@@ -113,3 +113,37 @@ Complete database isolation per site. Each site = separate MySQL database. No cr
 ### Config is DB-Sourced
 
 YAML files are one-shot imports. Config lives in `_kora_*` tables. Versioned with changelog. Additive schema changes auto-applied. Destructive changes (DROP COLUMN, CHANGE TYPE) require `--allow-breaking`. Export via `kora config export`.
+
+## Release Workflow
+
+### CI/CD (GitHub Actions)
+
+On every PR and push to `main`:
+- **Go**: `golangci-lint` → `go test ./...` → `go build`
+- **UI**: `bun install` → `tsc --noEmit` → `bun run build`
+
+On tag push (`v*`): auto-generates release notes and creates a GitHub Release.
+
+### Creating a Release
+
+```bash
+# 1. All changes go through PRs against main
+# 2. CI must be green
+# 3. Merge the PR
+# 4. Tag and push:
+git tag -a v0.2.0 -m "Description of changes"
+git push origin v0.2.0
+```
+
+The release workflow auto-generates release notes from commit history.
+
+### Branch Rules (set in GitHub Settings → Rules → Rulesets)
+
+- Require PR before merging to `main`
+- Require status checks (`Go`, `UI`) to pass
+- Block force pushes
+- Require linear history (rebase/squash, no merge commits)
+
+## Contributing
+
+See `CONTRIBUTING.md` for full guidelines. PRs must pass CI before merging. All changes to `main` go through pull requests — never push directly to `main`.
