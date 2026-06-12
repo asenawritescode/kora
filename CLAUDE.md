@@ -127,23 +127,37 @@ YAML files are one-shot imports. Config lives in `_kora_*` tables. Versioned wit
 ### CI/CD (GitHub Actions)
 
 On every PR and push to `main`:
-- **Go**: `golangci-lint` → `go test ./...` → `go build`
+- **Go**: `go vet ./...` → `go test ./...` → `go build`
 - **UI**: `bun install` → `tsc --noEmit` → `bun run build`
 
-On tag push (`v*`): auto-generates release notes and creates a GitHub Release.
+On tag push (`v*`): builds binaries for linux/darwin (amd64/arm64), categorizes commits into Features/Fixes/Security/Improvements/Docs, creates a GitHub Release with download links and SHA256 checksums.
 
 ### Creating a Release
 
 ```bash
-# 1. All changes go through PRs against main
-# 2. CI must be green
-# 3. Merge the PR
-# 4. Tag and push:
-git tag -a v0.2.0 -m "Description of changes"
-git push origin v0.2.0
+# Full release: validates, generates changelog, bumps version, tags, pushes
+./scripts/release.sh v0.2.0
+
+# Or via Make:
+make release TAG=v0.2.0
 ```
 
-The release workflow auto-generates release notes from commit history.
+The release script (`scripts/release.sh`) runs these steps:
+
+| Step | What it does |
+|------|-------------|
+| 1. **Validate** | `go test ./...` + `go build` — blocks release if checks fail |
+| 2. **Changelog** | Categorizes commits into Features/Fixes/Security/Improvements/Docs, prepends to `CHANGELOG.md` |
+| 3. **Version bump** | Writes version number to `VERSION` file |
+| 4. **Tag & push** | Commits changelog + version, creates annotated tag, pushes |
+
+After push, GitHub Actions:
+- Builds `kora-linux-amd64`, `kora-darwin-amd64`, `kora-darwin-arm64` with SHA256 checksums
+- Creates a GitHub Release with categorized release notes and download links
+
+### Version File
+
+`VERSION` at the repo root holds the current version (e.g., `0.2.0`). The release script bumps it automatically. The `go.mod` uses `go 1.25.0` (gin v1.12.0 requires it). CI uses `go vet` instead of `golangci-lint` because golangci-lint v1.64.8 doesn't support Go 1.25 analysis yet.
 
 ### Branch Rules (set in GitHub Settings → Rules → Rulesets)
 
