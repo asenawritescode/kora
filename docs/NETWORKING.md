@@ -25,7 +25,7 @@ This design was chosen for:
          │     Middleware Stack       │
          │                            │
          │  1. gin.Recovery           │ ← Panic recovery
-         │  2. RequestID              │ ← X-Request-Id: <uuid>
+         │  2. RequestID              │ ← X-Request-Id: <ulid>
          │  3. SecurityHeaders        │ ← HSTS, CSP, XFO, XSS
          │  4. CORS                   │ ← Access-Control-*
          │  5. SiteRouter             │ ← Host → DB + Registry
@@ -159,7 +159,7 @@ Double-submit cookie pattern.
 
 ### Request ID
 
-Every request gets a unique UUID (or uses the one from `X-Request-Id` header if provided by an upstream proxy). The ID is returned in the response header and included in all log messages.
+Every request gets a unique ULID (or uses the one from `X-Request-Id` header if provided by an upstream proxy). ULIDs are 26-character, lexicographically sortable, URL-safe identifiers — an upgrade from UUID for better index performance. The ID is returned in the response header and included in all log messages.
 
 ### Graceful Shutdown
 

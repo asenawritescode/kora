@@ -170,7 +170,8 @@ func runConfigImport(siteName, path string) error {
 		fmt.Printf("Found %d workflows\n", len(workflows))
 	}
 
-	// Save to database.
+	// Save to database. Each SaveDocType is individually transactional.
+	// Roles, permissions, and workflows are also individually saved.
 	store := configstore.NewStore(db)
 	for _, dt := range doctypes {
 		if err := store.SaveDocType(dt); err != nil {
@@ -201,17 +202,19 @@ func runConfigImport(siteName, path string) error {
 		registry.Workflows.Register(wf)
 	}
 
+	// Create config version BEFORE migration (so we have a snapshot to roll back to).
+	// This is fatal — don't apply schema changes without a version record.
+	versionID, versionNum, err := store.CreateConfigVersion(siteName, "system", "Config import from "+path, "Active", doctypes)
+	if err != nil {
+		return fmt.Errorf("creating config version: %w", err)
+	}
+	fmt.Printf("  ✓ Config version %d (%s) created\n", versionNum, versionID)
+
 	// Run migration.
 	if err := schema.MigrateSite(db, siteCfg.DBName, registry); err != nil {
 		return fmt.Errorf("migrating: %w", err)
 	}
-
-	// Create config version record.
-	versionID, versionNum, err := store.CreateConfigVersion(siteName, "system", "Config import from "+path, "Active", doctypes)
-	if err != nil {
-		fmt.Printf("  ⚠️  Warning: failed to create config version: %v\n", err)
-	} else {
-		// Print changelog summary.
+	// Print changelog summary.
 		var changelogStr string
 		db.QueryRow("SELECT COALESCE(changelog, '') FROM _kora_config_version WHERE id = ?", versionID).Scan(&changelogStr)
 		if changelogStr != "" {
@@ -226,8 +229,6 @@ func runConfigImport(siteName, path string) error {
 				fmt.Printf("  ✓ %s\n", diff.Summary())
 			}
 		}
-		fmt.Printf("  ✓ Config version %d created\n", versionNum)
-	}
 
 	fmt.Println("Config imported successfully.")
 	return nil

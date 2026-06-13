@@ -4,7 +4,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/secure"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
+	"github.com/oklog/ulid/v2"
 )
 
 // RequestIDMiddleware ensures every request has a traceable ID.
@@ -12,7 +12,7 @@ func RequestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.GetHeader("X-Request-Id")
 		if id == "" {
-			id = uuid.New().String()
+			id = ulid.Make().String()
 		}
 		c.Header("X-Request-Id", id)
 		c.Set("request_id", id)

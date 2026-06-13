@@ -70,10 +70,9 @@ export default function NewFormPage() {
       navigate({ to: '/workspace/$doctype', params: { doctype } })
     } catch (err: any) {
       const msg = err.message || 'Failed to create'
+      setError(msg) // Always show banner.
       if (err.field) {
-        setFieldErrors({ [err.field]: msg })
-      } else {
-        setError(msg)
+        setFieldErrors({ [err.field]: msg }) // Also show inline.
       }
     } finally {
       setSaving(false)

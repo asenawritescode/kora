@@ -347,6 +347,21 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	// Register in runtime registry.
 	reg.Register(&dt)
 
+	// Auto-create default permissions for all existing roles so non-admin users
+	// can immediately access the new doctype (read, write, create).
+	if err := store.AutoCreatePermissionsForDoctype(dt.Name); err != nil {
+		slog.Warn("failed to auto-create permissions for new doctype", "doctype", dt.Name, "error", err)
+	} else {
+		// Reload permissions into the in-memory registry so they take effect immediately.
+		roles, err := store.LoadRoles()
+		if err == nil {
+			perms, err2 := store.LoadPermissions()
+			if err2 == nil {
+				reg.Permissions.LoadPermissionsFromDB(roles, perms)
+			}
+		}
+	}
+
 	// Determine if we should activate immediately.
 	activate := c.Query("activate") != "false"
 	status := "Draft"
@@ -524,9 +539,38 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 
 // --- Doctype Validate ---
 
-// HandleSystemDoctypeValidate validates a DocType JSON body without saving.
+// HandleSystemDoctypeValidate validates a DocType JSON or YAML body without saving.
 // POST /api/system/doctype/validate
+// Accepts JSON (Content-Type: application/json) or YAML (Content-Type: application/x-yaml).
+// Returns structured errors with line numbers for unknown keys and validation issues.
 func (h *Handler) HandleSystemDoctypeValidate(c *gin.Context) {
+	ct := c.GetHeader("Content-Type")
+
+	// If YAML, use strict validation with line-numbered errors.
+	if ct == "application/x-yaml" || ct == "text/yaml" || ct == "application/yaml" {
+		body, err := c.GetRawData()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error: map[string]string{"message": "Failed to read request body"},
+			})
+			return
+		}
+		syntaxErrs, validationErrs, err := doctype.ValidateYAML(body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error: map[string]string{"message": err.Error()},
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"valid":       len(syntaxErrs) == 0 && len(validationErrs) == 0,
+			"syntax":      syntaxErrs,
+			"validations": validationErrs,
+		})
+		return
+	}
+
+	// JSON input — use existing flow.
 	var dt doctype.DocType
 	if err := c.ShouldBindJSON(&dt); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{

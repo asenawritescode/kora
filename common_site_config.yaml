@@ -2,7 +2,7 @@
 # Settings shared across all sites. Override per-site in site_config.yaml.
 
 # Infrastructure
-redis_url: redis://localhost:6379/0
+# redis_url: redis://localhost:6379/0  # Planned: session store for multi-server deployments
 db_host: 127.0.0.1
 http_port: 8000
 workers: 4
@@ -13,7 +13,7 @@ log_format: json         # json | text
 
 # Branding
 app_name: Kora
-version: "0.1.0"
+version: "0.2.0"
 primary_color: "#2563eb"
 
 # Session & security

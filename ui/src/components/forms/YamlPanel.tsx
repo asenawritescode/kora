@@ -1,8 +1,12 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { dump, load } from 'js-yaml'
 import type { DocType } from '@/types/kora'
 import { Button } from '@/components/ui/button'
-import { Code2, Edit3, ArrowLeftRight } from 'lucide-react'
+import { Code2, Edit3, ArrowLeftRight, AlertTriangle } from 'lucide-react'
+function getCsrfToken(): string {
+  const match = document.cookie.match(/(?:^|;\s*)kora_csrf=([^;]*)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
 
 /** Minimal YAML syntax highlighter — wraps tokens in colored spans. */
 function highlightYaml(text: string): string {
@@ -47,6 +51,15 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+interface YamlSyntaxError {
+  line: number
+  column: number
+  message: string
+  key: string
+  context: string
+  detail?: string
+}
+
 interface YamlPanelProps {
   form: DocType
   onApply: (parsed: DocType) => void
@@ -56,6 +69,10 @@ export function YamlPanel({ form, onApply }: YamlPanelProps) {
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
   const [applyError, setApplyError] = useState<string | null>(null)
+  const [syntaxErrors, setSyntaxErrors] = useState<YamlSyntaxError[]>([])
+  const [validating, setValidating] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Serialize form to YAML.
   const yamlText = useMemo(() => {
@@ -66,21 +83,161 @@ export function YamlPanel({ form, onApply }: YamlPanelProps) {
     }
   }, [form])
 
+  // Validate YAML against the backend with debounce.
+  const validateYaml = useCallback(async (yaml: string) => {
+    if (!yaml.trim()) {
+      setSyntaxErrors([])
+      return
+    }
+    setValidating(true)
+    try {
+      const response = await fetch('/api/system/doctype/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-yaml', 'X-Kora-CSRF-Token': getCsrfToken() || '' },
+        credentials: 'same-origin',
+        body: yaml,
+      })
+      const data = await response.json()
+      if (data.syntax && data.syntax.length > 0) {
+        setSyntaxErrors(data.syntax)
+      } else if (data.validations && data.validations.length > 0) {
+        // Convert validation errors to syntax-like format for display.
+        setSyntaxErrors(data.validations.map((v: any) => ({
+          line: 1,
+          column: 1,
+          message: v.message,
+          key: v.field || '',
+          context: v.doctype || '',
+        })))
+      } else {
+        setSyntaxErrors([])
+      }
+    } catch {
+      // Network error — don't bother the user.
+    } finally {
+      setValidating(false)
+    }
+  }, [])
+
+  const handleTextChange = (text: string) => {
+    setEditText(text)
+    setApplyError(null)
+    // Debounce validation: 300ms after last keystroke.
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => validateYaml(text), 300)
+  }
+
+  // Cleanup debounce on unmount.
+  useEffect(() => {
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [])
+
+  // ── Auto-indentation ──────────────────────────────────────────
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const ta = e.currentTarget
+    const { selectionStart, selectionEnd, value } = ta
+
+    // Tab: insert 2 spaces (or indent selected lines).
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault()
+      if (selectionStart !== selectionEnd) {
+        // Indent each selected line by 2 spaces.
+        const before = value.substring(0, selectionStart)
+        const sel = value.substring(selectionStart, selectionEnd)
+        const after = value.substring(selectionEnd)
+        const lines = sel.split('\n')
+        const indented = lines.map((l) => '  ' + l).join('\n')
+        const newValue = before + indented + after
+        // Update via state (controlled component) and restore cursor.
+        handleTextChange(newValue)
+        requestAnimationFrame(() => {
+          ta.selectionStart = selectionStart
+          ta.selectionEnd = selectionStart + indented.length
+        })
+      } else {
+        const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1
+        const col = selectionStart - lineStart
+        const spaces = col % 2 === 0 ? 2 : 1  // snap to even column
+        const newValue = value.substring(0, selectionStart) + ' '.repeat(spaces) + value.substring(selectionEnd)
+        handleTextChange(newValue)
+        requestAnimationFrame(() => {
+          ta.selectionStart = ta.selectionEnd = selectionStart + spaces
+        })
+      }
+      return
+    }
+
+    // Shift+Tab: un-indent selected lines.
+    if (e.key === 'Tab' && e.shiftKey) {
+      e.preventDefault()
+      const before = value.substring(0, selectionStart)
+      const sel = value.substring(selectionStart, selectionEnd)
+      const after = value.substring(selectionEnd)
+      const lines = sel.split('\n')
+      const unindented = lines.map((l) => l.startsWith('  ') ? l.slice(2) : l.startsWith(' ') ? l.slice(1) : l).join('\n')
+      const removed = sel.length - unindented.length
+      const newValue = before + unindented + after
+      handleTextChange(newValue)
+      requestAnimationFrame(() => {
+        ta.selectionStart = selectionStart
+        ta.selectionEnd = selectionEnd - removed
+      })
+      return
+    }
+
+    // Enter: copy indentation from current line, add extra indent after ':'.
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1
+      const currentLine = value.substring(lineStart, selectionStart)
+      const indent = currentLine.match(/^(\s*)/)?.[1] ?? ''
+      let extra = ''
+      // If line ends with ':', add one more indent level.
+      if (currentLine.trimEnd().endsWith(':') && currentLine.trimEnd().length > 0) {
+        extra = '  '
+      }
+      const insertion = '\n' + indent + extra
+      const newValue = value.substring(0, selectionStart) + insertion + value.substring(selectionEnd)
+      handleTextChange(newValue)
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = selectionStart + insertion.length
+      })
+      return
+    }
+
+    // Backspace at line start: remove one indent level (up to 2 spaces).
+    if (e.key === 'Backspace' && selectionStart === selectionEnd) {
+      const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1
+      const col = selectionStart - lineStart
+      if (col > 0 && col <= 2 && value.substring(lineStart, selectionStart).trim() === '') {
+        e.preventDefault()
+        const remove = col === 2 ? 2 : 1
+        const newValue = value.substring(0, selectionStart - remove) + value.substring(selectionStart)
+        handleTextChange(newValue)
+        requestAnimationFrame(() => {
+          ta.selectionStart = ta.selectionEnd = selectionStart - remove
+        })
+        return
+      }
+    }
+  }
+
   const handleStartEdit = () => {
     setEditText(yamlText)
     setEditing(true)
     setApplyError(null)
+    setSyntaxErrors([])
+    // Validate initial text.
+    validateYaml(yamlText)
   }
 
   const handleApply = async () => {
     setApplyError(null)
     try {
-      // Parse YAML client-side.
       const parsed = load(editText) as DocType
-      // Validate against backend (optional, catches structural issues).
       const response = await fetch('/api/system/doctype/validate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Kora-CSRF-Token': getCsrfToken() || '' },
         credentials: 'same-origin',
         body: JSON.stringify(parsed),
       })
@@ -90,6 +247,7 @@ export function YamlPanel({ form, onApply }: YamlPanelProps) {
       }
       onApply(parsed)
       setEditing(false)
+      setSyntaxErrors([])
     } catch (e) {
       setApplyError((e as Error).message)
     }
@@ -98,7 +256,17 @@ export function YamlPanel({ form, onApply }: YamlPanelProps) {
   const handleCancel = () => {
     setEditing(false)
     setApplyError(null)
+    setSyntaxErrors([])
   }
+
+  // Build set of error lines for highlighting in textarea.
+  const errorLines = useMemo(() => {
+    const lines = new Set<number>()
+    for (const e of syntaxErrors) {
+      if (e.line > 0) lines.add(e.line)
+    }
+    return lines
+  }, [syntaxErrors])
 
   return (
     <div className="flex flex-col h-full">
@@ -106,6 +274,15 @@ export function YamlPanel({ form, onApply }: YamlPanelProps) {
         <div className="flex items-center gap-2 text-sm font-medium">
           <Code2 className="h-4 w-4" />
           YAML
+          {syntaxErrors.length > 0 && (
+            <span className="flex items-center gap-1 text-amber-500 text-xs">
+              <AlertTriangle className="h-3 w-3" />
+              {syntaxErrors.length} issue{syntaxErrors.length > 1 ? 's' : ''}
+            </span>
+          )}
+          {validating && (
+            <span className="text-muted-foreground text-xs">checking...</span>
+          )}
         </div>
         {!editing ? (
           <Button variant="ghost" size="sm" onClick={handleStartEdit}>
@@ -121,6 +298,29 @@ export function YamlPanel({ form, onApply }: YamlPanelProps) {
         )}
       </div>
 
+      {/* Error panel with line-numbered errors */}
+      {syntaxErrors.length > 0 && (
+        <div className="mx-2 mt-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded text-xs max-h-[200px] overflow-auto">
+          <div className="font-medium text-amber-600 dark:text-amber-400 mb-1 flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            {syntaxErrors.length} validation issue{syntaxErrors.length > 1 ? 's' : ''}
+          </div>
+          {syntaxErrors.map((err, i) => (
+            <div key={i} className="py-0.5 text-amber-700 dark:text-amber-300 font-mono leading-relaxed">
+              <span className="text-muted-foreground select-none">Line {err.line}: </span>
+              {err.detail ? (
+                <>
+                  <span className="text-destructive">{err.message}</span>
+                  {' '}<span className="text-muted-foreground">({err.detail})</span>
+                </>
+              ) : (
+                <span>{err.message}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {applyError && (
         <div className="mx-3 mt-2 p-2 text-xs text-destructive bg-destructive/10 rounded">
           {applyError}
@@ -129,9 +329,11 @@ export function YamlPanel({ form, onApply }: YamlPanelProps) {
 
       {editing ? (
         <textarea
+          ref={textareaRef}
           className="flex-1 w-full resize-none border-0 bg-[#1e1e1e] text-[#d4d4d4] p-3 font-mono text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-inset focus:ring-primary"
           value={editText}
-          onChange={(e) => setEditText(e.target.value)}
+          onChange={(e) => handleTextChange(e.target.value)}
+          onKeyDown={handleKeyDown}
           spellCheck={false}
         />
       ) : (

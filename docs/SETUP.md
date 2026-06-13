@@ -2,31 +2,86 @@
 
 ## Prerequisites
 
-- **Go 1.23+** (tested with 1.25)
-- **Docker + Docker Compose** (for MySQL; or a running MySQL 8.0 instance)
-- **Node.js 20+** / **Bun** (for building the React SPA)
+| Tool | Required | Install |
+|------|----------|---------|
+| **Go** 1.25+ | Backend + ORM | [go.dev/dl](https://go.dev/dl/) |
+| **Bun** 1.x | Frontend build | [bun.sh](https://bun.sh) |
+| **Docker** + Compose | MySQL 8.0 | [docker.com](https://www.docker.com/products/docker-desktop/) |
+
+**Linux:**
+```bash
+# Go: https://go.dev/dl/
+wget -q https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+
+# Bun: https://bun.sh
+curl -fsSL https://bun.sh/install | bash
+
+# Docker: Docker Engine + Compose plugin
+# https://docs.docker.com/engine/install/ubuntu/
+```
+
+**macOS:**
+```bash
+brew install go oven-sh/bun/bun
+brew install --cask docker      # Docker Desktop
+```
+
+**Windows:** Download and run the installers from the links above.
+
+Verify:
+```bash
+go version      # go version go1.25.0
+bun --version   # 1.x.x
+docker ps       # no errors
+```
 
 ## Quick Start (5 minutes)
 
-### 1. Start MySQL
+### 1. Set MySQL password (first time only)
+
+```bash
+# Create .env with the root password Docker will use:
+echo 'MYSQL_ROOT_PASSWORD=kora123' > .env
+```
+
+### 2. Start MySQL
 
 ```bash
 docker compose up -d mysql
+# Wait 15-30 seconds for MySQL to be ready.
+# Check: docker compose ps mysql  (should show "(healthy)")
 ```
 
-Wait for healthy:
+### 3. One-command build + setup + serve
+
 ```bash
-docker compose ps mysql  # Look for "(healthy)"
+make dev DB_PASS=kora123 ADMIN_PASS=kora123
 ```
 
-### 2. Build the UI
+This runs: MySQL health check → `make build` → `./kora setup` → `./kora serve`.
+
+### If you already have MySQL
+
+Skip Docker. Just pass your credentials:
 
 ```bash
-cd ui
-bun install
-bun run build
-cp -r dist ../workspace/dist
-cd ..
+make dev DB_USER=root DB_PASS=yourpassword
+```
+
+Or step by step:
+
+```bash
+# Build the UI (one-time, or after frontend changes)
+cd ui && bun install && bun run build && cp -r dist ../workspace/dist && cd ..
+
+# Build Go + setup + serve
+make build-go
+./kora setup --site airtime.local --path config/airtime/ \
+  --db-user root --db-pass yourpassword \
+  --admin-email admin@airtime.local --admin-password kora123
+./kora serve --port 8000
 ```
 
 ### 3. One-Command Setup

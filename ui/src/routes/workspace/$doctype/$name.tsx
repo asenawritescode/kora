@@ -34,6 +34,8 @@ export default function EditFormPage() {
   })
 
   const dt: DocType | undefined = schemaQuery.data?.doctype
+  const perms = schemaQuery.data?.permissions
+  const canWrite = perms?.write ?? false
   const fields = dt?.fields?.filter(
     (f: Field) => !isLayoutField(f.fieldtype),
   ) ?? []
@@ -88,10 +90,9 @@ export default function EditFormPage() {
       navigate({ to: '/workspace/$doctype', params: { doctype } })
     } catch (err: any) {
       const msg = err.message || 'Failed to save'
+      setError(msg) // Always show banner.
       if (err.field) {
-        setFieldErrors({ [err.field]: msg })
-      } else {
-        setError(msg)
+        setFieldErrors({ [err.field]: msg }) // Also show inline.
       }
     } finally {
       setSaving(false)
@@ -135,13 +136,14 @@ export default function EditFormPage() {
         <div className="flex-1">
           <h1 className="text-2xl font-bold">
             {dt.name}: {name}
+            {!canWrite && <span className="ml-2 text-sm font-normal text-amber-600 dark:text-amber-400">(read-only)</span>}
           </h1>
           <div className="mt-1 flex items-center gap-2">
             <Badge variant="outline">{String(statusLabel)}</Badge>
             <span className="text-xs text-muted-foreground font-mono">{name}</span>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={saving} size="lg">
+        <Button onClick={handleSave} disabled={saving || !canWrite} size="lg" title={!canWrite ? "You don't have permission to edit" : undefined}>
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
           {saving ? 'Saving...' : 'Save'}
         </Button>
@@ -172,7 +174,7 @@ export default function EditFormPage() {
               value={formData[field.fieldname] ?? null}
               onChange={handleFieldChange}
               onRowsChange={handleRowsChange}
-              disabled={saving}
+              disabled={saving || !canWrite}
               error={fieldErrors[field.fieldname]}
             />
           ))

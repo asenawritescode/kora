@@ -82,12 +82,14 @@ export function FieldRenderer({ field, value, onChange, onRowsChange, disabled, 
             onChange={(e) => onChange(fieldname, e.target.value === '' ? null : parseInt(e.target.value))}
             disabled={disabled || field.read_only}
           />
+          {error && <p className="text-sm text-destructive mt-1">{error}</p>}
         </div>
       )
 
     case 'Float':
     case 'Currency':
-    case 'Percent':
+    case 'Percent': {
+      const displayValue = value != null && value !== '' ? Number(value).toFixed(2) : ''
       return (
         <div className={gapClass}>
           <Label htmlFor={id} className={labelClass}>{label}</Label>
@@ -96,12 +98,13 @@ export function FieldRenderer({ field, value, onChange, onRowsChange, disabled, 
             type="number"
             step="any"
             className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
-            value={value ?? ''}
+            value={displayValue}
             onChange={(e) => onChange(fieldname, e.target.value === '' ? null : parseFloat(e.target.value))}
             disabled={disabled || field.read_only}
           />
+          {error && <p className="text-sm text-destructive mt-1">{error}</p>}
         </div>
-      )
+      )}
 
     // --- Boolean ---
     case 'Check':
@@ -157,6 +160,7 @@ export function FieldRenderer({ field, value, onChange, onRowsChange, disabled, 
             onChange={(e) => onChange(fieldname, e.target.value)}
             disabled={disabled || field.read_only}
           />
+          {error && <p className="text-sm text-destructive mt-1">{error}</p>}
         </div>
       )
 
@@ -171,6 +175,7 @@ export function FieldRenderer({ field, value, onChange, onRowsChange, disabled, 
             onChange={(e) => onChange(fieldname, e.target.value)}
             disabled={disabled || field.read_only}
           />
+          {error && <p className="text-sm text-destructive mt-1">{error}</p>}
         </div>
       )
 
@@ -185,6 +190,7 @@ export function FieldRenderer({ field, value, onChange, onRowsChange, disabled, 
             onChange={(e) => onChange(fieldname, e.target.value)}
             disabled={disabled || field.read_only}
           />
+          {error && <p className="text-sm text-destructive mt-1">{error}</p>}
         </div>
       )
 

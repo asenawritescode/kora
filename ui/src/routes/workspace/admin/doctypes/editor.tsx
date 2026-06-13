@@ -1,5 +1,5 @@
 import { useNavigate, useRouterState } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { fetchDoctypes, createDoctype, updateDoctype } from '@/lib/api/system'
 import type { DocType, Field } from '@/types/kora'
@@ -132,6 +132,8 @@ export default function AdminDoctypeEditorPage() {
     setExpandedField(null)
   }, [])
 
+  const queryClient = useQueryClient()
+
   const handleSave = async (activate: boolean) => {
     setSaving(true)
     setError(null)
@@ -141,6 +143,10 @@ export default function AdminDoctypeEditorPage() {
       } else {
         await createDoctype(form, activate)
       }
+      // Invalidate caches so the new/updated doctype appears immediately
+      // in the admin list, sidebar navigation, and dashboard.
+      queryClient.invalidateQueries({ queryKey: ['admin', 'doctypes'] })
+      queryClient.invalidateQueries({ queryKey: ['navigation'] })
       navigate({ to: '/workspace/admin/doctypes' })
     } catch (e) {
       setError((e as Error).message)
@@ -536,6 +542,77 @@ function FieldRow({
                 onChange={(e) => onChange({ computed: e.target.value })}
                 placeholder="quantity * unit_price"
               />
+            </div>
+          )}
+
+          {/* Constraints */}
+          {!isLayout && (
+            <div className="mt-3 border-t pt-3">
+              <div className="flex items-center justify-between mb-2">
+                <Label>Constraints</Label>
+                <Button
+                  variant="ghost" size="sm"
+                  onClick={() => {
+                    const updated = [...(field.constraints || []), { type: 'max', value: undefined as any, message: '' }]
+                    onChange({ constraints: updated })
+                  }}
+                >+ Add</Button>
+              </div>
+              {(field.constraints || []).map((c, ci) => (
+                <div key={ci} className="grid grid-cols-12 gap-2 mb-2 items-start">
+                  <select
+                    className="col-span-3 h-9 rounded-md border bg-background px-2 text-sm"
+                    value={c.type}
+                    onChange={(e) => {
+                      const updated = [...(field.constraints || [])]
+                      updated[ci] = { ...updated[ci], type: e.target.value }
+                      onChange({ constraints: updated })
+                    }}
+                  >
+                    <option value="max">max</option>
+                    <option value="min">min</option>
+                    <option value="max_length">max_length</option>
+                    <option value="min_length">min_length</option>
+                    <option value="max_rows">max_rows</option>
+                    <option value="min_rows">min_rows</option>
+                    <option value="regex">regex</option>
+                    <option value="one_of">one_of</option>
+                    <option value="not_one_of">not_one_of</option>
+                    <option value="min_date">min_date</option>
+                    <option value="max_date">max_date</option>
+                  </select>
+                  <Input
+                    className="col-span-3 h-9 text-sm"
+                    value={c.value != null ? String(c.value) : ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      const num = Number(v)
+                      const updated = [...(field.constraints || [])]
+                      updated[ci] = { ...updated[ci], value: isNaN(num) ? v : num }
+                      onChange({ constraints: updated })
+                    }}
+                    placeholder="value"
+                  />
+                  <Input
+                    className="col-span-5 h-9 text-sm"
+                    value={c.message || ''}
+                    onChange={(e) => {
+                      const updated = [...(field.constraints || [])]
+                      updated[ci] = { ...updated[ci], message: e.target.value }
+                      onChange({ constraints: updated })
+                    }}
+                    placeholder="Error message"
+                  />
+                  <Button
+                    variant="ghost" size="sm"
+                    className="col-span-1 h-9 text-destructive"
+                    onClick={() => {
+                      const updated = (field.constraints || []).filter((_, i) => i !== ci)
+                      onChange({ constraints: updated.length > 0 ? updated : null })
+                    }}
+                  >✕</Button>
+                </div>
+              ))}
             </div>
           )}
         </div>

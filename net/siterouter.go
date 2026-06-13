@@ -89,13 +89,22 @@ func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 
 		host := stripPort(strings.ToLower(c.Request.Host))
 
-		// Check site cookie (set by /s/:site/... redirect). Persists for the session.
+		// Check site cookie (set by /s/:site/... redirect).
+		// Validate that the request Host is trusted when using this cookie to prevent
+		// cross-site access via cookie injection on shared networks.
 		if siteName, _ := c.Cookie("kora_site"); siteName != "" {
 			if s := sr.SiteByName(siteName); s != nil {
-				c.Set("site_name", s.Name)
-				c.Set("site_db", s.DB)
-				c.Set("site_registry", s.Registry)
-				c.Next()
+				if sr.isHostAllowedForSite(host, s) {
+					c.Set("site_name", s.Name)
+					c.Set("site_db", s.DB)
+					c.Set("site_registry", s.Registry)
+					c.Next()
+					return
+				}
+				c.AbortWithStatusJSON(403, gin.H{
+					"error":   "site_access_denied",
+					"message": fmt.Sprintf("Site %q cannot be accessed via host %q", siteName, host),
+				})
 				return
 			}
 		}
@@ -120,6 +129,20 @@ func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 		c.Set("site_registry", site.Registry)
 		c.Next()
 	}
+}
+
+// isHostAllowedForSite checks if the given host is allowed to access a site via the kora_site cookie.
+// Allowed: localhost, loopback IPs, any parsed IP (dev/testing), or a domain configured for the site.
+func (sr *SiteRouter) isHostAllowedForSite(host string, site *LoadedSite) bool {
+	if net.ParseIP(host) != nil || host == "localhost" || host == "127.0.0.1" {
+		return true
+	}
+	for _, d := range site.Config.Domains {
+		if strings.EqualFold(d, host) {
+			return true
+		}
+	}
+	return false
 }
 
 // AllDomains returns every domain across all sites (for autocert).

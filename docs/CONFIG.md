@@ -57,6 +57,7 @@ All YAML files are imported once via `kora config import` and then live in the d
 | `depends_on` | string | no | Expression to show/hide the field |
 | `linked_field` | string | no | `"{link_field}.{source}"` — auto-populate from a linked document |
 | `computed` | string | no | Expression to auto-compute this field's value |
+| `renamed_from` | string | no | Old column name — safe, non-breaking rename via ALTER TABLE RENAME COLUMN |
 | `constraints` | array | no | Validation rules |
 
 ### Field Types
@@ -431,7 +432,7 @@ db_name: fieldwork_local
 db_user: kora
 db_password: secret
 
-redis_url: redis://localhost:6379/0
+# redis_url: redis://localhost:6379/0   # Planned — session store for multi-server (not yet wired)
 
 file_storage: local
 files_path: sites/fieldwork.local/files
@@ -449,7 +450,7 @@ apps:
 
 ```yaml
 # common_site_config.yaml
-redis_url: redis://localhost:6379/0
+# redis_url: redis://localhost:6379/0   # Planned — session store for multi-server (not yet wired)
 db_host: 127.0.0.1
 http_port: 8000
 workers: 4

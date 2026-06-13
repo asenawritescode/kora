@@ -2,10 +2,76 @@
 
 Define your application — data model, permissions, workflows — in YAML. Kora gives you a database, REST API, React admin UI, and background jobs. No code generation.
 
+## Prerequisites
+
+You need three things installed before running Kora:
+
+| Tool | Why | Version |
+|------|-----|---------|
+| **Go** | Backend server + ORM | 1.25+ |
+| **Bun** | Frontend build (React SPA) | 1.x |
+| **Docker** | MySQL database | 24+ |
+
+### Install on Linux
+
+```bash
+# Go
+wget -q https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+
+# Bun
+curl -fsSL https://bun.sh/install | bash
+
+# Docker
+sudo apt install docker.io docker-compose-v2    # Debian/Ubuntu
+sudo systemctl start docker
+```
+
+### Install on macOS
+
+```bash
+# Go
+brew install go
+
+# Bun
+brew install oven-sh/bun/bun
+
+# Docker
+brew install --cask docker
+# Start Docker Desktop from Applications
+```
+
+### Install on Windows
+
+| Tool | Download |
+|------|----------|
+| Go | https://go.dev/dl/ — run the `.msi` installer |
+| Bun | https://bun.sh — run the `.exe` installer |
+| Docker | https://www.docker.com/products/docker-desktop/ — run the installer, then start Docker Desktop |
+
+Verify everything is installed:
+
+```bash
+go version      # go version go1.25.0 linux/amd64
+bun --version   # 1.x.x
+docker ps       # (should show no errors)
+```
+
 ## Quick Start
 
 ```bash
-make dev                           # MySQL + build + setup + serve
+# 1. Clone
+git clone https://github.com/yourorg/kora.git && cd kora
+
+# 2. Set MySQL root password (first time only)
+echo 'MYSQL_ROOT_PASSWORD=kora123' > .env
+
+# 3. Start MySQL
+docker compose up -d mysql
+
+# 4. Build, setup, and serve (one command)
+make dev DB_PASS=kora123 ADMIN_PASS=kora123
 ```
 
 Or step by step:
@@ -13,8 +79,16 @@ Or step by step:
 ```bash
 docker compose up -d mysql         # Start MySQL
 make build                         # Build UI + Go binary
-make setup                         # Setup airtime site
+make setup DB_PASS=kora123 ADMIN_PASS=kora123   # Setup airtime site
 make serve                         # Start server on :8000
+```
+
+### If you already have MySQL running
+
+Skip Docker. Just pass your credentials:
+
+```bash
+make dev DB_USER=root DB_PASS=yourpassword
 ```
 
 Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / `kora123`.
@@ -22,20 +96,36 @@ Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / 
 ### All Make Commands
 
 ```
-make dev          Full setup: MySQL + build + setup + serve
-make build        Build UI + Go binary
-make serve        Start server
-make restart      Kill old server + rebuild all + start fresh
-make setup        Setup a site (override: SITE=fieldwork.local CONFIG=config/fieldwork/)
-make test         Run Go tests
-make lint         Run linters (Go + TypeScript)
-make fmt          Format code (go fmt + prettier)
-make release      Tag and push a release (TAG=v0.2.0)
-make clean        Remove build artifacts
-make help         Show all commands
+make dev           MySQL + build + setup + serve (one command)
+make build         Build UI (bun) + Go binary
+make serve         Build + start server on :8000
+make restart       Kill old server + rebuild all + start fresh
+make setup         Setup a site from config YAML files
+make test          Run Go tests (go test ./...)
+make lint          Run linters (Go + TypeScript)
+make fmt           Format code (go fmt + prettier)
+make release       Tag, changelog, push release (TAG=v0.2.0)
+make clean         Remove build artifacts
+make help          Show all commands with descriptions
 ```
 
-Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / `kora123`.
+### Override Variables
+
+```bash
+make dev SITE=fieldwork.local CONFIG=config/fieldwork/   # Different site
+make dev DB_USER=root DB_PASS=secret                      # MySQL credentials
+make dev ADMIN_EMAIL=admin@test.com ADMIN_PASS=pass123    # Admin account
+make build PORT=9000                                       # Custom port (serve target)
+```
+
+## Features
+
+- **YAML Strict Validation** — unknown keys rejected at parse time with line numbers and "did you mean?" suggestions
+- **Visual Constraints Editor** — add min/max, regex, one_of, and other constraints via the form builder
+- **Auto-Indenting YAML Editor** — Tab/Enter/Shift+Tab with context-aware indentation
+- **Session Cache** — 30-second TTL in-memory cache reduces database load on every request
+- **Config Import Safety** — transactional imports with field-level merge (no more DELETE+re-INSERT)
+- **Site Isolation** — `kora_site` cookie validated against Host header, unknown hosts get 403
 
 ## Multi-Site
 

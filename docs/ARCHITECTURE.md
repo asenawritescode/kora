@@ -205,7 +205,15 @@ Permissions are defined per DocType, per Role. The engine enforces them at the A
 | `submit` | Can execute workflow transitions |
 | `if_owner` | Above operations apply only to own documents |
 
-Administrator role bypasses all checks.
+Administrator role bypasses all checks. Other roles **default to denied** — permissions must be explicitly granted.
+
+**New Doctype Default:** When a doctype is created, only the Administrator role gets permissions automatically. All other roles must be explicitly granted access via the Permissions panel (`/workspace/admin/permissions`). This follows the principle "explicit is better than implicit" and prevents accidental data exposure.
+
+**Frontend Integration:** The SPA reads permission data from `GET /api/system/doctype/:name` (the `permissions` field in the schema response) and gates UI elements:
+- No `create` → "New" button disabled (greyed out) with tooltip
+- No `write` → Save button disabled, form fields disabled, "(read-only)" badge
+
+Permissions are also reloaded into the in-memory registry after a new doctype is created, so changes take effect immediately without a server restart.
 
 ### System Console
 

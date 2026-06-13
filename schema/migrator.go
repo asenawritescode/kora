@@ -29,10 +29,11 @@ type TableInfo struct {
 
 // Diff represents the difference between the registry and the live schema.
 type Diff struct {
-	NewTables    []string            // Tables to CREATE
-	NewColumns   map[string][]ColumnAdd // Table → columns to ADD
-	NewIndexes   map[string][]IndexAdd  // Table → indexes to CREATE
-	Orphaned     []OrphanedColumn       // Columns in DB but not in registry
+	NewTables     []string                  // Tables to CREATE
+	NewColumns    map[string][]ColumnAdd     // Table → columns to ADD
+	NewIndexes    map[string][]IndexAdd      // Table → indexes to CREATE
+	RenameColumns map[string][]ColumnRename  // Table → columns to RENAME
+	Orphaned      []OrphanedColumn           // Columns in DB but not in registry
 }
 
 // ColumnAdd describes a column to be added to an existing table.
@@ -41,6 +42,12 @@ type ColumnAdd struct {
 	Type     string
 	Nullable bool
 	Default  string
+}
+
+// ColumnRename describes a column to be renamed (from renamed_from).
+type ColumnRename struct {
+	OldName string
+	NewName string
 }
 
 // IndexAdd describes an index to be created.
@@ -134,8 +141,9 @@ func LoadLiveSchema(db *sql.DB, dbName string) (map[string]*TableInfo, error) {
 // and produces a Diff of changes needed.
 func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo) *Diff {
 	diff := &Diff{
-		NewColumns: make(map[string][]ColumnAdd),
-		NewIndexes: make(map[string][]IndexAdd),
+		NewColumns:    make(map[string][]ColumnAdd),
+		NewIndexes:    make(map[string][]IndexAdd),
+		RenameColumns: make(map[string][]ColumnRename),
 	}
 
 	for _, dt := range registry.All() {
@@ -148,13 +156,23 @@ func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo) *
 			continue
 		}
 
-		// Check for new columns.
+		// Check for new columns. Handle renames (renamed_from).
 		for _, field := range dt.DataFields() {
 			if field.Fieldtype == "Table" {
 				// Table fields are handled as separate child tables.
 				continue
 			}
 			if _, exists := liveTable.Columns[field.Fieldname]; !exists {
+				// If the field has renamed_from and the old column exists, use RENAME instead of ADD.
+				if field.RenamedFrom != "" {
+					if _, oldExists := liveTable.Columns[field.RenamedFrom]; oldExists {
+						diff.RenameColumns[tableName] = append(diff.RenameColumns[tableName], ColumnRename{
+							OldName: field.RenamedFrom,
+							NewName: field.Fieldname,
+						})
+						continue
+					}
+				}
 				colAdd := ColumnAdd{
 					Name:     field.Fieldname,
 					Type:     field.DBType(),
@@ -225,7 +243,7 @@ func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo) *
 
 // IsEmpty returns true if there are no changes to apply.
 func (d *Diff) IsEmpty() bool {
-	return len(d.NewTables) == 0 && len(d.NewColumns) == 0 && len(d.NewIndexes) == 0
+	return len(d.NewTables) == 0 && len(d.NewColumns) == 0 && len(d.NewIndexes) == 0 && len(d.RenameColumns) == 0
 }
 
 // GenerateDDL produces the SQL statements to apply the diff.
@@ -242,6 +260,15 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry) []string {
 	for tableName, cols := range d.NewColumns {
 		for _, col := range cols {
 			stmt := generateAddColumn(tableName, col)
+			statements = append(statements, stmt)
+		}
+	}
+
+	// ALTER TABLE RENAME COLUMN statements (from renamed_from).
+	for tableName, renames := range d.RenameColumns {
+		for _, r := range renames {
+			stmt := fmt.Sprintf("ALTER TABLE `%s` RENAME COLUMN `%s` TO `%s`",
+				tableName, r.OldName, r.NewName)
 			statements = append(statements, stmt)
 		}
 	}
@@ -413,6 +440,7 @@ func MigrateSite(db *sql.DB, dbName string, registry *doctype.Registry) error {
 		"new_tables", len(diff.NewTables),
 		"new_columns", len(diff.NewColumns),
 		"new_indexes", len(diff.NewIndexes),
+		"renamed_columns", len(diff.RenameColumns),
 		"orphaned_columns", len(diff.Orphaned),
 	)
 

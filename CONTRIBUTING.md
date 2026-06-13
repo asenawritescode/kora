@@ -8,7 +8,7 @@ Kora is a config-driven application engine — define your data model in YAML, g
 |-----------|---------|-----|---------|
 | **Go** | 1.25+ | Backend server, CLI, ORM, schema migration | [go.dev/dl](https://go.dev/dl/) |
 | **Bun** | 1.3+ | Frontend package manager, build tool (faster than npm/yarn) | [bun.sh](https://bun.sh) |
-| **Docker** | 27+ | Runs MySQL and Redis for development | [docker.com](https://docker.com) |
+| **Docker** | 27+ | Runs MySQL for development | [docker.com](https://docker.com) |
 | **MySQL** | 8.0 | Database engine (runs in Docker for dev) | Comes with Docker |
 
 That's it. Bun replaces Node.js/npm — `bun install`, `bun run build`, `bun run dev` all work. Docker gives you MySQL without installing it locally.

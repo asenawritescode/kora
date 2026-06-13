@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -412,7 +413,7 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 	}
 
 	// Save.
-	if err := h.siteTx(c).Save(dt, doc, modifiedBy, owner); err != nil {
+	if err := h.siteTx(c).Save(dt, doc, modifiedBy, owner, oldDoc); err != nil {
 		var valErr *doctype.ValidationError
 		if errors.As(err, &valErr) {
 			c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -491,7 +492,16 @@ func docToMap(doc *doctype.Document, dt *doctype.DocType, registry *doctype.Regi
 				result[f.Fieldname] = []any{}
 			}
 		} else {
-			result[f.Fieldname] = doc.Get(f.Fieldname)
+			val := doc.Get(f.Fieldname)
+			// Round Float/Currency/Percent to 2 decimal places.
+			if f.Fieldtype == "Float" || f.Fieldtype == "Currency" || f.Fieldtype == "Percent" {
+				if s, ok := val.(string); ok && s != "" {
+					if n, err := strconv.ParseFloat(s, 64); err == nil {
+						val = math.Round(n*100) / 100
+					}
+				}
+			}
+			result[f.Fieldname] = val
 		}
 	}
 
@@ -734,7 +744,7 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 	if modifiedBy == "" {
 		modifiedBy = "system"
 	}
-	if err := h.siteTx(c).Save(dt, doc, modifiedBy, owner); err != nil {
+	if err := h.siteTx(c).Save(dt, doc, modifiedBy, owner, nil); err != nil {
 		internalError(c, "workflow save failed", err)
 		return
 	}

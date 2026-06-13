@@ -4,11 +4,14 @@ package orm
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
+	"github.com/oklog/ulid/v2"
 	"github.com/yourorg/kora/doctype"
 )
 
@@ -62,14 +65,15 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 		return fmt.Errorf("cannot insert an existing document")
 	}
 
-	// Check unique constraints before inserting.
-	if err := tx.checkUniqueConstraints(dt, doc, ""); err != nil {
-		return err
+	dbTx, err := tx.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
 	}
+	defer dbTx.Rollback()
 
 	if doc.Name == "" {
 		var count int
-		err := tx.DB.QueryRow(
+		err := dbTx.QueryRow(
 			fmt.Sprintf("SELECT COUNT(*) FROM %s", dt.TableName()),
 		).Scan(&count)
 		if err != nil {
@@ -111,8 +115,11 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 		strings.Join(placeholders, ", "),
 	)
 
-	_, err := tx.DB.Exec(query, values...)
+	_, err = dbTx.Exec(query, values...)
 	if err != nil {
+		if valErr := parseDuplicateError(err, dt); valErr != nil {
+			return valErr
+		}
 		return fmt.Errorf("inserting document: %w", err)
 	}
 
@@ -125,12 +132,8 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 		if childDT == nil {
 			return fmt.Errorf("child doctype %q not found", f.Options)
 		}
-
-		for i, child := range children {
-			child.DocType = childDT.Name
-			if err := tx.insertChild(dt, f.Fieldname, childDT, child, doc.Name, i); err != nil {
-				return fmt.Errorf("inserting child row %d in %s: %w", i, f.Fieldname, err)
-			}
+		if err := insertChildrenBatch(dbTx, dt, f.Fieldname, childDT, children, doc.Name); err != nil {
+			return fmt.Errorf("inserting child rows in %s: %w", f.Fieldname, err)
 		}
 	}
 
@@ -157,8 +160,12 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 	}
 
 	// Persist computed field values via UPDATE.
-	if err := tx.updateComputedFields(dt, doc); err != nil {
+	if err := updateComputedFieldsExec(dbTx, dt, doc); err != nil {
 		return fmt.Errorf("persisting computed fields: %w", err)
+	}
+
+	if err := dbTx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 
 	doc.IsNew = false
@@ -207,13 +214,9 @@ func (tx *TxManager) insertChild(parentDT *doctype.DocType, parentField string, 
 // insertChildExec inserts a child row using the given executor (DB or Tx).
 func insertChildExec(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, doc *doctype.Document, parentName string, idx int) error {
 	if doc.Name == "" {
-		// Generate unique child row name including parent reference.
-		var count int
+		// Generate unique child row name using ULID — no database query needed.
 		prefix := derivePrefix(childDT.Name)
-		ex.QueryRow(
-			fmt.Sprintf("SELECT COUNT(*) FROM %s", parentDT.ChildTableName(parentField)),
-		).Scan(&count)
-		doc.Name = fmt.Sprintf("%s-%s-%04d", prefix, parentName, count+1)
+		doc.Name = fmt.Sprintf("%s-%s", prefix, ulid.Make().String())
 	}
 
 	now := time.Now()
@@ -263,17 +266,208 @@ func insertChildExec(ex sqlExecutor, parentDT *doctype.DocType, parentField stri
 	return err
 }
 
+// insertChildrenBatch inserts multiple child rows in a single multi-row INSERT statement.
+// Chunked at 100 rows to stay safely within MySQL's max_allowed_packet.
+func insertChildrenBatch(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, children []*doctype.Document, parentName string) error {
+	if len(children) == 0 {
+		return nil
+	}
+
+	childTableName := parentDT.ChildTableName(parentField)
+	prefix := derivePrefix(childDT.Name)
+
+	// Build column list once (same for all rows).
+	var columns []string
+	columns = append(columns, "name", "owner", "creation", "modified", "modified_by", "doc_status", "idx")
+	columns = append(columns, "parent", "parentfield", "parenttype")
+	for _, f := range childDT.DataFields() {
+		if f.Fieldtype == "Table" {
+			continue
+		}
+		columns = append(columns, f.Fieldname)
+	}
+
+	// Build SET clause for ON DUPLICATE KEY UPDATE (update all non-key, non-parent columns).
+	var updateClauses []string
+	for _, col := range columns {
+		if col != "name" && col != "parent" && col != "parentfield" && col != "parenttype" {
+			updateClauses = append(updateClauses, fmt.Sprintf("%s = VALUES(%s)", col, col))
+		}
+	}
+
+	// Insert in chunks of 100.
+	const chunkSize = 100
+	for start := 0; start < len(children); start += chunkSize {
+		end := min(start+chunkSize, len(children))
+		chunk := children[start:end]
+
+		var placeholders []string
+		var values []any
+		now := time.Now()
+
+		for i, child := range chunk {
+			idx := start + i
+			if child.Name == "" {
+				child.Name = fmt.Sprintf("%s-%s", prefix, ulid.Make().String())
+			}
+
+			placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?"+strings.Repeat(", ?", len(columns)-10)+")")
+
+			values = append(values,
+				child.Name, "", now, now, "", 0, idx, // name, owner, creation, modified, modified_by, doc_status, idx
+				parentName, parentField, parentDT.Name, // parent, parentfield, parenttype
+			)
+
+			for _, f := range childDT.DataFields() {
+				if f.Fieldtype == "Table" {
+					continue
+				}
+				val := child.Get(f.Fieldname)
+				if val == nil && f.Default != "" {
+					val = convertDefault(f.Default, f.Fieldtype)
+				}
+				values = append(values, val)
+			}
+		}
+
+		query := fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES %s ON DUPLICATE KEY UPDATE %s",
+			childTableName,
+			strings.Join(columns, ", "),
+			strings.Join(placeholders, ", "),
+			strings.Join(updateClauses, ", "),
+		)
+
+		if _, err := ex.Exec(query, values...); err != nil {
+			return fmt.Errorf("batch inserting child rows [%d-%d]: %w", start, end, err)
+		}
+	}
+
+	return nil
+}
+
+// reconcileChildren performs three-way reconciliation for child table rows.
+// It compares old and new child rows and only issues necessary DB operations:
+//   - DELETE rows present in old but missing in new
+//   - INSERT rows present in new but missing in old
+//   - UPDATE rows present in both with changed data
+func reconcileChildren(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, oldChildren, newChildren []*doctype.Document, parentName string) error {
+	childTableName := parentDT.ChildTableName(parentField)
+
+	oldByName := make(map[string]*doctype.Document)
+	for _, c := range oldChildren {
+		oldByName[c.Name] = c
+	}
+	newByName := make(map[string]*doctype.Document)
+	for _, c := range newChildren {
+		if c.Name != "" {
+			newByName[c.Name] = c
+		}
+	}
+
+	// DELETE rows that were removed (in old but not in new).
+	var toDelete []string
+	for name := range oldByName {
+		if _, ok := newByName[name]; !ok {
+			toDelete = append(toDelete, name)
+		}
+	}
+	if len(toDelete) > 0 {
+		placeholders := make([]string, len(toDelete))
+		args := make([]any, len(toDelete))
+		for i, name := range toDelete {
+			placeholders[i] = "?"
+			args[i] = name
+		}
+		query := fmt.Sprintf("DELETE FROM %s WHERE name IN (%s)",
+			childTableName, strings.Join(placeholders, ", "))
+		if _, err := ex.Exec(query, args...); err != nil {
+			return fmt.Errorf("deleting removed child rows: %w", err)
+		}
+	}
+
+	// INSERT new rows (in new but not in old).
+	var toInsert []*doctype.Document
+	for name, child := range newByName {
+		if _, ok := oldByName[name]; !ok {
+			toInsert = append(toInsert, child)
+		}
+	}
+	if len(toInsert) > 0 {
+		if err := insertChildrenBatch(ex, parentDT, parentField, childDT, toInsert, parentName); err != nil {
+			return fmt.Errorf("inserting new child rows: %w", err)
+		}
+	}
+
+	// UPDATE rows that exist in both but have changed.
+	for name, newChild := range newByName {
+		oldChild, ok := oldByName[name]
+		if !ok {
+			continue
+		}
+		if documentsEqual(oldChild, newChild, childDT) {
+			continue
+		}
+		if err := updateChildRow(ex, childTableName, childDT, newChild); err != nil {
+			return fmt.Errorf("updating child row %s: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+// updateChildRow issues an UPDATE for a single child row, setting all data columns.
+func updateChildRow(ex sqlExecutor, tableName string, childDT *doctype.DocType, doc *doctype.Document) error {
+	var setClauses []string
+	var values []any
+
+	for _, f := range childDT.DataFields() {
+		if f.Fieldtype == "Table" {
+			continue
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
+		values = append(values, doc.Get(f.Fieldname))
+	}
+
+	if len(setClauses) == 0 {
+		return nil
+	}
+
+	setClauses = append(setClauses, "modified = ?")
+	values = append(values, time.Now())
+
+	values = append(values, doc.Name)
+	query := fmt.Sprintf("UPDATE %s SET %s WHERE name = ?",
+		tableName, strings.Join(setClauses, ", "))
+
+	_, err := ex.Exec(query, values...)
+	return err
+}
+
+// documentsEqual compares two documents' data fields for equality (ignoring system columns).
+func documentsEqual(a, b *doctype.Document, dt *doctype.DocType) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	for _, f := range dt.DataFields() {
+		if f.Fieldtype == "Table" {
+			continue
+		}
+		if a.Get(f.Fieldname) != b.Get(f.Fieldname) {
+			return false
+		}
+	}
+	return true
+}
+
 // Save updates an existing document.
 // If owner is non-empty, only updates if the document is owned by that user.
 // All operations run in a database transaction to ensure atomicity.
-func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy string, owner string) error {
+// oldDoc is the document before modifications (from GetDoc); when provided, child table
+// reconciliation uses a diff-based approach instead of DELETE-all + re-INSERT-all.
+func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy string, owner string, oldDoc *doctype.Document) error {
 	if doc.IsNew {
 		return fmt.Errorf("cannot save a new document; use Insert instead")
-	}
-
-	// Check unique constraints before updating.
-	if err := tx.checkUniqueConstraints(dt, doc, doc.Name); err != nil {
-		return err
 	}
 
 	// Start a transaction so DELETE + INSERT for child tables is atomic.
@@ -296,8 +490,14 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 		// Note: read_only is a UI hint, not an ORM constraint.
 		// The workflow handler needs to persist state changes to read_only fields.
 		// Direct edits are blocked at the API level (HandleUpdate).
+		newVal := doc.Get(f.Fieldname)
+		if oldDoc != nil {
+			if oldVal := oldDoc.Get(f.Fieldname); oldVal == newVal {
+				continue
+			}
+		}
 		setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
-		values = append(values, doc.Get(f.Fieldname))
+		values = append(values, newVal)
 	}
 
 	setClauses = append(setClauses, "modified = ?", "modified_by = ?", "doc_status = ?")
@@ -319,6 +519,9 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 
 	result, err := dbTx.Exec(query, values...)
 	if err != nil {
+		if valErr := parseDuplicateError(err, dt); valErr != nil {
+			return valErr
+		}
 		return fmt.Errorf("updating document: %w", err)
 	}
 
@@ -329,26 +532,38 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 
 	for _, f := range dt.TableFields() {
 		childTableName := dt.ChildTableName(f.Fieldname)
-		if _, err := dbTx.Exec(
-			fmt.Sprintf("DELETE FROM %s WHERE parent = ?", childTableName),
-			doc.Name,
-		); err != nil {
-			return fmt.Errorf("deleting old child rows for %s: %w", f.Fieldname, err)
-		}
-
-		children := doc.GetTable(f.Fieldname)
-		if children == nil {
-			continue
-		}
+		newChildren := doc.GetTable(f.Fieldname)
 		childDT := tx.Registry.Get(f.Options)
 		if childDT == nil {
-			return fmt.Errorf("child doctype %q not found", f.Options)
+			if newChildren != nil {
+				return fmt.Errorf("child doctype %q not found", f.Options)
+			}
+			continue
 		}
 
-		for i, child := range children {
-			child.DocType = childDT.Name
-			if err := insertChildExec(dbTx, dt, f.Fieldname, childDT, child, doc.Name, i); err != nil {
-				return fmt.Errorf("inserting child row %d in %s: %w", i, f.Fieldname, err)
+		var oldChildren []*doctype.Document
+		if oldDoc != nil {
+			oldChildren = oldDoc.GetTable(f.Fieldname)
+		}
+
+		if oldDoc == nil {
+			// Fallback: no old document available — DELETE-all + re-INSERT-all.
+			if _, err := dbTx.Exec(
+				fmt.Sprintf("DELETE FROM %s WHERE parent = ?", childTableName),
+				doc.Name,
+			); err != nil {
+				return fmt.Errorf("deleting old child rows for %s: %w", f.Fieldname, err)
+			}
+			if newChildren == nil {
+				continue
+			}
+			if err := insertChildrenBatch(dbTx, dt, f.Fieldname, childDT, newChildren, doc.Name); err != nil {
+				return fmt.Errorf("inserting child rows in %s: %w", f.Fieldname, err)
+			}
+		} else {
+			// Diff-based reconciliation: only DELETE removed, INSERT new, UPDATE changed.
+			if err := reconcileChildren(dbTx, dt, f.Fieldname, childDT, oldChildren, newChildren, doc.Name); err != nil {
+				return fmt.Errorf("reconciling child rows in %s: %w", f.Fieldname, err)
 			}
 		}
 	}
@@ -450,7 +665,7 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 		if childDT == nil {
 			continue
 		}
-		children, err := tx.getChildRows(dt.ChildTableName(f.Fieldname), childDT)
+		children, err := tx.getChildRows(dt.ChildTableName(f.Fieldname), childDT, name)
 		if err != nil {
 			return nil, fmt.Errorf("loading child table %s: %w", f.Fieldname, err)
 		}
@@ -460,7 +675,7 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 	return doc, nil
 }
 
-func (tx *TxManager) getChildRows(tableName string, childDT *doctype.DocType) ([]*doctype.Document, error) {
+func (tx *TxManager) getChildRows(tableName string, childDT *doctype.DocType, parentName string) ([]*doctype.Document, error) {
 	dataFields := childDT.DataFields()
 
 	var cols []string
@@ -473,7 +688,8 @@ func (tx *TxManager) getChildRows(tableName string, childDT *doctype.DocType) ([
 	cols = append(cols, "name", "idx", "parent", "parentfield", "parenttype")
 
 	rows, err := tx.DB.Query(
-		fmt.Sprintf("SELECT %s FROM %s ORDER BY idx", strings.Join(cols, ", "), tableName),
+		fmt.Sprintf("SELECT %s FROM %s WHERE parent = ? ORDER BY idx", strings.Join(cols, ", "), tableName),
+		parentName,
 	)
 	if err != nil {
 		return nil, err
@@ -614,9 +830,15 @@ func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string
 // Delete removes a document by name.
 // If owner is non-empty, only deletes if the document is owned by that user.
 func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) error {
+	dbTx, err := tx.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer dbTx.Rollback()
+
 	for _, f := range dt.TableFields() {
 		childTable := dt.ChildTableName(f.Fieldname)
-		if _, err := tx.DB.Exec(
+		if _, err := dbTx.Exec(
 			fmt.Sprintf("DELETE FROM %s WHERE parent = ?", childTable),
 			name,
 		); err != nil {
@@ -631,7 +853,7 @@ func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) erro
 		args = append(args, owner)
 	}
 
-	result, err := tx.DB.Exec(
+	result, err := dbTx.Exec(
 		fmt.Sprintf("DELETE FROM %s WHERE %s", dt.TableName(), where),
 		args...,
 	)
@@ -642,6 +864,10 @@ func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) erro
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("document %q not found or access denied", name)
+	}
+
+	if err := dbTx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 
 	return nil
@@ -714,39 +940,55 @@ func validateOrderBy(orderBy string, dt *doctype.DocType) (string, error) {
 	return strings.Join(safeParts, ", "), nil
 }
 
-// checkUniqueConstraints verifies that unique fields don't conflict with existing documents.
-// Returns a doctype.ValidationError if a duplicate is found, so the frontend can show a field-level error.
-func (tx *TxManager) checkUniqueConstraints(dt *doctype.DocType, doc *doctype.Document, excludeName string) error {
-	for _, f := range dt.Fields {
-		if !f.Unique {
-			continue
-		}
-		val := doc.Get(f.Fieldname)
-		if val == nil || val == "" {
-			continue // nil/empty values don't trigger unique checks.
-		}
-
-		// SELECT name FROM tabX WHERE `fieldname` = ? AND name != ?
-		query := fmt.Sprintf("SELECT name FROM %s WHERE `%s` = ?", dt.TableName(), f.Fieldname)
-		args := []any{val}
-		if excludeName != "" {
-			query += " AND name != ?"
-			args = append(args, excludeName)
-		}
-
-		var existingName string
-		err := tx.DB.QueryRow(query, args...).Scan(&existingName)
-		if err == nil {
+// parseDuplicateError detects MySQL error 1062 (Duplicate entry) and converts it
+// to a doctype.ValidationError. Unique constraints are enforced at the database level
+// via UNIQUE KEY indexes (uq_{fieldname}); this function maps the error back to the field.
+func parseDuplicateError(err error, dt *doctype.DocType) *doctype.ValidationError {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		// Message format: "Duplicate entry 'value' for key 'uq_fieldname'"
+		fieldName := parseKeyFromDuplicateError(mysqlErr.Message)
+		if fieldName != "" {
+			// Find the field label for a user-friendly message.
+			label := fieldName
+			if f := dt.GetField(fieldName); f != nil {
+				label = f.Label
+			}
 			return &doctype.ValidationError{
 				Type:    "UniqueConstraint",
-				Message: fmt.Sprintf("%s must be unique. Value %q already exists in %s.", f.Label, val, existingName),
-				Field:   f.Fieldname,
+				Message: fmt.Sprintf("%s must be unique.", label),
+				Field:   fieldName,
 				DocType: dt.Name,
 			}
 		}
-		// sql.ErrNoRows is expected — no duplicate found.
 	}
 	return nil
+}
+
+// parseKeyFromDuplicateError extracts the field name from a MySQL duplicate entry error message.
+// MySQL format: "Duplicate entry 'value' for key 'uq_fieldname'"
+// Returns "" if the key name cannot be parsed.
+func parseKeyFromDuplicateError(msg string) string {
+	// Look for "key 'uq_" prefix and extract the field name.
+	const prefix = "key 'uq_"
+	idx := strings.Index(msg, prefix)
+	if idx < 0 {
+		// Also try without the uq_ prefix (some index types use different naming).
+		const altPrefix = "key '"
+		idx = strings.Index(msg, altPrefix)
+		if idx < 0 {
+			return ""
+		}
+		idx += len(altPrefix)
+	} else {
+		idx += len(prefix)
+	}
+	// Extract until the closing quote.
+	end := strings.IndexByte(msg[idx:], '\'')
+	if end < 0 {
+		return ""
+	}
+	return msg[idx : idx+end]
 }
 
 // --- Helpers ---

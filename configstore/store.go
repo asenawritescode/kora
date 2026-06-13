@@ -23,14 +23,22 @@ func NewStore(db *sql.DB) *Store {
 }
 
 // SaveDocType inserts or updates a DocType and its fields in the database.
+// Uses a transaction for atomicity. Existing fields are diffed against new fields:
+// only removed fields are deleted, only new fields are inserted, changed fields are updated.
 func (s *Store) SaveDocType(dt *doctype.DocType) error {
+	dbTx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer dbTx.Rollback()
+
 	configJSON, err := json.Marshal(dt)
 	if err != nil {
 		return fmt.Errorf("marshaling doctype: %w", err)
 	}
 
 	// Upsert the DocType record.
-	_, err = s.DB.Exec(`
+	_, err = dbTx.Exec(`
 		INSERT INTO _kora_doctype (name, module, is_submittable, is_child_table, is_single,
 			track_changes, title_field, search_fields, sort_field, sort_order, description, config_json, version)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
@@ -57,56 +65,113 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 		return fmt.Errorf("saving doctype %s: %w", dt.Name, err)
 	}
 
-	// Delete existing fields for this doctype.
-	if _, err := s.DB.Exec("DELETE FROM _kora_field WHERE parent = ?", dt.Name); err != nil {
-		return fmt.Errorf("deleting old fields for %s: %w", dt.Name, err)
+	// Load existing fields for diff-based merge.
+	existingFields, err := s.loadFieldsMap(dt.Name, dbTx)
+	if err != nil {
+		return fmt.Errorf("loading existing fields for %s: %w", dt.Name, err)
 	}
 
-	// Insert new fields.
+	// Build set of new field names.
+	newFieldNames := make(map[string]bool)
+	for _, field := range dt.Fields {
+		newFieldNames[field.Fieldname] = true
+	}
+
+	// Delete fields that are in the DB but NOT in the new config.
+	var toDelete []string
+	for name := range existingFields {
+		if !newFieldNames[name] {
+			toDelete = append(toDelete, name)
+		}
+	}
+	for _, name := range toDelete {
+		if _, err := dbTx.Exec("DELETE FROM _kora_field WHERE parent = ? AND fieldname = ?", dt.Name, name); err != nil {
+			return fmt.Errorf("deleting removed field %s.%s: %w", dt.Name, name, err)
+		}
+		slog.Info("removed field from config import", "doctype", dt.Name, "field", name)
+	}
+
+	// Insert new fields and update existing ones.
 	for i, field := range dt.Fields {
 		constraintsJSON, _ := json.Marshal(field.Constraints)
 
-		_, err := s.DB.Exec(`
-			INSERT INTO _kora_field (name, parent, fieldname, fieldtype, label, options,
-				reqd, unique_constraint, default_value, hidden, read_only, bold,
-				in_list_view, in_standard_filter, search_index, description,
-				depends_on, mandatory_depends_on, constraints_json, renamed_from, linked_field, computed, idx)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`,
-			fmt.Sprintf("%s.%s", dt.Name, field.Fieldname),
-			dt.Name,
-			field.Fieldname,
-			field.Fieldtype,
-			field.Label,
-			field.Options,
-			boolToInt(field.Reqd),
-			boolToInt(field.Unique),
-			field.Default,
-			boolToInt(field.Hidden),
-			boolToInt(field.ReadOnly),
-			boolToInt(field.Bold),
-			boolToInt(field.InListView),
-			boolToInt(field.InStandardFilter),
-			boolToInt(field.SearchIndex),
-			field.Description,
-			field.DependsOn,
-			field.MandatoryDependsOn,
-			string(constraintsJSON),
-			field.RenamedFrom,
-			field.LinkedField,
-			field.Computed,
-			i,
-		)
-		if err != nil {
-			return fmt.Errorf("saving field %s.%s: %w", dt.Name, field.Fieldname, err)
+		if _, exists := existingFields[field.Fieldname]; exists {
+			// UPDATE existing field.
+			_, err = dbTx.Exec(`
+				UPDATE _kora_field SET
+					fieldtype = ?, label = ?, options = ?, reqd = ?, unique_constraint = ?,
+					default_value = ?, hidden = ?, read_only = ?, bold = ?,
+					in_list_view = ?, in_standard_filter = ?, search_index = ?, description = ?,
+					depends_on = ?, mandatory_depends_on = ?, constraints_json = ?,
+					renamed_from = ?, linked_field = ?, computed = ?, idx = ?
+				WHERE parent = ? AND fieldname = ?
+			`,
+				field.Fieldtype, field.Label, field.Options,
+				boolToInt(field.Reqd), boolToInt(field.Unique), field.Default,
+				boolToInt(field.Hidden), boolToInt(field.ReadOnly), boolToInt(field.Bold),
+				boolToInt(field.InListView), boolToInt(field.InStandardFilter),
+				boolToInt(field.SearchIndex), field.Description,
+				field.DependsOn, field.MandatoryDependsOn, string(constraintsJSON),
+				field.RenamedFrom, field.LinkedField, field.Computed, i,
+				dt.Name, field.Fieldname,
+			)
+			if err != nil {
+				return fmt.Errorf("updating field %s.%s: %w", dt.Name, field.Fieldname, err)
+			}
+		} else {
+			// INSERT new field.
+			_, err = dbTx.Exec(`
+				INSERT INTO _kora_field (name, parent, fieldname, fieldtype, label, options,
+					reqd, unique_constraint, default_value, hidden, read_only, bold,
+					in_list_view, in_standard_filter, search_index, description,
+					depends_on, mandatory_depends_on, constraints_json, renamed_from, linked_field, computed, idx)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+				fmt.Sprintf("%s.%s", dt.Name, field.Fieldname),
+				dt.Name, field.Fieldname, field.Fieldtype, field.Label, field.Options,
+				boolToInt(field.Reqd), boolToInt(field.Unique), field.Default,
+				boolToInt(field.Hidden), boolToInt(field.ReadOnly), boolToInt(field.Bold),
+				boolToInt(field.InListView), boolToInt(field.InStandardFilter),
+				boolToInt(field.SearchIndex), field.Description,
+				field.DependsOn, field.MandatoryDependsOn, string(constraintsJSON),
+				field.RenamedFrom, field.LinkedField, field.Computed, i,
+			)
+			if err != nil {
+				return fmt.Errorf("inserting field %s.%s: %w", dt.Name, field.Fieldname, err)
+			}
 		}
 	}
 
-	slog.Debug("saved doctype config", "name", dt.Name, "fields", len(dt.Fields))
+	if err := dbTx.Commit(); err != nil {
+		return fmt.Errorf("committing doctype %s: %w", dt.Name, err)
+	}
+
+	slog.Debug("saved doctype config", "name", dt.Name, "fields", len(dt.Fields),
+		"deleted", len(toDelete), "new", len(dt.Fields)-len(existingFields)+len(toDelete))
 	return nil
 }
 
+// loadFieldsMap returns existing field definitions keyed by fieldname.
+func (s *Store) loadFieldsMap(parent string, tx *sql.Tx) (map[string]bool, error) {
+	rows, err := tx.Query("SELECT fieldname FROM _kora_field WHERE parent = ?", parent)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		result[name] = true
+	}
+	return result, rows.Err()
+}
+
 // LoadAll loads all DocTypes from the database into the registry.
+// Uses two batched queries instead of N+1 (one for doctypes, one for all fields).
 func (s *Store) LoadAll() ([]*doctype.DocType, error) {
 	rows, err := s.DB.Query(`
 		SELECT name, module, is_submittable, is_child_table, is_single,
@@ -135,18 +200,72 @@ func (s *Store) LoadAll() ([]*doctype.DocType, error) {
 		dt.IsChildTable = isChildTable == 1
 		dt.IsSingle = isSingle == 1
 		dt.TrackChanges = trackChanges == 1
-
-		// Load fields.
-		fields, err := s.loadFields(dt.Name)
-		if err != nil {
-			return nil, fmt.Errorf("loading fields for %s: %w", dt.Name, err)
-		}
-		dt.Fields = fields
-
 		doctypes = append(doctypes, dt)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
-	return doctypes, rows.Err()
+	// Load all fields in a single batched query.
+	allFields, err := s.loadAllFields()
+	if err != nil {
+		return nil, fmt.Errorf("loading all fields: %w", err)
+	}
+
+	// Group fields by parent doctype.
+	for _, dt := range doctypes {
+		dt.Fields = allFields[dt.Name]
+	}
+
+	return doctypes, nil
+}
+
+// loadAllFields fetches all fields for all doctypes in a single query.
+func (s *Store) loadAllFields() (map[string][]doctype.Field, error) {
+	rows, err := s.DB.Query(`
+		SELECT parent, fieldname, fieldtype, label, options, reqd, unique_constraint,
+			default_value, hidden, read_only, bold, in_list_view, in_standard_filter,
+			search_index, description, depends_on, mandatory_depends_on,
+			constraints_json, renamed_from, COALESCE(linked_field,'') as linked_field, COALESCE(computed,'') as computed, idx
+		FROM _kora_field
+		ORDER BY parent, idx
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string][]doctype.Field)
+	for rows.Next() {
+		var parent string
+		f := doctype.Field{}
+		var reqd, unique, hidden, readOnly, bold, inListView, inStdFilter, searchIdx, idxVal int
+		var constraintsJSON string
+
+		err := rows.Scan(
+			&parent, &f.Fieldname, &f.Fieldtype, &f.Label, &f.Options,
+			&reqd, &unique, &f.Default, &hidden, &readOnly, &bold,
+			&inListView, &inStdFilter, &searchIdx, &f.Description,
+			&f.DependsOn, &f.MandatoryDependsOn, &constraintsJSON,
+			&f.RenamedFrom, &f.LinkedField, &f.Computed, &idxVal,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scanning field: %w", err)
+		}
+
+		f.Reqd = reqd == 1
+		f.Unique = unique == 1
+		f.Hidden = hidden == 1
+		f.ReadOnly = readOnly == 1
+		f.Bold = bold == 1
+		f.InListView = inListView == 1
+		f.InStandardFilter = inStdFilter == 1
+		f.SearchIndex = searchIdx == 1
+
+		result[parent] = append(result[parent], f)
+	}
+
+	return result, rows.Err()
 }
 
 func (s *Store) loadFields(parent string) ([]doctype.Field, error) {
@@ -281,6 +400,78 @@ func (s *Store) SavePermissions(permissions []*doctype.Permission) error {
 			return fmt.Errorf("saving permission %s: %w", name, err)
 		}
 	}
+	return nil
+}
+
+// AutoCreatePermissionsForDoctype creates Administrator-only permissions for a
+// newly created doctype. Other roles must be explicitly granted access via the
+// Permissions panel. This follows the principle: explicit is better than implicit.
+func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string) error {
+	// Ensure _kora_permission table exists.
+	s.DB.Exec(`CREATE TABLE IF NOT EXISTS _kora_permission (
+		name VARCHAR(140) PRIMARY KEY,
+		doctype VARCHAR(140) NOT NULL, role VARCHAR(140) NOT NULL,
+		can_read TINYINT(1) NOT NULL DEFAULT 0, can_write TINYINT(1) NOT NULL DEFAULT 0,
+		can_create TINYINT(1) NOT NULL DEFAULT 0, can_delete TINYINT(1) NOT NULL DEFAULT 0,
+		can_submit TINYINT(1) NOT NULL DEFAULT 0, can_cancel TINYINT(1) NOT NULL DEFAULT 0,
+		can_amend TINYINT(1) NOT NULL DEFAULT 0, can_export TINYINT(1) NOT NULL DEFAULT 0,
+		can_import TINYINT(1) NOT NULL DEFAULT 0, can_report TINYINT(1) NOT NULL DEFAULT 0,
+		if_owner TINYINT(1) NOT NULL DEFAULT 0,
+		UNIQUE KEY idx_doctype_role (doctype, role)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+
+	// Get all existing roles.
+	rows, err := s.DB.Query("SELECT name FROM _kora_role")
+	if err != nil {
+		return fmt.Errorf("querying roles: %w", err)
+	}
+	defer rows.Close()
+
+	var roles []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		roles = append(roles, name)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// Only Administrator gets auto-granted permissions. Other roles must be
+	// explicitly granted access via the Permissions panel (explicit > implicit).
+	for _, role := range roles {
+		if role != "Administrator" {
+			continue
+		}
+		name := fmt.Sprintf("%s.%s", doctypeName, role)
+		_, err := s.DB.Exec(`
+			INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
+				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON DUPLICATE KEY UPDATE
+				can_read = VALUES(can_read), can_write = VALUES(can_write),
+				can_create = VALUES(can_create), can_delete = VALUES(can_delete),
+				can_submit = VALUES(can_submit), can_cancel = VALUES(can_cancel),
+				can_amend = VALUES(can_amend), can_export = VALUES(can_export),
+				can_import = VALUES(can_import), can_report = VALUES(can_report),
+				if_owner = VALUES(if_owner)
+		`,
+			name, doctypeName, role,
+			true, true, true, // read, write, create
+			true, true, true, // delete, submit, cancel
+			true, true, true, true, // amend, export, import, report
+			false, // if_owner
+		)
+		if err != nil {
+			return fmt.Errorf("creating default permission for %s: %w", name, err)
+		}
+	}
+
+	// Reload permissions into the in-memory registry so they take effect immediately.
+	// The caller's registry will pick these up on the next request.
+	slog.Info("auto-created default permissions for new doctype", "doctype", doctypeName, "roles", len(roles))
 	return nil
 }
 

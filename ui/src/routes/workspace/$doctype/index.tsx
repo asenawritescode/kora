@@ -36,6 +36,9 @@ export default function ListPage() {
   })
 
   const dt: DocType | undefined = schemaQuery.data?.doctype
+  const perms = schemaQuery.data?.permissions
+  const canCreate = perms?.create ?? false
+  const canWrite = perms?.write ?? false
   const listFields = dt?.fields?.filter((f) => f.in_list_view && !isLayoutField(f.fieldtype)) ?? []
   const total = listQuery.data?.meta?.total ?? 0
   const totalPages = Math.ceil(total / limit)
@@ -65,9 +68,14 @@ export default function ListPage() {
           <h1 className="text-2xl font-bold tracking-tight">{dt.name}</h1>
           <p className="text-sm text-muted-foreground">
             {total} record{total !== 1 ? 's' : ''}
+            {!canWrite && <span className="ml-2 text-amber-600 dark:text-amber-400">(read-only)</span>}
           </p>
         </div>
-        <Button onClick={() => navigate({ to: '/workspace/$doctype/new', params: { doctype } })}>
+        <Button
+          onClick={() => navigate({ to: '/workspace/$doctype/new', params: { doctype } })}
+          disabled={!canCreate}
+          title={!canCreate ? "You don't have permission to create" : undefined}
+        >
           <Plus className="mr-2 h-4 w-4" />
           New {dt.name}
         </Button>

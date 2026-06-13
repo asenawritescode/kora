@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -25,14 +26,31 @@ type User struct {
 // SessionLifetime is the duration for which sessions are valid. Set before creating SessionManagers.
 var SessionLifetime = 24 * time.Hour
 
-// SessionManager manages user sessions.
+// sessionCacheTTL is how long session lookups are cached before re-validating.
+const sessionCacheTTL = 30 * time.Second
+const sessionCacheCleanupInterval = 5 * time.Minute
+
+type sessionCacheEntry struct {
+	user      *User
+	cachedAt  time.Time
+	expiresAt time.Time // session expiry from DB
+}
+
+// SessionManager manages user sessions with an in-memory TTL cache.
 type SessionManager struct {
-	DB *sql.DB
+	DB       *sql.DB
+	cacheMu  sync.RWMutex
+	cache    map[string]*sessionCacheEntry
 }
 
 // NewSessionManager creates a new session manager.
 func NewSessionManager(db *sql.DB) *SessionManager {
-	return &SessionManager{DB: db}
+	sm := &SessionManager{
+		DB:    db,
+		cache: make(map[string]*sessionCacheEntry),
+	}
+	go sm.sweepCacheLoop()
+	return sm
 }
 
 // CreateSession creates a new session for a user and returns the session ID.
@@ -61,14 +79,26 @@ func (sm *SessionManager) CreateSession(user *User) (string, error) {
 		return "", fmt.Errorf("creating session: %w", err)
 	}
 
-	// Clean up expired sessions periodically.
-	sm.cleanupExpired()
-
 	return sid, nil
 }
 
 // GetSession validates a session ID and returns the associated user.
+// Uses an in-memory TTL cache to avoid hitting the database on every request.
 func (sm *SessionManager) GetSession(sid string) (*User, error) {
+	// Check cache first.
+	sm.cacheMu.RLock()
+	entry, ok := sm.cache[sid]
+	sm.cacheMu.RUnlock()
+
+	if ok && time.Now().Before(entry.cachedAt.Add(sessionCacheTTL)) {
+		if time.Now().After(entry.expiresAt) {
+			sm.DeleteSession(sid)
+			return nil, fmt.Errorf("session expired")
+		}
+		return entry.user, nil
+	}
+
+	// Cache miss or expired — query database.
 	var userJSON string
 	var expiresAt time.Time
 
@@ -78,6 +108,10 @@ func (sm *SessionManager) GetSession(sid string) (*User, error) {
 	).Scan(&userJSON, &expiresAt)
 
 	if err == sql.ErrNoRows {
+		// Remove from cache if present.
+		sm.cacheMu.Lock()
+		delete(sm.cache, sid)
+		sm.cacheMu.Unlock()
 		return nil, fmt.Errorf("session not found")
 	}
 	if err != nil {
@@ -91,10 +125,18 @@ func (sm *SessionManager) GetSession(sid string) (*User, error) {
 
 	// Parse JSON. For simplicity in Phase 1, parse manually.
 	user := &User{}
-	// Extract fields from JSON.
 	if err := scanUserJSON(userJSON, user); err != nil {
 		return nil, fmt.Errorf("parsing session data: %w", err)
 	}
+
+	// Populate cache.
+	sm.cacheMu.Lock()
+	sm.cache[sid] = &sessionCacheEntry{
+		user:      user,
+		cachedAt:  time.Now(),
+		expiresAt: expiresAt,
+	}
+	sm.cacheMu.Unlock()
 
 	return user, nil
 }
@@ -207,6 +249,38 @@ func (sm *SessionManager) DeleteSession(sid string) {
 	_, err := sm.DB.Exec("DELETE FROM _kora_session WHERE sid = ?", sid)
 	if err != nil {
 		slog.Warn("failed to delete session", "sid", sid, "error", err)
+	}
+	// Invalidate cache entry.
+	sm.cacheMu.Lock()
+	delete(sm.cache, sid)
+	sm.cacheMu.Unlock()
+}
+
+// InvalidateSession removes a session from the cache without deleting it from the database.
+// Use this when user state changes (role change, password change, disable) to force re-validation.
+func (sm *SessionManager) InvalidateSession(sid string) {
+	sm.cacheMu.Lock()
+	delete(sm.cache, sid)
+	sm.cacheMu.Unlock()
+}
+
+// sweepCacheLoop periodically removes expired cache entries and cleans up expired DB sessions.
+func (sm *SessionManager) sweepCacheLoop() {
+	ticker := time.NewTicker(sessionCacheCleanupInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		// Clean in-memory cache.
+		sm.cacheMu.Lock()
+		now := time.Now()
+		for sid, entry := range sm.cache {
+			if now.After(entry.expiresAt) || now.After(entry.cachedAt.Add(sessionCacheTTL*2)) {
+				delete(sm.cache, sid)
+			}
+		}
+		sm.cacheMu.Unlock()
+
+		// Clean expired DB sessions.
+		sm.cleanupExpired()
 	}
 }
 

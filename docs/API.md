@@ -423,7 +423,20 @@ Removes config from `_kora_doctype`/`_kora_field`. Does NOT drop the data table.
 POST /api/system/doctype/validate
 ```
 
-Parses and validates a DocType JSON body without saving. Returns the validated DocType with defaults applied, or validation errors.
+Accepts JSON (`Content-Type: application/json`) or YAML (`Content-Type: application/x-yaml`). For JSON, returns validated DocType with defaults. For YAML, returns structured syntax errors with line numbers and "did you mean?" suggestions:
+
+```json
+{
+  "valid": false,
+  "syntax": [
+    {"line": 4, "column": 1, "key": "is_submittible", "context": "doctype", "detail": "did you mean \"is_submittable\"?"},
+    {"line": 9, "column": 5, "key": "icon", "context": "doctype"}
+  ],
+  "validations": null
+}
+```
+
+Unknown keys inside `fields[]`, `constraints[]`, and `doc_constraints[]` are checked recursively.
 
 ### Dry-Run Impact Analysis
 
@@ -598,7 +611,7 @@ Content-Security-Policy: default-src 'self'; script-src ...; style-src ...
 Referrer-Policy: same-origin
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
-X-Request-Id: <uuid>
+X-Request-Id: <ulid>
 X-Xss-Protection: 1; mode=block
 Strict-Transport-Security: max-age=31536000 (if TLS enabled)
 ```

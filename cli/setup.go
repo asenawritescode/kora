@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/google/uuid"
+	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 	"github.com/yourorg/kora/auth"
 	"github.com/yourorg/kora/configstore"
@@ -183,7 +183,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Admin user created: %s\n", setupAdminEmail)
 
 	// Step 9: Create initial config version.
-	versionID := uuid.New().String()
+	versionID := ulid.Make().String()
 	_, err = db.Exec(
 		`INSERT INTO _kora_config_version (id, site, version, created_by, label, is_active, config)
 		 VALUES (?, ?, 1, 'setup', 'Initial setup', 1, '{}')`,

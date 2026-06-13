@@ -68,11 +68,19 @@ Three methods coexist:
 
 The `SiteRouter` middleware sets `site_name`, `site_db`, `site_registry` in Gin context. **All auth is site-scoped** — login, session creation, session validation, and logout all read `site_db` from context. A session from one site doesn't work on another.
 
+The `kora_site` cookie (set by path-based routing) is validated against the request Host header via `isHostAllowedForSite()` — only `localhost`, loopback IPs, or the site's configured domains are allowed. Unknown hosts get 403.
+
 ### API Envelope
 
 All responses: `{"data": ..., "meta": {"doctype": "...", "total": N, "config_version": N}}`  
 Errors: `{"error": "plain message"}` or `{"error": {"type": "UniqueConstraint", "message": "...", "field": "fieldname"}}`  
 Multiple: `{"error": {"errors": [{"type": "...", "message": "...", "field": "..."}]}}`
+
+**YAML validation errors** (from `POST /api/system/doctype/validate`):
+```json
+{"valid": false, "syntax": [{"line": 4, "column": 1, "key": "is_submittible", "context": "doctype", "detail": "did you mean \"is_submittable\"?"}]}
+```
+Unknown YAML keys are rejected with line numbers and Levenshtein-based suggestions. Fields inside `fields[]`, `constraints[]`, and `doc_constraints[]` are checked recursively.
 
 ### DocType & Field Config (`config/{app}/doctypes/*.yaml`)
 
@@ -81,7 +89,9 @@ Fields map to DB columns. Key field types: Data, Int, Float, Currency, Select, L
 **New config-driven properties:**
 - `computed: "quantity * unit_price"` — expression auto-calculated when dependencies change. Supports `+`, `-`, `*`, `/`, `SUM(table.field)`, `ROUND(expr, N)`
 - `linked_field: "product.selling_price"` — auto-populates from linked document when Link field changes
-- `unique: true` — DB UNIQUE index + pre-save SELECT check → field-level error
+- `unique: true` — DB UNIQUE index enforced at database level (MySQL error 1062 → field-level ValidationError)
+- `renamed_from: "old_fieldname"` — non-breaking column rename via `ALTER TABLE RENAME COLUMN` during migration
+- `constraints` — field constraints (min, max, regex, one_of, etc.) editable via visual form builder or YAML
 
 ### Frontend (`ui/`)
 
@@ -119,9 +129,9 @@ Every doctype change is classified on activation:
 
 | Tier | Changes | Action |
 |------|---------|--------|
-| Safe | Add nullable field, new doctype, add index | Auto-apply |
+| Safe | Add nullable field, new doctype, add index, rename via `renamed_from` | Auto-apply |
 | Warning | Add required field no default, orphan field | Show impact, require confirm |
-| Blocked | Change field type, rename without migration | Require explicit fix |
+| Blocked | Change field type, rename without `renamed_from` | Require explicit fix |
 
 The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affected rows, and classifies each change.
 
@@ -130,11 +140,11 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 | Package | Purpose |
 |---|---|
 | `doctype/` | DocType, Field, Constraint, Document, Registry, PermissionMatrix, Workflow, expression engine |
-| `orm/` | Generic CRUD (Insert, Save, GetDoc, GetList, Delete), filter parsing, unique constraint check |
-| `schema/` | INFORMATION_SCHEMA diff → DDL (additive only by default) |
-| `api/` | REST handlers, envelope, CRUD, workflow actions, system endpoints |
-| `auth/` | Session auth (bcrypt), CSRF (double-submit cookie), SystemGuard, SiteGuard |
-| `net/` | SiteRouter, security headers, CORS, rate limiter, TLS (autocert) |
+| `orm/` | Generic CRUD (Insert, Save, GetDoc, GetList, Delete), filter parsing, DB-level unique enforcement, batched child INSERTs, diff-based Save, ULID name generation |
+| `schema/` | INFORMATION_SCHEMA diff → DDL (additive + rename), column rename via `renamed_from` |
+| `api/` | REST handlers, envelope, CRUD, workflow actions, system endpoints, YAML validation |
+| `auth/` | Session auth (bcrypt), in-memory session cache (30s TTL), CSRF (double-submit cookie), SystemGuard, SiteGuard |
+| `net/` | SiteRouter with host validation, security headers, CORS, rate limiter, TLS (autocert), ULID request IDs |
 | `cli/` | Cobra CLI: serve, setup, migrate, config (import/export/versions/diff/rollback), new-site |
 | `configstore/` | Read/write config to/from DB (_kora_doctype, _kora_field, etc.) |
 | `workspace/` | SPA serving (go:embed dist/*), NoRoute handler, static file server |
@@ -144,7 +154,7 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 
 ### ORM Document Model
 
-Documents are `map[string]any`. Names are auto-generated: `PREFIX-NNNN` (prefix = first 4 chars of single-word names, first-letter-of-each-word for multi-word). System columns on every table: `name`, `owner`, `creation`, `modified`, `modified_by`, `doc_status`, `idx`. Child tables add: `parent`, `parentfield`, `parenttype`. Table names are backtick-quoted for SQL safety (spaces in names like "Work Order").
+Documents are `map[string]any`. Parent document names are auto-generated: `PREFIX-NNNN` via `SELECT COUNT(*)` (prefix = first 4 chars of single-word names, first-letter-of-each-word for multi-word). Child row names use ULID: `PREFIX-<ulid>` (26-char sortable unique ID, no DB query needed). System columns on every table: `name`, `owner`, `creation`, `modified`, `modified_by`, `doc_status`, `idx`. Child tables add: `parent`, `parentfield`, `parenttype`. Table names are backtick-quoted for SQL safety (spaces in names like "Work Order").
 
 ### Multi-Tenancy
 
