@@ -1,11 +1,11 @@
 - name: Sales Rep
-  desk_access: true
+  workspace_access: true
   description: Creates and manages own leads, contacts, and deals. Can view companies and activities.
 
 - name: Sales Manager
-  desk_access: true
+  workspace_access: true
   description: Full CRM access. Can manage all deals, close won/lost, and view team pipeline.
 
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

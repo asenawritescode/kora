@@ -1,7 +1,7 @@
 - name: Sales Agent
-  desk_access: true
+  workspace_access: true
   description: Creates and manages customer orders.
 
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access, order processing.

@@ -32,8 +32,8 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 	// Upsert the DocType record.
 	_, err = s.DB.Exec(`
 		INSERT INTO _kora_doctype (name, module, is_submittable, is_child_table, is_single,
-			track_changes, title_field, search_fields, sort_field, sort_order, description, config_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			track_changes, title_field, search_fields, sort_field, sort_order, description, config_json, version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 		ON DUPLICATE KEY UPDATE
 			module = VALUES(module),
 			is_submittable = VALUES(is_submittable),
@@ -45,7 +45,8 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 			sort_field = VALUES(sort_field),
 			sort_order = VALUES(sort_order),
 			description = VALUES(description),
-			config_json = VALUES(config_json)
+			config_json = VALUES(config_json),
+			version = version + 1
 	`,
 		dt.Name, dt.Module, boolToInt(dt.IsSubmittable), boolToInt(dt.IsChildTable),
 		boolToInt(dt.IsSingle), boolToInt(dt.TrackChanges),
@@ -225,16 +226,16 @@ func (s *Store) SaveRoles(roles []*doctype.Role) error {
 	// Ensure table exists.
 	s.DB.Exec(`CREATE TABLE IF NOT EXISTS _kora_role (
 		name VARCHAR(140) PRIMARY KEY,
-		desk_access TINYINT(1) NOT NULL DEFAULT 1,
+		workspace_access TINYINT(1) NOT NULL DEFAULT 1,
 		description TEXT
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
 
 	for _, role := range roles {
 		_, err := s.DB.Exec(`
-			INSERT INTO _kora_role (name, desk_access, description)
+			INSERT INTO _kora_role (name, workspace_access, description)
 			VALUES (?, ?, ?)
-			ON DUPLICATE KEY UPDATE desk_access = VALUES(desk_access), description = VALUES(description)
-		`, role.Name, boolToInt(role.DeskAccess), role.Description)
+			ON DUPLICATE KEY UPDATE workspace_access = VALUES(workspace_access), description = VALUES(description)
+		`, role.Name, boolToInt(role.WorkspaceAccess), role.Description)
 		if err != nil {
 			return fmt.Errorf("saving role %s: %w", role.Name, err)
 		}
@@ -375,7 +376,7 @@ func (s *Store) SaveWorkflows(workflows []*doctype.Workflow) error {
 
 // LoadRoles loads all roles from _kora_role.
 func (s *Store) LoadRoles() ([]*doctype.Role, error) {
-	rows, err := s.DB.Query("SELECT name, desk_access, description FROM _kora_role ORDER BY name")
+	rows, err := s.DB.Query("SELECT name, workspace_access, description FROM _kora_role ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -384,11 +385,11 @@ func (s *Store) LoadRoles() ([]*doctype.Role, error) {
 	var roles []*doctype.Role
 	for rows.Next() {
 		r := &doctype.Role{}
-		var deskAccess int
-		if err := rows.Scan(&r.Name, &deskAccess, &r.Description); err != nil {
+		var workspaceAccess int
+		if err := rows.Scan(&r.Name, &workspaceAccess, &r.Description); err != nil {
 			return nil, err
 		}
-		r.DeskAccess = deskAccess == 1
+		r.WorkspaceAccess = workspaceAccess == 1
 		roles = append(roles, r)
 	}
 	return roles, rows.Err()
@@ -428,6 +429,54 @@ func (s *Store) LoadPermissions() ([]*doctype.Permission, error) {
 		perms = append(perms, p)
 	}
 	return perms, rows.Err()
+}
+
+// CreateConfigVersion saves a snapshot of the full config for version tracking.
+// Returns the version ID, version number, and any error.
+func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, doctypes []*doctype.DocType) (string, int, error) {
+	var currentVersion int
+	s.DB.QueryRow("SELECT COALESCE(MAX(version), 0) FROM _kora_config_version WHERE site = ?", siteName).Scan(&currentVersion)
+	newVersion := currentVersion + 1
+
+	// If activating, deactivate all other versions first.
+	if status == "Active" {
+		s.DB.Exec("UPDATE _kora_config_version SET status = 'Superseded' WHERE site = ? AND status = 'Active'", siteName)
+	}
+
+	// Serialize config snapshot as JSON.
+	configJSON, err := json.Marshal(doctypes)
+	if err != nil {
+		return "", 0, fmt.Errorf("marshaling config: %w", err)
+	}
+
+	// Compute diff against previous version if one exists.
+	var changelog any
+	var prevConfigJSON string
+	s.DB.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND version = ?", siteName, currentVersion).Scan(&prevConfigJSON)
+
+	if prevConfigJSON != "" {
+		var prevDoctypes []*doctype.DocType
+		if err := json.Unmarshal([]byte(prevConfigJSON), &prevDoctypes); err == nil {
+			diff := doctype.DiffConfigs(prevDoctypes, doctypes)
+			diff.FromVersion = currentVersion
+			diff.ToVersion = newVersion
+			changelogBytes, _ := json.Marshal(diff)
+			changelog = string(changelogBytes)
+		}
+	}
+
+	versionID := fmt.Sprintf("cv-%s-%d", siteName, newVersion)
+	_, err = s.DB.Exec(
+		`INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, changelog, status, config)
+		 VALUES (?, ?, ?, NOW(6), ?, ?, ?, ?, ?)`,
+		versionID, siteName, newVersion, createdBy, label, changelog, status, string(configJSON),
+	)
+	if err != nil {
+		return "", 0, fmt.Errorf("creating config version: %w", err)
+	}
+
+	slog.Debug("created config version", "id", versionID, "version", newVersion, "status", status)
+	return versionID, newVersion, nil
 }
 
 // LoadWorkflows loads all workflows from the database.

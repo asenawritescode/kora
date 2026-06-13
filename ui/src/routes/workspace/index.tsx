@@ -37,7 +37,7 @@ export default function DashboardPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data?.modules?.map((mod) =>
-            mod.doctypes.slice(0, 3).map((dt) => (
+            mod.doctypes.map((dt) => (
               <Link
                 key={dt.name}
                 to="/workspace/$doctype"

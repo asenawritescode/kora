@@ -207,58 +207,30 @@ func runConfigImport(siteName, path string) error {
 	}
 
 	// Create config version record.
-	createConfigVersion(db, siteName, "system", "Config import from "+path, doctypes)
-
-	fmt.Println("Config imported successfully.")
-	return nil
-}
-
-func createConfigVersion(db *sql.DB, siteName, createdBy, label string, doctypes []*doctype.DocType) {
-	var currentVersion int
-	db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM _kora_config_version WHERE site = ?", siteName).Scan(&currentVersion)
-	newVersion := currentVersion + 1
-
-	// Deactivate all previous versions.
-	db.Exec("UPDATE _kora_config_version SET is_active = 0 WHERE site = ?", siteName)
-
-	// Serialize config snapshot as JSON (config column is JSON type).
-	configJSON, _ := json.Marshal(doctypes)
-
-	// Compute diff against previous version if one exists.
-	var prevConfigJSON string
-	db.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND version = ?", siteName, currentVersion).Scan(&prevConfigJSON)
-
-	var changelog any // nil when empty, string when populated (MySQL JSON column rejects "")
-	if prevConfigJSON != "" {
-		var prevDoctypes []*doctype.DocType
-		if err := json.Unmarshal([]byte(prevConfigJSON), &prevDoctypes); err == nil {
-			diff := doctype.DiffConfigs(prevDoctypes, doctypes)
-			diff.FromVersion = currentVersion
-			diff.ToVersion = newVersion
-			changelogBytes, _ := json.Marshal(diff)
-			changelog = string(changelogBytes)
-
-			if diff.IsBreaking {
-				fmt.Printf("  ⚠️  Warning: %d breaking changes detected!\n", len(diff.BreakingChanges()))
-				for _, c := range diff.BreakingChanges() {
-					fmt.Printf("     - %s\n", c.Message)
-				}
-			}
-			fmt.Printf("  ✓ %s\n", diff.Summary())
-		}
-	}
-
-	versionID := fmt.Sprintf("cv-%s-%d", siteName, newVersion)
-	_, err := db.Exec(
-		`INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, changelog, is_active, config)
-		 VALUES (?, ?, ?, NOW(6), ?, ?, ?, 1, ?)`,
-		versionID, siteName, newVersion, createdBy, label, changelog, string(configJSON),
-	)
+	versionID, versionNum, err := store.CreateConfigVersion(siteName, "system", "Config import from "+path, "Active", doctypes)
 	if err != nil {
 		fmt.Printf("  ⚠️  Warning: failed to create config version: %v\n", err)
 	} else {
-		fmt.Printf("  ✓ Config version %d created\n", newVersion)
+		// Print changelog summary.
+		var changelogStr string
+		db.QueryRow("SELECT COALESCE(changelog, '') FROM _kora_config_version WHERE id = ?", versionID).Scan(&changelogStr)
+		if changelogStr != "" {
+			var diff doctype.ConfigDiff
+			if json.Unmarshal([]byte(changelogStr), &diff) == nil {
+				if diff.IsBreaking {
+					fmt.Printf("  ⚠️  Warning: %d breaking changes detected!\n", len(diff.BreakingChanges()))
+					for _, c := range diff.BreakingChanges() {
+						fmt.Printf("     - %s\n", c.Message)
+					}
+				}
+				fmt.Printf("  ✓ %s\n", diff.Summary())
+			}
+		}
+		fmt.Printf("  ✓ Config version %d created\n", versionNum)
 	}
+
+	fmt.Println("Config imported successfully.")
+	return nil
 }
 
 func bootstrapSystemTables(db *sql.DB) error {
@@ -276,9 +248,13 @@ func bootstrapSystemTables(db *sql.DB) error {
 			sort_order VARCHAR(4) NOT NULL DEFAULT 'DESC',
 			description TEXT,
 			config_json JSON,
+			version INT NOT NULL DEFAULT 1,
 			creation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 			modified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// Add version column to existing _kora_doctype tables.
+		`ALTER TABLE _kora_doctype ADD COLUMN version INT NOT NULL DEFAULT 1`,
 
 		`CREATE TABLE IF NOT EXISTS _kora_field (
 			name VARCHAR(140) PRIMARY KEY,
@@ -314,7 +290,7 @@ func bootstrapSystemTables(db *sql.DB) error {
 
 		`CREATE TABLE IF NOT EXISTS _kora_role (
 			name VARCHAR(140) PRIMARY KEY,
-			desk_access TINYINT(1) NOT NULL DEFAULT 1,
+			workspace_access TINYINT(1) NOT NULL DEFAULT 1,
 			description TEXT
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -344,11 +320,17 @@ func bootstrapSystemTables(db *sql.DB) error {
 			created_by VARCHAR(140) NOT NULL DEFAULT 'system',
 			label VARCHAR(255) NOT NULL DEFAULT '',
 			changelog JSON,
-			is_active TINYINT(1) NOT NULL DEFAULT 0,
+			status VARCHAR(20) NOT NULL DEFAULT 'Draft',
 			config JSON,
-			INDEX idx_site_active (site, is_active),
+			INDEX idx_site_status (site, status),
 			INDEX idx_site_version (site, version)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// Add status column (ignored if already exists). Also try adding is_active
+		// for backwards compat, and migrate old data if both columns exist.
+		`ALTER TABLE _kora_config_version ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'Superseded'`,
+		`ALTER TABLE _kora_config_version ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 0`,
+		`UPDATE _kora_config_version SET status = 'Active' WHERE is_active = 1 AND status = 'Superseded'`,
 
 		`CREATE TABLE IF NOT EXISTS _kora_user (
 			name VARCHAR(140) PRIMARY KEY,
@@ -375,8 +357,11 @@ func bootstrapSystemTables(db *sql.DB) error {
 
 	for _, ddl := range systemTableSQL {
 		if _, err := db.Exec(ddl); err != nil {
-			// Ignore duplicate column errors (for ALTER TABLE ADD COLUMN).
-			if strings.Contains(err.Error(), "Duplicate column") {
+			// Ignore duplicate column errors and unknown column errors
+			// (for idempotent ALTER TABLE and migration UPDATE statements).
+			errStr := err.Error()
+			if strings.Contains(errStr, "Duplicate column") ||
+				strings.Contains(errStr, "Unknown column") {
 				continue
 			}
 			return fmt.Errorf("creating system table: %w\nSQL: %s", err, ddl)

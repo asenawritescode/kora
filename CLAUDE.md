@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 make dev                # MySQL + build + setup + serve (one command)
 make build              # Build UI + Go binary
 make serve              # Start server on :8000
+make restart            # Kill old server + rebuild all + start fresh
 make setup              # Setup a site (SITE=airtime.local CONFIG=config/airtime/)
 make test               # Run Go tests
 make lint               # Run linters (Go + TypeScript)
@@ -87,11 +88,42 @@ Fields map to DB columns. Key field types: Data, Int, Float, Currency, Select, L
 React 19 + TanStack Router/Query/Table/Form + shadcn/ui + Tailwind CSS v4 + Zustand. All views are **config-driven** — the SPA reads `/api/system/doctype/:name` and renders forms, lists, and workflow generically. No per-doctype components.
 
 Key patterns:
-- `router.tsx`: Auto-detects basepath for multi-site (`/s/:site` prefix)
+- `router.tsx`: Auto-detects basepath for multi-site (`/s/:site` prefix). **Admin routes must be registered before `$doctype`** to avoid the catch-all route capturing literal paths. Admin pages are under `ui/src/routes/workspace/admin/`.
 - `lib/basepath.ts`: `sitePath()` helper — all navigation uses this to preserve site prefix
 - `lib/computed-fields.ts`: Expression evaluator for `computed` fields
 - `lib/expression-eval.ts`: Parses `SUM()`, `ROUND()`, arithmetic
+- `components/tables/DataTable.tsx`: Shared table component — desktop table + mobile stacked cards via `hidden md:` / `md:hidden`
 - Forms served via `NoRoute` handler in `workspace/spa.go` (not middleware — Gin's radix tree conflicts)
+- **Mobile**: Tables use stacked card layout. Permissions uses role drill-down accordion. Workflow editor uses collapsible card sections. No horizontal scroll anywhere.
+
+### Administrator Tab (SPA)
+
+The workspace sidebar has an Administrator section with four views, all config-driven:
+
+| Page | Route | Purpose |
+|------|-------|---------|
+| DocTypes | `/workspace/admin/doctypes` | CRUD doctypes via visual form builder + live YAML panel |
+| Permissions | `/workspace/admin/permissions` | Role × DocType permission matrix, inline editing |
+| Workflows | `/workspace/admin/workflows` | Define state machines for submittable doctypes |
+| Versions | `/workspace/admin/versions` | Config version history with Activate/Discard/Rollback |
+
+The doctype editor uses a split-pane layout: visual form builder on the left, live YAML preview on the right (with syntax highlighting). YAML is editable and can be applied back to the form via `js-yaml` client-side parsing.
+
+### Config Versioning
+
+Config versions use a status workflow: **Draft → Active → Superseded**. The `_kora_config_version` table has a `status` column (replaced `is_active`). Versions store a full config snapshot + diff changelog. Only one version is Active at a time. Draft versions are not applied to the live schema — they must be Activated. Versions can be rolled back.
+
+### Schema Migration Safety Tiers
+
+Every doctype change is classified on activation:
+
+| Tier | Changes | Action |
+|------|---------|--------|
+| Safe | Add nullable field, new doctype, add index | Auto-apply |
+| Warning | Add required field no default, orphan field | Show impact, require confirm |
+| Blocked | Change field type, rename without migration | Require explicit fix |
+
+The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affected rows, and classifies each change.
 
 ### Key Packages
 

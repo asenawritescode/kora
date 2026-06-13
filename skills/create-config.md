@@ -2,6 +2,8 @@
 
 You are generating YAML configuration files for Kora, a config-driven application engine. These files define the entire application: data model, permissions, roles, and workflows. The engine reads them and provides database schema, REST API, and a React admin UI automatically.
 
+> **Alternative:** Config can also be created via the **Administrator tab** in the workspace UI — a visual form builder with live YAML preview. Go to `/workspace/admin/doctypes` after logging in. This guide covers the YAML format used by both the visual builder and manual file creation.
+
 ## Directory Structure
 
 ```
@@ -183,11 +185,11 @@ Flat YAML array — NOT a map with a `roles:` key:
 
 ```yaml
 - name: Sales Agent
-  desk_access: true          # Can access the workspace UI
+  workspace_access: true          # Can access the workspace UI
   description: Creates and manages customer orders.
 
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.
 ```
 
@@ -252,6 +254,14 @@ transitions:
     condition: "len(doc.items) > 0"       # Expression that must be true
     require_fields:                       # Fields that must be non-empty
       - payment_method
+
+notifications:                           # Optional — email on state change
+  - event: state_change
+    to_state: Shipped
+    recipients:
+      - field: customer.email
+    subject: "Your order {name} has shipped"
+    message: "Order {name} is on its way."
 ```
 
 ## Complete Example: Todo App
@@ -311,11 +321,11 @@ fields:
 
 ```yaml
 - name: Todo User
-  desk_access: true
+  workspace_access: true
   description: Can create and manage todos.
 
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.
 ```
 

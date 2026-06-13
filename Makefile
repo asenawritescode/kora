@@ -40,6 +40,11 @@ setup: build                       ## Build + setup a site (SITE=airtime.local C
 serve: build                       ## Build + start the server
 	./kora serve --port $(PORT)
 
+restart:                           ## Rebuild UI + Go, kill old server, start fresh
+	@fuser -k $(PORT)/tcp 2>/dev/null || true
+	$(MAKE) build
+	./kora serve --port $(PORT)
+
 ## Quality
 test:                              ## Run Go tests
 	go test ./... -v -count=1

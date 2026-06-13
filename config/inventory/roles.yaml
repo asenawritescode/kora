@@ -1,6 +1,6 @@
 - name: Warehouse Operator
-  desk_access: true
+  workspace_access: true
   description: Manages stock movements and inventory.
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

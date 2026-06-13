@@ -1,7 +1,7 @@
 # Site configuration for airtime.local
 db_host: 127.0.0.1
 db_port: 3306
-db_name: airtime_db
+db_name: airtime_local
 db_user: root
 db_password: kora123
 

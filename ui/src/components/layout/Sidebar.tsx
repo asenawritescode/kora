@@ -11,6 +11,10 @@ import {
   Sun,
   PanelLeftClose,
   PanelLeft,
+  FileCode,
+  History,
+  ShieldCheck,
+  Workflow,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -126,6 +130,33 @@ export function Sidebar() {
           ))}
         </nav>
       </ScrollArea>
+
+      <Separator />
+
+      {/* Administrator section */}
+      <nav className="space-y-1 p-2">
+        {!sidebarCollapsed && (
+          <h4 className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Administrator
+          </h4>
+        )}
+        <NavItem to="/workspace/admin/doctypes" collapsed={sidebarCollapsed}>
+          <FileCode className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && 'DocTypes'}
+        </NavItem>
+        <NavItem to="/workspace/admin/permissions" collapsed={sidebarCollapsed}>
+          <ShieldCheck className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && 'Permissions'}
+        </NavItem>
+        <NavItem to="/workspace/admin/workflows" collapsed={sidebarCollapsed}>
+          <Workflow className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && 'Workflows'}
+        </NavItem>
+        <NavItem to="/workspace/admin/versions" collapsed={sidebarCollapsed}>
+          <History className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && 'Versions'}
+        </NavItem>
+      </nav>
 
       <Separator />
 

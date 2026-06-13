@@ -1,11 +1,11 @@
 - name: Field Technician
-  desk_access: true
+  workspace_access: true
   description: Creates and manages their own work orders.
 
 - name: Service Manager
-  desk_access: true
+  workspace_access: true
   description: Approves work orders and manages all field operations.
 
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

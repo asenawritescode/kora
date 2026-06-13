@@ -1,6 +1,6 @@
 - name: Billing Clerk
-  desk_access: true
+  workspace_access: true
   description: Creates and manages invoices.
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

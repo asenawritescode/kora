@@ -1,6 +1,6 @@
 - name: Instructor
-  desk_access: true
+  workspace_access: true
   description: Creates and manages courses and content.
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

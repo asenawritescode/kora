@@ -1,6 +1,6 @@
 - name: Event Coordinator
-  desk_access: true
+  workspace_access: true
   description: Creates and manages events.
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

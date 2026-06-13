@@ -1,7 +1,7 @@
 - name: Todo User
-  desk_access: true
+  workspace_access: true
   description: Can create and manage todos.
 
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

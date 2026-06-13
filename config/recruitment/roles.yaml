@@ -1,6 +1,6 @@
 - name: Recruiter
-  desk_access: true
+  workspace_access: true
   description: Manages job openings and candidates.
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

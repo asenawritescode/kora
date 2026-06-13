@@ -372,6 +372,144 @@ The frontend displays this as an inline error on the specific field, with a red 
 
 ---
 
+## Admin API
+
+These endpoints power the Administrator tab in the workspace. They manage doctypes, roles, permissions, workflows, and config versions. All require authentication.
+
+### List All DocTypes
+
+```http
+GET /api/system/doctypes
+```
+
+Returns a flat array of all DocType objects (excluding child tables).
+
+### Create DocType
+
+```http
+POST /api/system/doctype?activate=true|false
+Content-Type: application/json
+
+{
+  "name": "Invoice",
+  "module": "Billing",
+  "title_field": "invoice_number",
+  "is_submittable": true,
+  "fields": [...]
+}
+```
+
+Set `?activate=false` to save as Draft (version only, no migration). Default is `activate=true` which applies immediately.
+
+### Update DocType
+
+```http
+PUT /api/system/doctype/:doctype?activate=true|false
+```
+
+Same body as create. Updates an existing doctype. Uses optimistic locking via a `version` column.
+
+### Delete DocType
+
+```http
+DELETE /api/system/doctype/:doctype
+```
+
+Removes config from `_kora_doctype`/`_kora_field`. Does NOT drop the data table.
+
+### Validate DocType
+
+```http
+POST /api/system/doctype/validate
+```
+
+Parses and validates a DocType JSON body without saving. Returns the validated DocType with defaults applied, or validation errors.
+
+### Dry-Run Impact Analysis
+
+```http
+POST /api/system/doctype/dry-run
+```
+
+Returns the DDL and safety tier classification for a proposed doctype change without applying it:
+
+```json
+{
+  "data": {
+    "ddl": ["ALTER TABLE tabInvoice ADD COLUMN discount DECIMAL(21,9) DEFAULT NULL"],
+    "changes": [{"tier": "safe", "doctype": "Invoice", "rows": 1250, "message": "..."}],
+    "blocked": [],
+    "warnings": []
+  }
+}
+```
+
+### Get References (dependency check)
+
+```http
+GET /api/system/doctype/:doctype/references
+```
+
+Returns other doctypes that have Link fields pointing to this doctype.
+
+### YAML Export
+
+```http
+GET /api/system/doctype/:doctype?format=yaml
+```
+
+Returns the DocType serialized as YAML (`text/yaml` content type).
+
+### Roles CRUD
+
+```http
+GET    /api/system/roles              # List all roles
+POST   /api/system/roles              # Create a role
+PUT    /api/system/roles/:name        # Update a role
+DELETE /api/system/roles/:name        # Delete a role (returns affected user count)
+```
+
+Role body: `{"name": "Sales Agent", "workspace_access": true, "description": "..."}`
+
+### Permissions
+
+```http
+GET /api/system/permissions           # List all permissions
+PUT /api/system/permissions           # Save full permission set (replaces all)
+```
+
+Permission body: `{"doctype": "Invoice", "role": "Sales Agent", "read": true, "write": true, ...}`
+
+### Workflows CRUD
+
+```http
+GET    /api/system/workflows           # List all workflows
+GET    /api/system/workflows/:doctype  # Get workflow for a specific doctype
+POST   /api/system/workflows           # Create or update a workflow
+DELETE /api/system/workflows/:doctype  # Remove a workflow
+```
+
+### Config Version Actions
+
+```http
+POST /api/system/config/versions/:id/activate   # Activate a Draft version
+POST /api/system/config/versions/:id/discard    # Discard a Draft version
+POST /api/system/config/versions/:id/rollback   # Rollback to a previous version
+```
+
+### YAML Import
+
+```http
+POST /api/system/config/import
+Content-Type: multipart/form-data
+
+file: doctype.yaml
+```
+
+Parses a YAML file and returns the structured DocType JSON. Does not save — the frontend loads it into the editor for review.
+
+---
+
 ## System Config API
 
 ### List Config Versions

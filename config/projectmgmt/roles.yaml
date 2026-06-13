@@ -1,11 +1,11 @@
 - name: Team Member
-  desk_access: true
+  workspace_access: true
   description: Creates and updates tasks.
 
 - name: Project Manager
-  desk_access: true
+  workspace_access: true
   description: Manages projects and team assignments.
 
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

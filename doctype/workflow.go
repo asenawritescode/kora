@@ -74,6 +74,11 @@ func (wm *WorkflowMap) Has(doctype string) bool {
 	return ok
 }
 
+// Remove removes a workflow from the map.
+func (wm *WorkflowMap) Remove(doctype string) {
+	delete(wm.workflows, doctype)
+}
+
 // GetAvailableTransitions returns transitions available from the current state
 // for the given user role. Also evaluates conditions.
 func (wm *WorkflowMap) GetAvailableTransitions(doctype, currentState, userRole string, doc *Document) []WorkflowTransition {

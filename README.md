@@ -17,7 +17,7 @@ make setup                         # Setup airtime site
 make serve                         # Start server on :8000
 ```
 
-Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / `admin123`.
+Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / `kora123`.
 
 ### All Make Commands
 
@@ -25,6 +25,7 @@ Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / 
 make dev          Full setup: MySQL + build + setup + serve
 make build        Build UI + Go binary
 make serve        Start server
+make restart      Kill old server + rebuild all + start fresh
 make setup        Setup a site (override: SITE=fieldwork.local CONFIG=config/fieldwork/)
 make test         Run Go tests
 make lint         Run linters (Go + TypeScript)
@@ -34,7 +35,7 @@ make clean        Remove build artifacts
 make help         Show all commands
 ```
 
-Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / `admin123`.
+Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / `kora123`.
 
 ## Multi-Site
 
@@ -45,6 +46,17 @@ http://localhost:8000/console/login           → System console
 ```
 
 No DNS or `/etc/hosts` needed. Path-based routing just works. For production, add real domains — Host-based routing takes over automatically.
+
+## Administrator Panel
+
+After login, the sidebar has an **Administrator** section for managing the data model entirely from the browser — no YAML files or CLI needed:
+
+- **DocTypes** — Visual form builder with live YAML preview, collapsible field editors, Draft → Activate workflow
+- **Permissions** — Role × DocType access matrix with inline editing
+- **Workflows** — State machine editor (states, transitions, notifications) for submittable doctypes
+- **Versions** — Config version history with diff view, rollback, and Draft activation
+
+All pages are mobile-responsive — tables become stacked card layouts on small screens.
 
 ## Documentation
 

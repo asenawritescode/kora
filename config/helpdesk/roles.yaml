@@ -1,11 +1,11 @@
 - name: Support Agent
-  desk_access: true
+  workspace_access: true
   description: Creates and manages own tickets.
 
 - name: Support Manager
-  desk_access: true
+  workspace_access: true
   description: Manages all tickets and team workload.
 
 - name: Administrator
-  desk_access: true
+  workspace_access: true
   description: Full system access.

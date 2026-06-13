@@ -423,3 +423,163 @@ func MigrateSite(db *sql.DB, dbName string, registry *doctype.Registry) error {
 
 	return ApplyDDL(db, ddl)
 }
+
+// TieredChange describes a single schema change with its safety classification.
+type TieredChange struct {
+	Tier    string `json:"tier"`    // "safe", "warning", "blocked"
+	DocType string `json:"doctype"`
+	Field   string `json:"field,omitempty"`
+	Change  string `json:"change"`
+	Rows    int    `json:"rows"`
+	DDL     string `json:"ddl,omitempty"`
+	Message string `json:"message"`
+}
+
+// ActivationPreview contains the full impact analysis for activating a config change.
+type ActivationPreview struct {
+	DDL      []string       `json:"ddl"`
+	Changes  []TieredChange `json:"changes"`
+	Blocked  []TieredChange `json:"blocked"`
+	Warnings []TieredChange `json:"warnings"`
+}
+
+// AnalyzeImpact compares a proposed doctype against the existing one (if any)
+// and classifies each change into safety tiers. It also counts affected rows.
+func AnalyzeImpact(db *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype.Registry) *ActivationPreview {
+	preview := &ActivationPreview{}
+
+	if oldDT == nil {
+		// New doctype — always safe.
+		tableName := newDT.RawTableName()
+		preview.Changes = append(preview.Changes, TieredChange{
+			Tier:    "safe",
+			DocType: newDT.Name,
+			Change:  "Create new doctype",
+			Message: "New table will be created",
+		})
+		ddl := generateCreateTable(tableName, reg)
+		preview.DDL = append(preview.DDL, ddl)
+
+		// Also check child tables.
+		for _, f := range newDT.TableFields() {
+			childDT := reg.Get(f.Options)
+			if childDT != nil {
+				childTableName := newDT.RawChildTableName(f.Fieldname)
+				childDDL := generateCreateTable(childTableName, reg)
+				preview.DDL = append(preview.DDL, childDDL)
+			}
+		}
+		return preview
+	}
+
+	// Count existing rows.
+	var rowCount int
+	tableName := oldDT.RawTableName()
+	query := "SELECT COUNT(*) FROM `" + tableName + "`"
+	_ = db.QueryRow(query).Scan(&rowCount)
+
+	// Build field maps.
+	oldFields := make(map[string]*doctype.Field)
+	newFields := make(map[string]*doctype.Field)
+	for i := range oldDT.Fields {
+		oldFields[oldDT.Fields[i].Fieldname] = &oldDT.Fields[i]
+	}
+	for i := range newDT.Fields {
+		newFields[newDT.Fields[i].Fieldname] = &newDT.Fields[i]
+	}
+
+	// Detect added fields.
+	for name, f := range newFields {
+		if _, exists := oldFields[name]; !exists {
+			change := TieredChange{
+				DocType: oldDT.Name,
+				Field:   name,
+				Change:  fmt.Sprintf("Add field %s (%s)", name, f.Fieldtype),
+				Rows:    rowCount,
+			}
+			if f.Reqd && f.Default == "" {
+				change.Tier = "warning"
+				change.Message = fmt.Sprintf("Required field with no default — %d existing rows will get empty values", rowCount)
+			} else {
+				change.Tier = "safe"
+				if f.Default != "" {
+					change.Message = fmt.Sprintf("%d existing rows backfilled with default '%s'", rowCount, f.Default)
+				} else {
+					change.Message = fmt.Sprintf("%d existing rows get NULL", rowCount)
+				}
+			}
+			ddl := generateAddColumn(tableName, ColumnAdd{
+				Name:     f.Fieldname,
+				Type:     f.DBType(),
+				Nullable: !f.Reqd,
+				Default:  f.Default,
+			})
+			change.DDL = ddl
+			preview.DDL = append(preview.DDL, ddl)
+			preview.Changes = append(preview.Changes, change)
+		}
+	}
+
+	// Detect removed/orphaned fields.
+	for name, f := range oldFields {
+		if _, exists := newFields[name]; !exists {
+			change := TieredChange{
+				Tier:    "warning",
+				DocType: oldDT.Name,
+				Field:   name,
+				Change:  fmt.Sprintf("Remove field %s (%s)", name, f.Fieldtype),
+				Rows:    rowCount,
+				Message: fmt.Sprintf("Column '%s' will be orphaned — %d rows of data preserved but hidden", name, rowCount),
+			}
+			preview.Changes = append(preview.Changes, change)
+		}
+	}
+
+	// Detect type changes.
+	for name, newF := range newFields {
+		oldF, exists := oldFields[name]
+		if !exists {
+			continue
+		}
+		if oldF.Fieldtype != newF.Fieldtype {
+			change := TieredChange{
+				Tier:    "blocked",
+				DocType: oldDT.Name,
+				Field:   name,
+				Change:  fmt.Sprintf("Change field type %s → %s", oldF.Fieldtype, newF.Fieldtype),
+				Rows:    rowCount,
+				Message: fmt.Sprintf("Type change from %s to %s requires data conversion for %d rows", oldF.Fieldtype, newF.Fieldtype, rowCount),
+			}
+			preview.Changes = append(preview.Changes, change)
+		}
+		// Detect not-required → required changes.
+		if !oldF.Reqd && newF.Reqd {
+			change := TieredChange{
+				DocType: oldDT.Name,
+				Field:   name,
+				Change:  "Field is now required",
+				Rows:    rowCount,
+			}
+			if newF.Default != "" {
+				change.Tier = "safe"
+				change.Message = fmt.Sprintf("%d rows backfilled with default", rowCount)
+			} else {
+				change.Tier = "warning"
+				change.Message = fmt.Sprintf("%d rows may have empty values", rowCount)
+			}
+			preview.Changes = append(preview.Changes, change)
+		}
+	}
+
+	// Classify into blocked/warnings.
+	for _, c := range preview.Changes {
+		switch c.Tier {
+		case "blocked":
+			preview.Blocked = append(preview.Blocked, c)
+		case "warning":
+			preview.Warnings = append(preview.Warnings, c)
+		}
+	}
+
+	return preview
+}

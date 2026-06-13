@@ -118,6 +118,13 @@ func (r *Registry) GetChildDocType(parent *DocType, fieldName string) (*DocType,
 	return r.ResolveLink(field.Options)
 }
 
+// Remove removes a DocType from the registry.
+func (r *Registry) Remove(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.doctypes, name)
+}
+
 // CanUser checks permission for a user with given roles.
 func (r *Registry) CanUser(userRoles []string, doctype, operation string) (allowed bool, ownerOnly bool) {
 	return r.Permissions.UserCan(userRoles, doctype, operation)

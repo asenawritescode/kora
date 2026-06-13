@@ -18,7 +18,7 @@ func SetAdminRole(role string) { AdminRole = role }
 // Role definition from roles.yaml
 type Role struct {
 	Name        string `yaml:"name"        json:"name"`
-	DeskAccess  bool   `yaml:"desk_access" json:"desk_access"`
+	WorkspaceAccess bool   `yaml:"workspace_access" json:"workspace_access"`
 	Description string `yaml:"description" json:"description"`
 }
 
