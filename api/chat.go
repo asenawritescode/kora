@@ -90,14 +90,36 @@ func (h *Handler) HandleChat(c *gin.Context) {
 		return
 	}
 
-	// Process the AI response.
+	// Process the AI response with multi-turn tool execution.
+	// If the AI calls tools, execute them and feed results back to the AI
+	// for a natural language response (including error explanations).
 	choice := aiResp["choices"].([]any)[0].(map[string]any)
 	msg := choice["message"].(map[string]any)
 
-	// Check for tool calls.
 	if toolCalls, ok := msg["tool_calls"]; ok {
-		action, reply := executeToolCalls(tx, reg, toolCalls.([]any))
-		c.JSON(http.StatusOK, ChatResponse{Reply: reply, Action: action})
+		// Execute tools and feed results back to the AI.
+		toolResults := executeToolCallsForAI(tx, reg, toolCalls.([]any))
+		// Append assistant tool call + tool results to messages.
+		messages = append(messages, map[string]any{
+			"role": "assistant", "content": nil, "tool_calls": toolCalls,
+		})
+		messages = append(messages, toolResults...)
+		// Second AI call to interpret results (including errors).
+		aiBody2 := map[string]any{
+			"model":    model,
+			"messages": messages,
+		}
+		aiResp2, err := callAI(baseURL, apiKey, aiBody2)
+		if err != nil {
+			slog.Error("AI follow-up call failed", "error", err)
+			// Fall back to raw results.
+			action, reply := formatToolResults(toolCalls.([]any), toolResults)
+			c.JSON(http.StatusOK, ChatResponse{Reply: reply, Action: action})
+			return
+		}
+		choice2 := aiResp2["choices"].([]any)[0].(map[string]any)
+		msg2 := choice2["message"].(map[string]any)
+		c.JSON(http.StatusOK, ChatResponse{Reply: msg2["content"].(string)})
 		return
 	}
 
@@ -224,10 +246,12 @@ func callAI(baseURL, apiKey string, body map[string]any) (map[string]any, error)
 	return result, nil
 }
 
-func executeToolCalls(db *orm.TxManager, reg *doctype.Registry, toolCalls []any) (action string, reply string) {
-	parts := make([]string, len(toolCalls))
-	for i, tc := range toolCalls {
+// executeToolCallsForAI runs tool calls and returns results in OpenAI tool message format.
+func executeToolCallsForAI(tx *orm.TxManager, reg *doctype.Registry, toolCalls []any) []map[string]any {
+	var results []map[string]any
+	for _, tc := range toolCalls {
 		call := tc.(map[string]any)
+		id := call["id"].(string)
 		fn := call["function"].(map[string]any)
 		name := fn["name"].(string)
 		argsJSON := fn["arguments"].(string)
@@ -235,7 +259,21 @@ func executeToolCalls(db *orm.TxManager, reg *doctype.Registry, toolCalls []any)
 		var args map[string]any
 		json.Unmarshal([]byte(argsJSON), &args)
 
-		parts[i] = executeSingleTool(db, reg, name, args)
+		result := executeSingleTool(tx, reg, name, args)
+		results = append(results, map[string]any{
+			"role":         "tool",
+			"tool_call_id": id,
+			"content":      result,
+		})
+	}
+	return results
+}
+
+// formatToolResults is a fallback for when the AI follow-up call fails.
+func formatToolResults(toolCalls []any, results []map[string]any) (action string, reply string) {
+	var parts []string
+	for _, r := range results {
+		parts = append(parts, r["content"].(string))
 	}
 	return strings.Join(parts, "; "), strings.Join(parts, "\n")
 }
