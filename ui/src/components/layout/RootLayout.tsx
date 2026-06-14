@@ -1,5 +1,6 @@
 import { Outlet } from '@tanstack/react-router'
 import { Sidebar } from './Sidebar'
+import { ChatWidget } from '@/components/chat/ChatWidget'
 import { useUIStore } from '@/lib/ui-store'
 import { Button } from '@/components/ui/button'
 import { Menu, X } from 'lucide-react'
@@ -39,6 +40,9 @@ export function RootLayout() {
         </div>
         <Outlet />
       </main>
+
+      {/* AI Chat Widget — floating button + panel */}
+      <ChatWidget />
     </div>
   )
 }
