@@ -265,14 +265,28 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 		if v, ok := args["limit"].(float64); ok {
 			limit = int(v)
 		}
-		_, total, err := tx.GetList(dt, "", "", limit, 0, "")
+		docs, total, err := tx.GetList(dt, "", "", limit, 0, "")
 		if err != nil {
 			return fmt.Sprintf("Error listing %s: %v", dt.Name, err)
 		}
 		if total == 0 {
 			return fmt.Sprintf("No %s found.", dt.Name)
 		}
-		return fmt.Sprintf("Found %d %s.", total, dt.Name)
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Found %d %s:", total, dt.Name))
+		for _, doc := range docs {
+			parts := []string{doc.Name}
+			for _, f := range dt.DataFields() {
+				if f.Fieldtype == "Table" || !f.InListView {
+					continue
+				}
+				if v := doc.Get(f.Fieldname); v != nil && v != "" {
+					parts = append(parts, fmt.Sprintf("%s=%v", f.Fieldname, v))
+				}
+			}
+			lines = append(lines, "  - "+strings.Join(parts, ", "))
+		}
+		return strings.Join(lines, "\n")
 	case "get":
 		name, _ := args["name"].(string)
 		doc, err := tx.GetDoc(dt, name, "")
