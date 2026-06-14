@@ -1,6 +1,48 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useChat } from './useChat'
 import { MessageCircle, X, Send, Loader2 } from 'lucide-react'
+
+/** Simple markdown-to-HTML for tables, bold, and basic formatting. */
+function renderMarkdown(text: string): string {
+  let html = text
+  // Bold.
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  // Italic.
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+  // Inline code.
+  html = html.replace(/`(.+?)`/g, '<code class="bg-muted px-1 rounded text-xs">$1</code>')
+  // Tables: split into lines, detect | separator, wrap in HTML table.
+  const lines = html.split('\n')
+  let inTable = false
+  let result: string[] = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      if (!inTable) {
+        result.push('<table class="w-full text-xs border-collapse my-2"><tbody>')
+        inTable = true
+      }
+      const cells = trimmed.split('|').slice(1, -1).map(c => c.trim())
+      const isHeader = cells.every(c => c === '---' || c === ':---' || c === '---:' || c === ':---:')
+      if (isHeader) continue
+      const tag = inTable && result.filter(l => l.includes('<tr>')).length === 0 ? 'th' : 'td'
+      const cellHtml = cells.map(c => `<${tag} class="border px-2 py-1">${c}</${tag}>`).join('')
+      result.push(`<tr>${cellHtml}</tr>`)
+    } else {
+      if (inTable) {
+        result.push('</tbody></table>')
+        inTable = false
+      }
+      if (trimmed) {
+        result.push(`<p class="my-1">${trimmed}</p>`)
+      } else {
+        result.push('<br/>')
+      }
+    }
+  }
+  if (inTable) result.push('</tbody></table>')
+  return result.join('\n')
+}
 
 export function ChatWidget() {
   const [open, setOpen] = useState(false)
@@ -71,7 +113,11 @@ export function ChatWidget() {
                       : 'bg-muted'
                   }`}
                 >
-                  {msg.content}
+                  {msg.role === 'assistant' ? (
+                    <div className="markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                  ) : (
+                    msg.content
+                  )}
                 </div>
               </div>
             ))}

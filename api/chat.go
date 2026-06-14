@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -272,20 +273,37 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 		if total == 0 {
 			return fmt.Sprintf("No %s found.", dt.Name)
 		}
-		var lines []string
-		lines = append(lines, fmt.Sprintf("Found %d %s:", total, dt.Name))
-		for _, doc := range docs {
-			parts := []string{doc.Name}
-			for _, f := range dt.DataFields() {
-				if f.Fieldtype == "Table" || !f.InListView {
-					continue
-				}
-				if v := doc.Get(f.Fieldname); v != nil && v != "" {
-					parts = append(parts, fmt.Sprintf("%s=%v", f.Fieldname, v))
-				}
+		// Build a markdown table for clean presentation.
+		var cols []string
+		var colLabels []string
+		for _, f := range dt.DataFields() {
+			if f.Fieldtype == "Table" || !f.InListView {
+				continue
 			}
-			lines = append(lines, "  - "+strings.Join(parts, ", "))
+			cols = append(cols, f.Fieldname)
+			colLabels = append(colLabels, f.Label)
 		}
+		var lines []string
+		lines = append(lines, fmt.Sprintf("**%d %s found:**", total, dt.Name))
+		lines = append(lines, "")
+		// Header row.
+		lines = append(lines, "| "+strings.Join(colLabels, " | ")+" |")
+		// Separator.
+		var seps []string
+		for range cols {
+			seps = append(seps, "---")
+		}
+		lines = append(lines, "| "+strings.Join(seps, " | ")+" |")
+		// Data rows.
+		for _, doc := range docs {
+			var vals []string
+			for _, col := range cols {
+				v := doc.Get(col)
+				vals = append(vals, formatCell(col, v))
+			}
+			lines = append(lines, "| "+strings.Join(vals, " | ")+" |")
+		}
+		lines = append(lines, "")
 		return strings.Join(lines, "\n")
 	case "get":
 		name, _ := args["name"].(string)
@@ -312,5 +330,28 @@ func sanitizeName(name string) string {
 	s := strings.ToLower(name)
 	s = strings.ReplaceAll(s, " ", "_")
 	s = strings.ReplaceAll(s, "-", "_")
+	return s
+}
+
+func formatCell(fieldname string, v any) string {
+	if v == nil {
+		return ""
+	}
+	s := fmt.Sprintf("%v", v)
+	// Format Known decimal fields to 2 places.
+	if strings.Contains(s, ".") && len(s) > 4 {
+		if n, err := strconv.ParseFloat(s, 64); err == nil {
+			return fmt.Sprintf("%.2f", n)
+		}
+	}
+	// Boolean → emoji checkmark.
+	if s == "1" && (strings.Contains(fieldname, "is_") || strings.Contains(fieldname, "available") ||
+		fieldname == "completed") {
+		return "✅"
+	}
+	if s == "0" && (strings.Contains(fieldname, "is_") || strings.Contains(fieldname, "available") ||
+		fieldname == "completed") {
+		return "❌"
+	}
 	return s
 }
