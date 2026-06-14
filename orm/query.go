@@ -71,6 +71,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 	}
 	defer dbTx.Rollback()
 
+	nextNum := 1
 	if doc.Name == "" {
 		var maxNum sql.NullInt64
 		prefix := derivePrefix(dt.Name)
@@ -81,7 +82,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 		if err != nil {
 			return fmt.Errorf("reading max name number: %w", err)
 		}
-		nextNum := int(maxNum.Int64) + 1
+		nextNum = int(maxNum.Int64) + 1
 		doc.Name = fmt.Sprintf("%s-%04d", derivePrefix(dt.Name), nextNum)
 	}
 
@@ -95,7 +96,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 
 	columns = append(columns, "name", "owner", "creation", "modified", "modified_by", "doc_status", "idx")
 	placeholders = append(placeholders, "?", "?", "?", "?", "?", "?", "?")
-	values = append(values, doc.Name, owner, now, now, owner, doc.DocStatus, 0)
+	values = append(values, doc.Name, owner, now, now, owner, doc.DocStatus, nextNum)
 
 	for _, f := range dataFields {
 		if f.Fieldtype == "Table" {
