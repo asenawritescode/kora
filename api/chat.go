@@ -195,13 +195,23 @@ func buildFunctions(reg *doctype.Registry) []map[string]any {
 		funcs = append(funcs, map[string]any{
 			"type": "function",
 			"function": map[string]any{
+				"name":        lower + "_find",
+				"description": "Find a " + dt.Name + " by field values. Use this to check if a record exists before creating. Returns matching documents or empty list if none found.",
+				"parameters": map[string]any{
+					"type":       "object",
+					"properties": props,
+				},
+			},
+		}, map[string]any{
+			"type": "function",
+			"function": map[string]any{
 				"name":        lower + "_list",
-				"description": "List " + dt.Name + " documents",
+				"description": "List " + dt.Name + " documents (recent first). Use after _find to browse all records.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"limit":  map[string]any{"type": "integer"},
-						"offset": map[string]any{"type": "integer"},
+						"limit":  map[string]any{"type": "integer", "description": "Max results (default 20)"},
+						"offset": map[string]any{"type": "integer", "description": "Pagination offset"},
 					},
 				},
 			},
@@ -311,6 +321,23 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 	}
 
 	switch operation {
+	case "find":
+		// Build JSON filter array from provided field values.
+		var filtParts []string
+		for k, v := range args {
+			if v != nil && v != "" && k != "limit" && k != "offset" {
+				filtParts = append(filtParts, fmt.Sprintf(`["%s","=","%v"]`, k, v))
+			}
+		}
+		filter := "[" + strings.Join(filtParts, ",") + "]"
+		docs, total, err := tx.GetList(dt, filter, "", 5, 0, "")
+		if err != nil {
+			return fmt.Sprintf("Error finding %s: %v", dt.Name, err)
+		}
+		if total == 0 {
+			return fmt.Sprintf("No %s found matching the criteria.", dt.Name)
+		}
+		return fmt.Sprintf("Found %d matching %s: %v", total, dt.Name, docs[0].Fields)
 	case "list":
 		limit := 20
 		if v, ok := args["limit"].(float64); ok {

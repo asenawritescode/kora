@@ -72,14 +72,15 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 	defer dbTx.Rollback()
 
 	if doc.Name == "" {
-		var count int
+		var maxIdx sql.NullInt64
 		err := dbTx.QueryRow(
-			fmt.Sprintf("SELECT COUNT(*) FROM %s", dt.TableName()),
-		).Scan(&count)
+			fmt.Sprintf("SELECT MAX(idx) FROM %s", dt.TableName()),
+		).Scan(&maxIdx)
 		if err != nil {
-			return fmt.Errorf("counting existing rows: %w", err)
+			return fmt.Errorf("reading max index: %w", err)
 		}
-		doc.Name = generateName(dt, count)
+		nextNum := int(maxIdx.Int64) + 1
+		doc.Name = fmt.Sprintf("%s-%04d", derivePrefix(dt.Name), nextNum)
 	}
 
 	now := time.Now()
