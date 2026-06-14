@@ -24,6 +24,7 @@ func init() {
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(newSiteCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(secretCmd)
 }
 
 var serveCmd = &cobra.Command{

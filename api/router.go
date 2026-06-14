@@ -614,6 +614,10 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 		resource.POST("/:doctype/:name/workflow_action", handler.HandleWorkflowAction)
 	}
 
+	// OpenAPI docs.
+	apiGroup.GET("/openapi.json", handler.HandleOpenAPI)
+	apiGroup.GET("/swagger-ui", handler.HandleSwaggerUI)
+
 	// System config endpoints.
 	system := apiGroup.Group("/system/config")
 	{
