@@ -25,13 +25,13 @@ var secretSetCmd = &cobra.Command{
 			return fmt.Errorf("--site, --key, and --value are required")
 		}
 
-		cfg, db, err := loadSiteDB(siteName)
+		db, err := loadSiteDB(siteName)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
 		store := secret.NewStore(db)
-		if err := store.Set(siteName, key, value, cfg.DBPassword); err != nil {
+		if err := store.Set(siteName, key, value); err != nil {
 			return fmt.Errorf("setting secret: %w", err)
 		}
 		fmt.Printf("✓ Secret %q set for site %q\n", key, siteName)
@@ -39,16 +39,16 @@ var secretSetCmd = &cobra.Command{
 	},
 }
 
-func loadSiteDB(siteName string) (*site.SiteConfig, *sql.DB, error) {
+func loadSiteDB(siteName string) (*sql.DB, error) {
 	cfg, err := site.LoadSiteConfig("sites/" + siteName + "/site_config.yaml")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	db, err := site.Connect(cfg)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return cfg, db, nil
+	return db, nil
 }
 
 var secretGetCmd = &cobra.Command{
@@ -60,13 +60,13 @@ var secretGetCmd = &cobra.Command{
 		if siteName == "" || key == "" {
 			return fmt.Errorf("--site and --key are required")
 		}
-		cfg, db, err := loadSiteDB(siteName)
+		db, err := loadSiteDB(siteName)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
 		store := secret.NewStore(db)
-		val, err := store.Get(siteName, key, cfg.DBPassword)
+		val, err := store.Get(siteName, key)
 		if err != nil {
 			return fmt.Errorf("getting secret: %w", err)
 		}
@@ -83,7 +83,7 @@ var secretListCmd = &cobra.Command{
 		if siteName == "" {
 			return fmt.Errorf("--site is required")
 		}
-		_, db, err := loadSiteDB(siteName)
+		db, err := loadSiteDB(siteName)
 		if err != nil {
 			return err
 		}
@@ -109,7 +109,7 @@ var secretDeleteCmd = &cobra.Command{
 		if siteName == "" || key == "" {
 			return fmt.Errorf("--site and --key are required")
 		}
-		_, db, err := loadSiteDB(siteName)
+		db, err := loadSiteDB(siteName)
 		if err != nil {
 			return err
 		}

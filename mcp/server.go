@@ -89,7 +89,7 @@ func (s *Server) addConfigTools() {
 }
 
 func (s *Server) addDoctypeTools(dt *doctype.DocType) {
-	lower := strings.ToLower(dt.Name)
+	lower := sanitizeName(dt.Name)
 	props := buildFieldSchema(dt)
 
 	// List tool.
@@ -237,4 +237,11 @@ func mergeMaps(a, b map[string]any) map[string]any {
 		a[k] = v
 	}
 	return a
+}
+
+func sanitizeName(name string) string {
+	s := strings.ToLower(name)
+	s = strings.ReplaceAll(s, " ", "_")
+	s = strings.ReplaceAll(s, "-", "_")
+	return s
 }

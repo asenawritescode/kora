@@ -39,13 +39,13 @@ func (s *Store) EnsureTable() error {
 	return err
 }
 
-// Set encrypts and stores a secret. The encryption key is derived from the site's DB password.
-func (s *Store) Set(site, key, value, dbPassword string) error {
+// Set encrypts and stores a secret. The encryption key is derived from the site name.
+func (s *Store) Set(site, key, value string) error {
 	if err := s.EnsureTable(); err != nil {
 		return fmt.Errorf("ensuring table: %w", err)
 	}
 
-	encrypted, err := encrypt([]byte(value), deriveKey([]byte(dbPassword)))
+	encrypted, err := encrypt([]byte(value), deriveKey([]byte(site)))
 	if err != nil {
 		return fmt.Errorf("encrypting: %w", err)
 	}
@@ -58,8 +58,8 @@ func (s *Store) Set(site, key, value, dbPassword string) error {
 	return err
 }
 
-// Get decrypts and returns a secret.
-func (s *Store) Get(site, key, dbPassword string) (string, error) {
+// Get decrypts and returns a secret. The encryption key is derived from the site name.
+func (s *Store) Get(site, key string) (string, error) {
 	var encrypted []byte
 	err := s.DB.QueryRow(
 		"SELECT encrypted_value FROM _kora_secret WHERE site = ? AND key_name = ?",
@@ -72,7 +72,7 @@ func (s *Store) Get(site, key, dbPassword string) (string, error) {
 		return "", err
 	}
 
-	plain, err := decrypt(encrypted, deriveKey([]byte(dbPassword)))
+	plain, err := decrypt(encrypted, deriveKey([]byte(site)))
 	if err != nil {
 		return "", fmt.Errorf("decrypting: %w", err)
 	}

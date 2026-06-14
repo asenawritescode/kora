@@ -618,6 +618,9 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 	apiGroup.GET("/openapi.json", handler.HandleOpenAPI)
 	apiGroup.GET("/swagger-ui", handler.HandleSwaggerUI)
 
+	// AI Chat.
+	apiGroup.POST("/chat", handler.HandleChat)
+
 	// System config endpoints.
 	system := apiGroup.Group("/system/config")
 	{
