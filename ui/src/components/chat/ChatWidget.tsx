@@ -114,7 +114,10 @@ export function ChatWidget() {
                   }`}
                 >
                   {msg.role === 'assistant' ? (
-                    <div className="markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                    <div
+                      className="[&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-muted-foreground/20 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_td]:border [&_td]:border-muted-foreground/20 [&_td]:px-2 [&_td]:py-1 [&_td]:text-xs [&_p]:my-1 [&_strong]:text-foreground"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                    />
                   ) : (
                     msg.content
                   )}

@@ -277,7 +277,7 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 		var cols []string
 		var colLabels []string
 		for _, f := range dt.DataFields() {
-			if f.Fieldtype == "Table" || !f.InListView {
+			if f.Fieldtype == "Table" || f.Fieldtype == "Section Break" || f.Fieldtype == "Column Break" || f.Fieldtype == "Heading" {
 				continue
 			}
 			cols = append(cols, f.Fieldname)
