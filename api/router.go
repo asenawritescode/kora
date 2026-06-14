@@ -302,7 +302,7 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 	}
 
 	// Insert.
-	if err := h.siteTx(c).Insert(dt, doc, owner); err != nil {
+	if err := h.siteTx(c).Insert(dt, doc, owner, owner); err != nil {
 		var valErr *doctype.ValidationError
 		if errors.As(err, &valErr) {
 			c.JSON(http.StatusBadRequest, ErrorResponse{

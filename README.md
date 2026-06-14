@@ -120,6 +120,8 @@ make build PORT=9000                                       # Custom port (serve 
 
 ## Features
 
+- **AI Chat Assistant** — floating chat widget on every page. Create, find, and update records via natural language. Supports OpenAI, DeepSeek, and Anthropic. Multi-turn tool execution with finish_reason loop, stall detection, and context compaction.
+- **AI Doctype Generator** — describe a form in plain English ("an Invoice with line items, customer link, computed totals, tax") — the AI generates the YAML, validates it, and saves it as Draft. A human reviews and activates.
 - **YAML Strict Validation** — unknown keys rejected at parse time with line numbers and "did you mean?" suggestions
 - **Visual Constraints Editor** — add min/max, regex, one_of, and other constraints via the form builder
 - **Auto-Indenting YAML Editor** — Tab/Enter/Shift+Tab with context-aware indentation
@@ -163,8 +165,8 @@ All pages are mobile-responsive — tables become stacked card layouts on small 
 
 ```
 kora/
-├── cli/            # Cobra CLI: serve, setup, migrate, config
-├── api/            # REST handlers, CRUD, system endpoints
+├── cli/            # Cobra CLI: serve, setup, migrate, config, mcp, secret
+├── api/            # REST handlers, CRUD, system endpoints, AI Chat
 ├── auth/           # Session auth, CSRF, SystemGuard, SiteGuard
 ├── net/            # SiteRouter, TLS, security headers, rate limiting
 ├── doctype/        # DocType, Field, Registry, permissions, workflow, expressions
@@ -176,8 +178,10 @@ kora/
 ├── scheduler/      # Cron-style background jobs
 ├── site/           # Site config loading, DB connection
 ├── email/          # Email sending (mock for dev)
+├── secret/         # Encrypted API key storage (AWS-256-GCM)
+├── mcp/            # Model Context Protocol server for Claude Desktop
 ├── config/         # Sample app YAML configs (airtime, fieldwork)
-├── ui/             # React 19 SPA (Vite + TanStack + shadcn/ui)
+├── ui/             # React 19 SPA (Vite + TanStack + shadcn/ui) + AI Chat Widget
 ├── docs/           # Documentation
 └── sites/          # Per-site config and files
 ```
@@ -189,6 +193,8 @@ kora/
 | **Language** | Go 1.25 |
 | **HTTP** | Gin, net/http |
 | **Database** | MySQL 8.0 |
+| **AI / LLM** | OpenAI, DeepSeek V4, Anthropic Claude (multi-provider, OpenAI-compatible API) |
+| **Tool Protocol** | MCP (Model Context Protocol) for Claude Desktop integration |
 | **Expressions** | expr-lang/expr |
 | **CLI** | Cobra |
 | **TLS** | autocert (Let's Encrypt) |

@@ -60,7 +60,8 @@ type TxManager struct {
 }
 
 // Insert creates a new document in the database.
-func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner string) error {
+// modifiedBy is stored in the modified_by column — use the actor responsible (e.g., user or "ai-assistant").
+func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner, modifiedBy string) error {
 	if !doc.IsNew {
 		return fmt.Errorf("cannot insert an existing document")
 	}
@@ -96,7 +97,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 
 	columns = append(columns, "name", "owner", "creation", "modified", "modified_by", "doc_status", "idx")
 	placeholders = append(placeholders, "?", "?", "?", "?", "?", "?", "?")
-	values = append(values, doc.Name, owner, now, now, owner, doc.DocStatus, nextNum)
+	values = append(values, doc.Name, owner, now, now, modifiedBy, doc.DocStatus, nextNum)
 
 	for _, f := range dataFields {
 		if f.Fieldtype == "Table" {
@@ -122,6 +123,9 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 	_, err = dbTx.Exec(query, values...)
 	if err != nil {
 		if valErr := parseDuplicateError(err, dt); valErr != nil {
+			return valErr
+		}
+		if valErr := parseNotNullError(err, dt); valErr != nil {
 			return valErr
 		}
 		return fmt.Errorf("inserting document: %w", err)
@@ -524,6 +528,9 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 	result, err := dbTx.Exec(query, values...)
 	if err != nil {
 		if valErr := parseDuplicateError(err, dt); valErr != nil {
+			return valErr
+		}
+		if valErr := parseNotNullError(err, dt); valErr != nil {
 			return valErr
 		}
 		return fmt.Errorf("updating document: %w", err)
@@ -967,6 +974,46 @@ func parseDuplicateError(err error, dt *doctype.DocType) *doctype.ValidationErro
 		}
 	}
 	return nil
+}
+
+// parseNotNullError detects MySQL NOT NULL / missing default errors (1364, 1048) and
+// converts them to a doctype.ValidationError so callers (including AI tool execution)
+// get a clear, actionable message instead of a raw MySQL error.
+func parseNotNullError(err error, dt *doctype.DocType) *doctype.ValidationError {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1364 || mysqlErr.Number == 1048) {
+		// Messages: "Field 'full_name' doesn't have a default value" or "Column 'full_name' cannot be null"
+		fieldName := parseFieldFromNotNullError(mysqlErr.Message)
+		if fieldName != "" {
+			label := fieldName
+			if f := dt.GetField(fieldName); f != nil {
+				label = f.Label
+			}
+			return &doctype.ValidationError{
+				Type:    "NotNullConstraint",
+				Message: fmt.Sprintf("%s is required.", label),
+				Field:   fieldName,
+				DocType: dt.Name,
+			}
+		}
+	}
+	return nil
+}
+
+// parseFieldFromNotNullError extracts the field name from a MySQL NOT NULL error.
+// Formats: "Field 'fieldname' doesn't have a default value" or "Column 'fieldname' cannot be null"
+func parseFieldFromNotNullError(msg string) string {
+	for _, prefix := range []string{"Field '", "Column '"} {
+		idx := strings.Index(msg, prefix)
+		if idx >= 0 {
+			start := idx + len(prefix)
+			end := strings.IndexByte(msg[start:], '\'')
+			if end >= 0 {
+				return msg[start : start+end]
+			}
+		}
+	}
+	return ""
 }
 
 // parseKeyFromDuplicateError extracts the field name from a MySQL duplicate entry error message.

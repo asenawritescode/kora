@@ -26,6 +26,10 @@ go run . serve --port 8000                   # Dev run
 go run . migrate --all                       # Apply all pending migrations
 go run . config import --site X --path Y     # Re-import YAML config to DB
 
+# AI & Secrets
+./kora secret set --site X --key deepseek_api_key --value sk-...   # Set AI provider key
+./kora mcp --site X                           # Start MCP server (stdio) for Claude Desktop
+
 # Frontend (React SPA in ui/)
 cd ui && bun install                         # Install deps
 cd ui && bun run build                       # Build SPA → dist/
@@ -140,21 +144,121 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 | Package | Purpose |
 |---|---|
 | `doctype/` | DocType, Field, Constraint, Document, Registry, PermissionMatrix, Workflow, expression engine |
-| `orm/` | Generic CRUD (Insert, Save, GetDoc, GetList, Delete), filter parsing, DB-level unique enforcement, batched child INSERTs, diff-based Save, ULID name generation |
+| `orm/` | Generic CRUD (Insert, Save, GetDoc, GetList, Delete), filter parsing, DB-level unique enforcement, batched child INSERTs, diff-based Save, ULID name generation, NOT NULL error parsing |
 | `schema/` | INFORMATION_SCHEMA diff → DDL (additive + rename), column rename via `renamed_from` |
-| `api/` | REST handlers, envelope, CRUD, workflow actions, system endpoints, YAML validation |
+| `api/` | REST handlers, envelope, CRUD, workflow actions, system endpoints, YAML validation, **AI Chat** |
 | `auth/` | Session auth (bcrypt), in-memory session cache (30s TTL), CSRF (double-submit cookie), SystemGuard, SiteGuard |
 | `net/` | SiteRouter with host validation, security headers, CORS, rate limiter, TLS (autocert), ULID request IDs |
-| `cli/` | Cobra CLI: serve, setup, migrate, config (import/export/versions/diff/rollback), new-site |
+| `cli/` | Cobra CLI: serve, setup, migrate, config (import/export/versions/diff/rollback), new-site, mcp, secret |
 | `configstore/` | Read/write config to/from DB (_kora_doctype, _kora_field, etc.) |
 | `workspace/` | SPA serving (go:embed dist/*), NoRoute handler, static file server |
 | `console/` | System console (server-rendered Go templates, SystemGuard auth) |
 | `scheduler/` | Cron-style background jobs |
-| `ui/` | React SPA (Vite + TanStack + shadcn) |
+| `secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys |
+| `mcp/` | Model Context Protocol server — auto-generates tools from doctype registry for Claude Desktop |
+| `ui/` | React SPA (Vite + TanStack + shadcn) with floating AI Chat Widget |
+
+### AI Chat System
+
+The AI chat at `POST /api/chat` auto-generates OpenAI-compatible function definitions from the doctype registry and executes tools via the ORM. Supports OpenAI, DeepSeek, and Anthropic providers (all via `/chat/completions` endpoint).
+
+#### Tool Generation (`api/chat.go`)
+
+For each non-child-table DocType, `buildFunctions()` generates tools:
+
+| Tool pattern | Purpose |
+|-------------|---------|
+| `<doctype>_find` | Search by field values (duplicate check before create) |
+| `<doctype>_list` | List documents (paginated, markdown table format) |
+| `<doctype>_get` | Get single document by name |
+| `<doctype>_create` | Create a new document |
+
+Plus system-level tools from `buildSystemFunctions()`:
+
+| Tool | Purpose |
+|------|---------|
+| `list_doctypes` | List all doctypes with field counts |
+| `validate_doctype_yaml` | Validate YAML without saving, returns line-numbered errors |
+| `create_doctype_draft` | Create new DocType as **Draft only** — never activates, never runs migrations |
+
+#### Multi-Round Tool Execution Loop
+
+The execution loop is `finish_reason`-driven (industry standard — same pattern as Anthropic SDK, OpenAI SDK, Vercel AI SDK, LangChain):
+
+```
+while round < MaxRounds:
+    call AI (WITH tools always)
+    switch finish_reason:
+        case "stop"        → return final response
+        case "tool_calls"  → execute tools, feed results back, loop
+        case "length"      → return truncated response
+        case "content_filter" → return policy message
+```
+
+**Safety nets** (all thresholds configurable via `AIConfig`, per-model defaults + site overrides):
+- Max rounds (fallback cap, not primary termination)
+- Stall detection (3× identical tool call → specific nudge injected)
+- Tool error circuit breaker (5 errors → force model to respond)
+- Context compaction at 80% token budget (preserves system prompt + first user message)
+- Tool result size cap (4KB per result, head+tail preservation)
+- HTTP timeout + exponential backoff retry on 429/503
+- Textified tool call detection (scans for `<｜｜DSML｜｜tool_calls>` in content — retries with `tool_choice: "required"`)
+- Narrate-then-act detection (GPT-4o false finish — re-prompts with tool_choice escalation)
+
+#### AI Configuration (`api/ai_config.go`)
+
+`AIConfig` struct with per-model defaults + site-level overrides from `_kora_secret` (keys prefixed `ai.`):
+
+```go
+type AIConfig struct {
+    MaxRounds, TokenBudget, MaxToolResultChars, StallThreshold, MaxToolErrors int
+    CompactionThreshold float64  // 0.0-1.0
+    MaxTokensPerCall, HTTPTimeoutSec, MaxRetries, RetryBackoffMs, HistoryLimit int
+}
+```
+
+Model-specific defaults: GPT-4o (120K budget), Claude Sonnet (190K), DeepSeek V4 (120K).
+
+#### AI Audit Trail
+
+AI-created records use `owner = <authenticated_user>` (for permissions) and `modified_by = "ai-assistant"` (for audit). Query `WHERE modified_by = 'ai-assistant'` to find all AI-created records.
+
+#### Safe Access Layer
+
+All AI response parsing uses safe helpers (`safeGetString`, `safeGetMap`, `safeGetSlice`) — no bare type assertions. Prevents panics from unexpected provider response shapes (nil content, empty choices, missing finish_reason, DeepSeek `reasoning_content`).
+
+#### Tool Name Parsing
+
+Uses suffix matching against known operations (`_find`, `_list`, `_get`, `_create`, `_update`, `_delete`) instead of `strings.SplitN(name, "_", 2)`. This correctly handles multi-word doctype names like "Work Order" → `work_order_create`.
+
+#### ORM Error Handling
+
+MySQL errors are parsed into clean validation errors before reaching the AI:
+- Error 1062 (Duplicate) → `"X must be unique."` (`parseDuplicateError`)
+- Error 1364/1048 (NOT NULL) → `"X is required."` (`parseNotNullError`)
+
+#### Doctype Creation Safety
+
+- `create_doctype_draft` ALWAYS sets `status: "Draft"` — no migration runs, no table created
+- Human must review and activate via Versions admin panel
+- Config version stores: `status: Draft`, `is_active: 0`, `label: "Created X via AI (Draft)"`
+- Confirmation UX: AI validates → summarizes in 2-3 lines → asks "Create as draft?" → waits for user confirmation → creates
+
+#### Frontend Chat Widget
+
+- `ui/src/components/chat/ChatWidget.tsx` — floating Intercom-style panel (bottom-right)
+- `ui/src/components/chat/useChat.ts` — React hook, sends `POST /api/chat` with CSRF token
+- Embedded in `RootLayout.tsx` — available on every page
+
+#### MCP Server (`mcp/server.go`)
+
+Separate from chat API. Auto-generates MCP tools (5 per doctype: list, create, get, update, delete) for use with Claude Desktop, Cursor, etc. over stdio transport.
 
 ### ORM Document Model
 
 Documents are `map[string]any`. Parent document names are auto-generated: `PREFIX-NNNN` via `SELECT COUNT(*)` (prefix = first 4 chars of single-word names, first-letter-of-each-word for multi-word). Child row names use ULID: `PREFIX-<ulid>` (26-char sortable unique ID, no DB query needed). System columns on every table: `name`, `owner`, `creation`, `modified`, `modified_by`, `doc_status`, `idx`. Child tables add: `parent`, `parentfield`, `parenttype`. Table names are backtick-quoted for SQL safety (spaces in names like "Work Order").
+
+`Insert(dt, doc, owner, modifiedBy)` — `modified_by` tracks the actor. REST API passes `owner` (user creating directly); AI Chat passes `"ai-assistant"` for audit trail.
 
 ### Multi-Tenancy
 
