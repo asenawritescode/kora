@@ -72,14 +72,16 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 	defer dbTx.Rollback()
 
 	if doc.Name == "" {
-		var maxIdx sql.NullInt64
+		var maxNum sql.NullInt64
+		prefix := derivePrefix(dt.Name)
 		err := dbTx.QueryRow(
-			fmt.Sprintf("SELECT MAX(idx) FROM %s", dt.TableName()),
-		).Scan(&maxIdx)
+			fmt.Sprintf("SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(name, '-', -1) AS UNSIGNED)), 0) FROM %s WHERE name LIKE ?", dt.TableName()),
+			prefix+"-%",
+		).Scan(&maxNum)
 		if err != nil {
-			return fmt.Errorf("reading max index: %w", err)
+			return fmt.Errorf("reading max name number: %w", err)
 		}
-		nextNum := int(maxIdx.Int64) + 1
+		nextNum := int(maxNum.Int64) + 1
 		doc.Name = fmt.Sprintf("%s-%04d", derivePrefix(dt.Name), nextNum)
 	}
 
