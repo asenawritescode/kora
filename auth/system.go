@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,6 +181,12 @@ func (g *SystemGuard) Middleware() gin.HandlerFunc {
 			SetSecureCookie(c, "kora_console_sid", "", -1, "/", true)
 		}
 
+		// Browser requests get a redirect to the login page; API clients get 401 JSON.
+		if strings.Contains(c.GetHeader("Accept"), "text/html") {
+			c.Redirect(http.StatusFound, "/console/login")
+			c.Abort()
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "system authentication required"})
 	}
 }

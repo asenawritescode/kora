@@ -41,12 +41,15 @@ func init() {
 }
 
 func runServe() error {
+	// Load all config from a single source — validated once.
+	sc := site.LoadStartupConfig()
+	if err := sc.Validate(); err != nil {
+		return err
+	}
+
 	configDir := configDirFlag
 	if configDir == "" {
-		configDir = os.Getenv("KORA_CONFIG_DIR")
-	}
-	if configDir == "" {
-		configDir = "."
+		configDir = sc.ConfigDir
 	}
 
 	common, err := site.LoadCommonConfig(filepath.Join(configDir, "common_site_config.yaml"))
@@ -55,6 +58,21 @@ func runServe() error {
 		common = site.CommonConfigFromEnv()
 	}
 	configureLogging(common.LogLevel, common.LogFormat)
+
+	// Startup DB connection check.
+	if sc.DBDSN != "" {
+		db, err := sql.Open(sc.DBType, sc.DBDSN)
+		if err != nil {
+			slog.Error("startup db check: failed to open", "type", sc.DBType, "error", err)
+			return fmt.Errorf("failed to open %s connection: %w", sc.DBType, err)
+		}
+		defer db.Close()
+		if err := db.Ping(); err != nil {
+			slog.Error("startup db check: ping failed", "type", sc.DBType, "error", err)
+			return fmt.Errorf("failed to ping %s: %w", sc.DBType, err)
+		}
+		slog.Info("database connected", "type", sc.DBType)
+	}
 
 	// Discover sites.
 	hostnames := []string{serveSiteFlag}
