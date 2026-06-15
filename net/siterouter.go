@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yourorg/kora/doctype"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // LoadedSite holds the runtime state for a single site.

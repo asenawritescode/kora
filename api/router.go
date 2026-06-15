@@ -18,8 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
-	"github.com/yourorg/kora/doctype"
-	"github.com/yourorg/kora/orm"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/orm"
 )
 
 // Handler holds dependencies for API handlers.
@@ -588,9 +588,24 @@ func RegisterRoutes(router *gin.Engine, registry *doctype.Registry, txManager *o
 	handler := NewHandler(registry, txManager)
 	RegisterRoutesOnGroup(router.Group("/api"), registry, txManager)
 
-	// Health check outside the API group.
+	// Health check — used by Docker HEALTHCHECK and load balancers.
+	// Verifies DB connectivity for readiness probes.
 	router.GET("/api/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "pong"})
+	})
+	router.GET("/health", func(c *gin.Context) {
+		db, _ := c.Get("site_db")
+		status := "ok"
+		dbStatus := "connected"
+		if sqlDB, ok := db.(*sql.DB); ok {
+			if err := sqlDB.Ping(); err != nil {
+				dbStatus = "disconnected"
+				status = "degraded"
+			}
+		} else {
+			dbStatus = "unknown"
+		}
+		c.JSON(200, gin.H{"status": status, "db": dbStatus})
 	})
 
 	// File upload endpoint.

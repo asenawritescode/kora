@@ -175,7 +175,12 @@ func DiscoverSites(basePath string) ([]string, error) {
 
 // Connect opens a database connection for the site.
 func Connect(cfg *SiteConfig) (*sql.DB, error) {
-	db, err := sql.Open("mysql", cfg.DSN())
+	dsn := cfg.DSN()
+	// DB_DSN env var overrides YAML-based config — used in container deployments.
+	if envDSN := os.Getenv("DB_DSN"); envDSN != "" {
+		dsn = envDSN
+	}
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening database connection: %w", err)
 	}

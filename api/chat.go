@@ -16,10 +16,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
-	"github.com/yourorg/kora/configstore"
-	"github.com/yourorg/kora/doctype"
-	"github.com/yourorg/kora/orm"
-	"github.com/yourorg/kora/secret"
+	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/secret"
 )
 
 // ChatRequest is the JSON body for POST /api/chat.

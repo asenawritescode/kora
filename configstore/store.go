@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/yourorg/kora/doctype"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // Store persists DocType configurations to the database.

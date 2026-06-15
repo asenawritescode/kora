@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/yourorg/kora/doctype"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // Server wraps the MCP server with Kora registry awareness.

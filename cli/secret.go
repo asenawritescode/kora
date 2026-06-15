@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/yourorg/kora/secret"
-	"github.com/yourorg/kora/site"
+	"github.com/asenawritescode/kora/secret"
+	"github.com/asenawritescode/kora/site"
 )
 
 var secretCmd = &cobra.Command{

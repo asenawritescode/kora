@@ -3,7 +3,7 @@ package api
 import (
 	"strconv"
 
-	"github.com/yourorg/kora/secret"
+	"github.com/asenawritescode/kora/secret"
 )
 
 // AIConfig holds all configurable thresholds for the AI chat pipeline.

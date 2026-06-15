@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/yourorg/kora/doctype"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // ColumnInfo represents a column in the live database schema.

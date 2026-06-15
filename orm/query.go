@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/oklog/ulid/v2"
-	"github.com/yourorg/kora/doctype"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // generateName creates a unique document name based on the DocType.

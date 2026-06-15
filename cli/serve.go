@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"os/signal"
 	"syscall"
 	"time"
@@ -13,32 +14,42 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
-	"github.com/yourorg/kora/api"
-	"github.com/yourorg/kora/auth"
-	"github.com/yourorg/kora/configstore"
-	"github.com/yourorg/kora/console"
-	"github.com/yourorg/kora/workspace"
-	"github.com/yourorg/kora/doctype"
-	"github.com/yourorg/kora/email"
-	knet "github.com/yourorg/kora/net"
-	"github.com/yourorg/kora/orm"
-	"github.com/yourorg/kora/scheduler"
-	"github.com/yourorg/kora/schema"
-	"github.com/yourorg/kora/site"
+	"github.com/asenawritescode/kora/api"
+	"github.com/asenawritescode/kora/auth"
+	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/console"
+	"github.com/asenawritescode/kora/workspace"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/email"
+	knet "github.com/asenawritescode/kora/net"
+	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/scheduler"
+	"github.com/asenawritescode/kora/schema"
+	"github.com/asenawritescode/kora/site"
 )
 
 var (
 	serveSiteFlag string
 	httpPortFlag  int
+	configDirFlag string
 )
 
 func init() {
 	serveCmd.Flags().StringVar(&serveSiteFlag, "site", "", "Site hostname to serve (default: all sites)")
 	serveCmd.Flags().IntVar(&httpPortFlag, "port", 0, "HTTP port (overrides common config)")
+	serveCmd.Flags().StringVar(&configDirFlag, "config-dir", "", "Config directory (env: KORA_CONFIG_DIR). Defaults to current directory.")
 }
 
 func runServe() error {
-	common, err := site.LoadCommonConfig("common_site_config.yaml")
+	configDir := configDirFlag
+	if configDir == "" {
+		configDir = os.Getenv("KORA_CONFIG_DIR")
+	}
+	if configDir == "" {
+		configDir = "."
+	}
+
+	common, err := site.LoadCommonConfig(filepath.Join(configDir, "common_site_config.yaml"))
 	if err != nil {
 		return fmt.Errorf("loading common config: %w", err)
 	}
@@ -47,7 +58,7 @@ func runServe() error {
 	// Discover sites.
 	hostnames := []string{serveSiteFlag}
 	if serveSiteFlag == "" {
-		hostnames, err = site.DiscoverSites("sites")
+		hostnames, err = site.DiscoverSites(filepath.Join(configDir, "sites"))
 		if err != nil {
 			return fmt.Errorf("discovering sites: %w", err)
 		}
@@ -62,7 +73,7 @@ func runServe() error {
 	var firstDB *sql.DB // kept for session manager compatibility
 
 	for _, hostname := range hostnames {
-		siteCfg, err := site.LoadSiteConfig(fmt.Sprintf("sites/%s/site_config.yaml", hostname))
+		siteCfg, err := site.LoadSiteConfig(filepath.Join(configDir, "sites", hostname, "site_config.yaml"))
 		if err != nil {
 			slog.Warn("skipping site", "hostname", hostname, "error", err)
 			continue

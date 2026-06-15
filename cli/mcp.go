@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/yourorg/kora/configstore"
-	"github.com/yourorg/kora/doctype"
-	"github.com/yourorg/kora/mcp"
-	"github.com/yourorg/kora/site"
+	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/mcp"
+	"github.com/asenawritescode/kora/site"
 )
 
 var mcpCmd = &cobra.Command{

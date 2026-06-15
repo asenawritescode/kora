@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourorg/kora/doctype"
-	"github.com/yourorg/kora/email"
-	"github.com/yourorg/kora/orm"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/email"
+	"github.com/asenawritescode/kora/orm"
 )
 
 // JobType enumerates the built-in job types.

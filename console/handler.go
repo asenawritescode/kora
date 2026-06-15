@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yourorg/kora/auth"
+	"github.com/asenawritescode/kora/auth"
 )
 
 //go:embed templates/*.html

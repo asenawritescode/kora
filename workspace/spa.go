@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	knet "github.com/yourorg/kora/net"
+	knet "github.com/asenawritescode/kora/net"
 )
 
 //go:embed dist/*

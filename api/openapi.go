@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/yourorg/kora/doctype"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // HandleOpenAPI returns the OpenAPI 3.x spec for the current site.

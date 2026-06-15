@@ -1,4 +1,4 @@
-module github.com/yourorg/kora
+module github.com/asenawritescode/kora
 
 go 1.25.0
 

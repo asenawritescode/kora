@@ -7,11 +7,11 @@ import (
 
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
-	"github.com/yourorg/kora/auth"
-	"github.com/yourorg/kora/configstore"
-	"github.com/yourorg/kora/doctype"
-	"github.com/yourorg/kora/schema"
-	"github.com/yourorg/kora/site"
+	"github.com/asenawritescode/kora/auth"
+	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/schema"
+	"github.com/asenawritescode/kora/site"
 )
 
 var (

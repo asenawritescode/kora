@@ -2,7 +2,7 @@
 // Used by OpenAPI, MCP, and Chat to generate consistent tool/schema definitions.
 package api
 
-import "github.com/yourorg/kora/doctype"
+import "github.com/asenawritescode/kora/doctype"
 
 // FieldToJSONSchema maps a Kora field definition to a JSON Schema property.
 func FieldToJSONSchema(f *doctype.Field) map[string]any {
