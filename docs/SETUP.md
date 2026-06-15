@@ -277,6 +277,66 @@ kora config rollback --site airtime.local 3
 
 ---
 
+## AI Chat Setup
+
+The floating chat widget on every page is powered by an LLM provider. Configure once per site.
+
+### 1. Set API Key
+
+```bash
+# DeepSeek V4 (default, no account needed outside China)
+./kora secret set --site airtime.local --key deepseek_api_key --value sk-...
+
+# OpenAI
+./kora secret set --site airtime.local --key openai_api_key --value sk-...
+
+# Anthropic Claude
+./kora secret set --site airtime.local --key anthropic_api_key --value sk-ant-...
+```
+
+The first key found is used (searched in order: OpenAI → DeepSeek → Anthropic). Keys are encrypted at rest with AES-256-GCM.
+
+### 2. Restart
+
+```bash
+make restart
+```
+
+The chat widget appears automatically on every page. No frontend config needed.
+
+### 3. Customize AI Behavior (Optional)
+
+Override thresholds per site via `_kora_secret` keys prefixed `ai.`:
+
+```bash
+./kora secret set --site airtime.local --key ai.max_rounds --value 15
+./kora secret set --site airtime.local --key ai.max_tool_result_chars --value 8000
+./kora secret set --site airtime.local --key ai.history_limit --value 30
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `ai.max_rounds` | 10–25* | Max tool-calling rounds |
+| `ai.token_budget` | 80K–190K* | Context window budget |
+| `ai.max_tool_result_chars` | 4000–8000* | Cap per tool result |
+| `ai.stall_threshold` | 3 | Repeated calls before nudge |
+| `ai.max_tool_errors` | 5 | Errors before circuit breaker |
+| `ai.max_tokens_per_call` | 4096–8192* | `max_tokens` per API call |
+| `ai.history_limit` | 20–30* | Max incoming chat history |
+
+\* Varies by model. See `api/ai_config.go` for per-model defaults.
+
+### Supported AI Features
+
+| Feature | Description |
+|---------|-------------|
+| **CRUD via chat** | Create, find, list, update records in natural language |
+| **Doctype generation** | Describe a form in English → AI creates it as Draft |
+| **Multi-turn reasoning** | Find → check duplicates → create in one conversation |
+| **MCP server** | `./kora mcp --site X` for Claude Desktop integration |
+
+---
+
 ## Production Deployment
 
 ### Single Binary

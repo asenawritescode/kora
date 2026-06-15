@@ -422,6 +422,61 @@ Files are stored under `sites/<site>/files/<YYYY>/<MM>/`. Duplicate filenames ge
   label: Resume
 ```
 
+## AI Secrets & Configuration
+
+AI provider API keys and behavior thresholds are stored in `_kora_secret` (encrypted at rest with AES-256-GCM, keyed per site).
+
+### Provider API Keys
+
+```bash
+# Set via CLI (not stored in YAML — encrypted in DB)
+./kora secret set --site airtime.local --key deepseek_api_key --value sk-...
+./kora secret set --site airtime.local --key openai_api_key --value sk-...
+./kora secret set --site airtime.local --key anthropic_api_key --value sk-ant-...
+```
+
+The first key found is used. Search order: OpenAI → DeepSeek → Anthropic.
+
+### AI Behavior Overrides
+
+Optional per-site thresholds override per-model defaults. Stored with `ai.` prefix:
+
+```bash
+./kora secret set --site airtime.local --key ai.max_rounds --value 15
+./kora secret set --site airtime.local --key ai.stall_threshold --value 4
+./kora secret set --site airtime.local --key ai.history_limit --value 30
+```
+
+| Key | Default (model-dependent) | Description |
+|-----|---------------------------|-------------|
+| `ai.max_rounds` | 10–25 | Max tool-calling rounds |
+| `ai.token_budget` | 80K–190K | Context window token budget |
+| `ai.compaction_threshold` | 0.80 | Fraction of budget to trigger compaction |
+| `ai.max_tool_result_chars` | 4000–8000 | Cap per tool result (head+tail preserved) |
+| `ai.stall_threshold` | 3 | Identical calls before nudge |
+| `ai.max_tool_errors` | 5 | Errors before circuit breaker |
+| `ai.max_tokens_per_call` | 4096–8192 | `max_tokens` per AI call |
+| `ai.http_timeout_sec` | 60–120 | AI provider HTTP timeout |
+| `ai.max_retries` | 2–3 | Retries on transient errors (429/503) |
+| `ai.retry_backoff_ms` | 500–1000 | Base exponential backoff |
+| `ai.history_limit` | 20–30 | Max incoming chat history messages |
+
+Per-model defaults in `api/ai_config.go`:
+
+| Model | Budget | Max Rounds | Max Tokens/Call |
+|-------|--------|------------|-----------------|
+| `gpt-4o` | 120K | 15 | 4096 |
+| `gpt-4o-mini` | 120K | 10 | 4096 |
+| `claude-sonnet-4-6` | 190K | 20 | 8192 |
+| `claude-opus-4-8` | 190K | 25 | 8192 |
+| `deepseek-v4-pro` | 120K | 15 | 4096 |
+
+### AI Doctype Creation Safety
+
+The `create_doctype_draft` AI tool always creates config versions with `status: "Draft"`. No migration runs, no database tables are created. Human activation via Versions admin panel is required. The config version stores `label: "Created <name> via AI (Draft)"` and `is_active: 0`.
+
+---
+
 ## Site Config
 
 ```yaml

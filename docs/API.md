@@ -229,6 +229,69 @@ Content-Type: application/json
 
 ---
 
+## AI Chat
+
+### Send Chat Message
+
+```
+POST /api/chat
+```
+
+Send a natural language message to the AI assistant. The AI auto-generates tool definitions from the doctype registry and executes CRUD operations via a multi-round `finish_reason`-driven loop.
+
+**Request:**
+```json
+{
+  "message": "Create a customer with ACME Corp, john@acme.com, 0701002000",
+  "history": [
+    {"role": "user", "content": "..."},
+    {"role": "assistant", "content": "..."}
+  ],
+  "model": "gpt-4o"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `message` | string | Yes | Natural language instruction |
+| `history` | ChatMessage[] | No | Previous conversation turns (capped at configurable limit, default 20) |
+| `model` | string | No | Override default model (e.g., `gpt-4o`, `claude-sonnet-4-6`, `deepseek-v4-pro`) |
+
+**Response:** `200 OK`
+```json
+{
+  "reply": "Created Customer \"ACME Corp\" (CUST-0002).",
+  "action": "listed 3 customers"
+}
+```
+
+**Provider Support:** OpenAI GPT-4o, DeepSeek V4, Anthropic Claude. Configure via `./kora secret set --site X --key <provider>_api_key --value sk-...`.
+
+**AI Tools Generated Per DocType:**
+
+| Tool | Purpose |
+|------|---------|
+| `<doctype>_find` | Search by field values (duplicate check before create) |
+| `<doctype>_list` | List documents (paginated, markdown table) |
+| `<doctype>_get` | Get single document by name |
+| `<doctype>_create` | Create new document |
+
+**System Tools:**
+
+| Tool | Purpose |
+|------|---------|
+| `list_doctypes` | List all doctypes with field counts |
+| `validate_doctype_yaml` | Validate YAML without saving (line-numbered errors) |
+| `create_doctype_draft` | Create new DocType as **Draft only** — never activates, human required |
+
+**Multi-Round Execution:** The loop runs until `finish_reason == "stop"` with safety nets: max rounds (10 default), stall detection, error circuit breaker, context compaction at 80% token budget, tool result size caps (4KB).
+
+**AI Audit Trail:** AI-created records set `modified_by = "ai-assistant"` for audit queries.
+
+**CSRF:** Required. Include `X-Kora-CSRF-Token` header.
+
+---
+
 ## System Schema API
 
 ### Get Doctype Schema
