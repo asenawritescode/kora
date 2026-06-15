@@ -1,6 +1,10 @@
-import { createRouter, createRoute, createRootRoute, Outlet } from '@tanstack/react-router'
+import { useEffect } from 'react'
+import { createRouter, createRoute, createRootRoute, Outlet, Navigate } from '@tanstack/react-router'
 import { RootLayout } from '@/components/layout/RootLayout'
+import { ConsoleLayout } from '@/components/layout/ConsoleLayout'
 import { AuthGuard } from '@/components/layout/AuthGuard'
+import { useConsoleAuthStore } from '@/lib/console-auth-store'
+import { Loader2 } from 'lucide-react'
 import LoginPage from '@/routes/workspace/auth/login'
 import DashboardPage from '@/routes/workspace/index'
 import ListPage from '@/routes/workspace/$doctype/index'
@@ -11,6 +15,8 @@ import AdminDoctypeEditorPage from '@/routes/workspace/admin/doctypes/editor'
 import AdminVersionsPage from '@/routes/workspace/admin/versions'
 import AdminPermissionsPage from '@/routes/workspace/admin/permissions'
 import AdminWorkflowsPage from '@/routes/workspace/admin/workflows'
+import ConsoleLoginPage from '@/routes/console/login'
+import ConsoleDashboard from '@/routes/console/index'
 
 // Root — just auth guard, no layout.
 const rootRoute = createRootRoute({
@@ -120,8 +126,38 @@ const settingsRoute = createRoute({
   ),
 })
 
+// Console login — public.
+const consoleLoginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/console/login',
+  component: ConsoleLoginPage,
+})
+
+// Console layout — protected by token auth, renders ConsoleLayout shell.
+const consoleLayout = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/console',
+  component: () => {
+    const { isAuthenticated, isLoading, checkAuth } = useConsoleAuthStore()
+    useEffect(() => { checkAuth() }, [])
+    if (isLoading) return <div className="flex min-h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+    if (!isAuthenticated) return <Navigate to="/console/login" />
+    return <ConsoleLayout />
+  },
+})
+
+const consoleIndexRoute = createRoute({
+  getParentRoute: () => consoleLayout,
+  path: '/',
+  component: ConsoleDashboard,
+})
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
+  consoleLoginRoute,
+  consoleLayout.addChildren([
+    consoleIndexRoute,
+  ]),
   workspaceLayout.addChildren([
     dashboardRoute,
     adminRoute.addChildren([

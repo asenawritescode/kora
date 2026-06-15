@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Kora Console</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,sans-serif;background:#f5f5f5;color:#111}
+  nav{background:#111;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
+  nav a,nav button{color:#fff;text-decoration:none;background:none;border:1px solid #555;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:13px}
+  main{max-width:800px;margin:24px auto;padding:0 16px}
+  .card{background:#fff;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+  h2{font-size:16px;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px;text-align:left;border-bottom:1px solid #eee}
+  th{font-weight:600;color:#666}
+  .badge{padding:2px 8px;border-radius:10px;font-size:11px}
+  .badge-active{background:#e6f7e6;color:#2e7d32}
+  .badge-error{background:#fdecea;color:#c62828}
+  input,select{width:100%;padding:8px;margin-bottom:8px;border:1px solid #ddd;border-radius:4px;font-size:13px}
+  button{background:#111;color:#fff;border:none;padding:10px 20px;border-radius:4px;cursor:pointer;font-size:14px}
+  button:hover{background:#333}
+  .msg{padding:8px;border-radius:4px;margin-bottom:12px;font-size:13px}
+  .msg-ok{background:#e6f7e6;color:#2e7d32}
+  .msg-err{background:#fdecea;color:#c62828}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+</style></head>
+<body>
+<nav>
+  <strong>Kora Console</strong>
+  <div>
+    <span style="font-size:12px;opacity:0.7;margin-right:12px">{{.Email}}</span>
+    <a href="/console/logout">Logout</a>
+  </div>
+</nav>
+<main>
+{{if .Message}}<div class="msg {{if .Error}}msg-err{{else}}msg-ok{{end}}">{{.Message}}</div>{{end}}
+
+<div class="card">
+  <h2>Sites ({{len .Sites}})</h2>
+  {{if .Sites}}
+  <table>
+    <tr><th>Hostname</th><th>Status</th><th>DocTypes</th></tr>
+    {{range .Sites}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td><span class="badge {{if eq .Status "active"}}badge-active{{else}}badge-error{{end}}">{{.Status}}</span></td>
+      <td>{{.DocTypes}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p style="color:#666;font-size:13px">No sites yet. Create your first site below.</p>
+  {{end}}
+</div>
+
+<div class="card">
+  <h2>Create Site</h2>
+  <form id="createForm" onsubmit="createSite(event)">
+    <div class="grid2">
+      <input name="hostname" placeholder="Hostname (airtime.local)" required>
+      <input name="db_name" placeholder="Database name" required>
+      <input name="db_host" placeholder="DB Host (localhost)" required>
+      <input name="db_port" value="3306" placeholder="Port">
+      <input name="db_user" value="root" placeholder="DB User">
+      <input name="db_password" type="password" placeholder="DB Password" required>
+    </div>
+    <div class="grid2">
+      <input name="admin_email" type="email" placeholder="Admin email" required>
+      <input name="admin_password" type="password" placeholder="Admin password" required>
+    </div>
+    <button type="submit">Create Site</button>
+  </form>
+</div>
+</main>
+<script>
+const TOKEN = '{{.Email}}'; // We'll get the token from the session cookie
+async function createSite(e) {
+  e.preventDefault();
+  const f = document.getElementById('createForm');
+  const btn = f.querySelector('button');
+  btn.disabled = true; btn.textContent = 'Creating...';
+  const data = {};
+  f.querySelectorAll('input').forEach(i => { if(i.name) data[i.name] = i.value });
+  data.db_port = parseInt(data.db_port) || 3306;
+  try {
+    const r = await fetch('/api/console/sites', {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+getToken()},
+      body: JSON.stringify(data)
+    });
+    const j = await r.json();
+    if (r.ok) {
+      document.querySelector('.msg')?.remove();
+      const msg = document.createElement('div');
+      msg.className = 'msg msg-ok';
+      msg.textContent = 'Site '+data.hostname+' created! Reloading...';
+      f.prepend(msg);
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      alert('Error: ' + (j.error?.message || j.error || 'Failed'));
+    }
+  } catch(err) { alert('Error: '+err.message); }
+  btn.disabled = false; btn.textContent = 'Create Site';
+}
+function getToken() {
+  var m = document.cookie.match(/(?:^|;\s*)kora_console_sid=([^;]*)/);
+  return m ? m[1] : '';
+}
+</script>
+</body>
+</html>

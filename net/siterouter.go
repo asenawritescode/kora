@@ -99,7 +99,7 @@ func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip site resolution for console, health, and other system paths.
 		path := c.Request.URL.Path
-		if path == "/health" || strings.HasPrefix(path, "/api/console") || path == "/api/ping" {
+		if path == "/health" || strings.HasPrefix(path, "/api/console") || strings.HasPrefix(path, "/console") || path == "/api/ping" {
 			c.Next()
 			return
 		}

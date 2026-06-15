@@ -88,10 +88,17 @@ func (h *ConsoleHandler) HandleChangePassword(c *gin.Context) {
 // Auth middleware for console API routes
 // ---------------------------------------------------------------------------
 
-// RequireConsoleAuth is middleware that validates the console session token.
+// RequireConsoleAuth is middleware that validates the console session.
+// Accepts Authorization: Bearer <token> header OR kora_console_sid cookie.
 func (h *ConsoleHandler) RequireConsoleAuth(c *gin.Context) {
 	token := c.GetHeader("Authorization")
 	token = strings.TrimPrefix(token, "Bearer ")
+	if token == "" {
+		// Fallback: check the console session cookie.
+		if sid, err := c.Cookie("kora_console_sid"); err == nil && sid != "" {
+			token = sid
+		}
+	}
 	if token == "" {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, ErrorResponse{Error: map[string]string{"message": "Authentication required"}})
 		return

@@ -188,7 +188,7 @@ func runServe() error {
 				DocTypes: s.Registry.Len(), Workflows: 0, Status: "active",
 			})
 		}
-		consoleHandler := console.NewHandler(systemGuard, consoleSites, common.Version)
+		consoleHandler := console.NewHandler(systemGuard, consoleSites, common.Version, siteRouter)
 		consoleHandler.RegisterRoutes(router)
 
 		// Console API (React-driven, Bearer token auth).

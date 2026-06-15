@@ -80,3 +80,10 @@ export interface ListResponse<T = any> {
     total: number
   }
 }
+
+export interface ConsoleSite {
+  name: string
+  domains: string[]
+  doctypes: number
+  status: string
+}

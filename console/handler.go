@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/asenawritescode/kora/auth"
+	knet "github.com/asenawritescode/kora/net"
 )
 
 //go:embed templates/*.html
@@ -37,19 +38,21 @@ type SiteInfo struct {
 
 // Handler serves the system console at /console.
 type Handler struct {
-	guard       *auth.SystemGuard
-	sites       []SiteInfo
-	startedAt   time.Time
-	version     string
+	guard      *auth.SystemGuard
+	sites      []SiteInfo
+	siteRouter *knet.SiteRouter // for dynamic site listing
+	startedAt  time.Time
+	version    string
 }
 
 // NewHandler creates a console handler.
-func NewHandler(guard *auth.SystemGuard, sites []SiteInfo, version string) *Handler {
+func NewHandler(guard *auth.SystemGuard, sites []SiteInfo, version string, sr *knet.SiteRouter) *Handler {
 	return &Handler{
-		guard:     guard,
-		sites:     sites,
-		startedAt: time.Now(),
-		version:   version,
+		guard:      guard,
+		sites:      sites,
+		siteRouter: sr,
+		startedAt:  time.Now(),
+		version:    version,
 	}
 }
 
@@ -153,29 +156,31 @@ func (h *Handler) HandleLogout(c *gin.Context) {
 // HandleHome renders the system console dashboard.
 func (h *Handler) HandleHome(c *gin.Context) {
 	data := h.baseData("Dashboard", "dashboard")
-	active := 0
-	errCount := 0
-	for _, s := range h.sites {
-		if s.Status == "active" {
-			active++
-		} else {
-			errCount++
-		}
-	}
-	// Store counts in an accessible way for the template.
-	data.NumCPU = active
-	data.NumGoroutine = errCount
 	data.Email = c.GetString("system_email")
 
+	// Use live site data from SiteRouter if available.
+	if h.siteRouter != nil {
+		var liveSites []SiteInfo
+		for _, s := range h.siteRouter.AllSites() {
+			status := "active"
+			if err := s.DB.Ping(); err != nil {
+				status = "error"
+			}
+			liveSites = append(liveSites, SiteInfo{
+				Name: s.Name, DBName: s.Config.Hostname, Domains: s.Config.Domains,
+				DocTypes: len(s.Registry.All()), Status: status,
+			})
+		}
+		data.Sites = liveSites
+	}
+
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	tmpl.ExecuteTemplate(c.Writer, "shell.html", data)
+	tmpl.ExecuteTemplate(c.Writer, "dashboard.html", data)
 }
 
 // HandleSites lists all sites.
 func (h *Handler) HandleSites(c *gin.Context) {
-	data := h.baseData("Sites", "sites")
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	tmpl.ExecuteTemplate(c.Writer, "shell.html", data)
+	h.HandleHome(c)
 }
 
 // HandleSiteDetail shows a single site's details.
