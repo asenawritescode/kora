@@ -25,6 +25,22 @@ func (sr *SiteRouter) AllSites() []*LoadedSite {
 	return sr.allSites
 }
 
+// AddSite hot-adds a site to the running router without a restart.
+// Used by the console when creating a new site via API.
+func (sr *SiteRouter) AddSite(s *LoadedSite) {
+	domains := s.Config.Domains
+	if len(domains) == 0 {
+		domains = []string{s.Config.Hostname}
+	}
+	for _, d := range domains {
+		sr.sites[strings.ToLower(d)] = s
+	}
+	sr.allSites = append(sr.allSites, s)
+	if sr.defaultSite == nil {
+		sr.defaultSite = s
+	}
+}
+
 // SiteByName returns a site by its name or short name.
 // E.g., both "airtime.local" and "airtime" match the airtime site.
 func (sr *SiteRouter) SiteByName(name string) *LoadedSite {
@@ -81,6 +97,13 @@ func NewSiteRouter(sites []*LoadedSite) *SiteRouter {
 // Middleware returns a Gin middleware that resolves the Host header to a site.
 func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Skip site resolution for console, health, and other system paths.
+		path := c.Request.URL.Path
+		if path == "/health" || strings.HasPrefix(path, "/api/console") || path == "/api/ping" {
+			c.Next()
+			return
+		}
+
 		// If already set by path-based routing, skip.
 		if _, exists := c.Get("site_db"); exists {
 			c.Next()

@@ -51,7 +51,8 @@ func runServe() error {
 
 	common, err := site.LoadCommonConfig(filepath.Join(configDir, "common_site_config.yaml"))
 	if err != nil {
-		return fmt.Errorf("loading common config: %w", err)
+		slog.Warn("common config not found, using env defaults", "path", configDir)
+		common = site.CommonConfigFromEnv()
 	}
 	configureLogging(common.LogLevel, common.LogFormat)
 
@@ -64,13 +65,13 @@ func runServe() error {
 		}
 	}
 	if len(hostnames) == 0 {
-		return fmt.Errorf("no sites found. Run 'kora setup' or 'kora new-site' first.")
+		slog.Warn("no sites found — console-only mode. Use /console to create your first site.")
 	}
 
 	// Load all sites.
 	var loadedSites []*knet.LoadedSite
 	var allDomains []string
-	var firstDB *sql.DB // kept for session manager compatibility
+	var firstDB *sql.DB
 
 	for _, hostname := range hostnames {
 		siteCfg, err := site.LoadSiteConfig(filepath.Join(configDir, "sites", hostname, "site_config.yaml"))
@@ -92,7 +93,6 @@ func runServe() error {
 			firstDB = db
 		}
 
-		// Bootstrap and load config.
 		if err := bootstrapSystemTables(db); err != nil {
 			db.Close()
 			return fmt.Errorf("bootstrapping %s: %w", hostname, err)
@@ -110,76 +110,59 @@ func runServe() error {
 			registry.Workflows.Register(wf)
 		}
 
-		// Run migration.
 		if err := schema.MigrateSite(db, siteCfg.DBName, registry); err != nil {
 			db.Close()
 			return fmt.Errorf("migrating %s: %w", hostname, err)
 		}
 
 		domains := siteCfg.Domains()
-		s := &knet.LoadedSite{
-			Name:   hostname,
-			Config: knet.SiteRouterConfig{Hostname: hostname, Domains: domains},
-			DB:     db, Registry: registry,
-		}
-		loadedSites = append(loadedSites, s)
+		loadedSites = append(loadedSites, &knet.LoadedSite{
+			Name: hostname, Config: knet.SiteRouterConfig{Hostname: hostname, Domains: domains},
+			DB: db, Registry: registry,
+		})
 		allDomains = append(allDomains, domains...)
-
-		slog.Info("site loaded", "hostname", hostname, "domains", domains,
-			"doctypes", registry.Len(), "workflows", len(workflows))
+		slog.Info("site loaded", "hostname", hostname, "domains", domains, "doctypes", registry.Len())
 	}
 
 	if len(loadedSites) == 0 {
-		return fmt.Errorf("no sites could be loaded")
+		slog.Warn("no sites loaded — console-only mode. Use /console to create your first site.")
 	}
 
-	// Build site router.
+	// Build site router and Gin engine.
 	siteRouter := knet.NewSiteRouter(loadedSites)
-
-	// Build Gin router with full middleware stack.
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.RedirectTrailingSlash = false
 
-	// Global middleware (order matters).
 	router.Use(gin.Recovery())
 	router.Use(knet.RequestIDMiddleware())
 	router.Use(knet.SecurityHeadersMiddleware(common.TLSMode != "" && common.TLSMode != "off"))
-	router.Use(knet.CORSMiddleware(nil)) // nil = allow all in dev
-	// Host-based routing: Host header → site (reads kora_site cookie as fallback).
+	router.Use(knet.CORSMiddleware(nil))
 	router.Use(siteRouter.Middleware())
 	router.Use(knet.NewRateLimiter(float64(common.RateLimitRPS), common.RateLimitBurst).Middleware())
 
-	// Set config values from common config.
 	auth.SessionLifetime = time.Duration(common.SessionLifetimeHours) * time.Hour
 	doctype.SetAdminRole(common.AdminRole)
 	api.AppBranding = api.Branding{AppName: common.AppName, PrimaryColor: common.PrimaryColor}
 	api.SetAPILimits(common.APIDefaultLimit, common.APIMaxLimit)
 
-	// Public auth routes (login, logout).
+	// Fallback registry — used when no sites are loaded. Routes resolve via SiteRouter.
+	primaryRegistry := doctype.NewRegistry()
+	if len(loadedSites) > 0 {
+		primaryRegistry = loadedSites[0].Registry
+	}
+
+	// Always register core routes — sites can be hot-added via console.
 	sessionMgr := auth.NewSessionManager(firstDB)
 	auth.RegisterAuthRoutes(router, sessionMgr, firstDB)
-
-	// SiteGuard: unified Auth + CSRF + site context.
 	siteGuard := auth.NewSiteGuard(firstDB)
-	// Set CSRF Secure flag from config.
 	auth.SetCSRFSecure(common.CSRFSecure)
-
-	// API routes (SiteGuard with CSRF).
 	apiGroup := router.Group("/api")
-	apiGroup.Use(siteGuard.Middleware(false)) // false = CSRF enabled
-	primaryRegistry := loadedSites[0].Registry
+	apiGroup.Use(siteGuard.Middleware(false))
 	txManager := &orm.TxManager{DB: firstDB, Registry: primaryRegistry}
 	api.RegisterRoutesOnGroup(apiGroup, primaryRegistry, txManager)
 
-	// Workspace SPA — served without SiteGuard.
-	// The SPA handles auth detection internally. All API calls are protected
-	// by SiteGuard on /api/*. The SPA is just static files.
-	// The old HTMX template handler is kept as fallback during migration.
 	workspaceHandler := workspace.NewHandler(primaryRegistry)
-
-	// Serve the React SPA at /workspace/* (production) or use old templates (fallback).
-	// Check for dist/index.html to determine if SPA is built.
 	if spaIndex, _ := workspace.SPAFS().Open("index.html"); spaIndex != nil {
 		spaIndex.Close()
 		slog.Info("serving React SPA at /workspace")
@@ -191,81 +174,75 @@ func runServe() error {
 		workspaceHandler.RegisterRoutesOnGroup(workspaceGroup)
 	}
 
-	// System console routes.
+	// System console — file first, fall back to env/baked-in defaults.
 	systemGuard, err := auth.LoadSystemGuard("system_credentials.yaml")
 	if err != nil {
-		slog.Warn("system console disabled", "error", err)
-	} else {
-		// Build site info for console.
+		systemGuard = auth.LoadSystemGuardFromEnv()
+		slog.Info("console using env/baked-in credentials (system_credentials.yaml not found)")
+	}
+	if systemGuard != nil {
 		var consoleSites []console.SiteInfo
 		for _, s := range loadedSites {
 			consoleSites = append(consoleSites, console.SiteInfo{
-				Name:      s.Name,
-				DBName:    s.Config.Hostname, // simplified
-				Domains:   s.Config.Domains,
-				DocTypes:  s.Registry.Len(),
-				Workflows: 0, // workflows are in registry.Workflows but no Len() method
-				Status:    "active",
+				Name: s.Name, DBName: s.Config.Hostname, Domains: s.Config.Domains,
+				DocTypes: s.Registry.Len(), Workflows: 0, Status: "active",
 			})
 		}
 		consoleHandler := console.NewHandler(systemGuard, consoleSites, common.Version)
 		consoleHandler.RegisterRoutes(router)
+
+		// Console API (React-driven, Bearer token auth).
+		ch := api.NewConsoleHandler(systemGuard, siteRouter)
+		router.POST("/api/console/login", ch.HandleLogin)
+		router.POST("/api/console/change-password", ch.HandleChangePassword)
+		router.GET("/api/console/sites", ch.RequireConsoleAuth, ch.HandleListSites)
+		router.POST("/api/console/sites", ch.RequireConsoleAuth, ch.HandleCreateSite)
 	}
 
-	// Public ping.
-	router.GET("/api/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{"message": "pong"})
+	// Health + ping.
+	router.GET("/api/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong"}) })
+	router.GET("/health", func(c *gin.Context) {
+		dbStatus := "connected"
+		if firstDB != nil {
+			if err := firstDB.Ping(); err != nil { dbStatus = "disconnected" }
+		} else { dbStatus = "unknown" }
+		status := "ok"
+		if dbStatus != "connected" { status = "degraded" }
+		c.JSON(200, gin.H{"status": status, "db": dbStatus})
 	})
 
-	// Start scheduler.
-	startScheduler(firstDB, primaryRegistry, txManager)
+	// Scheduler.
+	if len(loadedSites) > 0 {
+		startScheduler(firstDB, primaryRegistry, txManager)
+	}
 
-	// Build server.
+	// Server.
 	port := common.HTTPPort
-	if httpPortFlag > 0 {
-		port = httpPortFlag
-	}
+	if httpPortFlag > 0 { port = httpPortFlag }
 	addr := fmt.Sprintf(":%d", port)
-
 	tlsCfg := &knet.TLSConfig{Mode: common.TLSMode, Email: common.TLSEmail}
-	if len(allDomains) > 0 {
-		tlsCfg.Domains = allDomains
-	}
-
+	if len(allDomains) > 0 { tlsCfg.Domains = allDomains }
 	srv := knet.NewServer(router, addr, tlsCfg)
-	// Apply server timeouts from config.
-	if common.ReadTimeout > 0 {
-		srv.ReadTimeout = time.Duration(common.ReadTimeout) * time.Second
-	}
-	if common.WriteTimeout > 0 {
-		srv.WriteTimeout = time.Duration(common.WriteTimeout) * time.Second
-	}
-	if common.IdleTimeout > 0 {
-		srv.IdleTimeout = time.Duration(common.IdleTimeout) * time.Second
-	}
+	if common.ReadTimeout > 0 { srv.ReadTimeout = time.Duration(common.ReadTimeout) * time.Second }
+	if common.WriteTimeout > 0 { srv.WriteTimeout = time.Duration(common.WriteTimeout) * time.Second }
+	if common.IdleTimeout > 0 { srv.IdleTimeout = time.Duration(common.IdleTimeout) * time.Second }
 
-	// Graceful shutdown.
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
 		sig := <-sigCh
 		slog.Info("received signal, shutting down gracefully", "signal", sig)
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-
-		if err := srv.Shutdown(ctx); err != nil {
-			slog.Error("server shutdown error", "error", err)
-		}
-
-		for _, s := range loadedSites {
-			s.DB.Close()
-		}
+		if err := srv.Shutdown(ctx); err != nil { slog.Error("server shutdown error", "error", err) }
+		for _, s := range loadedSites { s.DB.Close() }
 		slog.Info("server stopped")
 	}()
 
 	return srv.ListenAndServe()
 }
+
 
 func startScheduler(db *sql.DB, registry *doctype.Registry, txManager *orm.TxManager) {
 	cfg := loadSchedulerConfig()

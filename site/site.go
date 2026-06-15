@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -134,6 +135,46 @@ func LoadCommonConfig(path string) (*CommonConfig, error) {
 		return nil, fmt.Errorf("parsing common config: %w", err)
 	}
 	return cfg, nil
+}
+
+// CommonConfigFromEnv builds a CommonConfig from environment variables with sensible defaults.
+// Used when common_site_config.yaml is missing (container/console-first deployments).
+func CommonConfigFromEnv() *CommonConfig {
+	return &CommonConfig{
+		HTTPPort:             getEnvInt("KORA_HTTP_PORT", 8000),
+		LogLevel:             getEnv("KORA_LOG_LEVEL", "info"),
+		LogFormat:            getEnv("KORA_LOG_FORMAT", "json"),
+		AppName:              getEnv("KORA_APP_NAME", "Kora"),
+		Version:              getEnv("KORA_VERSION", "0.3.0"),
+		PrimaryColor:         getEnv("KORA_PRIMARY_COLOR", "#000000"),
+		SessionLifetimeHours: getEnvInt("KORA_SESSION_HOURS", 72),
+		RateLimitRPS:         getEnvInt("KORA_RATE_LIMIT", 100),
+		RateLimitBurst:       getEnvInt("KORA_RATE_BURST", 20),
+		DBMaxOpenConns:       getEnvInt("KORA_DB_MAX_OPEN", 25),
+		DBMaxIdleConns:       getEnvInt("KORA_DB_MAX_IDLE", 5),
+		APIDefaultLimit:      getEnvInt("KORA_API_DEFAULT_LIMIT", 50),
+		APIMaxLimit:          getEnvInt("KORA_API_MAX_LIMIT", 500),
+		ReadTimeout:          getEnvInt("KORA_READ_TIMEOUT", 30),
+		WriteTimeout:         getEnvInt("KORA_WRITE_TIMEOUT", 60),
+		IdleTimeout:          getEnvInt("KORA_IDLE_TIMEOUT", 120),
+		AdminRole:            getEnv("KORA_ADMIN_ROLE", "Administrator"),
+	}
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
 }
 
 // LoadSiteConfig reads a site configuration from a YAML file.
