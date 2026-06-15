@@ -221,7 +221,11 @@ func Connect(cfg *SiteConfig) (*sql.DB, error) {
 	if envDSN := os.Getenv("DB_DSN"); envDSN != "" {
 		dsn = envDSN
 	}
-	db, err := sql.Open("mysql", dsn)
+	driver := os.Getenv("KORA_DB_TYPE")
+	if driver == "" {
+		driver = "mysql"
+	}
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening database connection: %w", err)
 	}
@@ -250,6 +254,15 @@ func NewSite(cfg *SiteConfig) (*Site, error) {
 // CreateDatabase creates the site's database if it doesn't exist.
 // Connects without a database name, issues CREATE DATABASE IF NOT EXISTS.
 func CreateDatabase(cfg *SiteConfig) error {
+	driver := os.Getenv("KORA_DB_TYPE")
+	if driver == "" {
+		driver = "mysql"
+	}
+	// LibSQL/SQLite creates the database file on first connection — no CREATE DATABASE needed.
+	if driver != "mysql" {
+		return nil
+	}
+
 	// Connect to MySQL without specifying a database.
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?parseTime=true&charset=utf8mb4",
 		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort)
