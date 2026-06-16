@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/site"
 )
 
@@ -79,7 +80,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	// Import YAML config.
 	slog.Info("importing config", "path", setupConfigPath)
-	if err := site.ImportConfig(result.DB, result.Registry, result.Config.DBName, siteName, setupConfigPath); err != nil {
+	if err := site.ImportConfig(result.DB, result.Registry, result.Config.DBName, siteName, setupConfigPath, kdb.Resolve(result.Config.DBType)); err != nil {
 		return fmt.Errorf("importing config: %w", err)
 	}
 

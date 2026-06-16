@@ -17,6 +17,7 @@ import (
 	"github.com/asenawritescode/kora/api"
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/configstore"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/workspace"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/email"
@@ -126,7 +127,7 @@ func runServe() error {
 			firstDB = db
 		}
 
-		if err := site.BootstrapSystemTables(db); err != nil {
+		if err := site.BootstrapSystemTables(db, kdb.Resolve(common.DBType)); err != nil {
 			db.Close()
 			return fmt.Errorf("bootstrapping %s: %w", hostname, err)
 		}
@@ -143,7 +144,7 @@ func runServe() error {
 			registry.Workflows.Register(wf)
 		}
 
-		if err := schema.MigrateSite(db, siteCfg.DBName, registry); err != nil {
+		if err := schema.MigrateSite(db, siteCfg.DBName, registry, kdb.Resolve(common.DBType)); err != nil {
 			db.Close()
 			return fmt.Errorf("migrating %s: %w", hostname, err)
 		}

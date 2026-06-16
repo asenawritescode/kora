@@ -10,6 +10,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/asenawritescode/kora/auth"
+	sqlDialect "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -137,7 +138,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	}
 
 	// Step 4: Bootstrap system tables.
-	if err := BootstrapSystemTables(db); err != nil {
+	if err := BootstrapSystemTables(db, sqlDialect.Resolve(input.DBType)); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("bootstrapping system tables: %w", err)
 	}

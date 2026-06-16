@@ -301,6 +301,72 @@ func (d *MySQLDialect) ParseError(err error, dt *doctype.DocType) *doctype.Valid
 
 func (d *MySQLDialect) Placeholder(n int) string { return "?" }
 
+func (d *MySQLDialect) UpsertClause(conflictCols []string, updateCols []string) string {
+	var parts []string
+	for _, col := range updateCols {
+		parts = append(parts, fmt.Sprintf("%s = VALUES(%s)", d.QuoteIdent(col), d.QuoteIdent(col)))
+	}
+	return "ON DUPLICATE KEY UPDATE " + strings.Join(parts, ", ")
+}
+
+func (d *MySQLDialect) InsertOrIgnorePrefix() string { return "INSERT IGNORE" }
+
+func (d *MySQLDialect) NameGenQuery(tableName, prefix string) string {
+	return fmt.Sprintf(
+		"SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(name, '-', -1) AS UNSIGNED)), 0) FROM %s WHERE name LIKE '%s-%%'",
+		d.QuoteIdent(tableName), prefix,
+	)
+}
+
+func (d *MySQLDialect) SystemTableSQL() []string {
+	return []string{
+		// _kora_doctype
+		"CREATE TABLE IF NOT EXISTS _kora_doctype (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tmodule VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tis_submittable TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tis_child_table TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tis_single TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\ttrack_changes TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\ttitle_field VARCHAR(140) NOT NULL DEFAULT 'name',\n\t\t\tsearch_fields VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tsort_field VARCHAR(140) NOT NULL DEFAULT 'modified',\n\t\t\tsort_order VARCHAR(4) NOT NULL DEFAULT 'DESC',\n\t\t\tdescription TEXT,\n\t\t\tconfig_json JSON,\n\t\t\tversion INT NOT NULL DEFAULT 1,\n\t\t\tcreation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// Add version column to existing _kora_doctype tables (backwards compat).
+		"ALTER TABLE _kora_doctype ADD COLUMN version INT NOT NULL DEFAULT 1",
+
+		// _kora_field
+		"CREATE TABLE IF NOT EXISTS _kora_field (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tparent VARCHAR(140) NOT NULL,\n\t\t\tfieldname VARCHAR(140) NOT NULL,\n\t\t\tfieldtype VARCHAR(50) NOT NULL,\n\t\t\tlabel VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\toptions TEXT,\n\t\t\treqd TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tunique_constraint TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdefault_value VARCHAR(255),\n\t\t\thidden TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tread_only TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tbold TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tin_list_view TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tin_standard_filter TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tsearch_index TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdescription TEXT,\n\t\t\tdepends_on TEXT,\n\t\t\tmandatory_depends_on TEXT,\n\t\t\tconstraints_json JSON,\n\t\t\trenamed_from VARCHAR(140),\n\t\t\tlinked_field VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tcomputed TEXT,\n\t\t\tidx INT NOT NULL DEFAULT 0,\n\t\t\tINDEX idx_parent (parent),\n\t\t\tINDEX idx_parent_fieldname (parent, fieldname)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// Add columns for backwards compat.
+		"ALTER TABLE _kora_field ADD COLUMN linked_field VARCHAR(255) NOT NULL DEFAULT ''",
+		"ALTER TABLE _kora_field ADD COLUMN computed TEXT",
+
+		// _kora_role
+		"CREATE TABLE IF NOT EXISTS _kora_role (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tworkspace_access TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\tdescription TEXT\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// _kora_permission
+		"CREATE TABLE IF NOT EXISTS _kora_permission (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\trole VARCHAR(140) NOT NULL,\n\t\t\tcan_read TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_write TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_create TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_delete TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_submit TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_cancel TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_amend TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_export TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_import TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_report TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tif_owner TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tUNIQUE KEY idx_doctype_role (doctype, role)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// _kora_config_version
+		"CREATE TABLE IF NOT EXISTS _kora_config_version (\n\t\t\tid VARCHAR(36) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL,\n\t\t\tversion INT NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tcreated_by VARCHAR(140) NOT NULL DEFAULT 'system',\n\t\t\tlabel VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tchangelog JSON,\n\t\t\tstatus VARCHAR(20) NOT NULL DEFAULT 'Draft',\n\t\t\tconfig JSON,\n\t\t\tINDEX idx_site_status (site, status),\n\t\t\tINDEX idx_site_version (site, version)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// Backwards compat columns.
+		"ALTER TABLE _kora_config_version ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'Superseded'",
+		"ALTER TABLE _kora_config_version ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 0",
+		"UPDATE _kora_config_version SET status = 'Active' WHERE is_active = 1 AND status = 'Superseded'",
+
+		// _kora_user
+		"CREATE TABLE IF NOT EXISTS _kora_user (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\temail VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tpassword_hash VARCHAR(255) NOT NULL,\n\t\t\tfull_name VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tenabled TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\troles TEXT,\n\t\t\tcreation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tUNIQUE KEY idx_email (email)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// _kora_session
+		"CREATE TABLE IF NOT EXISTS _kora_session (\n\t\t\tsid VARCHAR(255) PRIMARY KEY,\n\t\t\tuser VARCHAR(140) NOT NULL,\n\t\t\tdata JSON,\n\t\t\texpires_at DATETIME(6) NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tINDEX idx_user (user),\n\t\t\tINDEX idx_expires (expires_at)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// _kora_workflow
+		"CREATE TABLE IF NOT EXISTS _kora_workflow (\n\t\t\tname VARCHAR(140) NOT NULL,\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\tis_active TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\tPRIMARY KEY (name)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// _kora_workflow_state
+		"CREATE TABLE IF NOT EXISTS _kora_workflow_state (\n\t\t\tname VARCHAR(255) NOT NULL,\n\t\t\tworkflow VARCHAR(140) NOT NULL,\n\t\t\tlabel VARCHAR(140) NOT NULL,\n\t\t\tis_initial TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdoc_status TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcolor VARCHAR(20) NOT NULL DEFAULT '',\n\t\t\tPRIMARY KEY (name)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// _kora_workflow_transition
+		"CREATE TABLE IF NOT EXISTS _kora_workflow_transition (\n\t\t\tname VARCHAR(255) NOT NULL,\n\t\t\tworkflow VARCHAR(140) NOT NULL,\n\t\t\tfrom_state VARCHAR(255) NOT NULL,\n\t\t\tto_state VARCHAR(255) NOT NULL,\n\t\t\tlabel VARCHAR(140) NOT NULL,\n\t\t\tallowed_role VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tcondition_expr TEXT,\n\t\t\tPRIMARY KEY (name)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// _kora_secret
+		"CREATE TABLE IF NOT EXISTS _kora_secret (\n\t\t\tsite VARCHAR(140) NOT NULL,\n\t\t\tkey_name VARCHAR(140) NOT NULL,\n\t\t\tencrypted_value BLOB NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tupdated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tPRIMARY KEY (site, key_name)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+	}
+}
+
 func parseMySQLKeyField(msg string) string {
 	const prefix = "key 'uq_"
 	idx := strings.Index(msg, prefix)

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/asenawritescode/kora/configstore"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/site"
@@ -52,7 +53,7 @@ func runMigrate() error {
 		}
 
 		// Bootstrap system tables.
-		if err := site.BootstrapSystemTables(db); err != nil {
+		if err := site.BootstrapSystemTables(db, kdb.Resolve(siteCfg.DBType)); err != nil {
 			db.Close()
 			return fmt.Errorf("bootstrapping %s: %w", hostname, err)
 		}
@@ -74,7 +75,7 @@ func runMigrate() error {
 		registry := doctype.NewRegistry()
 		registry.LoadFromDB(doctypes)
 
-		if err := schema.MigrateSite(db, siteCfg.DBName, registry); err != nil {
+		if err := schema.MigrateSite(db, siteCfg.DBName, registry, kdb.Resolve(siteCfg.DBType)); err != nil {
 			db.Close()
 			return fmt.Errorf("migrating %s: %w", hostname, err)
 		}

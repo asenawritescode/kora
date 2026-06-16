@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/asenawritescode/kora/configstore"
+	sqlDialect "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/schema"
 )
@@ -14,7 +15,7 @@ import (
 // builds the registry, and runs schema migration. This is a separate composable
 // step called only when a YAML config directory is provided (CLI setup path).
 // Console-created sites skip this — users configure doctypes via AI or admin UI.
-func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, configPath string) error {
+func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, configPath string, dialect sqlDialect.Dialect) error {
 	// Step 1: Parse DocType config files.
 	doctypes, err := doctype.ParseConfigTree(configPath)
 	if err != nil {
@@ -63,7 +64,7 @@ func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, conf
 	}
 
 	// Step 7: Run schema migration.
-	if err := schema.MigrateSite(db, dbName, registry); err != nil {
+	if err := schema.MigrateSite(db, dbName, registry, dialect); err != nil {
 		return fmt.Errorf("migrating schema: %w", err)
 	}
 

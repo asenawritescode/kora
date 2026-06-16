@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/asenawritescode/kora/configstore"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/site"
@@ -134,7 +135,7 @@ func runConfigImport(siteName, path string) error {
 	defer db.Close()
 
 	// Bootstrap system tables if needed.
-	if err := site.BootstrapSystemTables(db); err != nil {
+	if err := site.BootstrapSystemTables(db, kdb.Resolve(siteCfg.DBType)); err != nil {
 		return fmt.Errorf("bootstrapping: %w", err)
 	}
 
@@ -210,7 +211,7 @@ func runConfigImport(siteName, path string) error {
 	fmt.Printf("  ✓ Config version %d (%s) created\n", versionNum, versionID)
 
 	// Run migration.
-	if err := schema.MigrateSite(db, siteCfg.DBName, registry); err != nil {
+	if err := schema.MigrateSite(db, siteCfg.DBName, registry, kdb.Resolve(siteCfg.DBType)); err != nil {
 		return fmt.Errorf("migrating: %w", err)
 	}
 	// Print changelog summary.

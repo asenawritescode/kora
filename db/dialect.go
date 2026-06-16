@@ -47,6 +47,24 @@ type Dialect interface {
 	// Placeholder returns the parameter placeholder for the nth argument (1-indexed).
 	// MySQL/LibSQL use "?". PostgreSQL uses "$1", "$2", etc.
 	Placeholder(n int) string
+
+	// UpsertClause generates an upsert suffix for INSERT statements.
+	// MySQL: ON DUPLICATE KEY UPDATE col = VALUES(col), ...
+	// SQLite: ON CONFLICT(cols) DO UPDATE SET col = excluded.col, ...
+	UpsertClause(conflictCols []string, updateCols []string) string
+
+	// InsertOrIgnorePrefix returns the prefix for an idempotent INSERT.
+	// MySQL: "INSERT IGNORE" — SQLite: "INSERT OR IGNORE"
+	InsertOrIgnorePrefix() string
+
+	// NameGenQuery returns SQL to find the next numeric suffix for document naming.
+	// MySQL uses SUBSTRING_INDEX + CAST AS UNSIGNED.
+	// SQLite uses SUBSTR + INSTR + CAST AS INTEGER.
+	NameGenQuery(tableName, prefix string) string
+
+	// SystemTableSQL returns the CREATE TABLE IF NOT EXISTS DDL for all _kora_*
+	// system tables. Each dialect provides its own version.
+	SystemTableSQL() []string
 }
 
 // ---------------------------------------------------------------------------
@@ -117,3 +135,6 @@ func Resolve(dbType string) Dialect {
 		return &MySQLDialect{}
 	}
 }
+
+// MySQL returns the MySQL dialect (for callers that don't have DBType info).
+func MySQL() Dialect { return &MySQLDialect{} }

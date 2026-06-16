@@ -12,6 +12,7 @@ import (
 
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/configstore"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/schema"
 )
@@ -373,7 +374,7 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	if activate {
 		var dbName string
 		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-		if err := schema.MigrateSite(db, dbName, reg); err != nil {
+		if err := schema.MigrateSite(db, dbName, reg, kdb.MySQL()); err != nil {
 			slog.Error("migration failed after doctype create", "doctype", dt.Name, "error", err)
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
@@ -463,7 +464,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 		// Get DB name from the connection.
 		var dbName string
 		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-		if err := schema.MigrateSite(db, dbName, reg); err != nil {
+		if err := schema.MigrateSite(db, dbName, reg, kdb.MySQL()); err != nil {
 			slog.Error("migration failed after doctype update", "doctype", doctypeName, "error", err)
 		}
 	}
@@ -619,7 +620,7 @@ func (h *Handler) HandleSystemDoctypeDryRun(c *gin.Context) {
 	}
 
 	// Run impact analysis.
-	preview := schema.AnalyzeImpact(db, oldDT, &proposed, reg)
+	preview := schema.AnalyzeImpact(db, oldDT, &proposed, reg, kdb.MySQL())
 
 	c.JSON(http.StatusOK, Response{Data: preview})
 }
@@ -698,7 +699,7 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	// Run migration.
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	if err := schema.MigrateSite(db, dbName, reg); err != nil {
+	if err := schema.MigrateSite(db, dbName, reg, kdb.MySQL()); err != nil {
 		slog.Error("migration failed on version activate", "version", versionID, "error", err)
 	}
 
@@ -793,7 +794,7 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	schema.MigrateSite(db, dbName, reg)
+	schema.MigrateSite(db, dbName, reg, kdb.MySQL())
 
 	createdBy := c.GetString("user")
 	if createdBy == "" {

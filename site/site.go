@@ -125,7 +125,16 @@ func (s *SiteConfig) DSN() string {
 		if s.DBHost == "" && s.DBName != "" {
 			return fmt.Sprintf("file:%s.db", s.DBName)
 		}
-		if strings.HasPrefix(s.DBHost, "file:") || strings.HasPrefix(s.DBHost, "libsql://") || strings.HasPrefix(s.DBHost, "http") {
+		if strings.HasPrefix(s.DBHost, "file:") || strings.HasPrefix(s.DBHost, "libsql://") {
+			return s.DBHost
+		}
+		if strings.HasPrefix(s.DBHost, "http") {
+			// Embed credentials in URL if provided and not already present.
+			if s.DBUser != "" && s.DBPassword != "" && !strings.Contains(s.DBHost, "@") {
+				rest := strings.TrimPrefix(s.DBHost, "https://")
+				rest = strings.TrimPrefix(rest, "http://")
+				return fmt.Sprintf("http://%s:%s@%s", s.DBUser, s.DBPassword, rest)
+			}
 			return s.DBHost
 		}
 		// Default: file-based LibSQL.
