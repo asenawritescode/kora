@@ -69,19 +69,25 @@ func runServe() error {
 		slog.Warn("platform db_user or db_password not set in common_site_config.yaml — site creation from console UI will fail. Set db_user and db_password in common_site_config.yaml or KORA_DB_USER / KORA_DB_PASSWORD env vars.")
 	}
 
-	// Startup DB connection check.
+	// Startup DB connection check. Keep connection open for console site creation.
+	var platformDB *sql.DB
 	if sc.DBDSN != "" {
-		db, err := sql.Open(sc.DBType, sc.DBDSN)
+		var err error
+		platformDB, err = sql.Open(sc.DBType, sc.DBDSN)
 		if err != nil {
 			slog.Error("startup db check: failed to open", "type", sc.DBType, "error", err)
 			return fmt.Errorf("failed to open %s connection: %w", sc.DBType, err)
 		}
-		defer db.Close()
-		if err := db.Ping(); err != nil {
+		if err := platformDB.Ping(); err != nil {
+			platformDB.Close()
 			slog.Error("startup db check: ping failed", "type", sc.DBType, "error", err)
 			return fmt.Errorf("failed to ping %s: %w", sc.DBType, err)
 		}
 		slog.Info("database connected", "type", sc.DBType)
+	}
+	// Close platformDB on shutdown if it was opened.
+	if platformDB != nil {
+		defer platformDB.Close()
 	}
 
 	// Discover sites.
@@ -217,7 +223,7 @@ func runServe() error {
 	if systemGuard != nil {
 		// Console API (React SPA-driven, Bearer token auth).
 		// The /console frontend is served by the SPA via NoRoute handler.
-		ch := api.NewConsoleHandler(systemGuard, siteRouter, common.DBType, common.DBHost, common.DBUser, common.DBPassword, 3306)
+		ch := api.NewConsoleHandler(systemGuard, siteRouter, common.DBType, common.DBHost, common.DBUser, common.DBPassword, 3306, platformDB)
 		router.POST("/api/console/login", ch.HandleLogin)
 		router.POST("/api/console/change-password", ch.HandleChangePassword)
 		router.GET("/api/console/sites", ch.RequireConsoleAuth, ch.HandleListSites)

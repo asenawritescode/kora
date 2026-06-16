@@ -40,6 +40,11 @@ type CreateSiteInput struct {
 	PlatformDBUser     string
 	PlatformDBPassword string
 
+	// PlatformDB is an existing, authenticated connection to the platform database.
+	// When set (for LibSQL), CreateSite reuses this connection instead of calling Connect.
+	// This avoids auth issues with opening a second connection to the same server.
+	PlatformDB *sql.DB
+
 	// ConfigDir is where site_config.yaml is written. Defaults to KORA_CONFIG_DIR or ".".
 	ConfigDir string
 }
@@ -132,20 +137,34 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	}
 
 	// Step 3: Connect to the new database.
-	db, err := Connect(siteCfg)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to database: %w", err)
+	// For LibSQL, reuse the platform's already-authenticated connection
+	// to avoid auth issues (HTTP Basic auth may not carry to a second sql.Open).
+	var db *sql.DB
+	isPlatformDB := false
+	if input.PlatformDB != nil && input.DBType == "libsql" {
+		db = input.PlatformDB
+		isPlatformDB = true
+	} else {
+		var err error
+		db, err = Connect(siteCfg)
+		if err != nil {
+			return nil, fmt.Errorf("connecting to database: %w", err)
+		}
 	}
 
 	// Step 4: Bootstrap system tables.
 	if err := BootstrapSystemTables(db, sqlDialect.Resolve(input.DBType)); err != nil {
-		db.Close()
+		if !isPlatformDB {
+			db.Close()
+		}
 		return nil, fmt.Errorf("bootstrapping system tables: %w", err)
 	}
 
 	// Step 5: Create admin user.
 	if err := createAdminUser(db, input.AdminEmail, input.AdminPassword, input.AdminFullName); err != nil {
-		db.Close()
+		if !isPlatformDB {
+			db.Close()
+		}
 		return nil, fmt.Errorf("creating admin user: %w", err)
 	}
 

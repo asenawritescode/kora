@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,10 +23,11 @@ type ConsoleHandler struct {
 	PlatformDBPort      int
 	PlatformDBUser      string
 	PlatformDBPassword  string
+	PlatformDB          *sql.DB // Existing platform DB connection (for LibSQL reuse)
 }
 
 // NewConsoleHandler creates a console API handler.
-func NewConsoleHandler(guard *auth.SystemGuard, sr *net.SiteRouter, dbType, dbHost, dbUser, dbPassword string, dbPort int) *ConsoleHandler {
+func NewConsoleHandler(guard *auth.SystemGuard, sr *net.SiteRouter, dbType, dbHost, dbUser, dbPassword string, dbPort int, platformDB *sql.DB) *ConsoleHandler {
 	return &ConsoleHandler{
 		SystemGuard:        guard,
 		SiteRouter:         sr,
@@ -34,6 +36,7 @@ func NewConsoleHandler(guard *auth.SystemGuard, sr *net.SiteRouter, dbType, dbHo
 		PlatformDBPort:     dbPort,
 		PlatformDBUser:     dbUser,
 		PlatformDBPassword: dbPassword,
+		PlatformDB:         platformDB,
 	}
 }
 
@@ -220,6 +223,7 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 		PlatformDBPort:      platformPort,
 		PlatformDBUser:      platformUser,
 		PlatformDBPassword:  platformPass,
+		PlatformDB:          h.PlatformDB,
 	})
 	if err != nil {
 		slog.Error("creating site failed", "hostname", req.Hostname, "error", err)
