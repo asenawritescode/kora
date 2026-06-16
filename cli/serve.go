@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"os/signal"
+		"os/signal"
 	"syscall"
 	"time"
 
@@ -55,18 +54,13 @@ func runServe() error {
 		configDir = sc.ConfigDir
 	}
 
-	common, err := site.LoadCommonConfig(filepath.Join(configDir, "common_site_config.yaml"))
-	if err != nil {
-		slog.Warn("common config not found, using env defaults", "path", configDir)
-		common = site.CommonConfigFromEnv()
-	}
+	// All config from env vars (no YAML files).
+	common := site.CommonConfigFromEnv()
 	configureLogging(common.LogLevel, common.LogFormat)
 
 	// Validate platform DB credentials for site creation via console.
-	// Existing site databases use per-site credentials from site_config.yaml,
-	// but creating NEW sites requires platform-level MySQL credentials.
 	if common.DBUser == "" || common.DBPassword == "" {
-		slog.Warn("platform db_user or db_password not set in common_site_config.yaml — site creation from console UI will fail. Set db_user and db_password in common_site_config.yaml or KORA_DB_USER / KORA_DB_PASSWORD env vars.")
+		slog.Warn("platform db_user or db_password not set — site creation from console UI will fail. Set KORA_DB_USER / KORA_DB_PASSWORD env vars.")
 	}
 
 	// Startup DB connection check. Keep connection open for console site creation.
@@ -90,12 +84,14 @@ func runServe() error {
 		defer platformDB.Close()
 	}
 
-	// Discover sites.
+	// Discover sites from the database (single source of truth).
+	// No YAML files — all site config is reconstructed from platform defaults.
 	hostnames := []string{serveSiteFlag}
-	if serveSiteFlag == "" {
-		hostnames, err = site.DiscoverSites(filepath.Join(configDir, "sites"))
-		if err != nil {
-			return fmt.Errorf("discovering sites: %w", err)
+	if serveSiteFlag == "" && platformDB != nil {
+		dbHostnames, err := site.DiscoverSitesFromDB(platformDB)
+		if err == nil && len(dbHostnames) > 0 {
+			hostnames = dbHostnames
+			slog.Info("sites discovered from database", "count", len(hostnames))
 		}
 	}
 	if len(hostnames) == 0 {
@@ -108,20 +104,9 @@ func runServe() error {
 	var firstDB *sql.DB
 
 	for _, hostname := range hostnames {
-		siteCfg, err := site.LoadSiteConfig(filepath.Join(configDir, "sites", hostname, "site_config.yaml"))
-		if err != nil {
-			slog.Warn("skipping site", "hostname", hostname, "error", err)
-			continue
-		}
-		if siteCfg.DBHost == "" {
-			siteCfg.DBHost = common.DBHost
-		}
-
-		// Validate DB fingerprint — prevents accidental DB drift.
-		if err := site.ValidateFingerprint(siteCfg); err != nil {
-			slog.Error("db fingerprint mismatch — refusing to load site", "site", hostname, "error", err)
-			continue
-		}
+		// Reconstruct site config from platform defaults (no YAML files).
+		siteCfg := site.ReconstructSiteConfig(hostname, common)
+		siteCfg.DBHost = common.DBHost
 
 		slog.Info("connecting to database", "site", hostname, "db", siteCfg.DBName)
 		db, err := site.Connect(siteCfg)

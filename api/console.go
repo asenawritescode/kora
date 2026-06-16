@@ -126,9 +126,25 @@ func (h *ConsoleHandler) RequireConsoleAuth(c *gin.Context) {
 // ---------------------------------------------------------------------------
 
 // HandleListSites returns all loaded sites with status.
+// Falls back to querying the database directly when no sites are loaded (e.g. after
+// container redeploy where site_config.yaml files were lost but DB data persists).
 // GET /api/console/sites
 func (h *ConsoleHandler) HandleListSites(c *gin.Context) {
 	sites := h.SiteRouter.AllSites()
+
+	// If no sites in memory, try the database — sites survive redeploys there.
+	if len(sites) == 0 && h.PlatformDB != nil {
+		if dbSites, err := site.DiscoverSitesFromDB(h.PlatformDB); err == nil {
+			for _, name := range dbSites {
+				sites = append(sites, &net.LoadedSite{
+					Name:   name,
+					Config: net.SiteRouterConfig{Hostname: name, Domains: []string{name}},
+					DB:     h.PlatformDB,
+				})
+			}
+		}
+	}
+
 	type SiteEntry struct {
 		Name     string   `json:"name"`
 		Domains  []string `json:"domains"`
@@ -138,8 +154,12 @@ func (h *ConsoleHandler) HandleListSites(c *gin.Context) {
 	var result []SiteEntry
 	for _, s := range sites {
 		status := "active"
-		if err := s.DB.Ping(); err != nil {
-			status = "error"
+		if s.DB != nil {
+			if err := s.DB.Ping(); err != nil {
+				status = "error"
+			}
+		} else {
+			status = "unknown"
 		}
 		result = append(result, SiteEntry{
 			Name:     s.Name,

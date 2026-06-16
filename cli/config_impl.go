@@ -45,10 +45,8 @@ func runConfigExport(siteName, path string) error {
 		return fmt.Errorf("--site and --path are required")
 	}
 
-	siteCfg, err := site.LoadSiteConfig(fmt.Sprintf("sites/%s/site_config.yaml", siteName))
-	if err != nil {
-		return fmt.Errorf("loading site config: %w", err)
-	}
+	common_cfg := site.CommonConfigFromEnv()
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
 
 	db, err := site.Connect(siteCfg)
 	if err != nil {
@@ -122,10 +120,8 @@ func runConfigExport(siteName, path string) error {
 
 func runConfigImport(siteName, path string) error {
 	// Load site config.
-	siteCfg, err := site.LoadSiteConfig(fmt.Sprintf("sites/%s/site_config.yaml", siteName))
-	if err != nil {
-		return fmt.Errorf("loading site config: %w", err)
-	}
+	common_cfg := site.CommonConfigFromEnv()
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
 
 	// Connect to database.
 	db, err := site.Connect(siteCfg)
@@ -280,10 +276,8 @@ func init() {
 }
 
 func runConfigVersions(siteName string) error {
-	siteCfg, err := site.LoadSiteConfig(fmt.Sprintf("sites/%s/site_config.yaml", siteName))
-	if err != nil {
-		return err
-	}
+	common_cfg := site.CommonConfigFromEnv()
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
 	db, err := site.Connect(siteCfg)
 	if err != nil {
 		return err
@@ -326,7 +320,8 @@ func runConfigDiff(siteName, fromID, toID string) error {
 	if fromID == "" || toID == "" {
 		return fmt.Errorf("--from and --to are required")
 	}
-	siteCfg, _ := site.LoadSiteConfig(fmt.Sprintf("sites/%s/site_config.yaml", siteName))
+	common_cfg := site.CommonConfigFromEnv()
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
 	db, _ := site.Connect(siteCfg)
 	defer db.Close()
 
@@ -354,10 +349,8 @@ func runConfigRollback(siteName string, toVersion int) error {
 	if toVersion < 1 {
 		return fmt.Errorf("--to-version must be >= 1")
 	}
-	siteCfg, err := site.LoadSiteConfig(fmt.Sprintf("sites/%s/site_config.yaml", siteName))
-	if err != nil {
-		return err
-	}
+	common_cfg := site.CommonConfigFromEnv()
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
 	db, err := site.Connect(siteCfg)
 	if err != nil {
 		return err

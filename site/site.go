@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -292,28 +291,40 @@ func LoadSiteConfig(path string) (*SiteConfig, error) {
 	return cfg, nil
 }
 
-// DiscoverSites finds all site directories under the given base path.
-// Each subdirectory containing a site_config.yaml is considered a site.
-func DiscoverSites(basePath string) ([]string, error) {
-	entries, err := os.ReadDir(basePath)
+// DiscoverSitesFromDB finds sites by querying _kora_config_version in the platform database.
+// This allows sites created via console to survive container redeploys — the database
+// has all the data, we just need to rediscover the site names.
+func DiscoverSitesFromDB(db *sql.DB) ([]string, error) {
+	rows, err := db.Query("SELECT DISTINCT site FROM _kora_config_version")
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading sites directory: %w", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	var sites []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	for rows.Next() {
+		var site string
+		if err := rows.Scan(&site); err != nil {
+			return nil, err
 		}
-		configPath := filepath.Join(basePath, entry.Name(), "site_config.yaml")
-		if _, err := os.Stat(configPath); err == nil {
-			sites = append(sites, entry.Name())
-		}
+		sites = append(sites, site)
 	}
-	return sites, nil
+	return sites, rows.Err()
+}
+
+// ReconstructSiteConfig builds a SiteConfig from platform defaults when no
+// site_config.yaml exists on disk (site was created via console, config file
+// was lost on container redeploy).
+func ReconstructSiteConfig(hostname string, common *CommonConfig) *SiteConfig {
+	return &SiteConfig{
+		DBType:     common.DBType,
+		DBHost:     common.DBHost,
+		DBUser:     common.DBUser,
+		DBPassword: common.DBPassword,
+		DBName:     strings.ReplaceAll(hostname, ".", "_"),
+		Hostname:   hostname,
+		Apps:       []string{"core"},
+	}
 }
 
 // Connect opens a database connection for the site.

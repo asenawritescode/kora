@@ -1,7 +1,6 @@
 package site
 
 import (
-	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"os"
@@ -130,20 +129,12 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 		DomainsList: domains,
 	}
 
-	// Compute and store DB fingerprint.
-	siteCfg.DBFingerprint = computeFingerprint(siteCfg)
-
 	// Step 1: Create database.
 	if err := CreateDatabase(siteCfg); err != nil {
 		return nil, fmt.Errorf("creating database: %w", err)
 	}
 
-	// Step 2: Write site config to disk (with fingerprint).
-	if err := writeSiteConfig(input.ConfigDir, input.Hostname, siteCfg); err != nil {
-		return nil, fmt.Errorf("writing site config: %w", err)
-	}
-
-	// Step 3: Connect to the new database.
+	// Step 2: Connect to the new database.
 	// For LibSQL, open a fresh connection just like the startup check does —
 	// this avoids any connection-pool auth issues with the libsql HTTP driver.
 	var db *sql.DB
@@ -176,7 +167,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 		}
 	}
 
-	// Step 4: Bootstrap system tables.
+	// Step 3: Bootstrap system tables.
 	if err := BootstrapSystemTables(db, sqlDialect.Resolve(input.DBType)); err != nil {
 		if isOwnedDB {
 			db.Close()
@@ -184,7 +175,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 		return nil, fmt.Errorf("bootstrapping system tables: %w", err)
 	}
 
-	// Step 5: Create admin user.
+	// Step 4: Create admin user.
 	if err := createAdminUser(db, input.AdminEmail, input.AdminPassword, input.AdminFullName); err != nil {
 		if isOwnedDB {
 			db.Close()
@@ -192,10 +183,10 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 		return nil, fmt.Errorf("creating admin user: %w", err)
 	}
 
-	// Step 6: Create initial config version.
+	// Step 5: Create initial config version (used by DiscoverSitesFromDB).
 	ensureConfigVersion(db, input.Hostname)
 
-	// Step 7: Build empty registry.
+	// Step 6: Build empty registry.
 	registry := doctype.NewRegistry()
 	registry.LoadFull(nil, nil, nil)
 
@@ -205,86 +196,6 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 		Registry: registry,
 	}, nil
 }
-
-// computeFingerprint returns a SHA-256 hash of (host:port:dbname).
-// Password is deliberately excluded — passwords legitimately change.
-func computeFingerprint(cfg *SiteConfig) string {
-	payload := fmt.Sprintf("%s:%d:%s", cfg.DBHost, cfg.DBPort, cfg.DBName)
-	sum := sha256.Sum256([]byte(payload))
-	return fmt.Sprintf("%x", sum)
-}
-
-// ValidateFingerprint checks that the current DB connection details match the
-// fingerprint stored at site creation time. Returns an error if they don't match.
-func ValidateFingerprint(cfg *SiteConfig) error {
-	if cfg.DBFingerprint == "" {
-		return nil // No fingerprint — site created before this feature, skip.
-	}
-	current := computeFingerprint(cfg)
-	if current != cfg.DBFingerprint {
-		return fmt.Errorf(
-			"site %q DB connection changed: fingerprint mismatch.\n"+
-				"  Current:  %s\n"+
-				"  Expected: %s\n"+
-				"If this change is intentional, update db_fingerprint in sites/%s/site_config.yaml to:\n"+
-				"  db_fingerprint: %s\n"+
-				"Or remove db_fingerprint to disable this check.",
-			cfg.Hostname, current, cfg.DBFingerprint, cfg.Hostname, current,
-		)
-	}
-	return nil
-}
-
-// writeSiteConfig writes a site_config.yaml with the DB fingerprint to disk.
-// If KORA_SECRET_KEY is set, the DB password is encrypted at rest.
-func writeSiteConfig(configDir, hostname string, cfg *SiteConfig) error {
-	siteDir := fmt.Sprintf("%s/sites/%s", configDir, hostname)
-	if err := os.MkdirAll(siteDir, 0755); err != nil {
-		return err
-	}
-	filesDir := fmt.Sprintf("%s/files", siteDir)
-	if err := os.MkdirAll(filesDir, 0755); err != nil {
-		return err
-	}
-
-	// Encrypt password if we have a server key.
-	dbPassword := cfg.DBPassword
-	dbPasswordEncrypted := false
-	if dbPassword != "" {
-		if encrypted, err := encryptPassword(dbPassword); err == nil {
-			dbPassword = encrypted
-			dbPasswordEncrypted = true
-		}
-		// If encryption fails (no KORA_SECRET_KEY), we store plaintext.
-	}
-
-	content := fmt.Sprintf(`# Site configuration for %s
-db_host: %s
-db_port: %d
-db_name: %s
-db_user: %s
-db_password: %s
-db_password_encrypted: %v
-
-redis_url: redis://localhost:6379/0
-
-file_storage: local
-files_path: sites/%s/files
-
-apps:
-  - core
-
-hostname: %s
-
-# Auto-generated — do not edit manually.
-# To change DB connection, run: kora site update-db --site %s
-db_fingerprint: %s
-`, hostname, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, dbPassword, dbPasswordEncrypted,
-		hostname, hostname, hostname, cfg.DBFingerprint)
-
-	return os.WriteFile(fmt.Sprintf("%s/site_config.yaml", siteDir), []byte(content), 0644)
-}
-
 // createAdminUser hashes the password and inserts a user into _kora_user.
 func createAdminUser(db *sql.DB, email, password, fullName string) error {
 	passwordHash, err := auth.HashPassword(password)

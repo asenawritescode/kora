@@ -28,9 +28,18 @@ func runMigrate() error {
 		return fmt.Errorf("specify --site <hostname> or --all")
 	}
 
+	common := site.CommonConfigFromEnv()
+
 	var hostnames []string
 	if migrateAllFlag {
-		discovered, err := site.DiscoverSites("sites")
+		// Discover sites from database.
+		cfg := site.ReconstructSiteConfig("_discovery_", common)
+		db, err := site.Connect(cfg)
+		if err != nil {
+			return fmt.Errorf("connecting to platform db: %w", err)
+		}
+		discovered, err := site.DiscoverSitesFromDB(db)
+		db.Close()
 		if err != nil {
 			return fmt.Errorf("discovering sites: %w", err)
 		}
@@ -42,10 +51,7 @@ func runMigrate() error {
 	for _, hostname := range hostnames {
 		slog.Info("migrating site", "site", hostname)
 
-		siteCfg, err := site.LoadSiteConfig(fmt.Sprintf("sites/%s/site_config.yaml", hostname))
-		if err != nil {
-			return fmt.Errorf("loading site config for %s: %w", hostname, err)
-		}
+		siteCfg := site.ReconstructSiteConfig(hostname, common)
 
 		db, err := site.Connect(siteCfg)
 		if err != nil {

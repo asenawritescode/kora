@@ -33,10 +33,8 @@ Configure Claude Desktop to use it:
 			return fmt.Errorf("--site is required")
 		}
 
-		cfg, err := site.LoadSiteConfig("sites/" + siteName + "/site_config.yaml")
-		if err != nil {
-			return fmt.Errorf("loading site config: %w", err)
-		}
+		common := site.CommonConfigFromEnv()
+		cfg := site.ReconstructSiteConfig(siteName, common)
 
 		db, err := site.Connect(cfg)
 		if err != nil {
