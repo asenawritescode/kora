@@ -28,7 +28,7 @@ export default function ConsoleDashboard() {
   const { needsPasswordChange, token } = useConsoleAuthStore()
   const queryClient = useQueryClient()
   const [form, setForm] = useState({
-    hostname: '', db_type: 'mysql', db_host: '', db_port: '',
+    hostname: '', db_type: '', db_host: '', db_port: '',
     db_name: '', db_user: '', db_password: '', admin_email: '', admin_password: '',
   })
   const [creating, setCreating] = useState(false)
@@ -73,7 +73,7 @@ export default function ConsoleDashboard() {
       const workspaceUrl = `/s/${form.hostname}/workspace`
       setMsg({ text: `Site "${form.hostname}" created! `, ok: true, link: workspaceUrl })
       setCreatedSite(form.hostname)
-      setForm(f => ({ ...f, hostname: '', db_type: 'mysql', db_name: '', admin_email: '', admin_password: '', db_password: '' }))
+      setForm(f => ({ ...f, hostname: '', db_type: '', db_name: '', admin_email: '', admin_password: '', db_password: '' }))
       queryClient.invalidateQueries({ queryKey: ['console', 'sites'] })
       refetch()
     } catch (err: any) {
@@ -208,7 +208,7 @@ export default function ConsoleDashboard() {
                 <div className="grid grid-cols-2 gap-4 mt-3">
                   <div className="space-y-2">
                     <Label htmlFor="db_type">DB Type</Label>
-                    <Select value={form.db_type} onValueChange={(v) => setForm(f => ({ ...f, db_type: v || 'mysql' }))}>
+                    <Select value={form.db_type} onValueChange={(v) => setForm(f => ({ ...f, db_type: v ?? '' }))}>
                       <SelectTrigger id="db_type"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="mysql">MySQL / MariaDB</SelectItem>
