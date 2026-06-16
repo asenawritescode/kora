@@ -110,12 +110,12 @@ func (sm *SessionManager) GetSession(sid string) (*User, error) {
 
 	// Cache miss or expired — query database.
 	var userJSON string
-	var expiresAt time.Time
+	var expiresStr string // scanned as string for SQLite compatibility (TEXT column)
 
 	err := sm.DB.QueryRow(
 		"SELECT data, expires_at FROM _kora_session WHERE sid = ?",
 		sid,
-	).Scan(&userJSON, &expiresAt)
+	).Scan(&userJSON, &expiresStr)
 
 	if err == sql.ErrNoRows {
 		// Remove from cache if present.
@@ -126,6 +126,11 @@ func (sm *SessionManager) GetSession(sid string) (*User, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying session: %w", err)
+	}
+
+	expiresAt, err := parseTime(expiresStr)
+	if err != nil {
+		return nil, fmt.Errorf("parsing session expiry: %w", err)
 	}
 
 	if time.Now().After(expiresAt) {
@@ -595,4 +600,21 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 			})
 		})
 	}
+}
+
+// parseTime parses a datetime string from the database (MySQL DATETIME or SQLite TEXT).
+func parseTime(s string) (time.Time, error) {
+	// Try RFC 3339 (Go's default time.Time encoding for SQL parameters).
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	// Try MySQL datetime format with microseconds: "2006-01-02 15:04:05.999999"
+	if t, err := time.Parse("2006-01-02 15:04:05.999999", s); err == nil {
+		return t, nil
+	}
+	// Try without microseconds: "2006-01-02 15:04:05"
+	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("unrecognized time format: %q", s)
 }
