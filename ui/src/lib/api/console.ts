@@ -65,3 +65,16 @@ export async function createSite(data: {
   }
   return json.data
 }
+
+export async function updateSite(name: string, domains: string[]): Promise<void> {
+  const resp = await fetch(BASE + '/sites/' + encodeURIComponent(name), {
+    method: 'PUT',
+    headers: headers(),
+    body: JSON.stringify({ domains }),
+    credentials: 'same-origin',
+  })
+  if (!resp.ok) {
+    const json = await resp.json()
+    throw new Error(json.error?.message || 'Failed to update site')
+  }
+}

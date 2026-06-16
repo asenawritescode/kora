@@ -3,6 +3,7 @@ package site
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -293,38 +294,57 @@ func LoadSiteConfig(path string) (*SiteConfig, error) {
 }
 
 // DiscoverSitesFromDB finds sites by querying _kora_config_version in the platform database.
-// This allows sites created via console to survive container redeploys — the database
-// has all the data, we just need to rediscover the site names.
-func DiscoverSitesFromDB(db *sql.DB) ([]string, error) {
-	rows, err := db.Query("SELECT DISTINCT site FROM _kora_config_version")
+// DBSiteInfo holds site metadata discovered from the database.
+type DBSiteInfo struct {
+	Name    string
+	Domains []string
+}
+
+// DiscoverSitesFromDB finds sites by querying _kora_config_version in the platform database.
+// Returns site names and their persisted domains (stored in the config JSON).
+// This allows sites created via console to survive container redeploys.
+func DiscoverSitesFromDB(db *sql.DB) ([]DBSiteInfo, error) {
+	rows, err := db.Query("SELECT DISTINCT site, config FROM _kora_config_version WHERE status = 'Active'")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var sites []string
+	var sites []DBSiteInfo
 	for rows.Next() {
-		var site string
-		if err := rows.Scan(&site); err != nil {
+		var site, configJSON string
+		if err := rows.Scan(&site, &configJSON); err != nil {
 			return nil, err
 		}
-		sites = append(sites, site)
+		info := DBSiteInfo{Name: site, Domains: []string{site}}
+		// Parse domains from config JSON if present.
+		if configJSON != "" && configJSON != "{}" {
+			var cfg struct {
+				Domains []string `json:"domains"`
+			}
+			if json.Unmarshal([]byte(configJSON), &cfg) == nil && len(cfg.Domains) > 0 {
+				info.Domains = cfg.Domains
+			}
+		}
+		sites = append(sites, info)
 	}
 	return sites, rows.Err()
 }
 
-// ReconstructSiteConfig builds a SiteConfig from platform defaults when no
-// site_config.yaml exists on disk (site was created via console, config file
-// was lost on container redeploy).
-func ReconstructSiteConfig(hostname string, common *CommonConfig) *SiteConfig {
+// ReconstructSiteConfig builds a SiteConfig from platform defaults and persisted domains.
+func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []string) *SiteConfig {
+	if len(domains) == 0 {
+		domains = []string{hostname}
+	}
 	return &SiteConfig{
-		DBType:     common.DBType,
-		DBHost:     common.DBHost,
-		DBUser:     common.DBUser,
-		DBPassword: common.DBPassword,
-		DBName:     strings.ReplaceAll(hostname, ".", "_"),
-		Hostname:   hostname,
-		Apps:       []string{"core"},
+		DBType:      common.DBType,
+		DBHost:      common.DBHost,
+		DBUser:      common.DBUser,
+		DBPassword:  common.DBPassword,
+		DBName:      strings.ReplaceAll(hostname, ".", "_"),
+		Hostname:    hostname,
+		DomainsList: domains,
+		Apps:        []string{"core"},
 	}
 }
 

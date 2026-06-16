@@ -89,16 +89,18 @@ func runServe() error {
 	}
 
 	// Discover sites from the database (single source of truth).
-	// No YAML files — all site config is reconstructed from platform defaults.
-	hostnames := []string{serveSiteFlag}
+	var dbSites []site.DBSiteInfo
+	var err error
 	if serveSiteFlag == "" && platformDB != nil {
-		dbHostnames, err := site.DiscoverSitesFromDB(platformDB)
-		if err == nil && len(dbHostnames) > 0 {
-			hostnames = dbHostnames
-			slog.Info("sites discovered from database", "count", len(hostnames))
+		dbSites, err = site.DiscoverSitesFromDB(platformDB)
+		if err == nil && len(dbSites) > 0 {
+			slog.Info("sites discovered from database", "count", len(dbSites))
 		}
 	}
-	if len(hostnames) == 0 {
+	if serveSiteFlag != "" {
+		dbSites = []site.DBSiteInfo{{Name: serveSiteFlag}}
+	}
+	if len(dbSites) == 0 {
 		slog.Warn("no sites found — console-only mode. Use /console to create your first site.")
 	}
 
@@ -107,15 +109,15 @@ func runServe() error {
 	var allDomains []string
 	var firstDB *sql.DB
 
-	for _, hostname := range hostnames {
-		// Reconstruct site config from platform defaults (no YAML files).
-		siteCfg := site.ReconstructSiteConfig(hostname, common)
+	for _, info := range dbSites {
+		// Reconstruct site config from platform defaults + persisted domains.
+		siteCfg := site.ReconstructSiteConfig(info.Name, common, info.Domains)
 		siteCfg.DBHost = common.DBHost
 
-		slog.Info("connecting to database", "site", hostname, "db", siteCfg.DBName)
+		slog.Info("connecting to database", "site", info.Name, "db", siteCfg.DBName)
 		db, err := site.Connect(siteCfg)
 		if err != nil {
-			slog.Warn("skipping site", "hostname", hostname, "error", err)
+			slog.Warn("skipping site", "hostname", info.Name, "error", err)
 			continue
 		}
 		if firstDB == nil {
@@ -124,7 +126,7 @@ func runServe() error {
 
 		if err := site.BootstrapSystemTables(db, kdb.Resolve(common.DBType)); err != nil {
 			db.Close()
-			return fmt.Errorf("bootstrapping %s: %w", hostname, err)
+			return fmt.Errorf("bootstrapping %s: %w", info.Name, err)
 		}
 
 		store := configstore.NewStore(db, kdb.Resolve(common.DBType))
@@ -141,16 +143,16 @@ func runServe() error {
 
 		if err := schema.MigrateSite(db, siteCfg.DBName, registry, kdb.Resolve(common.DBType)); err != nil {
 			db.Close()
-			return fmt.Errorf("migrating %s: %w", hostname, err)
+			return fmt.Errorf("migrating %s: %w", info.Name, err)
 		}
 
 		domains := siteCfg.Domains()
 		loadedSites = append(loadedSites, &knet.LoadedSite{
-			Name: hostname, Config: knet.SiteRouterConfig{Hostname: hostname, Domains: domains},
+			Name: info.Name, Config: knet.SiteRouterConfig{Hostname: info.Name, Domains: domains},
 			DB: db, Registry: registry,
 		})
 		allDomains = append(allDomains, domains...)
-		slog.Info("site loaded", "hostname", hostname, "domains", domains, "doctypes", registry.Len())
+		slog.Info("site loaded", "hostname", info.Name, "domains", domains, "doctypes", registry.Len())
 	}
 
 	if len(loadedSites) == 0 {
@@ -217,6 +219,7 @@ func runServe() error {
 		router.POST("/api/console/change-password", ch.HandleChangePassword)
 		router.GET("/api/console/sites", ch.RequireConsoleAuth, ch.HandleListSites)
 		router.POST("/api/console/sites", ch.RequireConsoleAuth, ch.HandleCreateSite)
+		router.PUT("/api/console/sites/:name", ch.RequireConsoleAuth, ch.HandleUpdateSite)
 	}
 
 	// Health + ping.

@@ -2,6 +2,8 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -135,10 +137,10 @@ func (h *ConsoleHandler) HandleListSites(c *gin.Context) {
 	// If no sites in memory, try the database — sites survive redeploys there.
 	if len(sites) == 0 && h.PlatformDB != nil {
 		if dbSites, err := site.DiscoverSitesFromDB(h.PlatformDB); err == nil {
-			for _, name := range dbSites {
+			for _, info := range dbSites {
 				sites = append(sites, &net.LoadedSite{
-					Name:   name,
-					Config: net.SiteRouterConfig{Hostname: name, Domains: []string{name}},
+					Name:   info.Name,
+					Config: net.SiteRouterConfig{Hostname: info.Name, Domains: info.Domains},
 					DB:     h.PlatformDB,
 				})
 			}
@@ -304,6 +306,51 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 			"admin":    req.AdminEmail,
 		},
 	})
+}
+
+// HandleUpdateSite updates site metadata (domains).
+// PUT /api/console/sites/:name
+func (h *ConsoleHandler) HandleUpdateSite(c *gin.Context) {
+	siteName := c.Param("name")
+	if siteName == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "site name required"}})
+		return
+	}
+
+	var req struct {
+		Domains []string `json:"domains"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Invalid request"}})
+		return
+	}
+
+	site := h.SiteRouter.SiteByName(siteName)
+	if site == nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"message": "Site not found: " + siteName}})
+		return
+	}
+
+	// Update domains in the in-memory router.
+	site.Config.Domains = req.Domains
+	if len(site.Config.Domains) == 0 {
+		site.Config.Domains = []string{site.Config.Hostname}
+	}
+
+	// Persist to DB if platform DB is available.
+	if h.PlatformDB != nil {
+		domainsJSON, _ := json.Marshal(req.Domains)
+		h.PlatformDB.Exec(
+			"UPDATE _kora_config_version SET config = ? WHERE site = ? AND status = 'Active'",
+			fmt.Sprintf(`{"domains": %s}`, string(domainsJSON)), siteName,
+		)
+	}
+
+	slog.Info("site updated via console", "hostname", siteName, "domains", req.Domains)
+	c.JSON(http.StatusOK, Response{Data: map[string]any{
+		"hostname": siteName,
+		"domains":  site.Config.Domains,
+	}})
 }
 
 // ---------------------------------------------------------------------------

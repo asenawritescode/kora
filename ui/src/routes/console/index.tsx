@@ -10,7 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Plus, Globe, ChevronDown, ChevronRight, Database, ExternalLink, Circle } from 'lucide-react'
+import { Loader2, Plus, Globe, ChevronDown, ChevronRight, Database, ExternalLink, Circle, Pencil, Check, X } from 'lucide-react'
+import { updateSite } from '@/lib/api/console'
 
 function useHealth() {
   return useQuery({
@@ -36,6 +37,8 @@ export default function ConsoleDashboard() {
   const [msg, setMsg] = useState<{ text: string; ok: boolean; link?: string } | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [createdSite, setCreatedSite] = useState<string | null>(null)
+  const [editingSite, setEditingSite] = useState<string | null>(null)
+  const [editDomains, setEditDomains] = useState('')
 
   const { data: health } = useHealth()
   const dbConnected = health?.db === 'connected'
@@ -53,6 +56,17 @@ export default function ConsoleDashboard() {
 
   const update = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const handleUpdate = async (name: string) => {
+    const domains = editDomains.split(',').map(d => d.trim()).filter(Boolean)
+    try {
+      await updateSite(name, domains)
+      setEditingSite(null)
+      refetch()
+    } catch (err: any) {
+      alert(err.message)
+    }
+  }
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -144,7 +158,29 @@ export default function ConsoleDashboard() {
                 {sites.map((s) => (
                   <TableRow key={s.name}>
                     <TableCell className="font-medium">{s.name}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{s.domains?.join(', ') || '-'}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {editingSite === s.name ? (
+                        <span className="flex items-center gap-1">
+                          <input
+                            className="border rounded px-1 py-0.5 text-xs w-full"
+                            value={editDomains}
+                            onChange={e => setEditDomains(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') handleUpdate(s.name); if (e.key === 'Escape') setEditingSite(null) }}
+                            autoFocus
+                          />
+                          <Check className="h-3 w-3 cursor-pointer text-green-600" onClick={() => handleUpdate(s.name)} />
+                          <X className="h-3 w-3 cursor-pointer text-red-600" onClick={() => setEditingSite(null)} />
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 group">
+                          {s.domains?.join(', ') || '-'}
+                          <Pencil
+                            className="h-3 w-3 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => { setEditingSite(s.name); setEditDomains(s.domains?.join(', ') || '') }}
+                          />
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell>{s.doctypes}</TableCell>
                     <TableCell>
                       <Badge variant={s.status === 'active' ? 'default' : 'destructive'}>{s.status}</Badge>

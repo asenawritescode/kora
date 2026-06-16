@@ -18,50 +18,49 @@ var (
 )
 
 func init() {
-	migrateCmd.Flags().StringVar(&migrateSiteFlag, "site", "", "Target site hostname")
+	migrateCmd.Flags().StringVar(&migrateSiteFlag, "site", "", "Target site info.Name")
 	migrateCmd.Flags().BoolVar(&migrateAllFlag, "all", false, "Migrate all sites")
 	migrateCmd.Flags().BoolVar(&allowBreakingFlag, "allow-breaking", false, "Allow breaking schema changes")
 }
 
 func runMigrate() error {
 	if migrateSiteFlag == "" && !migrateAllFlag {
-		return fmt.Errorf("specify --site <hostname> or --all")
+		return fmt.Errorf("specify --site <info.Name> or --all")
 	}
 
 	common := site.CommonConfigFromEnv()
 
-	var hostnames []string
+	var dbSites []site.DBSiteInfo
 	if migrateAllFlag {
 		// Discover sites from database.
-		cfg := site.ReconstructSiteConfig("_discovery_", common)
+		cfg := site.ReconstructSiteConfig("_discovery_", common, nil)
 		db, err := site.Connect(cfg)
 		if err != nil {
 			return fmt.Errorf("connecting to platform db: %w", err)
 		}
-		discovered, err := site.DiscoverSitesFromDB(db)
+		dbSites, err = site.DiscoverSitesFromDB(db)
 		db.Close()
 		if err != nil {
 			return fmt.Errorf("discovering sites: %w", err)
 		}
-		hostnames = discovered
 	} else {
-		hostnames = []string{migrateSiteFlag}
+		dbSites = []site.DBSiteInfo{{Name: migrateSiteFlag}}
 	}
 
-	for _, hostname := range hostnames {
-		slog.Info("migrating site", "site", hostname)
+	for _, info := range dbSites {
+		slog.Info("migrating site", "site", info.Name)
 
-		siteCfg := site.ReconstructSiteConfig(hostname, common)
+		siteCfg := site.ReconstructSiteConfig(info.Name, common, info.Domains)
 
 		db, err := site.Connect(siteCfg)
 		if err != nil {
-			return fmt.Errorf("connecting to %s: %w", hostname, err)
+			return fmt.Errorf("connecting to %s: %w", info.Name, err)
 		}
 
 		// Bootstrap system tables.
 		if err := site.BootstrapSystemTables(db, kdb.Resolve(siteCfg.DBType)); err != nil {
 			db.Close()
-			return fmt.Errorf("bootstrapping %s: %w", hostname, err)
+			return fmt.Errorf("bootstrapping %s: %w", info.Name, err)
 		}
 
 		// Load config from DB.
@@ -69,11 +68,11 @@ func runMigrate() error {
 		doctypes, err := store.LoadAll()
 		if err != nil {
 			db.Close()
-			return fmt.Errorf("loading config for %s: %w", hostname, err)
+			return fmt.Errorf("loading config for %s: %w", info.Name, err)
 		}
 
 		if len(doctypes) == 0 {
-			slog.Warn("no DocTypes found", "site", hostname)
+			slog.Warn("no DocTypes found", "site", info.Name)
 			db.Close()
 			continue
 		}
@@ -83,11 +82,11 @@ func runMigrate() error {
 
 		if err := schema.MigrateSite(db, siteCfg.DBName, registry, kdb.Resolve(siteCfg.DBType)); err != nil {
 			db.Close()
-			return fmt.Errorf("migrating %s: %w", hostname, err)
+			return fmt.Errorf("migrating %s: %w", info.Name, err)
 		}
 
 		db.Close()
-		fmt.Printf("  ✓ %s migrated\n", hostname)
+		fmt.Printf("  ✓ %s migrated\n", info.Name)
 	}
 
 	fmt.Println("Migration complete.")

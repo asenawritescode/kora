@@ -41,7 +41,7 @@ var secretSetCmd = &cobra.Command{
 
 func loadSiteDB(siteName string) (*sql.DB, error) {
 	common := site.CommonConfigFromEnv()
-	cfg := site.ReconstructSiteConfig(siteName, common)
+	cfg := site.ReconstructSiteConfig(siteName, common, nil)
 	db, err := site.Connect(cfg)
 	if err != nil {
 		return nil, err

@@ -46,7 +46,7 @@ func runConfigExport(siteName, path string) error {
 	}
 
 	common_cfg := site.CommonConfigFromEnv()
-	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg, nil)
 
 	db, err := site.Connect(siteCfg)
 	if err != nil {
@@ -121,7 +121,7 @@ func runConfigExport(siteName, path string) error {
 func runConfigImport(siteName, path string) error {
 	// Load site config.
 	common_cfg := site.CommonConfigFromEnv()
-	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg, nil)
 
 	// Connect to database.
 	db, err := site.Connect(siteCfg)
@@ -277,7 +277,7 @@ func init() {
 
 func runConfigVersions(siteName string) error {
 	common_cfg := site.CommonConfigFromEnv()
-	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg, nil)
 	db, err := site.Connect(siteCfg)
 	if err != nil {
 		return err
@@ -321,7 +321,7 @@ func runConfigDiff(siteName, fromID, toID string) error {
 		return fmt.Errorf("--from and --to are required")
 	}
 	common_cfg := site.CommonConfigFromEnv()
-	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg, nil)
 	db, _ := site.Connect(siteCfg)
 	defer db.Close()
 
@@ -350,7 +350,7 @@ func runConfigRollback(siteName string, toVersion int) error {
 		return fmt.Errorf("--to-version must be >= 1")
 	}
 	common_cfg := site.CommonConfigFromEnv()
-	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg)
+	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg, nil)
 	db, err := site.Connect(siteCfg)
 	if err != nil {
 		return err

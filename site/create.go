@@ -2,6 +2,7 @@ package site
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -187,7 +188,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	}
 
 	// Step 5: Create initial config version (used by DiscoverSitesFromDB).
-	ensureConfigVersion(db, input.Hostname)
+	ensureConfigVersion(db, input.Hostname, domains)
 
 	// Step 6: Build empty registry.
 	registry := doctype.NewRegistry()
@@ -218,18 +219,21 @@ func createAdminUser(db *sql.DB, email, password, fullName string) error {
 }
 
 // ensureConfigVersion creates an initial config version if none exists for the site.
-func ensureConfigVersion(db *sql.DB, hostname string) {
+// domains are persisted in the config JSON so they survive container redeploys.
+func ensureConfigVersion(db *sql.DB, hostname string, domains []string) {
 	var count int
 	db.QueryRow("SELECT COUNT(*) FROM _kora_config_version WHERE site = ?", hostname).Scan(&count)
 	if count > 0 {
 		return
 	}
 
+	domainsJSON, _ := json.Marshal(domains)
+	configJSON := fmt.Sprintf(`{"domains": %s}`, string(domainsJSON))
 	versionID := ulid.Make().String()
 	_, err := db.Exec(
 		`INSERT INTO _kora_config_version (id, site, version, created_by, label, status, config)
-		 VALUES (?, ?, 1, 'setup', 'Initial setup', 'Active', '{}')`,
-		versionID, hostname,
+		 VALUES (?, ?, 1, 'setup', 'Initial setup', 'Active', ?)`,
+		versionID, hostname, configJSON,
 	)
 	if err != nil {
 		// Non-fatal — site is still usable.
