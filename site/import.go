@@ -35,7 +35,7 @@ func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, conf
 	}
 
 	// Step 4: Save to database.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, dialect)
 	for _, dt := range doctypes {
 		if err := store.SaveDocType(dt); err != nil {
 			return fmt.Errorf("saving doctype %s: %w", dt.Name, err)

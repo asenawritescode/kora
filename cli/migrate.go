@@ -59,7 +59,7 @@ func runMigrate() error {
 		}
 
 		// Load config from DB.
-		store := configstore.NewStore(db)
+		store := configstore.NewStore(db, kdb.Resolve(siteCfg.DBType))
 		doctypes, err := store.LoadAll()
 		if err != nil {
 			db.Close()

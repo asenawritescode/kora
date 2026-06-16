@@ -9,17 +9,19 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
 
 // Store persists DocType configurations to the database.
 type Store struct {
-	DB *sql.DB
+	DB      *sql.DB
+	Dialect db.Dialect
 }
 
 // NewStore creates a new config store.
-func NewStore(db *sql.DB) *Store {
-	return &Store{DB: db}
+func NewStore(database *sql.DB, dialect db.Dialect) *Store {
+	return &Store{DB: database, Dialect: dialect}
 }
 
 // SaveDocType inserts or updates a DocType and its fields in the database.
@@ -342,19 +344,11 @@ func GetTargetFields(dt *doctype.DocType) []string {
 
 // SaveRoles saves role definitions to _kora_role.
 func (s *Store) SaveRoles(roles []*doctype.Role) error {
-	// Ensure table exists.
-	s.DB.Exec(`CREATE TABLE IF NOT EXISTS _kora_role (
-		name VARCHAR(140) PRIMARY KEY,
-		workspace_access TINYINT(1) NOT NULL DEFAULT 1,
-		description TEXT
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
-
 	for _, role := range roles {
-		_, err := s.DB.Exec(`
-			INSERT INTO _kora_role (name, workspace_access, description)
-			VALUES (?, ?, ?)
-			ON DUPLICATE KEY UPDATE workspace_access = VALUES(workspace_access), description = VALUES(description)
-		`, role.Name, boolToInt(role.WorkspaceAccess), role.Description)
+		upsertSQL := `INSERT INTO _kora_role (name, workspace_access, description)
+			VALUES (?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"workspace_access", "description"})
+		_, err := s.DB.Exec(upsertSQL, role.Name, boolToInt(role.WorkspaceAccess), role.Description)
 		if err != nil {
 			return fmt.Errorf("saving role %s: %w", role.Name, err)
 		}
@@ -364,33 +358,14 @@ func (s *Store) SaveRoles(roles []*doctype.Role) error {
 
 // SavePermissions saves permission definitions to _kora_permission.
 func (s *Store) SavePermissions(permissions []*doctype.Permission) error {
-	// Ensure table exists.
-	s.DB.Exec(`CREATE TABLE IF NOT EXISTS _kora_permission (
-		name VARCHAR(140) PRIMARY KEY,
-		doctype VARCHAR(140) NOT NULL, role VARCHAR(140) NOT NULL,
-		can_read TINYINT(1) NOT NULL DEFAULT 0, can_write TINYINT(1) NOT NULL DEFAULT 0,
-		can_create TINYINT(1) NOT NULL DEFAULT 0, can_delete TINYINT(1) NOT NULL DEFAULT 0,
-		can_submit TINYINT(1) NOT NULL DEFAULT 0, can_cancel TINYINT(1) NOT NULL DEFAULT 0,
-		can_amend TINYINT(1) NOT NULL DEFAULT 0, can_export TINYINT(1) NOT NULL DEFAULT 0,
-		can_import TINYINT(1) NOT NULL DEFAULT 0, can_report TINYINT(1) NOT NULL DEFAULT 0,
-		if_owner TINYINT(1) NOT NULL DEFAULT 0,
-		UNIQUE KEY idx_doctype_role (doctype, role)
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
-
 	for _, p := range permissions {
 		name := fmt.Sprintf("%s.%s", p.Doctype, p.Role)
-		_, err := s.DB.Exec(`
-			INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
+		upsertSQL := `INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
 				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON DUPLICATE KEY UPDATE
-				can_read = VALUES(can_read), can_write = VALUES(can_write),
-				can_create = VALUES(can_create), can_delete = VALUES(can_delete),
-				can_submit = VALUES(can_submit), can_cancel = VALUES(can_cancel),
-				can_amend = VALUES(can_amend), can_export = VALUES(can_export),
-				can_import = VALUES(can_import), can_report = VALUES(can_report),
-				if_owner = VALUES(if_owner)
-		`, name, p.Doctype, p.Role,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
+				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner"})
+		_, err := s.DB.Exec(upsertSQL, name, p.Doctype, p.Role,
 			boolToInt(p.Read), boolToInt(p.Write), boolToInt(p.Create),
 			boolToInt(p.Delete), boolToInt(p.Submit), boolToInt(p.Cancel),
 			boolToInt(p.Amend), boolToInt(p.Export), boolToInt(p.Import),
@@ -407,19 +382,6 @@ func (s *Store) SavePermissions(permissions []*doctype.Permission) error {
 // newly created doctype. Other roles must be explicitly granted access via the
 // Permissions panel. This follows the principle: explicit is better than implicit.
 func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string) error {
-	// Ensure _kora_permission table exists.
-	s.DB.Exec(`CREATE TABLE IF NOT EXISTS _kora_permission (
-		name VARCHAR(140) PRIMARY KEY,
-		doctype VARCHAR(140) NOT NULL, role VARCHAR(140) NOT NULL,
-		can_read TINYINT(1) NOT NULL DEFAULT 0, can_write TINYINT(1) NOT NULL DEFAULT 0,
-		can_create TINYINT(1) NOT NULL DEFAULT 0, can_delete TINYINT(1) NOT NULL DEFAULT 0,
-		can_submit TINYINT(1) NOT NULL DEFAULT 0, can_cancel TINYINT(1) NOT NULL DEFAULT 0,
-		can_amend TINYINT(1) NOT NULL DEFAULT 0, can_export TINYINT(1) NOT NULL DEFAULT 0,
-		can_import TINYINT(1) NOT NULL DEFAULT 0, can_report TINYINT(1) NOT NULL DEFAULT 0,
-		if_owner TINYINT(1) NOT NULL DEFAULT 0,
-		UNIQUE KEY idx_doctype_role (doctype, role)
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
-
 	// Get all existing roles.
 	rows, err := s.DB.Query("SELECT name FROM _kora_role")
 	if err != nil {
@@ -446,18 +408,12 @@ func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string) error {
 			continue
 		}
 		name := fmt.Sprintf("%s.%s", doctypeName, role)
-		_, err := s.DB.Exec(`
-			INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
+		upsertSQL := `INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
 				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON DUPLICATE KEY UPDATE
-				can_read = VALUES(can_read), can_write = VALUES(can_write),
-				can_create = VALUES(can_create), can_delete = VALUES(can_delete),
-				can_submit = VALUES(can_submit), can_cancel = VALUES(can_cancel),
-				can_amend = VALUES(can_amend), can_export = VALUES(can_export),
-				can_import = VALUES(can_import), can_report = VALUES(can_report),
-				if_owner = VALUES(if_owner)
-		`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
+				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner"})
+		_, err := s.DB.Exec(upsertSQL,
 			name, doctypeName, role,
 			true, true, true, // read, write, create
 			true, true, true, // delete, submit, cancel
@@ -477,60 +433,13 @@ func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string) error {
 
 // SaveWorkflows saves workflow definitions to _kora_workflow table.
 func (s *Store) SaveWorkflows(workflows []*doctype.Workflow) error {
-	// Ensure _kora_workflow table exists.
-	_, err := s.DB.Exec(`
-		CREATE TABLE IF NOT EXISTS _kora_workflow (
-			name VARCHAR(140) PRIMARY KEY,
-			document_type VARCHAR(140) NOT NULL,
-			is_active TINYINT(1) NOT NULL DEFAULT 1,
-			workflow_state_field VARCHAR(140) NOT NULL DEFAULT 'status',
-			config_json JSON,
-			INDEX idx_doctype (document_type)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-	`)
-	if err != nil {
-		return fmt.Errorf("creating _kora_workflow table: %w", err)
-	}
-
-	// Also ensure workflow state and transition tables.
-	for _, ddl := range []string{
-		`CREATE TABLE IF NOT EXISTS _kora_workflow_state (
-			name VARCHAR(140) PRIMARY KEY,
-			workflow VARCHAR(140) NOT NULL,
-			state VARCHAR(140) NOT NULL,
-			doc_status INT NOT NULL DEFAULT 0,
-			allow_edit VARCHAR(140) NOT NULL DEFAULT '',
-			style VARCHAR(20) NOT NULL DEFAULT 'default',
-			idx INT NOT NULL DEFAULT 0,
-			INDEX idx_workflow (workflow)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-		`CREATE TABLE IF NOT EXISTS _kora_workflow_transition (
-			name VARCHAR(140) PRIMARY KEY,
-			workflow VARCHAR(140) NOT NULL,
-			action VARCHAR(140) NOT NULL,
-			from_state VARCHAR(140) NOT NULL,
-			to_state VARCHAR(140) NOT NULL,
-			allowed VARCHAR(255) NOT NULL DEFAULT '',
-			condition_expr TEXT,
-			require_fields TEXT,
-			idx INT NOT NULL DEFAULT 0,
-			INDEX idx_workflow (workflow)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-	} {
-		if _, err := s.DB.Exec(ddl); err != nil {
-			return fmt.Errorf("creating workflow system table: %w", err)
-		}
-	}
-
 	for _, wf := range workflows {
 		configJSON, _ := json.Marshal(wf)
 
-		_, err := s.DB.Exec(`
-			INSERT INTO _kora_workflow (name, document_type, is_active, workflow_state_field, config_json)
-			VALUES (?, ?, ?, ?, ?)
-			ON DUPLICATE KEY UPDATE
-				is_active = VALUES(is_active), config_json = VALUES(config_json)
-		`, wf.Name, wf.DocumentType, boolToInt(wf.IsActive), wf.WorkflowStateField, string(configJSON))
+		upsertSQL := `INSERT INTO _kora_workflow (name, document_type, is_active, workflow_state_field, config_json)
+			VALUES (?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"is_active", "config_json"})
+		_, err := s.DB.Exec(upsertSQL, wf.Name, wf.DocumentType, boolToInt(wf.IsActive), wf.WorkflowStateField, string(configJSON))
 		if err != nil {
 			return fmt.Errorf("saving workflow %s: %w", wf.Name, err)
 		}
@@ -538,11 +447,10 @@ func (s *Store) SaveWorkflows(workflows []*doctype.Workflow) error {
 		// Save states.
 		for i, state := range wf.States {
 			stateName := fmt.Sprintf("%s.%s", wf.Name, state.State)
-			_, err := s.DB.Exec(`
-				INSERT INTO _kora_workflow_state (name, workflow, state, doc_status, allow_edit, style, idx)
-				VALUES (?, ?, ?, ?, ?, ?, ?)
-				ON DUPLICATE KEY UPDATE doc_status = VALUES(doc_status), allow_edit = VALUES(allow_edit), style = VALUES(style)
-			`, stateName, wf.Name, state.State, state.DocStatus, state.AllowEdit, state.Style, i)
+			upsertSQL := `INSERT INTO _kora_workflow_state (name, workflow, state, doc_status, allow_edit, style, idx)
+				VALUES (?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+				[]string{"name"}, []string{"doc_status", "allow_edit", "style"})
+			_, err := s.DB.Exec(upsertSQL, stateName, wf.Name, state.State, state.DocStatus, state.AllowEdit, state.Style, i)
 			if err != nil {
 				return fmt.Errorf("saving workflow state %s: %w", stateName, err)
 			}
@@ -552,11 +460,10 @@ func (s *Store) SaveWorkflows(workflows []*doctype.Workflow) error {
 		for i, t := range wf.Transitions {
 			transName := fmt.Sprintf("%s.%s", wf.Name, t.Action)
 			requireFields := strings.Join(t.RequireFields, ",")
-			_, err := s.DB.Exec(`
-				INSERT INTO _kora_workflow_transition (name, workflow, action, from_state, to_state, allowed, condition_expr, require_fields, idx)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON DUPLICATE KEY UPDATE from_state = VALUES(from_state), to_state = VALUES(to_state), allowed = VALUES(allowed)
-			`, transName, wf.Name, t.Action, t.From, t.To, t.Allowed, t.Condition, requireFields, i)
+			upsertSQL := `INSERT INTO _kora_workflow_transition (name, workflow, action, from_state, to_state, allowed, condition_expr, require_fields, idx)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+				[]string{"name"}, []string{"from_state", "to_state", "allowed"})
+			_, err := s.DB.Exec(upsertSQL, transName, wf.Name, t.Action, t.From, t.To, t.Allowed, t.Condition, requireFields, i)
 			if err != nil {
 				return fmt.Errorf("saving workflow transition %s: %w", transName, err)
 			}
@@ -659,7 +566,7 @@ func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, d
 	versionID := fmt.Sprintf("cv-%s-%d", siteName, newVersion)
 	_, err = s.DB.Exec(
 		`INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, changelog, status, config)
-		 VALUES (?, ?, ?, NOW(6), ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ` + s.Dialect.NowTimestamp() + `, ?, ?, ?, ?, ?)`,
 		versionID, siteName, newVersion, createdBy, label, changelog, status, string(configJSON),
 	)
 	if err != nil {
@@ -672,13 +579,6 @@ func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, d
 
 // LoadWorkflows loads all workflows from the database.
 func (s *Store) LoadWorkflows() ([]*doctype.Workflow, error) {
-	// First ensure the table exists.
-	s.DB.Exec(`CREATE TABLE IF NOT EXISTS _kora_workflow (
-		name VARCHAR(140) PRIMARY KEY, document_type VARCHAR(140) NOT NULL,
-		is_active TINYINT(1) NOT NULL DEFAULT 1,
-		workflow_state_field VARCHAR(140) NOT NULL DEFAULT 'status', config_json JSON
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
-
 	rows, err := s.DB.Query("SELECT config_json FROM _kora_workflow WHERE is_active = 1")
 	if err != nil {
 		return nil, err

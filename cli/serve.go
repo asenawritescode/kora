@@ -132,7 +132,7 @@ func runServe() error {
 			return fmt.Errorf("bootstrapping %s: %w", hostname, err)
 		}
 
-		store := configstore.NewStore(db)
+		store := configstore.NewStore(db, kdb.Resolve(common.DBType))
 		doctypes, _ := store.LoadAll()
 		roles, _ := store.LoadRoles()
 		permissions, _ := store.LoadPermissions()
@@ -193,7 +193,7 @@ func runServe() error {
 	auth.SetCSRFSecure(common.CSRFSecure)
 	apiGroup := router.Group("/api")
 	apiGroup.Use(siteGuard.Middleware(false))
-	txManager := &orm.TxManager{DB: firstDB, Registry: primaryRegistry}
+	txManager := &orm.TxManager{DB: firstDB, Registry: primaryRegistry, Dialect: kdb.Resolve(common.DBType)}
 	api.RegisterRoutesOnGroup(apiGroup, primaryRegistry, txManager)
 
 	workspaceHandler := workspace.NewHandler(primaryRegistry)

@@ -56,7 +56,7 @@ func runConfigExport(siteName, path string) error {
 	}
 	defer db.Close()
 
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.Resolve(siteCfg.DBType))
 	doctypes, err := store.LoadAll()
 	if err != nil {
 		return fmt.Errorf("loading doctypes: %w", err)
@@ -172,7 +172,7 @@ func runConfigImport(siteName, path string) error {
 
 	// Save to database. Each SaveDocType is individually transactional.
 	// Roles, permissions, and workflows are also individually saved.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.Resolve(siteCfg.DBType))
 	for _, dt := range doctypes {
 		if err := store.SaveDocType(dt); err != nil {
 			return fmt.Errorf("saving %s: %w", dt.Name, err)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/asenawritescode/kora/configstore"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/mcp"
 	"github.com/asenawritescode/kora/site"
@@ -44,7 +45,7 @@ Configure Claude Desktop to use it:
 		defer db.Close()
 
 		// Load config from DB.
-		store := configstore.NewStore(db)
+		store := configstore.NewStore(db, kdb.Resolve(cfg.DBType))
 		doctypes, err := store.LoadAll()
 		if err != nil {
 			return fmt.Errorf("loading doctypes: %w", err)

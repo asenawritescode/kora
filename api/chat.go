@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/secret"
@@ -1387,7 +1388,7 @@ func executeCreateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr
 	}
 
 	// 5. Save to configstore as Draft — NEVER activate.
-	store := configstore.NewStore(tx.DB)
+	store := configstore.NewStore(tx.DB, db.MySQL())
 	if err := store.SaveDocType(&dt); err != nil {
 		return fmt.Sprintf("Error saving doctype: %v", err)
 	}

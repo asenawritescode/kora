@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 )
@@ -55,7 +56,7 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 	if db != nil && reg != nil {
 		if sqlDB, ok := db.(*sql.DB); ok {
 			if r, ok := reg.(*doctype.Registry); ok {
-				return &orm.TxManager{DB: sqlDB, Registry: r}
+				return &orm.TxManager{DB: sqlDB, Registry: r, Dialect: kdb.MySQL()}
 			}
 		}
 	}

@@ -339,7 +339,7 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	}
 
 	// Save to configstore.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	if err := store.SaveDocType(&dt); err != nil {
 		internalError(c, "saving doctype", err)
 		return
@@ -447,7 +447,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 	}
 
 	// Save.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	if err := store.SaveDocType(&newDT); err != nil {
 		internalError(c, "saving doctype", err)
 		return
@@ -509,7 +509,7 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 	}
 
 	// Delete from config tables.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	if _, err := db.Exec("DELETE FROM _kora_field WHERE parent = ?", doctypeName); err != nil {
 		internalError(c, "deleting fields", err)
 		return
@@ -683,7 +683,7 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	}
 
 	// Reload all doctypes from config version into the store + registry.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	for _, dt := range doctypes {
 		if err := store.SaveDocType(dt); err != nil {
 			internalError(c, "saving doctype from version", err)
@@ -780,7 +780,7 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 		return
 	}
 
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	for _, dt := range doctypes {
 		if err := store.SaveDocType(dt); err != nil {
 			internalError(c, "saving during rollback", err)
@@ -865,7 +865,7 @@ func collectDoctypes(reg *doctype.Registry) []*doctype.DocType {
 // GET /api/system/roles
 func (h *Handler) HandleSystemRoles(c *gin.Context) {
 	db := h.siteTx(c).DB
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	roles, err := store.LoadRoles()
 	if err != nil {
 		internalError(c, "loading roles", err)
@@ -887,7 +887,7 @@ func (h *Handler) HandleSystemRoleCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Role name is required"}})
 		return
 	}
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	if err := store.SaveRoles([]*doctype.Role{&role}); err != nil {
 		internalError(c, "saving role", err)
 		return
@@ -906,7 +906,7 @@ func (h *Handler) HandleSystemRoleUpdate(c *gin.Context) {
 		return
 	}
 	role.Name = roleName
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	if err := store.SaveRoles([]*doctype.Role{&role}); err != nil {
 		internalError(c, "saving role", err)
 		return
@@ -939,7 +939,7 @@ func (h *Handler) HandleSystemRoleDelete(c *gin.Context) {
 // GET /api/system/permissions
 func (h *Handler) HandleSystemPermissions(c *gin.Context) {
 	db := h.siteTx(c).DB
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	permissions, err := store.LoadPermissions()
 	if err != nil {
 		internalError(c, "loading permissions", err)
@@ -957,7 +957,7 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Invalid request"}})
 		return
 	}
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	if err := store.SavePermissions(permissions); err != nil {
 		internalError(c, "saving permissions", err)
 		return
@@ -975,7 +975,7 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 // GET /api/system/workflows
 func (h *Handler) HandleSystemWorkflows(c *gin.Context) {
 	db := h.siteTx(c).DB
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	workflows, err := store.LoadWorkflows()
 	if err != nil {
 		internalError(c, "loading workflows", err)
@@ -1011,7 +1011,7 @@ func (h *Handler) HandleSystemWorkflowSave(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "name and document_type are required"}})
 		return
 	}
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, kdb.MySQL())
 	if err := store.SaveWorkflows([]*doctype.Workflow{&wf}); err != nil {
 		internalError(c, "saving workflow", err)
 		return
