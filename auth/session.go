@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -64,22 +65,22 @@ func (sm *SessionManager) CreateSession(user *User) (string, error) {
 	sid := generateSessionID()
 	expiresAt := time.Now().Add(SessionLifetime)
 
-	rolesJSON := ""
-	if len(user.Roles) > 0 {
-		rolesJSON = "["
-		for i, r := range user.Roles {
-			if i > 0 {
-				rolesJSON += ", "
-			}
-			rolesJSON += `"` + r + `"`
-		}
-		rolesJSON += "]"
+	// Marshal user data as JSON in Go (dialect-neutral, avoids MySQL-only JSON_OBJECT).
+	userData := gin.H{
+		"name":      user.Name,
+		"email":     user.Email,
+		"full_name": user.FullName,
+		"roles":     user.Roles,
+	}
+	userJSON, err := json.Marshal(userData)
+	if err != nil {
+		return "", fmt.Errorf("marshaling user data: %w", err)
 	}
 
-	_, err := sm.DB.Exec(
+	_, err = sm.DB.Exec(
 		`INSERT INTO _kora_session (sid, user, data, expires_at, created_at)
-		 VALUES (?, ?, JSON_OBJECT('name', ?, 'email', ?, 'full_name', ?, 'roles', CAST(? AS JSON)), ?, ?)`,
-		sid, user.Name, user.Name, user.Email, user.FullName, rolesJSON, expiresAt, time.Now(),
+		 VALUES (?, ?, ?, ?, ?)`,
+		sid, user.Name, string(userJSON), expiresAt, time.Now(),
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating session: %w", err)

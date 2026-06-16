@@ -226,18 +226,18 @@ func (h *Handler) HandleUserUpdate(c *gin.Context) {
 
 	// Update full_name.
 	if req.FullName != "" {
-		db.Exec("UPDATE _kora_user SET full_name = ?, modified = NOW() WHERE name = ?", req.FullName, name)
+		db.Exec("UPDATE _kora_user SET full_name = ?, modified = CURRENT_TIMESTAMP WHERE name = ?", req.FullName, name)
 	}
 
 	// Update roles.
 	if req.Roles != nil {
 		rolesStr := strings.Join(req.Roles, ",")
-		db.Exec("UPDATE _kora_user SET roles = ?, modified = NOW() WHERE name = ?", rolesStr, name)
+		db.Exec("UPDATE _kora_user SET roles = ?, modified = CURRENT_TIMESTAMP WHERE name = ?", rolesStr, name)
 	}
 
 	// Update enabled.
 	if req.Enabled != nil {
-		db.Exec("UPDATE _kora_user SET enabled = ?, modified = NOW() WHERE name = ?", *req.Enabled, name)
+		db.Exec("UPDATE _kora_user SET enabled = ?, modified = CURRENT_TIMESTAMP WHERE name = ?", *req.Enabled, name)
 	}
 
 	// Optionally update password.
@@ -253,7 +253,7 @@ func (h *Handler) HandleUserUpdate(c *gin.Context) {
 			internalError(c, "hashing password", err)
 			return
 		}
-		db.Exec("UPDATE _kora_user SET password_hash = ?, modified = NOW() WHERE name = ?", passwordHash, name)
+		db.Exec("UPDATE _kora_user SET password_hash = ?, modified = CURRENT_TIMESTAMP WHERE name = ?", passwordHash, name)
 	}
 
 	// Fetch updated user.
@@ -363,7 +363,7 @@ func (h *Handler) HandleUserResetPassword(c *gin.Context) {
 		return
 	}
 
-	if _, err := db.Exec("UPDATE _kora_user SET password_hash = ?, modified = NOW() WHERE name = ?", passwordHash, name); err != nil {
+	if _, err := db.Exec("UPDATE _kora_user SET password_hash = ?, modified = CURRENT_TIMESTAMP WHERE name = ?", passwordHash, name); err != nil {
 		internalError(c, "updating password", err)
 		return
 	}
