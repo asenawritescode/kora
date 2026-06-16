@@ -234,8 +234,12 @@ func runServe() error {
 	router.GET("/api/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong", "version": Version}) })
 	router.GET("/health", func(c *gin.Context) {
 		dbStatus := "connected"
-		if firstDB != nil {
-			if err := firstDB.Ping(); err != nil { dbStatus = "disconnected" }
+		checkDB := firstDB
+		if checkDB == nil {
+			checkDB = platformDB
+		}
+		if checkDB != nil {
+			if err := checkDB.Ping(); err != nil { dbStatus = "disconnected" }
 		} else { dbStatus = "unknown" }
 		status := "ok"
 		if dbStatus != "connected" { status = "degraded" }
