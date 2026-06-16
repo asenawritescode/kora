@@ -120,12 +120,9 @@ func (s *SiteConfig) DSN() string {
 	}
 	switch dbType {
 	case "libsql":
-		// LibSQL supports multiple URL schemes — use host as the base.
-		// Accepts: file:path, libsql://host, http(s)://host
-		if s.DBHost == "" && s.DBName != "" {
-			return fmt.Sprintf("file:%s.db", s.DBName)
-		}
-		if strings.HasPrefix(s.DBHost, "file:") || strings.HasPrefix(s.DBHost, "libsql://") {
+		// LibSQL remote-only — no embedded/file fallback.
+		// Accepts: libsql://host or http(s)://host
+		if strings.HasPrefix(s.DBHost, "libsql://") {
 			return s.DBHost
 		}
 		if strings.HasPrefix(s.DBHost, "http") {
@@ -137,8 +134,8 @@ func (s *SiteConfig) DSN() string {
 			}
 			return s.DBHost
 		}
-		// Default: file-based LibSQL.
-		return fmt.Sprintf("file:%s.db", s.DBName)
+		// No valid remote URL — this will fail at connect time with a clear error.
+		return s.DBHost
 	default:
 		// MySQL / MariaDB.
 		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci",

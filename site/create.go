@@ -45,6 +45,10 @@ type CreateSiteInput struct {
 	// This avoids auth issues with opening a second connection to the same server.
 	PlatformDB *sql.DB
 
+	// ExtraDomains are additional domains this site responds to (e.g. public proxy host).
+	// Appended to the Hostname in the site's domains list.
+	ExtraDomains []string
+
 	// ConfigDir is where site_config.yaml is written. Defaults to KORA_CONFIG_DIR or ".".
 	ConfigDir string
 }
@@ -109,6 +113,9 @@ type CreateSiteResult struct {
 func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	input.applyDefaults()
 
+	domains := []string{input.Hostname}
+	domains = append(domains, input.ExtraDomains...)
+
 	siteCfg := &SiteConfig{
 		DBType:      input.DBType,
 		DBHost:      input.DBHost,
@@ -120,7 +127,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 		FileStorage: "local",
 		FilesPath:   fmt.Sprintf("sites/%s/files", input.Hostname),
 		Apps:        []string{"core"},
-		DomainsList: []string{input.Hostname},
+		DomainsList: domains,
 	}
 
 	// Compute and store DB fingerprint.

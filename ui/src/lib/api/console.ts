@@ -47,7 +47,7 @@ export async function listSites(): Promise<ConsoleSite[]> {
 
 export async function createSite(data: {
   hostname: string; db_type: string; db_host: string; db_port: number; db_name: string
-  db_user: string; db_password: string
+  db_user: string; db_password: string; domains?: string
   admin_email: string; admin_password: string; admin_full_name?: string
 }): Promise<{ hostname: string; db_name: string; status: string; admin: string }> {
   const resp = await fetch(BASE + '/sites', {

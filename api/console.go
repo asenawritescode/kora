@@ -167,6 +167,7 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 		DBName        string `json:"db_name"`
 		DBUser        string `json:"db_user"`
 		DBPassword    string `json:"db_password"`
+		Domains       string `json:"domains"` // comma-separated extra domains
 		AdminEmail    string `json:"admin_email"`
 		AdminPassword string `json:"admin_password"`
 		AdminFullName string `json:"admin_full_name"`
@@ -207,6 +208,17 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 		platformPass = os.Getenv("KORA_DB_PASSWORD")
 	}
 
+	// Parse comma-separated extra domains.
+	var extraDomains []string
+	if req.Domains != "" {
+		for _, d := range strings.Split(req.Domains, ",") {
+			d = strings.TrimSpace(d)
+			if d != "" && d != req.Hostname {
+				extraDomains = append(extraDomains, d)
+			}
+		}
+	}
+
 	result, err := site.CreateSite(site.CreateSiteInput{
 		Hostname:            req.Hostname,
 		DBType:              req.DBType,
@@ -218,6 +230,7 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 		AdminEmail:          req.AdminEmail,
 		AdminPassword:       req.AdminPassword,
 		AdminFullName:       req.AdminFullName,
+		ExtraDomains:         extraDomains,
 		PlatformDBType:      platformType,
 		PlatformDBHost:      platformHost,
 		PlatformDBPort:      platformPort,
@@ -244,11 +257,18 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 	}
 
 	// Hot-add site to the running router.
+	// Collect all domains: hostname + explicit extra domains + request host (for sslip.io etc.)
+	domains := []string{req.Hostname}
+	domains = append(domains, extraDomains...)
+	requestHost := strings.ToLower(strings.Split(c.Request.Host, ":")[0])
+	if requestHost != "" && requestHost != req.Hostname && requestHost != "localhost" && requestHost != "127.0.0.1" && requestHost != "::1" {
+		domains = append(domains, requestHost)
+	}
 	loaded := &net.LoadedSite{
 		Name: req.Hostname,
 		Config: net.SiteRouterConfig{
 			Hostname: req.Hostname,
-			Domains:  []string{req.Hostname},
+			Domains:  domains,
 		},
 		DB:       result.DB,
 		Registry: result.Registry,

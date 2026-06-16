@@ -29,7 +29,8 @@ export default function ConsoleDashboard() {
   const queryClient = useQueryClient()
   const [form, setForm] = useState({
     hostname: '', db_type: '', db_host: '', db_port: '',
-    db_name: '', db_user: '', db_password: '', admin_email: '', admin_password: '',
+    db_name: '', db_user: '', db_password: '', domains: '',
+    admin_email: '', admin_password: '',
   })
   const [creating, setCreating] = useState(false)
   const [msg, setMsg] = useState<{ text: string; ok: boolean; link?: string } | null>(null)
@@ -67,6 +68,7 @@ export default function ConsoleDashboard() {
         db_name: effectiveDBName,
         db_user: form.db_user,
         db_password: form.db_password,
+        domains: form.domains || undefined,
         admin_email: form.admin_email,
         admin_password: form.admin_password,
       })
@@ -169,6 +171,11 @@ export default function ConsoleDashboard() {
               <div className="space-y-2">
                 <Label htmlFor="hostname">Hostname *</Label>
                 <Input id="hostname" placeholder="airtime.local" value={form.hostname} onChange={update('hostname')} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="domains">Domains</Label>
+                <Input id="domains" placeholder="e.g. kora.sslip.io (comma-separated)" value={form.domains} onChange={update('domains')} />
+                <p className="text-[0.8rem] text-muted-foreground">Additional hostnames for this site.</p>
               </div>
               {form.hostname && (
                 <div className="text-xs text-muted-foreground flex items-center gap-1.5 pl-1">
