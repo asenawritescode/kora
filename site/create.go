@@ -137,15 +137,32 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	}
 
 	// Step 3: Connect to the new database.
-	// For LibSQL, reuse the platform's already-authenticated connection
-	// to avoid auth issues (HTTP Basic auth may not carry to a second sql.Open).
+	// For LibSQL, open a fresh connection just like the startup check does —
+	// this avoids any connection-pool auth issues with the libsql HTTP driver.
 	var db *sql.DB
-	isPlatformDB := false
-	if input.PlatformDB != nil && input.DBType == "libsql" {
-		db = input.PlatformDB
-		isPlatformDB = true
+	var err error
+	isOwnedDB := true
+	if input.DBType == "libsql" {
+		if dsn := os.Getenv("DB_DSN"); dsn != "" {
+			db, err = sql.Open("libsql", dsn)
+			if err != nil {
+				return nil, fmt.Errorf("opening libsql connection: %w", err)
+			}
+			db.SetMaxOpenConns(1) // single connection avoids pool auth issues with HTTP driver
+			if err := db.Ping(); err != nil {
+				db.Close()
+				return nil, fmt.Errorf("pinging libsql: %w", err)
+			}
+		} else if input.PlatformDB != nil {
+			db = input.PlatformDB
+			isOwnedDB = false
+		} else {
+			db, err = Connect(siteCfg)
+			if err != nil {
+				return nil, fmt.Errorf("connecting to database: %w", err)
+			}
+		}
 	} else {
-		var err error
 		db, err = Connect(siteCfg)
 		if err != nil {
 			return nil, fmt.Errorf("connecting to database: %w", err)
@@ -154,7 +171,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 
 	// Step 4: Bootstrap system tables.
 	if err := BootstrapSystemTables(db, sqlDialect.Resolve(input.DBType)); err != nil {
-		if !isPlatformDB {
+		if isOwnedDB {
 			db.Close()
 		}
 		return nil, fmt.Errorf("bootstrapping system tables: %w", err)
@@ -162,7 +179,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 
 	// Step 5: Create admin user.
 	if err := createAdminUser(db, input.AdminEmail, input.AdminPassword, input.AdminFullName); err != nil {
-		if !isPlatformDB {
+		if isOwnedDB {
 			db.Close()
 		}
 		return nil, fmt.Errorf("creating admin user: %w", err)
