@@ -52,7 +52,7 @@ func runMigrate() error {
 		}
 
 		// Bootstrap system tables.
-		if err := bootstrapSystemTables(db); err != nil {
+		if err := site.BootstrapSystemTables(db); err != nil {
 			db.Close()
 			return fmt.Errorf("bootstrapping %s: %w", hostname, err)
 		}

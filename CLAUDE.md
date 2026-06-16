@@ -26,8 +26,8 @@ go run . serve --port 8000                   # Dev run
 go run . migrate --all                       # Apply all pending migrations
 go run . config import --site X --path Y     # Re-import YAML config to DB
 
-# AI & Secrets
-./kora secret set --site X --key deepseek_api_key --value sk-...   # Set AI provider key
+# AI & Secrets (also configurable via UI at /workspace/admin/secrets)
+./kora secret set --site X --key deepseek_api_key --value sk-...   # Set AI provider key (CLI)
 ./kora mcp --site X                           # Start MCP server (stdio) for Claude Desktop
 
 # Frontend (React SPA in ui/)
@@ -112,7 +112,7 @@ Key patterns:
 
 ### Administrator Tab (SPA)
 
-The workspace sidebar has an Administrator section with four views, all config-driven:
+The workspace sidebar has an Administrator section with seven views, all config-driven:
 
 | Page | Route | Purpose |
 |------|-------|---------|
@@ -120,6 +120,9 @@ The workspace sidebar has an Administrator section with four views, all config-d
 | Permissions | `/workspace/admin/permissions` | Role × DocType permission matrix, inline editing |
 | Workflows | `/workspace/admin/workflows` | Define state machines for submittable doctypes |
 | Versions | `/workspace/admin/versions` | Config version history with Activate/Discard/Rollback |
+| Users | `/workspace/admin/users` | User CRUD, role assignment, enable/disable, password reset |
+| Secrets | `/workspace/admin/secrets` | AI provider keys (OpenAI, DeepSeek, Anthropic) via dropdown UI |
+| API Docs | `/api/swagger-ui` | Auto-generated OpenAPI 3.0 spec with interactive Swagger UI |
 
 The doctype editor uses a split-pane layout: visual form builder on the left, live YAML preview on the right (with syntax highlighting). YAML is editable and can be applied back to the form via `js-yaml` client-side parsing.
 
@@ -146,21 +149,21 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 | `doctype/` | DocType, Field, Constraint, Document, Registry, PermissionMatrix, Workflow, expression engine |
 | `orm/` | Generic CRUD (Insert, Save, GetDoc, GetList, Delete), filter parsing, DB-level unique enforcement, batched child INSERTs, diff-based Save, ULID name generation, NOT NULL error parsing |
 | `schema/` | INFORMATION_SCHEMA diff → DDL (additive + rename), column rename via `renamed_from` |
-| `api/` | REST handlers, envelope, CRUD, workflow actions, system endpoints, YAML validation, **AI Chat** |
+| `api/` | REST handlers, envelope, CRUD, workflow actions, system endpoints, YAML validation, AI Chat, User management (`users.go`), Secrets management (`secrets.go`), OpenAPI spec generation |
 | `auth/` | Session auth (bcrypt), in-memory session cache (30s TTL), CSRF (double-submit cookie), SystemGuard, SiteGuard |
 | `net/` | SiteRouter with host validation, security headers, CORS, rate limiter, TLS (autocert), ULID request IDs |
 | `cli/` | Cobra CLI: serve, setup, migrate, config (import/export/versions/diff/rollback), new-site, mcp, secret |
 | `configstore/` | Read/write config to/from DB (_kora_doctype, _kora_field, etc.) |
 | `workspace/` | SPA serving (go:embed dist/*), NoRoute handler, static file server |
-| `console/` | System console (server-rendered Go templates, SystemGuard auth) |
+| `console/` | System console — React SPA for site creation + system admin (SystemGuard auth) |
 | `scheduler/` | Cron-style background jobs |
-| `secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys |
+| `secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys (settable via UI at `/workspace/admin/secrets`) |
 | `mcp/` | Model Context Protocol server — auto-generates tools from doctype registry for Claude Desktop |
 | `ui/` | React SPA (Vite + TanStack + shadcn) with floating AI Chat Widget |
 
 ### AI Chat System
 
-The AI chat at `POST /api/chat` auto-generates OpenAI-compatible function definitions from the doctype registry and executes tools via the ORM. Supports OpenAI, DeepSeek, and Anthropic providers (all via `/chat/completions` endpoint).
+The AI chat at `POST /api/chat` auto-generates OpenAI-compatible function definitions from the doctype registry and executes tools via the ORM. Supports OpenAI, DeepSeek, and Anthropic providers (all via `/chat/completions` endpoint). API keys are configured via the Secrets admin page at `/workspace/admin/secrets` — no CLI required.
 
 #### Tool Generation (`api/chat.go`)
 
@@ -311,6 +314,38 @@ After push, GitHub Actions:
 - Require status checks (`Go`, `UI`) to pass
 - Block force pushes
 - Require linear history (rebase/squash, no merge commits)
+
+### Docker Release (Manual — not in CI yet)
+
+Images are built and pushed manually to Docker Hub. GitHub Actions CI (above) handles Go/UI checks only — Docker publishing is done locally for now.
+
+```bash
+# 1. Build with version injected via ldflags
+VSN=$(cat VERSION)
+docker build --build-arg VERSION=$VSN -t kora:$VSN .
+
+# 2. Test locally
+docker run -d --name kora-test -p 8001:8000 \
+  -e KORA_DB_TYPE=mysql \
+  -e CONSOLE_EMAIL=admin@kora.local -e CONSOLE_PASSWORD=kora123 \
+  kora:$VSN
+curl -s http://localhost:8001/api/ping
+# {"message":"pong","version":"0.5.0-alpha.3"}
+docker stop kora-test && docker rm kora-test
+
+# 3. Tag for Docker Hub
+docker tag kora:$VSN smitdockerhub/kora:$VSN
+docker tag kora:$VSN smitdockerhub/kora:latest
+
+# 4. Push
+docker login -u smitdockerhub
+docker push smitdockerhub/kora:$VSN
+docker push smitdockerhub/kora:latest
+```
+
+**Image:** `smitdockerhub/kora` — supports both MySQL and LibSQL, pure Go (no CGO), ~63MB, version injected at build time.
+
+**Dockerfile** (`/Dockerfile`): Multi-stage — Bun for UI, Go for binary (CGO_ENABLED=0, ldflags for version), Alpine runtime. `build-arg VERSION` sets the version string returned by `/api/ping`.
 
 ## Contributing
 

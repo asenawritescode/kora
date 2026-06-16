@@ -230,3 +230,81 @@ export async function saveWorkflow(data: WorkflowDef): Promise<WorkflowDef> {
 export async function deleteWorkflow(doctype: string): Promise<{ message: string }> {
   return api.delete(`/api/system/workflows/${encodeURIComponent(doctype)}`)
 }
+
+// --- Admin: Users ---
+
+export interface User {
+  name: string
+  email: string
+  full_name: string
+  roles: string[]
+  enabled: boolean
+  created: string
+  modified: string
+}
+
+export interface UserCreateRequest {
+  email: string
+  password: string
+  full_name: string
+  roles: string[]
+}
+
+export interface UserUpdateRequest {
+  full_name?: string
+  roles?: string[]
+  enabled?: boolean
+  password?: string
+}
+
+export interface PasswordResetRequest {
+  password: string
+}
+
+export async function fetchUsers(): Promise<User[]> {
+  return api.get<User[]>('/api/system/users')
+}
+
+export async function fetchUser(name: string): Promise<User> {
+  return api.get<User>(`/api/system/users/${encodeURIComponent(name)}`)
+}
+
+export async function createUser(data: UserCreateRequest): Promise<User> {
+  return api.post<User>('/api/system/users', data)
+}
+
+export async function updateUser(name: string, data: UserUpdateRequest): Promise<User> {
+  return api.put<User>(`/api/system/users/${encodeURIComponent(name)}`, data)
+}
+
+export async function deleteUser(name: string): Promise<{ message: string }> {
+  return api.delete(`/api/system/users/${encodeURIComponent(name)}`)
+}
+
+export async function resetUserPassword(name: string, data: PasswordResetRequest): Promise<{ message: string }> {
+  return api.post(`/api/system/users/${encodeURIComponent(name)}/reset-password`, data)
+}
+
+// --- Admin: Secrets ---
+
+export interface SecretEntry {
+  key_name: string
+  updated_at: string
+}
+
+export interface SecretSetRequest {
+  key: string
+  value: string
+}
+
+export async function fetchSecrets(): Promise<SecretEntry[]> {
+  return api.get<SecretEntry[]>('/api/system/secrets')
+}
+
+export async function setSecret(data: SecretSetRequest): Promise<{ message: string; key: string }> {
+  return api.post('/api/system/secrets', data)
+}
+
+export async function deleteSecret(key: string): Promise<{ message: string; key: string }> {
+  return api.delete(`/api/system/secrets/${encodeURIComponent(key)}`)
+}

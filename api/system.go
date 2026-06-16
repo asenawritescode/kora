@@ -1082,5 +1082,18 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.GET("/workflows/:doctype", handler.HandleSystemWorkflowByDoctype)
 		system.POST("/workflows", handler.HandleSystemWorkflowSave)
 		system.DELETE("/workflows/:doctype", handler.HandleSystemWorkflowDelete)
+
+		// Users.
+		system.GET("/users", handler.HandleUserList)
+		system.POST("/users", handler.HandleUserCreate)
+		system.GET("/users/:name", handler.HandleUserGet)
+		system.PUT("/users/:name", handler.HandleUserUpdate)
+		system.DELETE("/users/:name", handler.HandleUserDelete)
+		system.POST("/users/:name/reset-password", handler.HandleUserResetPassword)
+
+		// Secrets.
+		system.GET("/secrets", handler.HandleSecretList)
+		system.POST("/secrets", handler.HandleSecretSet)
+		system.DELETE("/secrets/:key", handler.HandleSecretDelete)
 	}
 }

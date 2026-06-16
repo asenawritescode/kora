@@ -55,6 +55,12 @@ func RegisterSPARoutes(router *gin.Engine, siteRouter *knet.SiteRouter) {
 			return
 		}
 
+		// 4. Serve /console and /console/* (SPA client-side routing).
+		if reqPath == "/console" || strings.HasPrefix(reqPath, "/console/") {
+			serveSPA(c, sub, reqPath)
+			return
+		}
+
 		c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 	})
 }

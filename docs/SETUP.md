@@ -149,7 +149,7 @@ Email: admin@kora.local
 Password: admin123
 ```
 
-Credentials are in `system_credentials.yaml` (password is bcrypt-hashed on startup).
+The console is a React SPA for system administration — create sites, monitor health, manage all sites from one place. Credentials are in `system_credentials.yaml` (password is bcrypt-hashed on startup).
 
 ---
 
@@ -279,12 +279,21 @@ kora config rollback --site airtime.local 3
 
 ## AI Chat Setup
 
-The floating chat widget on every page is powered by an LLM provider. Configure once per site.
+The floating chat widget on every page is powered by an LLM provider. Configure once per site — either via the workspace UI (recommended) or CLI.
 
-### 1. Set API Key
+### Option 1: Via UI (recommended)
+
+1. Login to the workspace as an Administrator
+2. Navigate to **Administrator → Secrets** (`/workspace/admin/secrets`)
+3. Select your provider from the dropdown (OpenAI, DeepSeek, or Anthropic)
+4. Enter the API key and click **Save**
+
+Keys are encrypted at rest with AES-256-GCM. No restart needed — the change takes effect immediately.
+
+### Option 2: Via CLI
 
 ```bash
-# DeepSeek V4 (default, no account needed outside China)
+# DeepSeek V4
 ./kora secret set --site airtime.local --key deepseek_api_key --value sk-...
 
 # OpenAI
@@ -294,15 +303,7 @@ The floating chat widget on every page is powered by an LLM provider. Configure 
 ./kora secret set --site airtime.local --key anthropic_api_key --value sk-ant-...
 ```
 
-The first key found is used (searched in order: OpenAI → DeepSeek → Anthropic). Keys are encrypted at rest with AES-256-GCM.
-
-### 2. Restart
-
-```bash
-make restart
-```
-
-The chat widget appears automatically on every page. No frontend config needed.
+Then restart: `make restart`.
 
 ### 3. Customize AI Behavior (Optional)
 
@@ -435,12 +436,12 @@ ENTRYPOINT ["kora", "serve"]
 
 ## System Console
 
-The console at `/console` is a separate server-rendered UI for system administrators. Auth uses `system_credentials.yaml` (separate from per-site `_kora_user`).
+The console at `/console` is a React SPA for system administrators. Auth uses `system_credentials.yaml` (separate from per-site `_kora_user`).
 
 | Page | Purpose |
 |---|---|
 | `/console/` | Dashboard — site count, uptime, version |
-| `/console/sites` | Site list — name, database, status |
+| `/console/sites` | Site list — name, database, status, create new sites |
 | `/console/sites/:name` | Site detail — config, domains, doctypes |
 | `/console/health` | System health — runtime metrics |
 

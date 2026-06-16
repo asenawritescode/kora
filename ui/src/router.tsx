@@ -15,6 +15,8 @@ import AdminDoctypeEditorPage from '@/routes/workspace/admin/doctypes/editor'
 import AdminVersionsPage from '@/routes/workspace/admin/versions'
 import AdminPermissionsPage from '@/routes/workspace/admin/permissions'
 import AdminWorkflowsPage from '@/routes/workspace/admin/workflows'
+import AdminUsersPage from '@/routes/workspace/admin/users'
+import AdminSecretsPage from '@/routes/workspace/admin/secrets'
 import ConsoleLoginPage from '@/routes/console/login'
 import ConsoleDashboard from '@/routes/console/index'
 
@@ -114,6 +116,18 @@ const adminWorkflowsRoute = createRoute({
   component: AdminWorkflowsPage,
 })
 
+const adminUsersRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: 'users',
+  component: AdminUsersPage,
+})
+
+const adminSecretsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: 'secrets',
+  component: AdminSecretsPage,
+})
+
 // Settings (placeholder).
 const settingsRoute = createRoute({
   getParentRoute: () => workspaceLayout,
@@ -167,6 +181,8 @@ const routeTree = rootRoute.addChildren([
       adminVersionsRoute,
       adminPermissionsRoute,
       adminWorkflowsRoute,
+      adminUsersRoute,
+      adminSecretsRoute,
     ]),
     doctypeRoute.addChildren([doctypeListRoute, doctypeNewRoute, doctypeEditRoute]),
     settingsRoute,

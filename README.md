@@ -2,7 +2,25 @@
 
 Define your application — data model, permissions, workflows — in YAML. Kora gives you a database, REST API, React admin UI, and background jobs. No code generation.
 
-## Prerequisites
+[![Docker Hub](https://img.shields.io/badge/docker-smitdockerhub%2Fkora-blue?logo=docker)](https://hub.docker.com/r/smitdockerhub/kora)
+[![GitHub](https://img.shields.io/badge/github-asenawritescode%2Fkora-black?logo=github)](https://github.com/asenawritescode/kora)
+
+## Quick Start (Docker)
+
+```bash
+docker run -d --name kora -p 8000:8000 \
+  -e KORA_DB_TYPE=mysql \
+  -e KORA_DB_HOST=127.0.0.1 \
+  -e KORA_DB_USER=root \
+  -e KORA_DB_PASSWORD=yourpassword \
+  -e CONSOLE_EMAIL=admin@kora.local \
+  -e CONSOLE_PASSWORD=admin123 \
+  smitdockerhub/kora:latest
+```
+
+Open **http://localhost:8000/console** to create your first site. See [SETUP.md](docs/SETUP.md) for MySQL setup, multi-site, and production deployment.
+
+## Prerequisites (Local Development)
 
 You need three things installed before running Kora:
 
@@ -118,9 +136,13 @@ make dev ADMIN_EMAIL=admin@test.com ADMIN_PASS=pass123    # Admin account
 make build PORT=9000                                       # Custom port (serve target)
 ```
 
+## Screenshot
+
+![Kora dashboard with modules and AI chat](docs/images/dashboard-ai-chat.png)
+
 ## Features
 
-- **AI Chat Assistant** — floating chat widget on every page. Create, find, and update records via natural language. Supports OpenAI, DeepSeek, and Anthropic. Multi-turn tool execution with finish_reason loop, stall detection, and context compaction.
+- **AI Chat Assistant** — floating chat widget on every page. Create, find, and update records via natural language. Supports OpenAI, DeepSeek, and Anthropic. Multi-turn tool execution with finish_reason loop, stall detection, and context compaction. API keys configured in the UI at `/workspace/admin/secrets`.
 - **AI Doctype Generator** — describe a form in plain English ("an Invoice with line items, customer link, computed totals, tax") — the AI generates the YAML, validates it, and saves it as Draft. A human reviews and activates.
 - **YAML Strict Validation** — unknown keys rejected at parse time with line numbers and "did you mean?" suggestions
 - **Visual Constraints Editor** — add min/max, regex, one_of, and other constraints via the form builder
@@ -128,6 +150,8 @@ make build PORT=9000                                       # Custom port (serve 
 - **Session Cache** — 30-second TTL in-memory cache reduces database load on every request
 - **Config Import Safety** — transactional imports with field-level merge (no more DELETE+re-INSERT)
 - **Site Isolation** — `kora_site` cookie validated against Host header, unknown hosts get 403
+- **Console UI** — React SPA at `/console` for system administration: create sites, monitor health, manage all sites from one place
+- **Swagger/OpenAPI** — auto-generated OpenAPI 3.0 spec at `/api/openapi.json`, interactive Swagger UI at `/api/swagger-ui`
 
 ## Multi-Site
 
@@ -147,8 +171,11 @@ After login, the sidebar has an **Administrator** section for managing the data 
 - **Permissions** — Role × DocType access matrix with inline editing
 - **Workflows** — State machine editor (states, transitions, notifications) for submittable doctypes
 - **Versions** — Config version history with diff view, rollback, and Draft activation
+- **Users** — User management with CRUD, role assignment, enable/disable, and admin-forced password reset
+- **Secrets** — API key management for AI providers (OpenAI, DeepSeek, Anthropic) via dropdown UI. Values encrypted at rest (AES-256-GCM) and never exposed by the API
+- **API Docs** — Full Swagger UI at `/api/swagger-ui` with OpenAPI 3.0 spec generated from the doctype registry
 
-All pages are mobile-responsive — tables become stacked card layouts on small screens.
+All pages are mobile-responsive — tables become stacked card layouts on small screens. All management is done from the browser — no CLI needed after initial setup.
 
 ## Documentation
 
@@ -166,7 +193,7 @@ All pages are mobile-responsive — tables become stacked card layouts on small 
 ```
 kora/
 ├── cli/            # Cobra CLI: serve, setup, migrate, config, mcp, secret
-├── api/            # REST handlers, CRUD, system endpoints, AI Chat
+├── api/            # REST handlers, CRUD, system endpoints, AI Chat, Users, Secrets
 ├── auth/           # Session auth, CSRF, SystemGuard, SiteGuard
 ├── net/            # SiteRouter, TLS, security headers, rate limiting
 ├── doctype/        # DocType, Field, Registry, permissions, workflow, expressions
@@ -174,11 +201,11 @@ kora/
 ├── schema/         # INFORMATION_SCHEMA diff → DDL migration
 ├── configstore/    # Config persistence (_kora_* tables)
 ├── workspace/      # React SPA serving (go:embed)
-├── console/        # System admin console (server-rendered)
+├── console/        # System console (React SPA)
 ├── scheduler/      # Cron-style background jobs
 ├── site/           # Site config loading, DB connection
 ├── email/          # Email sending (mock for dev)
-├── secret/         # Encrypted API key storage (AWS-256-GCM)
+├── secret/         # Encrypted API key storage (AES-256-GCM)
 ├── mcp/            # Model Context Protocol server for Claude Desktop
 ├── config/         # Sample app YAML configs (airtime, fieldwork)
 ├── ui/             # React 19 SPA (Vite + TanStack + shadcn/ui) + AI Chat Widget
@@ -192,7 +219,7 @@ kora/
 |---|---|
 | **Language** | Go 1.25 |
 | **HTTP** | Gin, net/http |
-| **Database** | MySQL 8.0 |
+| **Database** | MySQL 8.0, MariaDB, LibSQL (Turso-compatible) |
 | **AI / LLM** | OpenAI, DeepSeek V4, Anthropic Claude (multi-provider, OpenAI-compatible API) |
 | **Tool Protocol** | MCP (Model Context Protocol) for Claude Desktop integration |
 | **Expressions** | expr-lang/expr |
@@ -201,4 +228,12 @@ kora/
 | **Frontend** | React 19, TanStack Router/Query/Table/Form, shadcn/ui, Tailwind CSS v4 |
 | **State** | Zustand, TanStack Query |
 | **Validation** | Zod |
-| **Delivery** | Single binary — everything via `go:embed` |
+| **Delivery** | Single binary — everything via `go:embed`, ~63MB |
+
+## Docker
+
+```
+docker pull smitdockerhub/kora:latest
+```
+
+Multi-arch ready. Supports MySQL + LibSQL. Pure Go, no CGO. Version injected at build time — check with `curl /api/ping`.

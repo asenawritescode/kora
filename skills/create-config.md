@@ -2,7 +2,7 @@
 
 You are generating YAML configuration files for Kora, a config-driven application engine. These files define the entire application: data model, permissions, roles, and workflows. The engine reads them and provides database schema, REST API, and a React admin UI automatically.
 
-> **Alternative:** Config can also be created via the **Administrator tab** in the workspace UI — a visual form builder with live YAML preview. Go to `/workspace/admin/doctypes` after logging in. This guide covers the YAML format used by both the visual builder and manual file creation.
+> **Alternative:** Config can also be created via the **Administrator tab** in the workspace UI — a visual form builder with live YAML preview at `/workspace/admin/doctypes`. Users, permissions, workflows, API keys, and site management are also available from the browser. This guide covers the YAML format used by both the visual builder and manual file creation.
 
 ## Directory Structure
 

@@ -44,17 +44,23 @@ type SessionManager struct {
 }
 
 // NewSessionManager creates a new session manager.
+// If db is nil (console-only mode with no sites), the sweep goroutine is not started.
 func NewSessionManager(db *sql.DB) *SessionManager {
 	sm := &SessionManager{
 		DB:    db,
 		cache: make(map[string]*sessionCacheEntry),
 	}
-	go sm.sweepCacheLoop()
+	if db != nil {
+		go sm.sweepCacheLoop()
+	}
 	return sm
 }
 
 // CreateSession creates a new session for a user and returns the session ID.
 func (sm *SessionManager) CreateSession(user *User) (string, error) {
+	if sm.DB == nil {
+		return "", fmt.Errorf("no database connection available")
+	}
 	sid := generateSessionID()
 	expiresAt := time.Now().Add(SessionLifetime)
 
@@ -72,7 +78,7 @@ func (sm *SessionManager) CreateSession(user *User) (string, error) {
 
 	_, err := sm.DB.Exec(
 		`INSERT INTO _kora_session (sid, user, data, expires_at, created_at)
-		 VALUES (?, ?, JSON_OBJECT('name', ?, 'email', ?, 'full_name', ?, 'roles', ?), ?, ?)`,
+		 VALUES (?, ?, JSON_OBJECT('name', ?, 'email', ?, 'full_name', ?, 'roles', CAST(? AS JSON)), ?, ?)`,
 		sid, user.Name, user.Name, user.Email, user.FullName, rolesJSON, expiresAt, time.Now(),
 	)
 	if err != nil {
@@ -85,6 +91,9 @@ func (sm *SessionManager) CreateSession(user *User) (string, error) {
 // GetSession validates a session ID and returns the associated user.
 // Uses an in-memory TTL cache to avoid hitting the database on every request.
 func (sm *SessionManager) GetSession(sid string) (*User, error) {
+	if sm.DB == nil {
+		return nil, fmt.Errorf("no database connection available")
+	}
 	// Check cache first.
 	sm.cacheMu.RLock()
 	entry, ok := sm.cache[sid]
@@ -246,6 +255,9 @@ func splitQuoted(s string) []string {
 
 // DeleteSession removes a session.
 func (sm *SessionManager) DeleteSession(sid string) {
+	if sm.DB == nil {
+		return
+	}
 	_, err := sm.DB.Exec("DELETE FROM _kora_session WHERE sid = ?", sid)
 	if err != nil {
 		slog.Warn("failed to delete session", "sid", sid, "error", err)
@@ -285,6 +297,9 @@ func (sm *SessionManager) sweepCacheLoop() {
 }
 
 func (sm *SessionManager) cleanupExpired() {
+	if sm.DB == nil {
+		return // console-only mode — no site database
+	}
 	_, err := sm.DB.Exec("DELETE FROM _kora_session WHERE expires_at < ?", time.Now())
 	if err != nil {
 		slog.Warn("failed to cleanup expired sessions", "error", err)
@@ -293,6 +308,9 @@ func (sm *SessionManager) cleanupExpired() {
 
 // AuthenticateUser verifies a username/email and password against the database.
 func (sm *SessionManager) AuthenticateUser(email, password string) (*User, error) {
+	if sm.DB == nil {
+		return nil, fmt.Errorf("no database connection available")
+	}
 	var name, emailAddr, passwordHash, fullName, rolesStr string
 	var enabled bool
 

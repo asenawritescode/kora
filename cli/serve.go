@@ -17,7 +17,6 @@ import (
 	"github.com/asenawritescode/kora/api"
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/configstore"
-	"github.com/asenawritescode/kora/console"
 	"github.com/asenawritescode/kora/workspace"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/email"
@@ -27,6 +26,9 @@ import (
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/site"
 )
+
+// Version is set at build time via -ldflags "-X github.com/asenawritescode/kora/cli.Version=...".
+var Version = "dev"
 
 var (
 	serveSiteFlag string
@@ -58,6 +60,13 @@ func runServe() error {
 		common = site.CommonConfigFromEnv()
 	}
 	configureLogging(common.LogLevel, common.LogFormat)
+
+	// Validate platform DB credentials for site creation via console.
+	// Existing site databases use per-site credentials from site_config.yaml,
+	// but creating NEW sites requires platform-level MySQL credentials.
+	if common.DBUser == "" || common.DBPassword == "" {
+		slog.Warn("platform db_user or db_password not set in common_site_config.yaml — site creation from console UI will fail. Set db_user and db_password in common_site_config.yaml or KORA_DB_USER / KORA_DB_PASSWORD env vars.")
+	}
 
 	// Startup DB connection check.
 	if sc.DBDSN != "" {
@@ -101,6 +110,12 @@ func runServe() error {
 			siteCfg.DBHost = common.DBHost
 		}
 
+		// Validate DB fingerprint — prevents accidental DB drift.
+		if err := site.ValidateFingerprint(siteCfg); err != nil {
+			slog.Error("db fingerprint mismatch — refusing to load site", "site", hostname, "error", err)
+			continue
+		}
+
 		slog.Info("connecting to database", "site", hostname, "db", siteCfg.DBName)
 		db, err := site.Connect(siteCfg)
 		if err != nil {
@@ -111,7 +126,7 @@ func runServe() error {
 			firstDB = db
 		}
 
-		if err := bootstrapSystemTables(db); err != nil {
+		if err := site.BootstrapSystemTables(db); err != nil {
 			db.Close()
 			return fmt.Errorf("bootstrapping %s: %w", hostname, err)
 		}
@@ -199,18 +214,9 @@ func runServe() error {
 		slog.Info("console using env/baked-in credentials (system_credentials.yaml not found)")
 	}
 	if systemGuard != nil {
-		var consoleSites []console.SiteInfo
-		for _, s := range loadedSites {
-			consoleSites = append(consoleSites, console.SiteInfo{
-				Name: s.Name, DBName: s.Config.Hostname, Domains: s.Config.Domains,
-				DocTypes: s.Registry.Len(), Workflows: 0, Status: "active",
-			})
-		}
-		consoleHandler := console.NewHandler(systemGuard, consoleSites, common.Version, siteRouter)
-		consoleHandler.RegisterRoutes(router)
-
-		// Console API (React-driven, Bearer token auth).
-		ch := api.NewConsoleHandler(systemGuard, siteRouter)
+		// Console API (React SPA-driven, Bearer token auth).
+		// The /console frontend is served by the SPA via NoRoute handler.
+		ch := api.NewConsoleHandler(systemGuard, siteRouter, common.DBType, common.DBHost, common.DBUser, common.DBPassword, 3306)
 		router.POST("/api/console/login", ch.HandleLogin)
 		router.POST("/api/console/change-password", ch.HandleChangePassword)
 		router.GET("/api/console/sites", ch.RequireConsoleAuth, ch.HandleListSites)
@@ -218,7 +224,7 @@ func runServe() error {
 	}
 
 	// Health + ping.
-	router.GET("/api/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong"}) })
+	router.GET("/api/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong", "version": Version}) })
 	router.GET("/health", func(c *gin.Context) {
 		dbStatus := "connected"
 		if firstDB != nil {

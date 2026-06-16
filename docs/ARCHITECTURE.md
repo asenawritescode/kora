@@ -217,7 +217,7 @@ Permissions are also reloaded into the in-memory registry after a new doctype is
 
 ### System Console
 
-A separate `/console` endpoint serves a server-rendered system dashboard (site health, uptime). Config management (doctypes, permissions, workflows, versions) is done via the **Administrator tab** in the workspace SPA. The console uses **separate authentication** from site workspaces:
+A separate `/console` endpoint serves a React SPA for system administration — site creation, health monitoring, and site management. Config management (doctypes, permissions, workflows, versions, users, secrets) is done via the **Administrator tab** in the workspace SPA. The console uses **separate authentication** from site workspaces:
 
 - **Credentials**: `system_credentials.yaml` — email + bcrypt (cost 12) password, hashed at startup
 - **Auth methods**: HTTP Basic auth (`Authorization: Basic base64(email:password)`) or `kora_console_sid` session cookie
@@ -361,9 +361,12 @@ The workspace sidebar has an **Administrator** section for managing the data mod
 | Page | Purpose |
 |------|---------|
 | **DocTypes** | Visual form builder with split-pane YAML preview. Collapsible field rows. Save as Draft or Activate. |
-| **Permissions** | Role x DocType access matrix. Desktop table view, mobile role drill-down accordion. |
+| **Permissions** | Role × DocType access matrix. Desktop table view, mobile role drill-down accordion. |
 | **Workflows** | State machine editor. States, transitions, notifications as collapsible card sections. All doctypes shown. |
 | **Versions** | Config version history. Draft/Active/Superseded status. View diffs, activate, discard, rollback. |
+| **Users** | User CRUD, role assignment, enable/disable toggle, admin-forced password reset with session invalidation. |
+| **Secrets** | API key management for AI providers. Dropdown selector (OpenAI/DeepSeek/Anthropic) + key input. Values encrypted (AES-256-GCM). |
+| **API Docs** | Auto-generated OpenAPI 3.0 spec at `/api/openapi.json`, interactive Swagger UI at `/api/swagger-ui`. |
 
 ### Config Versioning
 
@@ -425,11 +428,10 @@ kora/
 │   └── fieldwork.local/
 │       ├── site_config.yaml
 │       └── files/
-├── api/          REST API handlers
+├── api/          REST API handlers (CRUD, users, secrets, AI chat, OpenAPI)
 ├── auth/         Session + CSRF
 ├── cli/          CLI commands (cobra)
 ├── configstore/  Config DB read/write
-├── desk/         Admin UI templates
 ├── doctype/      Core types + registry + validation
 ├── email/        SMTP sender
 ├── net/          HTTP server + middleware

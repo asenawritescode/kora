@@ -3,7 +3,11 @@
 
 # Infrastructure
 # redis_url: redis://localhost:6379/0  # Planned: session store for multi-server deployments
+db_type: mysql           # mysql | libsql
 db_host: 127.0.0.1
+db_user: root
+# db_password is NOT set here — use KORA_DB_PASSWORD env var for security.
+# Example: export KORA_DB_PASSWORD=kora123
 http_port: 8000
 workers: 4
 

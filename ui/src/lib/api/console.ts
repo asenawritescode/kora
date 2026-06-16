@@ -46,7 +46,7 @@ export async function listSites(): Promise<ConsoleSite[]> {
 }
 
 export async function createSite(data: {
-  hostname: string; db_host: string; db_port: number; db_name: string
+  hostname: string; db_type: string; db_host: string; db_port: number; db_name: string
   db_user: string; db_password: string
   admin_email: string; admin_password: string; admin_full_name?: string
 }): Promise<{ hostname: string; db_name: string; status: string; admin: string }> {
@@ -57,6 +57,11 @@ export async function createSite(data: {
     credentials: 'same-origin',
   })
   const json = await resp.json()
-  if (!resp.ok) throw new Error(json.error?.message || json.error || 'Failed to create site')
+  if (!resp.ok) {
+    const msg = typeof json.error === 'string'
+      ? json.error
+      : json.error?.message || json.error?.errors?.[0]?.message || 'Failed to create site'
+    throw new Error(msg)
+  }
   return json.data
 }
