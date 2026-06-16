@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -349,8 +350,16 @@ func Connect(cfg *SiteConfig) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
+	// Connection pool tuning.
+	if driver == "libsql" {
+		// LibSQL HTTP streams expire server-side after ~30s idle.
+		// Don't pool idle connections — open fresh each time.
+		db.SetMaxIdleConns(0)
+		db.SetConnMaxLifetime(25 * time.Second)
+	} else {
+		db.SetMaxOpenConns(25)
+		db.SetMaxIdleConns(5)
+	}
 	return db, nil
 }
 

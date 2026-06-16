@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 
@@ -146,7 +147,9 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 			if err != nil {
 				return nil, fmt.Errorf("opening libsql connection: %w", err)
 			}
-			db.SetMaxOpenConns(1) // single connection avoids pool auth issues with HTTP driver
+			db.SetMaxOpenConns(1)
+			db.SetMaxIdleConns(0)
+			db.SetConnMaxLifetime(25 * time.Second)
 			if err := db.Ping(); err != nil {
 				db.Close()
 				return nil, fmt.Errorf("pinging libsql: %w", err)

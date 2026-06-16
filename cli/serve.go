@@ -77,6 +77,10 @@ func runServe() error {
 			slog.Error("startup db check: ping failed", "type", sc.DBType, "error", err)
 			return fmt.Errorf("failed to ping %s: %w", sc.DBType, err)
 		}
+		if sc.DBType == "libsql" {
+			platformDB.SetMaxIdleConns(0)
+			platformDB.SetConnMaxLifetime(25 * time.Second)
+		}
 		slog.Info("database connected", "type", sc.DBType)
 	}
 	// Close platformDB on shutdown if it was opened.
