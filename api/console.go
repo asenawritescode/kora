@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/asenawritescode/kora/auth"
+	sqlDialect "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/site"
 )
@@ -350,6 +351,127 @@ func (h *ConsoleHandler) HandleUpdateSite(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{Data: map[string]any{
 		"hostname": siteName,
 		"domains":  site.Config.Domains,
+	}})
+}
+
+// HandleDeleteSite deletes a site and all its data.
+// DELETE /api/console/sites/:name
+// Requires confirmation: {"confirm": "<hostname>"}
+func (h *ConsoleHandler) HandleDeleteSite(c *gin.Context) {
+	siteName := c.Param("name")
+	if siteName == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "site name required"}})
+		return
+	}
+
+	var req struct {
+		Confirm string `json:"confirm"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Invalid request"}})
+		return
+	}
+	if req.Confirm != siteName {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Type the site hostname to confirm deletion."}})
+		return
+	}
+
+	loaded := h.SiteRouter.SiteByName(siteName)
+	if loaded == nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"message": "Site not found: " + siteName}})
+		return
+	}
+
+	// Derive DB name from hostname.
+	dbName := strings.ReplaceAll(siteName, ".", "_")
+
+	slog.Info("deleting site via console", "hostname", siteName)
+
+	if err := site.DeleteSite(site.DeleteSiteInput{
+		DB:         loaded.DB,
+		Dialect:    sqlDialect.Resolve(h.PlatformDBType),
+		Hostname:   siteName,
+		DBType:     h.PlatformDBType,
+		DBName:     dbName,
+		DBHost:     h.PlatformDBHost,
+		DBPort:     h.PlatformDBPort,
+		DBUser:     h.PlatformDBUser,
+		DBPassword: h.PlatformDBPassword,
+	}); err != nil {
+		slog.Error("deleting site failed", "hostname", siteName, "error", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to delete site: " + err.Error()}})
+		return
+	}
+
+	// Remove from the in-memory router.
+	h.SiteRouter.RemoveSite(siteName)
+
+	slog.Info("site deleted via console", "hostname", siteName)
+	c.JSON(http.StatusOK, Response{Data: map[string]any{
+		"hostname": siteName,
+		"deleted":  true,
+	}})
+}
+
+// HandleResetSitePassword resets a site user's password.
+// POST /api/console/sites/:name/reset-password
+func (h *ConsoleHandler) HandleResetSitePassword(c *gin.Context) {
+	siteName := c.Param("name")
+	if siteName == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "site name required"}})
+		return
+	}
+
+	var req struct {
+		Email       string `json:"email"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Invalid request"}})
+		return
+	}
+	if req.Email == "" || req.NewPassword == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "email and new_password are required"}})
+		return
+	}
+
+	loaded := h.SiteRouter.SiteByName(siteName)
+	if loaded == nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"message": "Site not found: " + siteName}})
+		return
+	}
+
+	// Hash the new password.
+	passwordHash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		slog.Error("hashing password failed", "error", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to hash password."}})
+		return
+	}
+
+	// Update the user's password in the site's database.
+	result, err := loaded.DB.Exec(
+		"UPDATE _kora_user SET password_hash = ?, modified = CURRENT_TIMESTAMP WHERE email = ?",
+		passwordHash, req.Email,
+	)
+	if err != nil {
+		slog.Error("resetting site password failed", "site", siteName, "email", req.Email, "error", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to update password: " + err.Error()}})
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"message": "No user found with email: " + req.Email}})
+		return
+	}
+
+	// Invalidate all sessions for this user.
+	loaded.DB.Exec("DELETE FROM _kora_session WHERE user = (SELECT name FROM _kora_user WHERE email = ?)", req.Email)
+
+	slog.Info("site user password reset via console", "site", siteName, "email", req.Email)
+	c.JSON(http.StatusOK, Response{Data: map[string]any{
+		"message": "Password reset successfully. All existing sessions have been invalidated.",
 	}})
 }
 

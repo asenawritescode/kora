@@ -5,12 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	sqlDialect "github.com/asenawritescode/kora/db"
 )
 
 // SiteConfig holds the configuration for a single site/tenant.
@@ -429,6 +432,95 @@ func CreateDatabase(cfg *SiteConfig) error {
 		return fmt.Errorf("creating database %s: %w", cfg.DBName, err)
 	}
 	return nil
+}
+
+// DeleteSiteInput holds the parameters needed to tear down a site.
+type DeleteSiteInput struct {
+	DB       *sql.DB
+	Dialect  sqlDialect.Dialect
+	Hostname string
+
+	// MySQL-specific (for DROP DATABASE).
+	DBType     string
+	DBName     string
+	DBHost     string
+	DBPort     int
+	DBUser     string
+	DBPassword string
+}
+
+// DeleteSite tears down a site completely, removing all data and closing connections.
+// For MySQL: drops the entire database via a temporary connection.
+// For LibSQL: drops all application tables and cleans shared system-table rows.
+func DeleteSite(input DeleteSiteInput) error {
+	dbType := input.DBType
+	if dbType == "" {
+		dbType = "mysql"
+	}
+
+	switch dbType {
+	case "mysql":
+		// Close the site's DB connection before dropping the database.
+		if input.DB != nil {
+			input.DB.Close()
+		}
+
+		// Open a temporary connection without a database name.
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?parseTime=true&charset=utf8mb4",
+			input.DBUser, input.DBPassword, input.DBHost, input.DBPort)
+		tempDB, err := sql.Open("mysql", dsn)
+		if err != nil {
+			return fmt.Errorf("connecting for teardown: %w", err)
+		}
+		defer tempDB.Close()
+
+		if _, err := tempDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", input.Dialect.QuoteIdent(input.DBName))); err != nil {
+			return fmt.Errorf("dropping database %s: %w", input.DBName, err)
+		}
+		slog.Info("site database dropped", "hostname", input.Hostname, "db_name", input.DBName)
+		return nil
+
+	case "libsql":
+		if input.DB == nil {
+			return nil
+		}
+
+		// Drop all application tables (tab%).
+		rows, err := input.DB.Query("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'tab%'")
+		if err != nil {
+			return fmt.Errorf("listing tables: %w", err)
+		}
+		var tables []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				rows.Close()
+				return fmt.Errorf("scanning table name: %w", err)
+			}
+			tables = append(tables, name)
+		}
+		rows.Close()
+
+		for _, t := range tables {
+			if _, err := input.DB.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", input.Dialect.QuoteIdent(t))); err != nil {
+				return fmt.Errorf("dropping table %s: %w", t, err)
+			}
+		}
+
+		// Clean up shared system-table rows for this site.
+		if _, err := input.DB.Exec("DELETE FROM _kora_config_version WHERE site = ?", input.Hostname); err != nil {
+			return fmt.Errorf("cleaning config versions: %w", err)
+		}
+		if _, err := input.DB.Exec("DELETE FROM _kora_secret WHERE site = ?", input.Hostname); err != nil {
+			return fmt.Errorf("cleaning secrets: %w", err)
+		}
+
+		input.DB.Close()
+		slog.Info("site data deleted", "hostname", input.Hostname, "tables_dropped", len(tables))
+		return nil
+	}
+
+	return fmt.Errorf("unsupported db type: %s", dbType)
 }
 
 // Close closes the site's database connection.

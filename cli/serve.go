@@ -220,7 +220,9 @@ func runServe() error {
 		router.GET("/api/console/sites", ch.RequireConsoleAuth, ch.HandleListSites)
 		router.POST("/api/console/sites", ch.RequireConsoleAuth, ch.HandleCreateSite)
 		router.PUT("/api/console/sites/:name", ch.RequireConsoleAuth, ch.HandleUpdateSite)
-	}
+		router.DELETE("/api/console/sites/:name", ch.RequireConsoleAuth, ch.HandleDeleteSite)
+		router.POST("/api/console/sites/:name/reset-password", ch.RequireConsoleAuth, ch.HandleResetSitePassword)
+		}
 
 	// Health + ping.
 	router.GET("/api/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong", "version": Version}) })

@@ -78,3 +78,29 @@ export async function updateSite(name: string, domains: string[]): Promise<void>
     throw new Error(json.error?.message || 'Failed to update site')
   }
 }
+
+export async function deleteSite(name: string): Promise<void> {
+  const resp = await fetch(BASE + '/sites/' + encodeURIComponent(name), {
+    method: 'DELETE',
+    headers: headers(),
+    body: JSON.stringify({ confirm: name }),
+    credentials: 'same-origin',
+  })
+  if (!resp.ok) {
+    const json = await resp.json()
+    throw new Error(json.error?.message || 'Failed to delete site')
+  }
+}
+
+export async function resetSitePassword(name: string, email: string, newPassword: string): Promise<void> {
+  const resp = await fetch(BASE + '/sites/' + encodeURIComponent(name) + '/reset-password', {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ email, new_password: newPassword }),
+    credentials: 'same-origin',
+  })
+  if (!resp.ok) {
+    const json = await resp.json()
+    throw new Error(json.error?.message || 'Failed to reset password')
+  }
+}

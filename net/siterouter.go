@@ -41,6 +41,44 @@ func (sr *SiteRouter) AddSite(s *LoadedSite) {
 	}
 }
 
+// RemoveSite removes a site from the router by name. Returns the removed site
+// or nil if not found. Updates the default site if the removed site was the default.
+func (sr *SiteRouter) RemoveSite(name string) *LoadedSite {
+	// Find the site in allSites.
+	idx := -1
+	for i, s := range sr.allSites {
+		if s.Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil
+	}
+	site := sr.allSites[idx]
+
+	// Remove all its domains from the sites map.
+	for _, d := range site.Config.Domains {
+		delete(sr.sites, strings.ToLower(d))
+	}
+	// Also remove the hostname if not in domains.
+	delete(sr.sites, strings.ToLower(site.Config.Hostname))
+
+	// Remove from allSites slice.
+	sr.allSites = append(sr.allSites[:idx], sr.allSites[idx+1:]...)
+
+	// Update default site if needed.
+	if sr.defaultSite == site {
+		if len(sr.allSites) > 0 {
+			sr.defaultSite = sr.allSites[0]
+		} else {
+			sr.defaultSite = nil
+		}
+	}
+
+	return site
+}
+
 // SiteByName returns a site by its name or short name.
 // E.g., both "airtime.local" and "airtime" match the airtime site.
 func (sr *SiteRouter) SiteByName(name string) *LoadedSite {
