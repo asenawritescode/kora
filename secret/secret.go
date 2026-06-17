@@ -26,20 +26,22 @@ type Store struct {
 func NewStore(db *sql.DB) *Store { return &Store{DB: db} }
 
 // EnsureTable creates the _kora_secret table if it doesn't exist.
+// Uses portable SQL compatible with both MySQL and LibSQL.
 func (s *Store) EnsureTable() error {
 	_, err := s.DB.Exec(`
 		CREATE TABLE IF NOT EXISTS _kora_secret (
 			site VARCHAR(140) NOT NULL,
 			key_name VARCHAR(140) NOT NULL,
 			encrypted_value BLOB NOT NULL,
-			created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-			updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (site, key_name)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+		)`)
 	return err
 }
 
-// Set encrypts and stores a secret. The encryption key is derived from the site name.
+// Set encrypts and stores a secret. Uses a portable upsert pattern
+// (SELECT-then-INSERT-or-UPDATE) compatible with both MySQL and LibSQL.
 func (s *Store) Set(site, key, value string) error {
 	if err := s.EnsureTable(); err != nil {
 		return fmt.Errorf("ensuring table: %w", err)
@@ -50,11 +52,23 @@ func (s *Store) Set(site, key, value string) error {
 		return fmt.Errorf("encrypting: %w", err)
 	}
 
-	_, err = s.DB.Exec(`
-		INSERT INTO _kora_secret (site, key_name, encrypted_value, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE encrypted_value = VALUES(encrypted_value), updated_at = VALUES(updated_at)
-	`, site, key, encrypted, time.Now(), time.Now())
+	now := time.Now()
+
+	// Check if the key already exists.
+	var existing int
+	s.DB.QueryRow("SELECT COUNT(*) FROM _kora_secret WHERE site = ? AND key_name = ?", site, key).Scan(&existing)
+
+	if existing > 0 {
+		_, err = s.DB.Exec(
+			"UPDATE _kora_secret SET encrypted_value = ?, updated_at = ? WHERE site = ? AND key_name = ?",
+			encrypted, now, site, key,
+		)
+	} else {
+		_, err = s.DB.Exec(
+			"INSERT INTO _kora_secret (site, key_name, encrypted_value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			site, key, encrypted, now, now,
+		)
+	}
 	return err
 }
 

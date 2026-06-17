@@ -473,29 +473,34 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// _kora_workflow
 		`CREATE TABLE IF NOT EXISTS "_kora_workflow" (
 			"name" TEXT NOT NULL PRIMARY KEY,
-			"doctype" TEXT NOT NULL,
-			"is_active" INTEGER NOT NULL DEFAULT 1
+			"document_type" TEXT NOT NULL DEFAULT '',
+			"is_active" INTEGER NOT NULL DEFAULT 1,
+			"workflow_state_field" TEXT NOT NULL DEFAULT '',
+			"config_json" TEXT
 		)`,
 
 		// _kora_workflow_state
 		`CREATE TABLE IF NOT EXISTS "_kora_workflow_state" (
 			"name" TEXT NOT NULL PRIMARY KEY,
 			"workflow" TEXT NOT NULL,
-			"label" TEXT NOT NULL,
-			"is_initial" INTEGER NOT NULL DEFAULT 0,
+			"state" TEXT NOT NULL DEFAULT '',
 			"doc_status" INTEGER NOT NULL DEFAULT 0,
-			"color" TEXT NOT NULL DEFAULT ''
+			"allow_edit" INTEGER NOT NULL DEFAULT 1,
+			"style" TEXT NOT NULL DEFAULT '',
+			"idx" INTEGER NOT NULL DEFAULT 0
 		)`,
 
 		// _kora_workflow_transition
 		`CREATE TABLE IF NOT EXISTS "_kora_workflow_transition" (
 			"name" TEXT NOT NULL PRIMARY KEY,
 			"workflow" TEXT NOT NULL,
-			"from_state" TEXT NOT NULL,
-			"to_state" TEXT NOT NULL,
-			"label" TEXT NOT NULL,
-			"allowed_role" TEXT NOT NULL DEFAULT '',
-			"condition_expr" TEXT
+			"action" TEXT NOT NULL DEFAULT '',
+			"from_state" TEXT NOT NULL DEFAULT '',
+			"to_state" TEXT NOT NULL DEFAULT '',
+			"allowed" TEXT NOT NULL DEFAULT '',
+			"condition_expr" TEXT,
+			"require_fields" TEXT,
+			"idx" INTEGER NOT NULL DEFAULT 0
 		)`,
 
 		// _kora_secret
