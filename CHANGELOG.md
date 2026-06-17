@@ -1,3 +1,30 @@
+## v0.5.0-alpha.17 — 2026-06-17
+
+### Features
+- feat: console site management — delete site, reset password, sheet-based editing
+- feat: site domains persisted in DB + console edit UI
+- feat: purge YAML — all site config from DB, env vars only
+- feat: domains field in console create-site form + auto-detect request host
+- fix: open fresh libsql connection in CreateSite via DB_DSN + add sqlite driver
+- feat: wire db.Dialect into configstore and ORM for full LibSQL CRUD
+- feat: wire db.Dialect into site/schema/cli/api for LibSQL support
+- feat: StartupConfig — single source for all env vars, validated at boot
+
+### Fixes
+- fix: parseTime handles SQLite nanosecond+timezone format + visible edit icon
+- fix: libsql connection pool — disable idle conns, set 25s lifetime
+- fix: scan expires_at as string for SQLite TEXT column compatibility
+- fix: replace MySQL-specific JSON_OBJECT and NOW() with portable SQL
+- fix: health endpoint + path-based site routing for console-only mode
+- fix: open fresh libsql connection in CreateSite via DB_DSN + add sqlite driver
+- fix: reuse platform DB connection for LibSQL site creation
+- fix: console site creation now respects platform DB type from env
+
+### Documentation
+- docs: update ARCHITECTURE.md and NETWORKING.md — remove YAML references
+- v0.5.0-alpha: User management, secrets, libsql, console UI, docs
+
+
 ## v0.5.0 — 2026-06-16
 
 ### Features
