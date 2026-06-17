@@ -18,6 +18,18 @@ import {
   Circle, Search, Server, Activity, Trash2, KeyRound, X, Pencil,
 } from 'lucide-react'
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)')
+    setIsMobile(mq.matches)
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return isMobile
+}
+
 function useHealth() {
   return useQuery({
     queryKey: ['console', 'health'],
@@ -252,6 +264,7 @@ function SiteEditSheet({
   onClose: () => void
   onUpdated: () => void
 }) {
+  const isMobile = useIsMobile()
   const [domains, setDomains] = useState<string[]>([])
   const [newDomain, setNewDomain] = useState('')
   const [saving, setSaving] = useState(false)
@@ -342,7 +355,7 @@ function SiteEditSheet({
 
   return (
     <Sheet open={!!site} onOpenChange={(open) => { if (!open) onClose() }}>
-      <SheetContent side="right" className="w-full sm:max-w-md flex flex-col">
+      <SheetContent side={isMobile ? 'bottom' : 'right'} className="w-full sm:max-w-lg flex flex-col">
         <SheetHeader>
           <SheetTitle>Edit Site: {site?.name}</SheetTitle>
           <SheetDescription>
@@ -474,6 +487,7 @@ function CreateSiteSheet({
   onClose: () => void
   onCreated: () => void
 }) {
+  const isMobile = useIsMobile()
   const [form, setForm] = useState({
     hostname: '', db_type: '', db_host: '', db_port: '',
     db_name: '', db_user: '', db_password: '', domains: '',
@@ -518,7 +532,7 @@ function CreateSiteSheet({
 
   return (
     <Sheet open={open} onOpenChange={(open) => { if (!open) onClose() }}>
-      <SheetContent side="right" className="w-full sm:max-w-md flex flex-col">
+      <SheetContent side={isMobile ? 'bottom' : 'right'} className="w-full sm:max-w-lg flex flex-col">
         <SheetHeader>
           <SheetTitle>Create Site</SheetTitle>
           <SheetDescription>
