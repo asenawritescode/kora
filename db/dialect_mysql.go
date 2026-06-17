@@ -226,6 +226,30 @@ func (d *MySQLDialect) QuoteIdent(name string) string {
 	return "`" + name + "`"
 }
 
+func (d *MySQLDialect) SystemColumnDDL() []string {
+	return []string{
+		"name VARCHAR(140) NOT NULL",
+		"owner VARCHAR(140) NOT NULL DEFAULT ''",
+		"creation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)",
+		"modified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)",
+		"modified_by VARCHAR(140) NOT NULL DEFAULT ''",
+		"doc_status TINYINT(1) NOT NULL DEFAULT 0",
+		"idx INT NOT NULL DEFAULT 0",
+	}
+}
+
+func (d *MySQLDialect) ChildColumnDDL() []string {
+	return []string{
+		"parent VARCHAR(140) NOT NULL DEFAULT ''",
+		"parentfield VARCHAR(140) NOT NULL DEFAULT ''",
+		"parenttype VARCHAR(140) NOT NULL DEFAULT ''",
+	}
+}
+
+func (d *MySQLDialect) TableSuffix() string {
+	return "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+}
+
 func (d *MySQLDialect) ColumnType(f *doctype.Field) string {
 	switch f.Fieldtype {
 	case "Data", "Select", "Link", "Dynamic Link":

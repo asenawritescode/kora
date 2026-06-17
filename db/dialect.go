@@ -34,6 +34,17 @@ type Dialect interface {
 	// QuoteIdent quotes an identifier (table or column name) for safe embedding in SQL.
 	QuoteIdent(name string) string
 
+	// SystemColumnDDL returns DDL fragments for the 7 standard system columns
+	// (name, owner, creation, modified, modified_by, doc_status, idx).
+	SystemColumnDDL() []string
+
+	// ChildColumnDDL returns DDL fragments for child-table system columns
+	// (parent, parentfield, parenttype).
+	ChildColumnDDL() []string
+
+	// TableSuffix returns the table options suffix (ENGINE/CHARSET for MySQL, empty for LibSQL).
+	TableSuffix() string
+
 	// ColumnType returns the DDL column type for a field.
 	ColumnType(f *doctype.Field) string
 

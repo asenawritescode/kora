@@ -249,6 +249,30 @@ func (d *LibSQLDialect) QuoteIdent(name string) string {
 	return `"` + name + `"`
 }
 
+func (d *LibSQLDialect) SystemColumnDDL() []string {
+	return []string{
+		`"name" TEXT NOT NULL`,
+		`"owner" TEXT NOT NULL DEFAULT ''`,
+		`"creation" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))`,
+		`"modified" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))`,
+		`"modified_by" TEXT NOT NULL DEFAULT ''`,
+		`"doc_status" INTEGER NOT NULL DEFAULT 0`,
+		`"idx" INTEGER NOT NULL DEFAULT 0`,
+	}
+}
+
+func (d *LibSQLDialect) ChildColumnDDL() []string {
+	return []string{
+		`"parent" TEXT NOT NULL DEFAULT ''`,
+		`"parentfield" TEXT NOT NULL DEFAULT ''`,
+		`"parenttype" TEXT NOT NULL DEFAULT ''`,
+	}
+}
+
+func (d *LibSQLDialect) TableSuffix() string {
+	return ""
+}
+
 func (d *LibSQLDialect) ColumnType(f *doctype.Field) string {
 	switch f.Fieldtype {
 	case "Data", "Select", "Link", "Dynamic Link", "Password":

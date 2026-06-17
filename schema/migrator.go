@@ -302,22 +302,14 @@ func generateCreateTable(tableName string, registry *doctype.Registry, dialect d
 
 	var cols []string
 
-	// System columns first.
-	cols = append(cols, "name VARCHAR(140) NOT NULL")
-	cols = append(cols, "owner VARCHAR(140) NOT NULL DEFAULT ''")
-	cols = append(cols, "creation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)")
-	cols = append(cols, "modified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)")
-	cols = append(cols, "modified_by VARCHAR(140) NOT NULL DEFAULT ''")
-	cols = append(cols, "doc_status TINYINT(1) NOT NULL DEFAULT 0")
-	cols = append(cols, "idx INT NOT NULL DEFAULT 0")
+	// System columns from dialect.
+	cols = append(cols, dialect.SystemColumnDDL()...)
 
 	// Child table system columns.
 	if isChild {
 		_ = parentDT
 		_ = parentField
-		cols = append(cols, "parent VARCHAR(140) NOT NULL DEFAULT ''")
-		cols = append(cols, "parentfield VARCHAR(140) NOT NULL DEFAULT ''")
-		cols = append(cols, "parenttype VARCHAR(140) NOT NULL DEFAULT ''")
+		cols = append(cols, dialect.ChildColumnDDL()...)
 	}
 
 	// Data columns from the DocType.
@@ -348,26 +340,12 @@ func generateCreateTable(tableName string, registry *doctype.Registry, dialect d
 	// Primary key.
 	cols = append(cols, "PRIMARY KEY (name)")
 
-	// Indexes.
-	if dt != nil {
-		for _, f := range dt.DataFields() {
-			if f.SearchIndex {
-				idxCols := []string{f.Fieldname}
-				cols = append(cols, fmt.Sprintf("INDEX idx_%s (%s)", f.Fieldname, strings.Join(idxCols, ", ")))
-			}
-			if f.Unique {
-				cols = append(cols, fmt.Sprintf("UNIQUE KEY uq_%s (%s)", f.Fieldname, f.Fieldname))
-			}
-		}
+	suffix := dialect.TableSuffix()
+	if suffix != "" {
+		suffix = " " + suffix
 	}
-
-	// Child table indexes.
-	if isChild {
-		cols = append(cols, "INDEX idx_parent (parent)")
-	}
-
-	return fmt.Sprintf("CREATE TABLE %s (\n  %s\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-		sqlTableName, strings.Join(cols, ",\n  "))
+	return fmt.Sprintf("CREATE TABLE %s (\n  %s\n)%s",
+		sqlTableName, strings.Join(cols, ",\n  "), suffix)
 }
 
 func generateAddColumn(tableName string, col ColumnAdd, dialect db.Dialect) string {
@@ -382,17 +360,9 @@ func generateAddColumn(tableName string, col ColumnAdd, dialect db.Dialect) stri
 			nullable = fmt.Sprintf(" NOT NULL DEFAULT '%s'", escapeSQL(col.Default))
 		}
 	}
-	return fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN %s %s%s", tableName, col.Name, col.Type, nullable)
+	return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s%s", dialect.QuoteIdent(tableName), col.Name, col.Type, nullable)
 }
 
-func generateCreateIndex(tableName string, idx IndexAdd) string {
-	uniqueStr := ""
-	if idx.Unique {
-		uniqueStr = "UNIQUE "
-	}
-	colStr := strings.Join(idx.Columns, ", ")
-	return fmt.Sprintf("CREATE %sINDEX idx_%s ON `%s` (%s)", uniqueStr, strings.Join(idx.Columns, "_"), tableName, colStr)
-}
 
 func escapeSQL(s string) string {
 	return strings.ReplaceAll(s, "'", "''")

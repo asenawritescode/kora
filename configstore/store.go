@@ -40,24 +40,11 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 	}
 
 	// Upsert the DocType record.
-	_, err = dbTx.Exec(`
-		INSERT INTO _kora_doctype (name, module, is_submittable, is_child_table, is_single,
-			track_changes, title_field, search_fields, sort_field, sort_order, description, config_json, version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-		ON DUPLICATE KEY UPDATE
-			module = VALUES(module),
-			is_submittable = VALUES(is_submittable),
-			is_child_table = VALUES(is_child_table),
-			is_single = VALUES(is_single),
-			track_changes = VALUES(track_changes),
-			title_field = VALUES(title_field),
-			search_fields = VALUES(search_fields),
-			sort_field = VALUES(sort_field),
-			sort_order = VALUES(sort_order),
-			description = VALUES(description),
-			config_json = VALUES(config_json),
-			version = version + 1
-	`,
+	doctypeSQL := fmt.Sprintf(
+		"INSERT INTO _kora_doctype (name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description, config_json, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) %s",
+		s.Dialect.UpsertClause([]string{"name"}, []string{"module", "is_submittable", "is_child_table", "is_single", "track_changes", "title_field", "search_fields", "sort_field", "sort_order", "description", "config_json"}),
+	)
+	_, err = dbTx.Exec(doctypeSQL,
 		dt.Name, dt.Module, boolToInt(dt.IsSubmittable), boolToInt(dt.IsChildTable),
 		boolToInt(dt.IsSingle), boolToInt(dt.TrackChanges),
 		dt.TitleField, dt.SearchFields, dt.SortField, dt.SortOrder,

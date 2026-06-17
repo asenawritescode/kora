@@ -113,40 +113,6 @@ func (f *Field) IsLayoutField() bool {
 	return !f.IsDataField()
 }
 
-// DBType returns the MySQL column type for this field.
-func (f *Field) DBType() string {
-	switch f.Fieldtype {
-	case "Data", "Select", "Link", "Dynamic Link":
-		return "VARCHAR(140)"
-	case "Text":
-		return "TEXT"
-	case "Text Editor":
-		return "LONGTEXT"
-	case "Int":
-		return "BIGINT"
-	case "Float", "Currency", "Percent":
-		return "DECIMAL(21,9)"
-	case "Check":
-		return "TINYINT(1)"
-	case "Date":
-		return "DATE"
-	case "Time":
-		return "TIME(6)"
-	case "Datetime":
-		return "DATETIME(6)"
-	case "Table":
-		return "" // Child table — not a column on the parent
-	case "Attach", "Attach Image":
-		return "TEXT"
-	case "JSON":
-		return "JSON"
-	case "Password":
-		return "VARCHAR(255)"
-	default:
-		return "TEXT"
-	}
-}
-
 // IsNumeric returns true if the field type stores a numeric value.
 func (f *Field) IsNumeric() bool {
 	switch f.Fieldtype {
