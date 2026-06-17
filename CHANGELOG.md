@@ -1,3 +1,8 @@
+## v0.5.0-alpha.18 — 2026-06-17
+### Fixes
+- fix: responsive sheet — bottom drawer on mobile, wider on desktop
+
+
 ## v0.5.0-alpha.17 — 2026-06-17
 
 ### Features
