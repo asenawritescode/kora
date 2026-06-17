@@ -604,17 +604,18 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 
 // parseTime parses a datetime string from the database (MySQL DATETIME or SQLite TEXT).
 func parseTime(s string) (time.Time, error) {
-	// Try RFC 3339 (Go's default time.Time encoding for SQL parameters).
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
+	formats := []string{
+		time.RFC3339Nano,                            // "2006-01-02T15:04:05.999999999Z07:00"
+		"2006-01-02 15:04:05.999999999-07:00",       // SQLite with nanoseconds + timezone
+		"2006-01-02 15:04:05.999999-07:00",          // SQLite with microseconds + timezone
+		"2006-01-02 15:04:05-07:00",                 // SQLite with timezone
+		"2006-01-02 15:04:05.999999",                // MySQL with microseconds
+		"2006-01-02 15:04:05",                       // MySQL without fractional seconds
 	}
-	// Try MySQL datetime format with microseconds: "2006-01-02 15:04:05.999999"
-	if t, err := time.Parse("2006-01-02 15:04:05.999999", s); err == nil {
-		return t, nil
-	}
-	// Try without microseconds: "2006-01-02 15:04:05"
-	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
-		return t, nil
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t, nil
+		}
 	}
 	return time.Time{}, fmt.Errorf("unrecognized time format: %q", s)
 }

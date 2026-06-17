@@ -175,7 +175,7 @@ export default function ConsoleDashboard() {
                         <span className="flex items-center gap-1 group">
                           {s.domains?.join(', ') || '-'}
                           <Pencil
-                            className="h-3 w-3 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="h-3 w-3 cursor-pointer text-muted-foreground hover:text-foreground ml-1"
                             onClick={() => { setEditingSite(s.name); setEditDomains(s.domains?.join(', ') || '') }}
                           />
                         </span>
