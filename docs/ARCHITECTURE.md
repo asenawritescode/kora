@@ -44,9 +44,10 @@ The engine is **generic and permanent**. Applications are **configurations**. De
 │  └───────────────────────┬────────────────────────────────┘  │
 │                          │                                    │
 │  ┌───────────────────────┴────────────────────────────────┐  │
-│  │              Schema Migration Engine                     │  │
-│  │  Diff registry vs INFORMATION_SCHEMA → DDL              │  │
-│  │  CREATE TABLE · ADD COLUMN · CREATE INDEX               │  │
+│  │               SQL Dialect (db/)                           │  │
+│  │  MySQL · LibSQL — DDL, DML, error parsing                │  │
+│  │  ├─ Schema Migration Engine                               │  │
+│  │  └─ Diff registry vs live schema → DDL                   │  │
 │  └───────────────────────┬────────────────────────────────┘  │
 │                          │                                    │
 └──────────────────────────┼────────────────────────────────────┘
@@ -120,14 +121,15 @@ Path-based access sets a `kora_site` cookie so API calls know which site context
 
 ```
 1. kora serve
-2. Load common_site_config.yaml
-3. Discover sites in sites/ directory
-4. For each site:
-   a. Load site_config.yaml
+2. Load config from env vars (CommonConfigFromEnv)
+3. Connect to platform DB (MySQL or remote LibSQL via DB_DSN)
+4. Discover sites from DB: SELECT DISTINCT site FROM _kora_config_version
+5. For each site:
+   a. Reconstruct site config from platform defaults + persisted domains
    b. Connect to database
-   c. Bootstrap _kora_* system tables
+   c. Bootstrap _kora_* system tables (dialect-aware DDL)
    d. Load config from database → Registry
-   e. Run schema migration
+   e. Run schema migration (dialect-aware)
 5. Build SiteRouter (domain → site map)
 6. Register middleware stack
 7. Register API routes
