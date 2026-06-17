@@ -1,3 +1,8 @@
+## v0.5.0-alpha.19 — 2026-06-17
+### Fixes
+- fix: workflow table schema mismatch and secret store LibSQL compatibility
+
+
 ## v0.5.0-alpha.18 — 2026-06-17
 ### Fixes
 - fix: responsive sheet — bottom drawer on mobile, wider on desktop
