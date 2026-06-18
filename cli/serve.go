@@ -156,7 +156,7 @@ func runServe() error {
 					slog.Warn("analytics: bootstrap failed", "site", info.Name, "error", err)
 				} else {
 					siteEventBus = analytics.NewChannelBus(analyticsCfg.ChannelSize, analyticsCfg.WALDir)
-					siteWorker = analytics.NewWorker(siteEventBus, db, registry, info.Name, analyticsCfg)
+					siteWorker = analytics.NewWorker(siteEventBus, db, kdb.Resolve(common.DBType), registry, info.Name, analyticsCfg)
 					go siteWorker.Start()
 					slog.Info("analytics enabled", "site", info.Name)
 				}
