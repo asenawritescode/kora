@@ -44,9 +44,10 @@ The engine is **generic and permanent**. Applications are **configurations**. De
 │  └───────────────────────┬────────────────────────────────┘  │
 │                          │                                    │
 │  ┌───────────────────────┴────────────────────────────────┐  │
-│  │              Schema Migration Engine                     │  │
-│  │  Diff registry vs INFORMATION_SCHEMA → DDL              │  │
-│  │  CREATE TABLE · ADD COLUMN · CREATE INDEX               │  │
+│  │               SQL Dialect (db/)                           │  │
+│  │  MySQL · LibSQL — DDL, DML, error parsing                │  │
+│  │  ├─ Schema Migration Engine                               │  │
+│  │  └─ Diff registry vs live schema → DDL                   │  │
 │  └───────────────────────┬────────────────────────────────┘  │
 │                          │                                    │
 └──────────────────────────┼────────────────────────────────────┘
@@ -120,14 +121,15 @@ Path-based access sets a `kora_site` cookie so API calls know which site context
 
 ```
 1. kora serve
-2. Load common_site_config.yaml
-3. Discover sites in sites/ directory
-4. For each site:
-   a. Load site_config.yaml
+2. Load config from env vars (CommonConfigFromEnv)
+3. Connect to platform DB (MySQL or remote LibSQL via DB_DSN)
+4. Discover sites from DB: SELECT DISTINCT site FROM _kora_config_version
+5. For each site:
+   a. Reconstruct site config from platform defaults + persisted domains
    b. Connect to database
-   c. Bootstrap _kora_* system tables
+   c. Bootstrap _kora_* system tables (dialect-aware DDL)
    d. Load config from database → Registry
-   e. Run schema migration
+   e. Run schema migration (dialect-aware)
 5. Build SiteRouter (domain → site map)
 6. Register middleware stack
 7. Register API routes
@@ -217,7 +219,7 @@ Permissions are also reloaded into the in-memory registry after a new doctype is
 
 ### System Console
 
-A separate `/console` endpoint serves a server-rendered system dashboard (site health, uptime). Config management (doctypes, permissions, workflows, versions) is done via the **Administrator tab** in the workspace SPA. The console uses **separate authentication** from site workspaces:
+A separate `/console` endpoint serves a React SPA for system administration — site creation, health monitoring, and site management. Config management (doctypes, permissions, workflows, versions, users, secrets) is done via the **Administrator tab** in the workspace SPA. The console uses **separate authentication** from site workspaces:
 
 - **Credentials**: `system_credentials.yaml` — email + bcrypt (cost 12) password, hashed at startup
 - **Auth methods**: HTTP Basic auth (`Authorization: Basic base64(email:password)`) or `kora_console_sid` session cookie
@@ -309,6 +311,35 @@ Scheduled via cron expressions in `scheduler.yaml`. Two built-in job types:
 | `doctype_alert` | Query a DocType; notify users if matches found |
 | `email_report` | Query a DocType; send results as formatted email |
 
+### AI Chat System
+
+The AI Chat at `POST /api/chat` auto-generates OpenAI-compatible function definitions from the doctype registry, enabling natural language CRUD operations. Supports OpenAI, DeepSeek, and Anthropic providers via `/chat/completions`.
+
+**Tool Generation:** For each non-child DocType, four tools are generated per doctype: `_find`, `_list`, `_get`, `_create`. System tools (`list_doctypes`, `validate_doctype_yaml`, `create_doctype_draft`) enable AI-assisted doctype creation — always as Draft, never activated by AI.
+
+**Multi-Round Loop:** `finish_reason`-driven (same pattern as Anthropic SDK, OpenAI SDK, LangChain):
+- `finish_reason: "stop"` → return final response
+- `finish_reason: "tool_calls"` → execute tools, feed results back, loop (tools always present)
+- `finish_reason: "length"` → return truncated response
+- `finish_reason: "content_filter"` → return policy message
+
+**Safety Nets (all configurable via `AIConfig`):**
+- Max rounds fallback cap + stall detection (3× identical call → nudge)
+- Tool error circuit breaker (5 errors → force respond)
+- Context compaction at 80% token budget
+- Tool result size cap (4KB head+tail)
+- Textified tool call detection (DeepSeek V4 `<｜｜DSML｜｜tool_calls>` pattern)
+- Narrate-then-act false finish detection (GPT-4o)
+- HTTP retry with exponential backoff on 429/503
+
+**AI Audit Trail:** AI-created records use `owner = <user>` and `modified_by = "ai-assistant"`. Query `WHERE modified_by = 'ai-assistant'` for audit.
+
+**AI Configuration:** Per-model defaults in `api/ai_config.go` (GPT-4o: 120K tokens, Claude: 190K, DeepSeek: 120K). Site-level overrides via `_kora_secret` keys prefixed `ai.`.
+
+**Frontend:** Floating chat widget (`ui/src/components/chat/ChatWidget.tsx`) embedded in root layout, available on every page.
+
+**MCP Server:** Separate stdio-based MCP server (`mcp/server.go`) for Claude Desktop integration — auto-generates 5 tools per doctype.
+
 ### Admin UI (Workspace)
 
 React SPA served at `/workspace`. Built with Vite, embedded in the Go binary via `go:embed`. All views are **config-driven** — the UI has no knowledge of specific doctypes. It reads schemas from `/api/system/doctype/:name` and renders accordingly.
@@ -332,9 +363,12 @@ The workspace sidebar has an **Administrator** section for managing the data mod
 | Page | Purpose |
 |------|---------|
 | **DocTypes** | Visual form builder with split-pane YAML preview. Collapsible field rows. Save as Draft or Activate. |
-| **Permissions** | Role x DocType access matrix. Desktop table view, mobile role drill-down accordion. |
+| **Permissions** | Role × DocType access matrix. Desktop table view, mobile role drill-down accordion. |
 | **Workflows** | State machine editor. States, transitions, notifications as collapsible card sections. All doctypes shown. |
 | **Versions** | Config version history. Draft/Active/Superseded status. View diffs, activate, discard, rollback. |
+| **Users** | User CRUD, role assignment, enable/disable toggle, admin-forced password reset with session invalidation. |
+| **Secrets** | API key management for AI providers. Dropdown selector (OpenAI/DeepSeek/Anthropic) + key input. Values encrypted (AES-256-GCM). |
+| **API Docs** | Auto-generated OpenAPI 3.0 spec at `/api/openapi.json`, interactive Swagger UI at `/api/swagger-ui`. |
 
 ### Config Versioning
 
@@ -367,6 +401,9 @@ Versions store full config snapshots + structured diff changelogs in `_kora_conf
 | Security | gin-contrib/secure + cors | Production headers, CORS |
 | Rate Limiting | x/time/rate | Token bucket, stdlib-adjacent |
 | Config format | YAML (import), JSON (storage) | Human-readable + machine-friendly |
+| AI / LLM | OpenAI GPT-4o, DeepSeek V4, Anthropic Claude | Multi-provider via OpenAI-compatible `/chat/completions` |
+| AI Config | `AIConfig` struct + `_kora_secret` overrides | Per-model defaults, site-level customization |
+| MCP | modelcontextprotocol/go-sdk | Stdio-based MCP server for Claude Desktop |
 
 ## Directory Structure
 
@@ -389,19 +426,21 @@ kora/
 │   ├── contracts/               # Contracts, Obligations
 │   ├── fieldwork/               # Field service (original sample)
 │   └── airtime/                 # Airtime sales (original sample)
-├── sites/                     # Runtime site configs
-│   └── fieldwork.local/
-│       ├── site_config.yaml
+├── sites/                     # Runtime site data (file uploads, site_config.yaml)
+│   └── airtime.local/
+│       ├── site_config.yaml   # Auto-generated from DB at runtime
 │       └── files/
-├── api/          REST API handlers
+├── api/          REST API handlers (CRUD, users, secrets, AI chat, OpenAPI)
 ├── auth/         Session + CSRF
 ├── cli/          CLI commands (cobra)
 ├── configstore/  Config DB read/write
-├── desk/         Admin UI templates
 ├── doctype/      Core types + registry + validation
 ├── email/        SMTP sender
 ├── net/          HTTP server + middleware
 ├── orm/          Generic ORM
 ├── scheduler/    Background jobs
-└── schema/       DDL generation
+├── schema/       DDL generation
+├── secret/       Encrypted API key store (AES-256-GCM)
+├── mcp/          MCP server for Claude Desktop integration
+└── workspace/    SPA serving (go:embed)
 ```

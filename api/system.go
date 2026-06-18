@@ -10,10 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
-	"github.com/yourorg/kora/auth"
-	"github.com/yourorg/kora/configstore"
-	"github.com/yourorg/kora/doctype"
-	"github.com/yourorg/kora/schema"
+	"github.com/asenawritescode/kora/auth"
+	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/schema"
 )
 
 // --- Auth Providers ---
@@ -338,7 +338,7 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	}
 
 	// Save to configstore.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	if err := store.SaveDocType(&dt); err != nil {
 		internalError(c, "saving doctype", err)
 		return
@@ -373,7 +373,7 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	if activate {
 		var dbName string
 		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-		if err := schema.MigrateSite(db, dbName, reg); err != nil {
+		if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
 			slog.Error("migration failed after doctype create", "doctype", dt.Name, "error", err)
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
@@ -446,7 +446,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 	}
 
 	// Save.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	if err := store.SaveDocType(&newDT); err != nil {
 		internalError(c, "saving doctype", err)
 		return
@@ -463,7 +463,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 		// Get DB name from the connection.
 		var dbName string
 		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-		if err := schema.MigrateSite(db, dbName, reg); err != nil {
+		if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
 			slog.Error("migration failed after doctype update", "doctype", doctypeName, "error", err)
 		}
 	}
@@ -508,7 +508,7 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 	}
 
 	// Delete from config tables.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	if _, err := db.Exec("DELETE FROM _kora_field WHERE parent = ?", doctypeName); err != nil {
 		internalError(c, "deleting fields", err)
 		return
@@ -619,7 +619,7 @@ func (h *Handler) HandleSystemDoctypeDryRun(c *gin.Context) {
 	}
 
 	// Run impact analysis.
-	preview := schema.AnalyzeImpact(db, oldDT, &proposed, reg)
+	preview := schema.AnalyzeImpact(db, oldDT, &proposed, reg, h.TxManager.Dialect)
 
 	c.JSON(http.StatusOK, Response{Data: preview})
 }
@@ -682,7 +682,7 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	}
 
 	// Reload all doctypes from config version into the store + registry.
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	for _, dt := range doctypes {
 		if err := store.SaveDocType(dt); err != nil {
 			internalError(c, "saving doctype from version", err)
@@ -698,7 +698,7 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	// Run migration.
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	if err := schema.MigrateSite(db, dbName, reg); err != nil {
+	if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
 		slog.Error("migration failed on version activate", "version", versionID, "error", err)
 	}
 
@@ -779,7 +779,7 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 		return
 	}
 
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	for _, dt := range doctypes {
 		if err := store.SaveDocType(dt); err != nil {
 			internalError(c, "saving during rollback", err)
@@ -793,7 +793,7 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	schema.MigrateSite(db, dbName, reg)
+	schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect)
 
 	createdBy := c.GetString("user")
 	if createdBy == "" {
@@ -864,7 +864,7 @@ func collectDoctypes(reg *doctype.Registry) []*doctype.DocType {
 // GET /api/system/roles
 func (h *Handler) HandleSystemRoles(c *gin.Context) {
 	db := h.siteTx(c).DB
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	roles, err := store.LoadRoles()
 	if err != nil {
 		internalError(c, "loading roles", err)
@@ -886,7 +886,7 @@ func (h *Handler) HandleSystemRoleCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Role name is required"}})
 		return
 	}
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	if err := store.SaveRoles([]*doctype.Role{&role}); err != nil {
 		internalError(c, "saving role", err)
 		return
@@ -905,7 +905,7 @@ func (h *Handler) HandleSystemRoleUpdate(c *gin.Context) {
 		return
 	}
 	role.Name = roleName
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	if err := store.SaveRoles([]*doctype.Role{&role}); err != nil {
 		internalError(c, "saving role", err)
 		return
@@ -938,7 +938,7 @@ func (h *Handler) HandleSystemRoleDelete(c *gin.Context) {
 // GET /api/system/permissions
 func (h *Handler) HandleSystemPermissions(c *gin.Context) {
 	db := h.siteTx(c).DB
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	permissions, err := store.LoadPermissions()
 	if err != nil {
 		internalError(c, "loading permissions", err)
@@ -956,7 +956,7 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Invalid request"}})
 		return
 	}
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	if err := store.SavePermissions(permissions); err != nil {
 		internalError(c, "saving permissions", err)
 		return
@@ -974,7 +974,7 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 // GET /api/system/workflows
 func (h *Handler) HandleSystemWorkflows(c *gin.Context) {
 	db := h.siteTx(c).DB
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	workflows, err := store.LoadWorkflows()
 	if err != nil {
 		internalError(c, "loading workflows", err)
@@ -1010,7 +1010,7 @@ func (h *Handler) HandleSystemWorkflowSave(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "name and document_type are required"}})
 		return
 	}
-	store := configstore.NewStore(db)
+	store := configstore.NewStore(db, h.TxManager.Dialect)
 	if err := store.SaveWorkflows([]*doctype.Workflow{&wf}); err != nil {
 		internalError(c, "saving workflow", err)
 		return
@@ -1082,5 +1082,18 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.GET("/workflows/:doctype", handler.HandleSystemWorkflowByDoctype)
 		system.POST("/workflows", handler.HandleSystemWorkflowSave)
 		system.DELETE("/workflows/:doctype", handler.HandleSystemWorkflowDelete)
+
+		// Users.
+		system.GET("/users", handler.HandleUserList)
+		system.POST("/users", handler.HandleUserCreate)
+		system.GET("/users/:name", handler.HandleUserGet)
+		system.PUT("/users/:name", handler.HandleUserUpdate)
+		system.DELETE("/users/:name", handler.HandleUserDelete)
+		system.POST("/users/:name/reset-password", handler.HandleUserResetPassword)
+
+		// Secrets.
+		system.GET("/secrets", handler.HandleSecretList)
+		system.POST("/secrets", handler.HandleSecretSet)
+		system.DELETE("/secrets/:key", handler.HandleSecretDelete)
 	}
 }

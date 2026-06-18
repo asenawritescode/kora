@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	knet "github.com/yourorg/kora/net"
+	knet "github.com/asenawritescode/kora/net"
 )
 
 //go:embed dist/*
@@ -51,6 +51,12 @@ func RegisterSPARoutes(router *gin.Engine, siteRouter *knet.SiteRouter) {
 
 		// 3. Serve /workspace and /workspace/* (SPA client-side routing).
 		if reqPath == "/workspace" || strings.HasPrefix(reqPath, "/workspace/") {
+			serveSPA(c, sub, reqPath)
+			return
+		}
+
+		// 4. Serve /console and /console/* (SPA client-side routing).
+		if reqPath == "/console" || strings.HasPrefix(reqPath, "/console/") {
 			serveSPA(c, sub, reqPath)
 			return
 		}

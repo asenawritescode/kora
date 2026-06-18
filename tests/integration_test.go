@@ -13,11 +13,11 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"gopkg.in/yaml.v3"
 
-	"github.com/yourorg/kora/auth"
-	"github.com/yourorg/kora/configstore"
-	"github.com/yourorg/kora/doctype"
-	"github.com/yourorg/kora/orm"
-	"github.com/yourorg/kora/schema"
+	"github.com/asenawritescode/kora/auth"
+	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/schema"
 )
 
 // getTestDB returns a MySQL connection for integration tests.

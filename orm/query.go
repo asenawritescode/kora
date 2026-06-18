@@ -12,7 +12,8 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/oklog/ulid/v2"
-	"github.com/yourorg/kora/doctype"
+	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // generateName creates a unique document name based on the DocType.
@@ -57,10 +58,12 @@ type sqlExecutor interface {
 type TxManager struct {
 	DB       *sql.DB
 	Registry *doctype.Registry
+	Dialect  db.Dialect
 }
 
 // Insert creates a new document in the database.
-func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner string) error {
+// modifiedBy is stored in the modified_by column — use the actor responsible (e.g., user or "ai-assistant").
+func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner, modifiedBy string) error {
 	if !doc.IsNew {
 		return fmt.Errorf("cannot insert an existing document")
 	}
@@ -71,15 +74,19 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 	}
 	defer dbTx.Rollback()
 
+	nextNum := 1
 	if doc.Name == "" {
-		var count int
+		var maxNum sql.NullInt64
+		prefix := derivePrefix(dt.Name)
 		err := dbTx.QueryRow(
-			fmt.Sprintf("SELECT COUNT(*) FROM %s", dt.TableName()),
-		).Scan(&count)
+			tx.Dialect.NameGenQuery(dt.TableName(), prefix),
+			prefix+"-%",
+		).Scan(&maxNum)
 		if err != nil {
-			return fmt.Errorf("counting existing rows: %w", err)
+			return fmt.Errorf("reading max name number: %w", err)
 		}
-		doc.Name = generateName(dt, count)
+		nextNum = int(maxNum.Int64) + 1
+		doc.Name = fmt.Sprintf("%s-%04d", derivePrefix(dt.Name), nextNum)
 	}
 
 	now := time.Now()
@@ -92,7 +99,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 
 	columns = append(columns, "name", "owner", "creation", "modified", "modified_by", "doc_status", "idx")
 	placeholders = append(placeholders, "?", "?", "?", "?", "?", "?", "?")
-	values = append(values, doc.Name, owner, now, now, owner, doc.DocStatus, 0)
+	values = append(values, doc.Name, owner, now, now, modifiedBy, doc.DocStatus, nextNum)
 
 	for _, f := range dataFields {
 		if f.Fieldtype == "Table" {
@@ -117,7 +124,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 
 	_, err = dbTx.Exec(query, values...)
 	if err != nil {
-		if valErr := parseDuplicateError(err, dt); valErr != nil {
+		if valErr := tx.Dialect.ParseError(err, dt); valErr != nil {
 			return valErr
 		}
 		return fmt.Errorf("inserting document: %w", err)
@@ -132,7 +139,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 		if childDT == nil {
 			return fmt.Errorf("child doctype %q not found", f.Options)
 		}
-		if err := insertChildrenBatch(dbTx, dt, f.Fieldname, childDT, children, doc.Name); err != nil {
+		if err := insertChildrenBatch(dbTx, dt, f.Fieldname, childDT, children, doc.Name, tx.Dialect); err != nil {
 			return fmt.Errorf("inserting child rows in %s: %w", f.Fieldname, err)
 		}
 	}
@@ -208,11 +215,11 @@ func updateComputedFieldsExec(ex sqlExecutor, dt *doctype.DocType, doc *doctype.
 }
 
 func (tx *TxManager) insertChild(parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, doc *doctype.Document, parentName string, idx int) error {
-	return insertChildExec(tx.DB, parentDT, parentField, childDT, doc, parentName, idx)
+	return insertChildExec(tx.DB, parentDT, parentField, childDT, doc, parentName, idx, tx.Dialect)
 }
 
 // insertChildExec inserts a child row using the given executor (DB or Tx).
-func insertChildExec(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, doc *doctype.Document, parentName string, idx int) error {
+func insertChildExec(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, doc *doctype.Document, parentName string, idx int, dialect db.Dialect) error {
 	if doc.Name == "" {
 		// Generate unique child row name using ULID — no database query needed.
 		prefix := derivePrefix(childDT.Name)
@@ -246,20 +253,20 @@ func insertChildExec(ex sqlExecutor, parentDT *doctype.DocType, parentField stri
 		values = append(values, val)
 	}
 
-	// Build SET clause for ON DUPLICATE KEY UPDATE (update all non-key columns).
-	var updateClauses []string
+	// Build upsert clause (ON DUPLICATE KEY UPDATE for MySQL, ON CONFLICT for SQLite).
+	var updateCols []string
 	for _, col := range columns {
 		if col != "name" {
-			updateClauses = append(updateClauses, fmt.Sprintf("%s = VALUES(%s)", col, col))
+			updateCols = append(updateCols, col)
 		}
 	}
 
 	query := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
+		"INSERT INTO %s (%s) VALUES (%s) %s",
 		parentDT.ChildTableName(parentField),
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "),
-		strings.Join(updateClauses, ", "),
+		dialect.UpsertClause([]string{"name"}, updateCols),
 	)
 
 	_, err := ex.Exec(query, values...)
@@ -268,7 +275,7 @@ func insertChildExec(ex sqlExecutor, parentDT *doctype.DocType, parentField stri
 
 // insertChildrenBatch inserts multiple child rows in a single multi-row INSERT statement.
 // Chunked at 100 rows to stay safely within MySQL's max_allowed_packet.
-func insertChildrenBatch(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, children []*doctype.Document, parentName string) error {
+func insertChildrenBatch(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, children []*doctype.Document, parentName string, dialect db.Dialect) error {
 	if len(children) == 0 {
 		return nil
 	}
@@ -287,11 +294,11 @@ func insertChildrenBatch(ex sqlExecutor, parentDT *doctype.DocType, parentField 
 		columns = append(columns, f.Fieldname)
 	}
 
-	// Build SET clause for ON DUPLICATE KEY UPDATE (update all non-key, non-parent columns).
-	var updateClauses []string
+	// Build list of update columns (non-key, non-parent) for upsert clause.
+	var updateCols []string
 	for _, col := range columns {
 		if col != "name" && col != "parent" && col != "parentfield" && col != "parenttype" {
-			updateClauses = append(updateClauses, fmt.Sprintf("%s = VALUES(%s)", col, col))
+			updateCols = append(updateCols, col)
 		}
 	}
 
@@ -331,11 +338,11 @@ func insertChildrenBatch(ex sqlExecutor, parentDT *doctype.DocType, parentField 
 		}
 
 		query := fmt.Sprintf(
-			"INSERT INTO %s (%s) VALUES %s ON DUPLICATE KEY UPDATE %s",
+			"INSERT INTO %s (%s) VALUES %s %s",
 			childTableName,
 			strings.Join(columns, ", "),
 			strings.Join(placeholders, ", "),
-			strings.Join(updateClauses, ", "),
+			dialect.UpsertClause([]string{"name"}, updateCols),
 		)
 
 		if _, err := ex.Exec(query, values...); err != nil {
@@ -351,7 +358,7 @@ func insertChildrenBatch(ex sqlExecutor, parentDT *doctype.DocType, parentField 
 //   - DELETE rows present in old but missing in new
 //   - INSERT rows present in new but missing in old
 //   - UPDATE rows present in both with changed data
-func reconcileChildren(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, oldChildren, newChildren []*doctype.Document, parentName string) error {
+func reconcileChildren(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, oldChildren, newChildren []*doctype.Document, parentName string, dialect db.Dialect) error {
 	childTableName := parentDT.ChildTableName(parentField)
 
 	oldByName := make(map[string]*doctype.Document)
@@ -394,7 +401,7 @@ func reconcileChildren(ex sqlExecutor, parentDT *doctype.DocType, parentField st
 		}
 	}
 	if len(toInsert) > 0 {
-		if err := insertChildrenBatch(ex, parentDT, parentField, childDT, toInsert, parentName); err != nil {
+		if err := insertChildrenBatch(ex, parentDT, parentField, childDT, toInsert, parentName, dialect); err != nil {
 			return fmt.Errorf("inserting new child rows: %w", err)
 		}
 	}
@@ -519,7 +526,7 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 
 	result, err := dbTx.Exec(query, values...)
 	if err != nil {
-		if valErr := parseDuplicateError(err, dt); valErr != nil {
+		if valErr := tx.Dialect.ParseError(err, dt); valErr != nil {
 			return valErr
 		}
 		return fmt.Errorf("updating document: %w", err)
@@ -557,12 +564,12 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 			if newChildren == nil {
 				continue
 			}
-			if err := insertChildrenBatch(dbTx, dt, f.Fieldname, childDT, newChildren, doc.Name); err != nil {
+			if err := insertChildrenBatch(dbTx, dt, f.Fieldname, childDT, newChildren, doc.Name, tx.Dialect); err != nil {
 				return fmt.Errorf("inserting child rows in %s: %w", f.Fieldname, err)
 			}
 		} else {
 			// Diff-based reconciliation: only DELETE removed, INSERT new, UPDATE changed.
-			if err := reconcileChildren(dbTx, dt, f.Fieldname, childDT, oldChildren, newChildren, doc.Name); err != nil {
+			if err := reconcileChildren(dbTx, dt, f.Fieldname, childDT, oldChildren, newChildren, doc.Name, tx.Dialect); err != nil {
 				return fmt.Errorf("reconciling child rows in %s: %w", f.Fieldname, err)
 			}
 		}
@@ -963,6 +970,46 @@ func parseDuplicateError(err error, dt *doctype.DocType) *doctype.ValidationErro
 		}
 	}
 	return nil
+}
+
+// parseNotNullError detects MySQL NOT NULL / missing default errors (1364, 1048) and
+// converts them to a doctype.ValidationError so callers (including AI tool execution)
+// get a clear, actionable message instead of a raw MySQL error.
+func parseNotNullError(err error, dt *doctype.DocType) *doctype.ValidationError {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1364 || mysqlErr.Number == 1048) {
+		// Messages: "Field 'full_name' doesn't have a default value" or "Column 'full_name' cannot be null"
+		fieldName := parseFieldFromNotNullError(mysqlErr.Message)
+		if fieldName != "" {
+			label := fieldName
+			if f := dt.GetField(fieldName); f != nil {
+				label = f.Label
+			}
+			return &doctype.ValidationError{
+				Type:    "NotNullConstraint",
+				Message: fmt.Sprintf("%s is required.", label),
+				Field:   fieldName,
+				DocType: dt.Name,
+			}
+		}
+	}
+	return nil
+}
+
+// parseFieldFromNotNullError extracts the field name from a MySQL NOT NULL error.
+// Formats: "Field 'fieldname' doesn't have a default value" or "Column 'fieldname' cannot be null"
+func parseFieldFromNotNullError(msg string) string {
+	for _, prefix := range []string{"Field '", "Column '"} {
+		idx := strings.Index(msg, prefix)
+		if idx >= 0 {
+			start := idx + len(prefix)
+			end := strings.IndexByte(msg[start:], '\'')
+			if end >= 0 {
+				return msg[start : start+end]
+			}
+		}
+	}
+	return ""
 }
 
 // parseKeyFromDuplicateError extracts the field name from a MySQL duplicate entry error message.

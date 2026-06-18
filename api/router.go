@@ -18,8 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
-	"github.com/yourorg/kora/doctype"
-	"github.com/yourorg/kora/orm"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/orm"
 )
 
 // Handler holds dependencies for API handlers.
@@ -55,7 +55,7 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 	if db != nil && reg != nil {
 		if sqlDB, ok := db.(*sql.DB); ok {
 			if r, ok := reg.(*doctype.Registry); ok {
-				return &orm.TxManager{DB: sqlDB, Registry: r}
+				return &orm.TxManager{DB: sqlDB, Registry: r, Dialect: h.TxManager.Dialect}
 			}
 		}
 	}
@@ -302,7 +302,7 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 	}
 
 	// Insert.
-	if err := h.siteTx(c).Insert(dt, doc, owner); err != nil {
+	if err := h.siteTx(c).Insert(dt, doc, owner, owner); err != nil {
 		var valErr *doctype.ValidationError
 		if errors.As(err, &valErr) {
 			c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -588,9 +588,24 @@ func RegisterRoutes(router *gin.Engine, registry *doctype.Registry, txManager *o
 	handler := NewHandler(registry, txManager)
 	RegisterRoutesOnGroup(router.Group("/api"), registry, txManager)
 
-	// Health check outside the API group.
+	// Health check — used by Docker HEALTHCHECK and load balancers.
+	// Verifies DB connectivity for readiness probes.
 	router.GET("/api/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "pong"})
+	})
+	router.GET("/health", func(c *gin.Context) {
+		db, _ := c.Get("site_db")
+		status := "ok"
+		dbStatus := "connected"
+		if sqlDB, ok := db.(*sql.DB); ok {
+			if err := sqlDB.Ping(); err != nil {
+				dbStatus = "disconnected"
+				status = "degraded"
+			}
+		} else {
+			dbStatus = "unknown"
+		}
+		c.JSON(200, gin.H{"status": status, "db": dbStatus})
 	})
 
 	// File upload endpoint.
@@ -613,6 +628,13 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 		resource.DELETE("/:doctype/:name", handler.HandleDelete)
 		resource.POST("/:doctype/:name/workflow_action", handler.HandleWorkflowAction)
 	}
+
+	// OpenAPI docs.
+	apiGroup.GET("/openapi.json", handler.HandleOpenAPI)
+	apiGroup.GET("/swagger-ui", handler.HandleSwaggerUI)
+
+	// AI Chat.
+	apiGroup.POST("/chat", handler.HandleChat)
 
 	// System config endpoints.
 	system := apiGroup.Group("/system/config")

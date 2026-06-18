@@ -27,3 +27,5 @@ Thumbs.db
 
 # Docker
 mysql_data/
+libtest_local.db
+sites/

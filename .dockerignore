@@ -1,0 +1,36 @@
+# Dependencies
+ui/node_modules
+ui/.bun
+
+# Build artifacts
+kora
+workspace/dist
+ui/dist
+
+# Config and data (mounted at runtime, not baked in)
+sites/
+*.yaml
+!go.sum
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+
+# Docs (not needed at runtime)
+docs/
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment (never bake secrets)
+.env
+.env.*

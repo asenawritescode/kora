@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -44,36 +45,42 @@ type SessionManager struct {
 }
 
 // NewSessionManager creates a new session manager.
+// If db is nil (console-only mode with no sites), the sweep goroutine is not started.
 func NewSessionManager(db *sql.DB) *SessionManager {
 	sm := &SessionManager{
 		DB:    db,
 		cache: make(map[string]*sessionCacheEntry),
 	}
-	go sm.sweepCacheLoop()
+	if db != nil {
+		go sm.sweepCacheLoop()
+	}
 	return sm
 }
 
 // CreateSession creates a new session for a user and returns the session ID.
 func (sm *SessionManager) CreateSession(user *User) (string, error) {
+	if sm.DB == nil {
+		return "", fmt.Errorf("no database connection available")
+	}
 	sid := generateSessionID()
 	expiresAt := time.Now().Add(SessionLifetime)
 
-	rolesJSON := ""
-	if len(user.Roles) > 0 {
-		rolesJSON = "["
-		for i, r := range user.Roles {
-			if i > 0 {
-				rolesJSON += ", "
-			}
-			rolesJSON += `"` + r + `"`
-		}
-		rolesJSON += "]"
+	// Marshal user data as JSON in Go (dialect-neutral, avoids MySQL-only JSON_OBJECT).
+	userData := gin.H{
+		"name":      user.Name,
+		"email":     user.Email,
+		"full_name": user.FullName,
+		"roles":     user.Roles,
+	}
+	userJSON, err := json.Marshal(userData)
+	if err != nil {
+		return "", fmt.Errorf("marshaling user data: %w", err)
 	}
 
-	_, err := sm.DB.Exec(
+	_, err = sm.DB.Exec(
 		`INSERT INTO _kora_session (sid, user, data, expires_at, created_at)
-		 VALUES (?, ?, JSON_OBJECT('name', ?, 'email', ?, 'full_name', ?, 'roles', ?), ?, ?)`,
-		sid, user.Name, user.Name, user.Email, user.FullName, rolesJSON, expiresAt, time.Now(),
+		 VALUES (?, ?, ?, ?, ?)`,
+		sid, user.Name, string(userJSON), expiresAt, time.Now(),
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating session: %w", err)
@@ -85,6 +92,9 @@ func (sm *SessionManager) CreateSession(user *User) (string, error) {
 // GetSession validates a session ID and returns the associated user.
 // Uses an in-memory TTL cache to avoid hitting the database on every request.
 func (sm *SessionManager) GetSession(sid string) (*User, error) {
+	if sm.DB == nil {
+		return nil, fmt.Errorf("no database connection available")
+	}
 	// Check cache first.
 	sm.cacheMu.RLock()
 	entry, ok := sm.cache[sid]
@@ -100,12 +110,12 @@ func (sm *SessionManager) GetSession(sid string) (*User, error) {
 
 	// Cache miss or expired — query database.
 	var userJSON string
-	var expiresAt time.Time
+	var expiresStr string // scanned as string for SQLite compatibility (TEXT column)
 
 	err := sm.DB.QueryRow(
 		"SELECT data, expires_at FROM _kora_session WHERE sid = ?",
 		sid,
-	).Scan(&userJSON, &expiresAt)
+	).Scan(&userJSON, &expiresStr)
 
 	if err == sql.ErrNoRows {
 		// Remove from cache if present.
@@ -116,6 +126,11 @@ func (sm *SessionManager) GetSession(sid string) (*User, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying session: %w", err)
+	}
+
+	expiresAt, err := parseTime(expiresStr)
+	if err != nil {
+		return nil, fmt.Errorf("parsing session expiry: %w", err)
 	}
 
 	if time.Now().After(expiresAt) {
@@ -246,6 +261,9 @@ func splitQuoted(s string) []string {
 
 // DeleteSession removes a session.
 func (sm *SessionManager) DeleteSession(sid string) {
+	if sm.DB == nil {
+		return
+	}
 	_, err := sm.DB.Exec("DELETE FROM _kora_session WHERE sid = ?", sid)
 	if err != nil {
 		slog.Warn("failed to delete session", "sid", sid, "error", err)
@@ -285,6 +303,9 @@ func (sm *SessionManager) sweepCacheLoop() {
 }
 
 func (sm *SessionManager) cleanupExpired() {
+	if sm.DB == nil {
+		return // console-only mode — no site database
+	}
 	_, err := sm.DB.Exec("DELETE FROM _kora_session WHERE expires_at < ?", time.Now())
 	if err != nil {
 		slog.Warn("failed to cleanup expired sessions", "error", err)
@@ -293,6 +314,9 @@ func (sm *SessionManager) cleanupExpired() {
 
 // AuthenticateUser verifies a username/email and password against the database.
 func (sm *SessionManager) AuthenticateUser(email, password string) (*User, error) {
+	if sm.DB == nil {
+		return nil, fmt.Errorf("no database connection available")
+	}
 	var name, emailAddr, passwordHash, fullName, rolesStr string
 	var enabled bool
 
@@ -576,4 +600,22 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 			})
 		})
 	}
+}
+
+// parseTime parses a datetime string from the database (MySQL DATETIME or SQLite TEXT).
+func parseTime(s string) (time.Time, error) {
+	formats := []string{
+		time.RFC3339Nano,                            // "2006-01-02T15:04:05.999999999Z07:00"
+		"2006-01-02 15:04:05.999999999-07:00",       // SQLite with nanoseconds + timezone
+		"2006-01-02 15:04:05.999999-07:00",          // SQLite with microseconds + timezone
+		"2006-01-02 15:04:05-07:00",                 // SQLite with timezone
+		"2006-01-02 15:04:05.999999",                // MySQL with microseconds
+		"2006-01-02 15:04:05",                       // MySQL without fractional seconds
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognized time format: %q", s)
 }

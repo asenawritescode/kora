@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,7 @@ type SystemCredentials struct {
 type SystemGuard struct {
 	email        string
 	passwordHash string // bcrypt hash, computed on startup
+	isDefault    bool   // true if using baked-in default password (forces change)
 
 	// In-memory session store for console sessions.
 	mu       sync.RWMutex
@@ -179,8 +181,79 @@ func (g *SystemGuard) Middleware() gin.HandlerFunc {
 			SetSecureCookie(c, "kora_console_sid", "", -1, "/", true)
 		}
 
+		// Browser requests get a redirect to the login page; API clients get 401 JSON.
+		if strings.Contains(c.GetHeader("Accept"), "text/html") {
+			c.Redirect(http.StatusFound, "/console/login")
+			c.Abort()
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "system authentication required"})
 	}
+}
+
+// ValidateWithChangeCheck validates credentials and returns whether a password change is required.
+// Password change is required when using the baked-in default credentials.
+func (g *SystemGuard) ValidateWithChangeCheck(email, password string) (valid bool, needsChange bool) {
+	if email != g.email {
+		return false, false
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(g.passwordHash), []byte(password)); err != nil {
+		return false, false
+	}
+	return true, g.isDefault
+}
+
+// ValidateSessionBool returns true if the session token is valid.
+func (g *SystemGuard) ValidateSessionBool(sid string) bool {
+	return g.ValidateSession(sid) != ""
+}
+
+// UpdatePassword replaces the stored password hash. Used for first-login forced change.
+func (g *SystemGuard) UpdatePassword(newPassword string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost+2)
+	if err != nil {
+		return err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.passwordHash = string(hash)
+	g.isDefault = false
+	return nil
+}
+
+// LoadSystemGuardFromEnv creates a SystemGuard from environment variables.
+// Falls back to baked-in defaults if env vars are not set.
+// Default: admin@kora.local / kora123 (isDefault=true forces password change).
+func LoadSystemGuardFromEnv() *SystemGuard {
+	email := os.Getenv("CONSOLE_EMAIL")
+	password := os.Getenv("CONSOLE_PASSWORD")
+	isDefault := false
+
+	if email == "" {
+		email = "admin@kora.local"
+	}
+	if password == "" {
+		password = "kora123"
+		isDefault = true
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost+2)
+	if err != nil {
+		slog.Error("failed to hash console password", "error", err)
+		return nil
+	}
+
+	guard := &SystemGuard{
+		email:        email,
+		passwordHash: string(hash),
+		isDefault:    isDefault,
+		sessions:     make(map[string]*ConsoleSession),
+	}
+
+	go guard.cleanupLoop()
+
+	slog.Info("system guard loaded from env", "email", email, "is_default", isDefault)
+	return guard
 }
 
 // checkAuthHeader validates the Authorization header.

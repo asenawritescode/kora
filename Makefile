@@ -19,8 +19,11 @@ build-ui:                          ## Build React SPA
 	rm -rf workspace/dist
 	cp -r ui/dist workspace/dist
 
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo "dev")
+LDFLAGS += -X github.com/asenawritescode/kora/cli.Version=$(VERSION)
+
 build-go:                          ## Build Go binary
-	go build -o kora .
+	go build -ldflags="-s -w $(LDFLAGS)" -o kora .
 
 ## Development
 dev:                               ## Full dev setup: MySQL + build + setup + serve

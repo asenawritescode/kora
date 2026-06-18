@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yourorg/kora/doctype"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // LoadedSite holds the runtime state for a single site.
@@ -23,6 +23,60 @@ type LoadedSite struct {
 // AllSites returns all loaded sites (for console, path-based routing, etc.).
 func (sr *SiteRouter) AllSites() []*LoadedSite {
 	return sr.allSites
+}
+
+// AddSite hot-adds a site to the running router without a restart.
+// Used by the console when creating a new site via API.
+func (sr *SiteRouter) AddSite(s *LoadedSite) {
+	domains := s.Config.Domains
+	if len(domains) == 0 {
+		domains = []string{s.Config.Hostname}
+	}
+	for _, d := range domains {
+		sr.sites[strings.ToLower(d)] = s
+	}
+	sr.allSites = append(sr.allSites, s)
+	if sr.defaultSite == nil {
+		sr.defaultSite = s
+	}
+}
+
+// RemoveSite removes a site from the router by name. Returns the removed site
+// or nil if not found. Updates the default site if the removed site was the default.
+func (sr *SiteRouter) RemoveSite(name string) *LoadedSite {
+	// Find the site in allSites.
+	idx := -1
+	for i, s := range sr.allSites {
+		if s.Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil
+	}
+	site := sr.allSites[idx]
+
+	// Remove all its domains from the sites map.
+	for _, d := range site.Config.Domains {
+		delete(sr.sites, strings.ToLower(d))
+	}
+	// Also remove the hostname if not in domains.
+	delete(sr.sites, strings.ToLower(site.Config.Hostname))
+
+	// Remove from allSites slice.
+	sr.allSites = append(sr.allSites[:idx], sr.allSites[idx+1:]...)
+
+	// Update default site if needed.
+	if sr.defaultSite == site {
+		if len(sr.allSites) > 0 {
+			sr.defaultSite = sr.allSites[0]
+		} else {
+			sr.defaultSite = nil
+		}
+	}
+
+	return site
 }
 
 // SiteByName returns a site by its name or short name.
@@ -81,6 +135,13 @@ func NewSiteRouter(sites []*LoadedSite) *SiteRouter {
 // Middleware returns a Gin middleware that resolves the Host header to a site.
 func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Skip site resolution for console, health, and other system paths.
+		path := c.Request.URL.Path
+		if path == "/health" || strings.HasPrefix(path, "/api/console") || strings.HasPrefix(path, "/console") || strings.HasPrefix(path, "/assets/") || path == "/api/ping" || strings.HasPrefix(path, "/s/") {
+			c.Next()
+			return
+		}
+
 		// If already set by path-based routing, skip.
 		if _, exists := c.Get("site_db"); exists {
 			c.Next()

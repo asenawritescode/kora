@@ -229,6 +229,69 @@ Content-Type: application/json
 
 ---
 
+## AI Chat
+
+### Send Chat Message
+
+```
+POST /api/chat
+```
+
+Send a natural language message to the AI assistant. The AI auto-generates tool definitions from the doctype registry and executes CRUD operations via a multi-round `finish_reason`-driven loop.
+
+**Request:**
+```json
+{
+  "message": "Create a customer with ACME Corp, john@acme.com, 0701002000",
+  "history": [
+    {"role": "user", "content": "..."},
+    {"role": "assistant", "content": "..."}
+  ],
+  "model": "gpt-4o"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `message` | string | Yes | Natural language instruction |
+| `history` | ChatMessage[] | No | Previous conversation turns (capped at configurable limit, default 20) |
+| `model` | string | No | Override default model (e.g., `gpt-4o`, `claude-sonnet-4-6`, `deepseek-v4-pro`) |
+
+**Response:** `200 OK`
+```json
+{
+  "reply": "Created Customer \"ACME Corp\" (CUST-0002).",
+  "action": "listed 3 customers"
+}
+```
+
+**Provider Support:** OpenAI GPT-4o, DeepSeek V4, Anthropic Claude. Configure API keys via the workspace UI at `/workspace/admin/secrets` (dropdown selector + key input) or via CLI: `./kora secret set --site X --key <provider>_api_key --value sk-...`.
+
+**AI Tools Generated Per DocType:**
+
+| Tool | Purpose |
+|------|---------|
+| `<doctype>_find` | Search by field values (duplicate check before create) |
+| `<doctype>_list` | List documents (paginated, markdown table) |
+| `<doctype>_get` | Get single document by name |
+| `<doctype>_create` | Create new document |
+
+**System Tools:**
+
+| Tool | Purpose |
+|------|---------|
+| `list_doctypes` | List all doctypes with field counts |
+| `validate_doctype_yaml` | Validate YAML without saving (line-numbered errors) |
+| `create_doctype_draft` | Create new DocType as **Draft only** — never activates, human required |
+
+**Multi-Round Execution:** The loop runs until `finish_reason == "stop"` with safety nets: max rounds (10 default), stall detection, error circuit breaker, context compaction at 80% token budget, tool result size caps (4KB).
+
+**AI Audit Trail:** AI-created records set `modified_by = "ai-assistant"` for audit queries.
+
+**CSRF:** Required. Include `X-Kora-CSRF-Token` header.
+
+---
+
 ## System Schema API
 
 ### Get Doctype Schema
@@ -323,6 +386,167 @@ GET /api/auth/providers
   }
 }
 ```
+
+---
+
+## User Management API
+
+All endpoints require Administrator role. Responses use the standard envelope.
+
+### List Users
+
+```http
+GET /api/system/users
+```
+
+Returns all users with their roles, status, and timestamps.
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "name": "USER-0001",
+      "email": "admin@airtime.local",
+      "full_name": "Administrator",
+      "roles": ["Administrator"],
+      "enabled": true,
+      "created": "2026-06-10T12:00:00Z",
+      "modified": "2026-06-15T08:30:00Z"
+    }
+  ]
+}
+```
+
+### Get User
+
+```http
+GET /api/system/users/:name
+```
+
+### Create User
+
+```http
+POST /api/system/users
+Content-Type: application/json
+
+{
+  "email": "agent@airtime.local",
+  "password": "secret123",
+  "full_name": "Sales Agent",
+  "roles": ["Sales Agent"]
+}
+```
+
+**Response:** `201 Created`
+
+Password requirements: minimum 8 characters. Email must be unique per site. A ULID-based `name` is auto-generated.
+
+### Update User
+
+```http
+PUT /api/system/users/USER-0002
+Content-Type: application/json
+
+{
+  "full_name": "Senior Sales Agent",
+  "roles": ["Sales Agent", "Manager"],
+  "enabled": true
+}
+```
+
+Optionally include `"password": "newpassword"` to change the password.
+
+### Delete User
+
+```http
+DELETE /api/system/users/USER-0002
+```
+
+Prevents self-delete (cannot delete your own account). All sessions for the deleted user are terminated.
+
+### Reset Password
+
+```http
+POST /api/system/users/USER-0002/reset-password
+Content-Type: application/json
+
+{
+  "password": "newpassword123"
+}
+```
+
+Sets a new password and invalidates all existing sessions for that user, forcing re-login. Minimum 8 characters. No email infrastructure needed — the admin communicates the new password to the user.
+
+**Errors:** `403` — non-Administrator. `400` — password too short. `404` — user not found.
+
+---
+
+## Secrets Management API
+
+Manage encrypted configuration secrets (API keys, credentials). Values are encrypted at rest with AES-256-GCM and **never returned by the API**. All endpoints require Administrator role.
+
+### List Secrets
+
+```http
+GET /api/system/secrets
+```
+
+**Response:**
+```json
+{
+  "data": [
+    {"key_name": "openai_api_key", "updated_at": "2026-06-15T10:00:00Z"},
+    {"key_name": "deepseek_api_key", "updated_at": "2026-06-14T09:00:00Z"}
+  ]
+}
+```
+
+Only key names and timestamps are returned. Values are never exposed.
+
+### Set Secret
+
+```http
+POST /api/system/secrets
+Content-Type: application/json
+
+{
+  "key": "openai_api_key",
+  "value": "sk-proj-..."
+}
+```
+
+Creates or updates a secret. The value is encrypted before storage.
+
+### Delete Secret
+
+```http
+DELETE /api/system/secrets/:key
+```
+
+Removes the secret. Any functionality depending on it (e.g., AI Chat) will stop working.
+
+**AI Provider Quick-Set:** The workspace UI at `/workspace/admin/secrets` provides a dropdown to select the provider (OpenAI, DeepSeek, Anthropic) and enter the key — no need to remember the exact key name.
+
+---
+
+## OpenAPI / Swagger
+
+### OpenAPI Spec
+
+```http
+GET /api/openapi.json
+```
+
+Returns a full OpenAPI 3.0.3 spec auto-generated from the doctype registry — all CRUD endpoints, schemas, and auth.
+
+### Swagger UI
+
+```http
+GET /api/swagger-ui
+```
+
+Interactive API documentation. Also linked from the workspace sidebar as "API Docs" (opens in new tab).
 
 ---
 

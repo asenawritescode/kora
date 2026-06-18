@@ -61,12 +61,10 @@ Kora uses `golang.org/x/crypto/acme/autocert` for automatic Let's Encrypt certif
 5. Certificate is cached in the `certs/` directory
 6. Renewal happens automatically 30 days before expiry
 
-**Configuration:**
-```yaml
-# common_site_config.yaml
-tls_mode: auto          # off | auto | manual
-tls_email: admin@example.com
-tls_cert_dir: certs
+**Configuration (env vars):**
+```
+KORA_TLS_MODE=auto
+KORA_TLS_EMAIL=admin@example.com
 ```
 
 ### Site Router
@@ -82,15 +80,7 @@ Request: Host: 127.0.0.1 → falls back to default site
 
 **Fallback behavior:** If the Host header doesn't match any configured domain, and it's an IP address or `localhost`, the default site is used. This enables development without DNS configuration.
 
-**Multi-domain sites:** A single site can respond to multiple domains:
-```yaml
-# sites/acme.com/site_config.yaml
-hostname: acme.com
-domains:
-  - acme.com
-  - www.acme.com
-  - app.acme.com
-```
+**Multi-domain sites:** A single site can respond to multiple domains. Domains are configured via the console UI or API — persisted in `_kora_config_version.config`.
 
 ### Security Headers
 
@@ -111,13 +101,10 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 ### CORS
 
-Provided by `github.com/gin-contrib/cors`. Configurable per site:
+Provided by `github.com/gin-contrib/cors`. Configurable via environment variables:
 
-```yaml
-# site_config.yaml
-cors_origins:
-  - https://app.example.com
-  - https://admin.example.com
+```
+KORA_CORS_ORIGINS=https://app.example.com,https://admin.example.com
 ```
 
 Default: allow all origins (development). In production, restrict to specific origins.
@@ -134,11 +121,11 @@ Uses `golang.org/x/time/rate` — an in-process token bucket implementation.
 - Cleanup: idle entries purged every 5 minutes
 - Response: `429 Too Many Requests`
 
-**Configuration:**
-```yaml
-# common_site_config.yaml
-rate_limit: 100      # requests per second per user
-rate_limit_burst: 20 # max burst
+**Configuration (env vars):**
+```
+KORA_RATE_LIMIT=100
+KORA_RATE_BURST=20
+KORA_CORS_ORIGINS=https://app.example.com
 ```
 
 ### CSRF Protection

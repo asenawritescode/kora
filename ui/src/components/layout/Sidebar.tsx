@@ -15,6 +15,9 @@ import {
   History,
   ShieldCheck,
   Workflow,
+  Users,
+  KeyRound,
+  BookOpen,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -61,7 +64,7 @@ export function Sidebar() {
   })
 
   const { user, logout } = useAuthStore()
-  const { theme, toggleTheme, sidebarCollapsed, setSidebarCollapsed } = useUIStore()
+  const { theme, toggleTheme, sidebarCollapsed, setSidebarCollapsed, setSidebarOpen } = useUIStore()
 
   const NavSkeleton = () => (
     <div className="space-y-2 p-4">
@@ -156,6 +159,27 @@ export function Sidebar() {
           <History className="h-4 w-4 shrink-0" />
           {!sidebarCollapsed && 'Versions'}
         </NavItem>
+        <NavItem to="/workspace/admin/users" collapsed={sidebarCollapsed}>
+          <Users className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && 'Users'}
+        </NavItem>
+        <NavItem to="/workspace/admin/secrets" collapsed={sidebarCollapsed}>
+          <KeyRound className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && 'Secrets'}
+        </NavItem>
+        <a
+          href="/api/swagger-ui"
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => setSidebarOpen(false)}
+          className={cn(
+            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+            sidebarCollapsed && 'justify-center px-2',
+          )}
+        >
+          <BookOpen className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && 'API Docs'}
+        </a>
       </nav>
 
       <Separator />

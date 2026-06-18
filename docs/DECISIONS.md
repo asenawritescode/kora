@@ -565,3 +565,57 @@ queryClient.invalidateQueries({ queryKey: ['navigation'] })
 - Buttons stay visible — just disabled — so users know the action exists but they lack access
 
 **Impact:** Users get immediate visual feedback about their permission level. No more filling out a form only to get a 403 on submit.
+
+## ADR-030: AI Tool Loop — `finish_reason`-Driven Termination
+
+**Date:** 2026-06-14
+**Status:** Accepted
+
+**Context:** The first implementation of AI chat used a single-round pattern: call AI with tools → if tool_calls present, execute and call AI again WITHOUT tools. This broke two-step workflows (find → create) because the follow-up call couldn't make a second tool call, causing the model to output tool calls as plain text.
+
+**Alternatives considered:**
+- **Max-iteration loop only:** `for round < N` — simple but doesn't use the model's own intent signal. Wastes rounds when the model is done early, breaks silently when the cap is hit.
+- **Content-type check:** Check if `response.content[0].type == "text"` — fragile. Models can return text AND tool_calls in the same response.
+- **`finish_reason`-driven loop:** The model signals its own intent via `finish_reason`. This is the pattern used by Anthropic SDK (`stop_reason`), OpenAI SDK, Vercel AI SDK, and LangChain.
+
+**Decision:** Use `finish_reason` as the primary termination signal with composed safety nets:
+- `"stop"` → return final response
+- `"tool_calls"` → execute tools, feed results back, loop (tools ALWAYS present)
+- `"length"` → return truncated response
+- `"content_filter"` → return policy message
+- Max rounds (configurable) as a fallback cap only — not a normal exit path
+
+**Impact:** Two-step workflows (find → create) work correctly. Models that return text+tool_calls in one response are handled correctly. The loop exits when the model says it's done, not when a counter runs out.
+
+## ADR-031: AI Doctype Creation — Draft-Only, Human Activation Required
+
+**Date:** 2026-06-14
+**Status:** Accepted
+
+**Context:** When adding AI tools for doctype creation, the question was whether the AI should be allowed to activate doctypes (create DB tables + run migrations) or only create drafts.
+
+**Alternatives considered:**
+- **Full auto-activation:** AI creates and activates — fast but dangerous. A hallucinated doctype creates real DB tables with irreversible DDL.
+- **No AI creation at all:** Safe but leaves the most powerful AI capability unused.
+- **Draft-only:** AI creates Draft versions. A human reviews and activates. Matches the existing Config Version workflow (Draft → Active).
+
+**Decision:** The `create_doctype_draft` tool ALWAYS sets `status: "Draft"`. It never activates — no migration runs, no tables created. The human activates from the Versions admin panel. The confirmation UX pattern: AI validates YAML → summarizes in 2-3 lines → asks "Create as draft?" → waits for confirmation → creates.
+
+**Impact:** Zero risk of AI creating bad database tables. Human stays in control of all schema changes. The AI becomes a productivity multiplier (generates YAML from English descriptions) without any destructive capability.
+
+## ADR-032: AI Audit Trail — `modified_by = "ai-assistant"`
+
+**Date:** 2026-06-14
+**Status:** Accepted
+
+**Context:** The first implementation hardcoded `owner = "mcp-agent"` for AI-created records. This served as an implicit audit trail but broke permission checks (records owned by phantom user). The fix needed to preserve both audit capability and proper ownership.
+
+**Alternatives considered:**
+- **Keep `owner = "mcp-agent"`:** Easy audit but breaks filtering by owner, reports by user, and permission scoping.
+- **`owner = user + " (via AI)"`:** String concatenation breaks exact-match lookups and is fragile.
+- **Separate audit field:** Add a new column to every table — expensive schema change.
+- **Use `modified_by`:** Every Kora table already has a `modified_by` column. On Insert, ORM sets both `owner` (to the authenticated user) and `modified_by` (to `"ai-assistant"` for AI-created records, or the user for direct REST API creates).
+
+**Decision:** Change `Insert(dt, doc, owner)` to `Insert(dt, doc, owner, modifiedBy)`. REST API passes `owner` for both; AI Chat passes `owner = <user>` and `modifiedBy = "ai-assistant"`. Query `WHERE modified_by = 'ai-assistant'` for AI audit.
+
+**Impact:** Records are properly owned by the real user (permissions work). AI-created records are easily queryable for audit. No schema change needed — `modified_by` already exists on every table. Two-line ORM signature change with only 2 call sites.

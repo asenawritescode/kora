@@ -7,7 +7,7 @@ interface AuthGuardProps {
   children: ReactNode
 }
 
-const PUBLIC_PATHS = ['/workspace/auth/login']
+const PUBLIC_PATHS = ['/workspace/auth/login', '/console/login', '/console']
 
 export function AuthGuard({ children }: AuthGuardProps) {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore()
@@ -32,8 +32,10 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const isPublic = PUBLIC_PATHS.some((p) => pathWithoutPrefix.startsWith(p))
 
   // Public paths: render children directly, no sidebar/layout.
+  // Console uses its own auth system, so don't redirect console paths.
   if (isPublic) {
-    if (isAuthenticated) {
+    const isConsolePath = pathWithoutPrefix.startsWith('/console')
+    if (isAuthenticated && !isConsolePath) {
       window.location.href = sitePath('/workspace')
       return null
     }

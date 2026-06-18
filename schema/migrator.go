@@ -9,7 +9,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/yourorg/kora/doctype"
+	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // ColumnInfo represents a column in the live database schema.
@@ -63,83 +64,42 @@ type OrphanedColumn struct {
 	Column string
 }
 
-// LoadLiveSchema reads the current database schema from INFORMATION_SCHEMA.
-func LoadLiveSchema(db *sql.DB, dbName string) (map[string]*TableInfo, error) {
-	rows, err := db.Query(`
-		SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
-		FROM INFORMATION_SCHEMA.COLUMNS
-		WHERE TABLE_SCHEMA = ?
-		ORDER BY TABLE_NAME, ORDINAL_POSITION
-	`, dbName)
+// LoadLiveSchema reads the current database schema using the dialect.
+// Delegates to db.Dialect.LoadSchema and converts to the local TableInfo format.
+func LoadLiveSchema(database *sql.DB, dbName string, dialect db.Dialect) (map[string]*TableInfo, error) {
+	liveSchema, err := dialect.LoadSchema(database, dbName)
 	if err != nil {
-		return nil, fmt.Errorf("querying information_schema: %w", err)
+		return nil, fmt.Errorf("loading schema: %w", err)
 	}
-	defer rows.Close()
 
 	tables := make(map[string]*TableInfo)
-	for rows.Next() {
-		var tableName, colName, colType, isNullable string
-		var colDefault sql.NullString
-		if err := rows.Scan(&tableName, &colName, &colType, &isNullable, &colDefault); err != nil {
-			return nil, fmt.Errorf("scanning column info: %w", err)
-		}
-
-		table, ok := tables[tableName]
-		if !ok {
-			table = &TableInfo{
-				Name:    tableName,
-				Columns: make(map[string]*ColumnInfo),
-			}
-			tables[tableName] = table
-		}
-
-		table.Columns[colName] = &ColumnInfo{
-			Name:     colName,
-			Type:     colType,
-			Nullable: isNullable == "YES",
-			Default:  colDefault,
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating schema rows: %w", err)
-	}
-
-	// Load indexes.
-	idxRows, err := db.Query(`
-		SELECT TABLE_NAME, COLUMN_NAME, INDEX_NAME, NON_UNIQUE
-		FROM INFORMATION_SCHEMA.STATISTICS
-		WHERE TABLE_SCHEMA = ?
-		ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
-	`, dbName)
-	if err != nil {
-		return nil, fmt.Errorf("querying indexes: %w", err)
-	}
-	defer idxRows.Close()
-
-	for idxRows.Next() {
-		var tableName, colName, indexName string
-		var nonUnique int
-		if err := idxRows.Scan(&tableName, &colName, &indexName, &nonUnique); err != nil {
-			return nil, fmt.Errorf("scanning index info: %w", err)
-		}
-		// Skip PRIMARY KEY indexes.
-		if indexName == "PRIMARY" {
-			continue
-		}
-		if table, ok := tables[tableName]; ok {
-			if col, ok := table.Columns[colName]; ok {
-				col.Indexed = true
+	for _, lt := range liveSchema.Tables {
+		cols := make(map[string]*ColumnInfo)
+		for _, lc := range lt.Columns {
+			cols[lc.Name] = &ColumnInfo{
+				Name:     lc.Name,
+				Type:     lc.Type,
+				Nullable: lc.IsNullable,
+				Default:  sql.NullString{String: lc.DefaultValue, Valid: lc.DefaultValue != ""},
 			}
 		}
+		// Mark indexed columns.
+		for _, idx := range lt.Indexes {
+			for _, idxCol := range idx.Columns {
+				if col, ok := cols[idxCol]; ok {
+					col.Indexed = true
+				}
+			}
+		}
+		tables[lt.Name] = &TableInfo{Name: lt.Name, Columns: cols}
 	}
 
 	return tables, nil
 }
 
-// ComputeDiff compares the registry DocTypes against the live database schema
+// ComputeDiff// ComputeDiff compares the registry DocTypes against the live database schema
 // and produces a Diff of changes needed.
-func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo) *Diff {
+func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo, dialect db.Dialect) *Diff {
 	diff := &Diff{
 		NewColumns:    make(map[string][]ColumnAdd),
 		NewIndexes:    make(map[string][]IndexAdd),
@@ -175,7 +135,7 @@ func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo) *
 				}
 				colAdd := ColumnAdd{
 					Name:     field.Fieldname,
-					Type:     field.DBType(),
+					Type:     dialect.ColumnType(&field),
 					Nullable: !field.Reqd,
 				}
 				if field.Default != "" {
@@ -247,19 +207,46 @@ func (d *Diff) IsEmpty() bool {
 }
 
 // GenerateDDL produces the SQL statements to apply the diff.
-func (d *Diff) GenerateDDL(registry *doctype.Registry) []string {
+func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []string {
 	var statements []string
 
 	// CREATE TABLE statements.
 	for _, tableName := range d.NewTables {
-		stmt := generateCreateTable(tableName, registry)
+		// Find the DocType for this table and use dialect DDL.
+		var stmt string
+		var foundDT *doctype.DocType
+		for _, dt := range registry.All() {
+			if dt.RawTableName() == tableName {
+				foundDT = dt
+				break
+			}
+		}
+		if foundDT != nil {
+			stmt = dialect.CreateTable(foundDT)
+		} else {
+			stmt = generateCreateTable(tableName, registry, dialect)
+		}
 		statements = append(statements, stmt)
 	}
 
 	// ALTER TABLE ADD COLUMN statements.
 	for tableName, cols := range d.NewColumns {
 		for _, col := range cols {
-			stmt := generateAddColumn(tableName, col)
+			var stmt string
+			var foundF *doctype.Field
+			for _, dt := range registry.All() {
+				if dt.RawTableName() == tableName {
+					if f := dt.GetField(col.Name); f != nil {
+						foundF = f
+					}
+					break
+				}
+			}
+			if foundF != nil {
+				stmt = dialect.AddColumn(dialect.QuoteIdent(tableName), foundF)
+			} else {
+				stmt = generateAddColumn(tableName, col, dialect)
+			}
 			statements = append(statements, stmt)
 		}
 	}
@@ -267,8 +254,7 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry) []string {
 	// ALTER TABLE RENAME COLUMN statements (from renamed_from).
 	for tableName, renames := range d.RenameColumns {
 		for _, r := range renames {
-			stmt := fmt.Sprintf("ALTER TABLE `%s` RENAME COLUMN `%s` TO `%s`",
-				tableName, r.OldName, r.NewName)
+			stmt := dialect.RenameColumn(tableName, r.OldName, r.NewName)
 			statements = append(statements, stmt)
 		}
 	}
@@ -276,7 +262,7 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry) []string {
 	// CREATE INDEX statements.
 	for tableName, idxs := range d.NewIndexes {
 		for _, idx := range idxs {
-			stmt := generateCreateIndex(tableName, idx)
+			stmt := dialect.CreateIndex(tableName, idx.Columns[0], idx.Unique)
 			statements = append(statements, stmt)
 		}
 	}
@@ -284,7 +270,7 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry) []string {
 	return statements
 }
 
-func generateCreateTable(tableName string, registry *doctype.Registry) string {
+func generateCreateTable(tableName string, registry *doctype.Registry, dialect db.Dialect) string {
 	// Determine if this is a regular table or a child table.
 	var dt *doctype.DocType
 	var isChild bool
@@ -312,26 +298,18 @@ func generateCreateTable(tableName string, registry *doctype.Registry) string {
 	}
 
 	// Use quoted table name for SQL.
-	sqlTableName := "`" + tableName + "`"
+	sqlTableName := dialect.QuoteIdent(tableName)
 
 	var cols []string
 
-	// System columns first.
-	cols = append(cols, "name VARCHAR(140) NOT NULL")
-	cols = append(cols, "owner VARCHAR(140) NOT NULL DEFAULT ''")
-	cols = append(cols, "creation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)")
-	cols = append(cols, "modified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)")
-	cols = append(cols, "modified_by VARCHAR(140) NOT NULL DEFAULT ''")
-	cols = append(cols, "doc_status TINYINT(1) NOT NULL DEFAULT 0")
-	cols = append(cols, "idx INT NOT NULL DEFAULT 0")
+	// System columns from dialect.
+	cols = append(cols, dialect.SystemColumnDDL()...)
 
 	// Child table system columns.
 	if isChild {
 		_ = parentDT
 		_ = parentField
-		cols = append(cols, "parent VARCHAR(140) NOT NULL DEFAULT ''")
-		cols = append(cols, "parentfield VARCHAR(140) NOT NULL DEFAULT ''")
-		cols = append(cols, "parenttype VARCHAR(140) NOT NULL DEFAULT ''")
+		cols = append(cols, dialect.ChildColumnDDL()...)
 	}
 
 	// Data columns from the DocType.
@@ -340,7 +318,7 @@ func generateCreateTable(tableName string, registry *doctype.Registry) string {
 			if f.Fieldtype == "Table" {
 				continue
 			}
-			dbType := f.DBType()
+			dbType := dialect.ColumnType(&f)
 			if dbType == "" {
 				continue
 			}
@@ -362,29 +340,15 @@ func generateCreateTable(tableName string, registry *doctype.Registry) string {
 	// Primary key.
 	cols = append(cols, "PRIMARY KEY (name)")
 
-	// Indexes.
-	if dt != nil {
-		for _, f := range dt.DataFields() {
-			if f.SearchIndex {
-				idxCols := []string{f.Fieldname}
-				cols = append(cols, fmt.Sprintf("INDEX idx_%s (%s)", f.Fieldname, strings.Join(idxCols, ", ")))
-			}
-			if f.Unique {
-				cols = append(cols, fmt.Sprintf("UNIQUE KEY uq_%s (%s)", f.Fieldname, f.Fieldname))
-			}
-		}
+	suffix := dialect.TableSuffix()
+	if suffix != "" {
+		suffix = " " + suffix
 	}
-
-	// Child table indexes.
-	if isChild {
-		cols = append(cols, "INDEX idx_parent (parent)")
-	}
-
-	return fmt.Sprintf("CREATE TABLE %s (\n  %s\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-		sqlTableName, strings.Join(cols, ",\n  "))
+	return fmt.Sprintf("CREATE TABLE %s (\n  %s\n)%s",
+		sqlTableName, strings.Join(cols, ",\n  "), suffix)
 }
 
-func generateAddColumn(tableName string, col ColumnAdd) string {
+func generateAddColumn(tableName string, col ColumnAdd, dialect db.Dialect) string {
 	nullable := ""
 	if !col.Nullable {
 		nullable = " NOT NULL"
@@ -396,17 +360,9 @@ func generateAddColumn(tableName string, col ColumnAdd) string {
 			nullable = fmt.Sprintf(" NOT NULL DEFAULT '%s'", escapeSQL(col.Default))
 		}
 	}
-	return fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN %s %s%s", tableName, col.Name, col.Type, nullable)
+	return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s%s", dialect.QuoteIdent(tableName), col.Name, col.Type, nullable)
 }
 
-func generateCreateIndex(tableName string, idx IndexAdd) string {
-	uniqueStr := ""
-	if idx.Unique {
-		uniqueStr = "UNIQUE "
-	}
-	colStr := strings.Join(idx.Columns, ", ")
-	return fmt.Sprintf("CREATE %sINDEX idx_%s ON `%s` (%s)", uniqueStr, strings.Join(idx.Columns, "_"), tableName, colStr)
-}
 
 func escapeSQL(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
@@ -424,13 +380,13 @@ func ApplyDDL(db *sql.DB, statements []string) error {
 }
 
 // MigrateSite computes the schema diff for a site and applies it.
-func MigrateSite(db *sql.DB, dbName string, registry *doctype.Registry) error {
-	liveSchema, err := LoadLiveSchema(db, dbName)
+func MigrateSite(database *sql.DB, dbName string, registry *doctype.Registry, dialect db.Dialect) error {
+	liveSchema, err := LoadLiveSchema(database, dbName, dialect)
 	if err != nil {
 		return fmt.Errorf("loading live schema: %w", err)
 	}
 
-	diff := ComputeDiff(registry, liveSchema)
+	diff := ComputeDiff(registry, liveSchema, dialect)
 	if diff.IsEmpty() {
 		slog.Info("schema is up to date, no migrations needed")
 		return nil
@@ -444,12 +400,12 @@ func MigrateSite(db *sql.DB, dbName string, registry *doctype.Registry) error {
 		"orphaned_columns", len(diff.Orphaned),
 	)
 
-	ddl := diff.GenerateDDL(registry)
+	ddl := diff.GenerateDDL(registry, dialect)
 	for _, stmt := range ddl {
 		slog.Info("DDL", "sql", stmt)
 	}
 
-	return ApplyDDL(db, ddl)
+	return ApplyDDL(database, ddl)
 }
 
 // TieredChange describes a single schema change with its safety classification.
@@ -473,7 +429,7 @@ type ActivationPreview struct {
 
 // AnalyzeImpact compares a proposed doctype against the existing one (if any)
 // and classifies each change into safety tiers. It also counts affected rows.
-func AnalyzeImpact(db *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype.Registry) *ActivationPreview {
+func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype.Registry, dialect db.Dialect) *ActivationPreview {
 	preview := &ActivationPreview{}
 
 	if oldDT == nil {
@@ -485,7 +441,7 @@ func AnalyzeImpact(db *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype.Regis
 			Change:  "Create new doctype",
 			Message: "New table will be created",
 		})
-		ddl := generateCreateTable(tableName, reg)
+		ddl := generateCreateTable(tableName, reg, dialect)
 		preview.DDL = append(preview.DDL, ddl)
 
 		// Also check child tables.
@@ -493,7 +449,7 @@ func AnalyzeImpact(db *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype.Regis
 			childDT := reg.Get(f.Options)
 			if childDT != nil {
 				childTableName := newDT.RawChildTableName(f.Fieldname)
-				childDDL := generateCreateTable(childTableName, reg)
+				childDDL := generateCreateTable(childTableName, reg, dialect)
 				preview.DDL = append(preview.DDL, childDDL)
 			}
 		}
@@ -504,7 +460,7 @@ func AnalyzeImpact(db *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype.Regis
 	var rowCount int
 	tableName := oldDT.RawTableName()
 	query := "SELECT COUNT(*) FROM `" + tableName + "`"
-	_ = db.QueryRow(query).Scan(&rowCount)
+	_ = database.QueryRow(query).Scan(&rowCount)
 
 	// Build field maps.
 	oldFields := make(map[string]*doctype.Field)
@@ -538,10 +494,10 @@ func AnalyzeImpact(db *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype.Regis
 			}
 			ddl := generateAddColumn(tableName, ColumnAdd{
 				Name:     f.Fieldname,
-				Type:     f.DBType(),
+				Type:     dialect.ColumnType(f),
 				Nullable: !f.Reqd,
 				Default:  f.Default,
-			})
+			}, dialect)
 			change.DDL = ddl
 			preview.DDL = append(preview.DDL, ddl)
 			preview.Changes = append(preview.Changes, change)

@@ -422,42 +422,85 @@ Files are stored under `sites/<site>/files/<YYYY>/<MM>/`. Duplicate filenames ge
   label: Resume
 ```
 
-## Site Config
+## AI Secrets & Configuration
 
-```yaml
-# sites/fieldwork.local/site_config.yaml
-db_host: 127.0.0.1
-db_port: 3306
-db_name: fieldwork_local
-db_user: kora
-db_password: secret
+AI provider API keys and behavior thresholds are stored in `_kora_secret` (encrypted at rest with AES-256-GCM, keyed per site).
 
-# redis_url: redis://localhost:6379/0   # Planned — session store for multi-server (not yet wired)
+### Provider API Keys
 
-file_storage: local
-files_path: sites/fieldwork.local/files
-
-hostname: fieldwork.local
-domains:
-  - fieldwork.local
-  - www.fieldwork.local
-
-apps:
-  - core
+```bash
+# Set via CLI (not stored in YAML — encrypted in DB)
+./kora secret set --site airtime.local --key deepseek_api_key --value sk-...
+./kora secret set --site airtime.local --key openai_api_key --value sk-...
+./kora secret set --site airtime.local --key anthropic_api_key --value sk-ant-...
 ```
 
-## Common Site Config
+The first key found is used. Search order: OpenAI → DeepSeek → Anthropic.
 
-```yaml
-# common_site_config.yaml
-# redis_url: redis://localhost:6379/0   # Planned — session store for multi-server (not yet wired)
-db_host: 127.0.0.1
-http_port: 8000
-workers: 4
-log_level: info       # debug | info | warn | error
-log_format: json      # json | text
-rate_limit: 100       # requests/sec per user
-rate_limit_burst: 20
-tls_mode: off         # off | auto | manual
-tls_email: ""         # For Let's Encrypt
+### AI Behavior Overrides
+
+Optional per-site thresholds override per-model defaults. Stored with `ai.` prefix:
+
+```bash
+./kora secret set --site airtime.local --key ai.max_rounds --value 15
+./kora secret set --site airtime.local --key ai.stall_threshold --value 4
+./kora secret set --site airtime.local --key ai.history_limit --value 30
 ```
+
+| Key | Default (model-dependent) | Description |
+|-----|---------------------------|-------------|
+| `ai.max_rounds` | 10–25 | Max tool-calling rounds |
+| `ai.token_budget` | 80K–190K | Context window token budget |
+| `ai.compaction_threshold` | 0.80 | Fraction of budget to trigger compaction |
+| `ai.max_tool_result_chars` | 4000–8000 | Cap per tool result (head+tail preserved) |
+| `ai.stall_threshold` | 3 | Identical calls before nudge |
+| `ai.max_tool_errors` | 5 | Errors before circuit breaker |
+| `ai.max_tokens_per_call` | 4096–8192 | `max_tokens` per AI call |
+| `ai.http_timeout_sec` | 60–120 | AI provider HTTP timeout |
+| `ai.max_retries` | 2–3 | Retries on transient errors (429/503) |
+| `ai.retry_backoff_ms` | 500–1000 | Base exponential backoff |
+| `ai.history_limit` | 20–30 | Max incoming chat history messages |
+
+Per-model defaults in `api/ai_config.go`:
+
+| Model | Budget | Max Rounds | Max Tokens/Call |
+|-------|--------|------------|-----------------|
+| `gpt-4o` | 120K | 15 | 4096 |
+| `gpt-4o-mini` | 120K | 10 | 4096 |
+| `claude-sonnet-4-6` | 190K | 20 | 8192 |
+| `claude-opus-4-8` | 190K | 25 | 8192 |
+| `deepseek-v4-pro` | 120K | 15 | 4096 |
+
+### AI Doctype Creation Safety
+
+The `create_doctype_draft` AI tool always creates config versions with `status: "Draft"`. No migration runs, no database tables are created. Human activation via Versions admin panel is required. The config version stores `label: "Created <name> via AI (Draft)"` and `is_active: 0`.
+
+---
+
+## Site & Platform Configuration
+
+All configuration is via environment variables. There are no YAML config files for site or platform settings. See [SETUP.md](SETUP.md) for the complete env var reference.
+
+### Key Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KORA_DB_TYPE` | `mysql` | `mysql` or `libsql` |
+| `KORA_DB_HOST` | `127.0.0.1` | DB host |
+| `DB_DSN` | — | Full connection string (recommended for LibSQL) |
+| `KORA_HTTP_PORT` | `8000` | Server port |
+| `KORA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `KORA_LOG_FORMAT` | `json` | `json` or `text` |
+| `KORA_SESSION_HOURS` | `72` | Session lifetime |
+| `KORA_APP_NAME` | `Kora` | App branding |
+| `KORA_PRIMARY_COLOR` | `#000000` | Primary UI color |
+| `KORA_RATE_LIMIT` | `100` | Requests/sec per user |
+| `KORA_RATE_BURST` | `20` | Rate limit burst size |
+| `KORA_TLS_MODE` | `off` | `off`, `auto`, or `manual` |
+| `KORA_TLS_EMAIL` | — | For Let's Encrypt |
+| `CONSOLE_EMAIL` | `admin@kora.local` | Console admin email |
+| `CONSOLE_PASSWORD` | `kora123` | Console admin password |
+
+### Runtime Site Config
+
+Each site stores its runtime config (domains, database name) in the database (`_kora_config_version.config`). A `site_config.yaml` file is auto-generated in `sites/<site>/` at startup for backward compatibility and file-based config consumers, but it is not the source of truth — the database is.
