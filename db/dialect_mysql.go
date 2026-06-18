@@ -152,21 +152,21 @@ func (d *MySQLDialect) CreateTable(dt *doctype.DocType) string {
 	// Primary key.
 	cols = append(cols, "PRIMARY KEY (name)")
 
-	tableName := d.QuoteIdent(dt.TableName())
+	tableName := d.QuoteIdent(dt.RawTableName())
 	ddl := fmt.Sprintf("CREATE TABLE %s (\n  %s\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 		tableName, strings.Join(cols, ",\n  "))
 
 	// Search indexes for fields with search_index: true.
 	for _, f := range dt.DataFields() {
 		if f.SearchIndex {
-			ddl += "\n" + d.CreateIndex(dt.TableName(), f.Fieldname, false)
+			ddl += "\n" + d.CreateIndex(dt.RawTableName(), f.Fieldname, false)
 		}
 	}
 
 	// UNIQUE indexes for fields with unique: true.
 	for _, f := range dt.DataFields() {
 		if f.Unique {
-			ddl += "\n" + d.CreateIndex(dt.TableName(), f.Fieldname, true)
+			ddl += "\n" + d.CreateIndex(dt.RawTableName(), f.Fieldname, true)
 		}
 	}
 

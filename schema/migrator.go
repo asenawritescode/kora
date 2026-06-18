@@ -243,7 +243,7 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []str
 				}
 			}
 			if foundF != nil {
-				stmt = dialect.AddColumn(dialect.QuoteIdent(tableName), foundF)
+				stmt = dialect.AddColumn(tableName, foundF)
 			} else {
 				stmt = generateAddColumn(tableName, col, dialect)
 			}

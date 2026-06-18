@@ -175,25 +175,25 @@ func (d *LibSQLDialect) CreateTable(dt *doctype.DocType) string {
 	// Primary key.
 	cols = append(cols, `PRIMARY KEY ("name")`)
 
-	tableName := d.QuoteIdent(dt.TableName())
+	tableName := d.QuoteIdent(dt.RawTableName())
 	ddl := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", tableName, strings.Join(cols, ",\n  "))
 
 	// Search indexes.
 	for _, f := range dt.DataFields() {
 		if f.SearchIndex {
-			ddl += "\n" + d.CreateIndex(dt.TableName(), f.Fieldname, false)
+			ddl += "\n" + d.CreateIndex(dt.RawTableName(), f.Fieldname, false)
 		}
 	}
 
 	// UNIQUE indexes.
 	for _, f := range dt.DataFields() {
 		if f.Unique {
-			ddl += "\n" + d.CreateIndex(dt.TableName(), f.Fieldname, true)
+			ddl += "\n" + d.CreateIndex(dt.RawTableName(), f.Fieldname, true)
 		}
 	}
 
 	// ON UPDATE trigger for the modified column (SQLite has no ON UPDATE attribute).
-	triggerName := d.QuoteIdent(dt.TableName() + "_modified_on_update")
+	triggerName := d.QuoteIdent(dt.RawTableName() + "_modified_on_update")
 	ddl += fmt.Sprintf("\nCREATE TRIGGER %s AFTER UPDATE ON %s FOR EACH ROW BEGIN UPDATE %s SET \"modified\" = STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', 'NOW') WHERE \"name\" = NEW.\"name\"; END",
 		triggerName, tableName, tableName)
 
