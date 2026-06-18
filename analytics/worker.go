@@ -83,10 +83,11 @@ func (w *Worker) Start() {
 	flushTicker := time.NewTicker(w.flushEvery)
 	defer flushTicker.Stop()
 
-	// Retention cleanup: run once at startup and then daily.
+	// Retention cleanup + monthly rollup: run once at startup and then daily.
 	retentionTicker := time.NewTicker(24 * time.Hour)
 	defer retentionTicker.Stop()
 	go w.cleanupRetention()
+	go w.rollupMonthly()
 
 	count := 0
 	for {
@@ -336,6 +337,39 @@ func (w *Worker) drainWAL() {
 	}
 	if count > 0 {
 		w.flush()
+	}
+}
+
+// rollupMonthly aggregates daily rows into _kora_analytics_monthly for the previous month.
+func (w *Worker) rollupMonthly() {
+	if w.db == nil {
+		return
+	}
+	// Aggregate the previous month.
+	now := time.Now()
+	monthStart := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, now.Location())
+	monthEnd := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+
+	upsert := w.dialect.UpsertIncrement(
+		[]string{"site", "doctype", "metric", "dimension", "month"},
+		[]string{"value"},
+	)
+
+	query := fmt.Sprintf(
+		`INSERT INTO _kora_analytics_monthly (site, doctype, metric, dimension, month, value)
+		 SELECT site, doctype, metric, dimension, ? AS month, SUM(value)
+		 FROM _kora_analytics_daily
+		 WHERE site = ? AND date >= ? AND date < ?
+		 GROUP BY site, doctype, metric, dimension
+		 %s`, upsert)
+
+	result, err := w.db.Exec(query, monthStart, w.siteName, monthStart, monthEnd)
+	if err != nil {
+		slog.Warn("analytics: monthly rollup failed", "site", w.siteName, "error", err)
+		return
+	}
+	if n, _ := result.RowsAffected(); n > 0 {
+		slog.Info("analytics: monthly rollup complete", "site", w.siteName, "rows", n)
 	}
 }
 

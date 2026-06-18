@@ -782,6 +782,13 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 			statusField = dt.GetField(wf.WorkflowStateField)
 		}
 	}
+
+	// Capture pre-mutation state for analytics (so worker can detect state transition).
+	oldFields := make(map[string]any)
+	for k, v := range doc.Fields {
+		oldFields[k] = v
+	}
+	oldDocStatus := doc.DocStatus
 	if statusField != nil {
 		doc.Set(statusField.Fieldname, newState)
 	}
@@ -792,7 +799,7 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 	if modifiedBy == "" {
 		modifiedBy = "system"
 	}
-	if err := h.siteTx(c).Save(dt, doc, modifiedBy, owner, nil); err != nil {
+	if err := h.siteTx(c).Save(dt, doc, modifiedBy, owner, &doctype.Document{Fields: oldFields, DocStatus: oldDocStatus}); err != nil {
 		internalError(c, "workflow save failed", err)
 		return
 	}
