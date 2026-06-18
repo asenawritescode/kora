@@ -1,3 +1,11 @@
+## v0.5.0-alpha.21 — 2026-06-18
+### Fixes
+- docs: update documentation for console-first workflow, env var config, and dialect fix
+
+### Documentation
+- docs: update documentation for console-first workflow, env var config, and dialect fix
+
+
 ## v0.5.0-alpha.20 — 2026-06-17
 ### Fixes
 - fix: eliminate all hardcoded MySQL SQL for LibSQL compatibility
