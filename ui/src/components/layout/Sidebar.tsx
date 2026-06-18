@@ -18,6 +18,7 @@ import {
   Users,
   KeyRound,
   BookOpen,
+  BarChart3,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -166,6 +167,10 @@ export function Sidebar() {
         <NavItem to="/workspace/admin/secrets" collapsed={sidebarCollapsed}>
           <KeyRound className="h-4 w-4 shrink-0" />
           {!sidebarCollapsed && 'Secrets'}
+        </NavItem>
+        <NavItem to="/workspace/admin/analytics" collapsed={sidebarCollapsed}>
+          <BarChart3 className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && 'Analytics'}
         </NavItem>
         <a
           href="/api/swagger-ui"

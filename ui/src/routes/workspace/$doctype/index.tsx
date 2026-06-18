@@ -4,9 +4,11 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchDoctypeSchema } from '@/lib/api/system'
 import { fetchList } from '@/lib/api/resources'
 import { DataTable } from '@/components/tables/DataTable'
+import { InsightsPanel } from '@/components/analytics/InsightsPanel'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus } from 'lucide-react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Plus, List, BarChart3 } from 'lucide-react'
 import type { Document, DocType } from '@/types/kora'
 
 export default function ListPage() {
@@ -15,6 +17,7 @@ export default function ListPage() {
 
   const [page, setPage] = useState(0)
   const [sorting, setSorting] = useState<{ field: string; order: string } | null>(null)
+  const [activeTab, setActiveTab] = useState<string>("list")
   const limit = 50
 
   const schemaQuery = useQuery({
@@ -81,28 +84,47 @@ export default function ListPage() {
         </Button>
       </div>
 
-      {/* Table */}
-      <DataTable
-        columns={listFields}
-        data={(listQuery.data?.data as Document[]) ?? []}
-        titleField={dt.title_field}
-        total={total}
-        page={page}
-        totalPages={totalPages}
-        sorting={sorting}
-        onSortingChange={setSorting}
-        onPageChange={setPage}
-        onRowClick={(doc) =>
-          navigate({
-            to: '/workspace/$doctype/$name',
-            params: { doctype, name: doc.name },
-          })
-        }
-        isEmpty={!listQuery.isFetching && total === 0}
-        isFetching={listQuery.isFetching}
-        isError={listQuery.isError}
-        onRetry={() => listQuery.refetch()}
-      />
+      {/* Tab bar: List | Insights */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="mb-6">
+          <TabsTrigger value="list" className="flex items-center gap-2">
+            <List className="h-4 w-4" />
+            List
+          </TabsTrigger>
+          <TabsTrigger value="insights" className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" />
+            Insights
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list">
+          <DataTable
+            columns={listFields}
+            data={(listQuery.data?.data as Document[]) ?? []}
+            titleField={dt.title_field}
+            total={total}
+            page={page}
+            totalPages={totalPages}
+            sorting={sorting}
+            onSortingChange={setSorting}
+            onPageChange={setPage}
+            onRowClick={(doc) =>
+              navigate({
+                to: '/workspace/$doctype/$name',
+                params: { doctype, name: doc.name },
+              })
+            }
+            isEmpty={!listQuery.isFetching && total === 0}
+            isFetching={listQuery.isFetching}
+            isError={listQuery.isError}
+            onRetry={() => listQuery.refetch()}
+          />
+        </TabsContent>
+
+        <TabsContent value="insights">
+          <InsightsPanel doctype={doctype} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
