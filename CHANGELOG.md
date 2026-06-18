@@ -1,3 +1,5 @@
+## v0.6.0 — 2026-06-18
+
 ## v0.5.0-alpha.21 — 2026-06-18
 ### Fixes
 - docs: update documentation for console-first workflow, env var config, and dialect fix
