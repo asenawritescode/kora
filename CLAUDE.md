@@ -277,6 +277,8 @@ System console at `/console` sees all sites (SystemGuard, env var credentials). 
 
 ### SQL Dialect (`db/` package)
 
+> **Skill**: `.claude/skills/db-compat.md` — invoke when writing SQL, reviewing DB code, or debugging MySQL/LibSQL errors. All SQL must go through the Dialect; never hardcode database-specific syntax.
+
 The `db.Dialect` interface abstracts all DB-specific SQL generation for MySQL and LibSQL:
 - DDL: `CreateTable`, `AddColumn`, `ColumnType`, schema introspection (`LoadSchema` via INFORMATION_SCHEMA vs PRAGMA)
 - DML: `UpsertClause` (ON DUPLICATE KEY UPDATE vs ON CONFLICT DO UPDATE), `InsertOrIgnorePrefix`
@@ -361,7 +363,7 @@ docker push smitdockerhub/kora:$VSN
 docker push smitdockerhub/kora:latest
 ```
 
-**Image:** `smitdockerhub/kora` — supports both MySQL and LibSQL, pure Go (no CGO), ~63MB, version injected at build time.
+**Image:** `smitdockerhub/kora` — supports both MySQL and LibSQL, pure Go (no CGO), ~30MB, version injected at build time.
 
 **Dockerfile** (`/Dockerfile`): Multi-stage — Bun for UI, Go for binary (CGO_ENABLED=0, ldflags for version), Alpine runtime. `build-arg VERSION` sets the version string returned by `/api/ping`.
 

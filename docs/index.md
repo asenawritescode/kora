@@ -35,16 +35,20 @@ Open **http://localhost:8000/console** → create your first site. No code neede
 ## How It Works
 
 ```
-You write this:                    Kora builds:
+1. Start Kora                     Kora builds:
 
-config/todo/                       ✅ MySQL / LibSQL database
-  doctypes/todo.yaml               ✅ REST API (CRUD + auth)
-  roles.yaml                       ✅ React admin panel
-  permissions.yaml                 ✅ Forms, lists, filters
-                                   ✅ Mobile responsive
+   ./kora serve                      ✅ MySQL / LibSQL database
+                                     ✅ REST API (CRUD + auth)
+2. Create a site                    ✅ React admin panel
+   via /console UI                   ✅ Forms, lists, filters
+    OR YAML import                   ✅ Mobile responsive
 ```
 
-Three YAML files. One binary. **Zero application code.**
+One binary. Define your app via console UI or YAML import. **Zero application code.**
+
+**Two paths, same result:**
+- **Console UI** — `/console` → Create Site → build doctypes in the visual builder
+- **YAML import** — `./kora config import --site X --path config/todo/` for batch operations
 
 ---
 
@@ -140,6 +144,7 @@ fields:
 - [API Reference](API.md) — REST endpoints, auth, users, secrets, OpenAPI
 - [Architecture](ARCHITECTURE.md) — Request flow, middleware, multi-tenancy, AI system
 - [Decisions](DECISIONS.md) — Why React SPA, computed fields, path-based routing
+- [Plugin Architecture](plugin-architecture.md) — Extension & webhook system design (draft)
 
 ---
 

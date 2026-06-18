@@ -101,13 +101,10 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 ### CORS
 
-Provided by `github.com/gin-contrib/cors`. Configurable per site:
+Provided by `github.com/gin-contrib/cors`. Configurable via environment variables:
 
-```yaml
-# site_config.yaml
-cors_origins:
-  - https://app.example.com
-  - https://admin.example.com
+```
+KORA_CORS_ORIGINS=https://app.example.com,https://admin.example.com
 ```
 
 Default: allow all origins (development). In production, restrict to specific origins.
@@ -128,6 +125,7 @@ Uses `golang.org/x/time/rate` — an in-process token bucket implementation.
 ```
 KORA_RATE_LIMIT=100
 KORA_RATE_BURST=20
+KORA_CORS_ORIGINS=https://app.example.com
 ```
 
 ### CSRF Protection

@@ -17,7 +17,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/asenawritescode/kora/configstore"
-	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/secret"
@@ -274,7 +273,7 @@ DOCTYPE CREATION (special rules):
 					slog.Info("AI tool call", "name", safeGetString(fn, "name"), "args", safeGetString(fn, "arguments"))
 				}
 			}
-			toolResults := executeToolCallsForAI(tx, reg, toolCalls, currentUser)
+			toolResults := executeToolCallsForAI(tx, reg, toolCalls, currentUser, siteName)
 			for i, tr := range toolResults {
 				raw := tr["content"].(string)
 				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])
@@ -593,7 +592,7 @@ func isTransientError(err error) bool {
 // ---------------------------------------------------------------------------
 
 // executeToolCallsForAI runs tool calls and returns results in OpenAI tool message format.
-func executeToolCallsForAI(tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner string) []map[string]any {
+func executeToolCallsForAI(tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner, siteName string) []map[string]any {
 	var results []map[string]any
 	for _, tc := range toolCalls {
 		call, ok := tc.(map[string]any)
@@ -630,7 +629,7 @@ func executeToolCallsForAI(tx *orm.TxManager, reg *doctype.Registry, toolCalls [
 			continue
 		}
 
-		result := executeSingleTool(tx, reg, name, args, owner)
+		result := executeSingleTool(tx, reg, name, args, owner, siteName)
 		results = append(results, map[string]any{
 			"role":         "tool",
 			"tool_call_id": id,
@@ -640,7 +639,7 @@ func executeToolCallsForAI(tx *orm.TxManager, reg *doctype.Registry, toolCalls [
 	return results
 }
 
-func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner string) string {
+func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName string) string {
 	// --- System tools (no doctype prefix) ---
 	switch toolName {
 	case "list_doctypes":
@@ -650,7 +649,7 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 		return executeValidateYAML(yamlStr)
 	case "create_doctype_draft":
 		yamlStr, _ := args["yaml"].(string)
-		return executeCreateDoctypeDraft(tx, reg, yamlStr, owner)
+		return executeCreateDoctypeDraft(tx, reg, yamlStr, owner, siteName)
 	}
 
 	// Parse tool name using suffix matching (handles multi-word doctype names like "Work Order").
@@ -1347,7 +1346,7 @@ func executeValidateYAML(yamlStr string) string {
 	return strings.Join(parts, "\n")
 }
 
-func executeCreateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr, owner string) string {
+func executeCreateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr, owner, siteName string) string {
 	if yamlStr == "" {
 		return "Error: no YAML content provided. Use validate_doctype_yaml first."
 	}
@@ -1388,7 +1387,7 @@ func executeCreateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr
 	}
 
 	// 5. Save to configstore as Draft — NEVER activate.
-	store := configstore.NewStore(tx.DB, db.MySQL())
+	store := configstore.NewStore(tx.DB, tx.Dialect)
 	if err := store.SaveDocType(&dt); err != nil {
 		return fmt.Sprintf("Error saving doctype: %v", err)
 	}
@@ -1410,7 +1409,7 @@ func executeCreateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr
 		owner = "ai-assistant"
 	}
 	verID, verNum, err := store.CreateConfigVersion(
-		"", owner, "Created "+dt.Name+" via AI (Draft)", "Draft", allDoctypes,
+		siteName, owner, "Created "+dt.Name+" via AI (Draft)", "Draft", allDoctypes,
 	)
 	if err != nil {
 		slog.Warn("config version creation failed", "error", err)

@@ -477,42 +477,30 @@ The `create_doctype_draft` AI tool always creates config versions with `status: 
 
 ---
 
-## Site Config
+## Site & Platform Configuration
 
-```yaml
-# sites/fieldwork.local/site_config.yaml
-db_host: 127.0.0.1
-db_port: 3306
-db_name: fieldwork_local
-db_user: kora
-db_password: secret
+All configuration is via environment variables. There are no YAML config files for site or platform settings. See [SETUP.md](SETUP.md) for the complete env var reference.
 
-# redis_url: redis://localhost:6379/0   # Planned — session store for multi-server (not yet wired)
+### Key Environment Variables
 
-file_storage: local
-files_path: sites/fieldwork.local/files
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KORA_DB_TYPE` | `mysql` | `mysql` or `libsql` |
+| `KORA_DB_HOST` | `127.0.0.1` | DB host |
+| `DB_DSN` | — | Full connection string (recommended for LibSQL) |
+| `KORA_HTTP_PORT` | `8000` | Server port |
+| `KORA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `KORA_LOG_FORMAT` | `json` | `json` or `text` |
+| `KORA_SESSION_HOURS` | `72` | Session lifetime |
+| `KORA_APP_NAME` | `Kora` | App branding |
+| `KORA_PRIMARY_COLOR` | `#000000` | Primary UI color |
+| `KORA_RATE_LIMIT` | `100` | Requests/sec per user |
+| `KORA_RATE_BURST` | `20` | Rate limit burst size |
+| `KORA_TLS_MODE` | `off` | `off`, `auto`, or `manual` |
+| `KORA_TLS_EMAIL` | — | For Let's Encrypt |
+| `CONSOLE_EMAIL` | `admin@kora.local` | Console admin email |
+| `CONSOLE_PASSWORD` | `kora123` | Console admin password |
 
-hostname: fieldwork.local
-domains:
-  - fieldwork.local
-  - www.fieldwork.local
+### Runtime Site Config
 
-apps:
-  - core
-```
-
-## Common Site Config
-
-```yaml
-# common_site_config.yaml
-# redis_url: redis://localhost:6379/0   # Planned — session store for multi-server (not yet wired)
-db_host: 127.0.0.1
-http_port: 8000
-workers: 4
-log_level: info       # debug | info | warn | error
-log_format: json      # json | text
-rate_limit: 100       # requests/sec per user
-rate_limit_burst: 20
-tls_mode: off         # off | auto | manual
-tls_email: ""         # For Let's Encrypt
-```
+Each site stores its runtime config (domains, database name) in the database (`_kora_config_version.config`). A `site_config.yaml` file is auto-generated in `sites/<site>/` at startup for backward compatibility and file-based config consumers, but it is not the source of truth — the database is.

@@ -114,6 +114,7 @@ Seven admin views — all config-driven, all mobile-responsive:
 | [API.md](docs/API.md) | REST API reference, auth, CRUD, system endpoints |
 | [DECISIONS.md](docs/DECISIONS.md) | Architecture Decision Records |
 | [NETWORKING.md](docs/NETWORKING.md) | TLS, autocert, rate limiting, security headers, CORS |
+| [Plugin Architecture](docs/plugin-architecture.md) | Extension & webhook system design (draft) |
 
 ## Tech Stack
 

@@ -426,9 +426,9 @@ kora/
 │   ├── contracts/               # Contracts, Obligations
 │   ├── fieldwork/               # Field service (original sample)
 │   └── airtime/                 # Airtime sales (original sample)
-├── sites/                     # Runtime site configs
-│   └── fieldwork.local/
-│       ├── site_config.yaml
+├── sites/                     # Runtime site data (file uploads, site_config.yaml)
+│   └── airtime.local/
+│       ├── site_config.yaml   # Auto-generated from DB at runtime
 │       └── files/
 ├── api/          REST API handlers (CRUD, users, secrets, AI chat, OpenAPI)
 ├── auth/         Session + CSRF
