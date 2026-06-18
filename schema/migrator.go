@@ -213,7 +213,6 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []str
 	// CREATE TABLE statements.
 	for _, tableName := range d.NewTables {
 		// Find the DocType for this table and use dialect DDL.
-		var stmt string
 		var foundDT *doctype.DocType
 		for _, dt := range registry.All() {
 			if dt.RawTableName() == tableName {
@@ -222,11 +221,10 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []str
 			}
 		}
 		if foundDT != nil {
-			stmt = dialect.CreateTable(foundDT)
+			statements = append(statements, dialect.CreateTable(foundDT)...)
 		} else {
-			stmt = generateCreateTable(tableName, registry, dialect)
+			statements = append(statements, generateCreateTable(tableName, registry, dialect))
 		}
-		statements = append(statements, stmt)
 	}
 
 	// ALTER TABLE ADD COLUMN statements.

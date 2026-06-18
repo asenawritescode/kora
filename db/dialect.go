@@ -23,7 +23,7 @@ type Dialect interface {
 	LoadSchema(db *sql.DB, dbName string) (*LiveSchema, error)
 
 	// DDL generation.
-	CreateTable(dt *doctype.DocType) string
+	CreateTable(dt *doctype.DocType) []string
 	AddColumn(tableName string, f *doctype.Field) string
 	AlterColumn(tableName string, f *doctype.Field) string
 	RenameColumn(tableName, oldName, newName string) string

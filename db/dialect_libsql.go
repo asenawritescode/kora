@@ -143,7 +143,7 @@ func (d *LibSQLDialect) LoadSchema(db *sql.DB, _ string) (*LiveSchema, error) {
 // DDL Generation (SQLite-compatible)
 // ---------------------------------------------------------------------------
 
-func (d *LibSQLDialect) CreateTable(dt *doctype.DocType) string {
+func (d *LibSQLDialect) CreateTable(dt *doctype.DocType) []string {
 	var cols []string
 
 	// System columns — no ENGINE, no CHARSET, no COLLATE.
@@ -193,11 +193,12 @@ func (d *LibSQLDialect) CreateTable(dt *doctype.DocType) string {
 	}
 
 	// ON UPDATE trigger for the modified column (SQLite has no ON UPDATE attribute).
+	// Returned as a separate statement because LibSQL does not support multi-statement Exec.
 	triggerName := d.QuoteIdent(dt.RawTableName() + "_modified_on_update")
-	ddl += fmt.Sprintf("\nCREATE TRIGGER %s AFTER UPDATE ON %s FOR EACH ROW BEGIN UPDATE %s SET \"modified\" = STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', 'NOW') WHERE \"name\" = NEW.\"name\"; END",
+	triggerDDL := fmt.Sprintf("CREATE TRIGGER %s AFTER UPDATE ON %s FOR EACH ROW BEGIN UPDATE %s SET \"modified\" = STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', 'NOW') WHERE \"name\" = NEW.\"name\"; END",
 		triggerName, tableName, tableName)
 
-	return ddl
+	return []string{ddl, triggerDDL}
 }
 
 func (d *LibSQLDialect) AddColumn(tableName string, f *doctype.Field) string {

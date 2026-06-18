@@ -118,7 +118,7 @@ func (s *LiveSchema) ensureTable(name string) *LiveTable {
 // DDL Generation
 // ---------------------------------------------------------------------------
 
-func (d *MySQLDialect) CreateTable(dt *doctype.DocType) string {
+func (d *MySQLDialect) CreateTable(dt *doctype.DocType) []string {
 	var cols []string
 
 	// System columns.
@@ -170,7 +170,7 @@ func (d *MySQLDialect) CreateTable(dt *doctype.DocType) string {
 		}
 	}
 
-	return ddl
+	return []string{ddl}
 }
 
 func (d *MySQLDialect) AddColumn(tableName string, f *doctype.Field) string {
