@@ -207,6 +207,7 @@ export default function ConsoleDashboard() {
                   <TableHead>Domains</TableHead>
                   <TableHead className="text-right">DocTypes</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-[60px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -225,6 +226,19 @@ export default function ConsoleDashboard() {
                       <Badge variant={s.status === 'active' ? 'default' : 'destructive'}>
                         {s.status}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <a
+                        href={`/s/${s.name}/workspace`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+                        title={`Open workspace login for ${s.name}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Login</span>
+                      </a>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -402,6 +416,23 @@ function SiteEditSheet({
               {saving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
               Save Domains
             </Button>
+          </div>
+
+          {/* Workspace Login */}
+          <div className="space-y-3 border-t pt-6">
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Workspace Login</Label>
+            <a
+              href={`/s/${site?.name}/workspace`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Open workspace for {site?.name}
+            </a>
+            <p className="text-xs text-muted-foreground">
+              Path-based URL: <code className="text-xs bg-muted px-1 py-0.5 rounded">/s/{site?.name}/workspace</code>
+            </p>
           </div>
 
           {/* Reset Password */}
