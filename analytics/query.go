@@ -1,16 +1,66 @@
 package analytics
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
+
+// cacheEntry holds a cached query result with expiry.
+type cacheEntry struct {
+	result   *QueryResult
+	expiresAt time.Time
+}
 
 // QueryEngine resolves metric queries against the rollup tables.
 type QueryEngine struct {
 	DB       *sql.DB
 	SiteName string
+	cache    sync.Map // key string → *cacheEntry
+}
+
+// CachedResolve returns a cached result if available and not expired.
+// Otherwise, delegates to Resolve and caches the result for the given TTL.
+func (qe *QueryEngine) CachedResolve(metric *Metric, req QueryRequest, ttl time.Duration) (*QueryResult, error) {
+	key := qe.cacheKey(metric.Name, req)
+	if entry, ok := qe.cache.Load(key); ok {
+		if e := entry.(*cacheEntry); time.Now().Before(e.expiresAt) {
+			return e.result, nil
+		}
+		qe.cache.Delete(key)
+	}
+
+	result, err := qe.Resolve(metric, req)
+	if err != nil {
+		return nil, err
+	}
+
+	qe.cache.Store(key, &cacheEntry{
+		result:    result,
+		expiresAt: time.Now().Add(ttl),
+	})
+	return result, nil
+}
+
+func (qe *QueryEngine) cacheKey(metric string, req QueryRequest) string {
+	h := sha256.New()
+	h.Write([]byte(qe.SiteName))
+	h.Write([]byte(metric))
+	h.Write([]byte(req.From))
+	h.Write([]byte(req.To))
+	h.Write([]byte(req.GroupBy))
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// InvalidateCache clears all cached results for this engine.
+func (qe *QueryEngine) InvalidateCache() {
+	qe.cache.Range(func(key, _ any) bool {
+		qe.cache.Delete(key)
+		return true
+	})
 }
 
 // QueryRequest holds parameters for a metric query.

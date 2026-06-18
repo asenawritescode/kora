@@ -66,6 +66,7 @@ func NewWorker(bus EventBus, database *sql.DB, dialect db.Dialect, registry *doc
 }
 
 // Start begins consuming events. Runs in a background goroutine.
+// On startup, drains any WAL backlog from a previous unclean shutdown.
 func (w *Worker) Start() {
 	ch, err := w.bus.Subscribe()
 	if err != nil {
@@ -76,15 +77,22 @@ func (w *Worker) Start() {
 	slog.Info("analytics worker started", "site", w.siteName,
 		"batch_size", w.batchSize, "flush_interval", w.flushEvery)
 
+	// Drain any WAL backlog before consuming live events.
+	w.drainWAL()
+
 	flushTicker := time.NewTicker(w.flushEvery)
 	defer flushTicker.Stop()
+
+	// Retention cleanup: run once at startup and then daily.
+	retentionTicker := time.NewTicker(24 * time.Hour)
+	defer retentionTicker.Stop()
+	go w.cleanupRetention()
 
 	count := 0
 	for {
 		select {
 		case event, ok := <-ch:
 			if !ok {
-				// Channel closed — flush and exit.
 				w.flush()
 				return
 			}
@@ -100,6 +108,9 @@ func (w *Worker) Start() {
 				w.flush()
 				count = 0
 			}
+
+		case <-retentionTicker.C:
+			go w.cleanupRetention()
 
 		case <-w.stopCh:
 			w.flush()
@@ -187,6 +198,9 @@ func (w *Worker) process(event ChangeEvent) {
 				if oldState != newState {
 					oldDim := "state=" + oldState
 					w.addDelta(event.Doctype, m.Name, oldDim, today, -1)
+
+					// Track the state transition for funnel/duration metrics.
+					w.trackWorkflowTransition(event, oldState, newState)
 				}
 			}
 
@@ -302,4 +316,59 @@ func toFloat(v any) float64 {
 	default:
 		return 0
 	}
+}
+
+// drainWAL replays any events spilled to disk from a previous unclean shutdown.
+func (w *Worker) drainWAL() {
+	count, err := w.bus.DrainWAL(func(event ChangeEvent) {
+		w.process(event)
+	})
+	if err != nil {
+		slog.Error("analytics worker: WAL drain failed", "error", err)
+	}
+	if count > 0 {
+		w.flush()
+	}
+}
+
+// cleanupRetention deletes rollup rows older than the configured retention period.
+func (w *Worker) cleanupRetention() {
+	// Retention is handled by the Config — but the worker doesn't have a direct
+	// reference to it currently. In the meantime, keep 90 days of daily data.
+	cutoff := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
+	for _, table := range []string{"_kora_analytics_daily", "_kora_analytics_events"} {
+		result, err := w.db.Exec(
+			fmt.Sprintf("DELETE FROM %s WHERE site = ? AND date < ?", table),
+			w.siteName, cutoff,
+		)
+		if err != nil {
+			slog.Warn("analytics: retention cleanup failed", "table", table, "error", err)
+			continue
+		}
+		if n, _ := result.RowsAffected(); n > 0 {
+			slog.Info("analytics: retention cleanup", "table", table, "deleted", n)
+		}
+	}
+}
+
+// trackWorkflowTransition records a state transition in _kora_analytics_workflow.
+// Called when a document's workflow state changes.
+func (w *Worker) trackWorkflowTransition(event ChangeEvent, oldState, newState string) {
+	now := event.Timestamp
+	enteredAt := now // Approximate: we don't know exactly when the old state was entered.
+
+	// Find and close the previous transition for this document (set exited_at + duration).
+	w.db.Exec(
+		`UPDATE _kora_analytics_workflow
+		 SET exited_at = ?, duration_seconds = TIMESTAMPDIFF(SECOND, entered_at, ?)
+		 WHERE site = ? AND doctype = ? AND doc_name = ? AND to_state = ? AND exited_at IS NULL`,
+		now, now, event.Site, event.Doctype, event.DocName, oldState,
+	)
+
+	// Insert the new state transition.
+	w.db.Exec(
+		`INSERT INTO _kora_analytics_workflow (site, doctype, doc_name, from_state, to_state, entered_at, actor)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		event.Site, event.Doctype, event.DocName, oldState, newState, enteredAt, event.ModifiedBy,
+	)
 }

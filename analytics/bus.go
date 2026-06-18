@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -78,6 +79,61 @@ func (b *channelBus) Publish(event ChangeEvent) error {
 			"doctype", event.Doctype, "doc", event.DocName, "op", event.Operation)
 		return nil
 	}
+}
+
+// DrainWAL reads any events from the WAL file and passes them to the handler.
+// After successful replay, the WAL file is truncated. Returns the count of
+// replayed events.
+func (b *channelBus) DrainWAL(handler func(ChangeEvent)) (int, error) {
+	walPath := b.currentWALPath()
+	if walPath == "" {
+		return 0, nil
+	}
+
+	b.walMu.Lock()
+	defer b.walMu.Unlock()
+
+	// Close current WAL file handle if open.
+	if b.walFile != nil {
+		b.walFile.Close()
+		b.walFile = nil
+	}
+
+	f, err := os.Open(walPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("open wal for drain: %w", err)
+	}
+	defer f.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var event ChangeEvent
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			slog.Warn("analytics: skipping corrupt WAL line", "error", err)
+			continue
+		}
+		handler(event)
+		count++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return count, fmt.Errorf("reading wal: %w", err)
+	}
+
+	// Truncate WAL after successful drain.
+	if err := os.Truncate(walPath, 0); err != nil {
+		slog.Warn("analytics: failed to truncate WAL after drain", "error", err)
+	}
+
+	if count > 0 {
+		slog.Info("analytics: drained WAL backlog", "events", count)
+	}
+
+	return count, nil
 }
 
 func (b *channelBus) Subscribe() (<-chan ChangeEvent, error) {

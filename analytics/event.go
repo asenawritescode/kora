@@ -38,6 +38,10 @@ type EventBus interface {
 	// Subscribe returns a channel that receives events. Only one subscriber per bus.
 	Subscribe() (<-chan ChangeEvent, error)
 
+	// DrainWAL replays any events spilled to the WAL through the given handler.
+	// Called once at startup before consuming live events.
+	DrainWAL(handler func(ChangeEvent)) (int, error)
+
 	// Dropped returns the count of events spilled to WAL due to a full channel.
 	Dropped() int64
 
