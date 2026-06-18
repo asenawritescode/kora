@@ -87,8 +87,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner, m
 		var maxNum sql.NullInt64
 		prefix := derivePrefix(dt.Name)
 		err := dbTx.QueryRow(
-			tx.Dialect.NameGenQuery(dt.TableName(), prefix),
-			prefix+"-%",
+			tx.Dialect.NameGenQuery(dt.RawTableName(), prefix),
 		).Scan(&maxNum)
 		if err != nil {
 			return fmt.Errorf("reading max name number: %w", err)

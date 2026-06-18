@@ -378,19 +378,36 @@ func (w *Worker) cleanupRetention() {
 	if w.db == nil {
 		return
 	}
-	cutoff := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
-	for _, table := range []string{"_kora_analytics_daily", "_kora_analytics_events"} {
+	dateCutoff := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
+
+	// Each table uses a different date column.
+	tables := []struct {
+		name, dateCol string
+	}{
+		{"_kora_analytics_daily", "date"},
+		{"_kora_analytics_monthly", "month"},
+	}
+	for _, t := range tables {
 		result, err := w.db.Exec(
-			fmt.Sprintf("DELETE FROM %s WHERE site = ? AND date < ?", table),
-			w.siteName, cutoff,
+			fmt.Sprintf("DELETE FROM %s WHERE site = ? AND %s < ?", t.name, t.dateCol),
+			w.siteName, dateCutoff,
 		)
 		if err != nil {
-			slog.Warn("analytics: retention cleanup failed", "table", table, "error", err)
-			continue
+			slog.Warn("analytics: retention cleanup failed", "table", t.name, "error", err)
+		} else if n, _ := result.RowsAffected(); n > 0 {
+			slog.Info("analytics: retention cleanup", "table", t.name, "deleted", n)
 		}
-		if n, _ := result.RowsAffected(); n > 0 {
-			slog.Info("analytics: retention cleanup", "table", table, "deleted", n)
-		}
+	}
+
+	// Events table uses 'event_at' (datetime, not date).
+	result, err := w.db.Exec(
+		"DELETE FROM _kora_analytics_events WHERE site = ? AND event_at < ?",
+		w.siteName, dateCutoff+" 00:00:00",
+	)
+	if err != nil {
+		slog.Warn("analytics: retention cleanup failed", "table", "_kora_analytics_events", "error", err)
+	} else if n, _ := result.RowsAffected(); n > 0 {
+		slog.Info("analytics: retention cleanup", "table", "_kora_analytics_events", "deleted", n)
 	}
 }
 

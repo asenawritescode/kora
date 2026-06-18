@@ -1,0 +1,46 @@
+name: Sale
+module: POS
+title_field: customer_name
+search_fields: customer_name
+sort_field: creation
+sort_order: DESC
+is_submittable: true
+fields:
+  - fieldname: customer_name
+    fieldtype: Data
+    label: Customer Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: payment_status
+    fieldtype: Select
+    label: Payment Status
+    options: |
+      Pending
+      Paid
+      Refunded
+    default: Pending
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: payment_method
+    fieldtype: Select
+    label: Payment Method
+    options: |
+      Cash
+      Card
+      Mobile Money
+    in_list_view: true
+  - fieldname: total_amount
+    fieldtype: Currency
+    label: Total Amount
+    reqd: true
+    in_list_view: true
+  - fieldname: discount
+    fieldtype: Percent
+    label: Discount
+    default: "0"
+  - fieldname: items
+    fieldtype: Table
+    label: Sale Items
+    options: Sale Item

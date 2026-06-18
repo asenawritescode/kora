@@ -156,21 +156,22 @@ func (d *MySQLDialect) CreateTable(dt *doctype.DocType) []string {
 	ddl := fmt.Sprintf("CREATE TABLE %s (\n  %s\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 		tableName, strings.Join(cols, ",\n  "))
 
-	// Search indexes for fields with search_index: true.
+	// Build statement list — separate CREATE INDEX statements for MySQL compatibility.
+	// MySQL does not support multi-statement Exec calls without multiStatements=true.
+	statements := []string{ddl}
+
 	for _, f := range dt.DataFields() {
 		if f.SearchIndex {
-			ddl += "\n" + d.CreateIndex(dt.RawTableName(), f.Fieldname, false)
+			statements = append(statements, d.CreateIndex(dt.RawTableName(), f.Fieldname, false))
 		}
 	}
-
-	// UNIQUE indexes for fields with unique: true.
 	for _, f := range dt.DataFields() {
 		if f.Unique {
-			ddl += "\n" + d.CreateIndex(dt.RawTableName(), f.Fieldname, true)
+			statements = append(statements, d.CreateIndex(dt.RawTableName(), f.Fieldname, true))
 		}
 	}
 
-	return []string{ddl}
+	return statements
 }
 
 func (d *MySQLDialect) AddColumn(tableName string, f *doctype.Field) string {

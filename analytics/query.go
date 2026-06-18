@@ -133,7 +133,13 @@ func (qe *QueryEngine) Resolve(metric *Metric, req QueryRequest) (*QueryResult, 
 			return nil, fmt.Errorf("scan row: %w", err)
 		}
 		for i, col := range cols {
-			row[col] = *(scanTargets[i].(*any))
+			val := *(scanTargets[i].(*any))
+			// Normalize MySQL []byte → string for JSON-safe output.
+			if b, ok := val.([]byte); ok {
+				row[col] = string(b)
+			} else {
+				row[col] = val
+			}
 		}
 		result.Rows = append(result.Rows, row)
 	}
@@ -164,17 +170,15 @@ func (qe *QueryEngine) ResolveInsights(doctype string, metrics []*Metric) (map[s
 			switch m.Type {
 			case MetricCount, MetricSum:
 				if len(result.Rows) > 0 {
-					// First row, first numeric column (usually "value").
-					for _, v := range result.Rows[0] {
+					if v, ok := result.Rows[0]["value"]; ok {
 						insights[m.Name] = v
-						break
 					}
 				}
 			case MetricCountByField, MetricStateDistribution:
 				byField := make(map[string]any)
 				for _, row := range result.Rows {
-					dim, _ := row["dimension"].(string)
-					val, _ := row["value"].(float64)
+					dim := dbString(row["dimension"])
+					val := dbFloat(row["value"])
 					if dim != "" {
 						// Strip "fieldname=" prefix for cleaner AI consumption.
 						if idx := strings.Index(dim, "="); idx >= 0 {
@@ -284,4 +288,33 @@ func GetStatus(bus EventBus) *Status {
 		s.EventsDropped = bus.Dropped()
 	}
 	return s
+}
+
+// dbString safely extracts a string from a DB-scanned value.
+// MySQL driver returns []byte for VARCHAR; LibSQL returns string.
+func dbString(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case []byte:
+		return string(val)
+	default:
+		return ""
+	}
+}
+
+// dbFloat safely extracts a float64 from a DB-scanned value.
+func dbFloat(v any) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int64:
+		return float64(val)
+	case []byte:
+		var f float64
+		fmt.Sscanf(string(val), "%f", &f)
+		return f
+	default:
+		return 0
+	}
 }

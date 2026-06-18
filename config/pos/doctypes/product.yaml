@@ -1,0 +1,50 @@
+name: Product
+module: Inventory
+title_field: product_name
+search_fields: product_name, category
+sort_field: modified
+sort_order: DESC
+fields:
+  - fieldname: product_name
+    fieldtype: Data
+    label: Product Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    in_standard_filter: true
+    search_index: true
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Electronics
+      Groceries
+      Clothing
+      Beverages
+      Household
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: price
+    fieldtype: Currency
+    label: Unit Price
+    reqd: true
+    in_list_view: true
+  - fieldname: cost
+    fieldtype: Currency
+    label: Cost Price
+    in_list_view: false
+  - fieldname: stock_level
+    fieldtype: Int
+    label: Stock Level
+    default: "0"
+    in_list_view: true
+  - fieldname: reorder_point
+    fieldtype: Int
+    label: Reorder Point
+    default: "10"
+  - fieldname: sku
+    fieldtype: Data
+    label: SKU
+    unique: true
+    in_list_view: true

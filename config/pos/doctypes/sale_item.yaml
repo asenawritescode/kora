@@ -1,0 +1,27 @@
+name: Sale Item
+module: POS
+is_child_table: true
+title_field: product
+fields:
+  - fieldname: product
+    fieldtype: Link
+    label: Product
+    options: Product
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Int
+    label: Quantity
+    reqd: true
+    in_list_view: true
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit Price
+    reqd: true
+    in_list_view: true
+  - fieldname: line_total
+    fieldtype: Currency
+    label: Line Total
+    computed: quantity * unit_price
+    read_only: true
+    in_list_view: true
