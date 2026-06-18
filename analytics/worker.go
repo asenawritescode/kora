@@ -254,6 +254,14 @@ func (w *Worker) addDelta(doctype, metric, dimension, date string, delta float64
 
 // flush writes all accumulated deltas to _kora_analytics_daily via batched UPSERTs.
 func (w *Worker) flush() {
+	if w.db == nil {
+		// No DB connection — discard deltas (test mode).
+		w.mu.Lock()
+		w.deltas = make(map[deltaKey]float64)
+		w.mu.Unlock()
+		return
+	}
+
 	w.mu.Lock()
 	if len(w.deltas) == 0 {
 		w.mu.Unlock()
@@ -333,8 +341,9 @@ func (w *Worker) drainWAL() {
 
 // cleanupRetention deletes rollup rows older than the configured retention period.
 func (w *Worker) cleanupRetention() {
-	// Retention is handled by the Config — but the worker doesn't have a direct
-	// reference to it currently. In the meantime, keep 90 days of daily data.
+	if w.db == nil {
+		return
+	}
 	cutoff := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
 	for _, table := range []string{"_kora_analytics_daily", "_kora_analytics_events"} {
 		result, err := w.db.Exec(
@@ -353,11 +362,14 @@ func (w *Worker) cleanupRetention() {
 
 // trackWorkflowTransition records a state transition in _kora_analytics_workflow.
 // Called when a document's workflow state changes.
+// No-op if the worker has no DB connection (e.g., in tests).
 func (w *Worker) trackWorkflowTransition(event ChangeEvent, oldState, newState string) {
+	if w.db == nil {
+		return
+	}
 	now := event.Timestamp
-	enteredAt := now // Approximate: we don't know exactly when the old state was entered.
 
-	// Find and close the previous transition for this document (set exited_at + duration).
+	// Close the previous transition for this document (set exited_at + duration).
 	w.db.Exec(
 		`UPDATE _kora_analytics_workflow
 		 SET exited_at = ?, duration_seconds = TIMESTAMPDIFF(SECOND, entered_at, ?)
@@ -369,6 +381,6 @@ func (w *Worker) trackWorkflowTransition(event ChangeEvent, oldState, newState s
 	w.db.Exec(
 		`INSERT INTO _kora_analytics_workflow (site, doctype, doc_name, from_state, to_state, entered_at, actor)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		event.Site, event.Doctype, event.DocName, oldState, newState, enteredAt, event.ModifiedBy,
+		event.Site, event.Doctype, event.DocName, oldState, newState, now, event.ModifiedBy,
 	)
 }
