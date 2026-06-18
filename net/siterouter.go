@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -18,6 +19,14 @@ type LoadedSite struct {
 	Config   SiteRouterConfig
 	DB       *sql.DB
 	Registry *doctype.Registry
+
+	// AnalyticsEventBus receives change events from the ORM layer.
+	// nil if analytics is disabled for this site.
+	AnalyticsEventBus analytics.EventBus
+
+	// AnalyticsWorker processes change events into rollup tables.
+	// nil if analytics is disabled for this site.
+	AnalyticsWorker *analytics.Worker
 }
 
 // AllSites returns all loaded sites (for console, path-based routing, etc.).

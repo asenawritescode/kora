@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 )
@@ -27,6 +28,10 @@ import (
 type Handler struct {
 	Registry  *doctype.Registry
 	TxManager *orm.TxManager
+
+	// SiteEventBuses maps site name → EventBus for analytics event emission.
+	// When set, siteTx() propagates the EventBus to the TxManager.
+	SiteEventBuses map[string]analytics.EventBus
 }
 
 // NewHandler creates a new API handler.
@@ -52,10 +57,20 @@ func (h *Handler) siteRegistry(c *gin.Context) *doctype.Registry {
 func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 	db, _ := c.Get("site_db")
 	reg, _ := c.Get("site_registry")
+	siteName, _ := c.Get("site_name")
 	if db != nil && reg != nil {
 		if sqlDB, ok := db.(*sql.DB); ok {
 			if r, ok := reg.(*doctype.Registry); ok {
-				return &orm.TxManager{DB: sqlDB, Registry: r, Dialect: h.TxManager.Dialect}
+				tm := &orm.TxManager{DB: sqlDB, Registry: r, Dialect: h.TxManager.Dialect}
+				if h.SiteEventBuses != nil {
+					if siteNameStr, ok := siteName.(string); ok {
+						if bus, exists := h.SiteEventBuses[siteNameStr]; exists {
+							tm.EventBus = bus
+							tm.SiteName = siteNameStr
+						}
+					}
+				}
+				return tm
 			}
 		}
 	}
@@ -617,7 +632,15 @@ func RegisterRoutes(router *gin.Engine, registry *doctype.Registry, txManager *o
 // RegisterRoutesOnGroup registers all CRUD routes on an existing RouterGroup.
 // This allows the caller to apply middleware (e.g., auth) before the group.
 func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager) {
+	RegisterRoutesOnGroupWithAnalytics(apiGroup, registry, txManager, nil)
+}
+
+// RegisterRoutesOnGroupWithAnalytics registers all CRUD routes with optional
+// analytics event propagation. siteBuses maps site name → EventBus; if nil or
+// empty, analytics event emission is a no-op.
+func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]analytics.EventBus) {
 	handler := NewHandler(registry, txManager)
+	handler.SiteEventBuses = siteBuses
 
 	resource := apiGroup.Group("/resource")
 	{

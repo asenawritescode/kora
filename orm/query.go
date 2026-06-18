@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/oklog/ulid/v2"
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
@@ -59,6 +60,13 @@ type TxManager struct {
 	DB       *sql.DB
 	Registry *doctype.Registry
 	Dialect  db.Dialect
+
+	// EventBus receives change events after successful writes.
+	// If nil, analytics event emission is disabled (no-op).
+	EventBus analytics.EventBus
+
+	// SiteName is the tenant identifier used in analytics events.
+	SiteName string
 }
 
 // Insert creates a new document in the database.
@@ -176,6 +184,19 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner, m
 	}
 
 	doc.IsNew = false
+
+	if tx.EventBus != nil {
+		tx.EventBus.Publish(analytics.ChangeEvent{
+			Site:       tx.SiteName,
+			Doctype:    dt.Name,
+			DocName:    doc.Name,
+			Operation:  analytics.EventInsert,
+			Timestamp:  time.Now(),
+			ModifiedBy: modifiedBy,
+			Data:       doc.Fields,
+		})
+	}
+
 	return nil
 }
 
@@ -604,6 +625,23 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 		return fmt.Errorf("committing transaction: %w", err)
 	}
 
+	if tx.EventBus != nil {
+		var oldData map[string]any
+		if oldDoc != nil {
+			oldData = oldDoc.Fields
+		}
+		tx.EventBus.Publish(analytics.ChangeEvent{
+			Site:       tx.SiteName,
+			Doctype:    dt.Name,
+			DocName:    doc.Name,
+			Operation:  analytics.EventUpdate,
+			Timestamp:  time.Now(),
+			ModifiedBy: modifiedBy,
+			Data:       doc.Fields,
+			OldData:    oldData,
+		})
+	}
+
 	return nil
 }
 
@@ -837,6 +875,15 @@ func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string
 // Delete removes a document by name.
 // If owner is non-empty, only deletes if the document is owned by that user.
 func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) error {
+	// Read the document before deleting — needed for analytics event Data.
+	var oldFields map[string]any
+	if tx.EventBus != nil {
+		oldDoc, err := tx.GetDoc(dt, name, owner)
+		if err == nil {
+			oldFields = oldDoc.Fields
+		}
+	}
+
 	dbTx, err := tx.DB.Begin()
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -875,6 +922,18 @@ func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) erro
 
 	if err := dbTx.Commit(); err != nil {
 		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	if tx.EventBus != nil && oldFields != nil {
+		tx.EventBus.Publish(analytics.ChangeEvent{
+			Site:       tx.SiteName,
+			Doctype:    dt.Name,
+			DocName:    name,
+			Operation:  analytics.EventDelete,
+			Timestamp:  time.Now(),
+			ModifiedBy: "",
+			Data:       oldFields,
+		})
 	}
 
 	return nil

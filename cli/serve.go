@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/api"
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/configstore"
@@ -146,10 +147,25 @@ func runServe() error {
 			return fmt.Errorf("migrating %s: %w", info.Name, err)
 		}
 
+			// Initialize analytics for this site (if KORA_ANALYTICS=true).
+			analyticsCfg := analytics.LoadConfig()
+			var siteEventBus analytics.EventBus
+			var siteWorker *analytics.Worker
+			if analyticsCfg.Enabled {
+				if err := analytics.BootstrapTables(db, kdb.Resolve(common.DBType)); err != nil {
+					slog.Warn("analytics: bootstrap failed", "site", info.Name, "error", err)
+				} else {
+					siteEventBus = analytics.NewChannelBus(analyticsCfg.ChannelSize, analyticsCfg.WALDir)
+					siteWorker = analytics.NewWorker(siteEventBus, db, registry, info.Name, analyticsCfg)
+					go siteWorker.Start()
+					slog.Info("analytics enabled", "site", info.Name)
+				}
+			}
+
 		domains := siteCfg.Domains()
 		loadedSites = append(loadedSites, &knet.LoadedSite{
 			Name: info.Name, Config: knet.SiteRouterConfig{Hostname: info.Name, Domains: domains},
-			DB: db, Registry: registry,
+			DB: db, Registry: registry, AnalyticsEventBus: siteEventBus, AnalyticsWorker: siteWorker,
 		})
 		allDomains = append(allDomains, domains...)
 		slog.Info("site loaded", "hostname", info.Name, "domains", domains, "doctypes", registry.Len())
@@ -191,7 +207,13 @@ func runServe() error {
 	apiGroup := router.Group("/api")
 	apiGroup.Use(siteGuard.Middleware(false))
 	txManager := &orm.TxManager{DB: firstDB, Registry: primaryRegistry, Dialect: kdb.Resolve(common.DBType)}
-	api.RegisterRoutesOnGroup(apiGroup, primaryRegistry, txManager)
+		siteBuses := make(map[string]analytics.EventBus)
+		for _, s := range loadedSites {
+			if s.AnalyticsEventBus != nil {
+				siteBuses[s.Name] = s.AnalyticsEventBus
+			}
+		}
+		api.RegisterRoutesOnGroupWithAnalytics(apiGroup, primaryRegistry, txManager, siteBuses)
 
 	workspaceHandler := workspace.NewHandler(primaryRegistry)
 	if spaIndex, _ := workspace.SPAFS().Open("index.html"); spaIndex != nil {
