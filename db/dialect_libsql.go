@@ -357,6 +357,19 @@ func (d *LibSQLDialect) UpsertClause(conflictCols []string, updateCols []string)
 	return fmt.Sprintf("ON CONFLICT(%s) DO UPDATE SET %s", strings.Join(quotedCols, ", "), strings.Join(parts, ", "))
 }
 
+func (d *LibSQLDialect) UpsertIncrement(conflictCols []string, incrementCols []string) string {
+	var quotedCols []string
+	for _, col := range conflictCols {
+		quotedCols = append(quotedCols, d.QuoteIdent(col))
+	}
+	var parts []string
+	for _, col := range incrementCols {
+		q := d.QuoteIdent(col)
+		parts = append(parts, fmt.Sprintf("%s = %s + excluded.%s", q, q, q))
+	}
+	return fmt.Sprintf("ON CONFLICT(%s) DO UPDATE SET %s", strings.Join(quotedCols, ", "), strings.Join(parts, ", "))
+}
+
 func (d *LibSQLDialect) InsertOrIgnorePrefix() string { return "INSERT OR IGNORE" }
 
 func (d *LibSQLDialect) NameGenQuery(tableName, prefix string) string {

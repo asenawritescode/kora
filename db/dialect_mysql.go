@@ -333,6 +333,15 @@ func (d *MySQLDialect) UpsertClause(conflictCols []string, updateCols []string) 
 	return "ON DUPLICATE KEY UPDATE " + strings.Join(parts, ", ")
 }
 
+func (d *MySQLDialect) UpsertIncrement(conflictCols []string, incrementCols []string) string {
+	var parts []string
+	for _, col := range incrementCols {
+		q := d.QuoteIdent(col)
+		parts = append(parts, fmt.Sprintf("%s = %s + VALUES(%s)", q, q, q))
+	}
+	return "ON DUPLICATE KEY UPDATE " + strings.Join(parts, ", ")
+}
+
 func (d *MySQLDialect) InsertOrIgnorePrefix() string { return "INSERT IGNORE" }
 
 func (d *MySQLDialect) NameGenQuery(tableName, prefix string) string {

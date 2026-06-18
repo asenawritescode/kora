@@ -669,6 +669,9 @@ func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doc
 
 	// System schema/navigation endpoints.
 	RegisterSystemRoutes(apiGroup, handler)
+
+		// Analytics endpoints (no-op if siteBuses is empty).
+		RegisterAnalyticsRoutes(apiGroup, registry, txManager.DB, siteBuses)
 }
 
 // HandleWorkflowAction handles POST /api/resource/{doctype}/{name}/workflow_action

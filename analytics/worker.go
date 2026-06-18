@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -19,6 +20,7 @@ import (
 type Worker struct {
 	bus      EventBus
 	db       *sql.DB
+	dialect  db.Dialect
 	registry *doctype.Registry
 	siteName string
 
@@ -44,7 +46,7 @@ type deltaKey struct {
 }
 
 // NewWorker creates an analytics worker for a single site.
-func NewWorker(bus EventBus, database *sql.DB, registry *doctype.Registry, siteName string, cfg *Config) *Worker {
+func NewWorker(bus EventBus, database *sql.DB, dialect db.Dialect, registry *doctype.Registry, siteName string, cfg *Config) *Worker {
 	d, _ := time.ParseDuration(cfg.FlushInterval)
 	if d <= 0 {
 		d = 1 * time.Second
@@ -52,6 +54,7 @@ func NewWorker(bus EventBus, database *sql.DB, registry *doctype.Registry, siteN
 	return &Worker{
 		bus:        bus,
 		db:         database,
+		dialect:    dialect,
 		registry:   registry,
 		siteName:   siteName,
 		deltas:     make(map[deltaKey]float64),
@@ -256,7 +259,11 @@ func (w *Worker) flush() {
 	stmt, err := tx.Prepare(fmt.Sprintf(
 		`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
 		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON DUPLICATE KEY UPDATE value = value + VALUES(value)`))
+		 %s`,
+		w.dialect.UpsertIncrement(
+			[]string{"site", "doctype", "metric", "dimension", "date"},
+			[]string{"value"},
+		)))
 	if err != nil {
 		slog.Error("analytics worker: prepare upsert", "error", err)
 		return

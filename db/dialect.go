@@ -64,6 +64,12 @@ type Dialect interface {
 	// SQLite: ON CONFLICT(cols) DO UPDATE SET col = excluded.col, ...
 	UpsertClause(conflictCols []string, updateCols []string) string
 
+	// UpsertIncrement generates an upsert suffix that increments existing values.
+	// Used by analytics rollup tables to accumulate deltas.
+	// MySQL: ON DUPLICATE KEY UPDATE col = col + VALUES(col), ...
+	// SQLite: ON CONFLICT(cols) DO UPDATE SET col = col + excluded.col, ...
+	UpsertIncrement(conflictCols []string, incrementCols []string) string
+
 	// InsertOrIgnorePrefix returns the prefix for an idempotent INSERT.
 	// MySQL: "INSERT IGNORE" — SQLite: "INSERT OR IGNORE"
 	InsertOrIgnorePrefix() string
