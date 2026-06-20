@@ -340,6 +340,44 @@ The AI Chat at `POST /api/chat` auto-generates OpenAI-compatible function defini
 
 **MCP Server:** Separate stdio-based MCP server (`mcp/server.go`) for Claude Desktop integration — auto-generates 5 tools per doctype.
 
+### Analytics Engine
+
+The analytics engine provides real-time metrics and insights auto-generated from DocType metadata. It's an **opt-in** system — enabled by setting `KORA_ANALYTICS=true` and `KORA_MYSQL_BUS_HOST` (the bus is a separate MySQL server to avoid interfering with operational workloads).
+
+**Architecture:** EventBus (in-memory channel + WAL drain to MySQL) → Worker (aggregation) → Daily/Monthly rollup tables → Query Engine (SQL-based) → REST API → Frontend Insights tab + Analytics admin page.
+
+```
+Document Write (ORM)
+       │
+       ▼
+   EventBus (in-memory channel, async)
+       │
+       ▼
+   Worker pool (UPSERT daily rollup, track workflow transitions)
+       │
+       ▼
+   _kora_analytics_daily / _kora_analytics_monthly / _kora_analytics_transition
+       │
+       ▼
+   Query Engine (SQL aggregation: COUNT, SUM, AVG, MIN, MAX, funnel, duration)
+       │
+       ▼
+   GET /api/analytics/metrics → POST /api/analytics/metrics/:name/query → Frontend charts
+```
+
+**Auto-generated Metrics:** Every DocType gets `total_<doctype>` (COUNT) and one metric per Select/Link field (grouped count). Submittable doctypes get additional funnel metrics per workflow state and `avg_duration_<doctype>` for completed workflows.
+
+**Query Engine** supports:
+- Time series (daily/weekly/monthly granularity, date range filtering)
+- Group-by dimensions (Select/Link fields)
+- Funnel analysis (workflow state transitions with fall-through rates)
+- Duration tracking (time-in-state for workflow documents)
+- Custom metrics (user-defined via POST /api/analytics/metrics)
+
+**Retention & Cleanup:** A background job purges events older than configured retention (default 90 days). WAL table is drained into the daily rollup every 5 seconds.
+
+**CLI:** `kora analytics backfill --site X` reprocesses all historical events from the WAL.
+
 ### Admin UI (Workspace)
 
 React SPA served at `/workspace`. Built with Vite, embedded in the Go binary via `go:embed`. All views are **config-driven** — the UI has no knowledge of specific doctypes. It reads schemas from `/api/system/doctype/:name` and renders accordingly.
@@ -369,6 +407,7 @@ The workspace sidebar has an **Administrator** section for managing the data mod
 | **Users** | User CRUD, role assignment, enable/disable toggle, admin-forced password reset with session invalidation. |
 | **Secrets** | API key management for AI providers. Dropdown selector (OpenAI/DeepSeek/Anthropic) + key input. Values encrypted (AES-256-GCM). |
 | **API Docs** | Auto-generated OpenAPI 3.0 spec at `/api/openapi.json`, interactive Swagger UI at `/api/swagger-ui`. |
+| **Analytics** | Real-time metrics dashboard. Auto-generated metrics per DocType. Time-series charts, funnel analysis, workflow tracking. Custom metric creation. |
 
 ### Config Versioning
 
@@ -404,6 +443,7 @@ Versions store full config snapshots + structured diff changelogs in `_kora_conf
 | AI / LLM | OpenAI GPT-4o, DeepSeek V4, Anthropic Claude | Multi-provider via OpenAI-compatible `/chat/completions` |
 | AI Config | `AIConfig` struct + `_kora_secret` overrides | Per-model defaults, site-level customization |
 | MCP | modelcontextprotocol/go-sdk | Stdio-based MCP server for Claude Desktop |
+| Analytics | Go stdlib + MySQL | EventBus async CDC, daily/monthly rollup, query engine |
 
 ## Directory Structure
 
@@ -440,6 +480,7 @@ kora/
 ├── orm/          Generic ORM
 ├── scheduler/    Background jobs
 ├── schema/       DDL generation
+├── analytics/    EventBus + Worker + Query Engine + daily/monthly rollup
 ├── secret/       Encrypted API key store (AES-256-GCM)
 ├── mcp/          MCP server for Claude Desktop integration
 └── workspace/    SPA serving (go:embed)

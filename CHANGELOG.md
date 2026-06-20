@@ -1,3 +1,21 @@
+## v0.6.1-alpha — 2026-06-20
+
+### Features
+- Analytics Engine: EventBus + ORM hooks for real-time CDC (Phase 1)
+- Analytics Query Engine + REST API + CLI backfill (Phase 2)
+- Frontend Insights tab, charts, analytics navigation (Phase 3)
+- WAL drain, retention cleanup, workflow tracking, query cache (Phases 4-5)
+- WorkflowAction events, dashboard config, monthly rollup (backend completion)
+- 32 tests for analytics package + nil-safety fixes
+
+### Fixes
+- MySQL DDL multi-statement, dimension []byte, NameGenQuery double-quoting
+
+### Documentation
+- DDL migration notes for db-compat skill
+- Analytics API docs, architecture docs, CLAUDE.md package reference
+
+
 ## v0.6.0 — 2026-06-18
 
 ## v0.5.0-alpha.21 — 2026-06-18

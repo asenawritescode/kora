@@ -162,6 +162,7 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 | `console/` | System console — React SPA for site creation + system admin (SystemGuard auth) |
 | `scheduler/` | Cron-style background jobs |
 | `secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys (settable via UI at `/workspace/admin/secrets`) |
+| `analytics/` | EventBus + Worker + Query Engine — real-time CDC, daily/monthly rollup tables, time-series/funnel/duration queries, auto-generated metrics |
 | `mcp/` | Model Context Protocol server — auto-generates tools from doctype registry for Claude Desktop |
 | `ui/` | React SPA (Vite + TanStack + shadcn) with floating AI Chat Widget |
 

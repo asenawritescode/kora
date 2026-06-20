@@ -769,6 +769,107 @@ GET /api/system/config/diff?from=cv-fieldwork.local-1&to=cv-fieldwork.local-2
 
 ---
 
+## Analytics API
+
+All endpoints require Administrator role. The analytics system is opt-in — enable via `KORA_ANALYTICS=true` and `KORA_MYSQL_BUS_HOST`.
+
+### Status
+
+```http
+GET /api/analytics/status
+```
+
+Returns whether analytics is enabled and the event processing stats.
+
+**Response:**
+```json
+{
+  "data": {
+    "enabled": true,
+    "events_processed": 15420,
+    "events_dropped": 0
+  }
+}
+```
+
+### List Metrics
+
+```http
+GET /api/analytics/metrics
+```
+
+Returns all metrics for the site — auto-generated from DocType metadata plus user-defined custom metrics.
+
+**Response:**
+```json
+{
+  "data": [
+    {"name": "total_customer", "label": "Total Customers", "type": "count", "doctype": "Customer", "auto_generated": true},
+    {"name": "total_work_order", "label": "Total Work Orders", "type": "count", "doctype": "Work Order", "auto_generated": true},
+    {"name": "work_order_by_status", "label": "Work Orders by Status", "type": "count", "doctype": "Work Order", "field": "status", "auto_generated": true}
+  ]
+}
+```
+
+### Get Metric
+
+```http
+GET /api/analytics/metrics/:name
+```
+
+### Query Metric
+
+```http
+POST /api/analytics/metrics/:name/query
+Content-Type: application/json
+
+{
+  "from": "2026-06-01",
+  "to": "2026-06-30",
+  "group_by": "month"
+}
+```
+
+Returns aggregated time-series data. `group_by` supports `day`, `week`, or `month`.
+
+**Response:**
+```json
+{
+  "data": {
+    "metric": "total_customer",
+    "columns": ["period", "value"],
+    "rows": [{"period": "2026-06-01", "value": 42}, {"period": "2026-06-08", "value": 58}],
+    "total": 100
+  }
+}
+```
+
+### Create Custom Metric
+
+```http
+POST /api/analytics/metrics
+Content-Type: application/json
+
+{
+  "name": "high_priority_orders",
+  "label": "High Priority Orders",
+  "type": "count",
+  "doctype": "Order",
+  "field": "priority",
+  "group_by_field": "customer"
+}
+```
+
+### Insights
+
+```http
+GET /api/analytics/insights/:doctype
+```
+
+Returns time-series, group-by breakdowns, funnel data, and duration stats for a specific DocType. Used by the frontend Insights tab on the DocType detail page.
+
+---
+
 ## Response Envelope
 
 All success responses follow:

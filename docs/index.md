@@ -87,6 +87,7 @@ Every DocType you create gets a full REST API — and every API gets live, inter
 | **Admin UI** | Config-driven forms, lists, searchable autocomplete, computed fields |
 | **AI Chat** | Natural language CRUD — create, find, update records via chat |
 | **Workflows** | State machines — Draft → Submitted → Approved |
+| **Analytics** | Real-time metrics, time-series charts, funnel analysis, Insights per DocType |
 | **Multi-site** | One server, many apps, separate databases per site |
 | **User Management** | Site-scoped users, roles, password reset — all from the UI |
 | **Single binary** | Go + React SPA embedded via go:embed, ~63MB |
