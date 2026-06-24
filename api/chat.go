@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -62,7 +63,7 @@ func (h *Handler) HandleChat(c *gin.Context) {
 	_, apiKey, baseURL, model := resolveProvider(tx.DB, siteName, req.Model)
 	if apiKey == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": "No AI provider configured. Run: ./kora secret set --site " + siteName + " --key openai_api_key --value sk-..."},
+			Error: map[string]string{"message": "No AI provider configured. Go to /workspace/admin/secrets to add your API key (OpenAI, DeepSeek, or Anthropic)."},
 		})
 		return
 	}
@@ -440,6 +441,25 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string) (providerKey, a
 			return p.key, k, p.base, m
 		}
 	}
+
+	// Fallback: shared AI keys from environment (superadmin-configured).
+	if os.Getenv("KORA_SHARED_AI_ENABLED") != "true" {
+		return "", "", "", ""
+	}
+	sharedProviders := []struct{ envKey, base, defaultModel string }{
+		{"KORA_SHARED_OPENAI_API_KEY", "https://api.openai.com/v1", "gpt-4o"},
+		{"KORA_SHARED_DEEPSEEK_API_KEY", "https://api.deepseek.com", "deepseek-v4-pro"},
+		{"KORA_SHARED_ANTHROPIC_API_KEY", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
+	}
+	for _, p := range sharedProviders {
+		if k := os.Getenv(p.envKey); k != "" {
+			m := p.defaultModel
+			if modelOverride != "" {
+				m = modelOverride
+			}
+			return p.envKey, k, p.base, m
+		}
+	}
 	return "", "", "", ""
 }
 
@@ -653,8 +673,9 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 	case "validate_doctype_yaml":
 		yamlStr, _ := args["yaml"].(string)
 		return executeValidateYAML(yamlStr)
-			doctypeName, _ := args["doctype"].(string)
-			return executeAnalyticsInsights(tx, reg, doctypeName, siteName)
+	case "analytics_insights":
+		doctypeName, _ := args["doctype"].(string)
+		return executeAnalyticsInsights(tx, reg, doctypeName, siteName)
 	case "create_doctype_draft":
 		yamlStr, _ := args["yaml"].(string)
 		return executeCreateDoctypeDraft(tx, reg, yamlStr, owner, siteName)
