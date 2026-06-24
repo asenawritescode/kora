@@ -550,6 +550,10 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"updated_at" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
 			PRIMARY KEY ("site", "key_name")
 		)`,
+
+		// Backwards compat: add columns to existing tables.
+		`ALTER TABLE "_kora_doctype" ADD COLUMN "config_json" TEXT`,
+		`ALTER TABLE "_kora_workflow" ADD COLUMN "config_json" TEXT`,
 	}
 }
 
