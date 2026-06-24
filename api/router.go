@@ -15,12 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"gopkg.in/yaml.v3"
-
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/gin-gonic/gin"
+	"gopkg.in/yaml.v3"
 )
 
 // Handler holds dependencies for API handlers.
@@ -51,6 +50,24 @@ func (h *Handler) siteRegistry(c *gin.Context) *doctype.Registry {
 		}
 	}
 	return h.Registry
+}
+
+// siteAnalyticsWorker returns the analytics worker for the current request's site, or nil.
+func (h *Handler) siteAnalyticsWorker(c *gin.Context) *analytics.Worker {
+	if w, ok := c.Get("site_analytics_worker"); ok {
+		if worker, ok := w.(*analytics.Worker); ok {
+			return worker
+		}
+	}
+	return nil
+}
+
+// invalidateAnalyticsForDoctype clears the analytics worker's metrics cache
+// and triggers regeneration for the given doctype after a config change.
+func (h *Handler) invalidateAnalyticsForDoctype(c *gin.Context, doctype string) {
+	if w := h.siteAnalyticsWorker(c); w != nil {
+		w.InvalidateMetrics(doctype)
+	}
 }
 
 // siteTx returns a TxManager for the current request's site database and registry.
@@ -233,9 +250,15 @@ func (h *Handler) HandleGet(c *gin.Context) {
 
 	doc, err := h.siteTx(c).GetDoc(dt, name, owner)
 	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, ErrorResponse{
+				Error: map[string]string{"message": "Document not found"},
+			})
+			return
+		}
 		slog.Warn("document get failed", "doctype", doctypeName, "name", name, "error", err)
-		c.JSON(http.StatusNotFound, ErrorResponse{
-			Error: map[string]string{"message": "Document not found"},
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: map[string]string{"message": "Failed to load document"},
 		})
 		return
 	}

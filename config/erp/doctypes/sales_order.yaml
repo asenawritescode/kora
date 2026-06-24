@@ -1,0 +1,29 @@
+name: Sales Order
+module: Sales
+title_field: customer
+search_fields: customer, status
+sort_field: creation
+sort_order: DESC
+is_submittable: true
+fields:
+  - fieldname: customer
+    fieldtype: Link
+    label: Customer
+    options: Customer
+    reqd: true
+    in_list_view: true
+  - fieldname: order_date
+    fieldtype: Date
+    label: Order Date
+    reqd: true
+    in_list_view: true
+  - fieldname: delivery_date
+    fieldtype: Date
+    label: Delivery Date
+  - fieldname: total_amount
+    fieldtype: Currency
+    label: Total Amount
+    computed: SUM(items.line_total)
+    read_only: true
+    in_list_view: true
+  - fieldname: tax_amount

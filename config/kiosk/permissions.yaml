@@ -1,0 +1,64 @@
+- doctype: Product
+  role: Kiosk Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Product
+  role: Kiosk Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+- doctype: Stock Move
+  role: Kiosk Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Stock Move
+  role: Kiosk Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+- doctype: Sale
+  role: Kiosk Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Sale
+  role: Kiosk Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+- doctype: Sale Item
+  role: Kiosk Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Sale Item
+  role: Kiosk Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+- doctype: Expense
+  role: Kiosk Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Expense
+  role: Kiosk Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

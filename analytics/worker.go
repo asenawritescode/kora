@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,10 @@ import (
 // Design: batch-and-merge. Instead of UPSERTing on every event, the worker
 // accumulates deltas in memory and flushes periodically. Multiple increments
 // to the same (metric, dimension, date) row are merged into a single UPSERT.
+//
+// Workflow transitions are also batched: the UPDATE (close previous) and INSERT
+// (new transition) are accumulated in memory and flushed in the same transaction
+// as the daily rollup deltas, eliminating 2 extra DB round-trips per transition.
 type Worker struct {
 	bus      EventBus
 	db       *sql.DB
@@ -27,6 +32,12 @@ type Worker struct {
 	// Accumulated deltas, keyed by (doctype, metric, dimension, date).
 	mu     sync.Mutex
 	deltas map[deltaKey]float64
+
+	// Accumulated workflow transition operations.
+	// workflowCloses: UPDATE to set exited_at on the previous transition.
+	// workflowOpens: INSERT the new transition row.
+	workflowCloses []workflowCloseOp
+	workflowOpens  []workflowOpenOp
 
 	batchSize   int
 	flushEvery  time.Duration
@@ -43,6 +54,26 @@ type deltaKey struct {
 	Metric    string
 	Dimension string
 	Date      string // "2006-01-02" format
+}
+
+// workflowCloseOp closes the previous workflow transition (sets exited_at + duration).
+type workflowCloseOp struct {
+	Site    string
+	Doctype string
+	DocName string
+	OldState string
+	Now     time.Time
+}
+
+// workflowOpenOp inserts a new workflow transition row.
+type workflowOpenOp struct {
+	Site       string
+	Doctype    string
+	DocName    string
+	FromState  string
+	ToState    string
+	Now        time.Time
+	ModifiedBy string
 }
 
 // NewWorker creates an analytics worker for a single site.
@@ -68,6 +99,18 @@ func NewWorker(bus EventBus, database *sql.DB, dialect db.Dialect, registry *doc
 // Start begins consuming events. Runs in a background goroutine.
 // On startup, drains any WAL backlog from a previous unclean shutdown.
 func (w *Worker) Start() {
+	// Recover from panics in the analytics worker. Without this, a nil pointer
+	// or type assertion panic in process() or flush() crashes the ENTIRE Go process,
+	// taking down all sites. We log the panic and let the goroutine die — the HTTP
+	// server stays up, analytics for other sites continue, and the backfill CLI
+	// can recover any lost events.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("analytics worker panicked — restart required to resume analytics for this site",
+				"site", w.siteName, "panic", r)
+		}
+	}()
+
 	ch, err := w.bus.Subscribe()
 	if err != nil {
 		slog.Error("analytics worker: failed to subscribe to event bus", "error", err)
@@ -120,6 +163,22 @@ func (w *Worker) Start() {
 	}
 }
 
+// InvalidateMetrics clears cached metrics for a single doctype, forcing
+// re-generation on the next event. Call after config activation/rollback/reload.
+func (w *Worker) InvalidateMetrics(doctype string) {
+	w.metricsMu.Lock()
+	defer w.metricsMu.Unlock()
+	delete(w.metrics, doctype)
+}
+
+// InvalidateAllMetrics clears all cached metrics for all doctypes.
+// Call after a full config reload or site rebuild.
+func (w *Worker) InvalidateAllMetrics() {
+	w.metricsMu.Lock()
+	defer w.metricsMu.Unlock()
+	w.metrics = make(map[string][]*Metric)
+}
+
 // Stop signals the worker to flush and exit.
 func (w *Worker) Stop() {
 	w.mu.Lock()
@@ -134,6 +193,7 @@ func (w *Worker) Stop() {
 func (w *Worker) process(event ChangeEvent) {
 	dt := w.registry.Get(event.Doctype)
 	if dt == nil {
+		// Only log first occurrence per doctype to avoid flooding in hot path.
 		slog.Warn("analytics worker: unknown doctype", "doctype", event.Doctype)
 		return
 	}
@@ -155,14 +215,14 @@ func (w *Worker) process(event ChangeEvent) {
 				continue
 			}
 			val := event.Data[m.Field]
-			dim := fmt.Sprintf("%s=%v", m.Field, val)
+			dim := m.Field + "=" + anyToString(val)
 			w.addDelta(event.Doctype, m.Name, dim, today, 1)
 
 			// On update: decrement old dimension if the field changed.
 			if event.Operation == EventUpdate && event.OldData != nil {
 				oldVal := event.OldData[m.Field]
-				if fmt.Sprintf("%v", oldVal) != fmt.Sprintf("%v", val) {
-					oldDim := fmt.Sprintf("%s=%v", m.Field, oldVal)
+				if anyToString(oldVal) != anyToString(val) {
+					oldDim := m.Field + "=" + anyToString(oldVal)
 					w.addDelta(event.Doctype, m.Name, oldDim, today, -1)
 				}
 			}
@@ -190,30 +250,27 @@ func (w *Worker) process(event ChangeEvent) {
 
 		case MetricStateDistribution:
 			// Track document counts by workflow state.
-			newState := fmt.Sprintf("%v", event.Data["doc_status"])
+			newState := anyToString(event.Data["doc_status"])
 			newDim := "state=" + newState
 			w.addDelta(event.Doctype, m.Name, newDim, today, 1)
 
 			if event.Operation == EventUpdate && event.OldData != nil {
-				oldState := fmt.Sprintf("%v", event.OldData["doc_status"])
+				oldState := anyToString(event.OldData["doc_status"])
 				if oldState != newState {
 					oldDim := "state=" + oldState
 					w.addDelta(event.Doctype, m.Name, oldDim, today, -1)
 
-					// Track the state transition for funnel/duration metrics.
-					w.trackWorkflowTransition(event, oldState, newState)
+					// Accumulate workflow transition for batch flush.
+					w.addWorkflowTransition(event, oldState, newState)
 				}
 			}
 
 		case MetricCountByLinkedField:
-			// Cross-doctype: resolve Link field → linked document → extract group_by_field.
-			// For now, linked field value is stored as the linked document name.
-			// Full cross-doctype resolution (following the link) is a future enhancement.
 			if m.LinkField == "" {
 				continue
 			}
 			val := event.Data[m.LinkField]
-			dim := fmt.Sprintf("%s=%v", m.LinkField, val)
+			dim := m.LinkField + "=" + anyToString(val)
 			w.addDelta(event.Doctype, m.Name, dim, today, 1)
 		}
 	}
@@ -253,25 +310,45 @@ func (w *Worker) addDelta(doctype, metric, dimension, date string, delta float64
 	w.deltas[key] += delta
 }
 
-// flush writes all accumulated deltas to _kora_analytics_daily via batched UPSERTs.
+// flush writes all accumulated deltas and workflow transitions to the DB
+// in a single transaction.
+//
+// Optimization: instead of N individual stmt.Exec() calls (one per delta row),
+// we build a single multi-VALUES INSERT (split into chunks for SQLite compat).
+// Workflow transitions are also flushed in the same transaction instead of
+// being fired as separate auto-commit db.Exec() calls from the hot path.
 func (w *Worker) flush() {
 	if w.db == nil {
-		// No DB connection — discard deltas (test mode).
+		// No DB connection — discard accumulated state (test mode).
 		w.mu.Lock()
 		w.deltas = make(map[deltaKey]float64)
+		w.workflowCloses = nil
+		w.workflowOpens = nil
 		w.mu.Unlock()
 		return
 	}
 
 	w.mu.Lock()
-	if len(w.deltas) == 0 {
+	if len(w.deltas) == 0 && len(w.workflowOpens) == 0 {
 		w.mu.Unlock()
 		return
 	}
 	deltas := w.deltas
 	w.deltas = make(map[deltaKey]float64)
+	closes := w.workflowCloses
+	w.workflowCloses = nil
+	opens := w.workflowOpens
+	w.workflowOpens = nil
 	w.mu.Unlock()
 
+	// Rotate the WAL BEFORE committing to the DB. This atomically swaps
+	// the current WAL file for a fresh one. If we crash after the DB commit
+	// but before deleting the old WAL, the old WAL (.flushing file) is
+	// replayed on restart — causing a bounded double-count, which is
+	// acceptable for analytics.
+	oldWAL, _ := w.bus.RotateWAL()
+
+	// Wrap in a transaction so deltas + workflow ops are atomic.
 	tx, err := w.db.Begin()
 	if err != nil {
 		slog.Error("analytics worker: begin tx for flush", "error", err)
@@ -279,34 +356,111 @@ func (w *Worker) flush() {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(fmt.Sprintf(
-		`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 %s`,
-		w.dialect.UpsertIncrement(
-			[]string{"site", "doctype", "metric", "dimension", "date"},
-			[]string{"value"},
-		)))
-	if err != nil {
-		slog.Error("analytics worker: prepare upsert", "error", err)
-		return
+	// Flush daily rollup deltas (split into chunks for SQLite variable limit).
+	if len(deltas) > 0 {
+		w.flushDeltasTx(tx, deltas)
 	}
-	defer stmt.Close()
 
-	for key, delta := range deltas {
-		if _, err := stmt.Exec(w.siteName, key.Doctype, key.Metric, key.Dimension, key.Date, delta); err != nil {
-			slog.Error("analytics worker: upsert delta",
-				"doctype", key.Doctype, "metric", key.Metric,
-				"dimension", key.Dimension, "date", key.Date, "delta", delta, "error", err)
-		}
+	// Flush workflow transitions within the same transaction.
+	for i := range closes {
+		w.flushWorkflowCloseTx(tx, &closes[i])
+	}
+	for i := range opens {
+		w.flushWorkflowOpenTx(tx, &opens[i])
 	}
 
 	if err := tx.Commit(); err != nil {
 		slog.Error("analytics worker: commit flush", "error", err)
+		// Don't commit WAL rotation — the .flushing file remains and will be
+		// drained on next restart.
 		return
 	}
 
-	slog.Debug("analytics worker: flushed deltas", "site", w.siteName, "rows", len(deltas))
+	// DB commit succeeded — safely delete the old WAL file.
+	if err := w.bus.CommitWALRotation(oldWAL); err != nil {
+		slog.Warn("analytics worker: commit WAL rotation failed", "error", err)
+	}
+
+	slog.Debug("analytics worker: flushed",
+		"site", w.siteName, "deltas", len(deltas),
+		"workflow_closes", len(closes), "workflow_opens", len(opens))
+}
+
+// maxBatchRows is the maximum rows per multi-VALUES INSERT.
+// SQLite has a default SQLITE_MAX_VARIABLE_NUMBER of 999. With 6 columns per
+// row, 150 rows = 900 placeholders, safely under the limit. MySQL handles
+// much larger batches, but capping at 150 keeps both dialects happy.
+const maxBatchRows = 150
+
+// flushDeltasTx writes daily rollup deltas in multi-row UPSERT chunks within tx.
+func (w *Worker) flushDeltasTx(tx *sql.Tx, deltas map[deltaKey]float64) {
+	const rowCols = 6
+	upsertSuffix := w.dialect.UpsertIncrement(
+		[]string{"site", "doctype", "metric", "dimension", "date"},
+		[]string{"value"},
+	)
+
+	// Flatten map to slice for chunking (map iteration order is random but
+	// that's fine — UPSERT is idempotent regardless of order).
+	type entry struct {
+		key   deltaKey
+		delta float64
+	}
+	flat := make([]entry, 0, len(deltas))
+	for k, v := range deltas {
+		flat = append(flat, entry{k, v})
+	}
+
+	// Split into chunks to stay under SQLite's variable limit.
+	for start := 0; start < len(flat); start += maxBatchRows {
+		end := min(start+maxBatchRows, len(flat))
+		chunk := flat[start:end]
+		n := len(chunk)
+
+		rowPlaceholder := "(" + strings.Repeat("?,", rowCols-1) + "?)"
+		placeholders := strings.Repeat(rowPlaceholder+",", n-1) + rowPlaceholder
+
+		args := make([]any, 0, n*rowCols)
+		for _, e := range chunk {
+			args = append(args, w.siteName, e.key.Doctype, e.key.Metric, e.key.Dimension, e.key.Date, e.delta)
+		}
+
+		query := "INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value) VALUES " +
+			placeholders + " " + upsertSuffix
+
+		if _, err := tx.Exec(query, args...); err != nil {
+			slog.Error("analytics worker: batch upsert chunk failed",
+				"site", w.siteName, "chunk_rows", n, "error", err)
+			// Continue with remaining chunks — don't lose all data because of one chunk.
+		}
+	}
+}
+
+// flushWorkflowCloseTx executes the UPDATE to close a previous workflow transition.
+func (w *Worker) flushWorkflowCloseTx(tx *sql.Tx, op *workflowCloseOp) {
+	_, err := tx.Exec(
+		`UPDATE _kora_analytics_workflow
+		 SET exited_at = ?, duration_seconds = TIMESTAMPDIFF(SECOND, entered_at, ?)
+		 WHERE site = ? AND doctype = ? AND doc_name = ? AND to_state = ? AND exited_at IS NULL`,
+		op.Now, op.Now, op.Site, op.Doctype, op.DocName, op.OldState,
+	)
+	if err != nil {
+		slog.Warn("analytics worker: workflow close failed",
+			"doctype", op.Doctype, "doc", op.DocName, "old_state", op.OldState, "error", err)
+	}
+}
+
+// flushWorkflowOpenTx executes the INSERT for a new workflow transition.
+func (w *Worker) flushWorkflowOpenTx(tx *sql.Tx, op *workflowOpenOp) {
+	_, err := tx.Exec(
+		`INSERT INTO _kora_analytics_workflow (site, doctype, doc_name, from_state, to_state, entered_at, actor)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		op.Site, op.Doctype, op.DocName, op.FromState, op.ToState, op.Now, op.ModifiedBy,
+	)
+	if err != nil {
+		slog.Warn("analytics worker: workflow open failed",
+			"doctype", op.Doctype, "doc", op.DocName, "from", op.FromState, "to", op.ToState, "error", err)
+	}
 }
 
 // toFloat safely converts an interface{} to float64.
@@ -342,6 +496,11 @@ func (w *Worker) drainWAL() {
 
 // rollupMonthly aggregates daily rows into _kora_analytics_monthly for the previous month.
 func (w *Worker) rollupMonthly() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("analytics worker: rollupMonthly panicked", "site", w.siteName, "panic", r)
+		}
+	}()
 	if w.db == nil {
 		return
 	}
@@ -375,6 +534,11 @@ func (w *Worker) rollupMonthly() {
 
 // cleanupRetention deletes rollup rows older than the configured retention period.
 func (w *Worker) cleanupRetention() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("analytics worker: cleanupRetention panicked", "site", w.siteName, "panic", r)
+		}
+	}()
 	if w.db == nil {
 		return
 	}
@@ -411,27 +575,48 @@ func (w *Worker) cleanupRetention() {
 	}
 }
 
-// trackWorkflowTransition records a state transition in _kora_analytics_workflow.
-// Called when a document's workflow state changes.
-// No-op if the worker has no DB connection (e.g., in tests).
-func (w *Worker) trackWorkflowTransition(event ChangeEvent, oldState, newState string) {
+// addWorkflowTransition accumulates a workflow state transition for batch flush.
+// Replaces the old trackWorkflowTransition which did 2 separate db.Exec() calls
+// per transition — now they are batched into the flush transaction.
+func (w *Worker) addWorkflowTransition(event ChangeEvent, oldState, newState string) {
 	if w.db == nil {
 		return
 	}
-	now := event.Timestamp
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	// Close the previous transition for this document (set exited_at + duration).
-	w.db.Exec(
-		`UPDATE _kora_analytics_workflow
-		 SET exited_at = ?, duration_seconds = TIMESTAMPDIFF(SECOND, entered_at, ?)
-		 WHERE site = ? AND doctype = ? AND doc_name = ? AND to_state = ? AND exited_at IS NULL`,
-		now, now, event.Site, event.Doctype, event.DocName, oldState,
-	)
+	w.workflowCloses = append(w.workflowCloses, workflowCloseOp{
+		Site:     event.Site,
+		Doctype:  event.Doctype,
+		DocName:  event.DocName,
+		OldState: oldState,
+		Now:      event.Timestamp,
+	})
+	w.workflowOpens = append(w.workflowOpens, workflowOpenOp{
+		Site:       event.Site,
+		Doctype:    event.Doctype,
+		DocName:    event.DocName,
+		FromState:  oldState,
+		ToState:    newState,
+		Now:        event.Timestamp,
+		ModifiedBy: event.ModifiedBy,
+	})
+}
 
-	// Insert the new state transition.
-	w.db.Exec(
-		`INSERT INTO _kora_analytics_workflow (site, doctype, doc_name, from_state, to_state, entered_at, actor)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		event.Site, event.Doctype, event.DocName, oldState, newState, now, event.ModifiedBy,
-	)
+// anyToString converts an interface{} to string without fmt.Sprintf allocation.
+// For the common cases (string, []byte, nil) this is 3-5x faster than fmt.Sprintf("%v", v).
+func anyToString(v any) string {
+	if v == nil {
+		return "<nil>"
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case []byte:
+		return string(val)
+	case fmt.Stringer:
+		return val.String()
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }

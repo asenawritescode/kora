@@ -1,0 +1,76 @@
+name: Employee
+module: HR
+title_field: full_name
+search_fields: full_name, employee_id, department, designation
+sort_field: modified
+sort_order: DESC
+fields:
+  - fieldname: full_name
+    fieldtype: Data
+    label: Full Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: employee_id
+    fieldtype: Data
+    label: Employee ID
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: department
+    fieldtype: Select
+    label: Department
+    options: |
+      Engineering
+      Sales
+      Marketing
+      Finance
+      HR
+      Operations
+      Executive
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: designation
+    fieldtype: Data
+    label: Designation
+    reqd: true
+    in_list_view: true
+  - fieldname: employment_type
+    fieldtype: Select
+    label: Employment Type
+    options: |
+      Full-Time
+      Part-Time
+      Contract
+      Intern
+    default: Full-Time
+    in_list_view: true
+  - fieldname: salary
+    fieldtype: Currency
+    label: Monthly Salary
+    in_list_view: true
+  - fieldname: joining_date
+    fieldtype: Date
+    label: Joining Date
+    reqd: true
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+    options: Email
+    unique: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      On Leave
+      Terminated
+    default: Active
+    in_list_view: true
+    in_standard_filter: true

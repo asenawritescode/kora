@@ -1,0 +1,2 @@
+{"site":"test.local","doctype":"Customer","doc_name":"CUST-0001","operation":"insert","timestamp":"2026-06-24T08:02:08.790121809+03:00","modified_by":"","data":{"name":"Acme Corp"}}
+{"site":"test.local","doctype":"Customer","doc_name":"CUST-0001","operation":"insert","timestamp":"2026-06-24T08:02:16.304150949+03:00","modified_by":"","data":{"name":"Acme Corp"}}

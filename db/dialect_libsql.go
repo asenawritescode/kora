@@ -477,7 +477,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"config" TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS "idx_site_status" ON "_kora_config_version" ("site", "status")`,
-		`CREATE INDEX IF NOT EXISTS "idx_site_version" ON "_kora_config_version" ("site", "version")`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_site_version_unique" ON "_kora_config_version" ("site", "version")`,
 
 		// Backwards compat columns.
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'Superseded'`,

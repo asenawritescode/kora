@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/asenawritescode/kora/db"
@@ -18,6 +19,13 @@ type Store struct {
 	DB      *sql.DB
 	Dialect db.Dialect
 }
+// sqlExecutor is satisfied by both *sql.DB and *sql.Tx.
+type sqlExecutor interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+}
+
 
 // NewStore creates a new config store.
 func NewStore(database *sql.DB, dialect db.Dialect) *Store {
@@ -27,13 +35,24 @@ func NewStore(database *sql.DB, dialect db.Dialect) *Store {
 // SaveDocType inserts or updates a DocType and its fields in the database.
 // Uses a transaction for atomicity. Existing fields are diffed against new fields:
 // only removed fields are deleted, only new fields are inserted, changed fields are updated.
+// SaveDocTypeTx is like SaveDocType but uses an existing transaction for atomic multi-doctype saves.
+func (s *Store) SaveDocTypeTx(tx *sql.Tx, dt *doctype.DocType) error {
+	return s.saveDocTypeExec(tx, dt)
+}
+
 func (s *Store) SaveDocType(dt *doctype.DocType) error {
 	dbTx, err := s.DB.Begin()
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer dbTx.Rollback()
+	if err := s.saveDocTypeExec(dbTx, dt); err != nil {
+		return err
+	}
+	return dbTx.Commit()
+}
 
+func (s *Store) saveDocTypeExec(ex sqlExecutor, dt *doctype.DocType) error {
 	configJSON, err := json.Marshal(dt)
 	if err != nil {
 		return fmt.Errorf("marshaling doctype: %w", err)
@@ -44,7 +63,7 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 		"INSERT INTO _kora_doctype (name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description, config_json, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) %s",
 		s.Dialect.UpsertClause([]string{"name"}, []string{"module", "is_submittable", "is_child_table", "is_single", "track_changes", "title_field", "search_fields", "sort_field", "sort_order", "description", "config_json"}),
 	)
-	_, err = dbTx.Exec(doctypeSQL,
+	_, err = ex.Exec(doctypeSQL,
 		dt.Name, dt.Module, boolToInt(dt.IsSubmittable), boolToInt(dt.IsChildTable),
 		boolToInt(dt.IsSingle), boolToInt(dt.TrackChanges),
 		dt.TitleField, dt.SearchFields, dt.SortField, dt.SortOrder,
@@ -55,7 +74,7 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 	}
 
 	// Load existing fields for diff-based merge.
-	existingFields, err := s.loadFieldsMap(dt.Name, dbTx)
+	existingFields, err := s.loadFieldsMapTx(ex, dt.Name)
 	if err != nil {
 		return fmt.Errorf("loading existing fields for %s: %w", dt.Name, err)
 	}
@@ -74,7 +93,7 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 		}
 	}
 	for _, name := range toDelete {
-		if _, err := dbTx.Exec("DELETE FROM _kora_field WHERE parent = ? AND fieldname = ?", dt.Name, name); err != nil {
+		if _, err := ex.Exec("DELETE FROM _kora_field WHERE parent = ? AND fieldname = ?", dt.Name, name); err != nil {
 			return fmt.Errorf("deleting removed field %s.%s: %w", dt.Name, name, err)
 		}
 		slog.Info("removed field from config import", "doctype", dt.Name, "field", name)
@@ -86,7 +105,7 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 
 		if _, exists := existingFields[field.Fieldname]; exists {
 			// UPDATE existing field.
-			_, err = dbTx.Exec(`
+			_, err = ex.Exec(`
 				UPDATE _kora_field SET
 					fieldtype = ?, label = ?, options = ?, reqd = ?, unique_constraint = ?,
 					default_value = ?, hidden = ?, read_only = ?, bold = ?,
@@ -109,7 +128,7 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 			}
 		} else {
 			// INSERT new field.
-			_, err = dbTx.Exec(`
+			_, err = ex.Exec(`
 				INSERT INTO _kora_field (name, parent, fieldname, fieldtype, label, options,
 					reqd, unique_constraint, default_value, hidden, read_only, bold,
 					in_list_view, in_standard_filter, search_index, description,
@@ -131,16 +150,30 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 		}
 	}
 
-	if err := dbTx.Commit(); err != nil {
-		return fmt.Errorf("committing doctype %s: %w", dt.Name, err)
-	}
-
 	slog.Debug("saved doctype config", "name", dt.Name, "fields", len(dt.Fields),
 		"deleted", len(toDelete), "new", len(dt.Fields)-len(existingFields)+len(toDelete))
 	return nil
 }
 
 // loadFieldsMap returns existing field definitions keyed by fieldname.
+// loadFieldsMapTx is like loadFieldsMap but accepts any sqlExecutor.
+func (s *Store) loadFieldsMapTx(ex sqlExecutor, parent string) (map[string]bool, error) {
+	rows, err := ex.Query("SELECT fieldname FROM _kora_field WHERE parent = ?", parent)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		result[name] = true
+	}
+	return result, rows.Err()
+}
+
 func (s *Store) loadFieldsMap(parent string, tx *sql.Tx) (map[string]bool, error) {
 	rows, err := tx.Query("SELECT fieldname FROM _kora_field WHERE parent = ?", parent)
 	if err != nil {
@@ -517,8 +550,12 @@ func (s *Store) LoadPermissions() ([]*doctype.Permission, error) {
 }
 
 // CreateConfigVersion saves a snapshot of the full config for version tracking.
+// The snapshot includes doctypes, roles, permissions, and workflows.
 // Returns the version ID, version number, and any error.
-func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, doctypes []*doctype.DocType) (string, int, error) {
+func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, snapshot *doctype.ConfigSnapshot) (string, int, error) {
+	if snapshot == nil {
+		return "", 0, fmt.Errorf("snapshot is required")
+	}
 	var currentVersion int
 	s.DB.QueryRow("SELECT COALESCE(MAX(version), 0) FROM _kora_config_version WHERE site = ?", siteName).Scan(&currentVersion)
 	newVersion := currentVersion + 1
@@ -528,21 +565,22 @@ func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, d
 		s.DB.Exec("UPDATE _kora_config_version SET status = 'Superseded' WHERE site = ? AND status = 'Active'", siteName)
 	}
 
-	// Serialize config snapshot as JSON.
-	configJSON, err := json.Marshal(doctypes)
+	// Serialize the FULL config snapshot as JSON (new format).
+	configJSON, err := json.Marshal(snapshot)
 	if err != nil {
 		return "", 0, fmt.Errorf("marshaling config: %w", err)
 	}
 
 	// Compute diff against previous version if one exists.
+	// Handles both old format (JSON array of doctypes) and new format (ConfigSnapshot).
 	var changelog any
 	var prevConfigJSON string
 	s.DB.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND version = ?", siteName, currentVersion).Scan(&prevConfigJSON)
 
 	if prevConfigJSON != "" {
-		var prevDoctypes []*doctype.DocType
-		if err := json.Unmarshal([]byte(prevConfigJSON), &prevDoctypes); err == nil {
-			diff := doctype.DiffConfigs(prevDoctypes, doctypes)
+		prevSnapshot, parseErr := doctype.ParseSnapshot(prevConfigJSON)
+		if parseErr == nil {
+			diff := doctype.DiffConfigs(prevSnapshot.DocTypes, snapshot.DocTypes)
 			diff.FromVersion = currentVersion
 			diff.ToVersion = newVersion
 			changelogBytes, _ := json.Marshal(diff)
@@ -562,6 +600,64 @@ func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, d
 
 	slog.Debug("created config version", "id", versionID, "version", newVersion, "status", status)
 	return versionID, newVersion, nil
+}
+
+// CollectSnapshot reads all live config state and builds a ConfigSnapshot for versioning.
+// Call before creating a version to capture the complete current state.
+// Doctypes are sorted by name for deterministic snapshot ordering (fixes non-deterministic map iteration).
+func (s *Store) CollectSnapshot(reg *doctype.Registry) (*doctype.ConfigSnapshot, error) {
+	doctypes := make([]*doctype.DocType, 0)
+	for _, name := range reg.Names() {
+		if dt := reg.Get(name); dt != nil {
+			doctypes = append(doctypes, dt)
+		}
+	}
+	sort.Slice(doctypes, func(i, j int) bool { return doctypes[i].Name < doctypes[j].Name })
+	roles, _ := s.LoadRoles()
+	permissions, _ := s.LoadPermissions()
+	workflows, _ := s.LoadWorkflows()
+	analyticsMetrics, _ := s.LoadAnalyticsMetrics()
+	return &doctype.ConfigSnapshot{
+		DocTypes:         doctypes,
+		Roles:            roles,
+		Permissions:      permissions,
+		Workflows:        workflows,
+		AnalyticsMetrics: analyticsMetrics,
+	}, nil
+}
+
+// LoadAnalyticsMetrics loads all custom analytics metric definitions.
+func (s *Store) LoadAnalyticsMetrics() ([]*doctype.AnalyticsMetricConfig, error) {
+	rows, err := s.DB.Query("SELECT name, label, type, doctype, field_name, link_field, group_by_field FROM _kora_analytics_metric")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var metrics []*doctype.AnalyticsMetricConfig
+	for rows.Next() {
+		var m doctype.AnalyticsMetricConfig
+		rows.Scan(&m.Name, &m.Label, &m.Type, &m.DocType, &m.FieldName, &m.LinkField, &m.GroupByField)
+		m.AutoGenerated = false
+		metrics = append(metrics, &m)
+	}
+	return metrics, rows.Err()
+}
+
+// SaveAnalyticsMetrics saves custom analytics metric definitions from a snapshot.
+func (s *Store) SaveAnalyticsMetrics(metrics []*doctype.AnalyticsMetricConfig) error {
+	for _, m := range metrics {
+		if m == nil {
+			continue
+		}
+		upsertSQL := `INSERT INTO _kora_analytics_metric (name, label, type, doctype, field_name, link_field, group_by_field)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			` + s.Dialect.UpsertClause([]string{"name"}, []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field"})
+		_, err := s.DB.Exec(upsertSQL, m.Name, m.Label, m.Type, m.DocType, m.FieldName, m.LinkField, m.GroupByField)
+		if err != nil {
+			return fmt.Errorf("saving analytics metric %s: %w", m.Name, err)
+		}
+	}
+	return nil
 }
 
 // LoadWorkflows loads all workflows from the database.

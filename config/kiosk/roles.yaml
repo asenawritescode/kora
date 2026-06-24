@@ -1,0 +1,6 @@
+- name: Kiosk Operator
+  workspace_access: true
+  description: Manages daily sales, stock, and expenses at the kiosk.
+- name: Kiosk Manager
+  workspace_access: true
+  description: Oversees the kiosk — can view reports and manage all records.

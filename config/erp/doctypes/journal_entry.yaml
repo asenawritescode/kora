@@ -1,0 +1,25 @@
+name: Journal Entry
+module: Finance
+title_field: reference
+search_fields: reference, description
+sort_field: posting_date
+sort_order: DESC
+is_submittable: true
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    bold: true
+    in_list_view: true
+  - fieldname: posting_date
+    fieldtype: Date
+    label: Posting Date
+    reqd: true
+    in_list_view: true
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+  - fieldname: total_debit
+    fieldtype: Currency
+    label: Total Debit

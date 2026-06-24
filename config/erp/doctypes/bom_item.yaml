@@ -1,0 +1,29 @@
+  - fieldname: quantity
+    fieldtype: Int
+    label: Output Quantity
+    default: "1"
+  - fieldname: items
+    fieldtype: Table
+    label: Raw Materials
+    options: BOM Item
+
+---
+name: BOM Item
+module: Manufacturing
+is_child_table: true
+fields:
+  - fieldname: item
+    fieldtype: Link
+    label: Item
+    options: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    in_list_view: true
+  - fieldname: unit
+    fieldtype: Data
+    label: Unit
+    default: Piece

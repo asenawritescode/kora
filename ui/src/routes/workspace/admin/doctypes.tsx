@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchDoctypes, deleteDoctype } from '@/lib/api/system'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Badge } from '@/components/ui/badge'
 import { Plus, Edit, Trash2, FileText } from 'lucide-react'
 import { useState } from 'react'
 
@@ -82,6 +83,7 @@ function DocTypeTable() {
             <th className="text-left px-4 py-3 text-sm font-medium">Name</th>
             <th className="text-left px-4 py-3 text-sm font-medium">Module</th>
             <th className="text-left px-4 py-3 text-sm font-medium">Fields</th>
+            <th className="text-left px-4 py-3 text-sm font-medium">Status</th>
             <th className="text-left px-4 py-3 text-sm font-medium">Submittable</th>
             <th className="text-right px-4 py-3 text-sm font-medium">Actions</th>
           </tr>
@@ -126,6 +128,13 @@ function DoctypeRow({ dt, onDeleted }: { dt: any; onDeleted: () => void }) {
         <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
           {dt.fields?.length || 0} fields
         </span>
+      </td>
+      <td className="px-4 py-3">
+        {dt.status === 'Active' ? (
+          <Badge variant="default" className="bg-green-600 hover:bg-green-600">Active</Badge>
+        ) : (
+          <Badge variant="secondary" className="bg-amber-100 text-amber-800 hover:bg-amber-100">Draft</Badge>
+        )}
       </td>
       <td className="px-4 py-3">
         {dt.is_submittable ? (
@@ -186,11 +195,18 @@ function DoctypeCard({ dt, onDeleted }: { dt: any; onDeleted: () => void }) {
           {dt.fields?.length || 0} fields
         </span>
       </div>
-      {dt.is_submittable && (
-        <span className="inline-flex items-center rounded-full bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 text-xs font-medium">
-          Submittable
-        </span>
-      )}
+      <div className="flex items-center gap-2">
+        {dt.status === 'Active' ? (
+          <Badge variant="default" className="bg-green-600 hover:bg-green-600 text-xs">Active</Badge>
+        ) : (
+          <Badge variant="secondary" className="bg-amber-100 text-amber-800 hover:bg-amber-100 text-xs">Draft</Badge>
+        )}
+        {dt.is_submittable && (
+          <span className="inline-flex items-center rounded-full bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 text-xs font-medium">
+            Submittable
+          </span>
+        )}
+      </div>
     </div>
   )
 }

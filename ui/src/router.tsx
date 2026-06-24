@@ -17,8 +17,15 @@ import AdminPermissionsPage from '@/routes/workspace/admin/permissions'
 import AdminWorkflowsPage from '@/routes/workspace/admin/workflows'
 import AdminUsersPage from '@/routes/workspace/admin/users'
 import AdminSecretsPage from '@/routes/workspace/admin/secrets'
+import AdminAnalyticsPage from '@/routes/workspace/admin/analytics'
 import ConsoleLoginPage from '@/routes/console/login'
 import ConsoleDashboard from '@/routes/console/index'
+import MarketingLayout from '@/components/landing/MarketingLayout'
+import DocsLayout from '@/components/landing/DocsLayout'
+import HomePage from '@/routes/landing/home'
+import ExamplesPage from '@/routes/landing/examples'
+import DocsPage from '@/routes/landing/docs'
+import BlogPage from '@/routes/landing/blog'
 
 // Root — just auth guard, no layout.
 const rootRoute = createRootRoute({
@@ -34,6 +41,34 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/workspace/auth/login',
   component: LoginPage,
+})
+
+// Marketing pages — public, direct children of rootRoute.
+// Each wraps its own layout to avoid path nesting conflicts.
+
+const homeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/',
+  component: () => <MarketingLayout><HomePage /></MarketingLayout>,
+})
+
+const examplesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/examples',
+  component: () => <MarketingLayout><ExamplesPage /></MarketingLayout>,
+})
+
+const blogRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/blog',
+  component: () => <MarketingLayout><BlogPage /></MarketingLayout>,
+})
+
+// Docs gets its own layout (nav + sidebar + content).
+const docsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/docs',
+  component: () => <DocsLayout><DocsPage /></DocsLayout>,
 })
 
 // Workspace layout with sidebar — all authenticated pages are nested here.
@@ -128,6 +163,12 @@ const adminSecretsRoute = createRoute({
   component: AdminSecretsPage,
 })
 
+const adminAnalyticsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: 'analytics',
+  component: AdminAnalyticsPage,
+})
+
 // Settings (placeholder).
 const settingsRoute = createRoute({
   getParentRoute: () => workspaceLayout,
@@ -167,6 +208,10 @@ const consoleIndexRoute = createRoute({
 })
 
 const routeTree = rootRoute.addChildren([
+  homeRoute,
+  examplesRoute,
+  blogRoute,
+  docsRoute,
   loginRoute,
   consoleLoginRoute,
   consoleLayout.addChildren([
@@ -183,6 +228,7 @@ const routeTree = rootRoute.addChildren([
       adminWorkflowsRoute,
       adminUsersRoute,
       adminSecretsRoute,
+      adminAnalyticsRoute,
     ]),
     doctypeRoute.addChildren([doctypeListRoute, doctypeNewRoute, doctypeEditRoute]),
     settingsRoute,

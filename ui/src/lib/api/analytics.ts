@@ -43,3 +43,10 @@ export async function queryMetric(name: string, req?: QueryRequest): Promise<Que
 export async function fetchInsights(doctype: string): Promise<Record<string, any>> {
   return api.get(`/api/analytics/insights/${encodeURIComponent(doctype)}`);
 }
+
+export async function createMetric(metric: {
+  name: string; label?: string; type: string; doctype: string;
+  field?: string; link_field?: string; group_by_field?: string;
+}): Promise<Metric> {
+  return api.post("/api/analytics/metrics", metric);
+}

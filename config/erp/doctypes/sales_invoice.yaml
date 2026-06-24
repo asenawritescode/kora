@@ -1,0 +1,30 @@
+name: Sales Invoice
+module: Sales
+title_field: customer
+search_fields: customer, invoice_number
+sort_field: creation
+sort_order: DESC
+is_submittable: true
+fields:
+  - fieldname: customer
+    fieldtype: Link
+    label: Customer
+    options: Customer
+    reqd: true
+    in_list_view: true
+  - fieldname: invoice_number
+    fieldtype: Data
+    label: Invoice Number
+    unique: true
+    in_list_view: true
+  - fieldname: sales_order
+    fieldtype: Link
+    label: Sales Order
+    options: Sales Order
+  - fieldname: invoice_date
+    fieldtype: Date
+    label: Invoice Date
+    reqd: true
+    in_list_view: true
+  - fieldname: due_date
+    fieldtype: Date

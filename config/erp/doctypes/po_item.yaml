@@ -1,0 +1,42 @@
+    computed: SUM(items.line_total)
+    read_only: true
+    in_list_view: true
+  - fieldname: items
+    fieldtype: Table
+    label: PO Items
+    options: PO Item
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: Draft
+    read_only: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+
+---
+name: PO Item
+module: Purchasing
+is_child_table: true
+fields:
+  - fieldname: item
+    fieldtype: Link
+    label: Item
+    options: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Int
+    label: Quantity
+    reqd: true
+    in_list_view: true
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit Price
+    reqd: true
+    in_list_view: true
+  - fieldname: line_total
+    fieldtype: Currency
+    label: Line Total
+    computed: quantity * unit_price
+    read_only: true

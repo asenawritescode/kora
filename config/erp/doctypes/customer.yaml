@@ -1,0 +1,62 @@
+name: Customer
+module: CRM
+title_field: company_name
+search_fields: company_name, email, phone, industry
+sort_field: modified
+sort_order: DESC
+fields:
+  - fieldname: company_name
+    fieldtype: Data
+    label: Company Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: industry
+    fieldtype: Select
+    label: Industry
+    options: |
+      Technology
+      Healthcare
+      Finance
+      Manufacturing
+      Retail
+      Education
+      Government
+      Other
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: contact_person
+    fieldtype: Data
+    label: Contact Person
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+    options: Email
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+  - fieldname: address
+    fieldtype: Text
+    label: Address
+  - fieldname: customer_type
+    fieldtype: Select
+    label: Customer Type
+    options: |
+      Individual
+      Company
+      Government
+    default: Company
+    in_list_view: true
+  - fieldname: annual_revenue
+    fieldtype: Currency
+    label: Annual Revenue
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+      Lead
+    default: Active

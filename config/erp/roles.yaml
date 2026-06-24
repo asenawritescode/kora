@@ -1,0 +1,23 @@
+- name: Administrator
+  workspace_access: true
+  description: Full system access.
+
+- name: ERP Manager
+  workspace_access: true
+  description: Access to all ERP modules.
+
+- name: Sales Manager
+  workspace_access: true
+  description: Sales and CRM access.
+
+- name: HR Manager
+  workspace_access: true
+  description: HR module access.
+
+- name: Accountant
+  workspace_access: true
+  description: Finance module access.
+
+- name: Inventory Manager
+  workspace_access: true
+  description: Inventory and manufacturing.

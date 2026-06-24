@@ -22,10 +22,12 @@ func (b *fakeBus) Publish(event ChangeEvent) error {
 	b.ch <- event
 	return nil
 }
-func (b *fakeBus) Subscribe() (<-chan ChangeEvent, error) { return b.ch, nil }
+func (b *fakeBus) Subscribe() (<-chan ChangeEvent, error)  { return b.ch, nil }
 func (b *fakeBus) DrainWAL(handler func(ChangeEvent)) (int, error) { return 0, nil }
-func (b *fakeBus) Dropped() int64                           { return b.dropped }
-func (b *fakeBus) Close() error                             { close(b.ch); return nil }
+func (b *fakeBus) RotateWAL() (string, error)               { return "", nil }
+func (b *fakeBus) CommitWALRotation(string) error           { return nil }
+func (b *fakeBus) Dropped() int64                            { return b.dropped }
+func (b *fakeBus) Close() error                              { close(b.ch); return nil }
 
 // testWorker creates a Worker for unit testing (no DB).
 // We test the delta accumulation logic, not the flush.

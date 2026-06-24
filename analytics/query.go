@@ -1,7 +1,6 @@
 package analytics
 
 import (
-	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -46,13 +45,9 @@ func (qe *QueryEngine) CachedResolve(metric *Metric, req QueryRequest, ttl time.
 }
 
 func (qe *QueryEngine) cacheKey(metric string, req QueryRequest) string {
-	h := sha256.New()
-	h.Write([]byte(qe.SiteName))
-	h.Write([]byte(metric))
-	h.Write([]byte(req.From))
-	h.Write([]byte(req.To))
-	h.Write([]byte(req.GroupBy))
-	return fmt.Sprintf("%x", h.Sum(nil))
+	// Simple concatenation — much faster than SHA-256 for a cache key.
+	// The key is only used for in-memory map lookups, not security-sensitive.
+	return qe.SiteName + "\x00" + metric + "\x00" + req.From + "\x00" + req.To + "\x00" + req.GroupBy
 }
 
 // InvalidateCache clears all cached results for this engine.
@@ -122,23 +117,23 @@ func (qe *QueryEngine) Resolve(metric *Metric, req QueryRequest) (*QueryResult, 
 	cols, _ := rows.Columns()
 	result.Columns = cols
 
+	// Pre-allocate scan targets once, reuse per row to reduce GC pressure.
+	scanTargets := make([]any, len(cols))
+	scanVals := make([]any, len(cols))
+	for i := range cols {
+		scanTargets[i] = &scanVals[i]
+	}
+
 	for rows.Next() {
-		row := make(map[string]any)
-		scanTargets := make([]any, len(cols))
-		for i := range cols {
-			var v any
-			scanTargets[i] = &v
-		}
 		if err := rows.Scan(scanTargets...); err != nil {
 			return nil, fmt.Errorf("scan row: %w", err)
 		}
+		row := make(map[string]any, len(cols))
 		for i, col := range cols {
-			val := *(scanTargets[i].(*any))
-			// Normalize MySQL []byte → string for JSON-safe output.
-			if b, ok := val.([]byte); ok {
+			if b, ok := scanVals[i].([]byte); ok {
 				row[col] = string(b)
 			} else {
-				row[col] = val
+				row[col] = scanVals[i]
 			}
 		}
 		result.Rows = append(result.Rows, row)

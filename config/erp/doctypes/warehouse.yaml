@@ -1,0 +1,29 @@
+name: Warehouse
+module: Inventory
+title_field: warehouse_name
+search_fields: warehouse_name, location
+fields:
+  - fieldname: warehouse_name
+    fieldtype: Data
+    label: Warehouse Name
+    reqd: true
+    bold: true
+    in_list_view: true
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+    in_list_view: true
+  - fieldname: capacity
+    fieldtype: Int
+    label: Capacity (sqm)
+  - fieldname: manager
+    fieldtype: Link
+    label: Manager
+    options: Employee
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: Active

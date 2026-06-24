@@ -8,6 +8,7 @@ import { InsightsPanel } from '@/components/analytics/InsightsPanel'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Breadcrumbs } from '@/components/layout/Breadcrumbs'
 import { Plus, List, BarChart3 } from 'lucide-react'
 import type { Document, DocType } from '@/types/kora'
 
@@ -64,9 +65,10 @@ export default function ListPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
+      <Breadcrumbs items={[{ label: dt.name }]} className="mb-2" />
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{dt.name}</h1>
           <p className="text-sm text-muted-foreground">

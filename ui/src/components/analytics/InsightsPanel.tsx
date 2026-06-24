@@ -1,5 +1,6 @@
+import { BarChart3 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchInsights, fetchAnalyticsStatus } from "@/lib/api/analytics";
+import { fetchInsights, fetchAnalyticsStatus, fetchMetrics } from "@/lib/api/analytics";
 import { StatCard } from "@/components/charts/StatCard";
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart";
 import { DonutChart } from "@/components/charts/DonutChart";
@@ -16,12 +17,26 @@ export function InsightsPanel({ doctype }: InsightsPanelProps) {
     staleTime: 30000,
   });
 
+  const metrics = useQuery({
+    queryKey: ["analytics", "metrics"],
+    queryFn: fetchMetrics,
+    staleTime: 60000,
+  });
+
   const insights = useQuery({
     queryKey: ["analytics", "insights", doctype],
     queryFn: () => fetchInsights(doctype),
     staleTime: 30000,
     enabled: !!doctype,
   });
+
+  // Build metric name → label map for human-readable display.
+  const labelMap: Record<string, string> = {};
+  if (metrics.data) {
+    for (const m of metrics.data) {
+      labelMap[m.name] = m.label;
+    }
+  }
 
   if (!status.data?.enabled) {
     return (
@@ -63,14 +78,14 @@ export function InsightsPanel({ doctype }: InsightsPanelProps) {
   const timeSeries: { title: string; data: { bucket: string; value: number }[] }[] = [];
 
   for (const [key, val] of Object.entries(data)) {
+    const title = labelMap[key] || key;
     if (typeof val === "number") {
-      stats.push({ title: formatMetricName(key, doctype), value: val });
+      stats.push({ title, value: val });
     } else if (typeof val === "object" && val !== null) {
-      // Distribution: { "Active": 5, "Inactive": 2 }
       const entries = Object.entries(val as Record<string, any>);
       if (entries.length > 0 && typeof entries[0][1] === "number") {
         distributions.push({
-          title: formatMetricName(key, doctype),
+          title,
           data: entries.map(([k, v]) => ({ name: k, value: v as number })),
         });
       }
@@ -104,22 +119,14 @@ export function InsightsPanel({ doctype }: InsightsPanelProps) {
       )}
 
       {stats.length === 0 && distributions.length === 0 && (
-        <div className="flex items-center justify-center py-16 text-muted-foreground text-sm border-2 border-dashed rounded-lg">
-          Analytics data is accumulating. Insights will appear here automatically.
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground text-sm border-2 border-dashed rounded-lg gap-2">
+          <BarChart3 className="h-8 w-8 opacity-30" />
+          <p className="font-medium">No analytics data yet</p>
+          <p>Create your first {doctype} record to see insights appear here automatically.</p>
+          <p className="text-xs opacity-50">Counts, distributions, sums, and trends are pre-computed on every write.</p>
         </div>
       )}
     </div>
   );
 }
 
-function formatMetricName(key: string, doctype: string): string {
-  // Strip doctype prefix: "work_order_count" → "Count"
-  //                       "work_order_count_by_status" → "By Status"
-  const prefix = doctype.toLowerCase().replace(/\s+/g, "_") + "_";
-  let name = key.replace(new RegExp("^" + prefix), "");
-
-  return name
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .replace(/^Count By /, "By ");
-}

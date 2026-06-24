@@ -192,7 +192,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner, m
 			Operation:  analytics.EventInsert,
 			Timestamp:  time.Now(),
 			ModifiedBy: modifiedBy,
-			Data:       doc.Fields,
+			Data:       copyFieldsWithStatus(doc.Fields, doc.DocStatus),
 		})
 	}
 
@@ -627,7 +627,8 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 	if tx.EventBus != nil {
 		var oldData map[string]any
 		if oldDoc != nil {
-			oldData = oldDoc.Fields
+			
+			oldData = copyFieldsWithStatus(oldDoc.Fields, oldDoc.DocStatus)
 		}
 		tx.EventBus.Publish(analytics.ChangeEvent{
 			Site:       tx.SiteName,
@@ -636,7 +637,7 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 			Operation:  analytics.EventUpdate,
 			Timestamp:  time.Now(),
 			ModifiedBy: modifiedBy,
-			Data:       doc.Fields,
+			Data:       copyFieldsWithStatus(doc.Fields, doc.DocStatus),
 			OldData:    oldData,
 		})
 	}
@@ -1151,4 +1152,14 @@ func convertDefault(def string, fieldtype string) any {
 	default:
 		return def
 	}
+}
+
+// copyFieldsWithStatus creates a copy of fields with doc_status injected for analytics.
+func copyFieldsWithStatus(fields map[string]any, docStatus int) map[string]any {
+	out := make(map[string]any, len(fields)+1)
+	for k, v := range fields {
+		out[k] = v
+	}
+	out["doc_status"] = docStatus
+	return out
 }

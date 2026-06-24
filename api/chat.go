@@ -101,9 +101,15 @@ RULES (follow strictly):
 - NEVER mention internal details: database schemas, table names, SQL, tool/function names, error tracebacks.
 - Format booleans as ✅/❌. Use proper currency formatting.
 
+DESTRUCTIVE ACTIONS (safety gate):
+- NEVER call _delete on multiple records without asking "Delete N [records]?" first. For single deletes, confirm: "Delete [name]?"
+- NEVER call _update to change workflow states, amounts, or linked documents without summarizing what will change and asking.
+- If the user says "delete all" or "clean up" or "remove old" — STOP. Ask: "How many records should I delete? Which ones specifically?"
+- These rules prevent accidental data loss. The user should always confirm destructive actions.
+
 DOCTYPE CREATION (special rules):
 - When asked to create a new form/doctype: gather requirements, call validate_doctype_yaml, then SUMMARIZE what you understood in 2-3 lines max. Ask "Create this as draft?" Do NOT show the YAML.
-- WAIT for user confirmation before calling create_doctype_draft.
+- WAIT for user confirmation before calling create_doctype_draft or update_doctype_draft.
 - If user says "yes" or "go ahead" or "create it": call create_doctype_draft immediately.
 - If user says "add X" or "change Y": adjust and validate again, then ask again.
 - The summary must be scannable. Example: "Invoice form: link to Customer, date fields, Draft→Paid status, line items table with auto-calculated totals, tax at 16%. Create as draft?"
@@ -647,6 +653,8 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 	case "validate_doctype_yaml":
 		yamlStr, _ := args["yaml"].(string)
 		return executeValidateYAML(yamlStr)
+			doctypeName, _ := args["doctype"].(string)
+			return executeAnalyticsInsights(tx, reg, doctypeName, siteName)
 	case "create_doctype_draft":
 		yamlStr, _ := args["yaml"].(string)
 		return executeCreateDoctypeDraft(tx, reg, yamlStr, owner, siteName)
@@ -927,6 +935,7 @@ fields:
     read_only: true`
 
 	return []map[string]any{
+		analyticsToolDef(),
 		{
 			"type": "function",
 			"function": map[string]any{
@@ -947,6 +956,20 @@ fields:
 					"type": "object",
 					"properties": map[string]any{
 						"yaml": map[string]any{"type": "string", "description": "YAML content to validate"},
+					},
+					"required": []string{"yaml"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "update_doctype_draft",
+				"description": "Update an EXISTING DocType as DRAFT. Provide the FULL YAML for the doctype (include all existing fields plus your changes). The existing doctype is replaced with this definition. Always call validate_doctype_yaml first. Only call AFTER user confirms they want to update.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"yaml": map[string]any{"type": "string", "description": "Complete updated doctype YAML"},
 					},
 					"required": []string{"yaml"},
 				},
@@ -1346,6 +1369,74 @@ func executeValidateYAML(yamlStr string) string {
 	return strings.Join(parts, "\n")
 }
 
+func executeUpdateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr, owner, siteName string) string {
+	if yamlStr == "" {
+		return "Error: no YAML content provided. Use validate_doctype_yaml first."
+	}
+
+	// 1. Validate YAML.
+	syntaxErrs, validationErrs, err := doctype.ValidateYAML([]byte(yamlStr))
+	if err != nil {
+		return fmt.Sprintf("Error parsing YAML: %v", err)
+	}
+	if len(syntaxErrs) > 0 || len(validationErrs) > 0 {
+		var msgs []string
+		for _, e := range syntaxErrs {
+			msgs = append(msgs, fmt.Sprintf("Line %d: %s", e.Line, e.Message))
+		}
+		for _, e := range validationErrs {
+			msgs = append(msgs, fmt.Sprintf("Validation: %s", e.Message))
+		}
+		return fmt.Sprintf("YAML validation failed:\n%s\n\nFix errors and validate again before updating.", strings.Join(msgs, "\n"))
+	}
+
+	// 2. Parse YAML into DocType struct.
+	var dt doctype.DocType
+	if err := yaml.Unmarshal([]byte(yamlStr), &dt); err != nil {
+		return fmt.Sprintf("Error parsing YAML: %v", err)
+	}
+	if dt.Name == "" {
+		return "Error: doctype 'name' is required in the YAML."
+	}
+
+	// 3. Check the doctype exists.
+	if !reg.Has(dt.Name) {
+		return fmt.Sprintf("Error: DocType %q does not exist. Use create_doctype_draft to create new doctypes.", dt.Name)
+	}
+
+	// 4. Run full validation.
+	if err := dt.Validate(); err != nil {
+		return fmt.Sprintf("Error validating doctype: %v", err)
+	}
+
+	// 5. Save as Draft — NEVER activate.
+	store := configstore.NewStore(tx.DB, tx.Dialect)
+	if err := store.SaveDocType(&dt); err != nil {
+		return fmt.Sprintf("Error saving doctype: %v", err)
+	}
+
+	// 6. Update registry.
+	reg.Register(&dt)
+
+	// 7. Create config version as Draft with full snapshot.
+	snapshot, _ := store.CollectSnapshot(reg)
+	if owner == "" || owner == "mcp-agent" {
+		owner = "ai-assistant"
+	}
+	verID, verNum, err := store.CreateConfigVersion(
+		siteName, owner, "Updated "+dt.Name+" via AI (Draft)", "Draft", snapshot,
+	)
+	if err != nil {
+		slog.Warn("config version creation failed", "error", err)
+	}
+
+	fields := len(dt.DataFields())
+	return fmt.Sprintf(
+		"✓ Updated DocType %q as DRAFT (%d fields). Version #%d (ID: %s). A human must review and activate it before it takes effect.",
+		dt.Name, fields, verNum, verID,
+	)
+}
+
 func executeCreateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr, owner, siteName string) string {
 	if yamlStr == "" {
 		return "Error: no YAML content provided. Use validate_doctype_yaml first."
@@ -1400,16 +1491,13 @@ func executeCreateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr
 		return fmt.Sprintf("Doctype created but permission setup failed: %v", err)
 	}
 
-	// 8. Create config version as Draft.
-	var allDoctypes []*doctype.DocType
-	for _, d := range reg.All() {
-		allDoctypes = append(allDoctypes, d)
-	}
+	// 8. Create config version as Draft with full snapshot.
+	snapshot, _ := store.CollectSnapshot(reg)
 	if owner == "" || owner == "mcp-agent" {
 		owner = "ai-assistant"
 	}
 	verID, verNum, err := store.CreateConfigVersion(
-		siteName, owner, "Created "+dt.Name+" via AI (Draft)", "Draft", allDoctypes,
+		siteName, owner, "Created "+dt.Name+" via AI (Draft)", "Draft", snapshot,
 	)
 	if err != nil {
 		slog.Warn("config version creation failed", "error", err)

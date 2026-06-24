@@ -1,0 +1,63 @@
+name: Product
+module: Kiosk
+title_field: product_name
+search_fields: product_name, sku
+sort_field: product_name
+sort_order: ASC
+
+fields:
+  - fieldname: product_name
+    fieldtype: Data
+    label: Product Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: sku
+    fieldtype: Data
+    label: SKU
+    unique: true
+    in_list_view: true
+
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Snacks & Sweets
+      Beverages
+      Airtime & Data
+      Household
+      Toiletries
+      Stationery
+      Other
+    in_standard_filter: true
+
+  - fieldname: selling_price
+    fieldtype: Currency
+    label: Selling Price
+    reqd: true
+    in_list_view: true
+
+  - fieldname: cost_price
+    fieldtype: Currency
+    label: Cost Price
+    in_list_view: false
+
+  - fieldname: stock_qty
+    fieldtype: Float
+    label: Current Stock
+    computed: "SUM(stock_moves.qty_change)"
+    read_only: true
+    in_list_view: true
+
+  - fieldname: reorder_level
+    fieldtype: Int
+    label: Reorder Level
+    default: "5"
+    description: Alert when stock drops below this level.
+
+  - fieldname: stock_moves
+    fieldtype: Table
+    label: Stock Movements
+    options: Stock Move

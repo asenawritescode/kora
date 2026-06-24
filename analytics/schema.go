@@ -63,6 +63,20 @@ func rollupTableDDL(dialect db.Dialect) []string {
 			INDEX idx_site_doctype_time (site, doctype, entered_at)
 		)`, quote("_kora_analytics_workflow")),
 
+		// Custom metric definitions created by users via the admin UI.
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			site VARCHAR(140) NOT NULL,
+			name VARCHAR(140) NOT NULL,
+			label VARCHAR(255) NOT NULL DEFAULT '',
+			type VARCHAR(50) NOT NULL,
+			doctype VARCHAR(140) NOT NULL,
+			field_name VARCHAR(140) NOT NULL DEFAULT '',
+			link_field VARCHAR(140) NOT NULL DEFAULT '',
+			group_by_field VARCHAR(140) NOT NULL DEFAULT '',
+			UNIQUE KEY uq_site_name (site, name)
+		)`, quote("_kora_analytics_metric")),
+
 		// Raw event log. Only populated when a DocType has analytics.track_raw_events: true.
 		// Used for per-document audit trails and ad-hoc drill-down.
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (

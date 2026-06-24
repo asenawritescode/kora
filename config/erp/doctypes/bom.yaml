@@ -1,0 +1,17 @@
+name: BOM
+module: Manufacturing
+title_field: product
+search_fields: product, bom_name
+fields:
+  - fieldname: product
+    fieldtype: Link
+    label: Product
+    options: Item
+    reqd: true
+    bold: true
+    in_list_view: true
+  - fieldname: bom_name
+    fieldtype: Data
+    label: BOM Name
+    reqd: true
+    in_list_view: true

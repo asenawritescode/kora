@@ -58,7 +58,8 @@ func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, conf
 	}
 
 	// Step 6: Create config version BEFORE migration (so we have a rollback snapshot).
-	versionID, _, err := store.CreateConfigVersion(siteName, "system", "Config import from "+configPath, "Active", doctypes)
+	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes}
+	versionID, _, err := store.CreateConfigVersion(siteName, "system", "Config import from "+configPath, "Active", snapshot)
 	if err != nil {
 		return fmt.Errorf("creating config version: %w", err)
 	}

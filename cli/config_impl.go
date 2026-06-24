@@ -200,7 +200,8 @@ func runConfigImport(siteName, path string) error {
 
 	// Create config version BEFORE migration (so we have a snapshot to roll back to).
 	// This is fatal — don't apply schema changes without a version record.
-	versionID, versionNum, err := store.CreateConfigVersion(siteName, "system", "Config import from "+path, "Active", doctypes)
+	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, Workflows: workflows}
+	versionID, versionNum, err := store.CreateConfigVersion(siteName, "system", "Config import from "+path, "Active", snapshot)
 	if err != nil {
 		return fmt.Errorf("creating config version: %w", err)
 	}
@@ -285,7 +286,7 @@ func runConfigVersions(siteName string) error {
 	defer db.Close()
 
 	rows, err := db.Query(
-		"SELECT version, created_at, created_by, label, is_active FROM _kora_config_version WHERE site = ? ORDER BY version DESC",
+		"SELECT version, created_at, created_by, label, status FROM _kora_config_version WHERE site = ? ORDER BY version DESC",
 		siteName,
 	)
 	if err != nil {
@@ -298,11 +299,13 @@ func runConfigVersions(siteName string) error {
 	for rows.Next() {
 		var version int
 		var createdAt, createdBy, label string
-		var isActive bool
-		rows.Scan(&version, &createdAt, &createdBy, &label, &isActive)
+		var status string
+		rows.Scan(&version, &createdAt, &createdBy, &label, &status)
 		active := ""
-		if isActive {
+		if status == "Active" {
 			active = " (active)"
+		} else if status == "Draft" {
+			active = " (draft)"
 		}
 		fmt.Printf("%-8d %-20s %-15s %s%s\n", version, createdAt[:min19(createdAt)], createdBy, label, active)
 	}
@@ -366,14 +369,53 @@ func runConfigRollback(siteName string, toVersion int) error {
 		return fmt.Errorf("version %d not found: %w", toVersion, err)
 	}
 
-	var targetDocTypes []*doctype.DocType
-	if err := yaml.Unmarshal([]byte(targetJSON), &targetDocTypes); err != nil {
+	// Parse the version snapshot with backward compatibility.
+	snapshot, err := doctype.ParseSnapshot(targetJSON)
+	if err != nil {
 		return fmt.Errorf("parsing version %d: %w", toVersion, err)
 	}
 
-	fmt.Printf("Rolling back to version %d (%d doctypes)...\n", toVersion, len(targetDocTypes))
-	db.Exec("UPDATE _kora_config_version SET is_active = 0 WHERE site = ?", siteName)
-	db.Exec("UPDATE _kora_config_version SET is_active = 1 WHERE site = ? AND version = ?", siteName, toVersion)
+	fmt.Printf("Rolling back to version %d (%d doctypes)...\n", toVersion, len(snapshot.DocTypes))
+
+	dialect := kdb.Resolve(common_cfg.DBType)
+	store := configstore.NewStore(db, dialect)
+
+	// Restore doctypes from snapshot.
+	for _, dt := range snapshot.DocTypes {
+		if err := store.SaveDocType(dt); err != nil {
+			return fmt.Errorf("saving doctype %s: %w", dt.Name, err)
+		}
+	}
+
+	// Restore roles, permissions, and workflows from snapshot.
+	if len(snapshot.Roles) > 0 {
+		store.SaveRoles(snapshot.Roles)
+	}
+	if len(snapshot.Permissions) > 0 {
+		store.SavePermissions(snapshot.Permissions)
+	}
+	if len(snapshot.Workflows) > 0 {
+		store.SaveWorkflows(snapshot.Workflows)
+	}
+
+	// Build a temporary registry and run migration.
+	reg := doctype.NewRegistry()
+	for _, dt := range snapshot.DocTypes {
+		reg.Register(dt)
+	}
+	reg.Permissions.LoadPermissionsFromDB(snapshot.Roles, snapshot.Permissions)
+	reg.Workflows.LoadFromDB(snapshot.Workflows)
+
+	var dbName string
+	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
+	if err := schema.MigrateSite(db, dbName, reg, dialect); err != nil {
+		return fmt.Errorf("migration failed during rollback: %w", err)
+	}
+
+	// Create a new Active version to record the rollback.
+	newSnapshot, _ := store.CollectSnapshot(reg)
+	store.CreateConfigVersion(siteName, "system", fmt.Sprintf("Rollback to version %d", toVersion), "Active", newSnapshot)
+
 	fmt.Println("Rollback complete.")
 	return nil
 }

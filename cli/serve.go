@@ -239,6 +239,7 @@ func runServe() error {
 		ch := api.NewConsoleHandler(systemGuard, siteRouter, common.DBType, common.DBHost, common.DBUser, common.DBPassword, 3306, platformDB)
 		router.POST("/api/console/login", ch.HandleLogin)
 		router.POST("/api/console/change-password", ch.HandleChangePassword)
+		router.POST("/api/console/sites/onboard", ch.HandleOnboard) // public — no auth
 		router.GET("/api/console/sites", ch.RequireConsoleAuth, ch.HandleListSites)
 		router.POST("/api/console/sites", ch.RequireConsoleAuth, ch.HandleCreateSite)
 		router.PUT("/api/console/sites/:name", ch.RequireConsoleAuth, ch.HandleUpdateSite)

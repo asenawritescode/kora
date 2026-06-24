@@ -182,7 +182,15 @@ func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo, d
 	for _, dt := range registry.All() {
 		for _, field := range dt.TableFields() {
 			childTableName := dt.RawChildTableName(field.Fieldname)
+			childDT := registry.Get(field.Options)
 			if _, exists := liveSchema[childTableName]; !exists {
+				// Child table doesn't exist yet. Only create it if the child
+				// doctype is available (otherwise defer until child is activated).
+				if childDT == nil {
+					slog.Warn("schema: deferring child table creation — child doctype not yet activated",
+						"child_table", childTableName, "parent", dt.Name, "field", field.Fieldname)
+					continue
+				}
 				// Avoid duplicate entries.
 				found := false
 				for _, nt := range diff.NewTables {
@@ -193,6 +201,32 @@ func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo, d
 				}
 				if !found {
 					diff.NewTables = append(diff.NewTables, childTableName)
+				}
+			} else if childDT != nil {
+				// Child table already exists AND child doctype is now available.
+				// Detect missing data columns and add them. This recovers from
+				// cases where a parent was activated before its child doctype,
+				// creating a skeleton child table without data columns.
+				existingTable := liveSchema[childTableName]
+				for _, cf := range childDT.DataFields() {
+					if cf.Fieldtype == "Table" {
+						continue
+					}
+					if _, exists := existingTable.Columns[cf.Fieldname]; !exists {
+						diff.NewColumns[childTableName] = append(
+							diff.NewColumns[childTableName],
+							ColumnAdd{
+								Name:     cf.Fieldname,
+								Type:     dialect.ColumnType(&cf),
+								Nullable: !cf.Reqd,
+								Default:  cf.Default,
+							},
+						)
+						slog.Info("schema: backfilling missing column in existing child table",
+							"child_table", childTableName,
+							"column", cf.Fieldname,
+							"child_doctype", childDT.Name)
+					}
 				}
 			}
 		}
@@ -223,7 +257,10 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []str
 		if foundDT != nil {
 			statements = append(statements, dialect.CreateTable(foundDT)...)
 		} else {
-			statements = append(statements, generateCreateTable(tableName, registry, dialect))
+			ddl := generateCreateTable(tableName, registry, dialect)
+			if ddl != "" {
+				statements = append(statements, ddl)
+			}
 		}
 	}
 
@@ -293,6 +330,17 @@ func generateCreateTable(tableName string, registry *doctype.Registry, dialect d
 		if dt != nil {
 			break
 		}
+	}
+
+	// If this is a child table but the child doctype doesn't exist yet,
+	// log a warning and skip — the table will be created when the child
+	// doctype is activated, with full column information available.
+	if isChild && dt == nil {
+		slog.Warn("schema: skipping child table creation — child doctype not yet activated",
+			"child_table", tableName,
+			"parent", parentDT.Name,
+			"field", parentField)
+		return ""
 	}
 
 	// Use quoted table name for SQL.

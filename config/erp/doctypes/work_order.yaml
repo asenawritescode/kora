@@ -1,0 +1,50 @@
+name: Work Order
+module: Manufacturing
+title_field: product
+search_fields: product, status
+sort_field: creation
+sort_order: DESC
+is_submittable: true
+fields:
+  - fieldname: product
+    fieldtype: Link
+    label: Product
+    options: Item
+    reqd: true
+    bold: true
+    in_list_view: true
+  - fieldname: bom
+    fieldtype: Link
+    label: BOM
+    options: BOM
+  - fieldname: quantity
+    fieldtype: Int
+    label: Quantity to Produce
+    reqd: true
+    in_list_view: true
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start Date
+    in_list_view: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: End Date
+  - fieldname: priority
+    fieldtype: Select
+    label: Priority
+    options: |
+      Low
+      Medium
+      High
+      Critical
+    default: Medium
+    in_list_view: true
+  - fieldname: assigned_to
+    fieldtype: Link
+    label: Assigned To
+    options: Employee
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: Draft
+    read_only: true

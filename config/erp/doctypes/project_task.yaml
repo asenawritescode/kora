@@ -1,0 +1,53 @@
+    in_list_view: true
+  - fieldname: budget
+    fieldtype: Currency
+    label: Budget
+    in_list_view: true
+  - fieldname: actual_cost
+    fieldtype: Currency
+    label: Actual Cost
+    computed: SUM(tasks.actual_hours) * 50
+    read_only: true
+  - fieldname: priority
+    fieldtype: Select
+    label: Priority
+    options: |
+      Low
+      Medium
+      High
+      Critical
+    default: Medium
+  - fieldname: tasks
+    fieldtype: Table
+    label: Tasks
+    options: Project Task
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: Planning
+    read_only: true
+
+---
+name: Project Task
+module: Projects
+is_child_table: true
+fields:
+  - fieldname: task_name
+    fieldtype: Data
+    label: Task Name
+    reqd: true
+    in_list_view: true
+  - fieldname: assigned_to
+    fieldtype: Link
+    label: Assigned To
+    options: Employee
+    in_list_view: true
+  - fieldname: estimated_hours
+    fieldtype: Float
+    label: Estimated Hours
+  - fieldname: actual_hours
+    fieldtype: Float
+    label: Actual Hours
+  - fieldname: completed
+    fieldtype: Check
+    label: Completed

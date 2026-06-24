@@ -1,0 +1,40 @@
+name: Stock Move
+module: Kiosk
+is_child_table: true
+title_field: reference
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    description: Supplier name, invoice number, or reason for adjustment.
+
+  - fieldname: move_type
+    fieldtype: Select
+    label: Type
+    options: |
+      Stock In (Purchase)
+      Stock Out (Sale)
+      Adjustment (+)
+      Adjustment (-)
+      Return
+    reqd: true
+    default: Stock In (Purchase)
+    in_list_view: true
+
+  - fieldname: qty_change
+    fieldtype: Float
+    label: Quantity Change
+    reqd: true
+    description: Positive for stock in, negative for stock out.
+    in_list_view: true
+
+  - fieldname: unit_cost
+    fieldtype: Currency
+    label: Unit Cost
+    description: Purchase cost per unit at time of movement.
+
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

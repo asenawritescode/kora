@@ -9,7 +9,7 @@ import (
 )
 
 func TestChannelBus_PublishSubscribe(t *testing.T) {
-	bus := NewChannelBus(10, "")
+	bus := NewChannelBus(10, t.TempDir()+"/wal")
 	defer bus.Close()
 
 	ch, err := bus.Subscribe()
@@ -44,24 +44,36 @@ func TestChannelBus_PublishSubscribe(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for event")
 	}
+
+	// Verify the event was also written to WAL (WAL-first durability).
+	walPath := filepath.Join(bus.(*channelBus).walDir, "events.jsonl")
+	data, err := os.ReadFile(walPath)
+	if err != nil {
+		t.Fatalf("WAL file not found after publish: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("WAL should contain the published event")
+	}
+	t.Logf("WAL content: %s", string(data))
 }
 
-func TestChannelBus_BufferFull_SpillsToWAL(t *testing.T) {
+func TestChannelBus_BufferFull_StillWritesToWAL(t *testing.T) {
 	tmpDir := t.TempDir()
 	walDir := filepath.Join(tmpDir, "wal")
 	bus := NewChannelBus(1, walDir) // buffer of 1
 	defer bus.Close()
 
-	// First event fills the buffer.
+	// With WAL-first, ALL events go to WAL regardless of channel state.
+	// The channel is just a wake-up optimization.
 	bus.Publish(ChangeEvent{Site: "test", Doctype: "A", DocName: "1", Operation: EventInsert})
-	// Second event should spill to WAL (buffer full).
 	bus.Publish(ChangeEvent{Site: "test", Doctype: "B", DocName: "2", Operation: EventInsert})
 
-	if dropped := bus.Dropped(); dropped != 1 {
-		t.Errorf("expected 1 dropped event, got %d", dropped)
+	// dropped should be 0 — WAL writes succeeded for both.
+	if dropped := bus.Dropped(); dropped != 0 {
+		t.Errorf("expected 0 dropped events, got %d", dropped)
 	}
 
-	// Verify WAL file exists and has content.
+	// Both events should be in the WAL.
 	walPath := filepath.Join(walDir, "events.jsonl")
 	data, err := os.ReadFile(walPath)
 	if err != nil {
@@ -79,19 +91,10 @@ func TestChannelBus_DrainWAL(t *testing.T) {
 	bus := NewChannelBus(1, walDir) // tiny buffer
 	defer bus.Close()
 
-	// First event fills the buffer (not WAL). Drain it.
+	// With WAL-first, all events go to WAL. Publish 3 events.
 	bus.Publish(ChangeEvent{Site: "test", Doctype: "A", DocName: "1", Operation: EventInsert})
-	ch, _ := bus.Subscribe()
-	<-ch // consume the buffered event
-
-	// Now publish 3 more — all should spill to WAL since the buffer is empty
-	// but Publish tries channel first. Actually, the channel IS empty now (we consumed),
-	// so the next events go to channel, not WAL.
-
-	// The right approach: fill channel, then publish MORE to force WAL.
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "X1", DocName: "d1", Operation: EventInsert}) // fills channel
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "X2", DocName: "d2", Operation: EventInsert}) // WAL
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "X3", DocName: "d3", Operation: EventInsert}) // WAL
+	bus.Publish(ChangeEvent{Site: "test", Doctype: "B", DocName: "2", Operation: EventInsert})
+	bus.Publish(ChangeEvent{Site: "test", Doctype: "C", DocName: "3", Operation: EventInsert})
 
 	// Drain WAL.
 	var drained []ChangeEvent
@@ -104,17 +107,11 @@ func TestChannelBus_DrainWAL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DrainWAL failed: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("expected 2 drained events, got %d", count)
+	if count != 3 {
+		t.Fatalf("expected 3 drained events (all written to WAL), got %d", count)
 	}
-	if len(drained) != 2 {
-		t.Fatalf("expected 2 callbacks, got %d", len(drained))
-	}
-	if drained[0].Doctype != "X2" {
-		t.Errorf("first drained should be X2, got %s", drained[0].Doctype)
-	}
-	if drained[1].Doctype != "X3" {
-		t.Errorf("second drained should be X3, got %s", drained[1].Doctype)
+	if len(drained) != 3 {
+		t.Fatalf("expected 3 callbacks, got %d", len(drained))
 	}
 
 	// WAL should be empty after drain.
@@ -128,8 +125,62 @@ func TestChannelBus_DrainWAL(t *testing.T) {
 	}
 }
 
+func TestChannelBus_DrainWAL_WithFlushingFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	walDir := filepath.Join(tmpDir, "wal")
+	bus := NewChannelBus(1, walDir)
+	defer bus.Close()
+
+	// Publish 2 events to the WAL.
+	bus.Publish(ChangeEvent{Site: "test", Doctype: "X", DocName: "1", Operation: EventInsert})
+	bus.Publish(ChangeEvent{Site: "test", Doctype: "Y", DocName: "2", Operation: EventInsert})
+
+	// Rotate simulates a pre-flush rotation.
+	oldPath, err := bus.RotateWAL()
+	if err != nil {
+		t.Fatalf("RotateWAL failed: %v", err)
+	}
+	if oldPath == "" {
+		t.Fatal("expected a rotated WAL path")
+	}
+
+	// Publish 1 more event to the new WAL.
+	bus.Publish(ChangeEvent{Site: "test", Doctype: "Z", DocName: "3", Operation: EventInsert})
+
+	// Drain should replay both the .flushing file and the current WAL.
+	count, err := bus.DrainWAL(func(e ChangeEvent) {})
+	if err != nil {
+		t.Fatalf("DrainWAL failed: %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 drained events (2 in .flushing + 1 in current), got %d", count)
+	}
+
+	// The .flushing file should be deleted after drain.
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Error(".flushing file should be deleted after drain")
+	}
+
+	// Commit the rotation (clean up — file already deleted by drain).
+	bus.CommitWALRotation(oldPath)
+}
+
+func TestChannelBus_RotateWAL_Empty(t *testing.T) {
+	bus := NewChannelBus(1, t.TempDir()+"/wal")
+	defer bus.Close()
+
+	// Rotating an empty WAL (no events published) should return "".
+	oldPath, err := bus.RotateWAL()
+	if err != nil {
+		t.Fatalf("RotateWAL on empty should not error: %v", err)
+	}
+	if oldPath != "" {
+		t.Errorf("expected empty string for empty WAL rotation, got %q", oldPath)
+	}
+}
+
 func TestChannelBus_Close(t *testing.T) {
-	bus := NewChannelBus(10, "")
+	bus := NewChannelBus(10, t.TempDir()+"/wal")
 	ch, _ := bus.Subscribe()
 
 	if err := bus.Close(); err != nil {
@@ -150,19 +201,24 @@ func TestChannelBus_Close(t *testing.T) {
 }
 
 func TestChannelBus_Dropped(t *testing.T) {
-	bus := NewChannelBus(1, t.TempDir()+"/wal")
-	defer bus.Close()
+	tmpDir := t.TempDir()
+	walDir := filepath.Join(tmpDir, "wal")
 
-	if d := bus.Dropped(); d != 0 {
-		t.Errorf("initial dropped count should be 0, got %d", d)
+	// Create a WAL file where a directory should be to trigger write errors.
+	// This simulates a disk-full or permission-error scenario.
+	os.MkdirAll(walDir, 0755)
+	// Create a FILE named "events.jsonl" inside walDir to make WAL writes fail
+	// (os.OpenFile with O_APPEND on a directory will fail on Linux).
+	// Actually, make the walDir itself a regular file — then MkdirAll fails.
+	// Simpler: use a path that can't be written to.
+	invalidBus := &channelBus{
+		ch:      make(chan ChangeEvent, 1),
+		walDir:  "/proc/analytics_test_wal", // /proc is a virtual filesystem, can't create dirs
 	}
 
-	// Fill buffer.
-	bus.Publish(ChangeEvent{Site: "a", Doctype: "a", DocName: "a", Operation: EventInsert})
-	// Spill to WAL.
-	bus.Publish(ChangeEvent{Site: "b", Doctype: "b", DocName: "b", Operation: EventInsert})
-
-	if d := bus.Dropped(); d != 1 {
-		t.Errorf("expected 1 dropped, got %d", d)
+	// Publish should fail the WAL write.
+	invalidBus.Publish(ChangeEvent{Site: "a", Doctype: "a", DocName: "a", Operation: EventInsert})
+	if d := invalidBus.Dropped(); d != 1 {
+		t.Errorf("expected 1 dropped (WAL write failed), got %d", d)
 	}
 }

@@ -1,6 +1,7 @@
 import { Outlet, Link, useNavigate } from '@tanstack/react-router'
 import { useConsoleAuthStore } from '@/lib/console-auth-store'
-import { Monitor, LogOut } from 'lucide-react'
+import { LogOut } from 'lucide-react'
+import { LogoMark } from '@/components/ui/LogoMark'
 
 export function ConsoleLayout() {
   const { email, logout } = useConsoleAuthStore()
@@ -16,7 +17,7 @@ export function ConsoleLayout() {
       <header className="sticky top-0 z-40 border-b bg-background">
         <div className="flex h-14 items-center justify-between px-6">
           <div className="flex items-center gap-3">
-            <Monitor className="h-5 w-5 text-muted-foreground" />
+            <LogoMark size={20} />
             <Link to="/console" className="font-semibold text-sm">
               Kora Console
             </Link>

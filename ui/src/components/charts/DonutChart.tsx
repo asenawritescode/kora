@@ -1,8 +1,19 @@
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
-const COLORS = ["hsl(var(--primary))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
+// Vibrant chart colors that work in both light and dark mode.
+const CHART_COLORS = [
+  "#4f46e5", // indigo
+  "#0891b2", // cyan
+  "#059669", // emerald
+  "#d97706", // amber
+  "#dc2626", // red
+  "#7c3aed", // violet
+  "#0d9488", // teal
+  "#ea580c", // orange
+];
 
 interface DonutChartProps {
   title: string;
@@ -13,6 +24,7 @@ interface DonutChartProps {
 }
 
 export function DonutChart({ title, data, loading, error, height = 300 }: DonutChartProps) {
+  const colors = useMemo(() => data.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]), [data]);
   if (error) {
     return (
       <Card>
@@ -52,7 +64,7 @@ export function DonutChart({ title, data, loading, error, height = 300 }: DonutC
           <PieChart>
             <Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={100} dataKey="value" nameKey="name">
               {data.map((_, i) => (
-                <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                <Cell key={i} fill={colors[i]} />
               ))}
             </Pie>
             <Tooltip />
@@ -64,4 +76,3 @@ export function DonutChart({ title, data, loading, error, height = 300 }: DonutC
   );
 }
 
-export { COLORS };

@@ -38,7 +38,6 @@ func init() {
 var analyticsCmd = &cobra.Command{
 	Use:   "analytics",
 	Short: "Analytics management",
-	Long:  `Backfill historical data and check analytics pipeline status.`,
 }
 
 var analyticsBackfillCmd = &cobra.Command{
@@ -185,7 +184,7 @@ func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *ana
 			 %s`,
 			m.Field, col, table, col, col, col, upsert,
 		)
-		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, m.Field, from)
+		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
 		return err
 
 	case analytics.MetricSum:
@@ -197,6 +196,18 @@ func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *ana
 			 GROUP BY DATE(creation)
 			 %s`,
 			col, table, col, upsert,
+		)
+		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
+		return err
+
+	case analytics.MetricStateDistribution:
+		query := fmt.Sprintf(
+			`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
+			 SELECT ?, ?, ?, CONCAT('state=', CAST(doc_status AS CHAR)), DATE(creation), COUNT(*)
+			 FROM %s WHERE creation >= ?
+			 GROUP BY doc_status, DATE(creation)
+			 %s`,
+			table, upsert,
 		)
 		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
 		return err

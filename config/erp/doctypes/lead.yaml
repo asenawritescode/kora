@@ -1,0 +1,62 @@
+name: Lead
+module: CRM
+title_field: company_name
+search_fields: company_name, email, source
+sort_field: modified
+sort_order: DESC
+is_submittable: true
+fields:
+  - fieldname: company_name
+    fieldtype: Data
+    label: Company Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: contact_person
+    fieldtype: Data
+    label: Contact Person
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+    options: Email
+    reqd: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+  - fieldname: source
+    fieldtype: Select
+    label: Source
+    options: |
+      Website
+      Referral
+      Cold Call
+      Event
+      Social Media
+      Other
+    in_list_view: true
+  - fieldname: industry
+    fieldtype: Select
+    label: Industry
+    options: |
+      Technology
+      Healthcare
+      Finance
+      Manufacturing
+      Retail
+    in_list_view: true
+  - fieldname: expected_value
+    fieldtype: Currency
+    label: Expected Value
+  - fieldname: probability
+    fieldtype: Percent
+    label: Probability
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: New
+    read_only: true

@@ -1,0 +1,64 @@
+name: Item
+module: Inventory
+title_field: item_name
+search_fields: item_name, item_code, category
+sort_field: modified
+sort_order: DESC
+fields:
+  - fieldname: item_name
+    fieldtype: Data
+    label: Item Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: item_code
+    fieldtype: Data
+    label: Item Code
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Raw Material
+      Finished Good
+      Service
+      Asset
+      Consumable
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: unit
+    fieldtype: Select
+    label: Unit
+    options: |
+      Piece
+      Kg
+      Liter
+      Meter
+      Box
+      Hour
+    default: Piece
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Selling Price
+    in_list_view: true
+  - fieldname: cost_price
+    fieldtype: Currency
+    label: Cost Price
+  - fieldname: current_stock
+    fieldtype: Int
+    label: Current Stock
+    computed: incoming - outgoing
+    read_only: true
+    in_list_view: true
+  - fieldname: reorder_level
+    fieldtype: Int
+    label: Reorder Level
+    default: "10"
+  - fieldname: warehouse
+    fieldtype: Link
+    label: Default Warehouse
+    options: Warehouse

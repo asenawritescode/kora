@@ -83,6 +83,11 @@ func (s *Scheduler) Stop() {
 
 func (s *Scheduler) runJob(job *JobConfig) {
 	defer s.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("scheduler job panicked", "name", job.Name, "panic", r)
+		}
+	}()
 
 	cron := parseCron(job.Schedule)
 	slog.Info("scheduling job", "name", job.Name, "schedule", job.Schedule, "next", cron.nextRun())

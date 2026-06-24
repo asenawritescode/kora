@@ -11,6 +11,7 @@ export interface DocType {
   sort_order: string
   description: string
   fields: Field[]
+  status?: string  // "Active" | "Draft" — set by the API
 }
 
 export type FieldType =
@@ -89,6 +90,7 @@ export interface ReferenceInfo {
 
 export interface DocTypeSchema {
   doctype: DocType
+  status?: string  // "Active" | "Draft"
   workflow?: Workflow
   permissions: PermissionMap
   transitions?: WorkflowTransition[]

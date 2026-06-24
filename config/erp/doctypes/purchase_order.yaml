@@ -1,0 +1,25 @@
+name: Purchase Order
+module: Purchasing
+title_field: supplier
+search_fields: supplier, status
+sort_field: creation
+sort_order: DESC
+is_submittable: true
+fields:
+  - fieldname: supplier
+    fieldtype: Link
+    label: Supplier
+    options: Supplier
+    reqd: true
+    in_list_view: true
+  - fieldname: order_date
+    fieldtype: Date
+    label: Order Date
+    reqd: true
+    in_list_view: true
+  - fieldname: expected_date
+    fieldtype: Date
+    label: Expected Delivery
+  - fieldname: total_amount
+    fieldtype: Currency
+    label: Total Amount

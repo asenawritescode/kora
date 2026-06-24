@@ -1,0 +1,49 @@
+name: Leave Application
+module: HR
+title_field: employee
+search_fields: employee, leave_type
+sort_field: creation
+sort_order: DESC
+is_submittable: true
+fields:
+  - fieldname: employee
+    fieldtype: Link
+    label: Employee
+    options: Employee
+    reqd: true
+    in_list_view: true
+  - fieldname: leave_type
+    fieldtype: Select
+    label: Leave Type
+    options: |
+      Annual
+      Sick
+      Maternity
+      Paternity
+      Unpaid
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: from_date
+    fieldtype: Date
+    label: From Date
+    reqd: true
+    in_list_view: true
+  - fieldname: to_date
+    fieldtype: Date
+    label: To Date
+    reqd: true
+  - fieldname: total_days
+    fieldtype: Int
+    label: Total Days
+    computed: DATEDIFF(to_date, from_date) + 1
+    read_only: true
+    in_list_view: true
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: Draft
+    read_only: true

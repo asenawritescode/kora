@@ -68,6 +68,7 @@ type CommonConfig struct {
 	RedisURL   string `yaml:"redis_url"`
 	DBType     string `yaml:"db_type"` // "mysql" or "libsql"
 	DBHost     string `yaml:"db_host"`
+	DBPort     int    `yaml:"db_port"`
 	DBUser     string `yaml:"db_user"`
 	DBPassword string `yaml:"db_password"`
 	HTTPPort   int    `yaml:"http_port"`
@@ -227,6 +228,7 @@ func CommonConfigFromEnv() *CommonConfig {
 	return &CommonConfig{
 		DBType:               getEnv("KORA_DB_TYPE", "mysql"),
 		DBHost:               getEnv("KORA_DB_HOST", "127.0.0.1"),
+		DBPort:               getEnvInt("KORA_DB_PORT", 3306),
 		DBUser:               getEnv("KORA_DB_USER", ""),
 		DBPassword:           getEnv("KORA_DB_PASSWORD", ""),
 		HTTPPort:             getEnvInt("KORA_HTTP_PORT", 8000),
@@ -339,9 +341,14 @@ func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []stri
 	if len(domains) == 0 {
 		domains = []string{hostname}
 	}
+	dbPort := common.DBPort
+	if dbPort == 0 {
+		dbPort = 3306
+	}
 	return &SiteConfig{
 		DBType:      common.DBType,
 		DBHost:      common.DBHost,
+		DBPort:      dbPort,
 		DBUser:      common.DBUser,
 		DBPassword:  common.DBPassword,
 		DBName:      strings.ReplaceAll(hostname, ".", "_"),

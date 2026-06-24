@@ -1,0 +1,65 @@
+name: Expense
+module: Kiosk
+title_field: description
+search_fields: description, category
+sort_field: date
+sort_order: DESC
+
+fields:
+  - fieldname: description
+    fieldtype: Data
+    label: Description
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Rent
+      Utilities
+      Stock Purchase
+      Transport
+      Maintenance
+      Supplies
+      Staff
+      Other
+    reqd: true
+    in_standard_filter: true
+    in_list_view: true
+
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+
+  - fieldname: date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+
+  - fieldname: payment_method
+    fieldtype: Select
+    label: Payment Method
+    options: |
+      Cash
+      Mobile Money
+      Bank Transfer
+
+  - fieldname: paid_to
+    fieldtype: Data
+    label: Paid To
+    description: Supplier, landlord, or recipient name.
+
+  - fieldname: receipt
+    fieldtype: Data
+    label: Receipt / Ref #
+    description: Receipt number or reference.
+
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

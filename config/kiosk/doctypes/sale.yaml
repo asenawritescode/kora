@@ -1,0 +1,57 @@
+name: Sale
+module: Kiosk
+title_field: customer_name
+search_fields: customer_name
+sort_field: creation
+sort_order: DESC
+is_submittable: true
+
+fields:
+  - fieldname: customer_name
+    fieldtype: Data
+    label: Customer Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: payment_status
+    fieldtype: Select
+    label: Payment Status
+    options: |
+      Pending
+      Paid
+      Cancelled
+    default: Pending
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: payment_method
+    fieldtype: Select
+    label: Payment Method
+    options: |
+      Cash
+      Mobile Money
+      Card
+    in_list_view: true
+
+  - fieldname: total_amount
+    fieldtype: Currency
+    label: Total Amount
+    computed: "SUM(items.line_total)"
+    read_only: true
+    in_list_view: true
+
+  - fieldname: discount
+    fieldtype: Percent
+    label: Discount %
+    default: "0"
+
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+
+  - fieldname: items
+    fieldtype: Table
+    label: Sale Items
+    options: Sale Item

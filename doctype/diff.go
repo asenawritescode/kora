@@ -108,35 +108,85 @@ func diffFields(oldDT, newDT *DocType) []ConfigChange {
 		newFields[newDT.Fields[i].Fieldname] = &newDT.Fields[i]
 	}
 
-	// Added fields.
-	for name, f := range newFields {
-		if _, ok := oldFields[name]; !ok {
-			c := ConfigChange{
-				Type:    ChangeFieldAdded,
-				DocType: oldDT.Name,
-				Field:   name,
-				Message: fmt.Sprintf("Field %q added to %s", name, oldDT.Name),
-			}
-			// Adding optional field = non-breaking; adding required field without default = breaking.
-			if f.Reqd && f.Default == "" {
-				c.Breaking = true
-				c.Message += " (required, no default — BREAKING)"
-			}
-			changes = append(changes, c)
+	// Detect cross-name renames: new field has RenamedFrom pointing to an old field name
+	// that no longer exists in the new config (meaning the field was renamed in the DocType).
+	renamedFields := make(map[string]string) // old_fieldname → new_fieldname
+	matchedOld := make(map[string]bool)      // old field names that are renames (not removals)
+
+	for newName, newF := range newFields {
+		if newF.RenamedFrom == "" {
+			continue
+		}
+		if _, hasNew := oldFields[newName]; hasNew {
+			// Same-name rename — the fieldname didn't change, just the column was renamed in DB.
+			// Handled below in the "changed fields" loop.
+			continue
+		}
+		if _, hasOld := oldFields[newF.RenamedFrom]; hasOld {
+			// Cross-name rename: old field "status" → new field "state" with renamed_from="status".
+			renamedFields[newF.RenamedFrom] = newName
+			matchedOld[newF.RenamedFrom] = true
 		}
 	}
 
-	// Removed fields.
-	for name := range oldFields {
-		if _, ok := newFields[name]; !ok {
-			changes = append(changes, ConfigChange{
-				Type:     ChangeFieldRemoved,
-				DocType:  oldDT.Name,
-				Field:    name,
-				Breaking: true,
-				Message:  fmt.Sprintf("Field %q removed from %s (BREAKING)", name, oldDT.Name),
-			})
+	// Added fields (skip those that are actually renames).
+	for name, f := range newFields {
+		if _, ok := oldFields[name]; ok {
+			continue // It's a matched same-name field, handle in "changed fields".
 		}
+		// Check if this new field is a rename target.
+		isRename := false
+		for _, renamedTo := range renamedFields {
+			if renamedTo == name {
+				isRename = true
+				break
+			}
+		}
+		if isRename {
+			continue // Handled as a rename below.
+		}
+		c := ConfigChange{
+			Type:    ChangeFieldAdded,
+			DocType: oldDT.Name,
+			Field:   name,
+			Message: fmt.Sprintf("Field %q added to %s", name, oldDT.Name),
+		}
+		// Adding optional field = non-breaking; adding required field without default = breaking.
+		if f.Reqd && f.Default == "" {
+			c.Breaking = true
+			c.Message += " (required, no default — BREAKING)"
+		}
+		changes = append(changes, c)
+	}
+
+	// Removed fields (skip those that are actually renames).
+	for name := range oldFields {
+		if matchedOld[name] {
+			continue // This old field was renamed, not removed.
+		}
+		if _, ok := newFields[name]; ok {
+			continue // Same-name field exists, handle in "changed fields".
+		}
+		changes = append(changes, ConfigChange{
+			Type:     ChangeFieldRemoved,
+			DocType:  oldDT.Name,
+			Field:    name,
+			Breaking: true,
+			Message:  fmt.Sprintf("Field %q removed from %s (BREAKING)", name, oldDT.Name),
+		})
+	}
+
+	// Emit renames detected above.
+	for oldName, newName := range renamedFields {
+		changes = append(changes, ConfigChange{
+			Type:     ChangeFieldRenamed,
+			DocType:  oldDT.Name,
+			Field:    newName,
+			OldValue: oldName,
+			NewValue: newName,
+			Breaking: false,
+			Message:  fmt.Sprintf("Field renamed from %q to %q", oldName, newName),
+		})
 	}
 
 	// Changed fields.

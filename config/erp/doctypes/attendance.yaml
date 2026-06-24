@@ -1,0 +1,35 @@
+name: Attendance
+module: HR
+title_field: employee
+sort_field: attendance_date
+sort_order: DESC
+fields:
+  - fieldname: employee
+    fieldtype: Link
+    label: Employee
+    options: Employee
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: attendance_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+  - fieldname: check_in
+    fieldtype: Time
+    label: Check In
+  - fieldname: check_out
+    fieldtype: Time
+    label: Check Out
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Present
+      Absent
+      Late
+      Half Day
+    default: Present
+    in_list_view: true
+    in_standard_filter: true

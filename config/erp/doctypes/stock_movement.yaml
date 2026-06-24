@@ -1,0 +1,45 @@
+name: Stock Movement
+module: Inventory
+title_field: item
+search_fields: item, movement_type
+sort_field: movement_date
+sort_order: DESC
+fields:
+  - fieldname: item
+    fieldtype: Link
+    label: Item
+    options: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: warehouse
+    fieldtype: Link
+    label: Warehouse
+    options: Warehouse
+    reqd: true
+  - fieldname: movement_type
+    fieldtype: Select
+    label: Movement Type
+    options: |
+      Receipt
+      Issue
+      Transfer
+      Adjustment
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: quantity
+    fieldtype: Int
+    label: Quantity
+    reqd: true
+    in_list_view: true
+  - fieldname: movement_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

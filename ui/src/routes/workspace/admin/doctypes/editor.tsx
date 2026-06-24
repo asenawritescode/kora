@@ -12,6 +12,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, Plus, ChevronDown, ChevronRight, GripVertical, Edit, Trash2, Save } from 'lucide-react'
 import { YamlPanel } from '@/components/forms/YamlPanel'
+import { Badge } from '@/components/ui/badge'
 
 // --- Field type groups ---
 const FIELD_TYPE_GROUPS: { label: string; types: string[] }[] = [
@@ -78,6 +79,7 @@ export default function AdminDoctypeEditorPage() {
   const [error, setError] = useState<string | null>(null)
   const [expandedField, setExpandedField] = useState<number | null>(0)
   const [loadingEdit, setLoadingEdit] = useState(isEdit)
+  const [currentStatus, setCurrentStatus] = useState<string | null>(null)
 
   // For edit mode, load from the doctypes list.
   const { data: doctypes } = useQuery({
@@ -92,6 +94,7 @@ export default function AdminDoctypeEditorPage() {
       const existing = doctypes.find((d: DocType) => d.name === doctypeName)
       if (existing) {
         setForm(JSON.parse(JSON.stringify(existing)))
+        setCurrentStatus(existing.status || null)
         setLoadingEdit(false)
       }
     }
@@ -175,14 +178,21 @@ export default function AdminDoctypeEditorPage() {
           <h1 className="text-base sm:text-2xl font-bold tracking-tight truncate">
             {isEdit ? doctypeName : 'New'}
           </h1>
+          {currentStatus && (
+            currentStatus === 'Active' ? (
+              <Badge variant="default" className="bg-green-600 hover:bg-green-600 shrink-0">Active</Badge>
+            ) : (
+              <Badge variant="secondary" className="bg-amber-100 text-amber-800 hover:bg-amber-100 shrink-0">Draft</Badge>
+            )
+          )}
         </div>
         <div className="flex gap-1 sm:gap-2 shrink-0">
           <Button variant="outline" size="sm" className="text-xs sm:text-sm h-8" onClick={() => handleSave(false)} disabled={saving}>
-            Draft
+            Save Draft
           </Button>
           <Button size="sm" className="text-xs sm:text-sm h-8" onClick={() => handleSave(true)} disabled={saving}>
             <Save className="h-3.5 w-3.5 sm:mr-1" />
-            <span className="hidden sm:inline">Activate</span>
+            <span className="hidden sm:inline">{currentStatus === 'Active' ? 'Save & Migrate' : 'Save & Activate'}</span>
           </Button>
         </div>
       </div>

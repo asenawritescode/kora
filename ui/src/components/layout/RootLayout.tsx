@@ -5,6 +5,7 @@ import { useUIStore } from '@/lib/ui-store'
 import { Button } from '@/components/ui/button'
 import { Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ToastContainer } from '@/components/ui/Toast'
 
 export function RootLayout() {
   const { sidebarOpen, toggleSidebar } = useUIStore()
@@ -43,6 +44,9 @@ export function RootLayout() {
 
       {/* AI Chat Widget — floating button + panel */}
       <ChatWidget />
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </div>
   )
 }

@@ -10,8 +10,12 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AlertCircle, ArrowLeft, Save, Loader2 } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { Field, DocType } from '@/types/kora'
+import { Breadcrumbs } from '@/components/layout/Breadcrumbs'
+import { ProgressBar } from '@/components/forms/ProgressBar'
+import { FormSection, isLayoutField } from '@/components/forms/FormSection'
+import { toast } from '@/components/ui/Toast'
 
 export default function EditFormPage() {
   const { doctype, name } = useParams({ from: '/workspace/$doctype/$name' })
@@ -96,6 +100,7 @@ export default function EditFormPage() {
       }
     } finally {
       setSaving(false)
+      toast("success", `${dt?.name || doctype} ${name} saved`)
     }
   }
 
@@ -122,10 +127,37 @@ export default function EditFormPage() {
   const statusValue = statusField ? formData[statusField.fieldname] : null
   const statusLabel = statusValue || `Draft (${docQuery.data.doc_status})`
 
+  // Compute required field count for progress bar.
+  const requiredFields = fields.filter((f: Field) => f.reqd)
+  const filledRequired = requiredFields.filter((f: Field) => {
+    const v = formData[f.fieldname]
+    return v !== null && v !== undefined && v !== ''
+  }).length
+
+  // Group fields into sections by Section Break.
+  const sections: { title: string; fields: Field[] }[] = []
+  let currentSection: Field[] = []
+  for (const f of fields) {
+    if (f.fieldtype === 'Section Break') {
+      if (currentSection.length > 0) sections.push({ title: f.label || 'Section', fields: currentSection })
+      currentSection = []
+    } else if (f.fieldtype === 'Heading') {
+      if (currentSection.length > 0) sections.push({ title: f.label || '', fields: currentSection })
+      currentSection = []
+    } else if (!isLayoutField(f.fieldtype)) {
+      currentSection.push(f)
+    }
+  }
+  if (currentSection.length > 0) sections.push({ title: 'Details', fields: currentSection })
+  const hasSections = sections.length > 1
+
   return (
-    <div className="p-8 max-w-3xl">
+    <div className="p-4 md:p-8 max-w-3xl">
+      {/* Breadcrumbs */}
+      <Breadcrumbs items={[{ label: dt.name, to: `/workspace/${encodeURIComponent(doctype)}` }, { label: name }]} className="mb-4" />
+
       {/* Header */}
-      <div className="mb-6 flex items-center gap-4">
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
         <Button
           variant="ghost"
           size="icon"
@@ -133,21 +165,25 @@ export default function EditFormPage() {
         >
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl md:text-2xl font-bold truncate">
             {dt.name}: {name}
-            {!canWrite && <span className="ml-2 text-sm font-normal text-amber-600 dark:text-amber-400">(read-only)</span>}
           </h1>
-          <div className="mt-1 flex items-center gap-2">
+          <div className="mt-1 flex items-center gap-2 flex-wrap">
             <Badge variant="outline">{String(statusLabel)}</Badge>
-            <span className="text-xs text-muted-foreground font-mono">{name}</span>
+            <span className="text-xs text-muted-foreground font-mono truncate">{name}</span>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={saving || !canWrite} size="lg" title={!canWrite ? "You don't have permission to edit" : undefined}>
+        <Button onClick={handleSave} disabled={saving || !canWrite} size="lg">
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
           {saving ? 'Saving...' : 'Save'}
         </Button>
       </div>
+
+      {/* Progress bar */}
+      {requiredFields.length > 0 && (
+        <ProgressBar filled={filledRequired} total={requiredFields.length} className="mb-4" />
+      )}
 
       {error && (
         <div className="mb-4 flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" /><p className="text-destructive">{error}</p></div>
@@ -162,10 +198,31 @@ export default function EditFormPage() {
         />
       )}
 
-      {/* Form fields */}
-      <div className="space-y-6 rounded-lg border p-6">
+      {/* Form fields — grouped into collapsible sections */}
+      <div className="space-y-4">
         {fields.length === 0 ? (
           <p className="text-sm text-muted-foreground">This document has no editable fields.</p>
+        ) : hasSections ? (
+          sections.map((section, i) => (
+            <FormSection
+              key={i}
+              title={section.title}
+              defaultOpen={i < 3}
+              badge={`${section.fields.filter((f: Field) => f.reqd && formData[f.fieldname] !== null && formData[f.fieldname] !== undefined && formData[f.fieldname] !== '').length}/${section.fields.filter((f: Field) => f.reqd).length} req'd`}
+            >
+              {section.fields.map((field: Field) => (
+                <FieldRenderer
+                  key={field.fieldname}
+                  field={field}
+                  value={formData[field.fieldname] ?? null}
+                  onChange={handleFieldChange}
+                  onRowsChange={handleRowsChange}
+                  disabled={saving || !canWrite}
+                  error={fieldErrors[field.fieldname]}
+                />
+              ))}
+            </FormSection>
+          ))
         ) : (
           fields.map((field: Field) => (
             <FieldRenderer
@@ -187,6 +244,3 @@ export default function EditFormPage() {
   )
 }
 
-function isLayoutField(fieldtype: string): boolean {
-  return ['Section Break', 'Column Break', 'Heading'].includes(fieldtype)
-}

@@ -1,15 +1,17 @@
 package api
 
 import (
-	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/doctype"
@@ -42,6 +44,7 @@ type ReferenceInfo struct {
 // SystemDoctypeResponse is the full schema response for a single DocType.
 type SystemDoctypeResponse struct {
 	DocType      *doctype.DocType              `json:"doctype"`
+	Status       string                        `json:"status"` // "Active" or "Draft"
 	Workflow     *WorkflowResponse              `json:"workflow,omitempty"`
 	Permissions  map[string]bool               `json:"permissions"`
 	Transitions  []doctype.WorkflowTransition  `json:"transitions,omitempty"`
@@ -86,6 +89,17 @@ func (h *Handler) HandleSystemDoctype(c *gin.Context) {
 	resp := SystemDoctypeResponse{
 		DocType:     dt,
 		Permissions: getUserPermissions(reg, c, doctypeName),
+	}
+
+	// Determine if this doctype is Active (table exists) or Draft (config only).
+	db := h.siteTx(c).DB
+	var dbName string
+	_ = db.QueryRow("SELECT DATABASE()").Scan(&dbName)
+	resp.Status = "Draft"
+	if liveSchema, err := h.TxManager.Dialect.LoadSchema(db, dbName); err == nil && liveSchema != nil {
+		if _, ok := liveSchema.Tables["tab"+doctypeName]; ok {
+			resp.Status = "Active"
+		}
 	}
 
 	// Compute which doctypes link to this one (back-references).
@@ -288,17 +302,39 @@ func findReferencingDoctypes(reg *doctype.Registry, targetDoctype string) []Refe
 
 // --- Doctype List (admin) ---
 
-// HandleSystemDoctypes returns a flat list of all DocTypes.
+// doctypeWithStatus wraps a DocType with its activation status.
+type doctypeWithStatus struct {
+	*doctype.DocType
+	Status string `json:"status"` // "Active" or "Draft"
+}
+
+// HandleSystemDoctypes returns a flat list of all DocTypes with status.
 // GET /api/system/doctypes
 func (h *Handler) HandleSystemDoctypes(c *gin.Context) {
 	reg := h.siteRegistry(c)
 	doctypes := reg.All()
 
+	// Determine table existence so we can show Active vs Draft status.
+	db := h.siteTx(c).DB
+	var dbName string
+	_ = db.QueryRow("SELECT DATABASE()").Scan(&dbName)
+	tableExists := make(map[string]bool)
+	if liveSchema, err := h.TxManager.Dialect.LoadSchema(db, dbName); err == nil && liveSchema != nil {
+		for tableName := range liveSchema.Tables {
+			// Table names are like "tabProduct" — strip the "tab" prefix.
+			tableExists[strings.TrimPrefix(tableName, "tab")] = true
+		}
+	}
+
 	// Filter out child tables for the admin list.
-	var result []*doctype.DocType
+	var result []doctypeWithStatus
 	for _, dt := range doctypes {
 		if !dt.IsChildTable {
-			result = append(result, dt)
+			status := "Draft"
+			if tableExists[dt.Name] {
+				status = "Active"
+			}
+			result = append(result, doctypeWithStatus{DocType: dt, Status: status})
 		}
 	}
 
@@ -380,16 +416,18 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 			})
 			return
 		}
+		// Invalidate analytics worker — new doctype means new auto-generated metrics.
+		h.invalidateAnalyticsForDoctype(c, dt.Name)
 	}
 
 	// Create config version.
-	allDoctypes := collectDoctypes(reg)
+	snapshot, _ := store.CollectSnapshot(reg)
 	createdBy := c.GetString("user")
 	if createdBy == "" {
 		createdBy = "system"
 	}
 	versionID, versionNum, err := store.CreateConfigVersion(
-		c.GetString("site_name"), createdBy, "Created "+dt.Name+" via web", status, allDoctypes,
+		c.GetString("site_name"), createdBy, "Created "+dt.Name+" via web", status, snapshot,
 	)
 	if err != nil {
 		slog.Warn("failed to create config version", "error", err)
@@ -466,16 +504,18 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 		if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
 			slog.Error("migration failed after doctype update", "doctype", doctypeName, "error", err)
 		}
+		// Invalidate analytics worker — field changes mean regenerated metrics.
+		h.invalidateAnalyticsForDoctype(c, doctypeName)
 	}
 
 	// Create config version.
-	allDoctypes := collectDoctypes(reg)
+	snapshot, _ := store.CollectSnapshot(reg)
 	createdBy := c.GetString("user")
 	if createdBy == "" {
 		createdBy = "system"
 	}
 	versionID, versionNum, err := store.CreateConfigVersion(
-		c.GetString("site_name"), createdBy, "Updated "+doctypeName+" via web", status, allDoctypes,
+		c.GetString("site_name"), createdBy, "Updated "+doctypeName+" via web", status, snapshot,
 	)
 	if err != nil {
 		slog.Warn("failed to create config version", "error", err)
@@ -494,7 +534,10 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 // --- Doctype Delete ---
 
 // HandleSystemDoctypeDelete removes a DocType configuration.
-// DELETE /api/system/doctype/:doctype
+// DELETE /api/system/doctype/:doctype?cleanup=config|full
+//   cleanup=config (default): Delete config rows only. Business tables, analytics, permissions survive.
+//   cleanup=full: Full cleanup — also deletes analytics, permissions, workflows, and clears Link fields.
+//   cleanup=none: Soft delete — only remove from registry.
 func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 	doctypeName := c.Param("doctype")
 	reg := h.siteRegistry(c)
@@ -507,7 +550,12 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 		return
 	}
 
-	// Delete from config tables.
+	cleanup := c.Query("cleanup")
+	if cleanup == "" {
+		cleanup = "config" // default: current behavior
+	}
+
+	// Delete from config tables (always).
 	store := configstore.NewStore(db, h.TxManager.Dialect)
 	if _, err := db.Exec("DELETE FROM _kora_field WHERE parent = ?", doctypeName); err != nil {
 		internalError(c, "deleting fields", err)
@@ -518,23 +566,59 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 		return
 	}
 
+	// Full cleanup: also clean analytics, permissions, workflows, and dangling Link fields.
+	if cleanup == "full" {
+		// Clean analytics rollup tables.
+		for _, table := range []string{
+			"_kora_analytics_daily",
+			"_kora_analytics_monthly",
+			"_kora_analytics_workflow",
+			"_kora_analytics_events",
+			"_kora_analytics_metric",
+		} {
+			if _, err := db.Exec(fmt.Sprintf("DELETE FROM %s WHERE doctype = ?", table), doctypeName); err != nil {
+				slog.Warn("analytics cleanup failed", "table", table, "doctype", doctypeName, "error", err)
+			}
+		}
+
+		// Clean permissions.
+		if _, err := db.Exec("DELETE FROM _kora_permission WHERE doctype = ?", doctypeName); err != nil {
+			slog.Warn("permission cleanup failed", "doctype", doctypeName, "error", err)
+		}
+
+		// Clean workflows.
+		if _, err := db.Exec("DELETE FROM _kora_workflow WHERE document_type = ?", doctypeName); err != nil {
+			slog.Warn("workflow cleanup failed", "doctype", doctypeName, "error", err)
+		}
+
+		// Clear dangling Link fields in OTHER doctypes that pointed to this one.
+		if _, err := db.Exec("UPDATE _kora_field SET options = '' WHERE fieldtype = 'Link' AND options = ?", doctypeName); err != nil {
+			slog.Warn("link field cleanup failed", "doctype", doctypeName, "error", err)
+		}
+
+		slog.Info("full doctype cleanup complete", "doctype", doctypeName)
+	}
+
 	// Remove from registry.
 	reg.Remove(doctypeName)
 
+	// Invalidate analytics worker metrics cache.
+	h.invalidateAnalyticsForDoctype(c, doctypeName)
+
 	// Create config version recording the deletion.
-	allDoctypes := collectDoctypes(reg)
+	snapshot, _ := store.CollectSnapshot(reg)
 	createdBy := c.GetString("user")
 	if createdBy == "" {
 		createdBy = "system"
 	}
 	_, _, err := store.CreateConfigVersion(
-		c.GetString("site_name"), createdBy, "Deleted "+doctypeName+" via web", "Active", allDoctypes,
+		c.GetString("site_name"), createdBy, "Deleted "+doctypeName+" via web", "Active", snapshot,
 	)
 	if err != nil {
 		slog.Warn("failed to create config version", "error", err)
 	}
 
-	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "deleted"}})
+	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "deleted", "cleanup": cleanup}})
 }
 
 // --- Doctype Validate ---
@@ -645,6 +729,70 @@ func (h *Handler) HandleSystemDoctypeReferences(c *gin.Context) {
 
 // --- Config Version Actions ---
 
+// HandleConfigVersionPreview returns a preview of what activating a version will change.
+// GET /api/system/config/versions/:id/preview
+func (h *Handler) HandleConfigVersionPreview(c *gin.Context) {
+	versionID := c.Param("id")
+	db := h.siteTx(c).DB
+	reg := h.siteRegistry(c)
+
+	var configJSON, siteName, currentStatus string
+	err := db.QueryRow(
+		"SELECT config, site, status FROM _kora_config_version WHERE id = ?", versionID,
+	).Scan(&configJSON, &siteName, &currentStatus)
+	if err != nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"message": "Version not found"}})
+		return
+	}
+
+	snapshot, err := doctype.ParseSnapshot(configJSON)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to parse version config"}})
+		return
+	}
+
+	// Compute diff between current registry and the version's snapshot.
+	currentDoctypes := make([]*doctype.DocType, 0)
+	for _, name := range reg.Names() {
+		if dt := reg.Get(name); dt != nil {
+			currentDoctypes = append(currentDoctypes, dt)
+		}
+	}
+	diff := doctype.DiffConfigs(currentDoctypes, snapshot.DocTypes)
+
+	// Check staleness.
+	var newerActiveCount int
+	db.QueryRow(
+		"SELECT COUNT(*) FROM _kora_config_version WHERE site = ? AND version > (SELECT version FROM _kora_config_version WHERE id = ?) AND status = 'Active'",
+		siteName, versionID,
+	).Scan(&newerActiveCount)
+
+	preview := map[string]any{
+		"version_id":            versionID,
+		"status":                currentStatus,
+		"doctypes_in_snapshot":  len(snapshot.DocTypes),
+		"roles_in_snapshot":     len(snapshot.Roles),
+		"permissions_in_snapshot": len(snapshot.Permissions),
+		"workflows_in_snapshot": len(snapshot.Workflows),
+		"diff_summary":          diff.Summary(),
+		"is_breaking":           diff.IsBreaking,
+		"newer_active_versions": newerActiveCount,
+		"warning":               "",
+	}
+	if newerActiveCount > 0 {
+		preview["warning"] = fmt.Sprintf("Activating this version will REVERT %d newer active version(s). Changes made since this version was created will be lost.", newerActiveCount)
+	}
+	if diff.IsBreaking {
+		if preview["warning"] != "" {
+			preview["warning"] = preview["warning"].(string) + " This version has BREAKING changes (field removals, type changes)."
+		} else {
+			preview["warning"] = "This version has BREAKING changes (field removals, type changes)."
+		}
+	}
+
+	c.JSON(http.StatusOK, Response{Data: preview})
+}
+
 // HandleConfigVersionActivate activates a Draft version.
 // POST /api/system/config/versions/:id/activate
 func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
@@ -672,34 +820,79 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		return
 	}
 
-	// Parse the config snapshot.
-	var doctypes []*doctype.DocType
-	if err := json.Unmarshal([]byte(configJSON), &doctypes); err != nil {
+	// Staleness check: warn if newer versions have been activated since this Draft was created.
+	var newerActiveCount int
+	db.QueryRow(
+		"SELECT COUNT(*) FROM _kora_config_version WHERE site = ? AND version > (SELECT version FROM _kora_config_version WHERE id = ?) AND status = 'Active'",
+		siteName, versionID,
+	).Scan(&newerActiveCount)
+	if newerActiveCount > 0 {
+		slog.Warn("activating stale draft", "version", versionID, "newer_active_versions", newerActiveCount)
+	}
+
+	// Parse the config snapshot with backward compatibility (old array vs new object format).
+	snapshot, err := doctype.ParseSnapshot(configJSON)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": "Failed to parse version config"},
+			Error: map[string]string{"message": "Failed to parse version config: " + err.Error()},
 		})
 		return
 	}
 
-	// Reload all doctypes from config version into the store + registry.
+	// Reload all config from version snapshot into the store + registry.
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	for _, dt := range doctypes {
+	for _, dt := range snapshot.DocTypes {
 		if err := store.SaveDocType(dt); err != nil {
 			internalError(c, "saving doctype from version", err)
 			return
 		}
 	}
 
-	// Rebuild registry.
-	roles, _ := store.LoadRoles()
-	permissions, _ := store.LoadPermissions()
-	reg.LoadFull(doctypes, roles, permissions)
+	// Restore roles, permissions, and workflows from snapshot (not live DB).
+	if len(snapshot.Roles) > 0 {
+		store.SaveRoles(snapshot.Roles)
+	}
+	if len(snapshot.Permissions) > 0 {
+		store.SavePermissions(snapshot.Permissions)
+	}
+	if len(snapshot.Workflows) > 0 {
+		store.SaveWorkflows(snapshot.Workflows)
+	}
+	if len(snapshot.AnalyticsMetrics) > 0 {
+		store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics)
+	}
 
-	// Run migration.
+	// Rebuild registry from snapshot (not live DB).
+	reg.LoadFull(snapshot.DocTypes, snapshot.Roles, snapshot.Permissions)
+	reg.Workflows.LoadFromDB(snapshot.Workflows)
+
+	// Invalidate analytics worker metrics cache — config activation may change
+	// field types, add/remove fields, or change submittable status.
+	if w := h.siteAnalyticsWorker(c); w != nil {
+		w.InvalidateAllMetrics()
+	}
+
+	// Run migration. If DDL fails, block activation — the schema doesn't match
+	// the registry and creating an Active version would record a broken state.
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
 	if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
-		slog.Error("migration failed on version activate", "version", versionID, "error", err)
+		slog.Error("migration failed — activation blocked", "version", versionID, "error", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
+		})
+		return
+	}
+
+	// Migrate analytics rollup data for field renames and doctype changes.
+	// Get pre-activation doctypes from the currently active version for comparison.
+	var prevConfigJSON string
+	db.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' AND id != ? ORDER BY version DESC LIMIT 1", siteName, versionID).Scan(&prevConfigJSON)
+	if prevConfigJSON != "" {
+		prevSnapshot, _ := doctype.ParseSnapshot(prevConfigJSON)
+		if prevSnapshot != nil {
+			analytics.MigrateRollupMetrics(db, siteName, prevSnapshot.DocTypes, snapshot.DocTypes)
+		}
 	}
 
 	// Create new Active version.
@@ -707,7 +900,8 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	if createdBy == "" {
 		createdBy = "system"
 	}
-	_, _, err = store.CreateConfigVersion(siteName, createdBy, "Activated version "+versionID, "Active", doctypes)
+	newSnapshot, _ := store.CollectSnapshot(reg)
+		_, _, err = store.CreateConfigVersion(siteName, createdBy, "Activated version "+versionID, "Active", newSnapshot)
 	if err != nil {
 		slog.Warn("failed to create active version", "error", err)
 	}
@@ -745,6 +939,61 @@ func (h *Handler) HandleConfigVersionDiscard(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "discarded", "status": "Superseded"}})
 }
 
+// HandleConfigVersionRollbackPreview returns a preview of what rolling back to a version will change.
+// GET /api/system/config/versions/:id/rollback-preview
+func (h *Handler) HandleConfigVersionRollbackPreview(c *gin.Context) {
+	versionID := c.Param("id")
+	db := h.siteTx(c).DB
+	reg := h.siteRegistry(c)
+
+	var configJSON, siteName, currentStatus string
+	err := db.QueryRow(
+		"SELECT config, site, status FROM _kora_config_version WHERE id = ?", versionID,
+	).Scan(&configJSON, &siteName, &currentStatus)
+	if err != nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"message": "Version not found"}})
+		return
+	}
+
+	snapshot, err := doctype.ParseSnapshot(configJSON)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to parse version config"}})
+		return
+	}
+
+	// Compute what would change.
+	currentDoctypes := make([]*doctype.DocType, 0)
+	for _, name := range reg.Names() {
+		if dt := reg.Get(name); dt != nil {
+			currentDoctypes = append(currentDoctypes, dt)
+		}
+	}
+	diff := doctype.DiffConfigs(currentDoctypes, snapshot.DocTypes)
+
+	// Check if any doctypes in current registry would be REMOVED by this rollback.
+	var wouldBeRemoved []string
+	for _, c := range diff.Changes {
+		if c.Type == doctype.ChangeDocTypeRemoved {
+			wouldBeRemoved = append(wouldBeRemoved, c.DocType)
+		}
+	}
+
+	preview := map[string]any{
+		"version_id":            versionID,
+		"status":                currentStatus,
+		"doctypes_in_snapshot":  len(snapshot.DocTypes),
+		"diff_summary":          diff.Summary(),
+		"is_breaking":           diff.IsBreaking,
+		"would_remove_doctypes": wouldBeRemoved,
+		"changes":               len(diff.Changes),
+	}
+	if len(wouldBeRemoved) > 0 {
+		preview["warning"] = fmt.Sprintf("Rolling back will REMOVE these doctypes from the registry: %s. Their tables will be orphaned in the database.", strings.Join(wouldBeRemoved, ", "))
+	}
+
+	c.JSON(http.StatusOK, Response{Data: preview})
+}
+
 // HandleConfigVersionRollback activates a Superseded version (rollback).
 // POST /api/system/config/versions/:id/rollback
 func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
@@ -770,36 +1019,61 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 		return
 	}
 
-	// Parse and apply.
-	var doctypes []*doctype.DocType
-	if err := json.Unmarshal([]byte(configJSON), &doctypes); err != nil {
+	// Parse and apply with backward compatibility.
+	snapshot, err := doctype.ParseSnapshot(configJSON)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": "Failed to parse version config"},
+			Error: map[string]string{"message": "Failed to parse version config: " + err.Error()},
 		})
 		return
 	}
 
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	for _, dt := range doctypes {
+	for _, dt := range snapshot.DocTypes {
 		if err := store.SaveDocType(dt); err != nil {
 			internalError(c, "saving during rollback", err)
 			return
 		}
 	}
 
-	roles, _ := store.LoadRoles()
-	permissions, _ := store.LoadPermissions()
-	reg.LoadFull(doctypes, roles, permissions)
+	// Restore roles, permissions, and workflows from snapshot (not live DB).
+	if len(snapshot.Roles) > 0 {
+		store.SaveRoles(snapshot.Roles)
+	}
+	if len(snapshot.Permissions) > 0 {
+		store.SavePermissions(snapshot.Permissions)
+	}
+	if len(snapshot.Workflows) > 0 {
+		store.SaveWorkflows(snapshot.Workflows)
+	}
+	if len(snapshot.AnalyticsMetrics) > 0 {
+		store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics)
+	}
+
+	reg.LoadFull(snapshot.DocTypes, snapshot.Roles, snapshot.Permissions)
+	reg.Workflows.LoadFromDB(snapshot.Workflows)
+
+	// Invalidate analytics worker — rollback restores old schema.
+	if w := h.siteAnalyticsWorker(c); w != nil {
+		w.InvalidateAllMetrics()
+	}
 
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect)
+	if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
+		slog.Error("migration failed during rollback — blocked", "version", versionID, "error", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: map[string]string{"message": "Schema migration failed during rollback: " + err.Error()},
+		})
+		return
+	}
 
 	createdBy := c.GetString("user")
 	if createdBy == "" {
 		createdBy = "system"
 	}
-	store.CreateConfigVersion(siteName, createdBy, "Rollback to version "+versionID, "Active", doctypes)
+	newSnapshot, _ := store.CollectSnapshot(reg)
+		store.CreateConfigVersion(siteName, createdBy, "Rollback to version "+versionID, "Active", newSnapshot)
 
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "rolled back", "status": "Active"}})
 }
@@ -1060,8 +1334,10 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.DELETE("/doctype/:doctype", handler.HandleSystemDoctypeDelete)
 
 		// Config version actions.
+		system.GET("/config/versions/:id/preview", handler.HandleConfigVersionPreview)
 		system.POST("/config/versions/:id/activate", handler.HandleConfigVersionActivate)
 		system.POST("/config/versions/:id/discard", handler.HandleConfigVersionDiscard)
+		system.GET("/config/versions/:id/rollback-preview", handler.HandleConfigVersionRollbackPreview)
 		system.POST("/config/versions/:id/rollback", handler.HandleConfigVersionRollback)
 
 		// Config import.

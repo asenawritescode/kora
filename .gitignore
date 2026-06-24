@@ -25,6 +25,9 @@ Thumbs.db
 .env.local
 *.log
 
+# Claude
+.claude/
+
 # Docker
 mysql_data/
 libtest_local.db

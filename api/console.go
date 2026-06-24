@@ -9,6 +9,9 @@ import (
 	"os"
 	"strings"
 
+	"sync"
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/asenawritescode/kora/auth"
@@ -16,6 +19,24 @@ import (
 	"github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/site"
 )
+
+// onboardRateLimiter tracks IP → count for self-service site creation.
+var (
+	onboardLimiter   = make(map[string]int)
+	onboardLimiterMu sync.Mutex
+	onboardLimitMax  = 3
+)
+
+func init() {
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			onboardLimiterMu.Lock()
+			onboardLimiter = make(map[string]int)
+			onboardLimiterMu.Unlock()
+		}
+	}()
+}
 
 // ConsoleHandler holds dependencies for console API endpoints.
 type ConsoleHandler struct {
@@ -305,6 +326,120 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 			"db_name":  result.Config.DBName,
 			"status":   "active",
 			"admin":    req.AdminEmail,
+		},
+	})
+}
+
+// HandleOnboard creates a site via public self-service (no console auth).
+// POST /api/console/sites/onboard
+// Rate limited: 3 per hour per IP.
+func (h *ConsoleHandler) HandleOnboard(c *gin.Context) {
+	var req struct {
+		Hostname      string `json:"hostname"`
+		AdminEmail    string `json:"admin_email"`
+		AdminPassword string `json:"admin_password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Invalid request: " + err.Error()}})
+		return
+	}
+	if req.Hostname == "" || req.AdminEmail == "" || req.AdminPassword == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "hostname, admin_email, and admin_password are required"}})
+		return
+	}
+	if len(req.AdminPassword) < 8 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "Password must be at least 8 characters"}})
+		return
+	}
+
+	// Rate limit by client IP.
+	ip := c.ClientIP()
+	onboardLimiterMu.Lock()
+	count := onboardLimiter[ip]
+	if count >= onboardLimitMax {
+		onboardLimiterMu.Unlock()
+		c.JSON(http.StatusTooManyRequests, ErrorResponse{Error: map[string]string{"message": "Too many requests. Please try again later."}})
+		return
+	}
+	onboardLimiter[ip] = count + 1
+	onboardLimiterMu.Unlock()
+
+	// Check if hostname is already taken.
+	var existing int
+	if h.PlatformDB != nil {
+		h.PlatformDB.QueryRow("SELECT COUNT(*) FROM _kora_config_version WHERE site = ?", req.Hostname).Scan(&existing)
+	}
+	if existing > 0 {
+		c.JSON(http.StatusConflict, ErrorResponse{Error: map[string]string{"message": "This site name is already taken. Try another."}})
+		return
+	}
+
+	// Derive admin name from email.
+	adminFullName := strings.Split(req.AdminEmail, "@")[0]
+
+	// Resolve platform DB credentials.
+	platformType := h.PlatformDBType
+	if platformType == "" {
+		platformType = os.Getenv("KORA_DB_TYPE")
+	}
+	if platformType == "" {
+		platformType = "mysql"
+	}
+	platformHost := h.PlatformDBHost
+	if platformHost == "" {
+		platformHost = os.Getenv("KORA_DB_HOST")
+	}
+	platformPort := h.PlatformDBPort
+	if platformPort == 0 {
+		platformPort = envConsoleInt("KORA_DB_PORT")
+	}
+	platformUser := h.PlatformDBUser
+	if platformUser == "" {
+		platformUser = os.Getenv("KORA_DB_USER")
+	}
+	platformPass := h.PlatformDBPassword
+	if platformPass == "" {
+		platformPass = os.Getenv("KORA_DB_PASSWORD")
+	}
+
+	result, err := site.CreateSite(site.CreateSiteInput{
+		Hostname:           req.Hostname,
+		AdminEmail:         req.AdminEmail,
+		AdminPassword:      req.AdminPassword,
+		AdminFullName:      adminFullName,
+		PlatformDBType:     platformType,
+		PlatformDBHost:     platformHost,
+		PlatformDBPort:     platformPort,
+		PlatformDBUser:     platformUser,
+		PlatformDBPassword: platformPass,
+		PlatformDB:         h.PlatformDB,
+	})
+	if err != nil {
+		slog.Error("self-service site creation failed", "hostname", req.Hostname, "error", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to create site. Please try again."}})
+		return
+	}
+
+	// Hot-add site.
+	domains := []string{req.Hostname}
+	loaded := &net.LoadedSite{
+		Name: req.Hostname,
+		Config: net.SiteRouterConfig{
+			Hostname: req.Hostname,
+			Domains:  domains,
+		},
+		DB:       result.DB,
+		Registry: result.Registry,
+	}
+	h.SiteRouter.AddSite(loaded)
+
+	slog.Info("site created via self-service onboarding", "hostname", req.Hostname)
+	c.JSON(http.StatusCreated, Response{
+		Data: map[string]any{
+			"hostname":      req.Hostname,
+			"workspace_url": "/s/" + req.Hostname + "/workspace",
+			"admin_email":   req.AdminEmail,
+			"status":        "active",
 		},
 	})
 }

@@ -79,6 +79,15 @@ func (wm *WorkflowMap) Remove(doctype string) {
 	delete(wm.workflows, doctype)
 }
 
+// LoadFromDB registers multiple workflows at once (e.g., after config activation).
+func (wm *WorkflowMap) LoadFromDB(workflows []*Workflow) {
+	for _, wf := range workflows {
+		if wf != nil {
+			wm.workflows[wf.DocumentType] = wf
+		}
+	}
+}
+
 // GetAvailableTransitions returns transitions available from the current state
 // for the given user role. Also evaluates conditions.
 func (wm *WorkflowMap) GetAvailableTransitions(doctype, currentState, userRole string, doc *Document) []WorkflowTransition {

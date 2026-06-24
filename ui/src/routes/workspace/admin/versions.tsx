@@ -114,71 +114,153 @@ export default function AdminVersionsPage() {
       )}
 
       {data && data.length > 0 && (
-        <div className="space-y-3">
-          {data.map((v) => (
-            <div key={v.id} className="border rounded-lg">
-              <div className="flex items-center gap-4 px-4 py-3">
-                <div className="font-mono text-sm font-bold">v{v.version}</div>
-                {statusBadge(v.status)}
-                <div className="flex-1">
-                  <div className="text-sm font-medium">{v.label}</div>
-                  <div className="text-xs text-muted-foreground">
-                    by {v.created_by} &middot; {new Date(v.created_at).toLocaleString()}
-                  </div>
-                </div>
-                <div className="flex gap-1">
-                  <Button variant="ghost" size="sm" onClick={() => viewDiff(v.id)}>
-                    <Eye className="h-4 w-4 mr-1" /> {viewingDiff === v.id ? 'Hide' : 'View'}
-                  </Button>
-                  {v.status === 'Draft' && (
-                    <>
-                      <Button variant="ghost" size="sm" onClick={() => handleActivate(v.id)} disabled={acting === v.id}>
-                        <Play className="h-4 w-4 mr-1" /> Activate
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleDiscard(v.id)} disabled={acting === v.id}>
-                        <X className="h-4 w-4 mr-1" /> Discard
-                      </Button>
-                    </>
-                  )}
-                  {v.status === 'Superseded' && (
-                    <Button variant="ghost" size="sm" onClick={() => handleRollback(v.id)} disabled={acting === v.id}>
-                      <RotateCcw className="h-4 w-4 mr-1" /> Rollback
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {/* Diff view */}
-              {viewingDiff === v.id && diffData && (
-                <div className="border-t px-4 py-3 bg-muted/30">
-                  {diffData.changes?.map((c: any, i: number) => {
-                    const colors: Record<string, string> = {
-                      'doctype_added': 'text-green-700',
-                      'field_added': 'text-green-700',
-                      'constraint_added': 'text-green-700',
-                      'doctype_removed': 'text-red-700',
-                      'field_removed': 'text-red-700',
-                      'constraint_removed': 'text-amber-700',
-                      'field_type_changed': 'text-red-700',
-                      'field_renamed': 'text-blue-700',
-                      'field_required_changed': 'text-amber-700',
-                    }
-                    return (
-                      <div key={i} className={`text-sm py-1 ${colors[c.type] || ''}`}>
-                        {c.breaking && '🔴 '}
-                        {c.message}
-                      </div>
-                    )
-                  })}
-                  {(!diffData.changes || diffData.changes.length === 0) && (
-                    <div className="text-sm text-muted-foreground">No changes detected.</div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+        <GroupedVersionList
+          data={data}
+          statusBadge={statusBadge}
+          viewDiff={viewDiff}
+          viewingDiff={viewingDiff}
+          diffData={diffData}
+          acting={acting}
+          handleActivate={handleActivate}
+          handleDiscard={handleDiscard}
+          handleRollback={handleRollback}
+        />
       )}
     </div>
+  )
+}
+
+function GroupedVersionList({ data, statusBadge, viewDiff, viewingDiff, diffData, acting, handleActivate, handleDiscard, handleRollback }: {
+  data: ConfigVersion[]
+  statusBadge: (s: string) => React.ReactNode
+  viewDiff: (id: string) => void
+  viewingDiff: string | null
+  diffData: any
+  acting: string | null
+  handleActivate: (id: string) => Promise<void>
+  handleDiscard: (id: string) => Promise<void>
+  handleRollback: (id: string) => Promise<void>
+}) {
+  const drafts = data.filter(v => v.status === 'Draft')
+  const active = data.filter(v => v.status === 'Active')
+  const history = data.filter(v => v.status === 'Superseded')
+
+  const handleActivateAll = async () => {
+    if (!confirm(`Activate ALL ${drafts.length} Draft versions? This will activate the last Draft (v${drafts[0]?.version}), applying all accumulated changes.`)) return
+    const lastDraft = drafts.reduce((a, b) => a.version > b.version ? a : b, drafts[0])
+    if (lastDraft) await handleActivate(lastDraft.id)
+  }
+
+  const renderVersion = (v: ConfigVersion) => (
+          <div key={v.id} className="border rounded-lg">
+            <div className="flex items-center gap-4 px-4 py-3">
+              <div className="font-mono text-sm font-bold">v{v.version}</div>
+              {statusBadge(v.status)}
+              <div className="flex-1">
+                <div className="text-sm font-medium">{v.label}</div>
+                <div className="text-xs text-muted-foreground">
+                  by {v.created_by} &middot; {new Date(v.created_at).toLocaleString()}
+                </div>
+              </div>
+              <div className="flex gap-1">
+                <Button variant="ghost" size="sm" onClick={() => viewDiff(v.id)}>
+                  <Eye className="h-4 w-4 mr-1" /> {viewingDiff === v.id ? 'Hide' : 'View'}
+                </Button>
+                {v.status === 'Draft' && (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={() => handleActivate(v.id)} disabled={acting === v.id}>
+                      <Play className="h-4 w-4 mr-1" /> Activate
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleDiscard(v.id)} disabled={acting === v.id}>
+                      <X className="h-4 w-4 mr-1" /> Discard
+                    </Button>
+                  </>
+                )}
+                {v.status === 'Superseded' && (
+                  <Button variant="ghost" size="sm" onClick={() => handleRollback(v.id)} disabled={acting === v.id}>
+                    <RotateCcw className="h-4 w-4 mr-1" /> Rollback
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Diff view */}
+            {viewingDiff === v.id && diffData && (
+              <div className="border-t px-4 py-3 bg-muted/30">
+                {diffData.changes?.map((c: any, i: number) => {
+                  const colors: Record<string, string> = {
+                    'doctype_added': 'text-green-700',
+                    'field_added': 'text-green-700',
+                    'constraint_added': 'text-green-700',
+                    'doctype_removed': 'text-red-700',
+                    'field_removed': 'text-red-700',
+                    'constraint_removed': 'text-amber-700',
+                    'field_type_changed': 'text-red-700',
+                    'field_renamed': 'text-blue-700',
+                    'field_required_changed': 'text-amber-700',
+                  }
+                  return (
+                    <div key={i} className={`text-sm py-1 ${colors[c.type] || ''}`}>
+                      {c.breaking && '🔴 '}
+                      {c.message}
+                    </div>
+                  )
+                })}
+                {(!diffData.changes || diffData.changes.length === 0) && (
+                  <div className="text-sm text-muted-foreground">No changes detected.</div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+
+        return (
+        <div className="space-y-6">
+          {/* Pending Activation (Drafts) */}
+          {drafts.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-amber-600 flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-amber-500 inline-block" />
+                  Pending Activation ({drafts.length})
+                </h2>
+                {drafts.length > 1 && (
+                  <Button variant="outline" size="sm" onClick={handleActivateAll} className="text-xs">
+                    <Play className="h-3 w-3 mr-1" /> Activate All
+                  </Button>
+                )}
+              </div>
+              <div className="space-y-2">
+                {drafts.map(renderVersion)}
+              </div>
+            </div>
+          )}
+
+          {/* Active */}
+          {active.length > 0 && (
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-green-600 flex items-center gap-2 mb-2">
+                <span className="h-2 w-2 rounded-full bg-green-500 inline-block" />
+                Active ({active.length})
+              </h2>
+              <div className="space-y-2">
+                {active.map(renderVersion)}
+              </div>
+            </div>
+          )}
+
+          {/* History (Superseded) */}
+          {history.length > 0 && (
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2 mb-2">
+                <span className="h-2 w-2 rounded-full bg-muted-foreground/30 inline-block" />
+                History ({history.length})
+              </h2>
+              <div className="space-y-2">
+                {history.map(renderVersion)}
+              </div>
+            </div>
+          )}
+        </div>
   )
 }
