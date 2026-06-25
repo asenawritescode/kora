@@ -109,11 +109,14 @@ DESTRUCTIVE ACTIONS (safety gate):
 - These rules prevent accidental data loss. The user should always confirm destructive actions.
 
 DOCTYPE CREATION (special rules):
-- When asked to create a new form/doctype: gather requirements, call validate_doctype_yaml, then SUMMARIZE what you understood in 2-3 lines max. Ask "Create this as draft?" Do NOT show the YAML.
+- BEFORE writing any YAML, ask 2-3 clarifying questions about the business: what they do, what data they track, who the users are, what reports/metrics matter. Understand the workflow FIRST.
+- Ask about: key entities, relationships, required vs optional fields, validation rules (min/max, allowed options), who can do what (workflow steps), and what should be searchable.
+- THEN call validate_doctype_yaml, SUMMARIZE what you understood in 2-3 lines. Ask "Create this as draft?" Do NOT show the YAML.
 - WAIT for user confirmation before calling create_doctype_draft or update_doctype_draft.
 - If user says "yes" or "go ahead" or "create it": call create_doctype_draft immediately.
 - If user says "add X" or "change Y": adjust and validate again, then ask again.
 - The summary must be scannable. Example: "Invoice form: link to Customer, date fields, Draft→Paid status, line items table with auto-calculated totals, tax at 16%. Create as draft?"
+- CHILD TABLES: if a doctype has a Table field, create the child doctype FIRST (with is_child_table: true), then create the parent doctype.
 - Never show the YAML to the user unless they explicitly ask "show me the YAML."`,
 	}}
 	for _, h := range sanitizedHistory {
@@ -854,11 +857,12 @@ fields:
   - fieldname: email
     fieldtype: Data
     label: Email
-    options: Email
   - fieldname: phone
     fieldtype: Data
     label: Phone
-    options: Phone
+  - fieldname: website
+    fieldtype: Data
+    label: Website
   - fieldname: address
     fieldtype: Text
     label: Address`
@@ -972,7 +976,7 @@ fields:
 			"type": "function",
 			"function": map[string]any{
 				"name":        "validate_doctype_yaml",
-				"description": "Validate a DocType YAML definition WITHOUT saving. Always call this first before create_doctype_draft. Returns syntax errors with line numbers and 'did you mean?' suggestions for unknown keys.\n\nFIELD TYPES: Data, Text, Int, Float, Currency, Percent, Check, Date, Time, Datetime, Select (with options), Link (set options to target doctype name), Table (set options to child doctype name), Section Break, Column Break, Heading.\n\nCOMPUTED FIELDS: Use expressions like 'quantity * unit_price', 'SUM(items.line_total)', 'ROUND(expr, 2)'. Computed fields should be read_only: true.\n\nTABLE (CHILD TABLE): When adding a Table field, you MUST also create the child doctype (set is_child_table: true). The child doctype name goes in the Table field's 'options'.\n\nSIMPLE EXAMPLE:\n" + simpleExample + "\n\nCOMPLEX EXAMPLE (with Table, computed, Link, Select):\n" + complexExample + "\n\nCHILD TABLE EXAMPLE:\n" + childTableExample,
+				"description": "Validate a DocType YAML definition WITHOUT saving. Always call this first before create_doctype_draft. Returns syntax errors with line numbers and 'did you mean?' suggestions for unknown keys.\n\nFIELD TYPES: Data, Text, Text Editor, Int, Float, Currency, Percent, Check, Date, Time, Datetime, Select (with options), Link (set options to target doctype name), Dynamic Link, Table (set options to child doctype name), Attach, Attach Image, Password, JSON, Section Break, Column Break, Heading.\n\nFIELD PROPERTIES: reqd (required), unique (must be unique across all records), in_list_view (show in table), in_standard_filter (show in filter sidebar), search_index (full-text searchable), read_only (non-editable), bold (highlight in forms), default (default value).\n\nLINKED FIELDS: Use linked_field: \"target.fieldname\" on a Link field to auto-populate data from the linked document (e.g., linked_field: \"product.selling_price\" auto-fills the price when a Product is selected).\n\nDEPENDS_ON: Use depends_on: \"fieldname\" to show/hide a field based on another field. Use mandatory_depends_on: \"fieldname\" to make the dependency required.\n\nCONSTRAINTS: Per-field validation rules as array of {type, value, message}:\n- min: minimum numeric value\n- max: maximum numeric value\n- min_length: minimum string length\n- max_length: maximum string length\n- regex: pattern to match\n- one_of: array of allowed values\n- not_one_of: array of disallowed values\nCOMPUTED FIELDS: Use expressions like 'quantity * unit_price', 'SUM(items.line_total)', 'ROUND(expr, 2)'. Computed fields should be read_only: true.\n\nTABLE (CHILD TABLE): Create the child doctype FIRST (with is_child_table: true), then the parent. The child doctype name goes in the Table field's 'options'.\n\nSIMPLE EXAMPLE:\n" + simpleExample + "\n\nCOMPLEX EXAMPLE (with Table, computed, Link, Select):\n" + complexExample + "\n\nCHILD TABLE EXAMPLE:\n" + childTableExample,
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -1000,7 +1004,7 @@ fields:
 			"type": "function",
 			"function": map[string]any{
 				"name":        "create_doctype_draft",
-				"description": "Create a NEW DocType as DRAFT only. Does NOT create database tables — a human must review and activate. If the doctype has a Table field, create the child doctype FIRST (as a separate call), then the parent. Always call validate_doctype_yaml before this. Only call this AFTER the user confirms they want to create.\n\nFIELD TYPES: Data, Text, Int, Float, Currency, Percent, Check, Date, Time, Datetime, Select (with options using | prefix for multi-line), Link (options = target doctype name), Table (options = child doctype name), Section Break, Column Break.\n\nCOMPUTED: 'quantity * unit_price', 'SUM(items.line_total)', 'ROUND(expr, N)'. Set read_only: true.\n\nFor child tables: set is_child_table: true. Do NOT include table columns (parent, parentfield, parenttype, idx) — the system adds them automatically.\n\nSIMPLE EXAMPLE:\n" + simpleExample + "\n\nCOMPLEX EXAMPLE (with Table, Link, Select, computed fields, submittable):\n" + complexExample + "\n\nCHILD TABLE EXAMPLE:\n" + childTableExample,
+				"description": "Create a NEW DocType as DRAFT only. Does NOT create database tables — a human must review and activate. If the doctype has a Table field, create the child doctype FIRST (as a separate call), then the parent. Always call validate_doctype_yaml before this. Only call this AFTER the user confirms they want to create.\n\nFIELD TYPES: Data, Text, Text Editor, Int, Float, Currency, Percent, Check, Date, Time, Datetime, Select (with options using | prefix for multi-line), Link (options = target doctype name), Dynamic Link, Table (options = child doctype name), Attach, Attach Image, Password, JSON, Section Break, Column Break, Heading.\n\nFIELD PROPERTIES: reqd, unique, in_list_view, in_standard_filter, search_index, read_only, bold, default, linked_field (auto-populate from linked doc), depends_on, mandatory_depends_on.\n\nCONSTRAINTS: Array of {type, value, message}. Types: min, max, min_length, max_length, regex, one_of, not_one_of.\n\nCOMPUTED: 'quantity * unit_price', 'SUM(items.line_total)', 'ROUND(expr, N)'. Set read_only: true.\n\nFor child tables: set is_child_table: true. Create child FIRST, then parent. Do NOT include table columns (parent, parentfield, parenttype, idx) — the system adds them automatically.\n\nSIMPLE EXAMPLE:\n" + simpleExample + "\n\nCOMPLEX EXAMPLE (with Table, Link, Select, computed fields, submittable):\n" + complexExample + "\n\nCHILD TABLE EXAMPLE:\n" + childTableExample,
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
