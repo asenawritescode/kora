@@ -384,10 +384,14 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"UPDATE _kora_config_version SET status = 'Active' WHERE is_active = 1 AND status = 'Superseded'",
 
 		// _kora_user
-		"CREATE TABLE IF NOT EXISTS _kora_user (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\temail VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tpassword_hash VARCHAR(255) NOT NULL,\n\t\t\tfull_name VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tenabled TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\troles TEXT,\n\t\t\tcreation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tUNIQUE KEY idx_email (email)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+		"CREATE TABLE IF NOT EXISTS _kora_user (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\temail VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tpassword_hash VARCHAR(255) NOT NULL,\n\t\t\tfull_name VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tenabled TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\troles TEXT,\n\t\t\tcreation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tUNIQUE KEY idx_site_email (site, email)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+		"ALTER TABLE _kora_user ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
+		"ALTER TABLE _kora_user DROP INDEX idx_email",
+		"ALTER TABLE _kora_user ADD UNIQUE KEY idx_site_email (site, email)",
 
 		// _kora_session
-		"CREATE TABLE IF NOT EXISTS _kora_session (\n\t\t\tsid VARCHAR(255) PRIMARY KEY,\n\t\t\tuser VARCHAR(140) NOT NULL,\n\t\t\tdata JSON,\n\t\t\texpires_at DATETIME(6) NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tINDEX idx_user (user),\n\t\t\tINDEX idx_expires (expires_at)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+		"CREATE TABLE IF NOT EXISTS _kora_session (\n\t\t\tsid VARCHAR(255) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tuser VARCHAR(140) NOT NULL,\n\t\t\tdata JSON,\n\t\t\texpires_at DATETIME(6) NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tINDEX idx_user (user),\n\t\t\tINDEX idx_expires (expires_at)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+		"ALTER TABLE _kora_session ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
 
 		// _kora_workflow
 		"CREATE TABLE IF NOT EXISTS _kora_workflow (\n\t\t\tname VARCHAR(140) NOT NULL,\n\t\t\tdocument_type VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tis_active TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\tworkflow_state_field VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tconfig_json JSON,\n\t\t\tPRIMARY KEY (name)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",

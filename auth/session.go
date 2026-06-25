@@ -58,7 +58,7 @@ func NewSessionManager(db *sql.DB) *SessionManager {
 }
 
 // CreateSession creates a new session for a user and returns the session ID.
-func (sm *SessionManager) CreateSession(user *User) (string, error) {
+func (sm *SessionManager) CreateSession(site string, user *User) (string, error) {
 	if sm.DB == nil {
 		return "", fmt.Errorf("no database connection available")
 	}
@@ -78,9 +78,9 @@ func (sm *SessionManager) CreateSession(user *User) (string, error) {
 	}
 
 	_, err = sm.DB.Exec(
-		`INSERT INTO _kora_session (sid, user, data, expires_at, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		sid, user.Name, string(userJSON), expiresAt, time.Now(),
+		`INSERT INTO _kora_session (sid, site, user, data, expires_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		sid, site, user.Name, string(userJSON), expiresAt, time.Now(),
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating session: %w", err)
@@ -313,7 +313,7 @@ func (sm *SessionManager) cleanupExpired() {
 }
 
 // AuthenticateUser verifies a username/email and password against the database.
-func (sm *SessionManager) AuthenticateUser(email, password string) (*User, error) {
+func (sm *SessionManager) AuthenticateUser(site, email, password string) (*User, error) {
 	if sm.DB == nil {
 		return nil, fmt.Errorf("no database connection available")
 	}
@@ -321,8 +321,8 @@ func (sm *SessionManager) AuthenticateUser(email, password string) (*User, error
 	var enabled bool
 
 	err := sm.DB.QueryRow(
-		"SELECT name, email, password_hash, full_name, enabled, COALESCE(roles, '') FROM _kora_user WHERE email = ?",
-		email,
+		"SELECT name, email, password_hash, full_name, enabled, COALESCE(roles, '') FROM _kora_user WHERE site = ? AND email = ?",
+		site, email,
 	).Scan(&name, &emailAddr, &passwordHash, &fullName, &enabled, &rolesStr)
 
 	if err == sql.ErrNoRows {
@@ -517,7 +517,8 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 			}
 			sm := NewSessionManager(db)
 
-			user, err := sm.AuthenticateUser(req.Email, req.Password)
+			site := c.GetString("site_name")
+				user, err := sm.AuthenticateUser(site, req.Email, req.Password)
 			if err != nil {
 				// Only return known user-facing messages; log internal errors.
 				msg := err.Error()
@@ -529,7 +530,7 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 				return
 			}
 
-			sid, err := sm.CreateSession(user)
+			sid, err := sm.CreateSession(site, user)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
 				return

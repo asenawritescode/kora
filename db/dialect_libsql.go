@@ -487,6 +487,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// _kora_user
 		`CREATE TABLE IF NOT EXISTS "_kora_user" (
 			"name" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
 			"email" TEXT NOT NULL DEFAULT '',
 			"password_hash" TEXT NOT NULL,
 			"full_name" TEXT NOT NULL DEFAULT '',
@@ -495,11 +496,16 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"creation" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
 			"modified" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
 		)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_email" ON "_kora_user" ("email")`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_site_email" ON "_kora_user" ("site", "email")`,
+		`ALTER TABLE "_kora_user" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
+		`DROP INDEX IF EXISTS "idx_email"`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_site_email" ON "_kora_user" ("site", "email")`,
+		`ALTER TABLE "_kora_session" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 
 		// _kora_session
 		`CREATE TABLE IF NOT EXISTS "_kora_session" (
 			"sid" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
 			"user" TEXT NOT NULL,
 			"data" TEXT,
 			"expires_at" TEXT NOT NULL,
