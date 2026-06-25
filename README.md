@@ -62,8 +62,11 @@ KORA_DB_TYPE=mysql KORA_DB_HOST=127.0.0.1 KORA_DB_USER=root KORA_DB_PASSWORD=kor
 - **Multi-Site** — path-based (`/s/:site/workspace`) or host-based routing. Sites created from console UI, persisted in DB.
 - **Multi-Database** — MySQL, MariaDB, or remote LibSQL. SQL dialect abstraction handles all differences.
 - **Console UI** — `/console` for system admin: create/edit sites, view health, manage all sites.
+- **Self-Service Onboarding** — public site creation at `/onboard`. Users create their own sites with admin accounts. Rate-limited (3/hr/IP).
+- **Shared AI Keys** — superadmins can set global AI provider keys so new sites get AI chat immediately. Toggle with `KORA_SHARED_AI_ENABLED`.
 - **Swagger/OpenAPI** — auto-generated API docs at `/api/swagger-ui`.
 - **Mobile Responsive** — tables become stacked cards. No horizontal scroll anywhere.
+- **Marketing Website** — landing page, docs, examples, and blog at [kora.mradiafrica.com](https://kora.mradiafrica.com).
 
 ## Configuration
 
@@ -81,6 +84,11 @@ All config via environment variables. No YAML config files needed.
 | `CONSOLE_PASSWORD` | `kora123` | Console admin password |
 | `KORA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `KORA_SESSION_HOURS` | `72` | Session lifetime in hours |
+| `KORA_HOST` | — | Public app hostname (e.g., `app.kora.mradiafrica.com`) |
+| `KORA_SHARED_AI_ENABLED` | `false` | Enable shared AI provider keys for all sites |
+| `KORA_SHARED_OPENAI_API_KEY` | — | Shared OpenAI key (fallback when site has none) |
+| `KORA_SHARED_DEEPSEEK_API_KEY` | — | Shared DeepSeek key |
+| `KORA_SHARED_ANTHROPIC_API_KEY` | — | Shared Anthropic key |
 
 ## Multi-Site
 
