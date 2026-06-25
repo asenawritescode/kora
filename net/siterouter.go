@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -202,9 +203,13 @@ func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 }
 
 // isHostAllowedForSite checks if the given host is allowed to access a site via the kora_site cookie.
-// Allowed: localhost, loopback IPs, any parsed IP (dev/testing), or a domain configured for the site.
+// Allowed: localhost, loopback IPs, any parsed IP (dev/testing), the KORA_HOST env var, or a domain configured for the site.
 func (sr *SiteRouter) isHostAllowedForSite(host string, site *LoadedSite) bool {
 	if net.ParseIP(host) != nil || host == "localhost" || host == "127.0.0.1" {
+		return true
+	}
+	// Allow the configured app host (set via KORA_HOST env var).
+	if appHost := os.Getenv("KORA_HOST"); appHost != "" && strings.EqualFold(appHost, host) {
 		return true
 	}
 	for _, d := range site.Config.Domains {
