@@ -33,6 +33,7 @@ const sessionCacheCleanupInterval = 5 * time.Minute
 
 type sessionCacheEntry struct {
 	user      *User
+	site      string    // site the session belongs to (prevents cross-site cache hits)
 	cachedAt  time.Time
 	expiresAt time.Time // session expiry from DB
 }
@@ -101,11 +102,16 @@ func (sm *SessionManager) GetSession(site, sid string) (*User, error) {
 	sm.cacheMu.RUnlock()
 
 	if ok && time.Now().Before(entry.cachedAt.Add(sessionCacheTTL)) {
-		if time.Now().After(entry.expiresAt) {
-			sm.DeleteSession(sid)
-			return nil, fmt.Errorf("session expired")
+		if entry.site != site {
+			// Wrong site — cached session is from a different site.
+			// Fall through to database query with site filter.
+		} else {
+			if time.Now().After(entry.expiresAt) {
+				sm.DeleteSession(sid)
+				return nil, fmt.Errorf("session expired")
+			}
+			return entry.user, nil
 		}
-		return entry.user, nil
 	}
 
 	// Cache miss or expired — query database.
@@ -148,6 +154,7 @@ func (sm *SessionManager) GetSession(site, sid string) (*User, error) {
 	sm.cacheMu.Lock()
 	sm.cache[sid] = &sessionCacheEntry{
 		user:      user,
+		site:      site,
 		cachedAt:  time.Now(),
 		expiresAt: expiresAt,
 	}
