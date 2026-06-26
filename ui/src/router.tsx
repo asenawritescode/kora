@@ -17,6 +17,8 @@ import AdminPermissionsPage from '@/routes/workspace/admin/permissions'
 import AdminWorkflowsPage from '@/routes/workspace/admin/workflows'
 import AdminUsersPage from '@/routes/workspace/admin/users'
 import AdminSecretsPage from '@/routes/workspace/admin/secrets'
+import AdminScriptsPage from '@/routes/workspace/admin/scripts'
+import AdminExtensionsPage from '@/routes/workspace/admin/extensions'
 import AdminAnalyticsPage from '@/routes/workspace/admin/analytics'
 import ConsoleLoginPage from '@/routes/console/login'
 import ConsoleDashboard from '@/routes/console/index'
@@ -122,6 +124,18 @@ const adminUsersRoute = createRoute({
   component: AdminUsersPage,
 })
 
+const adminScriptsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: 'scripts',
+  component: AdminScriptsPage,
+})
+
+const adminExtensionsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: 'extensions',
+  component: AdminExtensionsPage,
+})
+
 const adminSecretsRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: 'secrets',
@@ -188,6 +202,8 @@ const routeTree = rootRoute.addChildren([
       adminPermissionsRoute,
       adminWorkflowsRoute,
       adminUsersRoute,
+      adminScriptsRoute,
+      adminExtensionsRoute,
       adminSecretsRoute,
       adminAnalyticsRoute,
     ]),

@@ -3,7 +3,9 @@
 package configstore
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -617,12 +619,14 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry) (*doctype.ConfigSnapshot,
 	permissions, _ := s.LoadPermissions()
 	workflows, _ := s.LoadWorkflows()
 	analyticsMetrics, _ := s.LoadAnalyticsMetrics()
+	scripts, _ := s.LoadScriptSnapshots()
 	return &doctype.ConfigSnapshot{
 		DocTypes:         doctypes,
 		Roles:            roles,
 		Permissions:      permissions,
 		Workflows:        workflows,
 		AnalyticsMetrics: analyticsMetrics,
+		Scripts:          scripts,
 	}, nil
 }
 
@@ -658,6 +662,32 @@ func (s *Store) SaveAnalyticsMetrics(metrics []*doctype.AnalyticsMetricConfig) e
 		}
 	}
 	return nil
+}
+
+// LoadScriptSnapshots loads all active scripts as snapshots for versioning.
+// Script bodies are hashed (SHA-256) rather than stored inline to avoid DB bloat.
+func (s *Store) LoadScriptSnapshots() ([]*doctype.ScriptSnapshot, error) {
+	rows, err := s.DB.Query(`SELECT name, script_type, doctype, event, method_path, workflow_action, schedule,
+		priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var scripts []*doctype.ScriptSnapshot
+	for rows.Next() {
+		var ss doctype.ScriptSnapshot
+		var script string
+		if err := rows.Scan(&ss.Name, &ss.ScriptType, &ss.DocType, &ss.Event, &ss.MethodPath,
+			&ss.WorkflowAction, &ss.Schedule, &ss.Priority, &ss.IsActive, &ss.RunAs,
+			&ss.TimeoutMs, &script); err != nil {
+			return nil, err
+		}
+		h := sha256.Sum256([]byte(script))
+		ss.ScriptHash = hex.EncodeToString(h[:])
+		scripts = append(scripts, &ss)
+	}
+	return scripts, rows.Err()
 }
 
 // LoadWorkflows loads all workflows from the database.

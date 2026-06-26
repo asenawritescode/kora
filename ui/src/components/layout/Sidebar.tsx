@@ -221,6 +221,8 @@ export function Sidebar() {
               { name: 'workflows', label: 'Workflows', to: '/workspace/admin/workflows' },
               { name: 'versions', label: 'Versions', to: '/workspace/admin/versions' },
               { name: 'users', label: 'Users', to: '/workspace/admin/users' },
+              { name: 'scripts', label: 'Scripts', to: '/workspace/admin/scripts' },
+              { name: 'extensions', label: 'Extensions', to: '/workspace/admin/extensions' },
               { name: 'secrets', label: 'Secrets', to: '/workspace/admin/secrets' },
               { name: 'analytics', label: 'Analytics', to: '/workspace/admin/analytics' },
             ]}

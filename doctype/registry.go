@@ -5,13 +5,18 @@ import (
 	"sync"
 )
 
+// ComputedHookFunc is called to evaluate a script-based computed field.
+// It receives the doctype name, field name, and document, and returns the computed value.
+type ComputedHookFunc func(doctypeName, fieldName string, doc *Document) (any, error)
+
 // Registry holds all DocType definitions, permissions, and workflows.
 // It is rebuilt from the active config version on startup and after config changes.
 type Registry struct {
-	mu           sync.RWMutex
-	doctypes     map[string]*DocType // keyed by doctype name
-	Permissions  *PermissionMatrix
-	Workflows    *WorkflowMap
+	mu              sync.RWMutex
+	doctypes        map[string]*DocType // keyed by doctype name
+	Permissions     *PermissionMatrix
+	Workflows       *WorkflowMap
+	ComputedHooks   ComputedHookFunc // optional — runs script-based computed fields
 }
 
 // NewRegistry creates an empty registry with blank permission matrix and workflow map.

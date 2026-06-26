@@ -15,6 +15,16 @@ import (
 // computedCache holds compiled programs for computed field expressions.
 var computedCache = make(map[string]*vm.Program)
 
+// computedScriptHook is set by the ORM before ComputeFields runs.
+// It bridges script-based computed fields (@script:name) to the JS runtime.
+var computedScriptHook func(doctypeName, scriptName string, doc *Document) (any, error)
+
+// SetComputedScriptHook sets the script hook for computed field evaluation.
+// Called by the ORM before Insert/Save to enable script-based computed fields.
+func SetComputedScriptHook(hook func(doctypeName, scriptName string, doc *Document) (any, error)) {
+	computedScriptHook = hook
+}
+
 // sumPattern matches SUM(field.column) — e.g., SUM(items.line_total).
 var sumPattern = regexp.MustCompile(`SUM\(\s*(\w+)\.(\w+)\s*\)`)
 
@@ -60,14 +70,36 @@ func ComputeFields(dt *DocType, doc *Document) error {
 		return nil
 	}
 
-	// Evaluate in dependency order:
+	// Evaluate script-based computed fields (@script:script_name).
+	// These are handled by the ComputedHooks function on the Registry.
+	for _, cf := range computed {
+		if strings.HasPrefix(cf.expr, "@script:") {
+			scriptName := strings.TrimPrefix(cf.expr, "@script:")
+			if computedScriptHook != nil {
+				val, err := computedScriptHook(dt.Name, scriptName, doc)
+				if err != nil {
+					slog.Warn("script computed field failed", "field", cf.field.Fieldname, "script", scriptName, "error", err)
+					continue
+				}
+				doc.Set(cf.field.Fieldname, val)
+			}
+		}
+	}
+
+	// Filter to expression-based computed fields only.
+	exprOnly := filterCF(computed, func(cf cfInfo) bool { return !strings.HasPrefix(cf.expr, "@script:") })
+	if len(exprOnly) == 0 {
+		return nil
+	}
+
+	// Evaluate expression-based computed fields in dependency order:
 	// 1. SUM/COUNT fields first (aggregate child data)
 	// 2. DATEDIFF/ROUND fields (depend on other fields)
 	// 3. Simple arithmetic fields last
 	passes := [][]cfInfo{
-		filterCF(computed, func(cf cfInfo) bool { return (cf.hasSum || cf.hasCount) && !cf.hasRound && !cf.hasDateDiff }),
-		filterCF(computed, func(cf cfInfo) bool { return cf.hasRound || cf.hasDateDiff }),
-		filterCF(computed, func(cf cfInfo) bool { return !cf.hasSum && !cf.hasCount && !cf.hasRound && !cf.hasDateDiff }),
+		filterCF(exprOnly, func(cf cfInfo) bool { return (cf.hasSum || cf.hasCount) && !cf.hasRound && !cf.hasDateDiff }),
+		filterCF(exprOnly, func(cf cfInfo) bool { return cf.hasRound || cf.hasDateDiff }),
+		filterCF(exprOnly, func(cf cfInfo) bool { return !cf.hasSum && !cf.hasCount && !cf.hasRound && !cf.hasDateDiff }),
 	}
 
 	for _, pass := range passes {

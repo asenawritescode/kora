@@ -180,7 +180,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	}
 
 	// Step 4: Create admin user.
-	if err := createAdminUser(db, input.AdminEmail, input.AdminPassword, input.AdminFullName); err != nil {
+	if err := createAdminUser(db, input.AdminEmail, input.AdminPassword, input.AdminFullName, input.Hostname); err != nil {
 		if isOwnedDB {
 			db.Close()
 		}
@@ -201,16 +201,16 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	}, nil
 }
 // createAdminUser hashes the password and inserts a user into _kora_user.
-func createAdminUser(db *sql.DB, email, password, fullName string) error {
+func createAdminUser(db *sql.DB, email, password, fullName, site string) error {
 	passwordHash, err := auth.HashPassword(password)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}
 
 	_, err = db.Exec(
-		`INSERT INTO _kora_user (name, email, password_hash, full_name, roles)
-		 VALUES (?, ?, ?, ?, ?)`,
-		ulid.Make().String(), email, passwordHash, fullName, "Administrator",
+		`INSERT INTO _kora_user (name, email, password_hash, full_name, roles, site)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		ulid.Make().String(), email, passwordHash, fullName, "Administrator", site,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting admin user: %w", err)
