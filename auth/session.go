@@ -89,9 +89,9 @@ func (sm *SessionManager) CreateSession(site string, user *User) (string, error)
 	return sid, nil
 }
 
-// GetSession validates a session ID and returns the associated user.
+// GetSession validates a session ID for a given site and returns the associated user.
 // Uses an in-memory TTL cache to avoid hitting the database on every request.
-func (sm *SessionManager) GetSession(sid string) (*User, error) {
+func (sm *SessionManager) GetSession(site, sid string) (*User, error) {
 	if sm.DB == nil {
 		return nil, fmt.Errorf("no database connection available")
 	}
@@ -113,8 +113,8 @@ func (sm *SessionManager) GetSession(sid string) (*User, error) {
 	var expiresStr string // scanned as string for SQLite compatibility (TEXT column)
 
 	err := sm.DB.QueryRow(
-		"SELECT data, expires_at FROM _kora_session WHERE sid = ?",
-		sid,
+		"SELECT data, expires_at FROM _kora_session WHERE site = ? AND sid = ?",
+		site, sid,
 	).Scan(&userJSON, &expiresStr)
 
 	if err == sql.ErrNoRows {
@@ -469,7 +469,8 @@ func validateSession(c *gin.Context, sm *SessionManager) bool {
 		}
 	}
 
-	user, err := sessionSM.GetSession(sid)
+	site := c.GetString("site_name")
+	user, err := sessionSM.GetSession(site, sid)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session"})
 		c.Abort()
@@ -585,7 +586,8 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 			if siteDB, exists := c.Get("site_db"); exists {
 				if sdb, ok := siteDB.(*sql.DB); ok { meSM = NewSessionManager(sdb) }
 			}
-			user, err := meSM.GetSession(sid)
+			site := c.GetString("site_name")
+			user, err := meSM.GetSession(site, sid)
 			if err != nil {
 				slog.Warn("session validation failed for /me", "error", err)
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session"})
