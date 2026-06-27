@@ -1,10 +1,8 @@
 package db
 
-// ExtensibilityTablesSQL returns CREATE TABLE statements for extensibility features.
-// These are appended to the SystemTableSQL output by each dialect.
-func ExtensibilityTablesSQL() []string {
+// ExtensibilityTablesMySQL returns MySQL-specific extensibility DDL.
+func ExtensibilityTablesMySQL() []string {
 	return []string{
-		// _kora_script — user-defined JavaScript hooks.
 		`CREATE TABLE IF NOT EXISTS _kora_script (
 			name VARCHAR(140) PRIMARY KEY,
 			site VARCHAR(140) NOT NULL DEFAULT '',
@@ -31,7 +29,6 @@ func ExtensibilityTablesSQL() []string {
 			INDEX idx_script_active (is_active)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// _kora_script_execution — audit log.
 		`CREATE TABLE IF NOT EXISTS _kora_script_execution (
 			id VARCHAR(26) PRIMARY KEY,
 			site VARCHAR(140) NOT NULL DEFAULT '',
@@ -49,7 +46,6 @@ func ExtensibilityTablesSQL() []string {
 			INDEX idx_exec_logged_at (logged_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// _kora_extension — webhook extension registry.
 		`CREATE TABLE IF NOT EXISTS _kora_extension (
 			name VARCHAR(140) PRIMARY KEY,
 			site VARCHAR(140) NOT NULL DEFAULT '',
@@ -78,7 +74,6 @@ func ExtensibilityTablesSQL() []string {
 			INDEX idx_ext_access_token (access_token)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// _kora_webhook_delivery — webhook delivery log.
 		`CREATE TABLE IF NOT EXISTS _kora_webhook_delivery (
 			id VARCHAR(26) PRIMARY KEY,
 			extension_name VARCHAR(140) NOT NULL,
@@ -97,5 +92,104 @@ func ExtensibilityTablesSQL() []string {
 			INDEX idx_deliv_status (status),
 			INDEX idx_deliv_created (created_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+	}
+}
+
+// ExtensibilityTablesLibSQL returns LibSQL-compatible extensibility DDL.
+func ExtensibilityTablesLibSQL() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS _kora_script (
+			name TEXT PRIMARY KEY,
+			site TEXT NOT NULL DEFAULT '',
+			script_type TEXT NOT NULL DEFAULT 'doc_event',
+			doctype TEXT NOT NULL DEFAULT '',
+			event TEXT NOT NULL DEFAULT '',
+			method_path TEXT NOT NULL DEFAULT '',
+			workflow_action TEXT NOT NULL DEFAULT '',
+			schedule TEXT NOT NULL DEFAULT '',
+			priority INTEGER NOT NULL DEFAULT 10,
+			is_active INTEGER NOT NULL DEFAULT 1,
+			run_as TEXT NOT NULL DEFAULT '',
+			timeout_ms INTEGER NOT NULL DEFAULT 5000,
+			script TEXT NOT NULL,
+			compiled_at TEXT,
+			compile_error TEXT,
+			created_by TEXT NOT NULL DEFAULT '',
+			updated_by TEXT NOT NULL DEFAULT '',
+			creation TEXT NOT NULL DEFAULT (datetime('now')),
+			modified TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_script_site ON _kora_script (site)`,
+		`CREATE INDEX IF NOT EXISTS idx_script_doctype_event ON _kora_script (doctype, event)`,
+		`CREATE INDEX IF NOT EXISTS idx_script_type ON _kora_script (script_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_script_active ON _kora_script (is_active)`,
+
+		`CREATE TABLE IF NOT EXISTS _kora_script_execution (
+			id TEXT PRIMARY KEY,
+			site TEXT NOT NULL DEFAULT '',
+			script_name TEXT NOT NULL,
+			script_type TEXT NOT NULL,
+			doctype TEXT NOT NULL DEFAULT '',
+			docname TEXT NOT NULL DEFAULT '',
+			event TEXT NOT NULL DEFAULT '',
+			trigger_user TEXT NOT NULL DEFAULT '',
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL DEFAULT 'success',
+			error_message TEXT,
+			logged_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_exec_script_name ON _kora_script_execution (script_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_exec_logged_at ON _kora_script_execution (logged_at)`,
+
+		`CREATE TABLE IF NOT EXISTS _kora_extension (
+			name TEXT PRIMARY KEY,
+			site TEXT NOT NULL DEFAULT '',
+			display_name TEXT NOT NULL DEFAULT '',
+			description TEXT,
+			endpoint_url TEXT NOT NULL,
+			secret TEXT NOT NULL,
+			access_token TEXT NOT NULL DEFAULT '',
+			old_secret TEXT,
+			old_secret_expires_at TEXT,
+			secret_count INTEGER NOT NULL DEFAULT 1,
+			is_active INTEGER NOT NULL DEFAULT 1,
+			subscriptions TEXT,
+			api_permissions TEXT,
+			retry_schedule TEXT,
+			timeout_sec INTEGER NOT NULL DEFAULT 10,
+			headers TEXT,
+			delivery_stats TEXT,
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			installed_at TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+			last_delivery_at TEXT,
+			last_error TEXT
+		)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_ext_site ON _kora_extension (site)`,
+		`CREATE INDEX IF NOT EXISTS idx_ext_active ON _kora_extension (is_active)`,
+		`CREATE INDEX IF NOT EXISTS idx_ext_access_token ON _kora_extension (access_token)`,
+
+		`CREATE TABLE IF NOT EXISTS _kora_webhook_delivery (
+			id TEXT PRIMARY KEY,
+			extension_name TEXT NOT NULL,
+			event_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			endpoint_url TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			attempt INTEGER NOT NULL DEFAULT 1,
+			response_status INTEGER,
+			response_body TEXT,
+			error_message TEXT,
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			next_retry_at TEXT
+		)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_deliv_extension ON _kora_webhook_delivery (extension_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_deliv_status ON _kora_webhook_delivery (status)`,
+		`CREATE INDEX IF NOT EXISTS idx_deliv_created ON _kora_webhook_delivery (created_at)`,
 	}
 }

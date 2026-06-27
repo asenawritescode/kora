@@ -31,7 +31,14 @@ func BootstrapSystemTables(database *sql.DB, dialect db.Dialect) error {
 	}
 
 	// Extensibility tables (scripts, extensions, webhooks).
-	for _, ddl := range db.ExtensibilityTablesSQL() {
+	var extDDL []string
+	switch dialect.(type) {
+	case *db.LibSQLDialect:
+		extDDL = db.ExtensibilityTablesLibSQL()
+	default:
+		extDDL = db.ExtensibilityTablesMySQL()
+	}
+	for _, ddl := range extDDL {
 		if _, err := database.Exec(ddl); err != nil {
 			errStr := err.Error()
 			if strings.Contains(errStr, "already exists") {
