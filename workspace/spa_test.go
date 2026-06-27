@@ -30,6 +30,16 @@ func TestEmbeddedFS_NotEmpty(t *testing.T) {
 func TestServesIndexHtml(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	sub := SPAFS()
+	if sub == nil {
+		t.Skip("SPA not built — skipping")
+	}
+	// Check if SPA is actually built (not just CI's touch-created empty file).
+	fi, err := fs.Stat(sub, "index.html")
+	if err != nil || fi.Size() < 100 {
+		t.Skip("SPA not built (index.html empty or missing) — skipping")
+	}
+
 	sr := knet.NewSiteRouter(nil)
 	r := gin.New()
 	RegisterSPARoutes(r, sr)
