@@ -1,35 +1,28 @@
-version: "3.8"
-
 services:
   mysql:
     image: mysql:8.0
-    container_name: kora-mysql
-    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_CHARACTER_SET_SERVER: utf8mb4
-      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+      MYSQL_ROOT_PASSWORD: kora123
+      MYSQL_DATABASE: kora
     ports:
       - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  redis:
-    image: redis:7-alpine
-    container_name: kora-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
       timeout: 3s
       retries: 10
 
-volumes:
-  mysql_data:
+  kora:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - KORA_DB_TYPE=mysql
+      - DB_DSN=root:kora123@tcp(mysql:3306)/kora?parseTime=true
+      - CONSOLE_EMAIL=admin@kora.local
+      - CONSOLE_PASSWORD=kora123
+      - KORA_DB_USER=root
+      - KORA_DB_PASSWORD=kora123
+    depends_on:
+      mysql:
+        condition: service_healthy

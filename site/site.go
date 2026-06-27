@@ -361,9 +361,14 @@ func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []stri
 // Connect opens a database connection for the site.
 func Connect(cfg *SiteConfig) (*sql.DB, error) {
 	dsn := cfg.DSN()
-	// DB_DSN env var overrides YAML-based config — used in container deployments.
+	// DB_DSN env var overrides per-site DSN only for LibSQL (shared-DB mode)
+	// or when the site config has no explicit DB credentials.
+	// In MySQL multi-database mode with KORA_DB_USER/KORA_DB_PASSWORD set,
+	// the site connects to its own database using the site-specific DSN.
 	if envDSN := os.Getenv("DB_DSN"); envDSN != "" {
-		dsn = envDSN
+		if cfg.DBType == "libsql" || cfg.DBUser == "" {
+			dsn = envDSN
+		}
 	}
 	driver := cfg.DBType
 	if driver == "" {

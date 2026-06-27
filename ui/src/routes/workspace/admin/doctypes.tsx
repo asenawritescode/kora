@@ -6,6 +6,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Edit, Trash2, FileText } from 'lucide-react'
 import { useState } from 'react'
+import { toast } from '@/components/ui/Toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 export default function AdminDoctypesPage() {
   return (
@@ -106,15 +108,20 @@ function DocTypeTable() {
 
 function DoctypeRow({ dt, onDeleted }: { dt: any; onDeleted: () => void }) {
   const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const handleDelete = async () => {
-    if (!confirm(`Delete "${dt.name}"?\n\nThis removes the configuration but does NOT drop the data table (tab${dt.name}).`)) return
+    setConfirmDelete(true)
+  }
+
+  const handleConfirmDelete = async () => {
     setDeleting(true)
+    setConfirmDelete(false)
     try {
       await deleteDoctype(dt.name)
       onDeleted()
     } catch (e) {
-      alert((e as Error).message)
+      toast('error', (e as Error).message)
     } finally {
       setDeleting(false)
     }
@@ -155,21 +162,36 @@ function DoctypeRow({ dt, onDeleted }: { dt: any; onDeleted: () => void }) {
           <Trash2 className="h-4 w-4 text-destructive" />
         </Button>
       </td>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete DocType"
+        description={<>Delete "{dt.name}"?<br /><br />This removes the configuration but does NOT drop the data table.</>}
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={handleConfirmDelete}
+        loading={deleting}
+      />
     </tr>
   )
 }
 
 function DoctypeCard({ dt, onDeleted }: { dt: any; onDeleted: () => void }) {
   const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const handleDelete = async () => {
-    if (!confirm(`Delete "${dt.name}"?\n\nThis removes the configuration but does NOT drop the data table.`)) return
+    setConfirmDelete(true)
+  }
+
+  const handleConfirmDelete = async () => {
     setDeleting(true)
+    setConfirmDelete(false)
     try {
       await deleteDoctype(dt.name)
       onDeleted()
     } catch (e) {
-      alert((e as Error).message)
+      toast('error', (e as Error).message)
     } finally {
       setDeleting(false)
     }
@@ -207,6 +229,16 @@ function DoctypeCard({ dt, onDeleted }: { dt: any; onDeleted: () => void }) {
           </span>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete DocType"
+        description={<>Delete "{dt.name}"?<br /><br />This removes the configuration but does NOT drop the data table.</>}
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={handleConfirmDelete}
+        loading={deleting}
+      />
     </div>
   )
 }

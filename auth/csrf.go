@@ -59,6 +59,13 @@ func CSRFMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Skip CSRF for API clients using Bearer tokens — the Authorization header
+		// cannot be set cross-origin, so CSRF is not a concern for these requests.
+		if c.GetHeader("Authorization") != "" {
+			c.Next()
+			return
+		}
+
 		// For state-changing methods, verify the token.
 		cookieToken, err := c.Cookie("kora_csrf")
 		if err != nil || cookieToken == "" {

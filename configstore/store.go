@@ -3,7 +3,9 @@
 package configstore
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -17,18 +19,11 @@ import (
 // Store persists DocType configurations to the database.
 type Store struct {
 	DB      *sql.DB
-	Dialect db.Dialect
+	Dialect db.QueryDialect
 }
-// sqlExecutor is satisfied by both *sql.DB and *sql.Tx.
-type sqlExecutor interface {
-	Exec(query string, args ...interface{}) (sql.Result, error)
-	Query(query string, args ...interface{}) (*sql.Rows, error)
-	QueryRow(query string, args ...interface{}) *sql.Row
-}
-
 
 // NewStore creates a new config store.
-func NewStore(database *sql.DB, dialect db.Dialect) *Store {
+func NewStore(database *sql.DB, dialect db.QueryDialect) *Store {
 	return &Store{DB: database, Dialect: dialect}
 }
 
@@ -52,7 +47,7 @@ func (s *Store) SaveDocType(dt *doctype.DocType) error {
 	return dbTx.Commit()
 }
 
-func (s *Store) saveDocTypeExec(ex sqlExecutor, dt *doctype.DocType) error {
+func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType) error {
 	configJSON, err := json.Marshal(dt)
 	if err != nil {
 		return fmt.Errorf("marshaling doctype: %w", err)
@@ -157,7 +152,7 @@ func (s *Store) saveDocTypeExec(ex sqlExecutor, dt *doctype.DocType) error {
 
 // loadFieldsMap returns existing field definitions keyed by fieldname.
 // loadFieldsMapTx is like loadFieldsMap but accepts any sqlExecutor.
-func (s *Store) loadFieldsMapTx(ex sqlExecutor, parent string) (map[string]bool, error) {
+func (s *Store) loadFieldsMapTx(ex db.Queryer, parent string) (map[string]bool, error) {
 	rows, err := ex.Query("SELECT fieldname FROM _kora_field WHERE parent = ?", parent)
 	if err != nil {
 		return nil, err
@@ -174,23 +169,6 @@ func (s *Store) loadFieldsMapTx(ex sqlExecutor, parent string) (map[string]bool,
 	return result, rows.Err()
 }
 
-func (s *Store) loadFieldsMap(parent string, tx *sql.Tx) (map[string]bool, error) {
-	rows, err := tx.Query("SELECT fieldname FROM _kora_field WHERE parent = ?", parent)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	result := make(map[string]bool)
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		result[name] = true
-	}
-	return result, rows.Err()
-}
 
 // LoadAll loads all DocTypes from the database into the registry.
 // Uses two batched queries instead of N+1 (one for doctypes, one for all fields).
@@ -290,57 +268,6 @@ func (s *Store) loadAllFields() (map[string][]doctype.Field, error) {
 	return result, rows.Err()
 }
 
-func (s *Store) loadFields(parent string) ([]doctype.Field, error) {
-	rows, err := s.DB.Query(`
-		SELECT fieldname, fieldtype, label, options, reqd, unique_constraint,
-			default_value, hidden, read_only, bold, in_list_view, in_standard_filter,
-			search_index, description, depends_on, mandatory_depends_on,
-			constraints_json, renamed_from, COALESCE(linked_field,'') as linked_field, COALESCE(computed,'') as computed, idx
-		FROM _kora_field
-		WHERE parent = ?
-		ORDER BY idx
-	`, parent)
-	if err != nil {
-		return nil, fmt.Errorf("querying fields: %w", err)
-	}
-	defer rows.Close()
-
-	var fields []doctype.Field
-	for rows.Next() {
-		f := doctype.Field{}
-		var reqd, unique, hidden, readOnly, bold, inListView, inStdFilter, searchIdx, idxVal int
-		var constraintsJSON string
-
-		err := rows.Scan(
-			&f.Fieldname, &f.Fieldtype, &f.Label, &f.Options,
-			&reqd, &unique, &f.Default, &hidden, &readOnly, &bold,
-			&inListView, &inStdFilter, &searchIdx,
-			&f.Description, &f.DependsOn, &f.MandatoryDependsOn,
-			&constraintsJSON, &f.RenamedFrom, &f.LinkedField, &f.Computed, &idxVal,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scanning field: %w", err)
-		}
-
-		f.Reqd = reqd == 1
-		f.Unique = unique == 1
-		f.Hidden = hidden == 1
-		f.ReadOnly = readOnly == 1
-		f.Bold = bold == 1
-		f.InListView = inListView == 1
-		f.InStandardFilter = inStdFilter == 1
-		f.SearchIndex = searchIdx == 1
-
-		// Parse constraints.
-		if constraintsJSON != "" && constraintsJSON != "null" {
-			json.Unmarshal([]byte(constraintsJSON), &f.Constraints)
-		}
-
-		fields = append(fields, f)
-	}
-
-	return fields, rows.Err()
-}
 
 // boolToInt converts a bool to 0/1 for MySQL TINYINT columns.
 func boolToInt(b bool) int {
@@ -350,17 +277,6 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-// GetTargetFields returns the field names used by Link fields in a doctype,
-// for use when resolving "exists" constraints.
-func GetTargetFields(dt *doctype.DocType) []string {
-	var fields []string
-	for _, f := range dt.Fields {
-		if f.Fieldtype == "Link" {
-			fields = append(fields, f.Options)
-		}
-	}
-	return fields
-}
 
 // SaveRoles saves role definitions to _kora_role.
 func (s *Store) SaveRoles(roles []*doctype.Role) error {
@@ -617,12 +533,14 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry) (*doctype.ConfigSnapshot,
 	permissions, _ := s.LoadPermissions()
 	workflows, _ := s.LoadWorkflows()
 	analyticsMetrics, _ := s.LoadAnalyticsMetrics()
+	scripts, _ := s.LoadScriptSnapshots()
 	return &doctype.ConfigSnapshot{
 		DocTypes:         doctypes,
 		Roles:            roles,
 		Permissions:      permissions,
 		Workflows:        workflows,
 		AnalyticsMetrics: analyticsMetrics,
+		Scripts:          scripts,
 	}, nil
 }
 
@@ -658,6 +576,32 @@ func (s *Store) SaveAnalyticsMetrics(metrics []*doctype.AnalyticsMetricConfig) e
 		}
 	}
 	return nil
+}
+
+// LoadScriptSnapshots loads all active scripts as snapshots for versioning.
+// Script bodies are hashed (SHA-256) rather than stored inline to avoid DB bloat.
+func (s *Store) LoadScriptSnapshots() ([]*doctype.ScriptSnapshot, error) {
+	rows, err := s.DB.Query(`SELECT name, script_type, doctype, event, method_path, workflow_action, schedule,
+		priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var scripts []*doctype.ScriptSnapshot
+	for rows.Next() {
+		var ss doctype.ScriptSnapshot
+		var script string
+		if err := rows.Scan(&ss.Name, &ss.ScriptType, &ss.DocType, &ss.Event, &ss.MethodPath,
+			&ss.WorkflowAction, &ss.Schedule, &ss.Priority, &ss.IsActive, &ss.RunAs,
+			&ss.TimeoutMs, &script); err != nil {
+			return nil, err
+		}
+		h := sha256.Sum256([]byte(script))
+		ss.ScriptHash = hex.EncodeToString(h[:])
+		scripts = append(scripts, &ss)
+	}
+	return scripts, rows.Err()
 }
 
 // LoadWorkflows loads all workflows from the database.

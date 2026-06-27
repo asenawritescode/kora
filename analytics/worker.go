@@ -25,7 +25,7 @@ import (
 type Worker struct {
 	bus      EventBus
 	db       *sql.DB
-	dialect  db.Dialect
+	dialect  db.QueryDialect
 	registry *doctype.Registry
 	siteName string
 
@@ -77,7 +77,7 @@ type workflowOpenOp struct {
 }
 
 // NewWorker creates an analytics worker for a single site.
-func NewWorker(bus EventBus, database *sql.DB, dialect db.Dialect, registry *doctype.Registry, siteName string, cfg *Config) *Worker {
+func NewWorker(bus EventBus, database *sql.DB, dialect db.QueryDialect, registry *doctype.Registry, siteName string, cfg *Config) *Worker {
 	d, _ := time.ParseDuration(cfg.FlushInterval)
 	if d <= 0 {
 		d = 1 * time.Second

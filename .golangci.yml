@@ -1,19 +1,40 @@
-linters:
-  enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - gofmt
-    - goimports
-
 run:
   timeout: 3m
+  tests: true
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gocyclo
+    - gocognit
+    - nestif
+    - funlen
+    - dupl
+    - ineffassign
+    - misspell
+    - unconvert
+    - goconst
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  gocognit:
+    min-complexity: 15
+  funlen:
+    lines: 80
+    statements: 40
+  nestif:
+    min-complexity: 3
+  dupl:
+    threshold: 80
+  goconst:
+    min-len: 3
+    min-occurrences: 3
 
 issues:
-  exclude-dirs:
-    - ui
-    - node_modules
-    - tests
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

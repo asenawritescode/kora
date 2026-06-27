@@ -211,6 +211,40 @@ cd ui && bun run build              # Full production build (catches all errors)
 
 **MySQL connection refused** — Run `docker compose up -d mysql` and wait ~5s for it to be ready. Password is `kora123` for root.
 
+## Go Code Review Checklist
+
+Use this checklist when reviewing Go code in pull requests.
+
+### Interfaces
+
+- [ ] Prefer 1-3 method interfaces (small, focused)
+- [ ] Define interfaces at the consumption point, not the production point
+- [ ] No fat interfaces — split into separate interfaces when a type has unrelated methods
+
+### Error Handling
+
+- [ ] Wrap errors with `%w` for unwrappable error chains
+- [ ] Use sentinel errors (`var ErrNotFound = errors.New("...")`) for known error conditions
+- [ ] No panic-driven control flow — use errors for expected failures
+
+### Context & Concurrency
+
+- [ ] `context.Context` is the first parameter in function signatures that need cancellation or deadlines
+- [ ] Goroutines have a clearly defined lifecycle (known start + known stop)
+- [ ] Threaded I/O uses appropriate synchronization (mutex, channel, or atomic)
+
+### Testing
+
+- [ ] Tests are table-driven where multiple cases share the same test logic
+- [ ] Coverage is meaningful — test the error paths, not just the happy path
+- [ ] `go test ./...` passes before requesting review
+
+### Architecture
+
+- [ ] No raw SQL in HTTP handlers — all DB access goes through the ORM or configstore
+- [ ] Packages are organized by domain capability, not by layer
+- [ ] No packages named `models`, `utils`, `helpers`, or `common`
+
 ## License
 
 Kora is licensed under the GNU Affero General Public License v3.0. By contributing, you agree that your contributions will be licensed under the same terms.

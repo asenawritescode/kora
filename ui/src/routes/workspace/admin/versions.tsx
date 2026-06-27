@@ -5,9 +5,10 @@ import type { ConfigVersion } from '@/lib/api/system'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import { History, Eye, Play, X, RotateCcw } from 'lucide-react'
 import { useState } from 'react'
+import { toast } from '@/components/ui/Toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 export default function AdminVersionsPage() {
   const { data, isLoading, error, refetch } = useQuery({
@@ -23,34 +24,24 @@ export default function AdminVersionsPage() {
   const [viewingDiff, setViewingDiff] = useState<string | null>(null)
   const [diffData, setDiffData] = useState<any>(null)
 
-  const handleActivate = async (id: string) => {
-    if (!confirm('Activate this version? It will become the live configuration.')) return
-    setActing(id)
-    try {
-      await activateVersion(id)
-      refetch()
-    } catch (e) { alert((e as Error).message) }
-    finally { setActing(null) }
+  type ConfirmAction =
+    | { type: 'activate'; id: string }
+    | { type: 'discard'; id: string }
+    | { type: 'rollback'; id: string }
+    | { type: 'activateAll' }
+    | null
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
+
+  const handleActivate = (id: string) => {
+    setConfirmAction({ type: 'activate', id })
   }
 
-  const handleDiscard = async (id: string) => {
-    if (!confirm('Discard this draft? It will be marked as Superseded.')) return
-    setActing(id)
-    try {
-      await discardVersion(id)
-      refetch()
-    } catch (e) { alert((e as Error).message) }
-    finally { setActing(null) }
+  const handleDiscard = (id: string) => {
+    setConfirmAction({ type: 'discard', id })
   }
 
-  const handleRollback = async (id: string) => {
-    if (!confirm('Rollback to this version? Current config will be replaced.')) return
-    setActing(id)
-    try {
-      await rollbackVersion(id)
-      refetch()
-    } catch (e) { alert((e as Error).message) }
-    finally { setActing(null) }
+  const handleRollback = (id: string) => {
+    setConfirmAction({ type: 'rollback', id })
   }
 
   const viewDiff = async (id: string) => {
@@ -124,31 +115,80 @@ export default function AdminVersionsPage() {
           handleActivate={handleActivate}
           handleDiscard={handleDiscard}
           handleRollback={handleRollback}
+          setConfirmAction={setConfirmAction}
         />
       )}
+
+      <ConfirmDialog
+        open={confirmAction !== null}
+        onOpenChange={() => setConfirmAction(null)}
+        title={
+          confirmAction?.type === 'activate' ? 'Activate Version' :
+          confirmAction?.type === 'discard' ? 'Discard Draft' :
+          confirmAction?.type === 'rollback' ? 'Rollback Version' :
+          'Activate All Drafts'
+        }
+        description={
+          confirmAction?.type === 'activate' ? 'Activate this version? It will become the live configuration.' :
+          confirmAction?.type === 'discard' ? 'Discard this draft? It will be marked as Superseded.' :
+          confirmAction?.type === 'rollback' ? 'Rollback to this version? Current config will be replaced.' :
+          confirmAction?.type === 'activateAll' ? `Activate ALL ${data?.filter(v => v.status === 'Draft').length} Draft versions? This will activate the last Draft, applying all accumulated changes.` :
+          ''
+        }
+        confirmLabel={
+          confirmAction?.type === 'discard' ? 'Discard' :
+          confirmAction?.type === 'rollback' ? 'Rollback' :
+          'Activate'
+        }
+        variant={confirmAction?.type === 'discard' ? 'destructive' : 'default'}
+        onConfirm={async () => {
+          if (!confirmAction) return
+          if (confirmAction.type === 'activateAll') {
+            const drafts = (data || []).filter(v => v.status === 'Draft')
+            const lastDraft = drafts.reduce((a, b) => a.version > b.version ? a : b, drafts[0])
+            if (lastDraft) {
+              setActing(lastDraft.id)
+              try {
+                await activateVersion(lastDraft.id)
+                refetch()
+              } catch (e) { toast('error', (e as Error).message) }
+              finally { setActing(null) }
+            }
+          } else {
+            setActing(confirmAction.id)
+            try {
+              if (confirmAction.type === 'activate') await activateVersion(confirmAction.id)
+              else if (confirmAction.type === 'discard') await discardVersion(confirmAction.id)
+              else if (confirmAction.type === 'rollback') await rollbackVersion(confirmAction.id)
+              refetch()
+            } catch (e) { toast('error', (e as Error).message) }
+            finally { setActing(null) }
+          }
+          setConfirmAction(null)
+        }}
+      />
     </div>
   )
 }
 
-function GroupedVersionList({ data, statusBadge, viewDiff, viewingDiff, diffData, acting, handleActivate, handleDiscard, handleRollback }: {
+function GroupedVersionList({ data, statusBadge, viewDiff, viewingDiff, diffData, acting, handleActivate, handleDiscard, handleRollback, setConfirmAction }: {
   data: ConfigVersion[]
   statusBadge: (s: string) => React.ReactNode
   viewDiff: (id: string) => void
   viewingDiff: string | null
   diffData: any
   acting: string | null
-  handleActivate: (id: string) => Promise<void>
-  handleDiscard: (id: string) => Promise<void>
-  handleRollback: (id: string) => Promise<void>
+  handleActivate: (id: string) => void
+  handleDiscard: (id: string) => void
+  handleRollback: (id: string) => void
+  setConfirmAction: (action: { type: 'activateAll' } | null) => void
 }) {
   const drafts = data.filter(v => v.status === 'Draft')
   const active = data.filter(v => v.status === 'Active')
   const history = data.filter(v => v.status === 'Superseded')
 
-  const handleActivateAll = async () => {
-    if (!confirm(`Activate ALL ${drafts.length} Draft versions? This will activate the last Draft (v${drafts[0]?.version}), applying all accumulated changes.`)) return
-    const lastDraft = drafts.reduce((a, b) => a.version > b.version ? a : b, drafts[0])
-    if (lastDraft) await handleActivate(lastDraft.id)
+  const handleActivateAll = () => {
+    setConfirmAction({ type: 'activateAll' })
   }
 
   const renderVersion = (v: ConfigVersion) => (

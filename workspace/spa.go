@@ -39,7 +39,7 @@ func RegisterSPARoutes(router *gin.Engine, siteRouter *knet.SiteRouter) {
 
 		// 1. Serve /assets/* for SPA static files.
 		if strings.HasPrefix(reqPath, "/assets/") {
-			serveFile(c, sub, reqPath)
+			serveFileOptimized(c, sub, reqPath)
 			return
 		}
 
@@ -112,22 +112,70 @@ func serveSPA(c *gin.Context, sub fs.FS, reqPath string) {
 		cleanPath = "index.html"
 	}
 
-	serveFile(c, sub, "/"+cleanPath)
+	serveFileOptimized(c, sub, "/"+cleanPath)
 }
 
-func serveFile(c *gin.Context, sub fs.FS, reqPath string) {
+func serveFileOptimized(c *gin.Context, sub fs.FS, reqPath string) {
 	cleanPath := strings.TrimPrefix(reqPath, "/")
-	data, err := fs.ReadFile(sub, cleanPath)
-	if err != nil {
-		c.String(http.StatusNotFound, "Not found")
-		return
+
+	// Determine if this is a hashed asset (immutable caching) or entry file.
+	isHashedAsset := strings.HasPrefix(cleanPath, "assets/")
+
+	// Try to serve a pre-compressed variant based on Accept-Encoding.
+	acceptEnc := c.GetHeader("Accept-Encoding")
+	supportsBrotli := strings.Contains(acceptEnc, "br")
+	supportsGzip := strings.Contains(acceptEnc, "gzip")
+
+	var data []byte
+	var contentType string
+	var contentEncoding string
+
+	// Try brotli first (best compression), then gzip, then uncompressed.
+	if supportsBrotli {
+		if brData, err := fs.ReadFile(sub, cleanPath+".br"); err == nil {
+			data = brData
+			contentEncoding = "br"
+		}
+	}
+	if data == nil && supportsGzip {
+		if gzData, err := fs.ReadFile(sub, cleanPath+".gz"); err == nil {
+			data = gzData
+			contentEncoding = "gzip"
+		}
+	}
+	if data == nil {
+		// Fall back to uncompressed.
+		var err error
+		data, err = fs.ReadFile(sub, cleanPath)
+		if err != nil {
+			c.String(http.StatusNotFound, "Not found")
+			return
+		}
 	}
 
+	// Determine Content-Type from file extension.
 	ext := filepath.Ext(cleanPath)
-	ct := mime.TypeByExtension(ext)
-	if ct == "" {
-		ct = "application/octet-stream"
+	contentType = mime.TypeByExtension(ext)
+	if contentType == "" {
+		contentType = "application/octet-stream"
 	}
-	c.Header("Content-Type", ct)
-	c.String(http.StatusOK, "%s", string(data))
+
+	// Set caching headers.
+	if isHashedAsset {
+		// Content-hashed assets are immutable — cache for 1 year.
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		// Entry files (index.html) should always be revalidated.
+		c.Header("Cache-Control", "no-cache")
+	}
+
+	// Set encoding header.
+	if contentEncoding != "" {
+		c.Header("Content-Encoding", contentEncoding)
+	}
+	c.Header("Vary", "Accept-Encoding")
+	c.Header("Content-Type", contentType)
+
+	// Write bytes directly — no string conversion.
+	c.Data(http.StatusOK, contentType, data)
 }

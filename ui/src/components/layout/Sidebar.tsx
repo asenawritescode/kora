@@ -221,6 +221,8 @@ export function Sidebar() {
               { name: 'workflows', label: 'Workflows', to: '/workspace/admin/workflows' },
               { name: 'versions', label: 'Versions', to: '/workspace/admin/versions' },
               { name: 'users', label: 'Users', to: '/workspace/admin/users' },
+              { name: 'scripts', label: 'Scripts', to: '/workspace/admin/scripts' },
+              { name: 'extensions', label: 'Extensions', to: '/workspace/admin/extensions' },
               { name: 'secrets', label: 'Secrets', to: '/workspace/admin/secrets' },
               { name: 'analytics', label: 'Analytics', to: '/workspace/admin/analytics' },
             ]}
@@ -231,7 +233,7 @@ export function Sidebar() {
           />
           <PendingBadge />
           <a
-            href="/api/swagger-ui"
+            href="/api/v1/swagger-ui"
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => setSidebarOpen(false)}
@@ -374,9 +376,10 @@ function RecentFlyout({ collapsed, isOpen, onOpen, onClose }: { collapsed: boole
 
 function PendingBadge() {
   const [draftCount, setDraftCount] = useState(0)
+  const { setSidebarOpen } = useUIStore()
 
   useEffect(() => {
-    fetch('/api/system/config/versions?status=Draft')
+    fetch('/api/v1/system/config/versions?status=Draft')
       .then(r => r.json())
       .then(d => {
         if (d.data?.versions) {
@@ -388,8 +391,14 @@ function PendingBadge() {
 
   if (draftCount === 0) return null
   return (
-    <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
-      {draftCount}
-    </span>
+    <Link
+      to="/workspace/admin/versions"
+      onClick={() => setSidebarOpen(false)}
+      className="ml-auto block"
+    >
+      <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+        {draftCount}
+      </span>
+    </Link>
   )
 }

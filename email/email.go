@@ -2,7 +2,6 @@
 package email
 
 import (
-	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -68,9 +67,3 @@ func interpolate(template string, data map[string]string) string {
 	return result
 }
 
-// MockSender is used when no SMTP config is available. It logs and drops.
-var MockSender = NewSender(&Config{From: "kora@localhost"})
-
-func init() {
-	_ = fmt.Sprintf
-}

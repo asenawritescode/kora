@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-		"os/signal"
+	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,7 +26,10 @@ import (
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/scheduler"
 	"github.com/asenawritescode/kora/schema"
+	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/secret"
 	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/webhook"
 )
 
 // Version is set at build time via -ldflags "-X github.com/asenawritescode/kora/cli.Version=...".
@@ -186,7 +190,7 @@ func runServe() error {
 	router.Use(knet.SecurityHeadersMiddleware(common.TLSMode != "" && common.TLSMode != "off"))
 	router.Use(knet.CORSMiddleware(nil))
 	router.Use(siteRouter.Middleware())
-	router.Use(knet.NewRateLimiter(float64(common.RateLimitRPS), common.RateLimitBurst).Middleware())
+	router.Use(knet.NewRateLimiter(float64(common.RateLimitRPS), common.RateLimitBurst).Middleware()) // 6. Per-user rate limiting
 
 	auth.SessionLifetime = time.Duration(common.SessionLifetimeHours) * time.Hour
 	doctype.SetAdminRole(common.AdminRole)
@@ -204,16 +208,78 @@ func runServe() error {
 	auth.RegisterAuthRoutes(router, sessionMgr, firstDB)
 	siteGuard := auth.NewSiteGuard(firstDB)
 	auth.SetCSRFSecure(common.CSRFSecure)
-	apiGroup := router.Group("/api")
+	// Canonical v1 routes
+	apiGroup := router.Group("/api/v1")
 	apiGroup.Use(siteGuard.Middleware(false))
+	apiGroup.Use(knet.CompressMiddleware()) // Gzip API responses
+	// Legacy routes — same handlers, no deprecation headers
+	apiLegacyGroup := router.Group("/api")
+	apiLegacyGroup.Use(siteGuard.Middleware(false))
+	apiLegacyGroup.Use(knet.CompressMiddleware()) // Gzip API responses
 	txManager := &orm.TxManager{DB: firstDB, Registry: primaryRegistry, Dialect: kdb.Resolve(common.DBType)}
+
+	// Initialize script runner (embedded goja runtime, disabled if no scripts configured).
+	var scriptRunner script.Runner
+	siteScriptStores := make(map[string]*script.Store)
+	siteSecretStores := make(map[string]*secret.Store)
+
+	// Parse HTTP allowlist from env var (comma-separated domains).
+	httpAllowlistStr := os.Getenv("KORA_SCRIPTS_HTTP_ALLOWLIST")
+	var httpAllowlist []string
+	if httpAllowlistStr != "" {
+		for _, d := range strings.Split(httpAllowlistStr, ",") {
+			d = strings.TrimSpace(d)
+			if d != "" {
+				httpAllowlist = append(httpAllowlist, d)
+			}
+		}
+	}
+
+	// Check if any site has scripts enabled.
+	scriptEnabled := os.Getenv("KORA_SCRIPTS_ENABLED")
+	if scriptEnabled == "" || scriptEnabled == "true" {
+		scriptRunner = script.NewEmbeddedRunner(script.DefaultEmbeddedConfig())
+		slog.Info("script runner initialized", "pool_size", script.DefaultEmbeddedConfig().PoolSize)
+
+		// Create stores per site.
+		for _, s := range loadedSites {
+			siteScriptStores[s.Name] = &script.Store{DB: s.DB}
+			siteSecretStores[s.Name] = secret.NewStore(s.DB)
+		}
+		if len(httpAllowlist) > 0 {
+			slog.Info("script HTTP allowlist configured", "domains", httpAllowlist)
+		}
+	} else {
+		slog.Info("script runner disabled (KORA_SCRIPTS_ENABLED=false)")
+	}
+
 		siteBuses := make(map[string]analytics.EventBus)
+		siteMultiBuses := make(map[string]*analytics.MultiBus)
+		siteWebhookWorkers := make(map[string]*webhook.Worker)
 		for _, s := range loadedSites {
 			if s.AnalyticsEventBus != nil {
 				siteBuses[s.Name] = s.AnalyticsEventBus
+				// Wrap in MultiBus for webhook fan-out.
+				mb, mbErr := analytics.NewMultiBus(s.AnalyticsEventBus)
+				if mbErr == nil {
+					siteMultiBuses[s.Name] = mb
+					// Start webhook worker for this site.
+					w := webhook.NewWorker(s.DB, mb, s.Name)
+					w.Start()
+					siteWebhookWorkers[s.Name] = w
+					slog.Info("webhook worker started", "site", s.Name)
+				} else {
+					slog.Warn("failed to create multi-bus for webhooks", "site", s.Name, "error", mbErr)
+				}
 			}
 		}
-		api.RegisterRoutesOnGroupWithAnalytics(apiGroup, primaryRegistry, txManager, siteBuses)
+		// Start async hook worker (processes after_* hooks in background).
+	asyncHookQueue := make(chan orm.AsyncHookRequest, 1000)
+	go runAsyncHookWorker(asyncHookQueue, scriptRunner, siteScriptStores, loadedSites)
+	slog.Info("async hook worker started", "queue_size", 1000)
+
+	api.RegisterRoutesOnGroupWithAnalytics(apiGroup, primaryRegistry, txManager, siteBuses, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookQueue)
+	api.RegisterRoutesOnGroupWithAnalytics(apiLegacyGroup, primaryRegistry, txManager, siteBuses, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookQueue)
 
 	workspaceHandler := workspace.NewHandler(primaryRegistry)
 	if spaIndex, _ := workspace.SPAFS().Open("index.html"); spaIndex != nil {
@@ -237,6 +303,7 @@ func runServe() error {
 		// Console API (React SPA-driven, Bearer token auth).
 		// The /console frontend is served by the SPA via NoRoute handler.
 		ch := api.NewConsoleHandler(systemGuard, siteRouter, common.DBType, common.DBHost, common.DBUser, common.DBPassword, 3306, platformDB)
+		ch.Start()
 		router.POST("/api/console/login", ch.HandleLogin)
 		router.POST("/api/console/change-password", ch.HandleChangePassword)
 		router.POST("/api/console/sites/onboard", ch.HandleOnboard) // public — no auth
@@ -248,6 +315,7 @@ func runServe() error {
 		}
 
 	// Health + ping.
+	router.GET("/api/v1/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong", "version": Version}) })
 	router.GET("/api/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong", "version": Version}) })
 	router.GET("/health", func(c *gin.Context) {
 		dbStatus := "connected"
@@ -288,7 +356,10 @@ func runServe() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil { slog.Error("server shutdown error", "error", err) }
+		// Stop webhook workers.
+		for _, w := range siteWebhookWorkers { w.Stop() }
 		for _, s := range loadedSites { s.DB.Close() }
+		if scriptRunner != nil { scriptRunner.Close() }
 		slog.Info("server stopped")
 	}()
 
@@ -346,4 +417,62 @@ func configureLogging(level, format string) {
 		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
 	}
 	slog.SetDefault(slog.New(handler))
+}
+
+// runAsyncHookWorker processes after_* hook requests from the async queue.
+func runAsyncHookWorker(queue chan orm.AsyncHookRequest, runner script.Runner, stores map[string]*script.Store, sites []*knet.LoadedSite) {
+	// Build a site DB lookup.
+	siteDBs := make(map[string]*sql.DB)
+	for _, s := range sites {
+		siteDBs[s.Name] = s.DB
+	}
+
+	for req := range queue {
+		db, ok := siteDBs[req.Site]
+		if !ok {
+			continue
+		}
+
+		tm := &orm.TxManager{
+			DB:           db,
+			ScriptRunner: runner,
+			SiteName:     req.Site,
+			CurrentUser:  req.User,
+			CurrentUserRole: req.UserRole,
+		}
+		if store, ok := stores[req.Site]; ok {
+			tm.ScriptStore = store
+		}
+
+		execReq := script.ExecuteRequest{
+			Script:     req.Rec.Script,
+			ScriptType: req.Rec.ScriptType,
+			ScriptName: req.Rec.Name,
+			DocType:    req.DT.Name,
+			Event:      req.Event,
+			Document:   req.Doc.Fields,
+			User:       req.User,
+			UserRoles:  []string{req.UserRole},
+			Site:       req.Site,
+		}
+		if req.OldDoc != nil {
+			execReq.OldDocument = req.OldDoc.Fields
+		}
+
+		result, execErr := runner.Execute(context.Background(), execReq)
+		status := "success"
+		errMsg := ""
+		durationMs := 0
+		if execErr != nil {
+			status = "error"
+			errMsg = execErr.Error()
+		}
+		if result != nil {
+			durationMs = int(result.Duration.Milliseconds())
+		}
+
+		if store, ok := stores[req.Site]; ok {
+			_ = store.LogExecution(req.Site, req.Rec, req.DT.Name, req.Doc.Name, req.Event, req.User, durationMs, status, errMsg)
+		}
+	}
 }

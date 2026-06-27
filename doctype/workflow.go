@@ -29,12 +29,28 @@ type WorkflowState struct {
 
 // WorkflowTransition defines a possible transition between states.
 type WorkflowTransition struct {
-	Action        string   `yaml:"action"         json:"action"`
-	From          string   `yaml:"from"           json:"from"`
-	To            string   `yaml:"to"             json:"to"`
-	Allowed       string   `yaml:"allowed"        json:"allowed"`        // Role(s) allowed to perform
-	Condition     string   `yaml:"condition"      json:"condition,omitempty"`
-	RequireFields []string `yaml:"require_fields" json:"require_fields,omitempty"`
+	Action        string            `yaml:"action"         json:"action"`
+	From          string            `yaml:"from"           json:"from"`
+	To            string            `yaml:"to"             json:"to"`
+	Allowed       string            `yaml:"allowed"        json:"allowed"`        // Role(s) allowed to perform
+	Condition     string            `yaml:"condition"      json:"condition,omitempty"`
+	RequireFields []string          `yaml:"require_fields" json:"require_fields,omitempty"`
+
+	// OnTransition runs before the state change. Throwing aborts the transition.
+	OnTransition []WorkflowAction `yaml:"on_transition"  json:"on_transition,omitempty"`
+	// OnSuccess runs after the state change is committed. Best-effort (errors logged).
+	OnSuccess []WorkflowAction `yaml:"on_success"     json:"on_success,omitempty"`
+	// OnFailure runs after the transition is rejected. Best-effort.
+	OnFailure []WorkflowAction `yaml:"on_failure"     json:"on_failure,omitempty"`
+}
+
+// WorkflowAction defines a custom action to run during a workflow transition.
+type WorkflowAction struct {
+	Type       string `yaml:"type"       json:"type"`       // "script" or "webhook"
+	Script     string `yaml:"script"     json:"script,omitempty"`     // script name from _kora_script
+	WebhookURL string `yaml:"webhook_url" json:"webhook_url,omitempty"`
+	Condition  string `yaml:"condition"  json:"condition,omitempty"`
+	Async      bool   `yaml:"async"      json:"async"`      // fire-and-forget
 }
 
 // WorkflowNotification defines a notification triggered by a state change.

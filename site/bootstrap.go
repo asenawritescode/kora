@@ -17,13 +17,27 @@ func BootstrapSystemTables(database *sql.DB, dialect db.Dialect) error {
 			// Ignore duplicate column errors and unknown column errors
 			// (for idempotent ALTER TABLE and migration UPDATE statements).
 			errStr := err.Error()
-			if strings.Contains(errStr, "Duplicate column") ||
+			if strings.Contains(errStr, "Duplicate") ||
 				strings.Contains(errStr, "Unknown column") ||
 				strings.Contains(errStr, "duplicate column") ||
-				strings.Contains(errStr, "already exists") {
+				strings.Contains(errStr, "already exists") ||
+				strings.Contains(errStr, "doesn't exist") ||
+				strings.Contains(errStr, "Can't DROP") ||
+				strings.Contains(errStr, "check that column") {
 				continue
 			}
 			return fmt.Errorf("creating system table: %w\nSQL: %s", err, ddl)
+		}
+	}
+
+	// Extensibility tables (scripts, extensions, webhooks).
+	for _, ddl := range db.ExtensibilityTablesSQL() {
+		if _, err := database.Exec(ddl); err != nil {
+			errStr := err.Error()
+			if strings.Contains(errStr, "already exists") {
+				continue
+			}
+			return fmt.Errorf("creating extensibility table: %w\nSQL: %s", err, ddl)
 		}
 	}
 

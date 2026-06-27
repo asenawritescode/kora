@@ -130,6 +130,17 @@ export default function AdminSecretsPage() {
         </Button>
       </div>
 
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+        <p className="mb-0.5 text-xs font-medium uppercase tracking-wide">AI key naming convention</p>
+        <p>
+          AI providers require exact key names:{' '}
+          <code className="rounded bg-blue-100 px-1 font-mono text-xs">openai_api_key</code>,{' '}
+          <code className="rounded bg-blue-100 px-1 font-mono text-xs">deepseek_api_key</code>, or{' '}
+          <code className="rounded bg-blue-100 px-1 font-mono text-xs">anthropic_api_key</code>.
+          Use the quick-configure card above — it sets the correct name automatically.
+        </p>
+      </div>
+
       {/* AI Provider — single dropdown + key input */}
       <Card>
         <CardHeader className="pb-3">
@@ -274,6 +285,11 @@ export default function AdminSecretsPage() {
                   disabled={!!editKey && existingKeys.has(editKey)}
                   required
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  AI providers require exact key names:{' '}
+                  <code className="font-mono">openai_api_key</code>, <code className="font-mono">deepseek_api_key</code>, or{' '}
+                  <code className="font-mono">anthropic_api_key</code>.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="value">Value *</Label>

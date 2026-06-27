@@ -61,7 +61,7 @@ func NewSessionManager(db *sql.DB) *SessionManager {
 // CreateSession creates a new session for a user and returns the session ID.
 func (sm *SessionManager) CreateSession(site string, user *User) (string, error) {
 	if sm.DB == nil {
-		return "", fmt.Errorf("no database connection available")
+		return "", fmt.Errorf("no database connection available: %w", ErrNoDBConnection)
 	}
 	sid := generateSessionID()
 	expiresAt := time.Now().Add(SessionLifetime)
@@ -94,7 +94,7 @@ func (sm *SessionManager) CreateSession(site string, user *User) (string, error)
 // Uses an in-memory TTL cache to avoid hitting the database on every request.
 func (sm *SessionManager) GetSession(site, sid string) (*User, error) {
 	if sm.DB == nil {
-		return nil, fmt.Errorf("no database connection available")
+		return nil, fmt.Errorf("no database connection available: %w", ErrNoDBConnection)
 	}
 	// Check cache first.
 	sm.cacheMu.RLock()
@@ -102,15 +102,9 @@ func (sm *SessionManager) GetSession(site, sid string) (*User, error) {
 	sm.cacheMu.RUnlock()
 
 	if ok && time.Now().Before(entry.cachedAt.Add(sessionCacheTTL)) {
-		if entry.site != site {
-			// Wrong site — cached session is from a different site.
-			// Fall through to database query with site filter.
-		} else {
-			if time.Now().After(entry.expiresAt) {
-				sm.DeleteSession(sid)
-				return nil, fmt.Errorf("session expired")
-			}
-			return entry.user, nil
+		if time.Now().After(entry.expiresAt) {
+			sm.DeleteSession(sid)
+			return nil, fmt.Errorf("session expired: %w", ErrSessionExpired)
 		}
 	}
 
@@ -141,7 +135,7 @@ func (sm *SessionManager) GetSession(site, sid string) (*User, error) {
 
 	if time.Now().After(expiresAt) {
 		sm.DeleteSession(sid)
-		return nil, fmt.Errorf("session expired")
+		return nil, fmt.Errorf("session expired: %w", ErrSessionExpired)
 	}
 
 	// Parse JSON. For simplicity in Phase 1, parse manually.
@@ -322,7 +316,7 @@ func (sm *SessionManager) cleanupExpired() {
 // AuthenticateUser verifies a username/email and password against the database.
 func (sm *SessionManager) AuthenticateUser(site, email, password string) (*User, error) {
 	if sm.DB == nil {
-		return nil, fmt.Errorf("no database connection available")
+		return nil, fmt.Errorf("no database connection available: %w", ErrNoDBConnection)
 	}
 	var name, emailAddr, passwordHash, fullName, rolesStr string
 	var enabled bool
@@ -333,7 +327,7 @@ func (sm *SessionManager) AuthenticateUser(site, email, password string) (*User,
 	).Scan(&name, &emailAddr, &passwordHash, &fullName, &enabled, &rolesStr)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("invalid credentials")
+		return nil, fmt.Errorf("%w", ErrInvalidCredentials)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying user: %w", err)
@@ -343,12 +337,12 @@ func (sm *SessionManager) AuthenticateUser(site, email, password string) (*User,
 		// Return generic "invalid credentials" to prevent user enumeration.
 		// The real reason is logged for audit purposes.
 		slog.Warn("login attempt for disabled account", "email", email)
-		return nil, fmt.Errorf("invalid credentials")
+		return nil, fmt.Errorf("%w", ErrInvalidCredentials)
 	}
 
 	// Verify password.
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
-		return nil, fmt.Errorf("invalid credentials")
+		return nil, fmt.Errorf("%w", ErrInvalidCredentials)
 	}
 
 	// Parse roles.

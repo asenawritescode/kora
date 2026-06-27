@@ -49,7 +49,7 @@ KORA_DB_TYPE=mysql KORA_DB_HOST=127.0.0.1 KORA_DB_USER=root KORA_DB_PASSWORD=kor
 |---------|-------------|
 | `make build` | Build UI (bun) + Go binary |
 | `make serve` | Build + start server |
-| `make test` | Run Go tests |
+| `make test` | Run Go tests (311 tests, 19/19 packages) |
 | `make lint` | Run linters (Go + TypeScript) |
 | `make fmt` | Format code |
 | `make help` | Show all commands |
@@ -67,6 +67,10 @@ KORA_DB_TYPE=mysql KORA_DB_HOST=127.0.0.1 KORA_DB_USER=root KORA_DB_PASSWORD=kor
 - **Swagger/OpenAPI** — auto-generated API docs at `/api/swagger-ui`.
 - **Mobile Responsive** — tables become stacked cards. No horizontal scroll anywhere.
 - **Marketing Website** — landing page, docs, examples, and blog at [kora.mradiafrica.com](https://kora.mradiafrica.com).
+- **Extensibility** — JS runtime, event hooks, webhook extensions, custom API methods, workflow actions, scheduled scripts, computed fields
+- **MCP Server** — Model Context Protocol server for Claude Desktop, Cursor, and other AI tool integration
+- **Go SDK + TypeScript SDK** — official SDKs for building custom extensions, integrations, and plugins
+- **API Versioning** — stable `/api/v1/` routes with backward compatibility guarantees
 
 ## Configuration
 
@@ -89,6 +93,52 @@ All config via environment variables. No YAML config files needed.
 | `KORA_SHARED_OPENAI_API_KEY` | — | Shared OpenAI key (fallback when site has none) |
 | `KORA_SHARED_DEEPSEEK_API_KEY` | — | Shared DeepSeek key |
 | `KORA_SHARED_ANTHROPIC_API_KEY` | — | Shared Anthropic key |
+| `KORA_SCRIPTS_ENABLED` | `false` | Enable JS script engine for extensions |
+| `KORA_SCRIPTS_MAX_RAM` | `64` | Max RAM per script (MB) |
+| `KORA_ANALYTICS` | `false` | Enable analytics event bus and rollup tables |
+| `KORA_DB_PORT` | `3306` | Database port (MySQL) |
+| `KORA_LOG_FORMAT` | `text` | Log format: `text` or `json` |
+| `KORA_CSRF_SECURE` | `true` | Set secure flag on CSRF cookies |
+| `KORA_RATE_LIMIT` | `100` | Max requests per minute per IP |
+| `KORA_RATE_BURST` | `200` | Rate limiter burst allowance |
+
+## SDK Quick Start
+
+Add Kora to your Go project:
+
+```go
+import "github.com/asenawritescode/kora/sdk"
+
+func main() {
+    client := sdk.NewClient(sdk.Config{
+        BaseURL: "http://localhost:8000/api/v1",
+        APIKey: "your-api-key",
+    })
+    // List documents
+    docs, err := client.GetList("Customer", map[string]string{})
+    // Get single document
+    doc, err := client.GetDoc("Customer", "CUST-0001")
+    // Create document
+    err := client.Insert("Customer", map[string]any{"name": "Acme Corp"})
+}
+```
+
+Or in TypeScript:
+
+```typescript
+import { KoraClient } from "@kora/sdk"
+
+const client = new KoraClient({
+  baseURL: "/api/v1",
+  csrfToken: await getCSRFToken(),
+})
+// List documents
+const customers = await client.getList("Customer", {})
+// Get single document
+const customer = await client.getDoc("Customer", "CUST-0001")
+// Create document
+await client.insert("Customer", { name: "Acme Corp" })
+```
 
 ## Multi-Site
 
@@ -102,12 +152,14 @@ Sites created via console are persisted in `_kora_config_version` — they survi
 
 ## Administrator Panel
 
-Seven admin views — all config-driven, all mobile-responsive:
+Nine admin views — all config-driven, all mobile-responsive:
 
 - **DocTypes** — visual form builder + live YAML preview
 - **Permissions** — role × doctype matrix, inline editing
 - **Workflows** — state machine editor
 - **Versions** — config version history, diff, rollback
+- **Scripts** — JS script editor, test runner, console logs
+- **Extensions** — webhook endpoints, custom API methods, event hooks
 - **Users** — CRUD, roles, enable/disable, password reset
 - **Secrets** — AI provider keys (encrypted at rest, AES-256-GCM)
 - **API Docs** — Swagger UI at `/api/swagger-ui`
@@ -123,6 +175,10 @@ Seven admin views — all config-driven, all mobile-responsive:
 | [DECISIONS.md](docs/DECISIONS.md) | Architecture Decision Records |
 | [NETWORKING.md](docs/NETWORKING.md) | TLS, autocert, rate limiting, security headers, CORS |
 | [Plugin Architecture](docs/plugin-architecture.md) | Extension & webhook system design (draft) |
+| [Extensibility Plan](docs/extensibility-plan.md) | Script engine, event hooks, custom API methods, and webhook extensions |
+| [Process Isolation](docs/extensibility-process-isolation.md) | Script sandboxing, security isolation, and resource limits |
+| [Security Audit](docs/extensibility-security-audit.md) | Security review and threat model of the extensibility system |
+| [Cloud Architecture](docs/kora-cloud-architecture.md) | Kora Cloud deployment, multi-tenant SaaS, and scaling architecture |
 
 ## Tech Stack
 
@@ -142,4 +198,4 @@ Seven admin views — all config-driven, all mobile-responsive:
 docker pull smitdockerhub/kora:latest
 ```
 
-Pure Go, no CGO, ~30MB. Supports MySQL + LibSQL. Version injected at build time — check with `curl /api/ping`.
+Pure Go, no CGO, ~30MB. Supports MySQL + LibSQL. Version injected at build time — check with `curl /api/v1/ping`.

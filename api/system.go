@@ -373,40 +373,31 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 		return
 	}
 
-	// Save to configstore.
-	store := configstore.NewStore(db, h.TxManager.Dialect)
-	if err := store.SaveDocType(&dt); err != nil {
-		internalError(c, "saving doctype", err)
-		return
-	}
-
-	// Register in runtime registry.
-	reg.Register(&dt)
-
-	// Auto-create default permissions for all existing roles so non-admin users
-	// can immediately access the new doctype (read, write, create).
-	if err := store.AutoCreatePermissionsForDoctype(dt.Name); err != nil {
-		slog.Warn("failed to auto-create permissions for new doctype", "doctype", dt.Name, "error", err)
-	} else {
-		// Reload permissions into the in-memory registry so they take effect immediately.
-		roles, err := store.LoadRoles()
-		if err == nil {
-			perms, err2 := store.LoadPermissions()
-			if err2 == nil {
-				reg.Permissions.LoadPermissionsFromDB(roles, perms)
-			}
-		}
-	}
-
 	// Determine if we should activate immediately.
 	activate := c.Query("activate") != "false"
-	status := "Draft"
-	if activate {
-		status = "Active"
-	}
 
-	// Run migration if activating (use connected database name).
+	store := configstore.NewStore(db, h.TxManager.Dialect)
+
 	if activate {
+		// Activate immediately: save to DB, register, create permissions, run migration.
+		if err := store.SaveDocType(&dt); err != nil {
+			internalError(c, "saving doctype", err)
+			return
+		}
+		reg.Register(&dt)
+
+		if err := store.AutoCreatePermissionsForDoctype(dt.Name); err != nil {
+			slog.Warn("failed to auto-create permissions for new doctype", "doctype", dt.Name, "error", err)
+		} else {
+			roles, err := store.LoadRoles()
+			if err == nil {
+				perms, err2 := store.LoadPermissions()
+				if err2 == nil {
+					reg.Permissions.LoadPermissionsFromDB(roles, perms)
+				}
+			}
+		}
+
 		var dbName string
 		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
 		if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
@@ -416,15 +407,29 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 			})
 			return
 		}
-		// Invalidate analytics worker — new doctype means new auto-generated metrics.
 		h.invalidateAnalyticsForDoctype(c, dt.Name)
+	} else {
+		// Draft: register temporarily for snapshot collection, then remove.
+		// Do NOT save to _kora_doctype. Do NOT run migration.
+		// The doctype only exists in the config version snapshot until activation.
+		reg.Register(&dt)
 	}
 
 	// Create config version.
 	snapshot, _ := store.CollectSnapshot(reg)
+
+	if !activate {
+		// Remove from runtime — Draft doctypes are not live.
+		reg.Unregister(dt.Name)
+	}
+
 	createdBy := c.GetString("user")
 	if createdBy == "" {
 		createdBy = "system"
+	}
+	status := "Draft"
+	if activate {
+		status = "Active"
 	}
 	versionID, versionNum, err := store.CreateConfigVersion(
 		c.GetString("site_name"), createdBy, "Created "+dt.Name+" via web", status, snapshot,

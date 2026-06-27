@@ -28,6 +28,9 @@ Thumbs.db
 # Claude
 .claude/
 
+# Docs (private — not part of the public repo)
+docs/
+
 # Docker
 mysql_data/
 libtest_local.db
