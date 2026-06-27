@@ -101,11 +101,12 @@ func (sm *SessionManager) GetSession(site, sid string) (*User, error) {
 	entry, ok := sm.cache[sid]
 	sm.cacheMu.RUnlock()
 
-	if ok && time.Now().Before(entry.cachedAt.Add(sessionCacheTTL)) {
+	if ok && time.Now().Before(entry.cachedAt.Add(sessionCacheTTL)) && entry.site == site {
 		if time.Now().After(entry.expiresAt) {
 			sm.DeleteSession(sid)
 			return nil, fmt.Errorf("session expired: %w", ErrSessionExpired)
 		}
+		return entry.user, nil
 	}
 
 	// Cache miss or expired — query database.

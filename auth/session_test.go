@@ -245,13 +245,14 @@ func TestGetSession_CacheHit(t *testing.T) {
 	sm.cacheMu.Lock()
 	sm.cache["cached-sid"] = &sessionCacheEntry{
 		user:      user,
+		site:      "test-site",
 		cachedAt:  time.Now(),
 		expiresAt: time.Now().Add(1 * time.Hour),
 	}
 	sm.cacheMu.Unlock()
 
 	// GetSession from cache should NOT hit the database.
-	got, err := sm.GetSession("cached-sid")
+	got, err := sm.GetSession("test-site", "cached-sid")
 	if err != nil {
 		t.Fatalf("GetSession error = %v", err)
 	}
