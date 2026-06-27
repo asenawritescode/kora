@@ -22,6 +22,7 @@ func BootstrapSystemTables(database *sql.DB, dialect db.Dialect) error {
 				strings.Contains(errStr, "duplicate column") ||
 				strings.Contains(errStr, "already exists") ||
 				strings.Contains(errStr, "doesn't exist") ||
+				strings.Contains(errStr, "no such column") ||
 				strings.Contains(errStr, "Can't DROP") ||
 				strings.Contains(errStr, "check that column") {
 				continue

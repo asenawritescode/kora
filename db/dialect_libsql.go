@@ -404,10 +404,10 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"creation" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
 			"modified" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
 		)`,
-		`CREATE INDEX IF NOT EXISTS "idx_doctype_site" ON "_kora_doctype" ("site")`,
-
-		// Add version column to existing _kora_doctype tables (backwards compat).
+		// Backwards compat: add columns to existing tables BEFORE creating indexes.
+		`ALTER TABLE "_kora_doctype" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "version" INTEGER NOT NULL DEFAULT 1`,
+		`CREATE INDEX IF NOT EXISTS "idx_doctype_site" ON "_kora_doctype" ("site")`,
 
 		// _kora_field
 		`CREATE TABLE IF NOT EXISTS "_kora_field" (

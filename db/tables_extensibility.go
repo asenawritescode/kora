@@ -190,12 +190,12 @@ func ExtensibilityTablesLibSQL() []string {
 			next_retry_at TEXT
 		)`,
 
+		// Add site column BEFORE site index (backwards compat for existing tables).
+		`ALTER TABLE _kora_webhook_delivery ADD COLUMN site TEXT NOT NULL DEFAULT ''`,
+
 		`CREATE INDEX IF NOT EXISTS idx_deliv_extension ON _kora_webhook_delivery (extension_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_deliv_status ON _kora_webhook_delivery (status)`,
 		`CREATE INDEX IF NOT EXISTS idx_deliv_created ON _kora_webhook_delivery (created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_deliv_site ON _kora_webhook_delivery (site)`,
-
-		// Add site column for multi-tenant isolation (LibSQL backwards compat).
-		`ALTER TABLE _kora_webhook_delivery ADD COLUMN site TEXT NOT NULL DEFAULT ''`,
 	}
 }
