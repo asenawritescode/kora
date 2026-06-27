@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/asenawritescode/kora/analytics"
+	db "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -14,7 +15,7 @@ import (
 // siteDB is the fallback DB; per-request DB is resolved from gin context.
 // registry is used to auto-generate metrics from DocType metadata.
 // siteBuses maps site name → EventBus; empty map = analytics disabled for all sites.
-func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus) {
+func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, dialect db.Dialect) {
 	ag := apiGroup.Group("/analytics")
 
 	// Status endpoint always available — reports whether analytics is running.
@@ -54,11 +55,11 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			return
 		}
 		siteName := c.GetString("site_name")
+		updateCols := []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field"}
 		_, err := db.Exec(
 			`INSERT INTO _kora_analytics_metric (site, name, label, type, doctype, field_name, link_field, group_by_field)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			 ON DUPLICATE KEY UPDATE label=VALUES(label), type=VALUES(type), doctype=VALUES(doctype),
-			 field_name=VALUES(field_name), link_field=VALUES(link_field), group_by_field=VALUES(group_by_field)`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?) `+
+			 dialect.UpsertClause([]string{"site", "name"}, updateCols),
 			siteName, input.Name, input.Label, string(input.Type), input.DocType,
 			input.Field, input.LinkField, input.GroupByField,
 		)
