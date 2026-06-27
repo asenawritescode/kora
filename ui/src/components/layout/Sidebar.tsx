@@ -376,6 +376,7 @@ function RecentFlyout({ collapsed, isOpen, onOpen, onClose }: { collapsed: boole
 
 function PendingBadge() {
   const [draftCount, setDraftCount] = useState(0)
+  const { setSidebarOpen } = useUIStore()
 
   useEffect(() => {
     fetch('/api/v1/system/config/versions?status=Draft')
@@ -390,8 +391,14 @@ function PendingBadge() {
 
   if (draftCount === 0) return null
   return (
-    <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
-      {draftCount}
-    </span>
+    <Link
+      to="/workspace/admin/versions"
+      onClick={() => setSidebarOpen(false)}
+      className="ml-auto block"
+    >
+      <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+        {draftCount}
+      </span>
+    </Link>
   )
 }

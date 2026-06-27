@@ -1,14 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   fetchScripts, fetchScript, fetchScriptExecutions,
   createScript, updateScript, deleteScript,
 } from '@/lib/api/scripts'
+import { fetchDoctypes, fetchUsers } from '@/lib/api/system'
 import type { ScriptRecord, ScriptExecution } from '@/lib/api/scripts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -17,9 +17,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import {
-  Code2, Plus, Pencil, Trash2, Play, History, AlertCircle,
+  Code2, Plus, Pencil, Trash2, FileCheck, History, AlertCircle,
   Loader2, CheckCircle, XCircle, Clock,
 } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { CodeEditor } from '@/components/forms/CodeEditor'
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false)
@@ -61,6 +63,18 @@ export default function AdminScriptsPage() {
     queryFn: fetchScripts,
   })
 
+  const { data: doctypes } = useQuery({
+    queryKey: ['admin', 'doctypes'],
+    queryFn: fetchDoctypes,
+  })
+  const doctypeNames = (doctypes as any[])?.map((d: any) => d.name) || []
+
+  const { data: users } = useQuery({
+    queryKey: ['admin', 'users'],
+    queryFn: fetchUsers as any,
+  })
+  const userEmails = (users as any[])?.map((u: any) => u.email).filter(Boolean) || []
+
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editName, setEditName] = useState('')
   const [formData, setFormData] = useState<{
@@ -82,8 +96,11 @@ export default function AdminScriptsPage() {
     enabled: !!executionsFor,
   })
 
-  const [testResult, setTestResult] = useState<{ status: string; output?: string; error?: string; duration?: number } | null>(null)
-  const [testing, setTesting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [validationResult, setValidationResult] = useState<{ status: string; output?: string; error?: string; duration?: number } | null>(null)
+  const [validating, setValidating] = useState(false)
+  const [logFilter, setLogFilter] = useState<'all' | 'success' | 'error'>('all')
+  const [expandedErrorId, setExpandedErrorId] = useState<string | null>(null)
 
   const openCreate = () => {
     setEditName('')
@@ -135,9 +152,7 @@ export default function AdminScriptsPage() {
   }
 
   const handleDelete = async (name: string) => {
-    if (!confirm(`Delete script "${name}"?`)) return
-    await deleteScript(name)
-    queryClient.invalidateQueries({ queryKey: ['admin', 'scripts'] })
+    setConfirmDelete(name)
   }
 
   const handleToggleActive = async (s: ScriptRecord) => {
@@ -145,25 +160,24 @@ export default function AdminScriptsPage() {
     queryClient.invalidateQueries({ queryKey: ['admin', 'scripts'] })
   }
 
-  const handleTest = async () => {
-    setTesting(true)
-    setTestResult(null)
+  const handleValidate = async () => {
+    setValidating(true)
+    setValidationResult(null)
     try {
-      // Simulate test — in production this calls the validate endpoint
       const res = await fetch('/api/system/script/_validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ script: formData.script }),
       })
       const data = await res.json()
       if (data.data?.valid) {
-        setTestResult({ status: 'success', output: 'Script compiles successfully.', duration: 0 })
+        setValidationResult({ status: 'success', output: 'Syntax is valid.', duration: 0 })
       } else {
-        setTestResult({ status: 'error', error: data.data?.error || 'Unknown error' })
+        setValidationResult({ status: 'error', error: data.data?.error || 'Unknown error' })
       }
     } catch (err: any) {
-      setTestResult({ status: 'error', error: err?.message || 'Test failed' })
+      setValidationResult({ status: 'error', error: err?.message || 'Validation failed' })
     } finally {
-      setTesting(false)
+      setValidating(false)
     }
   }
 
@@ -267,7 +281,12 @@ export default function AdminScriptsPage() {
       </Card>
 
       {/* Execution log */}
-      {executionsFor && (
+      {executionsFor && (() => {
+        const filteredExecutions = executions?.filter(e => {
+          if (logFilter === 'all') return true
+          return e.status === logFilter
+        }) || []
+        return (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -276,6 +295,14 @@ export default function AdminScriptsPage() {
             <CardDescription>Recent script execution log.</CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="flex items-center gap-2 mb-3">
+              <Button variant={logFilter === 'all' ? 'default' : 'outline'} size="sm" onClick={() => setLogFilter('all')}>All</Button>
+              <Button variant={logFilter === 'success' ? 'default' : 'outline'} size="sm" onClick={() => setLogFilter('success')}>Success</Button>
+              <Button variant={logFilter === 'error' ? 'default' : 'outline'} size="sm" onClick={() => setLogFilter('error')}>Errors</Button>
+              <span className="text-xs text-muted-foreground ml-2">
+                Showing {filteredExecutions.length} of {executions?.length || 0} executions
+              </span>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -292,8 +319,11 @@ export default function AdminScriptsPage() {
                 {(!executions || executions.length === 0) && (
                   <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-4">No executions yet.</TableCell></TableRow>
                 )}
-                {executions?.map((e) => (
-                  <TableRow key={e.id}>
+                {filteredExecutions.length === 0 && (executions?.length || 0) > 0 && (
+                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-4">No executions match the filter.</TableCell></TableRow>
+                )}
+                {filteredExecutions.map((e) => (
+                  <TableRow key={e.id} className={e.status === 'error' ? 'cursor-pointer hover:bg-red-50/50' : ''} onClick={() => e.status === 'error' && setExpandedErrorId(expandedErrorId === e.id ? null : e.id)}>
                     <TableCell className="text-xs text-muted-foreground">{new Date(e.logged_at).toLocaleString()}</TableCell>
                     <TableCell className="text-xs">{e.doctype || '—'}</TableCell>
                     <TableCell className="text-xs font-mono">{e.docname || '—'}</TableCell>
@@ -304,14 +334,15 @@ export default function AdminScriptsPage() {
                        e.status === 'error' ? <XCircle className="h-4 w-4 text-red-500" /> :
                        <Clock className="h-4 w-4 text-yellow-500" />}
                     </TableCell>
-                    <TableCell className="text-xs text-red-500 max-w-[200px] truncate">{e.error_message || ''}</TableCell>
+                    <TableCell className={`text-xs text-red-500 max-w-[200px] ${expandedErrorId === e.id ? 'whitespace-pre-wrap' : 'truncate'}`}>{e.error_message || ''}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </CardContent>
         </Card>
-      )}
+        )
+      })()}
 
       {/* Create/Edit Sheet */}
       <Sheet open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -345,7 +376,13 @@ export default function AdminScriptsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label>DocType</Label>
-                  <Input value={formData.doctype || ''} onChange={e => setFormData({...formData, doctype: e.target.value})} placeholder="e.g., Work Order" />
+                  <Select value={formData.doctype} onValueChange={(v) => setFormData({...formData, doctype: v || ''})}>
+                    <SelectTrigger><SelectValue placeholder="Select doctype..." /></SelectTrigger>
+                    <SelectContent>
+                      {doctypeNames.length === 0 && <SelectItem value="_loading" disabled>Loading...</SelectItem>}
+                      {doctypeNames.map((name: string) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="grid gap-2">
                   <Label>Event</Label>
@@ -393,8 +430,14 @@ export default function AdminScriptsPage() {
               </div>
               <div className="grid gap-2">
                 <Label>Run As</Label>
-                <Input value={formData.run_as} onChange={e => setFormData({...formData, run_as: e.target.value})}
-                  placeholder="Trigger User" />
+                <Select value={formData.run_as} onValueChange={(v) => setFormData({...formData, run_as: v || ''})}>
+                  <SelectTrigger><SelectValue placeholder="Trigger User" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Trigger User</SelectItem>
+                    <SelectItem value="system">System</SelectItem>
+                    {userEmails.map((email: string) => <SelectItem key={email} value={email}>{email}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -402,29 +445,27 @@ export default function AdminScriptsPage() {
             <div className="grid gap-2">
               <div className="flex items-center justify-between">
                 <Label>Script <span className="text-xs text-muted-foreground font-mono">(JavaScript)</span></Label>
-                <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={testing}>
-                  {testing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
-                  Test
+                <Button type="button" variant="outline" size="sm" onClick={handleValidate} disabled={validating}>
+                  {validating ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileCheck className="h-3 w-3 mr-1" />}
+                  Validate
                 </Button>
               </div>
-              <Textarea
+              <CodeEditor
                 value={formData.script}
-                onChange={e => setFormData({...formData, script: e.target.value})}
-                className="font-mono text-sm min-h-[300px] bg-zinc-950 text-zinc-100"
-                placeholder="// Write your JavaScript here"
-                rows={16}
+                onChange={(newValue) => setFormData({...formData, script: newValue})}
+                minHeight="300px"
               />
             </div>
 
-            {/* Test result */}
-            {testResult && (
-              <div className={`p-3 rounded text-sm ${testResult.status === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+            {/* Validation result */}
+            {validationResult && (
+              <div className={`p-3 rounded text-sm ${validationResult.status === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
                 <div className="flex items-center gap-2 font-medium">
-                  {testResult.status === 'success' ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                  {testResult.status === 'success' ? 'Script compiles successfully' : 'Script error'}
+                  {validationResult.status === 'success' ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                  {validationResult.status === 'success' ? 'Syntax is valid' : 'Syntax error'}
                 </div>
-                {testResult.error && <p className="mt-1 font-mono text-xs">{testResult.error}</p>}
-                {testResult.output && <p className="mt-1 text-xs">{testResult.output}</p>}
+                {validationResult.error && <p className="mt-1 font-mono text-xs">{validationResult.error}</p>}
+                {validationResult.output && <p className="mt-1 text-xs">{validationResult.output}</p>}
               </div>
             )}
 
@@ -436,7 +477,7 @@ export default function AdminScriptsPage() {
 
             </div>
             <div className="sticky bottom-0 border-t bg-background px-4 py-3 flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">{editName ? 'Update script configuration.' : 'Script will be created as inactive. Activate it after review.'}</p>
+              <p className="text-xs text-muted-foreground">{editName ? 'Update script configuration and code.' : 'Script will be created as inactive. Activate it after review.'}</p>
               <div className="flex gap-2 shrink-0">
                 <Button type="button" variant="outline" size="sm" onClick={() => setDialogOpen(false)}>Cancel</Button>
                 <Button type="submit" size="sm" disabled={saving}>
@@ -448,6 +489,21 @@ export default function AdminScriptsPage() {
           </form>
         </SheetContent>
       </Sheet>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        onOpenChange={() => setConfirmDelete(null)}
+        title="Delete Script"
+        description={`Delete script "${confirmDelete}"?`}
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!confirmDelete) return
+          await deleteScript(confirmDelete)
+          queryClient.invalidateQueries({ queryKey: ['admin', 'scripts'] })
+          setConfirmDelete(null)
+        }}
+      />
     </div>
   )
 }

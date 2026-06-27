@@ -507,3 +507,147 @@ func TestHandleList_PermissionDenied(t *testing.T) {
 		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusForbidden, w.Body.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Extension Permission Enforcement
+// ---------------------------------------------------------------------------
+
+func TestExtensionPermission_ReadGranted(t *testing.T) {
+	handler, reg, mock, sqlDB := setupTestHandler(t)
+
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM `tabTestDoc` WHERE 1=1").
+		WillReturnRows(sqlmock.NewRows([]string{"count(*)"}).AddRow(1))
+	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE 1=1 ORDER BY `modified` DESC LIMIT \\? OFFSET \\?").
+		WithArgs(50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"name", "owner", "creation", "modified", "modified_by", "doc_status", "title"}).
+			AddRow("TEST-0001", "bot", "2024-01-01 00:00:00", "2024-01-01 00:00:00", "bot", 0, "Ext Doc"))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/resource/TestDoc", nil)
+	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
+	injectDB(c, sqlDB, reg)
+	c.Set("auth_type", "extension")
+	c.Set("extension_name", "test-bot")
+	c.Set("extension_permissions", []doctype.Permission{{Doctype: "TestDoc", Read: true}})
+
+	handler.HandleList(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestExtensionPermission_DeleteDenied(t *testing.T) {
+	handler, reg, _, sqlDB := setupTestHandler(t)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("DELETE", "/api/resource/TestDoc/TEST-0001", nil)
+	c.Params = gin.Params{
+		{Key: "doctype", Value: "TestDoc"},
+		{Key: "name", Value: "TEST-0001"},
+	}
+	injectDB(c, sqlDB, reg)
+	c.Set("auth_type", "extension")
+	c.Set("extension_name", "test-bot")
+	c.Set("extension_permissions", []doctype.Permission{{Doctype: "TestDoc", Read: true}})
+
+	handler.HandleDelete(c)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusForbidden, w.Body.String())
+	}
+}
+
+func TestExtensionPermission_UnconfiguredDoctype(t *testing.T) {
+	handler, reg, _, sqlDB := setupTestHandler(t)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/resource/TestDoc", nil)
+	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
+	injectDB(c, sqlDB, reg)
+	c.Set("auth_type", "extension")
+	c.Set("extension_name", "test-bot")
+	c.Set("extension_permissions", []doctype.Permission{{Doctype: "OtherDoc", Read: true}})
+
+	handler.HandleList(c)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusForbidden, w.Body.String())
+	}
+}
+
+func TestExtensionPermission_WriteGranted(t *testing.T) {
+	handler, reg, mock, sqlDB := setupTestHandler(t)
+
+	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE name = \\?").
+		WithArgs("TEST-0001").
+		WillReturnRows(sqlmock.NewRows([]string{"name", "owner", "creation", "modified", "modified_by", "doc_status", "title"}).
+			AddRow("TEST-0001", "bot", "2024-01-01 00:00:00", "2024-01-01 00:00:00", "bot", 0, "Original"))
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `tabTestDoc` SET .+ WHERE name = \\?").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := `{"title": "Updated"}`
+	c.Request = httptest.NewRequest("PUT", "/api/resource/TestDoc/TEST-0001", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{
+		{Key: "doctype", Value: "TestDoc"},
+		{Key: "name", Value: "TEST-0001"},
+	}
+	injectDB(c, sqlDB, reg)
+	c.Set("auth_type", "extension")
+	c.Set("extension_name", "test-bot")
+	c.Set("extension_permissions", []doctype.Permission{{Doctype: "TestDoc", Write: true}})
+
+	handler.HandleUpdate(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestExtensionPermission_CreateGranted(t *testing.T) {
+	handler, reg, mock, sqlDB := setupTestHandler(t)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT COALESCE\\(MAX").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec("INSERT INTO `tabTestDoc`").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := `{"title": "New Doc"}`
+	c.Request = httptest.NewRequest("POST", "/api/resource/TestDoc", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
+	injectDB(c, sqlDB, reg)
+	c.Set("auth_type", "extension")
+	c.Set("extension_name", "test-bot")
+	c.Set("extension_permissions", []doctype.Permission{{Doctype: "TestDoc", Create: true}})
+
+	handler.HandleCreate(c)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}

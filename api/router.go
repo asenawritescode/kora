@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/analytics"
+	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/script"
@@ -194,17 +195,32 @@ type ErrorResponse struct {
 
 // checkPerm is a helper that checks permission for the current user and returns
 // whether the operation is owner-scoped. Returns true if forbidden (and writes response).
-func checkPerm(c *gin.Context, registry *doctype.Registry, doctype, operation string) (ownerOnly bool, forbidden bool) {
+func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation string) (ownerOnly bool, forbidden bool) {
+	// Extension auth: check scoped api_permissions.
+	if c.GetString("auth_type") == "extension" {
+		permsVal, exists := c.Get("extension_permissions")
+		perms, ok := permsVal.([]doctype.Permission)
+		if !exists || !ok || !auth.HasExtensionPermission(perms, docType, operation) {
+			c.JSON(http.StatusForbidden, ErrorResponse{
+				Error: map[string]string{
+					"message": fmt.Sprintf("Extension does not have %s permission on %s", operation, docType),
+				},
+			})
+			return false, true
+		}
+		return false, false
+	}
+
 	userRoles := c.GetStringSlice("user_roles")
 	if len(userRoles) == 0 {
 		// Fallback: if no roles set, allow (bootstrapping / system user).
 		return false, false
 	}
-	allowed, ownerScoped := registry.CanUser(userRoles, doctype, operation)
+	allowed, ownerScoped := registry.CanUser(userRoles, docType, operation)
 	if !allowed {
 		c.JSON(http.StatusForbidden, ErrorResponse{
 			Error: map[string]string{
-				"message": fmt.Sprintf("Permission denied: cannot %s on %s", operation, doctype),
+				"message": fmt.Sprintf("Permission denied: cannot %s on %s", operation, docType),
 			},
 		})
 		return false, true

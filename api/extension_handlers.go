@@ -81,6 +81,12 @@ func (h *Handler) HandleExtensionCreate(c *gin.Context) {
 		return
 	}
 
+	// Default empty api_permissions to "[]" — never store null/empty.
+	apiPerms := req.APIPermissions
+	if apiPerms == "" || apiPerms == "null" {
+		apiPerms = "[]"
+	}
+
 	db := h.queryDB(c)
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Database not available"}})
@@ -91,7 +97,7 @@ func (h *Handler) HandleExtensionCreate(c *gin.Context) {
 		`INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, subscriptions, api_permissions, installed_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))`,
 		req.Name, siteNameStr, req.DisplayName, req.Description, req.EndpointURL, secret, accessToken,
-		req.Subscriptions, req.APIPermissions)
+		req.Subscriptions, apiPerms)
 	if err != nil {
 		slog.Error("creating extension", "error", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to create extension"}})

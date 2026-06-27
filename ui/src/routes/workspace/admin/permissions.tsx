@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { fetchRoles, createRole, deleteRole } from '@/lib/api/system'
+import { fetchRoles, createRole, deleteRole, fetchUsers, updateUser } from '@/lib/api/system'
 import { fetchDoctypes } from '@/lib/api/system'
 import { fetchPermissions, savePermissions } from '@/lib/api/system'
 import type { Role, Permission } from '@/lib/api/system'
@@ -9,7 +9,16 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { Plus, Trash2, Save, ShieldCheck, UserPlus, Edit, ChevronDown, ChevronRight, X } from 'lucide-react'
+import { toast } from '@/components/ui/Toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 const OPS = [
   { key: 'read', label: 'Read' },
@@ -48,6 +57,10 @@ export default function AdminPermissionsPage() {
     queryKey: ['admin', 'permissions'],
     queryFn: fetchPermissions,
   })
+  const { data: users } = useQuery({
+    queryKey: ['admin', 'users'],
+    queryFn: fetchUsers,
+  })
 
   const doctypeNames = doctypes?.map((d: any) => d.name) || []
   const roleNames = roles?.map((r: Role) => r.name) || []
@@ -58,6 +71,10 @@ export default function AdminPermissionsPage() {
   const [newRole, setNewRole] = useState({ name: '', workspace_access: true, description: '' })
   const [saving, setSaving] = useState(false)
   const [expandedRole, setExpandedRole] = useState<string | null>(null)
+  const [deleteRoleTarget, setDeleteRoleTarget] = useState<string | null>(null)
+  const [deleteRoleDialogOpen, setDeleteRoleDialogOpen] = useState(false)
+  const [reassignTo, setReassignTo] = useState('')
+  const [confirmDeletePerm, setConfirmDeletePerm] = useState<Permission | null>(null)
 
   // Group permissions by role.
   const byRole = new Map<string, Permission[]>()
@@ -77,16 +94,13 @@ export default function AdminPermissionsPage() {
       await savePermissions(updated)
       setEditing(null)
       refetch()
-    } catch (e) { alert((e as Error).message) }
+    } catch (e) { toast('error', (e as Error).message) }
     finally { setSaving(false) }
   }
 
   const handleDeletePermission = async (perm: Permission) => {
-    if (!permissions || !confirm(`Delete: ${perm.role} on ${perm.doctype}?`)) return
-    try {
-      await savePermissions(permissions.filter((p) => !(p.role === perm.role && p.doctype === perm.doctype)))
-      refetch()
-    } catch (e) { alert((e as Error).message) }
+    if (!permissions) return
+    setConfirmDeletePerm(perm)
   }
 
   const handleAddRole = async () => {
@@ -96,12 +110,35 @@ export default function AdminPermissionsPage() {
       setAddingRole(false)
       setNewRole({ name: '', workspace_access: true, description: '' })
       refetchRoles()
-    } catch (e) { alert((e as Error).message) }
+    } catch (e) { toast('error', (e as Error).message) }
   }
 
   const handleDeleteRole = async (name: string) => {
-    if (!confirm(`Delete role "${name}"?`)) return
-    try { await deleteRole(name); refetchRoles(); refetch() } catch (e) { alert((e as Error).message) }
+    setDeleteRoleTarget(name)
+    setReassignTo('')
+    setDeleteRoleDialogOpen(true)
+  }
+
+  const handleConfirmDeleteRole = async () => {
+    if (!deleteRoleTarget) return
+    try {
+      if (reassignTo && users) {
+        const affected = users.filter(u => u.roles?.includes(deleteRoleTarget))
+        for (const user of affected) {
+          const newRoles = user.roles.filter(r => r !== deleteRoleTarget)
+          if (!newRoles.includes(reassignTo)) {
+            newRoles.push(reassignTo)
+          }
+          await updateUser(user.name, { roles: newRoles })
+        }
+      }
+      await deleteRole(deleteRoleTarget)
+      setDeleteRoleDialogOpen(false)
+      setDeleteRoleTarget(null)
+      setReassignTo('')
+      refetchRoles()
+      refetch()
+    } catch (e) { toast('error', (e as Error).message) }
   }
 
   return (
@@ -292,6 +329,104 @@ export default function AdminPermissionsPage() {
           )
         })}
       </div>
+
+      {/* Delete role cascade warning dialog */}
+      <Dialog open={deleteRoleDialogOpen} onOpenChange={(open) => {
+        setDeleteRoleDialogOpen(open)
+        if (!open) { setDeleteRoleTarget(null); setReassignTo('') }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Role &quot;{deleteRoleTarget}&quot;?</DialogTitle>
+          </DialogHeader>
+
+          {deleteRoleTarget && (
+            <div className="space-y-4">
+              {!users || !permissions ? (
+                <p className="text-sm text-muted-foreground">Loading impact information...</p>
+              ) : (() => {
+                const usersWithRole = users.filter(u => u.roles?.includes(deleteRoleTarget!))
+                const permDoctypes = [...new Set(
+                  permissions.filter(p => p.role === deleteRoleTarget!).map(p => p.doctype)
+                )]
+                const otherRoles = roles?.filter(r => r.name !== deleteRoleTarget)?.map(r => r.name) || []
+
+                return (
+                  <>
+                    {usersWithRole.length > 0 && (
+                      <div className="rounded-lg bg-destructive/10 p-3 text-sm">
+                        <div className="font-medium text-destructive mb-1">
+                          {usersWithRole.length} user{usersWithRole.length !== 1 ? 's' : ''} ha{usersWithRole.length === 1 ? 's' : 've'} this role
+                        </div>
+                        <div className="text-muted-foreground">
+                          {usersWithRole.slice(0, 3).map(u => u.full_name || u.name).join(', ')}
+                          {usersWithRole.length > 3 && `, and ${usersWithRole.length - 3} other${usersWithRole.length - 3 !== 1 ? 's' : ''}`}
+                        </div>
+                      </div>
+                    )}
+
+                    {permDoctypes.length > 0 && (
+                      <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 p-3 text-sm">
+                        <div className="font-medium text-amber-800 dark:text-amber-300 mb-1">
+                          {permDoctypes.length} doctype permission{permDoctypes.length !== 1 ? 's' : ''} will be removed
+                        </div>
+                        <div className="text-muted-foreground">
+                          {permDoctypes.join(', ')}
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-sm text-muted-foreground">
+                      These users will lose all access granted through this role. This cannot be undone.
+                    </p>
+
+                    {usersWithRole.length > 0 && otherRoles.length > 0 && (
+                      <div className="space-y-2 pt-2 border-t">
+                        <label className="text-sm font-medium">Reassign users to:</label>
+                        <Select value={reassignTo} onValueChange={(v) => setReassignTo(v ?? '')}>
+                          <SelectTrigger><SelectValue placeholder="Select a role..." /></SelectTrigger>
+                          <SelectContent>
+                            {otherRoles.map((name) => (
+                              <SelectItem key={name} value={name}>{name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          {reassignTo ? `Users will be reassigned to "${reassignTo}" before deletion.` : 'Users will lose this role with no replacement.'}
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDeleteRoleDialogOpen(false); setDeleteRoleTarget(null); setReassignTo('') }}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmDeleteRole}>
+              Delete Role
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={confirmDeletePerm !== null}
+        onOpenChange={() => setConfirmDeletePerm(null)}
+        title="Delete Permission"
+        description={`Delete: ${confirmDeletePerm?.role} on ${confirmDeletePerm?.doctype}?`}
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!confirmDeletePerm || !permissions) return
+          await savePermissions(permissions.filter((p) => !(p.role === confirmDeletePerm.role && p.doctype === confirmDeletePerm.doctype)))
+          refetch()
+          setConfirmDeletePerm(null)
+        }}
+      />
     </div>
   )
 }

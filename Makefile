@@ -13,6 +13,12 @@ TAG ?= v0.1.0
 ## Build
 build: build-ui build-go          ## Build UI + Go binary
 
+build-ui-analyze: build-ui          ## Build UI and analyze bundle sizes
+	@echo "=== Bundle chunks ==="
+	@ls -lhS ui/dist/assets/*.js | awk '{print $$5, $$9}'
+	@echo "=== Total ==="
+	@du -sh ui/dist/
+
 build-ui:                          ## Build React SPA
 	cd ui && bun install --frozen-lockfile
 	cd ui && bun run build

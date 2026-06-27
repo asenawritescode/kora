@@ -1,32 +1,36 @@
-import { useEffect } from 'react'
+import { useEffect, Suspense, lazy } from 'react'
 import { createRouter, createRoute, createRootRoute, Outlet, Navigate } from '@tanstack/react-router'
 import { RootLayout } from '@/components/layout/RootLayout'
 import { ConsoleLayout } from '@/components/layout/ConsoleLayout'
 import { AuthGuard } from '@/components/layout/AuthGuard'
 import { useConsoleAuthStore } from '@/lib/console-auth-store'
 import { Loader2 } from 'lucide-react'
-import LoginPage from '@/routes/workspace/auth/login'
-import DashboardPage from '@/routes/workspace/index'
-import ListPage from '@/routes/workspace/$doctype/index'
-import NewFormPage from '@/routes/workspace/$doctype/new'
-import EditFormPage from '@/routes/workspace/$doctype/$name'
-import AdminDoctypesPage from '@/routes/workspace/admin/doctypes'
-import AdminDoctypeEditorPage from '@/routes/workspace/admin/doctypes/editor'
-import AdminVersionsPage from '@/routes/workspace/admin/versions'
-import AdminPermissionsPage from '@/routes/workspace/admin/permissions'
-import AdminWorkflowsPage from '@/routes/workspace/admin/workflows'
-import AdminUsersPage from '@/routes/workspace/admin/users'
-import AdminSecretsPage from '@/routes/workspace/admin/secrets'
-import AdminScriptsPage from '@/routes/workspace/admin/scripts'
-import AdminExtensionsPage from '@/routes/workspace/admin/extensions'
-import AdminAnalyticsPage from '@/routes/workspace/admin/analytics'
-import ConsoleLoginPage from '@/routes/console/login'
-import ConsoleDashboard from '@/routes/console/index'
+
+const LoginPage = lazy(() => import('@/routes/workspace/auth/login'))
+const DashboardPage = lazy(() => import('@/routes/workspace/index'))
+const ListPage = lazy(() => import('@/routes/workspace/$doctype/index'))
+const NewFormPage = lazy(() => import('@/routes/workspace/$doctype/new'))
+const EditFormPage = lazy(() => import('@/routes/workspace/$doctype/$name'))
+const AdminDoctypesPage = lazy(() => import('@/routes/workspace/admin/doctypes'))
+const AdminDoctypeEditorPage = lazy(() => import('@/routes/workspace/admin/doctypes/editor'))
+const AdminVersionsPage = lazy(() => import('@/routes/workspace/admin/versions'))
+const AdminPermissionsPage = lazy(() => import('@/routes/workspace/admin/permissions'))
+const AdminWorkflowsPage = lazy(() => import('@/routes/workspace/admin/workflows'))
+const AdminUsersPage = lazy(() => import('@/routes/workspace/admin/users'))
+const AdminSecretsPage = lazy(() => import('@/routes/workspace/admin/secrets'))
+const AdminScriptsPage = lazy(() => import('@/routes/workspace/admin/scripts'))
+const AdminExtensionsPage = lazy(() => import('@/routes/workspace/admin/extensions'))
+const AdminAnalyticsPage = lazy(() => import('@/routes/workspace/admin/analytics'))
+const ConsoleLoginPage = lazy(() => import('@/routes/console/login'))
+const ConsoleDashboard = lazy(() => import('@/routes/console/index'))
+
 // Root — just auth guard, no layout.
 const rootRoute = createRootRoute({
   component: () => (
     <AuthGuard>
-      <Outlet />
+      <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+        <Outlet />
+      </Suspense>
     </AuthGuard>
   ),
 })

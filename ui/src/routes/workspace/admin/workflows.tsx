@@ -12,6 +12,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { Link } from '@tanstack/react-router'
 import { Workflow, Plus, Edit, Trash2, Save, ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react'
+import { toast } from '@/components/ui/Toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 const EMPTY_STATE: WorkflowState = { state: '', doc_status: 0, allow_edit: '', style: 'default' }
 const EMPTY_TRANSITION: WorkflowTransition = { action: '', from: '', to: '', allowed: '', condition: '', require_fields: [] }
@@ -24,6 +26,7 @@ export default function AdminWorkflowsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ states: true, transitions: true, notifications: true })
+  const [confirmDeleteDoctype, setConfirmDeleteDoctype] = useState<string | null>(null)
 
   const toggle = (key: string) => setExpanded((p) => ({ ...p, [key]: !p[key] }))
 
@@ -45,7 +48,7 @@ export default function AdminWorkflowsPage() {
       const wf = await fetchWorkflow(doctype)
       setForm({ ...wf, notifications: wf.notifications || [] })
       setEditingDocType(doctype); setError(null)
-    } catch (e) { alert((e as Error).message) }
+    } catch (e) { toast('error', (e as Error).message) }
   }
 
   const handleSave = async () => {
@@ -56,8 +59,7 @@ export default function AdminWorkflowsPage() {
   }
 
   const handleDelete = async (doctype: string) => {
-    if (!confirm(`Delete workflow for ${doctype}?`)) return
-    try { await deleteWorkflow(doctype); refetch() } catch (e) { alert((e as Error).message) }
+    setConfirmDeleteDoctype(doctype)
   }
 
   // --- Editor view ---
@@ -178,6 +180,26 @@ export default function AdminWorkflowsPage() {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteDoctype !== null}
+        onOpenChange={() => setConfirmDeleteDoctype(null)}
+        title="Delete Workflow"
+        description={`Delete workflow for ${confirmDeleteDoctype}?`}
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!confirmDeleteDoctype) return
+          try {
+            await deleteWorkflow(confirmDeleteDoctype)
+            refetch()
+          } catch (e) {
+            toast('error', (e as Error).message)
+          } finally {
+            setConfirmDeleteDoctype(null)
+          }
+        }}
+      />
     </div>
   )
 }

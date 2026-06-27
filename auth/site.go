@@ -2,9 +2,12 @@ package auth
 
 import (
 	"database/sql"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/asenawritescode/kora/doctype"
 	"github.com/gin-gonic/gin"
 )
 
@@ -90,16 +93,111 @@ func (g *SiteGuard) authenticateExtension(c *gin.Context, token string) bool {
 	}
 
 	var extName string
+	var permsJSON sql.NullString
 	err := sqlDB.QueryRow(
-		`SELECT name FROM _kora_extension WHERE access_token = ? AND is_active = 1`, token,
-	).Scan(&extName)
+		`SELECT name, api_permissions FROM _kora_extension WHERE access_token = ? AND is_active = 1`, token,
+	).Scan(&extName, &permsJSON)
 	if err != nil {
 		return false
 	}
 
+	perms := parseExtensionPermissions(permsJSON.String)
+
 	c.Set("auth_type", "extension")
 	c.Set("extension_name", extName)
+	c.Set("extension_permissions", perms)
 	return true
+}
+
+// parseExtensionPermissions parses the api_permissions JSON from the database.
+// Handles both boolean-flag format: [{"doctype":"X","read":true,"create":true}]
+// and operations-array format: [{"doctype":"X","operations":["read","create"]}].
+// Returns an empty slice on empty/null/malformed input.
+func parseExtensionPermissions(raw string) []doctype.Permission {
+	if raw == "" || raw == "null" || raw == "[]" {
+		return []doctype.Permission{}
+	}
+
+	// Try operations-array format: [{"doctype":"X","operations":["read","create"]}]
+	var opsPerms []struct {
+		Doctype    string   `json:"doctype"`
+		Operations []string `json:"operations"`
+	}
+	if err := json.Unmarshal([]byte(raw), &opsPerms); err == nil && len(opsPerms) > 0 {
+		hasOps := false
+		for _, op := range opsPerms {
+			if len(op.Operations) > 0 {
+				hasOps = true
+				break
+			}
+		}
+		if hasOps {
+			perms := make([]doctype.Permission, len(opsPerms))
+			for i, op := range opsPerms {
+				opSet := make(map[string]bool, len(op.Operations))
+				for _, o := range op.Operations {
+					opSet[o] = true
+				}
+				perms[i] = doctype.Permission{
+					Doctype: op.Doctype,
+					Read:    opSet["read"],
+					Write:   opSet["write"],
+					Create:  opSet["create"],
+					Delete:  opSet["delete"],
+					Submit:  opSet["submit"],
+					Cancel:  opSet["cancel"],
+					Amend:   opSet["amend"],
+					Export:  opSet["export"],
+					Import:  opSet["import"],
+					Report:  opSet["report"],
+				}
+			}
+			return perms
+		}
+	}
+
+	// Fall back to boolean-flag format (doctype.Permission JSON tags).
+	var perms []doctype.Permission
+	if err := json.Unmarshal([]byte(raw), &perms); err != nil {
+		slog.Warn("extension has malformed api_permissions",
+			"api_permissions", raw, "error", err)
+		return []doctype.Permission{}
+	}
+	return perms
+}
+
+// HasExtensionPermission checks whether the extension's scoped permissions
+// grant the requested operation on the given doctype.
+// Returns false for empty/nil permissions (secure by default).
+func HasExtensionPermission(perms []doctype.Permission, doctype, operation string) bool {
+	for _, p := range perms {
+		if p.Doctype != doctype {
+			continue
+		}
+		switch operation {
+		case "read":
+			return p.Read
+		case "write":
+			return p.Write
+		case "create":
+			return p.Create
+		case "delete":
+			return p.Delete
+		case "submit":
+			return p.Submit
+		case "cancel":
+			return p.Cancel
+		case "amend":
+			return p.Amend
+		case "export":
+			return p.Export
+		case "import":
+			return p.Import
+		case "report":
+			return p.Report
+		}
+	}
+	return false
 }
 
 // SiteDB returns the site's database from the request context.

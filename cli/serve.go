@@ -190,7 +190,7 @@ func runServe() error {
 	router.Use(knet.SecurityHeadersMiddleware(common.TLSMode != "" && common.TLSMode != "off"))
 	router.Use(knet.CORSMiddleware(nil))
 	router.Use(siteRouter.Middleware())
-	router.Use(knet.NewRateLimiter(float64(common.RateLimitRPS), common.RateLimitBurst).Middleware())
+	router.Use(knet.NewRateLimiter(float64(common.RateLimitRPS), common.RateLimitBurst).Middleware()) // 6. Per-user rate limiting
 
 	auth.SessionLifetime = time.Duration(common.SessionLifetimeHours) * time.Hour
 	doctype.SetAdminRole(common.AdminRole)
@@ -211,9 +211,11 @@ func runServe() error {
 	// Canonical v1 routes
 	apiGroup := router.Group("/api/v1")
 	apiGroup.Use(siteGuard.Middleware(false))
+	apiGroup.Use(knet.CompressMiddleware()) // Gzip API responses
 	// Legacy routes — same handlers, no deprecation headers
 	apiLegacyGroup := router.Group("/api")
 	apiLegacyGroup.Use(siteGuard.Middleware(false))
+	apiLegacyGroup.Use(knet.CompressMiddleware()) // Gzip API responses
 	txManager := &orm.TxManager{DB: firstDB, Registry: primaryRegistry, Dialect: kdb.Resolve(common.DBType)}
 
 	// Initialize script runner (embedded goja runtime, disabled if no scripts configured).
