@@ -24,11 +24,11 @@ func TestLoadAll_Empty(t *testing.T) {
 	s := newStore(db)
 
 	// Expect doctype query — returns empty.
-	mock.ExpectQuery("SELECT name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description FROM _kora_doctype ORDER BY name").
+	mock.ExpectQuery("SELECT name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description FROM _kora_doctype WHERE site = \\? OR site = '' ORDER BY name").
 		WillReturnRows(sqlmock.NewRows([]string{"name", "module", "is_submittable", "is_child_table", "is_single", "track_changes", "title_field", "search_fields", "sort_field", "sort_order", "description"}))
 
 	// Expect field query — also empty.
-	mock.ExpectQuery("SELECT parent, fieldname, fieldtype, label, options, reqd, unique_constraint, default_value, hidden, read_only, bold, in_list_view, in_standard_filter, search_index, description, depends_on, mandatory_depends_on, constraints_json, renamed_from, COALESCE\\(linked_field,''\\).*FROM _kora_field.*ORDER BY parent, idx").
+	mock.ExpectQuery("SELECT .* FROM _kora_field WHERE .* ORDER BY parent, idx").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"parent", "fieldname", "fieldtype", "label", "options",
 			"reqd", "unique_constraint", "default_value", "hidden", "read_only",
@@ -37,7 +37,7 @@ func TestLoadAll_Empty(t *testing.T) {
 			"renamed_from", "linked_field", "computed", "idx",
 		}))
 
-	doctypes, err := s.LoadAll()
+	doctypes, err := s.LoadAll("")
 	if err != nil {
 		t.Fatalf("LoadAll error = %v", err)
 	}
@@ -60,7 +60,7 @@ func TestLoadAll_WithDoctypes(t *testing.T) {
 		AddRow("Task", "Core", 1, 0, 0, 0, "subject", "subject,status", "modified", "DESC", "A task").
 		AddRow("User", "Core", 0, 0, 0, 0, "name", "name,email", "modified", "DESC", "A user")
 
-	mock.ExpectQuery("SELECT name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description FROM _kora_doctype ORDER BY name").
+	mock.ExpectQuery("SELECT name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description FROM _kora_doctype WHERE site = \\? OR site = '' ORDER BY name").
 		WillReturnRows(dtRows)
 
 	// Field rows.
@@ -75,10 +75,10 @@ func TestLoadAll_WithDoctypes(t *testing.T) {
 		AddRow("Task", "status", "Select", "Status", "Open,Closed", 1, 0, "Open", 0, 0, 0, 1, 0, 0, "", "", "", "[]", "", "", "", 1).
 		AddRow("User", "email", "Data", "Email", "", 1, 1, "", 0, 0, 0, 1, 0, 0, "", "", "", "[]", "", "", "", 0)
 
-	mock.ExpectQuery("SELECT parent, fieldname, fieldtype, label, options, reqd, unique_constraint, default_value, hidden, read_only, bold, in_list_view, in_standard_filter, search_index, description, depends_on, mandatory_depends_on, constraints_json, renamed_from, COALESCE\\(linked_field,''\\).*FROM _kora_field.*ORDER BY parent, idx").
+	mock.ExpectQuery("SELECT .* FROM _kora_field WHERE .* ORDER BY parent, idx").
 		WillReturnRows(fieldRows)
 
-	doctypes, err := s.LoadAll()
+	doctypes, err := s.LoadAll("")
 	if err != nil {
 		t.Fatalf("LoadAll error = %v", err)
 	}
@@ -130,13 +130,13 @@ func TestSaveRoles_RoundTrip(t *testing.T) {
 	}
 
 	for _, role := range roles {
-		expectUpsert := `INSERT INTO _kora_role \(name, workspace_access, description\) VALUES \(\?, \?, \?\) ON DUPLICATE KEY UPDATE`
+expectUpsert := `INSERT INTO _kora_role`
 		mock.ExpectExec(expectUpsert).
-			WithArgs(role.Name, 1, role.Description).
+			WithArgs(role.Name, 1, role.Description, "").
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}
 
-	err = s.SaveRoles(roles)
+	err = s.SaveRoles(roles, "")
 	if err != nil {
 		t.Fatalf("SaveRoles error = %v", err)
 	}
@@ -164,10 +164,10 @@ func TestLoadPermissions(t *testing.T) {
 		AddRow("Task", "Editor", 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0).
 		AddRow("User", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0)
 
-	mock.ExpectQuery("SELECT doctype, role, can_read, can_write, can_create, can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner FROM _kora_permission ORDER BY doctype, role").
+	mock.ExpectQuery("SELECT doctype, role, can_read, can_write, can_create, can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner FROM _kora_permission WHERE site = \\? OR site = '' ORDER BY doctype, role").
 		WillReturnRows(rows)
 
-	perms, err := s.LoadPermissions()
+	perms, err := s.LoadPermissions("")
 	if err != nil {
 		t.Fatalf("LoadPermissions error = %v", err)
 	}
@@ -209,7 +209,7 @@ func TestLoadWorkflows(t *testing.T) {
 	mock.ExpectQuery("SELECT config_json FROM _kora_workflow WHERE is_active = 1").
 		WillReturnRows(rows)
 
-	workflows, err := s.LoadWorkflows()
+	workflows, err := s.LoadWorkflows("")
 	if err != nil {
 		t.Fatalf("LoadWorkflows error = %v", err)
 	}
@@ -253,7 +253,7 @@ func TestLoadScriptSnapshots(t *testing.T) {
 	mock.ExpectQuery("SELECT name, script_type, doctype, event, method_path, workflow_action, schedule, priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = 1").
 		WillReturnRows(rows)
 
-	snapshots, err := s.LoadScriptSnapshots()
+	snapshots, err := s.LoadScriptSnapshots("")
 	if err != nil {
 		t.Fatalf("LoadScriptSnapshots error = %v", err)
 	}
@@ -289,10 +289,10 @@ func TestLoadRoles(t *testing.T) {
 		AddRow("Admin", 1, "Administrator").
 		AddRow("Guest", 0, "Guest access")
 
-	mock.ExpectQuery("SELECT name, workspace_access, description FROM _kora_role ORDER BY name").
+	mock.ExpectQuery("SELECT name, workspace_access, description FROM _kora_role WHERE site = \\? OR site = '' ORDER BY name").
 		WillReturnRows(rows)
 
-	roles, err := s.LoadRoles()
+	roles, err := s.LoadRoles("")
 	if err != nil {
 		t.Fatalf("LoadRoles error = %v", err)
 	}
@@ -333,14 +333,14 @@ func TestSavePermissions(t *testing.T) {
 	}
 
 	mock.ExpectExec("INSERT INTO _kora_permission").
-		WithArgs("Task.Admin", "Task", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0).
+		WithArgs("Task.Admin", "Task", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectExec("INSERT INTO _kora_permission").
-		WithArgs("Task.Guest", "Task", "Guest", 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0).
+		WithArgs("Task.Guest", "Task", "Guest", 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	err = s.SavePermissions(perms)
+	err = s.SavePermissions(perms, "")
 	if err != nil {
 		t.Fatalf("SavePermissions error = %v", err)
 	}

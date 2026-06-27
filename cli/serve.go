@@ -135,10 +135,10 @@ func runServe() error {
 		}
 
 		store := configstore.NewStore(db, kdb.Resolve(common.DBType))
-		doctypes, _ := store.LoadAll()
-		roles, _ := store.LoadRoles()
-		permissions, _ := store.LoadPermissions()
-		workflows, _ := store.LoadWorkflows()
+		doctypes, _ := store.LoadAll(info.Name)
+		roles, _ := store.LoadRoles(info.Name)
+		permissions, _ := store.LoadPermissions(info.Name)
+		workflows, _ := store.LoadWorkflows(info.Name)
 
 		registry := doctype.NewRegistry()
 		registry.LoadFull(doctypes, roles, permissions)

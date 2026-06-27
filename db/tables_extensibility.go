@@ -76,6 +76,7 @@ func ExtensibilityTablesMySQL() []string {
 
 		`CREATE TABLE IF NOT EXISTS _kora_webhook_delivery (
 			id VARCHAR(26) PRIMARY KEY,
+			site VARCHAR(140) NOT NULL DEFAULT '',
 			extension_name VARCHAR(140) NOT NULL,
 			event_id VARCHAR(255) NOT NULL,
 			event_type VARCHAR(255) NOT NULL,
@@ -174,6 +175,7 @@ func ExtensibilityTablesLibSQL() []string {
 
 		`CREATE TABLE IF NOT EXISTS _kora_webhook_delivery (
 			id TEXT PRIMARY KEY,
+			site TEXT NOT NULL DEFAULT '',
 			extension_name TEXT NOT NULL,
 			event_id TEXT NOT NULL,
 			event_type TEXT NOT NULL,
@@ -191,5 +193,9 @@ func ExtensibilityTablesLibSQL() []string {
 		`CREATE INDEX IF NOT EXISTS idx_deliv_extension ON _kora_webhook_delivery (extension_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_deliv_status ON _kora_webhook_delivery (status)`,
 		`CREATE INDEX IF NOT EXISTS idx_deliv_created ON _kora_webhook_delivery (created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_deliv_site ON _kora_webhook_delivery (site)`,
+
+		// Add site column for multi-tenant isolation (LibSQL backwards compat).
+		`ALTER TABLE _kora_webhook_delivery ADD COLUMN site TEXT NOT NULL DEFAULT ''`,
 	}
 }

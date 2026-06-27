@@ -31,23 +31,23 @@ func NewStore(database *sql.DB, dialect db.QueryDialect) *Store {
 // Uses a transaction for atomicity. Existing fields are diffed against new fields:
 // only removed fields are deleted, only new fields are inserted, changed fields are updated.
 // SaveDocTypeTx is like SaveDocType but uses an existing transaction for atomic multi-doctype saves.
-func (s *Store) SaveDocTypeTx(tx *sql.Tx, dt *doctype.DocType) error {
-	return s.saveDocTypeExec(tx, dt)
+func (s *Store) SaveDocTypeTx(tx *sql.Tx, dt *doctype.DocType, site string) error {
+	return s.saveDocTypeExec(tx, dt, site)
 }
 
-func (s *Store) SaveDocType(dt *doctype.DocType) error {
+func (s *Store) SaveDocType(dt *doctype.DocType, site string) error {
 	dbTx, err := s.DB.Begin()
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer dbTx.Rollback()
-	if err := s.saveDocTypeExec(dbTx, dt); err != nil {
+	if err := s.saveDocTypeExec(dbTx, dt, site); err != nil {
 		return err
 	}
 	return dbTx.Commit()
 }
 
-func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType) error {
+func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string) error {
 	configJSON, err := json.Marshal(dt)
 	if err != nil {
 		return fmt.Errorf("marshaling doctype: %w", err)
@@ -55,21 +55,21 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType) error {
 
 	// Upsert the DocType record.
 	doctypeSQL := fmt.Sprintf(
-		"INSERT INTO _kora_doctype (name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description, config_json, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) %s",
-		s.Dialect.UpsertClause([]string{"name"}, []string{"module", "is_submittable", "is_child_table", "is_single", "track_changes", "title_field", "search_fields", "sort_field", "sort_order", "description", "config_json"}),
+		"INSERT INTO _kora_doctype (name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description, config_json, version, site) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) %s",
+		s.Dialect.UpsertClause([]string{"name"}, []string{"module", "is_submittable", "is_child_table", "is_single", "track_changes", "title_field", "search_fields", "sort_field", "sort_order", "description", "config_json", "site"}),
 	)
 	_, err = ex.Exec(doctypeSQL,
 		dt.Name, dt.Module, boolToInt(dt.IsSubmittable), boolToInt(dt.IsChildTable),
 		boolToInt(dt.IsSingle), boolToInt(dt.TrackChanges),
 		dt.TitleField, dt.SearchFields, dt.SortField, dt.SortOrder,
-		dt.Description, string(configJSON),
+		dt.Description, string(configJSON), site,
 	)
 	if err != nil {
 		return fmt.Errorf("saving doctype %s: %w", dt.Name, err)
 	}
 
 	// Load existing fields for diff-based merge.
-	existingFields, err := s.loadFieldsMapTx(ex, dt.Name)
+	existingFields, err := s.loadFieldsMapTx(ex, dt.Name, site)
 	if err != nil {
 		return fmt.Errorf("loading existing fields for %s: %w", dt.Name, err)
 	}
@@ -152,8 +152,8 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType) error {
 
 // loadFieldsMap returns existing field definitions keyed by fieldname.
 // loadFieldsMapTx is like loadFieldsMap but accepts any sqlExecutor.
-func (s *Store) loadFieldsMapTx(ex db.Queryer, parent string) (map[string]bool, error) {
-	rows, err := ex.Query("SELECT fieldname FROM _kora_field WHERE parent = ?", parent)
+func (s *Store) loadFieldsMapTx(ex db.Queryer, parent string, site string) (map[string]bool, error) {
+	rows, err := ex.Query("SELECT fieldname FROM _kora_field WHERE parent = ? AND (site = ? OR site = '')", parent, site)
 	if err != nil {
 		return nil, err
 	}
@@ -172,13 +172,14 @@ func (s *Store) loadFieldsMapTx(ex db.Queryer, parent string) (map[string]bool, 
 
 // LoadAll loads all DocTypes from the database into the registry.
 // Uses two batched queries instead of N+1 (one for doctypes, one for all fields).
-func (s *Store) LoadAll() ([]*doctype.DocType, error) {
+func (s *Store) LoadAll(site string) ([]*doctype.DocType, error) {
 	rows, err := s.DB.Query(`
 		SELECT name, module, is_submittable, is_child_table, is_single,
 			track_changes, title_field, search_fields, sort_field, sort_order, description
 		FROM _kora_doctype
+		WHERE site = ? OR site = ''
 		ORDER BY name
-	`)
+	`, site)
 	if err != nil {
 		return nil, fmt.Errorf("querying doctypes: %w", err)
 	}
@@ -207,7 +208,7 @@ func (s *Store) LoadAll() ([]*doctype.DocType, error) {
 	}
 
 	// Load all fields in a single batched query.
-	allFields, err := s.loadAllFields()
+	allFields, err := s.loadAllFields(site)
 	if err != nil {
 		return nil, fmt.Errorf("loading all fields: %w", err)
 	}
@@ -221,15 +222,16 @@ func (s *Store) LoadAll() ([]*doctype.DocType, error) {
 }
 
 // loadAllFields fetches all fields for all doctypes in a single query.
-func (s *Store) loadAllFields() (map[string][]doctype.Field, error) {
+func (s *Store) loadAllFields(site string) (map[string][]doctype.Field, error) {
 	rows, err := s.DB.Query(`
 		SELECT parent, fieldname, fieldtype, label, options, reqd, unique_constraint,
 			default_value, hidden, read_only, bold, in_list_view, in_standard_filter,
 			search_index, description, depends_on, mandatory_depends_on,
 			constraints_json, renamed_from, COALESCE(linked_field,'') as linked_field, COALESCE(computed,'') as computed, idx
 		FROM _kora_field
+		WHERE site = ? OR site = ''
 		ORDER BY parent, idx
-	`)
+	`, site)
 	if err != nil {
 		return nil, err
 	}
@@ -279,12 +281,12 @@ func boolToInt(b bool) int {
 
 
 // SaveRoles saves role definitions to _kora_role.
-func (s *Store) SaveRoles(roles []*doctype.Role) error {
+func (s *Store) SaveRoles(roles []*doctype.Role, site string) error {
 	for _, role := range roles {
-		upsertSQL := `INSERT INTO _kora_role (name, workspace_access, description)
-			VALUES (?, ?, ?) ` + s.Dialect.UpsertClause(
-			[]string{"name"}, []string{"workspace_access", "description"})
-		_, err := s.DB.Exec(upsertSQL, role.Name, boolToInt(role.WorkspaceAccess), role.Description)
+		upsertSQL := `INSERT INTO _kora_role (name, workspace_access, description, site)
+			VALUES (?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"workspace_access", "description", "site"})
+		_, err := s.DB.Exec(upsertSQL, role.Name, boolToInt(role.WorkspaceAccess), role.Description, site)
 		if err != nil {
 			return fmt.Errorf("saving role %s: %w", role.Name, err)
 		}
@@ -293,19 +295,19 @@ func (s *Store) SaveRoles(roles []*doctype.Role) error {
 }
 
 // SavePermissions saves permission definitions to _kora_permission.
-func (s *Store) SavePermissions(permissions []*doctype.Permission) error {
+func (s *Store) SavePermissions(permissions []*doctype.Permission, site string) error {
 	for _, p := range permissions {
 		name := fmt.Sprintf("%s.%s", p.Doctype, p.Role)
 		upsertSQL := `INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
-				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, site)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
-				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner"})
+				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "site"})
 		_, err := s.DB.Exec(upsertSQL, name, p.Doctype, p.Role,
 			boolToInt(p.Read), boolToInt(p.Write), boolToInt(p.Create),
 			boolToInt(p.Delete), boolToInt(p.Submit), boolToInt(p.Cancel),
 			boolToInt(p.Amend), boolToInt(p.Export), boolToInt(p.Import),
-			boolToInt(p.Report), boolToInt(p.IfOwner),
+			boolToInt(p.Report), boolToInt(p.IfOwner), site,
 		)
 		if err != nil {
 			return fmt.Errorf("saving permission %s: %w", name, err)
@@ -317,9 +319,9 @@ func (s *Store) SavePermissions(permissions []*doctype.Permission) error {
 // AutoCreatePermissionsForDoctype creates Administrator-only permissions for a
 // newly created doctype. Other roles must be explicitly granted access via the
 // Permissions panel. This follows the principle: explicit is better than implicit.
-func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string) error {
-	// Get all existing roles.
-	rows, err := s.DB.Query("SELECT name FROM _kora_role")
+func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string, site string) error {
+	// Get all existing roles for this site.
+	rows, err := s.DB.Query("SELECT name FROM _kora_role WHERE site = ? OR site = ''", site)
 	if err != nil {
 		return fmt.Errorf("querying roles: %w", err)
 	}
@@ -345,16 +347,17 @@ func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string) error {
 		}
 		name := fmt.Sprintf("%s.%s", doctypeName, role)
 		upsertSQL := `INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
-				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, site)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
-				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner"})
+				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "site"})
 		_, err := s.DB.Exec(upsertSQL,
 			name, doctypeName, role,
 			true, true, true, // read, write, create
 			true, true, true, // delete, submit, cancel
 			true, true, true, true, // amend, export, import, report
 			false, // if_owner
+			site,
 		)
 		if err != nil {
 			return fmt.Errorf("creating default permission for %s: %w", name, err)
@@ -368,14 +371,14 @@ func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string) error {
 }
 
 // SaveWorkflows saves workflow definitions to _kora_workflow table.
-func (s *Store) SaveWorkflows(workflows []*doctype.Workflow) error {
+func (s *Store) SaveWorkflows(workflows []*doctype.Workflow, site string) error {
 	for _, wf := range workflows {
 		configJSON, _ := json.Marshal(wf)
 
-		upsertSQL := `INSERT INTO _kora_workflow (name, document_type, is_active, workflow_state_field, config_json)
-			VALUES (?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
-			[]string{"name"}, []string{"is_active", "config_json"})
-		_, err := s.DB.Exec(upsertSQL, wf.Name, wf.DocumentType, boolToInt(wf.IsActive), wf.WorkflowStateField, string(configJSON))
+		upsertSQL := `INSERT INTO _kora_workflow (name, document_type, is_active, workflow_state_field, config_json, site)
+			VALUES (?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"is_active", "config_json", "site"})
+		_, err := s.DB.Exec(upsertSQL, wf.Name, wf.DocumentType, boolToInt(wf.IsActive), wf.WorkflowStateField, string(configJSON), site)
 		if err != nil {
 			return fmt.Errorf("saving workflow %s: %w", wf.Name, err)
 		}
@@ -409,8 +412,8 @@ func (s *Store) SaveWorkflows(workflows []*doctype.Workflow) error {
 }
 
 // LoadRoles loads all roles from _kora_role.
-func (s *Store) LoadRoles() ([]*doctype.Role, error) {
-	rows, err := s.DB.Query("SELECT name, workspace_access, description FROM _kora_role ORDER BY name")
+func (s *Store) LoadRoles(site string) ([]*doctype.Role, error) {
+	rows, err := s.DB.Query("SELECT name, workspace_access, description FROM _kora_role WHERE site = ? OR site = '' ORDER BY name", site)
 	if err != nil {
 		return nil, err
 	}
@@ -430,12 +433,14 @@ func (s *Store) LoadRoles() ([]*doctype.Role, error) {
 }
 
 // LoadPermissions loads all permissions from _kora_permission.
-func (s *Store) LoadPermissions() ([]*doctype.Permission, error) {
+func (s *Store) LoadPermissions(site string) ([]*doctype.Permission, error) {
 	rows, err := s.DB.Query(`
 		SELECT doctype, role, can_read, can_write, can_create, can_delete,
 			can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner
-		FROM _kora_permission ORDER BY doctype, role
-	`)
+		FROM _kora_permission
+		WHERE site = ? OR site = ''
+		ORDER BY doctype, role
+	`, site)
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +526,7 @@ func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, s
 // CollectSnapshot reads all live config state and builds a ConfigSnapshot for versioning.
 // Call before creating a version to capture the complete current state.
 // Doctypes are sorted by name for deterministic snapshot ordering (fixes non-deterministic map iteration).
-func (s *Store) CollectSnapshot(reg *doctype.Registry) (*doctype.ConfigSnapshot, error) {
+func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.ConfigSnapshot, error) {
 	doctypes := make([]*doctype.DocType, 0)
 	for _, name := range reg.Names() {
 		if dt := reg.Get(name); dt != nil {
@@ -529,11 +534,11 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry) (*doctype.ConfigSnapshot,
 		}
 	}
 	sort.Slice(doctypes, func(i, j int) bool { return doctypes[i].Name < doctypes[j].Name })
-	roles, _ := s.LoadRoles()
-	permissions, _ := s.LoadPermissions()
-	workflows, _ := s.LoadWorkflows()
-	analyticsMetrics, _ := s.LoadAnalyticsMetrics()
-	scripts, _ := s.LoadScriptSnapshots()
+	roles, _ := s.LoadRoles(site)
+	permissions, _ := s.LoadPermissions(site)
+	workflows, _ := s.LoadWorkflows(site)
+	analyticsMetrics, _ := s.LoadAnalyticsMetrics(site)
+	scripts, _ := s.LoadScriptSnapshots(site)
 	return &doctype.ConfigSnapshot{
 		DocTypes:         doctypes,
 		Roles:            roles,
@@ -545,8 +550,8 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry) (*doctype.ConfigSnapshot,
 }
 
 // LoadAnalyticsMetrics loads all custom analytics metric definitions.
-func (s *Store) LoadAnalyticsMetrics() ([]*doctype.AnalyticsMetricConfig, error) {
-	rows, err := s.DB.Query("SELECT name, label, type, doctype, field_name, link_field, group_by_field FROM _kora_analytics_metric")
+func (s *Store) LoadAnalyticsMetrics(site string) ([]*doctype.AnalyticsMetricConfig, error) {
+	rows, err := s.DB.Query("SELECT name, label, type, doctype, field_name, link_field, group_by_field FROM _kora_analytics_metric WHERE site = ? OR site = ''", site)
 	if err != nil {
 		return nil, err
 	}
@@ -562,15 +567,15 @@ func (s *Store) LoadAnalyticsMetrics() ([]*doctype.AnalyticsMetricConfig, error)
 }
 
 // SaveAnalyticsMetrics saves custom analytics metric definitions from a snapshot.
-func (s *Store) SaveAnalyticsMetrics(metrics []*doctype.AnalyticsMetricConfig) error {
+func (s *Store) SaveAnalyticsMetrics(metrics []*doctype.AnalyticsMetricConfig, site string) error {
 	for _, m := range metrics {
 		if m == nil {
 			continue
 		}
-		upsertSQL := `INSERT INTO _kora_analytics_metric (name, label, type, doctype, field_name, link_field, group_by_field)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-			` + s.Dialect.UpsertClause([]string{"name"}, []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field"})
-		_, err := s.DB.Exec(upsertSQL, m.Name, m.Label, m.Type, m.DocType, m.FieldName, m.LinkField, m.GroupByField)
+		upsertSQL := `INSERT INTO _kora_analytics_metric (name, label, type, doctype, field_name, link_field, group_by_field, site)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			` + s.Dialect.UpsertClause([]string{"name"}, []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field", "site"})
+		_, err := s.DB.Exec(upsertSQL, m.Name, m.Label, m.Type, m.DocType, m.FieldName, m.LinkField, m.GroupByField, site)
 		if err != nil {
 			return fmt.Errorf("saving analytics metric %s: %w", m.Name, err)
 		}
@@ -580,9 +585,9 @@ func (s *Store) SaveAnalyticsMetrics(metrics []*doctype.AnalyticsMetricConfig) e
 
 // LoadScriptSnapshots loads all active scripts as snapshots for versioning.
 // Script bodies are hashed (SHA-256) rather than stored inline to avoid DB bloat.
-func (s *Store) LoadScriptSnapshots() ([]*doctype.ScriptSnapshot, error) {
+func (s *Store) LoadScriptSnapshots(site string) ([]*doctype.ScriptSnapshot, error) {
 	rows, err := s.DB.Query(`SELECT name, script_type, doctype, event, method_path, workflow_action, schedule,
-		priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = 1`)
+		priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = 1 AND (site = ? OR site = '')`, site)
 	if err != nil {
 		return nil, err
 	}
@@ -605,8 +610,8 @@ func (s *Store) LoadScriptSnapshots() ([]*doctype.ScriptSnapshot, error) {
 }
 
 // LoadWorkflows loads all workflows from the database.
-func (s *Store) LoadWorkflows() ([]*doctype.Workflow, error) {
-	rows, err := s.DB.Query("SELECT config_json FROM _kora_workflow WHERE is_active = 1")
+func (s *Store) LoadWorkflows(site string) ([]*doctype.Workflow, error) {
+	rows, err := s.DB.Query("SELECT config_json FROM _kora_workflow WHERE is_active = 1 AND (site = ? OR site = '')", site)
 	if err != nil {
 		return nil, err
 	}

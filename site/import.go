@@ -37,17 +37,17 @@ func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, conf
 	// Step 4: Save to database.
 	store := configstore.NewStore(db, dialect)
 	for _, dt := range doctypes {
-		if err := store.SaveDocType(dt); err != nil {
+		if err := store.SaveDocType(dt, siteName); err != nil {
 			return fmt.Errorf("saving doctype %s: %w", dt.Name, err)
 		}
 	}
-	if err := store.SaveRoles(roles); err != nil {
+	if err := store.SaveRoles(roles, siteName); err != nil {
 		return fmt.Errorf("saving roles: %w", err)
 	}
-	if err := store.SavePermissions(permissions); err != nil {
+	if err := store.SavePermissions(permissions, siteName); err != nil {
 		return fmt.Errorf("saving permissions: %w", err)
 	}
-	if err := store.SaveWorkflows(workflows); err != nil {
+	if err := store.SaveWorkflows(workflows, siteName); err != nil {
 		return fmt.Errorf("saving workflows: %w", err)
 	}
 

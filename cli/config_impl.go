@@ -55,20 +55,20 @@ func runConfigExport(siteName, path string) error {
 	defer db.Close()
 
 	store := configstore.NewStore(db, kdb.Resolve(siteCfg.DBType))
-	doctypes, err := store.LoadAll()
+	doctypes, err := store.LoadAll(siteName)
 	if err != nil {
 		return fmt.Errorf("loading doctypes: %w", err)
 	}
 
-	roles, err := store.LoadRoles()
+	roles, err := store.LoadRoles(siteName)
 	if err != nil {
 		return fmt.Errorf("loading roles: %w", err)
 	}
-	permissions, err := store.LoadPermissions()
+	permissions, err := store.LoadPermissions(siteName)
 	if err != nil {
 		return fmt.Errorf("loading permissions: %w", err)
 	}
-	workflows, err := store.LoadWorkflows()
+	workflows, err := store.LoadWorkflows(siteName)
 	if err != nil {
 		return fmt.Errorf("loading workflows: %w", err)
 	}
@@ -170,22 +170,22 @@ func runConfigImport(siteName, path string) error {
 	// Roles, permissions, and workflows are also individually saved.
 	store := configstore.NewStore(db, kdb.Resolve(siteCfg.DBType))
 	for _, dt := range doctypes {
-		if err := store.SaveDocType(dt); err != nil {
+		if err := store.SaveDocType(dt, siteName); err != nil {
 			return fmt.Errorf("saving %s: %w", dt.Name, err)
 		}
 		fmt.Printf("  ✓ %s (%d fields)\n", dt.Name, len(dt.Fields))
 	}
 
 	// Save roles and permissions.
-	if err := store.SaveRoles(roles); err != nil {
+	if err := store.SaveRoles(roles, siteName); err != nil {
 		return fmt.Errorf("saving roles: %w", err)
 	}
-	if err := store.SavePermissions(permissions); err != nil {
+	if err := store.SavePermissions(permissions, siteName); err != nil {
 		return fmt.Errorf("saving permissions: %w", err)
 	}
 
 	// Save workflows.
-	if err := store.SaveWorkflows(workflows); err != nil {
+	if err := store.SaveWorkflows(workflows, siteName); err != nil {
 		return fmt.Errorf("saving workflows: %w", err)
 	}
 
@@ -382,20 +382,20 @@ func runConfigRollback(siteName string, toVersion int) error {
 
 	// Restore doctypes from snapshot.
 	for _, dt := range snapshot.DocTypes {
-		if err := store.SaveDocType(dt); err != nil {
+		if err := store.SaveDocType(dt, siteName); err != nil {
 			return fmt.Errorf("saving doctype %s: %w", dt.Name, err)
 		}
 	}
 
 	// Restore roles, permissions, and workflows from snapshot.
 	if len(snapshot.Roles) > 0 {
-		store.SaveRoles(snapshot.Roles)
+		store.SaveRoles(snapshot.Roles, siteName)
 	}
 	if len(snapshot.Permissions) > 0 {
-		store.SavePermissions(snapshot.Permissions)
+		store.SavePermissions(snapshot.Permissions, siteName)
 	}
 	if len(snapshot.Workflows) > 0 {
-		store.SaveWorkflows(snapshot.Workflows)
+		store.SaveWorkflows(snapshot.Workflows, siteName)
 	}
 
 	// Build a temporary registry and run migration.
@@ -413,7 +413,7 @@ func runConfigRollback(siteName string, toVersion int) error {
 	}
 
 	// Create a new Active version to record the rollback.
-	newSnapshot, _ := store.CollectSnapshot(reg)
+	newSnapshot, _ := store.CollectSnapshot(reg, siteName)
 	store.CreateConfigVersion(siteName, "system", fmt.Sprintf("Rollback to version %d", toVersion), "Active", newSnapshot)
 
 	fmt.Println("Rollback complete.")

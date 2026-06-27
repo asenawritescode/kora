@@ -388,6 +388,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// _kora_doctype
 		`CREATE TABLE IF NOT EXISTS "_kora_doctype" (
 			"name" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
 			"module" TEXT NOT NULL DEFAULT '',
 			"is_submittable" INTEGER NOT NULL DEFAULT 0,
 			"is_child_table" INTEGER NOT NULL DEFAULT 0,
@@ -403,6 +404,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"creation" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
 			"modified" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
 		)`,
+		`CREATE INDEX IF NOT EXISTS "idx_doctype_site" ON "_kora_doctype" ("site")`,
 
 		// Add version column to existing _kora_doctype tables (backwards compat).
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "version" INTEGER NOT NULL DEFAULT 1`,
@@ -410,6 +412,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// _kora_field
 		`CREATE TABLE IF NOT EXISTS "_kora_field" (
 			"name" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
 			"parent" TEXT NOT NULL,
 			"fieldname" TEXT NOT NULL,
 			"fieldtype" TEXT NOT NULL,
@@ -435,6 +438,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		)`,
 		`CREATE INDEX IF NOT EXISTS "idx_parent" ON "_kora_field" ("parent")`,
 		`CREATE INDEX IF NOT EXISTS "idx_parent_fieldname" ON "_kora_field" ("parent", "fieldname")`,
+		`CREATE INDEX IF NOT EXISTS "idx_field_site" ON "_kora_field" ("site")`,
 
 		// Add columns for backwards compat.
 		`ALTER TABLE "_kora_field" ADD COLUMN "linked_field" TEXT NOT NULL DEFAULT ''`,
@@ -443,13 +447,16 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// _kora_role
 		`CREATE TABLE IF NOT EXISTS "_kora_role" (
 			"name" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
 			"workspace_access" INTEGER NOT NULL DEFAULT 1,
 			"description" TEXT
 		)`,
+		`CREATE INDEX IF NOT EXISTS "idx_role_site" ON "_kora_role" ("site")`,
 
 		// _kora_permission
 		`CREATE TABLE IF NOT EXISTS "_kora_permission" (
 			"name" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
 			"doctype" TEXT NOT NULL,
 			"role" TEXT NOT NULL,
 			"can_read" INTEGER NOT NULL DEFAULT 0,
@@ -465,6 +472,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"if_owner" INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_doctype_role" ON "_kora_permission" ("doctype", "role")`,
+		`CREATE INDEX IF NOT EXISTS "idx_permission_site" ON "_kora_permission" ("site")`,
 
 		// _kora_config_version
 		`CREATE TABLE IF NOT EXISTS "_kora_config_version" (
@@ -518,6 +526,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// _kora_workflow
 		`CREATE TABLE IF NOT EXISTS "_kora_workflow" (
 			"name" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
 			"document_type" TEXT NOT NULL DEFAULT '',
 			"is_active" INTEGER NOT NULL DEFAULT 1,
 			"workflow_state_field" TEXT NOT NULL DEFAULT '',
@@ -527,6 +536,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// _kora_workflow_state
 		`CREATE TABLE IF NOT EXISTS "_kora_workflow_state" (
 			"name" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
 			"workflow" TEXT NOT NULL,
 			"state" TEXT NOT NULL DEFAULT '',
 			"doc_status" INTEGER NOT NULL DEFAULT 0,
@@ -538,6 +548,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// _kora_workflow_transition
 		`CREATE TABLE IF NOT EXISTS "_kora_workflow_transition" (
 			"name" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
 			"workflow" TEXT NOT NULL,
 			"action" TEXT NOT NULL DEFAULT '',
 			"from_state" TEXT NOT NULL DEFAULT '',
@@ -561,6 +572,15 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// Backwards compat: add columns to existing tables.
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "config_json" TEXT`,
 		`ALTER TABLE "_kora_workflow" ADD COLUMN "config_json" TEXT`,
+
+		// Add site columns for multi-tenant isolation (LibSQL backwards compat).
+		`ALTER TABLE "_kora_doctype" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_role" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_permission" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_workflow" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_workflow_state" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_workflow_transition" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 	}
 }
 

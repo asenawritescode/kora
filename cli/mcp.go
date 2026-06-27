@@ -44,12 +44,12 @@ Configure Claude Desktop to use it:
 
 		// Load config from DB.
 		store := configstore.NewStore(db, kdb.Resolve(cfg.DBType))
-		doctypes, err := store.LoadAll()
+		doctypes, err := store.LoadAll(siteName)
 		if err != nil {
 			return fmt.Errorf("loading doctypes: %w", err)
 		}
-		roles, _ := store.LoadRoles()
-		permissions, _ := store.LoadPermissions()
+		roles, _ := store.LoadRoles(siteName)
+		permissions, _ := store.LoadPermissions(siteName)
 
 		reg := doctype.NewRegistry()
 		reg.LoadFull(doctypes, roles, permissions)

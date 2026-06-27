@@ -261,7 +261,7 @@ func TestIntegration_ConfigVersioning(t *testing.T) {
 
 	// Test version storage.
 	store := configstore.NewStore(db, dialect)
-	store.SaveDocType(original[0])
+	store.SaveDocType(original[0], "")
 
 	configJSON, _ := yaml.Marshal(original)
 	db.Exec("INSERT INTO _kora_config_version (id, site, version, created_by, label, is_active, config) VALUES ('v1', 'test', 1, 'test', 'v1', 1, ?)", string(configJSON))

@@ -91,7 +91,7 @@ func runAnalyticsBackfill(cmd *cobra.Command, args []string) error {
 	}
 
 	store := configstore.NewStore(db, dialect)
-	allDTs, err := store.LoadAll()
+	allDTs, err := store.LoadAll(target.Name)
 	if err != nil {
 		return fmt.Errorf("loading doctypes: %w", err)
 	}
@@ -110,7 +110,7 @@ func runAnalyticsBackfill(cmd *cobra.Command, args []string) error {
 
 		metrics := analytics.GenerateMetrics(dt)
 		if dt.IsSubmittable {
-			workflows, _ := store.LoadWorkflows()
+			workflows, _ := store.LoadWorkflows(target.Name)
 			for _, wf := range workflows {
 				if wf.DocumentType == dt.Name {
 					metrics = append(metrics, analytics.GenerateWorkflowMetrics(dt, wf)...)

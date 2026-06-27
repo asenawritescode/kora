@@ -93,7 +93,7 @@ func executeUpdateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr
 	original := reg.Get(dt.Name) // save reference to restore after snapshot
 	reg.Register(&dt)            // temporarily register updated version for snapshot
 	store := configstore.NewStore(tx.DB, tx.Dialect)
-	snapshot, _ := store.CollectSnapshot(reg)
+	snapshot, _ := store.CollectSnapshot(reg, siteName)
 	reg.Register(original)       // restore original — live doctype unchanged
 	if owner == "" || owner == "mcp-agent" {
 		owner = "ai-assistant"
@@ -155,7 +155,7 @@ func executeCreateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr
 	// 5. Register temporarily to collect a complete snapshot.
 	reg.Register(&dt)
 	store := configstore.NewStore(tx.DB, tx.Dialect)
-	snapshot, _ := store.CollectSnapshot(reg)
+	snapshot, _ := store.CollectSnapshot(reg, siteName)
 	// Remove from the runtime registry — Draft doctypes only exist in the
 	// config version snapshot until activation. SaveDocType is called during
 	// activation, not creation.

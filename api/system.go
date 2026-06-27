@@ -380,18 +380,18 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 
 	if activate {
 		// Activate immediately: save to DB, register, create permissions, run migration.
-		if err := store.SaveDocType(&dt); err != nil {
+		if err := store.SaveDocType(&dt, c.GetString("site_name")); err != nil {
 			internalError(c, "saving doctype", err)
 			return
 		}
 		reg.Register(&dt)
 
-		if err := store.AutoCreatePermissionsForDoctype(dt.Name); err != nil {
+		if err := store.AutoCreatePermissionsForDoctype(dt.Name, c.GetString("site_name")); err != nil {
 			slog.Warn("failed to auto-create permissions for new doctype", "doctype", dt.Name, "error", err)
 		} else {
-			roles, err := store.LoadRoles()
+			roles, err := store.LoadRoles(c.GetString("site_name"))
 			if err == nil {
-				perms, err2 := store.LoadPermissions()
+				perms, err2 := store.LoadPermissions(c.GetString("site_name"))
 				if err2 == nil {
 					reg.Permissions.LoadPermissionsFromDB(roles, perms)
 				}
@@ -416,7 +416,7 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	}
 
 	// Create config version.
-	snapshot, _ := store.CollectSnapshot(reg)
+	snapshot, _ := store.CollectSnapshot(reg, c.GetString("site_name"))
 
 	if !activate {
 		// Remove from runtime — Draft doctypes are not live.
@@ -490,7 +490,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 
 	// Save.
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	if err := store.SaveDocType(&newDT); err != nil {
+		if err := store.SaveDocType(&newDT, c.GetString("site_name")); err != nil {
 		internalError(c, "saving doctype", err)
 		return
 	}
@@ -514,7 +514,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 	}
 
 	// Create config version.
-	snapshot, _ := store.CollectSnapshot(reg)
+	snapshot, _ := store.CollectSnapshot(reg, c.GetString("site_name"))
 	createdBy := c.GetString("user")
 	if createdBy == "" {
 		createdBy = "system"
@@ -611,7 +611,7 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 	h.invalidateAnalyticsForDoctype(c, doctypeName)
 
 	// Create config version recording the deletion.
-	snapshot, _ := store.CollectSnapshot(reg)
+	snapshot, _ := store.CollectSnapshot(reg, c.GetString("site_name"))
 	createdBy := c.GetString("user")
 	if createdBy == "" {
 		createdBy = "system"
@@ -847,7 +847,7 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	// Reload all config from version snapshot into the store + registry.
 	store := configstore.NewStore(db, h.TxManager.Dialect)
 	for _, dt := range snapshot.DocTypes {
-		if err := store.SaveDocType(dt); err != nil {
+			if err := store.SaveDocType(dt, siteName); err != nil {
 			internalError(c, "saving doctype from version", err)
 			return
 		}
@@ -855,16 +855,16 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 
 	// Restore roles, permissions, and workflows from snapshot (not live DB).
 	if len(snapshot.Roles) > 0 {
-		store.SaveRoles(snapshot.Roles)
+			store.SaveRoles(snapshot.Roles, siteName)
 	}
 	if len(snapshot.Permissions) > 0 {
-		store.SavePermissions(snapshot.Permissions)
+			store.SavePermissions(snapshot.Permissions, siteName)
 	}
 	if len(snapshot.Workflows) > 0 {
-		store.SaveWorkflows(snapshot.Workflows)
+			store.SaveWorkflows(snapshot.Workflows, siteName)
 	}
 	if len(snapshot.AnalyticsMetrics) > 0 {
-		store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics)
+			store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName)
 	}
 
 	// Rebuild registry from snapshot (not live DB).
@@ -905,7 +905,7 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	if createdBy == "" {
 		createdBy = "system"
 	}
-	newSnapshot, _ := store.CollectSnapshot(reg)
+		newSnapshot, _ := store.CollectSnapshot(reg, siteName)
 		_, _, err = store.CreateConfigVersion(siteName, createdBy, "Activated version "+versionID, "Active", newSnapshot)
 	if err != nil {
 		slog.Warn("failed to create active version", "error", err)
@@ -1035,7 +1035,7 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 
 	store := configstore.NewStore(db, h.TxManager.Dialect)
 	for _, dt := range snapshot.DocTypes {
-		if err := store.SaveDocType(dt); err != nil {
+			if err := store.SaveDocType(dt, siteName); err != nil {
 			internalError(c, "saving during rollback", err)
 			return
 		}
@@ -1043,16 +1043,16 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 
 	// Restore roles, permissions, and workflows from snapshot (not live DB).
 	if len(snapshot.Roles) > 0 {
-		store.SaveRoles(snapshot.Roles)
+			store.SaveRoles(snapshot.Roles, siteName)
 	}
 	if len(snapshot.Permissions) > 0 {
-		store.SavePermissions(snapshot.Permissions)
+			store.SavePermissions(snapshot.Permissions, siteName)
 	}
 	if len(snapshot.Workflows) > 0 {
-		store.SaveWorkflows(snapshot.Workflows)
+			store.SaveWorkflows(snapshot.Workflows, siteName)
 	}
 	if len(snapshot.AnalyticsMetrics) > 0 {
-		store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics)
+			store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName)
 	}
 
 	reg.LoadFull(snapshot.DocTypes, snapshot.Roles, snapshot.Permissions)
@@ -1077,7 +1077,7 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 	if createdBy == "" {
 		createdBy = "system"
 	}
-	newSnapshot, _ := store.CollectSnapshot(reg)
+		newSnapshot, _ := store.CollectSnapshot(reg, siteName)
 		store.CreateConfigVersion(siteName, createdBy, "Rollback to version "+versionID, "Active", newSnapshot)
 
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "rolled back", "status": "Active"}})
@@ -1144,7 +1144,7 @@ func collectDoctypes(reg *doctype.Registry) []*doctype.DocType {
 func (h *Handler) HandleSystemRoles(c *gin.Context) {
 	db := h.siteTx(c).DB
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	roles, err := store.LoadRoles()
+	roles, err := store.LoadRoles(c.GetString("site_name"))
 	if err != nil {
 		internalError(c, "loading roles", err)
 		return
@@ -1166,7 +1166,7 @@ func (h *Handler) HandleSystemRoleCreate(c *gin.Context) {
 		return
 	}
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	if err := store.SaveRoles([]*doctype.Role{&role}); err != nil {
+	if err := store.SaveRoles([]*doctype.Role{&role}, c.GetString("site_name")); err != nil {
 		internalError(c, "saving role", err)
 		return
 	}
@@ -1185,7 +1185,7 @@ func (h *Handler) HandleSystemRoleUpdate(c *gin.Context) {
 	}
 	role.Name = roleName
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	if err := store.SaveRoles([]*doctype.Role{&role}); err != nil {
+	if err := store.SaveRoles([]*doctype.Role{&role}, c.GetString("site_name")); err != nil {
 		internalError(c, "saving role", err)
 		return
 	}
@@ -1218,7 +1218,7 @@ func (h *Handler) HandleSystemRoleDelete(c *gin.Context) {
 func (h *Handler) HandleSystemPermissions(c *gin.Context) {
 	db := h.siteTx(c).DB
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	permissions, err := store.LoadPermissions()
+	permissions, err := store.LoadPermissions(c.GetString("site_name"))
 	if err != nil {
 		internalError(c, "loading permissions", err)
 		return
@@ -1236,13 +1236,13 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 		return
 	}
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	if err := store.SavePermissions(permissions); err != nil {
+		if err := store.SavePermissions(permissions, c.GetString("site_name")); err != nil {
 		internalError(c, "saving permissions", err)
 		return
 	}
 	// Reload into registry.
 	reg := h.siteRegistry(c)
-	roles, _ := store.LoadRoles()
+		roles, _ := store.LoadRoles(c.GetString("site_name"))
 	reg.Permissions.LoadPermissionsFromDB(roles, permissions)
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "saved"}})
 }
@@ -1254,7 +1254,7 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 func (h *Handler) HandleSystemWorkflows(c *gin.Context) {
 	db := h.siteTx(c).DB
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	workflows, err := store.LoadWorkflows()
+	workflows, err := store.LoadWorkflows(c.GetString("site_name"))
 	if err != nil {
 		internalError(c, "loading workflows", err)
 		return
@@ -1290,7 +1290,7 @@ func (h *Handler) HandleSystemWorkflowSave(c *gin.Context) {
 		return
 	}
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	if err := store.SaveWorkflows([]*doctype.Workflow{&wf}); err != nil {
+		if err := store.SaveWorkflows([]*doctype.Workflow{&wf}, c.GetString("site_name")); err != nil {
 		internalError(c, "saving workflow", err)
 		return
 	}
