@@ -12,7 +12,7 @@ import (
 	knet "github.com/asenawritescode/kora/net"
 )
 
-//go:embed dist/*
+//go:embed all:dist
 var spaFS embed.FS
 
 // SPAFS returns the embedded filesystem containing the built SPA.
