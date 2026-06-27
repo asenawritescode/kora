@@ -178,27 +178,29 @@ func (d *LibSQLDialect) CreateTable(dt *doctype.DocType) []string {
 	tableName := d.QuoteIdent(dt.RawTableName())
 	ddl := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", tableName, strings.Join(cols, ",\n  "))
 
-	// Search indexes.
+	// Search indexes — each as a separate statement (LibSQL no multi-statement Exec).
+	var statements []string
+	statements = append(statements, ddl)
 	for _, f := range dt.DataFields() {
 		if f.SearchIndex {
-			ddl += "\n" + d.CreateIndex(dt.RawTableName(), f.Fieldname, false)
+			statements = append(statements, d.CreateIndex(dt.RawTableName(), f.Fieldname, false))
 		}
 	}
 
-	// UNIQUE indexes.
+	// UNIQUE indexes — each as a separate statement.
 	for _, f := range dt.DataFields() {
 		if f.Unique {
-			ddl += "\n" + d.CreateIndex(dt.RawTableName(), f.Fieldname, true)
+			statements = append(statements, d.CreateIndex(dt.RawTableName(), f.Fieldname, true))
 		}
 	}
 
 	// ON UPDATE trigger for the modified column (SQLite has no ON UPDATE attribute).
-	// Returned as a separate statement because LibSQL does not support multi-statement Exec.
 	triggerName := d.QuoteIdent(dt.RawTableName() + "_modified_on_update")
 	triggerDDL := fmt.Sprintf("CREATE TRIGGER %s AFTER UPDATE ON %s FOR EACH ROW BEGIN UPDATE %s SET \"modified\" = STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', 'NOW') WHERE \"name\" = NEW.\"name\"; END",
 		triggerName, tableName, tableName)
+	statements = append(statements, triggerDDL)
 
-	return []string{ddl, triggerDDL}
+	return statements
 }
 
 func (d *LibSQLDialect) AddColumn(tableName string, f *doctype.Field) string {
