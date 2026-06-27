@@ -1130,7 +1130,7 @@ func dispatchNotifications(registry *doctype.Registry, doctypeName, toState stri
 // HandleConfigVersions lists all config versions.
 func (h *Handler) HandleConfigVersions(c *gin.Context) {
 	rows, err := h.siteTx(c).DB.Query(
-		"SELECT id, site, version, created_at, created_by, label, is_active FROM _kora_config_version ORDER BY version DESC LIMIT 50",
+		"SELECT id, site, version, created_at, created_by, label, COALESCE(status, CASE WHEN is_active = 1 THEN 'Active' ELSE 'Superseded' END) as status FROM _kora_config_version ORDER BY version DESC LIMIT 50",
 	)
 	if err != nil {
 		internalError(c, "config versions query failed", err)
@@ -1140,16 +1140,15 @@ func (h *Handler) HandleConfigVersions(c *gin.Context) {
 
 	var versions []map[string]any
 	for rows.Next() {
-		var id, site, createdBy, label, createdAt string
+		var id, site, createdBy, label, createdAt, status string
 		var version int
-		var isActive bool
-		if err := rows.Scan(&id, &site, &version, &createdAt, &createdBy, &label, &isActive); err != nil {
+		if err := rows.Scan(&id, &site, &version, &createdAt, &createdBy, &label, &status); err != nil {
 			continue
 		}
 		versions = append(versions, map[string]any{
 			"id": id, "site": site, "version": version,
 			"created_at": createdAt, "created_by": createdBy,
-			"label": label, "is_active": isActive,
+			"label": label, "status": status,
 		})
 	}
 	c.JSON(http.StatusOK, Response{Data: versions})

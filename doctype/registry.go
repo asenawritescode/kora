@@ -50,6 +50,14 @@ func (r *Registry) Has(name string) bool {
 	return ok
 }
 
+// Unregister removes a DocType from the registry. Safe to call if the doctype
+// doesn't exist (no-op). Used to clean up temporary registrations.
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.doctypes, name)
+}
+
 // All returns all registered DocTypes.
 func (r *Registry) All() []*DocType {
 	r.mu.RLock()

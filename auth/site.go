@@ -30,7 +30,7 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip auth for login endpoint and health check.
 		path := c.Request.URL.Path
-		if path == "/api/auth/login" || path == "/api/ping" || path == "/workspace/login" {
+		if path == "/api/auth/login" || path == "/api/v1/auth/login" || path == "/api/ping" || path == "/api/v1/ping" || path == "/workspace/login" {
 			c.Next()
 			return
 		}

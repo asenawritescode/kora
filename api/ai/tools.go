@@ -317,6 +317,83 @@ fields:
 				},
 			},
 		},
+		// Script management tools.
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "script_create",
+				"description": "Create a new JavaScript script that automates business logic. Scripts run on document events, custom API endpoints, workflow actions, or schedules.\n\nSCRIPT TYPES:\n- doc_event: Runs on document lifecycle. Requires doctype + event.\n- api_method: Custom API at /api/method/{method_path}.\n- workflow_action: Fires on workflow transitions.\n- scheduled: Runs on a cron schedule.\n- computed: Computes field values from other fields.\n- validate: Custom validation logic.\n\nEVENTS (for doc_event): before_insert, after_insert, before_save, after_save, before_delete, after_delete, before_submit, after_submit, before_cancel, after_cancel, validate\n\nAVAILABLE JS API (kora global): kora.log.info/warn/error(msg...), kora.getDoc(doctype,name), kora.getList(doctype,filters,orderBy,limit,offset), kora.saveDoc(doctype,doc), kora.createDoc(doctype,doc), kora.deleteDoc(doctype,name), kora.secrets.get(key), kora.http.fetch({method,url,headers,body}), kora.context.user/roles/site, kora.now()\n\nEXAMPLE: {name:\"validate_order\", script_type:\"doc_event\", doctype:\"Order\", event:\"before_save\", script:\"if (!event.doc.total || event.doc.total <= 0) { throw new Error('Total required'); } return { doc: event.doc };\"}",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name":        map[string]any{"type": "string", "description": "Unique script name (lowercase, underscores)"},
+						"script_type": map[string]any{"type": "string", "description": "Type: doc_event, api_method, workflow_action, scheduled, computed, validate"},
+						"script":      map[string]any{"type": "string", "description": "JavaScript code (ES5.1+). Access event.doc and kora.* API."},
+						"doctype":     map[string]any{"type": "string", "description": "Target doctype (required for doc_event, computed, validate)"},
+						"event":       map[string]any{"type": "string", "description": "Event name (required for doc_event)"},
+						"method_path": map[string]any{"type": "string", "description": "API path (required for api_method, e.g., 'send_invoice')"},
+						"schedule":    map[string]any{"type": "string", "description": "Cron expression (required for scheduled, e.g., '0 9 * * *')"},
+						"workflow_action": map[string]any{"type": "string", "description": "Action name (required for workflow_action)"},
+						"description": map[string]any{"type": "string", "description": "Human-readable description of what this script does"},
+						"priority":    map[string]any{"type": "integer", "description": "Execution order (1-100, default 10)"},
+					},
+					"required": []string{"name", "script_type", "script"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "script_list",
+				"description": "List all scripts in this site with their types, status, and associated doctypes/events.",
+				"parameters": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "script_validate",
+				"description": "Validate JavaScript syntax WITHOUT saving. Always call this before script_create to catch errors early.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"script": map[string]any{"type": "string", "description": "JavaScript code to validate"},
+					},
+					"required": []string{"script"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "script_get",
+				"description": "Get the full details and JavaScript source of a single script by name.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string", "description": "Script name"},
+					},
+					"required": []string{"name"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "script_executions",
+				"description": "View the last 10 execution logs for a script. Shows timestamps, status, duration, and error messages. Use to debug failing scripts.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string", "description": "Script name"},
+					},
+					"required": []string{"name"},
+				},
+			},
+		},
 	}
 }
 
@@ -386,6 +463,16 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 	case "create_doctype_draft":
 		yamlStr, _ := args["yaml"].(string)
 		return executeCreateDoctypeDraft(tx, reg, yamlStr, owner, siteName)
+	case "script_create":
+		return executeScriptCreate(tx, args, siteName, owner)
+	case "script_list":
+		return executeScriptList(tx, siteName)
+	case "script_validate":
+		return executeScriptValidate(tx, args)
+	case "script_get":
+		return executeScriptGet(tx, args, siteName)
+	case "script_executions":
+		return executeScriptExecutions(tx, args, siteName)
 	}
 
 	// Parse tool name using suffix matching (handles multi-word doctype names like "Work Order").

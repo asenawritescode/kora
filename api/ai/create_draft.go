@@ -88,17 +88,13 @@ func executeUpdateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr
 		return fmt.Sprintf("Error validating doctype: %v", err)
 	}
 
-	// 5. Save as Draft — NEVER activate.
+	// 5. Save the update as a Draft version ONLY — do not modify the live doctype.
+	// The existing doctype stays as-is in _kora_doctype and the registry until activation.
+	original := reg.Get(dt.Name) // save reference to restore after snapshot
+	reg.Register(&dt)            // temporarily register updated version for snapshot
 	store := configstore.NewStore(tx.DB, tx.Dialect)
-	if err := store.SaveDocType(&dt); err != nil {
-		return fmt.Sprintf("Error saving doctype: %v", err)
-	}
-
-	// 6. Update registry.
-	reg.Register(&dt)
-
-	// 7. Create config version as Draft with full snapshot.
 	snapshot, _ := store.CollectSnapshot(reg)
+	reg.Register(original)       // restore original — live doctype unchanged
 	if owner == "" || owner == "mcp-agent" {
 		owner = "ai-assistant"
 	}
@@ -156,22 +152,14 @@ func executeCreateDoctypeDraft(tx *orm.TxManager, reg *doctype.Registry, yamlStr
 		return fmt.Sprintf("Error validating doctype: %v", err)
 	}
 
-	// 5. Save to configstore as Draft — NEVER activate.
-	store := configstore.NewStore(tx.DB, tx.Dialect)
-	if err := store.SaveDocType(&dt); err != nil {
-		return fmt.Sprintf("Error saving doctype: %v", err)
-	}
-
-	// 6. Register in runtime registry.
+	// 5. Register temporarily to collect a complete snapshot.
 	reg.Register(&dt)
-
-	// 7. Auto-create default permissions.
-	if err := store.AutoCreatePermissionsForDoctype(dt.Name); err != nil {
-		return fmt.Sprintf("Doctype created but permission setup failed: %v", err)
-	}
-
-	// 8. Create config version as Draft with full snapshot.
+	store := configstore.NewStore(tx.DB, tx.Dialect)
 	snapshot, _ := store.CollectSnapshot(reg)
+	// Remove from the runtime registry — Draft doctypes only exist in the
+	// config version snapshot until activation. SaveDocType is called during
+	// activation, not creation.
+	reg.Unregister(dt.Name)
 	if owner == "" || owner == "mcp-agent" {
 		owner = "ai-assistant"
 	}

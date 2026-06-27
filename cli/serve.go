@@ -208,8 +208,12 @@ func runServe() error {
 	auth.RegisterAuthRoutes(router, sessionMgr, firstDB)
 	siteGuard := auth.NewSiteGuard(firstDB)
 	auth.SetCSRFSecure(common.CSRFSecure)
-	apiGroup := router.Group("/api")
+	// Canonical v1 routes
+	apiGroup := router.Group("/api/v1")
 	apiGroup.Use(siteGuard.Middleware(false))
+	// Legacy routes — same handlers, no deprecation headers
+	apiLegacyGroup := router.Group("/api")
+	apiLegacyGroup.Use(siteGuard.Middleware(false))
 	txManager := &orm.TxManager{DB: firstDB, Registry: primaryRegistry, Dialect: kdb.Resolve(common.DBType)}
 
 	// Initialize script runner (embedded goja runtime, disabled if no scripts configured).
@@ -273,6 +277,7 @@ func runServe() error {
 	slog.Info("async hook worker started", "queue_size", 1000)
 
 	api.RegisterRoutesOnGroupWithAnalytics(apiGroup, primaryRegistry, txManager, siteBuses, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookQueue)
+	api.RegisterRoutesOnGroupWithAnalytics(apiLegacyGroup, primaryRegistry, txManager, siteBuses, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookQueue)
 
 	workspaceHandler := workspace.NewHandler(primaryRegistry)
 	if spaIndex, _ := workspace.SPAFS().Open("index.html"); spaIndex != nil {
@@ -308,6 +313,7 @@ func runServe() error {
 		}
 
 	// Health + ping.
+	router.GET("/api/v1/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong", "version": Version}) })
 	router.GET("/api/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong", "version": Version}) })
 	router.GET("/health", func(c *gin.Context) {
 		dbStatus := "connected"
