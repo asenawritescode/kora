@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Activity, BarChart3, CircleCheck, CircleX, Plus, Trash2 } from "lucide-react";
+import { Activity, BarChart3, CircleCheck, CircleX, Plus } from "lucide-react";
 
 export default function AdminAnalyticsPage() {
   const queryClient = useQueryClient();

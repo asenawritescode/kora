@@ -23,6 +23,9 @@ type Worker struct {
 	client  *http.Client
 	closeCh chan struct{}
 
+	// listenerCh is the channel registered with the MultiBus for fan-out.
+	listenerCh chan analytics.ChangeEvent
+
 	// RetrySchedule defines the backoff for failed deliveries.
 	RetrySchedule []time.Duration
 	// MaxConsecutiveFailures before auto-disabling an extension.
@@ -64,15 +67,15 @@ func NewWorker(db *sql.DB, bus *analytics.MultiBus, site string) *Worker {
 
 // Start begins listening for events and delivering webhooks.
 func (w *Worker) Start() {
-	ch := make(chan analytics.ChangeEvent, 1000)
-	w.Bus.AddListener(ch)
+	w.listenerCh = make(chan analytics.ChangeEvent, 1000)
+	w.Bus.AddListener(w.listenerCh)
 
 	go func() {
 		for {
 			select {
 			case <-w.closeCh:
 				return
-			case event := <-ch:
+			case event := <-w.listenerCh:
 				w.handleEvent(event)
 			}
 		}
@@ -81,8 +84,11 @@ func (w *Worker) Start() {
 	slog.Info("webhook worker started", "site", w.Site)
 }
 
-// Stop shuts down the worker.
+// Stop shuts down the worker and removes its listener from the event bus.
 func (w *Worker) Stop() {
+	if w.listenerCh != nil {
+		w.Bus.RemoveListener(w.listenerCh)
+	}
 	close(w.closeCh)
 	slog.Info("webhook worker stopped", "site", w.Site)
 }
@@ -123,11 +129,9 @@ func (w *Worker) deliver(ext Extension, event analytics.ChangeEvent, eventName s
 	}
 	body, _ := json.Marshal(envelope)
 
-	// Compute signature.
+	// Compute signature using the raw signing secret.
 	timestamp := time.Now().Unix()
-	secret := ext.secret() // from hash — we need the raw secret. Stored hashed, so use the hash as key material.
-	// Note: In production, secrets should be decryptable. For now, we compute the signature
-	// using the stored secret_hash as the key. This is a simplification.
+	secret := ext.secret()
 	sig := Sign(secret, body, timestamp)
 
 	// POST to extension endpoint.
@@ -178,7 +182,7 @@ func (w *Worker) deliver(ext Extension, event analytics.ChangeEvent, eventName s
 // loadMatchingExtensions returns active extensions that subscribe to the given doctype event.
 func (w *Worker) loadMatchingExtensions(doctype, eventName string) ([]Extension, error) {
 	rows, err := w.DB.Query(
-		`SELECT name, endpoint_url, secret_hash, subscriptions, timeout_sec, consecutive_failures
+		`SELECT name, endpoint_url, secret, subscriptions, timeout_sec, consecutive_failures
 		 FROM _kora_extension WHERE site = ? AND is_active = 1`, w.Site)
 	if err != nil {
 		return nil, err
@@ -189,7 +193,7 @@ func (w *Worker) loadMatchingExtensions(doctype, eventName string) ([]Extension,
 	for rows.Next() {
 		var ext Extension
 		var subsJSON string
-		if err := rows.Scan(&ext.Name, &ext.EndpointURL, &ext.SecretHash, &subsJSON, &ext.TimeoutSec, &ext.ConsecutiveFailures); err != nil {
+		if err := rows.Scan(&ext.Name, &ext.EndpointURL, 		&ext.Secret, &subsJSON, &ext.TimeoutSec, &ext.ConsecutiveFailures); err != nil {
 			continue
 		}
 		// Parse subscriptions JSON.
@@ -241,12 +245,12 @@ func (w *Worker) updateExtensionStats(extName, status string) {
 type Extension struct {
 	Name                 string
 	EndpointURL          string
-	SecretHash           string
+	Secret               string
 	TimeoutSec           int
 	ConsecutiveFailures  int
 }
 
-func (e Extension) secret() string { return e.SecretHash }
+func (e Extension) secret() string { return e.Secret }
 
 // Subscription defines an event filter for an extension.
 type Subscription struct {
@@ -331,4 +335,3 @@ func (w *Worker) RetryDeadLetters() error {
 	return nil
 }
 
-func init() {}

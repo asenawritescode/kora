@@ -65,32 +65,32 @@ export interface ScriptUpdateRequest {
 }
 
 export function fetchScripts() {
-  return api.get<ScriptRecord[]>('/api/system/script')
+  return api.get<ScriptRecord[]>('/api/v1/system/script')
 }
 
 export function fetchScript(name: string) {
-  return api.get<ScriptRecord>(`/api/system/script/${encodeURIComponent(name)}`)
+  return api.get<ScriptRecord>(`/api/v1/system/script/${encodeURIComponent(name)}`)
 }
 
 export function createScript(data: ScriptCreateRequest) {
-  return api.post<ScriptRecord>('/api/system/script', data)
+  return api.post<ScriptRecord>('/api/v1/system/script', data)
 }
 
 export function updateScript(name: string, data: ScriptUpdateRequest) {
-  return api.put(`/api/system/script/${encodeURIComponent(name)}`, data)
+  return api.put(`/api/v1/system/script/${encodeURIComponent(name)}`, data)
 }
 
 export function deleteScript(name: string) {
-  return api.delete(`/api/system/script/${encodeURIComponent(name)}`)
+  return api.delete(`/api/v1/system/script/${encodeURIComponent(name)}`)
 }
 
 export function validateScript(script: string) {
   return api.post<{ valid: boolean; error?: string; warnings?: string[] }>(
-    '/api/system/script/_validate',
+    '/api/v1/system/script/_validate',
     { script }
   )
 }
 
 export function fetchScriptExecutions(name: string) {
-  return api.get<ScriptExecution[]>(`/api/system/script/${encodeURIComponent(name)}/executions`)
+  return api.get<ScriptExecution[]>(`/api/v1/system/script/${encodeURIComponent(name)}/executions`)
 }

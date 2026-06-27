@@ -7,11 +7,14 @@ import (
 )
 
 // koraAPI is the JavaScript-accessible API injected into every script.
-// It bridges script calls to the KoraProvider.
+// It bridges script calls to the KoraProvider sub-interfaces.
 type koraAPI struct {
-	req    ExecuteRequest
-	runner *EmbeddedRunner
-	logs   []LogEntry
+	req           ExecuteRequest
+	runner        *EmbeddedRunner
+	logs          []LogEntry
+	docProvider   DocProvider
+	secretProvider SecretProvider
+	httpProvider  HTTPProvider
 }
 
 // buildObject constructs the JavaScript 'kora' global object.
@@ -42,7 +45,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 
 	// kora.getDoc(doctype, name) → document or null
 	obj.Set("getDoc", func(call goja.FunctionCall) goja.Value {
-		if api.req.Provider == nil {
+		if api.docProvider == nil {
 			return goja.Null()
 		}
 		if len(call.Arguments) < 2 {
@@ -50,7 +53,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		}
 		doctype := call.Arguments[0].String()
 		name := call.Arguments[1].String()
-		doc, err := api.req.Provider.GetDoc(doctype, name)
+		doc, err := api.docProvider.GetDoc(doctype, name)
 		if err != nil {
 			api.logMsg("warn", fmt.Sprintf("kora.getDoc(%q, %q) error: %v", doctype, name, err))
 			return goja.Null()
@@ -63,7 +66,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 
 	// kora.getList(doctype, {filters, orderBy, limit, offset}) → array
 	obj.Set("getList", func(call goja.FunctionCall) goja.Value {
-		if api.req.Provider == nil {
+		if api.docProvider == nil {
 			return vm.ToValue([]any{})
 		}
 		if len(call.Arguments) < 1 {
@@ -81,7 +84,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		limit := toInt(opts["limit"], 50)
 		offset := toInt(opts["offset"], 0)
 
-		docs, err := api.req.Provider.GetList(doctype, filters, orderBy, limit, offset)
+		docs, err := api.docProvider.GetList(doctype, filters, orderBy, limit, offset)
 		if err != nil {
 			api.logMsg("warn", fmt.Sprintf("kora.getList(%q) error: %v", doctype, err))
 			return vm.ToValue([]any{})
@@ -91,7 +94,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 
 	// kora.saveDoc(doctype, doc) → document
 	obj.Set("saveDoc", func(call goja.FunctionCall) goja.Value {
-		if api.req.Provider == nil {
+		if api.docProvider == nil {
 			return goja.Null()
 		}
 		if len(call.Arguments) < 2 {
@@ -102,7 +105,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		if !ok {
 			panic(vm.ToValue("kora.saveDoc: second argument must be an object"))
 		}
-		if err := api.req.Provider.SaveDoc(doctype, doc, api.req.User); err != nil {
+		if err := api.docProvider.SaveDoc(doctype, doc, api.req.User); err != nil {
 			panic(vm.ToValue(fmt.Sprintf("kora.saveDoc(%q) error: %v", doctype, err)))
 		}
 		return vm.ToValue(doc)
@@ -110,7 +113,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 
 	// kora.createDoc(doctype, doc) → document
 	obj.Set("createDoc", func(call goja.FunctionCall) goja.Value {
-		if api.req.Provider == nil {
+		if api.docProvider == nil {
 			return goja.Null()
 		}
 		if len(call.Arguments) < 2 {
@@ -121,7 +124,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		if !ok {
 			panic(vm.ToValue("kora.createDoc: second argument must be an object"))
 		}
-		created, err := api.req.Provider.CreateDoc(doctype, doc, api.req.User, api.req.User)
+		created, err := api.docProvider.CreateDoc(doctype, doc, api.req.User, api.req.User)
 		if err != nil {
 			panic(vm.ToValue(fmt.Sprintf("kora.createDoc(%q) error: %v", doctype, err)))
 		}
@@ -130,7 +133,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 
 	// kora.deleteDoc(doctype, name) → void
 	obj.Set("deleteDoc", func(call goja.FunctionCall) goja.Value {
-		if api.req.Provider == nil {
+		if api.docProvider == nil {
 			return goja.Undefined()
 		}
 		if len(call.Arguments) < 2 {
@@ -138,7 +141,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		}
 		doctype := call.Arguments[0].String()
 		name := call.Arguments[1].String()
-		if err := api.req.Provider.DeleteDoc(doctype, name); err != nil {
+		if err := api.docProvider.DeleteDoc(doctype, name); err != nil {
 			panic(vm.ToValue(fmt.Sprintf("kora.deleteDoc(%q, %q) error: %v", doctype, name, err)))
 		}
 		return goja.Undefined()
@@ -147,13 +150,13 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 	// kora.secrets.get(key) → string
 	secretsObj := vm.NewObject()
 	secretsObj.Set("get", func(call goja.FunctionCall) goja.Value {
-		if api.req.Provider == nil {
+		if api.secretProvider == nil {
 			return goja.Null()
 		}
 		if len(call.Arguments) < 1 {
 			panic(vm.ToValue("kora.secrets.get requires 1 argument: key"))
 		}
-		val, err := api.req.Provider.GetSecret(call.Arguments[0].String())
+		val, err := api.secretProvider.GetSecret(call.Arguments[0].String())
 		if err != nil {
 			api.logMsg("warn", fmt.Sprintf("kora.secrets.get error: %v", err))
 			return goja.Null()
@@ -165,7 +168,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 	// kora.http — external HTTP requests
 	httpObj := vm.NewObject()
 	httpObj.Set("fetch", func(call goja.FunctionCall) goja.Value {
-		if api.req.Provider == nil {
+		if api.httpProvider == nil {
 			panic(vm.ToValue("kora.http.fetch: provider not available"))
 		}
 		if len(call.Arguments) < 2 {
@@ -188,7 +191,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		}
 		body, _ := opts["body"].(string)
 
-		resp, err := api.req.Provider.DoHTTP(&HTTPRequest{
+		resp, err := api.httpProvider.DoHTTP(&HTTPRequest{
 			Method:  method,
 			URL:     url,
 			Headers: hdr,

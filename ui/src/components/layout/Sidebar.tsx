@@ -233,7 +233,7 @@ export function Sidebar() {
           />
           <PendingBadge />
           <a
-            href="/api/swagger-ui"
+            href="/api/v1/swagger-ui"
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => setSidebarOpen(false)}
@@ -378,7 +378,7 @@ function PendingBadge() {
   const [draftCount, setDraftCount] = useState(0)
 
   useEffect(() => {
-    fetch('/api/system/config/versions?status=Draft')
+    fetch('/api/v1/system/config/versions?status=Draft')
       .then(r => r.json())
       .then(d => {
         if (d.data?.versions) {

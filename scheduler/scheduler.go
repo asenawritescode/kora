@@ -380,6 +380,3 @@ func docToTemplateData(doc *doctype.Document, dt *doctype.DocType) map[string]st
 	return data
 }
 
-func init() {
-	_ = time.Since
-}

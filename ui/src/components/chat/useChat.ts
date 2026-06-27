@@ -25,7 +25,7 @@ export function useChat() {
     setError(null)
 
     try {
-      const resp = await fetch('/api/chat', {
+      const resp = await fetch('/api/v1/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

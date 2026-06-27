@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/sheet'
 import {
   Loader2, Plus, Globe, ChevronDown, ChevronRight, Database, ExternalLink,
-  Circle, Search, Server, Activity, Trash2, KeyRound, X, Pencil,
+  Circle, Search, Server, Activity, Trash2, KeyRound, X,
 } from 'lucide-react'
 
 function useIsMobile() {
@@ -46,7 +46,7 @@ function useVersion() {
   return useQuery({
     queryKey: ['console', 'version'],
     queryFn: async () => {
-      const resp = await fetch('/api/ping')
+      const resp = await fetch('/api/v1/ping')
       const json = await resp.json() as { message: string; version: string }
       return json
     },

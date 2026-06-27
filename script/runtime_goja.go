@@ -136,9 +136,13 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 		runner: r,
 		logs:   make([]LogEntry, 0),
 	}
+	if req.Provider != nil {
+		api.docProvider = req.Provider
+		api.secretProvider = req.Provider
+		api.httpProvider = req.Provider
+	}
 	vm.Set("kora", api.buildObject(vm))
 
-	// Set the event parameter.
 	vm.Set("__kora_event__", map[string]any{
 		"doc":    req.Document,
 		"oldDoc": req.OldDocument,

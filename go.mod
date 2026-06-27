@@ -3,6 +3,8 @@ module github.com/asenawritescode/kora
 go 1.25.0
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/dop251/goja v0.0.0-20260618133527-c9b2ea77db59
 	github.com/expr-lang/expr v1.17.8
 	github.com/getkin/kin-openapi v0.140.0
 	github.com/gin-contrib/cors v1.7.7
@@ -28,7 +30,6 @@ require (
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/coder/websocket v1.8.12 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
-	github.com/dop251/goja v0.0.0-20260618133527-c9b2ea77db59 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect

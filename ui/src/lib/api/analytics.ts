@@ -29,24 +29,24 @@ export interface QueryResult {
 }
 
 export async function fetchAnalyticsStatus(): Promise<AnalyticsStatus> {
-  return api.get("/api/analytics/status");
+  return api.get("/api/v1/analytics/status");
 }
 
 export async function fetchMetrics(): Promise<Metric[]> {
-  return api.get("/api/analytics/metrics");
+  return api.get("/api/v1/analytics/metrics");
 }
 
 export async function queryMetric(name: string, req?: QueryRequest): Promise<QueryResult> {
-  return api.post(`/api/analytics/metrics/${encodeURIComponent(name)}/query`, req || {});
+  return api.post(`/api/v1/analytics/metrics/${encodeURIComponent(name)}/query`, req || {});
 }
 
 export async function fetchInsights(doctype: string): Promise<Record<string, any>> {
-  return api.get(`/api/analytics/insights/${encodeURIComponent(doctype)}`);
+  return api.get(`/api/v1/analytics/insights/${encodeURIComponent(doctype)}`);
 }
 
 export async function createMetric(metric: {
   name: string; label?: string; type: string; doctype: string;
   field?: string; link_field?: string; group_by_field?: string;
 }): Promise<Metric> {
-  return api.post("/api/analytics/metrics", metric);
+  return api.post("/api/v1/analytics/metrics", metric);
 }

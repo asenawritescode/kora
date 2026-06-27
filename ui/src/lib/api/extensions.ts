@@ -29,26 +29,26 @@ export interface DeliveryRecord {
 }
 
 export function fetchExtensions() {
-  return api.get<ExtensionRecord[]>('/api/system/extension')
+  return api.get<ExtensionRecord[]>('/api/v1/system/extension')
 }
 
 export function createExtension(data: {
   name: string; display_name?: string; description?: string
   endpoint_url: string; subscriptions?: string; api_permissions?: string
 }) {
-  return api.post<{ name: string; secret: string; warning: string }>('/api/system/extension', data)
+  return api.post<{ name: string; secret: string; warning: string }>('/api/v1/system/extension', data)
 }
 
 export function deleteExtension(name: string) {
-  return api.delete(`/api/system/extension/${encodeURIComponent(name)}`)
+  return api.delete(`/api/v1/system/extension/${encodeURIComponent(name)}`)
 }
 
 export function fetchDeliveries(name: string) {
-  return api.get<DeliveryRecord[]>(`/api/system/extension/${encodeURIComponent(name)}/deliveries`)
+  return api.get<DeliveryRecord[]>(`/api/v1/system/extension/${encodeURIComponent(name)}/deliveries`)
 }
 
 export function rotateSecret(name: string) {
   return api.post<{ secret: string; warning: string }>(
-    `/api/system/extension/${encodeURIComponent(name)}/rotate-secret`
+    `/api/v1/system/extension/${encodeURIComponent(name)}/rotate-secret`
   )
 }

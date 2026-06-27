@@ -9,7 +9,7 @@ import (
 
 // BootstrapTables creates the analytics rollup tables in the operational DB.
 // Idempotent — uses IF NOT EXISTS. Called once per site at startup.
-func BootstrapTables(database *sql.DB, dialect db.Dialect) error {
+func BootstrapTables(database *sql.DB, dialect db.SchemaDialect) error {
 	for _, stmt := range rollupTableDDL(dialect) {
 		if _, err := database.Exec(stmt); err != nil {
 			return fmt.Errorf("analytics bootstrap: %w", err)
@@ -18,7 +18,7 @@ func BootstrapTables(database *sql.DB, dialect db.Dialect) error {
 	return nil
 }
 
-func rollupTableDDL(dialect db.Dialect) []string {
+func rollupTableDDL(dialect db.SchemaDialect) []string {
 	quote := func(name string) string { return dialect.QuoteIdent(name) }
 
 	return []string{

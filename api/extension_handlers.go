@@ -1,7 +1,7 @@
 package api
 
 import (
-	"crypto/sha256"
+	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"log/slog"
@@ -69,13 +69,17 @@ func (h *Handler) HandleExtensionCreate(c *gin.Context) {
 		return
 	}
 
-	// Generate signing secret.
+	// Generate signing secret and access token.
 	secret, err := webhook.GenerateSecret()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to generate secret"}})
 		return
 	}
-	secretHash := hashSecret(secret)
+	accessToken, err := generateAccessToken()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to generate access token"}})
+		return
+	}
 
 	db := h.queryDB(c)
 	if db == nil {
@@ -84,9 +88,9 @@ func (h *Handler) HandleExtensionCreate(c *gin.Context) {
 	}
 
 	_, err = db.Exec(
-		`INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret_hash, subscriptions, api_permissions, installed_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))`,
-		req.Name, siteNameStr, req.DisplayName, req.Description, req.EndpointURL, secretHash,
+		`INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, subscriptions, api_permissions, installed_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))`,
+		req.Name, siteNameStr, req.DisplayName, req.Description, req.EndpointURL, secret, accessToken,
 		req.Subscriptions, req.APIPermissions)
 	if err != nil {
 		slog.Error("creating extension", "error", err)
@@ -95,10 +99,10 @@ func (h *Handler) HandleExtensionCreate(c *gin.Context) {
 	}
 
 	slog.Info("extension registered", "name", req.Name, "site", siteNameStr)
-	// Return secret — shown once.
+	// Return secret and access token — shown once.
 	c.JSON(http.StatusCreated, Response{Data: map[string]any{
-		"name": req.Name, "secret": secret,
-		"warning": "Store this secret securely. It will not be shown again.",
+		"name": req.Name, "secret": secret, "access_token": accessToken,
+		"warning": "Store these credentials securely. They will not be shown again.",
 	}})
 }
 
@@ -169,8 +173,6 @@ func (h *Handler) HandleExtensionRotateSecret(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to generate secret"}})
 		return
 	}
-	secretHash := hashSecret(secret)
-
 	db := h.queryDB(c)
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Database not available"}})
@@ -178,9 +180,9 @@ func (h *Handler) HandleExtensionRotateSecret(c *gin.Context) {
 	}
 
 	// Move current secret to old_secret, set 24h expiry.
-	db.Exec(`UPDATE _kora_extension SET old_secret_hash = secret_hash, old_secret_expires_at = ?,
-		secret_hash = ?, secret_count = secret_count + 1, updated_at = NOW(6) WHERE name = ?`,
-		time.Now().Add(24*time.Hour).Format("2006-01-02 15:04:05"), secretHash, name)
+	db.Exec(`UPDATE _kora_extension SET old_secret = secret, old_secret_expires_at = ?,
+		secret = ?, secret_count = secret_count + 1, updated_at = NOW(6) WHERE name = ?`,
+		time.Now().Add(24*time.Hour).Format("2006-01-02 15:04:05"), secret, name)
 
 	c.JSON(http.StatusOK, Response{Data: map[string]any{
 		"secret": secret,
@@ -198,7 +200,10 @@ func (h *Handler) queryDB(c *gin.Context) *sql.DB {
 	return h.TxManager.DB
 }
 
-func hashSecret(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
+func generateAccessToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

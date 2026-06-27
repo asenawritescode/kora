@@ -5,7 +5,6 @@ import type { ConfigVersion } from '@/lib/api/system'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import { History, Eye, Play, X, RotateCcw } from 'lucide-react'
 import { useState } from 'react'
 

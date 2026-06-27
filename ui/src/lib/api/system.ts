@@ -3,7 +3,7 @@ import type { NavigationConfig } from '@/types/api'
 import type { DocTypeSchema, DocType, ReferenceInfo } from '@/types/kora'
 
 export async function fetchNavigation(): Promise<NavigationConfig> {
-  return api.get<NavigationConfig>('/api/system/navigation')
+  return api.get<NavigationConfig>('/api/v1/system/navigation')
 }
 
 export async function fetchDoctypeSchema(
@@ -12,20 +12,20 @@ export async function fetchDoctypeSchema(
 ): Promise<DocTypeSchema> {
   const params: Record<string, string | undefined> = {}
   if (state) params.state = state
-  return api.get<DocTypeSchema>(`/api/system/doctype/${encodeURIComponent(doctype)}`, params)
+  return api.get<DocTypeSchema>(`/api/v1/system/doctype/${encodeURIComponent(doctype)}`, params)
 }
 
 // --- Admin: Doctypes ---
 
 export async function fetchDoctypes(): Promise<DocType[]> {
-  return api.get<DocType[]>('/api/system/doctypes')
+  return api.get<DocType[]>('/api/v1/system/doctypes')
 }
 
 export async function createDoctype(
   data: DocType,
   activate = false,
 ): Promise<{ doctype: DocType; version_id: string; version_num: number; status: string }> {
-  const path = activate ? '/api/system/doctype' : '/api/system/doctype?activate=false'
+  const path = activate ? '/api/v1/system/doctype' : '/api/v1/system/doctype?activate=false'
   return api.post(path, data)
 }
 
@@ -35,28 +35,28 @@ export async function updateDoctype(
   activate = false,
 ): Promise<{ doctype: DocType; version_id: string; version_num: number; status: string }> {
   const path = activate
-    ? `/api/system/doctype/${encodeURIComponent(name)}`
-    : `/api/system/doctype/${encodeURIComponent(name)}?activate=false`
+    ? `/api/v1/system/doctype/${encodeURIComponent(name)}`
+    : `/api/v1/system/doctype/${encodeURIComponent(name)}?activate=false`
   return api.put(path, data)
 }
 
 export async function deleteDoctype(name: string): Promise<{ message: string }> {
-  return api.delete(`/api/system/doctype/${encodeURIComponent(name)}`)
+  return api.delete(`/api/v1/system/doctype/${encodeURIComponent(name)}`)
 }
 
 export async function validateDoctype(data: DocType): Promise<DocType> {
-  return api.post<DocType>('/api/system/doctype/validate', data)
+  return api.post<DocType>('/api/v1/system/doctype/validate', data)
 }
 
 export async function fetchDoctypeYaml(name: string): Promise<string> {
-  const url = new URL(`/api/system/doctype/${encodeURIComponent(name)}?format=yaml`, window.location.origin)
+  const url = new URL(`/api/v1/system/doctype/${encodeURIComponent(name)}?format=yaml`, window.location.origin)
   const response = await fetch(url.toString(), { credentials: 'same-origin' })
   if (!response.ok) throw new Error('Failed to fetch YAML')
   return response.text()
 }
 
 export async function fetchDoctypeReferences(name: string): Promise<ReferenceInfo[]> {
-  return api.get<ReferenceInfo[]>(`/api/system/doctype/${encodeURIComponent(name)}/references`)
+  return api.get<ReferenceInfo[]>(`/api/v1/system/doctype/${encodeURIComponent(name)}/references`)
 }
 
 // --- Admin: Dry-Run ---
@@ -79,7 +79,7 @@ export interface ActivationPreview {
 }
 
 export async function dryRunDoctype(data: DocType): Promise<ActivationPreview> {
-  return api.post<ActivationPreview>('/api/system/doctype/dry-run', data)
+  return api.post<ActivationPreview>('/api/v1/system/doctype/dry-run', data)
 }
 
 // --- Admin: Config Versions ---
@@ -95,15 +95,15 @@ export interface ConfigVersion {
 }
 
 export async function activateVersion(id: string): Promise<{ message: string; status: string }> {
-  return api.post(`/api/system/config/versions/${id}/activate`)
+  return api.post(`/api/v1/system/config/versions/${id}/activate`)
 }
 
 export async function discardVersion(id: string): Promise<{ message: string; status: string }> {
-  return api.post(`/api/system/config/versions/${id}/discard`)
+  return api.post(`/api/v1/system/config/versions/${id}/discard`)
 }
 
 export async function rollbackVersion(id: string): Promise<{ message: string; status: string }> {
-  return api.post(`/api/system/config/versions/${id}/rollback`)
+  return api.post(`/api/v1/system/config/versions/${id}/rollback`)
 }
 
 // --- Admin: Import (FormData upload) ---
@@ -112,7 +112,7 @@ export async function importDoctypeYaml(file: File): Promise<DocType> {
   const formData = new FormData()
   formData.append('file', file)
   // Use fetch directly since the api client always sends JSON.
-  const url = new URL('/api/system/config/import', window.location.origin)
+  const url = new URL('/api/v1/system/config/import', window.location.origin)
   const csrfMatch = document.cookie.match(/(?:^|;\s*)kora_csrf=([^;]*)/)
   const csrf = csrfMatch ? decodeURIComponent(csrfMatch[1]) : ''
   const response = await fetch(url.toString(), {
@@ -138,19 +138,19 @@ export interface Role {
 }
 
 export async function fetchRoles(): Promise<Role[]> {
-  return api.get<Role[]>('/api/system/roles')
+  return api.get<Role[]>('/api/v1/system/roles')
 }
 
 export async function createRole(data: Role): Promise<Role> {
-  return api.post<Role>('/api/system/roles', data)
+  return api.post<Role>('/api/v1/system/roles', data)
 }
 
 export async function updateRole(name: string, data: Role): Promise<Role> {
-  return api.put<Role>(`/api/system/roles/${encodeURIComponent(name)}`, data)
+  return api.put<Role>(`/api/v1/system/roles/${encodeURIComponent(name)}`, data)
 }
 
 export async function deleteRole(name: string): Promise<{ message: string; users_with_role: number }> {
-  return api.delete(`/api/system/roles/${encodeURIComponent(name)}`)
+  return api.delete(`/api/v1/system/roles/${encodeURIComponent(name)}`)
 }
 
 // --- Admin: Permissions ---
@@ -172,11 +172,11 @@ export interface Permission {
 }
 
 export async function fetchPermissions(): Promise<Permission[]> {
-  return api.get<Permission[]>('/api/system/permissions')
+  return api.get<Permission[]>('/api/v1/system/permissions')
 }
 
 export async function savePermissions(permissions: Permission[]): Promise<{ message: string }> {
-  return api.put<{ message: string }>('/api/system/permissions', permissions)
+  return api.put<{ message: string }>('/api/v1/system/permissions', permissions)
 }
 
 // --- Admin: Workflows ---
@@ -216,19 +216,19 @@ export interface WorkflowNotification {
 }
 
 export async function fetchWorkflows(): Promise<WorkflowDef[]> {
-  return api.get<WorkflowDef[]>('/api/system/workflows')
+  return api.get<WorkflowDef[]>('/api/v1/system/workflows')
 }
 
 export async function fetchWorkflow(doctype: string): Promise<WorkflowDef> {
-  return api.get<WorkflowDef>(`/api/system/workflows/${encodeURIComponent(doctype)}`)
+  return api.get<WorkflowDef>(`/api/v1/system/workflows/${encodeURIComponent(doctype)}`)
 }
 
 export async function saveWorkflow(data: WorkflowDef): Promise<WorkflowDef> {
-  return api.post<WorkflowDef>('/api/system/workflows', data)
+  return api.post<WorkflowDef>('/api/v1/system/workflows', data)
 }
 
 export async function deleteWorkflow(doctype: string): Promise<{ message: string }> {
-  return api.delete(`/api/system/workflows/${encodeURIComponent(doctype)}`)
+  return api.delete(`/api/v1/system/workflows/${encodeURIComponent(doctype)}`)
 }
 
 // --- Admin: Users ---
@@ -262,27 +262,27 @@ export interface PasswordResetRequest {
 }
 
 export async function fetchUsers(): Promise<User[]> {
-  return api.get<User[]>('/api/system/users')
+  return api.get<User[]>('/api/v1/system/users')
 }
 
 export async function fetchUser(name: string): Promise<User> {
-  return api.get<User>(`/api/system/users/${encodeURIComponent(name)}`)
+  return api.get<User>(`/api/v1/system/users/${encodeURIComponent(name)}`)
 }
 
 export async function createUser(data: UserCreateRequest): Promise<User> {
-  return api.post<User>('/api/system/users', data)
+  return api.post<User>('/api/v1/system/users', data)
 }
 
 export async function updateUser(name: string, data: UserUpdateRequest): Promise<User> {
-  return api.put<User>(`/api/system/users/${encodeURIComponent(name)}`, data)
+  return api.put<User>(`/api/v1/system/users/${encodeURIComponent(name)}`, data)
 }
 
 export async function deleteUser(name: string): Promise<{ message: string }> {
-  return api.delete(`/api/system/users/${encodeURIComponent(name)}`)
+  return api.delete(`/api/v1/system/users/${encodeURIComponent(name)}`)
 }
 
 export async function resetUserPassword(name: string, data: PasswordResetRequest): Promise<{ message: string }> {
-  return api.post(`/api/system/users/${encodeURIComponent(name)}/reset-password`, data)
+  return api.post(`/api/v1/system/users/${encodeURIComponent(name)}/reset-password`, data)
 }
 
 // --- Admin: Secrets ---
@@ -298,13 +298,13 @@ export interface SecretSetRequest {
 }
 
 export async function fetchSecrets(): Promise<SecretEntry[]> {
-  return api.get<SecretEntry[]>('/api/system/secrets')
+  return api.get<SecretEntry[]>('/api/v1/system/secrets')
 }
 
 export async function setSecret(data: SecretSetRequest): Promise<{ message: string; key: string }> {
-  return api.post('/api/system/secrets', data)
+  return api.post('/api/v1/system/secrets', data)
 }
 
 export async function deleteSecret(key: string): Promise<{ message: string; key: string }> {
-  return api.delete(`/api/system/secrets/${encodeURIComponent(key)}`)
+  return api.delete(`/api/v1/system/secrets/${encodeURIComponent(key)}`)
 }

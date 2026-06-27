@@ -2,6 +2,8 @@ package auth
 
 import (
 	"database/sql"
+	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,9 +23,7 @@ func NewSiteGuard(db *sql.DB) *SiteGuard {
 }
 
 // Middleware returns the combined site guard middleware.
-// It runs: Auth → CSRF → site context → handler.
-// Uses validateSession (no c.Next() inside) so CSRF check runs BEFORE the handler,
-// preventing double-responses.
+// It runs: Bearer (extension) auth → Session auth → CSRF → handler.
 func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 	csrf := CSRFMiddleware()
 
@@ -35,7 +35,21 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 			return
 		}
 
-		// Auth check — validates session without calling c.Next().
+		// Check Bearer token for extension API auth.
+		authHeader := c.GetHeader("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			if g.authenticateExtension(c, token) {
+				// Extension-authenticated — skip session and CSRF checks.
+				c.Next()
+				return
+			}
+			// Invalid Bearer token — reject.
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		// Session auth check — validates session without calling c.Next().
 		if !validateSession(c, g.sessionMgr) {
 			return
 		}
@@ -60,6 +74,32 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// authenticateExtension verifies a Bearer access token against the _kora_extension table.
+// On success, it sets auth_type=extension and extension_name in context.
+// The site_db must already be set in context by SiteRouter.
+func (g *SiteGuard) authenticateExtension(c *gin.Context, token string) bool {
+	db, exists := c.Get("site_db")
+	if !exists {
+		return false
+	}
+	sqlDB, ok := db.(*sql.DB)
+	if !ok || sqlDB == nil {
+		return false
+	}
+
+	var extName string
+	err := sqlDB.QueryRow(
+		`SELECT name FROM _kora_extension WHERE access_token = ? AND is_active = 1`, token,
+	).Scan(&extName)
+	if err != nil {
+		return false
+	}
+
+	c.Set("auth_type", "extension")
+	c.Set("extension_name", extName)
+	return true
 }
 
 // SiteDB returns the site's database from the request context.

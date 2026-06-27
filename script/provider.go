@@ -1,23 +1,30 @@
 package script
 
-import "net/http"
-
-// KoraProvider is the bridge between the JavaScript runtime and the Kora engine.
-// The engine implements this interface and passes it via ExecuteRequest.
-// Scripts call kora.getDoc() → provider.GetDoc().
-type KoraProvider interface {
-	// Document CRUD — operates within the triggering user's permissions.
+// DocProvider is the interface for document CRUD operations.
+// Consumers that only need document access should accept this interface.
+type DocProvider interface {
 	GetDoc(doctype, name string) (map[string]any, error)
 	GetList(doctype string, filters map[string]any, orderBy string, limit, offset int) ([]map[string]any, error)
 	SaveDoc(doctype string, doc map[string]any, modifiedBy string) error
 	CreateDoc(doctype string, doc map[string]any, owner, modifiedBy string) (map[string]any, error)
 	DeleteDoc(doctype, name string) error
+}
 
-	// Secrets — returns decrypted value from _kora_secret.
+// SecretProvider is the interface for retrieving secrets.
+type SecretProvider interface {
 	GetSecret(key string) (string, error)
+}
 
-	// HTTP — makes external HTTP requests (subject to domain allowlist).
+// HTTPProvider is the interface for making external HTTP requests.
+type HTTPProvider interface {
 	DoHTTP(req *HTTPRequest) (*HTTPResponse, error)
+}
+
+// KoraProvider is the composed interface for backward compatibility.
+type KoraProvider interface {
+	DocProvider
+	SecretProvider
+	HTTPProvider
 }
 
 // HTTPRequest represents an outgoing HTTP request from a script.
@@ -34,11 +41,6 @@ type HTTPResponse struct {
 	StatusText string
 	Headers    map[string]string
 	Body       []byte
-}
-
-// HTTPClient is the interface for making external HTTP requests from scripts.
-type HTTPClient interface {
-	Do(req *http.Request) (*http.Response, error)
 }
 
 // NoopProvider is a safe default that returns errors for all operations.

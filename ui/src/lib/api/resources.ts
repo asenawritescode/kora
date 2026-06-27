@@ -16,7 +16,7 @@ export async function fetchList(
 
   // Use getEnvelope to preserve meta (total, doctype).
   const result = await api.getEnvelope<Document[]>(
-    `/api/resource/${encodeURIComponent(doctype)}`,
+    `/api/v1/resource/${encodeURIComponent(doctype)}`,
     queryParams,
   )
   return {
@@ -30,12 +30,12 @@ export async function fetchList(
 
 export async function fetchDocument(doctype: string, name: string): Promise<Document> {
   return api.get<Document>(
-    `/api/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`,
+    `/api/v1/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`,
   )
 }
 
 export async function createDocument(doctype: string, data: Record<string, any>): Promise<Document> {
-  return api.post<Document>(`/api/resource/${encodeURIComponent(doctype)}`, data)
+  return api.post<Document>(`/api/v1/resource/${encodeURIComponent(doctype)}`, data)
 }
 
 export async function updateDocument(
@@ -44,13 +44,13 @@ export async function updateDocument(
   data: Record<string, any>,
 ): Promise<Document> {
   return api.put<Document>(
-    `/api/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`,
+    `/api/v1/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`,
     data,
   )
 }
 
 export async function deleteDocument(doctype: string, name: string): Promise<void> {
-  return api.delete(`/api/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`)
+  return api.delete(`/api/v1/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`)
 }
 
 export async function submitWorkflowAction(
@@ -59,7 +59,7 @@ export async function submitWorkflowAction(
   action: string,
 ): Promise<Document> {
   return api.post<Document>(
-    `/api/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}/workflow_action`,
+    `/api/v1/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}/workflow_action`,
     { action },
   )
 }

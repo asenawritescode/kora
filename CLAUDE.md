@@ -10,8 +10,8 @@ make build              # Build UI + Go binary
 make serve              # Start server on :8000
 make restart            # Kill old server + rebuild all + start fresh
 make setup              # Setup a site (SITE=airtime.local CONFIG=config/airtime/)
-make test               # Run Go tests
-make lint               # Run linters (Go + TypeScript)
+make test               # Run Go tests (311 tests, 19/19 packages)
+make lint               # Run linters (golangci-lint + TypeScript)
 make fmt                # Format code
 make release TAG=v0.2.0 # Tag and push a release
 make help               # Show all commands
@@ -115,7 +115,7 @@ Key patterns:
 
 ### Administrator Tab (SPA)
 
-The workspace sidebar has an Administrator section with seven views, all config-driven:
+The workspace sidebar has an Administrator section with nine views, all config-driven:
 
 | Page | Route | Purpose |
 |------|-------|---------|
@@ -123,6 +123,8 @@ The workspace sidebar has an Administrator section with seven views, all config-
 | Permissions | `/workspace/admin/permissions` | Role × DocType permission matrix, inline editing |
 | Workflows | `/workspace/admin/workflows` | Define state machines for submittable doctypes |
 | Versions | `/workspace/admin/versions` | Config version history with Activate/Discard/Rollback |
+| Scripts | `/workspace/admin/scripts` | JS script editor, test runner, console log viewer |
+| Extensions | `/workspace/admin/extensions` | Webhook endpoints, custom API methods, event hooks |
 | Users | `/workspace/admin/users` | User CRUD, role assignment, enable/disable, password reset |
 | Secrets | `/workspace/admin/secrets` | AI provider keys (OpenAI, DeepSeek, Anthropic) via dropdown UI |
 | API Docs | `/api/swagger-ui` | Auto-generated OpenAPI 3.0 spec with interactive Swagger UI |
@@ -164,6 +166,10 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 | `secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys (settable via UI at `/workspace/admin/secrets`) |
 | `analytics/` | EventBus + Worker + Query Engine — real-time CDC, daily/monthly rollup tables, time-series/funnel/duration queries, auto-generated metrics |
 | `mcp/` | Model Context Protocol server — auto-generates tools from doctype registry for Claude Desktop |
+| `api/ai/` | AI Chat handlers, AI config, tool execution loop, token accounting |
+| `script/` | JS script runtime — sandboxed execution engine for extensions |
+| `webhook/` | Webhook dispatcher — outgoing and incoming webhook management |
+| `sdk/` | Go SDK client library for external integrations |
 | `ui/` | React SPA (Vite + TanStack + shadcn) with floating AI Chat Widget |
 
 ### AI Chat System
@@ -263,6 +269,89 @@ Database errors are parsed via `db.Dialect.ParseError()` — dialect-neutral:
 
 Separate from chat API. Auto-generates MCP tools (5 per doctype: list, create, get, update, delete) for use with Claude Desktop, Cursor, etc. over stdio transport.
 
+### Extensibility System
+
+Kora provides a comprehensive extensibility system for customizing application behavior without modifying core code.
+
+#### Script Engine (`script/`)
+
+JavaScript runtime based on Go's JavaScript engine. Scripts run in a sandboxed environment with configurable RAM limits (`KORA_SCRIPTS_MAX_RAM`). Disabled by default — enable with `KORA_SCRIPTS_ENABLED=true`.
+
+- **Script types**: Event hooks, custom API methods, workflow actions, scheduled scripts
+- **Sandboxing**: Memory limits, CPU limits, timeout enforcement, no filesystem or network access
+- **Admin UI**: Script editor at `/workspace/admin/scripts` with syntax highlighting, test runner, and console log viewer
+
+#### Event Hooks
+
+Scripts can hook into document lifecycle events:
+
+| Hook | Trigger |
+|------|---------|
+| `before_insert` | Before a document is created |
+| `after_insert` | After a document is created |
+| `before_save` | Before a document is saved (create or update) |
+| `after_save` | After a document is saved |
+| `before_delete` | Before a document is deleted |
+| `after_delete` | After a document is deleted |
+| `on_submit` | When a document is submitted via workflow |
+| `on_cancel` | When a document is cancelled via workflow |
+
+Hooks receive the document as context and can modify it, validate it, or perform side effects.
+
+#### Custom API Methods
+
+Register custom REST endpoints implemented in JavaScript. Accessed at `/api/v1/x/:site/:method_name`. Useful for custom business logic, integrations, and specialized queries.
+
+#### Workflow Actions
+
+Custom actions that run during workflow transitions. A workflow action is a JavaScript function that executes when a document moves from one state to another. Actions can validate, transform, or create related records.
+
+#### Scheduled Scripts
+
+Cron-style scheduled jobs written in JavaScript. Configured via the Extensions admin panel with standard cron expressions. Each scheduled script has its own sandboxed runtime.
+
+#### Webhook Extensions (`webhook/`)
+
+- **Outgoing webhooks**: Trigger HTTP calls to external services on document events (create, update, delete, submit, cancel). Configure payload templates, headers, and retry policies.
+- **Incoming webhooks**: External services can push data to Kora via signed webhook endpoints. Each endpoint validates a secret token before processing.
+
+#### Extension Auth
+
+Extensions authenticate via:
+- **API keys** — generated in the Extensions admin panel, scoped to specific doctypes and operations
+- **Webhook secrets** — shared secrets for incoming webhook verification (HMAC-SHA256)
+- **Session tokens** — existing user sessions for UI-triggered extensions
+
+### API Versioning
+
+The REST API is versioned via URL prefix:
+
+| Prefix | Status |
+|--------|--------|
+| `/api/v1/` | Stable — backward compatible |
+| `/api/` | Legacy — redirects to `/api/v1/` |
+
+Versioning ensures that integrations built against `/api/v1/` continue to work across core updates. New features are added to the stable API without breaking changes.
+
+All endpoints documented in the auto-generated OpenAPI 3.0 spec at `/api/swagger-ui` (uses `/api/v1/` base path).
+
+### SDKs
+
+Kora provides two official SDKs for building integrations:
+
+- **Go SDK** (`sdk/`): `import "github.com/asenawritescode/kora/sdk"` — full CRUD client, filter building, connection pooling. Use for Go services that need to interact with Kora programmatically.
+- **TypeScript SDK** (`@kora/sdk`): Available on npm, integrates with any JS/TS runtime (Node, Bun, Deno, browser). Full type safety with generated TypeScript types from doctype definitions.
+
+### Code Quality
+
+Go code follows these quality standards:
+
+- **`golangci-lint`** — all linters pass on every PR
+- **Table-driven tests** — new code uses table-driven test patterns
+- **Interface hygiene** — small interfaces (1-3 methods), defined at consumption point
+- **No `utils`, `helpers`, `common` packages** — packages are organized by domain capability
+- **Error wrapping** — all errors use `%w` for proper error chains
+
 ### ORM Document Model
 
 Documents are `map[string]any`. Parent document names are auto-generated: `PREFIX-NNNN` via `SELECT COUNT(*)` (prefix = first 4 chars of single-word names, first-letter-of-each-word for multi-word). Child row names use ULID: `PREFIX-<ulid>` (26-char sortable unique ID, no DB query needed). System columns on every table: `name`, `owner`, `creation`, `modified`, `modified_by`, `doc_status`, `idx`. Child tables add: `parent`, `parentfield`, `parenttype`. Table names are backtick-quoted for SQL safety (spaces in names like "Work Order").
@@ -292,12 +381,17 @@ Dialect is resolved once at startup via `db.Resolve(common.DBType)` and threaded
 
 No YAML files for site config. `CommonConfigFromEnv()` builds all config from `KORA_*` environment variables. Sites are discovered from `_kora_config_version`. YAML doctype files are used only for bulk import/export (`cli/config_impl.go`).
 
+Key environment variables for extensibility and analytics:
+- `KORA_SCRIPTS_ENABLED` — Enable the JS script engine (default: `false`)
+- `KORA_SCRIPTS_MAX_RAM` — Max RAM per script in MB (default: `64`)
+- `KORA_ANALYTICS` — Enable analytics event bus and rollup tables (default: `false`)
+
 ## Release Workflow
 
 ### CI/CD (GitHub Actions)
 
 On every PR and push to `main`:
-- **Go**: `go vet ./...` → `go test ./...` → `go build`
+- **Go**: `golangci-lint run ./...` → `go test ./...` → `go build`
 - **UI**: `bun install` → `tsc --noEmit` → `bun run build`
 
 On tag push (`v*`): builds binaries for linux/darwin (amd64/arm64), categorizes commits into Features/Fixes/Security/Improvements/Docs, creates a GitHub Release with download links and SHA256 checksums.
@@ -327,7 +421,7 @@ After push, GitHub Actions:
 
 ### Version File
 
-`VERSION` at the repo root holds the current version (e.g., `0.2.0`). The release script bumps it automatically. The `go.mod` uses `go 1.25.0` (gin v1.12.0 requires it). CI uses `go vet` instead of `golangci-lint` because golangci-lint v1.64.8 doesn't support Go 1.25 analysis yet.
+`VERSION` at the repo root holds the current version (e.g., `0.2.0`). The release script bumps it automatically. The `go.mod` uses `go 1.25.0` (gin v1.12.0 requires it). CI uses `golangci-lint run ./...` for linting across all packages.
 
 ### Branch Rules (set in GitHub Settings → Rules → Rulesets)
 
@@ -350,7 +444,7 @@ docker run -d --name kora-test -p 8001:8000 \
   -e KORA_DB_TYPE=mysql \
   -e CONSOLE_EMAIL=admin@kora.local -e CONSOLE_PASSWORD=kora123 \
   kora:$VSN
-curl -s http://localhost:8001/api/ping
+curl -s http://localhost:8001/api/v1/ping
 # {"message":"pong","version":"0.5.0-alpha.3"}
 docker stop kora-test && docker rm kora-test
 
@@ -366,7 +460,7 @@ docker push smitdockerhub/kora:latest
 
 **Image:** `smitdockerhub/kora` — supports both MySQL and LibSQL, pure Go (no CGO), ~30MB, version injected at build time.
 
-**Dockerfile** (`/Dockerfile`): Multi-stage — Bun for UI, Go for binary (CGO_ENABLED=0, ldflags for version), Alpine runtime. `build-arg VERSION` sets the version string returned by `/api/ping`.
+**Dockerfile** (`/Dockerfile`): Multi-stage — Bun for UI, Go for binary (CGO_ENABLED=0, ldflags for version), Alpine runtime. `build-arg VERSION` sets the version string returned by `/api/v1/ping`.
 
 ## Contributing
 

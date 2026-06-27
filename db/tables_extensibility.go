@@ -56,8 +56,9 @@ func ExtensibilityTablesSQL() []string {
 			display_name VARCHAR(255) NOT NULL DEFAULT '',
 			description TEXT,
 			endpoint_url VARCHAR(1024) NOT NULL,
-			secret_hash VARCHAR(64) NOT NULL,
-			old_secret_hash VARCHAR(64),
+			secret VARCHAR(64) NOT NULL,
+			access_token VARCHAR(64) NOT NULL DEFAULT '',
+			old_secret VARCHAR(64),
 			old_secret_expires_at DATETIME(6),
 			secret_count INT NOT NULL DEFAULT 1,
 			is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -73,7 +74,8 @@ func ExtensibilityTablesSQL() []string {
 			last_delivery_at DATETIME(6),
 			last_error TEXT,
 			INDEX idx_ext_site (site),
-			INDEX idx_ext_active (is_active)
+			INDEX idx_ext_active (is_active),
+			INDEX idx_ext_access_token (access_token)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// _kora_webhook_delivery — webhook delivery log.

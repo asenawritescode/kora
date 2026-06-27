@@ -99,7 +99,7 @@ func LoadLiveSchema(database *sql.DB, dbName string, dialect db.Dialect) (map[st
 
 // ComputeDiff// ComputeDiff compares the registry DocTypes against the live database schema
 // and produces a Diff of changes needed.
-func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo, dialect db.Dialect) *Diff {
+func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo, dialect db.SchemaDialect) *Diff {
 	diff := &Diff{
 		NewColumns:    make(map[string][]ColumnAdd),
 		NewIndexes:    make(map[string][]IndexAdd),

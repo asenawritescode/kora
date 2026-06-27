@@ -19,11 +19,11 @@ import (
 // Store persists DocType configurations to the database.
 type Store struct {
 	DB      *sql.DB
-	Dialect db.Dialect
+	Dialect db.QueryDialect
 }
 
 // NewStore creates a new config store.
-func NewStore(database *sql.DB, dialect db.Dialect) *Store {
+func NewStore(database *sql.DB, dialect db.QueryDialect) *Store {
 	return &Store{DB: database, Dialect: dialect}
 }
 
