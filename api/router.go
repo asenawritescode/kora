@@ -103,6 +103,7 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 		if sqlDB, ok := db.(*sql.DB); ok {
 				if r, ok := reg.(*doctype.Registry); ok {
 				tm := &orm.TxManager{DB: sqlDB, Registry: r, Dialect: h.TxManager.Dialect}
+				tm.Context = c.Request.Context()
 				if siteNameStr, ok := siteName.(string); ok {
 				tm.SiteName = siteNameStr
 				}
@@ -307,7 +308,7 @@ func (h *Handler) HandleGet(c *gin.Context) {
 
 	doc, err := h.siteTx(c).GetDoc(dt, name, owner)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, orm.ErrNotFound) {
 			c.JSON(http.StatusNotFound, ErrorResponse{
 				Error: map[string]string{"message": "Document not found"},
 			})
@@ -1379,7 +1380,3 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// init registers this package's types for JSON handling.
-func init() {
-	_ = strings.NewReader
-}

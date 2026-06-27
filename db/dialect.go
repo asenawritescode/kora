@@ -9,6 +9,15 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 )
 
+// Queryer is satisfied by *sql.DB and *sql.Tx.
+// It provides Exec, Query, and QueryRow for use by packages that need
+// to run SQL against either a database or a transaction.
+type Queryer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // Dialect abstracts database-specific SQL generation, schema introspection,
 // and error parsing. Implementations are in dialect_*.go files.
 type Dialect interface {

@@ -27,17 +27,6 @@ var (
 	onboardLimitMax  = 3
 )
 
-func init() {
-	go func() {
-		for {
-			time.Sleep(1 * time.Hour)
-			onboardLimiterMu.Lock()
-			onboardLimiter = make(map[string]int)
-			onboardLimiterMu.Unlock()
-		}
-	}()
-}
-
 // ConsoleHandler holds dependencies for console API endpoints.
 type ConsoleHandler struct {
 	SystemGuard         *auth.SystemGuard
@@ -62,6 +51,18 @@ func NewConsoleHandler(guard *auth.SystemGuard, sr *net.SiteRouter, dbType, dbHo
 		PlatformDBPassword: dbPassword,
 		PlatformDB:         platformDB,
 	}
+}
+
+// Start begins the background rate limiter reset loop for self-service onboarding.
+func (h *ConsoleHandler) Start() {
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			onboardLimiterMu.Lock()
+			onboardLimiter = make(map[string]int)
+			onboardLimiterMu.Unlock()
+		}
+	}()
 }
 
 // ---------------------------------------------------------------------------

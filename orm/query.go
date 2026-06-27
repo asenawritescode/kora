@@ -51,17 +51,15 @@ func derivePrefix(name string) string {
 	return result.String()
 }
 
-// sqlExecutor abstracts *sql.DB and *sql.Tx for Exec and QueryRow calls.
-type sqlExecutor interface {
-	Exec(query string, args ...any) (sql.Result, error)
-	QueryRow(query string, args ...any) *sql.Row
-}
-
 // TxManager provides transactional operations on documents.
 type TxManager struct {
 	DB       *sql.DB
 	Registry *doctype.Registry
 	Dialect  db.Dialect
+
+	// Context carries the request-scoped context for script execution and
+	// other cancellable operations. If nil, context.Background() is used.
+	Context context.Context
 
 	// EventBus receives change events after successful writes.
 	// If nil, analytics event emission is disabled (no-op).
@@ -123,8 +121,11 @@ func (tx *TxManager) setupComputedHook() {
 					UserRoles: []string{tx.CurrentUserRole}, Site: tx.SiteName,
 					Provider: tx.ScriptProvider,
 				}
-				ctx := context.Background()
-				result, err := tx.ScriptRunner.Execute(ctx, req)
+				cctx := tx.Context
+				if cctx == nil {
+					cctx = context.Background()
+				}
+				result, err := tx.ScriptRunner.Execute(cctx, req)
 				if err != nil {
 					return nil, err
 				}
@@ -174,7 +175,10 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 		oldDocMap = oldDoc.Fields
 	}
 
-	ctx := context.Background()
+	ctx := tx.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	for _, rec := range scripts {
 		// Route after_* events to the async queue if available.
@@ -322,7 +326,10 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner, m
 	_, err = dbTx.Exec(query, values...)
 	if err != nil {
 		if valErr := tx.Dialect.ParseError(err, dt); valErr != nil {
-			return valErr
+			if valErr.Type == "UniqueConstraint" {
+				return fmt.Errorf("%w: %w", ErrDuplicate, valErr)
+			}
+			return fmt.Errorf("%w: %w", ErrValidation, valErr)
 		}
 		return fmt.Errorf("inserting document: %w", err)
 	}
@@ -403,7 +410,7 @@ func (tx *TxManager) updateComputedFields(dt *doctype.DocType, doc *doctype.Docu
 }
 
 // updateComputedFieldsExec UPDATEs computed fields using the given executor (DB or Tx).
-func updateComputedFieldsExec(ex sqlExecutor, dt *doctype.DocType, doc *doctype.Document) error {
+func updateComputedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
 	var setClauses []string
 	var values []any
 
@@ -437,7 +444,7 @@ func (tx *TxManager) insertChild(parentDT *doctype.DocType, parentField string, 
 }
 
 // insertChildExec inserts a child row using the given executor (DB or Tx).
-func insertChildExec(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, doc *doctype.Document, parentName string, idx int, dialect db.Dialect) error {
+func insertChildExec(ex db.Queryer, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, doc *doctype.Document, parentName string, idx int, dialect db.Dialect) error {
 	if doc.Name == "" {
 		// Generate unique child row name using ULID — no database query needed.
 		prefix := derivePrefix(childDT.Name)
@@ -493,7 +500,7 @@ func insertChildExec(ex sqlExecutor, parentDT *doctype.DocType, parentField stri
 
 // insertChildrenBatch inserts multiple child rows in a single multi-row INSERT statement.
 // Chunked at 100 rows to stay safely within MySQL's max_allowed_packet.
-func insertChildrenBatch(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, children []*doctype.Document, parentName string, dialect db.Dialect) error {
+func insertChildrenBatch(ex db.Queryer, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, children []*doctype.Document, parentName string, dialect db.Dialect) error {
 	if len(children) == 0 {
 		return nil
 	}
@@ -576,7 +583,7 @@ func insertChildrenBatch(ex sqlExecutor, parentDT *doctype.DocType, parentField 
 //   - DELETE rows present in old but missing in new
 //   - INSERT rows present in new but missing in old
 //   - UPDATE rows present in both with changed data
-func reconcileChildren(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, oldChildren, newChildren []*doctype.Document, parentName string, dialect db.Dialect) error {
+func reconcileChildren(ex db.Queryer, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, oldChildren, newChildren []*doctype.Document, parentName string, dialect db.Dialect) error {
 	childTableName := parentDT.ChildTableName(parentField)
 
 	oldByName := make(map[string]*doctype.Document)
@@ -642,7 +649,7 @@ func reconcileChildren(ex sqlExecutor, parentDT *doctype.DocType, parentField st
 }
 
 // updateChildRow issues an UPDATE for a single child row, setting all data columns.
-func updateChildRow(ex sqlExecutor, tableName string, childDT *doctype.DocType, doc *doctype.Document) error {
+func updateChildRow(ex db.Queryer, tableName string, childDT *doctype.DocType, doc *doctype.Document) error {
 	var setClauses []string
 	var values []any
 
@@ -750,14 +757,17 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 	result, err := dbTx.Exec(query, values...)
 	if err != nil {
 		if valErr := tx.Dialect.ParseError(err, dt); valErr != nil {
-			return valErr
+			if valErr.Type == "UniqueConstraint" {
+				return fmt.Errorf("%w: %w", ErrDuplicate, valErr)
+			}
+			return fmt.Errorf("%w: %w", ErrValidation, valErr)
 		}
 		return fmt.Errorf("updating document: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("document %q not found or access denied", doc.Name)
+		return fmt.Errorf("%w: document %q not found or access denied", ErrNotFound, doc.Name)
 	}
 
 	for _, f := range dt.TableFields() {
@@ -892,7 +902,7 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 	row := tx.DB.QueryRow(query, args...)
 	if err := row.Scan(scanTargets...); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("document %q not found in %s", name, dt.Name)
+			return nil, fmt.Errorf("%w: document %q not found in %s", ErrNotFound, name, dt.Name)
 		}
 		return nil, fmt.Errorf("scanning document: %w", err)
 	}
@@ -1136,7 +1146,7 @@ func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) erro
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("document %q not found or access denied", name)
+		return fmt.Errorf("%w: document %q not found or access denied", ErrNotFound, name)
 	}
 
 	if err := dbTx.Commit(); err != nil {

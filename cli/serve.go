@@ -296,6 +296,7 @@ func runServe() error {
 		// Console API (React SPA-driven, Bearer token auth).
 		// The /console frontend is served by the SPA via NoRoute handler.
 		ch := api.NewConsoleHandler(systemGuard, siteRouter, common.DBType, common.DBHost, common.DBUser, common.DBPassword, 3306, platformDB)
+		ch.Start()
 		router.POST("/api/console/login", ch.HandleLogin)
 		router.POST("/api/console/change-password", ch.HandleChangePassword)
 		router.POST("/api/console/sites/onboard", ch.HandleOnboard) // public — no auth
