@@ -8,30 +8,43 @@ import (
 	"github.com/asenawritescode/kora/db"
 )
 
+// isIdempotentSQLError returns true if the error is expected during
+// idempotent DDL execution (CREATE IF NOT EXISTS, ALTER TABLE ADD COLUMN,
+// CREATE INDEX IF NOT EXISTS). These errors are safe to ignore — the
+// schema is already in the desired state.
+func isIdempotentSQLError(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "already exists") ||
+		strings.Contains(s, "Duplicate") ||
+		strings.Contains(s, "duplicate column") ||
+		strings.Contains(s, "no such column") ||
+		strings.Contains(s, "Unknown column") ||
+		strings.Contains(s, "doesn't exist") ||
+		strings.Contains(s, "Can't DROP") ||
+		strings.Contains(s, "check that column")
+}
+
 // BootstrapSystemTables creates all _kora_* system tables if they don't exist.
 // This is the single canonical implementation used by CLI setup, server startup,
-// migration, and the console API.
+// migration, and the console API. All DDL is idempotent — errors matching
+// isIdempotentSQLError are silently skipped.
 func BootstrapSystemTables(database *sql.DB, dialect db.Dialect) error {
-	for _, ddl := range dialect.SystemTableSQL() {
+	execDDL := func(ddl string, label string) error {
 		if _, err := database.Exec(ddl); err != nil {
-			// Ignore duplicate column errors and unknown column errors
-			// (for idempotent ALTER TABLE and migration UPDATE statements).
-			errStr := err.Error()
-			if strings.Contains(errStr, "Duplicate") ||
-				strings.Contains(errStr, "Unknown column") ||
-				strings.Contains(errStr, "duplicate column") ||
-				strings.Contains(errStr, "already exists") ||
-				strings.Contains(errStr, "doesn't exist") ||
-				strings.Contains(errStr, "no such column") ||
-				strings.Contains(errStr, "Can't DROP") ||
-				strings.Contains(errStr, "check that column") {
-				continue
+			if isIdempotentSQLError(err) {
+				return nil
 			}
-			return fmt.Errorf("creating system table: %w\nSQL: %s", err, ddl)
+			return fmt.Errorf("%s: %w\nSQL: %s", label, err, ddl)
+		}
+		return nil
+	}
+
+	for _, ddl := range dialect.SystemTableSQL() {
+		if err := execDDL(ddl, "creating system table"); err != nil {
+			return err
 		}
 	}
 
-	// Extensibility tables (scripts, extensions, webhooks).
 	var extDDL []string
 	switch dialect.(type) {
 	case *db.LibSQLDialect:
@@ -40,16 +53,11 @@ func BootstrapSystemTables(database *sql.DB, dialect db.Dialect) error {
 		extDDL = db.ExtensibilityTablesMySQL()
 	}
 	for _, ddl := range extDDL {
-		if _, err := database.Exec(ddl); err != nil {
-			errStr := err.Error()
-			if strings.Contains(errStr, "already exists") {
-				continue
-			}
-			return fmt.Errorf("creating extensibility table: %w\nSQL: %s", err, ddl)
+		if err := execDDL(ddl, "creating extensibility table"); err != nil {
+			return err
 		}
 	}
 
-	// Insert Administrator role if not exists.
 	database.Exec(dialect.InsertOrIgnorePrefix() + ` INTO _kora_role (name, description) VALUES ('Administrator', 'Full access to all doctypes')`)
 
 	return nil
