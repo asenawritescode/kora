@@ -217,7 +217,7 @@ fields:
   - fieldname: subtotal
     fieldtype: Currency
     label: Subtotal
-    computed: SUM(items.line_total)
+    computed: (sum "items" "line_total")
     read_only: true
   - fieldname: tax_rate
     fieldtype: Percent
@@ -226,12 +226,12 @@ fields:
   - fieldname: tax_amount
     fieldtype: Currency
     label: Tax Amount
-    computed: subtotal * tax_rate / 100
+    computed: (/ (* subtotal tax_rate) 100)
     read_only: true
   - fieldname: grand_total
     fieldtype: Currency
     label: Grand Total
-    computed: subtotal + tax_amount
+    computed: (+ subtotal tax_amount)
     read_only: true`
 
 	childTableExample := `name: Invoice Item
@@ -259,7 +259,7 @@ fields:
   - fieldname: line_total
     fieldtype: Currency
     label: Line Total
-    computed: quantity * unit_price
+    computed: (* quantity unit_price)
     read_only: true`
 
 	return []map[string]any{
@@ -279,7 +279,7 @@ fields:
 			"type": "function",
 			"function": map[string]any{
 				"name":        "validate_doctype_yaml",
-				"description": "Validate a DocType YAML definition WITHOUT saving. Always call this first before create_doctype_draft. Returns syntax errors with line numbers and 'did you mean?' suggestions for unknown keys.\n\nFIELD TYPES: Data, Text, Text Editor, Int, Float, Currency, Percent, Check, Date, Time, Datetime, Select (with options), Link (set options to target doctype name), Dynamic Link, Table (set options to child doctype name), Attach, Attach Image, Password, JSON, Section Break, Column Break, Heading.\n\nFIELD PROPERTIES: reqd (required), unique (must be unique across all records), in_list_view (show in table), in_standard_filter (show in filter sidebar), search_index (full-text searchable), read_only (non-editable), bold (highlight in forms), default (default value).\n\nLINKED FIELDS: Use linked_field: \"target.fieldname\" on a Link field to auto-populate data from the linked document (e.g., linked_field: \"product.selling_price\" auto-fills the price when a Product is selected).\n\nDEPENDS_ON: Use depends_on: \"fieldname\" to show/hide a field based on another field. Use mandatory_depends_on: \"fieldname\" to make the dependency required.\n\nCONSTRAINTS: Per-field validation rules as array of {type, value, message}:\n- min: maximum numeric value\n- max: maximum numeric value\n- min_length: minimum string length\n- max_length: maximum string length\n- regex: pattern to match\n- one_of: array of allowed values\n- not_one_of: array of disallowed values\nCOMPUTED FIELDS: Use expressions like 'quantity * unit_price', 'SUM(items.line_total)', 'ROUND(expr, 2)'. Computed fields should be read_only: true.\n\nTABLE (CHILD TABLE): Create the child doctype FIRST (with is_child_table: true), then the parent. The child doctype name goes in the Table field's 'options'.\n\nSIMPLE EXAMPLE:\n" + simpleExample + "\n\nCOMPLEX EXAMPLE (with Table, computed, Link, Select):\n" + complexExample + "\n\nCHILD TABLE EXAMPLE:\n" + childTableExample,
+				"description": "Validate a DocType YAML definition WITHOUT saving. Always call this first before create_doctype_draft. Returns syntax errors with line numbers and 'did you mean?' suggestions for unknown keys.\n\nFIELD TYPES: Data, Text, Text Editor, Int, Float, Currency, Percent, Check, Date, Time, Datetime, Select (with options), Link (set options to target doctype name), Dynamic Link, Table (set options to child doctype name), Attach, Attach Image, Password, JSON, Section Break, Column Break, Heading.\n\nFIELD PROPERTIES: reqd (required), unique (must be unique across all records), in_list_view (show in table), in_standard_filter (show in filter sidebar), search_index (full-text searchable), read_only (non-editable), bold (highlight in forms), default (default value), dependency_scope (self/children/cross_doctype).\n\nLINKED FIELDS: Use linked_field: \"target.fieldname\" on a Link field to auto-populate data from the linked document (e.g., linked_field: \"product.selling_price\" auto-fills the price when a Product is selected).\n\nDEPENDS_ON: Use depends_on: \"fieldname\" to show/hide a field based on another field. Use mandatory_depends_on: \"fieldname\" to make the dependency required.\n\nCONSTRAINTS: Per-field as [{type, value, message}]. DOC CONSTRAINTS (doc_constraints): [{type, predicate, condition, message}]. Predicate: (> end_date start_date). Condition: doc.type == \"wholesale\". Types:\n- min: maximum numeric value\n- max: maximum numeric value\n- min_length: minimum string length\n- max_length: maximum string length\n- regex: pattern to match\n- one_of: array of allowed values\n- not_one_of: array of disallowed values\nCOMPUTED FIELDS: S-expression (preferred): (* qty price), (sum \"items\" \"amount\"), (round expr N). Legacy syntax also works. Set read_only: true.\n\nTABLE (CHILD TABLE): Create the child doctype FIRST (with is_child_table: true), then the parent. The child doctype name goes in the Table field's 'options'.\n\nSIMPLE EXAMPLE:\n" + simpleExample + "\n\nCOMPLEX EXAMPLE (with Table, computed, Link, Select):\n" + complexExample + "\n\nCHILD TABLE EXAMPLE:\n" + childTableExample,
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -307,7 +307,7 @@ fields:
 			"type": "function",
 			"function": map[string]any{
 				"name":        "create_doctype_draft",
-				"description": "Create a NEW DocType as DRAFT only. Does NOT create database tables — a human must review and activate. If the doctype has a Table field, create the child doctype FIRST (as a separate call), then the parent. Always call validate_doctype_yaml before this. Only call this AFTER the user confirms they want to create.\n\nFIELD TYPES: Data, Text, Text Editor, Int, Float, Currency, Percent, Check, Date, Time, Datetime, Select (with options using | prefix for multi-line), Link (options = target doctype name), Dynamic Link, Table (options = child doctype name), Attach, Attach Image, Password, JSON, Section Break, Column Break, Heading.\n\nFIELD PROPERTIES: reqd, unique, in_list_view, in_standard_filter, search_index, read_only, bold, default, linked_field (auto-populate from linked doc), depends_on, mandatory_depends_on.\n\nCONSTRAINTS: Array of {type, value, message}. Types: min, max, min_length, max_length, regex, one_of, not_one_of.\n\nCOMPUTED: 'quantity * unit_price', 'SUM(items.line_total)', 'ROUND(expr, N)'. Set read_only: true.\n\nFor child tables: set is_child_table: true. Create child FIRST, then parent. Do NOT include table columns (parent, parentfield, parenttype, idx) — the system adds them automatically.\n\nSIMPLE EXAMPLE:\n" + simpleExample + "\n\nCOMPLEX EXAMPLE (with Table, Link, Select, computed fields, submittable):\n" + complexExample + "\n\nCHILD TABLE EXAMPLE:\n" + childTableExample,
+				"description": "Create a NEW DocType as DRAFT only. Does NOT create database tables — a human must review and activate. If the doctype has a Table field, create the child doctype FIRST (as a separate call), then the parent. Always call validate_doctype_yaml before this. Only call this AFTER the user confirms they want to create.\n\nFIELD TYPES: Data, Text, Text Editor, Int, Float, Currency, Percent, Check, Date, Time, Datetime, Select (with options using | prefix for multi-line), Link (options = target doctype name), Dynamic Link, Table (options = child doctype name), Attach, Attach Image, Password, JSON, Section Break, Column Break, Heading.\n\nFIELD PROPERTIES: reqd, unique, in_list_view, in_standard_filter, search_index, read_only, bold, default, linked_field, depends_on, mandatory_depends_on, dependency_scope (self/children/cross_doctype).\n\nCONSTRAINTS: [{type, value, message}]. Types: min, max, min_length, max_length, regex, one_of, not_one_of. DOC CONSTRAINTS (doc_constraints): [{type, predicate, condition, message}]. Predicate: (> end_date start_date). Condition: doc.type == \"wholesale\".\n\nCOMPUTED: S-expression (preferred): (* qty price), (sum \"items\" \"amount\"), (round expr N). Legacy also works. Set read_only: true.\n\nFor child tables: set is_child_table: true. Create child FIRST, then parent. Do NOT include table columns (parent, parentfield, parenttype, idx) — the system adds them automatically.\n\nSIMPLE EXAMPLE:\n" + simpleExample + "\n\nCOMPLEX EXAMPLE (with Table, Link, Select, computed fields, submittable):\n" + complexExample + "\n\nCHILD TABLE EXAMPLE:\n" + childTableExample,
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
