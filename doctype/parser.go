@@ -523,6 +523,9 @@ func (d *DocType) Validate() error {
 
 		if f.Fieldname == "" {
 			return fmt.Errorf("doctype %s: field %d has no fieldname", d.Name, i)
+			}
+			if isReservedFieldName(f.Fieldname) {
+				return fmt.Errorf("doctype %s: field %q conflicts with a reserved system column name. Reserved names: name, owner, creation, modified, modified_by, doc_status, idx, parent, parentfield, parenttype", d.Name, f.Fieldname)
 		}
 
 		// Validate field name format.
@@ -840,6 +843,16 @@ func ValidateAll(doctypes []*DocType) []CrossFileError {
 // ──────────────────────────────────────────────────────────────
 // Layer 5: "Did You Mean?" Suggestions
 // ──────────────────────────────────────────────────────────────
+
+// reservedFieldNames are system column names that must not be used as field names.
+var reservedFieldNames = map[string]bool{
+	"name": true, "owner": true, "creation": true, "modified": true,
+	"modified_by": true, "doc_status": true, "idx": true,
+	"parent": true, "parentfield": true, "parenttype": true,
+}
+
+// isReservedFieldName reports whether a field name conflicts with a system column.
+func isReservedFieldName(name string) bool { return reservedFieldNames[name] }
 
 // suggestField returns the closest known field name within Levenshtein distance ≤ 3.
 func suggestField(unknown string, knownFields map[string]bool) string {
