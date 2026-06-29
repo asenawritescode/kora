@@ -534,13 +534,13 @@ func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, s
 	if prevConfigRaw != "" {
 		prevSnapshot, parseErr := doctype.ParseConfig(prevConfigRaw)
 		if parseErr == nil {
-			// Compute the full-snapshot diff (includes non-doctype sections).
-			fullDiff := doctype.DiffFullSnapshots(prevSnapshot, snapshot)
-			fullDiff.Doctypes.FromVersion = currentVersion
-			fullDiff.Doctypes.ToVersion = newVersion
-			changeListBytes, _ := json.Marshal(fullDiff)
-			changeList = string(changeListBytes)
-
+			// Compute the full-snapshot diff using s-expression IR for field-level granularity.
+			prevSExpr := doctype.ToSExpr(prevSnapshot)
+			newSExpr := doctype.ToSExpr(snapshot)
+			if changes, err := doctype.DiffSExpr(prevSExpr, newSExpr); err == nil {
+				changeListBytes, _ := json.Marshal(changes)
+				changeList = string(changeListBytes)
+			}
 			// Also keep backward-compat changelog (doctype-only diff).
 			doctypeDiff := doctype.DiffConfigs(prevSnapshot.DocTypes, snapshot.DocTypes)
 			doctypeDiff.FromVersion = currentVersion

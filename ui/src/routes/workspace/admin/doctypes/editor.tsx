@@ -369,31 +369,30 @@ export default function AdminDoctypeEditorPage() {
                   <>
                     <div className="col-span-4">
                       <Label className="text-xs">Predicate (s-expression)</Label>
-                      <Input
+                      <LispAutocomplete
                         className="h-9 text-sm font-mono"
                         value={c.predicate || ''}
-                        onChange={(e) => {
+                        onChange={(val) => {
                           const updated = [...(form.doc_constraints || [])]
-                          updated[ci] = { ...updated[ci], predicate: e.target.value }
+                          updated[ci] = { ...updated[ci], predicate: val }
                           setForm({ ...form, doc_constraints: updated })
                         }}
                         placeholder="(> end_date start_date)"
+                        fieldNames={form.fields?.map((f: any) => f.fieldname) || []}
                       />
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        S-expression: (&gt; &lt; = + - * / and or not sum count round)
-                      </p>
                     </div>
                     <div className="col-span-4">
                       <Label className="text-xs">Condition (optional)</Label>
-                      <Input
+                      <LispAutocomplete
                         className="h-9 text-sm font-mono"
                         value={c.condition || ''}
-                        onChange={(e) => {
+                        onChange={(val) => {
                           const updated = [...(form.doc_constraints || [])]
-                          updated[ci] = { ...updated[ci], condition: e.target.value }
+                          updated[ci] = { ...updated[ci], condition: val }
                           setForm({ ...form, doc_constraints: updated })
                         }}
                         placeholder='doc.type == "wholesale"'
+                        fieldNames={form.fields?.map((f: any) => f.fieldname) || []}
                       />
                     </div>
                     <div className="col-span-1 flex items-end pb-1">
