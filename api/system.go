@@ -1018,6 +1018,11 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		slog.Warn("failed to create active version", "error", err)
 	}
 
+	// Mark the Draft version as Superseded — it's been replaced by the new Active.
+	if _, err := db.Exec("UPDATE _kora_config_version SET status = 'Superseded' WHERE id = ?", versionID); err != nil {
+		slog.Warn("failed to update draft status after activation", "version", versionID, "error", err)
+	}
+
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "activated", "status": "Active"}})
 }
 
