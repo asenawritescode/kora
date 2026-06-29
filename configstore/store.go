@@ -93,10 +93,10 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 		batch := dt.Fields[start:end]
 
 		placeholders := make([]string, 0, len(batch))
-		args := make([]any, 0, len(batch)*23)
+		args := make([]any, 0, len(batch)*24)
 		for j, field := range batch {
 			constraintsJSON, _ := json.Marshal(field.Constraints)
-			placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+			placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 			args = append(args,
 				fmt.Sprintf("%s.%s", dt.Name, field.Fieldname),
 				dt.Name, field.Fieldname, field.Fieldtype, field.Label, field.Options,
@@ -106,6 +106,7 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 				boolToInt(field.SearchIndex), field.Description,
 				field.DependsOn, field.MandatoryDependsOn, string(constraintsJSON),
 				field.RenamedFrom, field.LinkedField, field.Computed, start+j,
+					site,
 			)
 		}
 
@@ -113,7 +114,7 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 			`INSERT INTO _kora_field (name, parent, fieldname, fieldtype, label, options,
 				reqd, unique_constraint, default_value, hidden, read_only, bold,
 				in_list_view, in_standard_filter, search_index, description,
-				depends_on, mandatory_depends_on, constraints_json, renamed_from, linked_field, computed, idx)
+					depends_on, mandatory_depends_on, constraints_json, renamed_from, linked_field, computed, idx, site)
 			VALUES %s`,
 			strings.Join(placeholders, ", "),
 		)
