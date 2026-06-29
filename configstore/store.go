@@ -250,6 +250,20 @@ func (s *Store) SaveRoles(roles []*doctype.Role, site string) error {
 	return nil
 }
 
+// SaveRolesTx is like SaveRoles but uses an existing transaction.
+func (s *Store) SaveRolesTx(tx *sql.Tx, roles []*doctype.Role, site string) error {
+	for _, role := range roles {
+		upsertSQL := `INSERT INTO _kora_role (name, workspace_access, description, site)
+			VALUES (?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"workspace_access", "description", "site"})
+		_, err := tx.Exec(upsertSQL, role.Name, boolToInt(role.WorkspaceAccess), role.Description, site)
+		if err != nil {
+			return fmt.Errorf("saving role %s: %w", role.Name, err)
+		}
+	}
+	return nil
+}
+
 // SavePermissions saves permission definitions to _kora_permission.
 func (s *Store) SavePermissions(permissions []*doctype.Permission, site string) error {
 	for _, p := range permissions {
@@ -260,6 +274,28 @@ func (s *Store) SavePermissions(permissions []*doctype.Permission, site string) 
 			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
 				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "site"})
 		_, err := s.DB.Exec(upsertSQL, name, p.Doctype, p.Role,
+			boolToInt(p.Read), boolToInt(p.Write), boolToInt(p.Create),
+			boolToInt(p.Delete), boolToInt(p.Submit), boolToInt(p.Cancel),
+			boolToInt(p.Amend), boolToInt(p.Export), boolToInt(p.Import),
+			boolToInt(p.Report), boolToInt(p.IfOwner), site,
+		)
+		if err != nil {
+			return fmt.Errorf("saving permission %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// SavePermissionsTx is like SavePermissions but uses an existing transaction.
+func (s *Store) SavePermissionsTx(tx *sql.Tx, permissions []*doctype.Permission, site string) error {
+	for _, p := range permissions {
+		name := fmt.Sprintf("%s.%s", p.Doctype, p.Role)
+		upsertSQL := `INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
+				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, site)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
+				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "site"})
+		_, err := tx.Exec(upsertSQL, name, p.Doctype, p.Role,
 			boolToInt(p.Read), boolToInt(p.Write), boolToInt(p.Create),
 			boolToInt(p.Delete), boolToInt(p.Submit), boolToInt(p.Cancel),
 			boolToInt(p.Amend), boolToInt(p.Export), boolToInt(p.Import),
@@ -367,6 +403,47 @@ func (s *Store) SaveWorkflows(workflows []*doctype.Workflow, site string) error 
 	return nil
 }
 
+// SaveWorkflowsTx is like SaveWorkflows but uses an existing transaction.
+func (s *Store) SaveWorkflowsTx(tx *sql.Tx, workflows []*doctype.Workflow, site string) error {
+	for _, wf := range workflows {
+		configJSON, _ := json.Marshal(wf)
+
+		upsertSQL := `INSERT INTO _kora_workflow (name, document_type, is_active, workflow_state_field, config_json, site)
+			VALUES (?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"is_active", "config_json", "site"})
+		_, err := tx.Exec(upsertSQL, wf.Name, wf.DocumentType, boolToInt(wf.IsActive), wf.WorkflowStateField, string(configJSON), site)
+		if err != nil {
+			return fmt.Errorf("saving workflow %s: %w", wf.Name, err)
+		}
+
+		// Save states.
+		for i, state := range wf.States {
+			stateName := fmt.Sprintf("%s.%s", wf.Name, state.State)
+			upsertSQL := `INSERT INTO _kora_workflow_state (name, workflow, state, doc_status, allow_edit, style, idx)
+				VALUES (?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+				[]string{"name"}, []string{"doc_status", "allow_edit", "style"})
+			_, err := tx.Exec(upsertSQL, stateName, wf.Name, state.State, state.DocStatus, state.AllowEdit, state.Style, i)
+			if err != nil {
+				return fmt.Errorf("saving workflow state %s: %w", stateName, err)
+			}
+		}
+
+		// Save transitions.
+		for i, t := range wf.Transitions {
+			transName := fmt.Sprintf("%s.%s", wf.Name, t.Action)
+			requireFields := strings.Join(t.RequireFields, ",")
+			upsertSQL := `INSERT INTO _kora_workflow_transition (name, workflow, action, from_state, to_state, allowed, condition_expr, require_fields, idx)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+				[]string{"name"}, []string{"from_state", "to_state", "allowed"})
+			_, err := tx.Exec(upsertSQL, transName, wf.Name, t.Action, t.From, t.To, t.Allowed, t.Condition, requireFields, i)
+			if err != nil {
+				return fmt.Errorf("saving workflow transition %s: %w", transName, err)
+			}
+		}
+	}
+	return nil
+}
+
 // LoadRoles loads all roles from _kora_role.
 func (s *Store) LoadRoles(site string) ([]*doctype.Role, error) {
 	rows, err := s.DB.Query("SELECT name, workspace_access, description FROM _kora_role WHERE site = ? OR site = '' ORDER BY name", site)
@@ -441,27 +518,20 @@ func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, s
 	if status == "Active" {
 		s.DB.Exec("UPDATE _kora_config_version SET status = 'Superseded' WHERE site = ? AND status = 'Active'", siteName)
 	}
-
-	// Serialize the FULL config snapshot as JSON (new format).
-	configJSON, err := json.Marshal(snapshot)
-	if err != nil {
-		return "", 0, fmt.Errorf("marshaling config: %w", err)
-	}
-	configStr := string(configJSON)
-
-	// Compute config_hash = SHA-256 of the canonical config JSON.
-	h := sha256.Sum256(configJSON)
+	// Serialize as canonical s-expression.
+	configSExpr := doctype.ToSExpr(snapshot)
+	h := sha256.Sum256([]byte(configSExpr))
 	configHash := hex.EncodeToString(h[:])
 
 	// Compute diff against previous version if one exists.
 	// Handles both old format (JSON array of doctypes) and new format (ConfigSnapshot).
 	var changelog any
 	var changeList any
-	var prevConfigJSON string
-	s.DB.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND version = ?", siteName, currentVersion).Scan(&prevConfigJSON)
+	var prevConfigRaw string
+	s.DB.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND version = ?", siteName, currentVersion).Scan(&prevConfigRaw)
 
-	if prevConfigJSON != "" {
-		prevSnapshot, parseErr := doctype.ParseSnapshot(prevConfigJSON)
+	if prevConfigRaw != "" {
+		prevSnapshot, parseErr := doctype.ParseConfig(prevConfigRaw)
 		if parseErr == nil {
 			// Compute the full-snapshot diff (includes non-doctype sections).
 			fullDiff := doctype.DiffFullSnapshots(prevSnapshot, snapshot)
@@ -489,10 +559,10 @@ func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, s
 	minKoraVersion := snapshot.MinKoraVersion
 
 	versionID := fmt.Sprintf("cv-%s-%d", siteName, newVersion)
-	_, err = s.DB.Exec(
+	_, err := s.DB.Exec(
 		`INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, changelog, status, config, change_list, config_hash, base_version_id, min_kora_version)
 		 VALUES (?, ?, ?, `+s.Dialect.NowTimestamp()+`, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		versionID, siteName, newVersion, createdBy, label, changelog, status, configStr,
+		versionID, siteName, newVersion, createdBy, label, changelog, status, configSExpr,
 		changeList, configHash, baseVersionID, minKoraVersion,
 	)
 	if err != nil {
@@ -563,6 +633,23 @@ func (s *Store) SaveAnalyticsMetrics(metrics []*doctype.AnalyticsMetricConfig, s
 	return nil
 }
 
+// SaveAnalyticsMetricsTx is like SaveAnalyticsMetrics but uses an existing transaction.
+func (s *Store) SaveAnalyticsMetricsTx(tx *sql.Tx, metrics []*doctype.AnalyticsMetricConfig, site string) error {
+	for _, m := range metrics {
+		if m == nil {
+			continue
+		}
+		upsertSQL := `INSERT INTO _kora_analytics_metric (name, label, type, doctype, field_name, link_field, group_by_field, site)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			` + s.Dialect.UpsertClause([]string{"name"}, []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field", "site"})
+		_, err := tx.Exec(upsertSQL, m.Name, m.Label, m.Type, m.DocType, m.FieldName, m.LinkField, m.GroupByField, site)
+		if err != nil {
+			return fmt.Errorf("saving analytics metric %s: %w", m.Name, err)
+		}
+	}
+	return nil
+}
+
 // LoadScriptSnapshots loads all active scripts as snapshots for versioning.
 // Script bodies are hashed (SHA-256) rather than stored inline to avoid DB bloat.
 func (s *Store) LoadScriptSnapshots(site string) ([]*doctype.ScriptSnapshot, error) {
@@ -612,3 +699,138 @@ func (s *Store) LoadWorkflows(site string) ([]*doctype.Workflow, error) {
 	return workflows, rows.Err()
 }
 
+// ActivateSnapshot runs the full activation in a single transaction.
+// 1. Writes all config rows (doctypes, roles, permissions, workflows, metrics)
+// 2. Applies DDL (caller must apply DDL after the tx, or use tx.Exec for SQLite)
+// 3. Rebuilds registry from the snapshot in memory
+// On any failure, returns an error (caller should roll back the transaction).
+func (s *Store) ActivateSnapshot(tx *sql.Tx, snapshot *doctype.ConfigSnapshot, reg *doctype.Registry, siteName string, dialect db.Dialect) error {
+	// Step 1: Save all doctypes using the transaction.
+	for _, dt := range snapshot.DocTypes {
+		if err := s.SaveDocTypeTx(tx, dt, siteName); err != nil {
+			return fmt.Errorf("saving doctype %s during activation: %w", dt.Name, err)
+		}
+	}
+
+	// Step 2: Save roles, permissions, workflows, and analytics metrics.
+	if len(snapshot.Roles) > 0 {
+		if err := s.SaveRolesTx(tx, snapshot.Roles, siteName); err != nil {
+			return fmt.Errorf("saving roles during activation: %w", err)
+		}
+	}
+	if len(snapshot.Permissions) > 0 {
+		if err := s.SavePermissionsTx(tx, snapshot.Permissions, siteName); err != nil {
+			return fmt.Errorf("saving permissions during activation: %w", err)
+		}
+	}
+	if len(snapshot.Workflows) > 0 {
+		if err := s.SaveWorkflowsTx(tx, snapshot.Workflows, siteName); err != nil {
+			return fmt.Errorf("saving workflows during activation: %w", err)
+		}
+	}
+	if len(snapshot.AnalyticsMetrics) > 0 {
+		if err := s.SaveAnalyticsMetricsTx(tx, snapshot.AnalyticsMetrics, siteName); err != nil {
+			return fmt.Errorf("saving analytics metrics during activation: %w", err)
+		}
+	}
+
+	// Step 3: Rebuild registry from snapshot (in-memory, no DB needed).
+	reg.LoadFull(snapshot.DocTypes, snapshot.Roles, snapshot.Permissions)
+	reg.Workflows.LoadFromDB(snapshot.Workflows)
+
+	return nil
+}
+
+// ApplyDDLTx executes DDL statements using the given transaction.
+// Unlike dialect.ExecuteBatch (which uses *sql.DB), this applies DDL within
+// a caller-managed transaction, which is important for SQLite/LibSQL atomic
+// DDL but won't prevent MySQL DDL auto-commit.
+func ApplyDDLTx(tx *sql.Tx, statements []string) error {
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("executing DDL: %w\nSQL: %s", err, stmt)
+		}
+	}
+	return nil
+}
+
+// MigrateLegacyConfigs converts any JSON-format config versions to s-expression format.
+// This is a lazy migration: existing JSON configs are converted in-place as they are discovered.
+// On the first call, it scans all versions with JSON-format configs and converts them.
+// Run at startup or on first access to config versions.
+func (s *Store) MigrateLegacyConfigs(site string) (int, error) {
+	rows, err := s.DB.Query(
+		"SELECT id, config FROM _kora_config_version WHERE site = ? AND config != '' AND config IS NOT NULL",
+		site,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("querying config versions for migration: %w", err)
+	}
+	defer rows.Close()
+
+	var toMigrate []struct {
+		id     string
+		config string
+	}
+
+	for rows.Next() {
+		var id, config string
+		if err := rows.Scan(&id, &config); err != nil {
+			return 0, fmt.Errorf("scanning config version: %w", err)
+		}
+		// Only migrate JSON-format configs (starts with { or [).
+		if doctype.IsJSONConfig(config) {
+			toMigrate = append(toMigrate, struct {
+				id     string
+				config string
+			}{id, config})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	migrated := 0
+	for _, m := range toMigrate {
+		snapshot, err := doctype.ParseSnapshot(m.config)
+		if err != nil {
+			slog.Warn("cannot migrate config version, skipping", "id", m.id, "error", err)
+			continue
+		}
+		sexpr := doctype.ToSExpr(snapshot)
+		_, err = s.DB.Exec("UPDATE _kora_config_version SET config = ? WHERE id = ?", sexpr, m.id)
+		if err != nil {
+			return migrated, fmt.Errorf("updating migrated config for %s: %w", m.id, err)
+		}
+		migrated++
+	}
+
+	if migrated > 0 {
+		slog.Info("migrated legacy config versions to s-expression", "site", site, "count", migrated)
+	}
+	return migrated, nil
+}
+
+// MigrateAllLegacyConfigs migrates legacy JSON configs for all sites.
+func (s *Store) MigrateAllLegacyConfigs() (int, error) {
+	rows, err := s.DB.Query("SELECT DISTINCT site FROM _kora_config_version WHERE config != '' AND config IS NOT NULL")
+	if err != nil {
+		return 0, fmt.Errorf("querying distinct sites for config migration: %w", err)
+	}
+	defer rows.Close()
+
+	total := 0
+	for rows.Next() {
+		var site string
+		if err := rows.Scan(&site); err != nil {
+			return 0, err
+		}
+		n, err := s.MigrateLegacyConfigs(site)
+		if err != nil {
+			slog.Warn("error migrating site", "site", site, "error", err)
+			continue
+		}
+		total += n
+	}
+	return total, rows.Err()
+}

@@ -140,6 +140,20 @@ func runServe() error {
 		permissions, _ := store.LoadPermissions(info.Name)
 		workflows, _ := store.LoadWorkflows(info.Name)
 
+		// Check min_kora_version on the active config version at startup.
+		var minKoraVersion string
+		db.QueryRow(
+			"SELECT COALESCE(min_kora_version, '') FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1",
+			info.Name,
+		).Scan(&minKoraVersion)
+		if minKoraVersion != "" && !doctype.MinVersionOK(Version, minKoraVersion) {
+			slog.Warn("active config version requires newer kora binary",
+				"site", info.Name,
+				"required", minKoraVersion,
+				"running", Version,
+			)
+		}
+
 		registry := doctype.NewRegistry()
 		registry.LoadFull(doctypes, roles, permissions)
 		for _, wf := range workflows {
@@ -196,6 +210,7 @@ func runServe() error {
 	doctype.SetAdminRole(common.AdminRole)
 	api.AppBranding = api.Branding{AppName: common.AppName, PrimaryColor: common.PrimaryColor}
 	api.SetAPILimits(common.APIDefaultLimit, common.APIMaxLimit)
+	api.BinaryVersion = Version
 
 	// Fallback registry — used when no sites are loaded. Routes resolve via SiteRouter.
 	primaryRegistry := doctype.NewRegistry()

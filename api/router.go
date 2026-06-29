@@ -27,6 +27,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// BinaryVersion is set at startup from cli.Version to avoid circular imports.
+// cli/serve.go sets this to its Version value during initialization.
+var BinaryVersion = "dev"
+
 // Handler holds dependencies for API handlers.
 // Registry and TxManager are fallbacks; handlers read site context from the request.
 type Handler struct {

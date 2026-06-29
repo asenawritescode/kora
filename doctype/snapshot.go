@@ -69,3 +69,43 @@ func ParseSnapshot(configJSON string) (*ConfigSnapshot, error) {
 	}
 	return &snapshot, nil
 }
+
+// IsJSONConfig returns true if the config string appears to be JSON (old format).
+func IsJSONConfig(config string) bool {
+	trimmed := strings.TrimSpace(config)
+	return strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
+}
+
+// IsSExprConfig returns true if the config string appears to be an s-expression.
+func IsSExprConfig(config string) bool {
+	trimmed := strings.TrimSpace(config)
+	return strings.HasPrefix(trimmed, "(")
+}
+
+// ParseConfig parses a config snapshot from either JSON or s-expression format.
+// Handles all three formats:
+//   - JSON array: [...] (old format, doctypes only)
+//   - JSON object: {"doctypes":[...], ...} (intermediate format)
+//   - s-expression: (config ...) (canonical format)
+func ParseConfig(config string) (*ConfigSnapshot, error) {
+	trimmed := strings.TrimSpace(config)
+	if trimmed == "" {
+		return &ConfigSnapshot{}, nil
+	}
+
+	if IsSExprConfig(trimmed) {
+		return FromSExpr(trimmed)
+	}
+
+	// Fall back to JSON parsing (handles both old and new JSON formats).
+	return ParseSnapshot(trimmed)
+}
+
+// MustParseConfig is like ParseConfig but panics on error (for use in tests).
+func MustParseConfig(config string) *ConfigSnapshot {
+	snapshot, err := ParseConfig(config)
+	if err != nil {
+		panic(err)
+	}
+	return snapshot
+}

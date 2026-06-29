@@ -1,6 +1,10 @@
 // Package schema manages database schema migration.
 // It compares the DocType registry against the live database schema
 // and generates/applies DDL to make them match.
+//
+// Deprecated: use GenerateDDLFromDiff from doctype/dialect_macros.go for
+// DDL generation. The schema package is retained for backward compatibility
+// with legacy config versions that lack a stored change_list.
 package schema
 
 import (

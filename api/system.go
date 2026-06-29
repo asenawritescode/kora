@@ -751,7 +751,7 @@ func (h *Handler) HandleConfigVersionPreview(c *gin.Context) {
 		return
 	}
 
-	snapshot, err := doctype.ParseSnapshot(configJSON)
+	snapshot, err := doctype.ParseConfig(configJSON)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to parse version config"}})
 		return
@@ -843,10 +843,10 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	reg := h.siteRegistry(c)
 
 	// Get the version's config snapshot, change_list, and base_version_id.
-	var configJSON, siteName, currentStatus, changeList, baseVersionID string
+	var configJSON, siteName, currentStatus, changeList, baseVersionID, minKoraVersion string
 	err := db.QueryRow(
-		"SELECT config, site, status, COALESCE(change_list, ''), COALESCE(base_version_id, '') FROM _kora_config_version WHERE id = ?", versionID,
-	).Scan(&configJSON, &siteName, &currentStatus, &changeList, &baseVersionID)
+		"SELECT config, site, status, COALESCE(change_list, ''), COALESCE(base_version_id, ''), COALESCE(min_kora_version, '') FROM _kora_config_version WHERE id = ?", versionID,
+	).Scan(&configJSON, &siteName, &currentStatus, &changeList, &baseVersionID, &minKoraVersion)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: map[string]string{"message": "Version not found"},
@@ -857,6 +857,19 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	if currentStatus != "Draft" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: map[string]string{"message": "Only Draft versions can be activated"},
+		})
+		return
+	}
+
+	// min_kora_version check: block activation if the binary is too old.
+	if minKoraVersion != "" && !doctype.MinVersionOK(BinaryVersion, minKoraVersion) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: map[string]string{
+				"message": fmt.Sprintf(
+					"This config version requires kora %s or newer, but running %s. Upgrade the binary and try again.",
+					minKoraVersion, BinaryVersion,
+				),
+			},
 		})
 		return
 	}
@@ -890,7 +903,7 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	}
 
 	// Parse the config snapshot with backward compatibility (old array vs new object format).
-	snapshot, err := doctype.ParseSnapshot(configJSON)
+	snapshot, err := doctype.ParseConfig(configJSON)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: map[string]string{"message": "Failed to parse version config: " + err.Error()},
@@ -900,97 +913,68 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 
 	store := configstore.NewStore(db, h.TxManager.Dialect)
 
-	// Replay step: if a stored change_list exists, use it for targeted saves.
+	// Begin the activation transaction.
+	// This wraps config writes in a single transaction for atomicity.
+	// DDL is also applied through the transaction (benefits SQLite/LibSQL;
+	// MySQL DDL auto-commits but ordering is still correct).
+	tx, err := db.Begin()
+	if err != nil {
+		internalError(c, "beginning activation transaction", err)
+		return
+	}
+	defer tx.Rollback() // no-op after successful commit
+
+	// Compute schema changes before applying them (read-only, uses *sql.DB).
+	// Prefer stored change_list for precise DDL generation; fall back to
+	// live schema diff for legacy versions without a stored change_list.
+	var ddlStatements []string
+	var dbName string
+	if h.TxManager.Dialect.DriverName() != "libsql" {
+		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
+	}
+
 	if changeList != "" {
 		var fullDiff doctype.ConfigDiffFull
 		if parseErr := json.Unmarshal([]byte(changeList), &fullDiff); parseErr == nil {
-			slog.Info("config version activation using stored change_list", "version", versionID)
-
-			// Process doctype changes: save only changed doctypes from snapshot.
-			changedDoctypes := make(map[string]bool)
-			for _, ch := range fullDiff.Doctypes.Changes {
-				if ch.DocType != "" {
-					changedDoctypes[ch.DocType] = true
-				}
-			}
-			for _, dt := range snapshot.DocTypes {
-				if changedDoctypes[dt.Name] {
-					if err := store.SaveDocType(dt, siteName); err != nil {
-						internalError(c, "saving doctype from version", err)
-						return
-					}
-				}
-			}
-
-			// Process section changes: save full sections for any section with changes.
-			sectionsWithChanges := make(map[string]bool)
-			for _, sc := range fullDiff.SectionChanges {
-				sectionsWithChanges[sc.Section] = true
-			}
-			if sectionsWithChanges["roles"] && len(snapshot.Roles) > 0 {
-				store.SaveRoles(snapshot.Roles, siteName)
-			}
-			if sectionsWithChanges["permissions"] && len(snapshot.Permissions) > 0 {
-				store.SavePermissions(snapshot.Permissions, siteName)
-			}
-			if sectionsWithChanges["workflows"] && len(snapshot.Workflows) > 0 {
-				store.SaveWorkflows(snapshot.Workflows, siteName)
-			}
-			if sectionsWithChanges["analytics_metrics"] && len(snapshot.AnalyticsMetrics) > 0 {
-				store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName)
-			}
-
-			// Run schema migration (always needed for doctype changes).
-			var dbName string
-			if h.TxManager.Dialect.DriverName() != "libsql" {
-				db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-			}
-			if err := schema.MigrateSite(db, dbName, snapshot.DocTypes, reg, h.TxManager.Dialect); err != nil {
-				slog.Error("migration failed — activation blocked", "version", versionID, "error", err)
-				c.JSON(http.StatusInternalServerError, ErrorResponse{
-					Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
-				})
-				return
+			slog.Info("activation: generating DDL from stored change_list", "version", versionID)
+			changes := doctype.ConvertConfigChanges(fullDiff.Doctypes.Changes, fullDiff.SectionChanges, snapshot)
+			ddlStatements, _ = doctype.GenerateDDLFromDiff(changes, h.TxManager.Dialect)
+			for _, stmt := range ddlStatements {
+				slog.Info("activation DDL (change_list)", "sql", stmt)
 			}
 		} else {
-			// Change_list parse failed; fall through to legacy behavior.
-			slog.Warn("stored change_list parse failed, falling back to legacy full-save", "version", versionID, "error", parseErr)
-			changeList = "" // force legacy fallback
+			slog.Warn("activation: stored change_list parse failed, falling back to live schema diff",
+				"version", versionID, "error", parseErr)
+			changeList = ""
 		}
 	}
 
-	// Legacy fallback: if no change_list or parse failed, save everything from snapshot.
 	if changeList == "" {
-		slog.Info("config version activation using legacy full-save (no stored change_list)", "version", versionID)
-
-		for _, dt := range snapshot.DocTypes {
-			if err := store.SaveDocType(dt, siteName); err != nil {
-				internalError(c, "saving doctype from version", err)
-				return
+		liveSchema, schemaErr := schema.LoadLiveSchema(db, dbName, h.TxManager.Dialect)
+		if schemaErr == nil && liveSchema != nil {
+			schemaDiff := schema.ComputeDiff(snapshot.DocTypes, reg.Get, liveSchema, h.TxManager.Dialect)
+			if !schemaDiff.IsEmpty() {
+				ddlStatements = schemaDiff.GenerateDDL(snapshot.DocTypes, reg.Get, h.TxManager.Dialect)
+				for _, stmt := range ddlStatements {
+					slog.Info("activation DDL (live diff)", "sql", stmt)
+				}
 			}
 		}
+	}
 
-		// Restore roles, permissions, and workflows from snapshot (not live DB).
-		if len(snapshot.Roles) > 0 {
-			store.SaveRoles(snapshot.Roles, siteName)
-		}
-		if len(snapshot.Permissions) > 0 {
-			store.SavePermissions(snapshot.Permissions, siteName)
-		}
-		if len(snapshot.Workflows) > 0 {
-			store.SaveWorkflows(snapshot.Workflows, siteName)
-		}
-		if len(snapshot.AnalyticsMetrics) > 0 {
-			store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName)
-		}
+	// Step 1: Save all config to DB within the transaction and rebuild the registry.
+	if err := store.ActivateSnapshot(tx, snapshot, reg, siteName, h.TxManager.Dialect); err != nil {
+		slog.Error("activation: config write failed — rolling back", "version", versionID, "error", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: map[string]string{"message": "Config write failed: " + err.Error()},
+		})
+		return
+	}
 
-		// Run schema migration BEFORE rebuilding the registry.
-		var dbName string
-		if h.TxManager.Dialect.DriverName() != "libsql" {
-			db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-		}
-		if err := schema.MigrateSite(db, dbName, snapshot.DocTypes, reg, h.TxManager.Dialect); err != nil {
-			slog.Error("migration failed — activation blocked", "version", versionID, "error", err)
+	// Step 2: Apply DDL within the transaction.
+	if len(ddlStatements) > 0 {
+		if err := configstore.ApplyDDLTx(tx, ddlStatements); err != nil {
+			slog.Error("activation: DDL failed — rolling back", "version", versionID, "error", err)
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
 			})
@@ -998,9 +982,11 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		}
 	}
 
-	// Rebuild registry from snapshot ONLY after successful migration.
-	reg.LoadFull(snapshot.DocTypes, snapshot.Roles, snapshot.Permissions)
-	reg.Workflows.LoadFromDB(snapshot.Workflows)
+	// Step 3: Commit the transaction.
+	if err := tx.Commit(); err != nil {
+		internalError(c, "committing activation transaction", err)
+		return
+	}
 
 	// Invalidate analytics worker metrics cache — config activation may change
 	// field types, add/remove fields, or change submittable status.
@@ -1009,17 +995,16 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	}
 
 	// Migrate analytics rollup data for field renames and doctype changes.
-	// Get pre-activation doctypes from the currently active version for comparison.
 	var prevConfigJSON string
 	db.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' AND id != ? ORDER BY version DESC LIMIT 1", siteName, versionID).Scan(&prevConfigJSON)
 	if prevConfigJSON != "" {
-		prevSnapshot, _ := doctype.ParseSnapshot(prevConfigJSON)
+		prevSnapshot, _ := doctype.ParseConfig(prevConfigJSON)
 		if prevSnapshot != nil {
 			analytics.MigrateRollupMetrics(db, siteName, prevSnapshot.DocTypes, snapshot.DocTypes)
 		}
 	}
 
-	// Create new Active version.
+	// Create new Active version reflecting the resulting state.
 	createdBy := c.GetString("user")
 	if createdBy == "" {
 		createdBy = "system"
@@ -1079,7 +1064,7 @@ func (h *Handler) HandleConfigVersionRollbackPreview(c *gin.Context) {
 		return
 	}
 
-	snapshot, err := doctype.ParseSnapshot(configJSON)
+	snapshot, err := doctype.ParseConfig(configJSON)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to parse version config"}})
 		return
@@ -1143,8 +1128,8 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 		return
 	}
 
-	// Parse and apply with backward compatibility.
-	snapshot, err := doctype.ParseSnapshot(configJSON)
+	// Parse the target version's snapshot (the state we're rolling back to).
+	snapshot, err := doctype.ParseConfig(configJSON)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: map[string]string{"message": "Failed to parse version config: " + err.Error()},
@@ -1153,51 +1138,63 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 	}
 
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	for _, dt := range snapshot.DocTypes {
-			if err := store.SaveDocType(dt, siteName); err != nil {
-			internalError(c, "saving during rollback", err)
+
+	// Compute the rollback DDL by comparing current registry state against
+	// the target snapshot. This produces quarantine-aware DDL that renames
+	// tables/columns instead of dropping them.
+	var dbName string
+	if h.TxManager.Dialect.DriverName() != "libsql" {
+		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
+	}
+
+	// Generate quarantine-aware rollback DDL from the snapshot comparison.
+	rollbackDDL := doctype.RollbackDDLForVersion(reg, snapshot, h.TxManager.Dialect)
+	for _, stmt := range rollbackDDL {
+		slog.Info("rollback DDL", "sql", stmt)
+	}
+
+	// Begin a transaction for the rollback.
+	tx, err := db.Begin()
+	if err != nil {
+		internalError(c, "beginning rollback transaction", err)
+		return
+	}
+	defer tx.Rollback()
+
+	// Apply quarantine-aware DDL through the transaction.
+	if len(rollbackDDL) > 0 {
+		if err := configstore.ApplyDDLTx(tx, rollbackDDL); err != nil {
+			slog.Error("rollback: DDL failed — rolling back", "version", versionID, "error", err)
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Error: map[string]string{"message": "Rollback DDL failed: " + err.Error()},
+			})
 			return
 		}
 	}
 
-	// Restore roles, permissions, and workflows from snapshot (not live DB).
-	if len(snapshot.Roles) > 0 {
-			store.SaveRoles(snapshot.Roles, siteName)
-	}
-	if len(snapshot.Permissions) > 0 {
-			store.SavePermissions(snapshot.Permissions, siteName)
-	}
-	if len(snapshot.Workflows) > 0 {
-			store.SaveWorkflows(snapshot.Workflows, siteName)
-	}
-	if len(snapshot.AnalyticsMetrics) > 0 {
-			store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName)
+	// Save the target version's config to DB within the transaction.
+	if err := store.ActivateSnapshot(tx, snapshot, reg, siteName, h.TxManager.Dialect); err != nil {
+		internalError(c, "saving config during rollback", err)
+		return
 	}
 
-	reg.LoadFull(snapshot.DocTypes, snapshot.Roles, snapshot.Permissions)
-	reg.Workflows.LoadFromDB(snapshot.Workflows)
+	// Commit the transaction.
+	if err := tx.Commit(); err != nil {
+		internalError(c, "committing rollback transaction", err)
+		return
+	}
 
 	// Invalidate analytics worker — rollback restores old schema.
 	if w := h.siteAnalyticsWorker(c); w != nil {
 		w.InvalidateAllMetrics()
 	}
 
-	var dbName string
-	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	if err := schema.MigrateSiteFromRegistry(db, dbName, reg, h.TxManager.Dialect); err != nil {
-		slog.Error("migration failed during rollback — blocked", "version", versionID, "error", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": "Schema migration failed during rollback: " + err.Error()},
-		})
-		return
-	}
-
 	createdBy := c.GetString("user")
 	if createdBy == "" {
 		createdBy = "system"
 	}
-		newSnapshot, _ := store.CollectSnapshot(reg, siteName)
-		store.CreateConfigVersion(siteName, createdBy, "Rollback to version "+versionID, "Active", newSnapshot)
+	newSnapshot, _ := store.CollectSnapshot(reg, siteName)
+	store.CreateConfigVersion(siteName, createdBy, "Rollback to version "+versionID, "Active", newSnapshot)
 
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "rolled back", "status": "Active"}})
 }

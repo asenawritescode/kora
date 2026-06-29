@@ -370,7 +370,7 @@ func runConfigRollback(siteName string, toVersion int) error {
 	}
 
 	// Parse the version snapshot with backward compatibility.
-	snapshot, err := doctype.ParseSnapshot(targetJSON)
+	snapshot, err := doctype.ParseConfig(targetJSON)
 	if err != nil {
 		return fmt.Errorf("parsing version %d: %w", toVersion, err)
 	}
