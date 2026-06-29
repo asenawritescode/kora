@@ -68,68 +68,36 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 		return fmt.Errorf("saving doctype %s: %w", dt.Name, err)
 	}
 
-	// Load existing fields for diff-based merge.
-	existingFields, err := s.loadFieldsMapTx(ex, dt.Name, site)
+	if len(dt.Fields) == 0 {
+		// No fields — delete any stale rows and we're done.
+		_, err = ex.Exec("DELETE FROM _kora_field WHERE parent = ? AND site = ?", dt.Name, site)
+		if err != nil {
+			return fmt.Errorf("deleting fields for %s: %w", dt.Name, err)
+		}
+		return nil
+	}
+
+	// Delete all existing fields for this doctype in one shot,
+	// then re-insert all current fields with a batched multi-row INSERT.
+	// This replaces the old per-field diff/update/insert loop.
+	_, err = ex.Exec("DELETE FROM _kora_field WHERE parent = ? AND site = ?", dt.Name, site)
 	if err != nil {
-		return fmt.Errorf("loading existing fields for %s: %w", dt.Name, err)
+		return fmt.Errorf("deleting fields for %s: %w", dt.Name, err)
 	}
 
-	// Build set of new field names.
-	newFieldNames := make(map[string]bool)
-	for _, field := range dt.Fields {
-		newFieldNames[field.Fieldname] = true
-	}
+	// Batch-insert fields in groups to stay under SQLite's max variable limit (999).
+	// 23 columns per field → 40 fields per batch = 920 params.
+	const batchSize = 40
+	for start := 0; start < len(dt.Fields); start += batchSize {
+		end := min(start+batchSize, len(dt.Fields))
+		batch := dt.Fields[start:end]
 
-	// Delete fields that are in the DB but NOT in the new config.
-	var toDelete []string
-	for name := range existingFields {
-		if !newFieldNames[name] {
-			toDelete = append(toDelete, name)
-		}
-	}
-	for _, name := range toDelete {
-		if _, err := ex.Exec("DELETE FROM _kora_field WHERE parent = ? AND fieldname = ?", dt.Name, name); err != nil {
-			return fmt.Errorf("deleting removed field %s.%s: %w", dt.Name, name, err)
-		}
-		slog.Info("removed field from config import", "doctype", dt.Name, "field", name)
-	}
-
-	// Insert new fields and update existing ones.
-	for i, field := range dt.Fields {
-		constraintsJSON, _ := json.Marshal(field.Constraints)
-
-		if _, exists := existingFields[field.Fieldname]; exists {
-			// UPDATE existing field.
-			_, err = ex.Exec(`
-				UPDATE _kora_field SET
-					fieldtype = ?, label = ?, options = ?, reqd = ?, unique_constraint = ?,
-					default_value = ?, hidden = ?, read_only = ?, bold = ?,
-					in_list_view = ?, in_standard_filter = ?, search_index = ?, description = ?,
-					depends_on = ?, mandatory_depends_on = ?, constraints_json = ?,
-					renamed_from = ?, linked_field = ?, computed = ?, idx = ?
-				WHERE parent = ? AND fieldname = ?
-			`,
-				field.Fieldtype, field.Label, field.Options,
-				boolToInt(field.Reqd), boolToInt(field.Unique), field.Default,
-				boolToInt(field.Hidden), boolToInt(field.ReadOnly), boolToInt(field.Bold),
-				boolToInt(field.InListView), boolToInt(field.InStandardFilter),
-				boolToInt(field.SearchIndex), field.Description,
-				field.DependsOn, field.MandatoryDependsOn, string(constraintsJSON),
-				field.RenamedFrom, field.LinkedField, field.Computed, i,
-				dt.Name, field.Fieldname,
-			)
-			if err != nil {
-				return fmt.Errorf("updating field %s.%s: %w", dt.Name, field.Fieldname, err)
-			}
-		} else {
-			// INSERT new field.
-			_, err = ex.Exec(`
-				INSERT INTO _kora_field (name, parent, fieldname, fieldtype, label, options,
-					reqd, unique_constraint, default_value, hidden, read_only, bold,
-					in_list_view, in_standard_filter, search_index, description,
-					depends_on, mandatory_depends_on, constraints_json, renamed_from, linked_field, computed, idx)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`,
+		placeholders := make([]string, 0, len(batch))
+		args := make([]any, 0, len(batch)*23)
+		for j, field := range batch {
+			constraintsJSON, _ := json.Marshal(field.Constraints)
+			placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+			args = append(args,
 				fmt.Sprintf("%s.%s", dt.Name, field.Fieldname),
 				dt.Name, field.Fieldname, field.Fieldtype, field.Label, field.Options,
 				boolToInt(field.Reqd), boolToInt(field.Unique), field.Default,
@@ -137,38 +105,26 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 				boolToInt(field.InListView), boolToInt(field.InStandardFilter),
 				boolToInt(field.SearchIndex), field.Description,
 				field.DependsOn, field.MandatoryDependsOn, string(constraintsJSON),
-				field.RenamedFrom, field.LinkedField, field.Computed, i,
+				field.RenamedFrom, field.LinkedField, field.Computed, start+j,
 			)
-			if err != nil {
-				return fmt.Errorf("inserting field %s.%s: %w", dt.Name, field.Fieldname, err)
-			}
+		}
+
+		insertSQL := fmt.Sprintf(
+			`INSERT INTO _kora_field (name, parent, fieldname, fieldtype, label, options,
+				reqd, unique_constraint, default_value, hidden, read_only, bold,
+				in_list_view, in_standard_filter, search_index, description,
+				depends_on, mandatory_depends_on, constraints_json, renamed_from, linked_field, computed, idx)
+			VALUES %s`,
+			strings.Join(placeholders, ", "),
+		)
+		if _, err := ex.Exec(insertSQL, args...); err != nil {
+			return fmt.Errorf("inserting fields for %s: %w", dt.Name, err)
 		}
 	}
 
-	slog.Debug("saved doctype config", "name", dt.Name, "fields", len(dt.Fields),
-		"deleted", len(toDelete), "new", len(dt.Fields)-len(existingFields)+len(toDelete))
+	slog.Debug("saved doctype config", "name", dt.Name, "fields", len(dt.Fields))
 	return nil
 }
-
-// loadFieldsMap returns existing field definitions keyed by fieldname.
-// loadFieldsMapTx is like loadFieldsMap but accepts any sqlExecutor.
-func (s *Store) loadFieldsMapTx(ex db.Queryer, parent string, site string) (map[string]bool, error) {
-	rows, err := ex.Query("SELECT fieldname FROM _kora_field WHERE parent = ? AND (site = ? OR site = '')", parent, site)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := make(map[string]bool)
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		result[name] = true
-	}
-	return result, rows.Err()
-}
-
 
 // LoadAll loads all DocTypes from the database into the registry.
 // Uses two batched queries instead of N+1 (one for doctypes, one for all fields).

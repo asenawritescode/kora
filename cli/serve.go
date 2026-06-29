@@ -146,7 +146,7 @@ func runServe() error {
 			registry.Workflows.Register(wf)
 		}
 
-		if err := schema.MigrateSite(db, siteCfg.DBName, registry, kdb.Resolve(common.DBType)); err != nil {
+		if err := schema.MigrateSiteFromRegistry(db, siteCfg.DBName, registry, kdb.Resolve(common.DBType)); err != nil {
 			db.Close()
 			return fmt.Errorf("migrating %s: %w", info.Name, err)
 		}

@@ -389,6 +389,9 @@ func Connect(cfg *SiteConfig) (*sql.DB, error) {
 	if driver == "libsql" {
 		// LibSQL HTTP streams expire server-side after ~30s idle.
 		// Don't pool idle connections — open fresh each time.
+		// Set a max open limit to prevent unbounded concurrent connections
+		// from overwhelming the LibSQL server (e.g. during sweep thundering herds).
+		db.SetMaxOpenConns(25)
 		db.SetMaxIdleConns(0)
 		db.SetConnMaxLifetime(25 * time.Second)
 	} else {

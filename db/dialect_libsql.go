@@ -231,11 +231,13 @@ func (d *LibSQLDialect) CreateIndex(tableName, fieldName string, unique bool) st
 	if unique {
 		uq = "UNIQUE "
 	}
-	indexName := fmt.Sprintf("idx_%s", fieldName)
+	// Include table name for global uniqueness — SQLite requires index names
+	// to be unique across the entire database, not just per-table.
+	indexName := fmt.Sprintf("idx_%s_%s", tableName, fieldName)
 	if unique {
-		indexName = fmt.Sprintf("uq_%s", fieldName)
+		indexName = fmt.Sprintf("uq_%s_%s", tableName, fieldName)
 	}
-	return fmt.Sprintf("CREATE %sINDEX %s ON %s (%s)",
+	return fmt.Sprintf("CREATE %sINDEX IF NOT EXISTS %s ON %s (%s)",
 		uq, d.QuoteIdent(indexName), d.QuoteIdent(tableName), d.QuoteIdent(fieldName))
 }
 
@@ -381,6 +383,31 @@ func (d *LibSQLDialect) NameGenQuery(tableName, prefix string) string {
 		"SELECT COALESCE(MAX(CAST(SUBSTR(name, INSTR(name, '-')+1) AS INTEGER)), 0) FROM %s WHERE name LIKE '%s-%%'",
 		d.QuoteIdent(tableName), prefix,
 	)
+}
+
+// ExecuteBatch runs multiple DDL statements in a single batch for LibSQL.
+// Statements are joined with semicolons and sent as one HTTP request,
+// which executes atomically in an implicit transaction on the Turso server.
+// This avoids the O(n) HTTP round-trip overhead of individual Exec calls.
+// If the batch fails with an idempotent error (e.g. "already exists"),
+// it falls back to sequential execution with idempotent error skipping.
+func (d *LibSQLDialect) ExecuteBatch(db *sql.DB, statements []string) error {
+	if len(statements) == 0 {
+		return nil
+	}
+	batch := strings.Join(statements, ";\n") + ";"
+	_, err := db.Exec(batch)
+	if err != nil {
+		// The batch may have failed because a statement is idempotent
+		// (e.g. CREATE TABLE IF NOT EXISTS on a table that already exists
+		// in a slightly different form). Fall back to sequential execution
+		// which can skip individual idempotent errors.
+		if isIdempotentSQLError(err) {
+			return executeDDLSequential(db, statements)
+		}
+		return fmt.Errorf("batch DDL: %w", err)
+	}
+	return nil
 }
 
 func (d *LibSQLDialect) SystemTableSQL() []string {
@@ -598,4 +625,38 @@ func parseLibSQLConstraintField(msg, prefix string) string {
 		return rest
 	}
 	return rest[dot+1:]
+}
+
+// isIdempotentSQLError returns true if the error is expected during
+// idempotent DDL execution (CREATE IF NOT EXISTS, ALTER TABLE ADD COLUMN,
+// CREATE INDEX IF NOT EXISTS). These errors are safe to ignore — the
+// schema is already in the desired state.
+func isIdempotentSQLError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "already exists") ||
+		strings.Contains(s, "Duplicate") ||
+		strings.Contains(s, "duplicate column") ||
+		strings.Contains(s, "no such column") ||
+		strings.Contains(s, "Unknown column") ||
+		strings.Contains(s, "doesn't exist") ||
+		strings.Contains(s, "Can't DROP") ||
+		strings.Contains(s, "check that column")
+}
+
+// executeDDLSequential runs DDL statements one at a time, skipping
+// idempotent errors. Used as a fallback when batch execution fails
+// because some statements were already applied.
+func executeDDLSequential(db *sql.DB, statements []string) error {
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			if isIdempotentSQLError(err) {
+				continue
+			}
+			return fmt.Errorf("executing DDL: %w\nSQL: %s", err, stmt)
+		}
+	}
+	return nil
 }

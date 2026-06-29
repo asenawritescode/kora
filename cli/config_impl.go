@@ -208,7 +208,7 @@ func runConfigImport(siteName, path string) error {
 	fmt.Printf("  ✓ Config version %d (%s) created\n", versionNum, versionID)
 
 	// Run migration.
-	if err := schema.MigrateSite(db, siteCfg.DBName, registry, kdb.Resolve(siteCfg.DBType)); err != nil {
+	if err := schema.MigrateSiteFromRegistry(db, siteCfg.DBName, registry, kdb.Resolve(siteCfg.DBType)); err != nil {
 		return fmt.Errorf("migrating: %w", err)
 	}
 	// Print changelog summary.
@@ -408,7 +408,7 @@ func runConfigRollback(siteName string, toVersion int) error {
 
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	if err := schema.MigrateSite(db, dbName, reg, dialect); err != nil {
+	if err := schema.MigrateSiteFromRegistry(db, dbName, reg, dialect); err != nil {
 		return fmt.Errorf("migration failed during rollback: %w", err)
 	}
 

@@ -138,7 +138,7 @@ func TestIntegration_FullFieldworkLifecycle(t *testing.T) {
 	// Migrate.
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	if err := schema.MigrateSite(db, dbName, registry, dialect); err != nil {
+	if err := schema.MigrateSiteFromRegistry(db, dbName, registry, dialect); err != nil {
 		t.Fatalf("migrating: %v", err)
 	}
 
@@ -300,7 +300,7 @@ func TestIntegration_ExtensionPermissions(t *testing.T) {
 	if err := db.QueryRow("SELECT DATABASE()").Scan(&dbName); err != nil {
 		t.Fatalf("get db name: %v", err)
 	}
-	if err := schema.MigrateSite(db, dbName, reg, dialect); err != nil {
+	if err := schema.MigrateSiteFromRegistry(db, dbName, reg, dialect); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 

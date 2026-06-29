@@ -75,6 +75,12 @@ type Dialect interface {
 	// SystemTableSQL returns the CREATE TABLE IF NOT EXISTS DDL for all _kora_*
 	// system tables. Each dialect provides its own version.
 	SystemTableSQL() []string
+
+	// ExecuteBatch runs multiple DDL statements as a single atomic operation.
+	// For LibSQL: joins statements with semicolons for a single HTTP round-trip.
+	// For MySQL: wraps in a transaction.
+	// For embedded SQLite: wraps in a transaction.
+	ExecuteBatch(db *sql.DB, statements []string) error
 }
 
 // ---------------------------------------------------------------------------

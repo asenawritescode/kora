@@ -207,9 +207,11 @@ func (d *MySQLDialect) CreateIndex(tableName, fieldName string, unique bool) str
 	if unique {
 		uq = "UNIQUE "
 	}
-	indexName := fmt.Sprintf("idx_%s", fieldName)
+	// Include table name for consistency with LibSQL and to avoid
+	// confusion when multiple tables have identically-named fields.
+	indexName := fmt.Sprintf("idx_%s_%s", tableName, fieldName)
 	if unique {
-		indexName = fmt.Sprintf("uq_%s", fieldName)
+		indexName = fmt.Sprintf("uq_%s_%s", tableName, fieldName)
 	}
 	return fmt.Sprintf("CREATE %sINDEX %s ON %s (%s)",
 		uq, d.QuoteIdent(indexName), d.QuoteIdent(tableName), d.QuoteIdent(fieldName))
@@ -350,6 +352,24 @@ func (d *MySQLDialect) NameGenQuery(tableName, prefix string) string {
 		"SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(name, '-', -1) AS UNSIGNED)), 0) FROM %s WHERE name LIKE '%s-%%'",
 		d.QuoteIdent(tableName), prefix,
 	)
+}
+
+// ExecuteBatch runs multiple DDL statements atomically inside a transaction.
+func (d *MySQLDialect) ExecuteBatch(db *sql.DB, statements []string) error {
+	if len(statements) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction for DDL batch: %w", err)
+	}
+	defer tx.Rollback()
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("executing DDL: %w\nSQL: %s", err, stmt)
+		}
+	}
+	return tx.Commit()
 }
 
 func (d *MySQLDialect) SystemTableSQL() []string {

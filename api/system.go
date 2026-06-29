@@ -400,7 +400,7 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 
 		var dbName string
 		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-		if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
+		if err := schema.MigrateSiteFromRegistry(db, dbName, reg, h.TxManager.Dialect); err != nil {
 			slog.Error("migration failed after doctype create", "doctype", dt.Name, "error", err)
 			c.JSON(http.StatusInternalServerError, ErrorResponse{
 				Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
@@ -506,7 +506,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 		// Get DB name from the connection.
 		var dbName string
 		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-		if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
+		if err := schema.MigrateSiteFromRegistry(db, dbName, reg, h.TxManager.Dialect); err != nil {
 			slog.Error("migration failed after doctype update", "doctype", doctypeName, "error", err)
 		}
 		// Invalidate analytics worker — field changes mean regenerated metrics.
@@ -867,7 +867,24 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 			store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName)
 	}
 
-	// Rebuild registry from snapshot (not live DB).
+	// Run schema migration BEFORE rebuilding the registry.
+	// If migration fails, the registry stays on the old config and
+	// the version remains Draft — the system is consistent.
+	// Pass the snapshot doctypes for the diff computation (target config)
+	// and the existing registry for child-table lookups.
+	var dbName string
+	if h.TxManager.Dialect.DriverName() != "libsql" {
+		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
+	}
+	if err := schema.MigrateSite(db, dbName, snapshot.DocTypes, reg, h.TxManager.Dialect); err != nil {
+		slog.Error("migration failed — activation blocked", "version", versionID, "error", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
+		})
+		return
+	}
+
+	// Rebuild registry from snapshot ONLY after successful migration.
 	reg.LoadFull(snapshot.DocTypes, snapshot.Roles, snapshot.Permissions)
 	reg.Workflows.LoadFromDB(snapshot.Workflows)
 
@@ -875,18 +892,6 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	// field types, add/remove fields, or change submittable status.
 	if w := h.siteAnalyticsWorker(c); w != nil {
 		w.InvalidateAllMetrics()
-	}
-
-	// Run migration. If DDL fails, block activation — the schema doesn't match
-	// the registry and creating an Active version would record a broken state.
-	var dbName string
-	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
-		slog.Error("migration failed — activation blocked", "version", versionID, "error", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
-		})
-		return
 	}
 
 	// Migrate analytics rollup data for field renames and doctype changes.
@@ -1065,7 +1070,7 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	if err := schema.MigrateSite(db, dbName, reg, h.TxManager.Dialect); err != nil {
+	if err := schema.MigrateSiteFromRegistry(db, dbName, reg, h.TxManager.Dialect); err != nil {
 		slog.Error("migration failed during rollback — blocked", "version", versionID, "error", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: map[string]string{"message": "Schema migration failed during rollback: " + err.Error()},

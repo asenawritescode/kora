@@ -65,7 +65,7 @@ func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, conf
 	}
 
 	// Step 7: Run schema migration.
-	if err := schema.MigrateSite(db, dbName, registry, dialect); err != nil {
+	if err := schema.MigrateSiteFromRegistry(db, dbName, registry, dialect); err != nil {
 		return fmt.Errorf("migrating schema: %w", err)
 	}
 

@@ -15,11 +15,12 @@ import (
 
 // ColumnInfo represents a column in the live database schema.
 type ColumnInfo struct {
-	Name     string
-	Type     string
-	Nullable bool
-	Default  sql.NullString
-	Indexed  bool
+	Name       string
+	Type       string
+	Nullable   bool
+	Default    sql.NullString
+	Indexed    bool
+	IndexNames []string // names of indexes covering this column (for old→new name migration)
 }
 
 // TableInfo represents a table in the live database schema.
@@ -28,11 +29,18 @@ type TableInfo struct {
 	Columns map[string]*ColumnInfo
 }
 
+// IndexDrop describes an index to be dropped.
+type IndexDrop struct {
+	Table string
+	Name  string
+}
+
 // Diff represents the difference between the registry and the live schema.
 type Diff struct {
 	NewTables     []string                  // Tables to CREATE
 	NewColumns    map[string][]ColumnAdd     // Table → columns to ADD
 	NewIndexes    map[string][]IndexAdd      // Table → indexes to CREATE
+	DropIndexes   []IndexDrop               // Indexes to DROP (old-style names)
 	RenameColumns map[string][]ColumnRename  // Table → columns to RENAME
 	Orphaned      []OrphanedColumn           // Columns in DB but not in registry
 }
@@ -83,11 +91,12 @@ func LoadLiveSchema(database *sql.DB, dbName string, dialect db.Dialect) (map[st
 				Default:  sql.NullString{String: lc.DefaultValue, Valid: lc.DefaultValue != ""},
 			}
 		}
-		// Mark indexed columns.
+		// Mark indexed columns and record index names for migration detection.
 		for _, idx := range lt.Indexes {
 			for _, idxCol := range idx.Columns {
 				if col, ok := cols[idxCol]; ok {
 					col.Indexed = true
+					col.IndexNames = append(col.IndexNames, idx.Name)
 				}
 			}
 		}
@@ -97,16 +106,18 @@ func LoadLiveSchema(database *sql.DB, dbName string, dialect db.Dialect) (map[st
 	return tables, nil
 }
 
-// ComputeDiff// ComputeDiff compares the registry DocTypes against the live database schema
+// ComputeDiff compares a set of DocTypes against the live database schema
 // and produces a Diff of changes needed.
-func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo, dialect db.SchemaDialect) *Diff {
+// doctypes is the target config (from the snapshot being activated).
+// getDocType looks up a DocType by name (for child table resolution).
+func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.DocType, liveSchema map[string]*TableInfo, dialect db.SchemaDialect) *Diff {
 	diff := &Diff{
 		NewColumns:    make(map[string][]ColumnAdd),
 		NewIndexes:    make(map[string][]IndexAdd),
 		RenameColumns: make(map[string][]ColumnRename),
 	}
 
-	for _, dt := range registry.All() {
+	for _, dt := range doctypes {
 		tableName := dt.RawTableName()
 		liveTable, exists := liveSchema[tableName]
 
@@ -145,14 +156,48 @@ func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo, d
 			}
 		}
 
-		// Check for new indexes.
+		// Check for new indexes and detect old-style index names that need migration.
 		for _, field := range dt.DataFields() {
 			if field.SearchIndex && field.IsDataField() {
-				if col, exists := liveTable.Columns[field.Fieldname]; exists && !col.Indexed {
+				col, exists := liveTable.Columns[field.Fieldname]
+				if !exists {
+					continue
+				}
+
+				// Expected new-style names (include table name for global uniqueness).
+				expectedIdxName := fmt.Sprintf("idx_%s_%s", tableName, field.Fieldname)
+				expectedUqName := fmt.Sprintf("uq_%s_%s", tableName, field.Fieldname)
+				// Old-style names (field name only — conflict-prone).
+				oldIdxName := fmt.Sprintf("idx_%s", field.Fieldname)
+				oldUqName := fmt.Sprintf("uq_%s", field.Fieldname)
+
+				hasNewStyle := false
+				var oldStyleName string
+				for _, idxName := range col.IndexNames {
+					if idxName == expectedIdxName || idxName == expectedUqName {
+						hasNewStyle = true
+						break
+					}
+					if idxName == oldIdxName || idxName == oldUqName {
+						oldStyleName = idxName
+					}
+				}
+
+				if !col.Indexed || (!hasNewStyle && oldStyleName != "") {
+					// Either the column isn't indexed at all, or it's indexed
+					// with an old-style name that needs migration.
 					diff.NewIndexes[tableName] = append(diff.NewIndexes[tableName], IndexAdd{
 						Table:   tableName,
 						Columns: []string{field.Fieldname},
 						Unique:  field.Unique,
+					})
+				}
+
+				// Drop old-style index so it doesn't conflict globally.
+				if oldStyleName != "" {
+					diff.DropIndexes = append(diff.DropIndexes, IndexDrop{
+						Table: tableName,
+						Name:  oldStyleName,
 					})
 				}
 			}
@@ -179,10 +224,10 @@ func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo, d
 	}
 
 	// Check for child tables (separate from main loop — applies even when parent is new).
-	for _, dt := range registry.All() {
+	for _, dt := range doctypes {
 		for _, field := range dt.TableFields() {
 			childTableName := dt.RawChildTableName(field.Fieldname)
-			childDT := registry.Get(field.Options)
+			childDT := getDocType(field.Options)
 			if _, exists := liveSchema[childTableName]; !exists {
 				// Child table doesn't exist yet. Only create it if the child
 				// doctype is available (otherwise defer until child is activated).
@@ -241,14 +286,15 @@ func (d *Diff) IsEmpty() bool {
 }
 
 // GenerateDDL produces the SQL statements to apply the diff.
-func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []string {
+// doctypes is the target config, getDocType looks up child doctypes by name.
+func (d *Diff) GenerateDDL(doctypes []*doctype.DocType, getDocType func(string) *doctype.DocType, dialect db.Dialect) []string {
 	var statements []string
 
 	// CREATE TABLE statements.
 	for _, tableName := range d.NewTables {
 		// Find the DocType for this table and use dialect DDL.
 		var foundDT *doctype.DocType
-		for _, dt := range registry.All() {
+		for _, dt := range doctypes {
 			if dt.RawTableName() == tableName {
 				foundDT = dt
 				break
@@ -257,7 +303,7 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []str
 		if foundDT != nil {
 			statements = append(statements, dialect.CreateTable(foundDT)...)
 		} else {
-			ddl := generateCreateTable(tableName, registry, dialect)
+			ddl := generateCreateTableForDoctypes(tableName, doctypes, getDocType, dialect)
 			if ddl != "" {
 				statements = append(statements, ddl)
 			}
@@ -269,7 +315,7 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []str
 		for _, col := range cols {
 			var stmt string
 			var foundF *doctype.Field
-			for _, dt := range registry.All() {
+			for _, dt := range doctypes {
 				if dt.RawTableName() == tableName {
 					if f := dt.GetField(col.Name); f != nil {
 						foundF = f
@@ -294,6 +340,13 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []str
 		}
 	}
 
+	// Drop deprecated (old-style) indexes before creating replacements.
+	// This handles migration from idx_<field> to idx_<table>_<field> naming.
+	for _, idx := range d.DropIndexes {
+		stmt := dialect.DropIndex(idx.Table, idx.Name)
+		statements = append(statements, stmt)
+	}
+
 	// CREATE INDEX statements.
 	for tableName, idxs := range d.NewIndexes {
 		for _, idx := range idxs {
@@ -305,14 +358,19 @@ func (d *Diff) GenerateDDL(registry *doctype.Registry, dialect db.Dialect) []str
 	return statements
 }
 
+// generateCreateTable is a backward-compat wrapper. Prefer generateCreateTableForDoctypes.
 func generateCreateTable(tableName string, registry *doctype.Registry, dialect db.Dialect) string {
+	return generateCreateTableForDoctypes(tableName, registry.All(), registry.Get, dialect)
+}
+
+func generateCreateTableForDoctypes(tableName string, doctypes []*doctype.DocType, getDocType func(string) *doctype.DocType, dialect db.Dialect) string {
 	// Determine if this is a regular table or a child table.
 	var dt *doctype.DocType
 	var isChild bool
 	var parentDT *doctype.DocType
 	var parentField string
 
-	for _, d := range registry.All() {
+	for _, d := range doctypes {
 		if d.RawTableName() == tableName {
 			dt = d
 			break
@@ -323,7 +381,7 @@ func generateCreateTable(tableName string, registry *doctype.Registry, dialect d
 				isChild = true
 				parentDT = d
 				parentField = f.Fieldname
-				dt = registry.Get(f.Options)
+				dt = getDocType(f.Options)
 				break
 			}
 		}
@@ -415,24 +473,27 @@ func escapeSQL(s string) string {
 }
 
 // ApplyDDL executes the DDL statements against the database.
-func ApplyDDL(db *sql.DB, statements []string) error {
-	for _, stmt := range statements {
-		slog.Debug("applying DDL", "sql", stmt)
-		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("executing DDL: %w\nSQL: %s", err, stmt)
-		}
+// Uses the dialect's ExecuteBatch for atomic execution (single HTTP
+// round-trip for LibSQL, single transaction for MySQL/SQLite).
+func ApplyDDL(db *sql.DB, statements []string, dialect db.Dialect) error {
+	if len(statements) == 0 {
+		return nil
 	}
-	return nil
+	return dialect.ExecuteBatch(db, statements)
 }
 
 // MigrateSite computes the schema diff for a site and applies it.
-func MigrateSite(database *sql.DB, dbName string, registry *doctype.Registry, dialect db.Dialect) error {
+// newDoctypes is the target config (from the snapshot being activated).
+// existingDoctypes is used for child-table lookups (finding child DocTypes
+// by name). The registry itself is NOT mutated — callers update it after
+// successful migration.
+func MigrateSite(database *sql.DB, dbName string, newDoctypes []*doctype.DocType, existingDoctypes *doctype.Registry, dialect db.Dialect) error {
 	liveSchema, err := LoadLiveSchema(database, dbName, dialect)
 	if err != nil {
 		return fmt.Errorf("loading live schema: %w", err)
 	}
 
-	diff := ComputeDiff(registry, liveSchema, dialect)
+	diff := ComputeDiff(newDoctypes, existingDoctypes.Get, liveSchema, dialect)
 	if diff.IsEmpty() {
 		slog.Info("schema is up to date, no migrations needed")
 		return nil
@@ -446,12 +507,12 @@ func MigrateSite(database *sql.DB, dbName string, registry *doctype.Registry, di
 		"orphaned_columns", len(diff.Orphaned),
 	)
 
-	ddl := diff.GenerateDDL(registry, dialect)
+	ddl := diff.GenerateDDL(newDoctypes, existingDoctypes.Get, dialect)
 	for _, stmt := range ddl {
 		slog.Info("DDL", "sql", stmt)
 	}
 
-	return ApplyDDL(database, ddl)
+	return ApplyDDL(database, ddl, dialect)
 }
 
 // TieredChange describes a single schema change with its safety classification.
@@ -612,4 +673,39 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 	}
 
 	return preview
+}
+
+// ---------------------------------------------------------------------------
+// Backward-compat wrappers — these accept *doctype.Registry and delegate
+// to the new doctypes-slice functions. Existing test and integration code
+// can keep using these without changes.
+// ---------------------------------------------------------------------------
+
+// ComputeDiffFromRegistry is a backward-compat wrapper. Prefer calling
+// ComputeDiff directly with doctype slices.
+func ComputeDiffFromRegistry(registry *doctype.Registry, liveSchema map[string]*TableInfo, dialect db.SchemaDialect) *Diff {
+	return ComputeDiff(registry.All(), registry.Get, liveSchema, dialect)
+}
+
+// GenerateDDLFromRegistry is a backward-compat wrapper. Prefer calling
+// GenerateDDL directly with doctype slices.
+func (d *Diff) GenerateDDLFromRegistry(registry *doctype.Registry, dialect db.Dialect) []string {
+	return d.GenerateDDL(registry.All(), registry.Get, dialect)
+}
+
+// MigrateSiteFromRegistry is a backward-compat wrapper. Prefer calling
+// MigrateSite directly with doctype slices.
+func MigrateSiteFromRegistry(database *sql.DB, dbName string, registry *doctype.Registry, dialect db.Dialect) error {
+	return MigrateSite(database, dbName, registry.All(), registry, dialect)
+}
+
+// ApplyDDLSequential is a backward-compat wrapper that executes DDL
+// statements one at a time. Prefer ApplyDDL with ExecuteBatch.
+func ApplyDDLSequential(db *sql.DB, statements []string) error {
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("executing DDL: %w\nSQL: %s", err, stmt)
+		}
+	}
+	return nil
 }

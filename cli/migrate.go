@@ -80,7 +80,7 @@ func runMigrate() error {
 		registry := doctype.NewRegistry()
 		registry.LoadFromDB(doctypes)
 
-		if err := schema.MigrateSite(db, siteCfg.DBName, registry, kdb.Resolve(siteCfg.DBType)); err != nil {
+		if err := schema.MigrateSiteFromRegistry(db, siteCfg.DBName, registry, kdb.Resolve(siteCfg.DBType)); err != nil {
 			db.Close()
 			return fmt.Errorf("migrating %s: %w", info.Name, err)
 		}

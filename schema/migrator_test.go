@@ -28,7 +28,7 @@ func TestComputeDiff_NewTable(t *testing.T) {
 	// Empty live schema — everything is new.
 	liveSchema := make(map[string]*TableInfo)
 
-	diff := ComputeDiff(reg, liveSchema, dialect)
+	diff := ComputeDiffFromRegistry(reg, liveSchema, dialect)
 	if diff.IsEmpty() {
 		t.Error("diff should not be empty for new doctype")
 	}
@@ -66,7 +66,7 @@ func TestComputeDiff_AddNullableField(t *testing.T) {
 		},
 	}
 
-	diff := ComputeDiff(reg, liveSchema, dialect)
+	diff := ComputeDiffFromRegistry(reg, liveSchema, dialect)
 	if diff.IsEmpty() {
 		t.Error("diff should not be empty")
 	}
@@ -108,7 +108,7 @@ func TestComputeDiff_DropField(t *testing.T) {
 		},
 	}
 
-	diff := ComputeDiff(reg, liveSchema, dialect)
+	diff := ComputeDiffFromRegistry(reg, liveSchema, dialect)
 	if len(diff.Orphaned) != 1 {
 		t.Fatalf("Orphaned = %v, want 1 orphaned column", diff.Orphaned)
 	}
@@ -144,7 +144,7 @@ func TestComputeDiff_RenamedFrom(t *testing.T) {
 		},
 	}
 
-	diff := ComputeDiff(reg, liveSchema, dialect)
+	diff := ComputeDiffFromRegistry(reg, liveSchema, dialect)
 	if len(diff.RenameColumns["tabTask"]) != 1 {
 		t.Fatalf("RenameColumns = %v, want 1 rename", diff.RenameColumns["tabTask"])
 	}
@@ -182,7 +182,7 @@ func TestComputeDiff_NewIndex(t *testing.T) {
 		},
 	}
 
-	diff := ComputeDiff(reg, liveSchema, dialect)
+	diff := ComputeDiffFromRegistry(reg, liveSchema, dialect)
 	if len(diff.NewIndexes["tabTask"]) != 1 {
 		t.Fatalf("NewIndexes = %v, want 1 index", diff.NewIndexes["tabTask"])
 	}
@@ -379,7 +379,7 @@ func TestGenerateDDL_CreateTable(t *testing.T) {
 		NewTables: []string{"tabNewDoc"},
 	}
 
-	ddl := diff.GenerateDDL(reg, dialect)
+	ddl := diff.GenerateDDLFromRegistry(reg, dialect)
 	if len(ddl) == 0 {
 		t.Fatal("GenerateDDL returned empty statements")
 	}
@@ -410,7 +410,7 @@ func TestGenerateDDL_AddColumn(t *testing.T) {
 		},
 	}
 
-	ddl := diff.GenerateDDL(reg, dialect)
+	ddl := diff.GenerateDDLFromRegistry(reg, dialect)
 	if len(ddl) == 0 {
 		t.Fatal("GenerateDDL returned empty statements")
 	}

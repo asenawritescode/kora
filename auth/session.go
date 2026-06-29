@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -14,6 +15,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// dbTimeout is the maximum time a database query can take before being cancelled.
+// Prevents indefinite hangs when the database server is slow or overloaded.
+const dbTimeout = 5 * time.Second
+const dbCleanupTimeout = 10 * time.Second // cleanup queries get longer timeout
 
 // User represents an authenticated user.
 type User struct {
@@ -45,16 +51,40 @@ type SessionManager struct {
 	cache    map[string]*sessionCacheEntry
 }
 
-// NewSessionManager creates a new session manager.
-// If db is nil (console-only mode with no sites), the sweep goroutine is not started.
+// sessionManagerRegistry caches SessionManagers per *sql.DB to prevent
+// goroutine leaks from per-request SessionManager creation. Each *sql.DB
+// gets exactly one SessionManager with one sweep goroutine.
+var (
+	sessionManagerRegistry   = make(map[*sql.DB]*SessionManager)
+	sessionManagerRegistryMu sync.Mutex
+)
+
+// NewSessionManager returns a shared SessionManager for the given *sql.DB.
+// If db is nil (console-only mode with no sites), returns a SessionManager
+// with no sweep goroutine and no shared caching — each call is independent.
+// For non-nil db, the same SessionManager is returned for the same *sql.DB
+// pointer, ensuring exactly one sweepCacheLoop goroutine per database.
 func NewSessionManager(db *sql.DB) *SessionManager {
+	if db == nil {
+		return &SessionManager{
+			DB:    nil,
+			cache: make(map[string]*sessionCacheEntry),
+		}
+	}
+
+	sessionManagerRegistryMu.Lock()
+	defer sessionManagerRegistryMu.Unlock()
+
+	if sm, ok := sessionManagerRegistry[db]; ok {
+		return sm
+	}
+
 	sm := &SessionManager{
 		DB:    db,
 		cache: make(map[string]*sessionCacheEntry),
 	}
-	if db != nil {
-		go sm.sweepCacheLoop()
-	}
+	go sm.sweepCacheLoop()
+	sessionManagerRegistry[db] = sm
 	return sm
 }
 
@@ -78,7 +108,9 @@ func (sm *SessionManager) CreateSession(site string, user *User) (string, error)
 		return "", fmt.Errorf("marshaling user data: %w", err)
 	}
 
-	_, err = sm.DB.Exec(
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+	_, err = sm.DB.ExecContext(ctx,
 		`INSERT INTO _kora_session (sid, site, user, data, expires_at, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		sid, site, user.Name, string(userJSON), expiresAt, time.Now(),
@@ -113,7 +145,9 @@ func (sm *SessionManager) GetSession(site, sid string) (*User, error) {
 	var userJSON string
 	var expiresStr string // scanned as string for SQLite compatibility (TEXT column)
 
-	err := sm.DB.QueryRow(
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+	err := sm.DB.QueryRowContext(ctx,
 		"SELECT data, expires_at FROM _kora_session WHERE site = ? AND sid = ?",
 		site, sid,
 	).Scan(&userJSON, &expiresStr)
@@ -266,7 +300,9 @@ func (sm *SessionManager) DeleteSession(sid string) {
 	if sm.DB == nil {
 		return
 	}
-	_, err := sm.DB.Exec("DELETE FROM _kora_session WHERE sid = ?", sid)
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+	_, err := sm.DB.ExecContext(ctx, "DELETE FROM _kora_session WHERE sid = ?", sid)
 	if err != nil {
 		slog.Warn("failed to delete session", "sid", sid, "error", err)
 	}
@@ -308,7 +344,9 @@ func (sm *SessionManager) cleanupExpired() {
 	if sm.DB == nil {
 		return // console-only mode — no site database
 	}
-	_, err := sm.DB.Exec("DELETE FROM _kora_session WHERE expires_at < ?", time.Now())
+	ctx, cancel := context.WithTimeout(context.Background(), dbCleanupTimeout)
+	defer cancel()
+	_, err := sm.DB.ExecContext(ctx, "DELETE FROM _kora_session WHERE expires_at < ?", time.Now())
 	if err != nil {
 		slog.Warn("failed to cleanup expired sessions", "error", err)
 	}
@@ -322,7 +360,9 @@ func (sm *SessionManager) AuthenticateUser(site, email, password string) (*User,
 	var name, emailAddr, passwordHash, fullName, rolesStr string
 	var enabled bool
 
-	err := sm.DB.QueryRow(
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+	err := sm.DB.QueryRowContext(ctx,
 		"SELECT name, email, password_hash, full_name, enabled, COALESCE(roles, '') FROM _kora_user WHERE site = ? AND email = ?",
 		site, email,
 	).Scan(&name, &emailAddr, &passwordHash, &fullName, &enabled, &rolesStr)
