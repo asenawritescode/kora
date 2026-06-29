@@ -42,10 +42,48 @@ func (ve ValidationErrors) HasErrors() bool {
 	return len(ve) > 0
 }
 
-// ValidateDocument runs all field-level constraints against a document.
+// ValidateDocument runs all field-level and document-level constraints against a document.
 // Returns all violations as a ValidationErrors slice.
 func ValidateDocument(dt *DocType, doc *Document, registry *Registry, oldDoc *Document) ValidationErrors {
 	var errors ValidationErrors
+
+	// Evaluate predicate-based document constraints.
+	sandbox := NewLispSandbox()
+	defer sandbox.Close()
+
+	for _, dc := range dt.DocConstraints {
+		if dc.Predicate == "" {
+			continue
+		}
+		if dc.Condition != "" {
+			if !evaluateCondition(dc.Condition, doc, nil) {
+				continue
+			}
+		}
+
+		result, err := sandbox.Eval(dc.Predicate, doc.Fields, nil)
+		if err != nil {
+			errors = append(errors, &ValidationError{
+				Type:    "ValidationError",
+				Message: fmt.Sprintf("Predicate evaluation error: %v", err),
+				DocType: dt.Name,
+			})
+			continue
+		}
+
+		// Predicate passes if non-nil and non-zero.
+		if !predicateResult(result) {
+			msg := dc.Message
+			if msg == "" {
+				msg = fmt.Sprintf("Predicate %q failed.", dc.Predicate)
+			}
+			errors = append(errors, &ValidationError{
+				Type:    "ValidationError",
+				Message: msg,
+				DocType: dt.Name,
+			})
+		}
+	}
 
 	for _, field := range dt.Fields {
 		if !field.IsDataField() || field.Fieldtype == "Table" {
@@ -591,5 +629,19 @@ func compareValues(a, b any) int {
 
 func valuesEqual(a, b any) bool {
 	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
+}
+
+// predicateResult returns true if the predicate evaluation result is truthy.
+// A nil or zero result means the predicate failed.
+func predicateResult(result any) bool {
+	if result == nil {
+		return false
+	}
+	f, ok := result.(float64)
+	if ok {
+		return f > 0
+	}
+	// Non-nil, non-float64 results (strings, etc.) are considered truthy.
+	return true
 }
 

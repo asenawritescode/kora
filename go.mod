@@ -13,6 +13,7 @@ require (
 	github.com/glycerine/zygomys/v9 v9.6.2
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/goccy/go-yaml v1.19.2
+	github.com/lib/pq v1.12.3
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/spf13/cobra v1.10.2

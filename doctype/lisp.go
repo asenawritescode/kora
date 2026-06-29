@@ -230,7 +230,50 @@ func (s *LispSandbox) registerBuiltins() {
 		}
 		return args[2], nil
 	})
-}
+
+	// empty(val) — returns 1.0 if val is nil, "", 0, or 0.0.
+	s.env.AddFunction("empty", func(env *zygomys.Zlisp, name string, args []zygomys.Sexp) (zygomys.Sexp, error) {
+		if len(args) < 1 {
+			return zygomys.SexpNull, fmt.Errorf("empty requires 1 argument")
+		}
+		val := args[0]
+		if val == nil || val == zygomys.SexpNull {
+			return &zygomys.SexpBool{Val: true}, nil
+		}
+		switch v := val.(type) {
+		case *zygomys.SexpStr:
+			if v.S == "" {
+				return &zygomys.SexpBool{Val: true}, nil
+			}
+		case *zygomys.SexpInt:
+			if v.Val == 0 {
+				return &zygomys.SexpBool{Val: true}, nil
+			}
+		case *zygomys.SexpFloat:
+			if v.Val == 0 {
+				return &zygomys.SexpBool{Val: true}, nil
+			}
+		}
+		return &zygomys.SexpBool{Val: false}, nil
+	})
+
+	// not(val) — boolean negation. Returns 1.0 if val is nil or false.
+	s.env.AddFunction("not", func(env *zygomys.Zlisp, name string, args []zygomys.Sexp) (zygomys.Sexp, error) {
+		if len(args) < 1 {
+			return zygomys.SexpNull, fmt.Errorf("not requires 1 argument")
+		}
+		val := args[0]
+		if val == nil || val == zygomys.SexpNull {
+			return &zygomys.SexpBool{Val: true}, nil
+		}
+		switch v := val.(type) {
+		case *zygomys.SexpBool:
+			return &zygomys.SexpBool{Val: !v.Val}, nil
+		default:
+			return &zygomys.SexpBool{Val: false}, nil
+		}
+	})
+	}
 
 // sexpToString extracts a string value from a Sexp.
 func sexpToString(s zygomys.Sexp) (string, error) {

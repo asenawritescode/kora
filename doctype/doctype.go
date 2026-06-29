@@ -139,6 +139,7 @@ type Constraint struct {
 type DocConstraint struct {
 	Type           string         `yaml:"type"            json:"type"`
 	Description    string         `yaml:"description"     json:"description"`
+		Predicate      string         `yaml:"predicate"       json:"predicate,omitempty"` // s-expression predicate, e.g. "(> end_date start_date)"
 	Condition      string         `yaml:"condition"       json:"condition,omitempty"`
 	RequireFields  []string       `yaml:"require_fields"  json:"require_fields,omitempty"`
 	Field          string         `yaml:"field"           json:"field,omitempty"`

@@ -20,6 +20,10 @@ type parityCase struct {
 // TestGoldenZygomysParity ensures the Zygomys sandbox produces identical results
 // to the legacy expr-lang evaluator for the same computations.
 func TestGoldenZygomysParity(t *testing.T) {
+	oldMode := DualEvalMode
+	DualEvalMode = "dual"
+	defer func() { DualEvalMode = oldMode }()
+
 	cases := []parityCase{
 		// Simple arithmetic.
 		{infixExpr: "qty * unit_price", lispExpr: "(* qty unit_price)",

@@ -19,6 +19,11 @@ type GoldenVector struct {
 
 // TestGoldenComputedVectors evaluates all golden vectors against ComputeFields.
 func TestGoldenComputedVectors(t *testing.T) {
+	// Use dual mode to verify both evaluators agree.
+	oldMode := DualEvalMode
+	DualEvalMode = "dual"
+	defer func() { DualEvalMode = oldMode }()
+
 	vectors := loadGoldenVectors(t)
 
 	for i, v := range vectors {

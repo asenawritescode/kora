@@ -25,7 +25,7 @@ import (
 // "legacy" — use expr-lang/expr only (original behavior)
 // "lisp"   — use Zygomys Lisp only
 // "dual"   — evaluate both, log mismatches, use legacy result (safe transition)
-var DualEvalMode = "dual"
+var DualEvalMode = "lisp"
 
 // computedCache holds compiled programs for computed field expressions.
 var computedCache = make(map[string]*vm.Program)
@@ -357,7 +357,14 @@ func evalComputedWithCtx(exprStr string, dt *DocType, doc *Document, sandbox *Li
 		return evalComputed(exprStr, dt, doc)
 
 	case "lisp":
-		return evalComputedLisp(exprStr, dt, doc, sandbox)
+		// Lisp-first: try Zygomys, fall back to legacy for infix expressions
+		// that haven't been migrated to s-expression syntax yet.
+		result, lispErr := evalComputedLisp(exprStr, dt, doc, sandbox)
+		if lispErr == nil {
+			return result, nil
+		}
+		slog.Debug("lisp eval failed, falling back to legacy", "expr", exprStr, "error", lispErr)
+		return evalComputed(exprStr, dt, doc)
 
 	case "dual":
 		result, err := evalComputed(exprStr, dt, doc)

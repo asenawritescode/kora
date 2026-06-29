@@ -145,8 +145,7 @@ func Resolve(dbType string) Dialect {
 	case "libsql":
 		return &LibSQLDialect{}
 	case "postgres":
-		// return &PostgresDialect{}
-		panic("postgres dialect not yet implemented")
+		return &PostgresDialect{}
 	default:
 		return &MySQLDialect{}
 	}

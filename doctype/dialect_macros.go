@@ -43,6 +43,8 @@ func ddlFuncMap(driverName string) map[string]func(Change, DDLDialect) []string 
 	switch driverName {
 	case "libsql":
 		return libsqlDDLMap
+	case "postgres":
+		return postgresDDLMap
 	default:
 		return mysqlDDLMap
 	}
@@ -70,9 +72,18 @@ var libsqlDDLMap = map[string]func(Change, DDLDialect) []string{
 	"remove-index":      libsqlDropIndex,
 }
 
-// ---------------------------------------------------------------------------
-// Attr helpers
-// ---------------------------------------------------------------------------
+// postgresDDLMap maps change types to PostgreSQL DDL generation functions.
+// The functions are the same as libsql since they delegate to the dialect's
+// own methods which handle PostgreSQL-specific SQL generation.
+var postgresDDLMap = map[string]func(Change, DDLDialect) []string{
+	"add-doctype":       libsqlCreateTable,
+	"add-field":         libsqlAddColumn,
+	"remove-field":      libsqlDropColumn,
+	"rename-field":      libsqlRenameColumn,
+	"change-field-type": libsqlAlterColumnDDL,
+	"add-index":         libsqlCreateIndex,
+	"remove-index":      libsqlDropIndex,
+}
 
 func getStringAttr(m map[string]any, key, def string) string {
 	if v, ok := m[key]; ok {

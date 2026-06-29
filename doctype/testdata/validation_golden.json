@@ -1,0 +1,7 @@
+[
+  {"predicate": "(> end_date start_date)", "inputs": {"start_date": "2026-06-01", "end_date": "2026-06-15"}, "expected": true},
+  {"predicate": "(> end_date start_date)", "inputs": {"start_date": "2026-06-15", "end_date": "2026-06-01"}, "expected": false},
+  {"predicate": "(> total 0)", "inputs": {"total": 100}, "expected": true},
+  {"predicate": "(> total 0)", "inputs": {"total": -50}, "expected": false},
+  {"predicate": "(and (> total 0) (not (empty customer)))", "inputs": {"total": 100, "customer": "Acme"}, "expected": true}
+]
