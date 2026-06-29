@@ -1200,17 +1200,35 @@ func (h *Handler) HandleConfigDiff(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "from and to required"}})
 		return
 	}
-	var fromJSON, toJSON string
-	h.siteTx(c).DB.QueryRow("SELECT config FROM _kora_config_version WHERE id = ?", fromID).Scan(&fromJSON)
-	h.siteTx(c).DB.QueryRow("SELECT config FROM _kora_config_version WHERE id = ?", toID).Scan(&toJSON)
-	if fromJSON == "" || toJSON == "" {
+	// First check if the "to" version has a stored change_list.
+	var changeList string
+	h.siteTx(c).DB.QueryRow("SELECT COALESCE(change_list, '') FROM _kora_config_version WHERE id = ?", toID).Scan(&changeList)
+	if changeList != "" {
+		var diff doctype.ConfigDiffFull
+		if err := json.Unmarshal([]byte(changeList), &diff); err == nil && len(diff.Doctypes.Changes) > 0 {
+			c.JSON(http.StatusOK, Response{Data: diff.Doctypes})
+			return
+		}
+	}
+	// Fallback: parse config columns (handles JSON and s-expression).
+	var fromConfig, toConfig string
+	h.siteTx(c).DB.QueryRow("SELECT config FROM _kora_config_version WHERE id = ?", fromID).Scan(&fromConfig)
+	h.siteTx(c).DB.QueryRow("SELECT config FROM _kora_config_version WHERE id = ?", toID).Scan(&toConfig)
+	if fromConfig == "" || toConfig == "" {
 		c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"message": "Version not found"}})
 		return
 	}
-	var from, to []*doctype.DocType
-	yaml.Unmarshal([]byte(fromJSON), &from)
-	yaml.Unmarshal([]byte(toJSON), &to)
-	diff := doctype.DiffConfigs(from, to)
+	fromSnapshot, fromErr := doctype.ParseConfig(fromConfig)
+	toSnapshot, toErr := doctype.ParseConfig(toConfig)
+	if fromErr != nil || toErr != nil {
+		var from, to []*doctype.DocType
+		yaml.Unmarshal([]byte(fromConfig), &from)
+		yaml.Unmarshal([]byte(toConfig), &to)
+		diff := doctype.DiffConfigs(from, to)
+		c.JSON(http.StatusOK, Response{Data: diff})
+		return
+	}
+	diff := doctype.DiffConfigs(fromSnapshot.DocTypes, toSnapshot.DocTypes)
 	c.JSON(http.StatusOK, Response{Data: diff})
 }
 
