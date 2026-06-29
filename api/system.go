@@ -985,7 +985,14 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		}
 	}
 
-	// Step 3: Commit the transaction.
+	// Step 3: Deactivate old Active versions inside the tx so it's atomic
+	// with the config writes. If anything fails after, the rollback preserves
+	// the previous Active.
+	if _, err := tx.Exec("UPDATE _kora_config_version SET status = 'Superseded' WHERE site = ? AND status = 'Active'", siteName); err != nil {
+		slog.Warn("failed to deactivate previous active", "error", err)
+	}
+
+	// Step 4: Commit the transaction.
 	if err := tx.Commit(); err != nil {
 		internalError(c, "committing activation transaction", err)
 		return
