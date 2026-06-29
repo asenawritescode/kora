@@ -9,10 +9,11 @@ import (
 
 // ValidationError represents a single constraint violation.
 type ValidationError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-	Field   string `json:"field,omitempty"`
-	DocType string `json:"doctype"`
+	Type      string `json:"type"`
+	Message   string `json:"message"`
+	Field     string `json:"field,omitempty"`
+	DocType   string `json:"doctype"`
+	Predicate string `json:"predicate,omitempty"` // s-expression predicate that failed
 }
 
 // Error implements the error interface.
@@ -81,6 +82,7 @@ func ValidateDocument(dt *DocType, doc *Document, registry *Registry, oldDoc *Do
 				Type:    "ValidationError",
 				Message: msg,
 				DocType: dt.Name,
+					Predicate: dc.Predicate,
 			})
 		}
 	}

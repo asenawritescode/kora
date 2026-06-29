@@ -12,6 +12,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, Plus, ChevronDown, ChevronRight, GripVertical, Edit, Trash2, Save } from 'lucide-react'
 import { YamlPanel } from '@/components/forms/YamlPanel'
+import { LispAutocomplete } from '@/components/forms/LispAutocomplete'
 import { Badge } from '@/components/ui/badge'
 
 // --- Field type groups ---
@@ -318,6 +319,156 @@ export default function AdminDoctypeEditorPage() {
             ))}
           </div>
         </section>
+
+        <Separator />
+
+        {/* Document Constraints */}
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Document Constraints</h2>
+            <Button variant="outline" size="sm" onClick={() => {
+              setForm({
+                ...form,
+                doc_constraints: [...(form.doc_constraints || []), { type: 'Predicate', predicate: '', condition: '', message: '' }]
+              })
+            }}>
+              <Plus className="h-4 w-4 mr-1" /> Add Constraint
+            </Button>
+          </div>
+          {(form.doc_constraints || []).length === 0 && (
+            <p className="text-sm text-muted-foreground italic">No document constraints defined.</p>
+          )}
+          {(form.doc_constraints || []).map((c, ci) => (
+            <div key={ci} className="border rounded-lg p-3 mb-2">
+              <div className="grid grid-cols-12 gap-2 items-start">
+                <div className="col-span-3">
+                  <Label className="text-xs">Type</Label>
+                  <select
+                    className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+                    value={c.type}
+                    onChange={(e) => {
+                      const updated = [...(form.doc_constraints || [])]
+                      updated[ci] = { ...updated[ci], type: e.target.value }
+                      setForm({ ...form, doc_constraints: updated })
+                    }}
+                  >
+                    <option value="Predicate">Predicate</option>
+                    <option value="max">max</option>
+                    <option value="min">min</option>
+                    <option value="max_length">max_length</option>
+                    <option value="min_length">min_length</option>
+                    <option value="regex">regex</option>
+                    <option value="one_of">one_of</option>
+                    <option value="not_one_of">not_one_of</option>
+                    <option value="min_date">min_date</option>
+                    <option value="max_date">max_date</option>
+                  </select>
+                </div>
+
+                {c.type === 'Predicate' ? (
+                  <>
+                    <div className="col-span-4">
+                      <Label className="text-xs">Predicate (s-expression)</Label>
+                      <Input
+                        className="h-9 text-sm font-mono"
+                        value={c.predicate || ''}
+                        onChange={(e) => {
+                          const updated = [...(form.doc_constraints || [])]
+                          updated[ci] = { ...updated[ci], predicate: e.target.value }
+                          setForm({ ...form, doc_constraints: updated })
+                        }}
+                        placeholder="(> end_date start_date)"
+                      />
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        S-expression: (&gt; &lt; = + - * / and or not sum count round)
+                      </p>
+                    </div>
+                    <div className="col-span-4">
+                      <Label className="text-xs">Condition (optional)</Label>
+                      <Input
+                        className="h-9 text-sm font-mono"
+                        value={c.condition || ''}
+                        onChange={(e) => {
+                          const updated = [...(form.doc_constraints || [])]
+                          updated[ci] = { ...updated[ci], condition: e.target.value }
+                          setForm({ ...form, doc_constraints: updated })
+                        }}
+                        placeholder='doc.type == "wholesale"'
+                      />
+                    </div>
+                    <div className="col-span-1 flex items-end pb-1">
+                      <Button
+                        variant="ghost" size="sm"
+                        className="h-9 text-destructive w-full"
+                        onClick={() => {
+                          const updated = (form.doc_constraints || []).filter((_, i) => i !== ci)
+                          setForm({ ...form, doc_constraints: updated.length > 0 ? updated : null })
+                        }}
+                      >✕</Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="col-span-3">
+                      <Label className="text-xs">Value</Label>
+                      <Input
+                        className="h-9 text-sm"
+                        value={c.value != null ? String(c.value) : ''}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          const num = Number(v)
+                          const updated = [...(form.doc_constraints || [])]
+                          updated[ci] = { ...updated[ci], value: isNaN(num) ? v : num }
+                          setForm({ ...form, doc_constraints: updated })
+                        }}
+                        placeholder="value"
+                      />
+                    </div>
+                    <div className="col-span-5">
+                      <Label className="text-xs">Message</Label>
+                      <Input
+                        className="h-9 text-sm"
+                        value={c.message || ''}
+                        onChange={(e) => {
+                          const updated = [...(form.doc_constraints || [])]
+                          updated[ci] = { ...updated[ci], message: e.target.value }
+                          setForm({ ...form, doc_constraints: updated })
+                        }}
+                        placeholder="Error message"
+                      />
+                    </div>
+                    <div className="col-span-1 flex items-end pb-1">
+                      <Button
+                        variant="ghost" size="sm"
+                        className="h-9 text-destructive w-full"
+                        onClick={() => {
+                          const updated = (form.doc_constraints || []).filter((_, i) => i !== ci)
+                          setForm({ ...form, doc_constraints: updated.length > 0 ? updated : null })
+                        }}
+                      >✕</Button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {c.type === 'Predicate' && (
+                <div className="mt-2">
+                  <Label className="text-xs">Message</Label>
+                  <Input
+                    className="h-9 text-sm"
+                    value={c.message || ''}
+                    onChange={(e) => {
+                      const updated = [...(form.doc_constraints || [])]
+                      updated[ci] = { ...updated[ci], message: e.target.value }
+                      setForm({ ...form, doc_constraints: updated })
+                    }}
+                    placeholder="End date must be after start date"
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+        </section>
       </div>
 
       {/* YAML panel (desktop only) */}
@@ -546,17 +697,13 @@ function FieldRow({
           {!isLayout && (
             <div className="mt-3">
               <Label>Computed Expression</Label>
-              <Input
+              <LispAutocomplete
                 className="mt-1 font-mono text-sm"
                 value={field.computed || ''}
-                onChange={(e) => onChange({ computed: e.target.value })}
+                onChange={(val) => onChange({ computed: val })}
                 placeholder={field.computed?.startsWith('(') ? '(sum "items" "amount")' : 'quantity * unit_price'}
+                fieldNames={form.fields?.map((f: any) => f.fieldname) || []}
               />
-              {field.computed?.startsWith('(') && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  S-expression: <code>(+ - * / sum count round today datediff concat if)</code>
-                </p>
-              )}
             </div>
           )}
 

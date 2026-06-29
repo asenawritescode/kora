@@ -1,4 +1,5 @@
 import { evaluateComputed, getAffectedComputedFields } from './expression-eval'
+import { evaluateLisp } from './lisp-eval'
 import type { Field } from '@/types/kora'
 
 /**
@@ -22,13 +23,28 @@ export function applyComputedFields(
 
   // Evaluate each computed field.
   for (const f of computedFields) {
-    const result = evaluateComputed(f.computed!, ctx)
+    const result = evaluateExpression(f.computed!, ctx)
     if (result !== null) {
       updated[f.fieldname] = result
     }
   }
 
   return updated
+}
+
+/**
+ * Routes expression evaluation based on syntax:
+ * - S-expressions starting with '(' go through the Lisp evaluator.
+ * - Legacy infix expressions go through the original evaluator.
+ */
+function evaluateExpression(
+  expr: string,
+  ctx: { fields: Record<string, any>; tables: Record<string, Record<string, any>[]> },
+): number | null {
+  if (expr.startsWith('(')) {
+    return evaluateLisp(expr, ctx) as number | null
+  }
+  return evaluateComputed(expr, ctx)
 }
 
 /**

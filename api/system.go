@@ -882,8 +882,11 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 			slog.Warn("stale draft -- base version mismatch", "draft_id", versionID, "base", baseVersionID, "active", activeVersionID)
 			if c.Query("force") != "true" {
 				c.JSON(http.StatusConflict, ErrorResponse{
-					Error: map[string]string{
+					Error: map[string]any{
 						"message": fmt.Sprintf("This draft was created from version %s but %s is now active. Re-save the draft to incorporate changes.", baseVersionID, activeVersionID),
+					"conflict_type":     "stale_base_version",
+					"base_version_id":   baseVersionID,
+					"active_version_id": activeVersionID,
 					},
 				})
 				return
@@ -1196,7 +1199,18 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 	newSnapshot, _ := store.CollectSnapshot(reg, siteName)
 	store.CreateConfigVersion(siteName, createdBy, "Rollback to version "+versionID, "Active", newSnapshot)
 
-	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "rolled back", "status": "Active"}})
+	// Collect quarantine info from the rollback DDL for user transparency.
+	var quarantined []string
+	for _, stmt := range rollbackDDL {
+		if strings.Contains(stmt, "_dropquar_") || strings.Contains(stmt, "RENAME") {
+			quarantined = append(quarantined, stmt)
+		}
+	}
+	c.JSON(http.StatusOK, Response{Data: map[string]any{
+		"message":     "rolled back",
+		"status":      "Active",
+		"quarantined": quarantined,
+	}})
 }
 
 // --- Config Import (YAML upload) ---

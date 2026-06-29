@@ -11,6 +11,7 @@ export interface DocType {
   sort_order: string
   description: string
   fields: Field[]
+  doc_constraints?: DocConstraint[]
   status?: string  // "Active" | "Draft" — set by the API
 }
 
@@ -54,6 +55,14 @@ export interface Constraint {
   message: string
   condition?: string
   scope?: string
+}
+
+export interface DocConstraint {
+  type: string
+  predicate?: string
+  condition?: string
+  message: string
+  value?: any
 }
 
 export interface WorkflowState {
