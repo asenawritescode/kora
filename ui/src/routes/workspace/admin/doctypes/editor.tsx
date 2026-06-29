@@ -402,7 +402,7 @@ export default function AdminDoctypeEditorPage() {
                         className="h-9 text-destructive w-full"
                         onClick={() => {
                           const updated = (form.doc_constraints || []).filter((_, i) => i !== ci)
-                          setForm({ ...form, doc_constraints: updated.length > 0 ? updated : null })
+                          setForm({ ...form, doc_constraints: updated.length > 0 ? updated : undefined })
                         }}
                       >✕</Button>
                     </div>
@@ -443,7 +443,7 @@ export default function AdminDoctypeEditorPage() {
                         className="h-9 text-destructive w-full"
                         onClick={() => {
                           const updated = (form.doc_constraints || []).filter((_, i) => i !== ci)
-                          setForm({ ...form, doc_constraints: updated.length > 0 ? updated : null })
+                          setForm({ ...form, doc_constraints: updated.length > 0 ? updated : undefined })
                         }}
                       >✕</Button>
                     </div>
@@ -702,7 +702,6 @@ function FieldRow({
                 value={field.computed || ''}
                 onChange={(val) => onChange({ computed: val })}
                 placeholder={field.computed?.startsWith('(') ? '(sum "items" "amount")' : 'quantity * unit_price'}
-                fieldNames={form.fields?.map((f: any) => f.fieldname) || []}
               />
             </div>
           )}

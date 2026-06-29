@@ -21,7 +21,13 @@ func isIdempotentSQLError(err error) bool {
 		strings.Contains(s, "Unknown column") ||
 		strings.Contains(s, "doesn't exist") ||
 		strings.Contains(s, "Can't DROP") ||
-		strings.Contains(s, "check that column")
+		strings.Contains(s, "check that column") ||
+		strings.Contains(s, "Error 1060") || // MySQL duplicate column
+		strings.Contains(s, "Error 1062") || // MySQL duplicate key
+		strings.Contains(s, "Error 1050") || // MySQL table already exists
+		strings.Contains(s, "Error 1061") || // MySQL duplicate index
+		(strings.Contains(s, "Error 1064") && strings.Contains(s, "near ''")) || // MySQL syntax error for empty DEFAULT on existing column
+		strings.Contains(s, "Error 1064") && strings.Contains(s, "DEFAULT ''") // Same, alternate message format
 }
 
 // BootstrapSystemTables creates all _kora_* system tables if they don't exist.
