@@ -1,11 +1,7 @@
 package doctype
 
 import (
-	"context"
-	"log/slog"
 	"math"
-	"os"
-	"strings"
 	"testing"
 )
 
@@ -20,9 +16,6 @@ type parityCase struct {
 // TestGoldenZygomysParity ensures the Zygomys sandbox produces identical results
 // to the legacy expr-lang evaluator for the same computations.
 func TestGoldenZygomysParity(t *testing.T) {
-	oldMode := DualEvalMode
-	DualEvalMode = "dual"
-	defer func() { DualEvalMode = oldMode }()
 
 	cases := []parityCase{
 		// Simple arithmetic.
@@ -150,150 +143,3 @@ func TestGoldenZygomysParity_DateFunctions(t *testing.T) {
 	}
 }
 
-// captureWarnHandler intercepts slog Warn-level messages for test assertions.
-type captureWarnHandler struct {
-	entries []string
-	inner   slog.Handler
-}
-
-func (h *captureWarnHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.inner.Enabled(ctx, level)
-}
-
-func (h *captureWarnHandler) Handle(ctx context.Context, r slog.Record) error {
-	if r.Level >= slog.LevelWarn {
-		h.entries = append(h.entries, r.Message)
-	}
-	return h.inner.Handle(ctx, r)
-}
-
-func (h *captureWarnHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &captureWarnHandler{inner: h.inner.WithAttrs(attrs), entries: h.entries}
-}
-
-func (h *captureWarnHandler) WithGroup(name string) slog.Handler {
-	return &captureWarnHandler{inner: h.inner.WithGroup(name), entries: h.entries}
-}
-
-// TestDualEvalMode_LogsMismatches verifies that dual mode logs mismatches but
-// doesn't break on expressions that produce the same result through both paths.
-func TestDualEvalMode_LogsMismatches(t *testing.T) {
-	oldMode := DualEvalMode
-	DualEvalMode = "dual"
-	defer func() { DualEvalMode = oldMode }()
-
-	// Capture slog Warn output.
-	handler := &captureWarnHandler{
-		entries: nil,
-		inner:   slog.NewTextHandler(os.Stderr, nil),
-	}
-	oldLogger := slog.Default()
-	slog.SetDefault(slog.New(handler))
-	defer slog.SetDefault(oldLogger)
-
-	// Case 1: Infix arithmetic — legacy gets 62.5, Lisp returns 0 (expected mismatch).
-	dt1 := &DocType{
-		Name:   "MismatchType",
-		Fields: []Field{{Fieldname: "result", Fieldtype: "Float", Computed: "qty * unit_price"}},
-	}
-	doc1 := NewDocument("MismatchType")
-	doc1.Set("qty", 5.0)
-	doc1.Set("unit_price", 12.5)
-
-	err := ComputeFields(dt1, doc1)
-	if err != nil {
-		t.Fatalf("ComputeFields error on mismatching expression: %v", err)
-	}
-	got1 := doc1.GetFloat("result")
-	if math.Abs(got1-62.5) > 1e-9 {
-		t.Errorf("mismatching expression: expected 62.5, got %v", got1)
-	}
-	// Dual mode must produce a mismatch warning for infix expressions since
-	// the Lisp sandbox cannot evaluate bare infix (it returns 0).
-	if !hasWarnAboutMismatch(handler.entries) {
-		t.Errorf("expected a mismatch warning for infix expression, got: %v", handler.entries)
-	}
-
-	// Case 2: Lisp expression — routes directly to Lisp sandbox, no dual comparison.
-	handler.entries = nil
-	dt2 := &DocType{
-		Name:   "LispType",
-		Fields: []Field{{Fieldname: "result", Fieldtype: "Float", Computed: "(* qty unit_price)"}},
-	}
-	doc2 := NewDocument("LispType")
-	doc2.Set("qty", 5.0)
-	doc2.Set("unit_price", 12.5)
-
-	err = ComputeFields(dt2, doc2)
-	if err != nil {
-		t.Fatalf("ComputeFields error on lisp expression: %v", err)
-	}
-	got2 := doc2.GetFloat("result")
-	if math.Abs(got2-62.5) > 1e-9 {
-		t.Errorf("lisp expression: expected 62.5, got %v", got2)
-	}
-	// Lisp expressions bypass the dual comparison, so no warning should appear.
-	if len(handler.entries) > 0 {
-		t.Errorf("expected no warnings for lisp expression (no dual comparison), got %d: %v",
-			len(handler.entries), handler.entries)
-	}
-
-	// Case 3: Dual mode still works in "legacy" mode (no sandbox created).
-	handler.entries = nil
-	oldMode2 := DualEvalMode
-	DualEvalMode = "legacy"
-	dt3 := &DocType{
-		Name:   "LegacyType",
-		Fields: []Field{{Fieldname: "result", Fieldtype: "Float", Computed: "qty * unit_price"}},
-	}
-	doc3 := NewDocument("LegacyType")
-	doc3.Set("qty", 5.0)
-	doc3.Set("unit_price", 12.5)
-
-	err = ComputeFields(dt3, doc3)
-	if err != nil {
-		t.Fatalf("ComputeFields error in legacy mode: %v", err)
-	}
-	got3 := doc3.GetFloat("result")
-	if math.Abs(got3-62.5) > 1e-9 {
-		t.Errorf("legacy mode: expected 62.5, got %v", got3)
-	}
-	if len(handler.entries) > 0 {
-		t.Errorf("expected no warnings in legacy mode, got %d: %v",
-			len(handler.entries), handler.entries)
-	}
-	DualEvalMode = oldMode2
-
-	// Case 4: SUM/COUNT expressions still work correctly in dual mode.
-	handler.entries = nil
-	dt4 := &DocType{
-		Name: "SumType",
-		Fields: []Field{
-			{Fieldname: "items", Fieldtype: "Table"},
-			{Fieldname: "total", Fieldtype: "Float", Computed: "SUM(items.amount)"},
-		},
-	}
-	doc4 := NewDocument("SumType")
-	doc4.SetTable("items", []*Document{
-		{Fields: map[string]any{"amount": 10.0}},
-		{Fields: map[string]any{"amount": 20.0}},
-	})
-
-	err = ComputeFields(dt4, doc4)
-	if err != nil {
-		t.Fatalf("ComputeFields error on SUM expression: %v", err)
-	}
-	got4 := doc4.GetFloat("total")
-	if math.Abs(got4-30.0) > 1e-9 {
-		t.Errorf("SUM expression: expected 30.0, got %v", got4)
-	}
-}
-
-func hasWarnAboutMismatch(entries []string) bool {
-	for _, e := range entries {
-		if strings.Contains(e, "mismatch") {
-			return true
-		}
-	}
-	return false
-}

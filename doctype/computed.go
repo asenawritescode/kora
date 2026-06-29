@@ -10,25 +10,12 @@ package doctype
 import (
 	"fmt"
 	"log/slog"
-	"math"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/expr-lang/expr"
-	"github.com/expr-lang/expr/vm"
 )
 
-// DualEvalMode controls how computed expressions are evaluated during the
-// transition from expr-lang/expr to Zygomys Lisp.
-// "legacy" — use expr-lang/expr only (original behavior)
-// "lisp"   — use Zygomys Lisp only
-// "dual"   — evaluate both, log mismatches, use legacy result (safe transition)
-var DualEvalMode = "lisp"
-
-// computedCache holds compiled programs for computed field expressions.
-var computedCache = make(map[string]*vm.Program)
 
 // computedScriptHook is set by the ORM before ComputeFields runs.
 // It bridges script-based computed fields (@script:name) to the JS runtime.
@@ -108,7 +95,7 @@ func ComputeFields(dt *DocType, doc *Document) error {
 	}
 
 	// Determine whether a Lisp sandbox is needed.
-	needsLisp := DualEvalMode != "legacy"
+	needsLisp := true
 	if !needsLisp {
 		for _, cf := range exprOnly {
 			if strings.HasPrefix(cf.expr, "(") {
@@ -160,151 +147,6 @@ func filterCF(items []cfInfo, fn func(cfInfo) bool) []cfInfo {
 }
 
 // evalComputed evaluates a single computed field expression.
-func evalComputed(exprStr string, dt *DocType, doc *Document) (any, error) {
-	resolved := exprStr
-
-	// Step 1: Resolve COUNT() calls.
-	for _, m := range countPattern.FindAllStringSubmatch(exprStr, -1) {
-		tableField := strings.TrimSpace(m[1])
-		children := doc.GetTable(tableField)
-		resolved = strings.Replace(resolved, m[0], strconv.Itoa(len(children)), 1)
-	}
-
-	// Step 2: Resolve SUM() calls.
-	for _, m := range sumPattern.FindAllStringSubmatch(exprStr, -1) {
-		tableField := m[1]
-		column := m[2]
-		var sum float64
-		children := doc.GetTable(tableField)
-		for _, child := range children {
-			sum += asFloat64(child.Get(column))
-		}
-		resolved = strings.Replace(resolved, m[0], strconv.FormatFloat(sum, 'f', -1, 64), 1)
-	}
-
-	// Step 3: Resolve DATEDIFF() calls.
-	for _, m := range datediffPattern.FindAllStringSubmatch(resolved, -1) {
-		left := strings.TrimSpace(m[1])
-		right := strings.TrimSpace(m[2])
-		leftDate := resolveDate(left, doc)
-		rightDate := resolveDate(right, doc)
-		days := int(rightDate.Sub(leftDate).Hours() / 24)
-		resolved = strings.Replace(resolved, m[0], strconv.Itoa(days), 1)
-	}
-
-	// Step 4: Build evaluation environment.
-	env := make(map[string]any)
-	for k, v := range doc.Fields {
-		// Keep table fields as-is (for len()), convert others to float64.
-		if doc.GetTable(k) != nil {
-			env[k] = v
-		} else {
-			env[k] = asFloat64(v)
-		}
-	}
-	env["name"] = doc.Name
-	env["doc_status"] = float64(doc.DocStatus)
-
-	// Step 5: Handle ROUND().
-	for _, m := range roundPattern.FindAllStringSubmatch(resolved, -1) {
-		inner := strings.TrimSpace(m[1])
-		decimals, _ := strconv.Atoi(m[2])
-		innerResult, err := evalSimpleExpr(inner, env)
-		if err != nil {
-			return nil, fmt.Errorf("evaluating ROUND inner %q: %w", inner, err)
-		}
-		rounded := roundTo(asFloat64(innerResult), decimals)
-		resolved = strings.Replace(resolved, m[0], strconv.FormatFloat(rounded, 'f', -1, 64), 1)
-	}
-
-	// Step 6: Final evaluation.
-	result, err := evalSimpleExpr(resolved, env)
-	if err != nil {
-		return nil, fmt.Errorf("evaluating %q: %w", resolved, err)
-	}
-
-	return result, nil
-}
-
-// resolveDate resolves a date value: field name, today(), or string literal.
-func resolveDate(s string, doc *Document) time.Time {
-	s = strings.TrimSpace(s)
-
-	// today() function.
-	if s == "today()" {
-		now := time.Now()
-		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	}
-
-	// String literal: '2026-01-15' or "2026-01-15".
-	if (strings.HasPrefix(s, "'") && strings.HasSuffix(s, "'")) ||
-		(strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"")) {
-		s = s[1 : len(s)-1]
-	}
-
-	// Try parsing as date.
-	for _, layout := range []string{"2006-01-02", "2006-01-02T15:04:05Z", "2006-01-02T15:04:05"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t
-		}
-	}
-
-	// Field name: look up in document.
-	if val := doc.Get(s); val != nil {
-		switch v := val.(type) {
-		case string:
-			for _, layout := range []string{"2006-01-02", "2006-01-02T15:04:05Z", "2006-01-02T15:04:05"} {
-				if t, err := time.Parse(layout, v); err == nil {
-					return t
-				}
-			}
-		case time.Time:
-			return v
-		}
-		// Try float64 (JSON number as unix timestamp days).
-		return time.Time{}
-	}
-
-	return time.Time{}
-}
-
-// evalSimpleExpr compiles and evaluates a simple arithmetic expression.
-func evalSimpleExpr(exprStr string, env map[string]any) (any, error) {
-	program, err := compileForComputed(exprStr)
-	if err != nil {
-		return nil, err
-	}
-	return expr.Run(program, env)
-}
-
-// roundTo rounds a float to N decimal places.
-func roundTo(val float64, decimals int) float64 {
-	pow := 1.0
-	for i := 0; i < decimals; i++ {
-		pow *= 10
-	}
-	return float64(int(val*pow+0.5)) / pow
-}
-
-// compileForComputed compiles an expression for computed field evaluation.
-func compileForComputed(exprStr string) (*vm.Program, error) {
-	if cached, ok := computedCache[exprStr]; ok {
-		return cached, nil
-	}
-
-	program, err := expr.Compile(exprStr, expr.AsAny())
-	if err != nil {
-		return nil, err
-	}
-
-	computedCache[exprStr] = program
-	return program, nil
-}
-
-// evalComputedLisp evaluates a computed field expression using the Zygomys Lisp sandbox.
-// The sandbox is reused across expressions in the same ComputeFields call.
-// expr is the Lisp s-expression or an infix expression (Zygomys supports both).
-// dt and doc provide the evaluation context (field values + child tables).
 func evalComputedLisp(expr string, dt *DocType, doc *Document, sandbox *LispSandbox) (any, error) {
 	if sandbox == nil {
 		return nil, fmt.Errorf("no Lisp sandbox available")
@@ -321,19 +163,19 @@ func evalComputedLisp(expr string, dt *DocType, doc *Document, sandbox *LispSand
 	docFields["name"] = doc.Name
 	docFields["doc_status"] = float64(doc.DocStatus)
 
-	// Build child tables from Table-type fields.
+	// Build child tables from Table-type fields AND any expression-referenced tables.
 	childTables := make(map[string][]map[string]any)
 	for i := range dt.Fields {
 		f := &dt.Fields[i]
 		if f.Fieldtype == "Table" {
-			children := doc.GetTable(f.Fieldname)
-			if len(children) > 0 {
-				rows := make([]map[string]any, len(children))
-				for j, child := range children {
-					rows[j] = child.Fields
-				}
-				childTables[f.Fieldname] = rows
-			}
+			collectChildTable(doc, f.Fieldname, childTables)
+		}
+	}
+	// Also scan the expression for table names (e.g. (sum "items" "amount"))
+	// and include those tables even if not in the doctype fields.
+	for _, tableName := range extractTableNames(expr) {
+		if _, ok := childTables[tableName]; !ok {
+			collectChildTable(doc, tableName, childTables)
 		}
 	}
 
@@ -351,44 +193,48 @@ func evalComputedWithCtx(exprStr string, dt *DocType, doc *Document, sandbox *Li
 		return evalComputedLisp(exprStr, dt, doc, sandbox)
 	}
 
-	// Legacy infix expression.
-	switch DualEvalMode {
-	case "legacy":
-		return evalComputed(exprStr, dt, doc)
-
-	case "lisp":
-		// Lisp-first: try Zygomys, fall back to legacy for infix expressions
-		// that haven't been migrated to s-expression syntax yet.
-		result, lispErr := evalComputedLisp(exprStr, dt, doc, sandbox)
-		if lispErr == nil {
-			return result, nil
+	// Legacy infix expression — auto-convert to s-expression and evaluate via Lisp.
+	if sandbox != nil {
+		sExpr := InfixToSExpr(exprStr)
+		if sExpr != exprStr {
+			return evalComputedLisp(sExpr, dt, doc, sandbox)
 		}
-		slog.Debug("lisp eval failed, falling back to legacy", "expr", exprStr, "error", lispErr)
-		return evalComputed(exprStr, dt, doc)
-
-	case "dual":
-		result, err := evalComputed(exprStr, dt, doc)
-		if err != nil {
-			return nil, err
-		}
-		if sandbox != nil {
-			if lispResult, lispErr := evalComputedLisp(exprStr, dt, doc, sandbox); lispErr == nil {
-				legacyFloat := asFloat64(result)
-				lispFloat := asFloat64(lispResult)
-				if legacyFloat != lispFloat && !(math.IsNaN(legacyFloat) && math.IsNaN(lispFloat)) {
-					slog.Warn("computed field dual eval mismatch",
-						"expr", exprStr,
-						"legacy", legacyFloat,
-						"lisp", lispFloat)
-				}
-			}
-		}
-		return result, nil
-
-	default:
-		// Unknown mode — fall back to legacy.
-		return evalComputed(exprStr, dt, doc)
 	}
+	// Last resort: try bare expression in Lisp sandbox.
+	if sandbox != nil {
+		return evalComputedLisp(exprStr, dt, doc, sandbox)
+	}
+	return nil, fmt.Errorf("no sandbox available for expression %q", exprStr)
+}
+
+// collectChildTable extracts child rows from a document table field.
+func collectChildTable(doc *Document, fieldName string, childTables map[string][]map[string]any) {
+	children := doc.GetTable(fieldName)
+	if len(children) == 0 {
+		return
+	}
+	rows := make([]map[string]any, len(children))
+	for j, child := range children {
+		rows[j] = child.Fields
+	}
+	childTables[fieldName] = rows
+}
+
+// tableNamePattern matches table names in s-expressions: (sum "table" ...) or (count "table").
+var tableNamePattern = regexp.MustCompile(`\((sum|count)\s+"([^"]+)"`)
+
+// extractTableNames extracts table names referenced in a Lisp expression.
+func extractTableNames(expr string) []string {
+	matches := tableNamePattern.FindAllStringSubmatch(expr, -1)
+	var names []string
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		if !seen[m[2]] {
+			names = append(names, m[2])
+			seen[m[2]] = true
+		}
+	}
+	return names
 }
 
 // asFloat64 converts any value to float64 for arithmetic.

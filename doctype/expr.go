@@ -1,186 +1,223 @@
 // Package doctype — boolean expression engine for validation and workflow conditions.
 //
-// Deprecation notice (Phase 1 of RFC-0001):
-// The expr-lang/expr evaluator in this file will be replaced by the Zygomys
-// Lisp sandbox (lisp.go) for validation predicates and workflow conditions.
-// See docs/rfc-0001-lisp-embedding.md for the full migration plan.
+// Uses the Zygomys Lisp sandbox (lisp.go) for condition evaluation.
 package doctype
 
 import (
 	"fmt"
 	"log/slog"
-	"strconv"
-	"time"
-
-	"github.com/expr-lang/expr"
-	"github.com/expr-lang/expr/vm"
+	"strings"
 )
 
-// ExprEngine compiles and evaluates constraint/workflow expressions.
-// Uses expr-lang/expr for safe, sandboxed evaluation.
-type ExprEngine struct {
-	// Cache of compiled programs keyed by expression string.
-	cache map[string]*vm.Program
-}
+// ExprEngine compiles and evaluates constraint/workflow expressions
+// using the Zygomys Lisp sandbox.
+type ExprEngine struct{}
 
 // NewExprEngine creates a new expression engine.
 func NewExprEngine() *ExprEngine {
-	return &ExprEngine{
-		cache: make(map[string]*vm.Program),
-	}
+	return &ExprEngine{}
 }
 
-// EvalEnv is the environment exposed to expression evaluation.
-type EvalEnv struct {
-	Doc  map[string]any `expr:"doc"`
-	User *EvalUser      `expr:"user"`
-}
-
-// EvalUser exposes user info for expressions like user.has_role('Role').
-type EvalUser struct {
-	Name  string   `expr:"name"`
-	Roles []string `expr:"roles"`
-}
-
-// Evaluate compiles (if not cached) and runs an expression against a document and user.
-// Returns true if the expression evaluates to true, false otherwise.
-// Expressions that fail to compile or evaluate default to false (fail-closed).
+// Evaluate evaluates a condition expression against a document and user roles.
+// Non-zero result = true, zero/nil = false. Errors default to false (fail-closed).
 func (e *ExprEngine) Evaluate(exprStr string, doc *Document, userRoles []string) bool {
+	return evaluateCondition(exprStr, doc, userRoles)
+}
+
+// evaluateCondition evaluates a condition expression.
+func evaluateCondition(exprStr string, doc *Document, userRoles []string) bool {
 	if exprStr == "" {
 		return true
 	}
 
-	// Build environment from document.
-	env := EvalEnv{
-		Doc: make(map[string]any),
-		User: &EvalUser{
-			Name:  "",
-			Roles: userRoles,
-		},
-	}
-
+	docFields := make(map[string]any)
 	if doc != nil {
 		for k, v := range doc.Fields {
-			env.Doc[k] = normalizeExprValue(v)
+			docFields[k] = normalizeExprValue(v)
 		}
-		env.Doc["name"] = doc.Name
-		env.Doc["doc_status"] = doc.DocStatus
+		docFields["name"] = doc.Name
+		docFields["doc_status"] = doc.DocStatus
+	}
+	if len(userRoles) > 0 {
+		docFields["user"] = map[string]any{
+			"name":  "",
+			"roles": userRoles,
+		}
 	}
 
-	// Compile or retrieve from cache.
-	program, err := e.compile(exprStr)
+	// Handle legacy expr-lang patterns.
+	if !strings.HasPrefix(exprStr, "(") {
+		if handled, result := evalLegacyEquals(exprStr, docFields); handled {
+			return result
+		}
+		if handled, result := evalLegacyHasRole(exprStr, userRoles); handled {
+			return result
+		}
+	}
+
+	// Convert legacy infix or evaluate directly through Lisp sandbox.
+	evalExpr := exprStr
+	if !strings.HasPrefix(exprStr, "(") {
+		evalExpr = InfixToSExpr(exprStr)
+	}
+
+	s := NewLispSandbox()
+	defer s.Close()
+
+	result, err := s.Eval(evalExpr, docFields, nil)
 	if err != nil {
-		slog.Warn("expression compilation failed, defaulting to false", "expr", exprStr, "error", err)
+		slog.Warn("condition evaluation failed, defaulting to false", "expr", exprStr, "error", err)
 		return false
 	}
-
-	// Evaluate.
-	output, err := expr.Run(program, env)
-	if err != nil {
-		slog.Warn("expression evaluation failed, defaulting to false", "expr", exprStr, "error", err)
-		return false
-	}
-
-	result, ok := output.(bool)
-	if !ok {
-		slog.Warn("expression did not return bool, defaulting to false", "expr", exprStr, "output", output)
-		return false
-	}
-
-	return result
+	return isTruthy(result)
 }
 
-func (e *ExprEngine) compile(exprStr string) (*vm.Program, error) {
-	if cached, ok := e.cache[exprStr]; ok {
-		return cached, nil
+// evalLegacyEquals handles doc.field == "value" and doc.field != "value".
+func evalLegacyEquals(exprStr string, docFields map[string]any) (bool, bool) {
+	clean := strings.ReplaceAll(exprStr, "doc.", "")
+	if idx := strings.Index(clean, "=="); idx >= 0 {
+		left := strings.TrimSpace(clean[:idx])
+		right := strings.TrimSpace(clean[idx+2:])
+		right = strings.Trim(right, `"'`)
+		if val, ok := docFields[left]; ok {
+			return true, fmt.Sprint(val) == right
+		}
 	}
-
-	// Build options with custom functions.
-	opts := []expr.Option{
-		expr.Env(EvalEnv{}),
-		expr.Function("today", func(params ...any) (any, error) {
-			now := time.Now()
-			return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()), nil
-		}),
-		expr.Function("now", func(params ...any) (any, error) {
-			return time.Now(), nil
-		}),
-		expr.Function("len", func(params ...any) (any, error) {
-			if len(params) != 1 {
-				return 0, fmt.Errorf("len() takes exactly 1 argument")
-			}
-			switch v := params[0].(type) {
-			case string:
-				return len(v), nil
-			case []any:
-				return len(v), nil
-			case []*Document:
-				return len(v), nil
-			default:
-				return 0, nil
-			}
-		}),
-		expr.Function("has_role", func(params ...any) (any, error) {
-			// user.has_role('Role') — called on the user object via method.
-			// This is handled through the EvalUser type below.
-			return false, nil
-		}),
+	if idx := strings.Index(clean, "!="); idx >= 0 {
+		left := strings.TrimSpace(clean[:idx])
+		right := strings.TrimSpace(clean[idx+2:])
+		right = strings.Trim(right, `"'`)
+		if val, ok := docFields[left]; ok {
+			return true, fmt.Sprint(val) != right
+		}
 	}
-
-	program, err := expr.Compile(exprStr, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("compiling expression %q: %w", exprStr, err)
-	}
-
-	e.cache[exprStr] = program
-	return program, nil
+	return false, false
 }
 
-// normalizeExprValue converts string values from the database to numeric types
-// so that expressions like doc.total > 0 work correctly.
+// evalLegacyHasRole handles user.has_role('Role').
+func evalLegacyHasRole(expr string, userRoles []string) (bool, bool) {
+	if !strings.Contains(expr, "has_role") {
+		return false, false
+	}
+	for _, role := range userRoles {
+		if strings.Contains(expr, fmt.Sprintf("'%s'", role)) || strings.Contains(expr, fmt.Sprintf("%q", role)) {
+			return true, true
+		}
+	}
+	return true, false
+}
+
+// isTruthy returns true for non-zero, non-nil, non-empty values.
+func isTruthy(v any) bool {
+	if v == nil {
+		return false
+	}
+	switch n := v.(type) {
+	case float64:
+		return n != 0
+	case int:
+		return n != 0
+	case int64:
+		return n != 0
+	case bool:
+		return n
+	case string:
+		return n != "" && n != "false" && n != "0"
+	}
+	return true
+}
+
+// normalizeExprValue converts string DB values to float64 for numeric comparisons.
+// Non-numeric strings are passed through unchanged.
 func normalizeExprValue(v any) any {
 	if v == nil {
-		return nil
+		return 0.0
 	}
-	switch val := v.(type) {
+	switch n := v.(type) {
+	case float64, float32, int, int64:
+		return n
 	case string:
-		// Try int first, then float.
-		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
-			return float64(i)
+		if isNumeric(n) {
+			if f, err := stringToFloat(n); err == nil {
+				return f
+			}
 		}
-		if f, err := strconv.ParseFloat(val, 64); err == nil {
-			return f
-		}
-		return val
+		return n
 	case []byte:
-		return normalizeExprValue(string(val))
-	default:
-		return v
+		s := string(n)
+		if isNumeric(s) {
+			if f, err := stringToFloat(s); err == nil {
+				return f
+			}
+		}
+		return s
 	}
+	return v
 }
 
-// EvalUser method for has_role. The expr library supports calling methods on structs.
-func (u *EvalUser) Has_role(role string) bool {
-	for _, r := range u.Roles {
-		if r == role || r == AdminRole {
-			return true
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	start := 0
+	if s[0] == '-' {
+		start = 1
+	}
+	if start >= len(s) {
+		return false
+	}
+	hasDot := false
+	hasDigit := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if c >= '0' && c <= '9' {
+			hasDigit = true
+			continue
+		}
+		if c == '.' && !hasDot {
+			hasDot = true
+			continue
+		}
+		return false
+	}
+	return hasDigit
+}
+
+func stringToFloat(s string) (float64, error) {
+	var result float64
+	var decimal float64 = 1
+	var negative bool
+	seenDecimal := false
+	started := false
+
+	for i, c := range s {
+		if i == 0 && c == '-' {
+			negative = true
+			continue
+		}
+		if c == '.' && !seenDecimal {
+			seenDecimal = true
+			continue
+		}
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("invalid char in %q", s)
+		}
+		started = true
+		if seenDecimal {
+			decimal *= 10
+			result += float64(c-'0') / decimal
+		} else {
+			result = result*10 + float64(c-'0')
 		}
 	}
-	return false
+	if !started {
+		return 0, fmt.Errorf("no digits in %q", s)
+	}
+	if negative {
+		result = -result
+	}
+	return result, nil
 }
 
-// DefaultEngine is a package-level engine used by validation and workflow code.
+// DefaultEngine is the package-level expression engine used by validation and workflow.
 var DefaultEngine = NewExprEngine()
-
-// evaluateCondition evaluates a condition expression using the expr engine.
-// This replaces the old hand-rolled string matcher.
-func evaluateCondition(exprStr string, doc *Document, user any) bool {
-	userRoles := []string{AdminRole}
-	if u, ok := user.(*EvalUser); ok && u != nil {
-		userRoles = u.Roles
-	}
-	if userRoles == nil {
-		userRoles = []string{}
-	}
-	return DefaultEngine.Evaluate(exprStr, doc, userRoles)
-}
