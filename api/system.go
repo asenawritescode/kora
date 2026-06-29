@@ -974,14 +974,22 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		return
 	}
 
-	// Step 2: Apply DDL within the transaction.
+	// Step 2: Apply DDL.
+	// LibSQL: use ExecuteBatch (SQLite DDL auto-commits, cannot be inside a tx).
+	// MySQL: use ApplyDDLTx (wrapped in the activation transaction for rollback).
 	if len(ddlStatements) > 0 {
-		if err := configstore.ApplyDDLTx(tx, ddlStatements); err != nil {
-			slog.Error("activation: DDL failed — rolling back", "version", versionID, "error", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
-				Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
-			})
-			return
+		if h.TxManager.Dialect.DriverName() == "libsql" {
+			if err := h.TxManager.Dialect.ExecuteBatch(db, ddlStatements); err != nil {
+				slog.Error("activation: LibSQL DDL failed", "version", versionID, "error", err)
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Schema migration failed: " + err.Error()}})
+				return
+			}
+		} else {
+			if err := configstore.ApplyDDLTx(tx, ddlStatements); err != nil {
+				slog.Error("activation: DDL failed — rolling back", "version", versionID, "error", err)
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Schema migration failed: " + err.Error()}})
+				return
+			}
 		}
 	}
 
@@ -1176,14 +1184,20 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 	}
 	defer tx.Rollback()
 
-	// Apply quarantine-aware DDL through the transaction.
+	// Apply quarantine-aware DDL. LibSQL uses ExecuteBatch (DDL auto-commits).
 	if len(rollbackDDL) > 0 {
-		if err := configstore.ApplyDDLTx(tx, rollbackDDL); err != nil {
-			slog.Error("rollback: DDL failed — rolling back", "version", versionID, "error", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
-				Error: map[string]string{"message": "Rollback DDL failed: " + err.Error()},
-			})
-			return
+		if h.TxManager.Dialect.DriverName() == "libsql" {
+			if err := h.TxManager.Dialect.ExecuteBatch(db, rollbackDDL); err != nil {
+				slog.Error("rollback: LibSQL DDL failed", "version", versionID, "error", err)
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Rollback DDL failed: " + err.Error()}})
+				return
+			}
+		} else {
+			if err := configstore.ApplyDDLTx(tx, rollbackDDL); err != nil {
+				slog.Error("rollback: DDL failed — rolling back", "version", versionID, "error", err)
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Rollback DDL failed: " + err.Error()}})
+				return
+			}
 		}
 	}
 
