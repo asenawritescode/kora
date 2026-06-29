@@ -1,3 +1,9 @@
+// Package doctype — boolean expression engine for validation and workflow conditions.
+//
+// Deprecation notice (Phase 1 of RFC-0001):
+// The expr-lang/expr evaluator in this file will be replaced by the Zygomys
+// Lisp sandbox (lisp.go) for validation predicates and workflow conditions.
+// See docs/rfc-0001-lisp-embedding.md for the full migration plan.
 package doctype
 
 import (

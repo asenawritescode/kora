@@ -95,6 +95,7 @@ type Field struct {
 	RenamedFrom        string       `yaml:"renamed_from"        json:"renamed_from"`
 	LinkedField        string       `yaml:"linked_field"        json:"linked_field,omitempty"`
 	Computed           string       `yaml:"computed"            json:"computed,omitempty"`
+	DependencyScope    string       `yaml:"dependency_scope"    json:"dependency_scope,omitempty"`
 }
 
 // IsDataField returns true if this field maps to a database column.

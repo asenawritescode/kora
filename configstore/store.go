@@ -447,29 +447,53 @@ func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, s
 	if err != nil {
 		return "", 0, fmt.Errorf("marshaling config: %w", err)
 	}
+	configStr := string(configJSON)
+
+	// Compute config_hash = SHA-256 of the canonical config JSON.
+	h := sha256.Sum256(configJSON)
+	configHash := hex.EncodeToString(h[:])
 
 	// Compute diff against previous version if one exists.
 	// Handles both old format (JSON array of doctypes) and new format (ConfigSnapshot).
 	var changelog any
+	var changeList any
 	var prevConfigJSON string
 	s.DB.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND version = ?", siteName, currentVersion).Scan(&prevConfigJSON)
 
 	if prevConfigJSON != "" {
 		prevSnapshot, parseErr := doctype.ParseSnapshot(prevConfigJSON)
 		if parseErr == nil {
-			diff := doctype.DiffConfigs(prevSnapshot.DocTypes, snapshot.DocTypes)
-			diff.FromVersion = currentVersion
-			diff.ToVersion = newVersion
-			changelogBytes, _ := json.Marshal(diff)
+			// Compute the full-snapshot diff (includes non-doctype sections).
+			fullDiff := doctype.DiffFullSnapshots(prevSnapshot, snapshot)
+			fullDiff.Doctypes.FromVersion = currentVersion
+			fullDiff.Doctypes.ToVersion = newVersion
+			changeListBytes, _ := json.Marshal(fullDiff)
+			changeList = string(changeListBytes)
+
+			// Also keep backward-compat changelog (doctype-only diff).
+			doctypeDiff := doctype.DiffConfigs(prevSnapshot.DocTypes, snapshot.DocTypes)
+			doctypeDiff.FromVersion = currentVersion
+			doctypeDiff.ToVersion = newVersion
+			changelogBytes, _ := json.Marshal(doctypeDiff)
 			changelog = string(changelogBytes)
 		}
 	}
 
+	// Look up base_version_id from the current active version (for staleness tracking).
+	var baseVersionID string
+	if status == "Draft" {
+		s.DB.QueryRow("SELECT id FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1", siteName).Scan(&baseVersionID)
+	}
+
+	// Get min_kora_version from the snapshot, or use empty string.
+	minKoraVersion := snapshot.MinKoraVersion
+
 	versionID := fmt.Sprintf("cv-%s-%d", siteName, newVersion)
 	_, err = s.DB.Exec(
-		`INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, changelog, status, config)
-		 VALUES (?, ?, ?, ` + s.Dialect.NowTimestamp() + `, ?, ?, ?, ?, ?)`,
-		versionID, siteName, newVersion, createdBy, label, changelog, status, string(configJSON),
+		`INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, changelog, status, config, change_list, config_hash, base_version_id, min_kora_version)
+		 VALUES (?, ?, ?, `+s.Dialect.NowTimestamp()+`, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		versionID, siteName, newVersion, createdBy, label, changelog, status, configStr,
+		changeList, configHash, baseVersionID, minKoraVersion,
 	)
 	if err != nil {
 		return "", 0, fmt.Errorf("creating config version: %w", err)

@@ -295,7 +295,207 @@ func isTighteningConstraint(cType string) bool {
 	}
 }
 
-// BreakingChanges returns only breaking changes from a diff.
+// --- ConfigDiffFull (full-snapshot diff) ---
+
+// ConfigDiffFull extends ConfigDiff with non-doctype section changes.
+type ConfigDiffFull struct {
+	Doctypes       *ConfigDiff     `json:"doctypes"`
+	SectionChanges []SectionChange `json:"section_changes,omitempty"`
+}
+
+// SectionChange describes a change to a non-doctype config section.
+type SectionChange struct {
+	Section string `json:"section"` // "roles", "permissions", "workflows", "analytics_metrics", "scripts"
+	Change  string `json:"change"`  // "added", "removed", "modified"
+	Name    string `json:"name"`    // name of the changed entity
+	Details string `json:"details"` // human-readable description
+}
+
+// DiffFullSnapshots compares two ConfigSnapshots and produces a complete diff
+// covering doctypes, roles, permissions, workflows, analytics metrics, and scripts.
+func DiffFullSnapshots(old, new *ConfigSnapshot) *ConfigDiffFull {
+	result := &ConfigDiffFull{
+		Doctypes: DiffConfigs(old.DocTypes, new.DocTypes),
+	}
+
+	// Compare Roles by name.
+	oldRoleNames := make(map[string]bool)
+	for _, r := range old.Roles {
+		oldRoleNames[r.Name] = true
+	}
+	for _, r := range new.Roles {
+		if !oldRoleNames[r.Name] {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "roles",
+				Change:  "added",
+				Name:    r.Name,
+				Details: fmt.Sprintf("Role %q added", r.Name),
+			})
+		}
+	}
+	newRoleNames := make(map[string]bool)
+	for _, r := range new.Roles {
+		newRoleNames[r.Name] = true
+	}
+	for _, r := range old.Roles {
+		if !newRoleNames[r.Name] {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "roles",
+				Change:  "removed",
+				Name:    r.Name,
+				Details: fmt.Sprintf("Role %q removed", r.Name),
+			})
+		}
+	}
+
+	// Compare Permissions by doctype+role key.
+	oldPermKeys := make(map[string]bool)
+	for _, p := range old.Permissions {
+		key := p.Doctype + "|" + p.Role
+		oldPermKeys[key] = true
+	}
+	for _, p := range new.Permissions {
+		key := p.Doctype + "|" + p.Role
+		if !oldPermKeys[key] {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "permissions",
+				Change:  "added",
+				Name:    key,
+				Details: fmt.Sprintf("Permission added for doctype %q, role %q", p.Doctype, p.Role),
+			})
+		}
+	}
+	newPermKeys := make(map[string]bool)
+	for _, p := range new.Permissions {
+		key := p.Doctype + "|" + p.Role
+		newPermKeys[key] = true
+	}
+	for _, p := range old.Permissions {
+		key := p.Doctype + "|" + p.Role
+		if !newPermKeys[key] {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "permissions",
+				Change:  "removed",
+				Name:    key,
+				Details: fmt.Sprintf("Permission removed for doctype %q, role %q", p.Doctype, p.Role),
+			})
+		}
+	}
+
+	// Compare Workflows by name.
+	oldWorkflowNames := make(map[string]bool)
+	for _, w := range old.Workflows {
+		oldWorkflowNames[w.Name] = true
+	}
+	for _, w := range new.Workflows {
+		if !oldWorkflowNames[w.Name] {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "workflows",
+				Change:  "added",
+				Name:    w.Name,
+				Details: fmt.Sprintf("Workflow %q added", w.Name),
+			})
+		}
+	}
+	newWorkflowNames := make(map[string]bool)
+	for _, w := range new.Workflows {
+		newWorkflowNames[w.Name] = true
+	}
+	for _, w := range old.Workflows {
+		if !newWorkflowNames[w.Name] {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "workflows",
+				Change:  "removed",
+				Name:    w.Name,
+				Details: fmt.Sprintf("Workflow %q removed", w.Name),
+			})
+		}
+	}
+
+	// Compare AnalyticsMetrics by name.
+	oldMetricNames := make(map[string]bool)
+	for _, m := range old.AnalyticsMetrics {
+		oldMetricNames[m.Name] = true
+	}
+	for _, m := range new.AnalyticsMetrics {
+		if !oldMetricNames[m.Name] {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "analytics_metrics",
+				Change:  "added",
+				Name:    m.Name,
+				Details: fmt.Sprintf("Analytics metric %q added", m.Name),
+			})
+		}
+	}
+	newMetricNames := make(map[string]bool)
+	for _, m := range new.AnalyticsMetrics {
+		newMetricNames[m.Name] = true
+	}
+	for _, m := range old.AnalyticsMetrics {
+		if !newMetricNames[m.Name] {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "analytics_metrics",
+				Change:  "removed",
+				Name:    m.Name,
+				Details: fmt.Sprintf("Analytics metric %q removed", m.Name),
+			})
+		}
+	}
+
+	// Compare Scripts by name+hash (modified if hash differs).
+	oldScripts := make(map[string]string)
+	for _, s := range old.Scripts {
+		oldScripts[s.Name] = s.ScriptHash
+	}
+	newScriptMap := make(map[string]string)
+	for _, s := range new.Scripts {
+		newScriptMap[s.Name] = s.ScriptHash
+	}
+	for _, s := range new.Scripts {
+		if oldHash, exists := oldScripts[s.Name]; !exists {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "scripts",
+				Change:  "added",
+				Name:    s.Name,
+				Details: fmt.Sprintf("Script %q added", s.Name),
+			})
+		} else if oldHash != s.ScriptHash {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "scripts",
+				Change:  "modified",
+				Name:    s.Name,
+				Details: fmt.Sprintf("Script %q modified (hash changed)", s.Name),
+			})
+		}
+	}
+	for _, s := range old.Scripts {
+		if _, exists := newScriptMap[s.Name]; !exists {
+			result.SectionChanges = append(result.SectionChanges, SectionChange{
+				Section: "scripts",
+				Change:  "removed",
+				Name:    s.Name,
+				Details: fmt.Sprintf("Script %q removed", s.Name),
+			})
+		}
+	}
+
+	return result
+}
+
+// Summary returns a human-readable summary of the full diff.
+func (d *ConfigDiffFull) Summary() string {
+	dtSummary := d.Doctypes.Summary()
+	sectionCount := len(d.SectionChanges)
+	if sectionCount > 0 {
+		return fmt.Sprintf("%s, %d section changes", dtSummary, sectionCount)
+	}
+	return dtSummary
+}
+
+// BreakingChanges returns all breaking changes across doctypes and sections.
+func (d *ConfigDiffFull) BreakingChanges() []ConfigChange {
+	return d.Doctypes.BreakingChanges()
+}
 func (d *ConfigDiff) BreakingChanges() []ConfigChange {
 	var result []ConfigChange
 	for _, c := range d.Changes {

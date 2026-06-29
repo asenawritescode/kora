@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -741,10 +742,10 @@ func (h *Handler) HandleConfigVersionPreview(c *gin.Context) {
 	db := h.siteTx(c).DB
 	reg := h.siteRegistry(c)
 
-	var configJSON, siteName, currentStatus string
+	var configJSON, siteName, currentStatus, changeList string
 	err := db.QueryRow(
-		"SELECT config, site, status FROM _kora_config_version WHERE id = ?", versionID,
-	).Scan(&configJSON, &siteName, &currentStatus)
+		"SELECT config, site, status, COALESCE(change_list, '') FROM _kora_config_version WHERE id = ?", versionID,
+	).Scan(&configJSON, &siteName, &currentStatus, &changeList)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"message": "Version not found"}})
 		return
@@ -756,7 +757,49 @@ func (h *Handler) HandleConfigVersionPreview(c *gin.Context) {
 		return
 	}
 
-	// Compute diff between current registry and the version's snapshot.
+	// Check staleness.
+	var newerActiveCount int
+	db.QueryRow(
+		"SELECT COUNT(*) FROM _kora_config_version WHERE site = ? AND version > (SELECT version FROM _kora_config_version WHERE id = ?) AND status = 'Active'",
+		siteName, versionID,
+	).Scan(&newerActiveCount)
+
+	var preview map[string]any
+
+	// If a stored change_list exists, use it directly (no re-computation).
+	if changeList != "" {
+		var fullDiff doctype.ConfigDiffFull
+		if parseErr := json.Unmarshal([]byte(changeList), &fullDiff); parseErr == nil {
+			preview = map[string]any{
+				"version_id":                versionID,
+				"status":                    currentStatus,
+				"doctypes_in_snapshot":      len(snapshot.DocTypes),
+				"roles_in_snapshot":         len(snapshot.Roles),
+				"permissions_in_snapshot":   len(snapshot.Permissions),
+				"workflows_in_snapshot":     len(snapshot.Workflows),
+				"diff_summary":              fullDiff.Doctypes.Summary(),
+				"is_breaking":               fullDiff.Doctypes.IsBreaking,
+				"newer_active_versions":     newerActiveCount,
+				"section_changes":           fullDiff.SectionChanges,
+				"change_list_version":       "v1",
+				"warning":                   "",
+			}
+			if newerActiveCount > 0 {
+				preview["warning"] = fmt.Sprintf("Activating this version will REVERT %d newer active version(s). Changes made since this version was created will be lost.", newerActiveCount)
+			}
+			if fullDiff.Doctypes.IsBreaking {
+				if preview["warning"] != "" {
+					preview["warning"] = preview["warning"].(string) + " This version has BREAKING changes (field removals, type changes)."
+				} else {
+					preview["warning"] = "This version has BREAKING changes (field removals, type changes)."
+				}
+			}
+			c.JSON(http.StatusOK, Response{Data: preview})
+			return
+		}
+	}
+
+	// Fallback: compute diff from current registry (for old versions without change_list).
 	currentDoctypes := make([]*doctype.DocType, 0)
 	for _, name := range reg.Names() {
 		if dt := reg.Get(name); dt != nil {
@@ -765,23 +808,17 @@ func (h *Handler) HandleConfigVersionPreview(c *gin.Context) {
 	}
 	diff := doctype.DiffConfigs(currentDoctypes, snapshot.DocTypes)
 
-	// Check staleness.
-	var newerActiveCount int
-	db.QueryRow(
-		"SELECT COUNT(*) FROM _kora_config_version WHERE site = ? AND version > (SELECT version FROM _kora_config_version WHERE id = ?) AND status = 'Active'",
-		siteName, versionID,
-	).Scan(&newerActiveCount)
-
-	preview := map[string]any{
-		"version_id":            versionID,
-		"status":                currentStatus,
-		"doctypes_in_snapshot":  len(snapshot.DocTypes),
-		"roles_in_snapshot":     len(snapshot.Roles),
+	preview = map[string]any{
+		"version_id":             versionID,
+		"status":                 currentStatus,
+		"doctypes_in_snapshot":   len(snapshot.DocTypes),
+		"roles_in_snapshot":      len(snapshot.Roles),
 		"permissions_in_snapshot": len(snapshot.Permissions),
-		"workflows_in_snapshot": len(snapshot.Workflows),
-		"diff_summary":          diff.Summary(),
-		"is_breaking":           diff.IsBreaking,
-		"newer_active_versions": newerActiveCount,
+		"workflows_in_snapshot":  len(snapshot.Workflows),
+		"diff_summary":           diff.Summary(),
+		"is_breaking":            diff.IsBreaking,
+		"newer_active_versions":  newerActiveCount,
+		"change_list_version":    "legacy",
 		"warning":               "",
 	}
 	if newerActiveCount > 0 {
@@ -805,12 +842,11 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	db := h.siteTx(c).DB
 	reg := h.siteRegistry(c)
 
-	// Get the version's config snapshot.
-	var configJSON, siteName string
-	var currentStatus string
+	// Get the version's config snapshot, change_list, and base_version_id.
+	var configJSON, siteName, currentStatus, changeList, baseVersionID string
 	err := db.QueryRow(
-		"SELECT config, site, status FROM _kora_config_version WHERE id = ?", versionID,
-	).Scan(&configJSON, &siteName, &currentStatus)
+		"SELECT config, site, status, COALESCE(change_list, ''), COALESCE(base_version_id, '') FROM _kora_config_version WHERE id = ?", versionID,
+	).Scan(&configJSON, &siteName, &currentStatus, &changeList, &baseVersionID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: map[string]string{"message": "Version not found"},
@@ -825,7 +861,25 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		return
 	}
 
-	// Staleness check: warn if newer versions have been activated since this Draft was created.
+	// Staleness check via base_version_id: ensure the draft was forked from the current active version.
+	if baseVersionID != "" {
+		var activeVersionID string
+		err := db.QueryRow("SELECT id FROM _kora_config_version WHERE site = ? AND status = 'Active' LIMIT 1", siteName).Scan(&activeVersionID)
+		if err == nil && baseVersionID != activeVersionID {
+			slog.Warn("stale draft -- base version mismatch", "draft_id", versionID, "base", baseVersionID, "active", activeVersionID)
+			if c.Query("force") != "true" {
+				c.JSON(http.StatusConflict, ErrorResponse{
+					Error: map[string]string{
+						"message": fmt.Sprintf("This draft was created from version %s but %s is now active. Re-save the draft to incorporate changes.", baseVersionID, activeVersionID),
+					},
+				})
+				return
+			}
+			slog.Warn("activating stale draft with force=true", "version", versionID)
+		}
+	}
+
+	// Additional staleness check: warn if newer versions have been activated since this Draft was created.
 	var newerActiveCount int
 	db.QueryRow(
 		"SELECT COUNT(*) FROM _kora_config_version WHERE site = ? AND version > (SELECT version FROM _kora_config_version WHERE id = ?) AND status = 'Active'",
@@ -844,44 +898,104 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		return
 	}
 
-	// Reload all config from version snapshot into the store + registry.
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-	for _, dt := range snapshot.DocTypes {
-			if err := store.SaveDocType(dt, siteName); err != nil {
-			internalError(c, "saving doctype from version", err)
-			return
+
+	// Replay step: if a stored change_list exists, use it for targeted saves.
+	if changeList != "" {
+		var fullDiff doctype.ConfigDiffFull
+		if parseErr := json.Unmarshal([]byte(changeList), &fullDiff); parseErr == nil {
+			slog.Info("config version activation using stored change_list", "version", versionID)
+
+			// Process doctype changes: save only changed doctypes from snapshot.
+			changedDoctypes := make(map[string]bool)
+			for _, ch := range fullDiff.Doctypes.Changes {
+				if ch.DocType != "" {
+					changedDoctypes[ch.DocType] = true
+				}
+			}
+			for _, dt := range snapshot.DocTypes {
+				if changedDoctypes[dt.Name] {
+					if err := store.SaveDocType(dt, siteName); err != nil {
+						internalError(c, "saving doctype from version", err)
+						return
+					}
+				}
+			}
+
+			// Process section changes: save full sections for any section with changes.
+			sectionsWithChanges := make(map[string]bool)
+			for _, sc := range fullDiff.SectionChanges {
+				sectionsWithChanges[sc.Section] = true
+			}
+			if sectionsWithChanges["roles"] && len(snapshot.Roles) > 0 {
+				store.SaveRoles(snapshot.Roles, siteName)
+			}
+			if sectionsWithChanges["permissions"] && len(snapshot.Permissions) > 0 {
+				store.SavePermissions(snapshot.Permissions, siteName)
+			}
+			if sectionsWithChanges["workflows"] && len(snapshot.Workflows) > 0 {
+				store.SaveWorkflows(snapshot.Workflows, siteName)
+			}
+			if sectionsWithChanges["analytics_metrics"] && len(snapshot.AnalyticsMetrics) > 0 {
+				store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName)
+			}
+
+			// Run schema migration (always needed for doctype changes).
+			var dbName string
+			if h.TxManager.Dialect.DriverName() != "libsql" {
+				db.QueryRow("SELECT DATABASE()").Scan(&dbName)
+			}
+			if err := schema.MigrateSite(db, dbName, snapshot.DocTypes, reg, h.TxManager.Dialect); err != nil {
+				slog.Error("migration failed — activation blocked", "version", versionID, "error", err)
+				c.JSON(http.StatusInternalServerError, ErrorResponse{
+					Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
+				})
+				return
+			}
+		} else {
+			// Change_list parse failed; fall through to legacy behavior.
+			slog.Warn("stored change_list parse failed, falling back to legacy full-save", "version", versionID, "error", parseErr)
+			changeList = "" // force legacy fallback
 		}
 	}
 
-	// Restore roles, permissions, and workflows from snapshot (not live DB).
-	if len(snapshot.Roles) > 0 {
-			store.SaveRoles(snapshot.Roles, siteName)
-	}
-	if len(snapshot.Permissions) > 0 {
-			store.SavePermissions(snapshot.Permissions, siteName)
-	}
-	if len(snapshot.Workflows) > 0 {
-			store.SaveWorkflows(snapshot.Workflows, siteName)
-	}
-	if len(snapshot.AnalyticsMetrics) > 0 {
-			store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName)
-	}
+	// Legacy fallback: if no change_list or parse failed, save everything from snapshot.
+	if changeList == "" {
+		slog.Info("config version activation using legacy full-save (no stored change_list)", "version", versionID)
 
-	// Run schema migration BEFORE rebuilding the registry.
-	// If migration fails, the registry stays on the old config and
-	// the version remains Draft — the system is consistent.
-	// Pass the snapshot doctypes for the diff computation (target config)
-	// and the existing registry for child-table lookups.
-	var dbName string
-	if h.TxManager.Dialect.DriverName() != "libsql" {
-		db.QueryRow("SELECT DATABASE()").Scan(&dbName)
-	}
-	if err := schema.MigrateSite(db, dbName, snapshot.DocTypes, reg, h.TxManager.Dialect); err != nil {
-		slog.Error("migration failed — activation blocked", "version", versionID, "error", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
-		})
-		return
+		for _, dt := range snapshot.DocTypes {
+			if err := store.SaveDocType(dt, siteName); err != nil {
+				internalError(c, "saving doctype from version", err)
+				return
+			}
+		}
+
+		// Restore roles, permissions, and workflows from snapshot (not live DB).
+		if len(snapshot.Roles) > 0 {
+			store.SaveRoles(snapshot.Roles, siteName)
+		}
+		if len(snapshot.Permissions) > 0 {
+			store.SavePermissions(snapshot.Permissions, siteName)
+		}
+		if len(snapshot.Workflows) > 0 {
+			store.SaveWorkflows(snapshot.Workflows, siteName)
+		}
+		if len(snapshot.AnalyticsMetrics) > 0 {
+			store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName)
+		}
+
+		// Run schema migration BEFORE rebuilding the registry.
+		var dbName string
+		if h.TxManager.Dialect.DriverName() != "libsql" {
+			db.QueryRow("SELECT DATABASE()").Scan(&dbName)
+		}
+		if err := schema.MigrateSite(db, dbName, snapshot.DocTypes, reg, h.TxManager.Dialect); err != nil {
+			slog.Error("migration failed — activation blocked", "version", versionID, "error", err)
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Error: map[string]string{"message": "Schema migration failed: " + err.Error()},
+			})
+			return
+		}
 	}
 
 	// Rebuild registry from snapshot ONLY after successful migration.
@@ -910,8 +1024,8 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	if createdBy == "" {
 		createdBy = "system"
 	}
-		newSnapshot, _ := store.CollectSnapshot(reg, siteName)
-		_, _, err = store.CreateConfigVersion(siteName, createdBy, "Activated version "+versionID, "Active", newSnapshot)
+	newSnapshot, _ := store.CollectSnapshot(reg, siteName)
+	_, _, err = store.CreateConfigVersion(siteName, createdBy, "Activated version "+versionID, "Active", newSnapshot)
 	if err != nil {
 		slog.Warn("failed to create active version", "error", err)
 	}

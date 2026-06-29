@@ -1,0 +1,11 @@
+[
+  {"expr": "SUM(items.amount)", "inputs": {"items": [{"amount": 10}, {"amount": 20}]}, "expected": 30},
+  {"expr": "ROUND(price * qty, 2)", "inputs": {"price": 10.5, "qty": 3}, "expected": 31.5},
+  {"expr": "COUNT(attendees)", "inputs": {"attendees": [{"name": "a"}, {"name": "b"}]}, "expected": 2},
+  {"expr": "DATEDIFF(start_date, end_date)", "inputs": {"start_date": "2026-06-29", "end_date": "2026-07-01"}, "expected": 2},
+  {"expr": "DATEDIFF(today(), due_date)", "inputs": {"due_date": "2026-07-01"}, "expected": 0},
+  {"expr": "qty * unit_price", "inputs": {"qty": 5, "unit_price": 12.5}, "expected": 62.5},
+  {"expr": "SUM(items.line_total)", "inputs": {"items": [{"line_total": 20}, {"line_total": 60}]}, "expected": 80},
+  {"expr": "ROUND(total / 3, 0)", "inputs": {"total": 100}, "expected": 33},
+  {"expr": "qty * price - discount", "inputs": {"qty": 10, "price": 5, "discount": 2}, "expected": 48}
+]

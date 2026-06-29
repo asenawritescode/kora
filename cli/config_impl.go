@@ -200,7 +200,7 @@ func runConfigImport(siteName, path string) error {
 
 	// Create config version BEFORE migration (so we have a snapshot to roll back to).
 	// This is fatal — don't apply schema changes without a version record.
-	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, Workflows: workflows}
+	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, Workflows: workflows, MinKoraVersion: Version}
 	versionID, versionNum, err := store.CreateConfigVersion(siteName, "system", "Config import from "+path, "Active", snapshot)
 	if err != nil {
 		return fmt.Errorf("creating config version: %w", err)

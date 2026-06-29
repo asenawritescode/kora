@@ -550,8 +550,13 @@ function FieldRow({
                 className="mt-1 font-mono text-sm"
                 value={field.computed || ''}
                 onChange={(e) => onChange({ computed: e.target.value })}
-                placeholder="quantity * unit_price"
+                placeholder={field.computed?.startsWith('(') ? '(sum "items" "amount")' : 'quantity * unit_price'}
               />
+              {field.computed?.startsWith('(') && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  S-expression: <code>(+ - * / sum count round today datediff concat if)</code>
+                </p>
+              )}
             </div>
           )}
 

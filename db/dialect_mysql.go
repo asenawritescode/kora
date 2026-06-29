@@ -400,11 +400,15 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_permission ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
 
 		// _kora_config_version
-		"CREATE TABLE IF NOT EXISTS _kora_config_version (\n\t\t\tid VARCHAR(36) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL,\n\t\t\tversion INT NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tcreated_by VARCHAR(140) NOT NULL DEFAULT 'system',\n\t\t\tlabel VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tchangelog JSON,\n\t\t\tstatus VARCHAR(20) NOT NULL DEFAULT 'Draft',\n\t\t\tconfig JSON,\n\t\t\tINDEX idx_site_status (site, status),\n\t\t\tUNIQUE INDEX idx_site_version_unique (site, version)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+		"CREATE TABLE IF NOT EXISTS _kora_config_version (\n\t\t\tid VARCHAR(36) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL,\n\t\t\tversion INT NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tcreated_by VARCHAR(140) NOT NULL DEFAULT 'system',\n\t\t\tlabel VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tchangelog JSON,\n\t\t\tstatus VARCHAR(20) NOT NULL DEFAULT 'Draft',\n\t\t\tconfig JSON,\n\t\t\tchange_list JSON,\n\t\t\tconfig_hash VARCHAR(64) NOT NULL DEFAULT '',\n\t\t\tbase_version_id VARCHAR(36) NOT NULL DEFAULT '',\n\t\t\tmin_kora_version VARCHAR(20) NOT NULL DEFAULT '',\n\t\t\tINDEX idx_site_status (site, status),\n\t\t\tUNIQUE INDEX idx_site_version_unique (site, version)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
 		// Backwards compat columns.
 		"ALTER TABLE _kora_config_version ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'Superseded'",
 		"ALTER TABLE _kora_config_version ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 0",
+		"ALTER TABLE _kora_config_version ADD COLUMN change_list JSON",
+		"ALTER TABLE _kora_config_version ADD COLUMN config_hash VARCHAR(64) NOT NULL DEFAULT ''",
+		"ALTER TABLE _kora_config_version ADD COLUMN base_version_id VARCHAR(36) NOT NULL DEFAULT ''",
+		"ALTER TABLE _kora_config_version ADD COLUMN min_kora_version VARCHAR(20) NOT NULL DEFAULT ''",
 		"UPDATE _kora_config_version SET status = 'Active' WHERE is_active = 1 AND status = 'Superseded'",
 
 		// _kora_user

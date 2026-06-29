@@ -1,8 +1,16 @@
+// Package doctype — computed field expression evaluation.
+//
+// Deprecation notice (Phase 1 of RFC-0001):
+// The expr-lang/expr evaluator and regex preprocessing in this file will be
+// replaced by the Zygomys Lisp sandbox (lisp.go) in a future release.
+// New computed field functions should be added to lisp.go, not here.
+// See docs/rfc-0001-lisp-embedding.md for the full migration plan.
 package doctype
 
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,6 +19,13 @@ import (
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 )
+
+// DualEvalMode controls how computed expressions are evaluated during the
+// transition from expr-lang/expr to Zygomys Lisp.
+// "legacy" — use expr-lang/expr only (original behavior)
+// "lisp"   — use Zygomys Lisp only
+// "dual"   — evaluate both, log mismatches, use legacy result (safe transition)
+var DualEvalMode = "dual"
 
 // computedCache holds compiled programs for computed field expressions.
 var computedCache = make(map[string]*vm.Program)
@@ -92,6 +107,24 @@ func ComputeFields(dt *DocType, doc *Document) error {
 		return nil
 	}
 
+	// Determine whether a Lisp sandbox is needed.
+	needsLisp := DualEvalMode != "legacy"
+	if !needsLisp {
+		for _, cf := range exprOnly {
+			if strings.HasPrefix(cf.expr, "(") {
+				needsLisp = true
+				break
+			}
+		}
+	}
+
+	// Create a reusable sandbox for this ComputeFields call.
+	var sandbox *LispSandbox
+	if needsLisp {
+		sandbox = NewLispSandbox()
+		defer sandbox.Close()
+	}
+
 	// Evaluate expression-based computed fields in dependency order:
 	// 1. SUM/COUNT fields first (aggregate child data)
 	// 2. DATEDIFF/ROUND fields (depend on other fields)
@@ -104,7 +137,7 @@ func ComputeFields(dt *DocType, doc *Document) error {
 
 	for _, pass := range passes {
 		for _, cf := range pass {
-			val, err := evalComputed(cf.expr, dt, doc)
+			val, err := evalComputedWithCtx(cf.expr, dt, doc, sandbox)
 			if err != nil {
 				slog.Warn("computed field evaluation failed", "field", cf.field.Fieldname, "expr", cf.expr, "error", err)
 				continue
@@ -266,6 +299,89 @@ func compileForComputed(exprStr string) (*vm.Program, error) {
 
 	computedCache[exprStr] = program
 	return program, nil
+}
+
+// evalComputedLisp evaluates a computed field expression using the Zygomys Lisp sandbox.
+// The sandbox is reused across expressions in the same ComputeFields call.
+// expr is the Lisp s-expression or an infix expression (Zygomys supports both).
+// dt and doc provide the evaluation context (field values + child tables).
+func evalComputedLisp(expr string, dt *DocType, doc *Document, sandbox *LispSandbox) (any, error) {
+	if sandbox == nil {
+		return nil, fmt.Errorf("no Lisp sandbox available")
+	}
+
+	// Build doc fields map, excluding Table-type fields (passed via childTables).
+	docFields := make(map[string]any)
+	for k, v := range doc.Fields {
+		if doc.GetTable(k) != nil {
+			continue
+		}
+		docFields[k] = v
+	}
+	docFields["name"] = doc.Name
+	docFields["doc_status"] = float64(doc.DocStatus)
+
+	// Build child tables from Table-type fields.
+	childTables := make(map[string][]map[string]any)
+	for i := range dt.Fields {
+		f := &dt.Fields[i]
+		if f.Fieldtype == "Table" {
+			children := doc.GetTable(f.Fieldname)
+			if len(children) > 0 {
+				rows := make([]map[string]any, len(children))
+				for j, child := range children {
+					rows[j] = child.Fields
+				}
+				childTables[f.Fieldname] = rows
+			}
+		}
+	}
+
+	result, err := sandbox.Eval(expr, docFields, childTables)
+	if err != nil {
+		return nil, fmt.Errorf("lisp eval of %q: %w", expr, err)
+	}
+	return asFloat64(result), nil
+}
+
+// evalComputedWithCtx dispatches computed field evaluation based on DualEvalMode.
+func evalComputedWithCtx(exprStr string, dt *DocType, doc *Document, sandbox *LispSandbox) (any, error) {
+	// Lisp-syntax expressions (starting with "(") always route to the Lisp sandbox.
+	if strings.HasPrefix(exprStr, "(") {
+		return evalComputedLisp(exprStr, dt, doc, sandbox)
+	}
+
+	// Legacy infix expression.
+	switch DualEvalMode {
+	case "legacy":
+		return evalComputed(exprStr, dt, doc)
+
+	case "lisp":
+		return evalComputedLisp(exprStr, dt, doc, sandbox)
+
+	case "dual":
+		result, err := evalComputed(exprStr, dt, doc)
+		if err != nil {
+			return nil, err
+		}
+		if sandbox != nil {
+			if lispResult, lispErr := evalComputedLisp(exprStr, dt, doc, sandbox); lispErr == nil {
+				legacyFloat := asFloat64(result)
+				lispFloat := asFloat64(lispResult)
+				if legacyFloat != lispFloat && !(math.IsNaN(legacyFloat) && math.IsNaN(lispFloat)) {
+					slog.Warn("computed field dual eval mismatch",
+						"expr", exprStr,
+						"legacy", legacyFloat,
+						"lisp", lispFloat)
+				}
+			}
+		}
+		return result, nil
+
+	default:
+		// Unknown mode — fall back to legacy.
+		return evalComputed(exprStr, dt, doc)
+	}
 }
 
 // asFloat64 converts any value to float64 for arithmetic.

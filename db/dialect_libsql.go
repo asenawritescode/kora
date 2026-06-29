@@ -511,7 +511,11 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"label" TEXT NOT NULL DEFAULT '',
 			"changelog" TEXT,
 			"status" TEXT NOT NULL DEFAULT 'Draft',
-			"config" TEXT
+			"config" TEXT,
+			"change_list" TEXT,
+			"config_hash" TEXT NOT NULL DEFAULT '',
+			"base_version_id" TEXT NOT NULL DEFAULT '',
+			"min_kora_version" TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS "idx_site_status" ON "_kora_config_version" ("site", "status")`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_site_version_unique" ON "_kora_config_version" ("site", "version")`,
@@ -519,6 +523,10 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// Backwards compat columns.
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'Superseded'`,
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "is_active" INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE "_kora_config_version" ADD COLUMN "change_list" TEXT`,
+		`ALTER TABLE "_kora_config_version" ADD COLUMN "config_hash" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_config_version" ADD COLUMN "base_version_id" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_config_version" ADD COLUMN "min_kora_version" TEXT NOT NULL DEFAULT ''`,
 		`UPDATE "_kora_config_version" SET "status" = 'Active' WHERE "is_active" = 1 AND "status" = 'Superseded'`,
 
 		// _kora_user
