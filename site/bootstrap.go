@@ -68,3 +68,20 @@ func BootstrapSystemTables(database *sql.DB, dialect db.Dialect) error {
 
 	return nil
 }
+
+// BootstrapPlatformRegistry creates the _kora_site_registry table on the
+// platform database. This is separate from BootstrapSystemTables because the
+// platform DB (used for site discovery) is distinct from per-site databases.
+func BootstrapPlatformRegistry(database *sql.DB, dialect db.Dialect) error {
+	for _, ddl := range dialect.SystemTableSQL() {
+		if strings.Contains(ddl, "_kora_site_registry") {
+			if _, err := database.Exec(ddl); err != nil {
+				if isIdempotentSQLError(err) {
+					return nil
+				}
+				return fmt.Errorf("create _kora_site_registry: %w\nSQL: %s", err, ddl)
+			}
+		}
+	}
+	return nil
+}

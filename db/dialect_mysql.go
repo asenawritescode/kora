@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/go-sql-driver/mysql"
 )
 
 // MySQLDialect implements Dialect for MySQL 8.0.
@@ -411,6 +411,16 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_config_version ADD COLUMN base_version_id VARCHAR(36) NOT NULL DEFAULT ''",
 		"ALTER TABLE _kora_config_version ADD COLUMN min_kora_version VARCHAR(20) NOT NULL DEFAULT ''",
 		"UPDATE _kora_config_version SET status = 'Active' WHERE is_active = 1 AND status = 'Superseded'",
+
+		// _kora_site_registry
+		"CREATE TABLE IF NOT EXISTS _kora_site_registry (\n\t\t\tsite VARCHAR(140) PRIMARY KEY,\n\t\t\tdb_type VARCHAR(20) NOT NULL DEFAULT 'mysql',\n\t\t\tdb_host VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tdb_port INT NOT NULL DEFAULT 0,\n\t\t\tdb_name VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tdb_user VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tdb_password TEXT,\n\t\t\tdb_password_encrypted TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdomains_json JSON,\n\t\t\tstatus VARCHAR(20) NOT NULL DEFAULT 'active',\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tupdated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tINDEX idx_site_registry_status (status)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+		"ALTER TABLE _kora_site_registry ADD COLUMN db_password TEXT",
+		"ALTER TABLE _kora_site_registry ADD COLUMN db_password_encrypted TINYINT(1) NOT NULL DEFAULT 0",
+		"ALTER TABLE _kora_site_registry ADD COLUMN domains_json JSON",
+		"ALTER TABLE _kora_site_registry ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active'",
+		"ALTER TABLE _kora_site_registry ADD COLUMN created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)",
+		"ALTER TABLE _kora_site_registry ADD COLUMN updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)",
+		"CREATE INDEX idx_site_registry_status ON _kora_site_registry (status)",
 
 		// _kora_user
 		"CREATE TABLE IF NOT EXISTS _kora_user (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\temail VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tpassword_hash VARCHAR(255) NOT NULL,\n\t\t\tfull_name VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tenabled TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\troles TEXT,\n\t\t\tcreation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tUNIQUE KEY idx_site_email (site, email)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",

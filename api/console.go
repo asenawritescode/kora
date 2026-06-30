@@ -29,14 +29,14 @@ var (
 
 // ConsoleHandler holds dependencies for console API endpoints.
 type ConsoleHandler struct {
-	SystemGuard         *auth.SystemGuard
-	SiteRouter          *net.SiteRouter
-	PlatformDBType      string
-	PlatformDBHost      string
-	PlatformDBPort      int
-	PlatformDBUser      string
-	PlatformDBPassword  string
-	PlatformDB          *sql.DB // Existing platform DB connection (for LibSQL reuse)
+	SystemGuard        *auth.SystemGuard
+	SiteRouter         *net.SiteRouter
+	PlatformDBType     string
+	PlatformDBHost     string
+	PlatformDBPort     int
+	PlatformDBUser     string
+	PlatformDBPassword string
+	PlatformDB         *sql.DB // Existing platform DB connection (for LibSQL reuse)
 }
 
 // NewConsoleHandler creates a console API handler.
@@ -265,23 +265,23 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 	}
 
 	result, err := site.CreateSite(site.CreateSiteInput{
-		Hostname:            req.Hostname,
-		DBType:              req.DBType,
-		DBHost:              req.DBHost,
-		DBPort:              req.DBPort,
-		DBName:              req.DBName,
-		DBUser:              req.DBUser,
-		DBPassword:          req.DBPassword,
-		AdminEmail:          req.AdminEmail,
-		AdminPassword:       req.AdminPassword,
-		AdminFullName:       req.AdminFullName,
-		ExtraDomains:         extraDomains,
-		PlatformDBType:      platformType,
-		PlatformDBHost:      platformHost,
-		PlatformDBPort:      platformPort,
-		PlatformDBUser:      platformUser,
-		PlatformDBPassword:  platformPass,
-		PlatformDB:          h.PlatformDB,
+		Hostname:           req.Hostname,
+		DBType:             req.DBType,
+		DBHost:             req.DBHost,
+		DBPort:             req.DBPort,
+		DBName:             req.DBName,
+		DBUser:             req.DBUser,
+		DBPassword:         req.DBPassword,
+		AdminEmail:         req.AdminEmail,
+		AdminPassword:      req.AdminPassword,
+		AdminFullName:      req.AdminFullName,
+		ExtraDomains:       extraDomains,
+		PlatformDBType:     platformType,
+		PlatformDBHost:     platformHost,
+		PlatformDBPort:     platformPort,
+		PlatformDBUser:     platformUser,
+		PlatformDBPassword: platformPass,
+		PlatformDB:         h.PlatformDB,
 	})
 	if err != nil {
 		slog.Error("creating site failed", "hostname", req.Hostname, "error", err)
@@ -524,15 +524,17 @@ func (h *ConsoleHandler) HandleDeleteSite(c *gin.Context) {
 	slog.Info("deleting site via console", "hostname", siteName)
 
 	if err := site.DeleteSite(site.DeleteSiteInput{
-		DB:         loaded.DB,
-		Dialect:    sqlDialect.Resolve(h.PlatformDBType),
-		Hostname:   siteName,
-		DBType:     h.PlatformDBType,
-		DBName:     dbName,
-		DBHost:     h.PlatformDBHost,
-		DBPort:     h.PlatformDBPort,
-		DBUser:     h.PlatformDBUser,
-		DBPassword: h.PlatformDBPassword,
+		DB:             loaded.DB,
+		Dialect:        sqlDialect.Resolve(h.PlatformDBType),
+		Hostname:       siteName,
+		PlatformDB:     h.PlatformDB,
+		PlatformDBType: h.PlatformDBType,
+		DBType:         h.PlatformDBType,
+		DBName:         dbName,
+		DBHost:         h.PlatformDBHost,
+		DBPort:         h.PlatformDBPort,
+		DBUser:         h.PlatformDBUser,
+		DBPassword:     h.PlatformDBPassword,
 	}); err != nil {
 		slog.Error("deleting site failed", "hostname", siteName, "error", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Failed to delete site: " + err.Error()}})

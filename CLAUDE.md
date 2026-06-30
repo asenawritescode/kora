@@ -47,14 +47,14 @@ Kora is a **config-driven application engine**. Applications are YAML configs �
 
 1. Load config from environment variables (`CommonConfigFromEnv` — no YAML files)
 2. Connect to platform DB (MySQL or remote LibSQL via `DB_DSN`)
-3. Discover sites from DB: `SELECT DISTINCT site FROM _kora_config_version`
-4. Per site: reconstruct config from platform defaults + persisted domains → connect → bootstrap `_kora_*` tables → load config from DB → build Registry → run schema migration
+3. Discover sites from DB: registry-first via `_kora_site_registry`, with legacy fallback to `_kora_config_version`
+4. Per site: reconstruct config from persisted site registry data + platform defaults → connect → bootstrap `_kora_*` tables → load config from DB → build Registry → run schema migration
 5. Build `SiteRouter` (domain → site map)
 6. Wire middleware: Recovery → RequestID → SecurityHeaders → CORS → SiteRouter → RateLimiter
 7. Register auth routes (public), API routes (/api — SiteGuard), SPA (/workspace — NoRoute), console (/console — SystemGuard)
 8. Start scheduler, listen, graceful shutdown on SIGTERM
 
-**Site config is reconstructed from env vars + DB** — no `site_config.yaml` files. Sites survive container redeploys because metadata persists in `_kora_config_version.config` (domains, etc.).
+**Site config is reconstructed from env vars + the durable site registry** — no `site_config.yaml` files. Sites survive container redeploys because metadata persists in `_kora_site_registry`, while tenant config history remains in `_kora_config_version`.
 
 ### Middleware Chain
 

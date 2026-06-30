@@ -148,7 +148,7 @@ http://host/s/fieldwork/workspace   → Fieldwork workspace
 http://host/console                 → System console
 ```
 
-Sites created via console are persisted in `_kora_config_version` — they survive container redeploys.
+Sites created via console are persisted in `_kora_site_registry` for startup discovery, and still keep tenant-local config history in `_kora_config_version`. They survive container redeploys and can be hot-added immediately after onboarding.
 
 ## Administrator Panel
 

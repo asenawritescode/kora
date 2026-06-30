@@ -20,7 +20,7 @@ func testSite(name string, domains ...string) *LoadedSite {
 	return &LoadedSite{
 		Name:     name,
 		Config:   cfg,
-		DB:       nil,             // not used in routing tests
+		DB:       nil, // not used in routing tests
 		Registry: doctype.NewRegistry(),
 	}
 }
@@ -474,5 +474,26 @@ func TestSiteRouter_AddSite(t *testing.T) {
 	}
 	if w.Body.String() != "new-site.com" {
 		t.Errorf("body = %q, want %q", w.Body.String(), "new-site.com")
+	}
+}
+
+func TestSiteRouter_AddSiteReplacesExistingSite(t *testing.T) {
+	sr := NewSiteRouter(nil)
+
+	first := testSite("app.example.com")
+	second := testSite("app.example.com", "app.example.com", "alias.example.com")
+
+	sr.AddSite(first)
+	sr.AddSite(second)
+
+	sites := sr.AllSites()
+	if len(sites) != 1 {
+		t.Fatalf("AllSites len = %d, want 1", len(sites))
+	}
+	if sites[0] != second {
+		t.Fatalf("AllSites[0] = %#v, want %#v", sites[0], second)
+	}
+	if got := sr.SiteByName("app.example.com"); got != second {
+		t.Fatalf("SiteByName() = %#v, want %#v", got, second)
 	}
 }

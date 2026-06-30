@@ -529,6 +529,29 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "min_kora_version" TEXT NOT NULL DEFAULT ''`,
 		`UPDATE "_kora_config_version" SET "status" = 'Active' WHERE "is_active" = 1 AND "status" = 'Superseded'`,
 
+		// _kora_site_registry
+		`CREATE TABLE IF NOT EXISTS "_kora_site_registry" (
+			"site" TEXT NOT NULL PRIMARY KEY,
+			"db_type" TEXT NOT NULL DEFAULT 'mysql',
+			"db_host" TEXT NOT NULL DEFAULT '',
+			"db_port" INTEGER NOT NULL DEFAULT 0,
+			"db_name" TEXT NOT NULL DEFAULT '',
+			"db_user" TEXT NOT NULL DEFAULT '',
+			"db_password" TEXT,
+			"db_password_encrypted" INTEGER NOT NULL DEFAULT 0,
+			"domains_json" TEXT,
+			"status" TEXT NOT NULL DEFAULT 'active',
+			"created_at" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
+			"updated_at" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
+		)`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "db_password" TEXT`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "db_password_encrypted" INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "domains_json" TEXT`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'active'`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "created_at" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "updated_at" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))`,
+		`CREATE INDEX IF NOT EXISTS "idx_site_registry_status" ON "_kora_site_registry" ("status")`,
+
 		// _kora_user
 		`CREATE TABLE IF NOT EXISTS "_kora_user" (
 			"name" TEXT NOT NULL PRIMARY KEY,

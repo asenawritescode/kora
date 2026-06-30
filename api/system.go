@@ -44,12 +44,12 @@ type ReferenceInfo struct {
 
 // SystemDoctypeResponse is the full schema response for a single DocType.
 type SystemDoctypeResponse struct {
-	DocType      *doctype.DocType              `json:"doctype"`
-	Status       string                        `json:"status"` // "Active" or "Draft"
-	Workflow     *WorkflowResponse              `json:"workflow,omitempty"`
-	Permissions  map[string]bool               `json:"permissions"`
-	Transitions  []doctype.WorkflowTransition  `json:"transitions,omitempty"`
-	ReferencedBy []ReferenceInfo               `json:"referenced_by,omitempty"`
+	DocType      *doctype.DocType             `json:"doctype"`
+	Status       string                       `json:"status"` // "Active" or "Draft"
+	Workflow     *WorkflowResponse            `json:"workflow,omitempty"`
+	Permissions  map[string]bool              `json:"permissions"`
+	Transitions  []doctype.WorkflowTransition `json:"transitions,omitempty"`
+	ReferencedBy []ReferenceInfo              `json:"referenced_by,omitempty"`
 }
 
 // WorkflowResponse holds the workflow definition for a DocType.
@@ -445,12 +445,28 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	}
 	c.JSON(code, Response{
 		Data: map[string]any{
-			"doctype":       dt,
-			"version_id":    versionID,
-			"version_num":   versionNum,
-			"status":        status,
+			"doctype":     dt,
+			"version_id":  versionID,
+			"version_num": versionNum,
+			"status":      status,
 		},
 	})
+
+	if activate {
+		if cfg := analytics.LoadCloudRelayConfig(); cfg != nil {
+			siteName := c.GetString("site_name")
+			analytics.SendCloudProductEvent(nil, *cfg, analytics.CloudProductEventDTO{
+				SiteID:    siteName,
+				AccountID: cfg.AccountID,
+				Kind:      "first_doctype",
+				Properties: analytics.FirstDocTypePropertiesDTO{
+					DocType: dt.Name,
+					Site:    siteName,
+					Status:  status,
+				},
+			}, "first_doctype:"+siteName)
+		}
+	}
 }
 
 // --- Doctype Update ---
@@ -491,7 +507,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 
 	// Save.
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-		if err := store.SaveDocType(&newDT, c.GetString("site_name")); err != nil {
+	if err := store.SaveDocType(&newDT, c.GetString("site_name")); err != nil {
 		internalError(c, "saving doctype", err)
 		return
 	}
@@ -541,9 +557,10 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 
 // HandleSystemDoctypeDelete removes a DocType configuration.
 // DELETE /api/system/doctype/:doctype?cleanup=config|full
-//   cleanup=config (default): Delete config rows only. Business tables, analytics, permissions survive.
-//   cleanup=full: Full cleanup — also deletes analytics, permissions, workflows, and clears Link fields.
-//   cleanup=none: Soft delete — only remove from registry.
+//
+//	cleanup=config (default): Delete config rows only. Business tables, analytics, permissions survive.
+//	cleanup=full: Full cleanup — also deletes analytics, permissions, workflows, and clears Link fields.
+//	cleanup=none: Soft delete — only remove from registry.
 func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 	doctypeName := c.Param("doctype")
 	reg := h.siteRegistry(c)
@@ -771,18 +788,18 @@ func (h *Handler) HandleConfigVersionPreview(c *gin.Context) {
 		var fullDiff doctype.ConfigDiffFull
 		if parseErr := json.Unmarshal([]byte(changeList), &fullDiff); parseErr == nil {
 			preview = map[string]any{
-				"version_id":                versionID,
-				"status":                    currentStatus,
-				"doctypes_in_snapshot":      len(snapshot.DocTypes),
-				"roles_in_snapshot":         len(snapshot.Roles),
-				"permissions_in_snapshot":   len(snapshot.Permissions),
-				"workflows_in_snapshot":     len(snapshot.Workflows),
-				"diff_summary":              fullDiff.Doctypes.Summary(),
-				"is_breaking":               fullDiff.Doctypes.IsBreaking,
-				"newer_active_versions":     newerActiveCount,
-				"section_changes":           fullDiff.SectionChanges,
-				"change_list_version":       "v1",
-				"warning":                   "",
+				"version_id":              versionID,
+				"status":                  currentStatus,
+				"doctypes_in_snapshot":    len(snapshot.DocTypes),
+				"roles_in_snapshot":       len(snapshot.Roles),
+				"permissions_in_snapshot": len(snapshot.Permissions),
+				"workflows_in_snapshot":   len(snapshot.Workflows),
+				"diff_summary":            fullDiff.Doctypes.Summary(),
+				"is_breaking":             fullDiff.Doctypes.IsBreaking,
+				"newer_active_versions":   newerActiveCount,
+				"section_changes":         fullDiff.SectionChanges,
+				"change_list_version":     "v1",
+				"warning":                 "",
 			}
 			if newerActiveCount > 0 {
 				preview["warning"] = fmt.Sprintf("Activating this version will REVERT %d newer active version(s). Changes made since this version was created will be lost.", newerActiveCount)
@@ -809,17 +826,17 @@ func (h *Handler) HandleConfigVersionPreview(c *gin.Context) {
 	diff := doctype.DiffConfigs(currentDoctypes, snapshot.DocTypes)
 
 	preview = map[string]any{
-		"version_id":             versionID,
-		"status":                 currentStatus,
-		"doctypes_in_snapshot":   len(snapshot.DocTypes),
-		"roles_in_snapshot":      len(snapshot.Roles),
+		"version_id":              versionID,
+		"status":                  currentStatus,
+		"doctypes_in_snapshot":    len(snapshot.DocTypes),
+		"roles_in_snapshot":       len(snapshot.Roles),
 		"permissions_in_snapshot": len(snapshot.Permissions),
-		"workflows_in_snapshot":  len(snapshot.Workflows),
-		"diff_summary":           diff.Summary(),
-		"is_breaking":            diff.IsBreaking,
-		"newer_active_versions":  newerActiveCount,
-		"change_list_version":    "legacy",
-		"warning":               "",
+		"workflows_in_snapshot":   len(snapshot.Workflows),
+		"diff_summary":            diff.Summary(),
+		"is_breaking":             diff.IsBreaking,
+		"newer_active_versions":   newerActiveCount,
+		"change_list_version":     "legacy",
+		"warning":                 "",
 	}
 	if newerActiveCount > 0 {
 		preview["warning"] = fmt.Sprintf("Activating this version will REVERT %d newer active version(s). Changes made since this version was created will be lost.", newerActiveCount)
@@ -883,10 +900,10 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 			if c.Query("force") != "true" {
 				c.JSON(http.StatusConflict, ErrorResponse{
 					Error: map[string]any{
-						"message": fmt.Sprintf("This draft was created from version %s but %s is now active. Re-save the draft to incorporate changes.", baseVersionID, activeVersionID),
-					"conflict_type":     "stale_base_version",
-					"base_version_id":   baseVersionID,
-					"active_version_id": activeVersionID,
+						"message":           fmt.Sprintf("This draft was created from version %s but %s is now active. Re-save the draft to incorporate changes.", baseVersionID, activeVersionID),
+						"conflict_type":     "stale_base_version",
+						"base_version_id":   baseVersionID,
+						"active_version_id": activeVersionID,
 					},
 				})
 				return
@@ -1392,13 +1409,13 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 		return
 	}
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-		if err := store.SavePermissions(permissions, c.GetString("site_name")); err != nil {
+	if err := store.SavePermissions(permissions, c.GetString("site_name")); err != nil {
 		internalError(c, "saving permissions", err)
 		return
 	}
 	// Reload into registry.
 	reg := h.siteRegistry(c)
-		roles, _ := store.LoadRoles(c.GetString("site_name"))
+	roles, _ := store.LoadRoles(c.GetString("site_name"))
 	reg.Permissions.LoadPermissionsFromDB(roles, permissions)
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "saved"}})
 }
@@ -1446,7 +1463,7 @@ func (h *Handler) HandleSystemWorkflowSave(c *gin.Context) {
 		return
 	}
 	store := configstore.NewStore(db, h.TxManager.Dialect)
-		if err := store.SaveWorkflows([]*doctype.Workflow{&wf}, c.GetString("site_name")); err != nil {
+	if err := store.SaveWorkflows([]*doctype.Workflow{&wf}, c.GetString("site_name")); err != nil {
 		internalError(c, "saving workflow", err)
 		return
 	}

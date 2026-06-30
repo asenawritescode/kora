@@ -19,7 +19,6 @@ import (
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/configstore"
 	kdb "github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/workspace"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/email"
 	knet "github.com/asenawritescode/kora/net"
@@ -30,6 +29,7 @@ import (
 	"github.com/asenawritescode/kora/secret"
 	"github.com/asenawritescode/kora/site"
 	"github.com/asenawritescode/kora/webhook"
+	"github.com/asenawritescode/kora/workspace"
 )
 
 // Version is set at build time via -ldflags "-X github.com/asenawritescode/kora/cli.Version=...".
@@ -88,6 +88,15 @@ func runServe() error {
 		}
 		slog.Info("database connected", "type", sc.DBType)
 	}
+
+	// Bootstrap the _kora_site_registry table on the platform database so
+	// site creation via the console persists metadata that survives restarts.
+	if platformDB != nil {
+		if err := site.BootstrapPlatformRegistry(platformDB, kdb.Resolve(common.DBType)); err != nil {
+			return fmt.Errorf("bootstrapping platform registry: %w", err)
+		}
+	}
+
 	// Close platformDB on shutdown if it was opened.
 	if platformDB != nil {
 		defer platformDB.Close()
@@ -115,9 +124,8 @@ func runServe() error {
 	var firstDB *sql.DB
 
 	for _, info := range dbSites {
-		// Reconstruct site config from platform defaults + persisted domains.
-		siteCfg := site.ReconstructSiteConfig(info.Name, common, info.Domains)
-		siteCfg.DBHost = common.DBHost
+		// Reconstruct site config from persisted registry metadata + platform defaults.
+		siteCfg := site.ReconstructSiteConfigFromDBInfo(info, common)
 
 		slog.Info("connecting to database", "site", info.Name, "db", siteCfg.DBName)
 		db, err := site.Connect(siteCfg)
@@ -165,20 +173,20 @@ func runServe() error {
 			return fmt.Errorf("migrating %s: %w", info.Name, err)
 		}
 
-			// Initialize analytics for this site (if KORA_ANALYTICS=true).
-			analyticsCfg := analytics.LoadConfig()
-			var siteEventBus analytics.EventBus
-			var siteWorker *analytics.Worker
-			if analyticsCfg.Enabled {
-				if err := analytics.BootstrapTables(db, kdb.Resolve(common.DBType)); err != nil {
-					slog.Warn("analytics: bootstrap failed", "site", info.Name, "error", err)
-				} else {
-					siteEventBus = analytics.NewChannelBus(analyticsCfg.ChannelSize, analyticsCfg.WALDir)
-					siteWorker = analytics.NewWorker(siteEventBus, db, kdb.Resolve(common.DBType), registry, info.Name, analyticsCfg)
-					go siteWorker.Start()
-					slog.Info("analytics enabled", "site", info.Name)
-				}
+		// Initialize analytics for this site (if KORA_ANALYTICS=true).
+		analyticsCfg := analytics.LoadConfig()
+		var siteEventBus analytics.EventBus
+		var siteWorker *analytics.Worker
+		if analyticsCfg.Enabled {
+			if err := analytics.BootstrapTables(db, kdb.Resolve(common.DBType)); err != nil {
+				slog.Warn("analytics: bootstrap failed", "site", info.Name, "error", err)
+			} else {
+				siteEventBus = analytics.NewChannelBus(analyticsCfg.ChannelSize, analyticsCfg.WALDir)
+				siteWorker = analytics.NewWorker(siteEventBus, db, kdb.Resolve(common.DBType), registry, info.Name, analyticsCfg)
+				go siteWorker.Start()
+				slog.Info("analytics enabled", "site", info.Name)
 			}
+		}
 
 		domains := siteCfg.Domains()
 		loadedSites = append(loadedSites, &knet.LoadedSite{
@@ -268,27 +276,32 @@ func runServe() error {
 		slog.Info("script runner disabled (KORA_SCRIPTS_ENABLED=false)")
 	}
 
-		siteBuses := make(map[string]analytics.EventBus)
-		siteMultiBuses := make(map[string]*analytics.MultiBus)
-		siteWebhookWorkers := make(map[string]*webhook.Worker)
-		for _, s := range loadedSites {
-			if s.AnalyticsEventBus != nil {
-				siteBuses[s.Name] = s.AnalyticsEventBus
-				// Wrap in MultiBus for webhook fan-out.
-				mb, mbErr := analytics.NewMultiBus(s.AnalyticsEventBus)
-				if mbErr == nil {
-					siteMultiBuses[s.Name] = mb
-					// Start webhook worker for this site.
-					w := webhook.NewWorker(s.DB, mb, s.Name)
-					w.Start()
-					siteWebhookWorkers[s.Name] = w
-					slog.Info("webhook worker started", "site", s.Name)
-				} else {
-					slog.Warn("failed to create multi-bus for webhooks", "site", s.Name, "error", mbErr)
+	siteBuses := make(map[string]analytics.EventBus)
+	siteMultiBuses := make(map[string]*analytics.MultiBus)
+	siteWebhookWorkers := make(map[string]*webhook.Worker)
+	cloudRelayCfg := analytics.LoadCloudRelayConfig()
+	for _, s := range loadedSites {
+		if s.AnalyticsEventBus != nil {
+			siteBuses[s.Name] = s.AnalyticsEventBus
+			// Wrap in MultiBus for webhook fan-out.
+			mb, mbErr := analytics.NewMultiBus(s.AnalyticsEventBus)
+			if mbErr == nil {
+				siteMultiBuses[s.Name] = mb
+				if cloudRelayCfg != nil {
+					relay := analytics.NewCloudRelay(mb, s.Name, *cloudRelayCfg)
+					relay.Start()
 				}
+				// Start webhook worker for this site.
+				w := webhook.NewWorker(s.DB, mb, s.Name)
+				w.Start()
+				siteWebhookWorkers[s.Name] = w
+				slog.Info("webhook worker started", "site", s.Name)
+			} else {
+				slog.Warn("failed to create multi-bus for webhooks", "site", s.Name, "error", mbErr)
 			}
 		}
-		// Start async hook worker (processes after_* hooks in background).
+	}
+	// Start async hook worker (processes after_* hooks in background).
 	asyncHookQueue := make(chan orm.AsyncHookRequest, 1000)
 	go runAsyncHookWorker(asyncHookQueue, scriptRunner, siteScriptStores, loadedSites)
 	slog.Info("async hook worker started", "queue_size", 1000)
@@ -327,7 +340,7 @@ func runServe() error {
 		router.PUT("/api/console/sites/:name", ch.RequireConsoleAuth, ch.HandleUpdateSite)
 		router.DELETE("/api/console/sites/:name", ch.RequireConsoleAuth, ch.HandleDeleteSite)
 		router.POST("/api/console/sites/:name/reset-password", ch.RequireConsoleAuth, ch.HandleResetSitePassword)
-		}
+	}
 
 	// Health + ping.
 	router.GET("/api/v1/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong", "version": Version}) })
@@ -339,10 +352,16 @@ func runServe() error {
 			checkDB = platformDB
 		}
 		if checkDB != nil {
-			if err := checkDB.Ping(); err != nil { dbStatus = "disconnected" }
-		} else { dbStatus = "unknown" }
+			if err := checkDB.Ping(); err != nil {
+				dbStatus = "disconnected"
+			}
+		} else {
+			dbStatus = "unknown"
+		}
 		status := "ok"
-		if dbStatus != "connected" { status = "degraded" }
+		if dbStatus != "connected" {
+			status = "degraded"
+		}
 		c.JSON(200, gin.H{"status": status, "db": dbStatus})
 	})
 
@@ -353,14 +372,24 @@ func runServe() error {
 
 	// Server.
 	port := common.HTTPPort
-	if httpPortFlag > 0 { port = httpPortFlag }
+	if httpPortFlag > 0 {
+		port = httpPortFlag
+	}
 	addr := fmt.Sprintf(":%d", port)
 	tlsCfg := &knet.TLSConfig{Mode: common.TLSMode, Email: common.TLSEmail}
-	if len(allDomains) > 0 { tlsCfg.Domains = allDomains }
+	if len(allDomains) > 0 {
+		tlsCfg.Domains = allDomains
+	}
 	srv := knet.NewServer(router, addr, tlsCfg)
-	if common.ReadTimeout > 0 { srv.ReadTimeout = time.Duration(common.ReadTimeout) * time.Second }
-	if common.WriteTimeout > 0 { srv.WriteTimeout = time.Duration(common.WriteTimeout) * time.Second }
-	if common.IdleTimeout > 0 { srv.IdleTimeout = time.Duration(common.IdleTimeout) * time.Second }
+	if common.ReadTimeout > 0 {
+		srv.ReadTimeout = time.Duration(common.ReadTimeout) * time.Second
+	}
+	if common.WriteTimeout > 0 {
+		srv.WriteTimeout = time.Duration(common.WriteTimeout) * time.Second
+	}
+	if common.IdleTimeout > 0 {
+		srv.IdleTimeout = time.Duration(common.IdleTimeout) * time.Second
+	}
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)
@@ -370,17 +399,24 @@ func runServe() error {
 		slog.Info("received signal, shutting down gracefully", "signal", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil { slog.Error("server shutdown error", "error", err) }
+		if err := srv.Shutdown(ctx); err != nil {
+			slog.Error("server shutdown error", "error", err)
+		}
 		// Stop webhook workers.
-		for _, w := range siteWebhookWorkers { w.Stop() }
-		for _, s := range loadedSites { s.DB.Close() }
-		if scriptRunner != nil { scriptRunner.Close() }
+		for _, w := range siteWebhookWorkers {
+			w.Stop()
+		}
+		for _, s := range loadedSites {
+			s.DB.Close()
+		}
+		if scriptRunner != nil {
+			scriptRunner.Close()
+		}
 		slog.Info("server stopped")
 	}()
 
 	return srv.ListenAndServe()
 }
-
 
 func startScheduler(db *sql.DB, registry *doctype.Registry, txManager *orm.TxManager) {
 	cfg := loadSchedulerConfig()
@@ -449,10 +485,10 @@ func runAsyncHookWorker(queue chan orm.AsyncHookRequest, runner script.Runner, s
 		}
 
 		tm := &orm.TxManager{
-			DB:           db,
-			ScriptRunner: runner,
-			SiteName:     req.Site,
-			CurrentUser:  req.User,
+			DB:              db,
+			ScriptRunner:    runner,
+			SiteName:        req.Site,
+			CurrentUser:     req.User,
 			CurrentUserRole: req.UserRole,
 		}
 		if store, ok := stores[req.Site]; ok {

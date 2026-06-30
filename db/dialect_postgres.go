@@ -539,6 +539,29 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		`CREATE INDEX IF NOT EXISTS "idx_site_status" ON "_kora_config_version" ("site", "status")`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_site_version_unique" ON "_kora_config_version" ("site", "version")`,
 
+		// _kora_site_registry
+		`CREATE TABLE IF NOT EXISTS "_kora_site_registry" (
+			"site" VARCHAR(140) PRIMARY KEY,
+			"db_type" VARCHAR(20) NOT NULL DEFAULT 'mysql',
+			"db_host" VARCHAR(255) NOT NULL DEFAULT '',
+			"db_port" INTEGER NOT NULL DEFAULT 0,
+			"db_name" VARCHAR(255) NOT NULL DEFAULT '',
+			"db_user" VARCHAR(255) NOT NULL DEFAULT '',
+			"db_password" TEXT,
+			"db_password_encrypted" SMALLINT NOT NULL DEFAULT 0,
+			"domains_json" JSONB,
+			"status" VARCHAR(20) NOT NULL DEFAULT 'active',
+			"created_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+			"updated_at" TIMESTAMP NOT NULL DEFAULT NOW()
+		)`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "db_password" TEXT`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "db_password_encrypted" SMALLINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "domains_json" JSONB`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "status" VARCHAR(20) NOT NULL DEFAULT 'active'`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "created_at" TIMESTAMP NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "updated_at" TIMESTAMP NOT NULL DEFAULT NOW()`,
+		`CREATE INDEX IF NOT EXISTS "idx_site_registry_status" ON "_kora_site_registry" ("status")`,
+
 		// _kora_user
 		`CREATE TABLE IF NOT EXISTS "_kora_user" (
 			"name" VARCHAR(140) PRIMARY KEY,

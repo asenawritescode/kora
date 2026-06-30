@@ -8,10 +8,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
-	"github.com/gin-gonic/gin"
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/gin-gonic/gin"
 )
 
 // LoadedSite holds the runtime state for a single site.
@@ -32,12 +33,19 @@ type LoadedSite struct {
 
 // AllSites returns all loaded sites (for console, path-based routing, etc.).
 func (sr *SiteRouter) AllSites() []*LoadedSite {
-	return sr.allSites
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
+	return append([]*LoadedSite(nil), sr.allSites...)
 }
 
 // AddSite hot-adds a site to the running router without a restart.
 // Used by the console when creating a new site via API.
 func (sr *SiteRouter) AddSite(s *LoadedSite) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	if existing := sr.siteByNameLocked(s.Name); existing != nil {
+		sr.removeSiteLocked(existing.Name)
+	}
 	domains := s.Config.Domains
 	if len(domains) == 0 {
 		domains = []string{s.Config.Hostname}
@@ -54,6 +62,12 @@ func (sr *SiteRouter) AddSite(s *LoadedSite) {
 // RemoveSite removes a site from the router by name. Returns the removed site
 // or nil if not found. Updates the default site if the removed site was the default.
 func (sr *SiteRouter) RemoveSite(name string) *LoadedSite {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	return sr.removeSiteLocked(name)
+}
+
+func (sr *SiteRouter) removeSiteLocked(name string) *LoadedSite {
 	// Find the site in allSites.
 	idx := -1
 	for i, s := range sr.allSites {
@@ -92,6 +106,12 @@ func (sr *SiteRouter) RemoveSite(name string) *LoadedSite {
 // SiteByName returns a site by its name or short name.
 // E.g., both "airtime.local" and "airtime" match the airtime site.
 func (sr *SiteRouter) SiteByName(name string) *LoadedSite {
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
+	return sr.siteByNameLocked(name)
+}
+
+func (sr *SiteRouter) siteByNameLocked(name string) *LoadedSite {
 	for _, s := range sr.allSites {
 		if s.Name == name {
 			return s
@@ -116,6 +136,7 @@ type SiteRouterConfig struct {
 
 // SiteRouter maps Host headers to loaded sites.
 type SiteRouter struct {
+	mu          sync.RWMutex
 	sites       map[string]*LoadedSite
 	allSites    []*LoadedSite
 	defaultSite *LoadedSite
@@ -159,19 +180,22 @@ func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 		}
 
 		host := stripPort(strings.ToLower(c.Request.Host))
+		sr.mu.RLock()
 
 		// Check site cookie (set by /s/:site/... redirect).
 		// Validate that the request Host is trusted when using this cookie to prevent
 		// cross-site access via cookie injection on shared networks.
 		if siteName, _ := c.Cookie("kora_site"); siteName != "" {
-			if s := sr.SiteByName(siteName); s != nil {
+			if s := sr.siteByNameLocked(siteName); s != nil {
 				if sr.isHostAllowedForSite(host, s) {
 					c.Set("site_name", s.Name)
 					c.Set("site_db", s.DB)
 					c.Set("site_registry", s.Registry)
+					sr.mu.RUnlock()
 					c.Next()
 					return
 				}
+				sr.mu.RUnlock()
 				c.AbortWithStatusJSON(403, gin.H{
 					"error":   "site_access_denied",
 					"message": fmt.Sprintf("Site %q cannot be accessed via host %q", siteName, host),
@@ -186,6 +210,7 @@ func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 				site = sr.defaultSite
 			}
 		}
+		sr.mu.RUnlock()
 
 		if site == nil {
 			c.AbortWithStatusJSON(404, gin.H{
@@ -222,6 +247,8 @@ func (sr *SiteRouter) isHostAllowedForSite(host string, site *LoadedSite) bool {
 
 // AllDomains returns every domain across all sites (for autocert).
 func (sr *SiteRouter) AllDomains() []string {
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
 	var domains []string
 	seen := make(map[string]bool)
 	for _, s := range sr.allSites {

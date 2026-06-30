@@ -190,7 +190,15 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	// Step 5: Create initial config version (used by DiscoverSitesFromDB).
 	ensureConfigVersion(db, input.Hostname, domains)
 
-	// Step 6: Build empty registry.
+	// Step 6: Persist durable site discovery metadata in the platform database.
+	if err := ensurePlatformSiteRegistration(input.PlatformDB, input.PlatformDBType, siteCfg); err != nil {
+		if isOwnedDB {
+			db.Close()
+		}
+		return nil, fmt.Errorf("persisting platform site registry: %w", err)
+	}
+
+	// Step 7: Build empty registry.
 	registry := doctype.NewRegistry()
 	registry.LoadFull(nil, nil, nil)
 
@@ -200,6 +208,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 		Registry: registry,
 	}, nil
 }
+
 // createAdminUser hashes the password and inserts a user into _kora_user.
 func createAdminUser(db *sql.DB, email, password, fullName, site string) error {
 	passwordHash, err := auth.HashPassword(password)

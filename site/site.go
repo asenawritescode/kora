@@ -72,9 +72,9 @@ type CommonConfig struct {
 	DBUser     string `yaml:"db_user"`
 	DBPassword string `yaml:"db_password"`
 	HTTPPort   int    `yaml:"http_port"`
-	Workers   int    `yaml:"workers"`
-	LogLevel  string `yaml:"log_level"`
-	LogFormat string `yaml:"log_format"`
+	Workers    int    `yaml:"workers"`
+	LogLevel   string `yaml:"log_level"`
+	LogFormat  string `yaml:"log_format"`
 
 	// App branding.
 	AppName      string `yaml:"app_name"`
@@ -298,17 +298,37 @@ func LoadSiteConfig(path string) (*SiteConfig, error) {
 	return cfg, nil
 }
 
-// DiscoverSitesFromDB finds sites by querying _kora_config_version in the platform database.
-// DBSiteInfo holds site metadata discovered from the database.
-type DBSiteInfo struct {
-	Name    string
-	Domains []string
+// DiscoverSitesFromDB finds sites from both the durable platform registry and,
+// for backwards compatibility, the legacy _kora_config_version table. Registry
+// entries take precedence over legacy entries with the same site name.
+func DiscoverSitesFromDB(db *sql.DB) ([]DBSiteInfo, error) {
+	registrySites, regErr := discoverSitesFromRegistry(db)
+	if regErr != nil && !isSiteRegistryMissing(regErr) {
+		return nil, regErr
+	}
+
+	// Always also discover from legacy config version to catch sites that
+	// predate the registry table. Registry entries override legacy ones.
+	legacySites, legErr := discoverSitesFromLegacyConfig(db)
+	if legErr != nil {
+		return nil, legErr
+	}
+
+	// Merge: registry takes precedence.
+	seen := make(map[string]int, len(registrySites))
+	for i, s := range registrySites {
+		seen[s.Name] = i
+	}
+	for _, s := range legacySites {
+		if _, exists := seen[s.Name]; !exists {
+			registrySites = append(registrySites, s)
+		}
+	}
+	return registrySites, nil
 }
 
-// DiscoverSitesFromDB finds sites by querying _kora_config_version in the platform database.
-// Returns site names and their persisted domains (stored in the config JSON).
-// This allows sites created via console to survive container redeploys.
-func DiscoverSitesFromDB(db *sql.DB) ([]DBSiteInfo, error) {
+// discoverSitesFromLegacyConfig reads site names from _kora_config_version.
+func discoverSitesFromLegacyConfig(db *sql.DB) ([]DBSiteInfo, error) {
 	rows, err := db.Query("SELECT DISTINCT site, config FROM _kora_config_version WHERE status = 'Active'")
 	if err != nil {
 		return nil, err
@@ -322,7 +342,6 @@ func DiscoverSitesFromDB(db *sql.DB) ([]DBSiteInfo, error) {
 			return nil, err
 		}
 		info := DBSiteInfo{Name: site, Domains: []string{site}}
-		// Parse domains from config JSON if present.
 		if configJSON != "" && configJSON != "{}" {
 			var cfg struct {
 				Domains []string `json:"domains"`
@@ -356,6 +375,31 @@ func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []stri
 		DomainsList: domains,
 		Apps:        []string{"core"},
 	}
+}
+
+// ReconstructSiteConfigFromDBInfo builds a SiteConfig from discovered site metadata
+// and fills any missing values from platform defaults.
+func ReconstructSiteConfigFromDBInfo(info DBSiteInfo, common *CommonConfig) *SiteConfig {
+	cfg := ReconstructSiteConfig(info.Name, common, info.Domains)
+	if info.DBType != "" {
+		cfg.DBType = info.DBType
+	}
+	if info.DBHost != "" {
+		cfg.DBHost = info.DBHost
+	}
+	if info.DBPort != 0 {
+		cfg.DBPort = info.DBPort
+	}
+	if info.DBName != "" {
+		cfg.DBName = info.DBName
+	}
+	if info.DBUser != "" {
+		cfg.DBUser = info.DBUser
+	}
+	if info.DBPassword != "" {
+		cfg.DBPassword = info.DBPassword
+	}
+	return cfg
 }
 
 // Connect opens a database connection for the site.
@@ -451,9 +495,11 @@ func CreateDatabase(cfg *SiteConfig) error {
 
 // DeleteSiteInput holds the parameters needed to tear down a site.
 type DeleteSiteInput struct {
-	DB       *sql.DB
-	Dialect  sqlDialect.Dialect
-	Hostname string
+	DB             *sql.DB
+	Dialect        sqlDialect.Dialect
+	Hostname       string
+	PlatformDB     *sql.DB
+	PlatformDBType string
 
 	// MySQL-specific (for DROP DATABASE).
 	DBType     string
@@ -492,6 +538,9 @@ func DeleteSite(input DeleteSiteInput) error {
 		if _, err := tempDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", input.Dialect.QuoteIdent(input.DBName))); err != nil {
 			return fmt.Errorf("dropping database %s: %w", input.DBName, err)
 		}
+		if err := removePlatformSiteRegistration(input.PlatformDB, input.PlatformDBType, input.Hostname); err != nil {
+			return fmt.Errorf("removing platform site registration: %w", err)
+		}
 		slog.Info("site database dropped", "hostname", input.Hostname, "db_name", input.DBName)
 		return nil
 
@@ -528,6 +577,9 @@ func DeleteSite(input DeleteSiteInput) error {
 		}
 		if _, err := input.DB.Exec("DELETE FROM _kora_secret WHERE site = ?", input.Hostname); err != nil {
 			return fmt.Errorf("cleaning secrets: %w", err)
+		}
+		if err := removePlatformSiteRegistration(input.PlatformDB, input.PlatformDBType, input.Hostname); err != nil {
+			return fmt.Errorf("removing platform site registration: %w", err)
 		}
 
 		input.DB.Close()

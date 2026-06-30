@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -39,16 +40,16 @@ const sessionCacheCleanupInterval = 5 * time.Minute
 
 type sessionCacheEntry struct {
 	user      *User
-	site      string    // site the session belongs to (prevents cross-site cache hits)
+	site      string // site the session belongs to (prevents cross-site cache hits)
 	cachedAt  time.Time
 	expiresAt time.Time // session expiry from DB
 }
 
 // SessionManager manages user sessions with an in-memory TTL cache.
 type SessionManager struct {
-	DB       *sql.DB
-	cacheMu  sync.RWMutex
-	cache    map[string]*sessionCacheEntry
+	DB      *sql.DB
+	cacheMu sync.RWMutex
+	cache   map[string]*sessionCacheEntry
 }
 
 // sessionManagerRegistry caches SessionManagers per *sql.DB to prevent
@@ -561,7 +562,7 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 			sm := NewSessionManager(db)
 
 			site := c.GetString("site_name")
-				user, err := sm.AuthenticateUser(site, req.Email, req.Password)
+			user, err := sm.AuthenticateUser(site, req.Email, req.Password)
 			if err != nil {
 				// Only return known user-facing messages; log internal errors.
 				msg := err.Error()
@@ -591,6 +592,19 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 				},
 				"sid": sid,
 			})
+
+			if cfg := analytics.LoadCloudRelayConfig(); cfg != nil {
+				analytics.SendCloudProductEvent(nil, *cfg, analytics.CloudProductEventDTO{
+					SiteID:    site,
+					AccountID: cfg.AccountID,
+					Kind:      "first_login",
+					Properties: analytics.FirstLoginPropertiesDTO{
+						User:  user.Email,
+						Site:  site,
+						Login: "password",
+					},
+				}, "first_login:"+site+":"+user.Email)
+			}
 		})
 
 		auth.POST("/logout", func(c *gin.Context) {
@@ -599,7 +613,9 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 				// Use site DB if available.
 				logoutSM := sm
 				if siteDB, exists := c.Get("site_db"); exists {
-					if sdb, ok := siteDB.(*sql.DB); ok { logoutSM = NewSessionManager(sdb) }
+					if sdb, ok := siteDB.(*sql.DB); ok {
+						logoutSM = NewSessionManager(sdb)
+					}
 				}
 				logoutSM.DeleteSession(sid)
 			}
@@ -608,16 +624,16 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 		})
 
 		auth.GET("/providers", func(c *gin.Context) {
-				c.JSON(http.StatusOK, gin.H{
-					"data": gin.H{
-						"providers": []gin.H{
-							{"name": "password", "label": "Email & Password"},
-						},
+			c.JSON(http.StatusOK, gin.H{
+				"data": gin.H{
+					"providers": []gin.H{
+						{"name": "password", "label": "Email & Password"},
 					},
-				})
+				},
 			})
+		})
 
-			auth.GET("/me", func(c *gin.Context) {
+		auth.GET("/me", func(c *gin.Context) {
 			sid, _ := c.Cookie("kora_sid")
 			if sid == "" {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
@@ -626,7 +642,9 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 			// Use site DB if available.
 			meSM := sm
 			if siteDB, exists := c.Get("site_db"); exists {
-				if sdb, ok := siteDB.(*sql.DB); ok { meSM = NewSessionManager(sdb) }
+				if sdb, ok := siteDB.(*sql.DB); ok {
+					meSM = NewSessionManager(sdb)
+				}
 			}
 			site := c.GetString("site_name")
 			user, err := meSM.GetSession(site, sid)
@@ -650,12 +668,12 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 // parseTime parses a datetime string from the database (MySQL DATETIME or SQLite TEXT).
 func parseTime(s string) (time.Time, error) {
 	formats := []string{
-		time.RFC3339Nano,                            // "2006-01-02T15:04:05.999999999Z07:00"
-		"2006-01-02 15:04:05.999999999-07:00",       // SQLite with nanoseconds + timezone
-		"2006-01-02 15:04:05.999999-07:00",          // SQLite with microseconds + timezone
-		"2006-01-02 15:04:05-07:00",                 // SQLite with timezone
-		"2006-01-02 15:04:05.999999",                // MySQL with microseconds
-		"2006-01-02 15:04:05",                       // MySQL without fractional seconds
+		time.RFC3339Nano,                      // "2006-01-02T15:04:05.999999999Z07:00"
+		"2006-01-02 15:04:05.999999999-07:00", // SQLite with nanoseconds + timezone
+		"2006-01-02 15:04:05.999999-07:00",    // SQLite with microseconds + timezone
+		"2006-01-02 15:04:05-07:00",           // SQLite with timezone
+		"2006-01-02 15:04:05.999999",          // MySQL with microseconds
+		"2006-01-02 15:04:05",                 // MySQL without fractional seconds
 	}
 	for _, f := range formats {
 		if t, err := time.Parse(f, s); err == nil {
