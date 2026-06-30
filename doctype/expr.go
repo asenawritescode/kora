@@ -37,6 +37,11 @@ func evaluateCondition(exprStr string, doc *Document, userRoles []string) bool {
 		}
 		docFields["name"] = doc.Name
 		docFields["doc_status"] = doc.DocStatus
+		docCopy := make(map[string]any, len(docFields))
+		for k, v := range docFields {
+			docCopy[k] = v
+		}
+		docFields["doc"] = docCopy
 	}
 	if len(userRoles) > 0 {
 		docFields["user"] = map[string]any{

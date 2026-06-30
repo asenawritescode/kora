@@ -39,7 +39,7 @@ transitions:
     from: Draft
     to: Submitted
     allowed: Field Technician
-    condition: "len(doc.items) > 0"
+    condition: "len(items) > 0"
 
   - action: Approve
     from: Submitted

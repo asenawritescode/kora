@@ -39,7 +39,7 @@ transitions:
     from: Lead
     to: Qualified
     allowed: Sales Rep, Sales Manager, Administrator
-    condition: "len(doc.items) > 0"
+    condition: "len(items) > 0"
 
   - action: Create Proposal
     from: Qualified

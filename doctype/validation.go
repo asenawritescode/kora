@@ -2,6 +2,7 @@ package doctype
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -79,20 +80,23 @@ func ValidateDocument(dt *DocType, doc *Document, registry *Registry, oldDoc *Do
 				msg = fmt.Sprintf("Predicate %q failed.", dc.Predicate)
 			}
 			errors = append(errors, &ValidationError{
-				Type:    "ValidationError",
-				Message: msg,
-				DocType: dt.Name,
-					Predicate: dc.Predicate,
+				Type:      "ValidationError",
+				Message:   msg,
+				DocType:   dt.Name,
+				Predicate: dc.Predicate,
 			})
 		}
 	}
 
 	for _, field := range dt.Fields {
-		if !field.IsDataField() || field.Fieldtype == "Table" {
+		if !field.IsDataField() {
 			continue
 		}
 
 		val := doc.Get(field.Fieldname)
+		if field.Fieldtype == "Table" {
+			val = doc.GetTable(field.Fieldname)
+		}
 
 		// Check required.
 		if field.Reqd {
@@ -306,11 +310,11 @@ func validateMinRows(field *Field, c *Constraint, val any, dt *DocType) *Validat
 	if !ok {
 		return nil
 	}
-	docs, ok := val.([]*Document)
+	docsLen, ok := sliceLen(val)
 	if !ok {
 		return nil
 	}
-	if len(docs) < minRows {
+	if docsLen < minRows {
 		msg := c.Message
 		if msg == "" {
 			msg = fmt.Sprintf("%s must have at least %d rows.", field.Label, minRows)
@@ -325,11 +329,11 @@ func validateMaxRows(field *Field, c *Constraint, val any, dt *DocType) *Validat
 	if !ok {
 		return nil
 	}
-	docs, ok := val.([]*Document)
+	docsLen, ok := sliceLen(val)
 	if !ok {
 		return nil
 	}
-	if len(docs) > maxRows {
+	if docsLen > maxRows {
 		msg := c.Message
 		if msg == "" {
 			msg = fmt.Sprintf("%s must have at most %d rows.", field.Label, maxRows)
@@ -547,6 +551,19 @@ func isNilOrEmpty(val any) bool {
 	return false
 }
 
+func sliceLen(val any) (int, bool) {
+	if val == nil {
+		return 0, false
+	}
+	rv := reflect.ValueOf(val)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		return rv.Len(), true
+	default:
+		return 0, false
+	}
+}
+
 func toFloat64(v any) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
@@ -646,4 +663,3 @@ func predicateResult(result any) bool {
 	// Non-nil, non-float64 results (strings, etc.) are considered truthy.
 	return true
 }
-

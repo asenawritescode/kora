@@ -39,7 +39,7 @@ transitions:
     from: Draft
     to: Confirmed
     allowed: Sales Agent,Administrator
-    condition: "len(doc.items) > 0"
+    condition: "len(items) > 0"
     require_fields:
       - payment_method
 
