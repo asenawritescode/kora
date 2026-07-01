@@ -175,6 +175,14 @@ func isSiteRegistryMissing(err error) bool {
 	return strings.Contains(s, "_kora_site_registry") && (strings.Contains(s, "doesn't exist") || strings.Contains(s, "does not exist") || strings.Contains(s, "no such table"))
 }
 
+func isLegacyConfigMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "_kora_config_version") && (strings.Contains(s, "doesn't exist") || strings.Contains(s, "does not exist") || strings.Contains(s, "no such table"))
+}
+
 func isDuplicateUpsertUnsupported(err error) bool {
 	if err == nil {
 		return false

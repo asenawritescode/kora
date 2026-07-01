@@ -81,6 +81,41 @@ func TestDiscoverSitesFromDBFallsBackToLegacyConfigVersions(t *testing.T) {
 	}
 }
 
+func TestDiscoverSitesFromDBUsesRegistryWhenLegacyConfigTableMissing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{
+		"site", "db_type", "db_host", "db_port", "db_name", "db_user", "db_password", "db_password_encrypted", "domains_json",
+	}).AddRow(
+		"partner", "mysql", "kora-mysql-lh5l6r", 3306, "partner", "root", "", 0, `["partner"]`,
+	)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site, db_type, db_host, db_port, db_name, db_user, COALESCE(db_password, ''), db_password_encrypted, COALESCE(domains_json, '[]') FROM _kora_site_registry WHERE status = 'active' ORDER BY site`)).
+		WillReturnRows(rows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT DISTINCT site, config FROM _kora_config_version WHERE status = 'Active'`)).
+		WillReturnError(assertLegacyConfigMissingError{})
+
+	sites, err := DiscoverSitesFromDB(db)
+	if err != nil {
+		t.Fatalf("DiscoverSitesFromDB: %v", err)
+	}
+	if len(sites) != 1 {
+		t.Fatalf("len(sites) = %d, want 1", len(sites))
+	}
+	if sites[0].Name != "partner" {
+		t.Fatalf("Name = %q", sites[0].Name)
+	}
+	if sites[0].DBName != "partner" {
+		t.Fatalf("DBName = %q", sites[0].DBName)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}
+
 func TestReconstructSiteConfigFromDBInfoPrefersRegistryValues(t *testing.T) {
 	common := &CommonConfig{
 		DBType:     "mysql",
@@ -122,4 +157,10 @@ type assertRegistryMissingError struct{}
 
 func (assertRegistryMissingError) Error() string {
 	return "no such table: _kora_site_registry"
+}
+
+type assertLegacyConfigMissingError struct{}
+
+func (assertLegacyConfigMissingError) Error() string {
+	return "no such table: _kora_config_version"
 }

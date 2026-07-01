@@ -107,7 +107,9 @@ func runServe() error {
 	var err error
 	if serveSiteFlag == "" && platformDB != nil {
 		dbSites, err = site.DiscoverSitesFromDB(platformDB)
-		if err == nil && len(dbSites) > 0 {
+		if err != nil {
+			slog.Warn("site discovery from database failed", "error", err)
+		} else if len(dbSites) > 0 {
 			slog.Info("sites discovered from database", "count", len(dbSites))
 		}
 	}

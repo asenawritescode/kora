@@ -311,7 +311,7 @@ func DiscoverSitesFromDB(db *sql.DB) ([]DBSiteInfo, error) {
 	// Always also discover from legacy config version to catch sites that
 	// predate the registry table. Registry entries override legacy ones.
 	legacySites, legErr := discoverSitesFromLegacyConfig(db)
-	if legErr != nil {
+	if legErr != nil && !isLegacyConfigMissing(legErr) {
 		return nil, legErr
 	}
 
