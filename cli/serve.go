@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -215,6 +217,56 @@ func runServe() error {
 	router.Use(knet.CORSMiddleware(nil))
 	router.Use(siteRouter.Middleware())
 	router.Use(knet.NewRateLimiter(float64(common.RateLimitRPS), common.RateLimitBurst).Middleware()) // 6. Per-user rate limiting
+	router.POST("/_kora/admin/reload-site", func(c *gin.Context) {
+		reloadToken := os.Getenv("KORA_RELOAD_TOKEN")
+		if reloadToken == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "reload token is not configured"})
+			return
+		}
+		if c.GetHeader("Authorization") != "Bearer "+reloadToken {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		if platformDB == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "platform database is not configured"})
+			return
+		}
+		var req struct {
+			Site string `json:"site"`
+		}
+		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		req.Site = strings.TrimSpace(req.Site)
+		if req.Site == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "site is required"})
+			return
+		}
+		if existing := siteRouter.SiteByName(req.Site); existing != nil {
+			c.JSON(http.StatusOK, gin.H{"status": "already_loaded", "site": req.Site})
+			return
+		}
+		infos, err := site.DiscoverSitesFromDB(platformDB)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for _, info := range infos {
+			if info.Name != req.Site {
+				continue
+			}
+			loaded, err := loadRuntimeSite(info, common)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			siteRouter.AddSite(loaded)
+			c.JSON(http.StatusOK, gin.H{"status": "loaded", "site": req.Site})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "site not found in registry"})
+	})
 
 	auth.SessionLifetime = time.Duration(common.SessionLifetimeHours) * time.Hour
 	doctype.SetAdminRole(common.AdminRole)
@@ -418,6 +470,42 @@ func runServe() error {
 	}()
 
 	return srv.ListenAndServe()
+}
+
+func loadRuntimeSite(info site.DBSiteInfo, common *site.CommonConfig) (*knet.LoadedSite, error) {
+	siteCfg := site.ReconstructSiteConfigFromDBInfo(info, common)
+	db, err := site.Connect(siteCfg)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to database: %w", err)
+	}
+	if err := site.BootstrapSystemTables(db, kdb.Resolve(common.DBType)); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("bootstrapping system tables: %w", err)
+	}
+	store := configstore.NewStore(db, kdb.Resolve(common.DBType))
+	doctypes, _ := store.LoadAll(info.Name)
+	roles, _ := store.LoadRoles(info.Name)
+	permissions, _ := store.LoadPermissions(info.Name)
+	workflows, _ := store.LoadWorkflows(info.Name)
+
+	registry := doctype.NewRegistry()
+	registry.LoadFull(doctypes, roles, permissions)
+	for _, wf := range workflows {
+		registry.Workflows.Register(wf)
+	}
+	if err := schema.MigrateSiteFromRegistry(db, siteCfg.DBName, registry, kdb.Resolve(common.DBType)); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrating site: %w", err)
+	}
+	return &knet.LoadedSite{
+		Name: info.Name,
+		Config: knet.SiteRouterConfig{
+			Hostname: info.Name,
+			Domains:  siteCfg.Domains(),
+		},
+		DB:       db,
+		Registry: registry,
+	}, nil
 }
 
 func startScheduler(db *sql.DB, registry *doctype.Registry, txManager *orm.TxManager) {
