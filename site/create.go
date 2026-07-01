@@ -4,10 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/oklog/ulid/v2"
 
 	"github.com/asenawritescode/kora/auth"
@@ -40,6 +43,7 @@ type CreateSiteInput struct {
 	PlatformDBType     string // "mysql" or "libsql"
 	PlatformDBUser     string
 	PlatformDBPassword string
+	PlatformDBDSN      string
 
 	// PlatformDB is an existing, authenticated connection to the platform database.
 	// When set (for LibSQL), CreateSite reuses this connection instead of calling Connect.
@@ -56,6 +60,23 @@ type CreateSiteInput struct {
 
 // applyDefaults fills empty fields with platform config or hardcoded defaults.
 func (in *CreateSiteInput) applyDefaults() {
+	if in.PlatformDBDSN != "" {
+		if dsnCfg, err := mysql.ParseDSN(in.PlatformDBDSN); err == nil {
+			host, port := mysqlHostPort(dsnCfg.Addr)
+			if in.PlatformDBHost == "" && host != "" {
+				in.PlatformDBHost = host
+			}
+			if in.PlatformDBPort == 0 && port != 0 {
+				in.PlatformDBPort = port
+			}
+			if in.PlatformDBUser == "" && dsnCfg.User != "" {
+				in.PlatformDBUser = dsnCfg.User
+			}
+			if in.PlatformDBPassword == "" && dsnCfg.Passwd != "" {
+				in.PlatformDBPassword = dsnCfg.Passwd
+			}
+		}
+	}
 	if in.DBHost == "" {
 		if in.PlatformDBHost != "" {
 			in.DBHost = in.PlatformDBHost
@@ -102,6 +123,21 @@ func (in *CreateSiteInput) applyDefaults() {
 	}
 }
 
+func mysqlHostPort(addr string) (string, int) {
+	if addr == "" {
+		return "", 0
+	}
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr, 0
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return host, 0
+	}
+	return host, port
+}
+
 // CreateSiteResult holds the result of a successful site creation.
 type CreateSiteResult struct {
 	Config   *SiteConfig
@@ -132,7 +168,7 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	}
 
 	// Step 1: Create database.
-	if err := CreateDatabase(siteCfg); err != nil {
+	if err := CreateDatabase(input, siteCfg); err != nil {
 		return nil, fmt.Errorf("creating database: %w", err)
 	}
 

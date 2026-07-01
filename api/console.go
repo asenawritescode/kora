@@ -281,6 +281,7 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 		PlatformDBPort:     platformPort,
 		PlatformDBUser:     platformUser,
 		PlatformDBPassword: platformPass,
+		PlatformDBDSN:      os.Getenv("DB_DSN"),
 		PlatformDB:         h.PlatformDB,
 	})
 	if err != nil {
@@ -410,6 +411,7 @@ func (h *ConsoleHandler) HandleOnboard(c *gin.Context) {
 		PlatformDBPort:     platformPort,
 		PlatformDBUser:     platformUser,
 		PlatformDBPassword: platformPass,
+		PlatformDBDSN:      os.Getenv("DB_DSN"),
 		PlatformDB:         h.PlatformDB,
 	})
 	if err != nil {

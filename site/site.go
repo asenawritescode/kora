@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"gopkg.in/yaml.v3"
 
 	sqlDialect "github.com/asenawritescode/kora/db"
@@ -460,7 +461,7 @@ func NewSite(cfg *SiteConfig) (*Site, error) {
 
 // CreateDatabase creates the site's database if it doesn't exist.
 // Connects without a database name, issues CREATE DATABASE IF NOT EXISTS.
-func CreateDatabase(cfg *SiteConfig) error {
+func CreateDatabase(input CreateSiteInput, cfg *SiteConfig) error {
 	driver := cfg.DBType
 	if driver == "" {
 		driver = os.Getenv("KORA_DB_TYPE")
@@ -473,10 +474,30 @@ func CreateDatabase(cfg *SiteConfig) error {
 		return nil
 	}
 
-	// Connect to MySQL without specifying a database.
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?parseTime=true&charset=utf8mb4",
-		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort)
-	db, err := sql.Open("mysql", dsn)
+	// Prefer the already-open platform connection when available. This keeps
+	// DB_DSN-based startup working without requiring separate host/user env vars.
+	if input.PlatformDB != nil {
+		if _, err := input.PlatformDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", cfg.DBName)); err != nil {
+			return fmt.Errorf("creating database %s: %w", cfg.DBName, err)
+		}
+		return nil
+	}
+
+	// Otherwise fall back to an explicit MySQL DSN or the legacy host/user/password fields.
+	dsn := input.PlatformDBDSN
+	if dsn == "" {
+		dsn = mysqlServerDSN(cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword)
+	}
+	if dsn == "" {
+		return fmt.Errorf("no MySQL connection details available for creating database %s", cfg.DBName)
+	}
+
+	baseDSN, err := mysqlBaseDSN(dsn)
+	if err != nil {
+		return fmt.Errorf("parsing MySQL DSN: %w", err)
+	}
+
+	db, err := sql.Open("mysql", baseDSN)
 	if err != nil {
 		return fmt.Errorf("connecting to MySQL server: %w", err)
 	}
@@ -486,11 +507,29 @@ func CreateDatabase(cfg *SiteConfig) error {
 		return fmt.Errorf("pinging MySQL server: %w", err)
 	}
 
-	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", cfg.DBName))
-	if err != nil {
+	if _, err := db.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", cfg.DBName)); err != nil {
 		return fmt.Errorf("creating database %s: %w", cfg.DBName, err)
 	}
 	return nil
+}
+
+func mysqlServerDSN(host string, port int, user, password string) string {
+	if host == "" || user == "" {
+		return ""
+	}
+	if port == 0 {
+		port = 3306
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/?parseTime=true&charset=utf8mb4", user, password, host, port)
+}
+
+func mysqlBaseDSN(dsn string) (string, error) {
+	cfg, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		return "", err
+	}
+	cfg.DBName = ""
+	return cfg.FormatDSN(), nil
 }
 
 // DeleteSiteInput holds the parameters needed to tear down a site.
@@ -508,6 +547,7 @@ type DeleteSiteInput struct {
 	DBPort     int
 	DBUser     string
 	DBPassword string
+	DBDSN      string
 }
 
 // DeleteSite tears down a site completely, removing all data and closing connections.
@@ -527,8 +567,17 @@ func DeleteSite(input DeleteSiteInput) error {
 		}
 
 		// Open a temporary connection without a database name.
-		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?parseTime=true&charset=utf8mb4",
-			input.DBUser, input.DBPassword, input.DBHost, input.DBPort)
+		dsn := input.DBDSN
+		if dsn == "" {
+			dsn = mysqlServerDSN(input.DBHost, input.DBPort, input.DBUser, input.DBPassword)
+		}
+		if dsn == "" {
+			return fmt.Errorf("no MySQL connection details available for dropping database %s", input.DBName)
+		}
+		dsn, err := mysqlBaseDSN(dsn)
+		if err != nil {
+			return fmt.Errorf("parsing MySQL DSN: %w", err)
+		}
 		tempDB, err := sql.Open("mysql", dsn)
 		if err != nil {
 			return fmt.Errorf("connecting for teardown: %w", err)

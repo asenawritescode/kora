@@ -57,18 +57,19 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	slog.Info("starting setup", "site", siteName, "config", setupConfigPath)
 
 	result, err := site.CreateSite(site.CreateSiteInput{
-		Hostname:            siteName,
-		DBHost:              setupDBHost,
-		DBPort:              setupDBPort,
-		DBName:              setupDBName,
-		DBUser:              setupDBUser,
-		DBPassword:          setupDBPass,
-		AdminEmail:          setupAdminEmail,
-		AdminPassword:       setupAdminPass,
-		PlatformDBHost:      os.Getenv("KORA_DB_HOST"),
-		PlatformDBPort:      envIntDefault("KORA_DB_PORT", 0),
-		PlatformDBUser:      os.Getenv("KORA_DB_USER"),
-		PlatformDBPassword:  os.Getenv("KORA_DB_PASSWORD"),
+		Hostname:           siteName,
+		DBHost:             setupDBHost,
+		DBPort:             setupDBPort,
+		DBName:             setupDBName,
+		DBUser:             setupDBUser,
+		DBPassword:         setupDBPass,
+		AdminEmail:         setupAdminEmail,
+		AdminPassword:      setupAdminPass,
+		PlatformDBHost:     os.Getenv("KORA_DB_HOST"),
+		PlatformDBPort:     envIntDefault("KORA_DB_PORT", 0),
+		PlatformDBUser:     os.Getenv("KORA_DB_USER"),
+		PlatformDBPassword: os.Getenv("KORA_DB_PASSWORD"),
+		PlatformDBDSN:      os.Getenv("DB_DSN"),
 	})
 	if err != nil {
 		return fmt.Errorf("creating site: %w", err)
