@@ -176,6 +176,7 @@ Nine admin views — all config-driven, all mobile-responsive:
 | [API.md](docs/API.md) | REST API reference, auth, CRUD, system endpoints |
 | [DECISIONS.md](docs/DECISIONS.md) | Architecture Decision Records |
 | [NETWORKING.md](docs/NETWORKING.md) | TLS, autocert, rate limiting, security headers, CORS |
+| [Backend Architecture](docs/backend-architecture.md) | Runtime architecture, env vars, site provisioning, request routing, and data flows |
 | [Plugin Architecture](docs/plugin-architecture.md) | Extension & webhook system design (draft) |
 | [Extensibility Plan](docs/extensibility-plan.md) | Script engine, event hooks, custom API methods, and webhook extensions |
 | [Process Isolation](docs/extensibility-process-isolation.md) | Script sandboxing, security isolation, and resource limits |
