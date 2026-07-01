@@ -302,13 +302,10 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 	}
 
 	// Hot-add site to the running router.
-	// Collect all domains: hostname + explicit extra domains + request host (for sslip.io etc.)
+	// Keep routing domains explicit. Do not auto-add the current request host here:
+	// path-based access should work without pretending the app host is a tenant domain.
 	domains := []string{req.Hostname}
 	domains = append(domains, extraDomains...)
-	requestHost := strings.ToLower(strings.Split(c.Request.Host, ":")[0])
-	if requestHost != "" && requestHost != req.Hostname && requestHost != "localhost" && requestHost != "127.0.0.1" && requestHost != "::1" {
-		domains = append(domains, requestHost)
-	}
 	loaded := &net.LoadedSite{
 		Name: req.Hostname,
 		Config: net.SiteRouterConfig{

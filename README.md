@@ -59,7 +59,7 @@ KORA_DB_TYPE=mysql KORA_DB_HOST=127.0.0.1 KORA_DB_USER=root KORA_DB_PASSWORD=kor
 - **AI Chat Assistant** — floating chat widget. Create, find, update records via natural language. OpenAI, DeepSeek, Anthropic. Multi-turn tool execution. Keys configured at `/workspace/admin/secrets`.
 - **AI Doctype Generator** — describe a form in plain English, AI generates validated YAML saved as Draft.
 - **Config-Driven Admin** — forms, lists, filters, workflows rendered from doctype definitions. No per-doctype code.
-- **Multi-Site** — path-based (`/s/:site/workspace`) or host-based routing. Sites created from console UI, persisted in DB.
+- **Multi-Site** — path-based (`/s/:site/workspace`) by default, with host-based routing only for domains you explicitly configure. Sites created from console UI are persisted in DB.
 - **Multi-Database** — MySQL, MariaDB, or remote LibSQL. SQL dialect abstraction handles all differences.
 - **Console UI** — `/console` for system admin: create/edit sites, view health, manage all sites.
 - **Self-Service Onboarding** — public site creation at `/onboard`. Users create their own sites with admin accounts. Rate-limited (3/hr/IP).
@@ -149,6 +149,8 @@ http://host/console                 → System console
 ```
 
 Sites created via console are persisted in `_kora_site_registry` for startup discovery, and still keep tenant-local config history in `_kora_config_version`. They survive container redeploys and can be hot-added immediately after onboarding.
+
+For path-based access, set `KORA_HOST` to the public app hostname. That host is allowed for session and cookie flow, while tenant routing stays on `/s/:site/...` until you add real tenant domains.
 
 ## Administrator Panel
 
