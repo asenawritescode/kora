@@ -1,3 +1,5 @@
+
+
 # Kora — Config-Driven Application Engine
 
 Describe your application in YAML. Kora gives you a database, REST API, React admin UI, and background jobs. No code generation.
@@ -185,7 +187,7 @@ Ten admin views — all config-driven, all mobile-responsive:
 | **HTTP** | Gin, net/http |
 | **Database** | MySQL 8.0, MariaDB, LibSQL (remote HTTP) |
 | **AI / LLM** | OpenAI, DeepSeek V4, Anthropic Claude |
-| **Frontend** | React 19, TanStack Router/Query/Table/Form, shadcn/ui, Tailwind CSS v4 |
+| **Frontend** | React 19, TanStack Router/Query/Table, shadcn/ui, Tailwind CSS v4 |
 | **State** | Zustand, TanStack Query |
 | **Delivery** | Single binary — everything via `go:embed`, ~30MB, pure Go, no CGO |
 
