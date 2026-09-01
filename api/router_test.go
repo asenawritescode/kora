@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/storage"
 )
 
 // setupTestHandler creates a Handler with a mocked DB, a registry containing
@@ -93,6 +95,28 @@ func (fakeScriptRunner) Validate(string) error { return nil }
 
 func (fakeScriptRunner) Close() error { return nil }
 
+type fakePublicStorage struct{}
+
+func (fakePublicStorage) Put(context.Context, string, io.Reader, int64, storage.FileMeta) (*storage.FileMeta, error) {
+	return nil, nil
+}
+
+func (fakePublicStorage) EnsureBucket(context.Context) error { return nil }
+
+func (fakePublicStorage) Head(context.Context, string) (*storage.FileMeta, error) {
+	return nil, storage.ErrNotFound
+}
+
+func (fakePublicStorage) Open(context.Context, string, int64, int64) (io.ReadCloser, error) {
+	return nil, storage.ErrNotFound
+}
+
+func (fakePublicStorage) Delete(context.Context, string) error { return nil }
+
+func (fakePublicStorage) URL(_ context.Context, key string) (string, error) {
+	return "https://cdn.example.com/" + key, nil
+}
+
 // ---------------------------------------------------------------------------
 // HandleList
 // ---------------------------------------------------------------------------
@@ -154,24 +178,26 @@ func TestHandlePublicList_AllowlistedFieldsAndServerFilters(t *testing.T) {
 		Fields: []doctype.Field{
 			{Fieldname: "title", Fieldtype: "Data"},
 			{Fieldname: "status", Fieldtype: "Data"},
+			{Fieldname: "hero_image", Fieldtype: "Attach Image"},
 			{Fieldname: "internal_notes", Fieldtype: "Text"},
 		},
 		PublicAccess: &doctype.PublicAccess{
 			Enabled: true,
 			List:    true,
 			Read:    true,
-			Fields:  []string{"title"},
+			Fields:  []string{"title", "hero_image"},
 			Filters: []doctype.PublicFilter{{Field: "status", Op: "equals", Value: "published"}},
 		},
 	})
+	handler.Storage = fakePublicStorage{}
 
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM `tabPublicPost` WHERE status = \\?").
 		WithArgs("published").
 		WillReturnRows(sqlmock.NewRows([]string{"count(*)"}).AddRow(1))
 	mock.ExpectQuery("SELECT .+ FROM `tabPublicPost` WHERE status = \\? ORDER BY `modified` DESC LIMIT \\? OFFSET \\?").
 		WithArgs("published", 50, 0).
-		WillReturnRows(sqlmock.NewRows([]string{"title", "status", "internal_notes", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).
-			AddRow("Published", "published", "secret", "PUB-0001", "owner", nil, nil, nil, 0))
+		WillReturnRows(sqlmock.NewRows([]string{"title", "status", "hero_image", "internal_notes", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).
+			AddRow("Published", "published", "sites/test/files/2026/09/hero.png", "secret", "PUB-0001", "owner", nil, nil, nil, 0))
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -191,6 +217,9 @@ func TestHandlePublicList_AllowlistedFieldsAndServerFilters(t *testing.T) {
 	data := resp.Data.([]any)[0].(map[string]any)
 	if data["title"] != "Published" {
 		t.Fatalf("title = %v, want Published", data["title"])
+	}
+	if data["hero_image_url"] != "https://cdn.example.com/sites/test/files/2026/09/hero.png" {
+		t.Fatalf("hero_image_url = %v, want resolved public url", data["hero_image_url"])
 	}
 	if _, ok := data["internal_notes"]; ok {
 		t.Fatalf("internal_notes leaked in public response: %#v", data)

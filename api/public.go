@@ -43,7 +43,7 @@ func (h *Handler) HandlePublicList(c *gin.Context) {
 	}
 	result := make([]map[string]any, 0, len(docs))
 	for _, doc := range docs {
-		result = append(result, publicDocToMap(doc, dt))
+		result = append(result, h.publicDocToMap(c, doc, dt))
 	}
 	setPublicCacheHeaders(c, pa)
 	c.JSON(http.StatusOK, Response{Data: result, Meta: &Meta{DocType: dt.Name, Total: total}})
@@ -70,7 +70,7 @@ func (h *Handler) HandlePublicGet(c *gin.Context) {
 		return
 	}
 	setPublicCacheHeaders(c, pa)
-	c.JSON(http.StatusOK, Response{Data: publicDocToMap(doc, dt), Meta: &Meta{DocType: dt.Name}})
+	c.JSON(http.StatusOK, Response{Data: h.publicDocToMap(c, doc, dt), Meta: &Meta{DocType: dt.Name}})
 }
 
 func (h *Handler) publicDocType(c *gin.Context, list bool) (*doctype.DocType, bool) {
@@ -96,9 +96,10 @@ func (h *Handler) publicDocType(c *gin.Context, list bool) (*doctype.DocType, bo
 	return dt, true
 }
 
-func publicDocToMap(doc *doctype.Document, dt *doctype.DocType) map[string]any {
+func (h *Handler) publicDocToMap(c *gin.Context, doc *doctype.Document, dt *doctype.DocType) map[string]any {
 	out := make(map[string]any)
 	allowed := dt.PublicFieldSet()
+	backend := h.siteStorage(c)
 	for field := range allowed {
 		switch field {
 		case "name":
@@ -107,11 +108,28 @@ func publicDocToMap(doc *doctype.Document, dt *doctype.DocType) map[string]any {
 			out["doc_status"] = doc.DocStatus
 		default:
 			if f := dt.GetField(field); f != nil && f.Fieldtype != "Table" {
-				out[field] = doc.Get(field)
+				value := doc.Get(field)
+				out[field] = value
+				if shouldExposePublicFileURL(f.Fieldtype) {
+					if path, ok := value.(string); ok && strings.TrimSpace(path) != "" {
+						if url, err := backend.URL(c.Request.Context(), path); err == nil && url != "" {
+							out[field+"_url"] = url
+						}
+					}
+				}
 			}
 		}
 	}
 	return out
+}
+
+func shouldExposePublicFileURL(fieldtype string) bool {
+	switch fieldtype {
+	case "Attach", "Attach Image", "Attach Audio":
+		return true
+	default:
+		return false
+	}
 }
 
 func publicFiltersJSON(serverFilters []doctype.PublicFilter, clientRaw string, dt *doctype.DocType) (string, error) {
