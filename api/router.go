@@ -1818,20 +1818,33 @@ func (h *Handler) HandleFileDelete(c *gin.Context) {
 
 // fileKeyForSite extracts and validates a site-scoped storage key from the request path.
 func fileKeyForSite(c *gin.Context) (string, error) {
+	return fileKeyForSiteReference(c, c.Param("path"))
+}
+
+// fileKeyForSiteReference normalizes both current site-scoped keys and legacy
+// attachment values that contain only the date/filename suffix.
+func fileKeyForSiteReference(c *gin.Context, reference string) (string, error) {
 	siteName := c.GetString("site_name")
 	if siteName == "" {
 		siteName = "default"
 	}
-	rel := filepath.Clean(strings.TrimPrefix(c.Param("path"), "/"))
+	rel := filepath.Clean(strings.TrimPrefix(strings.TrimSpace(reference), "/"))
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid file path")
+	}
 	// Never serve internal sidecar metadata files.
 	if strings.HasSuffix(strings.ToLower(rel), ".meta.json") {
 		return "", fmt.Errorf("invalid file path")
 	}
 	base := filepath.Join("sites", siteName, "files")
-	if rel != base && !strings.HasPrefix(rel, base+string(os.PathSeparator)) {
+	if rel == base || strings.HasPrefix(rel, base+string(os.PathSeparator)) {
+		return filepath.ToSlash(rel), nil
+	}
+	// Do not allow a reference scoped to another site to be silently remapped.
+	if strings.HasPrefix(rel, "sites"+string(os.PathSeparator)) {
 		return "", fmt.Errorf("invalid file path")
 	}
-	return filepath.ToSlash(rel), nil
+	return filepath.ToSlash(filepath.Join(base, rel)), nil
 }
 
 // parseRange parses a single "bytes=start-end" range against size. It returns

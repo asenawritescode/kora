@@ -197,13 +197,14 @@ func TestHandlePublicList_AllowlistedFieldsAndServerFilters(t *testing.T) {
 	mock.ExpectQuery("SELECT .+ FROM `tabPublicPost` WHERE status = \\? ORDER BY `modified` DESC LIMIT \\? OFFSET \\?").
 		WithArgs("published", 50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{"title", "status", "hero_image", "internal_notes", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).
-			AddRow("Published", "published", "sites/test/files/2026/09/hero.png", "secret", "PUB-0001", "owner", nil, nil, nil, 0))
+			AddRow("Published", "published", "2026/09/hero.png", "secret", "PUB-0001", "owner", nil, nil, nil, 0))
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/api/public/resource/PublicPost", nil)
 	c.Params = gin.Params{{Key: "doctype", Value: "PublicPost"}}
 	injectDB(c, sqlDB, reg)
+	injectContext(c)
 
 	handler.HandlePublicList(c)
 
@@ -218,11 +219,39 @@ func TestHandlePublicList_AllowlistedFieldsAndServerFilters(t *testing.T) {
 	if data["title"] != "Published" {
 		t.Fatalf("title = %v, want Published", data["title"])
 	}
-	if data["hero_image_url"] != "https://cdn.example.com/sites/test/files/2026/09/hero.png" {
+	if data["hero_image_url"] != "https://cdn.example.com/sites/test.local/files/2026/09/hero.png" {
 		t.Fatalf("hero_image_url = %v, want resolved public url", data["hero_image_url"])
 	}
 	if _, ok := data["internal_notes"]; ok {
 		t.Fatalf("internal_notes leaked in public response: %#v", data)
+	}
+}
+
+func TestFileKeyForSiteReference_NormalizesLegacyAndRejectsOtherSite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name string
+		ref  string
+		want string
+		ok   bool
+	}{
+		{name: "legacy relative", ref: "2026/09/hero.png", want: "sites/test.local/files/2026/09/hero.png", ok: true},
+		{name: "scoped current", ref: "sites/test.local/files/2026/09/hero.png", want: "sites/test.local/files/2026/09/hero.png", ok: true},
+		{name: "other site", ref: "sites/other/files/hero.png", ok: false},
+		{name: "traversal", ref: "../../secret.txt", ok: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Set("site_name", "test.local")
+			got, err := fileKeyForSiteReference(c, tc.ref)
+			if (err == nil) != tc.ok {
+				t.Fatalf("error = %v, want success=%v", err, tc.ok)
+			}
+			if tc.ok && got != tc.want {
+				t.Fatalf("key = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

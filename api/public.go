@@ -112,7 +112,11 @@ func (h *Handler) publicDocToMap(c *gin.Context, doc *doctype.Document, dt *doct
 				out[field] = value
 				if shouldExposePublicFileURL(f.Fieldtype) {
 					if path, ok := value.(string); ok && strings.TrimSpace(path) != "" {
-						if url, err := backend.URL(c.Request.Context(), path); err == nil && url != "" {
+						key, keyErr := fileKeyForSiteReference(c, path)
+						if keyErr != nil {
+							continue
+						}
+						if url, err := backend.URL(c.Request.Context(), key); err == nil && url != "" {
 							out[field+"_url"] = url
 						}
 					}
