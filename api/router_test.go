@@ -219,7 +219,7 @@ func TestHandlePublicList_AllowlistedFieldsAndServerFilters(t *testing.T) {
 	if data["title"] != "Published" {
 		t.Fatalf("title = %v, want Published", data["title"])
 	}
-	if data["hero_image_url"] != "https://cdn.example.com/sites/test.local/files/2026/09/hero.png" {
+	if data["hero_image_url"] != "https://example.com/api/public/files/sites/test.local/files/2026/09/hero.png" {
 		t.Fatalf("hero_image_url = %v, want resolved public url", data["hero_image_url"])
 	}
 	if _, ok := data["internal_notes"]; ok {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -99,7 +100,6 @@ func (h *Handler) publicDocType(c *gin.Context, list bool) (*doctype.DocType, bo
 func (h *Handler) publicDocToMap(c *gin.Context, doc *doctype.Document, dt *doctype.DocType) map[string]any {
 	out := make(map[string]any)
 	allowed := dt.PublicFieldSet()
-	backend := h.siteStorage(c)
 	for field := range allowed {
 		switch field {
 		case "name":
@@ -116,15 +116,44 @@ func (h *Handler) publicDocToMap(c *gin.Context, doc *doctype.Document, dt *doct
 						if keyErr != nil {
 							continue
 						}
-						if url, err := backend.URL(c.Request.Context(), key); err == nil && url != "" {
-							out[field+"_url"] = url
-						}
+						out[field+"_url"] = publicFileURL(c, key)
 					}
 				}
 			}
 		}
 	}
 	return out
+}
+
+// publicFileURL keeps the object backend private and avoids exposing an
+// internal S3-compatible endpoint in browser-facing API responses.
+func publicFileURL(c *gin.Context, key string) string {
+	requestPath := c.Request.URL.Path
+	prefix := requestPath
+	if i := strings.Index(prefix, "/public/resource"); i >= 0 {
+		prefix = prefix[:i]
+	}
+	scheme := c.GetHeader("X-Forwarded-Proto")
+	if scheme == "" {
+		scheme = "https"
+	}
+	host := c.GetHeader("X-Forwarded-Host")
+	if host == "" {
+		host = c.Request.Host
+	}
+	return (&url.URL{
+		Scheme: scheme,
+		Host:   host,
+		Path:   prefix + "/public/files/" + encodeFileURLPath(key),
+	}).String()
+}
+
+func encodeFileURLPath(key string) string {
+	parts := strings.Split(key, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
 }
 
 func shouldExposePublicFileURL(fieldtype string) bool {
