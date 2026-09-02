@@ -133,6 +133,13 @@ func publicFileURL(c *gin.Context, key string) string {
 	if i := strings.Index(prefix, "/public/resource"); i >= 0 {
 		prefix = prefix[:i]
 	}
+	siteName := c.GetString("site_name")
+	if siteName == "" {
+		siteName = "default"
+	}
+	if !strings.HasPrefix(prefix, "/s/") {
+		prefix = "/s/" + url.PathEscape(siteName) + prefix
+	}
 	scheme := c.GetHeader("X-Forwarded-Proto")
 	if scheme == "" {
 		scheme = "https"
