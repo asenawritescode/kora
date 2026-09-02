@@ -980,8 +980,9 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 
 // RegisterPublicRoutesOnGroup registers unauthenticated, read-only public
 // delivery routes. Access is controlled by DocType public_access config.
-func RegisterPublicRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager) {
+func RegisterPublicRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteStorages map[string]storage.Backend) {
 	handler := NewHandler(registry, txManager)
+	handler.SiteStorages = siteStorages
 	public := apiGroup.Group("/public/resource")
 	{
 		public.GET("/:doctype", handler.HandlePublicList)

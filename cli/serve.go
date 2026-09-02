@@ -554,8 +554,8 @@ func runServe() error {
 
 	api.RegisterRoutesOnGroupWithAnalytics(apiGroup, primaryRegistry, txManager, siteBuses, siteRealtimeProviders, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookQueueSink(asyncHookQueue), siteOutboxes, siteStorages, kernelCommands)
 	api.RegisterRoutesOnGroupWithAnalytics(apiLegacyGroup, primaryRegistry, txManager, siteBuses, siteRealtimeProviders, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookQueueSink(asyncHookQueue), siteOutboxes, siteStorages, kernelCommands)
-	api.RegisterPublicRoutesOnGroup(publicV1Group, primaryRegistry, txManager)
-	api.RegisterPublicRoutesOnGroup(publicLegacyGroup, primaryRegistry, txManager)
+	api.RegisterPublicRoutesOnGroup(publicV1Group, primaryRegistry, txManager, siteStorages)
+	api.RegisterPublicRoutesOnGroup(publicLegacyGroup, primaryRegistry, txManager, siteStorages)
 
 	workspaceHandler := workspace.NewHandler(primaryRegistry)
 	if spaIndex, _ := workspace.SPAFS().Open("index.html"); spaIndex != nil {
