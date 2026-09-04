@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/configstore"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -237,7 +238,22 @@ func runConfigImport(siteName, path, dbName string) error {
 
 	// Create config version BEFORE migration (so we have a snapshot to roll back to).
 	// This is fatal — don't apply schema changes without a version record.
-	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, Workflows: workflows, Views: views, MinKoraVersion: Version}
+	reportDefinitions, err := analytics.ParseReportsDirectory(path + "/reports")
+	if err != nil {
+		return fmt.Errorf("parsing reports: %w", err)
+	}
+	reports := make([]json.RawMessage, 0, len(reportDefinitions))
+	for _, report := range reportDefinitions {
+		data, err := json.Marshal(report)
+		if err != nil {
+			return fmt.Errorf("encoding report %s: %w", report.Name, err)
+		}
+		reports = append(reports, data)
+	}
+	if len(reports) > 0 {
+		fmt.Printf("Found %d reports\n", len(reports))
+	}
+	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, Workflows: workflows, Views: views, Reports: reports, MinKoraVersion: Version}
 	versionID, versionNum, err := store.CreateConfigVersion(siteName, "system", "Config import from "+path, "Active", snapshot)
 	if err != nil {
 		return fmt.Errorf("creating config version: %w", err)
