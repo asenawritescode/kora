@@ -1,6 +1,7 @@
 package doctype
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -119,6 +120,18 @@ func TestToSExpr_AllSections(t *testing.T) {
 	sexpr2 := ToSExpr(parsed)
 	if sexpr != sexpr2 {
 		t.Errorf("round-trip mismatch:\n%s\n\n%s", sexpr, sexpr2)
+	}
+}
+
+func TestToSExpr_RoundTripReports(t *testing.T) {
+	snapshot := &ConfigSnapshot{Reports: []json.RawMessage{json.RawMessage(`{"name":"cake_profit","label":"Cake profit","queries":[]}`)}}
+	sexpr := ToSExpr(snapshot)
+	parsed, err := FromSExpr(sexpr)
+	if err != nil {
+		t.Fatalf("FromSExpr error = %v", err)
+	}
+	if len(parsed.Reports) != 1 || string(parsed.Reports[0]) != string(snapshot.Reports[0]) {
+		t.Fatalf("reports were not preserved: %#v", parsed.Reports)
 	}
 }
 

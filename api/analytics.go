@@ -257,7 +257,7 @@ func loadSemanticReports(c *gin.Context, db *sql.DB) ([]analytics.ReportDefiniti
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := doctype.ParseSnapshot(configJSON)
+	snapshot, err := doctype.ParseConfig(configJSON)
 	if err != nil {
 		return nil, err
 	}
