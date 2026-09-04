@@ -4,20 +4,20 @@ route: /reports/cake-profit-and-loss
 queries:
   - id: sales
     model: cake_order
-    measures: [total_sales_sum, estimated_gross_profit_sum, balance_due_sum, count]
+    measures: [cake_order_sum_total_sales, cake_order_sum_estimated_gross_profit, cake_order_sum_balance_due, count]
     dimensions: [order_date]
   - id: expenses
     model: cake_expense
-    measures: [total_cost_sum, count]
+    measures: [cake_expense_sum_total_cost, count]
     dimensions: [expense_date]
 derived:
   - name: net_profit
     label: Net profit
-    formula: sales.total_sales_sum - expenses.total_cost_sum
+    formula: sales.cake_order_sum_total_sales - expenses.cake_expense_sum_total_cost
     format: currency
   - name: profit_margin
     label: Profit margin
-    formula: if(sales.total_sales_sum > 0, net_profit / sales.total_sales_sum * 100, 0)
+    formula: if(sales.cake_order_sum_total_sales > 0, net_profit / sales.cake_order_sum_total_sales * 100, 0)
     format: percent
 visuals:
   - id: pnl_trend
@@ -25,12 +25,11 @@ visuals:
     source: sales
     x_field: order_date
     series:
-      - field: total_sales_sum
+      - field: cake_order_sum_total_sales
         label: Sales
         type: bar
         format: currency
-      - field: estimated_gross_profit_sum
+      - field: cake_order_sum_estimated_gross_profit
         label: Estimated gross profit
         type: line
         format: currency
-
