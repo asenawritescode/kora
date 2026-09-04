@@ -31,6 +31,34 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		c.JSON(http.StatusOK, Response{Data: catalog})
 	})
 
+	ag.POST("/query", func(c *gin.Context) {
+		var request analytics.AnalyticsQueryRequest
+		if err := c.ShouldBindJSON(&request); err != nil {
+			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid analytics query", nil)
+			return
+		}
+		docTypes := make([]*doctype.DocType, 0, len(registry.Names()))
+		for _, name := range registry.Names() {
+			docTypes = append(docTypes, registry.Get(name))
+		}
+		catalog := analytics.BuildSemanticCatalog(docTypes)
+		if err := catalog.Validate(); err != nil {
+			internalError(c, "building analytics catalog", err)
+			return
+		}
+		qe := getQueryEngine(c, siteDB)
+		if qe == nil {
+			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
+			return
+		}
+		result, err := qe.ResolveSemanticQuery(catalog, request)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, "analytics.invalid_query", err.Error(), nil)
+			return
+		}
+		c.JSON(http.StatusOK, Response{Data: result})
+	})
+
 	// Status endpoint always available — reports whether analytics is running.
 	ag.GET("/status", func(c *gin.Context) {
 		siteName := c.GetString("site_name")

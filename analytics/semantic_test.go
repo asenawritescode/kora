@@ -131,3 +131,14 @@ func TestEventDateNormalizesBusinessDateAndFallsBack(t *testing.T) {
 		t.Fatalf("expected timestamp fallback, got %q", got)
 	}
 }
+
+func TestMetricForSemanticMeasureMapsCategoryCounts(t *testing.T) {
+	model := testCatalog().Models[0]
+	metric, err := metricForSemanticMeasure(&model, "order_count", []string{"flavour"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if metric.Name != "cake_orders_count_by_flavour" || metric.Type != MetricCountByField {
+		t.Fatalf("unexpected category metric: %#v", metric)
+	}
+}
