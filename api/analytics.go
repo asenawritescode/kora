@@ -22,9 +22,10 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 	queryCache := newAnalyticsQueryCache(30*time.Second, 256)
 
 	ag.GET("/catalog", func(c *gin.Context) {
-		docTypes := make([]*doctype.DocType, 0, len(registry.Names()))
-		for _, name := range registry.Names() {
-			docTypes = append(docTypes, registry.Get(name))
+		siteRegistry := analyticsRegistry(c, registry)
+		docTypes := make([]*doctype.DocType, 0, len(siteRegistry.Names()))
+		for _, name := range siteRegistry.Names() {
+			docTypes = append(docTypes, siteRegistry.Get(name))
 		}
 		catalog := analytics.BuildSemanticCatalog(docTypes)
 		reports, err := loadSemanticReports(c, getSiteDB(c, siteDB))
@@ -55,9 +56,10 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid analytics query", nil)
 			return
 		}
-		docTypes := make([]*doctype.DocType, 0, len(registry.Names()))
-		for _, name := range registry.Names() {
-			docTypes = append(docTypes, registry.Get(name))
+		siteRegistry := analyticsRegistry(c, registry)
+		docTypes := make([]*doctype.DocType, 0, len(siteRegistry.Names()))
+		for _, name := range siteRegistry.Names() {
+			docTypes = append(docTypes, siteRegistry.Get(name))
 		}
 		catalog := analytics.BuildSemanticCatalog(docTypes)
 		reports, err := loadSemanticReports(c, getSiteDB(c, siteDB))
@@ -104,9 +106,10 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid analytics query", nil)
 			return
 		}
-		docTypes := make([]*doctype.DocType, 0, len(registry.Names()))
-		for _, name := range registry.Names() {
-			docTypes = append(docTypes, registry.Get(name))
+		siteRegistry := analyticsRegistry(c, registry)
+		docTypes := make([]*doctype.DocType, 0, len(siteRegistry.Names()))
+		for _, name := range siteRegistry.Names() {
+			docTypes = append(docTypes, siteRegistry.Get(name))
 		}
 		catalog := analytics.BuildSemanticCatalog(docTypes)
 		if err := catalog.Validate(); err != nil {
@@ -242,6 +245,15 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 
 		c.JSON(http.StatusOK, Response{Data: insights})
 	})
+}
+
+func analyticsRegistry(c *gin.Context, fallback *doctype.Registry) *doctype.Registry {
+	if value, ok := c.Get("site_registry"); ok {
+		if registry, ok := value.(*doctype.Registry); ok && registry != nil {
+			return registry
+		}
+	}
+	return fallback
 }
 
 func loadSemanticReports(c *gin.Context, db *sql.DB) ([]analytics.ReportDefinition, error) {
