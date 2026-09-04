@@ -39,10 +39,10 @@ type Worker struct {
 	workflowCloses []workflowCloseOp
 	workflowOpens  []workflowOpenOp
 
-	batchSize   int
-	flushEvery  time.Duration
-	stopCh      chan struct{}
-	stopped     bool
+	batchSize  int
+	flushEvery time.Duration
+	stopCh     chan struct{}
+	stopped    bool
 
 	// Metrics cache: auto-generated metrics per doctype, resolved once.
 	metricsMu sync.RWMutex
@@ -58,11 +58,11 @@ type deltaKey struct {
 
 // workflowCloseOp closes the previous workflow transition (sets exited_at + duration).
 type workflowCloseOp struct {
-	Site    string
-	Doctype string
-	DocName string
+	Site     string
+	Doctype  string
+	DocName  string
 	OldState string
-	Now     time.Time
+	Now      time.Time
 }
 
 // workflowOpenOp inserts a new workflow transition row.
@@ -209,12 +209,11 @@ func (w *Worker) process(event ChangeEvent) {
 		return
 	}
 
-	today := event.Timestamp.Format("2006-01-02")
-
 	for _, m := range metrics {
+		date := eventDate(event, m.TimeField)
 		switch m.Type {
 		case MetricCount:
-			w.addDelta(event.Doctype, m.Name, "", today, 1)
+			w.addDelta(event.Doctype, m.Name, "", date, 1)
 
 		case MetricCountByField:
 			if m.Field == "" {
@@ -222,20 +221,20 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 			val := event.Data[m.Field]
 			dim := m.Field + "=" + anyToString(val)
-			w.addDelta(event.Doctype, m.Name, dim, today, 1)
+			w.addDelta(event.Doctype, m.Name, dim, date, 1)
 
 			// On update: decrement old dimension if the field changed.
 			if event.Operation == EventUpdate && event.OldData != nil {
 				oldVal := event.OldData[m.Field]
 				if anyToString(oldVal) != anyToString(val) {
 					oldDim := m.Field + "=" + anyToString(oldVal)
-					w.addDelta(event.Doctype, m.Name, oldDim, today, -1)
+					w.addDelta(event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
 				}
 			}
 
 		case MetricCountByTime:
 			if event.Operation == EventInsert {
-				w.addDelta(event.Doctype, m.Name, "", today, 1)
+				w.addDelta(event.Doctype, m.Name, "", event.Timestamp.Format("2006-01-02"), 1)
 			}
 
 		case MetricSum:
@@ -252,19 +251,19 @@ func (w *Worker) process(event ChangeEvent) {
 			if event.Operation == EventDelete {
 				netDelta = -newVal
 			}
-			w.addDelta(event.Doctype, m.Name, "", today, netDelta)
+			w.addDelta(event.Doctype, m.Name, "", date, netDelta)
 
 		case MetricStateDistribution:
 			// Track document counts by workflow state.
 			newState := anyToString(event.Data["doc_status"])
 			newDim := "state=" + newState
-			w.addDelta(event.Doctype, m.Name, newDim, today, 1)
+			w.addDelta(event.Doctype, m.Name, newDim, date, 1)
 
 			if event.Operation == EventUpdate && event.OldData != nil {
 				oldState := anyToString(event.OldData["doc_status"])
 				if oldState != newState {
 					oldDim := "state=" + oldState
-					w.addDelta(event.Doctype, m.Name, oldDim, today, -1)
+					w.addDelta(event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
 
 					// Accumulate workflow transition for batch flush.
 					w.addWorkflowTransition(event, oldState, newState)
@@ -277,7 +276,7 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 			val := event.Data[m.LinkField]
 			dim := m.LinkField + "=" + anyToString(val)
-			w.addDelta(event.Doctype, m.Name, dim, today, 1)
+			w.addDelta(event.Doctype, m.Name, dim, date, 1)
 		}
 	}
 }
@@ -625,4 +624,36 @@ func anyToString(v any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+func eventDate(event ChangeEvent, field string) string {
+	if field == "" || field == "creation" {
+		return event.Timestamp.Format("2006-01-02")
+	}
+	return normalizeEventDate(event.Data[field], event.Timestamp)
+}
+
+func eventOldDate(event ChangeEvent, field string) string {
+	if field == "" || field == "creation" || event.OldData == nil {
+		return event.Timestamp.Format("2006-01-02")
+	}
+	return normalizeEventDate(event.OldData[field], event.Timestamp)
+}
+
+func normalizeEventDate(value any, fallback time.Time) string {
+	switch v := value.(type) {
+	case time.Time:
+		return v.Format("2006-01-02")
+	case *time.Time:
+		if v != nil {
+			return v.Format("2006-01-02")
+		}
+	case string:
+		for _, layout := range []string{"2006-01-02", time.RFC3339, "2006-01-02 15:04:05"} {
+			if parsed, err := time.Parse(layout, v); err == nil {
+				return parsed.Format("2006-01-02")
+			}
+		}
+	}
+	return fallback.Format("2006-01-02")
 }

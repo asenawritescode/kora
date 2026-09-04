@@ -171,6 +171,11 @@ func resetAnalyticsForDoctype(db *sql.DB, siteName, doctypeName string) error {
 func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *analytics.Metric, from time.Time) error {
 	q := dialect.QuoteIdent
 	table := dt.TableName()
+	timeColumn := q("creation")
+	if m.TimeField != "" {
+		timeColumn = q(m.TimeField)
+	}
+	timeBucket := fmt.Sprintf("DATE(%s)", timeColumn)
 	upsert := dialect.UpsertIncrement(
 		[]string{"site", "doctype", "metric", "dimension", "date"},
 		[]string{"value"},
@@ -180,11 +185,11 @@ func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *ana
 	case analytics.MetricCount, analytics.MetricCountByTime:
 		query := fmt.Sprintf(
 			`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-			 SELECT ?, ?, ?, '', DATE(creation), COUNT(*)
-			 FROM %s WHERE creation >= ?
-			 GROUP BY DATE(creation)
+			 SELECT ?, ?, ?, '', %s, COUNT(*)
+			 FROM %s WHERE %s >= ?
+			 GROUP BY %s
 			 %s`,
-			table, upsert,
+			timeBucket, table, timeColumn, timeBucket, upsert,
 		)
 		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
 		return err
@@ -193,11 +198,11 @@ func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *ana
 		col := q(m.Field)
 		query := fmt.Sprintf(
 			`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-			 SELECT ?, ?, ?, CONCAT('%s=', %s), DATE(creation), COUNT(*)
-			 FROM %s WHERE creation >= ? AND %s IS NOT NULL AND %s != ''
-			 GROUP BY %s, DATE(creation)
+			 SELECT ?, ?, ?, CONCAT('%s=', %s), %s, COUNT(*)
+			 FROM %s WHERE %s >= ? AND %s IS NOT NULL AND %s != ''
+			 GROUP BY %s, %s
 			 %s`,
-			m.Field, col, table, col, col, col, upsert,
+			m.Field, col, timeBucket, table, timeColumn, col, col, col, timeBucket, upsert,
 		)
 		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
 		return err
@@ -206,11 +211,11 @@ func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *ana
 		col := q(m.Field)
 		query := fmt.Sprintf(
 			`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-			 SELECT ?, ?, ?, '', DATE(creation), SUM(%s)
-			 FROM %s WHERE creation >= ? AND %s IS NOT NULL
-			 GROUP BY DATE(creation)
+			 SELECT ?, ?, ?, '', %s, SUM(%s)
+			 FROM %s WHERE %s >= ? AND %s IS NOT NULL
+			 GROUP BY %s
 			 %s`,
-			col, table, col, upsert,
+			timeBucket, col, table, timeColumn, col, timeBucket, upsert,
 		)
 		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
 		return err
@@ -218,11 +223,11 @@ func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *ana
 	case analytics.MetricStateDistribution:
 		query := fmt.Sprintf(
 			`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-			 SELECT ?, ?, ?, CONCAT('state=', CAST(doc_status AS CHAR)), DATE(creation), COUNT(*)
-			 FROM %s WHERE creation >= ?
-			 GROUP BY doc_status, DATE(creation)
+			 SELECT ?, ?, ?, CONCAT('state=', CAST(doc_status AS CHAR)), %s, COUNT(*)
+			 FROM %s WHERE %s >= ?
+			 GROUP BY doc_status, %s
 			 %s`,
-			table, upsert,
+			timeBucket, table, timeColumn, timeBucket, upsert,
 		)
 		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
 		return err

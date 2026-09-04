@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"testing"
+	"time"
 
 	"github.com/asenawritescode/kora/doctype"
 )
@@ -96,5 +97,37 @@ func TestBuildSemanticModelUsesDocTypeFieldMetadata(t *testing.T) {
 	}
 	if model.Measures[1].Format != "currency" {
 		t.Fatalf("expected currency format, got %q", model.Measures[1].Format)
+	}
+}
+
+func TestPreferredTimeFieldUsesConfiguredBusinessDate(t *testing.T) {
+	dt := &doctype.DocType{
+		Name:      "Cake Order",
+		SortField: "order_date",
+		Fields: []doctype.Field{
+			{Fieldname: "order_date", Fieldtype: "Date"},
+			{Fieldname: "total_sales", Fieldtype: "Currency"},
+		},
+	}
+
+	if got := preferredTimeField(dt); got != "order_date" {
+		t.Fatalf("expected order_date, got %q", got)
+	}
+	metric := GenerateMetrics(dt)[0]
+	if metric.TimeField != "order_date" {
+		t.Fatalf("expected count metric to use order_date, got %q", metric.TimeField)
+	}
+}
+
+func TestEventDateNormalizesBusinessDateAndFallsBack(t *testing.T) {
+	event := ChangeEvent{
+		Timestamp: time.Date(2026, 9, 5, 14, 0, 0, 0, time.UTC),
+		Data:      map[string]any{"order_date": "2026-08-31"},
+	}
+	if got := eventDate(event, "order_date"); got != "2026-08-31" {
+		t.Fatalf("expected business date, got %q", got)
+	}
+	if got := eventDate(event, "missing_date"); got != "2026-09-05" {
+		t.Fatalf("expected timestamp fallback, got %q", got)
 	}
 }
