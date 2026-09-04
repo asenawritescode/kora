@@ -74,7 +74,10 @@ func (r *ReportDefinition) Validate(catalog *SemanticCatalog) error {
 			return fmt.Errorf("query %q requires a model and at least one measure", query.ID)
 		}
 		if catalog != nil {
-			candidate := AnalyticsQueryRequest{Queries: []ModelQuery{{Model: query.Model, Measures: query.Measures, Dimensions: query.Dimensions, Filters: query.Filters}}}
+			candidate := AnalyticsQueryRequest{
+				Queries: []ModelQuery{{Model: query.Model, Measures: query.Measures, Dimensions: query.Dimensions, Filters: query.Filters}},
+				Time:    QueryTime{From: "2000-01-01", To: "2000-01-02", Granularity: "day"},
+			}
 			if err := candidate.Validate(catalog); err != nil {
 				return fmt.Errorf("query %q: %w", query.ID, err)
 			}
