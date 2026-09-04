@@ -1,6 +1,10 @@
 package analytics
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/asenawritescode/kora/doctype"
+)
 
 func testCatalog() *SemanticCatalog {
 	return &SemanticCatalog{Models: []SemanticModel{{
@@ -69,5 +73,28 @@ func TestAnalyticsQueryRejectsUnknownMeasureAndLimit(t *testing.T) {
 
 	if err := request.Validate(testCatalog()); err == nil {
 		t.Fatal("expected invalid query to be rejected")
+	}
+}
+
+func TestBuildSemanticModelUsesDocTypeFieldMetadata(t *testing.T) {
+	model := BuildSemanticModel(&doctype.DocType{
+		Name:      "Cake Order",
+		SortField: "order_date",
+		Fields: []doctype.Field{
+			{Fieldname: "order_date", Fieldtype: "Date", Label: "Order date"},
+			{Fieldname: "flavour", Fieldtype: "Select", Label: "Flavour"},
+			{Fieldname: "total_sales", Fieldtype: "Currency", Label: "Total sales"},
+			{Fieldname: "notes", Fieldtype: "Text", Label: "Notes"},
+		},
+	})
+
+	if model.Name != "cake_order" || model.TimeDimension != "order_date" {
+		t.Fatalf("unexpected model identity: %#v", model)
+	}
+	if len(model.Dimensions) != 2 || len(model.Measures) != 2 {
+		t.Fatalf("unexpected catalog fields: dimensions=%d measures=%d", len(model.Dimensions), len(model.Measures))
+	}
+	if model.Measures[1].Format != "currency" {
+		t.Fatalf("expected currency format, got %q", model.Measures[1].Format)
 	}
 }

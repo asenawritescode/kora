@@ -18,6 +18,19 @@ import (
 func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, dialect db.Dialect) {
 	ag := apiGroup.Group("/analytics")
 
+	ag.GET("/catalog", func(c *gin.Context) {
+		docTypes := make([]*doctype.DocType, 0, len(registry.Names()))
+		for _, name := range registry.Names() {
+			docTypes = append(docTypes, registry.Get(name))
+		}
+		catalog := analytics.BuildSemanticCatalog(docTypes)
+		if err := catalog.Validate(); err != nil {
+			internalError(c, "building analytics catalog", err)
+			return
+		}
+		c.JSON(http.StatusOK, Response{Data: catalog})
+	})
+
 	// Status endpoint always available — reports whether analytics is running.
 	ag.GET("/status", func(c *gin.Context) {
 		siteName := c.GetString("site_name")

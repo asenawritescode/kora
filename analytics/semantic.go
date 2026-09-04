@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // SemanticCatalog is the governed vocabulary exposed to report builders and
@@ -12,6 +14,80 @@ import (
 type SemanticCatalog struct {
 	Models  []SemanticModel    `json:"models" yaml:"models"`
 	Reports []ReportDefinition `json:"reports,omitempty" yaml:"reports,omitempty"`
+}
+
+// BuildSemanticCatalog exposes the safe, automatically discoverable portion of
+// the registry to analytics consumers.
+func BuildSemanticCatalog(docTypes []*doctype.DocType) *SemanticCatalog {
+	catalog := &SemanticCatalog{Models: make([]SemanticModel, 0, len(docTypes))}
+	for _, dt := range docTypes {
+		if dt == nil || dt.IsChildTable || dt.IsSingle {
+			continue
+		}
+		catalog.Models = append(catalog.Models, BuildSemanticModel(dt))
+	}
+	return catalog
+}
+
+// BuildSemanticModel creates a conservative catalog model from DocType
+// metadata. Explicit semantic configuration can later enrich or replace this
+// projection without changing the query contract.
+func BuildSemanticModel(dt *doctype.DocType) SemanticModel {
+	model := SemanticModel{
+		Name:          metricName(dt.Name),
+		Label:         dt.Name,
+		SourceDoctype: dt.Name,
+	}
+	for _, field := range dt.Fields {
+		if field.IsLayoutField() || field.Fieldtype == "Table" || field.Fieldname == "" {
+			continue
+		}
+		label := field.Label
+		if label == "" {
+			label = field.Fieldname
+		}
+		switch field.Fieldtype {
+		case "Date", "Datetime":
+			model.Dimensions = append(model.Dimensions, SemanticDimension{
+				Name: field.Fieldname, Label: label, Field: field.Fieldname,
+				Type: "time", SupportedGranularities: []string{"day", "week", "month", "quarter", "year"},
+			})
+			if model.TimeDimension == "" || field.Fieldname == dt.SortField {
+				model.TimeDimension = field.Fieldname
+			}
+		case "Select", "Link", "Dynamic Link":
+			model.Dimensions = append(model.Dimensions, SemanticDimension{
+				Name: field.Fieldname, Label: label, Field: field.Fieldname, Type: "category",
+			})
+		case "Check":
+			model.Dimensions = append(model.Dimensions, SemanticDimension{
+				Name: field.Fieldname, Label: label, Field: field.Fieldname, Type: "boolean",
+			})
+		}
+		if field.IsNumeric() {
+			format := "number"
+			if field.Fieldtype == "Currency" {
+				format = "currency"
+			} else if field.Fieldtype == "Percent" {
+				format = "percent"
+			}
+			model.Measures = append(model.Measures, SemanticMeasure{
+				Name: field.Fieldname + "_sum", Label: "Total " + label,
+				Field: field.Fieldname, Aggregation: "sum", Format: format,
+			})
+		}
+	}
+	if model.TimeDimension == "" {
+		model.TimeDimension = "creation"
+		model.Dimensions = append(model.Dimensions, SemanticDimension{
+			Name: "creation", Label: "Created", Field: "creation", Type: "time",
+			SupportedGranularities: []string{"day", "week", "month", "quarter", "year"},
+		})
+	}
+	model.Measures = append([]SemanticMeasure{{
+		Name: "count", Label: "Count", Aggregation: "count", Format: "number",
+	}}, model.Measures...)
+	return model
 }
 
 // SemanticModel is an analytics-friendly projection of one or more sources.
