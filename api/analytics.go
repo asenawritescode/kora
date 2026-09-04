@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -26,11 +27,75 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			docTypes = append(docTypes, registry.Get(name))
 		}
 		catalog := analytics.BuildSemanticCatalog(docTypes)
+		reports, err := loadSemanticReports(c, getSiteDB(c, siteDB))
+		if err != nil {
+			internalError(c, "loading analytics reports", err)
+			return
+		}
+		catalog.Reports = reports
 		if err := catalog.Validate(); err != nil {
 			internalError(c, "building analytics catalog", err)
 			return
 		}
 		c.JSON(http.StatusOK, Response{Data: catalog})
+	})
+
+	ag.GET("/reports", func(c *gin.Context) {
+		reports, err := loadSemanticReports(c, getSiteDB(c, siteDB))
+		if err != nil {
+			internalError(c, "loading analytics reports", err)
+			return
+		}
+		c.JSON(http.StatusOK, Response{Data: reports})
+	})
+
+	ag.POST("/reports/:name/query", func(c *gin.Context) {
+		var request analytics.AnalyticsQueryRequest
+		if err := c.ShouldBindJSON(&request); err != nil {
+			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid analytics query", nil)
+			return
+		}
+		docTypes := make([]*doctype.DocType, 0, len(registry.Names()))
+		for _, name := range registry.Names() {
+			docTypes = append(docTypes, registry.Get(name))
+		}
+		catalog := analytics.BuildSemanticCatalog(docTypes)
+		reports, err := loadSemanticReports(c, getSiteDB(c, siteDB))
+		if err != nil {
+			internalError(c, "loading analytics reports", err)
+			return
+		}
+		catalog.Reports = reports
+		var report *analytics.ReportDefinition
+		for index := range reports {
+			if reports[index].Name == c.Param("name") {
+				report = &reports[index]
+				break
+			}
+		}
+		if report == nil {
+			writeError(c, http.StatusNotFound, "analytics.report_not_found", "Report not found", map[string]any{"name": c.Param("name")})
+			return
+		}
+		if err := report.Validate(catalog); err != nil {
+			writeError(c, http.StatusUnprocessableEntity, "analytics.report_invalid", err.Error(), nil)
+			return
+		}
+		request.Queries = make([]analytics.ModelQuery, 0, len(report.Queries))
+		for _, query := range report.Queries {
+			request.Queries = append(request.Queries, analytics.ModelQuery{Model: query.Model, Measures: query.Measures, Dimensions: query.Dimensions, Filters: query.Filters})
+		}
+		qe := getQueryEngine(c, siteDB)
+		if qe == nil {
+			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
+			return
+		}
+		result, err := qe.ResolveSemanticQuery(catalog, request)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, "analytics.invalid_query", err.Error(), nil)
+			return
+		}
+		c.JSON(http.StatusOK, Response{Data: gin.H{"report": report, "result": result}})
 	})
 
 	ag.POST("/query", func(c *gin.Context) {
@@ -177,6 +242,34 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 
 		c.JSON(http.StatusOK, Response{Data: insights})
 	})
+}
+
+func loadSemanticReports(c *gin.Context, db *sql.DB) ([]analytics.ReportDefinition, error) {
+	if db == nil {
+		return []analytics.ReportDefinition{}, nil
+	}
+	siteName := c.GetString("site_name")
+	var configJSON string
+	err := db.QueryRow(`SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1`, siteName).Scan(&configJSON)
+	if err == sql.ErrNoRows {
+		return []analytics.ReportDefinition{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := doctype.ParseSnapshot(configJSON)
+	if err != nil {
+		return nil, err
+	}
+	reports := make([]analytics.ReportDefinition, 0, len(snapshot.Reports))
+	for _, raw := range snapshot.Reports {
+		var report analytics.ReportDefinition
+		if err := json.Unmarshal(raw, &report); err != nil {
+			return nil, err
+		}
+		reports = append(reports, report)
+	}
+	return reports, nil
 }
 
 // resolveMetrics returns all metrics for the current site: auto-generated from
