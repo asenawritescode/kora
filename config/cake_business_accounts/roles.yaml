@@ -1,0 +1,9 @@
+- name: Cake Owner
+  workspace_access: true
+  description: Manages recipes, orders, costs, expenses, and business reporting.
+- name: Cake Staff
+  workspace_access: true
+  description: Records orders, expenses, and recipe inputs without managing access control.
+- name: Administrator
+  workspace_access: true
+  description: Full system access.

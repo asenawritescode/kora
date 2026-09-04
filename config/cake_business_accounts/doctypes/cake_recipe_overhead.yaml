@@ -1,0 +1,37 @@
+name: Cake Recipe Overhead
+module: Cake Accounts
+is_child_table: true
+title_field: item
+search_fields: item
+
+fields:
+  - fieldname: item
+    fieldtype: Data
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: Quantity cannot be negative.
+  - fieldname: unit
+    fieldtype: Select
+    options: |-
+      rate
+      hour
+      minute
+      trip
+      item
+  - fieldname: unit_cost
+    fieldtype: Currency
+    reqd: true
+    in_list_view: true
+  - fieldname: line_cost
+    fieldtype: Currency
+    computed: "(* quantity unit_cost)"
+    read_only: true
+    in_list_view: true
+  - fieldname: notes
+    fieldtype: Text

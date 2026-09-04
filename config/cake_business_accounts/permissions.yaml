@@ -1,0 +1,77 @@
+- doctype: Item Master
+  role: Cake Owner
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_export: true
+  can_import: true
+- doctype: Item Master
+  role: Cake Staff
+  can_read: true
+  can_write: false
+  can_create: false
+  can_delete: false
+- doctype: Cake Recipe Ingredient
+  role: Cake Owner
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Cake Recipe Ingredient
+  role: Cake Staff
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Cake Recipe Overhead
+  role: Cake Owner
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Cake Recipe Overhead
+  role: Cake Staff
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Cake Recipe
+  role: Cake Owner
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_export: true
+- doctype: Cake Recipe
+  role: Cake Staff
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Cake Order
+  role: Cake Owner
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_export: true
+- doctype: Cake Order
+  role: Cake Staff
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Cake Expense
+  role: Cake Owner
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_export: true
+- doctype: Cake Expense
+  role: Cake Staff
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false

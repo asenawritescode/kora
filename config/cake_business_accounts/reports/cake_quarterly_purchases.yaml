@@ -1,0 +1,19 @@
+name: cake_quarterly_purchases
+label: Quarterly purchases
+route: /reports/cake-quarterly-purchases
+queries:
+  - id: purchases
+    model: cake_expense
+    measures: [total_cost_sum, count]
+    dimensions: [item]
+visuals:
+  - id: spend_by_item
+    type: bar
+    source: purchases
+    x_field: item
+    series:
+      - field: total_cost_sum
+        label: Total spend
+        type: bar
+        format: currency
+

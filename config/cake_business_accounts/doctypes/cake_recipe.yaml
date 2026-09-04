@@ -1,0 +1,86 @@
+name: Cake Recipe
+module: Cake Accounts
+title_field: recipe_code
+search_fields: recipe_code, flavour, size
+sort_field: recipe_code
+sort_order: ASC
+
+fields:
+  - fieldname: recipe_code
+    fieldtype: Data
+    label: Recipe Code
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: flavour
+    fieldtype: Select
+    options: |-
+      Vanilla
+      Chocolate
+      Red Velvet
+      Lemon
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: size
+    fieldtype: Select
+    options: |-
+      500g
+      1kg
+      1.5kg
+      2kg
+      Bento
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: ingredient_lines
+    fieldtype: Table
+    options: Cake Recipe Ingredient
+    constraints:
+      - type: min_rows
+        value: 1
+        message: Add at least one ingredient.
+  - fieldname: decoration_lines
+    fieldtype: Table
+    options: Cake Recipe Ingredient
+  - fieldname: overhead_lines
+    fieldtype: Table
+    options: Cake Recipe Overhead
+  - fieldname: ingredient_cost
+    fieldtype: Currency
+    computed: "(sum \"ingredient_lines\" \"line_cost\")"
+    read_only: true
+    in_list_view: true
+  - fieldname: decoration_cost
+    fieldtype: Currency
+    computed: "(sum \"decoration_lines\" \"line_cost\")"
+    read_only: true
+  - fieldname: overhead_cost
+    fieldtype: Currency
+    computed: "(sum \"overhead_lines\" \"line_cost\")"
+    read_only: true
+  - fieldname: total_cost
+    fieldtype: Currency
+    computed: "(+ (+ ingredient_cost decoration_cost) overhead_cost)"
+    read_only: true
+    in_list_view: true
+  - fieldname: selling_price
+    fieldtype: Currency
+    label: Selling Price (KSh)
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: Selling price cannot be negative.
+  - fieldname: estimated_profit
+    fieldtype: Currency
+    computed: "(- selling_price total_cost)"
+    read_only: true
+    in_list_view: true
+  - fieldname: profit_margin
+    fieldtype: Percent
+    computed: "(if (> selling_price 0) (* (/ estimated_profit selling_price) 100) 0)"
+    read_only: true
+    in_list_view: true
+  - fieldname: notes
+    fieldtype: Text

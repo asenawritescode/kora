@@ -1,0 +1,31 @@
+name: Cake Accounts Workspace
+route: /cake-accounts
+type: workspace
+layout: two_panel
+label: Cake Business Accounts
+module: Cake Accounts
+components:
+  - id: orders
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Cake Order
+    label: Orders
+    desktop_columns: [order_id, order_date, customer, flavour, size, total_sales, balance_due, payment_status]
+    mobile_columns: [order_id, customer, balance_due, payment_status]
+  - id: recipes
+    type: record_table
+    region: side
+    position: 1
+    source_doctype: Cake Recipe
+    label: Recipe Costing
+    desktop_columns: [recipe_code, flavour, size, total_cost, selling_price, estimated_profit]
+    mobile_columns: [recipe_code, total_cost, selling_price]
+  - id: expenses
+    type: record_table
+    region: side
+    position: 2
+    source_doctype: Cake Expense
+    label: Expenses
+    desktop_columns: [expense_id, expense_date, item, category, total_cost]
+    mobile_columns: [expense_id, item, total_cost]

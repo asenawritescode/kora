@@ -1,0 +1,94 @@
+name: Item Master
+module: Cake Accounts
+title_field: item_code
+search_fields: item_code, category, supplier
+sort_field: item_code
+sort_order: ASC
+
+fields:
+  - fieldname: item_code
+    fieldtype: Data
+    label: Item
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: category
+    fieldtype: Select
+    options: |-
+      Ingredient
+      Decoration
+      Packaging
+      Labour
+      Overhead
+      Other
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: purchase_unit
+    fieldtype: Select
+    options: |-
+      kg
+      g
+      L
+      ml
+      m
+      pcs
+      box
+      pack
+      hour
+      rate
+    reqd: true
+  - fieldname: purchase_qty
+    fieldtype: Float
+    reqd: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: Purchase quantity must be greater than zero.
+  - fieldname: purchase_cost
+    fieldtype: Currency
+    label: Purchase Cost (KSh)
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: Purchase cost cannot be negative.
+  - fieldname: cost_per_purchase_unit
+    fieldtype: Currency
+    label: Cost per Purchase Unit (KSh)
+    computed: "(/ purchase_cost purchase_qty)"
+    read_only: true
+    in_list_view: true
+  - fieldname: costing_unit
+    fieldtype: Select
+    label: Costing Unit
+    options: |-
+      g
+      ml
+      m
+      pcs
+      box
+      pack
+      hour
+      rate
+    reqd: true
+  - fieldname: conversion_factor
+    fieldtype: Float
+    label: Purchase-to-costing conversion factor
+    default: "1"
+    reqd: true
+    description: Use 1000 for kg-to-g or L-to-ml; use 1 when the units already match.
+  - fieldname: cost_per_costing_unit
+    fieldtype: Currency
+    label: Cost per Costing Unit (KSh)
+    computed: "(/ cost_per_purchase_unit conversion_factor)"
+    read_only: true
+    in_list_view: true
+  - fieldname: supplier
+    fieldtype: Data
+    in_list_view: true
+  - fieldname: last_updated
+    fieldtype: Date
+  - fieldname: notes
+    fieldtype: Text

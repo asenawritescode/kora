@@ -1,0 +1,35 @@
+name: Cake Recipe Ingredient
+module: Cake Accounts
+is_child_table: true
+title_field: item
+search_fields: item
+
+fields:
+  - fieldname: item
+    fieldtype: Link
+    options: Item Master
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: Quantity cannot be negative.
+  - fieldname: unit_cost
+    fieldtype: Currency
+    linked_field: item.cost_per_costing_unit
+    read_only: true
+    in_list_view: true
+  - fieldname: costing_unit
+    fieldtype: Data
+    linked_field: item.costing_unit
+    read_only: true
+  - fieldname: line_cost
+    fieldtype: Currency
+    computed: "(* quantity unit_cost)"
+    read_only: true
+    in_list_view: true
+  - fieldname: notes
+    fieldtype: Text

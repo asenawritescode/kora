@@ -1,0 +1,76 @@
+name: Cake Expense
+module: Cake Accounts
+title_field: expense_id
+search_fields: expense_id, item, category, supplier, payment_method
+sort_field: expense_date
+sort_order: DESC
+
+fields:
+  - fieldname: expense_id
+    fieldtype: Data
+    label: Expense ID
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: expense_date
+    fieldtype: Date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: item
+    fieldtype: Link
+    options: Item Master
+    reqd: true
+    in_list_view: true
+  - fieldname: category
+    fieldtype: Data
+    linked_field: item.category
+    read_only: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: Quantity cannot be negative.
+  - fieldname: unit
+    fieldtype: Data
+    linked_field: item.costing_unit
+    read_only: true
+    in_list_view: true
+  - fieldname: unit_multiplier
+    fieldtype: Float
+    label: Unit Multiplier
+    default: "1"
+    reqd: true
+    description: Use 1000 when entering a purchase quantity in kg or L against a gram or millilitre costing unit.
+  - fieldname: unit_cost
+    fieldtype: Currency
+    label: Unit Cost (KSh)
+    linked_field: item.cost_per_costing_unit
+    read_only: true
+    in_list_view: true
+  - fieldname: total_cost
+    fieldtype: Currency
+    label: Total Cost (KSh)
+    computed: "(* (* quantity unit_cost) unit_multiplier)"
+    read_only: true
+    in_list_view: true
+  - fieldname: supplier
+    fieldtype: Data
+    linked_field: item.supplier
+    read_only: true
+    in_list_view: true
+  - fieldname: payment_method
+    fieldtype: Select
+    options: |-
+      Cash
+      M-Pesa
+      Bank
+      Card
+      Credit
+      Other
+    in_list_view: true
+  - fieldname: notes
+    fieldtype: Text

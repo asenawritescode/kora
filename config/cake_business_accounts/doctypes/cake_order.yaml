@@ -1,0 +1,97 @@
+name: Cake Order
+module: Cake Accounts
+title_field: order_id
+search_fields: order_id, customer, flavour, size, payment_status
+sort_field: order_date
+sort_order: DESC
+
+fields:
+  - fieldname: order_id
+    fieldtype: Data
+    label: Order ID
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: order_date
+    fieldtype: Date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: customer
+    fieldtype: Data
+    in_list_view: true
+  - fieldname: description
+    fieldtype: Text
+  - fieldname: recipe
+    fieldtype: Link
+    options: Cake Recipe
+    reqd: true
+    in_list_view: true
+  - fieldname: flavour
+    fieldtype: Data
+    linked_field: recipe.flavour
+    read_only: true
+    in_list_view: true
+  - fieldname: size
+    fieldtype: Data
+    linked_field: recipe.size
+    read_only: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Int
+    label: Qty
+    reqd: true
+    constraints:
+      - type: min
+        value: 1
+        message: Quantity must be at least one.
+  - fieldname: selling_price_per_cake
+    fieldtype: Currency
+    linked_field: recipe.selling_price
+    read_only: true
+    in_list_view: true
+  - fieldname: total_sales
+    fieldtype: Currency
+    computed: "(* quantity selling_price_per_cake)"
+    read_only: true
+    in_list_view: true
+  - fieldname: deposit_paid
+    fieldtype: Currency
+    label: Deposit Paid (KSh)
+    default: "0"
+    constraints:
+      - type: min
+        value: 0
+        message: Deposit cannot be negative.
+  - fieldname: balance_due
+    fieldtype: Currency
+    computed: "(if (> (- total_sales deposit_paid) 0) (- total_sales deposit_paid) 0)"
+    read_only: true
+    in_list_view: true
+  - fieldname: payment_status
+    fieldtype: Select
+    options: |-
+      Unpaid
+      Part Paid
+      Paid
+    default: Unpaid
+    in_list_view: true
+    in_standard_filter: true
+    description: Keep this aligned with the calculated balance due.
+  - fieldname: cost_per_cake
+    fieldtype: Currency
+    linked_field: recipe.total_cost
+    read_only: true
+  - fieldname: estimated_order_cost
+    fieldtype: Currency
+    computed: "(* quantity cost_per_cake)"
+    read_only: true
+    in_list_view: true
+  - fieldname: estimated_gross_profit
+    fieldtype: Currency
+    computed: "(- total_sales estimated_order_cost)"
+    read_only: true
+    in_list_view: true
+  - fieldname: notes
+    fieldtype: Text
