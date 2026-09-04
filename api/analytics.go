@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -17,6 +18,7 @@ import (
 // siteBuses maps site name → EventBus.
 func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, dialect db.Dialect) {
 	ag := apiGroup.Group("/analytics")
+	queryCache := newAnalyticsQueryCache(30*time.Second, 256)
 
 	ag.GET("/catalog", func(c *gin.Context) {
 		docTypes := make([]*doctype.DocType, 0, len(registry.Names()))
@@ -46,6 +48,11 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			internalError(c, "building analytics catalog", err)
 			return
 		}
+		cacheKey := queryCache.key(c.GetString("site_name"), request)
+		if cached, ok := queryCache.get(cacheKey); ok {
+			c.JSON(http.StatusOK, Response{Data: cached})
+			return
+		}
 		qe := getQueryEngine(c, siteDB)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
@@ -56,6 +63,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			writeError(c, http.StatusBadRequest, "analytics.invalid_query", err.Error(), nil)
 			return
 		}
+		queryCache.put(cacheKey, result)
 		c.JSON(http.StatusOK, Response{Data: result})
 	})
 
