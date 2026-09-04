@@ -2,10 +2,41 @@ package analytics
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// ParseReportsDirectory parses all YAML report definitions in a config pack.
+// A missing reports directory is valid for packs that do not provide reports.
+func ParseReportsDirectory(path string) ([]ReportDefinition, error) {
+	entries, err := os.ReadDir(path)
+	if os.IsNotExist(err) {
+		return []ReportDefinition{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	reports := make([]ReportDefinition, 0)
+	for _, entry := range entries {
+		if entry.IsDir() || (filepath.Ext(entry.Name()) != ".yaml" && filepath.Ext(entry.Name()) != ".yml") {
+			continue
+		}
+		filePath := filepath.Join(path, entry.Name())
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, err
+		}
+		report, err := ParseReportYAML(data, filePath)
+		if err != nil {
+			return nil, err
+		}
+		reports = append(reports, *report)
+	}
+	return reports, nil
+}
 
 // ParseReportYAML parses one report definition from a configuration file. The
 // report remains declarative: execution is still governed by the catalog.

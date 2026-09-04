@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/configstore"
 	sqlDialect "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -43,6 +44,18 @@ func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, conf
 	if err != nil {
 		return fmt.Errorf("parsing views: %w", err)
 	}
+	reportDefinitions, err := analytics.ParseReportsDirectory(configPath + "/reports")
+	if err != nil {
+		return fmt.Errorf("parsing reports: %w", err)
+	}
+	reports := make([]json.RawMessage, 0, len(reportDefinitions))
+	for _, report := range reportDefinitions {
+		data, err := json.Marshal(report)
+		if err != nil {
+			return fmt.Errorf("encoding report %s: %w", report.Name, err)
+		}
+		reports = append(reports, data)
+	}
 
 	return ImportConfigFromSnapshot(db, registry, dbName, siteName, fmt.Sprintf("Config import from %s", configPath), &doctype.ConfigSnapshot{
 		DocTypes:    doctypes,
@@ -50,6 +63,7 @@ func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, conf
 		Permissions: permissions,
 		Workflows:   workflows,
 		Views:       views,
+		Reports:     reports,
 	}, dialect, nil)
 }
 

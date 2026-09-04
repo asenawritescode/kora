@@ -46,6 +46,7 @@ type ConfigSnapshot struct {
 	Workflows        []*Workflow              `json:"workflows"`
 	Views            []*View                  `json:"views,omitempty"`
 	AnalyticsMetrics []*AnalyticsMetricConfig `json:"analytics_metrics,omitempty"`
+	Reports          []json.RawMessage        `json:"reports,omitempty"`
 	Scripts          []*ScriptSnapshot        `json:"scripts,omitempty"`
 	MinKoraVersion   string                   `json:"min_kora_version,omitempty"`
 }
