@@ -211,6 +211,11 @@ func (c *SemanticCatalog) Validate() error {
 		}
 		seen[model.Name] = true
 	}
+	for i := range c.Reports {
+		if err := c.Reports[i].Validate(c); err != nil {
+			return fmt.Errorf("report %q: %w", c.Reports[i].Name, err)
+		}
+	}
 	return nil
 }
 
@@ -303,6 +308,15 @@ func (q *AnalyticsQueryRequest) Validate(catalog *SemanticCatalog) error {
 	if q.Limit < 0 || q.Limit > 10000 {
 		return fmt.Errorf("limit must be between 0 and 10000")
 	}
+	if q.Time.From == "" || q.Time.To == "" {
+		return fmt.Errorf("time.from and time.to are required")
+	}
+	if q.Time.From > q.Time.To {
+		return fmt.Errorf("time.from must not be after time.to")
+	}
+	if q.Time.Granularity != "" && !validGranularity(q.Time.Granularity) {
+		return fmt.Errorf("unsupported query granularity %q", q.Time.Granularity)
+	}
 	for i, query := range q.Queries {
 		model := catalog.model(query.Model)
 		if model == nil {
@@ -327,6 +341,14 @@ func (q *AnalyticsQueryRequest) Validate(catalog *SemanticCatalog) error {
 		for _, name := range query.Dimensions {
 			if !dimensions[name] {
 				return fmt.Errorf("queries[%d]: unknown dimension %q", i, name)
+			}
+		}
+		for _, filter := range query.Filters {
+			if !dimensions[filter.Field] {
+				return fmt.Errorf("queries[%d]: unknown filter field %q", i, filter.Field)
+			}
+			if len(filter.Values) == 0 {
+				return fmt.Errorf("queries[%d]: filter %q requires at least one value", i, filter.Field)
 			}
 		}
 	}
