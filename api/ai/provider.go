@@ -193,7 +193,7 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string) (providerKey, a
 
 	providers := []struct{ key, base, defaultModel string }{
 		{"openai_api_key", "https://api.openai.com/v1", "gpt-4o"},
-		{"deepseek_api_key", "https://api.deepseek.com", "deepseek-v4-pro"},
+		{"deepseek_api_key", "https://api.deepseek.com", "deepseek-chat"},
 		{"anthropic_api_key", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
 	}
 	for _, p := range providers {
@@ -210,10 +210,10 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string) (providerKey, a
 	if os.Getenv("KORA_SHARED_AI_ENABLED") != "true" {
 		return "", "", "", ""
 	}
-	sharedProviders := []struct{ envKey, base, defaultModel string }{
-		{"KORA_SHARED_OPENAI_API_KEY", "https://api.openai.com/v1", "gpt-4o"},
-		{"KORA_SHARED_DEEPSEEK_API_KEY", "https://api.deepseek.com", "deepseek-v4-pro"},
-		{"KORA_SHARED_ANTHROPIC_API_KEY", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
+	sharedProviders := []struct{ providerKey, envKey, base, defaultModel string }{
+		{"openai_api_key", "KORA_SHARED_OPENAI_API_KEY", "https://api.openai.com/v1", "gpt-4o"},
+		{"deepseek_api_key", "KORA_SHARED_DEEPSEEK_API_KEY", "https://api.deepseek.com", "deepseek-chat"},
+		{"anthropic_api_key", "KORA_SHARED_ANTHROPIC_API_KEY", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
 	}
 	for _, p := range sharedProviders {
 		if k := os.Getenv(p.envKey); k != "" {
@@ -221,7 +221,7 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string) (providerKey, a
 			if modelOverride != "" {
 				m = modelOverride
 			}
-			return p.envKey, k, p.base, m
+			return p.providerKey, k, p.base, m
 		}
 	}
 	return "", "", "", ""

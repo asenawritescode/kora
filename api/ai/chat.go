@@ -92,6 +92,7 @@ func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteNa
 		return
 	}
 	if err := EnsureAIRunTables(c.Request.Context(), tx.DB); err != nil {
+		slog.Error("AI run storage initialization failed", "site", siteName, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to initialize AI run storage."}})
 		return
 	}
@@ -110,6 +111,7 @@ func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteNa
 			Status:     "active",
 			LastRunID:  runID,
 		}); err != nil {
+			slog.Error("AI conversation persistence failed", "site", siteName, "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to persist AI conversation."}})
 			return
 		}

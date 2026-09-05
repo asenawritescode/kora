@@ -6,10 +6,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -101,137 +105,187 @@ func EnsureAIRunTables(ctx context.Context, db *sql.DB) error {
 	}
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS _kora_ai_conversation (
-			id TEXT PRIMARY KEY,
-			site TEXT NOT NULL DEFAULT '',
-			channel TEXT NOT NULL DEFAULT 'chat',
-			subject_key TEXT NOT NULL DEFAULT '',
-			title TEXT NOT NULL DEFAULT '',
-			summary TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'active',
-			last_run_id TEXT NOT NULL DEFAULT '',
+			id VARCHAR(255) PRIMARY KEY,
+			site VARCHAR(255) NOT NULL DEFAULT '',
+			channel VARCHAR(255) NOT NULL DEFAULT 'chat',
+			subject_key VARCHAR(255) NOT NULL DEFAULT '',
+			title VARCHAR(255) NOT NULL DEFAULT '',
+			summary VARCHAR(255) NOT NULL DEFAULT '',
+			status VARCHAR(255) NOT NULL DEFAULT 'active',
+			last_run_id VARCHAR(255) NOT NULL DEFAULT '',
 			last_message_at DATETIME,
 			retention_expires_at DATETIME,
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_conversation_site ON _kora_ai_conversation (site, updated_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_conversation_subject ON _kora_ai_conversation (site, subject_key)`,
+		`CREATE INDEX idx_ai_conversation_site ON _kora_ai_conversation (site, updated_at)`,
+		`CREATE INDEX idx_ai_conversation_subject ON _kora_ai_conversation (site, subject_key)`,
 		`CREATE TABLE IF NOT EXISTS _kora_ai_run (
-			id TEXT PRIMARY KEY,
-			site TEXT NOT NULL DEFAULT '',
-			conversation_id TEXT NOT NULL DEFAULT '',
-			channel TEXT NOT NULL DEFAULT 'chat',
-			status TEXT NOT NULL DEFAULT 'planning',
-			model TEXT NOT NULL DEFAULT '',
-			provider TEXT NOT NULL DEFAULT '',
-			current_step_id TEXT NOT NULL DEFAULT '',
-			summary TEXT NOT NULL DEFAULT '',
-			input_message TEXT NOT NULL DEFAULT '',
-			output_message TEXT NOT NULL DEFAULT '',
-			error_message TEXT NOT NULL DEFAULT '',
-			cancel_reason TEXT NOT NULL DEFAULT '',
-			resume_token TEXT NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			id VARCHAR(255) PRIMARY KEY,
+			site VARCHAR(255) NOT NULL DEFAULT '',
+			conversation_id VARCHAR(255) NOT NULL DEFAULT '',
+			channel VARCHAR(255) NOT NULL DEFAULT 'chat',
+			status VARCHAR(255) NOT NULL DEFAULT 'planning',
+			model VARCHAR(255) NOT NULL DEFAULT '',
+			provider VARCHAR(255) NOT NULL DEFAULT '',
+			current_step_id VARCHAR(255) NOT NULL DEFAULT '',
+			summary VARCHAR(255) NOT NULL DEFAULT '',
+			input_message LONGTEXT NOT NULL,
+			output_message LONGTEXT NOT NULL,
+			error_message VARCHAR(255) NOT NULL DEFAULT '',
+			cancel_reason VARCHAR(255) NOT NULL DEFAULT '',
+			resume_token VARCHAR(255) NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			completed_at DATETIME,
 			cancelled_at DATETIME,
 			retention_expires_at DATETIME
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_run_site ON _kora_ai_run (site, updated_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_run_conversation ON _kora_ai_run (conversation_id, updated_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_run_status ON _kora_ai_run (site, status)`,
+		`CREATE INDEX idx_ai_run_site ON _kora_ai_run (site, updated_at)`,
+		`CREATE INDEX idx_ai_run_conversation ON _kora_ai_run (conversation_id, updated_at)`,
+		`CREATE INDEX idx_ai_run_status ON _kora_ai_run (site, status)`,
 		`CREATE TABLE IF NOT EXISTS _kora_ai_message (
-			id TEXT PRIMARY KEY,
-			site TEXT NOT NULL DEFAULT '',
-			conversation_id TEXT NOT NULL DEFAULT '',
-			run_id TEXT NOT NULL DEFAULT '',
-			role TEXT NOT NULL DEFAULT '',
-			content TEXT NOT NULL DEFAULT '',
-			message_kind TEXT NOT NULL DEFAULT 'message',
-			step_id TEXT NOT NULL DEFAULT '',
+			id VARCHAR(255) PRIMARY KEY,
+			site VARCHAR(255) NOT NULL DEFAULT '',
+			conversation_id VARCHAR(255) NOT NULL DEFAULT '',
+			run_id VARCHAR(255) NOT NULL DEFAULT '',
+			role VARCHAR(255) NOT NULL DEFAULT '',
+			content LONGTEXT NOT NULL,
+			message_kind VARCHAR(255) NOT NULL DEFAULT 'message',
+			step_id VARCHAR(255) NOT NULL DEFAULT '',
 			sequence INTEGER NOT NULL DEFAULT 0,
-			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_message_conversation ON _kora_ai_message (conversation_id, sequence)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_message_run ON _kora_ai_message (run_id, sequence)`,
+		`CREATE INDEX idx_ai_message_conversation ON _kora_ai_message (conversation_id, sequence)`,
+		`CREATE INDEX idx_ai_message_run ON _kora_ai_message (run_id, sequence)`,
 		`CREATE TABLE IF NOT EXISTS _kora_ai_step (
-			id TEXT PRIMARY KEY,
-			site TEXT NOT NULL DEFAULT '',
-			run_id TEXT NOT NULL DEFAULT '',
-			conversation_id TEXT NOT NULL DEFAULT '',
-			step_key TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'planning',
-			summary TEXT NOT NULL DEFAULT '',
-			tool_name TEXT NOT NULL DEFAULT '',
-			input_json TEXT NOT NULL DEFAULT '',
-			output_json TEXT NOT NULL DEFAULT '',
-			error_message TEXT NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			id VARCHAR(255) PRIMARY KEY,
+			site VARCHAR(255) NOT NULL DEFAULT '',
+			run_id VARCHAR(255) NOT NULL DEFAULT '',
+			conversation_id VARCHAR(255) NOT NULL DEFAULT '',
+			step_key VARCHAR(255) NOT NULL DEFAULT '',
+			status VARCHAR(255) NOT NULL DEFAULT 'planning',
+			summary VARCHAR(255) NOT NULL DEFAULT '',
+			tool_name VARCHAR(255) NOT NULL DEFAULT '',
+			input_json LONGTEXT NOT NULL,
+			output_json LONGTEXT NOT NULL,
+			error_message VARCHAR(255) NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_step_run ON _kora_ai_step (run_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_step_conversation ON _kora_ai_step (conversation_id, created_at)`,
+		`CREATE INDEX idx_ai_step_run ON _kora_ai_step (run_id, created_at)`,
+		`CREATE INDEX idx_ai_step_conversation ON _kora_ai_step (conversation_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS _kora_ai_task (
-			id TEXT PRIMARY KEY,
-			site TEXT NOT NULL DEFAULT '',
-			run_id TEXT NOT NULL DEFAULT '',
-			conversation_id TEXT NOT NULL DEFAULT '',
-			parent_task_id TEXT NOT NULL DEFAULT '',
-			kind TEXT NOT NULL DEFAULT 'task',
-			title TEXT NOT NULL DEFAULT '',
-			description TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'queued',
+			id VARCHAR(255) PRIMARY KEY,
+			site VARCHAR(255) NOT NULL DEFAULT '',
+			run_id VARCHAR(255) NOT NULL DEFAULT '',
+			conversation_id VARCHAR(255) NOT NULL DEFAULT '',
+			parent_task_id VARCHAR(255) NOT NULL DEFAULT '',
+			kind VARCHAR(255) NOT NULL DEFAULT 'task',
+			title VARCHAR(255) NOT NULL DEFAULT '',
+			description VARCHAR(255) NOT NULL DEFAULT '',
+			status VARCHAR(255) NOT NULL DEFAULT 'queued',
 			sort_order INTEGER NOT NULL DEFAULT 0,
-			notes TEXT NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			notes VARCHAR(255) NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			completed_at DATETIME
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_task_run ON _kora_ai_task (run_id, status, sort_order)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_task_conversation ON _kora_ai_task (conversation_id, updated_at)`,
+		`CREATE INDEX idx_ai_task_run ON _kora_ai_task (run_id, status, sort_order)`,
+		`CREATE INDEX idx_ai_task_conversation ON _kora_ai_task (conversation_id, updated_at)`,
 		`CREATE TABLE IF NOT EXISTS _kora_ai_approval (
-			id TEXT PRIMARY KEY,
-			site TEXT NOT NULL DEFAULT '',
-			operation_id TEXT NOT NULL DEFAULT '',
-			actor_principal_id TEXT NOT NULL DEFAULT '',
-			actor_principal_type TEXT NOT NULL DEFAULT '',
-			tool_name TEXT NOT NULL DEFAULT '',
-			state TEXT NOT NULL DEFAULT 'pending_approval',
-			target_fingerprint TEXT NOT NULL DEFAULT '',
-			argument_hash TEXT NOT NULL DEFAULT '',
+			id VARCHAR(255) PRIMARY KEY,
+			site VARCHAR(255) NOT NULL DEFAULT '',
+			operation_id VARCHAR(255) NOT NULL DEFAULT '',
+			actor_principal_id VARCHAR(255) NOT NULL DEFAULT '',
+			actor_principal_type VARCHAR(255) NOT NULL DEFAULT '',
+			tool_name VARCHAR(255) NOT NULL DEFAULT '',
+			state VARCHAR(255) NOT NULL DEFAULT 'pending_approval',
+			target_fingerprint VARCHAR(255) NOT NULL DEFAULT '',
+			argument_hash VARCHAR(255) NOT NULL DEFAULT '',
 			record_version INTEGER NOT NULL DEFAULT 0,
-			requested_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			expires_at DATETIME,
 			granted_at DATETIME,
-			granted_by TEXT NOT NULL DEFAULT '',
-			auth_session_id TEXT NOT NULL DEFAULT ''
+			granted_by VARCHAR(255) NOT NULL DEFAULT '',
+			auth_session_id VARCHAR(255) NOT NULL DEFAULT ''
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_approval_site ON _kora_ai_approval (site, requested_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_approval_operation ON _kora_ai_approval (operation_id, state)`,
+		`CREATE INDEX idx_ai_approval_site ON _kora_ai_approval (site, requested_at)`,
+		`CREATE INDEX idx_ai_approval_operation ON _kora_ai_approval (operation_id, state)`,
 		`CREATE TABLE IF NOT EXISTS _kora_ai_audit (
-			id TEXT PRIMARY KEY,
-			site TEXT NOT NULL DEFAULT '',
-			run_id TEXT NOT NULL DEFAULT '',
-			step_id TEXT NOT NULL DEFAULT '',
-			conversation_id TEXT NOT NULL DEFAULT '',
-			kind TEXT NOT NULL DEFAULT '',
-			name TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT '',
-			user_id TEXT NOT NULL DEFAULT '',
-			session_id TEXT NOT NULL DEFAULT '',
-			correlation_id TEXT NOT NULL DEFAULT '',
-			idempotency_key TEXT NOT NULL DEFAULT '',
-			details TEXT NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			id VARCHAR(255) PRIMARY KEY,
+			site VARCHAR(255) NOT NULL DEFAULT '',
+			run_id VARCHAR(255) NOT NULL DEFAULT '',
+			step_id VARCHAR(255) NOT NULL DEFAULT '',
+			conversation_id VARCHAR(255) NOT NULL DEFAULT '',
+			kind VARCHAR(255) NOT NULL DEFAULT '',
+			name VARCHAR(255) NOT NULL DEFAULT '',
+			status VARCHAR(255) NOT NULL DEFAULT '',
+			user_id VARCHAR(255) NOT NULL DEFAULT '',
+			session_id VARCHAR(255) NOT NULL DEFAULT '',
+			correlation_id VARCHAR(255) NOT NULL DEFAULT '',
+			idempotency_key VARCHAR(255) NOT NULL DEFAULT '',
+			details LONGTEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_ai_audit_site_run ON _kora_ai_audit (site, run_id, created_at)`,
+		`CREATE INDEX idx_ai_audit_site_run ON _kora_ai_audit (site, run_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS _kora_ai_usage (
+			id VARCHAR(255) PRIMARY KEY,
+			site VARCHAR(255) NOT NULL DEFAULT '',
+			organization_id VARCHAR(255) NOT NULL DEFAULT '',
+			user_id VARCHAR(255) NOT NULL DEFAULT '',
+			model VARCHAR(255) NOT NULL DEFAULT '',
+			provider VARCHAR(255) NOT NULL DEFAULT '',
+			run_id VARCHAR(255) NOT NULL DEFAULT '',
+			step_id VARCHAR(255) NOT NULL DEFAULT '',
+			channel VARCHAR(255) NOT NULL DEFAULT '',
+			attempt INTEGER NOT NULL DEFAULT 1,
+			status VARCHAR(255) NOT NULL DEFAULT 'completed',
+			tokens LONGTEXT,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			retry_of VARCHAR(255) NOT NULL DEFAULT '',
+			attribution LONGTEXT
+		)`,
+		`CREATE INDEX idx_ai_usage_site ON _kora_ai_usage (site, occurred_at)`,
+		`CREATE INDEX idx_ai_usage_run ON _kora_ai_usage (run_id)`,
+		`CREATE INDEX idx_ai_usage_step ON _kora_ai_usage (step_id)`,
+		`CREATE TABLE IF NOT EXISTS _kora_ai_budget_reservation (
+			id VARCHAR(255) PRIMARY KEY,
+			site VARCHAR(255) NOT NULL DEFAULT '',
+			model VARCHAR(255) NOT NULL DEFAULT '',
+			requested_tokens INTEGER NOT NULL DEFAULT 0,
+			consumed_tokens INTEGER NOT NULL DEFAULT 0,
+			status VARCHAR(255) NOT NULL DEFAULT 'reserved',
+			note VARCHAR(255) NOT NULL DEFAULT '',
+			reserved_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			released_at DATETIME
+		)`,
+		`CREATE INDEX idx_ai_budget_res_site ON _kora_ai_budget_reservation (site, model, status)`,
 	}
 	for _, stmt := range stmts {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
+		if _, err := db.ExecContext(ctx, stmt); err != nil && !isDuplicateIndexError(err) {
 			return err
 		}
 	}
 	return nil
+}
+
+func isDuplicateIndexError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1061
+}
+
+var aiExcludedColumn = regexp.MustCompile(`excluded\.([a-zA-Z0-9_]+)`)
+
+// aiUpsertSQL keeps the store compatible with both Kora database dialects.
+// SQLite uses ON CONFLICT/excluded; MySQL uses ON DUPLICATE KEY/VALUES.
+func aiUpsertSQL(query string) string {
+	if !strings.EqualFold(os.Getenv("KORA_DB_TYPE"), "mysql") {
+		return query
+	}
+	query = strings.Replace(query, "ON CONFLICT(id) DO UPDATE SET", "ON DUPLICATE KEY UPDATE", 1)
+	return aiExcludedColumn.ReplaceAllString(query, "VALUES($1)")
 }
 
 func UpsertConversation(ctx context.Context, db *sql.DB, rec ConversationRecord) error {
@@ -245,7 +299,7 @@ func UpsertConversation(ctx context.Context, db *sql.DB, rec ConversationRecord)
 	if rec.Channel == "" {
 		rec.Channel = "chat"
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, aiUpsertSQL(`
 INSERT INTO _kora_ai_conversation (
 	id, site, channel, subject_key, title, summary, status, last_run_id, last_message_at, retention_expires_at, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -259,7 +313,7 @@ ON CONFLICT(id) DO UPDATE SET
 	last_run_id=excluded.last_run_id,
 	last_message_at=excluded.last_message_at,
 	retention_expires_at=excluded.retention_expires_at,
-	updated_at=excluded.updated_at`,
+	updated_at=excluded.updated_at`),
 		rec.ID, rec.Site, rec.Channel, rec.SubjectKey, rec.Title, rec.Summary, rec.Status, rec.LastRunID, nullTime(rec.LastMessageAt), nullTime(rec.RetentionExpiresAt), now, now,
 	)
 	return err
@@ -314,7 +368,7 @@ func UpsertRun(ctx context.Context, db *sql.DB, rec RunRecord) error {
 	if rec.Channel == "" {
 		rec.Channel = "chat"
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, aiUpsertSQL(`
 INSERT INTO _kora_ai_run (
 	id, site, conversation_id, channel, status, model, provider, current_step_id, summary, input_message, output_message, error_message, cancel_reason, resume_token, created_at, updated_at, completed_at, cancelled_at, retention_expires_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -335,7 +389,7 @@ ON CONFLICT(id) DO UPDATE SET
 	updated_at=excluded.updated_at,
 	completed_at=excluded.completed_at,
 	cancelled_at=excluded.cancelled_at,
-	retention_expires_at=excluded.retention_expires_at`,
+	retention_expires_at=excluded.retention_expires_at`),
 		rec.ID, rec.Site, rec.ConversationID, rec.Channel, rec.Status, rec.Model, rec.Provider, rec.CurrentStepID, rec.Summary, rec.InputMessage, rec.OutputMessage, rec.ErrorMessage, rec.CancelReason, rec.ResumeToken, now, now, nullTime(rec.CompletedAt), nullTime(rec.CancelledAt), nullTime(rec.RetentionExpiresAt),
 	)
 	return err
@@ -384,7 +438,7 @@ func UpsertStep(ctx context.Context, db *sql.DB, stepID, site, runID, conversati
 	if stepID == "" {
 		stepID = ulid.Make().String()
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, aiUpsertSQL(`
 INSERT INTO _kora_ai_step (
 	id, site, run_id, conversation_id, step_key, status, summary, tool_name, input_json, output_json, error_message, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -399,7 +453,7 @@ ON CONFLICT(id) DO UPDATE SET
 	input_json=excluded.input_json,
 	output_json=excluded.output_json,
 	error_message=excluded.error_message,
-	updated_at=excluded.updated_at`,
+	updated_at=excluded.updated_at`),
 		stepID, site, runID, conversationID, stepKey, status, summary, toolName, inputJSON, outputJSON, errorMessage, now, now,
 	)
 	return err
@@ -413,7 +467,7 @@ func UpsertTask(ctx context.Context, db *sql.DB, rec TaskRecord) error {
 	if rec.ID == "" {
 		rec.ID = ulid.Make().String()
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, aiUpsertSQL(`
 INSERT INTO _kora_ai_task (
 	id, site, run_id, conversation_id, parent_task_id, kind, title, description, status, sort_order, notes, created_at, updated_at, completed_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -429,7 +483,7 @@ ON CONFLICT(id) DO UPDATE SET
 	sort_order=excluded.sort_order,
 	notes=excluded.notes,
 	updated_at=excluded.updated_at,
-	completed_at=excluded.completed_at`,
+	completed_at=excluded.completed_at`),
 		rec.ID, rec.Site, rec.RunID, rec.ConversationID, rec.ParentTaskID, rec.Kind, rec.Title, rec.Description, rec.Status, rec.SortOrder, rec.Notes, now, now, nullTime(rec.CompletedAt),
 	)
 	return err
@@ -579,7 +633,7 @@ func UpsertApproval(ctx context.Context, db *sql.DB, rec ApprovalRecord) error {
 	if rec.RequestedAt.IsZero() {
 		rec.RequestedAt = now
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, aiUpsertSQL(`
 INSERT INTO _kora_ai_approval (
 	id, site, operation_id, actor_principal_id, actor_principal_type, tool_name, state, target_fingerprint, argument_hash, record_version, requested_at, expires_at, granted_at, granted_by, auth_session_id
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -597,7 +651,7 @@ ON CONFLICT(id) DO UPDATE SET
 	expires_at=excluded.expires_at,
 	granted_at=excluded.granted_at,
 	granted_by=excluded.granted_by,
-	auth_session_id=excluded.auth_session_id`,
+	auth_session_id=excluded.auth_session_id`),
 		rec.ID, rec.Site, rec.OperationID, rec.ActorPrincipalID, rec.ActorPrincipalType, rec.ToolName, rec.State, rec.TargetFingerprint, rec.ArgumentHash, rec.RecordVersion, rec.RequestedAt, nullTime(rec.ExpiresAt), nullTime(rec.GrantedAt), rec.GrantedBy, rec.AuthSessionID,
 	)
 	return err

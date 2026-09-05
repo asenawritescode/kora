@@ -145,7 +145,7 @@ func TestResolveProviderFallsBackToSharedEnv(t *testing.T) {
 	t.Setenv("KORA_SHARED_ANTHROPIC_API_KEY", "")
 
 	providerKey, apiKey, baseURL, model := resolveProvider(db, "site-a", "")
-	if providerKey != "KORA_SHARED_OPENAI_API_KEY" || apiKey != "shared-openai" || baseURL != "https://api.openai.com/v1" || model != "gpt-4o" {
+	if providerKey != "openai_api_key" || apiKey != "shared-openai" || baseURL != "https://api.openai.com/v1" || model != "gpt-4o" {
 		t.Fatalf("unexpected shared provider fallback: %q %q %q %q", providerKey, apiKey, baseURL, model)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
