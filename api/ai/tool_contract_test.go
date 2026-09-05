@@ -85,6 +85,16 @@ func TestOpenAIToolsProjectFromCatalog(t *testing.T) {
 	}
 }
 
+func TestAnalyticsToolsAreExposed(t *testing.T) {
+	catalog := BuildToolCatalog(doctype.NewRegistry())
+	for _, name := range []string{"get_analytics_insights", "get_analytics_catalog", "query_analytics", "list_analytics_reports", "run_analytics_report"} {
+		tool := findTool(t, catalog.Tools, name)
+		if tool.SafetyLevel != "safe" {
+			t.Errorf("%s safety = %q, want safe", name, tool.SafetyLevel)
+		}
+	}
+}
+
 func findContractTool(t *testing.T, tools []contract.ToolDescriptor, name string) contract.ToolDescriptor {
 	t.Helper()
 	for _, tool := range tools {

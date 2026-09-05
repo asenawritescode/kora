@@ -3,6 +3,7 @@ package analytics
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -59,6 +60,9 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 		}
 		groupBy = ""
 	}
+	if len(query.Filters) > 0 && len(query.Dimensions) != 1 {
+		return nil, fmt.Errorf("model %q filters require one grouping dimension so the rollup can apply them safely", query.Model)
+	}
 
 	merged := map[string]map[string]any{}
 	order := []string{}
@@ -74,6 +78,10 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 		})
 		if err != nil {
 			return nil, err
+		}
+		if len(query.Filters) > 0 {
+			metricResult.Rows = filterSemanticRows(metricResult.Rows, query.Dimensions[0], query.Filters)
+			metricResult.Total = len(metricResult.Rows)
 		}
 		for _, row := range metricResult.Rows {
 			key := semanticRowKey(row)
@@ -105,6 +113,64 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 	}
 	columns = append(columns, query.Measures...)
 	return &SemanticQueryResult{Model: query.Model, Columns: columns, Rows: rows, Total: len(rows)}, nil
+}
+
+func filterSemanticRows(rows []map[string]any, dimension string, filters []SemanticFilter) []map[string]any {
+	filtered := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		value := fmt.Sprint(row[dimension])
+		if bucket, ok := row["bucket"]; ok {
+			value = fmt.Sprint(bucket)
+		}
+		if dimensionValue, ok := row["dimension"]; ok {
+			value = fmt.Sprint(dimensionValue)
+			if index := strings.Index(value, "="); index >= 0 {
+				value = value[index+1:]
+			}
+		}
+		matches := true
+		for _, filter := range filters {
+			if !semanticFilterMatches(value, filter) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
+}
+
+func semanticFilterMatches(value string, filter SemanticFilter) bool {
+	op := strings.ToLower(strings.TrimSpace(filter.Operator))
+	if op == "not in" || op == "not like" {
+		for _, candidate := range filter.Values {
+			candidate = strings.TrimSpace(candidate)
+			if (op == "not in" && value == candidate) || (op == "not like" && strings.Contains(strings.ToLower(value), strings.ToLower(candidate))) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, candidate := range filter.Values {
+		candidate = strings.TrimSpace(candidate)
+		matched := false
+		switch op {
+		case "=", "==", "in":
+			matched = value == candidate
+		case "!=", "<>":
+			matched = value != candidate
+		case "like":
+			matched = strings.Contains(strings.ToLower(value), strings.ToLower(candidate))
+		default:
+			return false
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 func metricForSemanticMeasure(model *SemanticModel, name string, dimensions []string) (*Metric, error) {

@@ -132,6 +132,17 @@ func TestEventDateNormalizesBusinessDateAndFallsBack(t *testing.T) {
 	}
 }
 
+func TestSemanticFilterMatchesRollupDimensionValues(t *testing.T) {
+	rows := []map[string]any{
+		{"dimension": "status=Active", "value": 4},
+		{"dimension": "status=Closed", "value": 2},
+	}
+	filtered := filterSemanticRows(rows, "status", []SemanticFilter{{Field: "status", Operator: "=", Values: []string{"Active"}}})
+	if len(filtered) != 1 || filtered[0]["dimension"] != "status=Active" {
+		t.Fatalf("unexpected filtered rows: %#v", filtered)
+	}
+}
+
 func TestMetricForSemanticMeasureMapsCategoryCounts(t *testing.T) {
 	model := testCatalog().Models[0]
 	metric, err := metricForSemanticMeasure(&model, "order_count", []string{"flavour"})

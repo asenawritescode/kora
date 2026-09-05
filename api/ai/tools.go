@@ -650,6 +650,10 @@ fields:
 
 	return []map[string]any{
 		analyticsToolDef(),
+		analyticsCatalogToolDef(),
+		analyticsQueryToolDef(),
+		analyticsReportsToolDef(),
+		runReportToolDef(),
 		{
 			"type": "function",
 			"function": map[string]any{
@@ -963,6 +967,14 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 	case "validate_doctype_yaml":
 		yamlStr, _ := args["yaml"].(string)
 		return executeValidateYAML(yamlStr)
+	case "get_analytics_catalog":
+		return executeAnalyticsCatalog(reg, tx, siteName)
+	case "query_analytics":
+		return executeAnalyticsQuery(reg, tx, siteName, args)
+	case "list_analytics_reports":
+		return executeAnalyticsReports(reg, tx, siteName)
+	case "run_analytics_report":
+		return executeAnalyticsReport(reg, tx, siteName, args)
 	case "get_analytics_insights", "analytics_insights":
 		doctypeName, _ := args["doctype"].(string)
 		return executeAnalyticsInsights(tx, reg, doctypeName, siteName)

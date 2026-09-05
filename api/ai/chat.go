@@ -206,6 +206,8 @@ FIELD CONSTRAINTS: Per-field validation: min, max (numbers), min_length, max_len
 
 MULTI-TENANT: Isolated sites with own database, users, doctypes. Created from /console or self-service /onboard. Access via /s/sitename/workspace or custom domain.
 
+REPORTING AND ANALYTICS: For a reporting or facts question, call get_analytics_catalog first when the model, measure, or dimension is not already clear. Use query_analytics for new questions and run_analytics_report for an approved report. Explain what each measure means, the date range, grouping, units (count, currency, percent), and whether a zero means no matching activity or no rollup data. Use list_analytics_reports for existing report names. Never invent fields, metrics, trends, or causes; say when the site does not have enough data. Results are governed rollups, not arbitrary database queries.
+
 AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and query analytics. Everything scoped to the current site.`,
 	}}
 	for _, h := range sanitizedHistory {
