@@ -176,7 +176,7 @@ func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *ana
 		timeColumn = q(m.TimeField)
 	}
 	timeBucket := fmt.Sprintf("DATE(%s)", timeColumn)
-	upsert := dialect.UpsertIncrement(
+	upsert := dialect.UpsertClause(
 		[]string{"site", "doctype", "metric", "dimension", "date"},
 		[]string{"value"},
 	)
@@ -217,6 +217,13 @@ func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *ana
 			 %s`,
 			timeBucket, col, table, timeColumn, col, timeBucket, upsert,
 		)
+		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
+		return err
+
+	case analytics.MetricSumByField:
+		col := q(m.Field)
+		groupCol := q(m.GroupByField)
+		query := fmt.Sprintf(`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value) SELECT ?, ?, ?, CONCAT('%s=', %s), %s, SUM(%s) FROM %s WHERE %s >= ? AND %s IS NOT NULL AND %s IS NOT NULL GROUP BY %s, %s %s`, m.GroupByField, groupCol, timeBucket, col, table, timeColumn, groupCol, col, timeBucket, groupCol, upsert)
 		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
 		return err
 

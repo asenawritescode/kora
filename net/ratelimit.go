@@ -61,6 +61,7 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 				"error":   "rate_limit_exceeded",
 				"message": "Too many requests. Please try again later.",
 			})
+			c.Header("Retry-After", "1")
 			return
 		}
 		c.Next()
@@ -96,4 +97,3 @@ func (rl *RateLimiter) cleanup(interval time.Duration) {
 		rl.mu.Unlock()
 	}
 }
-

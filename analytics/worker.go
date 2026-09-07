@@ -253,6 +253,24 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 			w.addDelta(event.Doctype, m.Name, "", date, netDelta)
 
+		case MetricSumByField:
+			if m.Field == "" || m.GroupByField == "" {
+				continue
+			}
+			newVal := toFloat(event.Data[m.Field])
+			oldVal := 0.0
+			if event.Operation == EventUpdate && event.OldData != nil {
+				oldVal = toFloat(event.OldData[m.Field])
+			}
+			netDelta := newVal - oldVal
+			if event.Operation == EventDelete {
+				netDelta = -newVal
+			}
+			w.addDelta(event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.Data[m.GroupByField]), date, netDelta)
+			if event.Operation == EventUpdate && event.OldData != nil && anyToString(event.OldData[m.GroupByField]) != anyToString(event.Data[m.GroupByField]) {
+				w.addDelta(event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.OldData[m.GroupByField]), eventOldDate(event, m.TimeField), -oldVal)
+			}
+
 		case MetricStateDistribution:
 			// Track document counts by workflow state.
 			newState := anyToString(event.Data["doc_status"])

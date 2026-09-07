@@ -351,8 +351,14 @@ func (h *Handler) HandleList(c *gin.Context) {
 	}
 
 	// Parse query parameters.
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", strconv.Itoa(APIDefaultLimit)))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limitRaw := c.DefaultQuery("limit", strconv.Itoa(APIDefaultLimit))
+	limit, limitErr := strconv.Atoi(limitRaw)
+	offsetRaw := c.DefaultQuery("offset", "0")
+	offset, offsetErr := strconv.Atoi(offsetRaw)
+	if limitErr != nil || offsetErr != nil || limit < 1 || offset < 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "limit must be a positive integer and offset must be a non-negative integer"}})
+		return
+	}
 	orderBy := c.Query("order_by")
 	filters := c.Query("filters")
 

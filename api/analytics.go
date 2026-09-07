@@ -79,6 +79,15 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			writeError(c, http.StatusNotFound, "analytics.report_not_found", "Report not found", map[string]any{"name": c.Param("name")})
 			return
 		}
+		if request.Time.From == "" {
+			request.Time.From = time.Now().AddDate(0, 0, -30).Format("2006-01-02")
+		}
+		if request.Time.To == "" {
+			request.Time.To = time.Now().Format("2006-01-02")
+		}
+		if request.Time.Granularity == "" {
+			request.Time.Granularity = "day"
+		}
 		if err := report.Validate(catalog); err != nil {
 			writeError(c, http.StatusUnprocessableEntity, "analytics.report_invalid", err.Error(), nil)
 			return

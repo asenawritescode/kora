@@ -55,9 +55,6 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 		return nil, fmt.Errorf("unsupported query granularity %q", groupBy)
 	}
 	if len(query.Dimensions) == 1 && query.Dimensions[0] != model.TimeDimension {
-		if len(query.Measures) != 1 || query.Measures[0] != "count" {
-			return nil, fmt.Errorf("model %q supports category grouping only with the count measure", query.Model)
-		}
 		groupBy = ""
 	}
 	if len(query.Filters) > 0 && len(query.Dimensions) != 1 {
@@ -188,6 +185,10 @@ func metricForSemanticMeasure(model *SemanticModel, name string, dimensions []st
 		}
 		if measure.Aggregation != "count" {
 			metricName = model.Name + "_" + measure.Aggregation + "_" + measure.Field
+		}
+		if len(dimensions) == 1 && dimensions[0] != model.TimeDimension && measure.Aggregation != "count" {
+			metricName += "_by_" + dimensions[0]
+			metricType = MetricSumByField
 		}
 		return &Metric{Name: metricName, DocType: model.SourceDoctype, Type: metricType, Field: field, TimeField: model.TimeDimension}, nil
 	}

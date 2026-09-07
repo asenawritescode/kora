@@ -350,6 +350,11 @@ func (q *AnalyticsQueryRequest) Validate(catalog *SemanticCatalog) error {
 			if len(filter.Values) == 0 {
 				return fmt.Errorf("queries[%d]: filter %q requires at least one value", i, filter.Field)
 			}
+			operator := strings.ToLower(strings.TrimSpace(filter.Operator))
+			allowedOperators := map[string]bool{"=": true, "==": true, "!=": true, "<>": true, "in": true, "not in": true, "like": true, "not like": true}
+			if !allowedOperators[operator] {
+				return fmt.Errorf("queries[%d]: unsupported filter operator %q", i, filter.Operator)
+			}
 		}
 	}
 	return nil
