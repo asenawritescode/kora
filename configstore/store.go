@@ -637,7 +637,7 @@ func (s *Store) createConfigVersionOnce(siteName, createdBy, label, status strin
 		}
 	}
 
-	versionID := fmt.Sprintf("cv-%s-%d", siteName, newVersion)
+	versionID := configVersionID(siteName, newVersion)
 	minKoraVersion := snapshot.MinKoraVersion
 	_, err = tx.Exec(
 		`INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, changelog, status, config, change_list, config_hash, base_version_id, min_kora_version)
@@ -655,6 +655,17 @@ func (s *Store) createConfigVersionOnce(siteName, createdBy, label, status strin
 		return "", 0, fmt.Errorf("committing config version: %w", err)
 	}
 	return versionID, newVersion, nil
+}
+
+// configVersionID keeps the historical readable ID for short site names while
+// staying within the 36-character database column for real tenant hostnames.
+func configVersionID(siteName string, version int) string {
+	readable := fmt.Sprintf("cv-%s-%d", siteName, version)
+	if len(readable) <= 36 {
+		return readable
+	}
+	hash := sha256.Sum256([]byte(siteName))
+	return fmt.Sprintf("cv-%s-%d", hex.EncodeToString(hash[:])[:16], version)
 }
 
 func isRetryableConfigVersionError(err error) bool {

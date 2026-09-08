@@ -483,6 +483,21 @@ func TestCreateConfigVersionWithBase_UsesExplicitBaseVersionID(t *testing.T) {
 	}
 }
 
+func TestConfigVersionIDBoundsLongSiteNames(t *testing.T) {
+	short := configVersionID("test", 4)
+	if short != "cv-test-4" {
+		t.Fatalf("short site ID = %q, want cv-test-4", short)
+	}
+
+	long := configVersionID("cake_business_accounts.demo.local", 1)
+	if len(long) > 36 {
+		t.Fatalf("long site ID length = %d, want <= 36: %q", len(long), long)
+	}
+	if long == configVersionID("another.demo.local", 1) {
+		t.Fatal("different site names must not share a compact version ID")
+	}
+}
+
 func TestSupersedeSiblingDrafts(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
