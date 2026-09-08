@@ -10,7 +10,7 @@ import (
 
 // cacheEntry holds a cached query result with expiry.
 type cacheEntry struct {
-	result   *QueryResult
+	result    *QueryResult
 	expiresAt time.Time
 }
 
@@ -60,11 +60,11 @@ func (qe *QueryEngine) InvalidateCache() {
 
 // QueryRequest holds parameters for a metric query.
 type QueryRequest struct {
-	Metric    string   `json:"metric"`
-	From      string   `json:"from,omitempty"`   // ISO date, inclusive
-	To        string   `json:"to,omitempty"`     // ISO date, inclusive
-	GroupBy   string   `json:"group_by,omitempty"` // "day" | "week" | "month"
-	Limit     int      `json:"limit,omitempty"`
+	Metric  string `json:"metric"`
+	From    string `json:"from,omitempty"`     // ISO date, inclusive
+	To      string `json:"to,omitempty"`       // ISO date, inclusive
+	GroupBy string `json:"group_by,omitempty"` // "day" | "week" | "month"
+	Limit   int    `json:"limit,omitempty"`
 }
 
 // QueryResult holds the result of a metric query.
@@ -156,10 +156,24 @@ func (qe *QueryEngine) ResolveInsights(doctype string, metrics []*Metric) (map[s
 		}
 		req := QueryRequest{Metric: m.Name, From: today, To: today}
 		result, err := qe.Resolve(m, req)
+		// Older or event-only rollups may have the creation trend without the
+		// companion count metric. Use that governed metric as a count fallback.
+		if (err != nil || result.Total == 0) && m.Type == MetricCount {
+			fallback := *m
+			fallback.Name = metricName(doctype) + "_created_daily"
+			fallback.Type = MetricCountByTime
+			result, err = qe.Resolve(&fallback, req)
+		}
 		if err != nil || result.Total == 0 {
 			// Try monthly for trend metrics.
 			req = QueryRequest{Metric: m.Name, From: monthAgo, To: today}
 			result, err = qe.Resolve(m, req)
+			if (err != nil || result.Total == 0) && m.Type == MetricCount {
+				fallback := *m
+				fallback.Name = metricName(doctype) + "_created_daily"
+				fallback.Type = MetricCountByTime
+				result, err = qe.Resolve(&fallback, req)
+			}
 		}
 		if err == nil && result.Total > 0 {
 			switch m.Type {
@@ -271,9 +285,9 @@ func parseDateRange(fromStr, toStr string) (time.Time, time.Time) {
 
 // Status holds the analytics pipeline status for a site.
 type Status struct {
-	Enabled         bool   `json:"enabled"`
-	EventsProcessed int64  `json:"events_processed"`
-	EventsDropped   int64  `json:"events_dropped"`
+	Enabled         bool  `json:"enabled"`
+	EventsProcessed int64 `json:"events_processed"`
+	EventsDropped   int64 `json:"events_dropped"`
 }
 
 // GetStatus returns the current analytics pipeline status.
