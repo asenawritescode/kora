@@ -189,7 +189,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 	})
 
 	ag.GET("/metrics", func(c *gin.Context) {
-		metrics := resolveMetrics(c, registry)
+		metrics := resolveMetrics(c, analyticsRegistry(c, registry))
 		c.JSON(http.StatusOK, Response{Data: metrics})
 	})
 
