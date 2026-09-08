@@ -90,6 +90,46 @@ func BuildSemanticModel(dt *doctype.DocType) SemanticModel {
 	return model
 }
 
+// GenerateDefaultReports creates a small, governed overview report for every
+// model that does not provide an explicit report definition. It uses only
+// fields already exposed by the semantic catalog, so new config packs get a
+// useful analytics entry point without inventing business meaning or SQL.
+func GenerateDefaultReports(catalog *SemanticCatalog) []ReportDefinition {
+	if catalog == nil {
+		return []ReportDefinition{}
+	}
+	reports := make([]ReportDefinition, 0, len(catalog.Models))
+	for _, model := range catalog.Models {
+		query := ReportQuery{ID: "overview", Model: model.Name, Measures: []string{"count"}}
+		series := []VisualSeries{{Field: "count", Label: "Records", Type: "bar", Format: "number"}}
+		if model.TimeDimension != "" {
+			query.Dimensions = append(query.Dimensions, model.TimeDimension)
+		}
+		for _, dimension := range model.Dimensions {
+			if dimension.Type == "category" {
+				query.Dimensions = append(query.Dimensions, dimension.Name)
+				break
+			}
+		}
+		for _, measure := range model.Measures {
+			if measure.Name == "count" {
+				continue
+			}
+			query.Measures = append(query.Measures, measure.Name)
+			series = append(series, VisualSeries{Field: measure.Name, Label: measure.Label, Type: "line", Format: measure.Format})
+			break
+		}
+		reports = append(reports, ReportDefinition{
+			Name:    model.Name + "_overview",
+			Label:   model.Label + " overview",
+			Route:   "/reports/" + model.Name + "-overview",
+			Queries: []ReportQuery{query},
+			Visuals: []ReportVisual{{ID: "overview_trend", Type: "combo", Source: "overview", XField: model.TimeDimension, Series: series}},
+		})
+	}
+	return reports
+}
+
 // SemanticModel is an analytics-friendly projection of one or more sources.
 type SemanticModel struct {
 	Name          string              `json:"name" yaml:"name"`

@@ -51,6 +51,34 @@ func TestSemanticCatalogRejectsUnknownRollupReference(t *testing.T) {
 	}
 }
 
+func TestGenerateDefaultReportsUsesCatalogFields(t *testing.T) {
+	catalog := &SemanticCatalog{Models: []SemanticModel{{
+		Name: "invoice", Label: "Invoice", TimeDimension: "invoice_date",
+		Dimensions: []SemanticDimension{
+			{Name: "status", Field: "status", Type: "category"},
+			{Name: "invoice_date", Field: "invoice_date", Type: "time"},
+		},
+		Measures: []SemanticMeasure{
+			{Name: "count", Label: "Count", Aggregation: "count", Format: "number"},
+			{Name: "amount_sum", Label: "Total Amount", Field: "amount", Aggregation: "sum", Format: "currency"},
+		},
+	}}}
+	reports := GenerateDefaultReports(catalog)
+	if len(reports) != 1 || reports[0].Name != "invoice_overview" {
+		t.Fatalf("unexpected reports: %#v", reports)
+	}
+	query := reports[0].Queries[0]
+	if len(query.Measures) != 2 || query.Measures[1] != "amount_sum" {
+		t.Fatalf("unexpected measures: %#v", query.Measures)
+	}
+	if len(query.Dimensions) != 2 || query.Dimensions[0] != "invoice_date" || query.Dimensions[1] != "status" {
+		t.Fatalf("unexpected dimensions: %#v", query.Dimensions)
+	}
+	if err := reports[0].Validate(catalog); err != nil {
+		t.Fatalf("generated report should validate: %v", err)
+	}
+}
+
 func TestAnalyticsQueryValidatesAgainstCatalog(t *testing.T) {
 	request := AnalyticsQueryRequest{
 		Queries: []ModelQuery{{

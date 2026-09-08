@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,7 +29,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			docTypes = append(docTypes, siteRegistry.Get(name))
 		}
 		catalog := analytics.BuildSemanticCatalog(docTypes)
-		reports, err := loadSemanticReports(c, getSiteDB(c, siteDB))
+		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB))
 		if err != nil {
 			internalError(c, "loading analytics reports", err)
 			return
@@ -42,7 +43,8 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 	})
 
 	ag.GET("/reports", func(c *gin.Context) {
-		reports, err := loadSemanticReports(c, getSiteDB(c, siteDB))
+		siteRegistry := analyticsRegistry(c, registry)
+		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB))
 		if err != nil {
 			internalError(c, "loading analytics reports", err)
 			return
@@ -62,7 +64,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			docTypes = append(docTypes, siteRegistry.Get(name))
 		}
 		catalog := analytics.BuildSemanticCatalog(docTypes)
-		reports, err := loadSemanticReports(c, getSiteDB(c, siteDB))
+		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB))
 		if err != nil {
 			internalError(c, "loading analytics reports", err)
 			return
@@ -290,6 +292,34 @@ func loadSemanticReports(c *gin.Context, db *sql.DB) ([]analytics.ReportDefiniti
 		}
 		reports = append(reports, report)
 	}
+	return reports, nil
+}
+
+func loadAvailableReports(c *gin.Context, registry *doctype.Registry, db *sql.DB) ([]analytics.ReportDefinition, error) {
+	docTypes := make([]*doctype.DocType, 0)
+	if registry != nil {
+		for _, name := range registry.Names() {
+			docTypes = append(docTypes, registry.Get(name))
+		}
+	}
+	catalog := analytics.BuildSemanticCatalog(docTypes)
+	configured, err := loadSemanticReports(c, db)
+	if err != nil {
+		return nil, err
+	}
+	// Explicit reports override generated defaults with the same name.
+	byName := make(map[string]analytics.ReportDefinition, len(configured))
+	for _, report := range analytics.GenerateDefaultReports(catalog) {
+		byName[report.Name] = report
+	}
+	for _, report := range configured {
+		byName[report.Name] = report
+	}
+	reports := make([]analytics.ReportDefinition, 0, len(byName))
+	for _, report := range byName {
+		reports = append(reports, report)
+	}
+	sort.Slice(reports, func(i, j int) bool { return reports[i].Name < reports[j].Name })
 	return reports, nil
 }
 
