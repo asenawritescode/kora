@@ -247,7 +247,13 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		}
 
 		doctypeName := c.Param("doctype")
-		metrics := resolveMetrics(c, analyticsRegistry(c, registry))
+		siteRegistry := analyticsRegistry(c, registry)
+		metrics := resolveMetrics(c, siteRegistry)
+		// Build the requested DocType's generated metrics directly as a safety
+		// net for path-based tenant requests and older metric registries.
+		if dt := siteRegistry.Get(doctypeName); dt != nil {
+			metrics = analytics.GenerateMetrics(dt)
+		}
 		insights, err := qe.ResolveInsights(doctypeName, metrics)
 		if err != nil {
 			internalError(c, "insights query failed", err)
