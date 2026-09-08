@@ -105,12 +105,6 @@ func GenerateDefaultReports(catalog *SemanticCatalog) []ReportDefinition {
 		if model.TimeDimension != "" {
 			query.Dimensions = append(query.Dimensions, model.TimeDimension)
 		}
-		for _, dimension := range model.Dimensions {
-			if dimension.Type == "category" {
-				query.Dimensions = append(query.Dimensions, dimension.Name)
-				break
-			}
-		}
 		for _, measure := range model.Measures {
 			if measure.Name == "count" {
 				continue

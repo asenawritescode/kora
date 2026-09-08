@@ -71,7 +71,7 @@ func TestGenerateDefaultReportsUsesCatalogFields(t *testing.T) {
 	if len(query.Measures) != 2 || query.Measures[1] != "amount_sum" {
 		t.Fatalf("unexpected measures: %#v", query.Measures)
 	}
-	if len(query.Dimensions) != 2 || query.Dimensions[0] != "invoice_date" || query.Dimensions[1] != "status" {
+	if len(query.Dimensions) != 1 || query.Dimensions[0] != "invoice_date" {
 		t.Fatalf("unexpected dimensions: %#v", query.Dimensions)
 	}
 	if err := reports[0].Validate(catalog); err != nil {
