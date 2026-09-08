@@ -194,7 +194,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 	})
 
 	ag.GET("/metrics/:name", func(c *gin.Context) {
-		metrics := resolveMetrics(c, registry)
+		metrics := resolveMetrics(c, analyticsRegistry(c, registry))
 		for _, m := range metrics {
 			if m.Name == c.Param("name") {
 				c.JSON(http.StatusOK, Response{Data: m})
@@ -217,7 +217,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		}
 		req.Metric = c.Param("name")
 
-		metrics := resolveMetrics(c, registry)
+		metrics := resolveMetrics(c, analyticsRegistry(c, registry))
 		var metric *analytics.Metric
 		for _, m := range metrics {
 			if m.Name == req.Metric {
@@ -247,7 +247,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		}
 
 		doctypeName := c.Param("doctype")
-		metrics := resolveMetrics(c, registry)
+		metrics := resolveMetrics(c, analyticsRegistry(c, registry))
 		insights, err := qe.ResolveInsights(doctypeName, metrics)
 		if err != nil {
 			internalError(c, "insights query failed", err)
