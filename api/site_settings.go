@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 	"strings"
 
@@ -31,6 +32,9 @@ func (h *Handler) HandleSiteSettings(c *gin.Context) {
 	).Scan(&stored)
 	if err == nil && stored != "" {
 		currency = stored
+	} else if err != nil && err != sql.ErrNoRows {
+		internalError(c, "reading site settings", err)
+		return
 	}
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"currency": currency}})
 }
