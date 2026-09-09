@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -261,6 +262,9 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 			continue
 		}
 		for _, child := range children {
+			if err := tx.populateLinkedFields(dbTx, childDT, child); err != nil {
+				return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
+			}
 			if err := doctype.ComputeFields(childDT, child); err != nil {
 				slog.Warn("computed fields failed on child", "doctype", childDT.Name, "error", err)
 			}
@@ -270,14 +274,18 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		}
 	}
 
+	// Resolve links before computed expressions consume their values.
+	if err := tx.populateLinkedFields(dbTx, dt, doc); err != nil {
+		return fmt.Errorf("populating linked fields: %w", err)
+	}
 	// Evaluate computed fields on the parent document (e.g., subtotal = SUM(items.line_total)).
 	if err := doctype.ComputeFields(dt, doc); err != nil {
 		slog.Warn("computed fields failed", "doctype", dt.Name, "error", err)
 	}
 
-	// Persist computed field values via UPDATE.
-	if err := updateComputedFieldsExec(dbTx, dt, doc); err != nil {
-		return fmt.Errorf("persisting computed fields: %w", err)
+	// Persist linked and computed field values via UPDATE.
+	if err := updateDerivedFieldsExec(dbTx, dt, doc); err != nil {
+		return fmt.Errorf("persisting derived fields: %w", err)
 	}
 
 	if err := tx.writeOutbox(dbTx, analytics.EventInsert, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), nil); err != nil {
@@ -292,13 +300,84 @@ func (tx *TxManager) updateComputedFields(dt *doctype.DocType, doc *doctype.Docu
 	return updateComputedFieldsExec(tx.DB, dt, doc)
 }
 
+// populateLinkedFields resolves Link values to their configured linked_field
+// values before computed fields run. Link inputs may use either the document
+// name or its title field, which keeps API payloads human-friendly.
+func (tx *TxManager) populateLinkedFields(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
+	if dt == nil || doc == nil {
+		return nil
+	}
+	for _, field := range dt.Fields {
+		if field.LinkedField == "" || field.Fieldtype == "Table" {
+			continue
+		}
+		sourceField, targetField, ok := strings.Cut(field.LinkedField, ".")
+		if !ok || sourceField == "" || targetField == "" {
+			continue
+		}
+		linkValue := strings.TrimSpace(fmt.Sprint(doc.Get(sourceField)))
+		if linkValue == "" || linkValue == "<nil>" {
+			continue
+		}
+		source := dt.GetField(sourceField)
+		if source == nil || source.Fieldtype != "Link" {
+			continue
+		}
+		targetDT := tx.Registry.Get(source.Options)
+		if targetDT == nil {
+			continue
+		}
+		where := "name = ?"
+		args := []any{linkValue}
+		if targetDT.TitleField != "" && targetDT.GetField(targetDT.TitleField) != nil {
+			where += " OR " + targetDT.TitleField + " = ?"
+			args = append(args, linkValue)
+		}
+		targetMeta := targetDT.GetField(targetField)
+		if targetMeta == nil {
+			continue
+		}
+		query := fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT 1", targetField, targetDT.TableName(), where)
+		var value any
+		if err := ex.QueryRow(query, args...).Scan(&value); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return err
+		}
+		if bytes, ok := value.([]byte); ok {
+			textValue := string(bytes)
+			switch targetMeta.Fieldtype {
+			case "Int", "Float", "Currency", "Percent":
+				if number, err := strconv.ParseFloat(textValue, 64); err == nil {
+					value = number
+				} else {
+					value = textValue
+				}
+			default:
+				value = textValue
+			}
+		}
+		if value != nil {
+			doc.Set(field.Fieldname, value)
+		}
+	}
+	return nil
+}
+
 // updateComputedFieldsExec UPDATEs computed fields using the given executor (DB or Tx).
 func updateComputedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
+	return updateDerivedFieldsExec(ex, dt, doc)
+}
+
+// updateDerivedFieldsExec persists both linked and computed values produced by
+// the document lifecycle. It intentionally excludes ordinary user fields.
+func updateDerivedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
 	var setClauses []string
 	var values []any
 
 	for _, f := range dt.Fields {
-		if f.Computed == "" || f.Fieldtype == "Table" {
+		if (f.Computed == "" && f.LinkedField == "") || f.Fieldtype == "Table" {
 			continue
 		}
 		val := doc.Get(f.Fieldname)
@@ -492,6 +571,9 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 			continue
 		}
 		for _, child := range children {
+			if err := tx.populateLinkedFields(dbTx, childDT, child); err != nil {
+				return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
+			}
 			if err := doctype.ComputeFields(childDT, child); err != nil {
 				slog.Warn("computed fields failed on child", "doctype", childDT.Name, "error", err)
 			}
@@ -501,12 +583,15 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 		}
 	}
 
+	if err := tx.populateLinkedFields(dbTx, dt, doc); err != nil {
+		return fmt.Errorf("populating linked fields: %w", err)
+	}
 	if err := doctype.ComputeFields(dt, doc); err != nil {
 		slog.Warn("computed fields failed", "doctype", dt.Name, "error", err)
 	}
 
-	if err := updateComputedFieldsExec(dbTx, dt, doc); err != nil {
-		return fmt.Errorf("persisting computed fields: %w", err)
+	if err := updateDerivedFieldsExec(dbTx, dt, doc); err != nil {
+		return fmt.Errorf("persisting derived fields: %w", err)
 	}
 
 	var oldOutboxData map[string]any
