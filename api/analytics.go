@@ -3,8 +3,11 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +16,20 @@ import (
 	db "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
+
+type analyticsRebuildJob struct {
+	ID          string    `json:"id"`
+	Status      string    `json:"status"`
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at,omitempty"`
+	Metrics     int       `json:"metrics,omitempty"`
+	Error       string    `json:"error,omitempty"`
+}
+
+var analyticsRebuildJobs = struct {
+	sync.RWMutex
+	items map[string]*analyticsRebuildJob
+}{items: make(map[string]*analyticsRebuildJob)}
 
 // RegisterAnalyticsRoutes registers analytics API endpoints.
 // siteDB is the fallback DB; per-request DB is resolved from gin context.
@@ -153,6 +170,65 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		c.JSON(http.StatusOK, Response{
 			Data: analytics.GetStatus(bus),
 		})
+	})
+
+	// Rebuild is an administrator-triggered recovery operation. It runs in the
+	// server so customers never need database or terminal access.
+	ag.POST("/rebuild", func(c *gin.Context) {
+		if !userHasAdminRole(c.GetStringSlice("user_roles")) {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{"code": "permission.admin_required", "message": "Administrator role required"}})
+			return
+		}
+		var request struct {
+			DocType string `json:"doctype"`
+			From    string `json:"from"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil && err != io.EOF {
+			badRequestError(c, "validation.invalid_json", "Invalid rebuild request", nil)
+			return
+		}
+		from := time.Now().AddDate(-1, 0, 0)
+		if request.From != "" {
+			parsed, err := time.Parse("2006-01-02", request.From)
+			if err != nil {
+				badRequestError(c, "validation.invalid_date", "from must be YYYY-MM-DD", map[string]any{"field": "from"})
+				return
+			}
+			from = parsed
+		}
+		job := &analyticsRebuildJob{ID: fmt.Sprintf("analytics-rebuild-%d", time.Now().UnixNano()), Status: "queued", StartedAt: time.Now().UTC()}
+		analyticsRebuildJobs.Lock()
+		analyticsRebuildJobs.items[job.ID] = job
+		analyticsRebuildJobs.Unlock()
+		db := getSiteDB(c, siteDB)
+		siteName := c.GetString("site_name")
+		siteRegistry := analyticsRegistry(c, registry)
+		go func() {
+			analyticsRebuildJobs.Lock()
+			job.Status = "running"
+			analyticsRebuildJobs.Unlock()
+			count, err := analytics.Backfill(db, dialect, siteName, siteRegistry, from, request.DocType)
+			analyticsRebuildJobs.Lock()
+			job.Metrics, job.CompletedAt = count, time.Now().UTC()
+			if err != nil {
+				job.Status, job.Error = "failed", err.Error()
+			} else {
+				job.Status = "completed"
+			}
+			analyticsRebuildJobs.Unlock()
+		}()
+		c.JSON(http.StatusAccepted, Response{Data: job})
+	})
+
+	ag.GET("/rebuild/:id", func(c *gin.Context) {
+		analyticsRebuildJobs.RLock()
+		job := analyticsRebuildJobs.items[c.Param("id")]
+		analyticsRebuildJobs.RUnlock()
+		if job == nil {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"code": "analytics.rebuild_not_found", "message": "Rebuild job not found"}})
+			return
+		}
+		c.JSON(http.StatusOK, Response{Data: job})
 	})
 
 	// POST /metrics — create a custom metric.
