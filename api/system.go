@@ -1887,6 +1887,7 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.GET("/doctypes", handler.HandleSystemDoctypes)
 		system.GET("/doctype/:doctype/references", handler.HandleSystemDoctypeReferences)
 		system.GET("/navigation", handler.HandleSystemNavigation)
+		system.GET("/settings", handler.HandleSiteSettings)
 
 		// Write endpoints.
 		system.POST("/doctype/validate", handler.HandleSystemDoctypeValidate)
@@ -1894,6 +1895,7 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.POST("/doctype", handler.HandleSystemDoctypeCreate)
 		system.PUT("/doctype/:doctype", handler.HandleSystemDoctypeUpdate)
 		system.DELETE("/doctype/:doctype", handler.HandleSystemDoctypeDelete)
+		system.PUT("/settings", handler.HandleSiteSettingsUpdate)
 
 		// Config version actions.
 		system.GET("/config/versions/:id/preview", handler.HandleConfigVersionPreview)

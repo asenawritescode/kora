@@ -552,6 +552,13 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		)`,
 		`CREATE INDEX IF NOT EXISTS "idx_site_status" ON "_kora_config_version" ("site", "status")`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_site_version_unique" ON "_kora_config_version" ("site", "version")`,
+		`CREATE TABLE IF NOT EXISTS "_kora_site_setting" (
+			"site" TEXT NOT NULL,
+			"setting_key" TEXT NOT NULL,
+			"setting_value" TEXT NOT NULL DEFAULT '',
+			"modified" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
+			PRIMARY KEY ("site", "setting_key")
+		)`,
 
 		// Backwards compat columns.
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'Superseded'`,

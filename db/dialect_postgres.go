@@ -564,6 +564,13 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "min_kora_version" VARCHAR(20) NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS "idx_site_status" ON "_kora_config_version" ("site", "status")`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_site_version_unique" ON "_kora_config_version" ("site", "version")`,
+		`CREATE TABLE IF NOT EXISTS "_kora_site_setting" (
+			"site" VARCHAR(140) NOT NULL,
+			"setting_key" VARCHAR(140) NOT NULL,
+			"setting_value" VARCHAR(255) NOT NULL DEFAULT '',
+			"modified" TIMESTAMP NOT NULL DEFAULT NOW(),
+			PRIMARY KEY ("site", "setting_key")
+		)`,
 
 		// _kora_site_registry
 		`CREATE TABLE IF NOT EXISTS "_kora_site_registry" (
