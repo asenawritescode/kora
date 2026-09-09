@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
@@ -29,7 +30,28 @@ func NewConsumer(p *Provider, cfg Config) (*Consumer, error) {
 	if cfg.MaxDeliver <= 0 {
 		cfg.MaxDeliver = 5
 	}
+	// JetStream durable names are identifiers, not subjects. Tenant hostnames
+	// commonly contain dots, so normalize them before creating consumers.
+	cfg.ConsumerName = durableName(cfg.ConsumerName)
 	return &Consumer{p: p, cfg: cfg, seen: make(chan struct{}, 1)}, nil
+}
+
+func durableName(value string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // Run consumes messages until ctx is cancelled.
