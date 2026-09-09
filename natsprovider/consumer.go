@@ -34,20 +34,28 @@ func NewConsumer(p *Provider, cfg Config) (*Consumer, error) {
 
 // Run consumes messages until ctx is cancelled.
 func (c *Consumer) Run(ctx context.Context, handler contract.Handler) error {
+	filterSubject := c.cfg.ConsumerSubject
+	if filterSubject == "" {
+		filterSubject = c.cfg.SubjectPrefix + ".>"
+	}
+	ackWait := c.cfg.AckWait
+	if ackWait <= 0 {
+		ackWait = 30 * time.Second
+	}
 	consumerCfg := &nats.ConsumerConfig{
 		Durable:       c.cfg.ConsumerName,
 		AckPolicy:     nats.AckExplicitPolicy,
 		DeliverPolicy: nats.DeliverAllPolicy,
-		FilterSubject: c.cfg.SubjectPrefix + ".>",
+		FilterSubject: filterSubject,
 		MaxDeliver:    c.cfg.MaxDeliver,
-		AckWait:       500 * time.Millisecond,
+		AckWait:       ackWait,
 	}
 	_, err := c.p.js.AddConsumer(c.cfg.StreamName, consumerCfg, nats.Context(ctx))
 	if err != nil && !isAlreadyExists(err) {
 		return fmt.Errorf("natsprovider: add consumer: %w", err)
 	}
 
-	sub, err := c.p.js.PullSubscribe(c.cfg.SubjectPrefix+".>", c.cfg.ConsumerName, nats.BindStream(c.cfg.StreamName))
+	sub, err := c.p.js.PullSubscribe(filterSubject, c.cfg.ConsumerName, nats.BindStream(c.cfg.StreamName))
 	if err != nil {
 		return fmt.Errorf("natsprovider: pull subscribe: %w", err)
 	}
@@ -79,7 +87,22 @@ func (c *Consumer) Run(ctx context.Context, handler contract.Handler) error {
 				Data:    append([]byte(nil), msg.Data...),
 				Attempt: attempt,
 			}
-			if err := handler(ctx, delivery); err != nil {
+			done := make(chan struct{})
+			go func() {
+				ticker := time.NewTicker(ackWait / 2)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						_ = msg.InProgress()
+					case <-done:
+						return
+					}
+				}
+			}()
+			err := handler(ctx, delivery)
+			close(done)
+			if err != nil {
 				if attempt >= c.cfg.MaxDeliver {
 					_ = c.publishDeadLetter(ctx, delivery, err)
 					_ = msg.Term()

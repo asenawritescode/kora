@@ -1682,6 +1682,7 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 func (h *Handler) HandleSystemRealtime(c *gin.Context) {
 	siteName := c.GetString("site_name")
 	provider := h.SiteRealtimeProviders[siteName]
+	bus := h.SiteEventBuses[siteName]
 	slog.Info("realtime request received",
 		"site", siteName,
 		"method", c.Request.Method,
@@ -1693,13 +1694,13 @@ func (h *Handler) HandleSystemRealtime(c *gin.Context) {
 		"user_agent", c.Request.UserAgent(),
 	)
 	if isWebSocketUpgrade(c.Request) {
-		h.handleSystemRealtimeWebSocket(c, provider, siteName)
+		h.handleSystemRealtimeWebSocket(c, provider, bus, siteName)
 		return
 	}
-	h.handleSystemRealtimeSSE(c, provider, siteName)
+	h.handleSystemRealtimeSSE(c, provider, bus, siteName)
 }
 
-func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natsprovider.Provider, siteName string) {
+func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natsprovider.Provider, bus analytics.EventBus, siteName string) {
 	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
@@ -1710,10 +1711,10 @@ func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natspr
 	defer conn.Close(websocket.StatusNormalClosure, "closed")
 	h.streamRealtime(c, func(msg []byte) error {
 		return conn.Write(c.Request.Context(), websocket.MessageText, msg)
-	}, provider, siteName)
+	}, provider, bus, siteName)
 }
 
-func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider.Provider, siteName string) {
+func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider.Provider, bus analytics.EventBus, siteName string) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -1750,11 +1751,28 @@ func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider
 			eventType = "message"
 		}
 		return writeEvent(eventType, envelope)
-	}, provider, siteName)
+	}, provider, bus, siteName)
 }
 
-func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provider *natsprovider.Provider, siteName string) {
+func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provider *natsprovider.Provider, bus analytics.EventBus, siteName string) {
 	if provider == nil {
+		var ch <-chan analytics.ChangeEvent
+		var remove func()
+		if multi, ok := bus.(*analytics.MultiBus); ok {
+			listener := make(chan analytics.ChangeEvent, 256)
+			multi.AddListener(listener)
+			ch = listener
+			remove = func() { multi.RemoveListener(listener) }
+		} else if bus != nil {
+			var err error
+			ch, err = bus.Subscribe()
+			if err != nil {
+				ch = nil
+			}
+		}
+		if remove != nil {
+			defer remove()
+		}
 		_ = send([]byte(`{"type":"connected","transport":"local","site":"` + siteName + `"}`))
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
@@ -1762,6 +1780,18 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 			select {
 			case <-c.Request.Context().Done():
 				return
+			case event, ok := <-ch:
+				if !ok {
+					return
+				}
+				payload, err := json.Marshal(map[string]any{
+					"type": "change", "transport": "local", "site": event.Site,
+					"resource": "doctype:" + event.Doctype, "doctype": event.Doctype,
+					"doc_name": event.DocName, "operation": event.Operation, "occurred_at": event.Timestamp,
+				})
+				if err == nil && send(payload) != nil {
+					return
+				}
 			case <-ticker.C:
 				if err := send([]byte(`{"type":"heartbeat","transport":"local"}`)); err != nil {
 					return

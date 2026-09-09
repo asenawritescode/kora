@@ -16,6 +16,22 @@ type MultiBus struct {
 	dropped  atomic.Int64
 }
 
+func (mb *MultiBus) Publish(event ChangeEvent) error { return mb.inner.Publish(event) }
+
+// Subscribe registers a buffered listener. Long-lived consumers should remove
+// their listener explicitly when their context ends.
+func (mb *MultiBus) Subscribe() (<-chan ChangeEvent, error) {
+	ch := make(chan ChangeEvent, 256)
+	mb.AddListener(ch)
+	return ch, nil
+}
+
+func (mb *MultiBus) DrainWAL(handler func(ChangeEvent)) (int, error) {
+	return mb.inner.DrainWAL(handler)
+}
+func (mb *MultiBus) RotateWAL() (string, error)          { return mb.inner.RotateWAL() }
+func (mb *MultiBus) CommitWALRotation(path string) error { return mb.inner.CommitWALRotation(path) }
+
 // NewMultiBus creates a fan-out wrapper around an existing EventBus.
 // It starts a goroutine that reads from the inner bus and fans out to all listeners.
 func NewMultiBus(inner EventBus) (*MultiBus, error) {
@@ -76,7 +92,7 @@ func (mb *MultiBus) ListenerCount() int {
 }
 
 // Dropped returns the number of fan-out events dropped for slow listeners.
-func (mb *MultiBus) Dropped() int64 { return mb.dropped.Load() }
+func (mb *MultiBus) Dropped() int64 { return mb.inner.Dropped() + mb.dropped.Load() }
 
 // Close shuts down the fan-out and closes the inner bus.
 func (mb *MultiBus) Close() error {

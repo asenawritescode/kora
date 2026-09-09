@@ -361,6 +361,7 @@ func (h *Handler) HandleList(c *gin.Context) {
 	}
 	orderBy := c.Query("order_by")
 	filters := c.Query("filters")
+	search := c.Query("search")
 
 	if limit < 1 {
 		limit = APIDefaultLimit
@@ -382,7 +383,7 @@ func (h *Handler) HandleList(c *gin.Context) {
 		}
 	}
 
-	docs, total, err := h.siteTx(c).GetList(dt, filters, orderBy, limit, offset, owner)
+	docs, total, err := h.siteTx(c).GetListWithOptions(dt, filters, orderBy, limit, offset, owner, requestedFields, search)
 	if err != nil {
 		internalError(c, "list query failed", err)
 		return
@@ -1124,7 +1125,7 @@ func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doc
 	}
 
 	// Analytics endpoints (no-op if siteBuses is empty).
-	RegisterAnalyticsRoutes(apiGroup, registry, txManager.DB, siteBuses, txManager.Dialect)
+	RegisterAnalyticsRoutes(apiGroup, registry, txManager.DB, siteBuses, realtimeProviders, txManager.Dialect)
 }
 
 // HandleWorkflowAction handles POST /api/resource/{doctype}/{name}/workflow_action

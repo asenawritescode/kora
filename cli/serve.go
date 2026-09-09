@@ -462,10 +462,10 @@ func runServe() error {
 	cloudRelayCfg := analytics.LoadCloudRelayConfig()
 	for _, s := range loadedSites {
 		if s.AnalyticsEventBus != nil {
-			siteBuses[s.Name] = s.AnalyticsEventBus
 			// Wrap in MultiBus for webhook fan-out.
 			mb, mbErr := analytics.NewMultiBus(s.AnalyticsEventBus)
 			if mbErr == nil {
+				siteBuses[s.Name] = mb
 				siteMultiBuses[s.Name] = mb
 				if cloudRelayCfg != nil {
 					relay := analytics.NewCloudRelay(mb, s.Name, *cloudRelayCfg)
@@ -501,10 +501,16 @@ func runServe() error {
 		}
 		go runRealtimeBridge(context.Background(), siteName, bus, provider)
 	}
-	// Transactional outbox (RFC §8.1). Opt-in via KORA_OUTBOX=true so the default
-	// durability mode never changes silently.
+	for _, s := range loadedSites {
+		if provider := siteRealtimeProviders[s.Name]; provider != nil {
+			go runAnalyticsRebuildConsumer(context.Background(), s.Name, provider, s.DB, kdb.Resolve(common.DBType), s.Registry)
+		}
+	}
+	// Transactional outbox (RFC §8.1). It is enabled explicitly or whenever NATS
+	// is enabled, because broker-backed deployments need durable cross-instance
+	// event delivery.
 	siteOutboxes := make(map[string]outbox.Writer)
-	if v := os.Getenv("KORA_OUTBOX"); v == "true" || v == "1" {
+	if v := os.Getenv("KORA_OUTBOX"); v == "true" || v == "1" || natsEnabled() {
 		for _, s := range loadedSites {
 			if s.DB == nil {
 				continue
@@ -542,7 +548,11 @@ func runServe() error {
 			// This keeps the DB/outbox as the source of truth while making NATS the
 			// transport for analytics and downstream consumers.
 			if natsSideEffects != nil && s.AnalyticsEventBus != nil {
-				go runNATSOutboxSideEffects(context.Background(), s.Name, natsSideEffects, s.AnalyticsEventBus)
+				bus := siteBuses[s.Name]
+				if bus == nil {
+					bus = s.AnalyticsEventBus
+				}
+				go runNATSOutboxSideEffects(context.Background(), s.Name, natsSideEffects, bus)
 			}
 		}
 	}
@@ -702,6 +712,57 @@ func runRealtimeBridge(ctx context.Context, siteName string, bus analytics.Event
 			}
 			_ = provider.PublishSubject(ctx, subjectPrefix, payload, contract.NewEventID())
 		}
+	}
+}
+
+func runAnalyticsRebuildConsumer(ctx context.Context, siteName string, provider *natsprovider.Provider, database *sql.DB, dialect kdb.Dialect, registry *doctype.Registry) {
+	cfg := provider.Config()
+	cfg.ConsumerName = siteName + "-analytics-rebuilds"
+	cfg.ConsumerSubject = cfg.SubjectPrefix + ".tasks.analytics-rebuild"
+	consumer, err := natsprovider.NewConsumer(provider, cfg)
+	if err != nil {
+		slog.Warn("analytics rebuild consumer init failed", "site", siteName, "error", err)
+		return
+	}
+	handler := func(ctx context.Context, delivery contract.Delivery) error {
+		var request struct {
+			JobID   string `json:"job_id"`
+			Site    string `json:"site"`
+			DocType string `json:"doctype"`
+			From    string `json:"from"`
+		}
+		if err := json.Unmarshal(delivery.Data, &request); err != nil {
+			return err
+		}
+		if request.JobID == "" || request.Site != siteName {
+			return fmt.Errorf("invalid analytics rebuild job payload")
+		}
+		job, err := analytics.GetRebuildJob(database, dialect, siteName, request.JobID)
+		if err != nil {
+			return err
+		}
+		if job.Status == "completed" {
+			return nil
+		}
+		if err := analytics.MarkRebuildRunning(database, dialect, siteName, request.JobID); err != nil {
+			return err
+		}
+		from := job.From
+		if request.From != "" {
+			if parsed, parseErr := time.Parse("2006-01-02", request.From); parseErr == nil {
+				from = parsed
+			}
+		}
+		count, err := analytics.Backfill(database, dialect, siteName, registry, from, request.DocType)
+		if err != nil {
+			_ = analytics.MarkRebuildFailed(database, dialect, siteName, request.JobID, err)
+			return err
+		}
+		return analytics.MarkRebuildCompleted(database, dialect, siteName, request.JobID, count)
+	}
+	slog.Info("analytics rebuild consumer started", "site", siteName, "consumer", cfg.ConsumerName)
+	if err := consumer.Run(ctx, handler); err != nil && ctx.Err() == nil {
+		slog.Warn("analytics rebuild consumer stopped", "site", siteName, "error", err)
 	}
 }
 

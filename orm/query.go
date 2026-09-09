@@ -151,7 +151,7 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner, m
 
 	doc.IsNew = false
 
-	if tx.EventBus != nil {
+	if tx.EventBus != nil && tx.Outbox == nil {
 		tx.EventBus.Publish(analytics.ChangeEvent{
 			Site:       tx.SiteName,
 			Doctype:    dt.Name,
@@ -431,7 +431,7 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 		return fmt.Errorf("committing transaction: %w", err)
 	}
 
-	if tx.EventBus != nil {
+	if tx.EventBus != nil && tx.Outbox == nil {
 		var oldData map[string]any
 		if oldDoc != nil {
 
@@ -680,6 +680,12 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 // GetList returns a paginated list of documents with optional filtering.
 // If owner is non-empty, only returns documents owned by that user.
 func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string, limit, offset int, owner string) ([]*doctype.Document, int, error) {
+	return tx.GetListWithOptions(dt, filters, orderBy, limit, offset, owner, nil, "")
+}
+
+// GetListWithOptions is the projected/searchable form of GetList used by HTTP
+// list endpoints. requestedFields is applied in SQL, not after scanning rows.
+func (tx *TxManager) GetListWithOptions(dt *doctype.DocType, filters string, orderBy string, limit, offset int, owner string, requestedFields []string, search string) ([]*doctype.Document, int, error) {
 	where := "1=1"
 	var whereArgs []any
 	if filters != "" && filters != "[]" {
@@ -700,6 +706,19 @@ func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string
 		where += " AND owner = ?"
 		whereArgs = append(whereArgs, owner)
 	}
+	if search = strings.TrimSpace(search); search != "" {
+		var searchClauses []string
+		searchValue := "%" + search + "%"
+		for _, f := range dt.NonTableDataFields() {
+			if searchableFieldType(f.Fieldtype) {
+				searchClauses = append(searchClauses, fmt.Sprintf("%s LIKE ?", tx.Dialect.QuoteIdent(f.Fieldname)))
+				whereArgs = append(whereArgs, searchValue)
+			}
+		}
+		searchClauses = append(searchClauses, fmt.Sprintf("%s LIKE ?", tx.Dialect.QuoteIdent("name")))
+		whereArgs = append(whereArgs, searchValue)
+		where += " AND (" + strings.Join(searchClauses, " OR ") + ")"
+	}
 
 	var total int
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", dt.TableName(), where)
@@ -709,11 +728,35 @@ func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string
 	}
 
 	dataFields := dt.NonTableDataFields()
-	var cols []string
-	for _, f := range dataFields {
-		cols = append(cols, f.Fieldname)
+	selected := make(map[string]bool)
+	var columnNames []string
+	if len(requestedFields) > 0 {
+		for _, name := range requestedFields {
+			if name == "name" || name == "owner" || name == "creation" || name == "modified" || name == "modified_by" || name == "doc_status" {
+				selected[name] = true
+				continue
+			}
+			if f := dt.GetField(name); f != nil && f.Fieldtype != "Table" {
+				selected[name] = true
+			}
+		}
 	}
-	cols = append(cols, "name", "owner", "creation", "modified", "modified_by", "doc_status")
+	for _, f := range dataFields {
+		if len(requestedFields) == 0 || selected[f.Fieldname] {
+			columnNames = append(columnNames, f.Fieldname)
+		}
+	}
+	for _, name := range []string{"name", "owner", "creation", "modified", "modified_by", "doc_status"} {
+		if len(requestedFields) == 0 || selected[name] || name == "name" {
+			if !containsString(columnNames, name) {
+				columnNames = append(columnNames, name)
+			}
+		}
+	}
+	cols := make([]string, 0, len(columnNames))
+	for _, name := range columnNames {
+		cols = append(cols, tx.Dialect.QuoteIdent(name))
+	}
 
 	if orderBy == "" {
 		orderBy = dt.SortField + " " + dt.SortOrder
@@ -756,7 +799,7 @@ func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string
 		doc := doctype.NewDocument(dt.Name)
 		doc.IsNew = false
 
-		for i, col := range cols {
+		for i, col := range columnNames {
 			val := *(scanTargets[i].(*any))
 			switch col {
 			case "name":
@@ -772,6 +815,24 @@ func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string
 	}
 
 	return docs, total, rows.Err()
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func searchableFieldType(fieldType string) bool {
+	switch fieldType {
+	case "Data", "Text", "Small Text", "Long Text", "Link", "Dynamic Link", "Select", "Email", "Phone", "Code", "Autocomplete":
+		return true
+	default:
+		return false
+	}
 }
 
 // Delete removes a document by name.
@@ -839,7 +900,7 @@ func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) erro
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 
-	if tx.EventBus != nil && oldFields != nil {
+	if tx.EventBus != nil && tx.Outbox == nil && oldFields != nil {
 		tx.EventBus.Publish(analytics.ChangeEvent{
 			Site:       tx.SiteName,
 			Doctype:    dt.Name,

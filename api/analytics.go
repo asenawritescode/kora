@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,27 +14,14 @@ import (
 	"github.com/asenawritescode/kora/analytics"
 	db "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/natsprovider"
 )
-
-type analyticsRebuildJob struct {
-	ID          string    `json:"id"`
-	Status      string    `json:"status"`
-	StartedAt   time.Time `json:"started_at"`
-	CompletedAt time.Time `json:"completed_at,omitempty"`
-	Metrics     int       `json:"metrics,omitempty"`
-	Error       string    `json:"error,omitempty"`
-}
-
-var analyticsRebuildJobs = struct {
-	sync.RWMutex
-	items map[string]*analyticsRebuildJob
-}{items: make(map[string]*analyticsRebuildJob)}
 
 // RegisterAnalyticsRoutes registers analytics API endpoints.
 // siteDB is the fallback DB; per-request DB is resolved from gin context.
 // registry is used to auto-generate metrics from DocType metadata.
 // siteBuses maps site name → EventBus.
-func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, dialect db.Dialect) {
+func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, dialect db.Dialect) {
 	ag := apiGroup.Group("/analytics")
 	queryCache := newAnalyticsQueryCache(30*time.Second, 256)
 
@@ -196,36 +182,54 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			}
 			from = parsed
 		}
-		job := &analyticsRebuildJob{ID: fmt.Sprintf("analytics-rebuild-%d", time.Now().UnixNano()), Status: "queued", StartedAt: time.Now().UTC()}
-		analyticsRebuildJobs.Lock()
-		analyticsRebuildJobs.items[job.ID] = job
-		analyticsRebuildJobs.Unlock()
-		db := getSiteDB(c, siteDB)
+		now := time.Now().UTC()
 		siteName := c.GetString("site_name")
+		db := getSiteDB(c, siteDB)
+		job := &analytics.RebuildJob{ID: fmt.Sprintf("analytics-rebuild-%d", time.Now().UnixNano()), Site: siteName, DocType: request.DocType, From: from, Status: "queued", StartedAt: now}
+		if err := analytics.CreateRebuildJob(db, dialect, job); err != nil {
+			internalError(c, "creating analytics rebuild job", err)
+			return
+		}
 		siteRegistry := analyticsRegistry(c, registry)
-		go func() {
-			analyticsRebuildJobs.Lock()
-			job.Status = "running"
-			analyticsRebuildJobs.Unlock()
-			count, err := analytics.Backfill(db, dialect, siteName, siteRegistry, from, request.DocType)
-			analyticsRebuildJobs.Lock()
-			job.Metrics, job.CompletedAt = count, time.Now().UTC()
+		provider := realtimeProviders[siteName]
+		if provider != nil {
+			payload, err := json.Marshal(map[string]any{"job_id": job.ID, "site": siteName, "doctype": request.DocType, "from": from.Format("2006-01-02")})
 			if err != nil {
-				job.Status, job.Error = "failed", err.Error()
-			} else {
-				job.Status = "completed"
+				_ = analytics.MarkRebuildFailed(db, dialect, siteName, job.ID, err)
+				internalError(c, "encoding analytics rebuild job", err)
+				return
 			}
-			analyticsRebuildJobs.Unlock()
-		}()
+			cfg := provider.Config()
+			subject := cfg.SubjectPrefix + ".tasks.analytics-rebuild"
+			if err := provider.PublishSubject(c.Request.Context(), subject, payload, job.ID); err != nil {
+				_ = analytics.MarkRebuildFailed(db, dialect, siteName, job.ID, err)
+				internalError(c, "queueing analytics rebuild job", err)
+				return
+			}
+		} else {
+			// Local development remains usable without NATS, but status is still
+			// durable and tenant-scoped instead of living in process memory.
+			go func() {
+				_ = analytics.MarkRebuildRunning(db, dialect, siteName, job.ID)
+				count, err := analytics.Backfill(db, dialect, siteName, siteRegistry, from, request.DocType)
+				if err != nil {
+					_ = analytics.MarkRebuildFailed(db, dialect, siteName, job.ID, err)
+					return
+				}
+				_ = analytics.MarkRebuildCompleted(db, dialect, siteName, job.ID, count)
+			}()
+		}
 		c.JSON(http.StatusAccepted, Response{Data: job})
 	})
 
 	ag.GET("/rebuild/:id", func(c *gin.Context) {
-		analyticsRebuildJobs.RLock()
-		job := analyticsRebuildJobs.items[c.Param("id")]
-		analyticsRebuildJobs.RUnlock()
-		if job == nil {
+		job, err := analytics.GetRebuildJob(getSiteDB(c, siteDB), dialect, c.GetString("site_name"), c.Param("id"))
+		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"code": "analytics.rebuild_not_found", "message": "Rebuild job not found"}})
+			return
+		}
+		if err != nil {
+			internalError(c, "loading analytics rebuild job", err)
 			return
 		}
 		c.JSON(http.StatusOK, Response{Data: job})

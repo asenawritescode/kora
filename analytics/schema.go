@@ -91,6 +91,22 @@ func rollupTableDDL(dialect db.SchemaDialect) []string {
 			new_value TEXT,
 			actor VARCHAR(140) NOT NULL DEFAULT '',
 			INDEX idx_site_doctype_time (site, doctype, event_at)
-		)`, quote("_kora_analytics_events")),
+			)`, quote("_kora_analytics_events")),
+
+		// Durable administrator-triggered rebuild jobs. The queue transports work;
+		// this table remains the source of truth for status and recovery.
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+				id VARCHAR(180) NOT NULL PRIMARY KEY,
+				site VARCHAR(140) NOT NULL,
+				doctype VARCHAR(140) NOT NULL DEFAULT '',
+				from_date DATE NOT NULL,
+				status VARCHAR(20) NOT NULL,
+				started_at DATETIME NOT NULL,
+				completed_at DATETIME,
+				metrics INT NOT NULL DEFAULT 0,
+				error TEXT,
+				updated_at DATETIME NOT NULL,
+				INDEX idx_rebuild_site_status (site, status, updated_at)
+			)`, quote("_kora_analytics_rebuild_job")),
 	}
 }

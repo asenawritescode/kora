@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Config controls the self-hosted NATS provider connection and bootstrap
@@ -19,6 +20,8 @@ type Config struct {
 	StreamName        string
 	SubjectPrefix     string
 	ConsumerName      string
+	ConsumerSubject   string
+	AckWait           time.Duration
 	DeadLetterSubject string
 	MaxDeliver        int
 }
