@@ -166,11 +166,12 @@ func getUserPermissions(reg *doctype.Registry, c *gin.Context, dt string) map[st
 
 // NavigationResponse is the full navigation config for the SPA sidebar.
 type NavigationResponse struct {
-	Modules           []ModuleGroup `json:"modules"`
-	Views             []ViewNavItem `json:"views,omitempty"`
-	Branding          Branding      `json:"branding"`
-	User              UserInfo      `json:"user"`
-	AdminCapabilities []string      `json:"admin_capabilities"`
+	Modules           []ModuleGroup  `json:"modules"`
+	Views             []ViewNavItem  `json:"views,omitempty"`
+	Branding          Branding       `json:"branding"`
+	Copy              ExperienceCopy `json:"copy"`
+	User              UserInfo       `json:"user"`
+	AdminCapabilities []string       `json:"admin_capabilities"`
 }
 
 // ModuleGroup is a group of DocTypes under a module.
@@ -205,7 +206,38 @@ var AppBranding = Branding{AppName: "Kora", PrimaryColor: "#2563eb"}
 // Branding holds per-site branding configuration.
 type Branding struct {
 	AppName      string `json:"app_name"`
+	ShortName    string `json:"short_name,omitempty"`
+	LogoURL      string `json:"logo_url,omitempty"`
+	LogoDarkURL  string `json:"logo_dark_url,omitempty"`
+	FaviconURL   string `json:"favicon_url,omitempty"`
 	PrimaryColor string `json:"primary_color"`
+	AccentColor  string `json:"accent_color,omitempty"`
+	FontFamily   string `json:"font_family,omitempty"`
+	HeadingFont  string `json:"heading_font,omitempty"`
+	DefaultMode  string `json:"default_mode,omitempty"`
+}
+
+type ExperienceCopy struct {
+	LoginTitle       string `json:"login_title"`
+	LoginDescription string `json:"login_description"`
+	LoginHelp        string `json:"login_help"`
+	WorkspaceLoading string `json:"workspace_loading"`
+	EmptyRecords     string `json:"empty_records"`
+	SupportLabel     string `json:"support_label"`
+}
+
+type TenantExperience struct {
+	Branding Branding       `json:"branding"`
+	Copy     ExperienceCopy `json:"copy"`
+}
+
+var defaultExperienceCopy = ExperienceCopy{
+	LoginTitle:       "Sign in to your workspace",
+	LoginDescription: "Access your records, workflows, and reports.",
+	LoginHelp:        "Use your organization account to continue.",
+	WorkspaceLoading: "Preparing your workspace",
+	EmptyRecords:     "No records found.",
+	SupportLabel:     "Contact your administrator",
 }
 
 // UserInfo is the current user's public info for the UI.
@@ -318,7 +350,7 @@ func (h *Handler) HandleSystemNavigation(c *gin.Context) {
 		}
 	}
 
-	branding := AppBranding
+	experience := h.resolveTenantExperience(c)
 
 	// Admin capabilities: only users with the admin role see the Administrator section.
 	// Each string matches the `name` of an admin item in the sidebar (Sidebar.tsx:adminItems).
@@ -334,7 +366,8 @@ func (h *Handler) HandleSystemNavigation(c *gin.Context) {
 		Data: NavigationResponse{
 			Modules:           modules,
 			Views:             views,
-			Branding:          branding,
+			Branding:          experience.Branding,
+			Copy:              experience.Copy,
 			User:              user,
 			AdminCapabilities: adminCapabilities,
 		},
@@ -1918,6 +1951,7 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.GET("/doctype/:doctype/references", handler.HandleSystemDoctypeReferences)
 		system.GET("/navigation", handler.HandleSystemNavigation)
 		system.GET("/settings", handler.HandleSiteSettings)
+		system.GET("/experience", handler.HandleSystemBranding)
 
 		// Write endpoints.
 		system.POST("/doctype/validate", handler.HandleSystemDoctypeValidate)
@@ -1926,6 +1960,7 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.PUT("/doctype/:doctype", handler.HandleSystemDoctypeUpdate)
 		system.DELETE("/doctype/:doctype", handler.HandleSystemDoctypeDelete)
 		system.PUT("/settings", handler.HandleSiteSettingsUpdate)
+		system.PUT("/experience", handler.HandleSystemExperienceUpdate)
 
 		// Config version actions.
 		system.GET("/config/versions/:id/preview", handler.HandleConfigVersionPreview)
