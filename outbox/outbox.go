@@ -45,6 +45,9 @@ func NewSQLWriter() Writer { return &SQLWriter{} }
 // Append inserts an event row. The event ID is the outbox row primary key and is
 // later reused as the provider message ID so duplicate publishes are detectable.
 func (w *SQLWriter) Append(ctx context.Context, tx *sql.Tx, event contract.EventEnvelope) error {
+	if err := event.Validate(); err != nil {
+		return fmt.Errorf("outbox: validate event: %w", err)
+	}
 	if event.ID == "" {
 		event.ID = contract.NewEventID()
 	}

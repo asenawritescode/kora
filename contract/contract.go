@@ -177,6 +177,30 @@ type EventEnvelope struct {
 	Data          json.RawMessage `json:"data"`
 }
 
+// Validate checks the minimum semantic envelope required for durable delivery.
+func (e EventEnvelope) Validate() error {
+	switch {
+	case e.ID == "":
+		return NewError(CodeValidationFailed, "event id is required")
+	case e.Type == "":
+		return NewError(CodeValidationFailed, "event type is required")
+	case e.Version <= 0:
+		return NewError(CodeValidationFailed, "event version must be positive")
+	case e.Source == "":
+		return NewError(CodeValidationFailed, "event source is required")
+	case e.Site == "":
+		return NewError(CodeValidationFailed, "event site is required")
+	case e.OccurredAt.IsZero():
+		return NewError(CodeValidationFailed, "event occurred_at is required")
+	case len(e.Data) == 0 || string(e.Data) == "null":
+		return NewError(CodeValidationFailed, "event data is required")
+	}
+	if !json.Valid(e.Data) {
+		return NewError(CodeValidationFailed, "event data must be valid JSON")
+	}
+	return nil
+}
+
 // CommandResult is the versioned result of a synchronous command (RFC §7.1).
 type CommandResult struct {
 	OperationID   string          `json:"operation_id"`

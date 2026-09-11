@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -49,6 +50,9 @@ func (m *Memory) Register(ctx context.Context, d contract.ResourceDescriptor) (c
 	if d.Ref.Name == "" {
 		return contract.ResourceRef{}, contract.ErrResourceNameRequired
 	}
+	if !knownKind(d.Kind) {
+		return contract.ResourceRef{}, fmt.Errorf("%w: %q", contract.ErrResourceKindUnknown, d.Kind)
+	}
 
 	hash := DescriptorHash(d)
 	d.Hash = hash
@@ -88,6 +92,20 @@ func (m *Memory) Register(ctx context.Context, d contract.ResourceDescriptor) (c
 		m.latest[nn] = d.Ref.Version
 	}
 	return d.Ref, nil
+}
+
+func knownKind(k contract.ResourceKind) bool {
+	switch k {
+	case contract.ResourceKindDoctype, contract.ResourceKindCollection, contract.ResourceKindCommand, contract.ResourceKindQuery,
+		contract.ResourceKindEntity, contract.ResourceKindRelation, contract.ResourceKindComputation, contract.ResourceKindRule,
+		contract.ResourceKindPolicy, contract.ResourceKindAction, contract.ResourceKindWorkflow, contract.ResourceKindCapability,
+		contract.ResourceKindSkill, contract.ResourceKindRole, contract.ResourceKindAgent, contract.ResourceKindView,
+		contract.ResourceKindEvent, contract.ResourceKindIntegration, contract.ResourceKindPlugin, contract.ResourceKindPackage,
+		contract.ResourceKindPage, contract.ResourceKindComponent:
+		return true
+	default:
+		return false
+	}
 }
 
 // Resolve returns the descriptor for ref. A Version of 0 resolves the latest

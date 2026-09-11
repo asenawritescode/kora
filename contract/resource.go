@@ -19,12 +19,38 @@ import (
 type ResourceKind string
 
 const (
-	ResourceKindDoctype    ResourceKind = "doctype"
-	ResourceKindCollection ResourceKind = "collection"
-	ResourceKindCommand    ResourceKind = "command"
-	ResourceKindQuery      ResourceKind = "query"
-	ResourceKindPage       ResourceKind = "page"
-	ResourceKindComponent  ResourceKind = "component"
+	ResourceKindDoctype     ResourceKind = "doctype"
+	ResourceKindCollection  ResourceKind = "collection"
+	ResourceKindCommand     ResourceKind = "command"
+	ResourceKindQuery       ResourceKind = "query"
+	ResourceKindEntity      ResourceKind = "entity"
+	ResourceKindRelation    ResourceKind = "relation"
+	ResourceKindComputation ResourceKind = "computation"
+	ResourceKindRule        ResourceKind = "rule"
+	ResourceKindPolicy      ResourceKind = "policy"
+	ResourceKindAction      ResourceKind = "action"
+	ResourceKindWorkflow    ResourceKind = "workflow"
+	ResourceKindCapability  ResourceKind = "capability"
+	ResourceKindSkill       ResourceKind = "skill"
+	ResourceKindRole        ResourceKind = "role"
+	ResourceKindAgent       ResourceKind = "agent"
+	ResourceKindView        ResourceKind = "view"
+	ResourceKindEvent       ResourceKind = "event"
+	ResourceKindIntegration ResourceKind = "integration"
+	ResourceKindPlugin      ResourceKind = "plugin"
+	ResourceKindPackage     ResourceKind = "package"
+	ResourceKindPage        ResourceKind = "page"
+	ResourceKindComponent   ResourceKind = "component"
+)
+
+type ResourceLifecycle string
+
+const (
+	LifecycleDraft    ResourceLifecycle = "draft"
+	LifecyclePreview  ResourceLifecycle = "preview"
+	LifecycleActive   ResourceLifecycle = "active"
+	LifecycleDisabled ResourceLifecycle = "disabled"
+	LifecycleRetired  ResourceLifecycle = "retired"
 )
 
 // TypedField is the minimal field projection carried on a ResourceDescriptor.
@@ -57,13 +83,14 @@ func (r ResourceRef) String() string {
 // version. Hash is the canonical SHA-256 of the descriptor content (excluding
 // the Hash field itself).
 type ResourceDescriptor struct {
-	Ref          ResourceRef   `json:"ref"`
-	Kind         ResourceKind  `json:"kind"`
-	Hash         string        `json:"hash"`
-	Fields       []TypedField  `json:"fields,omitempty"`
-	DependsOn    []ResourceRef `json:"depends_on,omitempty"`
-	CreatedAt    time.Time     `json:"created_at"`
-	SupersededAt time.Time     `json:"superseded_at,omitempty"`
+	Ref          ResourceRef       `json:"ref"`
+	Kind         ResourceKind      `json:"kind"`
+	Hash         string            `json:"hash"`
+	Fields       []TypedField      `json:"fields,omitempty"`
+	DependsOn    []ResourceRef     `json:"depends_on,omitempty"`
+	Lifecycle    ResourceLifecycle `json:"lifecycle,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	SupersededAt time.Time         `json:"superseded_at,omitempty"`
 }
 
 // ResourceRegistry is the registration and resolution surface for resources.
@@ -83,4 +110,5 @@ var (
 	ErrResourceNameRequired      = NewError(CodeValidationFailed, "resource name is required")
 	ErrResourceNotFound          = NewError(CodeNotFound, "resource not found")
 	ErrResourceVersionConflict   = NewError(CodeConflict, "resource version already registered")
+	ErrResourceKindUnknown       = NewError(CodeValidationFailed, "unknown resource kind")
 )

@@ -1,0 +1,18 @@
+{
+  "version": "1",
+  "resource_kinds": [
+    "entity", "relation", "query", "computation", "rule", "policy",
+    "action", "workflow", "capability", "skill", "role", "agent", "view",
+    "event", "integration", "plugin", "package"
+  ],
+  "reference_capability": {
+    "ref": {"namespace": "inventory", "name": "add_stock", "version": 1},
+    "inputs": [{"name": "item", "type": "string", "required": true}],
+    "effects": ["stock_movement", "stock_balance_projection"]
+  },
+  "reference_event": {
+    "type": "capability.executed",
+    "version": 1,
+    "required": ["id", "source", "site", "occurred_at", "data", "causation_id"]
+  }
+}

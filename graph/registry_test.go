@@ -163,3 +163,11 @@ func TestRegisterRejectsEmptyIdentity(t *testing.T) {
 		t.Fatalf("want ErrResourceNameRequired, got %v", err)
 	}
 }
+
+func TestResourceRegistryRejectsUnknownKind(t *testing.T) {
+	reg := NewMemory()
+	_, err := reg.Register(context.Background(), descriptor("tenant-a", "thing", 1, contract.ResourceKind("mystery"), nil))
+	if !errors.Is(err, contract.ErrResourceKindUnknown) {
+		t.Fatalf("want ErrResourceKindUnknown, got %v", err)
+	}
+}

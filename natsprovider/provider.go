@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 	"sync"
+	"time"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/nats-io/nats.go"
@@ -78,11 +78,11 @@ func (p *Provider) Close() {
 // Bootstrap ensures the configured stream exists. It is idempotent.
 func (p *Provider) Bootstrap(ctx context.Context) error {
 	cfg := &nats.StreamConfig{
-		Name:      p.cfg.StreamName,
-		Subjects:  []string{p.cfg.SubjectPrefix + ".>"},
-		Retention: nats.LimitsPolicy,
-		Storage:   nats.MemoryStorage,
-		Discard:   nats.DiscardOld,
+		Name:       p.cfg.StreamName,
+		Subjects:   []string{p.cfg.SubjectPrefix + ".>"},
+		Retention:  nats.LimitsPolicy,
+		Storage:    nats.MemoryStorage,
+		Discard:    nats.DiscardOld,
 		Duplicates: 2 * time.Minute,
 	}
 	_, err := p.js.AddStream(cfg, nats.Context(ctx))
@@ -99,8 +99,8 @@ func (p *Provider) Diagnostics(ctx context.Context) (Diagnostics, error) {
 		return Diagnostics{}, fmt.Errorf("natsprovider: provider is nil")
 	}
 	d := Diagnostics{
-		Connected: p.nc.IsConnected(),
-		ServerURL: p.nc.ConnectedUrl(),
+		Connected:  p.nc.IsConnected(),
+		ServerURL:  p.nc.ConnectedUrl(),
 		StreamName: p.cfg.StreamName,
 	}
 	info, err := p.js.StreamInfo(p.cfg.StreamName, nats.Context(ctx))
@@ -116,6 +116,24 @@ func (p *Provider) Diagnostics(ctx context.Context) (Diagnostics, error) {
 
 // Publish implements contract.EventPublisher.
 func (p *Provider) Publish(ctx context.Context, event contract.EventEnvelope) error {
+	// Preserve the pre-envelope provider API for callers that supplied the
+	// original minimal event shape. The normalized event is still validated
+	// before it crosses the provider boundary.
+	if event.Version == 0 {
+		event.Version = contract.CurrentVersion
+	}
+	if event.Source == "" {
+		event.Source = "natsprovider"
+	}
+	if event.OccurredAt.IsZero() {
+		event.OccurredAt = time.Now().UTC()
+	}
+	if len(event.Data) == 0 {
+		event.Data = json.RawMessage(`{}`)
+	}
+	if err := event.Validate(); err != nil {
+		return fmt.Errorf("nats: validate event: %w", err)
+	}
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err

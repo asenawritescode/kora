@@ -129,6 +129,21 @@ func TestEventEnvelopeJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEventEnvelopeValidateRejectsMalformedEvents(t *testing.T) {
+	valid := EventEnvelope{ID: "evt-1", Type: "stock.changed", Version: 1, Source: "engine", Site: "acme", OccurredAt: time.Now(), Data: json.RawMessage(`{"quantity":1}`)}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid event rejected: %v", err)
+	}
+	for _, event := range []EventEnvelope{valid, {Type: valid.Type, Version: 1, Source: valid.Source, Site: valid.Site, OccurredAt: valid.OccurredAt, Data: valid.Data}, {ID: "x", Type: valid.Type, Version: 1, Source: valid.Source, Site: valid.Site, OccurredAt: valid.OccurredAt, Data: json.RawMessage(`{`)}} {
+		if event.ID == "evt-1" {
+			event.Data = nil
+		}
+		if err := event.Validate(); err == nil {
+			t.Fatalf("malformed event accepted: %+v", event)
+		}
+	}
+}
+
 // TestCommandDeadlineSemantics verifies bounded-request behavior (RFC §7).
 func TestCommandDeadlineSemantics(t *testing.T) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
@@ -222,15 +237,15 @@ func TestContractInventoryCoversCurrentSurface(t *testing.T) {
 	}
 
 	want := map[string]SurfaceStatus{
-		"status":            SurfaceSupported,
-		"error_codes":       SurfaceSupported,
-		"actor_context":     SurfaceExperimental,
-		"command_envelope":  SurfaceSupported,
-		"event_envelope":    SurfaceSupported,
+		"status":              SurfaceSupported,
+		"error_codes":         SurfaceSupported,
+		"actor_context":       SurfaceExperimental,
+		"command_envelope":    SurfaceSupported,
+		"event_envelope":      SurfaceSupported,
 		"resource_descriptor": SurfacePartial,
-		"ui_manifest":       SurfaceSupported,
-		"offline_sync":      SurfaceSupported,
-		"authentication":    SurfaceSupported,
+		"ui_manifest":         SurfaceSupported,
+		"offline_sync":        SurfaceSupported,
+		"authentication":      SurfaceSupported,
 	}
 
 	got := map[string]SurfaceStatus{}
