@@ -15,7 +15,14 @@ func (h *Handler) agentStore(c *gin.Context) *org.AgentStore {
 		h.AgentStores = map[string]*org.AgentStore{}
 	}
 	if h.AgentStores[site] == nil {
-		h.AgentStores[site] = org.NewAgentStore()
+		if h.TxManager != nil && h.TxManager.DB != nil {
+			if store, err := org.NewSQLAgentStore(h.TxManager.DB); err == nil {
+				h.AgentStores[site] = store
+			}
+		}
+		if h.AgentStores[site] == nil {
+			h.AgentStores[site] = org.NewAgentStore()
+		}
 	}
 	return h.AgentStores[site]
 }

@@ -1,6 +1,8 @@
 package org
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -27,10 +29,38 @@ type AgentStore struct {
 	mu        sync.RWMutex
 	manifests map[string]AgentManifest
 	runs      map[string][]AgentRun
+	db        *sql.DB
 }
 
 func NewAgentStore() *AgentStore {
 	return &AgentStore{manifests: map[string]AgentManifest{}, runs: map[string][]AgentRun{}}
+}
+
+func NewSQLAgentStore(db *sql.DB) (*AgentStore, error) {
+	s := &AgentStore{manifests: map[string]AgentManifest{}, runs: map[string][]AgentRun{}, db: db}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS _kora_agent_manifest (id VARCHAR(191) PRIMARY KEY, manifest_json TEXT NOT NULL, updated_at TIMESTAMP NOT NULL)`); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS _kora_agent_run (id VARCHAR(191) PRIMARY KEY, agent_id VARCHAR(191) NOT NULL, run_json TEXT NOT NULL, created_at TIMESTAMP NOT NULL)`); err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT manifest_json FROM _kora_agent_manifest`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		var m AgentManifest
+		if err := json.Unmarshal([]byte(data), &m); err != nil {
+			return nil, err
+		}
+		s.manifests[m.ID] = m
+	}
+	return s, rows.Err()
 }
 func (s *AgentStore) SaveManifest(m AgentManifest) (AgentManifest, error) {
 	if m.ID == "" || m.Name == "" {
@@ -40,6 +70,12 @@ func (s *AgentStore) SaveManifest(m AgentManifest) (AgentManifest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.manifests[m.ID] = m
+	if s.db != nil {
+		data, _ := json.Marshal(m)
+		if _, err := s.db.Exec(`INSERT INTO _kora_agent_manifest (id, manifest_json, updated_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE manifest_json = VALUES(manifest_json), updated_at = VALUES(updated_at)`, m.ID, string(data), m.UpdatedAt); err != nil {
+			return AgentManifest{}, err
+		}
+	}
 	return m, nil
 }
 func (s *AgentStore) GetManifest(id string) (AgentManifest, bool) {
@@ -59,10 +95,31 @@ func (s *AgentStore) RecordRun(r AgentRun) (AgentRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.runs[r.AgentID] = append(s.runs[r.AgentID], r)
+	if s.db != nil {
+		data, _ := json.Marshal(r)
+		if _, err := s.db.Exec(`INSERT INTO _kora_agent_run (id, agent_id, run_json, created_at) VALUES (?, ?, ?, ?)`, r.ID, r.AgentID, string(data), r.CreatedAt); err != nil {
+			return AgentRun{}, err
+		}
+	}
 	return r, nil
 }
 func (s *AgentStore) Runs(id string) []AgentRun {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.db != nil {
+		rows, err := s.db.Query(`SELECT run_json FROM _kora_agent_run WHERE agent_id = ? ORDER BY created_at DESC`, id)
+		if err == nil {
+			defer rows.Close()
+			result := []AgentRun{}
+			for rows.Next() {
+				var data string
+				var run AgentRun
+				if rows.Scan(&data) == nil && json.Unmarshal([]byte(data), &run) == nil {
+					result = append(result, run)
+				}
+			}
+			return result
+		}
+	}
 	return append([]AgentRun(nil), s.runs[id]...)
 }
