@@ -9,8 +9,8 @@ own tests or validation gate passes.
 
 - [x] ORG-FOUND-001 Preserve and partition repository work.
 - [ ] ORG-FOUND-002 Establish canonical organizational vocabulary across repositories.
-- [ ] ORG-FOUND-003 Publish and consume versioned cross-repository fixtures.
-- [ ] ORG-FOUND-004 Build the isolated end-to-end acceptance harness.
+- [ ] ORG-FOUND-003 Publish and consume versioned cross-repository fixtures (engine fixture published; downstream consumption remains).
+- [ ] ORG-FOUND-004 Build the isolated end-to-end acceptance harness (engine-side flow implemented; cross-repository runner remains).
 
 ## Phase 1 — Engine foundations
 
