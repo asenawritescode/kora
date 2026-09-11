@@ -51,3 +51,38 @@ func TestLedgerAllowsConfiguredNegativeStock(t *testing.T) {
 		t.Fatal("configured negative balance not projected")
 	}
 }
+
+func TestReservationsDoNotChangePhysicalBalance(t *testing.T) {
+	l := NewLedger(Policy{})
+	if err := l.Append(movement("in-1", 10)); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Reserve("reserve-1", "item-1", "warehouse-1", 6, "user-1", "purchase request"); err != nil {
+		t.Fatal(err)
+	}
+	if l.Balance("item-1", "warehouse-1") != 10 {
+		t.Fatalf("physical balance changed: %d", l.Balance("item-1", "warehouse-1"))
+	}
+	if l.Reserved("item-1", "warehouse-1") != 6 || l.Available("item-1", "warehouse-1") != 4 {
+		t.Fatal("reservation projection incorrect")
+	}
+	if err := l.Release("release-1", "item-1", "warehouse-1", 6, "user-1", "cancelled"); err != nil {
+		t.Fatal(err)
+	}
+	if l.Reserved("item-1", "warehouse-1") != 0 {
+		t.Fatal("released reservation remained")
+	}
+}
+
+func TestTransferProjectsBothLocations(t *testing.T) {
+	l := NewLedger(Policy{})
+	if err := l.Append(Movement{ID: "in-1", Item: "item-1", Location: "from", Quantity: 10, Kind: MovementReceive, Actor: "user-1", Reason: "opening"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Transfer("move-out", "move-in", "item-1", "from", "to", 4, "user-1", "replenishment"); err != nil {
+		t.Fatal(err)
+	}
+	if l.Balance("item-1", "from") != 6 || l.Balance("item-1", "to") != 4 {
+		t.Fatal("transfer projection incorrect")
+	}
+}
