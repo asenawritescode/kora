@@ -1056,6 +1056,7 @@ func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doc
 	apiGroup.POST("/chat", handler.HandleChat)
 	aiGroup := apiGroup.Group("/ai")
 	{
+		aiGroup.GET("/approvals", handler.HandleAIListApprovals)
 		aiGroup.POST("/approvals/:id/grant", handler.HandleAIGrantApproval)
 		aiGroup.POST("/runs/:id/cancel", handler.HandleAICancel)
 		aiGroup.POST("/runs/:id/resume", handler.HandleAIResume)

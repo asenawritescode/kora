@@ -104,6 +104,10 @@ func (h *Handler) HandleAIGrantApproval(c *gin.Context) {
 // HandleAIListApprovals returns approval rows for the current site.
 func (h *Handler) HandleAIListApprovals(c *gin.Context) {
 	tx := h.siteTx(c)
+	if err := ai.EnsureAIRunTables(c.Request.Context(), tx.DB); err != nil {
+		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
+		return
+	}
 	state := c.Query("state")
 	if state == "" {
 		state = "pending_approval"
