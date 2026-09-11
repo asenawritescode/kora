@@ -145,14 +145,16 @@ cross-repository acceptance gates pass.
 
 Cloud marketplace publishing is now a dedicated control-plane concern. Package
 metadata is reviewable, requested permissions must be declared by the package
-manifest, and publication proceeds through validation, security, compatibility,
-and publish states with deprecation/withdrawal paths. Studio exposes package
-permissions, capabilities, required services, and cleanup behavior before
-activation; its agent surface edits a capability manifest while making
-prohibitions and approval gates visible. Studio’s crystallization flow makes
-conversation-to-runtime proposals explicit and reviewable, so conversation
-cannot silently create production behavior. Cloud package tests pass and
-Studio’s 35 test files/161 tests plus production build pass.
+manifest, publication proceeds through validation, security, compatibility,
+and publish states with deprecation/withdrawal paths, and metadata persists
+when `KORA_CONFIG_DIR` is configured. Studio exposes package permissions,
+capabilities, required services, cleanup behavior, and tenant preview
+installation before activation. Its agent surface persists a workspace
+capability manifest while making prohibitions and approval gates visible. Its
+crystallization flow persists the reviewed progression from conversation to
+runtime proposal, so conversation cannot silently create production behavior.
+Cloud package/API tests pass and Studio’s 35 test files/161 tests plus
+production build pass.
 
 ## Phase 7 — Website and launch validation
 
