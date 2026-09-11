@@ -44,7 +44,7 @@ own tests or validation gate passes.
 - [x] STUDIO-ORG-002 Build onboarding model review.
 - [x] STUDIO-ORG-003 Add the Today operational home.
 - [x] STUDIO-ORG-004 Implement generic record forms/lists.
-- [ ] STUDIO-ORG-005 Build the workflow editor.
+- [x] STUDIO-ORG-005 Build the workflow editor.
 - [ ] STUDIO-ORG-006 Build graph inspection.
 - [ ] STUDIO-ORG-007 Build provenance/why panels.
 
