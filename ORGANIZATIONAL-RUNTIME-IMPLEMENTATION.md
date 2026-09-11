@@ -21,7 +21,7 @@ for proving package isolation and generic loading.
 - [x] ORG-FOUND-001 Preserve and partition repository work.
 - [x] ORG-FOUND-002 Establish canonical organizational vocabulary across repositories.
 - [x] ORG-FOUND-003 Publish and consume versioned cross-repository fixtures (byte-identical v1 fixture is validated by engine, Cloud, Studio, and website CI gates).
-- [ ] ORG-FOUND-004 Build the isolated end-to-end acceptance harness (cross-repository local gate now exists at `scripts/organizational-runtime-acceptance.sh`; live website→Cloud→engine→Studio business-flow execution remains).
+- [ ] ORG-FOUND-004 Build the isolated end-to-end acceptance harness (cross-repository local gate passes at `scripts/organizational-runtime-acceptance.sh`; fallback headless Chrome verified `/s/demo.local/workspace/auth/login`; live website→Cloud→engine→Studio business-flow execution remains pending because Cloud onboarding is not wired to a local engine and Chrome DevTools MCP is unavailable in this session).
 
 ## Phase 1 — Engine foundations
 
