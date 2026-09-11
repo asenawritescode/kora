@@ -118,3 +118,31 @@ type PackageManifest struct {
 	Migrations  []string      `json:"migrations,omitempty"`
 	Cleanup     []string      `json:"cleanup,omitempty"`
 }
+
+type Profile struct {
+	Ref          ResourceRef   `json:"ref"`
+	Packages     []ResourceRef `json:"packages,omitempty"`
+	Capabilities []ResourceRef `json:"capabilities,omitempty"`
+}
+
+type PatchOperation struct {
+	Path  string `json:"path"`
+	Op    string `json:"op"`
+	Value any    `json:"value,omitempty"`
+}
+
+type ConfigurationPatch struct {
+	Ref        ResourceRef      `json:"ref"`
+	Target     ResourceRef      `json:"target"`
+	Operations []PatchOperation `json:"operations"`
+	Author     string           `json:"author"`
+	Reason     string           `json:"reason"`
+}
+
+type PackageComposition struct {
+	Base     ResourceRef   `json:"base"`
+	Packages []ResourceRef `json:"packages,omitempty"`
+	Plugins  []ResourceRef `json:"plugins,omitempty"`
+	Profiles []ResourceRef `json:"profiles,omitempty"`
+	Patches  []ResourceRef `json:"patches,omitempty"`
+}

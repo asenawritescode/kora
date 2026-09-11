@@ -3,6 +3,8 @@ package org
 import (
 	"fmt"
 	"sync"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 type PackageState string
@@ -17,8 +19,9 @@ const (
 )
 
 type PackageRecord struct {
-	Manifest any          `json:"manifest"`
-	State    PackageState `json:"state"`
+	Manifest any                           `json:"manifest"`
+	State    PackageState                  `json:"state"`
+	Patches  []contract.ConfigurationPatch `json:"patches,omitempty"`
 }
 
 type PackageStore struct {
@@ -61,6 +64,36 @@ func (s *PackageStore) Get(id string) (PackageRecord, bool) {
 	defer s.mu.RUnlock()
 	r, ok := s.items[id]
 	return r, ok
+}
+
+func (s *PackageStore) AddPatch(id string, patch contract.ConfigurationPatch) error {
+	if patch.Ref.Name == "" || patch.Target.Name == "" || patch.Author == "" || patch.Reason == "" || len(patch.Operations) == 0 {
+		return fmt.Errorf("patch requires refs, author, reason, and operations")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.items[id]
+	if !ok {
+		return fmt.Errorf("package %q not found", id)
+	}
+	if record.State == PackageRemoved || record.State == PackageRolledBack {
+		return fmt.Errorf("package %q is not active", id)
+	}
+	record.Patches = append(record.Patches, patch)
+	s.items[id] = record
+	return nil
+}
+
+func (s *PackageStore) Patches(id string) ([]contract.ConfigurationPatch, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.items[id]
+	if !ok {
+		return nil, fmt.Errorf("package %q not found", id)
+	}
+	out := make([]contract.ConfigurationPatch, len(record.Patches))
+	copy(out, record.Patches)
+	return out, nil
 }
 
 func validPackageTransition(from, to PackageState) bool {
