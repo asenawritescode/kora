@@ -136,10 +136,23 @@ cross-repository acceptance gates pass.
 
 ## Phase 6 — Marketplace and agents
 
-- [ ] CLOUD-ORG-006 Add marketplace publishing.
-- [ ] STUDIO-ORG-011 Build agent/delegation screens.
-- [ ] STUDIO-ORG-012 Build marketplace/extension manager.
-- [ ] STUDIO-ORG-013 Add conversational UI crystallization.
+- [x] CLOUD-ORG-006 Add marketplace publishing (reviewed package metadata, manifest permission validation, and guarded publishing lifecycle API).
+- [x] STUDIO-ORG-011 Build agent/delegation screens (capability grant/revoke controls, explicit prohibitions, approval gates, and handoff semantics).
+- [x] STUDIO-ORG-012 Build marketplace/extension manager (package inspection, permissions/dependencies/removal metadata, and lifecycle controls alongside engine extensions).
+- [x] STUDIO-ORG-013 Add conversational UI crystallization (explicit progression from temporary query to view, capability, workflow, and agent proposal).
+
+### Phase 6 completion audit
+
+Cloud marketplace publishing is now a dedicated control-plane concern. Package
+metadata is reviewable, requested permissions must be declared by the package
+manifest, and publication proceeds through validation, security, compatibility,
+and publish states with deprecation/withdrawal paths. Studio exposes package
+permissions, capabilities, required services, and cleanup behavior before
+activation; its agent surface edits a capability manifest while making
+prohibitions and approval gates visible. Studio’s crystallization flow makes
+conversation-to-runtime proposals explicit and reviewable, so conversation
+cannot silently create production behavior. Cloud package tests pass and
+Studio’s 35 test files/161 tests plus production build pass.
 
 ## Phase 7 — Website and launch validation
 
