@@ -98,6 +98,20 @@ func BootstrapSystemTables(database *sql.DB, dialect db.Dialect) error {
 			return err
 		}
 	}
+	var agentDDL []string
+	switch dialect.(type) {
+	case *db.LibSQLDialect:
+		agentDDL = db.AgentTablesLibSQL()
+	case *db.PostgresDialect:
+		agentDDL = db.AgentTablesPostgres()
+	default:
+		agentDDL = db.AgentTablesMySQL()
+	}
+	for _, ddl := range agentDDL {
+		if err := execDDL(ddl, "creating agent table"); err != nil {
+			return err
+		}
+	}
 
 	database.Exec(dialect.InsertOrIgnorePrefix() + ` INTO _kora_role (name, description) VALUES ('Administrator', 'Full access to all doctypes')`)
 

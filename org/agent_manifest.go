@@ -38,12 +38,6 @@ func NewAgentStore() *AgentStore {
 
 func NewSQLAgentStore(db *sql.DB) (*AgentStore, error) {
 	s := &AgentStore{manifests: map[string]AgentManifest{}, runs: map[string][]AgentRun{}, db: db}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS _kora_agent_manifest (id VARCHAR(191) PRIMARY KEY, manifest_json TEXT NOT NULL, updated_at TIMESTAMP NOT NULL)`); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS _kora_agent_run (id VARCHAR(191) PRIMARY KEY, agent_id VARCHAR(191) NOT NULL, run_json TEXT NOT NULL, created_at TIMESTAMP NOT NULL)`); err != nil {
-		return nil, err
-	}
 	rows, err := db.Query(`SELECT manifest_json FROM _kora_agent_manifest`)
 	if err != nil {
 		return nil, err
@@ -72,8 +66,15 @@ func (s *AgentStore) SaveManifest(m AgentManifest) (AgentManifest, error) {
 	s.manifests[m.ID] = m
 	if s.db != nil {
 		data, _ := json.Marshal(m)
-		if _, err := s.db.Exec(`INSERT INTO _kora_agent_manifest (id, manifest_json, updated_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE manifest_json = VALUES(manifest_json), updated_at = VALUES(updated_at)`, m.ID, string(data), m.UpdatedAt); err != nil {
+		result, err := s.db.Exec(`UPDATE _kora_agent_manifest SET manifest_json = ?, updated_at = ? WHERE id = ?`, string(data), m.UpdatedAt, m.ID)
+		if err != nil {
 			return AgentManifest{}, err
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			if _, err := s.db.Exec(`INSERT INTO _kora_agent_manifest (id, manifest_json, updated_at) VALUES (?, ?, ?)`, m.ID, string(data), m.UpdatedAt); err != nil {
+				return AgentManifest{}, err
+			}
 		}
 	}
 	return m, nil
