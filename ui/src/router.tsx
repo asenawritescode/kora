@@ -27,6 +27,7 @@ const AdminAnalyticsPage = lazy(() => import('@/routes/workspace/admin/analytics
 const AdminApprovalsPage = lazy(() => import('@/routes/workspace/admin/approvals'))
 const AdminPageManifestsPage = lazy(() => import('@/routes/workspace/admin/page-manifests'))
 const AdminPageManifestEditorPage = lazy(() => import('@/routes/workspace/admin/page-manifests/editor'))
+const StudioPage = lazy(() => import('@/routes/workspace/studio'))
 const ConsoleLoginPage = lazy(() => import('@/routes/console/login'))
 const ConsoleDashboard = lazy(() => import('@/routes/console/index'))
 
@@ -206,6 +207,12 @@ const settingsRoute = createRoute({
   ),
 })
 
+const studioRoute = createRoute({
+  getParentRoute: () => workspaceLayout,
+  path: 'studio',
+  component: StudioPage,
+})
+
 // Console login — public.
 const consoleLoginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -240,6 +247,7 @@ const routeTree = rootRoute.addChildren([
   ]),
   workspaceLayout.addChildren([
     dashboardRoute,
+    studioRoute,
     adminRoute.addChildren([
       adminDoctypesRoute,
       adminDoctypeNewRoute,
