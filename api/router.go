@@ -19,13 +19,11 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/inventory"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/natsprovider"
 	"github.com/asenawritescode/kora/orm"
@@ -64,12 +62,6 @@ type Handler struct {
 	// SiteRealtimeProviders maps site name → NATS provider used to source realtime events.
 	SiteRealtimeProviders map[string]*natsprovider.Provider
 
-	// SiteInventoryLedgers holds the reference package projection per site.
-	// Durable movement events are emitted through the site's event provider;
-	// recovery/replay can rebuild this projection from those events.
-	SiteInventoryLedgers map[string]*inventory.Ledger
-	inventoryMu          sync.Mutex
-
 	// ScriptRunner executes JavaScript hooks (shared across all sites).
 	ScriptRunner script.Runner
 
@@ -102,10 +94,9 @@ type Handler struct {
 // NewHandler creates a new API handler.
 func NewHandler(registry *doctype.Registry, txManager *orm.TxManager) *Handler {
 	return &Handler{
-		Registry:             registry,
-		TxManager:            txManager,
-		AuthProviders:        auth.NewProviderRegistry(),
-		SiteInventoryLedgers: make(map[string]*inventory.Ledger),
+		Registry:      registry,
+		TxManager:     txManager,
+		AuthProviders: auth.NewProviderRegistry(),
 	}
 }
 
@@ -1053,12 +1044,6 @@ func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doc
 	// config-defined command registry (KERNEL-008).
 	apiGroup.POST("/kernel/:command", handler.HandleKernelOperation)
 	apiGroup.GET("/kernel/_registry", handler.HandleKernelRegistry)
-
-	// Reference inventory package operations use the shared authenticated site
-	// context and ledger executor rather than generic balance mutations.
-	apiGroup.POST("/inventory/movements", handler.HandleInventoryMovement)
-	apiGroup.GET("/inventory/movements", handler.HandleInventoryMovements)
-	apiGroup.GET("/inventory/balance", handler.HandleInventoryBalance)
 
 	// OpenAPI docs.
 	apiGroup.GET("/openapi.json", handler.HandleOpenAPI)

@@ -1,0 +1,19 @@
+name: transfer_stock
+namespace: inventory
+version: 1
+permission: create
+input:
+  record: Stock Movement
+transaction:
+  - create:
+      record: Stock Movement
+      values:
+        reference: "$input.reference"
+        item: "$input.item"
+        location: "$input.location"
+        to_location: "$input.to_location"
+        quantity: "$input.quantity"
+        movement_type: "Transfer"
+        reason: "$input.reason"
+emit:
+  - inventory.stock_movement.recorded

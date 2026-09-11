@@ -1,0 +1,18 @@
+name: issue_stock
+namespace: inventory
+version: 1
+permission: create
+input:
+  record: Stock Movement
+transaction:
+  - create:
+      record: Stock Movement
+      values:
+        reference: "$input.reference"
+        item: "$input.item"
+        location: "$input.location"
+        quantity: "$input.quantity"
+        movement_type: "Issue"
+        reason: "$input.reason"
+emit:
+  - inventory.stock_movement.recorded
