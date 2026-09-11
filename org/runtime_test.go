@@ -39,6 +39,12 @@ func TestRuntimeUsesExplicitCapabilityGrantAndPublishesEvent(t *testing.T) {
 	if result.Event.CausationID != intent.ID || len(p.events) != 1 {
 		t.Fatalf("event provenance not recorded: %+v", result.Event)
 	}
+	if result.Event.Actor.PrincipalID != "user-1" || len(result.Event.ProvenanceIDs) != 1 {
+		t.Fatalf("event explanation links missing: %+v", result.Event)
+	}
+	if records := r.Provenance().ForEvent(result.Event.ID); len(records) != 1 || records[0].Capability.Name != ref.Name {
+		t.Fatalf("stored provenance missing: %+v", records)
+	}
 }
 
 func TestRevisionStorePreviewActivateAndRollback(t *testing.T) {
@@ -64,5 +70,26 @@ func TestRevisionStorePreviewActivateAndRollback(t *testing.T) {
 	}
 	if active.ID != "v1" || active.State != RevisionActive {
 		t.Fatalf("rollback active = %+v", active)
+	}
+}
+
+func TestRuntimeRequiresHumanApprovalForHighRiskGrant(t *testing.T) {
+	r := NewRuntime(nil)
+	ref := contract.ResourceRef{Namespace: "tenant-a", Name: "supplier.notify", Version: 1}
+	if err := r.RegisterCapability(Capability{Contract: contract.CapabilityContract{Ref: ref, Risk: contract.ToolSafetyHigh}, Handler: func(context.Context, Intent) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Grant(Grant{Capability: ref.String(), ActorID: "manager-1", ActorType: contract.PrincipalHuman, RequiresApproval: true}); err != nil {
+		t.Fatal(err)
+	}
+	intent := Intent{ID: "op-high-1", Site: "acme", Actor: contract.ActorContext{PrincipalID: "manager-1", PrincipalType: contract.PrincipalHuman}, Capability: ref}
+	if _, err := r.Execute(context.Background(), intent); err == nil {
+		t.Fatal("high-risk operation executed without approval")
+	}
+	if err := r.Approve(intent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Execute(context.Background(), intent); err != nil {
+		t.Fatalf("approved operation failed: %v", err)
 	}
 }

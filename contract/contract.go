@@ -174,6 +174,11 @@ type EventEnvelope struct {
 	OccurredAt    time.Time       `json:"occurred_at"`
 	CorrelationID string          `json:"correlation_id,omitempty"`
 	CausationID   string          `json:"causation_id,omitempty"`
+	Actor         ActorContext    `json:"actor,omitempty"`
+	Capability    ResourceRef     `json:"capability,omitempty"`
+	Skill         ResourceRef     `json:"skill,omitempty"`
+	ModelRevision string          `json:"model_revision,omitempty"`
+	ProvenanceIDs []string        `json:"provenance_ids,omitempty"`
 	Data          json.RawMessage `json:"data"`
 }
 
