@@ -1,13 +1,16 @@
 package tests
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
+	"github.com/asenawritescode/kora/workflow"
 )
 
 // TestInventoryPackageIsDeclarative proves the reference package is consumed
@@ -61,5 +64,52 @@ func TestInventoryPackageIsDeclarative(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("package resource missing %q: %v", path, err)
 		}
+	}
+}
+
+type packageStepExecutor struct{ steps []string }
+
+type packageRuleEvaluator struct{ result bool }
+
+func (e packageRuleEvaluator) Evaluate(context.Context, string, any) (bool, error) {
+	return e.result, nil
+}
+
+func (e *packageStepExecutor) Execute(_ context.Context, capability string, _ contract.ActorContext, _ any) error {
+	e.steps = append(e.steps, capability)
+	return nil
+}
+
+func TestInventoryPackageWorkflowRunsThroughGenericExecutor(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Dir(filepath.Dir(source))
+	packageRoot := filepath.Join(root, "config", "inventory")
+	raw, err := os.ReadFile(filepath.Join(packageRoot, "workflows", "low_stock_procurement.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, err := workflow.ParseDeclarativeWorkflow(raw)
+	if err != nil {
+		t.Fatalf("parse procurement workflow: %v", err)
+	}
+	executor := &packageStepExecutor{}
+	steps, err := workflow.RunDeclarativeWorkflow(context.Background(), wf, contract.ActorContext{PrincipalID: "operator", PrincipalType: contract.PrincipalHuman}, map[string]any{"item": "A", "quantity": 0}, executor)
+	if err != nil {
+		t.Fatalf("run procurement workflow: %v", err)
+	}
+	if len(steps) != 5 || len(executor.steps) != 5 {
+		t.Fatalf("workflow executed %v capability steps %v", steps, executor.steps)
+	}
+	raw, err = os.ReadFile(filepath.Join(packageRoot, "rules", "low_stock.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, err := workflow.ParseDeclarativeRule(raw)
+	if err != nil {
+		t.Fatalf("parse low-stock rule: %v", err)
+	}
+	matched, err := workflow.EvaluateDeclarativeRule(context.Background(), rule, "inventory.stock_movement.recorded", map[string]any{"quantity": 0, "reorder_level": 10}, packageRuleEvaluator{result: true})
+	if err != nil || !matched {
+		t.Fatalf("low-stock rule did not match through generic evaluator: matched=%v err=%v", matched, err)
 	}
 }

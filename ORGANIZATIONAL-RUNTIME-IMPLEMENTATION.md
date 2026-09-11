@@ -119,8 +119,20 @@ Studio production build all pass.
 - [x] KOR-ORG-013 Build the inventory/procurement package (complete declarative package manifest, entities, commands, permissions, rules, and workflow definitions; validated through generic loaders).
 - [x] KOR-ORG-014 Add generic integration adapters (existing provider-neutral webhook/email boundaries).
 - [x] STUDIO-ORG-008 Build inventory/procurement workspace (reference workspace and YAML view manifest are present and tested with the generic Studio build).
-- [ ] STUDIO-ORG-009 Implement stock movement workflows.
-- [ ] STUDIO-ORG-010 Implement low-stock procurement workflow.
+- [x] STUDIO-ORG-009 Implement stock movement workflows (declarative workflow steps execute through the shared capability executor).
+- [x] STUDIO-ORG-010 Implement low-stock procurement workflow (event-gated declarative rule plus approval-aware procurement workflow).
+
+### Phase 5 completion audit
+
+The reference package is fully declarative: entities, commands, package
+metadata, rules, workflows, permissions, and views are YAML resources. The
+generic workflow adapter parses these resources strictly, gates rules by event
+and delegates predicates to the shared evaluator, then executes workflow steps
+through an injected capability executor with human approval enforcement. The
+inventory contract test loads the package, verifies all required entities and
+commands, evaluates the low-stock rule, and runs the five-step procurement
+workflow without inventory-specific engine code. Full engine and
+cross-repository acceptance gates pass.
 
 ## Phase 6 — Marketplace and agents
 
