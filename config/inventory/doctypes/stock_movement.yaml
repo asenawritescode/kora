@@ -1,0 +1,60 @@
+name: Stock Movement
+module: Inventory
+title_field: reference
+search_fields: reference, item, location, movement_type
+sort_field: occurred_at
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: item
+    fieldtype: Data
+    label: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+    reqd: true
+    in_list_view: true
+  - fieldname: to_location
+    fieldtype: Data
+    label: Destination Location
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    in_list_view: true
+  - fieldname: movement_type
+    fieldtype: Select
+    label: Movement Type
+    options: |
+      Receive
+      Issue
+      Transfer
+      Adjust
+      Reserve
+      Release
+    reqd: true
+    in_list_view: true
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+    reqd: true
+  - fieldname: actor
+    fieldtype: Data
+    label: Actor
+    read_only: true
+  - fieldname: occurred_at
+    fieldtype: Datetime
+    label: Occurred At
+    read_only: true
+  - fieldname: compensates
+    fieldtype: Data
+    label: Compensates Movement
+    read_only: true
