@@ -99,8 +99,20 @@ proposal, and provisioning tests.
 - [x] STUDIO-ORG-003 Add the Today operational home.
 - [x] STUDIO-ORG-004 Implement generic record forms/lists.
 - [x] STUDIO-ORG-005 Build the workflow editor.
-- [ ] STUDIO-ORG-006 Build graph inspection (generic shell committed; live resource/provenance data remains).
-- [ ] STUDIO-ORG-007 Build provenance/why panels (generic shell committed; live source links remain).
+- [x] STUDIO-ORG-006 Build graph inspection (live entity/workflow relationships with operational links).
+- [x] STUDIO-ORG-007 Build provenance/why panels (live redacted operation-audit projection with actor, command, status, correlation, and hash evidence).
+
+### Phase 4 completion audit
+
+Studio’s workspace shell, model review, Today home, generic records/forms,
+workflow editor, graph inspector, and provenance surfaces are verified. The
+graph route reads active DocTypes and workflows through generic system APIs,
+allows progressive resource selection, shows declared operating and policy
+relationships, and links to normal operational routes. The engine now exposes
+a read-only `/api/v1/system/audit` projection that excludes command arguments
+and business payloads; Studio uses it to show recent provenance for selected
+entities. Engine `go test ./...`, Studio’s 35 test files/161 tests, and the
+Studio production build all pass.
 
 ## Phase 5 — Reference package
 
