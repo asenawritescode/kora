@@ -146,8 +146,8 @@ cross-repository acceptance gates pass.
 Cloud marketplace publishing is now a dedicated control-plane concern. Package
 metadata is reviewable, requested permissions must be declared by the package
 manifest, publication proceeds through validation, security, compatibility,
-and publish states with deprecation/withdrawal paths, and metadata persists
-when `KORA_CONFIG_DIR` is configured. Studio exposes package permissions,
+and publish states with deprecation/withdrawal paths, and metadata persists in
+the existing Cloud SQL control-plane database. Studio exposes package permissions,
 capabilities, required services, cleanup behavior, and tenant preview
 installation before activation. Its agent surface persists a workspace
 capability manifest while making prohibitions and approval gates visible. Its
