@@ -26,6 +26,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/natsprovider"
+	"github.com/asenawritescode/kora/org"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/script"
@@ -89,6 +90,7 @@ type Handler struct {
 	// loaded at startup from application configuration. Nil = built-ins only;
 	// GET /api/v1/kernel/_registry then reports an empty list.
 	KernelCommands *kernel.CommandRegistry
+	AgentStores    map[string]*org.AgentStore
 }
 
 // NewHandler creates a new API handler.
@@ -97,6 +99,7 @@ func NewHandler(registry *doctype.Registry, txManager *orm.TxManager) *Handler {
 		Registry:      registry,
 		TxManager:     txManager,
 		AuthProviders: auth.NewProviderRegistry(),
+		AgentStores:   map[string]*org.AgentStore{},
 	}
 }
 
@@ -1091,6 +1094,11 @@ func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doc
 
 	// System config endpoints.
 	system := apiGroup.Group("/system/config")
+	agents := apiGroup.Group("/system/agents")
+	agents.GET("/:id", handler.HandleAgentManifest)
+	agents.PUT("/:id", handler.HandleAgentManifest)
+	agents.GET("/:id/runs", handler.HandleAgentRuns)
+	agents.POST("/:id/runs", handler.HandleAgentRuns)
 	{
 		system.GET("/versions", handler.HandleConfigVersions)
 		system.GET("/versions/:id", handler.HandleConfigVersion)
