@@ -71,12 +71,26 @@ domain-neutral.
 
 ## Phase 3 — Cloud lifecycle
 
-- [ ] CLOUD-ORG-001 Establish the control-plane baseline.
-- [ ] CLOUD-ORG-002 Extend onboarding to organization activation.
-- [ ] CLOUD-ORG-003 Add model proposal and approval APIs.
-- [ ] CLOUD-ORG-004 Add package/plugin registry metadata.
-- [ ] CLOUD-ORG-005 Implement tenant package lifecycle.
-- [ ] CLOUD-ORG-007 Extend provisioning/deployment jobs.
+- [x] CLOUD-ORG-001 Establish the control-plane baseline.
+- [x] CLOUD-ORG-002 Extend onboarding to organization activation.
+- [x] CLOUD-ORG-003 Add model proposal and approval APIs.
+- [x] CLOUD-ORG-004 Add package/plugin registry metadata.
+- [x] CLOUD-ORG-005 Implement tenant package lifecycle.
+- [x] CLOUD-ORG-007 Extend provisioning/deployment jobs.
+
+### Phase 3 completion audit
+
+The Cloud control plane now owns tenant lifecycle, provisioning metadata,
+model proposals, package discovery metadata, tenant-scoped package state, and
+resumable deployment checkpoints while excluding tenant business records and
+runtime command execution. Onboarding captures organization/workflow intent;
+proposal APIs support validation, approval, activation, rejection, and
+rollback; package metadata includes compatibility, permissions, required
+services, migrations, cleanup, security, pricing, licensing, and review state;
+tenant package transitions are guarded and reversible; and provisioning jobs
+persist step status, health, and recovery information. The full Cloud gate
+passes with `go test ./...`, including the control-plane, API, package, model
+proposal, and provisioning tests.
 
 ## Phase 4 — Studio workspace
 
