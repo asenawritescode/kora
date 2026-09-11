@@ -40,10 +40,10 @@ own tests or validation gate passes.
 
 ## Phase 4 — Studio workspace
 
-- [ ] STUDIO-ORG-001 Establish the workspace shell.
-- [ ] STUDIO-ORG-002 Build onboarding model review.
-- [ ] STUDIO-ORG-003 Add the Today operational home.
-- [ ] STUDIO-ORG-004 Implement generic record forms/lists.
+- [x] STUDIO-ORG-001 Establish the workspace shell.
+- [x] STUDIO-ORG-002 Build onboarding model review.
+- [x] STUDIO-ORG-003 Add the Today operational home.
+- [x] STUDIO-ORG-004 Implement generic record forms/lists.
 - [ ] STUDIO-ORG-005 Build the workflow editor.
 - [ ] STUDIO-ORG-006 Build graph inspection.
 - [ ] STUDIO-ORG-007 Build provenance/why panels.
