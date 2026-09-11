@@ -1,0 +1,19 @@
+name: create_purchase_order
+namespace: inventory
+version: 1
+permission: create
+input:
+  record: Purchase Order
+transaction:
+  - create:
+      record: Purchase Order
+      values:
+        reference: "$input.reference"
+        purchase_request: "$input.purchase_request"
+        supplier: "$input.supplier"
+        item: "$input.item"
+        quantity: "$input.quantity"
+        status: "Draft"
+emit:
+  - inventory.purchase_order.created
+

@@ -1,0 +1,43 @@
+name: Supplier Notification
+module: Procurement
+title_field: reference
+search_fields: reference, supplier, status
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: purchase_order
+    fieldtype: Data
+    label: Purchase Order
+    reqd: true
+  - fieldname: supplier
+    fieldtype: Data
+    label: Supplier
+    reqd: true
+    in_list_view: true
+  - fieldname: channel
+    fieldtype: Select
+    label: Channel
+    options: |
+      Email
+      Webhook
+      SMS
+      WhatsApp
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Pending Approval
+      Queued
+      Delivered
+      Failed
+    in_list_view: true
+  - fieldname: failure_reason
+    fieldtype: Text
+    label: Failure Reason

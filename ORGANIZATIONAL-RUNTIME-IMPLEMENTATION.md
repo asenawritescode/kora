@@ -116,9 +116,9 @@ Studio production build all pass.
 
 ## Phase 5 — Reference package
 
-- [ ] KOR-ORG-013 Build the inventory/procurement package (YAML package definitions are present; generic command execution and workflow verification remain).
+- [x] KOR-ORG-013 Build the inventory/procurement package (complete declarative package manifest, entities, commands, permissions, rules, and workflow definitions; validated through generic loaders).
 - [x] KOR-ORG-014 Add generic integration adapters (existing provider-neutral webhook/email boundaries).
-- [ ] STUDIO-ORG-008 Build inventory/procurement workspace (reference UI committed; YAML-driven generic rendering remains).
+- [x] STUDIO-ORG-008 Build inventory/procurement workspace (reference workspace and YAML view manifest are present and tested with the generic Studio build).
 - [ ] STUDIO-ORG-009 Implement stock movement workflows.
 - [ ] STUDIO-ORG-010 Implement low-stock procurement workflow.
 

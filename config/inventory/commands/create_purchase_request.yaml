@@ -1,0 +1,19 @@
+name: create_purchase_request
+namespace: inventory
+version: 1
+permission: create
+input:
+  record: Purchase Request
+transaction:
+  - create:
+      record: Purchase Request
+      values:
+        reference: "$input.reference"
+        item: "$input.item"
+        quantity: "$input.quantity"
+        supplier: "$input.supplier"
+        reason: "$input.reason"
+        status: "Pending Approval"
+emit:
+  - inventory.purchase_request.created
+

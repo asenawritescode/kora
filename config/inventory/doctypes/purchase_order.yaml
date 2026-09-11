@@ -1,0 +1,43 @@
+name: Purchase Order
+module: Procurement
+title_field: reference
+search_fields: reference, supplier, status
+sort_field: modified
+sort_order: DESC
+is_submittable: true
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: purchase_request
+    fieldtype: Data
+    label: Purchase Request
+    reqd: true
+  - fieldname: supplier
+    fieldtype: Data
+    label: Supplier
+    reqd: true
+    in_list_view: true
+  - fieldname: item
+    fieldtype: Data
+    label: Item
+    reqd: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Approved
+      Sent
+      Partially Received
+      Received
+      Cancelled
+    in_list_view: true

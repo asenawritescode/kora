@@ -1,0 +1,36 @@
+name: Stock Balance
+module: Inventory
+title_field: item
+search_fields: item, location
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: item
+    fieldtype: Data
+    label: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    read_only: true
+    in_list_view: true
+  - fieldname: reorder_level
+    fieldtype: Float
+    label: Reorder Level
+    reqd: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Healthy
+      Low
+      Out of stock
+    read_only: true
+

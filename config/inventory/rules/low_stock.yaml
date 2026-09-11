@@ -1,0 +1,14 @@
+name: low_stock_procurement
+namespace: inventory
+version: 1
+kind: rule
+when:
+  event: inventory.stock_movement.recorded
+evaluate:
+  entity: Stock Balance
+  predicate: quantity < reorder_level
+then:
+  create_task: Review low-stock purchase request
+  capability: inventory.create_purchase_request
+  requires_approval: true
+

@@ -1,0 +1,30 @@
+name: Supplier
+module: Inventory
+title_field: supplier_name
+search_fields: supplier_name, supplier_code
+sort_field: supplier_name
+sort_order: ASC
+
+fields:
+  - fieldname: supplier_name
+    fieldtype: Data
+    label: Supplier Name
+    reqd: true
+    in_list_view: true
+  - fieldname: supplier_code
+    fieldtype: Data
+    label: Supplier Code
+    unique: true
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+

@@ -1,0 +1,41 @@
+name: Purchase Request
+module: Procurement
+title_field: reference
+search_fields: reference, item, status
+sort_field: modified
+sort_order: DESC
+is_submittable: true
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: item
+    fieldtype: Data
+    label: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+  - fieldname: supplier
+    fieldtype: Data
+    label: Supplier
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+    reqd: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Pending Approval
+      Approved
+      Rejected
+    in_list_view: true
+

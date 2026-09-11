@@ -1,0 +1,14 @@
+name: notify_supplier
+namespace: inventory
+version: 1
+permission: submit
+input:
+  record: Purchase Order
+transaction:
+  - update:
+      record: Purchase Order
+      name: "$input.name"
+      values:
+        status: "Sent"
+emit:
+  - inventory.supplier.notification_requested

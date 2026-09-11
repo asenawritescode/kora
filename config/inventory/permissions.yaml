@@ -35,3 +35,64 @@
   can_write: true
   can_create: true
   can_delete: false
+
+- doctype: Supplier
+  role: Warehouse Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Stock Balance
+  role: Warehouse Operator
+  can_read: true
+  can_write: false
+  can_create: false
+  can_delete: false
+- doctype: Stock Reservation
+  role: Warehouse Operator
+  can_read: true
+  can_write: false
+  can_create: true
+  can_delete: false
+- doctype: Purchase Request
+  role: Warehouse Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Purchase Order
+  role: Warehouse Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Supplier
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Stock Balance
+  role: Administrator
+  can_read: true
+  can_write: false
+  can_create: false
+  can_delete: false
+- doctype: Stock Reservation
+  role: Administrator
+  can_read: true
+  can_write: false
+  can_create: true
+  can_delete: false
+- doctype: Purchase Request
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Purchase Order
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

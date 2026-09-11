@@ -9,7 +9,7 @@ components:
     type: record_table
     region: main
     position: 0
-    source_doctype: Stock Move
+    source_doctype: Stock Movement
     label: Receiving and Exceptions
     desktop_columns: [name, status, modified]
     mobile_columns: [name, status]
@@ -17,7 +17,7 @@ components:
     type: record_table
     region: side
     position: 0
-    source_doctype: Stock Move
+    source_doctype: Purchase Request
     label: Exceptions
     desktop_columns: [name, status, modified]
     mobile_columns: [name, status]

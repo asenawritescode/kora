@@ -1,0 +1,34 @@
+name: inventory-procurement
+namespace: inventory
+version: 1
+description: Inventory and procurement reference package defined entirely as runtime data.
+resources:
+  doctypes:
+    - Product
+    - Warehouse
+    - Supplier
+    - Stock Balance
+    - Stock Movement
+    - Stock Reservation
+    - Purchase Request
+    - Purchase Order
+    - Goods Receipt
+    - Supplier Notification
+  commands:
+    - add_stock
+    - issue_stock
+    - transfer_stock
+    - adjust_stock
+    - reserve_stock
+    - release_stock
+    - create_purchase_request
+    - approve_purchase_request
+    - create_purchase_order
+    - receive_goods
+    - notify_supplier
+  workflows:
+    - low_stock_procurement
+cleanup:
+  - disable package-owned commands and views
+  - retain append-only business records
+

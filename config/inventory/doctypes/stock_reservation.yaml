@@ -1,0 +1,33 @@
+name: Stock Reservation
+module: Inventory
+title_field: reference
+search_fields: reference, item, location
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: item
+    fieldtype: Data
+    label: Item
+    reqd: true
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+    reqd: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Reserved
+      Released
+

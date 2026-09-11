@@ -1,0 +1,21 @@
+name: low_stock_procurement
+namespace: inventory
+version: 1
+kind: workflow
+trigger: inventory.low_stock.detected
+steps:
+  - id: recommend_purchase
+    capability: inventory.create_purchase_request
+    actor: human_or_agent
+  - id: approve_purchase
+    capability: inventory.approve_purchase_request
+    actor: human
+  - id: create_order
+    capability: inventory.create_purchase_order
+    actor: human_or_agent
+  - id: notify_supplier
+    capability: inventory.notify_supplier
+    actor: integration
+  - id: receive_goods
+    capability: inventory.receive_goods
+    actor: human_or_integration

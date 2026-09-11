@@ -1,0 +1,14 @@
+name: approve_purchase_request
+namespace: inventory
+version: 1
+permission: submit
+input:
+  record: Purchase Request
+transaction:
+  - update:
+      record: Purchase Request
+      name: "$input.name"
+      values:
+        status: "Approved"
+emit:
+  - inventory.purchase_request.approved
