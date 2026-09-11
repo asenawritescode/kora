@@ -56,6 +56,19 @@ routes were introduced.
 - [x] KOR-ORG-010 Add guarded agent execution (deny-by-default manifest contract).
 - [x] KOR-ORG-011 Add profiles, bundles, patches, and package lifecycle (engine package state machine).
 
+### Phase 2 completion audit
+
+The focused Phase 2 gate passes for `plugin`, `recon`, `reconcile`, `outbox`,
+`org`, and `contract`. Plugin providers are accessed through typed capability
+handles and scoped service bindings with cleanup; dependency reconciliation
+has deterministic drift, lease fencing, and bounded retry behavior; semantic
+events use validated durable envelopes and replayable outbox delivery;
+provenance records link outputs to actors, capabilities, and events; agent
+manifests deny capabilities by default and separate approval-required actions;
+and package/profile/patch lifecycle transitions reject unsafe changes while
+preserving cleanup and rollback state. All behavior remains provider- and
+domain-neutral.
+
 ## Phase 3 — Cloud lifecycle
 
 - [ ] CLOUD-ORG-001 Establish the control-plane baseline.
