@@ -5,11 +5,22 @@ Branch: `feature/organizational-runtime`
 Tasks are executed in this order. A task is marked complete only after its
 own tests or validation gate passes.
 
+## Audit invariant — domain packages stay declarative
+
+Inventory/procurement is a reference package, not a runtime mode. Its current
+definitions live under `config/inventory/` as YAML. The engine, generic
+runtime, and API must not import an inventory package or expose inventory
+routes. Package behavior enters through generic resource loaders and the shared
+command executor; package-specific YAML is validated as data. The current
+engine audit passes this boundary: production Go has no inventory import or
+inventory API route. Inventory names that remain in engine tests are fixtures
+for proving package isolation and generic loading.
+
 ## Phase 0 — Preserve and contract
 
 - [x] ORG-FOUND-001 Preserve and partition repository work.
 - [ ] ORG-FOUND-002 Establish canonical organizational vocabulary across repositories.
-- [ ] ORG-FOUND-003 Publish and consume versioned cross-repository fixtures (engine fixture published; downstream consumption remains).
+- [ ] ORG-FOUND-003 Publish and consume versioned cross-repository fixtures (fixture copies and consumers exist; canonical synchronization/CI validation remains).
 - [ ] ORG-FOUND-004 Build the isolated end-to-end acceptance harness (engine-side flow implemented; cross-repository runner remains).
 
 ## Phase 1 — Engine foundations
@@ -45,14 +56,14 @@ own tests or validation gate passes.
 - [x] STUDIO-ORG-003 Add the Today operational home.
 - [x] STUDIO-ORG-004 Implement generic record forms/lists.
 - [x] STUDIO-ORG-005 Build the workflow editor.
-- [ ] STUDIO-ORG-006 Build graph inspection.
-- [ ] STUDIO-ORG-007 Build provenance/why panels.
+- [ ] STUDIO-ORG-006 Build graph inspection (generic shell committed; live resource/provenance data remains).
+- [ ] STUDIO-ORG-007 Build provenance/why panels (generic shell committed; live source links remain).
 
 ## Phase 5 — Reference package
 
 - [ ] KOR-ORG-013 Build the inventory/procurement package (YAML package definitions are present; generic command execution and workflow verification remain).
 - [x] KOR-ORG-014 Add generic integration adapters (existing provider-neutral webhook/email boundaries).
-- [ ] STUDIO-ORG-008 Build inventory/procurement workspace.
+- [ ] STUDIO-ORG-008 Build inventory/procurement workspace (reference UI committed; YAML-driven generic rendering remains).
 - [ ] STUDIO-ORG-009 Implement stock movement workflows.
 - [ ] STUDIO-ORG-010 Implement low-stock procurement workflow.
 
