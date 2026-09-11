@@ -50,7 +50,7 @@ own tests or validation gate passes.
 
 ## Phase 5 — Reference package
 
-- [x] KOR-ORG-013 Build the inventory/procurement package (append-only stock ledger slice).
+- [ ] KOR-ORG-013 Build the inventory/procurement package (YAML package definitions are present; generic command execution and workflow verification remain).
 - [x] KOR-ORG-014 Add generic integration adapters (existing provider-neutral webhook/email boundaries).
 - [ ] STUDIO-ORG-008 Build inventory/procurement workspace.
 - [ ] STUDIO-ORG-009 Implement stock movement workflows.

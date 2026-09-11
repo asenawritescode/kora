@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/asenawritescode/kora/kernel"
 )
 
 func TestOrganizationalRuntimeFixtureIsValid(t *testing.T) {
@@ -20,5 +22,17 @@ func TestOrganizationalRuntimeFixtureIsValid(t *testing.T) {
 	}
 	if fixture.Version != "1" || len(fixture.ResourceKinds) < 17 {
 		t.Fatalf("unexpected fixture: %+v", fixture)
+	}
+}
+
+func TestYAMLPackageCommandsUseGenericKernelLoader(t *testing.T) {
+	registry, err := kernel.LoadCommandDir("config/inventory/commands")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"inventory.add_stock", "inventory.issue_stock", "inventory.transfer_stock", "inventory.reserve_stock", "inventory.release_stock"} {
+		if _, ok := registry.Lookup(name); !ok {
+			t.Fatalf("missing YAML command %q", name)
+		}
 	}
 }
