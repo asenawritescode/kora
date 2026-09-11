@@ -15,10 +15,10 @@
   can_read: true
   can_write: true
   can_create: true
-  can_delete: true
+  can_delete: false
 - doctype: Stock Move
   role: Administrator
   can_read: true
   can_write: true
   can_create: true
-  can_delete: true
+  can_delete: false
