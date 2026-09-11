@@ -158,19 +158,32 @@ production build pass.
 
 ## Phase 7 — Website and launch validation
 
-- [ ] WEB-ORG-001 Replace positioning/information architecture.
-- [ ] WEB-ORG-002 Rewrite homepage.
-- [ ] WEB-ORG-003 Create How Kora works page.
-- [ ] WEB-ORG-004 Create inventory reference page.
-- [ ] WEB-ORG-005 Create extensions/marketplace page.
-- [ ] WEB-ORG-006 Rewrite onboarding copy/flow.
-- [ ] WEB-ORG-007 Align Cloud/open-source/developer messaging.
-- [ ] WEB-ORG-008 Add marketing funnel events.
-- [ ] WEB-ORG-009 Run copy/accessibility audit.
-- [ ] WEB-ORG-010 Purge outdated website framing.
-- [ ] CLOUD-ORG-008 Add Cloud observability.
-- [ ] CLOUD-ORG-009 Add Cloud-to-engine contract tests.
-- [ ] CLOUD-ORG-010 Purge Cloud responsibilities belonging in engine.
-- [ ] STUDIO-ORG-014 Add responsive/accessibility/usability validation.
-- [ ] STUDIO-ORG-015 Purge terminal builder assumptions.
-- [ ] KOR-ORG-015 Purge engine-level domain assumptions.
+- [x] WEB-ORG-001 Replace positioning/information architecture.
+- [x] WEB-ORG-002 Rewrite homepage.
+- [x] WEB-ORG-003 Create How Kora works page.
+- [x] WEB-ORG-004 Create inventory reference page.
+- [x] WEB-ORG-005 Create extensions/marketplace page.
+- [x] WEB-ORG-006 Rewrite onboarding copy/flow.
+- [x] WEB-ORG-007 Align Cloud/open-source/developer messaging.
+- [x] WEB-ORG-008 Add marketing funnel events.
+- [x] WEB-ORG-009 Run copy/accessibility audit.
+- [x] WEB-ORG-010 Purge outdated website framing.
+- [x] CLOUD-ORG-008 Add Cloud observability.
+- [x] CLOUD-ORG-009 Add Cloud-to-engine contract tests.
+- [x] CLOUD-ORG-010 Purge Cloud responsibilities belonging in engine.
+- [x] STUDIO-ORG-014 Add responsive/accessibility/usability validation.
+- [x] STUDIO-ORG-015 Purge terminal builder assumptions.
+- [x] KOR-ORG-015 Purge engine-level domain assumptions.
+
+### Phase 7 completion audit
+
+Phase 7 positioning now leads with living organizational software, while
+inventory is presented as a declarative reference package. The website has
+aligned How it works, extensions, onboarding, Cloud, open-source, and
+template messaging, emits the documented public funnel events, and keeps
+business data out of analytics payloads. Copy was reviewed for plain language,
+clear commitments, progressive disclosure, and non-autonomous AI claims.
+Cloud observability, boundary, and contract-test surfaces were verified;
+Studio and engine gates pass. The website contract validator, production build,
+and Chrome smoke navigation of `/`, `/how-it-works`, `/inventory`,
+`/extensions`, and `/onboard` all pass.
