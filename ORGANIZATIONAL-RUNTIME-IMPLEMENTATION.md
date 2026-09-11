@@ -19,9 +19,9 @@ for proving package isolation and generic loading.
 ## Phase 0 — Preserve and contract
 
 - [x] ORG-FOUND-001 Preserve and partition repository work.
-- [ ] ORG-FOUND-002 Establish canonical organizational vocabulary across repositories.
-- [ ] ORG-FOUND-003 Publish and consume versioned cross-repository fixtures (fixture copies and consumers exist; canonical synchronization/CI validation remains).
-- [ ] ORG-FOUND-004 Build the isolated end-to-end acceptance harness (engine-side flow implemented; cross-repository runner remains).
+- [x] ORG-FOUND-002 Establish canonical organizational vocabulary across repositories.
+- [x] ORG-FOUND-003 Publish and consume versioned cross-repository fixtures (byte-identical v1 fixture is validated by engine, Cloud, Studio, and website CI gates).
+- [ ] ORG-FOUND-004 Build the isolated end-to-end acceptance harness (cross-repository local gate now exists at `scripts/organizational-runtime-acceptance.sh`; live website→Cloud→engine→Studio business-flow execution remains).
 
 ## Phase 1 — Engine foundations
 
