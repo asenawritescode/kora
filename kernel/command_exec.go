@@ -151,14 +151,18 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 
 	// Emit declared events through the outbox INSIDE the transaction so a
 	// committed command's events are guaranteed durable (spec §19, §41).
+	eventData, _ := json.Marshal(map[string]any{"command": def.Name, "steps": outcomes})
 	for _, evtType := range cmd.Emits {
 		env := contract.EventEnvelope{
 			Type:          evtType,
+			Source:        "kora.kernel",
 			Site:          op.Context.Site,
 			AggregateType: lastRecord,
 			AggregateID:   lastName,
 			CorrelationID: op.Context.CorrelationID,
 			CausationID:   opID,
+			Actor:         op.Context.Actor,
+			Data:          eventData,
 		}
 		if k.Outbox == nil {
 			break // no provider wired; skip silently only in tests — production wiring always sets Outbox
