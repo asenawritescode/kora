@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/natsprovider"
 	"github.com/asenawritescode/kora/schema"
@@ -47,6 +49,30 @@ type ReferenceInfo struct {
 	Doctype   string `json:"doctype"`
 	Fieldname string `json:"fieldname"`
 	Label     string `json:"label"`
+}
+
+// SystemAuditEntry is the redacted, read-only projection of the operation
+// ledger exposed to authorized Studio users. It intentionally excludes command
+// arguments and business payloads; hashes and actor metadata are sufficient to
+// explain an operation without leaking tenant data.
+type SystemAuditEntry struct {
+	ID            string `json:"id"`
+	OperationID   string `json:"operation_id"`
+	CorrelationID string `json:"correlation_id,omitempty"`
+	CausationID   string `json:"causation_id,omitempty"`
+	Source        string `json:"source,omitempty"`
+	PrincipalType string `json:"principal_type,omitempty"`
+	PrincipalID   string `json:"principal_id,omitempty"`
+	ActorUser     string `json:"actor_user,omitempty"`
+	Command       string `json:"command"`
+	Doctype       string `json:"doctype,omitempty"`
+	DocName       string `json:"doc_name,omitempty"`
+	Status        string `json:"status"`
+	ErrorCode     string `json:"error_code,omitempty"`
+	PayloadHash   string `json:"payload_hash,omitempty"`
+	BeforeHash    string `json:"before_hash,omitempty"`
+	AfterHash     string `json:"after_hash,omitempty"`
+	CreatedAt     string `json:"created_at"`
 }
 
 // SystemDoctypeResponse is the full schema response for a single DocType.
@@ -1941,6 +1967,62 @@ func (h *Handler) HandleSystemWorkflowDelete(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{Data: savedResponse{Message: "deleted"}})
 }
 
+// HandleSystemAudit returns a redacted operation-audit projection for
+// authorized Studio inspection. It never returns command arguments or
+// business payloads; hashes and actor metadata explain an operation without
+// leaking tenant data.
+func (h *Handler) HandleSystemAudit(c *gin.Context) {
+	limit := 50
+	if raw := c.Query("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query := `SELECT id, operation_id, correlation_id, causation_id, source,
+		principal_type, principal_id, actor_user, command_name, doctype, doc_name,
+		status, error_code, payload_hash, before_hash, after_hash, created_at
+		FROM _kora_operation_audit WHERE 1=1`
+	args := make([]any, 0, 3)
+	if doctype := strings.TrimSpace(c.Query("doctype")); doctype != "" {
+		query += " AND doctype = ?"
+		args = append(args, doctype)
+	}
+	if docName := strings.TrimSpace(c.Query("doc_name")); docName != "" {
+		query += " AND doc_name = ?"
+		args = append(args, docName)
+	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := h.siteTx(c).DB.Query(db.Rebind(h.TxManager.Dialect, query), args...)
+	if err != nil {
+		internalError(c, "operation audit query failed", err)
+		return
+	}
+	defer rows.Close()
+	entries := make([]SystemAuditEntry, 0)
+	for rows.Next() {
+		var entry SystemAuditEntry
+		if err := rows.Scan(&entry.ID, &entry.OperationID, &entry.CorrelationID, &entry.CausationID, &entry.Source,
+			&entry.PrincipalType, &entry.PrincipalID, &entry.ActorUser, &entry.Command, &entry.Doctype, &entry.DocName,
+			&entry.Status, &entry.ErrorCode, &entry.PayloadHash, &entry.BeforeHash, &entry.AfterHash, &entry.CreatedAt); err != nil {
+			internalError(c, "operation audit scan failed", err)
+			return
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		internalError(c, "operation audit iteration failed", err)
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: entries})
+}
+
 // RegisterSystemRoutes registers system endpoints on the given API group.
 func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 	system := apiGroup.Group("/system")
@@ -1952,6 +2034,7 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.GET("/navigation", handler.HandleSystemNavigation)
 		system.GET("/settings", handler.HandleSiteSettings)
 		system.GET("/experience", handler.HandleSystemBranding)
+		system.GET("/audit", handler.HandleSystemAudit)
 
 		// Write endpoints.
 		system.POST("/doctype/validate", handler.HandleSystemDoctypeValidate)
