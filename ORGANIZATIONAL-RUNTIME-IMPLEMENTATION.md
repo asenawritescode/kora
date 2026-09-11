@@ -35,6 +35,18 @@ The isolated run used disposable MySQL and local services on ports 3308/8000/808
 - [x] KOR-ORG-004 Implement policies, roles, actors, and delegation.
 - [x] KOR-ORG-005 Build the shared execution runtime.
 
+### Phase 1 completion audit
+
+Phase 1 was re-audited after the Phase 0 live acceptance run. The focused
+foundation gate passes for `graph`, `org`, `contract`, `kernel`, and `tests`.
+The registry covers all organizational resource kinds with namespaced,
+versioned, hashed identities; revisions support preview, activation, and
+rollback; capabilities are executor-neutral contracts; authorization fails
+closed for ungranted actors and supports expiry/prohibition and approval
+gates; and the shared runtime emits the same event/provenance shape for
+authorized executions. No domain package imports or domain-specific runtime
+routes were introduced.
+
 ## Phase 2 — Extensibility and explainability
 
 - [x] KOR-ORG-006 Add scoped capability seams and plugin services (contract/plugin foundation).
