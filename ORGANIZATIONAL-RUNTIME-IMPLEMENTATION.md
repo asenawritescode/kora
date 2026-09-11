@@ -21,7 +21,11 @@ for proving package isolation and generic loading.
 - [x] ORG-FOUND-001 Preserve and partition repository work.
 - [x] ORG-FOUND-002 Establish canonical organizational vocabulary across repositories.
 - [x] ORG-FOUND-003 Publish and consume versioned cross-repository fixtures (byte-identical v1 fixture is validated by engine, Cloud, Studio, and website CI gates).
-- [ ] ORG-FOUND-004 Build the isolated end-to-end acceptance harness (cross-repository local gate passes at `scripts/organizational-runtime-acceptance.sh`; fallback headless Chrome verified `/s/demo.local/workspace/auth/login`; live website→Cloud→engine→Studio business-flow execution remains pending because Cloud onboarding is not wired to a local engine and Chrome DevTools MCP is unavailable in this session).
+- [x] ORG-FOUND-004 Build the isolated end-to-end acceptance harness (cross-repository gate and disposable live stack verified website onboarding, Cloud provisioning/model activation/package metadata, YAML package import, generic engine registry/command execution, durable outbox/audit events, and Studio production-preview login/workspace rendering; Chrome DevTools MCP was unavailable in this session, so the equivalent installed headless Chrome fallback was used).
+
+### Phase 0 live evidence
+
+The isolated run used disposable MySQL and local services on ports 3308/8000/8081/5173/5175. The website created a fresh tenant and followed the returned workspace URL; Cloud provisioning completed and a model proposal transitioned through validation, approval, and activation; the inventory/procurement package was imported from YAML; the engine exposed only generic command resources and executed `inventory.add_stock` through the shared executor; and the database contained the completed command audit plus pending semantic outbox events. The Studio production preview then authenticated against the same tenant and rendered the workspace with the YAML-provided Inventory module, with no console errors or failed requests.
 
 ## Phase 1 — Engine foundations
 
