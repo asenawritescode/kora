@@ -1894,12 +1894,16 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 	}
 	siteDB := h.siteTx(c).DB
 	query := db.Rebind(h.TxManager.Dialect, `SELECT id, event_type, site, aggregate_type, aggregate_id, created_at
-		FROM _kora_outbox WHERE site = ? AND id > ? ORDER BY id LIMIT 500`)
+		FROM _kora_outbox WHERE site = ? AND id > ? ORDER BY id LIMIT 501`)
 	rows, err := siteDB.QueryContext(c.Request.Context(), query, c.GetString("site_name"), after)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
+	const replayLimit = 500
+	replayed := 0
+	truncated := false
+	lastID := after
 	for rows.Next() {
 		var id, eventType, site, aggregateType, aggregateID string
 		var occurredAt time.Time
@@ -1908,6 +1912,10 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 		}
 		if !matchesRealtimeScope(scopes, "doctype:"+aggregateType, aggregateType) {
 			continue
+		}
+		if replayed >= replayLimit {
+			truncated = true
+			break
 		}
 		payload, err := json.Marshal(map[string]any{
 			"id": id, "type": "change", "transport": "replay", "site": site,
@@ -1921,8 +1929,20 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 			}
 			return c.Request.Context().Err()
 		}
+		replayed++
+		lastID = id
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	marker, err := json.Marshal(map[string]any{
+		"type": "replay_complete", "transport": "replay", "cursor": lastID,
+		"replayed": replayed, "truncated": truncated,
+	})
+	if err != nil {
+		return err
+	}
+	return send(marker)
 }
 
 func realtimeOperation(eventType string) string {

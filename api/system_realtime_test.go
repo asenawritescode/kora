@@ -29,7 +29,7 @@ func TestReplayRealtimeReadsSiteScopedOutboxAfterCursor(t *testing.T) {
 	c.Set("site_name", "tenant-a")
 
 	occurredAt := time.Date(2026, 9, 12, 8, 0, 0, 0, time.UTC)
-	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 500").
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
 		WithArgs("tenant-a", "evt-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "created_at"}).
 			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", occurredAt))
@@ -46,11 +46,14 @@ func TestReplayRealtimeReadsSiteScopedOutboxAfterCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replayRealtime: %v", err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("replayed messages = %d, want 1", len(messages))
+	if len(messages) != 2 {
+		t.Fatalf("replayed messages = %d, want event plus completion marker", len(messages))
 	}
 	if messages[0]["id"] != "evt-2" || messages[0]["doctype"] != "Customer" || messages[0]["operation"] != "update" {
 		t.Fatalf("unexpected replay message: %#v", messages[0])
+	}
+	if messages[1]["type"] != "replay_complete" || messages[1]["cursor"] != "evt-2" || messages[1]["truncated"] != false {
+		t.Fatalf("unexpected replay completion: %#v", messages[1])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
