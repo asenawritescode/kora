@@ -1793,6 +1793,11 @@ func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider
 		if _, err := fmt.Fprintf(c.Writer, "event: %s\n", eventType); err != nil {
 			return err
 		}
+		if eventID, ok := payload["id"].(string); ok && eventID != "" {
+			if _, err := fmt.Fprintf(c.Writer, "id: %s\n", eventID); err != nil {
+				return err
+			}
+		}
 		if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", data); err != nil {
 			return err
 		}
@@ -1844,7 +1849,7 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 					return
 				}
 				payload, err := json.Marshal(map[string]any{
-					"type": "change", "transport": "local", "site": event.Site,
+					"id": event.ID, "type": "change", "transport": "local", "site": event.Site,
 					"resource": "doctype:" + event.Doctype, "doctype": event.Doctype,
 					"doc_name": event.DocName, "operation": event.Operation, "occurred_at": event.Timestamp,
 				})

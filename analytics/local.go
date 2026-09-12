@@ -27,6 +27,7 @@ func (p *LocalProvider) Publish(ctx context.Context, event contract.EventEnvelop
 	_ = ctx // the in-process bus is non-cancellable by design
 
 	change := ChangeEvent{
+		ID:        event.ID,
 		Site:      event.Site,
 		Doctype:   event.AggregateType,
 		DocName:   event.AggregateID,

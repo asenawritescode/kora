@@ -19,14 +19,15 @@ const (
 // ChangeEvent captures a document write for analytics ingestion.
 // Emitted by the ORM after every write — async, non-blocking.
 type ChangeEvent struct {
+	ID         string         `json:"id,omitempty"`
 	Site       string         `json:"site"`
 	Doctype    string         `json:"doctype"`
 	DocName    string         `json:"doc_name"`
 	Operation  EventOp        `json:"operation"`
 	Timestamp  time.Time      `json:"timestamp"`
 	ModifiedBy string         `json:"modified_by"`
-	Data       map[string]any `json:"data"`                 // full document fields after write
-	OldData    map[string]any `json:"old_data,omitempty"`   // previous state (update/delete only)
+	Data       map[string]any `json:"data"`               // full document fields after write
+	OldData    map[string]any `json:"old_data,omitempty"` // previous state (update/delete only)
 }
 
 // EventBus is the interface for publishing and subscribing to change events.

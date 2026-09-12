@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 // channelBus is the default EventBus implementation — an in-process buffered
@@ -70,6 +72,9 @@ func NewChannelBus(capacity int, walDir string) EventBus {
 }
 
 func (b *channelBus) Publish(event ChangeEvent) error {
+	if event.ID == "" {
+		event.ID = contract.NewEventID()
+	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if b.closed {
