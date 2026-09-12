@@ -5,10 +5,9 @@ kind: rule
 when:
   event: inventory.stock_movement.recorded
 evaluate:
-  entity: Stock Balance
+  doctype: Stock Balance
   predicate: quantity < reorder_level
 then:
   create_task: Review low-stock purchase request
   capability: inventory.create_purchase_request
   requires_approval: true
-

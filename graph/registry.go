@@ -97,7 +97,7 @@ func (m *Memory) Register(ctx context.Context, d contract.ResourceDescriptor) (c
 func knownKind(k contract.ResourceKind) bool {
 	switch k {
 	case contract.ResourceKindDoctype, contract.ResourceKindCollection, contract.ResourceKindCommand, contract.ResourceKindQuery,
-		contract.ResourceKindEntity, contract.ResourceKindRelation, contract.ResourceKindComputation, contract.ResourceKindRule,
+		contract.ResourceKindRelation, contract.ResourceKindComputation, contract.ResourceKindRule,
 		contract.ResourceKindPolicy, contract.ResourceKindAction, contract.ResourceKindWorkflow, contract.ResourceKindCapability,
 		contract.ResourceKindSkill, contract.ResourceKindRole, contract.ResourceKindAgent, contract.ResourceKindView,
 		contract.ResourceKindEvent, contract.ResourceKindIntegration, contract.ResourceKindPlugin, contract.ResourceKindPackage,

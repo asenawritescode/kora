@@ -1,7 +1,7 @@
 {
   "version": "1",
   "resource_kinds": [
-    "entity", "relation", "query", "computation", "rule", "policy",
+	"doctype", "relation", "query", "computation", "rule", "policy",
     "action", "workflow", "capability", "skill", "role", "agent", "view",
     "event", "integration", "plugin", "package"
   ],

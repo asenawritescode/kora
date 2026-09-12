@@ -93,6 +93,9 @@ then:
 	if err != nil {
 		t.Fatal(err)
 	}
+	if rule.Evaluate.DocType != "Balance" {
+		t.Fatalf("legacy entity target was not normalized to doctype: %q", rule.Evaluate.DocType)
+	}
 	matched, err := EvaluateDeclarativeRule(context.Background(), rule, "package.stock.changed", nil, declarativeRuleEvaluator{result: true})
 	if err != nil || !matched {
 		t.Fatalf("matched=%v err=%v", matched, err)
@@ -100,5 +103,25 @@ then:
 	matched, err = EvaluateDeclarativeRule(context.Background(), rule, "package.other", nil, declarativeRuleEvaluator{result: true})
 	if err != nil || matched {
 		t.Fatalf("wrong event matched=%v err=%v", matched, err)
+	}
+}
+
+func TestDeclarativeRuleRejectsConflictingLegacyEntityTarget(t *testing.T) {
+	_, err := ParseDeclarativeRule([]byte(`
+name: conflicting
+namespace: package
+version: 1
+kind: rule
+when:
+  event: package.changed
+evaluate:
+  doctype: Stock Movement
+  entity: Stock Balance
+  predicate: quantity > 0
+then:
+  capability: package.inspect
+`))
+	if err == nil {
+		t.Fatal("rule parser accepted conflicting doctype and legacy entity targets")
 	}
 }
