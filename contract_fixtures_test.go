@@ -23,6 +23,9 @@ func TestOrganizationalRuntimeFixtureIsValid(t *testing.T) {
 	if fixture.Version != "1" || len(fixture.ResourceKinds) < 17 {
 		t.Fatalf("unexpected fixture: %+v", fixture)
 	}
+	if fixture.ResourceKinds[0] != "doctype" {
+		t.Fatalf("canonical business schema kind = %q, want doctype", fixture.ResourceKinds[0])
+	}
 }
 
 func TestYAMLPackageCommandsUseGenericKernelLoader(t *testing.T) {
