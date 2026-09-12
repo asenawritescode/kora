@@ -1768,9 +1768,13 @@ func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natspr
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "closed")
-	h.streamRealtime(c, func(msg []byte) error {
+	send := func(msg []byte) error {
 		return conn.Write(c.Request.Context(), websocket.MessageText, msg)
-	}, provider, bus, siteName)
+	}
+	if err := h.replayRealtime(c, realtimeCursor(c), send); err != nil {
+		slog.Warn("realtime replay failed", "site", siteName, "error", err)
+	}
+	h.streamRealtime(c, send, provider, bus, siteName)
 }
 
 func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider.Provider, bus analytics.EventBus, siteName string) {
@@ -1805,7 +1809,7 @@ func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider
 		return nil
 	}
 
-	h.streamRealtime(c, func(msg []byte) error {
+	send := func(msg []byte) error {
 		var envelope map[string]any
 		if err := json.Unmarshal(msg, &envelope); err != nil {
 			envelope = map[string]any{"type": "heartbeat"}
@@ -1815,7 +1819,62 @@ func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider
 			eventType = "message"
 		}
 		return writeEvent(eventType, envelope)
-	}, provider, bus, siteName)
+	}
+	if err := h.replayRealtime(c, realtimeCursor(c), send); err != nil {
+		slog.Warn("realtime replay failed", "site", siteName, "error", err)
+	}
+	h.streamRealtime(c, send, provider, bus, siteName)
+}
+
+func realtimeCursor(c *gin.Context) string {
+	if cursor := strings.TrimSpace(c.Query("after")); cursor != "" {
+		return cursor
+	}
+	return strings.TrimSpace(c.GetHeader("Last-Event-ID"))
+}
+
+// replayRealtime replays durable outbox events after a client's last cursor.
+// The outbox is the transactional source of truth for event IDs, so replay is
+// scoped to the authenticated site and does not introduce a second history log.
+func (h *Handler) replayRealtime(c *gin.Context, after string, send func([]byte) error) error {
+	if after == "" || h.TxManager == nil {
+		return nil
+	}
+	siteDB := h.siteTx(c).DB
+	query := db.Rebind(h.TxManager.Dialect, `SELECT id, event_type, site, aggregate_type, aggregate_id, created_at
+		FROM _kora_outbox WHERE site = ? AND id > ? ORDER BY id LIMIT 500`)
+	rows, err := siteDB.QueryContext(c.Request.Context(), query, c.GetString("site_name"), after)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, eventType, site, aggregateType, aggregateID string
+		var occurredAt time.Time
+		if err := rows.Scan(&id, &eventType, &site, &aggregateType, &aggregateID, &occurredAt); err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{
+			"id": id, "type": "change", "transport": "replay", "site": site,
+			"resource": "doctype:" + aggregateType, "doctype": aggregateType,
+			"doc_name": aggregateID, "operation": realtimeOperation(eventType),
+			"occurred_at": occurredAt,
+		})
+		if err != nil || send(payload) != nil {
+			if err != nil {
+				return err
+			}
+			return c.Request.Context().Err()
+		}
+	}
+	return rows.Err()
+}
+
+func realtimeOperation(eventType string) string {
+	if index := strings.LastIndex(eventType, "."); index >= 0 && index+1 < len(eventType) {
+		return strings.TrimPrefix(eventType[index+1:], "after_")
+	}
+	return "update"
 }
 
 func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provider *natsprovider.Provider, bus analytics.EventBus, siteName string) {
