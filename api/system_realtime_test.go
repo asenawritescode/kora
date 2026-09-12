@@ -35,7 +35,7 @@ func TestReplayRealtimeReadsSiteScopedOutboxAfterCursor(t *testing.T) {
 			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", occurredAt))
 
 	var messages []map[string]any
-	err = h.replayRealtime(c, "evt-1", func(payload []byte) error {
+	err = h.replayRealtime(c, "evt-1", []string{"doctype:customer"}, func(payload []byte) error {
 		var message map[string]any
 		if err := json.Unmarshal(payload, &message); err != nil {
 			return err
@@ -54,6 +54,18 @@ func TestReplayRealtimeReadsSiteScopedOutboxAfterCursor(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRealtimeScopesFilterTargets(t *testing.T) {
+	if !matchesRealtimeScope([]string{"doctype:customer"}, "doctype:Customer", "Customer") {
+		t.Fatal("expected customer scope to match")
+	}
+	if matchesRealtimeScope([]string{"doctype:invoice"}, "doctype:Customer", "Customer") {
+		t.Fatal("unexpected invoice scope match")
+	}
+	if !realtimePayloadMatchesScopes([]byte(`{"resource":"doctype:Invoice"}`), []string{"doctype:invoice"}) {
+		t.Fatal("expected payload scope to match")
 	}
 }
 

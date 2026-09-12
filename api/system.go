@@ -1742,6 +1742,7 @@ func (h *Handler) HandleSystemRealtime(c *gin.Context) {
 	siteName := c.GetString("site_name")
 	provider := h.SiteRealtimeProviders[siteName]
 	bus := h.SiteEventBuses[siteName]
+	scopes := realtimeScopes(c)
 	slog.Info("realtime request received",
 		"site", siteName,
 		"method", c.Request.Method,
@@ -1753,13 +1754,13 @@ func (h *Handler) HandleSystemRealtime(c *gin.Context) {
 		"user_agent", c.Request.UserAgent(),
 	)
 	if isWebSocketUpgrade(c.Request) {
-		h.handleSystemRealtimeWebSocket(c, provider, bus, siteName)
+		h.handleSystemRealtimeWebSocket(c, provider, bus, siteName, scopes)
 		return
 	}
-	h.handleSystemRealtimeSSE(c, provider, bus, siteName)
+	h.handleSystemRealtimeSSE(c, provider, bus, siteName, scopes)
 }
 
-func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natsprovider.Provider, bus analytics.EventBus, siteName string) {
+func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natsprovider.Provider, bus analytics.EventBus, siteName string, scopes []string) {
 	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
@@ -1771,13 +1772,13 @@ func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natspr
 	send := func(msg []byte) error {
 		return conn.Write(c.Request.Context(), websocket.MessageText, msg)
 	}
-	if err := h.replayRealtime(c, realtimeCursor(c), send); err != nil {
+	if err := h.replayRealtime(c, realtimeCursor(c), scopes, send); err != nil {
 		slog.Warn("realtime replay failed", "site", siteName, "error", err)
 	}
-	h.streamRealtime(c, send, provider, bus, siteName)
+	h.streamRealtime(c, send, provider, bus, siteName, scopes)
 }
 
-func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider.Provider, bus analytics.EventBus, siteName string) {
+func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider.Provider, bus analytics.EventBus, siteName string, scopes []string) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -1820,10 +1821,61 @@ func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider
 		}
 		return writeEvent(eventType, envelope)
 	}
-	if err := h.replayRealtime(c, realtimeCursor(c), send); err != nil {
+	if err := h.replayRealtime(c, realtimeCursor(c), scopes, send); err != nil {
 		slog.Warn("realtime replay failed", "site", siteName, "error", err)
 	}
-	h.streamRealtime(c, send, provider, bus, siteName)
+	h.streamRealtime(c, send, provider, bus, siteName, scopes)
+}
+
+func realtimeScopes(c *gin.Context) []string {
+	values := append([]string{}, c.Request.URL.Query()["scope"]...)
+	values = append(values, c.Request.URL.Query()["resource"]...)
+	var scopes []string
+	for _, value := range values {
+		for _, raw := range strings.Split(value, ",") {
+			if scope := strings.ToLower(strings.TrimSpace(raw)); scope != "" {
+				scopes = append(scopes, scope)
+			}
+		}
+	}
+	return scopes
+}
+
+func matchesRealtimeScope(scopes []string, targets ...string) bool {
+	if len(scopes) == 0 {
+		return true
+	}
+	for _, scope := range scopes {
+		if scope == "*" {
+			return true
+		}
+		for _, target := range targets {
+			if strings.EqualFold(scope, target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func realtimePayloadMatchesScopes(payload []byte, scopes []string) bool {
+	if len(scopes) == 0 {
+		return true
+	}
+	var message map[string]any
+	if err := json.Unmarshal(payload, &message); err != nil {
+		return false
+	}
+	var targets []string
+	for _, key := range []string{"resource", "doctype", "aggregate_type"} {
+		if value, ok := message[key].(string); ok && value != "" {
+			targets = append(targets, value)
+			if key != "resource" {
+				targets = append(targets, "doctype:"+value)
+			}
+		}
+	}
+	return matchesRealtimeScope(scopes, targets...)
 }
 
 func realtimeCursor(c *gin.Context) string {
@@ -1836,7 +1888,7 @@ func realtimeCursor(c *gin.Context) string {
 // replayRealtime replays durable outbox events after a client's last cursor.
 // The outbox is the transactional source of truth for event IDs, so replay is
 // scoped to the authenticated site and does not introduce a second history log.
-func (h *Handler) replayRealtime(c *gin.Context, after string, send func([]byte) error) error {
+func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, send func([]byte) error) error {
 	if after == "" || h.TxManager == nil {
 		return nil
 	}
@@ -1853,6 +1905,9 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, send func([]byte)
 		var occurredAt time.Time
 		if err := rows.Scan(&id, &eventType, &site, &aggregateType, &aggregateID, &occurredAt); err != nil {
 			return err
+		}
+		if !matchesRealtimeScope(scopes, "doctype:"+aggregateType, aggregateType) {
+			continue
 		}
 		payload, err := json.Marshal(map[string]any{
 			"id": id, "type": "change", "transport": "replay", "site": site,
@@ -1877,7 +1932,7 @@ func realtimeOperation(eventType string) string {
 	return "update"
 }
 
-func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provider *natsprovider.Provider, bus analytics.EventBus, siteName string) {
+func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provider *natsprovider.Provider, bus analytics.EventBus, siteName string, scopes []string) {
 	if provider == nil {
 		var ch <-chan analytics.ChangeEvent
 		var remove func()
@@ -1906,6 +1961,9 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 			case event, ok := <-ch:
 				if !ok {
 					return
+				}
+				if !matchesRealtimeScope(scopes, "doctype:"+event.Doctype, event.Doctype) {
+					continue
 				}
 				payload, err := json.Marshal(map[string]any{
 					"id": event.ID, "type": "change", "transport": "local", "site": event.Site,
@@ -1941,6 +1999,9 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 		case msg, ok := <-ch:
 			if !ok {
 				return
+			}
+			if !realtimePayloadMatchesScopes(msg.Data, scopes) {
+				continue
 			}
 			if err := send(msg.Data); err != nil {
 				return
