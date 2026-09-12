@@ -21,14 +21,9 @@ type DeclarativeRule struct {
 		Event string `yaml:"event"`
 	} `yaml:"when"`
 	Evaluate struct {
-		// DocType is the compatibility target name for the record context. It
-		// intentionally resolves through the canonical DocType registry rather
-		// than introducing a second Entity schema.
-		DocType string `yaml:"doctype"`
-		// Entity is accepted only as a legacy spelling. It is normalized into
-		// DocType during parsing and is never registered or persisted as a
-		// separate runtime resource.
-		Entity    string `yaml:"entity"`
+		// DocType is the target name for the record context. It resolves through
+		// the canonical DocType registry; there is no parallel Entity schema.
+		DocType   string `yaml:"doctype"`
 		Predicate string `yaml:"predicate"`
 	} `yaml:"evaluate"`
 	Then struct {
@@ -63,14 +58,8 @@ func ParseDeclarativeRule(raw []byte) (DeclarativeRule, error) {
 	if err := dec.Decode(&rule); err != nil {
 		return rule, fmt.Errorf("rule definition: %w", err)
 	}
-	if rule.Evaluate.DocType != "" && rule.Evaluate.Entity != "" && rule.Evaluate.DocType != rule.Evaluate.Entity {
-		return rule, fmt.Errorf("rule evaluate.doctype and legacy evaluate.entity must match")
-	}
-	if rule.Evaluate.DocType == "" {
-		rule.Evaluate.DocType = rule.Evaluate.Entity
-	}
-	if rule.Name == "" || rule.Namespace == "" || rule.Version <= 0 || rule.Kind != "rule" || rule.When.Event == "" || rule.Evaluate.Predicate == "" || rule.Then.Capability == "" {
-		return rule, fmt.Errorf("rule requires name, namespace, positive version, kind rule, trigger event, predicate, and capability")
+	if rule.Name == "" || rule.Namespace == "" || rule.Version <= 0 || rule.Kind != "rule" || rule.When.Event == "" || rule.Evaluate.DocType == "" || rule.Evaluate.Predicate == "" || rule.Then.Capability == "" {
+		return rule, fmt.Errorf("rule requires name, namespace, positive version, kind rule, trigger event, doctype, predicate, and capability")
 	}
 	return rule, nil
 }

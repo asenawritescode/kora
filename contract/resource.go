@@ -19,15 +19,10 @@ import (
 type ResourceKind string
 
 const (
-	ResourceKindDoctype    ResourceKind = "doctype"
-	ResourceKindCollection ResourceKind = "collection"
-	ResourceKindCommand    ResourceKind = "command"
-	ResourceKindQuery      ResourceKind = "query"
-	// ResourceKindEntity is retained as a source-compatible spelling for
-	// callers that used the earlier organizational-runtime vocabulary. It is
-	// deliberately the same canonical kind as DocType: Kora has one persisted
-	// business-schema primitive, not separate Entity and DocType models.
-	ResourceKindEntity      ResourceKind = ResourceKindDoctype
+	ResourceKindDoctype     ResourceKind = "doctype"
+	ResourceKindCollection  ResourceKind = "collection"
+	ResourceKindCommand     ResourceKind = "command"
+	ResourceKindQuery       ResourceKind = "query"
 	ResourceKindRelation    ResourceKind = "relation"
 	ResourceKindComputation ResourceKind = "computation"
 	ResourceKindRule        ResourceKind = "rule"

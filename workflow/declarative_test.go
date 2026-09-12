@@ -85,7 +85,7 @@ kind: rule
 when:
   event: package.stock.changed
 evaluate:
-  entity: Balance
+  doctype: Balance
   predicate: quantity < reorder_level
 then:
   capability: package.create_request
@@ -94,7 +94,7 @@ then:
 		t.Fatal(err)
 	}
 	if rule.Evaluate.DocType != "Balance" {
-		t.Fatalf("legacy entity target was not normalized to doctype: %q", rule.Evaluate.DocType)
+		t.Fatalf("doctype target was not parsed: %q", rule.Evaluate.DocType)
 	}
 	matched, err := EvaluateDeclarativeRule(context.Background(), rule, "package.stock.changed", nil, declarativeRuleEvaluator{result: true})
 	if err != nil || !matched {
@@ -106,7 +106,7 @@ then:
 	}
 }
 
-func TestDeclarativeRuleRejectsConflictingLegacyEntityTarget(t *testing.T) {
+func TestDeclarativeRuleRejectsEntityTarget(t *testing.T) {
 	_, err := ParseDeclarativeRule([]byte(`
 name: conflicting
 namespace: package
@@ -122,6 +122,24 @@ then:
   capability: package.inspect
 `))
 	if err == nil {
-		t.Fatal("rule parser accepted conflicting doctype and legacy entity targets")
+		t.Fatal("rule parser accepted retired entity target")
+	}
+}
+
+func TestDeclarativeRuleRequiresDocTypeTarget(t *testing.T) {
+	_, err := ParseDeclarativeRule([]byte(`
+name: missing_target
+namespace: package
+version: 1
+kind: rule
+when:
+  event: package.changed
+evaluate:
+  predicate: quantity > 0
+then:
+  capability: package.inspect
+`))
+	if err == nil {
+		t.Fatal("rule parser accepted a rule without a doctype target")
 	}
 }
