@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DocType } from '../../../../types/kora'
 import { createBlankPageManifest } from '../../../../manifest/schema/page'
-import { addBoundComponent, getPrimaryDoctypeName, moveManifestComponent, withDoctypeDefaults } from './editor-builders'
+import { addBoundComponent, componentAvailability, getPrimaryDoctypeName, moveManifestComponent, withDoctypeDefaults } from './editor-builders'
 
 const doctype: DocType = {
   name: 'Sales Order',
@@ -40,6 +40,13 @@ describe('page manifest editor builders', () => {
     ])
     expect(moved.spec.layout.children.map((component) => component.position)).toEqual([0, 1, 2])
     expect(moveManifestComponent(moved, 'missing', 0)).toBe(moved)
+  })
+
+  it('uses generic field types to gate schema-dependent palette components', () => {
+    expect(componentAvailability('record_table', null).enabled).toBe(false)
+    expect(componentAvailability('chart', doctype).enabled).toBe(true)
+    expect(componentAvailability('calendar_view', doctype).enabled).toBe(false)
+    expect(componentAvailability('kanban_board', doctype).enabled).toBe(true)
   })
   it('binds record table components to the primary resource with responsive columns', () => {
     const base = {

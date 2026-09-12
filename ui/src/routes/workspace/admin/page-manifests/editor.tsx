@@ -28,6 +28,7 @@ import {
 } from './editor-helpers'
 import {
   addBoundComponent,
+  componentAvailability,
   getPrimaryDoctypeName,
   moveManifestComponent,
   withDoctypeDefaults,
@@ -775,27 +776,33 @@ function ComponentPalette({ primaryDoctype, onAdd }: { primaryDoctype: DocType |
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group}</p>
           <div className="space-y-1">
             {entries.map((entry) => (
+              (() => {
+                const availability = componentAvailability(entry.component, primaryDoctype)
+                return (
               <button
                 key={entry.component}
                 type="button"
-                disabled={isDataDisplayComponent(entry.component) && !primaryDoctype}
+                disabled={!availability.enabled}
                 className={cn(
                   'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50',
-                  isDataDisplayComponent(entry.component) && primaryDoctype ? 'border-primary/30 bg-primary/5' : 'bg-card',
+                  availability.enabled && isDataDisplayComponent(entry.component) && primaryDoctype ? 'border-primary/30 bg-primary/5' : 'bg-card',
                 )}
                 onClick={() => onAdd(entry.component)}
+                title={availability.reason}
               >
                 <span>
                   {entry.label}
-                  {isDataDisplayComponent(entry.component) && primaryDoctype && (
+                  {availability.enabled && isDataDisplayComponent(entry.component) && primaryDoctype && (
                     <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">primary.data</span>
                   )}
-                  {isDataDisplayComponent(entry.component) && !primaryDoctype && (
-                    <span className="mt-0.5 block text-[10px] text-muted-foreground">needs data source</span>
+                  {!availability.enabled && (
+                    <span className="mt-0.5 block text-[10px] text-muted-foreground">{availability.reason}</span>
                   )}
                 </span>
                 <Plus className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
+                )
+              })()
             ))}
           </div>
         </div>

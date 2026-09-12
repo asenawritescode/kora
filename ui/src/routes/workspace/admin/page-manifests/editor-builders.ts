@@ -2,6 +2,8 @@ import type { DocType } from '@/types/kora'
 import { PAGE_COMPONENT_LIBRARY, type PageComponent, type PageLayoutType, type PageManifest } from '../../../../manifest/schema/page'
 import { bindComponentToPrimaryResource, selectListFields } from '../../../../manifest/runtime/standard-pages'
 
+export type ComponentAvailability = { enabled: boolean; reason?: string }
+
 export function addBoundComponent(manifest: PageManifest, componentType: string, doctype: DocType | null): PageManifest {
   const libraryEntry = PAGE_COMPONENT_LIBRARY.find((entry) => entry.component === componentType)
   const position = manifest.spec.layout.children.length
@@ -58,6 +60,27 @@ export function moveManifestComponent(manifest: PageManifest, componentID: strin
       },
     },
   }
+}
+
+/** Return the generic schema prerequisites for a palette component. */
+export function componentAvailability(componentType: string, doctype: DocType | null): ComponentAvailability {
+  const needsRecord = ['record_table', 'record_list', 'record_cards', 'record_form', 'record_detail']
+  if (needsRecord.includes(componentType) && !doctype) {
+    return { enabled: false, reason: 'Choose a data source first.' }
+  }
+  if (!doctype) return { enabled: true }
+
+  const fields = doctype.fields.filter((field) => !['Section Break', 'Column Break', 'Heading'].includes(field.fieldtype))
+  if (componentType === 'chart' && !fields.some((field) => ['Int', 'Float', 'Currency', 'Percent'].includes(field.fieldtype))) {
+    return { enabled: false, reason: 'Needs a numeric field.' }
+  }
+  if (componentType === 'calendar_view' && !fields.some((field) => ['Date', 'Datetime'].includes(field.fieldtype))) {
+    return { enabled: false, reason: 'Needs a date or datetime field.' }
+  }
+  if (componentType === 'kanban_board' && !fields.some((field) => field.fieldtype === 'Select')) {
+    return { enabled: false, reason: 'Needs a Select field for lanes.' }
+  }
+  return { enabled: true }
 }
 
 export function withDoctypeDefaults(component: PageComponent, doctype: DocType, position: number): PageComponent {
