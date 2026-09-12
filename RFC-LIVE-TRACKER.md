@@ -139,7 +139,7 @@ This file is the working tracker for `KORA-ENGINE-RFC.md`.
 - [ ] Deliver a first-run POS setup that reaches a usable register in five short steps with safe defaults, sample data, resumable progress, and no required technical choices.
 - [ ] Add direct POS customization for moving, resizing, hiding, duplicating, removing, and adding cards with visible drop targets, undo, reset-to-default, and predictable portrait/landscape behavior.
 - [ ] Connect the POS starter to the backend offline capability and shared sync coordinator, including local snapshots, queued approved operations, cursors, conflicts, revocation, and clear `Ready`, `Syncing`, `Up to date`, and `Needs attention` states.
-- [ ] Add authenticated WebSocket transport through the realtime gateway with scoped subscriptions, heartbeat, resume cursor, deduplication, missed-event recovery, and authoritative refetch. Stable event IDs now flow through local WAL/change events and SSE, Studio deduplicates identified events across reconnect/fallback, the gateway replays site-scoped outbox events after `after`/`Last-Event-ID`, and both transports filter `scope`/`resource` subscriptions; replay-window/refetch browser proof remains open.
+- [ ] Add authenticated WebSocket transport through the realtime gateway with scoped subscriptions, heartbeat, resume cursor, deduplication, missed-event recovery, and authoritative refetch. Stable event IDs now flow through local WAL/change events and SSE, Studio deduplicates identified events across reconnect/fallback, the gateway replays site-scoped outbox events after `after`/`Last-Event-ID`, both transports filter `scope`/`resource` subscriptions, and replay emits a completion marker with cursor/truncation state that triggers authoritative Studio invalidation; replay-window/refetch browser proof remains open.
 - [ ] Add realtime notifications for product/stock/payment/task/sync/operation changes with notification-center history, read/ack commands, severity, related record/action, redaction, and offline-safe display.
 - [ ] Audit setup, builder, POS, empty, error, offline, and publish copy for plain language, consistent terms, constructive next steps, and outcome-focused buttons.
 - [x] Add typed realtime connection state, invalidation, operation progress, reconnect/resume, and authoritative refetch to live page presets.
@@ -198,7 +198,7 @@ This file is the working tracker for `KORA-ENGINE-RFC.md`.
 - [ ] Tenant isolation coverage for SQL, NATS, KV, Object Store, cache, logs, traces, metrics, backups, and credentials.
 - [ ] Cloud provisioning recovery after control-plane restart.
 - [ ] Offline conflict UI and conflict resolution lifecycle.
-- [ ] Final SSE/WebSocket protocol decisions. Stable event identity, bounded client deduplication, site-scoped outbox replay after a cursor, and `scope`/`resource` filtering are implemented and tested; replay-window semantics and browser recovery proof remain to be specified.
+- [ ] Final SSE/WebSocket protocol decisions. Stable event identity, bounded client deduplication, site-scoped outbox replay after a cursor, `scope`/`resource` filtering, and replay completion/truncation signaling are implemented and tested; browser recovery proof remains to be specified.
 - [ ] Builder/runtime parity evidence across desktop, tablet, and mobile.
 - [ ] Deterministic semantic layout contract; no editor-only coordinates or random orientation.
 - [ ] Builder publish preflight and draft autosave recovery behavior.
