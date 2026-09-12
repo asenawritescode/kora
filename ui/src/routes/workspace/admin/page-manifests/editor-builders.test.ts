@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DocType } from '../../../../types/kora'
 import { createBlankPageManifest } from '../../../../manifest/schema/page'
-import { addBoundComponent, getPrimaryDoctypeName, withDoctypeDefaults } from './editor-builders'
+import { addBoundComponent, getPrimaryDoctypeName, moveManifestComponent, withDoctypeDefaults } from './editor-builders'
 
 const doctype: DocType = {
   name: 'Sales Order',
@@ -24,6 +24,23 @@ const doctype: DocType = {
 }
 
 describe('page manifest editor builders', () => {
+
+  it('reorders semantic children and rewrites contiguous positions', () => {
+    const manifest = createBlankPageManifest()
+    const first = addBoundComponent(manifest, 'metric_card', null)
+    const second = addBoundComponent(first, 'record_table', null)
+    const third = addBoundComponent(second, 'record_form', null)
+
+    const moved = moveManifestComponent(third, third.spec.layout.children[2].id, 0)
+
+    expect(moved.spec.layout.children.map((component) => component.component)).toEqual([
+      'record_form',
+      'metric_card',
+      'record_table',
+    ])
+    expect(moved.spec.layout.children.map((component) => component.position)).toEqual([0, 1, 2])
+    expect(moveManifestComponent(moved, 'missing', 0)).toBe(moved)
+  })
   it('binds record table components to the primary resource with responsive columns', () => {
     const base = {
       id: 'record_table_1',

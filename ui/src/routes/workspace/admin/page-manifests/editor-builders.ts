@@ -31,6 +31,35 @@ export function addBoundComponent(manifest: PageManifest, componentType: string,
   }
 }
 
+/**
+ * Move a top-level component within the semantic layout order. The editor is
+ * allowed to rearrange components, but never writes editor-only coordinates;
+ * `position` remains the sole persisted ordering contract.
+ */
+export function moveManifestComponent(manifest: PageManifest, componentID: string, targetIndex: number): PageManifest {
+  const children = manifest.spec.layout.children
+  const sourceIndex = children.findIndex((component) => component.id === componentID)
+  if (sourceIndex < 0 || children.length < 2) return manifest
+
+  const boundedIndex = Math.max(0, Math.min(targetIndex, children.length - 1))
+  if (sourceIndex === boundedIndex) return manifest
+
+  const nextChildren = [...children]
+  const [moved] = nextChildren.splice(sourceIndex, 1)
+  nextChildren.splice(boundedIndex, 0, moved)
+
+  return {
+    ...manifest,
+    spec: {
+      ...manifest.spec,
+      layout: {
+        ...manifest.spec.layout,
+        children: nextChildren.map((component, index) => ({ ...component, position: index })),
+      },
+    },
+  }
+}
+
 export function withDoctypeDefaults(component: PageComponent, doctype: DocType, position: number): PageComponent {
   const fields = selectListFields(doctype)
   const title = doctype.title_field || fields[0] || 'name'

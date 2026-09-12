@@ -29,6 +29,7 @@ import {
 import {
   addBoundComponent,
   getPrimaryDoctypeName,
+  moveManifestComponent,
   withDoctypeDefaults,
 } from './editor-builders'
 import {
@@ -54,6 +55,8 @@ import { toast } from '@/components/ui/Toast'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   Boxes,
   ChevronRight,
   CheckCircle2,
@@ -397,6 +400,7 @@ export default function PageManifestWorkbench() {
             manifest={manifest}
             selectedComponentId={selectedComponentId}
             onSelect={setSelectedComponentId}
+            onMove={(componentID, targetIndex) => updateManifest((current) => moveManifestComponent(current, componentID, targetIndex))}
             onDuplicate={(component) => {
               const duplicate = duplicateComponent(component, manifest.spec.layout.children.length)
               updateManifest((current) => ({
@@ -636,12 +640,14 @@ function LayersPanel({
   manifest,
   selectedComponentId,
   onSelect,
+  onMove,
   onDuplicate,
   onRemove,
 }: {
   manifest: PageManifest
   selectedComponentId: string | null
   onSelect: (id: string) => void
+  onMove: (id: string, targetIndex: number) => void
   onDuplicate: (component: PageComponent) => void
   onRemove: (id: string) => void
 }) {
@@ -661,6 +667,20 @@ function LayersPanel({
             return (
               <div
                 key={component.id}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/kora-component', component.id)
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  const draggedID = event.dataTransfer.getData('text/kora-component')
+                  if (draggedID && draggedID !== component.id) onMove(draggedID, index)
+                }}
                 className={cn(
                   'group flex items-center gap-2 rounded-lg border px-2 py-2 text-xs transition-colors',
                   selected ? 'border-primary bg-primary/5' : 'bg-card hover:bg-muted/50',
@@ -676,6 +696,26 @@ function LayersPanel({
                   <span className="min-w-0 flex-1 truncate">{String(component.props.title || component.component)}</span>
                   <Badge variant="outline" className="hidden font-mono text-[10px] sm:inline-flex">{component.region}</Badge>
                 </button>
+                <div className="flex items-center gap-0.5" aria-label={`Move ${component.id}`}>
+                  <button
+                    type="button"
+                    className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                    aria-label={`Move ${component.id} up`}
+                    disabled={index === 0}
+                    onClick={() => onMove(component.id, index - 1)}
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                    aria-label={`Move ${component.id} down`}
+                    disabled={index === components.length - 1}
+                    onClick={() => onMove(component.id, index + 1)}
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </button>
+                </div>
                 <button
                   type="button"
                   className="rounded-md p-1 text-muted-foreground opacity-100 hover:bg-muted hover:text-foreground md:opacity-0 md:group-hover:opacity-100"
