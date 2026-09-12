@@ -2175,6 +2175,7 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		// Read endpoints.
 		system.GET("/doctype/:doctype", handler.HandleSystemDoctype)
 		system.GET("/doctypes", handler.HandleSystemDoctypes)
+		system.GET("/graph", handler.HandleSystemGraph)
 		system.GET("/doctype/:doctype/references", handler.HandleSystemDoctypeReferences)
 		system.GET("/navigation", handler.HandleSystemNavigation)
 		system.GET("/settings", handler.HandleSiteSettings)
