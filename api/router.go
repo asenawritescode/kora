@@ -16,13 +16,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/auth"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/natsprovider"
@@ -47,12 +47,12 @@ var fallbackStorage storage.Backend
 // Handler holds dependencies for API handlers.
 // Registry and TxManager are fallbacks; handlers read site context from the request.
 type Handler struct {
-	Registry      *doctype.Registry
-	TxManager     *orm.TxManager
-	AuthProviders *auth.ProviderRegistry
+	Registry        *doctype.Registry
+	TxManager       *orm.TxManager
+	AuthProviders   *auth.ProviderRegistry
+	RuntimeServices *SiteRuntimeServices
 
-	// SiteEventBuses maps site name → EventBus for analytics event emission.
-	// When set, siteTx() propagates the EventBus to the TxManager.
+	// SiteEventBuses maps site name → EventBus for analytics/realtime services.
 	SiteEventBuses map[string]analytics.EventBus
 
 	// SiteOutboxes maps site name → outbox.Writer for transactional outbox recording.
@@ -93,6 +93,35 @@ type Handler struct {
 	AgentStores    map[string]*org.AgentStore
 }
 
+func (h *Handler) runtimeService(c *gin.Context, site string) SiteRuntimeService {
+	if h.RuntimeServices != nil {
+		if value, ok := c.Get("site_runtime_services"); ok {
+			if services, ok := value.(SiteRuntimeService); ok {
+				return services
+			}
+		}
+		services, _ := h.RuntimeServices.Get(site)
+		return services
+	}
+	return SiteRuntimeService{
+		EventBus: h.SiteEventBuses[site], Realtime: h.SiteRealtimeProviders[site],
+		ScriptStore: h.SiteScriptStores[site], SecretStore: h.SiteSecretStores[site],
+		WebhookWorker: h.SiteWebhookWorkers[site], Outbox: h.SiteOutboxes[site], Storage: h.SiteStorages[site],
+	}
+}
+
+// linkedDocumentResolver binds declarative linked constraints to the current
+// site's transaction. The doctype package receives only this narrow resolver,
+// so generated constraints cannot obtain arbitrary database access.
+func (h *Handler) linkedDocumentResolver(c *gin.Context) doctype.LinkedDocumentResolver {
+	return func(target *doctype.DocType, name string) (*doctype.Document, error) {
+		if target == nil || strings.TrimSpace(name) == "" {
+			return nil, nil
+		}
+		return h.siteTx(c).GetDoc(target, name, "")
+	}
+}
+
 // NewHandler creates a new API handler.
 func NewHandler(registry *doctype.Registry, txManager *orm.TxManager) *Handler {
 	return &Handler{
@@ -116,9 +145,9 @@ func (h *Handler) siteRegistry(c *gin.Context) *doctype.Registry {
 
 // siteStorage returns the storage backend for the current request's site.
 func (h *Handler) siteStorage(c *gin.Context) storage.Backend {
-	if h.SiteStorages != nil {
+	if h.SiteStorages != nil || h.RuntimeServices != nil {
 		if siteName := c.GetString("site_name"); siteName != "" {
-			if b, ok := h.SiteStorages[siteName]; ok && b != nil {
+			if b := h.runtimeService(c, siteName).Storage; b != nil {
 				return b
 			}
 		}
@@ -157,10 +186,11 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 	siteName, _ := c.Get("site_name")
 	user, _ := c.Get("user")
 	userRole, _ := c.Get("user_role")
+	userRoles := c.GetStringSlice("user_roles")
 	if db != nil && reg != nil {
 		if sqlDB, ok := db.(*sql.DB); ok {
 			if r, ok := reg.(*doctype.Registry); ok {
-				tm := &orm.TxManager{DB: sqlDB, Registry: r, Dialect: h.TxManager.Dialect}
+				tm := &orm.TxManager{DB: sqlDB, Registry: r, Dialect: h.siteDialect(c)}
 				tm.Context = c.Request.Context()
 				if createdAt, ok := c.Get("session_created_at"); ok {
 					if ts, ok := createdAt.(time.Time); ok && !ts.IsZero() {
@@ -170,29 +200,14 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 				if siteNameStr, ok := siteName.(string); ok {
 					tm.SiteName = siteNameStr
 				}
-				if h.SiteEventBuses != nil {
-					if siteNameStr, ok := siteName.(string); ok {
-						if bus, exists := h.SiteEventBuses[siteNameStr]; exists {
-							tm.EventBus = bus
-						}
-					}
-				}
 				// Wire the transactional outbox writer for this site.
-				if h.SiteOutboxes != nil {
-					if siteNameStr, ok := siteName.(string); ok {
-						if w, exists := h.SiteOutboxes[siteNameStr]; exists {
-							tm.Outbox = w
-						}
-					}
+				if siteNameStr, ok := siteName.(string); ok {
+					tm.Outbox = h.runtimeService(c, siteNameStr).Outbox
 				}
 				// Wire script runner and store.
 				tm.ScriptRunner = h.ScriptRunner
-				if h.SiteScriptStores != nil {
-					if siteNameStr, ok := siteName.(string); ok {
-						if store, exists := h.SiteScriptStores[siteNameStr]; exists {
-							tm.ScriptStore = store
-						}
-					}
+				if siteNameStr, ok := siteName.(string); ok {
+					tm.ScriptStore = h.runtimeService(c, siteNameStr).ScriptStore
 				}
 				// Wire async hook queue.
 				tm.AsyncHookSink = h.AsyncHookSink
@@ -200,9 +215,9 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 				// Create script provider for this request (bridges JS → engine).
 				if h.ScriptRunner != nil {
 					var ss *secret.Store
-					if h.SiteSecretStores != nil {
+					if h.SiteSecretStores != nil || h.RuntimeServices != nil {
 						if siteNameStr, ok := siteName.(string); ok {
-							ss = h.SiteSecretStores[siteNameStr]
+							ss = h.runtimeService(c, siteNameStr).SecretStore
 						}
 					}
 					if siteNameStr, ok := siteName.(string); ok {
@@ -216,11 +231,50 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 				if r, ok := userRole.(string); ok {
 					tm.CurrentUserRole = r
 				}
+				tm.CurrentUserRoles = append([]string(nil), userRoles...)
 				return tm
 			}
 		}
 	}
 	return h.TxManager
+}
+
+// siteDialect selects the dialect belonging to the runtime bound to this
+// request. The handler-level dialect remains a fallback for tests and
+// single-site deployments without SiteRouter context.
+func (h *Handler) siteDialect(c *gin.Context) kdb.Dialect {
+	var fallback kdb.Dialect
+	if h.TxManager != nil {
+		fallback = h.TxManager.Dialect
+	}
+	return siteDialectFromContext(c, fallback)
+}
+
+// siteQuery converts dialect-neutral placeholders for the current tenant DB.
+// Keep raw API SQL portable until each call site is moved onto the query builder.
+func (h *Handler) siteQuery(c *gin.Context, query string) string {
+	return kdb.Rebind(h.siteDialect(c), query)
+}
+
+// siteDatabaseName is only needed by MySQL schema-inspection APIs. PostgreSQL
+// and LibSQL introspect the connected database directly and ignore this arg.
+func (h *Handler) siteDatabaseName(c *gin.Context, database *sql.DB) string {
+	if h.siteDialect(c).DriverName() != "mysql" || database == nil {
+		return ""
+	}
+	var name string
+	_ = database.QueryRow("SELECT DATABASE()").Scan(&name)
+	return name
+}
+
+func siteDialectFromContext(c *gin.Context, fallback kdb.Dialect) kdb.Dialect {
+	if dbType := strings.TrimSpace(c.GetString("site_db_type")); dbType != "" {
+		return kdb.Resolve(dbType)
+	}
+	if fallback != nil {
+		return fallback
+	}
+	return kdb.Resolve("")
 }
 
 // APIDefaultLimit and APIMaxLimit control pagination (set from common config at startup).
@@ -467,11 +521,6 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 		return
 	}
 
-	if _, forbidden := checkPerm(c, h.Registry, doctypeName, "create"); forbidden {
-		return
-	}
-
-	// Parse request body.
 	var rawData map[string]any
 	if err := c.ShouldBindJSON(&rawData); err != nil {
 		slog.Warn("invalid JSON in create", "error", err)
@@ -479,73 +528,19 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 		return
 	}
 
-	// Build Document from raw data.
-	doc := doctype.NewDocument(doctypeName)
-	for key, val := range rawData {
-		field := dt.GetField(key)
-		if field != nil && field.Fieldtype == "Table" {
-			// Parse child table rows.
-			children, err := parseChildRows(val, field, h.siteRegistry(c))
-			if err != nil {
-				badRequestError(c, "validation.invalid_child_table", fmt.Sprintf("Field %s: %s", key, err.Error()), map[string]any{"field": key})
-				return
-			}
-			doc.Set(key, children)
-		} else {
-			doc.Set(key, val)
-		}
-	}
-
-	// Set default values for fields not in request.
-	for _, f := range dt.DataFields() {
-		if f.Default != "" {
-			if _, exists := rawData[f.Fieldname]; !exists {
-				doc.Set(f.Fieldname, f.Default)
-			}
-		}
-	}
-	setTemplatePackHash(dt, doc)
-
-	// Run validate hooks (scripts can reject with throw).
-	if err := h.siteTx(c).RunHooksForValidate(dt, doc, nil); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
-		})
+	data, err := json.Marshal(rawData)
+	if err != nil {
+		badRequestError(c, "validation.invalid_json", "Invalid request format", nil)
 		return
 	}
-
-	// Validate.
-	validationErrs := doctype.ValidateDocument(dt, doc, h.Registry, nil)
-	if validationErrs.HasErrors() {
-		writeError(c, http.StatusBadRequest, "validation.failed", "Validation failed", map[string]any{"fields": validationErrorDetails(validationErrs)})
-		return
-	}
-
-	// Get current user.
-	owner := c.GetString("user")
-	if owner == "" {
-		owner = "system"
-	}
-
-	// Insert.
-	if err := h.siteTx(c).Insert(dt, doc, owner, owner); err != nil {
-		var valErr *doctype.ValidationError
-		if errors.As(err, &valErr) {
-			writeError(c, http.StatusBadRequest, "validation.failed", "Validation failed", map[string]any{"fields": validationErrorDetails(doctype.ValidationErrors{valErr})})
-			return
-		}
-		internalError(c, "insert failed", err)
+	h.executeResourceMutation(c, kernel.CommandRecordCreate, doctypeName, "", data, http.StatusCreated)
+	if c.Writer.Status() != http.StatusCreated {
 		return
 	}
 	h.invalidateAnalyticsForDoctype(c, doctypeName)
 	if w := h.siteAnalyticsWorker(c); w != nil {
 		w.Flush()
 	}
-
-	c.JSON(http.StatusCreated, Response{
-		Data: docToMap(doc, dt, h.siteRegistry(c), nil),
-		Meta: &Meta{DocType: doctypeName},
-	})
 }
 
 // --- Update Handler ---
@@ -561,25 +556,6 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 		return
 	}
 
-	// Check write permission.
-	ownerOnly, forbidden := checkPerm(c, h.Registry, doctypeName, "write")
-	if forbidden {
-		return
-	}
-	owner := ""
-	if ownerOnly {
-		owner = c.GetString("user")
-	}
-
-	// Load existing document.
-	oldDoc, err := h.siteTx(c).GetDoc(dt, name, owner)
-	if err != nil {
-		slog.Warn("document get failed for update", "doctype", doctypeName, "name", name, "error", err)
-		notFoundError(c, "resource.document_not_found", "Document not found", map[string]any{"doctype": doctypeName, "name": name})
-		return
-	}
-
-	// Parse request body.
 	var rawData map[string]any
 	if err := c.ShouldBindJSON(&rawData); err != nil {
 		slog.Warn("invalid JSON in update", "error", err)
@@ -587,209 +563,19 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 		return
 	}
 
-	// Build updated Document.
-	doc := doctype.NewDocument(doctypeName)
-	doc.Name = name
-	doc.IsNew = false
-
-	// Start with existing values, then overlay request data.
-	for _, f := range dt.DataFields() {
-		if f.Fieldtype == "Table" {
-			doc.Set(f.Fieldname, oldDoc.Get(f.Fieldname))
-		} else {
-			doc.Set(f.Fieldname, oldDoc.Get(f.Fieldname))
-		}
-	}
-
-	for key, val := range rawData {
-		field := dt.GetField(key)
-		if field != nil && field.Fieldtype == "Table" {
-			children, err := parseChildRows(val, field, h.siteRegistry(c))
-			if err != nil {
-				badRequestError(c, "validation.invalid_child_table", fmt.Sprintf("Field %s: %s", key, err.Error()), map[string]any{"field": key})
-				return
-			}
-			doc.Set(key, children)
-		} else if field != nil && field.ReadOnly {
-			// Silently ignore read-only fields.
-		} else {
-			doc.Set(key, val)
-		}
-	}
-	setTemplatePackHash(dt, doc)
-
-	// Template Pack hashes are server-owned. A PUT that resubmits unchanged
-	// child rows must still persist a repaired/stale config_hash.
-	packHashNeedsSave := dt.Name == "Template Pack" &&
-		doc.GetString("config_hash") != oldDoc.GetString("config_hash")
-	if h.canShortCircuitNoopUpdate() && !resourceUpdateChanged(dt, oldDoc, rawData) && !packHashNeedsSave {
-		c.JSON(http.StatusOK, Response{
-			Data: docToMap(oldDoc, dt, h.siteRegistry(c), nil),
-			Meta: &Meta{DocType: doctypeName},
-		})
+	data, err := json.Marshal(rawData)
+	if err != nil {
+		badRequestError(c, "validation.invalid_json", "Invalid request format", nil)
 		return
 	}
-
-	// Run validate hooks (scripts can reject with throw).
-	if err := h.siteTx(c).RunHooksForValidate(dt, doc, oldDoc); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
-		})
-		return
-	}
-
-	// Validate.
-	validationErrs := doctype.ValidateDocument(dt, doc, h.Registry, oldDoc)
-	if validationErrs.HasErrors() {
-		writeError(c, http.StatusBadRequest, "validation.failed", "Validation failed", map[string]any{"fields": validationErrorDetails(validationErrs)})
-		return
-	}
-
-	// Get current user.
-	modifiedBy := c.GetString("user")
-	if modifiedBy == "" {
-		modifiedBy = "system"
-	}
-
-	// Save.
-	if err := h.siteTx(c).Save(dt, doc, modifiedBy, owner, oldDoc); err != nil {
-		var valErr *doctype.ValidationError
-		if errors.As(err, &valErr) {
-			writeError(c, http.StatusBadRequest, "validation.failed", "Validation failed", map[string]any{"fields": validationErrorDetails(doctype.ValidationErrors{valErr})})
-			return
-		}
-		internalError(c, "save failed", err)
+	h.executeResourceMutation(c, kernel.CommandRecordUpdate, doctypeName, name, data, http.StatusOK)
+	if c.Writer.Status() != http.StatusOK {
 		return
 	}
 	h.invalidateAnalyticsForDoctype(c, doctypeName)
 	if w := h.siteAnalyticsWorker(c); w != nil {
 		w.Flush()
 	}
-
-	c.JSON(http.StatusOK, Response{
-		Data: docToMap(doc, dt, h.siteRegistry(c), nil),
-		Meta: &Meta{DocType: doctypeName},
-	})
-}
-
-func (h *Handler) canShortCircuitNoopUpdate() bool {
-	return h.ScriptRunner == nil
-}
-
-func resourceUpdateChanged(dt *doctype.DocType, oldDoc *doctype.Document, rawData map[string]any) bool {
-	for key, newVal := range rawData {
-		field := dt.GetField(key)
-		if field == nil || field.ReadOnly {
-			continue
-		}
-		if field.Fieldtype == "Table" {
-			return true
-		}
-		if !resourceFieldValuesEqual(field, oldDoc.Get(key), newVal) {
-			return true
-		}
-	}
-	return false
-}
-
-func resourceFieldValuesEqual(field *doctype.Field, oldVal, newVal any) bool {
-	if oldVal == nil || newVal == nil {
-		return oldVal == newVal
-	}
-
-	switch field.Fieldtype {
-	case "Int":
-		oldInt, okOld := anyToInt64(oldVal)
-		newInt, okNew := anyToInt64(newVal)
-		return okOld && okNew && oldInt == newInt
-	case "Float", "Currency", "Percent":
-		oldFloat, okOld := anyToFloat64(oldVal)
-		newFloat, okNew := anyToFloat64(newVal)
-		return okOld && okNew && oldFloat == newFloat
-	case "Check":
-		oldBool, okOld := anyToBool(oldVal)
-		newBool, okNew := anyToBool(newVal)
-		return okOld && okNew && oldBool == newBool
-	case "JSON":
-		return jsonValuesEqual(oldVal, newVal)
-	default:
-		return reflect.DeepEqual(oldVal, newVal)
-	}
-}
-
-func anyToInt64(v any) (int64, bool) {
-	switch n := v.(type) {
-	case int:
-		return int64(n), true
-	case int64:
-		return n, true
-	case float64:
-		if n == math.Trunc(n) {
-			return int64(n), true
-		}
-	case []byte:
-		return anyToInt64(string(n))
-	case string:
-		parsed, err := strconv.ParseInt(n, 10, 64)
-		return parsed, err == nil
-	}
-	return 0, false
-}
-
-func anyToFloat64(v any) (float64, bool) {
-	switch n := v.(type) {
-	case int:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case float64:
-		return n, true
-	case []byte:
-		return anyToFloat64(string(n))
-	case string:
-		parsed, err := strconv.ParseFloat(n, 64)
-		return parsed, err == nil
-	}
-	return 0, false
-}
-
-func anyToBool(v any) (bool, bool) {
-	switch b := v.(type) {
-	case bool:
-		return b, true
-	case int64:
-		return b != 0, true
-	case float64:
-		return b != 0, true
-	case []byte:
-		return anyToBool(string(b))
-	case string:
-		if b == "1" {
-			return true, true
-		}
-		if b == "0" {
-			return false, true
-		}
-		parsed, err := strconv.ParseBool(b)
-		return parsed, err == nil
-	}
-	return false, false
-}
-
-func jsonValuesEqual(oldVal, newVal any) bool {
-	var oldDecoded any
-	if s, ok := oldVal.(string); ok {
-		if err := json.Unmarshal([]byte(s), &oldDecoded); err == nil {
-			oldVal = oldDecoded
-		}
-	}
-	var newDecoded any
-	if s, ok := newVal.(string); ok {
-		if err := json.Unmarshal([]byte(s), &newDecoded); err == nil {
-			newVal = newDecoded
-		}
-	}
-	return reflect.DeepEqual(oldVal, newVal)
 }
 
 // --- Delete Handler ---
@@ -805,30 +591,14 @@ func (h *Handler) HandleDelete(c *gin.Context) {
 		return
 	}
 
-	// Check delete permission.
-	ownerOnly, forbidden := checkPerm(c, h.Registry, doctypeName, "delete")
-	if forbidden {
-		return
-	}
-	owner := ""
-	if ownerOnly {
-		owner = c.GetString("user")
-	}
-
-	if err := h.siteTx(c).Delete(dt, name, owner); err != nil {
-		slog.Warn("document delete failed", "doctype", doctypeName, "name", name, "error", err)
-		notFoundError(c, "resource.document_not_found", "Document not found", map[string]any{"doctype": doctypeName, "name": name})
+	h.executeResourceMutation(c, kernel.CommandRecordDelete, doctypeName, name, nil, http.StatusOK)
+	if c.Writer.Status() != http.StatusOK {
 		return
 	}
 	h.invalidateAnalyticsForDoctype(c, doctypeName)
 	if w := h.siteAnalyticsWorker(c); w != nil {
 		w.Flush()
 	}
-
-	c.JSON(http.StatusOK, Response{
-		Data: map[string]string{"message": "deleted"},
-		Meta: &Meta{DocType: doctypeName},
-	})
 }
 
 // --- Helpers ---
@@ -988,11 +758,17 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 	RegisterRoutesOnGroupWithAnalytics(apiGroup, registry, txManager, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
-// RegisterPublicRoutesOnGroup registers unauthenticated, read-only public
-// delivery routes. Access is controlled by DocType public_access config.
+// RegisterPublicRoutesOnGroup registers public delivery and provider callback
+// routes. Each route must enforce its own access policy; CRUD authentication is
+// registered separately.
 func RegisterPublicRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteStorages map[string]storage.Backend) {
+	RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup, registry, txManager, siteStorages, nil)
+}
+
+func RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteStorages map[string]storage.Backend, runtimeServices *SiteRuntimeServices) {
 	handler := NewHandler(registry, txManager)
 	handler.SiteStorages = siteStorages
+	handler.RuntimeServices = runtimeServices
 	public := apiGroup.Group("/public/resource")
 	{
 		public.GET("/:doctype", handler.HandlePublicList)
@@ -1008,13 +784,26 @@ func RegisterPublicRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Re
 	// DigiTax cannot use a Kora session/CSRF token. The handler authenticates
 	// this callback with the site's digitax_webhook_secret instead.
 	apiGroup.POST("/webhooks/digitax/etims", handler.HandleDigiTaxWebhook)
+	// Safaricom calls this endpoint asynchronously after an STK prompt is
+	// accepted or declined. The site-scoped operation ID is resolved from the
+	// provider CheckoutRequestID and callbacks are idempotently recorded.
+	apiGroup.POST("/webhooks/mpesa/stk", handler.HandleMPesaSTKCallback)
 }
 
 // RegisterRoutesOnGroupWithAnalytics registers all CRUD routes with optional
 // analytics event propagation. siteBuses maps site name → EventBus; if nil or
 // empty, analytics event emission is a no-op.
 func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry) {
+	RegisterRoutesOnGroupWithRuntimeServices(apiGroup, registry, txManager, siteBuses, realtimeProviders, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookSink, siteOutboxes, siteStorages, kernelCommands, nil)
+}
+
+// RegisterRoutesOnGroupWithRuntimeServices is the directory-aware form of
+// RegisterRoutesOnGroupWithAnalytics. New Engine deployments should pass the
+// shared synchronized service registry so hot-added sites become visible to
+// handlers without mutating maps concurrently.
+func RegisterRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry, runtimeServices *SiteRuntimeServices) {
 	handler := NewHandler(registry, txManager)
+	handler.RuntimeServices = runtimeServices
 	handler.SiteEventBuses = siteBuses
 	handler.SiteRealtimeProviders = realtimeProviders
 	handler.ScriptRunner = scriptRunner
@@ -1026,6 +815,7 @@ func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doc
 	handler.SiteOutboxes = siteOutboxes
 	handler.SiteStorages = siteStorages
 	handler.KernelCommands = kernelCommands
+	RegisterConversationRoutes(apiGroup, handler)
 
 	// File attachments: upload + authenticated serving (Range-aware for audio/video).
 	apiGroup.POST("/upload", handler.HandleUpload)
@@ -1066,11 +856,13 @@ func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doc
 	channel := apiGroup.Group("/internal/channel")
 	{
 		channel.POST("/sessions/issue", handler.HandleChannelSessionIssue)
+		channel.POST("/managed-client/rotate", handler.HandleManagedChannelClientRotate)
 		channel.POST("/sessions/revoke", handler.HandleChannelSessionRevoke)
 		channel.GET("/tools", handler.HandleChannelTools)
 		channel.POST("/query", handler.HandleChannelQuery)
 		channel.POST("/mutate", handler.HandleChannelMutate)
 	}
+	apiGroup.GET("/internal/site/identity", handler.HandleManagedSiteIdentity)
 
 	// Custom API methods (user-defined scripts).
 	// Scripts are registered as api_method in _kora_script, accessible at /api/method/{name}.
@@ -1092,14 +884,17 @@ func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doc
 
 	// RFC-native runtime page route resolution.
 	apiGroup.GET("/page-manifests", handler.HandlePageManifestByRoute)
+	apiGroup.POST("/view/action/:actionId", handler.HandleViewAction)
 
 	// System config endpoints.
 	system := apiGroup.Group("/system/config")
 	agents := apiGroup.Group("/system/agents")
 	agents.GET("/:id", handler.HandleAgentManifest)
 	agents.PUT("/:id", handler.HandleAgentManifest)
+	agents.GET("/:id/effective-permissions", handler.HandleAgentEffectivePermissions)
 	agents.GET("/:id/runs", handler.HandleAgentRuns)
 	agents.POST("/:id/runs", handler.HandleAgentRuns)
+	apiGroup.GET("/system/permissions/catalog", handler.HandleAgentPermissionCatalog)
 	{
 		system.GET("/versions", handler.HandleConfigVersions)
 		system.GET("/versions/:id", handler.HandleConfigVersion)
@@ -1135,7 +930,7 @@ func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doc
 	}
 
 	// Analytics endpoints (no-op if siteBuses is empty).
-	RegisterAnalyticsRoutes(apiGroup, registry, txManager.DB, siteBuses, realtimeProviders, txManager.Dialect)
+	RegisterAnalyticsRoutesWithRuntimeServices(apiGroup, registry, txManager.DB, siteBuses, realtimeProviders, txManager.Dialect, runtimeServices)
 }
 
 // HandleWorkflowAction handles POST /api/resource/{doctype}/{name}/workflow_action
@@ -1160,7 +955,7 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 	}
 
 	// Check submit permission.
-	ownerOnly, forbidden := checkPerm(c, h.Registry, doctypeName, "submit")
+	ownerOnly, forbidden := checkPerm(c, h.siteRegistry(c), doctypeName, "submit")
 	if forbidden {
 		return
 	}
@@ -1199,7 +994,12 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 	}
 
 	// Get current state.
-	currentState := doc.GetString(dt.GetField("status").Fieldname)
+	wf := h.siteRegistry(c).Workflows.Get(doctypeName)
+	stateField := "status"
+	if wf.WorkflowStateField != "" {
+		stateField = wf.WorkflowStateField
+	}
+	currentState := doc.GetString(stateField)
 	if currentState == "" {
 		currentState = "Draft"
 	}
@@ -1241,52 +1041,25 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 		}
 	}
 
-	// Apply transition.
-	newState, newDocStatus, err := h.siteRegistry(c).Workflows.ApplyTransition(doctypeName, currentState, req.Action, userRole, doc)
-	if err != nil {
-		// Run on_failure actions if transition validation fails.
+	// The kernel reloads the document and applies the transition in its write
+	// transaction. The revision fences the earlier checks and pre-transition
+	// scripts against a concurrent update.
+	transitioned, cerr := h.runKernelWorkflowTransition(c, doctypeName, name, req.Action, doc.Revision)
+	if cerr != nil {
 		if transition != nil {
 			h.executeWorkflowActions(c, transition.OnFailure, doctypeName, doc, userRole)
 		}
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
-		})
+		h.writeWorkflowKernelError(c, cerr)
 		return
 	}
+	doc = transitioned
+	newState := doc.GetString(stateField)
 
-	// Update document state.
-	statusField := dt.GetField("status")
-	if statusField == nil {
-		// Try workflow_state_field.
-		wf := h.siteRegistry(c).Workflows.Get(doctypeName)
-		if wf != nil {
-			statusField = dt.GetField(wf.WorkflowStateField)
-		}
-	}
-
-	// Capture pre-mutation state for analytics (so worker can detect state transition).
-	oldFields := make(map[string]any)
-	for k, v := range doc.Fields {
-		oldFields[k] = v
-	}
-	oldDocStatus := doc.DocStatus
-	if statusField != nil {
-		doc.Set(statusField.Fieldname, newState)
-	}
-	doc.DocStatus = newDocStatus
-
-	// Save.
-	modifiedBy := c.GetString("user")
-	if modifiedBy == "" {
-		modifiedBy = "system"
-	}
-	if err := h.siteTx(c).Save(dt, doc, modifiedBy, owner, &doctype.Document{Fields: oldFields, DocStatus: oldDocStatus}); err != nil {
-		internalError(c, "workflow save failed", err)
-		return
-	}
-
-	// Dispatch workflow notifications.
-	dispatchNotifications(h.Registry, doctypeName, newState, doc)
+	// Dispatch configured workflow notifications after the kernel commit. They
+	// share the site's live event transport but are filtered to each recipient.
+	siteName := c.GetString("site_name")
+	services := h.runtimeService(c, siteName)
+	dispatchNotifications(h.siteRegistry(c), doctypeName, newState, doc, siteName, c.GetString("user"), services.EventBus)
 
 	// Execute workflow on_success actions (best-effort, after state change committed).
 	if transition != nil {
@@ -1314,11 +1087,11 @@ func (h *Handler) executeWorkflowActionsSync(c *gin.Context, actions []doctype.W
 		if action.Type != "script" || action.Script == "" {
 			continue
 		}
-		if h.SiteScriptStores == nil {
+		if h.SiteScriptStores == nil && h.RuntimeServices == nil {
 			continue
 		}
-		store, exists := h.SiteScriptStores[siteNameStr]
-		if !exists || store == nil {
+		store := h.runtimeService(c, siteNameStr).ScriptStore
+		if store == nil {
 			continue
 		}
 
@@ -1375,11 +1148,11 @@ func (h *Handler) executeWorkflowActions(c *gin.Context, actions []doctype.Workf
 		}
 
 		// Look up the script.
-		if h.SiteScriptStores == nil {
+		if h.SiteScriptStores == nil && h.RuntimeServices == nil {
 			continue
 		}
-		store, exists := h.SiteScriptStores[siteNameStr]
-		if !exists || store == nil {
+		store := h.runtimeService(c, siteNameStr).ScriptStore
+		if store == nil {
 			continue
 		}
 
@@ -1425,7 +1198,7 @@ func (h *Handler) executeWorkflowActions(c *gin.Context, actions []doctype.Workf
 }
 
 // dispatchNotifications fires workflow notifications for a state change.
-func dispatchNotifications(registry *doctype.Registry, doctypeName, toState string, doc *doctype.Document) {
+func dispatchNotifications(registry *doctype.Registry, doctypeName, toState string, doc *doctype.Document, site, actor string, bus analytics.EventBus) {
 	wf := registry.Workflows.Get(doctypeName)
 	if wf == nil {
 		return
@@ -1434,21 +1207,29 @@ func dispatchNotifications(registry *doctype.Registry, doctypeName, toState stri
 		if n.Event != "state_change" || n.ToState != toState {
 			continue
 		}
-		data := make(map[string]string)
-		data["name"] = doc.Name
-		dt := registry.Get(doctypeName)
-		if dt != nil {
-			for _, f := range dt.DataFields() {
-				if f.Fieldtype != "Table" {
-					data[f.Fieldname] = fmt.Sprintf("%v", doc.Get(f.Fieldname))
-				}
-			}
-		}
 		for _, r := range n.Recipients {
 			if field, ok := r["field"]; ok {
 				recipient := doc.GetString(field)
 				if recipient != "" {
-					slog.Info("workflow notification", "to", recipient, "subject", n.Subject, "state", toState)
+					if bus == nil {
+						slog.Warn("workflow notification not delivered; realtime event bus unavailable", "doctype", doctypeName, "state", toState)
+						continue
+					}
+					title := strings.TrimSpace(n.Subject)
+					if title == "" {
+						title = doctypeName + " updated"
+					}
+					message := strings.TrimSpace(n.Message)
+					if message == "" {
+						message = fmt.Sprintf("%s %s moved to %s", doctypeName, doc.Name, toState)
+					}
+					if err := bus.Publish(analytics.ChangeEvent{
+						Site: site, Doctype: doctypeName, DocName: doc.Name,
+						Operation: analytics.EventNotification, Timestamp: time.Now().UTC(), ModifiedBy: actor,
+						Data: map[string]any{"recipient": recipient, "title": title, "message": message, "state": toState, "source": "workflow"},
+					}); err != nil {
+						slog.Warn("workflow notification publish failed", "doctype", doctypeName, "state", toState, "error", err)
+					}
 				}
 			}
 		}
@@ -1488,7 +1269,7 @@ func (h *Handler) HandleConfigVersion(c *gin.Context) {
 	var configJSON, changelog, label string
 	var version int
 	err := h.siteTx(c).DB.QueryRow(
-		"SELECT version, label, config, changelog FROM _kora_config_version WHERE id = ?", id,
+		h.siteQuery(c, "SELECT version, label, config, changelog FROM _kora_config_version WHERE id = ?"), id,
 	).Scan(&version, &label, &configJSON, &changelog)
 	if err != nil {
 		writeError(c, http.StatusNotFound, "version.not_found", "Version not found", nil)
@@ -1510,7 +1291,7 @@ func (h *Handler) HandleConfigDiff(c *gin.Context) {
 	}
 	// First check if the "to" version has a stored change_list.
 	var changeList string
-	h.siteTx(c).DB.QueryRow("SELECT COALESCE(change_list, '') FROM _kora_config_version WHERE id = ?", toID).Scan(&changeList)
+	h.siteTx(c).DB.QueryRow(h.siteQuery(c, "SELECT COALESCE(change_list, '') FROM _kora_config_version WHERE id = ?"), toID).Scan(&changeList)
 	if changeList != "" {
 		var diff doctype.ConfigDiffFull
 		if err := json.Unmarshal([]byte(changeList), &diff); err == nil && diff.Doctypes != nil && len(diff.Doctypes.Changes) > 0 {
@@ -1520,8 +1301,8 @@ func (h *Handler) HandleConfigDiff(c *gin.Context) {
 	}
 	// Fallback: parse config columns (handles JSON and s-expression).
 	var fromConfig, toConfig string
-	h.siteTx(c).DB.QueryRow("SELECT config FROM _kora_config_version WHERE id = ?", fromID).Scan(&fromConfig)
-	h.siteTx(c).DB.QueryRow("SELECT config FROM _kora_config_version WHERE id = ?", toID).Scan(&toConfig)
+	h.siteTx(c).DB.QueryRow(h.siteQuery(c, "SELECT config FROM _kora_config_version WHERE id = ?"), fromID).Scan(&fromConfig)
+	h.siteTx(c).DB.QueryRow(h.siteQuery(c, "SELECT config FROM _kora_config_version WHERE id = ?"), toID).Scan(&toConfig)
 	if fromConfig == "" || toConfig == "" {
 		writeError(c, http.StatusNotFound, "version.not_found", "Version not found", nil)
 		return
@@ -2006,14 +1787,14 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 	siteNameStr, _ := siteName.(string)
 
 	// Look up the script.
-	if h.SiteScriptStores == nil {
+	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: map[string]string{"message": fmt.Sprintf("method %q not found", methodName)},
 		})
 		return
 	}
-	store, exists := h.SiteScriptStores[siteNameStr]
-	if !exists || store == nil {
+	store := h.runtimeService(c, siteNameStr).ScriptStore
+	if store == nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: map[string]string{"message": fmt.Sprintf("method %q not found", methodName)},
 		})
@@ -2063,8 +1844,8 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 	// Build a provider for API method scripts (enables kora.getDoc, kora.http, etc.)
 	tx := h.siteTx(c)
 	var ss *secret.Store
-	if h.SiteSecretStores != nil {
-		ss = h.SiteSecretStores[siteNameStr]
+	if h.SiteSecretStores != nil || h.RuntimeServices != nil {
+		ss = h.runtimeService(c, siteNameStr).SecretStore
 	}
 	provider := NewScriptProvider(tx, h.siteRegistry(c), siteNameStr, ss, h.ScriptHTTPAllowlist)
 

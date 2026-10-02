@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -9,14 +11,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/script"
 	"github.com/asenawritescode/kora/secret"
 )
 
-// scriptProvider bridges the JS runtime to the Kora engine.
-// It has full access to the ORM, registry, and secrets.
+// scriptProvider bridges the JS runtime to Kora's canonical query and command APIs.
 type scriptProvider struct {
 	tx          *orm.TxManager
 	registry    *doctype.Registry
@@ -26,7 +29,9 @@ type scriptProvider struct {
 	// HTTP allowlist controls which domains scripts can call.
 	HTTPAllowlist []string
 
-	httpClient *http.Client
+	httpClient       *http.Client
+	activeHooks      []string
+	mutationExecutor script.MutationExecutor
 }
 
 // NewScriptProvider creates a provider with a scoped HTTP client.
@@ -133,26 +138,12 @@ func (p *scriptProvider) SaveDoc(doctypeName string, doc map[string]any, modifie
 		return fmt.Errorf("document must have a 'name' field")
 	}
 
-	// Fetch existing document to get old state.
-	existing, err := p.tx.GetDoc(dt, name, "")
+	data, err := scriptMutationFields(dt, p.registry, doc)
 	if err != nil {
-		return fmt.Errorf("fetching existing: %w", err)
+		return err
 	}
-	if existing == nil {
-		return fmt.Errorf("document %q not found", name)
-	}
-	oldDoc := cloneScriptDocument(existing)
-
-	doc = normalizeScriptDocumentInput(dt, p.registry, doc)
-
-	// Merge changes into existing document.
-	for k, v := range doc {
-		if k != "name" && k != "creation" && k != "modified" && k != "modified_by" && k != "owner" && k != "doc_status" {
-			existing.Set(k, v)
-		}
-	}
-
-	return p.tx.Save(dt, existing, modifiedBy, "", oldDoc)
+	_, err = p.executeRecordMutation(kernel.CommandRecordUpdate, dt.Name, name, data, modifiedBy, "")
+	return err
 }
 
 // CreateDoc creates a new document.
@@ -162,11 +153,23 @@ func (p *scriptProvider) CreateDoc(doctypeName string, doc map[string]any, owner
 		return nil, fmt.Errorf("doctype %q not found", doctypeName)
 	}
 
-	d := &doctype.Document{DocType: dt.Name, Fields: normalizeScriptDocumentInput(dt, p.registry, doc), IsNew: true}
-	if err := p.tx.Insert(dt, d, owner, modifiedBy); err != nil {
+	data, err := scriptMutationFields(dt, p.registry, doc)
+	if err != nil {
 		return nil, err
 	}
-	return d.ToMap(), nil
+	result, err := p.executeRecordMutation(kernel.CommandRecordCreate, dt.Name, "", data, modifiedBy, owner)
+	if err != nil {
+		return nil, err
+	}
+	// KoraProvider historically echoes unknown input keys in the immediate
+	// create result, although the ORM never persists them. Keep that behavior
+	// at this adapter boundary; kernel and stored documents remain schema-only.
+	for key, value := range doc {
+		if dt.GetField(key) == nil && !isScriptSystemField(key) {
+			result[key] = value
+		}
+	}
+	return result, nil
 }
 
 // DeleteDoc deletes a document by doctype and name.
@@ -175,7 +178,141 @@ func (p *scriptProvider) DeleteDoc(doctypeName, name string) error {
 	if dt == nil {
 		return fmt.Errorf("doctype %q not found", doctypeName)
 	}
-	return p.tx.Delete(dt, name, "")
+	_, err := p.executeRecordMutation(kernel.CommandRecordDelete, dt.Name, name, nil, p.tx.CurrentUser, "")
+	return err
+}
+
+func (p *scriptProvider) WithLifecycleHook(_ string, _ script.Event, scriptName string) script.KoraProvider {
+	copyProvider := *p
+	copyProvider.activeHooks = append(append([]string(nil), p.activeHooks...), scriptName)
+	return &copyProvider
+}
+
+func (p *scriptProvider) WithMutationExecutor(executor script.MutationExecutor) script.KoraProvider {
+	copyProvider := *p
+	copyProvider.mutationExecutor = executor
+	return &copyProvider
+}
+
+func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string, fields json.RawMessage, actorUser, owner string) (map[string]any, error) {
+	if p.tx == nil || p.tx.DB == nil || p.registry == nil {
+		return nil, fmt.Errorf("script provider is not bound to a site database")
+	}
+	if strings.TrimSpace(actorUser) == "" {
+		actorUser = p.tx.CurrentUser
+	}
+	if strings.TrimSpace(actorUser) == "" {
+		actorUser = "script-runtime"
+	}
+	roles := append([]string(nil), p.tx.CurrentUserRoles...)
+	if len(roles) == 0 && p.tx.CurrentUserRole != "" {
+		roles = []string{p.tx.CurrentUserRole}
+	}
+	if len(roles) == 0 {
+		// Lifecycle scripts historically ran with the system's unrestricted ORM
+		// capability. Preserve that trusted internal behavior explicitly rather
+		// than making an unauthenticated public adapter permissive.
+		roles = []string{doctype.AdminRole}
+	}
+
+	rawPayload, err := json.Marshal(struct {
+		Doctype string          `json:"doctype"`
+		Name    string          `json:"name,omitempty"`
+		Data    json.RawMessage `json:"data,omitempty"`
+	}{Doctype: doctypeName, Name: name, Data: fields})
+	if err != nil {
+		return nil, fmt.Errorf("encode script record payload: %w", err)
+	}
+
+	principalType := contract.PrincipalHuman
+	if actorUser == "script-runtime" || actorUser == "system" {
+		principalType = contract.PrincipalService
+	}
+	actor := contract.ActorContext{
+		PrincipalID: actorUser, PrincipalType: principalType,
+		SubjectUserID: p.tx.CurrentUser, Site: p.site, Roles: roles,
+	}
+	user := actorUser
+	ctx := p.tx.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	mutation := script.MutationRequest{
+		Command: command, Payload: rawPayload, Site: p.site, User: user, Owner: owner,
+		PrincipalID: actor.PrincipalID, PrincipalType: string(actor.PrincipalType),
+		SubjectUserID: actor.SubjectUserID, UserRole: p.tx.CurrentUserRole, Roles: roles,
+		SkipHookScripts: append([]string(nil), p.activeHooks...), AllowReadOnly: true,
+	}
+	var resultData json.RawMessage
+	if p.mutationExecutor != nil {
+		resultData, err = p.mutationExecutor.Execute(ctx, mutation)
+	} else {
+		k := kernel.New(p.tx.Dialect, p.tx.Outbox)
+		k.TxManager = p.tx
+		var result contract.CommandResult
+		result, cerr := k.Execute(ctx, p.tx.DB, p.registry, kernel.Operation{
+			Context: kernel.OperationContext{
+				Site: p.site, Actor: actor, User: user, Owner: owner,
+				UserRole: p.tx.CurrentUserRole, Roles: roles,
+				SkipHookScripts:     append([]string(nil), p.activeHooks...),
+				AllowReadOnlyFields: true, Source: kernel.SourceIntegration,
+			},
+			Command: command, Payload: rawPayload,
+		})
+		if cerr != nil {
+			return nil, cerr
+		}
+		resultData = result.Data
+	}
+	if err != nil {
+		return nil, err
+	}
+	var operation kernel.ResultData
+	if err := json.Unmarshal(resultData, &operation); err != nil {
+		return nil, fmt.Errorf("decode script record result: %w", err)
+	}
+	return operation.Document, nil
+}
+
+func scriptMutationFields(dt *doctype.DocType, registry *doctype.Registry, fields map[string]any) (json.RawMessage, error) {
+	normalized := normalizeScriptDocumentInput(dt, registry, fields)
+	allowed := make(map[string]any, len(normalized))
+	for key, value := range normalized {
+		field := dt.GetField(key)
+		if field == nil || isScriptSystemField(key) {
+			continue
+		}
+		if children, ok := value.([]*doctype.Document); ok {
+			rows := make([]any, 0, len(children))
+			childDT := registry.Get(field.Options)
+			for _, child := range children {
+				row := make(map[string]any, len(child.Fields))
+				for childField, childValue := range child.Fields {
+					if childDT == nil || childDT.GetField(childField) != nil {
+						row[childField] = childValue
+					}
+				}
+				rows = append(rows, row)
+			}
+			allowed[key] = rows
+			continue
+		}
+		allowed[key] = value
+	}
+	encoded, err := json.Marshal(allowed)
+	if err != nil {
+		return nil, fmt.Errorf("encode script fields: %w", err)
+	}
+	return encoded, nil
+}
+
+func isScriptSystemField(name string) bool {
+	switch name {
+	case "name", "creation", "modified", "modified_by", "owner", "doc_status", "revision":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetSecret returns the decrypted value of a secret from _kora_secret.

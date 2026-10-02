@@ -1,0 +1,26 @@
+name: POS Journal Line
+module: Retail POS Finance
+is_child_table: true
+title_field: account
+fields:
+  - fieldname: account
+    fieldtype: Link
+    options: POS Account
+    label: Account
+    reqd: true
+  - fieldname: debit
+    fieldtype: Currency
+    label: Debit
+    default: 0
+  - fieldname: credit
+    fieldtype: Currency
+    label: Credit
+    default: 0
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till session

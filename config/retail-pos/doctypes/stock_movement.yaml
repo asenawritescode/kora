@@ -1,0 +1,66 @@
+name: Stock Movement
+module: Retail Pos
+title_field: reference
+search_fields: reference, product, warehouse, movement_type, source_reference
+sort_field: posting_date
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product
+    reqd: true
+    in_list_view: true
+  - fieldname: movement_type
+    fieldtype: Select
+    label: Movement type
+    options: |
+      Receipt
+      Sale
+      Adjustment In
+      Adjustment Out
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    in_list_view: true
+  - fieldname: unit_cost
+    fieldtype: Currency
+    label: Unit cost
+  - fieldname: source_type
+    fieldtype: Data
+    label: Source type
+  - fieldname: source_reference
+    fieldtype: Data
+    label: Source reference
+    in_list_view: true
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+  - fieldname: posting_date
+    fieldtype: Datetime
+    label: Posting date
+    reqd: true
+    in_list_view: true
+  - fieldname: posted_by
+    fieldtype: User
+    label: Posted by
+    read_only: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Posted
+      Cancelled
+    default: Draft
+    in_list_view: true

@@ -7,6 +7,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var experienceHexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
@@ -32,7 +36,7 @@ func (h *Handler) resolveTenantExperience(c *gin.Context) TenantExperience {
 	if siteName == "" {
 		return TenantExperience{Branding: branding, Copy: copy}
 	}
-	for key, target := range map[string]*string{
+	targets := map[string]*string{
 		"branding.app_name": &branding.AppName, "branding.short_name": &branding.ShortName,
 		"branding.logo_url": &branding.LogoURL, "branding.logo_dark_url": &branding.LogoDarkURL,
 		"branding.favicon_url": &branding.FaviconURL, "branding.primary_color": &branding.PrimaryColor,
@@ -41,21 +45,43 @@ func (h *Handler) resolveTenantExperience(c *gin.Context) TenantExperience {
 		"copy.login_title": &copy.LoginTitle, "copy.login_description": &copy.LoginDescription,
 		"copy.login_help": &copy.LoginHelp, "copy.workspace_loading": &copy.WorkspaceLoading,
 		"copy.empty_records": &copy.EmptyRecords, "copy.support_label": &copy.SupportLabel,
-	} {
-		if value, err := h.readTenantExperienceSetting(c, siteName, key); err == nil && value != "" {
+	}
+
+	ctx, span := otel.Tracer("kora/api").Start(c.Request.Context(), "api.tenant_experience.load_settings",
+		trace.WithAttributes(
+			attribute.String("db.operation.name", "SELECT"),
+			attribute.String("kora.site.name", siteName),
+		),
+	)
+	defer span.End()
+
+	rows, err := h.siteTx(c).DB.QueryContext(ctx,
+		h.siteQuery(c, "SELECT setting_key, setting_value FROM _kora_site_setting WHERE site = ?"),
+		siteName,
+	)
+	if err != nil {
+		span.SetStatus(codes.Error, "loading tenant experience settings")
+		return TenantExperience{Branding: branding, Copy: copy}
+	}
+	defer rows.Close()
+
+	loaded := 0
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			span.SetStatus(codes.Error, "scanning tenant experience settings")
+			break
+		}
+		if target, ok := targets[key]; ok && value != "" {
 			*target = value
+			loaded++
 		}
 	}
+	if err := rows.Err(); err != nil {
+		span.SetStatus(codes.Error, "reading tenant experience settings")
+	}
+	span.SetAttributes(attribute.Int("kora.settings.loaded", loaded))
 	return TenantExperience{Branding: branding, Copy: copy}
-}
-
-func (h *Handler) readTenantExperienceSetting(c *gin.Context, siteName, key string) (string, error) {
-	var value string
-	err := h.siteTx(c).DB.QueryRow(
-		"SELECT setting_value FROM _kora_site_setting WHERE site = ? AND setting_key = ?",
-		siteName, key,
-	).Scan(&value)
-	return value, err
 }
 
 func (h *Handler) HandleSystemBranding(c *gin.Context) {
@@ -92,7 +118,7 @@ func (h *Handler) HandleSystemExperienceUpdate(c *gin.Context) {
 	}
 	db := h.siteTx(c).DB
 	siteName := c.GetString("site_name")
-	query := "INSERT INTO _kora_site_setting (site, setting_key, setting_value) VALUES (?, ?, ?) " + h.TxManager.Dialect.UpsertClause([]string{"site", "setting_key"}, []string{"setting_value"})
+	query := h.siteQuery(c, "INSERT INTO _kora_site_setting (site, setting_key, setting_value) VALUES (?, ?, ?)") + " " + h.siteDialect(c).UpsertClause([]string{"site", "setting_key"}, []string{"setting_value"})
 	for key, value := range values {
 		if len(value) > 255 {
 			writeError(c, http.StatusBadRequest, "validation.branding_value_too_long", "Branding values must be 255 characters or fewer", map[string]any{"field": key})

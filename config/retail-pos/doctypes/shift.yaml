@@ -1,0 +1,38 @@
+name: Shift
+module: Retail POS and Store Operations
+is_submittable: true
+title_field: reference
+search_fields: reference, status
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Shift reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Planned
+      Open
+      Paused
+      Closed
+    default: Open
+    in_list_view: true
+  - fieldname: supervisor
+    fieldtype: User
+    label: Supervisor
+  - fieldname: started_at
+    fieldtype: Datetime
+    label: Started at
+  - fieldname: ended_at
+    fieldtype: Datetime
+    label: Ended at
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+  - fieldname: members
+    fieldtype: Table
+    label: Shift members
+    options: Shift Member

@@ -4,9 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/spf13/cobra"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/secret"
 	"github.com/asenawritescode/kora/site"
+	"github.com/spf13/cobra"
 )
 
 var secretCmd = &cobra.Command{
@@ -25,12 +26,12 @@ var secretSetCmd = &cobra.Command{
 			return fmt.Errorf("--site, --key, and --value are required")
 		}
 
-		db, err := loadSiteDB(siteName)
+		db, dialect, err := loadSiteDB(siteName)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
-		store := secret.NewStore(db)
+		store := secret.NewStore(db, dialect)
 		if err := store.Set(siteName, key, value); err != nil {
 			return fmt.Errorf("setting secret: %w", err)
 		}
@@ -39,14 +40,14 @@ var secretSetCmd = &cobra.Command{
 	},
 }
 
-func loadSiteDB(siteName string) (*sql.DB, error) {
+func loadSiteDB(siteName string) (*sql.DB, kdb.Dialect, error) {
 	common := site.CommonConfigFromEnv()
 	cfg := site.ReconstructSiteConfig(siteName, common, nil)
 	db, err := site.Connect(cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return db, nil
+	return db, kdb.Resolve(cfg.DBType), nil
 }
 
 var secretGetCmd = &cobra.Command{
@@ -58,12 +59,12 @@ var secretGetCmd = &cobra.Command{
 		if siteName == "" || key == "" {
 			return fmt.Errorf("--site and --key are required")
 		}
-		db, err := loadSiteDB(siteName)
+		db, dialect, err := loadSiteDB(siteName)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
-		store := secret.NewStore(db)
+		store := secret.NewStore(db, dialect)
 		val, err := store.Get(siteName, key)
 		if err != nil {
 			return fmt.Errorf("getting secret: %w", err)
@@ -81,12 +82,12 @@ var secretListCmd = &cobra.Command{
 		if siteName == "" {
 			return fmt.Errorf("--site is required")
 		}
-		db, err := loadSiteDB(siteName)
+		db, dialect, err := loadSiteDB(siteName)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
-		store := secret.NewStore(db)
+		store := secret.NewStore(db, dialect)
 		keys, err := store.List(siteName)
 		if err != nil {
 			return fmt.Errorf("listing secrets: %w", err)
@@ -107,12 +108,12 @@ var secretDeleteCmd = &cobra.Command{
 		if siteName == "" || key == "" {
 			return fmt.Errorf("--site and --key are required")
 		}
-		db, err := loadSiteDB(siteName)
+		db, dialect, err := loadSiteDB(siteName)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
-		store := secret.NewStore(db)
+		store := secret.NewStore(db, dialect)
 		if err := store.Delete(siteName, key); err != nil {
 			return fmt.Errorf("deleting secret: %w", err)
 		}

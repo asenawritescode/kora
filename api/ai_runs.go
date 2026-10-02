@@ -44,7 +44,8 @@ func (h *Handler) HandleAICancel(c *gin.Context) {
 	runID := c.Param("id")
 	var req aiCancelRequest
 	_ = c.ShouldBindJSON(&req)
-	if err := ai.CancelRun(c.Request.Context(), tx.DB, runID, req.Reason); err != nil {
+	ctx := ai.WithDialect(c.Request.Context(), tx.Dialect)
+	if err := ai.CancelRun(ctx, tx.DB, runID, req.Reason); err != nil {
 		writeError(c, http.StatusNotFound, "ai_run.not_found", err.Error(), nil)
 		return
 	}
@@ -57,7 +58,8 @@ func (h *Handler) HandleAIResume(c *gin.Context) {
 	runID := c.Param("id")
 	var req aiResumeRequest
 	_ = c.ShouldBindJSON(&req)
-	rec, err := ai.ResumeRun(c.Request.Context(), tx.DB, runID, req.ResumeToken)
+	ctx := ai.WithDialect(c.Request.Context(), tx.Dialect)
+	rec, err := ai.ResumeRun(ctx, tx.DB, runID, req.ResumeToken)
 	if err != nil {
 		writeError(c, http.StatusNotFound, "ai_run.not_found", err.Error(), nil)
 		return
@@ -82,12 +84,13 @@ func (h *Handler) HandleAIGrantApproval(c *gin.Context) {
 			}
 		}
 	}
-	rec, err := ai.GrantApproval(c.Request.Context(), tx.DB, approvalID, req.GrantedBy)
+	ctx := ai.WithDialect(c.Request.Context(), tx.Dialect)
+	rec, err := ai.GrantApproval(ctx, tx.DB, approvalID, req.GrantedBy)
 	if err != nil {
 		writeError(c, http.StatusNotFound, "ai_run.not_found", err.Error(), nil)
 		return
 	}
-	run, err := ai.MarkRunPlanning(c.Request.Context(), tx.DB, rec.OperationID)
+	run, err := ai.MarkRunPlanning(ctx, tx.DB, rec.OperationID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
 		return
@@ -104,7 +107,7 @@ func (h *Handler) HandleAIGrantApproval(c *gin.Context) {
 // HandleAIListApprovals returns approval rows for the current site.
 func (h *Handler) HandleAIListApprovals(c *gin.Context) {
 	tx := h.siteTx(c)
-	if err := ai.EnsureAIRunTables(c.Request.Context(), tx.DB); err != nil {
+	if err := ai.EnsureAIRunTables(c.Request.Context(), tx.DB, tx.Dialect); err != nil {
 		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
 		return
 	}
@@ -112,11 +115,11 @@ func (h *Handler) HandleAIListApprovals(c *gin.Context) {
 	if state == "" {
 		state = "pending_approval"
 	}
-	rows, err := tx.DB.QueryContext(c.Request.Context(), `
+	rows, err := tx.DB.QueryContext(c.Request.Context(), h.siteQuery(c, `
 SELECT id, operation_id, actor_principal_id, actor_principal_type, tool_name, state, target_fingerprint, argument_hash, record_version, requested_at, expires_at, granted_at, granted_by, auth_session_id
 FROM _kora_ai_approval
 WHERE site = ? AND state = ?
-ORDER BY requested_at DESC`, c.GetString("site_name"), state)
+ORDER BY requested_at DESC`), c.GetString("site_name"), state)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
 		return
@@ -148,7 +151,8 @@ ORDER BY requested_at DESC`, c.GetString("site_name"), state)
 // HandleAIRetentionCleanup removes expired AI conversations, runs, messages, and steps.
 func (h *Handler) HandleAIRetentionCleanup(c *gin.Context) {
 	tx := h.siteTx(c)
-	removed, err := ai.CleanupExpired(c.Request.Context(), tx.DB, time.Now().UTC())
+	ctx := ai.WithDialect(c.Request.Context(), tx.Dialect)
+	removed, err := ai.CleanupExpired(ctx, tx.DB, time.Now().UTC())
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
 		return

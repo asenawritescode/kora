@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/smtp"
 	"net/textproto"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -68,6 +69,9 @@ func (s *Sender) Send(msg *Message) error {
 			"to", strings.Join(msg.To, ", "),
 			"subject", msg.Subject,
 		)
+		if os.Getenv("KORA_EMAIL_LOG_BODY") == "true" {
+			slog.Info("logged email body", "to", strings.Join(msg.To, ", "), "body", msg.TextBody)
+		}
 		return nil
 	}
 	if len(msg.To) == 0 {

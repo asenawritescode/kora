@@ -1,0 +1,24 @@
+name: Sale Item
+module: Point of Sale
+is_child_table: true
+title_field: product
+fields:
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product or service
+    reqd: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    default: 1
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit price
+    reqd: true
+    linked_field: product.selling_price
+  - fieldname: line_total
+    fieldtype: Currency
+    label: Line total
+    read_only: true

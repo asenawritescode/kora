@@ -15,9 +15,62 @@ fields:
   - fieldname: source_record
     fieldtype: Data
     label: Source Record
+    description: The original opening or handover record this till session came from.
   - fieldname: assignee
-    fieldtype: Data
+    fieldtype: User
     label: Assignee
+    description: Select the existing user responsible for this till session.
+    in_list_view: true
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+    reqd: true
+    in_list_view: true
+  - fieldname: shift
+    fieldtype: Link
+    options: Shift
+    label: Shift
+    reqd: true
+  - fieldname: opened_by
+    fieldtype: User
+    label: Opened by
+    read_only: true
+  - fieldname: closed_by
+    fieldtype: User
+    label: Closed by
+    read_only: true
+  - fieldname: opening_cash
+    fieldtype: Currency
+    label: Opening cash
+    reqd: true
+    default: 0
+  - fieldname: cash_sales
+    fieldtype: Currency
+    label: Cash sales
+    read_only: true
+    default: 0
+  - fieldname: cash_refunds
+    fieldtype: Currency
+    label: Cash refunds
+    read_only: true
+    default: 0
+  - fieldname: expected_cash
+    fieldtype: Currency
+    label: Expected closing cash
+    read_only: true
+    default: 0
+  - fieldname: counted_cash
+    fieldtype: Currency
+    label: Counted closing cash
+  - fieldname: variance
+    fieldtype: Currency
+    label: Variance
+    read_only: true
+    default: 0
+  - fieldname: closed_at
+    fieldtype: Datetime
+    label: Closed at
   - fieldname: evidence
     fieldtype: Text
     label: Evidence

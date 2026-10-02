@@ -2,6 +2,7 @@ package auth
 
 import (
 	"database/sql"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -65,6 +66,32 @@ func TestAuthenticateExtension_LoadsPermissions(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestProvisioningTokenIsRestrictedToManagedCredentialRotation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "provisioning-secret")
+	guard := (&SiteGuard{}).Middleware(true)
+	for _, tc := range []struct {
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{method: http.MethodPost, path: "/api/internal/channel/managed-client/rotate", wantStatus: 200},
+		{method: http.MethodGet, path: "/api/internal/site/identity", wantStatus: 200},
+		{method: http.MethodGet, path: "/api/internal/channel/tools", wantStatus: 401},
+	} {
+		router := gin.New()
+		router.Use(guard)
+		router.Handle(tc.method, tc.path, func(c *gin.Context) { c.Status(http.StatusOK) })
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(tc.method, tc.path, nil)
+		request.Header.Set("Authorization", "Bearer provisioning-secret")
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != tc.wantStatus {
+			t.Errorf("path %s returned %d, want %d", tc.path, recorder.Code, tc.wantStatus)
+		}
 	}
 }
 

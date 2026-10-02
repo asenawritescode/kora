@@ -27,3 +27,12 @@ func TestRebindPreservesStringLiterals(t *testing.T) {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }
+
+func TestRebindHandlesEmptyStringLiterals(t *testing.T) {
+	d := &PostgresDialect{}
+	got := Rebind(d, `SELECT * FROM t WHERE value = '' AND id = ?`)
+	want := `SELECT * FROM t WHERE value = '' AND id = $1`
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}

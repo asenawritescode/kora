@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/asenawritescode/kora/analytics"
@@ -17,11 +18,12 @@ import (
 // Worker delivers webhooks to extension endpoints.
 // It subscribes to the analytics event bus and dispatches matching events.
 type Worker struct {
-	DB      *sql.DB
-	Bus     *analytics.MultiBus
-	Site    string
-	client  *http.Client
-	closeCh chan struct{}
+	DB       *sql.DB
+	Bus      *analytics.MultiBus
+	Site     string
+	client   *http.Client
+	closeCh  chan struct{}
+	stopOnce sync.Once
 
 	// listenerCh is the channel registered with the MultiBus for fan-out.
 	listenerCh chan analytics.ChangeEvent
@@ -86,15 +88,20 @@ func (w *Worker) Start() {
 
 // Stop shuts down the worker and removes its listener from the event bus.
 func (w *Worker) Stop() {
-	if w.listenerCh != nil {
-		w.Bus.RemoveListener(w.listenerCh)
-	}
-	close(w.closeCh)
-	slog.Info("webhook worker stopped", "site", w.Site)
+	w.stopOnce.Do(func() {
+		if w.listenerCh != nil && w.Bus != nil {
+			w.Bus.RemoveListener(w.listenerCh)
+		}
+		close(w.closeCh)
+		slog.Info("webhook worker stopped", "site", w.Site)
+	})
 }
 
 // handleEvent processes a single change event and delivers to matching extensions.
 func (w *Worker) handleEvent(event analytics.ChangeEvent) {
+	if event.Operation == analytics.EventNotification {
+		return
+	}
 	// Map analytics operation to webhook event name.
 	eventName := mapOpToEvent(event.Operation, event.Doctype)
 
@@ -114,12 +121,12 @@ func (w *Worker) handleEvent(event analytics.ChangeEvent) {
 func (w *Worker) deliver(ext Extension, event analytics.ChangeEvent, eventName string) {
 	// Build event envelope.
 	envelope := map[string]any{
-		"id":             ulid.Make().String(),
-		"source":         "kora",
-		"event":          eventName,
-		"version":        "1",
-		"occurred_at":    event.Timestamp.Format(time.RFC3339Nano),
-		"site":           event.Site,
+		"id":          ulid.Make().String(),
+		"source":      "kora",
+		"event":       eventName,
+		"version":     "1",
+		"occurred_at": event.Timestamp.Format(time.RFC3339Nano),
+		"site":        event.Site,
 		"data": map[string]any{
 			"doctype":  event.Doctype,
 			"name":     event.DocName,
@@ -193,7 +200,7 @@ func (w *Worker) loadMatchingExtensions(doctype, eventName string) ([]Extension,
 	for rows.Next() {
 		var ext Extension
 		var subsJSON string
-		if err := rows.Scan(&ext.Name, &ext.EndpointURL, 		&ext.Secret, &subsJSON, &ext.TimeoutSec, &ext.ConsecutiveFailures); err != nil {
+		if err := rows.Scan(&ext.Name, &ext.EndpointURL, &ext.Secret, &subsJSON, &ext.TimeoutSec, &ext.ConsecutiveFailures); err != nil {
 			continue
 		}
 		// Parse subscriptions JSON.
@@ -243,18 +250,18 @@ func (w *Worker) updateExtensionStats(extName, status string) {
 
 // Extension represents a registered webhook extension.
 type Extension struct {
-	Name                 string
-	EndpointURL          string
-	Secret               string
-	TimeoutSec           int
-	ConsecutiveFailures  int
+	Name                string
+	EndpointURL         string
+	Secret              string
+	TimeoutSec          int
+	ConsecutiveFailures int
 }
 
 func (e Extension) secret() string { return e.Secret }
 
 // Subscription defines an event filter for an extension.
 type Subscription struct {
-	Event  string            `json:"event"`
+	Event  string             `json:"event"`
 	Filter SubscriptionFilter `json:"filter,omitempty"`
 }
 
@@ -334,4 +341,3 @@ func (w *Worker) RetryDeadLetters() error {
 	slog.Info("webhook: retried dead letters", "count", retried)
 	return nil
 }
-

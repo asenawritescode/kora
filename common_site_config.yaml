@@ -28,6 +28,7 @@ admin_role: Administrator
 # Rate limiting
 rate_limit_rps: 100      # Requests per second per user
 rate_limit_burst: 20
+trusted_proxies: []      # CIDRs allowed to supply X-Forwarded-For (empty trusts no forwarded headers)
 
 # Database connection pool
 db_max_open_conns: 25

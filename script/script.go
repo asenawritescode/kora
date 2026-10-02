@@ -5,9 +5,12 @@ package script
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/asenawritescode/kora/db"
 )
 
 // Type classifies the kind of script.
@@ -87,15 +90,58 @@ type Runner interface {
 	Close() error
 }
 
-// Store persists and retrieves script definitions.
-type Store struct {
-	DB      *sql.DB
-	Dialect Dialect
+// MutationRequest is a script-originated record command. The executor is
+// scoped to the current kernel transaction for lifecycle hooks, or absent
+// after commit when the provider should start a normal operation.
+type MutationRequest struct {
+	Command         string          `json:"command"`
+	Payload         json.RawMessage `json:"payload"`
+	Site            string          `json:"site"`
+	User            string          `json:"user"`
+	Owner           string          `json:"owner,omitempty"`
+	PrincipalID     string          `json:"principal_id"`
+	PrincipalType   string          `json:"principal_type"`
+	SubjectUserID   string          `json:"subject_user_id,omitempty"`
+	UserRole        string          `json:"user_role,omitempty"`
+	Roles           []string        `json:"roles,omitempty"`
+	SkipHookScripts []string        `json:"skip_hook_scripts,omitempty"`
+	AllowReadOnly   bool            `json:"allow_read_only,omitempty"`
 }
 
-// Dialect abstracts SQL dialect differences for script storage.
-type Dialect interface {
-	Placeholder(n int) string
+// MutationExecutor executes a nested script write in the current operation
+// transaction. The returned bytes are the canonical command result JSON.
+type MutationExecutor interface {
+	Execute(context.Context, MutationRequest) (json.RawMessage, error)
+}
+
+// MutationExecutorFunc adapts a function to MutationExecutor.
+type MutationExecutorFunc func(context.Context, MutationRequest) (json.RawMessage, error)
+
+func (f MutationExecutorFunc) Execute(ctx context.Context, req MutationRequest) (json.RawMessage, error) {
+	return f(ctx, req)
+}
+
+// MutationScopedProvider lets ORM lifecycle hooks bind a provider to the
+// active transaction without coupling the script package to the ORM.
+type MutationScopedProvider interface {
+	WithMutationExecutor(MutationExecutor) KoraProvider
+}
+
+// Store persists and retrieves script definitions using its site's database dialect.
+type Store struct {
+	DB      *sql.DB
+	Dialect db.Dialect
+}
+
+func (s *Store) dialect() db.Dialect {
+	if s.Dialect == nil {
+		panic("script.Store requires an explicit database dialect")
+	}
+	return s.Dialect
+}
+
+func (s *Store) rebind(query string) string {
+	return db.Rebind(s.dialect(), query)
 }
 
 // ScriptRecord mirrors a _kora_script row.
@@ -121,14 +167,52 @@ type ScriptRecord struct {
 	UpdatedAt      time.Time  `json:"modified"`
 }
 
+// scriptTimestamp accepts both native time values and the text timestamps
+// returned by SQLite-compatible drivers. MySQL and PostgreSQL return time.Time.
+type scriptTimestamp struct {
+	time.Time
+}
+
+func (t *scriptTimestamp) Scan(value any) error {
+	switch v := value.(type) {
+	case time.Time:
+		t.Time = v
+		return nil
+	case string:
+		return t.parse(v)
+	case []byte:
+		return t.parse(string(v))
+	case nil:
+		t.Time = time.Time{}
+		return nil
+	default:
+		return fmt.Errorf("script: unsupported timestamp value %T", value)
+	}
+}
+
+func (t *scriptTimestamp) parse(value string) error {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			t.Time = parsed
+			return nil
+		}
+	}
+	return fmt.Errorf("script: invalid timestamp %q", value)
+}
+
 // LoadActiveScripts returns all active scripts for a site, filtered by optional doctype+event.
 func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]ScriptRecord, error) {
 	query := `SELECT name, site, script_type, doctype, event, method_path, workflow_action, schedule,
 		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 		created_by, updated_by, creation, modified
 		FROM _kora_script
-		WHERE site = ? AND is_active = 1 AND script_type = 'doc_event'`
-	args := []any{site}
+		WHERE site = ? AND is_active = ? AND script_type = ?`
+	args := []any{site, true, string(TypeDocEvent)}
 
 	if doctype != "" {
 		query += " AND doctype = ?"
@@ -140,7 +224,7 @@ func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]S
 	}
 	query += " ORDER BY priority ASC"
 
-	rows, err := s.DB.Query(query, args...)
+	rows, err := s.DB.Query(s.rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("script: load active: %w", err)
 	}
@@ -150,7 +234,7 @@ func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]S
 	for rows.Next() {
 		var r ScriptRecord
 		var compiledAt, compileError, createdBy, updatedBy sql.NullString
-		var createdAt, updatedAt time.Time
+		var createdAt, updatedAt scriptTimestamp
 		if err := rows.Scan(&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,
 			&r.MethodPath, &r.WorkflowAction, &r.Schedule,
 			&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
@@ -160,8 +244,8 @@ func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]S
 		r.CompileError = compileError.String
 		r.CreatedBy = createdBy.String
 		r.UpdatedBy = updatedBy.String
-		r.CreatedAt = createdAt
-		r.UpdatedAt = updatedAt
+		r.CreatedAt = createdAt.Time
+		r.UpdatedAt = updatedAt.Time
 		if compiledAt.Valid {
 			t, _ := time.Parse("2006-01-02 15:04:05.999999", compiledAt.String)
 			r.CompiledAt = &t
@@ -177,13 +261,13 @@ func (s *Store) LoadMethodScript(site string, methodPath string) (*ScriptRecord,
 		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 		created_by, updated_by, creation, modified
 		FROM _kora_script
-		WHERE site = ? AND is_active = 1 AND script_type = 'api_method' AND method_path = ?
+		WHERE site = ? AND is_active = ? AND script_type = ? AND method_path = ?
 		LIMIT 1`
 
 	var r ScriptRecord
 	var compiledAt, compileError, createdBy, updatedBy sql.NullString
-	var createdAt, updatedAt time.Time
-	err := s.DB.QueryRow(query, site, methodPath).Scan(
+	var createdAt, updatedAt scriptTimestamp
+	err := s.DB.QueryRow(s.rebind(query), site, true, string(TypeAPIMethod), methodPath).Scan(
 		&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,
 		&r.MethodPath, &r.WorkflowAction, &r.Schedule,
 		&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
@@ -198,8 +282,8 @@ func (s *Store) LoadMethodScript(site string, methodPath string) (*ScriptRecord,
 	r.CompileError = compileError.String
 	r.CreatedBy = createdBy.String
 	r.UpdatedBy = updatedBy.String
-	r.CreatedAt = createdAt
-	r.UpdatedAt = updatedAt
+	r.CreatedAt = createdAt.Time
+	r.UpdatedAt = updatedAt.Time
 	if compiledAt.Valid {
 		t, _ := time.Parse("2006-01-02 15:04:05.999999", compiledAt.String)
 		r.CompiledAt = &t
@@ -213,10 +297,10 @@ func (s *Store) LoadWorkflowActionScripts(site string, actionName string) ([]Scr
 		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 		created_by, updated_by, creation, modified
 		FROM _kora_script
-		WHERE site = ? AND is_active = 1 AND script_type = 'workflow_action' AND workflow_action = ?
+		WHERE site = ? AND is_active = ? AND script_type = ? AND workflow_action = ?
 		ORDER BY priority ASC`
 
-	rows, err := s.DB.Query(query, site, actionName)
+	rows, err := s.DB.Query(s.rebind(query), site, true, string(TypeWorkflowAction), actionName)
 	if err != nil {
 		return nil, fmt.Errorf("script: load workflow actions: %w", err)
 	}
@@ -226,7 +310,7 @@ func (s *Store) LoadWorkflowActionScripts(site string, actionName string) ([]Scr
 	for rows.Next() {
 		var r ScriptRecord
 		var compiledAt, compileError, createdBy, updatedBy sql.NullString
-		var createdAt, updatedAt time.Time
+		var createdAt, updatedAt scriptTimestamp
 		if err := rows.Scan(&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,
 			&r.MethodPath, &r.WorkflowAction, &r.Schedule,
 			&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
@@ -236,8 +320,8 @@ func (s *Store) LoadWorkflowActionScripts(site string, actionName string) ([]Scr
 		r.CompileError = compileError.String
 		r.CreatedBy = createdBy.String
 		r.UpdatedBy = updatedBy.String
-		r.CreatedAt = createdAt
-		r.UpdatedAt = updatedAt
+		r.CreatedAt = createdAt.Time
+		r.UpdatedAt = updatedAt.Time
 		if compiledAt.Valid {
 			t, _ := time.Parse("2006-01-02 15:04:05.999999", compiledAt.String)
 			r.CompiledAt = &t
@@ -253,9 +337,9 @@ func (s *Store) LogExecution(site string, rec ScriptRecord, docType, docName str
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.Exec(
-		`INSERT INTO _kora_script_execution (id, site, script_name, script_type, doctype, docname, event, trigger_user, duration_ms, status, error_message, logged_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6))`,
+	query := fmt.Sprintf(`INSERT INTO _kora_script_execution (id, site, script_name, script_type, doctype, docname, event, trigger_user, duration_ms, status, error_message, logged_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, %s)`, s.dialect().NowTimestamp())
+	_, err = s.DB.Exec(s.rebind(query),
 		id, site, rec.Name, string(rec.ScriptType), docType, docName, string(event), triggerUser, durationMs, status, errMsg,
 	)
 	return err
@@ -290,11 +374,11 @@ func IsAfterEvent(e Event) bool {
 
 // LoadAllForSite returns all scripts for a site.
 func (s *Store) LoadAllForSite(site string) ([]ScriptRecord, error) {
-	rows, err := s.DB.Query(
+	rows, err := s.DB.Query(s.rebind(
 		`SELECT name, site, script_type, doctype, event, method_path, workflow_action, schedule,
-		 priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
-		 created_by, updated_by, creation, modified
-		 FROM _kora_script WHERE site = ? ORDER BY creation DESC`, site)
+			 priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
+			 created_by, updated_by, creation, modified
+			 FROM _kora_script WHERE site = ? ORDER BY creation DESC`), site)
 	if err != nil {
 		return nil, err
 	}
@@ -306,12 +390,12 @@ func (s *Store) LoadAllForSite(site string) ([]ScriptRecord, error) {
 func (s *Store) LoadByName(site, name string) (*ScriptRecord, error) {
 	var r ScriptRecord
 	var compiledAt, compileError, createdBy, updatedBy sql.NullString
-	var createdAt, updatedAt time.Time
-	err := s.DB.QueryRow(
+	var createdAt, updatedAt scriptTimestamp
+	err := s.DB.QueryRow(s.rebind(
 		`SELECT name, site, script_type, doctype, event, method_path, workflow_action, schedule,
-		 priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
-		 created_by, updated_by, creation, modified
-		 FROM _kora_script WHERE site = ? AND name = ?`, site, name).Scan(
+			 priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
+			 created_by, updated_by, creation, modified
+			 FROM _kora_script WHERE site = ? AND name = ?`), site, name).Scan(
 		&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event, &r.MethodPath, &r.WorkflowAction, &r.Schedule,
 		&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
 		&compiledAt, &compileError, &createdBy, &updatedBy, &createdAt, &updatedAt)
@@ -324,8 +408,8 @@ func (s *Store) LoadByName(site, name string) (*ScriptRecord, error) {
 	r.CompileError = compileError.String
 	r.CreatedBy = createdBy.String
 	r.UpdatedBy = updatedBy.String
-	r.CreatedAt = createdAt
-	r.UpdatedAt = updatedAt
+	r.CreatedAt = createdAt.Time
+	r.UpdatedAt = updatedAt.Time
 	if compiledAt.Valid {
 		t, _ := time.Parse("2006-01-02 15:04:05.999999", compiledAt.String)
 		r.CompiledAt = &t
@@ -335,10 +419,10 @@ func (s *Store) LoadByName(site, name string) (*ScriptRecord, error) {
 
 // Insert creates a new script record.
 func (s *Store) Insert(r ScriptRecord) error {
-	_, err := s.DB.Exec(
-		`INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, workflow_action, schedule,
+	query := fmt.Sprintf(`INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, workflow_action, schedule,
 		 priority, is_active, run_as, timeout_ms, script, created_by, updated_by, creation, modified)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, %[1]s, %[1]s)`, s.dialect().NowTimestamp())
+	_, err := s.DB.Exec(s.rebind(query),
 		r.Name, r.Site, string(r.ScriptType), r.DocType, string(r.Event), r.MethodPath, r.WorkflowAction, r.Schedule,
 		r.Priority, r.IsActive, r.RunAs, r.TimeoutMs, r.Script, r.CreatedBy, r.UpdatedBy)
 	return err
@@ -415,25 +499,25 @@ func (s *Store) Update(site, name string, req ScriptUpdateRequest, updatedBy str
 
 	sets = append(sets, "updated_by = ?")
 	args = append(args, updatedBy)
-	sets = append(sets, "modified = NOW(6)")
+	sets = append(sets, "modified = "+s.dialect().NowTimestamp())
 	args = append(args, site, name)
 
 	query := fmt.Sprintf("UPDATE _kora_script SET %s WHERE site = ? AND name = ?", strings.Join(sets, ", "))
-	_, err := s.DB.Exec(query, args...)
+	_, err := s.DB.Exec(s.rebind(query), args...)
 	return err
 }
 
 // Delete removes a script by site and name.
 func (s *Store) Delete(site, name string) error {
-	_, err := s.DB.Exec(`DELETE FROM _kora_script WHERE site = ? AND name = ?`, site, name)
+	_, err := s.DB.Exec(s.rebind(`DELETE FROM _kora_script WHERE site = ? AND name = ?`), site, name)
 	return err
 }
 
 // LoadExecutions returns recent executions for a script.
 func (s *Store) LoadExecutions(site, name string, limit int) ([]map[string]any, error) {
-	rows, err := s.DB.Query(
+	rows, err := s.DB.Query(s.rebind(
 		`SELECT id, script_name, script_type, doctype, docname, event, trigger_user, duration_ms, status, error_message, logged_at
-		 FROM _kora_script_execution WHERE site = ? AND script_name = ? ORDER BY logged_at DESC LIMIT ?`,
+		 FROM _kora_script_execution WHERE site = ? AND script_name = ? ORDER BY logged_at DESC LIMIT ?`),
 		site, name, limit)
 	if err != nil {
 		return nil, err
@@ -463,7 +547,7 @@ func scanScripts(rows *sql.Rows) ([]ScriptRecord, error) {
 	for rows.Next() {
 		var r ScriptRecord
 		var compiledAt, compileError, createdBy, updatedBy sql.NullString
-		var createdAt, updatedAt time.Time
+		var createdAt, updatedAt scriptTimestamp
 		if err := rows.Scan(&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,
 			&r.MethodPath, &r.WorkflowAction, &r.Schedule,
 			&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
@@ -473,8 +557,8 @@ func scanScripts(rows *sql.Rows) ([]ScriptRecord, error) {
 		r.CompileError = compileError.String
 		r.CreatedBy = createdBy.String
 		r.UpdatedBy = updatedBy.String
-		r.CreatedAt = createdAt
-		r.UpdatedAt = updatedAt
+		r.CreatedAt = createdAt.Time
+		r.UpdatedAt = updatedAt.Time
 		if compiledAt.Valid {
 			t, _ := time.Parse("2006-01-02 15:04:05.999999", compiledAt.String)
 			r.CompiledAt = &t

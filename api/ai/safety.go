@@ -89,7 +89,7 @@ func hasTextifiedToolCall(content string) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Narrate-then-act detection (GPT-4o false finish)
+// Detect responses that promise work without returning a result.
 // ---------------------------------------------------------------------------
 
 var narrativePatterns = []string{

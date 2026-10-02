@@ -17,6 +17,14 @@ type PostgresDialect struct{}
 
 func (d *PostgresDialect) DriverName() string { return "postgres" }
 
+func (d *PostgresDialect) IsWriteConflict(err error) bool {
+	var postgresErr *pq.Error
+	if !errors.As(err, &postgresErr) {
+		return false
+	}
+	return postgresErr.Code == "40001" || postgresErr.Code == "40P01"
+}
+
 func (d *PostgresDialect) Open(cfg DBConfig) (*sql.DB, error) {
 	// Build DSN: postgres://user:pass@host:port/db?sslmode=disable
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
@@ -161,6 +169,7 @@ func (d *PostgresDialect) CreateTable(dt *doctype.DocType) []string {
 		`"modified_by" VARCHAR(140) NOT NULL DEFAULT ''`,
 		`"doc_status" SMALLINT NOT NULL DEFAULT 0`,
 		`"idx" INTEGER NOT NULL DEFAULT 0`,
+		`"revision" BIGINT NOT NULL DEFAULT 1`,
 	)
 
 	// Data columns.
@@ -169,12 +178,13 @@ func (d *PostgresDialect) CreateTable(dt *doctype.DocType) []string {
 			continue
 		}
 		col := fmt.Sprintf("%s %s", d.QuoteIdent(f.Fieldname), d.ColumnType(&f))
+		defaultClause := sqlDefaultClause("postgres", f.Fieldtype, f.Default)
 		if f.Reqd {
 			col += " NOT NULL"
-		} else {
+		} else if defaultClause == "" {
 			col += " DEFAULT NULL"
 		}
-		col += sqlDefaultClause("postgres", f.Fieldtype, f.Default)
+		col += defaultClause
 		cols = append(cols, col)
 	}
 
@@ -204,12 +214,13 @@ func (d *PostgresDialect) CreateTable(dt *doctype.DocType) []string {
 
 func (d *PostgresDialect) AddColumn(tableName string, f *doctype.Field) string {
 	col := fmt.Sprintf("%s %s", d.QuoteIdent(f.Fieldname), d.ColumnType(f))
+	defaultClause := sqlDefaultClause("postgres", f.Fieldtype, f.Default)
 	if f.Reqd {
 		col += " NOT NULL"
-	} else {
+	} else if defaultClause == "" {
 		col += " DEFAULT NULL"
 	}
-	col += sqlDefaultClause("postgres", f.Fieldtype, f.Default)
+	col += defaultClause
 	return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", d.QuoteIdent(tableName), col)
 }
 
@@ -550,7 +561,7 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 			"label" VARCHAR(255) NOT NULL DEFAULT '',
 			"changelog" JSONB,
 			"status" VARCHAR(20) NOT NULL DEFAULT 'Draft',
-			"config" JSONB,
+			"config" TEXT,
 			"change_list" JSONB,
 			"config_hash" VARCHAR(64) NOT NULL DEFAULT '',
 			"base_version_id" VARCHAR(36) NOT NULL DEFAULT '',
@@ -558,6 +569,14 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		)`,
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "status" VARCHAR(20) NOT NULL DEFAULT 'Superseded'`,
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "is_active" SMALLINT NOT NULL DEFAULT 0`,
+		`DO $$ BEGIN IF EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema() AND table_name = '_kora_config_version'
+			AND column_name = 'config' AND data_type = 'jsonb'
+		) THEN
+			ALTER TABLE "_kora_config_version" ALTER COLUMN "config" TYPE TEXT
+			USING CASE WHEN "config" IS NULL THEN NULL WHEN jsonb_typeof("config") = 'string' THEN "config" #>> '{}' ELSE "config"::text END;
+		END IF; END $$`,
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "change_list" JSONB`,
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "config_hash" VARCHAR(64) NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_config_version" ADD COLUMN "base_version_id" VARCHAR(36) NOT NULL DEFAULT ''`,
@@ -597,6 +616,7 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_site_registry" ADD COLUMN "updated_at" TIMESTAMP NOT NULL DEFAULT NOW()`,
 		`ALTER TABLE "_kora_site_registry" ADD COLUMN "file_storage" VARCHAR(20) NOT NULL DEFAULT 'local'`,
 		`ALTER TABLE "_kora_site_registry" ADD COLUMN "storage_bucket" VARCHAR(63) NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "runtime_cell_id" VARCHAR(80) NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS "idx_site_registry_status" ON "_kora_site_registry" ("status")`,
 
 		// _kora_user

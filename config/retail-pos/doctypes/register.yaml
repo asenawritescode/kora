@@ -1,0 +1,30 @@
+name: Register
+module: Retail POS and Store Operations
+title_field: register_name
+search_fields: register_name, reference, status
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Register code
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: register_name
+    fieldtype: Data
+    label: Register name
+    reqd: true
+    in_list_view: true
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true
+  - fieldname: supervisor
+    fieldtype: User
+    label: Supervisor

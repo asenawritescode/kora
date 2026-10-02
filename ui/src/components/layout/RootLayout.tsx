@@ -16,6 +16,7 @@ import type { RealtimeConnectionState } from '@/types/api'
 import { toast } from '@/components/ui/Toast'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatRealtimeNotificationMessage, formatRealtimeNotificationTitle, getRootRealtimeBadge } from './root-layout-helpers'
+import { prependNotification, subscribeToRealtimeNotifications } from './notifications'
 
 function WorkspaceRouteFallback() {
   return (
@@ -85,20 +86,15 @@ export function RootLayout() {
   }, [queryClient, realtime.state])
 
   useEffect(() => {
-    const onNotification = (event: Event) => {
-      const detail = (event as CustomEvent<RealtimeEvent>).detail
-      if (!detail) return
+    return subscribeToRealtimeNotifications((detail) => {
       setNotifications((current) => {
-        const next = [detail, ...current]
-        return next.slice(0, 30)
+        return prependNotification(current, detail)
       })
       const message = detail?.message || detail?.title
       if (message) {
         toast((detail.severity as any) || 'info', message)
       }
-    }
-    window.addEventListener('kora:realtime-notification', onNotification as EventListener)
-    return () => window.removeEventListener('kora:realtime-notification', onNotification as EventListener)
+    })
   }, [])
 
   useEffect(() => {

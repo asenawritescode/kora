@@ -1,0 +1,21 @@
+records:
+  - doctype: Product Category
+    category_name: Products
+    display_order: 1
+    is_active: 1
+  - doctype: Product Category
+    category_name: Services
+    display_order: 2
+    is_active: 1
+  - doctype: Product
+    product_name: Sample item
+    item_type: Product
+    category: Products
+    selling_price: 250
+    status: Active
+  - doctype: Product
+    product_name: Basic service
+    item_type: Service
+    category: Services
+    selling_price: 500
+    status: Active

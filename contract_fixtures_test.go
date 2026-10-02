@@ -29,7 +29,7 @@ func TestOrganizationalRuntimeFixtureIsValid(t *testing.T) {
 }
 
 func TestYAMLPackageCommandsUseGenericKernelLoader(t *testing.T) {
-	registry, err := kernel.LoadCommandDir("config/inventory/commands")
+	registry, err := kernel.LoadCommandDir("config/v0/inventory/commands")
 	if err != nil {
 		t.Fatal(err)
 	}

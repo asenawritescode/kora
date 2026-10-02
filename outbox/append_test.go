@@ -6,6 +6,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
+	kdb "github.com/asenawritescode/kora/db"
 )
 
 func TestSQLWriterAppendCompletesEnvelopeDefaultsBeforeValidation(t *testing.T) {
@@ -25,7 +26,7 @@ func TestSQLWriterAppendCompletesEnvelopeDefaultsBeforeValidation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = NewSQLWriter().Append(context.Background(), tx, contract.EventEnvelope{
+	err = NewSQLWriter(kdb.Resolve("mysql")).Append(context.Background(), tx, contract.EventEnvelope{
 		Type: "record.created", Source: "kora.kernel", Site: "live-test",
 		AggregateType: "Record", AggregateID: "REC-1",
 		Data: contract.MustEncodeData(map[string]any{"name": "REC-1"}),

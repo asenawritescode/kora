@@ -97,7 +97,7 @@ func BuildSystemGraph(reg *doctype.Registry, workflows []*doctype.Workflow) Syst
 // GET /api/system/graph
 func (h *Handler) HandleSystemGraph(c *gin.Context) {
 	db := h.siteTx(c).DB
-	store := configstore.NewStore(db, h.TxManager.Dialect)
+	store := configstore.NewStore(db, h.siteDialect(c))
 	workflows, err := store.LoadWorkflows(c.GetString("site_name"))
 	if err != nil {
 		internalError(c, "loading graph workflows", err)

@@ -1,7 +1,7 @@
 name: Product
 module: Retail Pos
-title_field: reference
-search_fields: reference, status
+title_field: product_name
+search_fields: product_name, reference, category, status
 sort_field: modified
 sort_order: DESC
 
@@ -12,17 +12,49 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
+  - fieldname: product_name
+    fieldtype: Data
+    label: Product name
+    reqd: true
+    in_list_view: true
+  - fieldname: category
+    fieldtype: Link
+    options: Product Category
+    label: Category
+    in_standard_filter: true
+    in_list_view: true
+  - fieldname: selling_price
+    fieldtype: Currency
+    label: Selling price
+    reqd: true
+    in_list_view: true
+  - fieldname: stock_qty
+    fieldtype: Int
+    label: Stock quantity
+    default: 0
+    in_list_view: true
+  - fieldname: image
+    fieldtype: Data
+    label: Image URL
   - fieldname: source_record
     fieldtype: Data
     label: Source Record
+    description: The original catalogue, import, or external product reference, when applicable.
+    hidden: true
   - fieldname: assignee
-    fieldtype: Data
+    fieldtype: User
     label: Assignee
+    description: Select an existing site user responsible for this product.
+    hidden: true
   - fieldname: evidence
     fieldtype: Text
     label: Evidence
+    hidden: true
   - fieldname: status
     fieldtype: Data
-    label: Status
-    default: Draft
+    label: Availability
+    options: |
+      Active
+      Inactive
+    default: Active
     in_list_view: true

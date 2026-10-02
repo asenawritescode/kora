@@ -1,0 +1,34 @@
+name: Retail POS Cash Movement Workflow
+document_type: Cash Movement
+is_active: true
+workflow_state_field: status
+states:
+  - state: Draft
+    doc_status: 0
+    allow_edit: Cashier, Supervisor, Manager, Retail POS and Store Operations Administrator
+    style: default
+  - state: Submitted
+    doc_status: 0
+    allow_edit: Supervisor, Manager, Retail POS and Store Operations Administrator
+    style: warning
+  - state: Approved
+    doc_status: 1
+    allow_edit: Manager, Retail POS and Store Operations Administrator
+    style: success
+  - state: Rejected
+    doc_status: 0
+    allow_edit: Manager, Retail POS and Store Operations Administrator
+    style: danger
+transitions:
+  - action: Submit movement
+    from: Draft
+    to: Submitted
+    allowed: Cashier, Supervisor, Manager, Retail POS and Store Operations Administrator
+  - action: Approve movement
+    from: Submitted
+    to: Approved
+    allowed: Supervisor, Manager, Retail POS and Store Operations Administrator
+  - action: Reject movement
+    from: Submitted
+    to: Rejected
+    allowed: Supervisor, Manager, Retail POS and Store Operations Administrator

@@ -9,7 +9,7 @@ func FieldToJSONSchema(f *doctype.Field) map[string]any {
 	schema := map[string]any{}
 
 	switch f.Fieldtype {
-	case "Data", "Password":
+	case "Data", "Password", "User":
 		schema["type"] = "string"
 		schema["maxLength"] = 140
 	case "Text":

@@ -1,0 +1,27 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+:root {
+  --background: oklch(1 0 0); --foreground: oklch(.145 0 0); --card: oklch(1 0 0);
+  --card-foreground: oklch(.145 0 0); --muted: oklch(.97 0 0); --muted-foreground: oklch(.556 0 0);
+  --primary: #ff6b35; --primary-foreground: #fff; --border: oklch(.922 0 0); --input: oklch(.922 0 0);
+  --ring: #ff6b35; --destructive: oklch(.577 .245 27.325); --destructive-foreground: #fff;
+  --radius: .625rem;
+}
+* { box-sizing: border-box; border-color: var(--border); }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: 'Geist Variable', sans-serif; }
+button, input, textarea, select { font: inherit; }
+.kora-cloud-shell { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+.kora-cloud-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }
+.kora-cloud-nav { border-right: 1px solid var(--border); background: var(--card); padding: 1rem .75rem; }
+.kora-cloud-nav-section { margin: .75rem 0 1rem; }
+.kora-cloud-nav-heading { color: var(--muted-foreground); font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 0 .75rem .5rem; }
+.kora-cloud-nav-heading > span, .kora-cloud-nav-heading > small { display: block; }
+.kora-cloud-nav-item { align-items: center; border: 0; border-radius: .5rem; background: transparent; color: var(--foreground); cursor: pointer; display: flex; gap: .625rem; padding: .625rem .75rem; text-align: left; width: 100%; }
+.kora-cloud-nav-item:hover, .kora-cloud-nav-item[data-selected='true'] { background: var(--muted); }
+.kora-cloud-nav-item[data-selected='true'] { color: var(--primary); font-weight: 600; }
+.kora-cloud-table { width: 100%; border-collapse: collapse; }
+.kora-cloud-table th, .kora-cloud-table td { border-bottom: 1px solid var(--border); padding: .75rem; text-align: left; vertical-align: middle; }
+.kora-cloud-table th { color: var(--muted-foreground); font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; }
+@media (max-width: 760px) { .kora-cloud-body { grid-template-columns: 1fr; } .kora-cloud-nav { border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; padding: .5rem; } .kora-cloud-nav-section { display: flex; gap: .25rem; margin: 0; } .kora-cloud-nav-heading { display: none; } .kora-cloud-nav-item { white-space: nowrap; width: auto; } }

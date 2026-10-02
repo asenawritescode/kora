@@ -1,0 +1,56 @@
+name: Cash Movement
+module: Retail POS and Store Operations
+is_submittable: true
+title_field: reference
+search_fields: reference, movement_type, status
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till session
+    reqd: true
+    in_list_view: true
+  - fieldname: movement_type
+    fieldtype: Select
+    label: Movement type
+    options: |
+      Pay In
+      Pay Out
+      Safe Drop
+      Transfer In
+      Transfer Out
+      Refund Adjustment
+    reqd: true
+    in_list_view: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+    reqd: true
+  - fieldname: created_by
+    fieldtype: User
+    label: Created by
+    read_only: true
+  - fieldname: approved_by
+    fieldtype: User
+    label: Approved by
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Submitted
+      Approved
+      Rejected
+    default: Draft
+    in_list_view: true

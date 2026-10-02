@@ -8,7 +8,7 @@ import (
 
 func TestPRDTemplatePacksHaveCoreArtifacts(t *testing.T) {
 	packs := []string{
-		"small-business", "accounting", "invoicing", "expense", "budgeting",
+		"small-business", "accounting", "invoicing", "expense", "budgeting", "kora-mvp",
 		"crm", "marketing", "helpdesk", "customer-success", "inventory",
 		"purchasing", "retail-pos", "ecommerce", "wholesale", "subscriptions",
 		"projectmgmt", "professional-services", "fieldwork", "maintenance",
@@ -20,7 +20,10 @@ func TestPRDTemplatePacksHaveCoreArtifacts(t *testing.T) {
 
 	for _, pack := range packs {
 		t.Run(pack, func(t *testing.T) {
-			root := filepath.Join("../config", pack)
+			root := filepath.Join("../config", "v0", pack)
+			if pack == "retail-pos" || pack == "kora-mvp" {
+				root = filepath.Join("../config", pack)
+			}
 			for _, required := range []string{"roles.yaml", "permissions.yaml", "fixtures/demo.yaml"} {
 				if _, err := os.Stat(filepath.Join(root, required)); err != nil {
 					t.Fatalf("missing required artifact %s: %v", required, err)

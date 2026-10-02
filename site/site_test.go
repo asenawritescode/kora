@@ -2,9 +2,11 @@ package site
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	sqlDialect "github.com/asenawritescode/kora/db"
 )
 
 func TestDSN_MySQL(t *testing.T) {
@@ -23,6 +25,52 @@ func TestDSN_MySQL(t *testing.T) {
 	}
 }
 
+func TestSiteBootstrapWritesRebindForPostgres(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	dialect := sqlDialect.Resolve("postgres")
+
+	mock.ExpectExec("INSERT INTO _kora_user").
+		WithArgs(sqlmock.AnyArg(), "site-pg", "owner@example.com", "$kora$passwordless$disabled", "Owner", "Administrator").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	if err := createAdminUser(database, dialect, "owner@example.com", "", "Owner", "site-pg"); err != nil {
+		t.Fatalf("create PostgreSQL admin user: %v", err)
+	}
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).
+		WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`INSERT INTO _kora_config_version`).
+		WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).
+		WithArgs(1, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	ensureConfigVersion(database, dialect, "site-pg", []string{"site-pg"})
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDSN_Postgres(t *testing.T) {
+	cfg := &SiteConfig{
+		DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432,
+		DBName: "tenant", DBUser: "postgres", DBPassword: "acceptance-only",
+	}
+	if got, want := cfg.DSN(), "postgres://postgres:acceptance-only@127.0.0.1:5432/tenant?sslmode=disable"; got != want {
+		t.Fatalf("DSN() = %q, want %q", got, want)
+	}
+}
+
+func TestCreateSiteDefaultsPostgresPort(t *testing.T) {
+	input := CreateSiteInput{Hostname: "new-site.example.invalid", DBType: "postgres"}
+	input.applyDefaults()
+	if input.DBPort != 5432 {
+		t.Fatalf("default PostgreSQL port = %d, want 5432", input.DBPort)
+	}
+}
+
 func TestCreateAdminUserAllowsPasswordlessBootstrap(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -34,7 +82,7 @@ func TestCreateAdminUserAllowsPasswordlessBootstrap(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), "live-demo", "owner@example.com", "$kora$passwordless$disabled", "Owner", "Administrator").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	if err := createAdminUser(db, "owner@example.com", "", "Owner", "live-demo"); err != nil {
+	if err := createAdminUser(db, sqlDialect.Resolve("mysql"), "owner@example.com", "", "Owner", "live-demo"); err != nil {
 		t.Fatalf("createAdminUser: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -180,6 +228,7 @@ func TestCommonConfigFromEnv_Defaults(t *testing.T) {
 		"KORA_DB_TYPE", "KORA_DB_HOST", "KORA_DB_PORT",
 		"KORA_HTTP_PORT", "KORA_LOG_LEVEL", "KORA_LOG_FORMAT",
 		"KORA_APP_NAME", "KORA_VERSION", "KORA_ADMIN_ROLE",
+		"KORA_TRUSTED_PROXIES",
 	} {
 		os.Unsetenv(key)
 	}
@@ -208,6 +257,9 @@ func TestCommonConfigFromEnv_Defaults(t *testing.T) {
 	}
 	if cfg.AdminRole != "Administrator" {
 		t.Errorf("AdminRole = %q, want %q", cfg.AdminRole, "Administrator")
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("TrustedProxies = %#v, want none by default", cfg.TrustedProxies)
 	}
 }
 
@@ -257,6 +309,42 @@ func TestCommonConfigFromEnv_Overrides(t *testing.T) {
 	}
 }
 
+func TestTrustedProxiesConfigSupportsEnvironmentOverride(t *testing.T) {
+	t.Setenv("KORA_TRUSTED_PROXIES", " 10.0.0.0/8, 192.0.2.7 ")
+
+	cfg := CommonConfigFromEnv()
+	want := []string{"10.0.0.0/8", "192.0.2.7"}
+	if len(cfg.TrustedProxies) != len(want) {
+		t.Fatalf("trusted proxies = %#v, want %#v", cfg.TrustedProxies, want)
+	}
+	for i := range want {
+		if cfg.TrustedProxies[i] != want[i] {
+			t.Errorf("trusted proxies[%d] = %q, want %q", i, cfg.TrustedProxies[i], want[i])
+		}
+	}
+}
+
+func TestCommonConfigLoadsTrustedProxiesFromYAML(t *testing.T) {
+	t.Setenv("KORA_TRUSTED_PROXIES", "")
+	path := filepath.Join(t.TempDir(), "common_site_config.yaml")
+	if err := os.WriteFile(path, []byte("trusted_proxies:\n  - 10.0.0.0/8\n  - 192.0.2.7\n"), 0o600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+	cfg, err := LoadCommonConfig(path)
+	if err != nil {
+		t.Fatalf("load common config: %v", err)
+	}
+	want := []string{"10.0.0.0/8", "192.0.2.7"}
+	if len(cfg.TrustedProxies) != len(want) {
+		t.Fatalf("trusted proxies = %#v, want %#v", cfg.TrustedProxies, want)
+	}
+	for i := range want {
+		if cfg.TrustedProxies[i] != want[i] {
+			t.Errorf("trusted proxies[%d] = %q, want %q", i, cfg.TrustedProxies[i], want[i])
+		}
+	}
+}
+
 func TestStartupConfig_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -296,10 +384,18 @@ func TestStartupConfig_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "postgres dsn — supported",
+			cfg: &StartupConfig{
+				DBDSN:  "postgres://user:pass@localhost/db",
+				DBType: "postgres",
+			},
+			wantErr: false,
+		},
+		{
 			name: "dsn with invalid type — error",
 			cfg: &StartupConfig{
 				DBDSN:  "user:pass@tcp(localhost)/db",
-				DBType: "postgres",
+				DBType: "sqlite",
 			},
 			wantErr: true,
 		},

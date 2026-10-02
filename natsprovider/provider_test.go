@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,84 @@ func TestBootstrapIsIdempotentAndRequestReplyWorks(t *testing.T) {
 		Data: json.RawMessage(`{"data":{"name":"Test"}}`),
 	}); err != nil {
 		t.Fatalf("publish: %v", err)
+	}
+}
+
+func TestSiteDirectoryNotificationsUseDedicatedJetStream(t *testing.T) {
+	s, url := runEmbeddedServer(t)
+	defer s.Shutdown()
+	prefix := fmt.Sprintf("kora_test_%d", time.Now().UnixNano())
+	p, err := New(context.Background(), Config{
+		Name: "kora-directory-test", ServerURLs: []string{url},
+		StreamName: strings.ToUpper(prefix) + "_EVENTS", SubjectPrefix: prefix, MaxDeliver: 5,
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	defer p.Close()
+	if err := p.Bootstrap(context.Background()); err != nil {
+		t.Fatal("bootstrap event stream:", err)
+	}
+	if err := p.BootstrapSiteDirectory(context.Background()); err != nil {
+		t.Fatal("bootstrap directory stream:", err)
+	}
+	if err := p.BootstrapSiteDirectory(context.Background()); err != nil {
+		t.Fatal("repeat directory bootstrap:", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wakeups, err := p.SubscribeSiteDirectoryWakeups(ctx, "engine:replica-1")
+	if err != nil {
+		t.Fatal("subscribe directory wakeups:", err)
+	}
+	if err := p.PublishSiteDirectoryRevision(context.Background(), 42); err != nil {
+		t.Fatal("publish directory revision:", err)
+	}
+	select {
+	case revision := <-wakeups:
+		if revision != 42 {
+			t.Fatalf("directory wakeup revision = %d, want 42", revision)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for directory wakeup")
+	}
+	cancel()
+	for range wakeups {
+	}
+	if err := p.PublishSiteDirectoryRevision(context.Background(), 43); err != nil {
+		t.Fatal("publish while subscriber is offline:", err)
+	}
+	resumeCtx, resumeCancel := context.WithCancel(context.Background())
+	defer resumeCancel()
+	resumed, err := p.SubscribeSiteDirectoryWakeups(resumeCtx, "engine:replica-1")
+	if err != nil {
+		t.Fatal("resume durable directory subscription:", err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case revision := <-resumed:
+			if revision == 43 {
+				goto resumed
+			}
+			if revision != 42 {
+				t.Fatalf("unexpected resumed directory wakeup revision = %d", revision)
+			}
+		case <-deadline:
+			t.Fatal("durable directory subscription did not resume missed wakeup")
+		}
+	}
+resumed:
+	directoryInfo, err := p.js.StreamInfo(p.SiteDirectoryStreamName())
+	if err != nil {
+		t.Fatal("read directory stream:", err)
+	}
+	eventInfo, err := p.js.StreamInfo(p.cfg.StreamName)
+	if err != nil {
+		t.Fatal("read event stream:", err)
+	}
+	if directoryInfo.State.Msgs != 2 || eventInfo.State.Msgs != 0 || directoryInfo.Config.Storage != nats.FileStorage {
+		t.Fatalf("directory/event stream state = messages %d/%d, storage %v; want 2/0 and file storage", directoryInfo.State.Msgs, eventInfo.State.Msgs, directoryInfo.Config.Storage)
 	}
 }
 

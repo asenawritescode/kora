@@ -1,0 +1,76 @@
+name: Sale
+module: Retail POS and Store Operations
+is_submittable: true
+title_field: reference
+search_fields: reference, status, customer_name
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Awaiting Payment
+      Paid
+      Partially Paid
+      Refunded
+      Cancelled
+      Closed
+    default: Draft
+    in_list_view: true
+  - fieldname: customer
+    fieldtype: Link
+    options: POS Customer
+    label: Customer
+    in_list_view: true
+  - fieldname: cashier
+    fieldtype: User
+    label: Cashier
+    read_only: true
+    in_list_view: true
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+    in_list_view: true
+  - fieldname: shift
+    fieldtype: Link
+    options: Shift
+    label: Shift
+    in_list_view: true
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till session
+    in_list_view: true
+  - fieldname: subtotal
+    fieldtype: Currency
+    label: Subtotal
+    computed: "SUM(items.line_total)"
+    read_only: true
+  - fieldname: discount_amount
+    fieldtype: Currency
+    label: Discount
+    default: 0
+  - fieldname: tax_amount
+    fieldtype: Currency
+    label: Tax
+    default: 0
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    default: 0
+    in_list_view: true
+  - fieldname: items
+    fieldtype: Table
+    label: Items
+    options: Sale Item
+    reqd: true

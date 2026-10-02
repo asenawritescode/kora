@@ -99,13 +99,13 @@ func TestPostgres_CreateTableTemporalDefaults(t *testing.T) {
 	}
 
 	stmt := d.CreateTable(dt)[0]
-	if !contains(stmt, `"sale_date" DATE DEFAULT NULL DEFAULT CURRENT_DATE`) {
+	if !contains(stmt, `"sale_date" DATE DEFAULT CURRENT_DATE`) || contains(stmt, `"sale_date" DATE DEFAULT NULL`) {
 		t.Fatalf("expected CURRENT_DATE default, got: %s", stmt)
 	}
-	if !contains(stmt, `"sale_time" TIME DEFAULT NULL DEFAULT CURRENT_TIME`) {
+	if !contains(stmt, `"sale_time" TIME DEFAULT CURRENT_TIME`) || contains(stmt, `"sale_time" TIME DEFAULT NULL`) {
 		t.Fatalf("expected CURRENT_TIME default, got: %s", stmt)
 	}
-	if !contains(stmt, `"created_at" TIMESTAMP DEFAULT NULL DEFAULT NOW()`) {
+	if !contains(stmt, `"created_at" TIMESTAMP DEFAULT NOW()`) || contains(stmt, `"created_at" TIMESTAMP DEFAULT NULL`) {
 		t.Fatalf("expected NOW() default, got: %s", stmt)
 	}
 }
@@ -121,6 +121,23 @@ func TestPostgres_AddColumnEscapesAndFormatsDefaults(t *testing.T) {
 	textStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "title", Fieldtype: "Data", Default: "O'Reilly"})
 	if !contains(textStmt, "DEFAULT 'O''Reilly'") {
 		t.Fatalf("expected escaped string default, got: %s", textStmt)
+	}
+
+	nullableTemporalStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "received_at", Fieldtype: "Datetime", Default: "Now"})
+	if !contains(nullableTemporalStmt, `"received_at" TIMESTAMP DEFAULT NOW()`) || contains(nullableTemporalStmt, `"received_at" TIMESTAMP DEFAULT NULL`) {
+		t.Fatalf("nullable column should have one temporal default, got: %s", nullableTemporalStmt)
+	}
+}
+
+func TestPostgresIsWriteConflict(t *testing.T) {
+	d := &PostgresDialect{}
+	for _, code := range []string{"40001", "40P01"} {
+		if !d.IsWriteConflict(&pq.Error{Code: pq.ErrorCode(code)}) {
+			t.Errorf("PostgreSQL error %s should be a write conflict", code)
+		}
+	}
+	if d.IsWriteConflict(&pq.Error{Code: "23505"}) {
+		t.Fatal("unique violation should not be classified as serialization contention")
 	}
 }
 

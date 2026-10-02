@@ -18,6 +18,11 @@ func TestAllTemplateViewsMeetRuntimeContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find template views: %v", err)
 	}
+	legacyPaths, err := filepath.Glob(filepath.Join("..", "config", "v0", "*", "views", "*.yaml"))
+	if err != nil {
+		t.Fatalf("find v0 views: %v", err)
+	}
+	paths = append(paths, legacyPaths...)
 	if len(paths) == 0 {
 		t.Fatal("expected at least one template view")
 	}

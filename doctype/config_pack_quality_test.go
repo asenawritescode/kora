@@ -25,6 +25,19 @@ func TestConfigPacksMeetUATFoundationContract(t *testing.T) {
 		if err != nil || !info.IsDir() {
 			continue
 		}
+		if filepath.Base(root) == "v0" {
+			legacyPacks, err := filepath.Glob(filepath.Join(root, "*"))
+			if err != nil {
+				t.Fatalf("find v0 config packs: %v", err)
+			}
+			for _, legacyPack := range legacyPacks {
+				if legacyInfo, statErr := os.Stat(legacyPack); statErr == nil && legacyInfo.IsDir() {
+					packCount++
+					t.Run("v0/"+filepath.Base(legacyPack), func(t *testing.T) { auditConfigPack(t, legacyPack) })
+				}
+			}
+			continue
+		}
 		packCount++
 		t.Run(filepath.Base(root), func(t *testing.T) {
 			auditConfigPack(t, root)

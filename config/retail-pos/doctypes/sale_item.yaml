@@ -1,0 +1,33 @@
+name: Sale Item
+module: Retail POS and Store Operations
+is_child_table: true
+title_field: product
+fields:
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product
+    reqd: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    default: 1
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit price
+    reqd: true
+    linked_field: "product.selling_price"
+  - fieldname: discount_amount
+    fieldtype: Currency
+    label: Discount
+    default: 0
+  - fieldname: tax_amount
+    fieldtype: Currency
+    label: Tax
+    default: 0
+  - fieldname: line_total
+    fieldtype: Currency
+    label: Line total
+    computed: "quantity * unit_price - discount_amount + tax_amount"
+    read_only: true

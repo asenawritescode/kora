@@ -1,0 +1,31 @@
+name: POS Customer
+module: Retail POS and Store Operations
+title_field: customer_name
+search_fields: customer_name, phone, email
+sort_field: customer_name
+sort_order: ASC
+fields:
+  - fieldname: customer_name
+    fieldtype: Data
+    label: Customer name
+    reqd: true
+    in_list_view: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+    in_list_view: true
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true

@@ -641,6 +641,23 @@ func (d *DocType) Validate() error {
 		if dc.Message == "" {
 			return fmt.Errorf("doctype %s: doc_constraint %d has no message", d.Name, i)
 		}
+		if dc.Type == "linked_cross_field" {
+			if dc.Field == "" || dc.LinkField == "" || dc.RelatedField == "" || dc.Operator == "" {
+				return fmt.Errorf("doctype %s: linked_cross_field constraint %d requires field, link_field, related_field, and operator", d.Name, i)
+			}
+			field := d.GetField(dc.LinkField)
+			if field == nil || field.Fieldtype != "Link" {
+				return fmt.Errorf("doctype %s: linked_cross_field constraint %d link_field %q must be a Link field", d.Name, i, dc.LinkField)
+			}
+			if d.GetField(dc.Field) == nil {
+				return fmt.Errorf("doctype %s: linked_cross_field constraint %d field %q does not exist", d.Name, i, dc.Field)
+			}
+			switch dc.Operator {
+			case "<=", "<", ">=", ">", "==", "!=":
+			default:
+				return fmt.Errorf("doctype %s: linked_cross_field constraint %d has unsupported operator %q", d.Name, i, dc.Operator)
+			}
+		}
 		// Validate nested constraints in immutable_after.
 		if dc.Type == "immutable_after" {
 			for j, c := range dc.Constraints {
@@ -688,24 +705,36 @@ func validateDocTypeName(name string) error {
 	return nil
 }
 
-var nonResourceNameChars = regexp.MustCompile(`[^a-z0-9_]+`)
+var nonResourceNameChars = regexp.MustCompile(`[^a-z0-9_-]+`)
 
 func normalizeResourceName(resourceName, displayName string) string {
 	value := strings.TrimSpace(resourceName)
 	if value == "" {
 		value = displayName
+		// Display names are intentionally friendly (for example, "Work Order"),
+		// while resource names are URL identifiers. New identifiers use dashes so
+		// API clients never need to address a DocType using an encoded space.
+		value = strings.ReplaceAll(value, "_", "-")
 	}
 	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, " ", "_")
-	value = nonResourceNameChars.ReplaceAllString(value, "_")
-	for strings.Contains(value, "__") {
-		value = strings.ReplaceAll(value, "__", "_")
+	value = strings.ReplaceAll(value, " ", "-")
+	value = nonResourceNameChars.ReplaceAllString(value, "-")
+	for strings.Contains(value, "--") {
+		value = strings.ReplaceAll(value, "--", "-")
 	}
-	value = strings.Trim(value, "_")
+	value = strings.Trim(value, "-_")
 	if value == "" {
 		return "doctype"
 	}
 	return value
+}
+
+// apiResourceAlias returns the canonical URL segment derived from a DocType's
+// display name. It is registered in addition to ResourceName so existing
+// underscore-based resource names remain valid while friendly names gain a
+// stable, space-free dashed API path.
+func apiResourceAlias(displayName string) string {
+	return normalizeResourceName("", displayName)
 }
 
 // validFieldNameRe is a simple check: field names must start with a lowercase letter
@@ -807,6 +836,7 @@ func validateFieldType(ft string) error {
 		"Select": true, "Link": true, "Dynamic Link": true,
 		"Table": true, "Attach": true, "Attach Image": true, "Attach Audio": true,
 		"JSON": true, "Password": true,
+		"User":          true,
 		"Section Break": true, "Column Break": true, "Heading": true,
 	}
 	if !validTypes[ft] {
@@ -926,6 +956,7 @@ func ValidateAll(doctypes []*DocType) []CrossFileError {
 
 	// Check for duplicate name across doctypes.
 	seenNames := make(map[string]string)
+	seenResources := make(map[string]string)
 	for _, dt := range doctypes {
 		if prev, ok := seenNames[dt.Name]; ok {
 			errs = append(errs, CrossFileError{
@@ -935,6 +966,17 @@ func ValidateAll(doctypes []*DocType) []CrossFileError {
 			})
 		}
 		seenNames[dt.Name] = dt.Module
+
+		resourceName := normalizeResourceName(dt.ResourceName, dt.Name)
+		if previous, ok := seenResources[resourceName]; ok && previous != dt.Name {
+			errs = append(errs, CrossFileError{
+				Code:    "DuplicateResourceName",
+				Message: fmt.Sprintf("DocTypes %q and %q resolve to the same API resource name %q", previous, dt.Name, resourceName),
+				DocType: dt.Name,
+				Related: previous,
+			})
+		}
+		seenResources[resourceName] = dt.Name
 	}
 
 	return errs

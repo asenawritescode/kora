@@ -47,6 +47,10 @@ type QueryDialect interface {
 // ErrorDialect is the error-parsing subset.
 type ErrorDialect interface {
 	ParseError(err error, dt *doctype.DocType) *doctype.ValidationError
+	// IsWriteConflict identifies database-native optimistic/serialization
+	// conflicts so callers can preserve a stable contract without inspecting
+	// driver error strings outside the database boundary.
+	IsWriteConflict(err error) bool
 }
 
 // Dialect abstracts database-specific SQL generation, schema introspection,
@@ -140,7 +144,7 @@ type DBConfig struct {
 //
 //	KORA_DB_TYPE=mysql    → MySQL dialect (default)
 //	KORA_DB_TYPE=libsql   → LibSQL dialect
-//	KORA_DB_TYPE=postgres → PostgreSQL dialect (future)
+//	KORA_DB_TYPE=postgres → PostgreSQL dialect
 func Resolve(dbType string) Dialect {
 	switch dbType {
 	case "libsql":

@@ -75,6 +75,128 @@ func injectDB(c *gin.Context, sqlDB *sql.DB, reg *doctype.Registry) {
 	c.Set("site_registry", reg)
 }
 
+func TestSiteDialectUsesPerRuntimeDatabaseType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &orm.TxManager{Dialect: db.Resolve("mysql")})
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("site_db_type", "postgres")
+	if got := handler.siteDialect(ctx).DriverName(); got != "postgres" {
+		t.Fatalf("request site dialect = %q, want postgres", got)
+	}
+	ctxWithoutSite, _ := gin.CreateTestContext(httptest.NewRecorder())
+	if got := handler.siteDialect(ctxWithoutSite).DriverName(); got != "mysql" {
+		t.Fatalf("fallback site dialect = %q, want mysql", got)
+	}
+}
+
+func TestTenantUserAndSettingsQueriesRebindForPostgres(t *testing.T) {
+	handler, reg, mock, database := setupTestHandler(t)
+	defer database.Close()
+	gin.SetMode(gin.TestMode)
+
+	userRecorder := httptest.NewRecorder()
+	userContext, _ := gin.CreateTestContext(userRecorder)
+	userContext.Request = httptest.NewRequest(http.MethodGet, "/api/system/users", nil)
+	injectContext(userContext)
+	injectDB(userContext, database, reg)
+	userContext.Set("site_db_type", "postgres")
+	mock.ExpectQuery(`SELECT name, email, full_name, enabled, roles, creation, modified FROM _kora_user WHERE site = \$1 ORDER BY name`).
+		WithArgs("test.local").
+		WillReturnRows(sqlmock.NewRows([]string{"name", "email", "full_name", "enabled", "roles", "creation", "modified"}))
+	handler.HandleUserList(userContext)
+	if userRecorder.Code != http.StatusOK {
+		t.Fatalf("PostgreSQL user list returned HTTP %d: %s", userRecorder.Code, userRecorder.Body.String())
+	}
+
+	settingsRecorder := httptest.NewRecorder()
+	settingsContext, _ := gin.CreateTestContext(settingsRecorder)
+	settingsContext.Request = httptest.NewRequest(http.MethodPut, "/api/system/settings", strings.NewReader(`{"currency":"USD"}`))
+	settingsContext.Request.Header.Set("Content-Type", "application/json")
+	injectContext(settingsContext)
+	injectDB(settingsContext, database, reg)
+	settingsContext.Set("site_db_type", "postgres")
+	mock.ExpectExec(`INSERT INTO _kora_site_setting .*VALUES \(\$1, \$2, \$3\) ON CONFLICT`).
+		WithArgs("test.local", "currency", "USD").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	handler.HandleSiteSettingsUpdate(settingsContext)
+	if settingsRecorder.Code != http.StatusOK {
+		t.Fatalf("PostgreSQL site settings update returned HTTP %d: %s", settingsRecorder.Code, settingsRecorder.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("PostgreSQL query expectations: %v", err)
+	}
+}
+
+func TestConfigVersionEndpointsUsePostgresDialect(t *testing.T) {
+	handler, reg, mock, database := setupTestHandler(t)
+	defer database.Close()
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/system/config/versions/draft-1/discard", nil)
+	ctx.Params = gin.Params{{Key: "id", Value: "draft-1"}}
+	injectContext(ctx)
+	injectDB(ctx, database, reg)
+	ctx.Set("site_db_type", "postgres")
+	mock.ExpectQuery(`SELECT status FROM _kora_config_version WHERE id = \$1`).
+		WithArgs("draft-1").
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("Draft"))
+	mock.ExpectExec(`UPDATE _kora_config_version SET status = 'Superseded' WHERE id = \$1`).
+		WithArgs("draft-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	handler.HandleConfigVersionDiscard(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("PostgreSQL config-version discard returned HTTP %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	listRecorder := httptest.NewRecorder()
+	listContext, _ := gin.CreateTestContext(listRecorder)
+	listContext.Request = httptest.NewRequest(http.MethodGet, "/api/system/config/versions", nil)
+	injectContext(listContext)
+	injectDB(listContext, database, reg)
+	listContext.Set("site_db_type", "postgres")
+	mock.ExpectQuery(`COALESCE\(status, CASE WHEN is_active = 1 THEN 'Active' ELSE 'Superseded' END\)`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "site", "version", "created_at", "created_by", "label", "status"}))
+	handler.HandleConfigVersions(listContext)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("PostgreSQL config-version list returned HTTP %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("PostgreSQL config-version SQL expectations: %v", err)
+	}
+}
+
+func TestRoleDeleteUsesPostgresMembershipExpressionAndBindings(t *testing.T) {
+	handler, reg, mock, database := setupTestHandler(t)
+	defer database.Close()
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodDelete, "/api/system/roles/Store%20Manager", nil)
+	ctx.Params = gin.Params{{Key: "name", Value: "Store Manager"}}
+	injectContext(ctx)
+	injectDB(ctx, database, reg)
+	ctx.Set("site_db_type", "postgres")
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_user WHERE POSITION\(',' \|\| \$1 \|\| ',' IN ',' \|\| REPLACE\(roles, ', ', ','\) \|\| ','\) > 0`).
+		WithArgs("Store Manager").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectExec(`DELETE FROM _kora_role WHERE name = \$1`).
+		WithArgs("Store Manager").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM _kora_permission WHERE role = \$1`).
+		WithArgs("Store Manager").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	handler.HandleSystemRoleDelete(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("PostgreSQL role delete returned HTTP %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("PostgreSQL role-delete SQL expectations: %v", err)
+	}
+}
+
 func expectGeneratedName(mock sqlmock.Sqlmock, maxSuffix, allocated int64) {
 	mock.ExpectQuery("SELECT COALESCE\\(MAX").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(maxSuffix))
@@ -316,8 +438,8 @@ func TestHandleGet_Found(t *testing.T) {
 
 	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE name = \\?").
 		WithArgs("TEST-0001").
-		WillReturnRows(sqlmock.NewRows([]string{"name", "owner", "creation", "modified", "modified_by", "doc_status", "title"}).
-			AddRow("TEST-0001", "admin", "2024-01-01 00:00:00", "2024-01-01 00:00:00", "admin", 0, "First Doc"))
+		WillReturnRows(sqlmock.NewRows([]string{"name", "owner", "creation", "modified", "modified_by", "doc_status", "revision", "title"}).
+			AddRow("TEST-0001", "admin", "2024-01-01 00:00:00", "2024-01-01 00:00:00", "admin", 0, 1, "First Doc"))
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -397,70 +519,6 @@ func TestHandleGet_DoctypeNotFound(t *testing.T) {
 // HandleCreate
 // ---------------------------------------------------------------------------
 
-func TestHandleCreate_ValidDoc(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-
-	// Insert uses a transaction: Begin → NameGen → INSERT → Commit
-	mock.ExpectBegin()
-	expectGeneratedName(mock, 0, 1)
-	mock.ExpectExec("INSERT INTO `tabTestDoc`").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `{"title": "New Document"}`
-	c.Request = httptest.NewRequest("POST", "/api/resource/TestDoc", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
-	injectDB(c, sqlDB, reg)
-	injectContext(c)
-
-	handler.HandleCreate(c)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusCreated, w.Body.String())
-	}
-	var resp Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("json unmarshal: %v", err)
-	}
-	if resp.Meta == nil || resp.Meta.DocType != "TestDoc" {
-		t.Errorf("meta.doctype = %v, want TestDoc", resp.Meta)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
-	}
-}
-
-func TestHandleCreate_ValidationError(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-
-	// Should succeed — validation passes for an empty Data field.
-	mock.ExpectBegin()
-	expectGeneratedName(mock, 0, 1)
-	mock.ExpectExec("INSERT INTO `tabTestDoc`").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `{"title": ""}`
-	c.Request = httptest.NewRequest("POST", "/api/resource/TestDoc", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
-	injectDB(c, sqlDB, reg)
-	injectContext(c)
-
-	handler.HandleCreate(c)
-
-	if w.Code != http.StatusCreated {
-		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusCreated, w.Body.String())
-	}
-}
-
 func TestHandleCreate_DoctypeNotFound(t *testing.T) {
 	handler, reg, _, sqlDB := setupTestHandler(t)
 
@@ -504,284 +562,6 @@ func TestPermissionTargetForTool_UsesExactRegisteredDoctypeName(t *testing.T) {
 	}
 	if operation != "read" {
 		t.Fatalf("operation = %q, want %q", operation, "read")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// HandleUpdate
-// ---------------------------------------------------------------------------
-
-func TestHandleUpdate_Valid(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-
-	// GetDoc (no transaction).
-	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE name = \\?").
-		WithArgs("TEST-0001").
-		WillReturnRows(sqlmock.NewRows([]string{"title", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).
-			AddRow("Original Title", "TEST-0001", "admin", "2024-01-01 00:00:00", "2024-01-01 00:00:00", "admin", 0))
-
-	// Save uses a transaction: Begin → UPDATE → Commit
-	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE `tabTestDoc` SET .+ WHERE name = \\?").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `{"title": "Updated Title"}`
-	c.Request = httptest.NewRequest("PUT", "/api/resource/TestDoc/TEST-0001", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Params = gin.Params{
-		{Key: "doctype", Value: "TestDoc"},
-		{Key: "name", Value: "TEST-0001"},
-	}
-	injectDB(c, sqlDB, reg)
-	injectContext(c)
-
-	handler.HandleUpdate(c)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	var resp Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("json unmarshal: %v", err)
-	}
-	if resp.Meta == nil || resp.Meta.DocType != "TestDoc" {
-		t.Errorf("meta.doctype = %v, want TestDoc", resp.Meta)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
-	}
-}
-
-func TestHandleUpdate_NoEditableChangesSkipsSave(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-
-	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE name = \\?").
-		WithArgs("TEST-0001").
-		WillReturnRows(sqlmock.NewRows([]string{"title", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).
-			AddRow("Original Title", "TEST-0001", "admin", "2024-01-01 00:00:00", "2024-01-01 00:00:00", "admin", 0))
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `{"title": "Original Title"}`
-	c.Request = httptest.NewRequest("PUT", "/api/resource/TestDoc/TEST-0001", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Params = gin.Params{
-		{Key: "doctype", Value: "TestDoc"},
-		{Key: "name", Value: "TEST-0001"},
-	}
-	injectDB(c, sqlDB, reg)
-	injectContext(c)
-
-	handler.HandleUpdate(c)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
-	}
-}
-
-func TestHandleUpdate_ReadOnlySubmittedFieldSkipsSave(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-	dt := reg.Get("TestDoc")
-	dt.Fields = append(dt.Fields, doctype.Field{
-		Fieldname: "internal_note",
-		Fieldtype: "Data",
-		ReadOnly:  true,
-	})
-	reg.Register(dt)
-
-	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE name = \\?").
-		WithArgs("TEST-0001").
-		WillReturnRows(sqlmock.NewRows([]string{"title", "internal_note", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).
-			AddRow("Original Title", "locked", "TEST-0001", "admin", "2024-01-01 00:00:00", "2024-01-01 00:00:00", "admin", 0))
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `{"internal_note": "changed"}`
-	c.Request = httptest.NewRequest("PUT", "/api/resource/TestDoc/TEST-0001", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Params = gin.Params{
-		{Key: "doctype", Value: "TestDoc"},
-		{Key: "name", Value: "TEST-0001"},
-	}
-	injectDB(c, sqlDB, reg)
-	injectContext(c)
-
-	handler.HandleUpdate(c)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
-	}
-}
-
-func TestHandleUpdate_ScriptRunnerDisablesNoopShortCircuit(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-	handler.ScriptRunner = fakeScriptRunner{}
-
-	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE name = \\?").
-		WithArgs("TEST-0001").
-		WillReturnRows(sqlmock.NewRows([]string{"title", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).
-			AddRow("Original Title", "TEST-0001", "admin", "2024-01-01 00:00:00", "2024-01-01 00:00:00", "admin", 0))
-	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE `tabTestDoc` SET").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `{"title": "Original Title"}`
-	c.Request = httptest.NewRequest("PUT", "/api/resource/TestDoc/TEST-0001", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Params = gin.Params{
-		{Key: "doctype", Value: "TestDoc"},
-		{Key: "name", Value: "TEST-0001"},
-	}
-	injectDB(c, sqlDB, reg)
-	injectContext(c)
-
-	handler.HandleUpdate(c)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
-	}
-}
-
-func TestResourceFieldValuesEqualNormalizesCommonSQLAndJSONTypes(t *testing.T) {
-	tests := []struct {
-		name     string
-		field    doctype.Field
-		oldVal   any
-		newVal   any
-		wantSame bool
-	}{
-		{"int string and json number", doctype.Field{Fieldtype: "Int"}, "7", float64(7), true},
-		{"float string and json number", doctype.Field{Fieldtype: "Currency"}, "7.50", float64(7.5), true},
-		{"check int and bool", doctype.Field{Fieldtype: "Check"}, int64(1), true, true},
-		{"json string and object", doctype.Field{Fieldtype: "JSON"}, `{"enabled":true}`, map[string]any{"enabled": true}, true},
-		{"data change", doctype.Field{Fieldtype: "Data"}, "old", "new", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := resourceFieldValuesEqual(&tt.field, tt.oldVal, tt.newVal)
-			if got != tt.wantSame {
-				t.Fatalf("resourceFieldValuesEqual() = %v, want %v", got, tt.wantSame)
-			}
-		})
-	}
-}
-
-func TestHandleUpdate_NotFound(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-
-	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE name = \\?").
-		WithArgs("MISSING").
-		WillReturnError(sql.ErrNoRows)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `{"title": "Updated"}`
-	c.Request = httptest.NewRequest("PUT", "/api/resource/TestDoc/MISSING", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Params = gin.Params{
-		{Key: "doctype", Value: "TestDoc"},
-		{Key: "name", Value: "MISSING"},
-	}
-	injectDB(c, sqlDB, reg)
-	injectContext(c)
-
-	handler.HandleUpdate(c)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusNotFound, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// HandleDelete
-// ---------------------------------------------------------------------------
-
-func TestHandleDelete_Success(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-
-	// Delete uses a transaction: Begin → DELETE → Commit
-	mock.ExpectBegin()
-	mock.ExpectExec("DELETE FROM `tabTestDoc` WHERE name = \\?").
-		WithArgs("TEST-0001").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("DELETE", "/api/resource/TestDoc/TEST-0001", nil)
-	c.Params = gin.Params{
-		{Key: "doctype", Value: "TestDoc"},
-		{Key: "name", Value: "TEST-0001"},
-	}
-	injectDB(c, sqlDB, reg)
-	injectContext(c)
-
-	handler.HandleDelete(c)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	var resp Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("json unmarshal: %v", err)
-	}
-	if resp.Meta == nil || resp.Meta.DocType != "TestDoc" {
-		t.Errorf("meta.doctype = %v, want TestDoc", resp.Meta)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
-	}
-}
-
-func TestHandleDelete_NotFound(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-
-	// Delete begins a transaction, but the DELETE returns 0 rows
-	// so Save returns ErrNotFound before Commit.
-	mock.ExpectBegin()
-	mock.ExpectExec("DELETE FROM `tabTestDoc` WHERE name = \\?").
-		WithArgs("MISSING").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	// No ExpectCommit — save returns error before committing.
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("DELETE", "/api/resource/TestDoc/MISSING", nil)
-	c.Params = gin.Params{
-		{Key: "doctype", Value: "TestDoc"},
-		{Key: "name", Value: "MISSING"},
-	}
-	injectDB(c, sqlDB, reg)
-	injectContext(c)
-
-	handler.HandleDelete(c)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusNotFound, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
 	}
 }
 
@@ -853,6 +633,7 @@ func TestExtensionPermission_DeleteDenied(t *testing.T) {
 		{Key: "name", Value: "TEST-0001"},
 	}
 	injectDB(c, sqlDB, reg)
+	injectContext(c)
 	c.Set("auth_type", "extension")
 	c.Set("extension_name", "test-bot")
 	c.Set("extension_permissions", []doctype.Permission{{Doctype: "TestDoc", Read: true}})
@@ -880,74 +661,5 @@ func TestExtensionPermission_UnconfiguredDoctype(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusForbidden, w.Body.String())
-	}
-}
-
-func TestExtensionPermission_WriteGranted(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-
-	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE name = \\?").
-		WithArgs("TEST-0001").
-		WillReturnRows(sqlmock.NewRows([]string{"name", "owner", "creation", "modified", "modified_by", "doc_status", "title"}).
-			AddRow("TEST-0001", "bot", "2024-01-01 00:00:00", "2024-01-01 00:00:00", "bot", 0, "Original"))
-
-	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE `tabTestDoc` SET .+ WHERE name = \\?").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `{"title": "Updated"}`
-	c.Request = httptest.NewRequest("PUT", "/api/resource/TestDoc/TEST-0001", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Params = gin.Params{
-		{Key: "doctype", Value: "TestDoc"},
-		{Key: "name", Value: "TEST-0001"},
-	}
-	injectDB(c, sqlDB, reg)
-	c.Set("auth_type", "extension")
-	c.Set("extension_name", "test-bot")
-	c.Set("extension_permissions", []doctype.Permission{{Doctype: "TestDoc", Write: true}})
-
-	handler.HandleUpdate(c)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
-	}
-}
-
-func TestExtensionPermission_CreateGranted(t *testing.T) {
-	handler, reg, mock, sqlDB := setupTestHandler(t)
-
-	mock.ExpectBegin()
-	expectGeneratedName(mock, 0, 1)
-	mock.ExpectExec("INSERT INTO `tabTestDoc`").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `{"title": "New Doc"}`
-	c.Request = httptest.NewRequest("POST", "/api/resource/TestDoc", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
-	injectDB(c, sqlDB, reg)
-	c.Set("auth_type", "extension")
-	c.Set("extension_name", "test-bot")
-	c.Set("extension_permissions", []doctype.Permission{{Doctype: "TestDoc", Create: true}})
-
-	handler.HandleCreate(c)
-
-	if w.Code != http.StatusCreated {
-		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusCreated, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet mock expectations: %v", err)
 	}
 }

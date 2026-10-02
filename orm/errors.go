@@ -6,4 +6,5 @@ var (
 	ErrNotFound   = errors.New("document not found")
 	ErrDuplicate  = errors.New("duplicate document")
 	ErrValidation = errors.New("validation error")
+	ErrConflict   = errors.New("document changed during update")
 )

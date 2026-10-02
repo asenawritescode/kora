@@ -3,6 +3,8 @@ package configstore
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -287,7 +289,10 @@ func TestViewStore_NotFound(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for missing view, got nil")
 	}
-	if err.Error() != `view "Missing" not found` {
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("LoadView error = %v, want wrapped sql.ErrNoRows", err)
+	}
+	if !strings.Contains(err.Error(), `view "Missing" not found`) {
 		t.Errorf("unexpected error: %v", err)
 	}
 

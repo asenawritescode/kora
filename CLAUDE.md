@@ -9,7 +9,7 @@ make dev                # MySQL + build + setup + serve (one command)
 make build              # Build UI + Go binary
 make serve              # Start server on :8000
 make restart            # Kill old server + rebuild all + start fresh
-make setup              # Setup a site (SITE=airtime.local CONFIG=config/airtime/)
+make setup              # Setup a site (SITE=airtime.local CONFIG=config/v0/airtime/)
 make test               # Run Go tests (18 packages)
 make lint               # Run linters (golangci-lint + TypeScript)
 make fmt                # Format code
@@ -41,14 +41,13 @@ docker compose up -d mysql                   # MySQL 8.0 (root:kora123)
 
 ## Architecture
 
-Kora is currently a **DocType-centric config-driven application engine**. The codebase has real kernel, contract, workflow, AI/MCP, reconciliation, and cloud primitives, but it is not yet the full generic resource/runtime architecture described in `KORA-ENGINE-RFC.md`.
-Cloud is a control plane only: it owns deployment orchestration, package rollout, worker placement, NATS validation, tenant bootstrap, backups, observability, billing, and deletion workflows. Tenant business truth and site schema state remain in the engine/site databases.
+Kora is currently a **DocType-centric config-driven application engine**. The codebase has kernel, contract, workflow, AI/MCP, and reconciliation capabilities, while the generic resource/runtime architecture is still evolving.
 
 ### Startup Flow (`cli/serve.go`)
 
 1. Load config from environment variables (`CommonConfigFromEnv` — no YAML files)
 2. Connect to platform DB (MySQL or remote LibSQL via `DB_DSN`)
-3. Discover sites from DB: registry-first via `_kora_site_registry`, with legacy fallback to `_kora_config_version`
+3. Discover sites from the canonical `_kora_site_registry` only; missing registry is a startup error
 4. Per site: reconstruct config from persisted site registry data + platform defaults → connect → bootstrap `_kora_*` tables → load config from DB → build Registry → run schema migration
 5. Build `SiteRouter` (domain → site map)
 6. Wire middleware: Recovery → RequestID → SecurityHeaders → CORS → SiteRouter → RateLimiter

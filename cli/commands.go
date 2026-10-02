@@ -22,6 +22,7 @@ fully functional backend: database schema, REST API, admin UI, and background jo
 func init() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(migrateCmd)
+	rootCmd.AddCommand(siteDirectoryCmd)
 
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(secretCmd)

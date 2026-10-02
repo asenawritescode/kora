@@ -41,7 +41,7 @@ func (h *Handler) HandleSecretList(c *gin.Context) {
 	}
 
 	rows, err := db.Query(
-		"SELECT key_name, updated_at FROM _kora_secret WHERE site = ? ORDER BY key_name",
+		h.siteQuery(c, "SELECT key_name, updated_at FROM _kora_secret WHERE site = ? ORDER BY key_name"),
 		siteName,
 	)
 	if err != nil {
@@ -104,7 +104,7 @@ func (h *Handler) HandleSecretSet(c *gin.Context) {
 		return
 	}
 
-	store := secret.NewStore(db)
+	store := secret.NewStore(db, h.siteDialect(c))
 	if err := store.Set(siteName, req.Key, req.Value); err != nil {
 		internalError(c, "setting secret", err)
 		return
@@ -143,7 +143,7 @@ func (h *Handler) HandleSecretDelete(c *gin.Context) {
 		return
 	}
 
-	store := secret.NewStore(db)
+	store := secret.NewStore(db, h.siteDialect(c))
 	if err := store.Delete(siteName, key); err != nil {
 		internalError(c, "deleting secret", err)
 		return

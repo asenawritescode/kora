@@ -2,7 +2,7 @@
 
 # Defaults
 SITE ?= airtime.local
-CONFIG ?= config/airtime/
+CONFIG ?= config/v0/airtime/
 PORT ?= 8000
 DB_USER ?= root
 DB_PASS ?=
@@ -42,7 +42,7 @@ dev:                               ## Full dev setup: MySQL + build + setup + se
 	@echo "Starting server on :$(PORT)..."
 	./kora serve --port $(PORT)
 
-setup: build                       ## Build + setup a site (SITE=airtime.local CONFIG=config/airtime/)
+setup: build                       ## Build + setup a site (SITE=airtime.local CONFIG=config/v0/airtime/)
 	./kora setup --site $(SITE) --path $(CONFIG) --db-user $(DB_USER) --db-pass $(DB_PASS) --admin-email $(ADMIN_EMAIL) --admin-password $(ADMIN_PASS)
 
 serve: build                       ## Build + start the server

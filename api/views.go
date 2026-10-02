@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -16,7 +17,10 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/kernel"
+	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/script"
 )
 
@@ -55,7 +59,11 @@ func (h *Handler) HandleSystemView(c *gin.Context) {
 
 	view, err := store.LoadView(name, site)
 	if err != nil {
-		writeError(c, http.StatusNotFound, "view.not_found", "View not found", map[string]any{"name": name})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(c, http.StatusNotFound, "view.not_found", "View not found", map[string]any{"name": name})
+		} else {
+			internalError(c, "loading view", err)
+		}
 		return
 	}
 
@@ -333,30 +341,40 @@ func (h *Handler) HandleViewByRoute(c *gin.Context) {
 	// Draft preview: load from latest Draft config snapshot.
 	if c.Query("version") == "draft" {
 		store := h.viewStore(c)
-		if store != nil {
-			site := siteName(c)
-			var configJSON string
-			err := store.DB.QueryRow(
-				"SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Draft' ORDER BY version DESC LIMIT 1",
-				site,
-			).Scan(&configJSON)
-			if err == nil && configJSON != "" {
-				snapshot, parseErr := doctype.ParseConfig(configJSON)
-				if parseErr == nil {
-					for _, v := range snapshot.Views {
-						if v.Route == route {
-							c.JSON(http.StatusOK, Response{Data: map[string]any{
-								"view":      v,
-								"is_public": false,
-								"draft":     true,
-							}})
-							return
-						}
-					}
-				}
+		if store == nil {
+			writeError(c, http.StatusInternalServerError, "server.store_unavailable", "view store not available", nil)
+			return
+		}
+		site := siteName(c)
+		var configJSON string
+		err := store.DB.QueryRow(h.siteQuery(c,
+			"SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Draft' ORDER BY version DESC LIMIT 1"),
+			site,
+		).Scan(&configJSON)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(c, http.StatusNotFound, "version.not_found", "No draft version found for route", map[string]any{"route": route})
+			return
+		}
+		if err != nil {
+			internalError(c, "loading draft config for view preview", err)
+			return
+		}
+		snapshot, err := doctype.ParseConfig(configJSON)
+		if err != nil {
+			internalError(c, "parsing draft config for view preview", err)
+			return
+		}
+		for _, v := range snapshot.Views {
+			if v.Route == route {
+				c.JSON(http.StatusOK, Response{Data: map[string]any{
+					"view":      v,
+					"is_public": false,
+					"draft":     true,
+				}})
+				return
 			}
 		}
-		writeError(c, http.StatusNotFound, "version.not_found", "No draft version found for route", map[string]any{"route": route})
+		writeError(c, http.StatusNotFound, "view.not_found", "View not found in draft version", map[string]any{"route": route})
 		return
 	}
 
@@ -551,16 +569,20 @@ func (h *Handler) executeCreateRecord(c *gin.Context, action *doctype.ViewAction
 		return
 	}
 
-	doc := doctype.NewDocument("")
+	data := make(map[string]any)
 	for k, v := range ctx {
-		if !strings.HasPrefix(k, "_") {
-			doc.Set(k, v)
+		if !strings.HasPrefix(k, "_") && dt.GetField(k) != nil {
+			data[k] = v
 		}
 	}
-
-	user := currentUser(c)
-	if err := h.siteTx(c).Insert(dt, doc, user, "view-action"); err != nil {
-		handleViewError(c, dt, err)
+	raw, err := json.Marshal(data)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid action data", nil)
+		return
+	}
+	doc, cerr := h.runKernelResourceMutation(c, kernel.CommandRecordCreate, doctypeName, "", raw)
+	if cerr != nil {
+		h.writeKernelError(c, cerr)
 		return
 	}
 
@@ -584,22 +606,20 @@ func (h *Handler) executeUpdateRecord(c *gin.Context, action *doctype.ViewAction
 		return
 	}
 
-	tm := h.siteTx(c)
-	existing, err := tm.GetDoc(dt, name, "")
-	if err != nil {
-		writeError(c, http.StatusNotFound, "resource.document_not_found", "Document not found", map[string]any{"name": name})
-		return
-	}
-
+	data := make(map[string]any)
 	for k, v := range ctx {
-		if !strings.HasPrefix(k, "_") && k != "name" {
-			existing.Set(k, v)
+		if !strings.HasPrefix(k, "_") && k != "name" && dt.GetField(k) != nil {
+			data[k] = v
 		}
 	}
-
-	user := currentUser(c)
-	if err := tm.Save(dt, existing, user, "view-action", nil); err != nil {
-		handleViewError(c, dt, err)
+	raw, err := json.Marshal(data)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid action data", nil)
+		return
+	}
+	existing, cerr := h.runKernelResourceMutation(c, kernel.CommandRecordUpdate, doctypeName, name, raw)
+	if cerr != nil {
+		h.writeKernelError(c, cerr)
 		return
 	}
 
@@ -636,30 +656,25 @@ func (h *Handler) executeWorkflowTransition(c *gin.Context, action *doctype.View
 		return
 	}
 
-	currentState := fmt.Sprintf("%v", doc.Get(wf.WorkflowStateField))
-	user := currentUser(c)
-	userRole := "Administrator"
-	if r, ok := c.Get("user_role"); ok {
-		if s, ok := r.(string); ok {
-			userRole = s
+	transitioned, cerr := h.runKernelWorkflowTransition(c, doctypeName, name, transition, doc.Revision)
+	if cerr != nil {
+		status := http.StatusBadRequest
+		code := "workflow.transition_failed"
+		switch cerr.Type {
+		case contract.CodePermissionDenied:
+			status, code = http.StatusForbidden, "permission.denied"
+		case contract.CodeNotFound:
+			status, code = http.StatusNotFound, "resource.document_not_found"
+		case contract.CodeConflict, contract.CodeIdempotencyKeyReused:
+			status, code = http.StatusConflict, "resource.conflict"
+		case contract.CodeInternal, contract.CodeDependencyUnavailable:
+			status, code = http.StatusInternalServerError, "internal.error"
 		}
-	}
-
-	newState, newDocStatus, err := reg.Workflows.ApplyTransition(doctypeName, currentState, transition, userRole, doc)
-	if err != nil {
-		writeError(c, http.StatusBadRequest, "workflow.transition_failed", err.Error(), nil)
+		writeError(c, status, code, cerr.Message, nil)
 		return
 	}
 
-	doc.Set(wf.WorkflowStateField, newState)
-	doc.Set("doc_status", newDocStatus)
-
-	if err := tm.Save(dt, doc, user, "view-action", nil); err != nil {
-		handleViewError(c, dt, err)
-		return
-	}
-
-	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
+	c.JSON(http.StatusOK, Response{Data: documentToMap(transitioned, dt)})
 }
 
 func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewAction, ctx map[string]any) {
@@ -686,6 +701,15 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 			doc.Set(k, v)
 		}
 	}
+	// Required identifiers are generated by the configured transaction action,
+	// not by the browser. This keeps the contract reusable for every client.
+	if referenceField := getString(action.Config, "reference_field"); referenceField != "" && doc.GetString(referenceField) == "" {
+		prefix := getString(action.Config, "reference_prefix")
+		if prefix == "" {
+			prefix = targetDoctype
+		}
+		doc.Set(referenceField, fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()))
+	}
 
 	parentField, childDT, err := resolveTransactionChildTable(reg, dt, action)
 	if err != nil {
@@ -698,7 +722,7 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 		if rawItems == nil {
 			rawItems = ctx["items"]
 		}
-		children, err := buildTransactionChildren(rawItems, childDT)
+		children, err := buildTransactionChildren(rawItems, childDT, action.Config)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "validation.failed", err.Error(), nil)
 			return
@@ -708,6 +732,7 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 			return
 		}
 		doc.SetTable(parentField, children)
+		applyTransactionTotals(dt, doc, children, action.Config)
 	}
 
 	if requiredStatus := getString(action.Config, "requires_operation_status"); requiredStatus != "" {
@@ -744,10 +769,49 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 		}
 	}
 
-	if err := tm.Insert(dt, doc, user, "view-action"); err != nil {
-		handleViewError(c, dt, err)
+	operationName := getString(ctx, "external_operation")
+	paymentDT := reg.Get("Payment")
+	saleData, dataErr := transactionDocumentData(dt, doc)
+	if dataErr != nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid transaction data", nil)
 		return
 	}
+	bundle := kernel.RecordMutationBundlePayload{
+		Doctype: dt.Name,
+		Records: []kernel.RecordMutationBundleItem{{Key: "sale", Doctype: dt.Name, Data: saleData}},
+	}
+	if operationName == "" && paymentDT != nil {
+		paymentData, dataErr := json.Marshal(map[string]any{
+			"reference": "PAY-$records.sale.name", "sale": "$records.sale.name",
+			"amount": ctx["total"], "method": ctx["payment_method"],
+			"status": "Succeeded", "assignee": user,
+		})
+		if dataErr != nil {
+			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid payment data", nil)
+			return
+		}
+		bundle.Records = append(bundle.Records, kernel.RecordMutationBundleItem{Key: "payment", Doctype: paymentDT.Name, Data: paymentData})
+	} else if operationName != "" && paymentDT != nil {
+		// The provider operation and its Payment already exist. Complete the
+		// Sale and link Payment atomically so either both become final or neither.
+		if paymentName, lookupErr := linkedPaymentName(h, c, h.queryDB(c), operationName); lookupErr == nil && paymentName != "" {
+			paymentChanges, encodeErr := json.Marshal(map[string]any{"sale": "$records.sale.name", "status": "Succeeded"})
+			if encodeErr != nil {
+				writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid payment data", nil)
+				return
+			}
+			bundle.Records = append(bundle.Records, kernel.RecordMutationBundleItem{
+				Key: "payment", Operation: "update", Doctype: paymentDT.Name, Name: paymentName, Data: paymentChanges,
+			})
+		}
+	}
+	idempotencyKey := "pos-sale:" + doc.GetString(getString(action.Config, "reference_field"))
+	result, _, cerr := h.runKernelMutationBundle(c, bundle, idempotencyKey)
+	if cerr != nil {
+		h.writeKernelError(c, cerr)
+		return
+	}
+	doc = orm.DocumentFromMap(reg, dt.Name, result.Document)
 
 	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
 }
@@ -759,6 +823,7 @@ func (h *Handler) executeInitiateExternalOperation(c *gin.Context, action *docty
 		writeError(c, http.StatusBadRequest, "resource.doctype_not_found", "External Operation doctype is not available", nil)
 		return
 	}
+	scriptName := getString(action.Config, "script")
 	doc := doctype.NewDocument("")
 	setDefault := func(field, value string) {
 		if value != "" {
@@ -781,7 +846,11 @@ func (h *Handler) executeInitiateExternalOperation(c *gin.Context, action *docty
 	if doc.GetString("provider") == "" {
 		doc.Set("provider", "M-Pesa")
 	}
-	doc.Set("status", "Initiating")
+	initialStatus := "Initiating"
+	if scriptName == "" {
+		initialStatus = "Pending"
+	}
+	doc.Set("status", initialStatus)
 	doc.Set("currency", getString(action.Config, "currency"))
 	if doc.GetString("currency") == "" {
 		doc.Set("currency", "KES")
@@ -800,34 +869,108 @@ func (h *Handler) executeInitiateExternalOperation(c *gin.Context, action *docty
 	}
 	doc.Set("request_payload", ctx)
 	doc.Set("initiated_by", c.GetString("user"))
-	doc.Set("initiated_at", time.Now())
 
 	tm := h.siteTx(c)
-	if err := tm.Insert(dt, doc, currentUser(c), "view-action"); err != nil {
-		handleViewError(c, dt, err)
-		return
+	user := currentUser(c)
+	paymentDT := reg.Get("Payment")
+	if paymentDT != nil {
+		doc.Set("source_doctype", "Payment")
+		doc.Set("source_name", "$records.payment.name")
+		operationData, encodeErr := transactionDocumentData(dt, doc)
+		if encodeErr != nil {
+			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid operation data", nil)
+			return
+		}
+		paymentValues := map[string]any{
+			"reference": "PAY-$records.operation.name", "amount": ctx["total"],
+			"method": ctx["payment_method"], "phone_number": ctx["customer_phone"],
+			"external_operation": "$records.operation.name", "status": "Pending", "assignee": user,
+		}
+		paymentData, encodeErr := configuredFieldData(paymentDT, paymentValues)
+		if encodeErr != nil {
+			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid payment data", nil)
+			return
+		}
+		bundle := kernel.RecordMutationBundlePayload{
+			Doctype: dt.Name,
+			Records: []kernel.RecordMutationBundleItem{
+				{Key: "operation", Doctype: dt.Name, Data: operationData},
+				{Key: "payment", Doctype: paymentDT.Name, Data: paymentData},
+			},
+		}
+		if scriptName == "" {
+			if eventDT := reg.Get("External Operation Event"); eventDT != nil {
+				eventOperation := *doc
+				eventOperation.Name = "$records.operation.name"
+				eventKey := "external-operation-init:" + doc.GetString("idempotency_key")
+				eventData, encodeErr := externalOperationEventData(eventDT, &eventOperation, "Outbound", "Initiate", "Initiating", "Pending", ctx, nil, "Processed", "", eventKey, time.Time{})
+				if encodeErr != nil {
+					writeError(c, http.StatusInternalServerError, "internal.error", "Encoding operation initiation event failed", nil)
+					return
+				}
+				bundle.Records = append(bundle.Records, kernel.RecordMutationBundleItem{Key: "event", Doctype: eventDT.Name, Data: eventData})
+			}
+		}
+		result, replayed, cerr := h.runKernelMutationBundle(c, bundle, "external-operation:"+doc.GetString("idempotency_key"))
+		if cerr != nil {
+			h.writeKernelError(c, cerr)
+			return
+		}
+		doc = orm.DocumentFromMap(reg, dt.Name, result.Document)
+		doc.Set("initiated_at", time.Now().UTC())
+		if replayed {
+			if current, getErr := tm.GetDoc(dt, doc.Name, ""); getErr == nil {
+				doc = current
+			}
+			c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
+			return
+		}
+	} else {
+		operationData, encodeErr := transactionDocumentData(dt, doc)
+		if encodeErr != nil {
+			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid operation data", nil)
+			return
+		}
+		created, cerr := h.runKernelResourceMutationWithKey(c, kernel.CommandRecordCreate, dt.Name, "", operationData, "external-operation:"+doc.GetString("idempotency_key"))
+		if cerr != nil {
+			h.writeKernelError(c, cerr)
+			return
+		}
+		doc = created
+		if c.Writer.Header().Get("X-Kora-Replay") == "true" {
+			if current, getErr := tm.GetDoc(dt, doc.Name, ""); getErr == nil {
+				doc = current
+			}
+			c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
+			return
+		}
 	}
-
-	if scriptName := getString(action.Config, "script"); scriptName != "" {
+	if scriptName != "" {
 		doc.Set("_mode", "initiate")
 		result, err := h.executeNamedOperationScript(c, scriptName, doc)
 		delete(doc.Fields, "_mode")
 		if err != nil {
-			doc.Set("status", "Failed")
-			doc.Set("error_message", err.Error())
-			_ = tm.Save(dt, doc, currentUser(c), "", nil)
+			if failureErr := h.commitExternalOperationFailure(c, dt, doc, ctx, err.Error()); failureErr != nil {
+				h.writeKernelError(c, failureErr)
+				return
+			}
 			writeError(c, http.StatusBadRequest, "operation.failed", err.Error(), nil)
 			return
 		}
 		applyOperationScriptResult(doc, result)
+		if outcomeErr := h.commitExternalOperationSuccess(c, dt, doc, ctx, "Initiating"); outcomeErr != nil {
+			h.writeKernelError(c, outcomeErr)
+			return
+		}
+		if current, getErr := tm.GetDoc(dt, doc.Name, ""); getErr == nil {
+			doc = current
+		}
 	} else {
-		doc.Set("status", "Pending")
-	}
-	if err := tm.Save(dt, doc, currentUser(c), "", nil); err != nil {
-		handleViewError(c, dt, err)
+		// With no external script there is no provider I/O phase: operation,
+		// companion payment, and initiation event were committed together above.
+		c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
 		return
 	}
-	h.recordExternalOperationEvent(c, doc, "Outbound", "Initiate", "Initiating", doc.GetString("status"), ctx, doc.Get("response_payload"), "Processed", "")
 	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
 }
 
@@ -863,8 +1006,8 @@ func (h *Handler) executeValidateExternalOperation(c *gin.Context, action *docty
 		} else {
 			applyOperationScriptResult(doc, result)
 		}
-		if err := tm.Save(dt, doc, currentUser(c), "", nil); err != nil {
-			handleViewError(c, dt, err)
+		if err := h.saveExternalOperation(c, dt, doc, ""); err != nil {
+			h.writeKernelError(c, err)
 			return
 		}
 		h.recordExternalOperationEvent(c, doc, "Outbound", "Status Check", previousStatus, doc.GetString("status"), ctx, doc.Get("response_payload"), "Processed", "")
@@ -879,12 +1022,127 @@ func (h *Handler) executeValidateExternalOperation(c *gin.Context, action *docty
 	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
 }
 
-func (h *Handler) recordExternalOperationEvent(c *gin.Context, operation *doctype.Document, direction, eventType, previousStatus, newStatus string, requestPayload, responsePayload any, processingStatus, errorMessage string) {
+func (h *Handler) recordExternalOperationEvent(c *gin.Context, operation *doctype.Document, direction, eventType, previousStatus, newStatus string, requestPayload, responsePayload any, processingStatus, errorMessage string) *contract.Error {
 	reg := h.siteRegistry(c)
 	dt := reg.Get("External Operation Event")
 	if dt == nil || operation == nil || operation.Name == "" {
-		return
+		return nil
 	}
+	eventKey := fmt.Sprintf("%s:%s:%d", operation.Name, strings.ToLower(strings.ReplaceAll(eventType, " ", "-")), time.Now().UnixNano())
+	data, err := externalOperationEventData(dt, operation, direction, eventType, previousStatus, newStatus, requestPayload, responsePayload, processingStatus, errorMessage, eventKey, time.Now().UTC())
+	if err != nil {
+		slog.Warn("external operation event could not be encoded", "operation", operation.Name, "event", eventType, "error", err)
+		return contract.NewError(contract.CodeInternal, "encoding operation event failed")
+	}
+	if _, err := h.runKernelResourceMutationWithKey(c, kernel.CommandRecordCreate, dt.Name, "", data, "operation-event:"+eventKey); err != nil {
+		slog.Warn("external operation event could not be recorded", "operation", operation.Name, "event", eventType, "error", err)
+		return err
+	}
+	return nil
+}
+
+// commitExternalOperationFailure records the provider failure only after the
+// external call has returned. It updates the operation, any companion payment,
+// and its event in one kernel-owned transaction so a provider error cannot
+// leave the customer-facing payment pending while its operation is failed.
+func (h *Handler) commitExternalOperationFailure(c *gin.Context, operationDT *doctype.DocType, operation *doctype.Document, requestPayload any, failureMessage string) *contract.Error {
+	if operationDT == nil || operation == nil || operation.Name == "" {
+		return contract.NewError(contract.CodeValidationFailed, "external operation is required")
+	}
+	operation.Set("status", "Failed")
+	operation.Set("error_message", failureMessage)
+	operationData, err := transactionDocumentData(operationDT, operation)
+	if err != nil {
+		return contract.NewError(contract.CodeInternal, "encoding failed external operation")
+	}
+	bundle := kernel.RecordMutationBundlePayload{
+		Doctype: operationDT.Name,
+		Records: []kernel.RecordMutationBundleItem{{
+			Key: "operation", Operation: "update", Doctype: operationDT.Name, Name: operation.Name, Data: operationData,
+		}},
+	}
+	if paymentDT := h.siteRegistry(c).Get("Payment"); paymentDT != nil {
+		paymentName, lookupErr := linkedPaymentName(h, c, h.queryDB(c), operation.Name)
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return contract.NewError(contract.CodeDependencyUnavailable, "load companion payment failed")
+		}
+		if lookupErr == nil {
+			paymentData, encodeErr := configuredFieldData(paymentDT, map[string]any{
+				"status": "Failed", "provider_reference": operation.Get("provider_reference"),
+			})
+			if encodeErr != nil {
+				return contract.NewError(contract.CodeInternal, "encoding failed companion payment")
+			}
+			bundle.Records = append(bundle.Records, kernel.RecordMutationBundleItem{
+				Key: "payment", Operation: "update", Doctype: paymentDT.Name, Name: paymentName, Data: paymentData,
+			})
+		}
+	}
+	eventDT := h.siteRegistry(c).Get("External Operation Event")
+	if eventDT != nil {
+		eventKey := fmt.Sprintf("external-operation-failed:%x", sha256.Sum256([]byte(siteName(c)+"\x00"+operation.Name)))
+		eventData, encodeErr := externalOperationEventData(eventDT, operation, "Outbound", "Initiate", "Initiating", "Failed", requestPayload, nil, "Failed", failureMessage, eventKey, time.Now().UTC())
+		if encodeErr != nil {
+			return contract.NewError(contract.CodeInternal, "encoding operation failure event")
+		}
+		bundle.Records = append(bundle.Records, kernel.RecordMutationBundleItem{Key: "event", Doctype: eventDT.Name, Data: eventData})
+	}
+	if _, _, commandErr := h.runKernelMutationBundle(c, bundle, "external-operation-failed:"+operation.Name); commandErr != nil {
+		return commandErr
+	}
+	return nil
+}
+
+// commitExternalOperationSuccess persists the provider result, companion
+// payment status, and durable event as one kernel-owned transaction. Provider
+// I/O has already completed before this bundle is invoked.
+func (h *Handler) commitExternalOperationSuccess(c *gin.Context, operationDT *doctype.DocType, operation *doctype.Document, requestPayload any, previousStatus string) *contract.Error {
+	if operationDT == nil || operation == nil || operation.Name == "" {
+		return contract.NewError(contract.CodeValidationFailed, "external operation is required")
+	}
+	operationData, err := transactionDocumentData(operationDT, operation)
+	if err != nil {
+		return contract.NewError(contract.CodeInternal, "encoding completed external operation failed")
+	}
+	bundle := kernel.RecordMutationBundlePayload{
+		Doctype: operationDT.Name,
+		Records: []kernel.RecordMutationBundleItem{{
+			Key: "operation", Operation: "update", Doctype: operationDT.Name, Name: operation.Name, Data: operationData,
+		}},
+	}
+	if paymentDT := h.siteRegistry(c).Get("Payment"); paymentDT != nil {
+		paymentName, lookupErr := linkedPaymentName(h, c, h.queryDB(c), operation.Name)
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return contract.NewError(contract.CodeDependencyUnavailable, "load companion payment failed")
+		}
+		if lookupErr == nil {
+			paymentData, encodeErr := configuredFieldData(paymentDT, map[string]any{
+				"status": operation.GetString("status"), "provider_reference": operation.Get("provider_reference"),
+			})
+			if encodeErr != nil {
+				return contract.NewError(contract.CodeInternal, "encoding completed companion payment failed")
+			}
+			bundle.Records = append(bundle.Records, kernel.RecordMutationBundleItem{
+				Key: "payment", Operation: "update", Doctype: paymentDT.Name, Name: paymentName, Data: paymentData,
+			})
+		}
+	}
+	if eventDT := h.siteRegistry(c).Get("External Operation Event"); eventDT != nil {
+		eventKey := "external-operation-result:" + operation.Name
+		eventData, encodeErr := externalOperationEventData(eventDT, operation, "Outbound", "Initiate", previousStatus,
+			operation.GetString("status"), requestPayload, operation.Get("response_payload"), "Processed", "", eventKey, time.Now().UTC())
+		if encodeErr != nil {
+			return contract.NewError(contract.CodeInternal, "encoding completed external operation event failed")
+		}
+		bundle.Records = append(bundle.Records, kernel.RecordMutationBundleItem{Key: "event", Doctype: eventDT.Name, Data: eventData})
+	}
+	if _, _, commandErr := h.runKernelMutationBundle(c, bundle, "external-operation-result:"+operation.Name); commandErr != nil {
+		return commandErr
+	}
+	return nil
+}
+
+func externalOperationEventData(dt *doctype.DocType, operation *doctype.Document, direction, eventType, previousStatus, newStatus string, requestPayload, responsePayload any, processingStatus, errorMessage, eventKey string, occurredAt time.Time) (json.RawMessage, error) {
 	event := doctype.NewDocument("")
 	event.Set("operation", operation.Name)
 	event.Set("direction", direction)
@@ -897,20 +1155,43 @@ func (h *Handler) recordExternalOperationEvent(c *gin.Context, operation *doctyp
 	event.Set("response_payload", responsePayload)
 	event.Set("processing_status", processingStatus)
 	event.Set("error_message", errorMessage)
-	event.Set("idempotency_key", fmt.Sprintf("%s:%s:%d", operation.Name, strings.ToLower(strings.ReplaceAll(eventType, " ", "-")), time.Now().UnixNano()))
-	event.Set("received_at", time.Now())
-	event.Set("processed_at", time.Now())
-	if err := h.siteTx(c).Insert(dt, event, currentUser(c), "operation-event"); err != nil {
-		slog.Warn("external operation event could not be recorded", "operation", operation.Name, "event", eventType, "error", err)
+	event.Set("idempotency_key", eventKey)
+	if !occurredAt.IsZero() {
+		event.Set("received_at", occurredAt)
+		event.Set("processed_at", occurredAt)
 	}
+	return transactionDocumentData(dt, event)
+}
+
+func (h *Handler) saveExternalOperation(c *gin.Context, dt *doctype.DocType, doc *doctype.Document, stage string) *contract.Error {
+	data, err := transactionDocumentData(dt, doc)
+	if err != nil {
+		return contract.NewError(contract.CodeInternal, "encoding external operation update failed")
+	}
+	idempotencyKey := ""
+	if stage != "" {
+		idempotencyKey = "external-operation-state:" + doc.Name + ":" + stage
+	}
+	_, cerr := h.runKernelResourceMutationWithKey(c, kernel.CommandRecordUpdate, dt.Name, doc.Name, data, idempotencyKey)
+	return cerr
+}
+
+func configuredFieldData(dt *doctype.DocType, values map[string]any) (json.RawMessage, error) {
+	fields := make(map[string]any, len(values))
+	for name, value := range values {
+		if dt.GetField(name) != nil {
+			fields[name] = value
+		}
+	}
+	return json.Marshal(fields)
 }
 
 func (h *Handler) executeNamedOperationScript(c *gin.Context, scriptName string, doc *doctype.Document) (map[string]any, error) {
 	site := siteName(c)
-	if h.ScriptRunner == nil || h.SiteScriptStores == nil || h.SiteScriptStores[site] == nil {
+	if h.ScriptRunner == nil || (h.SiteScriptStores == nil && h.RuntimeServices == nil) || h.runtimeService(c, site).ScriptStore == nil {
 		return nil, fmt.Errorf("operation script runner is not available")
 	}
-	store := h.SiteScriptStores[site]
+	store := h.runtimeService(c, site).ScriptStore
 	rec, err := store.LoadByName(site, scriptName)
 	if err != nil {
 		return nil, fmt.Errorf("load operation script %q: %w", scriptName, err)
@@ -974,10 +1255,10 @@ func (h *Handler) executeTransactionPaymentScript(c *gin.Context, scriptName str
 	if h.ScriptRunner == nil {
 		return fmt.Errorf("payment script runner is not available")
 	}
-	if h.SiteScriptStores == nil || h.SiteScriptStores[site] == nil {
+	if (h.SiteScriptStores == nil && h.RuntimeServices == nil) || h.runtimeService(c, site).ScriptStore == nil {
 		return fmt.Errorf("payment script store is not available")
 	}
-	store := h.SiteScriptStores[site]
+	store := h.runtimeService(c, site).ScriptStore
 	rec, err := store.LoadByName(site, scriptName)
 	if err != nil {
 		return fmt.Errorf("load payment script %q: %w", scriptName, err)
@@ -1066,13 +1347,15 @@ func resolveTransactionChildTable(reg *doctype.Registry, parentDT *doctype.DocTy
 	return "", nil, fmt.Errorf("child_table %q is not a table field or child doctype on %s", configured, parentDT.Name)
 }
 
-func buildTransactionChildren(rawItems any, childDT *doctype.DocType) ([]*doctype.Document, error) {
+func buildTransactionChildren(rawItems any, childDT *doctype.DocType, actionConfig map[string]any) ([]*doctype.Document, error) {
 	items, ok := rawItems.([]any)
 	if !ok {
 		return nil, fmt.Errorf("cart/items must be an array")
 	}
 
 	children := make([]*doctype.Document, 0, len(items))
+	lineFields, _ := actionConfig["line_fields"].(map[string]any)
+	lineDefaults, _ := actionConfig["line_defaults"].(map[string]any)
 	for i, item := range items {
 		row, ok := item.(map[string]any)
 		if !ok {
@@ -1084,30 +1367,107 @@ func buildTransactionChildren(rawItems any, childDT *doctype.DocType) ([]*doctyp
 			if field.ReadOnly && field.Computed != "" {
 				continue
 			}
-			if val, ok := row[field.Fieldname]; ok {
+			sourceField := field.Fieldname
+			if configuredSource := getString(lineFields, field.Fieldname); configuredSource != "" {
+				sourceField = configuredSource
+			}
+			if val, ok := row[sourceField]; ok {
 				child.Set(field.Fieldname, val)
 				continue
 			}
-			switch field.Fieldname {
-			case "product", "item":
-				if val, ok := firstPresent(row, "product", "item", "name"); ok {
-					child.Set(field.Fieldname, val)
-				}
-			case "unit_price":
-				if val, ok := firstPresent(row, "unit_price", "rate", "price", "selling_price"); ok {
-					child.Set(field.Fieldname, val)
-				}
-			case "quantity":
-				if val, ok := firstPresent(row, "quantity", "qty"); ok {
-					child.Set(field.Fieldname, val)
-				} else {
-					child.Set(field.Fieldname, 1)
-				}
+			if defaultValue, ok := lineDefaults[field.Fieldname]; ok {
+				child.Set(field.Fieldname, defaultValue)
 			}
 		}
 		children = append(children, child)
 	}
 	return children, nil
+}
+
+func applyTransactionTotals(parentDT *doctype.DocType, doc *doctype.Document, children []*doctype.Document, actionConfig map[string]any) {
+	if parentDT == nil || doc == nil || len(children) == 0 {
+		return
+	}
+	totalsConfig, ok := actionConfig["totals"].(map[string]any)
+	if !ok || len(totalsConfig) == 0 {
+		return
+	}
+	linesConfig, _ := totalsConfig["lines"].(map[string]any)
+	quantityField := getString(linesConfig, "quantity_field")
+	unitPriceField := getString(linesConfig, "unit_price_field")
+	discountField := getString(linesConfig, "discount_field")
+	taxField := getString(linesConfig, "tax_field")
+	lineTotalField := getString(linesConfig, "line_total_field")
+	subtotalField := getString(totalsConfig, "subtotal_field")
+	discountTotalField := getString(totalsConfig, "discount_total_field")
+	taxTotalField := getString(totalsConfig, "tax_total_field")
+	totalField := getString(totalsConfig, "total_field")
+	if quantityField == "" || unitPriceField == "" || subtotalField == "" || totalField == "" {
+		return
+	}
+	var subtotal float64
+	var taxTotal float64
+	var discountTotal float64
+	for _, child := range children {
+		if child == nil {
+			continue
+		}
+		quantity := numberOrDefault(child.Get(quantityField), 1)
+		unitPrice := numberOrDefault(child.Get(unitPriceField), 0)
+		discount := numberOrDefault(child.Get(discountField), 0)
+		tax := numberOrDefault(child.Get(taxField), 0)
+		lineTotal := quantity*unitPrice - discount + tax
+		if lineTotalField != "" {
+			lineTotal = numberOrDefault(child.Get(lineTotalField), lineTotal)
+			child.Set(lineTotalField, lineTotal)
+		}
+		subtotal += quantity * unitPrice
+		discountTotal += discount
+		taxTotal += tax
+	}
+	total := subtotal - discountTotal + taxTotal
+	if parentDT.GetField(subtotalField) != nil && isEmptyNumber(doc.Get(subtotalField)) {
+		doc.Set(subtotalField, subtotal)
+	}
+	if discountTotalField != "" && parentDT.GetField(discountTotalField) != nil && isEmptyNumber(doc.Get(discountTotalField)) {
+		doc.Set(discountTotalField, discountTotal)
+	}
+	if taxTotalField != "" && parentDT.GetField(taxTotalField) != nil && isEmptyNumber(doc.Get(taxTotalField)) {
+		doc.Set(taxTotalField, taxTotal)
+	}
+	if parentDT.GetField(totalField) != nil && isEmptyNumber(doc.Get(totalField)) {
+		doc.Set(totalField, total)
+	}
+}
+
+func numberOrDefault(value any, fallback float64) float64 {
+	switch v := value.(type) {
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case float32:
+		return float64(v)
+	case float64:
+		return v
+	case json.Number:
+		if n, err := v.Float64(); err == nil {
+			return n
+		}
+	case string:
+		if v == "" {
+			return fallback
+		}
+		var parsed float64
+		if _, err := fmt.Sscanf(v, "%f", &parsed); err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func isEmptyNumber(value any) bool {
+	return numberOrDefault(value, 0) == 0
 }
 
 func firstPresent(row map[string]any, keys ...string) (any, bool) {
@@ -1227,28 +1587,36 @@ func (h *Handler) HandlePublicCreate(c *gin.Context) {
 		return
 	}
 
-	// Strip non-public fields.
 	publicFields := dt.PublicFieldSet()
-	doc := &doctype.Document{}
-	for k, v := range body {
-		if publicFields[k] || isPublicSystemField(k) {
-			doc.Set(k, v)
-		}
+	data, err := json.Marshal(body)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid form data", nil)
+		return
 	}
-
-	user := "public"
-	tm := h.siteTx(c)
-	if err := tm.Insert(dt, doc, user, "public-form"); err != nil {
-		handleViewError(c, dt, err)
+	payload, err := json.Marshal(map[string]any{
+		"doctype": dt.Name, "public_route": route, "data": json.RawMessage(data),
+	})
+	if err != nil {
+		internalError(c, "encoding public form submission", err)
+		return
+	}
+	commandResult, cerr := h.executeKernelOperation(c, kernel.CommandPublicFormSubmit, kernelRequest{Payload: payload})
+	if cerr != nil {
+		h.writeKernelError(c, cerr)
+		return
+	}
+	var operation kernel.ResultData
+	if err := json.Unmarshal(commandResult.Data, &operation); err != nil {
+		internalError(c, "decoding public form result", err)
 		return
 	}
 
 	// Only return public fields.
 	result := make(map[string]any)
 	for field := range publicFields {
-		result[field] = doc.Get(field)
+		result[field] = operation.Document[field]
 	}
-	result["name"] = doc.Name
+	result["name"] = operation.Name
 
 	c.JSON(http.StatusOK, Response{Data: result})
 }
@@ -1267,7 +1635,7 @@ func (h *Handler) viewStore(c *gin.Context) *configstore.Store {
 	if !ok {
 		return nil
 	}
-	return configstore.NewStore(sqlDB, h.TxManager.Dialect)
+	return configstore.NewStore(sqlDB, h.siteDialect(c))
 }
 
 // currentUser returns the authenticated user identifier from context.
@@ -1318,6 +1686,24 @@ func documentToMap(doc *doctype.Document, dt *doctype.DocType) map[string]any {
 		}
 	}
 	return result
+}
+
+func transactionDocumentData(dt *doctype.DocType, doc *doctype.Document) (json.RawMessage, error) {
+	if dt == nil || doc == nil {
+		return nil, fmt.Errorf("transaction document is required")
+	}
+	serialized := doc.ToMap()
+	fields := make(map[string]any, len(dt.DataFields()))
+	for _, field := range dt.DataFields() {
+		if value, exists := serialized[field.Fieldname]; exists {
+			fields[field.Fieldname] = value
+		}
+	}
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return nil, fmt.Errorf("encode transaction document: %w", err)
+	}
+	return encoded, nil
 }
 
 // handleViewError maps ORM/database errors to API error responses.

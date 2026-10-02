@@ -2,6 +2,8 @@ package api
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/asenawritescode/kora/auth"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -62,7 +65,7 @@ func (h *Handler) HandleUserList(c *gin.Context) {
 
 	site := siteName(c)
 	rows, err := db.Query(
-		"SELECT name, email, full_name, enabled, roles, creation, modified FROM _kora_user WHERE site = ? ORDER BY name",
+		h.siteQuery(c, "SELECT name, email, full_name, enabled, roles, creation, modified FROM _kora_user WHERE site = ? ORDER BY name"),
 		site,
 	)
 	if err != nil {
@@ -76,10 +79,15 @@ func (h *Handler) HandleUserList(c *gin.Context) {
 		var u UserResponse
 		var rolesStr string
 		if err := rows.Scan(&u.Name, &u.Email, &u.FullName, &u.Enabled, &rolesStr, &u.Created, &u.Modified); err != nil {
-			continue
+			internalError(c, "reading user list", err)
+			return
 		}
 		u.Roles = splitRolesStr(rolesStr)
 		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		internalError(c, "reading user list", err)
+		return
 	}
 
 	if users == nil {
@@ -123,7 +131,7 @@ func (h *Handler) HandleUserCreate(c *gin.Context) {
 
 	// Check for duplicate email within this site.
 	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_user WHERE site = ? AND email = ?", site, req.Email).Scan(&count); err != nil {
+	if err := db.QueryRow(h.siteQuery(c, "SELECT COUNT(*) FROM _kora_user WHERE site = ? AND email = ?"), site, req.Email).Scan(&count); err != nil {
 		internalError(c, "checking duplicate email", err)
 		return
 	}
@@ -147,7 +155,7 @@ func (h *Handler) HandleUserCreate(c *gin.Context) {
 	}
 
 	_, err = db.Exec(
-		"INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, email_verified_at, roles) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+		h.siteQuery(c, "INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, email_verified_at, roles) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)"),
 		name, site, req.Email, passwordHash, req.FullName, enabled, rolesStr,
 	)
 	if err != nil {
@@ -156,7 +164,7 @@ func (h *Handler) HandleUserCreate(c *gin.Context) {
 	}
 
 	// Fetch the created user to return full response.
-	u, err := fetchUser(db, site, name)
+	u, err := fetchUser(db, h.siteDialect(c), site, name)
 	if err != nil {
 		internalError(c, "fetching created user", err)
 		return
@@ -180,9 +188,13 @@ func (h *Handler) HandleUserGet(c *gin.Context) {
 
 	site := siteName(c)
 	name := c.Param("name")
-	u, err := fetchUser(db, site, name)
+	u, err := fetchUser(db, h.siteDialect(c), site, name)
 	if err != nil {
-		notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+		if errors.Is(err, sql.ErrNoRows) {
+			notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+		} else {
+			internalError(c, "loading user", err)
+		}
 		return
 	}
 
@@ -206,8 +218,12 @@ func (h *Handler) HandleUserUpdate(c *gin.Context) {
 	name := c.Param("name")
 
 	// Verify user exists.
-	if _, err := fetchUser(db, site, name); err != nil {
-		notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+	if _, err := fetchUser(db, h.siteDialect(c), site, name); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+		} else {
+			internalError(c, "loading user", err)
+		}
 		return
 	}
 
@@ -217,20 +233,25 @@ func (h *Handler) HandleUserUpdate(c *gin.Context) {
 		return
 	}
 
+	var assignments []string
+	var args []any
 	// Update full_name.
 	if req.FullName != "" {
-		db.Exec("UPDATE _kora_user SET full_name = ?, modified = CURRENT_TIMESTAMP WHERE site = ? AND name = ?", req.FullName, site, name)
+		assignments = append(assignments, "full_name = ?")
+		args = append(args, req.FullName)
 	}
 
 	// Update roles.
 	if req.Roles != nil {
 		rolesStr := strings.Join(req.Roles, ",")
-		db.Exec("UPDATE _kora_user SET roles = ?, modified = CURRENT_TIMESTAMP WHERE site = ? AND name = ?", rolesStr, site, name)
+		assignments = append(assignments, "roles = ?")
+		args = append(args, rolesStr)
 	}
 
 	// Update enabled.
 	if req.Enabled != nil {
-		db.Exec("UPDATE _kora_user SET enabled = ?, modified = CURRENT_TIMESTAMP WHERE site = ? AND name = ?", *req.Enabled, site, name)
+		assignments = append(assignments, "enabled = ?")
+		args = append(args, *req.Enabled)
 	}
 
 	// Optionally update password.
@@ -244,11 +265,31 @@ func (h *Handler) HandleUserUpdate(c *gin.Context) {
 			internalError(c, "hashing password", err)
 			return
 		}
-		db.Exec("UPDATE _kora_user SET password_hash = ?, email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP), modified = CURRENT_TIMESTAMP WHERE site = ? AND name = ?", passwordHash, site, name)
+		assignments = append(assignments, "password_hash = ?", "email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP)")
+		args = append(args, passwordHash)
+	}
+	if len(assignments) > 0 {
+		assignments = append(assignments, "modified = CURRENT_TIMESTAMP")
+		args = append(args, site, name)
+		query := "UPDATE _kora_user SET " + strings.Join(assignments, ", ") + " WHERE site = ? AND name = ?"
+		result, err := db.Exec(h.siteQuery(c, query), args...)
+		if err != nil {
+			internalError(c, "updating user", err)
+			return
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			internalError(c, "checking updated user", err)
+			return
+		}
+		if updated == 0 {
+			notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+			return
+		}
 	}
 
 	// Fetch updated user.
-	u, err := fetchUser(db, site, name)
+	u, err := fetchUser(db, h.siteDialect(c), site, name)
 	if err != nil {
 		internalError(c, "fetching updated user", err)
 		return
@@ -281,17 +322,42 @@ func (h *Handler) HandleUserDelete(c *gin.Context) {
 	}
 
 	// Verify user exists.
-	if _, err := fetchUser(db, site, name); err != nil {
-		notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+	if _, err := fetchUser(db, h.siteDialect(c), site, name); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+		} else {
+			internalError(c, "loading user", err)
+		}
 		return
 	}
 
-	// Delete sessions for this user on this site.
-	db.Exec("DELETE FROM _kora_session WHERE site = ? AND user = ?", site, name)
-
-	// Delete user.
-	if _, err := db.Exec("DELETE FROM _kora_user WHERE site = ? AND name = ?", site, name); err != nil {
+	tx, err := db.BeginTx(c.Request.Context(), nil)
+	if err != nil {
 		internalError(c, "deleting user", err)
+		return
+	}
+	defer tx.Rollback()
+	sessionDelete := fmt.Sprintf("DELETE FROM _kora_session WHERE site = ? AND %s = ?", h.siteDialect(c).QuoteIdent("user"))
+	if _, err := tx.Exec(h.siteQuery(c, sessionDelete), site, name); err != nil {
+		internalError(c, "deleting user sessions", err)
+		return
+	}
+	result, err := tx.Exec(h.siteQuery(c, "DELETE FROM _kora_user WHERE site = ? AND name = ?"), site, name)
+	if err != nil {
+		internalError(c, "deleting user", err)
+		return
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		internalError(c, "checking deleted user", err)
+		return
+	}
+	if deleted == 0 {
+		notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(c, "committing user deletion", err)
 		return
 	}
 
@@ -317,8 +383,12 @@ func (h *Handler) HandleUserResetPassword(c *gin.Context) {
 	name := c.Param("name")
 
 	// Verify user exists.
-	if _, err := fetchUser(db, site, name); err != nil {
-		notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+	if _, err := fetchUser(db, h.siteDialect(c), site, name); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+		} else {
+			internalError(c, "loading user", err)
+		}
 		return
 	}
 
@@ -342,13 +412,37 @@ func (h *Handler) HandleUserResetPassword(c *gin.Context) {
 		return
 	}
 
-	if _, err := db.Exec("UPDATE _kora_user SET password_hash = ?, email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP), modified = CURRENT_TIMESTAMP WHERE site = ? AND name = ?", passwordHash, site, name); err != nil {
+	tx, err := db.BeginTx(c.Request.Context(), nil)
+	if err != nil {
 		internalError(c, "updating password", err)
+		return
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(h.siteQuery(c, "UPDATE _kora_user SET password_hash = ?, email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP), modified = CURRENT_TIMESTAMP WHERE site = ? AND name = ?"), passwordHash, site, name)
+	if err != nil {
+		internalError(c, "updating password", err)
+		return
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		internalError(c, "checking updated password", err)
+		return
+	}
+	if updated == 0 {
+		notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
 		return
 	}
 
 	// Invalidate all existing sessions for this user on this site so they must re-login.
-	db.Exec("DELETE FROM _kora_session WHERE site = ? AND user = ?", site, name)
+	sessionDelete := fmt.Sprintf("DELETE FROM _kora_session WHERE site = ? AND %s = ?", h.siteDialect(c).QuoteIdent("user"))
+	if _, err := tx.Exec(h.siteQuery(c, sessionDelete), site, name); err != nil {
+		internalError(c, "invalidating user sessions", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(c, "committing password reset", err)
+		return
+	}
 
 	c.JSON(http.StatusOK, Response{
 		Data: map[string]string{"message": "Password reset. User must log in again."},
@@ -375,11 +469,11 @@ func requireAdmin(c *gin.Context) bool {
 }
 
 // fetchUser loads a single user by name and site from the database.
-func fetchUser(db *sql.DB, site, name string) (*UserResponse, error) {
+func fetchUser(db *sql.DB, dialect kdb.Dialect, site, name string) (*UserResponse, error) {
 	var u UserResponse
 	var rolesStr string
 	err := db.QueryRow(
-		"SELECT name, email, full_name, enabled, roles, creation, modified FROM _kora_user WHERE site = ? AND name = ?",
+		kdb.Rebind(dialect, "SELECT name, email, full_name, enabled, roles, creation, modified FROM _kora_user WHERE site = ? AND name = ?"),
 		site, name,
 	).Scan(&u.Name, &u.Email, &u.FullName, &u.Enabled, &rolesStr, &u.Created, &u.Modified)
 	if err != nil {

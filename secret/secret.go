@@ -14,29 +14,45 @@ import (
 	"io"
 	"time"
 
+	kdb "github.com/asenawritescode/kora/db"
 	"golang.org/x/crypto/hkdf"
 )
 
 // Store persists encrypted secrets to the database.
 type Store struct {
-	DB *sql.DB
+	DB      *sql.DB
+	Dialect kdb.Dialect
 }
 
 // NewStore creates a new secret store.
-func NewStore(db *sql.DB) *Store { return &Store{DB: db} }
+func NewStore(db *sql.DB, dialect ...kdb.Dialect) *Store {
+	store := &Store{DB: db}
+	if len(dialect) != 0 {
+		store.Dialect = dialect[0]
+	}
+	return store
+}
+
+func (s *Store) query(statement string) string {
+	return kdb.Rebind(s.Dialect, statement)
+}
 
 // EnsureTable creates the _kora_secret table if it doesn't exist.
 // Uses portable SQL compatible with both MySQL and LibSQL.
 func (s *Store) EnsureTable() error {
-	_, err := s.DB.Exec(`
+	valueType := "BLOB"
+	if s.Dialect != nil && s.Dialect.DriverName() == "postgres" {
+		valueType = "BYTEA"
+	}
+	_, err := s.DB.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS _kora_secret (
 			site VARCHAR(140) NOT NULL,
 			key_name VARCHAR(140) NOT NULL,
-			encrypted_value BLOB NOT NULL,
+			encrypted_value %s NOT NULL,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (site, key_name)
-		)`)
+		)`, valueType))
 	return err
 }
 
@@ -56,16 +72,18 @@ func (s *Store) Set(site, key, value string) error {
 
 	// Check if the key already exists.
 	var existing int
-	s.DB.QueryRow("SELECT COUNT(*) FROM _kora_secret WHERE site = ? AND key_name = ?", site, key).Scan(&existing)
+	if err := s.DB.QueryRow(s.query("SELECT COUNT(*) FROM _kora_secret WHERE site = ? AND key_name = ?"), site, key).Scan(&existing); err != nil {
+		return fmt.Errorf("checking existing secret: %w", err)
+	}
 
 	if existing > 0 {
 		_, err = s.DB.Exec(
-			"UPDATE _kora_secret SET encrypted_value = ?, updated_at = ? WHERE site = ? AND key_name = ?",
+			s.query("UPDATE _kora_secret SET encrypted_value = ?, updated_at = ? WHERE site = ? AND key_name = ?"),
 			encrypted, now, site, key,
 		)
 	} else {
 		_, err = s.DB.Exec(
-			"INSERT INTO _kora_secret (site, key_name, encrypted_value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			s.query("INSERT INTO _kora_secret (site, key_name, encrypted_value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"),
 			site, key, encrypted, now, now,
 		)
 	}
@@ -76,7 +94,7 @@ func (s *Store) Set(site, key, value string) error {
 func (s *Store) Get(site, key string) (string, error) {
 	var encrypted []byte
 	err := s.DB.QueryRow(
-		"SELECT encrypted_value FROM _kora_secret WHERE site = ? AND key_name = ?",
+		s.query("SELECT encrypted_value FROM _kora_secret WHERE site = ? AND key_name = ?"),
 		site, key,
 	).Scan(&encrypted)
 	if err == sql.ErrNoRows {
@@ -95,13 +113,13 @@ func (s *Store) Get(site, key string) (string, error) {
 
 // Delete removes a secret.
 func (s *Store) Delete(site, key string) error {
-	_, err := s.DB.Exec("DELETE FROM _kora_secret WHERE site = ? AND key_name = ?", site, key)
+	_, err := s.DB.Exec(s.query("DELETE FROM _kora_secret WHERE site = ? AND key_name = ?"), site, key)
 	return err
 }
 
 // List returns all key names (not values) for a site.
 func (s *Store) List(site string) ([]string, error) {
-	rows, err := s.DB.Query("SELECT key_name FROM _kora_secret WHERE site = ? ORDER BY key_name", site)
+	rows, err := s.DB.Query(s.query("SELECT key_name FROM _kora_secret WHERE site = ? ORDER BY key_name"), site)
 	if err != nil {
 		return nil, err
 	}
@@ -175,13 +193,16 @@ func decrypt(data, key []byte) ([]byte, error) {
 // ReEncrypt re-encrypts all secrets for a site with a new password.
 // Use after changing the site's database password.
 func (s *Store) ReEncrypt(site, oldPassword, newPassword string) error {
-	rows, err := s.DB.Query("SELECT key_name, encrypted_value FROM _kora_secret WHERE site = ?", site)
+	rows, err := s.DB.Query(s.query("SELECT key_name, encrypted_value FROM _kora_secret WHERE site = ?"), site)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
-	type kv struct{ key string; val []byte }
+	type kv struct {
+		key string
+		val []byte
+	}
 	var secrets []kv
 	for rows.Next() {
 		var k string
@@ -206,7 +227,7 @@ func (s *Store) ReEncrypt(site, oldPassword, newPassword string) error {
 		if err != nil {
 			return fmt.Errorf("re-encrypting %s: %w", sec.key, err)
 		}
-		_, err = s.DB.Exec("UPDATE _kora_secret SET encrypted_value = ? WHERE site = ? AND key_name = ?",
+		_, err = s.DB.Exec(s.query("UPDATE _kora_secret SET encrypted_value = ? WHERE site = ? AND key_name = ?"),
 			encrypted, site, sec.key)
 		if err != nil {
 			return fmt.Errorf("updating %s: %w", sec.key, err)

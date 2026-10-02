@@ -14,6 +14,7 @@ import (
 
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/db"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -35,12 +36,12 @@ type Writer interface {
 	Append(ctx context.Context, tx *sql.Tx, event contract.EventEnvelope) error
 }
 
-// SQLWriter is the default Writer implementation. It is dialect-neutral at write
-// time (the table name and placeholders match every dialect's _kora_outbox).
-type SQLWriter struct{}
+// SQLWriter is the default Writer implementation. It receives the site's SQL
+// dialect so its placeholders match the active database driver.
+type SQLWriter struct{ Dialect db.QueryDialect }
 
 // NewSQLWriter returns a Writer backed by _kora_outbox.
-func NewSQLWriter() Writer { return &SQLWriter{} }
+func NewSQLWriter(dialect db.QueryDialect) Writer { return &SQLWriter{Dialect: dialect} }
 
 // Append inserts an event row. The event ID is the outbox row primary key and is
 // later reused as the provider message ID so duplicate publishes are detectable.
@@ -63,10 +64,11 @@ func (w *SQLWriter) Append(ctx context.Context, tx *sql.Tx, event contract.Event
 		return fmt.Errorf("outbox: marshal event: %w", err)
 	}
 
-	_, err = tx.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx, db.Rebind(w.Dialect,
 		`INSERT INTO _kora_outbox
 			(id, site, event_type, event_version, aggregate_type, aggregate_id, payload, status, attempts, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	),
 		event.ID,
 		event.Site,
 		event.Type,
@@ -89,6 +91,7 @@ func (w *SQLWriter) Append(ctx context.Context, tx *sql.Tx, event contract.Event
 // because claims use a lease. Rows are never deleted automatically.
 type Publisher struct {
 	DB          *sql.DB
+	Dialect     db.QueryDialect
 	Destination contract.EventPublisher
 	LeaseOwner  string
 	LeaseTTL    time.Duration
@@ -96,9 +99,10 @@ type Publisher struct {
 }
 
 // NewPublisher returns a Publisher with sensible defaults.
-func NewPublisher(db *sql.DB, dest contract.EventPublisher) *Publisher {
+func NewPublisher(database *sql.DB, dest contract.EventPublisher, dialect db.QueryDialect) *Publisher {
 	return &Publisher{
-		DB:          db,
+		DB:          database,
+		Dialect:     dialect,
 		Destination: dest,
 		LeaseOwner:  ulid.Make().String(),
 		LeaseTTL:    30 * time.Second,
@@ -118,12 +122,12 @@ func (p *Publisher) PublishDue(ctx context.Context, limit int) (int, error) {
 	// Select due row IDs first (LIMIT in SELECT is portable across MySQL, LibSQL,
 	// and Postgres), then claim each row by primary key. This avoids LIMIT in an
 	// UPDATE, which SQLite/LibSQL do not support.
-	rows, err := p.DB.QueryContext(ctx,
+	rows, err := p.DB.QueryContext(ctx, db.Rebind(p.Dialect,
 		`SELECT id FROM _kora_outbox
 		 WHERE (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
 			OR (status = 'publishing' AND lease_until IS NOT NULL AND lease_until < ?)
 		 ORDER BY created_at
-		 LIMIT ?`,
+		 LIMIT ?`),
 		now, now, limit)
 	if err != nil {
 		return 0, fmt.Errorf("outbox: select due rows: %w", err)
@@ -151,14 +155,14 @@ func (p *Publisher) PublishDue(ctx context.Context, limit int) (int, error) {
 	// Claim each due row. Rows that another worker claimed in between are skipped.
 	published := 0
 	for _, id := range ids {
-		res, err := p.DB.ExecContext(ctx,
+		res, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
 			`UPDATE _kora_outbox
 			 SET status = ?, lease_owner = ?, lease_until = ?, attempts = attempts + 1
 			 WHERE id = ?
 			   AND (
 			       (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
 			       OR (status = 'publishing' AND lease_until IS NOT NULL AND lease_until < ?)
-			   )`,
+			   )`),
 			string(StatusPublishing), p.LeaseOwner, leaseUntil, id, now, now)
 		if err != nil {
 			continue // claim failed — leave for another worker
@@ -169,7 +173,7 @@ func (p *Publisher) PublishDue(ctx context.Context, limit int) (int, error) {
 
 		var attempts int
 		_ = p.DB.QueryRowContext(ctx,
-			`SELECT attempts FROM _kora_outbox WHERE id = ?`, id).Scan(&attempts)
+			db.Rebind(p.Dialect, `SELECT attempts FROM _kora_outbox WHERE id = ?`), id).Scan(&attempts)
 
 		if err := p.publishOne(ctx, id); err != nil {
 			if attempts >= p.MaxAttempts {
@@ -189,7 +193,7 @@ func (p *Publisher) PublishDue(ctx context.Context, limit int) (int, error) {
 func (p *Publisher) publishOne(ctx context.Context, id string) error {
 	var payload string
 	err := p.DB.QueryRowContext(ctx,
-		`SELECT payload FROM _kora_outbox WHERE id = ?`, id).Scan(&payload)
+		db.Rebind(p.Dialect, `SELECT payload FROM _kora_outbox WHERE id = ?`), id).Scan(&payload)
 	if err != nil {
 		return err
 	}
@@ -202,32 +206,32 @@ func (p *Publisher) publishOne(ctx context.Context, id string) error {
 }
 
 func (p *Publisher) markPublished(ctx context.Context, id string) error {
-	_, err := p.DB.ExecContext(ctx,
-		`UPDATE _kora_outbox SET status = ?, published_at = ?, lease_owner = '', lease_until = NULL WHERE id = ?`,
+	_, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
+		`UPDATE _kora_outbox SET status = ?, published_at = ?, lease_owner = '', lease_until = NULL WHERE id = ?`),
 		string(StatusPublished), time.Now().UTC(), id)
 	return err
 }
 
 func (p *Publisher) retry(ctx context.Context, id string, attempts int, cause error) error {
-	_, err := p.DB.ExecContext(ctx,
+	_, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
 		`UPDATE _kora_outbox SET status = 'pending', last_error = ?, lease_owner = '', lease_until = NULL,
-			next_attempt_at = ? WHERE id = ?`,
+			next_attempt_at = ? WHERE id = ?`),
 		cause.Error(), time.Now().UTC().Add(backoff(attempts)), id)
 	return err
 }
 
 func (p *Publisher) markFailed(ctx context.Context, id string, cause error) error {
-	_, err := p.DB.ExecContext(ctx,
-		`UPDATE _kora_outbox SET status = ?, last_error = ?, lease_owner = '', lease_until = NULL WHERE id = ?`,
+	_, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
+		`UPDATE _kora_outbox SET status = ?, last_error = ?, lease_owner = '', lease_until = NULL WHERE id = ?`),
 		string(StatusFailed), cause.Error(), id)
 	return err
 }
 
 // ReplayFailed resets failed rows to pending so they are retried (operator replay).
 func (p *Publisher) ReplayFailed(ctx context.Context) (int, error) {
-	res, err := p.DB.ExecContext(ctx,
+	res, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
 		`UPDATE _kora_outbox SET status = 'pending', next_attempt_at = NULL, last_error = NULL
-		 WHERE status = 'failed' AND attempts < ?`,
+		 WHERE status = 'failed' AND attempts < ?`),
 		p.MaxAttempts)
 	if err != nil {
 		return 0, err
@@ -240,20 +244,21 @@ func (p *Publisher) ReplayFailed(ctx context.Context) (int, error) {
 // a consumer persists a unique (consumer_name, event_id) receipt before applying
 // its effect, so duplicate delivery (at-least-once) never duplicates the effect.
 type Consumer struct {
-	DB   *sql.DB
-	Name string
+	DB      *sql.DB
+	Name    string
+	Dialect db.QueryDialect
 }
 
 // NewConsumer returns a named consumer for idempotent outbox delivery.
-func NewConsumer(db *sql.DB, name string) *Consumer {
-	return &Consumer{DB: db, Name: name}
+func NewConsumer(database *sql.DB, name string, dialect db.QueryDialect) *Consumer {
+	return &Consumer{DB: database, Name: name, Dialect: dialect}
 }
 
 // HasSeen reports whether the consumer has already recorded a receipt for eventID.
 func (c *Consumer) HasSeen(ctx context.Context, eventID string) (bool, error) {
 	var n int
-	if err := c.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM _kora_outbox_receipt WHERE consumer_name = ? AND event_id = ?`,
+	if err := c.DB.QueryRowContext(ctx, db.Rebind(c.Dialect,
+		`SELECT COUNT(*) FROM _kora_outbox_receipt WHERE consumer_name = ? AND event_id = ?`),
 		c.Name, eventID).Scan(&n); err != nil {
 		return false, err
 	}
@@ -264,9 +269,9 @@ func (c *Consumer) HasSeen(ctx context.Context, eventID string) (bool, error) {
 // unique primary key makes a concurrent duplicate insert a no-op for MySQL and
 // LibSQL (the error is swallowed by the caller as a dedupe signal).
 func (c *Consumer) RecordReceipt(ctx context.Context, eventID, site string) error {
-	_, err := c.DB.ExecContext(ctx,
+	_, err := c.DB.ExecContext(ctx, db.Rebind(c.Dialect,
 		`INSERT INTO _kora_outbox_receipt (consumer_name, event_id, site, received_at)
-		 VALUES (?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?)`),
 		c.Name, eventID, site, time.Now().UTC())
 	return err
 }
@@ -281,12 +286,12 @@ type OutboxMetrics struct {
 // Metrics returns outbox health counters for operator visibility.
 func (p *Publisher) Metrics(ctx context.Context) (OutboxMetrics, error) {
 	var m OutboxMetrics
-	err := p.DB.QueryRowContext(ctx,
+	err := p.DB.QueryRowContext(ctx, db.Rebind(p.Dialect,
 		`SELECT
 		  COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0),
 		  COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0),
 		  COALESCE(SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END), 0)
-		 FROM _kora_outbox`).Scan(&m.Pending, &m.Failed, &m.Published)
+		 FROM _kora_outbox`)).Scan(&m.Pending, &m.Failed, &m.Published)
 	return m, err
 }
 
@@ -302,12 +307,13 @@ type Worker func(ctx context.Context, event contract.EventEnvelope) error
 // (consumer_name, event_id) receipts.
 type Dispatcher struct {
 	DB      *sql.DB
+	Dialect db.QueryDialect
 	Workers map[string]Worker
 }
 
 // NewDispatcher returns a Dispatcher with no workers registered.
-func NewDispatcher(db *sql.DB) *Dispatcher {
-	return &Dispatcher{DB: db, Workers: make(map[string]Worker)}
+func NewDispatcher(database *sql.DB, dialect db.QueryDialect) *Dispatcher {
+	return &Dispatcher{DB: database, Dialect: dialect, Workers: make(map[string]Worker)}
 }
 
 // Register adds a named worker.
@@ -322,11 +328,11 @@ func (d *Dispatcher) Run(ctx context.Context, limit int) (int, error) {
 		limit = 100
 	}
 
-	rows, err := d.DB.QueryContext(ctx,
+	rows, err := d.DB.QueryContext(ctx, db.Rebind(d.Dialect,
 		`SELECT id, payload FROM _kora_outbox
 		 WHERE status = 'pending'
 		 ORDER BY created_at
-		 LIMIT ?`, limit)
+		 LIMIT ?`), limit)
 	if err != nil {
 		return 0, fmt.Errorf("outbox: select due events: %w", err)
 	}
@@ -345,7 +351,7 @@ func (d *Dispatcher) Run(ctx context.Context, limit int) (int, error) {
 
 		allOK := true
 		for name, worker := range d.Workers {
-			c := &Consumer{DB: d.DB, Name: name}
+			c := &Consumer{DB: d.DB, Name: name, Dialect: d.Dialect}
 			seen, err := c.HasSeen(ctx, id)
 			if err != nil {
 				allOK = false
@@ -375,8 +381,8 @@ func (d *Dispatcher) Run(ctx context.Context, limit int) (int, error) {
 }
 
 func (d *Dispatcher) markPublished(ctx context.Context, id string) error {
-	_, err := d.DB.ExecContext(ctx,
-		`UPDATE _kora_outbox SET status = ?, published_at = ? WHERE id = ?`,
+	_, err := d.DB.ExecContext(ctx, db.Rebind(d.Dialect,
+		`UPDATE _kora_outbox SET status = ?, published_at = ? WHERE id = ?`),
 		string(StatusPublished), time.Now().UTC(), id)
 	return err
 }

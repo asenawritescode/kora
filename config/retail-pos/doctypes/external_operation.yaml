@@ -1,0 +1,90 @@
+name: External Operation
+module: Integrations
+title_field: purpose
+search_fields: purpose, source_name, provider, provider_reference, idempotency_key
+sort_field: creation
+sort_order: DESC
+fields:
+  - fieldname: operation_type
+    fieldtype: Select
+    label: Operation Type
+    options: |
+      Payment
+      Shipment
+      Booking
+      KYC
+      Tax Submission
+      Notification
+      Other
+    reqd: true
+  - fieldname: purpose
+    fieldtype: Data
+    label: Purpose
+    reqd: true
+  - fieldname: source_doctype
+    fieldtype: Data
+    label: Source DocType
+    reqd: true
+  - fieldname: source_name
+    fieldtype: Data
+    label: Source Record
+  - fieldname: provider
+    fieldtype: Data
+    label: Provider
+    reqd: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Created
+      Initiating
+      Pending
+      Succeeded
+      Failed
+      Cancelled
+      Expired
+      Finalized
+    default: Created
+    reqd: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+  - fieldname: currency
+    fieldtype: Data
+    label: Currency
+    default: KES
+  - fieldname: contact_reference
+    fieldtype: Data
+    label: Contact Reference
+  - fieldname: provider_reference
+    fieldtype: Data
+    label: Provider Reference
+  - fieldname: provider_request_id
+    fieldtype: Data
+    label: Provider Request ID
+  - fieldname: idempotency_key
+    fieldtype: Data
+    label: Idempotency Key
+    unique: true
+  - fieldname: request_payload
+    fieldtype: JSON
+    label: Request Payload
+  - fieldname: response_payload
+    fieldtype: JSON
+    label: Response Payload
+  - fieldname: callback_payload
+    fieldtype: JSON
+    label: Callback Payload
+  - fieldname: error_message
+    fieldtype: Text
+    label: Error Message
+  - fieldname: initiated_by
+    fieldtype: Data
+    label: Initiated By
+  - fieldname: initiated_at
+    fieldtype: Datetime
+    label: Initiated At
+    default: now
+  - fieldname: completed_at
+    fieldtype: Datetime
+    label: Completed At

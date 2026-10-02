@@ -22,6 +22,10 @@ import (
 // registry is used to auto-generate metrics from DocType metadata.
 // siteBuses maps site name → EventBus.
 func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, dialect db.Dialect) {
+	RegisterAnalyticsRoutesWithRuntimeServices(apiGroup, registry, siteDB, siteBuses, realtimeProviders, dialect, nil)
+}
+
+func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, dialect db.Dialect, runtimeServices *SiteRuntimeServices) {
 	ag := apiGroup.Group("/analytics")
 	queryCache := newAnalyticsQueryCache(30*time.Second, 256)
 
@@ -32,7 +36,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			docTypes = append(docTypes, siteRegistry.Get(name))
 		}
 		catalog := analytics.BuildSemanticCatalog(docTypes)
-		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB))
+		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB), dialect)
 		if err != nil {
 			internalError(c, "loading analytics reports", err)
 			return
@@ -47,7 +51,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 
 	ag.GET("/reports", func(c *gin.Context) {
 		siteRegistry := analyticsRegistry(c, registry)
-		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB))
+		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB), dialect)
 		if err != nil {
 			internalError(c, "loading analytics reports", err)
 			return
@@ -67,7 +71,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			docTypes = append(docTypes, siteRegistry.Get(name))
 		}
 		catalog := analytics.BuildSemanticCatalog(docTypes)
-		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB))
+		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB), dialect)
 		if err != nil {
 			internalError(c, "loading analytics reports", err)
 			return
@@ -101,7 +105,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		for _, query := range report.Queries {
 			request.Queries = append(request.Queries, analytics.ModelQuery{Model: query.Model, Measures: query.Measures, Dimensions: query.Dimensions, Filters: query.Filters})
 		}
-		qe := getQueryEngine(c, siteDB)
+		qe := getQueryEngine(c, siteDB, dialect)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
@@ -135,7 +139,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			c.JSON(http.StatusOK, Response{Data: cached})
 			return
 		}
-		qe := getQueryEngine(c, siteDB)
+		qe := getQueryEngine(c, siteDB, dialect)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
@@ -153,6 +157,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 	ag.GET("/status", func(c *gin.Context) {
 		siteName := c.GetString("site_name")
 		bus := siteBuses[siteName]
+		bus = RuntimeServiceForContext(c, runtimeServices, siteName).EventBus
 		c.JSON(http.StatusOK, Response{
 			Data: analytics.GetStatus(bus),
 		})
@@ -184,25 +189,27 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		}
 		now := time.Now().UTC()
 		siteName := c.GetString("site_name")
+		siteDialect := siteDialectFromContext(c, dialect)
 		db := getSiteDB(c, siteDB)
 		job := &analytics.RebuildJob{ID: fmt.Sprintf("analytics-rebuild-%d", time.Now().UnixNano()), Site: siteName, DocType: request.DocType, From: from, Status: "queued", StartedAt: now}
-		if err := analytics.CreateRebuildJob(db, dialect, job); err != nil {
+		if err := analytics.CreateRebuildJob(db, siteDialect, job); err != nil {
 			internalError(c, "creating analytics rebuild job", err)
 			return
 		}
 		siteRegistry := analyticsRegistry(c, registry)
 		provider := realtimeProviders[siteName]
+		provider = RuntimeServiceForContext(c, runtimeServices, siteName).Realtime
 		if provider != nil {
 			payload, err := json.Marshal(map[string]any{"job_id": job.ID, "site": siteName, "doctype": request.DocType, "from": from.Format("2006-01-02")})
 			if err != nil {
-				_ = analytics.MarkRebuildFailed(db, dialect, siteName, job.ID, err)
+				_ = analytics.MarkRebuildFailed(db, siteDialect, siteName, job.ID, err)
 				internalError(c, "encoding analytics rebuild job", err)
 				return
 			}
 			cfg := provider.Config()
 			subject := cfg.SubjectPrefix + ".tasks.analytics-rebuild"
 			if err := provider.PublishSubject(c.Request.Context(), subject, payload, job.ID); err != nil {
-				_ = analytics.MarkRebuildFailed(db, dialect, siteName, job.ID, err)
+				_ = analytics.MarkRebuildFailed(db, siteDialect, siteName, job.ID, err)
 				internalError(c, "queueing analytics rebuild job", err)
 				return
 			}
@@ -210,20 +217,20 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			// Local development remains usable without NATS, but status is still
 			// durable and tenant-scoped instead of living in process memory.
 			go func() {
-				_ = analytics.MarkRebuildRunning(db, dialect, siteName, job.ID)
-				count, err := analytics.Backfill(db, dialect, siteName, siteRegistry, from, request.DocType)
+				_ = analytics.MarkRebuildRunning(db, siteDialect, siteName, job.ID)
+				count, err := analytics.Backfill(db, siteDialect, siteName, siteRegistry, from, request.DocType)
 				if err != nil {
-					_ = analytics.MarkRebuildFailed(db, dialect, siteName, job.ID, err)
+					_ = analytics.MarkRebuildFailed(db, siteDialect, siteName, job.ID, err)
 					return
 				}
-				_ = analytics.MarkRebuildCompleted(db, dialect, siteName, job.ID, count)
+				_ = analytics.MarkRebuildCompleted(db, siteDialect, siteName, job.ID, count)
 			}()
 		}
 		c.JSON(http.StatusAccepted, Response{Data: job})
 	})
 
 	ag.GET("/rebuild/:id", func(c *gin.Context) {
-		job, err := analytics.GetRebuildJob(getSiteDB(c, siteDB), dialect, c.GetString("site_name"), c.Param("id"))
+		job, err := analytics.GetRebuildJob(getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), c.GetString("site_name"), c.Param("id"))
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, ErrorResponse{Error: map[string]string{"code": "analytics.rebuild_not_found", "message": "Rebuild job not found"}})
 			return
@@ -247,17 +254,18 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			return
 		}
 		input.AutoGenerated = false
-		db := getSiteDB(c, siteDB)
-		if db == nil {
+		database := getSiteDB(c, siteDB)
+		if database == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.database_unavailable", "No database connection", nil)
 			return
 		}
 		siteName := c.GetString("site_name")
+		siteDialect := siteDialectFromContext(c, dialect)
 		updateCols := []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field"}
-		_, err := db.Exec(
-			`INSERT INTO _kora_analytics_metric (site, name, label, type, doctype, field_name, link_field, group_by_field)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?) `+
-				dialect.UpsertClause([]string{"site", "name"}, updateCols),
+		query := `INSERT INTO _kora_analytics_metric (site, name, label, type, doctype, field_name, link_field, group_by_field)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?) ` + siteDialect.UpsertClause([]string{"site", "name"}, updateCols)
+		_, err := database.Exec(
+			db.Rebind(siteDialect, query),
 			siteName, input.Name, input.Label, string(input.Type), input.DocType,
 			input.Field, input.LinkField, input.GroupByField,
 		)
@@ -269,12 +277,12 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 	})
 
 	ag.GET("/metrics", func(c *gin.Context) {
-		metrics := resolveMetrics(c, analyticsRegistry(c, registry))
+		metrics := resolveMetrics(c, analyticsRegistry(c, registry), dialect)
 		c.JSON(http.StatusOK, Response{Data: metrics})
 	})
 
 	ag.GET("/metrics/:name", func(c *gin.Context) {
-		metrics := resolveMetrics(c, analyticsRegistry(c, registry))
+		metrics := resolveMetrics(c, analyticsRegistry(c, registry), dialect)
 		for _, m := range metrics {
 			if m.Name == c.Param("name") {
 				c.JSON(http.StatusOK, Response{Data: m})
@@ -285,7 +293,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 	})
 
 	ag.POST("/metrics/:name/query", func(c *gin.Context) {
-		qe := getQueryEngine(c, siteDB)
+		qe := getQueryEngine(c, siteDB, dialect)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
@@ -297,7 +305,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		}
 		req.Metric = c.Param("name")
 
-		metrics := resolveMetrics(c, analyticsRegistry(c, registry))
+		metrics := resolveMetrics(c, analyticsRegistry(c, registry), dialect)
 		var metric *analytics.Metric
 		for _, m := range metrics {
 			if m.Name == req.Metric {
@@ -320,7 +328,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 	})
 
 	ag.GET("/insights/:doctype", func(c *gin.Context) {
-		qe := getQueryEngine(c, siteDB)
+		qe := getQueryEngine(c, siteDB, dialect)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
@@ -328,7 +336,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 
 		doctypeName := c.Param("doctype")
 		siteRegistry := analyticsRegistry(c, registry)
-		metrics := resolveMetrics(c, siteRegistry)
+		metrics := resolveMetrics(c, siteRegistry, dialect)
 		// Build the requested DocType's generated metrics directly as a safety
 		// net for path-based tenant requests and older metric registries.
 		if dt := siteRegistry.Get(doctypeName); dt != nil {
@@ -353,13 +361,13 @@ func analyticsRegistry(c *gin.Context, fallback *doctype.Registry) *doctype.Regi
 	return fallback
 }
 
-func loadSemanticReports(c *gin.Context, db *sql.DB) ([]analytics.ReportDefinition, error) {
-	if db == nil {
+func loadSemanticReports(c *gin.Context, database *sql.DB, dialect db.Dialect) ([]analytics.ReportDefinition, error) {
+	if database == nil {
 		return []analytics.ReportDefinition{}, nil
 	}
 	siteName := c.GetString("site_name")
 	var configJSON string
-	err := db.QueryRow(`SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1`, siteName).Scan(&configJSON)
+	err := database.QueryRow(db.Rebind(siteDialectFromContext(c, dialect), `SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1`), siteName).Scan(&configJSON)
 	if err == sql.ErrNoRows {
 		return []analytics.ReportDefinition{}, nil
 	}
@@ -381,7 +389,7 @@ func loadSemanticReports(c *gin.Context, db *sql.DB) ([]analytics.ReportDefiniti
 	return reports, nil
 }
 
-func loadAvailableReports(c *gin.Context, registry *doctype.Registry, db *sql.DB) ([]analytics.ReportDefinition, error) {
+func loadAvailableReports(c *gin.Context, registry *doctype.Registry, database *sql.DB, dialect db.Dialect) ([]analytics.ReportDefinition, error) {
 	docTypes := make([]*doctype.DocType, 0)
 	if registry != nil {
 		for _, name := range registry.Names() {
@@ -389,7 +397,7 @@ func loadAvailableReports(c *gin.Context, registry *doctype.Registry, db *sql.DB
 		}
 	}
 	catalog := analytics.BuildSemanticCatalog(docTypes)
-	configured, err := loadSemanticReports(c, db)
+	configured, err := loadSemanticReports(c, database, dialect)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +419,7 @@ func loadAvailableReports(c *gin.Context, registry *doctype.Registry, db *sql.DB
 
 // resolveMetrics returns all metrics for the current site: auto-generated from
 // DocType metadata plus any user-defined custom metrics.
-func resolveMetrics(c *gin.Context, registry *doctype.Registry) []*analytics.Metric {
+func resolveMetrics(c *gin.Context, registry *doctype.Registry, dialect db.Dialect) []*analytics.Metric {
 	var all []*analytics.Metric
 	for _, name := range registry.Names() {
 		dt := registry.Get(name)
@@ -426,11 +434,11 @@ func resolveMetrics(c *gin.Context, registry *doctype.Registry) []*analytics.Met
 		}
 	}
 	// Load custom metrics from DB.
-	db := getSiteDB(c, nil)
-	if db != nil {
+	database := getSiteDB(c, nil)
+	if database != nil {
 		siteName := c.GetString("site_name")
-		rows, err := db.Query(
-			"SELECT name, label, type, doctype, field_name, link_field, group_by_field FROM _kora_analytics_metric WHERE site = ?",
+		rows, err := database.Query(
+			db.Rebind(siteDialectFromContext(c, dialect), "SELECT name, label, type, doctype, field_name, link_field, group_by_field FROM _kora_analytics_metric WHERE site = ?"),
 			siteName,
 		)
 		if err == nil {
@@ -457,7 +465,7 @@ func getSiteDB(c *gin.Context, fallback *sql.DB) *sql.DB {
 }
 
 // getQueryEngine returns a QueryEngine for the current request's site.
-func getQueryEngine(c *gin.Context, fallbackDB *sql.DB) *analytics.QueryEngine {
+func getQueryEngine(c *gin.Context, fallbackDB *sql.DB, dialect db.Dialect) *analytics.QueryEngine {
 	siteName := c.GetString("site_name")
 	if siteName == "" {
 		return nil
@@ -466,5 +474,5 @@ func getQueryEngine(c *gin.Context, fallbackDB *sql.DB) *analytics.QueryEngine {
 	if db == nil {
 		return nil
 	}
-	return &analytics.QueryEngine{DB: db, SiteName: siteName}
+	return &analytics.QueryEngine{DB: db, SiteName: siteName, Dialect: siteDialectFromContext(c, dialect)}
 }

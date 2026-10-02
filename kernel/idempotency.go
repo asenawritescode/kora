@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	"github.com/asenawritescode/kora/contract"
@@ -14,20 +15,24 @@ const (
 	receiptCompleted = "completed"
 )
 
+var errConcurrentIdempotencyClaim = contract.NewError(contract.CodeConflict, "concurrent idempotency claim")
+
 // lookupReceipt returns the committed result of a prior operation with the
 // same (site, idempotency key). A payload-hash mismatch is a key reuse: the
 // caller intended a different operation under a key that is already spent.
-func (k *Kernel) lookupReceipt(ctx context.Context, siteDB *sql.DB, op Operation, opID string) (contract.CommandResult, bool, *contract.Error) {
+func (k *Kernel) lookupReceipt(ctx context.Context, siteDB *sql.DB, op Operation) (contract.CommandResult, bool, *contract.Error) {
 	var (
 		storedPayloadHash string
-		resultHash        string
+		storedResultHash  string
 		status            string
+		operationID       string
+		resultJSON        sql.NullString
 	)
 	err := siteDB.QueryRowContext(ctx,
-		db.Rebind(k.dialect(), `SELECT payload_hash, result_hash, status FROM _kora_idempotency_receipt
+		db.Rebind(k.dialect(), `SELECT operation_id, payload_hash, result_hash, status, result_json FROM _kora_idempotency_receipt
 		 WHERE site = ? AND idempotency_key = ?`),
 		op.Context.Site, op.Context.IdempotencyKey,
-	).Scan(&storedPayloadHash, &resultHash, &status)
+	).Scan(&operationID, &storedPayloadHash, &storedResultHash, &status, &resultJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return contract.CommandResult{}, false, nil
 	}
@@ -37,15 +42,42 @@ func (k *Kernel) lookupReceipt(ctx context.Context, siteDB *sql.DB, op Operation
 	if storedPayloadHash != "" && storedPayloadHash != payloadHash(op.Payload) {
 		return contract.CommandResult{}, true, ErrKeyReused
 	}
-	// A completed receipt replays as an empty completed result carrying only
-	// the recorded result hash; full result replay lands with SPEC-005's
-	// canonical envelope (receipt stores result_hash today).
-	return contract.CommandResult{
-		OperationID:   opID,
-		CorrelationID: op.Context.CorrelationID,
-		Status:        contract.StatusCompleted,
-		Replayed:      true,
-	}, true, nil
+	if status != receiptCompleted || !resultJSON.Valid || resultJSON.String == "" {
+		return contract.CommandResult{}, true, contract.NewError(contract.CodeConflict, "the original idempotency result is unavailable; use a new key")
+	}
+	var result contract.CommandResult
+	if err := json.Unmarshal([]byte(resultJSON.String), &result); err != nil {
+		return contract.CommandResult{}, true, contract.NewError(contract.CodeInternal, "stored idempotency result is invalid")
+	}
+	if storedResultHash != "" && storedResultHash != resultHash(result) {
+		return contract.CommandResult{}, true, contract.NewError(contract.CodeInternal, "stored idempotency result failed integrity check")
+	}
+	result.OperationID = operationID
+	result.Replayed = true
+	return result, true, nil
+}
+
+// storeReceiptResult stores the exact command envelope before the business
+// transaction commits, so a successful mutation can always be replayed.
+func (k *Kernel) storeReceiptResult(dbTx *sql.Tx, op Operation, result contract.CommandResult) *contract.Error {
+	if op.Context.IdempotencyKey == "" {
+		return nil
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return contract.NewError(contract.CodeInternal, "encoding idempotency result failed")
+	}
+	resultRow, err := dbTx.Exec(
+		db.Rebind(k.dialect(), `UPDATE _kora_idempotency_receipt SET result_hash = ?, result_json = ? WHERE site = ? AND idempotency_key = ?`),
+		resultHash(result), string(raw), op.Context.Site, op.Context.IdempotencyKey,
+	)
+	if err != nil {
+		return contract.NewError(contract.CodeInternal, "storing idempotency result failed")
+	}
+	if affected, err := resultRow.RowsAffected(); err != nil || affected != 1 {
+		return contract.NewError(contract.CodeInternal, "idempotency receipt was not finalized in the transaction")
+	}
+	return nil
 }
 
 // claimReceipt inserts the receipt inside the active transaction. A primary-
@@ -77,16 +109,5 @@ func (k *Kernel) claimReceipt(dbTx *sql.Tx, op Operation, def CommandDefinition,
 	if scanErr == nil && existing != pHash {
 		return ErrKeyReused
 	}
-	return contract.NewError(contract.CodeIdempotencyKeyReused, "idempotency key concurrently used")
-}
-
-// finalizeReceipt records the committed result hash so later replays can be
-// verified. Failure to finalize degrades to at-least-once execution safety:
-// the business commit stands, and the next attempt re-executes under the same
-// key and hits the receipt's unique constraint instead of double-applying.
-func (k *Kernel) finalizeReceipt(ctx context.Context, siteDB *sql.DB, op Operation, opID, rHash string) {
-	_, _ = siteDB.ExecContext(ctx,
-		db.Rebind(k.dialect(), `UPDATE _kora_idempotency_receipt SET result_hash = ? WHERE site = ? AND idempotency_key = ?`),
-		rHash, op.Context.Site, op.Context.IdempotencyKey,
-	)
+	return errConcurrentIdempotencyClaim
 }

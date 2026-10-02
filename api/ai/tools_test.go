@@ -56,6 +56,16 @@ func TestBuildToolCatalogAllowsWhatsAppWithGuards(t *testing.T) {
 	}
 }
 
+func TestExecuteSingleToolDeniesDocTypeOperationWithoutRolePermission(t *testing.T) {
+	reg := doctype.NewRegistry()
+	reg.Register(&doctype.DocType{Name: "PurchaseRequest"})
+	tx := &orm.TxManager{Context: context.Background()}
+	result := executeSingleToolWithRolesAndCallID(tx, reg, "purchaserequest_list", map[string]any{}, "agent", "site", "run", "step", "", []string{"Guest"})
+	if !strings.Contains(result, "Permission denied") {
+		t.Fatalf("expected permission denial, got %q", result)
+	}
+}
+
 func TestUpdateToolAllowsStableNameArgument(t *testing.T) {
 	dt := &doctype.DocType{
 		Name: "Task",
@@ -78,6 +88,77 @@ func TestUpdateToolAllowsStableNameArgument(t *testing.T) {
 	}, dt, map[string]bool{"name": true})
 	if len(unknown) != 1 || unknown[0] != "missing" {
 		t.Fatalf("expected only real unknown fields to be rejected, got %#v", unknown)
+	}
+}
+
+func TestExecuteUpdateToolRejectsInvalidArgumentsBeforeMutation(t *testing.T) {
+	dt := &doctype.DocType{
+		Name: "Task",
+		Fields: []doctype.Field{
+			{Fieldname: "title", Fieldtype: "Data", Label: "Title"},
+			{Fieldname: "calculated", Fieldtype: "Data", Label: "Calculated", ReadOnly: true},
+		},
+	}
+	reg := doctype.NewRegistry()
+	reg.Register(dt)
+	tests := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{name: "missing record name", args: map[string]any{"title": "Updated"}, want: "name is required"},
+		{name: "unknown field", args: map[string]any{"name": "TASK-1", "missing": "value"}, want: "unknown fields: missing"},
+		{name: "read-only field", args: map[string]any{"name": "TASK-1", "calculated": "forged"}, want: "field calculated is not writable"},
+		{name: "empty change set", args: map[string]any{"name": "TASK-1"}, want: "provide at least one writable field"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := executeUpdateToolWithKey(nil, reg, dt, test.args, "alice@example.test", []string{doctype.AdminRole}, "", false)
+			if !strings.Contains(got, test.want) {
+				t.Fatalf("update result = %q, want it to contain %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestAIToolMutationIdempotencyKeyIsStableAndScoped(t *testing.T) {
+	key := aiToolMutationIdempotencyKey("site-a", "run-1", "step-1", "call-1")
+	if key == "" || key != aiToolMutationIdempotencyKey("site-a", "run-1", "step-1", "call-1") {
+		t.Fatalf("same tool invocation must produce a stable non-empty idempotency key: %q", key)
+	}
+	if key == aiToolMutationIdempotencyKey("site-a", "run-1", "step-1", "call-2") || key == aiToolMutationIdempotencyKey("site-b", "run-1", "step-1", "call-1") {
+		t.Fatal("different tool invocations or sites must not share an idempotency key")
+	}
+	if got := aiToolMutationIdempotencyKey("site-a", "run-1", "", "call-1"); got != "" {
+		t.Fatalf("incomplete invocation identity must not enable accidental cross-call deduplication: %q", got)
+	}
+}
+
+func TestRolesForToolUsesAuthenticatedTxRoles(t *testing.T) {
+	tx := &orm.TxManager{CurrentUserRole: "Cashier", CurrentUserRoles: []string{"Cashier", "POS Manager"}}
+	got := rolesForTool(tx)
+	if len(got) != 2 || got[0] != "Cashier" || got[1] != "POS Manager" {
+		t.Fatalf("rolesForTool = %#v, want both resolved roles", got)
+	}
+	got[0] = "mutated"
+	if tx.CurrentUserRoles[0] != "Cashier" {
+		t.Fatal("rolesForTool exposed the mutable request role slice")
+	}
+	if got := rolesForTool(&orm.TxManager{CurrentUserRole: "Cashier"}); len(got) != 1 || got[0] != "Cashier" {
+		t.Fatalf("primary-role fallback = %#v, want Cashier", got)
+	}
+}
+
+func TestChannelToolIdempotencyKeyIsBoundedAndSiteScoped(t *testing.T) {
+	key := channelToolMutationIdempotencyKey("site-a", strings.Repeat("client-key", 100))
+	if len(key) > 100 || key != channelToolMutationIdempotencyKey("site-a", strings.Repeat("client-key", 100)) {
+		t.Fatalf("channel key must be deterministic and bounded, got length %d", len(key))
+	}
+	if key == channelToolMutationIdempotencyKey("site-b", strings.Repeat("client-key", 100)) {
+		t.Fatal("same client key in different sites must be distinct at the adapter")
+	}
+	if channelToolMutationIdempotencyKey("site-a", " ") != "" {
+		t.Fatal("blank client key must not enable implicit deduplication")
 	}
 }
 
@@ -359,7 +440,7 @@ func TestExecuteSingleToolUpdateDoctypeDraftExecutesAfterApproval(t *testing.T) 
 	mock.ExpectExec(`INSERT INTO _kora_config_version`).
 		WithArgs(
 			sqlmock.AnyArg(), "site-a", 1, "alice", "Updated Task via AI (Draft)",
-			sqlmock.AnyArg(), "Draft", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), "Draft", false, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			"cv-base-1", "",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -417,7 +498,7 @@ func TestExecuteToolCallsForAIRecordsAuditRows(t *testing.T) {
 				"arguments": "{}",
 			},
 		},
-	}, "alice", "site-a", "run-1", "step-1", "conv-1")
+	}, "alice", "site-a", "run-1", "step-1", "conv-1", nil)
 
 	if len(results) != 1 {
 		t.Fatalf("expected one tool result, got %d", len(results))
@@ -496,7 +577,7 @@ func TestExecuteToolCallsForAIGuardedToolUsesSharedExecutor(t *testing.T) {
 				"arguments": `{"name":"hello_script","script_type":"validate","script":"return true;"}`,
 			},
 		},
-	}, "alice", "site-a", "run-1", "step-1", "conv-1")
+	}, "alice", "site-a", "run-1", "step-1", "conv-1", nil)
 
 	if len(results) != 1 {
 		t.Fatalf("expected one tool result, got %d", len(results))

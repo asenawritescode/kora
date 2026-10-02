@@ -1,0 +1,45 @@
+name: Expense
+module: Money
+is_submittable: true
+title_field: reference
+search_fields: reference, payee, reason
+sort_field: expense_date
+sort_order: DESC
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: expense_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+  - fieldname: payee
+    fieldtype: Data
+    label: Paid to
+    reqd: true
+    in_list_view: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+  - fieldname: payment_method
+    fieldtype: Select
+    label: Paid by
+    options: |
+      Cash
+      Card
+      Mpesa
+      Bank transfer
+      Other
+  - fieldname: reason
+    fieldtype: Data
+    label: What was it for?
+    reqd: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

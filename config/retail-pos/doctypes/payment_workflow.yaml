@@ -1,0 +1,60 @@
+name: Retail POS Payment Workflow
+document_type: Payment
+is_active: true
+workflow_state_field: status
+
+states:
+  - state: Draft
+    doc_status: 0
+    allow_edit: Retail POS and Store Operations Operator, Retail POS and Store Operations Administrator
+    style: default
+  - state: Initiated
+    doc_status: 0
+    allow_edit: Retail POS and Store Operations Operator, Retail POS and Store Operations Administrator
+    style: info
+  - state: Pending
+    doc_status: 0
+    allow_edit: Retail POS and Store Operations Operator, Retail POS and Store Operations Administrator
+    style: warning
+  - state: Succeeded
+    doc_status: 0
+    allow_edit: Retail POS and Store Operations Reviewer, Retail POS and Store Operations Administrator
+    style: success
+  - state: Failed
+    doc_status: 0
+    allow_edit: Retail POS and Store Operations Operator, Retail POS and Store Operations Administrator
+    style: danger
+  - state: Cancelled
+    doc_status: 0
+    allow_edit: Retail POS and Store Operations Operator, Retail POS and Store Operations Administrator
+    style: danger
+  - state: Finalized
+    doc_status: 1
+    allow_edit: Retail POS and Store Operations Reviewer, Retail POS and Store Operations Administrator
+    style: success
+
+transitions:
+  - action: Start STK Push
+    from: Draft
+    to: Initiated
+    allowed: Retail POS and Store Operations Operator, Retail POS and Store Operations Administrator
+  - action: Await provider
+    from: Initiated
+    to: Pending
+    allowed: Retail POS and Store Operations Operator, Retail POS and Store Operations Administrator
+  - action: Confirm payment
+    from: Pending
+    to: Succeeded
+    allowed: Retail POS and Store Operations Operator, Retail POS and Store Operations Reviewer, Retail POS and Store Operations Administrator
+  - action: Mark failed
+    from: Pending
+    to: Failed
+    allowed: Retail POS and Store Operations Operator, Retail POS and Store Operations Reviewer, Retail POS and Store Operations Administrator
+  - action: Cancel payment
+    from: Initiated
+    to: Cancelled
+    allowed: Retail POS and Store Operations Operator, Retail POS and Store Operations Administrator
+  - action: Finalize payment
+    from: Succeeded
+    to: Finalized
+    allowed: Retail POS and Store Operations Reviewer, Retail POS and Store Operations Administrator

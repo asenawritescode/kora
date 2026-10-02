@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/secret"
 )
 
@@ -188,8 +189,8 @@ func applyFloat(store *secret.Store, site, key string, dst *float64) {
 // Provider resolution
 // ---------------------------------------------------------------------------
 
-func resolveProvider(db *sql.DB, siteName, modelOverride string) (providerKey, apiKey, baseURL, model string) {
-	store := secret.NewStore(db)
+func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.Dialect) (providerKey, apiKey, baseURL, model string) {
+	store := secret.NewStore(db, dialect...)
 
 	providers := []struct{ key, base, defaultModel string }{
 		{"openai_api_key", "https://api.openai.com/v1", "gpt-4o"},

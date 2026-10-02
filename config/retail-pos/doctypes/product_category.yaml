@@ -1,0 +1,25 @@
+name: Product Category
+module: Retail POS and Store Operations
+title_field: category_name
+sort_field: display_order
+sort_order: ASC
+fields:
+  - fieldname: category_name
+    fieldtype: Data
+    label: Category name
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: display_order
+    fieldtype: Int
+    label: Display order
+    default: 0
+    in_list_view: true
+  - fieldname: is_active
+    fieldtype: Check
+    label: Active
+    default: 1
+    in_list_view: true
+  - fieldname: color
+    fieldtype: Data
+    label: Color

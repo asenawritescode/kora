@@ -15,14 +15,66 @@ fields:
   - fieldname: source_record
     fieldtype: Data
     label: Source Record
+    description: The original order, import, or external reference this payment came from.
   - fieldname: assignee
-    fieldtype: Data
+    fieldtype: User
     label: Assignee
+    read_only: true
   - fieldname: evidence
     fieldtype: Text
     label: Evidence
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
+    options: |
+      Draft
+      Initiated
+      Pending
+      Succeeded
+      Failed
+      Cancelled
+      Finalized
     default: Draft
     in_list_view: true
+  - fieldname: sale
+    fieldtype: Link
+    options: Sale
+    label: POS order
+    in_list_view: true
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+  - fieldname: shift
+    fieldtype: Link
+    options: Shift
+    label: Shift
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till session
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    in_list_view: true
+  - fieldname: method
+    fieldtype: Select
+    label: Method
+    options: |
+      Cash
+      Card
+      STK Push
+      Mobile Money
+    in_list_view: true
+  - fieldname: phone_number
+    fieldtype: Data
+    label: Customer phone number
+    options: Phone
+  - fieldname: external_operation
+    fieldtype: Link
+    options: External Operation
+    label: STK operation
+  - fieldname: provider_reference
+    fieldtype: Data
+    label: Provider reference
+    read_only: true

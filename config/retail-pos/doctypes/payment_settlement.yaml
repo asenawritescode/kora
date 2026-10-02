@@ -1,0 +1,46 @@
+name: Payment Settlement
+module: Retail POS Finance
+title_field: reference
+search_fields: reference, method, status
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: method
+    fieldtype: Select
+    label: Payment method
+    options: |
+      Card
+      Mobile Money
+      Bank Transfer
+    reqd: true
+    in_list_view: true
+  - fieldname: expected_amount
+    fieldtype: Currency
+    label: Expected amount
+    reqd: true
+  - fieldname: settled_amount
+    fieldtype: Currency
+    label: Settled amount
+  - fieldname: settlement_date
+    fieldtype: Date
+    label: Settlement date
+  - fieldname: provider_reference
+    fieldtype: Data
+    label: Provider reference
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Pending
+      Matched
+      Difference
+      Closed
+    default: Pending
+    in_list_view: true
+  - fieldname: difference_reason
+    fieldtype: Text
+    label: Difference reason

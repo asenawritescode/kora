@@ -35,8 +35,12 @@ type DeclarativeRule struct {
 
 // DeclarativeStep is one capability invocation in a declarative workflow.
 type DeclarativeStep struct {
-	ID         string `yaml:"id"`
-	Capability string `yaml:"capability"`
+	ID string `yaml:"id"`
+	// DocType and Operation are the canonical permission-first form.
+	DocType   string `yaml:"doctype,omitempty"`
+	Operation string `yaml:"operation,omitempty"`
+	// Capability is retained for legacy package definitions during migration.
+	Capability string `yaml:"capability,omitempty"`
 	Actor      string `yaml:"actor"`
 }
 
@@ -76,7 +80,7 @@ func ParseDeclarativeWorkflow(raw []byte) (DeclarativeWorkflow, error) {
 	}
 	seen := map[string]bool{}
 	for _, step := range workflow.Steps {
-		if step.ID == "" || step.Capability == "" || seen[step.ID] {
+		if step.ID == "" || (step.Capability == "" && (step.DocType == "" || step.Operation == "")) || seen[step.ID] {
 			return workflow, fmt.Errorf("workflow has invalid or duplicate step")
 		}
 		seen[step.ID] = true
@@ -109,6 +113,12 @@ type StepExecutor interface {
 	Execute(context.Context, string, contract.ActorContext, any) error
 }
 
+// PermissionStepExecutor is implemented by the production executor. It lets
+// workflows invoke the same DocType permission path as API and agent actors.
+type PermissionStepExecutor interface {
+	ExecutePermission(context.Context, string, string, contract.ActorContext, any) error
+}
+
 // RunDeclarativeWorkflow executes steps in declaration order, enforcing the
 // actor class declared by each step. Human-gated steps reject non-human actors.
 func RunDeclarativeWorkflow(ctx context.Context, workflow DeclarativeWorkflow, actor contract.ActorContext, input any, executor StepExecutor) ([]string, error) {
@@ -123,7 +133,17 @@ func RunDeclarativeWorkflow(ctx context.Context, workflow DeclarativeWorkflow, a
 		if requiresHuman(step.Actor) && actor.PrincipalType != contract.PrincipalHuman {
 			return executed, contract.NewError(contract.CodePermissionDenied, "workflow step requires human approval")
 		}
-		if err := executor.Execute(ctx, step.Capability, actor, input); err != nil {
+		var err error
+		if step.DocType != "" && step.Operation != "" {
+			permissionExecutor, ok := executor.(PermissionStepExecutor)
+			if !ok {
+				return executed, fmt.Errorf("workflow step %q requires a permission-aware executor", step.ID)
+			}
+			err = permissionExecutor.ExecutePermission(ctx, step.DocType, step.Operation, actor, input)
+		} else {
+			err = executor.Execute(ctx, step.Capability, actor, input)
+		}
+		if err != nil {
 			return executed, fmt.Errorf("workflow step %q: %w", step.ID, err)
 		}
 		executed = append(executed, step.ID)

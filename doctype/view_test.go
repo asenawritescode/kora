@@ -138,6 +138,38 @@ func TestPageManifestEnsurePrimaryDataBindings_RepairsMissingFormBinding(t *test
 	}
 }
 
+func TestPageManifestEnsurePrimaryDataBindingsRepairsDataBackedCommerceComponents(t *testing.T) {
+	manifest := &PageManifest{
+		Spec: PageManifestSpec{
+			Resources: []PageResource{{ID: "primary", Query: "document.list", Params: map[string]any{"doctype": "Product"}}, {ID: "products", Query: "document.list", Params: map[string]any{"doctype": "Product"}}},
+			Layout: PageManifestLayout{Children: []PageComponent{
+				{ID: "categories", Component: "category_tabs", Props: map[string]any{}},
+				{ID: "products", Component: "product_grid", Props: map[string]any{}},
+				{ID: "cart", Component: "cart_panel", Props: map[string]any{}},
+				{ID: "payment", Component: "payment_panel", Props: map[string]any{}},
+			}},
+		},
+	}
+
+	manifest.EnsurePrimaryDataBindings()
+
+	if got := manifest.Spec.Layout.Children[0].Data; got != "primary.data" {
+		t.Fatalf("category tabs binding = %q, want primary.data", got)
+	}
+	if got := manifest.Spec.Layout.Children[1].Data; got != "primary.data" {
+		t.Fatalf("product grid binding = %q, want primary.data", got)
+	}
+	if got := manifest.Spec.Layout.Children[0].Props["source_doctype"]; got != "Product" {
+		t.Fatalf("category tabs source doctype = %#v, want Product", got)
+	}
+	if got := manifest.Spec.Layout.Children[2].Data; got != "" {
+		t.Fatalf("cart panel binding = %q, want empty local-state component binding", got)
+	}
+	if got := manifest.Spec.Layout.Children[3].Data; got != "" {
+		t.Fatalf("payment panel binding = %q, want empty action component binding", got)
+	}
+}
+
 func TestPageManifestFromViewRoundTripPreservesCurrentProjection(t *testing.T) {
 	view := &View{
 		Name:          "Sales Dashboard",
@@ -190,6 +222,59 @@ func TestPageManifestFromViewRoundTripPreservesCurrentProjection(t *testing.T) {
 	}
 	if len(back.Components) != 1 || back.Components[0].Type != "record_form" {
 		t.Fatalf("expected component projection to survive round-trip: %+v", back.Components)
+	}
+}
+
+func TestPageManifestFromViewBindsEachComponentToItsDocTypeResource(t *testing.T) {
+	view := &View{
+		Name:          "Money",
+		Route:         "/money",
+		Type:          "workspace",
+		SourceDocType: "Sale",
+		Components: []ViewComponent{
+			{ID: "income", Type: "record_table", SourceDocType: "Sale"},
+			{ID: "expenses", Type: "record_table", SourceDocType: "Expense"},
+		},
+	}
+
+	manifest := PageManifestFromView(view)
+	if len(manifest.Spec.Resources) != 2 {
+		t.Fatalf("resources = %#v, want primary Sale and expense Expense", manifest.Spec.Resources)
+	}
+	if got := manifest.Spec.Layout.Children[0].Data; got != "primary.data" {
+		t.Fatalf("income data binding = %q, want primary.data", got)
+	}
+	if got := manifest.Spec.Layout.Children[1].Data; got != "expense.data" {
+		t.Fatalf("expense data binding = %q, want expense.data", got)
+	}
+	if got := manifest.Spec.Resources[1].Params["doctype"]; got != "Expense" {
+		t.Fatalf("expense resource doctype = %v, want Expense", got)
+	}
+}
+
+func TestPageManifestFromViewPreservesComponentActionConfiguration(t *testing.T) {
+	view := &View{
+		Name: "Point of Sale",
+		Components: []ViewComponent{{
+			ID: "payment",
+			Actions: []ViewAction{{
+				ID: "complete_sale", Trigger: "on_click", Type: "create_transaction",
+				Config: map[string]any{"target_doctype": "Sale"},
+			}},
+		}},
+	}
+
+	manifest := PageManifestFromView(view)
+	actions, ok := manifest.Spec.Layout.Children[0].Props["actions"].([]map[string]any)
+	if !ok || len(actions) != 1 {
+		t.Fatalf("component actions = %#v, want one configured action", manifest.Spec.Layout.Children[0].Props["actions"])
+	}
+	if actions[0]["id"] != "complete_sale" || actions[0]["type"] != "create_transaction" {
+		t.Fatalf("action identity/type = %#v", actions[0])
+	}
+	config, ok := actions[0]["config"].(map[string]any)
+	if !ok || config["target_doctype"] != "Sale" {
+		t.Fatalf("action config = %#v, want Sale target", actions[0]["config"])
 	}
 }
 

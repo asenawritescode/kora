@@ -239,6 +239,11 @@ type DocConstraint struct {
 	StatusValues    []string     `yaml:"status_values"   json:"status_values,omitempty"`
 	ImmutableFields []string     `yaml:"immutable_fields" json:"immutable_fields,omitempty"`
 	Constraints     []Constraint `yaml:"constraints"     json:"constraints,omitempty"`
+	// LinkField and RelatedField are used by linked_cross_field constraints.
+	// They allow a declarative rule on this document to compare a field with a
+	// field on the linked document without embedding executable code.
+	LinkField    string `yaml:"link_field"       json:"link_field,omitempty"`
+	RelatedField string `yaml:"related_field"    json:"related_field,omitempty"`
 }
 
 // SystemColumns returns the list of system column definitions that every table has.
@@ -257,6 +262,7 @@ func SystemColumns() []struct {
 		{"modified_by", "VARCHAR(140)"},
 		{"doc_status", "TINYINT(1)"},
 		{"idx", "INT"},
+		{"revision", "BIGINT"},
 	}
 }
 

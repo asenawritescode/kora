@@ -54,7 +54,6 @@ var analyticsStatusCmd = &cobra.Command{
 
 func runAnalyticsBackfill(cmd *cobra.Command, args []string) error {
 	common := site.CommonConfigFromEnv()
-	dialect := kdb.Resolve(common.DBType)
 	startup := site.LoadStartupConfig()
 
 	platformDB, err := sql.Open(startup.DBType, startup.DBDSN)
@@ -79,7 +78,8 @@ func runAnalyticsBackfill(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("site %q not found", backfillSite)
 	}
 
-	siteCfg := site.ReconstructSiteConfig(target.Name, common, target.Domains)
+	siteCfg := site.ReconstructSiteConfigFromDBInfo(*target, common)
+	dialect := kdb.Resolve(siteCfg.DBType)
 	db, err := site.Connect(siteCfg)
 	if err != nil {
 		return fmt.Errorf("connecting to site DB: %w", err)
@@ -109,14 +109,17 @@ func runAnalyticsBackfill(cmd *cobra.Command, args []string) error {
 		}
 
 		if backfillDoctype != "" {
-			if err := resetAnalyticsForDoctype(db, target.Name, dt.Name); err != nil {
+			if err := resetAnalyticsForDoctype(db, dialect, target.Name, dt.Name); err != nil {
 				return fmt.Errorf("resetting analytics for %s: %w", dt.Name, err)
 			}
 		}
 
 		metrics := analytics.GenerateMetrics(dt)
 		if dt.IsSubmittable {
-			workflows, _ := store.LoadWorkflows(target.Name)
+			workflows, err := store.LoadWorkflows(target.Name)
+			if err != nil {
+				return fmt.Errorf("loading workflows for %s: %w", dt.Name, err)
+			}
 			for _, wf := range workflows {
 				if wf.DocumentType == dt.Name {
 					metrics = append(metrics, analytics.GenerateWorkflowMetrics(dt, wf)...)
@@ -147,10 +150,17 @@ func runAnalyticsStatus(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
+	dialect := kdb.Resolve(siteCfg.DBType)
 	var daily, monthly, workflow int
-	db.QueryRow("SELECT COUNT(*) FROM _kora_analytics_daily WHERE site = ?", backfillSite).Scan(&daily)
-	db.QueryRow("SELECT COUNT(*) FROM _kora_analytics_monthly WHERE site = ?", backfillSite).Scan(&monthly)
-	db.QueryRow("SELECT COUNT(*) FROM _kora_analytics_workflow WHERE site = ?", backfillSite).Scan(&workflow)
+	for _, count := range []struct {
+		table string
+		dest  *int
+	}{{"_kora_analytics_daily", &daily}, {"_kora_analytics_monthly", &monthly}, {"_kora_analytics_workflow", &workflow}} {
+		query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE site = ?", dialect.QuoteIdent(count.table))
+		if err := db.QueryRow(kdb.Rebind(dialect, query), backfillSite).Scan(count.dest); err != nil {
+			return fmt.Errorf("reading %s analytics status: %w", count.table, err)
+		}
+	}
 
 	fmt.Printf("Site: %s\n", backfillSite)
 	fmt.Printf("Daily rollup rows:    %d\n", daily)
@@ -159,9 +169,10 @@ func runAnalyticsStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func resetAnalyticsForDoctype(db *sql.DB, siteName, doctypeName string) error {
+func resetAnalyticsForDoctype(db *sql.DB, dialect kdb.Dialect, siteName, doctypeName string) error {
 	for _, table := range []string{"_kora_analytics_daily", "_kora_analytics_monthly", "_kora_analytics_workflow", "_kora_analytics_events"} {
-		if _, err := db.Exec(fmt.Sprintf("DELETE FROM %s WHERE site = ? AND doctype = ?", table), siteName, doctypeName); err != nil {
+		query := fmt.Sprintf("DELETE FROM %s WHERE site = ? AND doctype = ?", dialect.QuoteIdent(table))
+		if _, err := db.Exec(kdb.Rebind(dialect, query), siteName, doctypeName); err != nil {
 			return err
 		}
 	}

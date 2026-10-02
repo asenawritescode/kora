@@ -15,6 +15,14 @@ type MySQLDialect struct{}
 
 func (d *MySQLDialect) DriverName() string { return "mysql" }
 
+func (d *MySQLDialect) IsWriteConflict(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return false
+	}
+	return mysqlErr.Number == 1205 || mysqlErr.Number == 1213
+}
+
 func (d *MySQLDialect) Open(cfg DBConfig) (*sql.DB, error) {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci",
 		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Name)
@@ -135,6 +143,7 @@ func (d *MySQLDialect) CreateTable(dt *doctype.DocType) []string {
 		"modified_by VARCHAR(140) NOT NULL DEFAULT ''",
 		"doc_status TINYINT(1) NOT NULL DEFAULT 0",
 		"idx INT NOT NULL DEFAULT 0",
+		"revision BIGINT NOT NULL DEFAULT 1",
 	)
 
 	// Data columns.
@@ -143,14 +152,16 @@ func (d *MySQLDialect) CreateTable(dt *doctype.DocType) []string {
 			continue
 		}
 		col := fmt.Sprintf("%s %s", d.QuoteIdent(f.Fieldname), d.ColumnType(&f))
+		defaultClause := ""
+		if mysqlSupportsDefault(f.Fieldtype) {
+			defaultClause = sqlDefaultClause("mysql", f.Fieldtype, f.Default)
+		}
 		if f.Reqd {
 			col += " NOT NULL"
-		} else {
+		} else if defaultClause == "" {
 			col += " DEFAULT NULL"
 		}
-		if mysqlSupportsDefault(f.Fieldtype) {
-			col += sqlDefaultClause("mysql", f.Fieldtype, f.Default)
-		}
+		col += defaultClause
 		cols = append(cols, col)
 	}
 
@@ -181,14 +192,16 @@ func (d *MySQLDialect) CreateTable(dt *doctype.DocType) []string {
 
 func (d *MySQLDialect) AddColumn(tableName string, f *doctype.Field) string {
 	col := fmt.Sprintf("%s %s", d.QuoteIdent(f.Fieldname), d.ColumnType(f))
+	defaultClause := ""
+	if mysqlSupportsDefault(f.Fieldtype) {
+		defaultClause = sqlDefaultClause("mysql", f.Fieldtype, f.Default)
+	}
 	if f.Reqd {
 		col += " NOT NULL"
-	} else {
+	} else if defaultClause == "" {
 		col += " DEFAULT NULL"
 	}
-	if mysqlSupportsDefault(f.Fieldtype) {
-		col += sqlDefaultClause("mysql", f.Fieldtype, f.Default)
-	}
+	col += defaultClause
 	return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", d.QuoteIdent(tableName), col)
 }
 
@@ -472,6 +485,7 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_site_registry ADD COLUMN updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)",
 		"ALTER TABLE _kora_site_registry ADD COLUMN file_storage VARCHAR(20) NOT NULL DEFAULT 'local'",
 		"ALTER TABLE _kora_site_registry ADD COLUMN storage_bucket VARCHAR(63) NOT NULL DEFAULT ''",
+		"ALTER TABLE _kora_site_registry ADD COLUMN runtime_cell_id VARCHAR(80) NOT NULL DEFAULT ''",
 		"CREATE INDEX idx_site_registry_status ON _kora_site_registry (status)",
 
 		// _kora_user

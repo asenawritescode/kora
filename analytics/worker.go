@@ -197,6 +197,9 @@ func (w *Worker) Stop() {
 
 // process handles a single ChangeEvent, resolving metrics and accumulating deltas.
 func (w *Worker) process(event ChangeEvent) {
+	if event.Operation == EventNotification {
+		return
+	}
 	dt := w.registry.Get(event.Doctype)
 	if dt == nil {
 		// Only log first occurrence per doctype to avoid flooding in hot path.

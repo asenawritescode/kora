@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "site_id": "site_0123456789abcdef0123456789abcdef",
+  "aliases": ["pos.example.test", "register.example.test"],
+  "status": "active",
+  "config_revision": 7
+}

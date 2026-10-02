@@ -11,7 +11,7 @@ export interface ViewComponentProps {
   disabled?: boolean
   readonly?: boolean
   children?: React.ReactNode
-  onAction: (actionId: string, context: Record<string, any>) => Promise<any> | void
+  onAction: (actionId: string, context: Record<string, any>) => Promise<any> | any
 }
 
 export interface RegisteredComponentConfig {
@@ -25,6 +25,7 @@ export interface RegisteredComponentConfig {
   actions?: Array<{ id: string; trigger: string; type: string; config?: Record<string, any> }>
   desktop_columns?: string[]
   mobile_columns?: string[]
+  filters?: Array<{ field: string; op?: string; value?: unknown }>
   components?: RegisteredComponentConfig[]
   position: number
   span?: number
@@ -194,7 +195,7 @@ function RecordCards(props: ViewComponentProps) {
 
 function FilterBar(props: ViewComponentProps) {
   const rows = Array.isArray(props.data?.data) ? props.data.data : []
-  const candidates = ['status', 'network', 'product_type', 'doc_status']
+  const candidates = ['status', 'network', 'product_type', 'doc_status', 'category', 'is_active']
   const field = candidates.find((candidate) => rows.some((row: Record<string, any>) => row?.[candidate] != null))
   const values = field
     ? [...new Set(rows.map((row: Record<string, any>) => row?.[field]).filter((value: unknown) => value != null && value !== ''))].slice(0, 6)

@@ -170,6 +170,54 @@ func TestValidateDocument_PredicateWithCondition(t *testing.T) {
 	})
 }
 
+func TestValidateDocumentWithResolver_LinkedCrossField(t *testing.T) {
+	guest := &DocType{Name: "Table", Module: "Restaurant", Fields: []Field{{Fieldname: "seat_capacity", Fieldtype: "Int"}}}
+	reservation := &DocType{
+		Name:   "Reservation",
+		Module: "Restaurant",
+		Fields: []Field{
+			{Fieldname: "table", Fieldtype: "Link", Options: "Table"},
+			{Fieldname: "party_size", Fieldtype: "Int"},
+		},
+		DocConstraints: []DocConstraint{{
+			Type:         "linked_cross_field",
+			Field:        "party_size",
+			LinkField:    "table",
+			RelatedField: "seat_capacity",
+			Operator:     "<=",
+			Message:      "The party is larger than the selected table.",
+		}},
+	}
+	if err := reservation.Validate(); err != nil {
+		t.Fatalf("reservation constraint should be structurally valid: %v", err)
+	}
+	registry := NewRegistry()
+	registry.Register(guest)
+	registry.Register(reservation)
+	resolver := func(target *DocType, name string) (*Document, error) {
+		if target.Name != "Table" || name != "table-1" {
+			return nil, fmt.Errorf("unexpected lookup %s/%s", target.Name, name)
+		}
+		doc := NewDocument("Table")
+		doc.Set("seat_capacity", 4)
+		return doc, nil
+	}
+
+	withinCapacity := NewDocument("Reservation")
+	withinCapacity.Set("table", "table-1")
+	withinCapacity.Set("party_size", 4)
+	if errs := ValidateDocumentWithResolver(reservation, withinCapacity, registry, nil, resolver); len(errs) != 0 {
+		t.Fatalf("within-capacity reservation failed: %v", errs)
+	}
+	overCapacity := NewDocument("Reservation")
+	overCapacity.Set("table", "table-1")
+	overCapacity.Set("party_size", 5)
+	errs := ValidateDocumentWithResolver(reservation, overCapacity, registry, nil, resolver)
+	if len(errs) != 1 || errs[0].Message != "The party is larger than the selected table." {
+		t.Fatalf("over-capacity validation = %v", errs)
+	}
+}
+
 // loadPredicateGoldenVectors reads and decodes the golden JSON file.
 func loadPredicateGoldenVectors(t *testing.T) []PredicateGoldenVector {
 	t.Helper()

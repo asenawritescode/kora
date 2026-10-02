@@ -1,0 +1,41 @@
+- doctype: Product
+  role: Business Owner
+  read: true
+  write: true
+  create: true
+- doctype: Product Category
+  role: Business Owner
+  read: true
+  write: true
+  create: true
+- doctype: Sale
+  role: Business Owner
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: Sale Item
+  role: Business Owner
+  read: true
+  write: true
+  create: true
+- doctype: Expense
+  role: Business Owner
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: Product
+  role: Cashier
+  read: true
+- doctype: Product Category
+  role: Cashier
+  read: true
+- doctype: Sale
+  role: Cashier
+  read: true
+  create: true
+- doctype: Sale Item
+  role: Cashier
+  read: true
+  create: true

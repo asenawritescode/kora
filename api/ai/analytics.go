@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/analytics"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 )
@@ -165,7 +166,7 @@ func executeAnalyticsQuery(reg *doctype.Registry, tx *orm.TxManager, siteName st
 	if err := request.Validate(catalog); err != nil {
 		return fmt.Sprintf("I could not run that report: %v. Use the analytics catalog to choose valid models, measures, and dimensions.", err)
 	}
-	result, err := (&analytics.QueryEngine{DB: tx.DB, SiteName: siteName}).ResolveSemanticQuery(catalog, request)
+	result, err := (&analytics.QueryEngine{DB: tx.DB, SiteName: siteName, Dialect: tx.Dialect}).ResolveSemanticQuery(catalog, request)
 	if err != nil {
 		return fmt.Sprintf("Analytics query failed: %v", err)
 	}
@@ -181,7 +182,7 @@ func loadAnalyticsReports(tx *orm.TxManager, siteName string) []analytics.Report
 		return []analytics.ReportDefinition{}
 	}
 	var configJSON string
-	err := tx.DB.QueryRow(`SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1`, siteName).Scan(&configJSON)
+	err := tx.DB.QueryRow(kdb.Rebind(tx.Dialect, `SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1`), siteName).Scan(&configJSON)
 	if err != nil {
 		return []analytics.ReportDefinition{}
 	}
@@ -232,7 +233,7 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 	// "all" → list doctypes with data.
 	if doctypeName == "" || doctypeName == "all" {
 		rows, err := tx.DB.Query(
-			"SELECT DISTINCT doctype FROM _kora_analytics_daily WHERE site = ? LIMIT 20",
+			kdb.Rebind(tx.Dialect, "SELECT DISTINCT doctype FROM _kora_analytics_daily WHERE site = ? LIMIT 20"),
 			siteName,
 		)
 		if err != nil {
@@ -252,14 +253,16 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 	}
 
 	// Get pre-computed metrics for this doctype.
+	from := time.Now().AddDate(0, 0, -30).Format("2006-01-02")
+	to := time.Now().Format("2006-01-02")
 	rows, err := tx.DB.Query(
-		`SELECT metric, dimension, SUM(value)
+		kdb.Rebind(tx.Dialect, `SELECT metric, dimension, SUM(value)
 		 FROM _kora_analytics_daily
 		 WHERE site = ? AND doctype = ?
-		   AND date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+		   AND date >= ? AND date <= ?
 		 GROUP BY metric, dimension
-		 ORDER BY metric, SUM(value) DESC`,
-		siteName, doctypeName,
+		 ORDER BY metric, SUM(value) DESC`),
+		siteName, doctypeName, from, to,
 	)
 	if err != nil {
 		return fmt.Sprintf("Error querying analytics: %v", err)

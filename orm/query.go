@@ -21,14 +21,29 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-// generateName creates a unique document name based on the DocType.
-// Format: {PREFIX}-{NNNN} where PREFIX is derived from the DocType name.
-func generateName(dt *doctype.DocType, existingCount int) string {
-	prefix := derivePrefix(dt.Name)
-	return fmt.Sprintf("%s-%04d", prefix, existingCount+1)
+func derivePrefix(name string) string {
+	return DerivePrefix(name)
 }
 
-func derivePrefix(name string) string {
+func (tx *TxManager) tableName(dt *doctype.DocType) string {
+	return quoteTableName(tx.Dialect, dt.RawTableName())
+}
+
+func (tx *TxManager) childTableName(dt *doctype.DocType, field string) string {
+	return quoteTableName(tx.Dialect, dt.RawChildTableName(field))
+}
+
+func quoteTableName(dialect db.QueryDialect, name string) string {
+	if identifiers, ok := dialect.(interface{ QuoteIdent(string) string }); ok {
+		return identifiers.QuoteIdent(name)
+	}
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+
+// DerivePrefix returns the stable prefix used by generated document names.
+// Kernel operations use it when a transaction needs to preassign names for
+// related records before resolving their cross-record references.
+func DerivePrefix(name string) string {
 	// For multi-word names, take the first letter of each word.
 	// For single-word names, take the first 4 letters.
 	// Examples: "Customer" → "CUST", "Work Order" → "WO", "Work Order Item" → "WOI"
@@ -63,13 +78,9 @@ type TxManager struct {
 	// other cancellable operations. If nil, context.Background() is used.
 	Context context.Context
 
-	// EventBus receives change events after successful writes.
-	// If nil, analytics event emission is disabled (no-op).
-	EventBus analytics.EventBus
-
 	// Outbox writes events into the transactional outbox in the same transaction
-	// as the business write (RFC §8.1). If nil, outbox recording is disabled and
-	// the existing post-commit EventBus.Publish path remains the only emission.
+	// as the business write (RFC §8.1). Mutation entry points are owned by the
+	// kernel; a missing outbox is therefore an explicit disabled-delivery mode.
 	Outbox outbox.Writer
 
 	// ScriptRunner executes JavaScript hooks (before_save, after_insert, etc.).
@@ -92,13 +103,25 @@ type TxManager struct {
 	AsyncHookSink AsyncHookSink
 
 	// User and UserRole from the current request context, used for script execution.
-	CurrentUser     string
-	CurrentUserRole string
+	CurrentUser      string
+	CurrentUserRole  string
+	CurrentUserRoles []string
+	SkipHookScripts  []string
+	// ScriptMutationExecutor is scoped to the active kernel transaction and is
+	// attached to the provider passed into lifecycle scripts. It is nil outside
+	// an uncommitted operation, so post-commit scripts start a fresh command.
+	ScriptMutationExecutor script.MutationExecutor
+	// PostCommitHooks delays after_* callbacks from nested script writes until
+	// the owning operation transaction has committed.
+	PostCommitHooks []func()
+	// HookScriptsByDoctype is a command-scoped snapshot of active lifecycle
+	// scripts. Kernel.Execute resets it for each command so each DocType is read
+	// once, rather than querying the script table once per lifecycle event.
+	HookScriptsByDoctype map[string][]script.ScriptRecord
 }
 
 // writeOutbox records a change event into the transactional outbox within the
-// given transaction. It is a no-op when tx.Outbox is nil, preserving the existing
-// post-commit EventBus.Publish behavior.
+// given transaction. It is a no-op when no outbox writer is configured.
 func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op analytics.EventOp, dt *doctype.DocType, docName, modifiedBy string, data, oldData map[string]any) error {
 	if tx.Outbox == nil {
 		return nil
@@ -120,61 +143,25 @@ func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op analytics.EventOp, dt *doctype
 	return tx.Outbox.Append(ctx, dbTx, outbox.ChangeEventToEnvelope(change))
 }
 
-// Insert creates a new document in the database.
-// modifiedBy is stored in the modified_by column — use the actor responsible (e.g., user or "ai-assistant").
-func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner, modifiedBy string) error {
-	if !doc.IsNew {
-		return fmt.Errorf("cannot insert an existing document")
-	}
-
-	// Run before_insert + before_save hooks — scripts can modify doc or reject.
+// PrepareInsert runs the before_insert and before_save lifecycle hooks. It is
+// used by kernel transactions so hooks run once.
+func (tx *TxManager) PrepareInsert(dt *doctype.DocType, doc *doctype.Document) error {
 	if err := tx.runHooks(dt, script.EventBeforeInsert, doc, nil); err != nil {
 		return err
 	}
-	if err := tx.runHooks(dt, script.EventBeforeSave, doc, nil); err != nil {
-		return err
-	}
-
-	dbTx, err := tx.DB.Begin()
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer dbTx.Rollback()
-
-	if err := tx.InsertInTx(dbTx, dt, doc, owner, modifiedBy); err != nil {
-		return err
-	}
-
-	if err := dbTx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	doc.IsNew = false
-
-	if tx.EventBus != nil && tx.Outbox == nil {
-		tx.EventBus.Publish(analytics.ChangeEvent{
-			Site:       tx.SiteName,
-			Doctype:    dt.Name,
-			DocName:    doc.Name,
-			Operation:  analytics.EventInsert,
-			Timestamp:  time.Now(),
-			ModifiedBy: modifiedBy,
-			Data:       copyFieldsWithStatus(doc.Fields, doc.DocStatus),
-		})
-	}
-
-	// Run after_insert + after_save hooks — best-effort, errors logged not returned.
-	_ = tx.runHooks(dt, script.EventAfterInsert, doc, nil)
-	_ = tx.runHooks(dt, script.EventAfterSave, doc, nil)
-
-	return nil
+	return tx.runHooks(dt, script.EventBeforeSave, doc, nil)
 }
 
-// InsertInTx performs the transactional portion of Insert using an existing
-// SQL transaction without committing it. Callers that must commit additional
-// rows atomically with the business write (operation kernel idempotency
-// receipts, audit rows, extra outbox events) use this variant and own the
-// surrounding transaction's Commit/Rollback.
+// CompleteInsert runs the best-effort after_insert and after_save hooks after
+// the database transaction has committed.
+func (tx *TxManager) CompleteInsert(dt *doctype.DocType, doc *doctype.Document) {
+	_ = tx.runHooks(dt, script.EventAfterInsert, doc, nil)
+	_ = tx.runHooks(dt, script.EventAfterSave, doc, nil)
+}
+
+// InsertInTx persists a new business record inside the operation kernel's
+// transaction. It never begins or commits a transaction; the kernel owns the
+// business write together with its receipt, audit row, and outbox events.
 func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document, owner, modifiedBy string) error {
 	nextNum := 1
 	if doc.Name == "" {
@@ -218,12 +205,12 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 
 	query := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES (%s)",
-		dt.TableName(),
+		tx.tableName(dt),
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "),
 	)
 
-	if _, err := dbTx.Exec(query, values...); err != nil {
+	if _, err := dbTx.Exec(db.Rebind(tx.Dialect, query), values...); err != nil {
 		if valErr := tx.Dialect.ParseError(err, dt); valErr != nil {
 			if valErr.Type == "UniqueConstraint" {
 				return fmt.Errorf("%w: %w", ErrDuplicate, valErr)
@@ -232,6 +219,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		}
 		return fmt.Errorf("inserting document: %w", err)
 	}
+	doc.Revision = 1
 
 	for _, f := range dt.TableFields() {
 		children := doc.GetTable(f.Fieldname)
@@ -243,13 +231,17 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 			return fmt.Errorf("child doctype %q not found", f.Options)
 		}
 		if err := insertChildrenBatch(dbTx, dt, f.Fieldname, childDT, children, doc.Name, tx.Dialect); err != nil {
+			if validationErr := tx.Dialect.ParseError(err, childDT); validationErr != nil {
+				if validationErr.Type == "UniqueConstraint" {
+					return fmt.Errorf("%w: %w", ErrDuplicate, validationErr)
+				}
+				return fmt.Errorf("%w: %w", ErrValidation, validationErr)
+			}
 			return fmt.Errorf("inserting child rows in %s: %w", f.Fieldname, err)
 		}
 	}
 
-	// Set up script-based computed fields.
-	tx.setupComputedHook()
-	defer doctype.SetComputedScriptHook(nil)
+	computedHook := tx.computedScriptHook()
 
 	// Evaluate computed fields on child items (e.g., line_total = quantity * unit_price).
 	for _, f := range dt.TableFields() {
@@ -265,11 +257,11 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 			if err := tx.populateLinkedFields(dbTx, childDT, child); err != nil {
 				return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
 			}
-			if err := doctype.ComputeFields(childDT, child); err != nil {
+			if err := doctype.ComputeFieldsWithHook(childDT, child, computedHook); err != nil {
 				slog.Warn("computed fields failed on child", "doctype", childDT.Name, "error", err)
 			}
 		}
-		if err := persistComputedChildFields(dbTx, dt, f.Fieldname, childDT, children); err != nil {
+		if err := persistComputedChildFields(dbTx, dt, f.Fieldname, childDT, children, tx.Dialect); err != nil {
 			return fmt.Errorf("persisting computed child fields in %s: %w", f.Fieldname, err)
 		}
 	}
@@ -279,12 +271,12 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		return fmt.Errorf("populating linked fields: %w", err)
 	}
 	// Evaluate computed fields on the parent document (e.g., subtotal = SUM(items.line_total)).
-	if err := doctype.ComputeFields(dt, doc); err != nil {
+	if err := doctype.ComputeFieldsWithHook(dt, doc, computedHook); err != nil {
 		slog.Warn("computed fields failed", "doctype", dt.Name, "error", err)
 	}
 
 	// Persist linked and computed field values via UPDATE.
-	if err := updateDerivedFieldsExec(dbTx, dt, doc); err != nil {
+	if err := updateDerivedFieldsExec(dbTx, dt, doc, tx.Dialect); err != nil {
 		return fmt.Errorf("persisting derived fields: %w", err)
 	}
 
@@ -297,7 +289,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 
 // updateComputedFields UPDATEs only computed field columns on the document.
 func (tx *TxManager) updateComputedFields(dt *doctype.DocType, doc *doctype.Document) error {
-	return updateComputedFieldsExec(tx.DB, dt, doc)
+	return tx.updateComputedFieldsExec(tx.DB, dt, doc)
 }
 
 // populateLinkedFields resolves Link values to their configured linked_field
@@ -337,9 +329,9 @@ func (tx *TxManager) populateLinkedFields(ex db.Queryer, dt *doctype.DocType, do
 		if targetMeta == nil {
 			continue
 		}
-		query := fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT 1", targetField, targetDT.TableName(), where)
+		query := fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT 1", targetField, tx.tableName(targetDT), where)
 		var value any
-		if err := ex.QueryRow(query, args...).Scan(&value); err != nil {
+		if err := ex.QueryRow(db.Rebind(tx.Dialect, query), args...).Scan(&value); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -366,13 +358,13 @@ func (tx *TxManager) populateLinkedFields(ex db.Queryer, dt *doctype.DocType, do
 }
 
 // updateComputedFieldsExec UPDATEs computed fields using the given executor (DB or Tx).
-func updateComputedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
-	return updateDerivedFieldsExec(ex, dt, doc)
+func (tx *TxManager) updateComputedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
+	return updateDerivedFieldsExec(ex, dt, doc, tx.Dialect)
 }
 
 // updateDerivedFieldsExec persists both linked and computed values produced by
 // the document lifecycle. It intentionally excludes ordinary user fields.
-func updateDerivedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
+func updateDerivedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document, dialect db.QueryDialect) error {
 	var setClauses []string
 	var values []any
 
@@ -393,72 +385,29 @@ func updateDerivedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Do
 
 	values = append(values, doc.Name)
 	query := fmt.Sprintf("UPDATE %s SET %s WHERE name = ?",
-		dt.TableName(),
+		quoteTableName(dialect, dt.RawTableName()),
 		strings.Join(setClauses, ", "),
 	)
 
-	_, err := ex.Exec(query, values...)
+	_, err := ex.Exec(db.Rebind(dialect, query), values...)
 	return err
 }
 
-// Save updates an existing document.
-// If owner is non-empty, only updates if the document is owned by that user.
-// All operations run in a database transaction to ensure atomicity.
-// oldDoc is the document before modifications (from GetDoc); when provided, child table
-// reconciliation uses a diff-based approach instead of DELETE-all + re-INSERT-all.
-func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy string, owner string, oldDoc *doctype.Document) error {
-	if doc.IsNew {
-		return fmt.Errorf("cannot save a new document; use Insert instead")
-	}
-
-	// Run before_save hooks — scripts can modify doc or reject.
-	if err := tx.runHooks(dt, script.EventBeforeSave, doc, oldDoc); err != nil {
-		return err
-	}
-
-	// Start a transaction so DELETE + INSERT for child tables is atomic.
-	dbTx, err := tx.DB.Begin()
-	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
-	}
-	defer dbTx.Rollback() // no-op after Commit
-
-	if err := tx.SaveInTx(dbTx, dt, doc, modifiedBy, owner, oldDoc); err != nil {
-		return err
-	}
-
-	if err := dbTx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction: %w", err)
-	}
-
-	if tx.EventBus != nil && tx.Outbox == nil {
-		var oldData map[string]any
-		if oldDoc != nil {
-
-			oldData = copyFieldsWithStatus(oldDoc.Fields, oldDoc.DocStatus)
-		}
-		tx.EventBus.Publish(analytics.ChangeEvent{
-			Site:       tx.SiteName,
-			Doctype:    dt.Name,
-			DocName:    doc.Name,
-			Operation:  analytics.EventUpdate,
-			Timestamp:  time.Now(),
-			ModifiedBy: modifiedBy,
-			Data:       copyFieldsWithStatus(doc.Fields, doc.DocStatus),
-			OldData:    oldData,
-		})
-	}
-
-	// Run after_save hooks — best-effort.
-	_ = tx.runHooks(dt, script.EventAfterSave, doc, oldDoc)
-
-	return nil
+// PrepareSave runs the before_save lifecycle hook. It is shared by ordinary
+// kernel transactions so the document is prepared consistently.
+func (tx *TxManager) PrepareSave(dt *doctype.DocType, doc, oldDoc *doctype.Document) error {
+	return tx.runHooks(dt, script.EventBeforeSave, doc, oldDoc)
 }
 
-// SaveInTx performs the transactional portion of Save using an existing SQL
-// transaction without committing it. Operation-kernel callers use this variant
-// to commit idempotency receipts and audit rows atomically with the mutation.
-// Returns orm.ErrNotFound wrapped error when the row vanished or is owner-hidden.
+// CompleteSave runs the best-effort after_save hook after commit.
+func (tx *TxManager) CompleteSave(dt *doctype.DocType, doc, oldDoc *doctype.Document) {
+	_ = tx.runHooks(dt, script.EventAfterSave, doc, oldDoc)
+}
+
+// SaveInTx updates a business record inside the operation kernel's transaction.
+// It never begins or commits a transaction; the kernel owns the mutation and
+// its receipt, audit row, and outbox events. Returns orm.ErrNotFound wrapped
+// error when the row vanished or is owner-hidden.
 func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document, modifiedBy string, owner string, oldDoc *doctype.Document) error {
 	now := time.Now()
 	dataFields := dt.NonTableDataFields()
@@ -468,8 +417,8 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 
 	for _, f := range dataFields {
 		// Note: read_only is a UI hint, not an ORM constraint.
-		// The workflow handler needs to persist state changes to read_only fields.
-		// Direct edits are blocked at the API level (HandleUpdate).
+		// Kernel command policy decides whether the current operation may change
+		// the field (for example, a trusted workflow transition).
 		newVal := doc.Get(f.Fieldname)
 		if oldDoc != nil {
 			if oldVal := oldDoc.Get(f.Fieldname); oldVal == newVal {
@@ -485,11 +434,15 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 		}
 	}
 
-	setClauses = append(setClauses, "modified = ?", "modified_by = ?", "doc_status = ?")
+	setClauses = append(setClauses, "modified = ?", "modified_by = ?", "doc_status = ?", "revision = revision + 1")
 	values = append(values, now, modifiedBy, doc.DocStatus)
 
 	where := "name = ?"
 	values = append(values, doc.Name)
+	if oldDoc != nil && oldDoc.Revision > 0 {
+		where += " AND revision = ?"
+		values = append(values, oldDoc.Revision)
+	}
 	if owner != "" {
 		where += " AND owner = ?"
 		values = append(values, owner)
@@ -497,12 +450,12 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 
 	query := fmt.Sprintf(
 		"UPDATE %s SET %s WHERE %s",
-		dt.TableName(),
+		tx.tableName(dt),
 		strings.Join(setClauses, ", "),
 		where,
 	)
 
-	result, err := dbTx.Exec(query, values...)
+	result, err := dbTx.Exec(db.Rebind(tx.Dialect, query), values...)
 	if err != nil {
 		if valErr := tx.Dialect.ParseError(err, dt); valErr != nil {
 			if valErr.Type == "UniqueConstraint" {
@@ -515,11 +468,21 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if oldDoc != nil && oldDoc.Revision > 0 {
+			return fmt.Errorf("%w: document %q revision changed", ErrConflict, doc.Name)
+		}
 		return fmt.Errorf("%w: document %q not found or access denied", ErrNotFound, doc.Name)
+	}
+	if oldDoc != nil && oldDoc.Revision > 0 {
+		doc.Revision = oldDoc.Revision + 1
+	} else if doc.Revision == 0 {
+		// Callers that do not provide a snapshot still receive the new
+		// revision without dereferencing a nil old document.
+		doc.Revision = 1
 	}
 
 	for _, f := range dt.TableFields() {
-		childTableName := dt.ChildTableName(f.Fieldname)
+		childTableName := tx.childTableName(dt, f.Fieldname)
 		newChildren := doc.GetTable(f.Fieldname)
 		childDT := tx.Registry.Get(f.Options)
 		if childDT == nil {
@@ -536,8 +499,8 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 
 		if oldDoc == nil {
 			// Fallback: no old document available — DELETE-all + re-INSERT-all.
-			if _, err := dbTx.Exec(
-				fmt.Sprintf("DELETE FROM %s WHERE parent = ?", childTableName),
+			if _, err := dbTx.Exec(db.Rebind(tx.Dialect,
+				fmt.Sprintf("DELETE FROM %s WHERE parent = ?", childTableName)),
 				doc.Name,
 			); err != nil {
 				return fmt.Errorf("deleting old child rows for %s: %w", f.Fieldname, err)
@@ -556,9 +519,7 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 		}
 	}
 
-	// Set up script-based computed fields.
-	tx.setupComputedHook()
-	defer doctype.SetComputedScriptHook(nil)
+	computedHook := tx.computedScriptHook()
 
 	// Evaluate computed fields on child items first, then parent.
 	for _, f := range dt.TableFields() {
@@ -574,11 +535,11 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 			if err := tx.populateLinkedFields(dbTx, childDT, child); err != nil {
 				return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
 			}
-			if err := doctype.ComputeFields(childDT, child); err != nil {
+			if err := doctype.ComputeFieldsWithHook(childDT, child, computedHook); err != nil {
 				slog.Warn("computed fields failed on child", "doctype", childDT.Name, "error", err)
 			}
 		}
-		if err := persistComputedChildFields(dbTx, dt, f.Fieldname, childDT, children); err != nil {
+		if err := persistComputedChildFields(dbTx, dt, f.Fieldname, childDT, children, tx.Dialect); err != nil {
 			return fmt.Errorf("persisting computed child fields in %s: %w", f.Fieldname, err)
 		}
 	}
@@ -586,11 +547,11 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 	if err := tx.populateLinkedFields(dbTx, dt, doc); err != nil {
 		return fmt.Errorf("populating linked fields: %w", err)
 	}
-	if err := doctype.ComputeFields(dt, doc); err != nil {
+	if err := doctype.ComputeFieldsWithHook(dt, doc, computedHook); err != nil {
 		slog.Warn("computed fields failed", "doctype", dt.Name, "error", err)
 	}
 
-	if err := updateDerivedFieldsExec(dbTx, dt, doc); err != nil {
+	if err := updateDerivedFieldsExec(dbTx, dt, doc, tx.Dialect); err != nil {
 		return fmt.Errorf("persisting derived fields: %w", err)
 	}
 
@@ -614,7 +575,7 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 	for _, f := range dataFields {
 		cols = append(cols, f.Fieldname)
 	}
-	cols = append(cols, "name", "owner", "creation", "modified", "modified_by", "doc_status")
+	cols = append(cols, "name", "owner", "creation", "modified", "modified_by", "doc_status", "revision")
 
 	scanTargets := make([]any, len(cols))
 	for i := range cols {
@@ -632,11 +593,11 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 	query := fmt.Sprintf(
 		"SELECT %s FROM %s WHERE %s",
 		strings.Join(cols, ", "),
-		dt.TableName(),
+		tx.tableName(dt),
 		where,
 	)
 
-	row := tx.DB.QueryRow(query, args...)
+	row := tx.DB.QueryRow(db.Rebind(tx.Dialect, query), args...)
 	if err := row.Scan(scanTargets...); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("%w: document %q not found in %s", ErrNotFound, name, dt.Name)
@@ -655,6 +616,8 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 			doc.Name = stringVal(val)
 		case "doc_status":
 			doc.DocStatus = intVal(val)
+		case "revision":
+			doc.Revision = uint64(intVal(val))
 		case "owner", "creation", "modified", "modified_by":
 			// System columns.
 		default:
@@ -667,7 +630,7 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 		if childDT == nil {
 			continue
 		}
-		children, err := tx.getChildRows(dt.ChildTableName(f.Fieldname), childDT, name)
+		children, err := tx.getChildRows(tx.childTableName(dt, f.Fieldname), childDT, name)
 		if err != nil {
 			return nil, fmt.Errorf("loading child table %s: %w", f.Fieldname, err)
 		}
@@ -721,8 +684,8 @@ func (tx *TxManager) GetListWithOptions(dt *doctype.DocType, filters string, ord
 	}
 
 	var total int
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", dt.TableName(), where)
-	err := tx.DB.QueryRow(countQuery, whereArgs...).Scan(&total)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tx.tableName(dt), where)
+	err := tx.DB.QueryRow(db.Rebind(tx.Dialect, countQuery), whereArgs...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("counting documents: %w", err)
 	}
@@ -771,14 +734,14 @@ func (tx *TxManager) GetListWithOptions(dt *doctype.DocType, filters string, ord
 	query := fmt.Sprintf(
 		"SELECT %s FROM %s WHERE %s ORDER BY %s LIMIT ? OFFSET ?",
 		strings.Join(cols, ", "),
-		dt.TableName(),
+		tx.tableName(dt),
 		where,
 		safeOrderBy,
 	)
 
 	args := append(whereArgs, limit, offset)
 
-	rows, err := tx.DB.Query(query, args...)
+	rows, err := tx.DB.Query(db.Rebind(tx.Dialect, query), args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("querying documents: %w", err)
 	}
@@ -828,44 +791,35 @@ func containsString(values []string, target string) bool {
 
 func searchableFieldType(fieldType string) bool {
 	switch fieldType {
-	case "Data", "Text", "Small Text", "Long Text", "Link", "Dynamic Link", "Select", "Email", "Phone", "Code", "Autocomplete":
+	case "Data", "User", "Text", "Small Text", "Long Text", "Link", "Dynamic Link", "Select", "Email", "Phone", "Code", "Autocomplete":
 		return true
 	default:
 		return false
 	}
 }
 
-// Delete removes a document by name.
-// If owner is non-empty, only deletes if the document is owned by that user.
-func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) error {
-	// Read the document before deleting — needed for analytics event Data and hooks.
-	var oldDoc *doctype.Document
-	var oldFields map[string]any
-	if tx.EventBus != nil || tx.ScriptRunner != nil || tx.Outbox != nil {
-		var err error
-		oldDoc, err = tx.GetDoc(dt, name, owner)
-		if err == nil {
-			oldFields = oldDoc.Fields
-		}
+// PrepareDelete runs the before_delete lifecycle hook when the prior document
+func (tx *TxManager) PrepareDelete(dt *doctype.DocType, oldDoc *doctype.Document) error {
+	if oldDoc == nil {
+		return nil
 	}
+	return tx.runHooks(dt, script.EventBeforeDelete, oldDoc, nil)
+}
 
-	// Run before_delete hooks — scripts can reject deletion.
+// CompleteDelete runs the best-effort after_delete lifecycle hook after commit.
+func (tx *TxManager) CompleteDelete(dt *doctype.DocType, oldDoc *doctype.Document) {
 	if oldDoc != nil {
-		if err := tx.runHooks(dt, script.EventBeforeDelete, oldDoc, nil); err != nil {
-			return err
-		}
+		_ = tx.runHooks(dt, script.EventAfterDelete, oldDoc, nil)
 	}
+}
 
-	dbTx, err := tx.DB.Begin()
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer dbTx.Rollback()
-
+// DeleteInTx removes a business record and its child rows in the operation
+// kernel's transaction. The kernel owns commit and lifecycle-hook scheduling.
+func (tx *TxManager) DeleteInTx(dbTx *sql.Tx, dt *doctype.DocType, name, owner string, oldDoc *doctype.Document) error {
 	for _, f := range dt.TableFields() {
-		childTable := dt.ChildTableName(f.Fieldname)
+		childTable := tx.childTableName(dt, f.Fieldname)
 		if _, err := dbTx.Exec(
-			fmt.Sprintf("DELETE FROM %s WHERE parent = ?", childTable),
+			db.Rebind(tx.Dialect, fmt.Sprintf("DELETE FROM %s WHERE parent = ?", childTable)),
 			name,
 		); err != nil {
 			return fmt.Errorf("deleting child rows for %s: %w", f.Fieldname, err)
@@ -878,45 +832,21 @@ func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) erro
 		where += " AND owner = ?"
 		args = append(args, owner)
 	}
-
-	result, err := dbTx.Exec(
-		fmt.Sprintf("DELETE FROM %s WHERE %s", dt.TableName(), where),
-		args...,
-	)
+	result, err := dbTx.Exec(db.Rebind(tx.Dialect, fmt.Sprintf("DELETE FROM %s WHERE %s", tx.tableName(dt), where)), args...)
 	if err != nil {
 		return fmt.Errorf("deleting document: %w", err)
 	}
-
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: document %q not found or access denied", ErrNotFound, name)
 	}
-
+	var oldFields map[string]any
+	if oldDoc != nil {
+		oldFields = oldDoc.Fields
+	}
 	if err := tx.writeOutbox(dbTx, analytics.EventDelete, dt, name, "", oldFields, nil); err != nil {
 		return fmt.Errorf("recording delete to outbox: %w", err)
 	}
-
-	if err := dbTx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	if tx.EventBus != nil && tx.Outbox == nil && oldFields != nil {
-		tx.EventBus.Publish(analytics.ChangeEvent{
-			Site:       tx.SiteName,
-			Doctype:    dt.Name,
-			DocName:    name,
-			Operation:  analytics.EventDelete,
-			Timestamp:  time.Now(),
-			ModifiedBy: "",
-			Data:       oldFields,
-		})
-	}
-
-	// Run after_delete hooks — best-effort.
-	if oldDoc != nil {
-		_ = tx.runHooks(dt, script.EventAfterDelete, oldDoc, nil)
-	}
-
 	return nil
 }
 
@@ -1148,6 +1078,26 @@ func copyFieldsWithStatus(fields map[string]any, docStatus int) map[string]any {
 // JSON fields: arrays/objects/slices are marshalled to JSON strings.
 // Strings are validated as JSON. Everything else passes through.
 func normalizeSQLValue(f doctype.Field, v any) (any, error) {
+	if f.Fieldtype == "Datetime" {
+		switch value := v.(type) {
+		case nil:
+			return nil, nil
+		case time.Time:
+			return value, nil
+		case string:
+			if strings.TrimSpace(value) == "" {
+				return nil, nil
+			}
+			for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05", "2006-01-02"} {
+				if parsed, err := time.Parse(layout, value); err == nil {
+					return parsed, nil
+				}
+			}
+			return nil, fmt.Errorf("invalid datetime")
+		default:
+			return nil, fmt.Errorf("invalid datetime value %T", v)
+		}
+	}
 	if f.Fieldtype != "JSON" {
 		return v, nil
 	}

@@ -4,7 +4,7 @@ import subprocess, json, os, re, sys
 import requests
 
 BASE = "http://localhost:8000/s/erp.local/api"
-SCRIPTS_DIR = "config/erp_kenya/scripts"
+SCRIPTS_DIR = "config/v0/erp_kenya/scripts"
 COOKIE_FILE = "/tmp/kora_cookies"
 SESSION = requests.Session()
 

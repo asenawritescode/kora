@@ -1,0 +1,40 @@
+name: Product
+module: Point of Sale
+title_field: product_name
+search_fields: product_name, category, status
+sort_field: product_name
+sort_order: ASC
+fields:
+  - fieldname: product_name
+    fieldtype: Data
+    label: Product or service name
+    reqd: true
+    in_list_view: true
+  - fieldname: item_type
+    fieldtype: Select
+    label: Type
+    options: |
+      Product
+      Service
+    default: Product
+    reqd: true
+    in_list_view: true
+  - fieldname: category
+    fieldtype: Link
+    options: Product Category
+    label: Category
+    in_standard_filter: true
+    in_list_view: true
+  - fieldname: selling_price
+    fieldtype: Currency
+    label: Selling price
+    reqd: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Availability
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true

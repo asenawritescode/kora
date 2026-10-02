@@ -525,6 +525,7 @@ func buildFullTestSnapshot() *ConfigSnapshot {
 				Event:      "before_save",
 				IsActive:   true,
 				ScriptHash: "abc123def456",
+				Source:     "return { success: true };\n",
 			},
 		},
 	}

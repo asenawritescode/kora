@@ -9,6 +9,16 @@ import (
 
 type declarativeExecutor struct{ capabilities []string }
 
+type permissionDeclarativeExecutor struct{ doctype, operation string }
+
+func (e *permissionDeclarativeExecutor) Execute(context.Context, string, contract.ActorContext, any) error {
+	return nil
+}
+func (e *permissionDeclarativeExecutor) ExecutePermission(_ context.Context, doctype, operation string, _ contract.ActorContext, _ any) error {
+	e.doctype, e.operation = doctype, operation
+	return nil
+}
+
 type declarativeRuleEvaluator struct{ result bool }
 
 func (e declarativeRuleEvaluator) Evaluate(context.Context, string, any) (bool, error) {
@@ -66,6 +76,31 @@ steps:
 	_, err = RunDeclarativeWorkflow(context.Background(), wf, contract.ActorContext{PrincipalID: "agent", PrincipalType: contract.PrincipalAgent}, nil, &declarativeExecutor{})
 	if err == nil {
 		t.Fatal("non-human actor passed human approval gate")
+	}
+}
+
+func TestDeclarativeWorkflowUsesPermissionOperation(t *testing.T) {
+	wf, err := ParseDeclarativeWorkflow([]byte(`
+name: purchasing
+namespace: package
+version: 1
+kind: workflow
+trigger: purchase.requested
+steps:
+  - id: submit
+    doctype: PurchaseRequest
+    operation: submit
+    actor: human
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &permissionDeclarativeExecutor{}
+	if _, err := RunDeclarativeWorkflow(context.Background(), wf, contract.ActorContext{PrincipalID: "manager", PrincipalType: contract.PrincipalHuman}, nil, executor); err != nil {
+		t.Fatal(err)
+	}
+	if executor.doctype != "PurchaseRequest" || executor.operation != "submit" {
+		t.Fatalf("unexpected permission operation: %#v", executor)
 	}
 }
 

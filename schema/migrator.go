@@ -42,11 +42,11 @@ type IndexDrop struct {
 // Diff represents the difference between the registry and the live schema.
 type Diff struct {
 	NewTables     []string                  // Tables to CREATE
-	NewColumns    map[string][]ColumnAdd     // Table → columns to ADD
-	NewIndexes    map[string][]IndexAdd      // Table → indexes to CREATE
+	NewColumns    map[string][]ColumnAdd    // Table → columns to ADD
+	NewIndexes    map[string][]IndexAdd     // Table → indexes to CREATE
 	DropIndexes   []IndexDrop               // Indexes to DROP (old-style names)
-	RenameColumns map[string][]ColumnRename  // Table → columns to RENAME
-	Orphaned      []OrphanedColumn           // Columns in DB but not in registry
+	RenameColumns map[string][]ColumnRename // Table → columns to RENAME
+	Orphaned      []OrphanedColumn          // Columns in DB but not in registry
 }
 
 // ColumnAdd describes a column to be added to an existing table.
@@ -215,6 +215,15 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 		// Add system columns.
 		for _, sc := range doctype.SystemColumns() {
 			registryFields[sc.Name] = true
+			if _, exists := liveTable.Columns[sc.Name]; !exists && sc.Name == "revision" {
+				// Legacy test fixtures and partially-created tables may not yet
+				// contain the normal system timestamp. Only upgrade a real Kora
+				// document table here; table creation gets revision from DDL.
+				if _, hasModified := liveTable.Columns["modified"]; !hasModified {
+					continue
+				}
+				diff.NewColumns[tableName] = append(diff.NewColumns[tableName], ColumnAdd{Name: sc.Name, Type: "BIGINT", Nullable: false, Default: "1"})
+			}
 		}
 
 		for colName := range liveTable.Columns {
@@ -471,7 +480,6 @@ func generateAddColumn(tableName string, col ColumnAdd, dialect db.Dialect) stri
 	return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s%s", dialect.QuoteIdent(tableName), col.Name, col.Type, nullable)
 }
 
-
 func escapeSQL(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
@@ -521,7 +529,7 @@ func MigrateSite(database *sql.DB, dbName string, newDoctypes []*doctype.DocType
 
 // TieredChange describes a single schema change with its safety classification.
 type TieredChange struct {
-	Tier    string `json:"tier"`    // "safe", "warning", "blocked"
+	Tier    string `json:"tier"` // "safe", "warning", "blocked"
 	DocType string `json:"doctype"`
 	Field   string `json:"field,omitempty"`
 	Change  string `json:"change"`

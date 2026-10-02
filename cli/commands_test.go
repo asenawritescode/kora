@@ -63,6 +63,19 @@ func TestMigrateCommand_Exists(t *testing.T) {
 	}
 }
 
+func TestSiteDirectoryMigrationCommand_Exists(t *testing.T) {
+	root := findSubCommand(rootCmd, "site-directory")
+	if root == nil {
+		t.Fatal("site-directory command not found")
+	}
+	if findSubCommand(root, "migrate") == nil {
+		t.Fatal("site-directory migrate command not found")
+	}
+	if findSubCommand(root, "probe") == nil {
+		t.Fatal("site-directory probe command not found")
+	}
+}
+
 func TestConfigCommand_Exists(t *testing.T) {
 	cmd := findSubCommand(rootCmd, "config")
 	if cmd == nil {
@@ -114,11 +127,16 @@ func TestServeFlags(t *testing.T) {
 		t.Fatal("serve command not found")
 	}
 
-	flags := []string{"site", "port", "config-dir"}
+	flags := []string{"port"}
 	for _, flagName := range flags {
 		flag := serveCmd.Flags().Lookup(flagName)
 		if flag == nil {
 			t.Errorf("serve command missing --%s flag", flagName)
+		}
+	}
+	for _, removed := range []string{"site", "config-dir"} {
+		if flag := serveCmd.Flags().Lookup(removed); flag != nil {
+			t.Errorf("serve command still exposes alternate startup flag --%s", removed)
 		}
 	}
 }
@@ -136,7 +154,7 @@ func TestRootCommand_SubCommands(t *testing.T) {
 		names[cmd.Use] = true
 	}
 
-	expected := []string{"serve", "migrate", "config", "secret", "nats"}
+	expected := []string{"serve", "migrate", "config", "secret", "nats", "remote"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("expected subcommand %q not found under root", name)

@@ -20,6 +20,7 @@ var (
 	setupAdminEmail string
 	setupAdminPass  string
 	setupConfigPath string
+	setupSiteName   string
 )
 
 func init() {
@@ -41,7 +42,7 @@ runs schema migrations, and creates an admin user — all in one command.`,
 	setupCmd.Flags().StringVar(&setupAdminEmail, "admin-email", "", "Admin user email (required)")
 	setupCmd.Flags().StringVar(&setupAdminPass, "admin-password", "", "Admin user password (required)")
 	setupCmd.Flags().StringVar(&setupConfigPath, "path", "", "Path to config directory (required)")
-	setupCmd.Flags().StringVar(&serveSiteFlag, "site", "", "Site hostname (required)")
+	setupCmd.Flags().StringVar(&setupSiteName, "site", "", "Site hostname (required)")
 
 	setupCmd.MarkFlagRequired("site")
 	setupCmd.MarkFlagRequired("path")
@@ -52,7 +53,7 @@ runs schema migrations, and creates an admin user — all in one command.`,
 }
 
 func runSetup(cmd *cobra.Command, args []string) error {
-	siteName := serveSiteFlag
+	siteName := setupSiteName
 
 	slog.Info("starting setup", "site", siteName, "config", setupConfigPath)
 
@@ -92,7 +93,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	fmt.Printf("│  Database: %-40s │\n", result.Config.DBName)
 	fmt.Printf("│  Admin:    %-40s │\n", setupAdminEmail)
 	fmt.Println("│                                                     │")
-	fmt.Printf("│  Start: kora serve --site %-25s │\n", siteName)
+	fmt.Println("│  Start: kora serve                              │")
 	fmt.Println("└─────────────────────────────────────────────────────┘")
 
 	return nil

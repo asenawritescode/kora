@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -13,7 +14,7 @@ import (
 // Existing views for the site are deleted and re-inserted atomically.
 func (s *Store) SaveViewsTx(tx *sql.Tx, views []*doctype.View, site string) error {
 	// Delete all existing views for this site.
-	if _, err := tx.Exec("DELETE FROM _kora_view WHERE site = ?", site); err != nil {
+	if _, err := tx.Exec(db.Rebind(s.Dialect, "DELETE FROM _kora_view WHERE site = ?"), site); err != nil {
 		return fmt.Errorf("deleting existing views: %w", err)
 	}
 
@@ -112,13 +113,12 @@ func (s *Store) SaveViews(views []*doctype.View, site string) error {
 
 // LoadViews reads all Views for a site from _kora_view.
 func (s *Store) LoadViews(site string) ([]*doctype.View, error) {
-	rows, err := s.DB.Query(
+	rows, err := s.DB.Query(db.Rebind(s.Dialect,
 		`SELECT name, route, type, layout, label, module, source_doctype,
 			public_enabled, public_components, public_allow_mutations, config_json
 		 FROM _kora_view WHERE site = ? OR site = ''
 		 ORDER BY idx`,
-		site,
-	)
+	), site)
 	if err != nil {
 		return nil, fmt.Errorf("querying views: %w", err)
 	}
@@ -185,9 +185,9 @@ func (s *Store) LoadViews(site string) ([]*doctype.View, error) {
 // LoadView reads a single View by name.
 func (s *Store) LoadView(name, site string) (*doctype.View, error) {
 	row := s.DB.QueryRow(
-		`SELECT name, route, type, layout, label, module, source_doctype,
+		db.Rebind(s.Dialect, `SELECT name, route, type, layout, label, module, source_doctype,
 			public_enabled, public_components, public_allow_mutations, config_json
-		 FROM _kora_view WHERE name = ? AND (site = ? OR site = '')`,
+		 FROM _kora_view WHERE name = ? AND (site = ? OR site = '')`),
 		name, site,
 	)
 
@@ -201,7 +201,7 @@ func (s *Store) LoadView(name, site string) (*doctype.View, error) {
 		&publicEnabled, &publicComponents, &publicAllowMutations, &configJSON,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("view %q not found", name)
+		return nil, fmt.Errorf("view %q not found: %w", name, sql.ErrNoRows)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("loading view %q: %w", name, err)
@@ -249,7 +249,7 @@ func isPageManifestJSON(value string) bool {
 
 // DeleteView removes a View by name.
 func (s *Store) DeleteView(name, site string) error {
-	_, err := s.DB.Exec("DELETE FROM _kora_view WHERE name = ? AND site = ?", name, site)
+	_, err := s.DB.Exec(db.Rebind(s.Dialect, "DELETE FROM _kora_view WHERE name = ? AND site = ?"), name, site)
 	if err != nil {
 		return fmt.Errorf("deleting view %q: %w", name, err)
 	}

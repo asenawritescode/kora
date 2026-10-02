@@ -11,7 +11,7 @@ import (
 // This is the transitional bridge for packages that compose raw SQL while
 // DB-001 migrates the ORM to dialect.Placeholder() everywhere. Quoted string
 // literals containing '?' are preserved.
-func Rebind(d Dialect, query string) string {
+func Rebind(d QueryDialect, query string) string {
 	if _, isPG := d.(*PostgresDialect); !isPG {
 		return query
 	}
@@ -22,9 +22,9 @@ func Rebind(d Dialect, query string) string {
 	for i := 0; i < len(query); i++ {
 		c := query[i]
 		switch {
-		case c == '\'' && !(i+1 < len(query) && query[i+1] == '\''):
-			// Toggle literal state; doubled '' stays inside the literal.
+		case c == '\'':
 			if inSingle && i+1 < len(query) && query[i+1] == '\'' {
+				// An escaped quote inside a string doesn't end the literal.
 				b.WriteByte(c)
 				b.WriteByte('\'')
 				i++

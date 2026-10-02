@@ -24,7 +24,7 @@ func TestLoadAll_Empty(t *testing.T) {
 	s := newStore(db)
 
 	// Expect doctype query — returns empty.
-	mock.ExpectQuery("SELECT name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description, COALESCE\\(config_json, ''\\) FROM _kora_doctype WHERE site = \\? OR site = '' ORDER BY name").
+	mock.ExpectQuery("SELECT name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description, config_json FROM _kora_doctype WHERE site = \\? OR site = '' ORDER BY name").
 		WillReturnRows(sqlmock.NewRows([]string{"name", "module", "is_submittable", "is_child_table", "is_single", "track_changes", "title_field", "search_fields", "sort_field", "sort_order", "description", "config_json"}))
 
 	// Expect field query — also empty.
@@ -46,6 +46,24 @@ func TestLoadAll_Empty(t *testing.T) {
 	}
 }
 
+func TestLoadAllFieldsRebindsPostgresPlaceholders(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer database.Close()
+	store := &Store{DB: database, Dialect: &koraDB.PostgresDialect{}}
+	mock.ExpectQuery("SELECT parent, fieldname, fieldtype, label, options, reqd, unique_constraint, default_value, hidden, read_only, bold, in_list_view, in_standard_filter, search_index, description, depends_on, mandatory_depends_on, constraints_json, renamed_from, COALESCE\\(linked_field,''\\) as linked_field, COALESCE\\(computed,''\\) as computed, COALESCE\\(accept,''\\) as accept, idx FROM _kora_field WHERE site = \\$1 OR site = '' ORDER BY parent, idx").
+		WithArgs("tenant").
+		WillReturnRows(sqlmock.NewRows([]string{"parent", "fieldname", "fieldtype", "label", "options", "reqd", "unique_constraint", "default_value", "hidden", "read_only", "bold", "in_list_view", "in_standard_filter", "search_index", "description", "depends_on", "mandatory_depends_on", "constraints_json", "renamed_from", "linked_field", "computed", "accept", "idx"}))
+	if _, err := store.loadAllFields("tenant"); err != nil {
+		t.Fatalf("loadAllFields: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoadAll_WithDoctypes(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -61,7 +79,7 @@ func TestLoadAll_WithDoctypes(t *testing.T) {
 		AddRow("Task", "Core", 1, 0, 0, 0, "subject", "subject,status", "modified", "DESC", "A task", taskConfig).
 		AddRow("User", "Core", 0, 0, 0, 0, "name", "name,email", "modified", "DESC", "A user", "")
 
-	mock.ExpectQuery("SELECT name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description, COALESCE\\(config_json, ''\\) FROM _kora_doctype WHERE site = \\? OR site = '' ORDER BY name").
+	mock.ExpectQuery("SELECT name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description, config_json FROM _kora_doctype WHERE site = \\? OR site = '' ORDER BY name").
 		WillReturnRows(dtRows)
 
 	// Field rows.
@@ -301,7 +319,8 @@ func TestLoadScriptSnapshots(t *testing.T) {
 		AddRow("validate_task", "doc_event", "Task", "before_save", "", "", "", 10, 1, "", 5000, "console.log('validating')").
 		AddRow("daily_report", "scheduled", "", "", "", "", "0 9 * * *", 5, 1, "Admin", 30000, "console.log('report')")
 
-	mock.ExpectQuery("SELECT name, script_type, doctype, event, method_path, workflow_action, schedule, priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = 1").
+	mock.ExpectQuery("SELECT name, script_type, doctype, event, method_path, workflow_action, schedule, priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = \\?").
+		WithArgs(true, "").
 		WillReturnRows(rows)
 
 	snapshots, err := s.LoadScriptSnapshots("")
@@ -468,7 +487,7 @@ func TestCreateConfigVersionWithBase_UsesExplicitBaseVersionID(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"config"}))
 	mock.ExpectExec("INSERT INTO _kora_config_version").
 		WithArgs(
-			"cv-test-4", "test", 4, "system", "Draft invoice", nil, "Draft", sqlmock.AnyArg(),
+			"cv-test-4", "test", 4, "system", "Draft invoice", nil, "Draft", false, sqlmock.AnyArg(),
 			nil, sqlmock.AnyArg(), "cv-test-2", "",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -480,6 +499,48 @@ func TestCreateConfigVersionWithBase_UsesExplicitBaseVersionID(t *testing.T) {
 	}
 	if versionID != "cv-test-4" || versionNum != 4 {
 		t.Fatalf("unexpected version result: id=%s version=%d", versionID, versionNum)
+	}
+}
+
+func TestCreateConfigVersionActiveSupersedesPreviousActiveAndSetsFlag(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	s := newStore(db)
+	snapshot := &doctype.ConfigSnapshot{
+		DocTypes: []*doctype.DocType{{Name: "Invoice", Module: "Accounts"}},
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT COALESCE\\(MAX\\(version\\), 0\\) FROM _kora_config_version WHERE site = \\?").
+		WithArgs("test").
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(3))
+	mock.ExpectExec("UPDATE _kora_config_version SET status = 'Superseded', is_active = \\? WHERE site = \\? AND status = 'Active'").
+		WithArgs(false, "test").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT config FROM _kora_config_version WHERE site = \\? AND version = \\?").
+		WithArgs("test", 3).
+		WillReturnRows(sqlmock.NewRows([]string{"config"}).AddRow(""))
+	mock.ExpectExec("INSERT INTO _kora_config_version").
+		WithArgs(
+			"cv-test-4", "test", 4, "system", "Activated", nil, "Active", true, sqlmock.AnyArg(),
+			nil, sqlmock.AnyArg(), "cv-test-3", "",
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	versionID, versionNum, err := s.CreateConfigVersionWithBase("test", "system", "Activated", "Active", snapshot, "cv-test-3")
+	if err != nil {
+		t.Fatalf("CreateConfigVersionWithBase error = %v", err)
+	}
+	if versionID != "cv-test-4" || versionNum != 4 {
+		t.Fatalf("unexpected version result: id=%s version=%d", versionID, versionNum)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
 	}
 }
 

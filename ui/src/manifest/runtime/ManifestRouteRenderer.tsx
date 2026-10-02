@@ -5,6 +5,7 @@ import { ManifestRenderer } from './ManifestRenderer'
 import { normalizeManifestRoute } from './policy'
 import { validatePageManifestContract } from '../schema/page'
 import { Skeleton } from '@/components/ui/skeleton'
+import { executeViewAction } from '@/lib/api/page-manifests'
 
 export function ManifestRouteRenderer({ route }: { route: string }) {
   const search = useSearch({ strict: false }) as { version?: string }
@@ -57,6 +58,19 @@ export function ManifestRouteRenderer({ route }: { route: string }) {
     )
   }
 
+  const handleAction = async (actionId: string, context: Record<string, unknown>) => {
+    if (actionId === 'filter' || actionId === 'search') return
+    const component = typeof context._component === 'string' ? context._component : ''
+    if (!component) return
+    const cleanContext = { ...context }
+    delete cleanContext._component
+    return executeViewAction(actionId, {
+      view: manifest.metadata.name,
+      component,
+      context: cleanContext,
+    })
+  }
+
   return (
     <div className="p-4 md:p-6">
       <div className="mb-6">
@@ -65,7 +79,7 @@ export function ManifestRouteRenderer({ route }: { route: string }) {
         </p>
         <h1 className="text-2xl font-bold tracking-tight">{manifest.metadata.name}</h1>
       </div>
-      <ManifestRenderer manifest={manifest} mode="runtime" />
+      <ManifestRenderer manifest={manifest} mode="runtime" onAction={handleAction} />
     </div>
   )
 }

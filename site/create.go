@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"strconv"
@@ -77,6 +78,16 @@ func (in *CreateSiteInput) applyDefaults() {
 			}
 		}
 	}
+	if in.DBType == "" {
+		if in.PlatformDBType != "" {
+			in.DBType = in.PlatformDBType
+		} else {
+			in.DBType = "mysql"
+		}
+	}
+	if in.PlatformDBType == "" {
+		in.PlatformDBType = in.DBType
+	}
 	if in.DBHost == "" {
 		if in.PlatformDBHost != "" {
 			in.DBHost = in.PlatformDBHost
@@ -85,22 +96,19 @@ func (in *CreateSiteInput) applyDefaults() {
 		}
 	}
 	if in.DBPort == 0 {
-		if in.PlatformDBPort != 0 {
+		platformTypeMatches := in.PlatformDBType == "" || strings.EqualFold(in.PlatformDBType, in.DBType)
+		if in.PlatformDBPort != 0 && platformTypeMatches {
 			in.DBPort = in.PlatformDBPort
 		} else {
 			in.DBPort = 3306
+			if strings.EqualFold(in.DBType, "postgres") {
+				in.DBPort = 5432
+			}
 		}
 	}
 	if in.DBName == "" {
 		// Derive from hostname: dots become underscores.
 		in.DBName = strings.ReplaceAll(in.Hostname, ".", "_")
-	}
-	if in.DBType == "" {
-		if in.PlatformDBType != "" {
-			in.DBType = in.PlatformDBType
-		} else {
-			in.DBType = "mysql"
-		}
 	}
 	if in.DBUser == "" {
 		if in.PlatformDBUser != "" {
@@ -140,6 +148,7 @@ func mysqlHostPort(addr string) (string, int) {
 
 // CreateSiteResult holds the result of a successful site creation.
 type CreateSiteResult struct {
+	SiteID   string
 	Config   *SiteConfig
 	DB       *sql.DB
 	Registry *doctype.Registry
@@ -182,6 +191,12 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 		input.PlatformDB = discoveredPlatformDB
 		defer discoveredPlatformDB.Close()
 	}
+	if input.PlatformDB == nil {
+		return nil, fmt.Errorf("durable platform site directory is required to create a site")
+	}
+	if err := BootstrapPlatformRegistry(input.PlatformDB, sqlDialect.Resolve(input.PlatformDBType)); err != nil {
+		return nil, fmt.Errorf("initializing platform site directory: %w", err)
+	}
 
 	domains := []string{input.Hostname}
 	domains = append(domains, input.ExtraDomains...)
@@ -204,6 +219,19 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 		siteCfg.StorageBucket = BucketNameForSite(input.Hostname)
 	}
 
+	// Publish durable intent before creating tenant data. A retry can reuse this
+	// canonical identity after a crash between database creation and activation.
+	if err := ensurePlatformSiteRegistrationStatus(input.PlatformDB, input.PlatformDBType, siteCfg, "provisioning"); err != nil {
+		return nil, fmt.Errorf("persisting platform site provisioning intent: %w", err)
+	}
+	siteID, err := registeredSiteID(input.PlatformDB, input.PlatformDBType, input.Hostname)
+	if err != nil {
+		return nil, fmt.Errorf("reading canonical site id: %w", err)
+	}
+	if siteID == "" {
+		return nil, fmt.Errorf("platform site directory returned an empty canonical site id")
+	}
+
 	// Step 1: Create database.
 	if err := CreateDatabase(input, siteCfg); err != nil {
 		return nil, fmt.Errorf("creating database: %w", err)
@@ -213,7 +241,6 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	// For LibSQL, open a fresh connection just like the startup check does —
 	// this avoids any connection-pool auth issues with the libsql HTTP driver.
 	var db *sql.DB
-	var err error
 	isOwnedDB := true
 	if input.DBType == "libsql" {
 		if dsn := os.Getenv("DB_DSN"); dsn != "" {
@@ -253,22 +280,23 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	}
 
 	// Step 4: Create admin user.
-	if err := createAdminUser(db, input.AdminEmail, input.AdminPassword, input.AdminFullName, input.Hostname); err != nil {
+	dialect := sqlDialect.Resolve(input.DBType)
+	if err := createAdminUser(db, dialect, input.AdminEmail, input.AdminPassword, input.AdminFullName, input.Hostname); err != nil {
 		if isOwnedDB {
 			db.Close()
 		}
 		return nil, fmt.Errorf("creating admin user: %w", err)
 	}
 
-	// Step 5: Create initial config version (used by DiscoverSitesFromDB).
-	ensureConfigVersion(db, input.Hostname, domains)
+	// Step 5: Create the initial config version for site history and review.
+	ensureConfigVersion(db, dialect, input.Hostname, domains)
 
-	// Step 6: Persist durable site discovery metadata in the platform database.
-	if err := ensurePlatformSiteRegistration(input.PlatformDB, input.PlatformDBType, siteCfg); err != nil {
+	// Step 6: Publish the tenant only after its database and bootstrap are ready.
+	if err := NewSQLSiteRegistry(input.PlatformDB, input.PlatformDBType).SetStatus(siteID, "active"); err != nil {
 		if isOwnedDB {
 			db.Close()
 		}
-		return nil, fmt.Errorf("persisting platform site registry: %w", err)
+		return nil, fmt.Errorf("activating site in platform directory: %w", err)
 	}
 
 	// Step 7: Build empty registry.
@@ -276,16 +304,29 @@ func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
 	registry.LoadFull(nil, nil, nil)
 
 	return &CreateSiteResult{
+		SiteID:   siteID,
 		Config:   siteCfg,
 		DB:       db,
 		Registry: registry,
 	}, nil
 }
 
+func registeredSiteID(platformDB *sql.DB, platformDBType, hostname string) (string, error) {
+	if platformDB == nil {
+		return "", nil
+	}
+	query := sqlDialect.Rebind(sqlDialect.Resolve(platformDBType), `SELECT site_id FROM _kora_site_registry WHERE site = ?`)
+	var id string
+	if err := platformDB.QueryRow(query, hostname).Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 // createAdminUser hashes the password and inserts a user into _kora_user.
 // An empty password intentionally creates a passwordless bootstrap account:
 // password login is disabled, but magic-link auth can still find the user.
-func createAdminUser(db *sql.DB, email, password, fullName, site string) error {
+func createAdminUser(db *sql.DB, dialect sqlDialect.QueryDialect, email, password, fullName, site string) error {
 	passwordHash := "$kora$passwordless$disabled"
 	if strings.TrimSpace(password) != "" {
 		var err error
@@ -295,9 +336,18 @@ func createAdminUser(db *sql.DB, email, password, fullName, site string) error {
 		}
 	}
 
+	query := `INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, email_verified_at, roles)
+		 VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?)`
+	if driver, ok := dialect.(interface{ DriverName() string }); ok {
+		switch driver.DriverName() {
+		case "mysql":
+			query += ` ON DUPLICATE KEY UPDATE email = VALUES(email)`
+		case "postgres", "libsql":
+			query += ` ON CONFLICT (site, email) DO NOTHING`
+		}
+	}
 	_, err := db.Exec(
-		`INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, email_verified_at, roles)
-		 VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?)`,
+		sqlDialect.Rebind(dialect, query),
 		ulid.Make().String(), site, email, passwordHash, fullName, "Administrator",
 	)
 	if err != nil {
@@ -308,9 +358,12 @@ func createAdminUser(db *sql.DB, email, password, fullName, site string) error {
 
 // ensureConfigVersion creates an initial config version if none exists for the site.
 // domains are persisted in the config JSON so they survive container redeploys.
-func ensureConfigVersion(db *sql.DB, hostname string, domains []string) {
+func ensureConfigVersion(db *sql.DB, dialect sqlDialect.QueryDialect, hostname string, domains []string) {
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM _kora_config_version WHERE site = ?", hostname).Scan(&count)
+	if err := db.QueryRow(sqlDialect.Rebind(dialect, "SELECT COUNT(*) FROM _kora_config_version WHERE site = ?"), hostname).Scan(&count); err != nil {
+		slog.Warn("initial site config-version check failed", "site", hostname, "error", err)
+		return
+	}
 	if count > 0 {
 		return
 	}
@@ -319,14 +372,21 @@ func ensureConfigVersion(db *sql.DB, hostname string, domains []string) {
 	configJSON := fmt.Sprintf(`{"domains": %s}`, string(domainsJSON))
 	versionID := ulid.Make().String()
 	_, err := db.Exec(
-		`INSERT INTO _kora_config_version (id, site, version, created_by, label, status, config)
-		 VALUES (?, ?, 1, 'setup', 'Initial setup', 'Active', ?)`,
+		sqlDialect.Rebind(dialect, `INSERT INTO _kora_config_version (id, site, version, created_by, label, status, config)
+		 VALUES (?, ?, 1, 'setup', 'Initial setup', 'Active', ?)`),
 		versionID, hostname, configJSON,
 	)
 	if err != nil {
-		// Non-fatal — site is still usable.
+		// Non-fatal — the canonical registry still makes the site routable.
+		slog.Warn("initial site config version was not created", "site", hostname, "error", err)
 		return
 	}
 	// Mark as active.
-	db.Exec("UPDATE _kora_config_version SET is_active = 1 WHERE id = ?", versionID)
+	activeFlag := any(true)
+	if driver, ok := dialect.(interface{ DriverName() string }); ok && driver.DriverName() == "postgres" {
+		activeFlag = 1
+	}
+	if _, err := db.Exec(sqlDialect.Rebind(dialect, "UPDATE _kora_config_version SET is_active = ? WHERE id = ?"), activeFlag, versionID); err != nil {
+		slog.Warn("initial site config version active flag was not set", "site", hostname, "error", err)
+	}
 }

@@ -27,7 +27,7 @@ func (h *Handler) HandleSiteSettings(c *gin.Context) {
 	currency := "KES"
 	var stored string
 	err := h.siteTx(c).DB.QueryRow(
-		"SELECT setting_value FROM _kora_site_setting WHERE site = ? AND setting_key = ?",
+		h.siteQuery(c, "SELECT setting_value FROM _kora_site_setting WHERE site = ? AND setting_key = ?"),
 		site, "currency",
 	).Scan(&stored)
 	if err == nil && stored != "" {
@@ -59,7 +59,7 @@ func (h *Handler) HandleSiteSettingsUpdate(c *gin.Context) {
 
 	db := h.siteTx(c).DB
 	site := c.GetString("site_name")
-	query := "INSERT INTO _kora_site_setting (site, setting_key, setting_value) VALUES (?, ?, ?) " + h.TxManager.Dialect.UpsertClause([]string{"site", "setting_key"}, []string{"setting_value"})
+	query := h.siteQuery(c, "INSERT INTO _kora_site_setting (site, setting_key, setting_value) VALUES (?, ?, ?)") + " " + h.siteDialect(c).UpsertClause([]string{"site", "setting_key"}, []string{"setting_value"})
 	if _, err := db.Exec(query, site, "currency", currency); err != nil {
 		internalError(c, "saving site settings", err)
 		return

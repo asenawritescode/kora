@@ -2,7 +2,10 @@ package natsprovider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -90,6 +93,131 @@ func (p *Provider) Bootstrap(ctx context.Context) error {
 		return fmt.Errorf("natsprovider: bootstrap stream: %w", err)
 	}
 	return nil
+}
+
+// SiteDirectoryStreamName and SiteDirectorySubject are deliberately outside
+// the general event subject tree so control-plane notifications have separate
+// retention and cannot be confused with analytics or conversation events.
+func (p *Provider) SiteDirectoryStreamName() string {
+	return strings.ToUpper(p.cfg.SubjectPrefix) + "_SITE_DIRECTORY"
+}
+
+func (p *Provider) SiteDirectorySubject() string {
+	return p.cfg.SubjectPrefix + "_site_directory.changed"
+}
+
+// BootstrapSiteDirectory creates the dedicated, bounded JetStream stream used
+// only for revision wakeups. The SQL outbox remains the durable source of truth.
+func (p *Provider) BootstrapSiteDirectory(ctx context.Context) error {
+	if p == nil || p.js == nil {
+		return fmt.Errorf("natsprovider: provider is nil")
+	}
+	name := p.SiteDirectoryStreamName()
+	_, err := p.js.AddStream(&nats.StreamConfig{
+		Name: name, Subjects: []string{p.cfg.SubjectPrefix + "_site_directory.>"},
+		Retention: nats.LimitsPolicy, Storage: nats.FileStorage,
+		Discard: nats.DiscardOld, MaxAge: 24 * time.Hour,
+		Duplicates: 10 * time.Minute,
+	}, nats.Context(ctx))
+	if err != nil && !isAlreadyExists(err) {
+		return fmt.Errorf("natsprovider: bootstrap site directory stream: %w", err)
+	}
+	info, err := p.js.StreamInfo(name, nats.Context(ctx))
+	if err != nil {
+		return fmt.Errorf("natsprovider: inspect site directory stream: %w", err)
+	}
+	if len(info.Config.Subjects) != 1 || info.Config.Subjects[0] != p.cfg.SubjectPrefix+"_site_directory.>" {
+		return fmt.Errorf("natsprovider: site directory stream %q has incompatible subjects", name)
+	}
+	return nil
+}
+
+type SiteDirectoryWakeup struct {
+	Version           int    `json:"version"`
+	DirectoryRevision uint64 `json:"directory_revision"`
+}
+
+// PublishSiteDirectoryRevision emits a small, credential-free wakeup. Message
+// IDs make duplicate publishers idempotent; consumers always read the SQL feed.
+func (p *Provider) PublishSiteDirectoryRevision(ctx context.Context, revision uint64) error {
+	if p == nil || p.js == nil || revision == 0 {
+		return fmt.Errorf("natsprovider: provider and positive directory revision are required")
+	}
+	payload, err := json.Marshal(SiteDirectoryWakeup{Version: 1, DirectoryRevision: revision})
+	if err != nil {
+		return err
+	}
+	_, err = p.js.PublishMsg(&nats.Msg{Subject: p.SiteDirectorySubject(), Data: payload},
+		nats.Context(ctx), nats.MsgId(fmt.Sprintf("site-directory-revision-%d", revision)))
+	if err != nil {
+		return fmt.Errorf("natsprovider: publish site directory revision %d: %w", revision, err)
+	}
+	return nil
+}
+
+// SubscribeSiteDirectoryWakeups is a durable per-engine JetStream consumer.
+// SQL polling remains the recovery mechanism if NATS retention expires.
+func (p *Provider) SubscribeSiteDirectoryWakeups(ctx context.Context, consumerID string) (<-chan uint64, error) {
+	if p == nil || p.js == nil || strings.TrimSpace(consumerID) == "" {
+		return nil, fmt.Errorf("natsprovider: provider and consumer identity are required")
+	}
+	digest := sha256.Sum256([]byte(consumerID))
+	durableName := "dir_" + hex.EncodeToString(digest[:12])
+	// Older adapter builds could leave a push durable under this name. Such a
+	// consumer cannot be rebound for pull delivery; recreate it. Wakeups are
+	// hints only, so the SQL outbox poller safely recovers any skipped revision.
+	if info, err := p.js.ConsumerInfo(p.SiteDirectoryStreamName(), durableName, nats.Context(ctx)); err == nil {
+		if info.Config.DeliverSubject != "" {
+			if err := p.js.DeleteConsumer(p.SiteDirectoryStreamName(), durableName, nats.Context(ctx)); err != nil {
+				return nil, fmt.Errorf("natsprovider: replace incompatible site directory consumer: %w", err)
+			}
+		}
+	} else if !errors.Is(err, nats.ErrConsumerNotFound) {
+		return nil, fmt.Errorf("natsprovider: inspect site directory consumer: %w", err)
+	}
+	subscription, err := p.js.PullSubscribe(p.SiteDirectorySubject(), durableName,
+		nats.DeliverAll(), nats.AckExplicit(), nats.ManualAck(), nats.MaxAckPending(256))
+	if err != nil {
+		return nil, fmt.Errorf("natsprovider: pull subscribe: %w", err)
+	}
+	revisions := make(chan uint64, 256)
+	go func() {
+		defer close(revisions)
+		defer subscription.Unsubscribe()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			messages, err := subscription.Fetch(1, nats.MaxWait(500*time.Millisecond))
+			if err != nil {
+				if errors.Is(err, nats.ErrTimeout) {
+					continue
+				}
+				if ctx.Err() != nil {
+					return
+				}
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			for _, message := range messages {
+				var wakeup SiteDirectoryWakeup
+				if json.Unmarshal(message.Data, &wakeup) != nil || wakeup.Version != 1 || wakeup.DirectoryRevision == 0 {
+					_ = message.Ack()
+					continue
+				}
+				select {
+				case revisions <- wakeup.DirectoryRevision:
+					_ = message.Ack()
+				case <-ctx.Done():
+					_ = message.Nak()
+					return
+				}
+			}
+		}
+	}()
+	return revisions, nil
 }
 
 // Diagnostics reads JetStream state for the configured stream. It never mutates

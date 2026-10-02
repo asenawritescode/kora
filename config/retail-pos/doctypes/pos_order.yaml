@@ -1,7 +1,7 @@
 name: POS Order
 module: Retail Pos
 title_field: reference
-search_fields: reference, status
+search_fields: reference, status, customer_name
 sort_field: modified
 sort_order: DESC
 
@@ -15,14 +15,64 @@ fields:
   - fieldname: source_record
     fieldtype: Data
     label: Source Record
+    description: The original order, quote, import, or external reference this POS order came from.
+    hidden: true
   - fieldname: assignee
-    fieldtype: Data
+    fieldtype: User
     label: Assignee
+    description: Select the existing user responsible for this order.
+    hidden: true
   - fieldname: evidence
     fieldtype: Text
     label: Evidence
+    hidden: true
   - fieldname: status
     fieldtype: Data
     label: Status
+    options: |
+      Draft
+      Awaiting Payment
+      Paid
+      Partially Paid
+      Refunded
+      Cancelled
+      Closed
     default: Draft
     in_list_view: true
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    default: 0
+    computed: '(sum "items" "line_total")'
+    read_only: true
+    in_list_view: true
+  - fieldname: payment_method
+    fieldtype: Data
+    label: Payment method
+    options: |
+      Cash
+      Card
+      Mobile Money
+      M-Pesa
+    default: Cash
+    in_list_view: true
+  - fieldname: customer_name
+    fieldtype: Data
+    label: Customer
+    hidden: true
+    in_list_view: false
+  - fieldname: customer
+    fieldtype: Link
+    options: POS Customer
+    label: Customer
+    in_list_view: true
+  - fieldname: line_items
+    fieldtype: Text
+    label: Line items
+    hidden: true
+    in_list_view: false
+  - fieldname: items
+    fieldtype: Table
+    options: Sale Item
+    label: Items
+    description: Add products; unit prices copy from the product.

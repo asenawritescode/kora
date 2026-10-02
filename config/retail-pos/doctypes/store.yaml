@@ -15,9 +15,11 @@ fields:
   - fieldname: source_record
     fieldtype: Data
     label: Source Record
+    description: The original imported or external store reference, when applicable.
   - fieldname: assignee
-    fieldtype: Data
+    fieldtype: User
     label: Assignee
+    description: Select the existing user responsible for this store.
   - fieldname: evidence
     fieldtype: Text
     label: Evidence

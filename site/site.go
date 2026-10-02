@@ -3,9 +3,10 @@ package site
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -20,12 +21,16 @@ import (
 // SiteConfig holds the configuration for a single site/tenant.
 type SiteConfig struct {
 	// Database connection settings.
-	DBType     string `yaml:"db_type"` // "mysql" or "libsql"
+	DBType     string `yaml:"db_type"` // "mysql", "postgres", or "libsql"
 	DBHost     string `yaml:"db_host"`
 	DBPort     int    `yaml:"db_port"`
 	DBName     string `yaml:"db_name"`
 	DBUser     string `yaml:"db_user"`
 	DBPassword string `yaml:"db_password"`
+	// Per-tenant pool bounds inherited from the platform configuration unless
+	// explicitly supplied for this site.
+	DBMaxOpenConns int `yaml:"db_max_open_conns,omitempty"`
+	DBMaxIdleConns int `yaml:"db_max_idle_conns,omitempty"`
 
 	// Redis connection.
 	RedisURL string `yaml:"redis_url"`
@@ -91,6 +96,10 @@ type CommonConfig struct {
 	RateLimitRPS   int `yaml:"rate_limit_rps"`
 	RateLimitBurst int `yaml:"rate_limit_burst"`
 
+	// Trusted network proxies allowed to supply forwarding headers. Empty means
+	// the server uses the socket peer address and ignores forwarded client IPs.
+	TrustedProxies []string `yaml:"trusted_proxies"`
+
 	// Database pool.
 	DBMaxOpenConns int `yaml:"db_max_open_conns"`
 	DBMaxIdleConns int `yaml:"db_max_idle_conns"`
@@ -151,6 +160,17 @@ func (s *SiteConfig) DSN() string {
 		}
 		// No valid remote URL — this will fail at connect time with a clear error.
 		return s.DBHost
+	case "postgres":
+		dsn := url.URL{
+			Scheme: "postgres",
+			User:   url.UserPassword(s.DBUser, s.DBPassword),
+			Host:   net.JoinHostPort(s.DBHost, strconv.Itoa(s.DBPort)),
+			Path:   "/" + s.DBName,
+		}
+		query := dsn.Query()
+		query.Set("sslmode", "disable")
+		dsn.RawQuery = query.Encode()
+		return dsn.String()
 	default:
 		// MySQL / MariaDB.
 		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci",
@@ -178,7 +198,7 @@ func LoadCommonConfig(path string) (*CommonConfig, error) {
 		RateLimitRPS:         100,
 		RateLimitBurst:       20,
 		DBMaxOpenConns:       25,
-		DBMaxIdleConns:       5,
+		DBMaxIdleConns:       1,
 		APIDefaultLimit:      50,
 		APIMaxLimit:          500,
 		ReadTimeout:          30,
@@ -196,6 +216,9 @@ func LoadCommonConfig(path string) (*CommonConfig, error) {
 // ApplyEnvOverrides overlays KORA_* environment variables on top of YAML values.
 // Env vars take precedence — this lets secrets like DB passwords stay out of YAML.
 func (c *CommonConfig) ApplyEnvOverrides() {
+	if v := os.Getenv("KORA_TRUSTED_PROXIES"); v != "" {
+		c.TrustedProxies = splitCSV(v)
+	}
 	if v := os.Getenv("KORA_DB_TYPE"); v != "" {
 		c.DBType = v
 	}
@@ -270,8 +293,9 @@ func CommonConfigFromEnv() *CommonConfig {
 		SessionLifetimeHours: getEnvInt("KORA_SESSION_HOURS", 72),
 		RateLimitRPS:         getEnvInt("KORA_RATE_LIMIT", 100),
 		RateLimitBurst:       getEnvInt("KORA_RATE_BURST", 20),
+		TrustedProxies:       splitCSV(os.Getenv("KORA_TRUSTED_PROXIES")),
 		DBMaxOpenConns:       getEnvInt("KORA_DB_MAX_OPEN", 25),
-		DBMaxIdleConns:       getEnvInt("KORA_DB_MAX_IDLE", 5),
+		DBMaxIdleConns:       getEnvInt("KORA_DB_MAX_IDLE", 1),
 		APIDefaultLimit:      getEnvInt("KORA_API_DEFAULT_LIMIT", 50),
 		APIMaxLimit:          getEnvInt("KORA_API_MAX_LIMIT", 500),
 		ReadTimeout:          getEnvInt("KORA_READ_TIMEOUT", 30),
@@ -285,6 +309,17 @@ func CommonConfigFromEnv() *CommonConfig {
 		SMTPFrom:             getEnv("KORA_SMTP_FROM", ""),
 		SMTPTLSMode:          getEnv("KORA_SMTP_TLS_MODE", "auto"),
 	}
+}
+
+func splitCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
 }
 
 func getEnv(key, fallback string) string {
@@ -334,65 +369,16 @@ func LoadSiteConfig(path string) (*SiteConfig, error) {
 	return cfg, nil
 }
 
-// DiscoverSitesFromDB finds sites from both the durable platform registry and,
-// for backwards compatibility, the legacy _kora_config_version table. Registry
-// entries take precedence over legacy entries with the same site name.
+// DiscoverSitesFromDB reads the canonical platform site directory.
 func DiscoverSitesFromDB(db *sql.DB) ([]DBSiteInfo, error) {
-	registrySites, regErr := discoverSitesFromRegistry(db)
-	if regErr != nil && !isSiteRegistryMissing(regErr) {
-		return nil, regErr
-	}
-
-	// Always also discover from legacy config version to catch sites that
-	// predate the registry table. Registry entries override legacy ones.
-	legacySites, legErr := discoverSitesFromLegacyConfig(db)
-	if legErr != nil && !isLegacyConfigMissing(legErr) {
-		return nil, legErr
-	}
-
-	// Merge: registry takes precedence.
-	seen := make(map[string]int, len(registrySites))
-	for i, s := range registrySites {
-		seen[s.Name] = i
-	}
-	for _, s := range legacySites {
-		if _, exists := seen[s.Name]; !exists {
-			registrySites = append(registrySites, s)
-		}
-	}
-	return registrySites, nil
-}
-
-// discoverSitesFromLegacyConfig reads site names from _kora_config_version.
-func discoverSitesFromLegacyConfig(db *sql.DB) ([]DBSiteInfo, error) {
-	rows, err := db.Query("SELECT DISTINCT site, config FROM _kora_config_version WHERE status = 'Active'")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var sites []DBSiteInfo
-	for rows.Next() {
-		var site, configJSON string
-		if err := rows.Scan(&site, &configJSON); err != nil {
-			return nil, err
-		}
-		info := DBSiteInfo{Name: site, Domains: []string{site}}
-		if configJSON != "" && configJSON != "{}" {
-			var cfg struct {
-				Domains []string `json:"domains"`
-			}
-			if json.Unmarshal([]byte(configJSON), &cfg) == nil && len(cfg.Domains) > 0 {
-				info.Domains = cfg.Domains
-			}
-		}
-		sites = append(sites, info)
-	}
-	return sites, rows.Err()
+	return discoverSitesFromRegistry(db)
 }
 
 // ReconstructSiteConfig builds a SiteConfig from platform defaults and persisted domains.
 func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []string) *SiteConfig {
+	if common == nil {
+		common = &CommonConfig{}
+	}
 	if len(domains) == 0 {
 		domains = []string{hostname}
 	}
@@ -401,15 +387,17 @@ func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []stri
 		dbPort = 3306
 	}
 	return &SiteConfig{
-		DBType:      common.DBType,
-		DBHost:      common.DBHost,
-		DBPort:      dbPort,
-		DBUser:      common.DBUser,
-		DBPassword:  common.DBPassword,
-		DBName:      strings.ReplaceAll(hostname, ".", "_"),
-		Hostname:    hostname,
-		DomainsList: domains,
-		Apps:        []string{"core"},
+		DBType:         common.DBType,
+		DBHost:         common.DBHost,
+		DBPort:         dbPort,
+		DBUser:         common.DBUser,
+		DBPassword:     common.DBPassword,
+		DBMaxOpenConns: common.DBMaxOpenConns,
+		DBMaxIdleConns: common.DBMaxIdleConns,
+		DBName:         strings.ReplaceAll(hostname, ".", "_"),
+		Hostname:       hostname,
+		DomainsList:    domains,
+		Apps:           []string{"core"},
 	}
 }
 
@@ -473,30 +461,47 @@ func Connect(cfg *SiteConfig) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
-	tuneConnectionPool(db, driver)
+	tuneConnectionPool(db, driver, cfg.DBMaxOpenConns, cfg.DBMaxIdleConns)
 	return db, nil
 }
 
 // tuneConnectionPool keeps driver-specific connection lifetimes shorter than the
 // backend's idle timeout so pooled sockets are retired before the server drops them.
-func tuneConnectionPool(db *sql.DB, driver string) {
+func tuneConnectionPool(db *sql.DB, driver string, maxOpen, maxIdle int) {
+	useDriverDefaults := maxOpen <= 0 && maxIdle <= 0
+	if maxOpen <= 0 {
+		maxOpen = 25
+	}
+	if maxIdle < 0 {
+		maxIdle = 0
+	}
+	if maxIdle == 0 && useDriverDefaults && !strings.EqualFold(driver, "libsql") {
+		if strings.EqualFold(driver, "mysql") {
+			maxIdle = 1
+		} else {
+			maxIdle = 5
+		}
+	}
+	if maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
 	switch driver {
 	case "libsql":
 		// LibSQL HTTP streams expire server-side after ~30s idle.
-		db.SetMaxOpenConns(25)
 		db.SetMaxIdleConns(0)
 		db.SetConnMaxLifetime(25 * time.Second)
 		db.SetConnMaxIdleTime(20 * time.Second)
 	case "mysql":
 		// MySQL can leave idle TCP sockets half-open from the application's point of view.
-		// Keep a small idle pool and retire sockets proactively to avoid broken-pipe churn.
-		db.SetMaxOpenConns(25)
-		db.SetMaxIdleConns(5)
+		// Retain one idle socket per tenant. With eager multi-site loading, even a
+		// modest per-pool idle cap multiplies across sites and can exhaust MySQL
+		// before any request traffic arrives; open concurrency remains separately
+		// bounded for active request bursts.
 		db.SetConnMaxIdleTime(2 * time.Minute)
 		db.SetConnMaxLifetime(10 * time.Minute)
 	default:
-		db.SetMaxOpenConns(25)
-		db.SetMaxIdleConns(5)
 	}
 }
 
@@ -523,9 +528,15 @@ func CreateDatabase(input CreateSiteInput, cfg *SiteConfig) error {
 	if driver == "" {
 		driver = "mysql" // Backwards compat: existing site configs may not have db_type.
 	}
-	// LibSQL/SQLite creates the database file on first connection — no CREATE DATABASE needed.
-	if driver != "mysql" {
+	if driver == "postgres" {
+		return createPostgresDatabase(input, cfg)
+	}
+	// LibSQL creates the remote database through its provider — no CREATE DATABASE needed.
+	if driver == "libsql" {
 		return nil
+	}
+	if driver != "mysql" {
+		return fmt.Errorf("unsupported database type %q", driver)
 	}
 
 	// Prefer the already-open platform connection when available. This keeps
@@ -567,6 +578,60 @@ func CreateDatabase(input CreateSiteInput, cfg *SiteConfig) error {
 	return nil
 }
 
+func createPostgresDatabase(input CreateSiteInput, cfg *SiteConfig) error {
+	databaseName := cfg.DBName
+	if strings.TrimSpace(databaseName) == "" || len(databaseName) > 63 {
+		return fmt.Errorf("invalid PostgreSQL database name length")
+	}
+	adminDB := input.PlatformDB
+	if adminDB != nil && input.PlatformDBType != "" && !strings.EqualFold(input.PlatformDBType, "postgres") {
+		// The platform registry and a tenant may live on different database
+		// engines; never issue PostgreSQL admin SQL through a MySQL/LibSQL handle.
+		adminDB = nil
+	}
+	owned := false
+	if adminDB == nil {
+		dsn := ""
+		if strings.EqualFold(input.PlatformDBType, "postgres") || input.PlatformDBType == "" {
+			dsn = input.PlatformDBDSN
+		}
+		if dsn == "" {
+			adminConfig := *cfg
+			adminConfig.DBName = "postgres"
+			dsn = adminConfig.DSN()
+		}
+		var err error
+		adminDB, err = sql.Open("postgres", dsn)
+		if err != nil {
+			return fmt.Errorf("connecting to PostgreSQL admin database: %w", err)
+		}
+		owned = true
+	}
+	if owned {
+		defer adminDB.Close()
+	}
+	if err := adminDB.Ping(); err != nil {
+		return fmt.Errorf("pinging PostgreSQL admin database: %w", err)
+	}
+	var exists bool
+	if err := adminDB.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, databaseName).Scan(&exists); err != nil {
+		return fmt.Errorf("checking PostgreSQL database %s: %w", databaseName, err)
+	}
+	if exists {
+		return nil
+	}
+	quotedName := `"` + strings.ReplaceAll(databaseName, `"`, `""`) + `"`
+	if _, err := adminDB.Exec(`CREATE DATABASE ` + quotedName); err != nil {
+		// Concurrent idempotent provisioning can race between the existence
+		// check and CREATE DATABASE. Accept only if the target now exists.
+		if checkErr := adminDB.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, databaseName).Scan(&exists); checkErr == nil && exists {
+			return nil
+		}
+		return fmt.Errorf("creating PostgreSQL database %s: %w", databaseName, err)
+	}
+	return nil
+}
+
 func mysqlServerDSN(host string, port int, user, password string) string {
 	if host == "" || user == "" {
 		return ""
@@ -575,6 +640,25 @@ func mysqlServerDSN(host string, port int, user, password string) string {
 		port = 3306
 	}
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/?parseTime=true&charset=utf8mb4", user, password, host, port)
+}
+
+func postgresAdminDSN(tenantDSN string, host string, port int, user, password string) (string, error) {
+	if tenantDSN != "" {
+		parsed, err := url.Parse(tenantDSN)
+		if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Host == "" {
+			return "", fmt.Errorf("invalid PostgreSQL tenant DSN")
+		}
+		parsed.Path = "/postgres"
+		parsed.RawPath = ""
+		return parsed.String(), nil
+	}
+	if host == "" || user == "" {
+		return "", fmt.Errorf("PostgreSQL host and user are required")
+	}
+	if port == 0 {
+		port = 5432
+	}
+	return (&SiteConfig{DBType: "postgres", DBHost: host, DBPort: port, DBName: "postgres", DBUser: user, DBPassword: password}).DSN(), nil
 }
 
 func mysqlBaseDSN(dsn string) (string, error) {
@@ -591,6 +675,7 @@ type DeleteSiteInput struct {
 	DB             *sql.DB
 	Dialect        sqlDialect.Dialect
 	Hostname       string
+	SiteID         string
 	PlatformDB     *sql.DB
 	PlatformDBType string
 
@@ -641,10 +726,51 @@ func DeleteSite(input DeleteSiteInput) error {
 		if _, err := tempDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", input.Dialect.QuoteIdent(input.DBName))); err != nil {
 			return fmt.Errorf("dropping database %s: %w", input.DBName, err)
 		}
-		if err := removePlatformSiteRegistration(input.PlatformDB, input.PlatformDBType, input.Hostname); err != nil {
+		if err := removePlatformSiteRegistrationByID(input.PlatformDB, input.PlatformDBType, input.SiteID, input.Hostname); err != nil {
 			return fmt.Errorf("removing platform site registration: %w", err)
 		}
 		slog.Info("site database dropped", "hostname", input.Hostname, "db_name", input.DBName)
+		return nil
+
+	case "postgres", "postgresql":
+		if input.DB != nil {
+			if err := input.DB.Close(); err != nil {
+				return fmt.Errorf("closing site database before drop: %w", err)
+			}
+		}
+		adminDB := input.PlatformDB
+		owned := false
+		if adminDB == nil || !strings.EqualFold(input.PlatformDBType, "postgres") {
+			dsn, err := postgresAdminDSN(input.DBDSN, input.DBHost, input.DBPort, input.DBUser, input.DBPassword)
+			if err != nil {
+				return fmt.Errorf("building PostgreSQL admin DSN: %w", err)
+			}
+			adminDB, err = sql.Open("postgres", dsn)
+			if err != nil {
+				return fmt.Errorf("connecting for PostgreSQL teardown: %w", err)
+			}
+			owned = true
+		}
+		if owned {
+			defer adminDB.Close()
+		}
+		var currentDatabase string
+		if err := adminDB.QueryRow(`SELECT current_database()`).Scan(&currentDatabase); err != nil {
+			return fmt.Errorf("checking PostgreSQL teardown connection: %w", err)
+		}
+		if currentDatabase == input.DBName {
+			return fmt.Errorf("refusing to drop PostgreSQL database %s using a connection to that same database", input.DBName)
+		}
+		if _, err := adminDB.Exec(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, input.DBName); err != nil {
+			return fmt.Errorf("terminating sessions for database %s: %w", input.DBName, err)
+		}
+		if _, err := adminDB.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS %s`, input.Dialect.QuoteIdent(input.DBName))); err != nil {
+			return fmt.Errorf("dropping database %s: %w", input.DBName, err)
+		}
+		if err := removePlatformSiteRegistrationByID(input.PlatformDB, input.PlatformDBType, input.SiteID, input.Hostname); err != nil {
+			return fmt.Errorf("removing platform site registration: %w", err)
+		}
+		slog.Info("site database dropped", "hostname", input.Hostname, "db_name", input.DBName, "db_type", "postgres")
 		return nil
 
 	case "libsql":
@@ -681,7 +807,7 @@ func DeleteSite(input DeleteSiteInput) error {
 		if _, err := input.DB.Exec("DELETE FROM _kora_secret WHERE site = ?", input.Hostname); err != nil {
 			return fmt.Errorf("cleaning secrets: %w", err)
 		}
-		if err := removePlatformSiteRegistration(input.PlatformDB, input.PlatformDBType, input.Hostname); err != nil {
+		if err := removePlatformSiteRegistrationByID(input.PlatformDB, input.PlatformDBType, input.SiteID, input.Hostname); err != nil {
 			return fmt.Errorf("removing platform site registration: %w", err)
 		}
 

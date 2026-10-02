@@ -1,0 +1,48 @@
+name: Sale
+module: Point of Sale
+is_submittable: true
+title_field: reference
+search_fields: reference, status, payment_method
+sort_field: modified
+sort_order: DESC
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Receipt number
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Paid
+      Refunded
+      Cancelled
+    default: Paid
+    in_list_view: true
+  - fieldname: payment_method
+    fieldtype: Select
+    label: Paid by
+    options: |
+      Cash
+      Card
+      Mpesa
+      Other
+    reqd: true
+    in_list_view: true
+  - fieldname: subtotal
+    fieldtype: Currency
+    label: Subtotal
+    read_only: true
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    read_only: true
+    in_list_view: true
+  - fieldname: items
+    fieldtype: Table
+    label: Items
+    options: Sale Item
+    reqd: true

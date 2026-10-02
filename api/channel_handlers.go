@@ -1,8 +1,13 @@
 package api
 
 import (
+	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +15,7 @@ import (
 	"github.com/asenawritescode/kora/api/ai"
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/webhook"
 	"github.com/gin-gonic/gin"
 )
 
@@ -90,6 +96,149 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 	}})
 }
 
+// HandleManagedChannelClientRotate is the narrow Engine-owned provisioning
+// operation used by Cloud to install or rotate its site-scoped access token.
+// The dedicated service token is accepted only for this exact route by
+// SiteGuard; the credential is returned once and is never logged.
+func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
+	if c.GetString("auth_type") != "engine_provisioner" {
+		writeError(c, http.StatusForbidden, "auth.engine_provisioner_required", "Engine provisioning authentication required", nil)
+		return
+	}
+	db := h.queryDB(c)
+	if db == nil {
+		writeError(c, http.StatusServiceUnavailable, "server.database_unavailable", "Database not available", nil)
+		return
+	}
+	siteName := c.GetString("site_name")
+	if strings.TrimSpace(siteName) == "" {
+		writeError(c, http.StatusBadRequest, "site.unresolved", "Site could not be resolved", nil)
+		return
+	}
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(idempotencyKey) < 8 || len(idempotencyKey) > 200 {
+		writeError(c, http.StatusBadRequest, "validation.idempotency_key_required", "Idempotency-Key must contain 8 to 200 characters", nil)
+		return
+	}
+	idempotencyHashBytes := sha256.Sum256([]byte(idempotencyKey))
+	idempotencyHash := hex.EncodeToString(idempotencyHashBytes[:])
+	const clientName = "kora-cloud-channel"
+	const endpoint = "https://kora-cloud.internal/channel"
+	const displayName = "Kora Cloud Channel"
+	const description = "Managed site-scoped channel access client"
+	const emptyJSON = "[]"
+	ctx := c.Request.Context()
+	var currentToken, currentKey string
+	err := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&currentToken, &currentKey)
+	missing := err == sql.ErrNoRows
+	if err == nil && currentKey == idempotencyHash && currentToken != "" {
+		writeManagedChannelCredential(c, clientName, currentToken)
+		return
+	}
+	if err != nil && err != sql.ErrNoRows {
+		internalError(c, "read managed channel credential", err)
+		return
+	}
+	secret, err := webhook.GenerateSecret()
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "extension.secret_generation_failed", "Failed to generate managed credential", nil)
+		return
+	}
+	token, err := generateAccessToken()
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "extension.token_generation_failed", "Failed to generate managed credential", nil)
+		return
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		internalError(c, "begin managed channel credential rotation", err)
+		return
+	}
+	defer tx.Rollback()
+	if missing {
+		_, err = tx.Exec(h.siteQuery(c, `INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, managed_idempotency_key, subscriptions, api_permissions, installed_at, updated_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE)`), clientName, siteName, displayName, description, endpoint, secret, token, idempotencyHash, emptyJSON, emptyJSON)
+		if err != nil {
+			_ = tx.Rollback()
+			var racedToken, racedKey string
+			readErr := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&racedToken, &racedKey)
+			if readErr == nil && racedKey == idempotencyHash && racedToken != "" {
+				writeManagedChannelCredential(c, clientName, racedToken)
+				return
+			}
+			if readErr == nil {
+				writeError(c, http.StatusConflict, "extension.credential_rotation_conflict", "A different managed credential rotation won; retry with the same Idempotency-Key", nil)
+				return
+			}
+			internalError(c, "create managed channel credential", err)
+			return
+		}
+	} else {
+		query := h.siteQuery(c, `UPDATE _kora_extension SET access_token = ?, managed_idempotency_key = ?, updated_at = CURRENT_TIMESTAMP, is_active = TRUE WHERE site = ? AND name = ? AND managed_idempotency_key = ?`)
+		result, execErr := tx.Exec(query, token, idempotencyHash, siteName, clientName, currentKey)
+		if execErr != nil {
+			internalError(c, "rotate managed channel credential", execErr)
+			return
+		}
+		changed, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			internalError(c, "check managed channel credential", rowsErr)
+			return
+		}
+		if changed == 0 {
+			_ = tx.Rollback()
+			var racedToken, racedKey string
+			readErr := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&racedToken, &racedKey)
+			if readErr == nil && racedKey == idempotencyHash && racedToken != "" {
+				writeManagedChannelCredential(c, clientName, racedToken)
+				return
+			}
+			writeError(c, http.StatusConflict, "extension.credential_rotation_conflict", "A different managed credential rotation won; retry with the same Idempotency-Key", nil)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(c, "commit managed channel credential", err)
+		return
+	}
+	slog.Info("managed channel credential issued", "site", siteName, "client", clientName)
+	writeManagedChannelCredential(c, clientName, token)
+}
+
+func writeManagedChannelCredential(c *gin.Context, name, token string) {
+	c.JSON(http.StatusOK, Response{Data: managedChannelClientResponse{Name: name, AccessToken: token, Warning: "Store this credential securely. It will not be shown again."}})
+}
+
+// HandleManagedSiteIdentity returns the live runtime identity through the
+// site-scoped route. A successful response includes a tenant DB ping, so Cloud
+// can distinguish a directory row from a serving, healthy Engine runtime.
+func (h *Handler) HandleManagedSiteIdentity(c *gin.Context) {
+	if c.GetString("auth_type") != "engine_provisioner" {
+		writeError(c, http.StatusForbidden, "auth.engine_provisioner_required", "Engine provisioning authentication required", nil)
+		return
+	}
+	db := h.queryDB(c)
+	if db == nil {
+		writeError(c, http.StatusServiceUnavailable, "server.database_unavailable", "Database not available", nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		writeError(c, http.StatusServiceUnavailable, "site.database_unavailable", "Site database health check failed", nil)
+		return
+	}
+	status := c.GetString("site_status")
+	if status == "" {
+		status = "active"
+	}
+	c.JSON(http.StatusOK, Response{Data: managedSiteIdentityResponse{
+		SiteID:         c.GetString("site_id"),
+		Status:         status,
+		ConfigRevision: c.GetUint64("site_config_revision"),
+		Healthy:        true,
+	}})
+}
+
 func (h *Handler) HandleChannelSessionRevoke(c *gin.Context) {
 	if c.GetString("auth_type") != "extension" || c.GetString("extension_name") != "kora-cloud-channel" {
 		writeError(c, http.StatusForbidden, "auth.extension_required", "extension authentication required", nil)
@@ -118,6 +267,7 @@ func (h *Handler) HandleChannelTools(c *gin.Context) {
 	}
 	channel := strings.TrimSpace(c.DefaultQuery("channel", "web"))
 	catalog := ai.BuildToolCatalog(h.siteRegistry(c))
+	configRevision := c.GetUint64("site_config_revision")
 	filtered := make([]ai.ToolDescriptor, 0, len(catalog.Tools))
 	for _, tool := range catalog.Tools {
 		if channelAllowed(tool.ChannelAllowlist, channel) {
@@ -125,7 +275,7 @@ func (h *Handler) HandleChannelTools(c *gin.Context) {
 		}
 	}
 	version := ai.ToolCatalog{
-		Version: catalog.Version,
+		Version: fmt.Sprintf("r%d:%s", configRevision, catalog.Version),
 		Tools:   filtered,
 	}
 	if match := strings.TrimSpace(c.GetHeader("If-None-Match")); match != "" && match == version.Version {
@@ -133,7 +283,7 @@ func (h *Handler) HandleChannelTools(c *gin.Context) {
 		return
 	}
 	c.Header("ETag", version.Version)
-	c.JSON(http.StatusOK, Response{Data: channelToolsResponse{Version: version.Version, Tools: version.Tools}})
+	c.JSON(http.StatusOK, Response{Data: channelToolsResponse{Version: version.Version, ConfigRevision: configRevision, Tools: version.Tools}})
 }
 
 func (h *Handler) HandleChannelQuery(c *gin.Context) {
@@ -188,7 +338,7 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 	siteName, _ := c.Get("site_name")
 	siteNameStr, _ := siteName.(string)
 	owner := "channel:" + c.GetString("channel_sender_address")
-	result := ai.ExecuteTool(h.siteTx(c), h.siteRegistry(c), req.ToolName, req.Args, owner, siteNameStr)
+	result := ai.ExecuteConfirmedToolWithIdempotencyKey(h.siteTx(c), h.siteRegistry(c), req.ToolName, req.Args, owner, siteNameStr, strings.TrimSpace(c.GetHeader("Idempotency-Key")))
 	status := "success"
 	var errorMessage string
 	if strings.HasPrefix(result, "Error:") || strings.HasPrefix(result, "Unknown tool:") {
@@ -213,9 +363,9 @@ func (h *Handler) insertChannelAudit(c *gin.Context, toolName, operationKind, st
 	}
 	siteName, _ := c.Get("site_name")
 	siteNameStr, _ := siteName.(string)
-	_, err := db.Exec(`INSERT INTO _kora_channel_audit
+	_, err := db.Exec(h.siteQuery(c, `INSERT INTO _kora_channel_audit
 		(id, site, channel_session_id, conversation_key, provider, sender_address, tool_name, operation_kind, status, request_summary, response_summary, error_message, created_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		auth.NewAuditID(), siteNameStr, c.GetString("channel_session_id"), c.GetString("channel_conversation_key"),
 		"twilio_whatsapp", c.GetString("channel_sender_address"), toolName, operationKind, status, requestSummary, responseSummary, errorMessage, time.Now().UTC(),
 	)

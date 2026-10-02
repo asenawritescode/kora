@@ -137,6 +137,14 @@ describe('realtime invalidation', () => {
     }
     const socket = (globalThis.WebSocket as any).mock.instances[0]
     socket.onmessage?.({ data: JSON.stringify(payload) })
+    const workflowNotification = {
+      type: 'notification',
+      title: 'Sale paid',
+      message: 'Your payment was recorded.',
+      severity: 'success',
+      action: { label: 'Open sale', href: '/workspace/Sale/SALE-1' },
+    }
+    socket.onmessage?.({ data: JSON.stringify(workflowNotification) })
 
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['view-data', 'Sales Order', true] })
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['view-data', 'Sales Order', false] })
@@ -148,6 +156,7 @@ describe('realtime invalidation', () => {
       message: 'Sales Order SO-0001 changed',
       action: { label: 'Open doctype', href: '/workspace/Sales%20Order' },
     })
+    expect(notifications[1]).toMatchObject(workflowNotification)
     expect(states[0]).toEqual({ state: 'connecting' })
     expect(states.at(-1)).toMatchObject({ state: 'connected' })
 

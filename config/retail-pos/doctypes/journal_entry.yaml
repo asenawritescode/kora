@@ -1,0 +1,39 @@
+name: POS Journal Entry
+module: Retail POS Finance
+is_submittable: true
+title_field: reference
+search_fields: reference, status, source_type
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: posting_date
+    fieldtype: Date
+    label: Posting date
+    reqd: true
+    in_list_view: true
+  - fieldname: source_type
+    fieldtype: Data
+    label: Source type
+  - fieldname: source_record
+    fieldtype: Data
+    label: Source record
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Posted
+      Reversed
+    default: Draft
+    in_list_view: true
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+  - fieldname: lines
+    fieldtype: Table
+    label: Journal lines
+    options: POS Journal Line

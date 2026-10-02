@@ -37,6 +37,19 @@ type extensionCreatedResponse struct {
 	Warning     string `json:"warning"`
 }
 
+type managedChannelClientResponse struct {
+	Name        string `json:"name"`
+	AccessToken string `json:"access_token"`
+	Warning     string `json:"warning"`
+}
+
+type managedSiteIdentityResponse struct {
+	SiteID         string `json:"site_id"`
+	Status         string `json:"status"`
+	ConfigRevision uint64 `json:"config_revision"`
+	Healthy        bool   `json:"healthy"`
+}
+
 type extensionReplayedResponse struct {
 	Status string `json:"status"`
 }
@@ -116,8 +129,9 @@ type channelSessionRevokeResponse struct {
 }
 
 type channelToolsResponse struct {
-	Version string              `json:"version"`
-	Tools   []ai.ToolDescriptor `json:"tools"`
+	Version        string              `json:"version"`
+	ConfigRevision uint64              `json:"config_revision"`
+	Tools          []ai.ToolDescriptor `json:"tools"`
 }
 
 type channelToolResponse struct {

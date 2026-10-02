@@ -9,10 +9,9 @@ import (
 // bridge required by RFC §10.4.5: BuildToolCatalog remains the registry
 // projection, and every adapter renders the canonical contract shape.
 //
-// The mapping is deliberately lossless for the shared, wire-visible fields. The
-// api/ai SafetyLevel string vocabulary ("safe"/"guarded"/"admin") is carried
-// through verbatim as a contract.ToolSafetyLevel (a string type); Phase 3A will
-// reconcile the two vocabularies into the canonical enum.
+// The mapping preserves all shared, wire-visible fields. Safety levels are
+// represented as strings in both packages so adapters can keep their existing
+// vocabulary without changing the contract payload.
 func ToContractDescriptor(d ToolDescriptor) contract.ToolDescriptor {
 	fields := make([]contract.FieldHint, 0, len(d.FieldHints))
 	for _, f := range d.FieldHints {

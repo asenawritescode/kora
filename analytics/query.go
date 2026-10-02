@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	kdb "github.com/asenawritescode/kora/db"
 )
 
 // cacheEntry holds a cached query result with expiry.
@@ -18,6 +20,7 @@ type cacheEntry struct {
 type QueryEngine struct {
 	DB       *sql.DB
 	SiteName string
+	Dialect  kdb.Dialect
 	cache    sync.Map // key string → *cacheEntry
 }
 
@@ -228,7 +231,7 @@ func (qe *QueryEngine) queryAggregate(table, dateCol string, metric *Metric, fro
 		selectClause, table, dateCol, dateCol, groupClause, orderClause,
 	)
 
-	return qe.DB.Query(query, qe.SiteName, metric.DocType, metric.Name, fromStr, toStr)
+	return qe.DB.Query(kdb.Rebind(qe.Dialect, query), qe.SiteName, metric.DocType, metric.Name, fromStr, toStr)
 }
 
 // queryAvg computes average by dividing sum by count for a time range.
@@ -247,7 +250,7 @@ func (qe *QueryEngine) queryAvg(table, dateCol string, metric *Metric, from, to 
 	)
 
 	var total, days float64
-	if err := qe.DB.QueryRow(query, qe.SiteName, metric.DocType, metric.Name, fromStr, toStr).Scan(&total, &days); err != nil {
+	if err := qe.DB.QueryRow(kdb.Rebind(qe.Dialect, query), qe.SiteName, metric.DocType, metric.Name, fromStr, toStr).Scan(&total, &days); err != nil {
 		return nil, err
 	}
 

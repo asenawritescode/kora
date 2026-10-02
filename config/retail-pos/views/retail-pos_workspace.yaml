@@ -5,11 +5,18 @@ layout: two_panel
 label: Retail POS and Store Operations
 module: Retail POS and Store Operations
 components:
+  - id: register_filters
+    type: filter_bar
+    region: main
+    position: 0
+    label: Filter orders
+    data: primary.data
+    required_capabilities: [filters]
   - id: primary_queue
     type: record_table
     region: main
-    position: 0
-    source_doctype: POS Order
+    position: 1
+    source_doctype: Sale
     label: POS Order Queue
-    desktop_columns: [name, reference, status]
-    mobile_columns: [reference, status]
+    desktop_columns: [reference, status, customer, total, cashier, register, shift, till_session, modified]
+    mobile_columns: [reference, status, total, customer]

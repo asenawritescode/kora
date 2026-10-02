@@ -60,6 +60,7 @@ const (
 	PrincipalHuman   PrincipalType = "human"
 	PrincipalService PrincipalType = "service"
 	PrincipalAgent   PrincipalType = "agent"
+	PrincipalPublic  PrincipalType = "public"
 )
 
 // Projection is the consumer-approved data projection that an event payload may

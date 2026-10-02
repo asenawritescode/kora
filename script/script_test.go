@@ -1,9 +1,27 @@
 package script
 
 import (
+	"database/sql/driver"
 	"testing"
 	"time"
 )
+
+func TestScriptTimestampScanAcrossDatabaseDrivers(t *testing.T) {
+	want := time.Date(2026, time.October, 2, 7, 56, 59, 528000000, time.UTC)
+	for _, value := range []driver.Value{
+		want,
+		"2026-10-02 07:56:59.528",
+		[]byte("2026-10-02T07:56:59.528Z"),
+	} {
+		var got scriptTimestamp
+		if err := got.Scan(value); err != nil {
+			t.Fatalf("Scan(%T) error = %v", value, err)
+		}
+		if !got.Equal(want) {
+			t.Errorf("Scan(%v) = %s, want %s", value, got.Format(time.RFC3339Nano), want.Format(time.RFC3339Nano))
+		}
+	}
+}
 
 func TestEventTypes(t *testing.T) {
 	tests := []struct {
@@ -94,6 +112,15 @@ func TestNoopProvider(t *testing.T) {
 	if created != nil {
 		t.Error("NoopProvider CreateDoc should return nil")
 	}
+}
+
+func TestStoreRequiresExplicitDatabaseDialect(t *testing.T) {
+	defer func() {
+		if got := recover(); got != "script.Store requires an explicit database dialect" {
+			t.Fatalf("missing dialect panic = %v", got)
+		}
+	}()
+	(&Store{}).dialect()
 }
 
 func TestScriptRecord(t *testing.T) {

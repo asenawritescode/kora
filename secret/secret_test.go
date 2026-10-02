@@ -3,7 +3,59 @@ package secret
 import (
 	"bytes"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	kdb "github.com/asenawritescode/kora/db"
 )
+
+func TestStoreRebindsPostgresStatementsAndUsesBytea(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create SQL mock:", err)
+	}
+	defer database.Close()
+	store := NewStore(database, kdb.Resolve("postgres"))
+
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS _kora_secret .*encrypted_value BYTEA NOT NULL`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_secret WHERE site = \$1 AND key_name = \$2`).
+		WithArgs("site-a", "provider-key").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`INSERT INTO _kora_secret .*VALUES \(\$1, \$2, \$3, \$4, \$5\)`).
+		WithArgs("site-a", "provider-key", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.Set("site-a", "provider-key", "secret-value"); err != nil {
+		t.Fatalf("set PostgreSQL secret: %v", err)
+	}
+
+	encrypted, err := encrypt([]byte("secret-value"), deriveKey([]byte("site-a")))
+	if err != nil {
+		t.Fatal("encrypt fixture:", err)
+	}
+	mock.ExpectQuery(`SELECT encrypted_value FROM _kora_secret WHERE site = \$1 AND key_name = \$2`).
+		WithArgs("site-a", "provider-key").
+		WillReturnRows(sqlmock.NewRows([]string{"encrypted_value"}).AddRow(encrypted))
+	if got, err := store.Get("site-a", "provider-key"); err != nil || got != "secret-value" {
+		t.Fatalf("get PostgreSQL secret = %q, %v", got, err)
+	}
+
+	mock.ExpectQuery(`SELECT key_name FROM _kora_secret WHERE site = \$1 ORDER BY key_name`).
+		WithArgs("site-a").
+		WillReturnRows(sqlmock.NewRows([]string{"key_name"}).AddRow("provider-key"))
+	if keys, err := store.List("site-a"); err != nil || len(keys) != 1 || keys[0] != "provider-key" {
+		t.Fatalf("list PostgreSQL secrets = %v, %v", keys, err)
+	}
+
+	mock.ExpectExec(`DELETE FROM _kora_secret WHERE site = \$1 AND key_name = \$2`).
+		WithArgs("site-a", "provider-key").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.Delete("site-a", "provider-key"); err != nil {
+		t.Fatalf("delete PostgreSQL secret: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("PostgreSQL secret SQL expectations: %v", err)
+	}
+}
 
 func TestEncryptDecrypt_RoundTrip(t *testing.T) {
 	key := deriveKey([]byte("test-site-password"))

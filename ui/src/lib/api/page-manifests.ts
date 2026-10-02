@@ -35,3 +35,10 @@ export async function updatePageManifest(name: string, data: PageManifest): Prom
 export async function deletePageManifest(name: string): Promise<unknown> {
   return api.delete(`/api/v1/system/page-manifests/${encodeURIComponent(name)}`)
 }
+
+export async function executeViewAction(
+  actionId: string,
+  payload: { view: string; component: string; context: Record<string, unknown> },
+): Promise<unknown> {
+  return api.post(`/api/v1/view/action/${encodeURIComponent(actionId)}`, payload)
+}

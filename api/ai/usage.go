@@ -80,7 +80,7 @@ func RecordUsage(ctx context.Context, db *sql.DB, ev contract.UsageEvent) error 
 	}
 	tokensJSON, _ := json.Marshal(ev.Tokens)
 	attrJSON, _ := json.Marshal(ev.Attribution)
-	_, err := db.ExecContext(ctx, `
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_usage (
 	id, site, organization_id, user_id, model, provider, run_id, step_id, channel,
 	attempt, status, tokens, latency_ms, occurred_at, retry_of, attribution
@@ -120,7 +120,7 @@ func RecordAudit(ctx context.Context, db *sql.DB, ev AuditEvent) error {
 		}
 	}
 	detailsJSON, _ := json.Marshal(ev.Details)
-	_, err := db.ExecContext(ctx, `
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_audit (
 	id, site, run_id, step_id, conversation_id, kind, name, status, user_id, session_id, correlation_id, idempotency_key, details, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -149,10 +149,10 @@ func ReserveBudget(ctx context.Context, db *sql.DB, site, model string, requeste
 	}()
 
 	var used int
-	if err := tx.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, bindAIQuery(ctx, `
 SELECT COALESCE(SUM(requested_tokens), 0)
 FROM _kora_ai_budget_reservation
-WHERE site = ? AND model = ? AND status = 'reserved'`,
+WHERE site = ? AND model = ? AND status = 'reserved'`),
 		site, model).Scan(&used); err != nil {
 		return BudgetReservation{}, fmt.Errorf("reserve ai budget: %w", err)
 	}
@@ -166,9 +166,9 @@ WHERE site = ? AND model = ? AND status = 'reserved'`,
 		RequestedTokens: requestedTokens,
 		Note:            note,
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, bindAIQuery(ctx, `
 INSERT INTO _kora_ai_budget_reservation (id, site, model, requested_tokens, status, note, reserved_at)
-VALUES (?, ?, ?, ?, 'reserved', ?, ?)`,
+VALUES (?, ?, ?, ?, 'reserved', ?, ?)`),
 		res.ID, res.Site, res.Model, res.RequestedTokens, res.Note, time.Now().UTC())
 	if err != nil {
 		return BudgetReservation{}, fmt.Errorf("reserve ai budget: %w", err)
@@ -184,7 +184,7 @@ func ReleaseBudget(ctx context.Context, db *sql.DB, res BudgetReservation) error
 	if db == nil || res.ID == "" {
 		return nil
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 UPDATE _kora_ai_budget_reservation
 SET status = 'released', released_at = ?
 WHERE id = ? AND status = 'reserved'`,
@@ -203,7 +203,7 @@ func FinalizeBudget(ctx context.Context, db *sql.DB, res BudgetReservation, cons
 	if consumedTokens < 0 {
 		consumedTokens = 0
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 UPDATE _kora_ai_budget_reservation
 SET status = 'finalized', consumed_tokens = ?, released_at = ?
 WHERE id = ? AND status = 'reserved'`,

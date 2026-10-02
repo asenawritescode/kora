@@ -54,6 +54,7 @@ func ExtensibilityTablesMySQL() []string {
 			endpoint_url VARCHAR(1024) NOT NULL,
 			secret VARCHAR(64) NOT NULL,
 			access_token VARCHAR(64) NOT NULL DEFAULT '',
+			managed_idempotency_key CHAR(64) NOT NULL DEFAULT '',
 			old_secret VARCHAR(64),
 			old_secret_expires_at DATETIME(6),
 			secret_count INT NOT NULL DEFAULT 1,
@@ -73,6 +74,7 @@ func ExtensibilityTablesMySQL() []string {
 			INDEX idx_ext_active (is_active),
 			INDEX idx_ext_access_token (access_token)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`ALTER TABLE _kora_extension ADD COLUMN managed_idempotency_key CHAR(64) NOT NULL DEFAULT ''`,
 
 		`CREATE TABLE IF NOT EXISTS _kora_channel_session (
 			id VARCHAR(64) PRIMARY KEY,
@@ -135,6 +137,85 @@ func ExtensibilityTablesMySQL() []string {
 	}
 }
 
+// ExtensibilityTablesPostgres returns PostgreSQL-specific system DDL.
+func ExtensibilityTablesPostgres() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS _kora_script (
+			name VARCHAR(140) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
+			script_type VARCHAR(50) NOT NULL DEFAULT 'doc_event', doctype VARCHAR(140) NOT NULL DEFAULT '',
+			event VARCHAR(100) NOT NULL DEFAULT '', method_path VARCHAR(255) NOT NULL DEFAULT '',
+			workflow_action VARCHAR(255) NOT NULL DEFAULT '', schedule VARCHAR(100) NOT NULL DEFAULT '',
+			priority INT NOT NULL DEFAULT 10, is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			run_as VARCHAR(140) NOT NULL DEFAULT '', timeout_ms INT NOT NULL DEFAULT 5000,
+			script TEXT NOT NULL, compiled_at TIMESTAMPTZ, compile_error TEXT,
+			created_by VARCHAR(140) NOT NULL DEFAULT '', updated_by VARCHAR(140) NOT NULL DEFAULT '',
+			creation TIMESTAMPTZ NOT NULL DEFAULT NOW(), modified TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_script_site ON _kora_script (site)`,
+		`CREATE INDEX IF NOT EXISTS idx_script_doctype_event ON _kora_script (doctype, event)`,
+		`CREATE INDEX IF NOT EXISTS idx_script_type ON _kora_script (script_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_script_active ON _kora_script (is_active)`,
+		`CREATE TABLE IF NOT EXISTS _kora_script_execution (
+			id VARCHAR(26) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
+			script_name VARCHAR(140) NOT NULL, script_type VARCHAR(50) NOT NULL,
+			doctype VARCHAR(140) NOT NULL DEFAULT '', docname VARCHAR(140) NOT NULL DEFAULT '',
+			event VARCHAR(100) NOT NULL DEFAULT '', trigger_user VARCHAR(255) NOT NULL DEFAULT '',
+			duration_ms INT NOT NULL DEFAULT 0, status VARCHAR(20) NOT NULL DEFAULT 'success',
+			error_message TEXT, logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_exec_script_name ON _kora_script_execution (script_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_exec_logged_at ON _kora_script_execution (logged_at)`,
+		`CREATE TABLE IF NOT EXISTS _kora_extension (
+			name VARCHAR(140) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
+			display_name VARCHAR(255) NOT NULL DEFAULT '', description TEXT,
+			endpoint_url VARCHAR(1024) NOT NULL, secret VARCHAR(64) NOT NULL,
+			access_token VARCHAR(64) NOT NULL DEFAULT '', managed_idempotency_key CHAR(64) NOT NULL DEFAULT '', old_secret VARCHAR(64), old_secret_expires_at TIMESTAMPTZ,
+			secret_count INT NOT NULL DEFAULT 1, is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			subscriptions JSONB, api_permissions JSONB, retry_schedule JSONB,
+			timeout_sec INT NOT NULL DEFAULT 10, headers JSONB, delivery_stats JSONB,
+			consecutive_failures INT NOT NULL DEFAULT 0, installed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_delivery_at TIMESTAMPTZ, last_error TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ext_site ON _kora_extension (site)`,
+		`CREATE INDEX IF NOT EXISTS idx_ext_active ON _kora_extension (is_active)`,
+		`CREATE INDEX IF NOT EXISTS idx_ext_access_token ON _kora_extension (access_token)`,
+		`ALTER TABLE _kora_extension ADD COLUMN managed_idempotency_key CHAR(64) NOT NULL DEFAULT ''`,
+		`CREATE TABLE IF NOT EXISTS _kora_channel_session (
+			id VARCHAR(64) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
+			client_name VARCHAR(140) NOT NULL DEFAULT '', conversation_key VARCHAR(255) NOT NULL DEFAULT '',
+			provider VARCHAR(80) NOT NULL DEFAULT '', sender_address VARCHAR(255) NOT NULL DEFAULT '',
+			token_hash CHAR(64) NOT NULL UNIQUE, api_permissions JSONB,
+			trusted_until TIMESTAMPTZ NOT NULL, sensitive_until TIMESTAMPTZ, revoked_at TIMESTAMPTZ,
+			revoked_reason VARCHAR(255) NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_used_at TIMESTAMPTZ
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_channel_site ON _kora_channel_session (site)`,
+		`CREATE INDEX IF NOT EXISTS idx_channel_conversation ON _kora_channel_session (conversation_key)`,
+		`CREATE INDEX IF NOT EXISTS idx_channel_trusted_until ON _kora_channel_session (trusted_until)`,
+		`CREATE TABLE IF NOT EXISTS _kora_channel_audit (
+			id VARCHAR(64) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
+			channel_session_id VARCHAR(64) NOT NULL DEFAULT '', conversation_key VARCHAR(255) NOT NULL DEFAULT '',
+			provider VARCHAR(80) NOT NULL DEFAULT '', sender_address VARCHAR(255) NOT NULL DEFAULT '',
+			tool_name VARCHAR(255) NOT NULL DEFAULT '', operation_kind VARCHAR(50) NOT NULL DEFAULT '',
+			status VARCHAR(50) NOT NULL DEFAULT '', request_summary TEXT, response_summary TEXT,
+			error_message TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_channel_audit_site ON _kora_channel_audit (site, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_channel_audit_session ON _kora_channel_audit (channel_session_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS _kora_webhook_delivery (
+			id VARCHAR(26) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
+			extension_name VARCHAR(140) NOT NULL, event_id VARCHAR(255) NOT NULL,
+			event_type VARCHAR(255) NOT NULL, endpoint_url VARCHAR(1024) NOT NULL,
+			status VARCHAR(50) NOT NULL DEFAULT 'pending', attempt INT NOT NULL DEFAULT 1,
+			response_status INT, response_body TEXT, error_message TEXT, duration_ms INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), next_retry_at TIMESTAMPTZ
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_deliv_extension ON _kora_webhook_delivery (extension_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_deliv_status ON _kora_webhook_delivery (status)`,
+		`CREATE INDEX IF NOT EXISTS idx_deliv_created ON _kora_webhook_delivery (created_at)`,
+	}
+}
+
 // ExtensibilityTablesLibSQL returns LibSQL-compatible extensibility DDL.
 func ExtensibilityTablesLibSQL() []string {
 	return []string{
@@ -191,6 +272,7 @@ func ExtensibilityTablesLibSQL() []string {
 			endpoint_url TEXT NOT NULL,
 			secret TEXT NOT NULL,
 			access_token TEXT NOT NULL DEFAULT '',
+			managed_idempotency_key TEXT NOT NULL DEFAULT '',
 			old_secret TEXT,
 			old_secret_expires_at TEXT,
 			secret_count INTEGER NOT NULL DEFAULT 1,
@@ -211,6 +293,7 @@ func ExtensibilityTablesLibSQL() []string {
 		`CREATE INDEX IF NOT EXISTS idx_ext_site ON _kora_extension (site)`,
 		`CREATE INDEX IF NOT EXISTS idx_ext_active ON _kora_extension (is_active)`,
 		`CREATE INDEX IF NOT EXISTS idx_ext_access_token ON _kora_extension (access_token)`,
+		`ALTER TABLE _kora_extension ADD COLUMN managed_idempotency_key TEXT NOT NULL DEFAULT ''`,
 
 		`CREATE TABLE IF NOT EXISTS _kora_channel_session (
 			id TEXT PRIMARY KEY,

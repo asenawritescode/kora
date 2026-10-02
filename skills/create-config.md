@@ -271,7 +271,7 @@ notifications:                           # Optional — email on state change
 
 ## Complete Example: Todo App
 
-### `config/todo/doctypes/todo.yaml`
+### `config/v0/todo/doctypes/todo.yaml`
 
 ```yaml
 name: Todo
@@ -322,7 +322,7 @@ fields:
     in_list_view: true
 ```
 
-### `config/todo/roles.yaml`
+### `config/v0/todo/roles.yaml`
 
 ```yaml
 - name: Todo User
@@ -334,7 +334,7 @@ fields:
   description: Full system access.
 ```
 
-### `config/todo/permissions.yaml`
+### `config/v0/todo/permissions.yaml`
 
 ```yaml
 - doctype: Todo

@@ -1,0 +1,123 @@
+name: Retail POS Register
+route: /pos
+type: register
+layout: two_panel
+label: Register
+module: Retail POS and Store Operations
+source_doctype: Product
+components:
+  - id: categories
+    type: category_tabs
+    region: main
+    position: 0
+    label: Product categories
+    source_doctype: Product
+    bindings:
+      group_field: category
+  - id: products
+    type: product_grid
+    region: main
+    position: 1
+    source_doctype: Product
+    label: Products
+    bindings:
+      title: product_name
+      subtitle: category
+      price: selling_price
+      badge: stock_qty
+    actions:
+      - id: tap
+        trigger: on_click
+        type: local_cart_add
+  - id: cart
+    type: cart_panel
+    region: side
+    position: 0
+    label: Current basket
+  - id: payments
+    type: payment_panel
+    region: side
+    position: 1
+    label: Take payment
+    bindings:
+      methods: "literal:cash, card, mpesa"
+      register: "literal:REG-001"
+    actions:
+      - id: open_shift
+        trigger: on_click
+        type: create_record
+        config:
+          target_doctype: Shift
+      - id: open_till_session
+        trigger: on_click
+        type: create_record
+        config:
+          target_doctype: Till Session
+      - id: initiate_payment
+        trigger: on_click
+        type: initiate_external_operation
+        config:
+          operation_type: Payment
+          purpose: POS sale payment
+          source_doctype: Sale
+          provider: M-Pesa
+      - id: validate_payment
+        trigger: on_click
+        type: validate_external_operation
+      - id: complete_mobile
+        trigger: on_click
+        type: create_transaction
+        config:
+          target_doctype: Sale
+          reference_field: reference
+          reference_prefix: POS
+          child_table: Sale Item
+          line_source: cart
+          line_fields:
+            product: product
+            unit_price: rate
+            quantity: quantity
+            discount_amount: discount_amount
+            tax_amount: tax_amount
+          line_defaults:
+            quantity: 1
+          requires_operation_status: Succeeded
+          totals:
+            subtotal_field: subtotal
+            discount_total_field: discount_amount
+            tax_total_field: tax_amount
+            total_field: total
+            lines:
+              quantity_field: quantity
+              unit_price_field: unit_price
+              discount_field: discount_amount
+              tax_field: tax_amount
+              line_total_field: line_total
+      - id: complete
+        trigger: on_click
+        type: create_transaction
+        config:
+          target_doctype: Sale
+          reference_field: reference
+          reference_prefix: POS
+          child_table: Sale Item
+          line_source: cart
+          line_fields:
+            product: product
+            unit_price: rate
+            quantity: quantity
+            discount_amount: discount_amount
+            tax_amount: tax_amount
+          line_defaults:
+            quantity: 1
+          totals:
+            subtotal_field: subtotal
+            discount_total_field: discount_amount
+            tax_total_field: tax_amount
+            total_field: total
+            lines:
+              quantity_field: quantity
+              unit_price_field: unit_price
+              discount_field: discount_amount
+              tax_field: tax_amount
+              line_total_field: line_total

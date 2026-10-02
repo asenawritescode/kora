@@ -31,6 +31,9 @@ type AsyncHookRequest struct {
 	User     string
 	UserRole string
 	Site     string
+	// SkipHookScripts prevents an async after-hook from recursively invoking
+	// itself when its provider performs a nested document mutation.
+	SkipHookScripts []string
 }
 
 // AsyncHookSink hands deferred after_* hooks to the background worker system.
@@ -38,25 +41,36 @@ type AsyncHookSink interface {
 	Enqueue(context.Context, AsyncHookRequest) error
 }
 
-// setupComputedHook sets the computed script hook before ComputeFields runs.
-func (tx *TxManager) setupComputedHook() {
+// computedScriptHook returns an operation-scoped evaluator for script-backed
+// computed fields. It never mutates package-global state.
+func (tx *TxManager) computedScriptHook() doctype.ComputedScriptHook {
 	if tx.ScriptRunner == nil || tx.ScriptStore == nil {
-		doctype.SetComputedScriptHook(nil)
-		return
+		return nil
 	}
-	doctype.SetComputedScriptHook(func(doctypeName, scriptName string, doc *doctype.Document) (any, error) {
-		scripts, err := tx.ScriptStore.LoadActiveScripts(tx.SiteName, doctypeName, script.EventComputed)
+	return func(doctypeName, scriptName string, doc *doctype.Document) (any, error) {
+		scripts, err := tx.activeHookScripts(doctypeName)
 		if err != nil {
 			return nil, err
 		}
 		for _, rec := range scripts {
+			if rec.Event != script.EventComputed {
+				continue
+			}
+			if containsHookScript(tx.SkipHookScripts, rec.Name) {
+				continue
+			}
 			if rec.Name == scriptName || rec.WorkflowAction == scriptName {
+				provider := scopedHookProvider(tx, tx.ScriptProvider, doctypeName, script.EventComputed, rec.Name)
+				userRoles := append([]string(nil), tx.CurrentUserRoles...)
+				if len(userRoles) == 0 && tx.CurrentUserRole != "" {
+					userRoles = []string{tx.CurrentUserRole}
+				}
 				req := script.ExecuteRequest{
 					Script: rec.Script, ScriptType: rec.ScriptType, ScriptName: rec.Name,
 					DocType: doctypeName, Event: script.EventComputed,
 					Document: doc.ToMap(), User: tx.CurrentUser,
-					UserRoles: []string{tx.CurrentUserRole}, Site: tx.SiteName,
-					Provider: tx.ScriptProvider,
+					UserRoles: userRoles, Site: tx.SiteName,
+					Provider: provider,
 				}
 				cctx := tx.Context
 				if cctx == nil {
@@ -74,7 +88,7 @@ func (tx *TxManager) setupComputedHook() {
 			}
 		}
 		return nil, fmt.Errorf("computed script %q not found", scriptName)
-	})
+	}
 }
 
 // RunHooksForValidate executes validate hooks from the API layer.
@@ -88,22 +102,34 @@ func (tx *TxManager) RunHooksForValidate(dt *doctype.DocType, doc *doctype.Docum
 // For after_* hooks, errors are logged but not returned (best-effort).
 func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doctype.Document, oldDoc *doctype.Document) error {
 	if tx.ScriptRunner == nil || tx.ScriptStore == nil {
-		slog.Warn("runHooks: runner or store nil", "runner", tx.ScriptRunner != nil, "store", tx.ScriptStore != nil, "site", tx.SiteName, "doctype", dt.Name, "event", event)
+		if tx.ScriptRunner != nil || tx.ScriptStore != nil {
+			slog.Warn("runHooks: runner or store nil", "runner", tx.ScriptRunner != nil, "store", tx.ScriptStore != nil, "site", tx.SiteName, "doctype", dt.Name, "event", event)
+		}
 		return nil
 	}
 
-	scripts, err := tx.ScriptStore.LoadActiveScripts(tx.SiteName, dt.Name, event)
+	scripts, err := tx.activeHookScripts(dt.Name)
 	if err != nil {
 		return fmt.Errorf("loading scripts: %w", err)
 	}
+	matching := make([]script.ScriptRecord, 0, len(scripts))
+	for _, record := range scripts {
+		if record.Event == event {
+			matching = append(matching, record)
+		}
+	}
+	scripts = matching
 	if len(scripts) == 0 {
-		slog.Info("runHooks: no scripts matched", "site", tx.SiteName, "doctype", dt.Name, "event", event)
+		slog.Debug("runHooks: no scripts matched", "site", tx.SiteName, "doctype", dt.Name, "event", event)
 		return nil
 	}
-	slog.Info("runHooks: executing scripts", "site", tx.SiteName, "doctype", dt.Name, "event", event, "count", len(scripts))
+	slog.Debug("runHooks: executing scripts", "site", tx.SiteName, "doctype", dt.Name, "event", event, "count", len(scripts))
 
-	userRoles := []string{tx.CurrentUserRole}
-	if tx.CurrentUserRole == "" {
+	userRoles := append([]string(nil), tx.CurrentUserRoles...)
+	if len(userRoles) == 0 && tx.CurrentUserRole != "" {
+		userRoles = []string{tx.CurrentUserRole}
+	}
+	if len(userRoles) == 0 {
 		userRoles = []string{doctype.AdminRole}
 	}
 
@@ -118,6 +144,9 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 	}
 
 	for _, rec := range scripts {
+		if containsHookScript(tx.SkipHookScripts, rec.Name) {
+			continue
+		}
 		// Route after_* events to the async sink if available.
 		if script.IsAfterEvent(event) && tx.AsyncHookSink != nil {
 			var docMap, oldDocMap map[string]any
@@ -128,6 +157,7 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 			if err := tx.AsyncHookSink.Enqueue(ctx, AsyncHookRequest{
 				Doctype: dt.Name, Event: event, Doc: docMap, OldDoc: oldDocMap, Rec: rec,
 				User: tx.CurrentUser, UserRole: tx.CurrentUserRole, Site: tx.SiteName,
+				SkipHookScripts: append(append([]string(nil), tx.SkipHookScripts...), rec.Name),
 			}); err != nil {
 				hookEnqueueFailed.Add(1)
 				slog.Warn("async hook enqueue failed", "script", rec.Name, "event", event, "failed_total", hookEnqueueFailed.Load(), "error", err)
@@ -146,7 +176,7 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 			User:        tx.CurrentUser,
 			UserRoles:   userRoles,
 			Site:        tx.SiteName,
-			Provider:    tx.ScriptProvider,
+			Provider:    scopedHookProvider(tx, tx.ScriptProvider, dt.Name, event, rec.Name),
 		}
 
 		// Execute with panic recovery.
@@ -196,6 +226,41 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 		}
 	}
 	return nil
+}
+
+func (tx *TxManager) activeHookScripts(doctypeName string) ([]script.ScriptRecord, error) {
+	if tx.HookScriptsByDoctype == nil {
+		tx.HookScriptsByDoctype = make(map[string][]script.ScriptRecord)
+	}
+	if scripts, loaded := tx.HookScriptsByDoctype[doctypeName]; loaded {
+		return scripts, nil
+	}
+	scripts, err := tx.ScriptStore.LoadActiveScripts(tx.SiteName, doctypeName, "")
+	if err != nil {
+		return nil, fmt.Errorf("loading scripts: %w", err)
+	}
+	tx.HookScriptsByDoctype[doctypeName] = scripts
+	return scripts, nil
+}
+
+func scopedHookProvider(tx *TxManager, provider script.KoraProvider, doctypeName string, event script.Event, scriptName string) script.KoraProvider {
+	scoped, ok := provider.(script.LifecycleScopedProvider)
+	if ok {
+		provider = scoped.WithLifecycleHook(doctypeName, event, scriptName)
+	}
+	if txScoped, ok := provider.(script.MutationScopedProvider); ok && tx.ScriptMutationExecutor != nil {
+		provider = txScoped.WithMutationExecutor(tx.ScriptMutationExecutor)
+	}
+	return provider
+}
+
+func containsHookScript(active []string, scriptName string) bool {
+	for _, activeName := range active {
+		if activeName == scriptName {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeHookDocumentFields(dt *doctype.DocType, registry *doctype.Registry, fields map[string]any) map[string]any {

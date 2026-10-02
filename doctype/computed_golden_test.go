@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -26,7 +27,7 @@ func TestGoldenComputedVectors(t *testing.T) {
 	for i, v := range vectors {
 		t.Run(fmt.Sprintf("vec_%d", i), func(t *testing.T) {
 			dt := &DocType{
-				Name:   "TestType",
+				Name: "TestType",
 				Fields: []Field{
 					{Fieldname: "result", Fieldtype: "Float", Computed: v.Expr},
 				},
@@ -83,6 +84,34 @@ func TestExportGoldenVectors(t *testing.T) {
 	}
 
 	t.Logf("validated %d golden vectors", len(vectors))
+}
+
+func TestComputeFieldsWithHookKeepsConcurrentScriptContextsIsolated(t *testing.T) {
+	dt := &DocType{Name: "Task", Fields: []Field{{Fieldname: "tenant_value", Fieldtype: "Data", Computed: "@script:tenant-value"}}}
+	results := []string{"site-a-value", "site-b-value"}
+	var wg sync.WaitGroup
+	for _, want := range results {
+		want := want
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			doc := NewDocument("Task")
+			err := ComputeFieldsWithHook(dt, doc, func(doctypeName, scriptName string, got *Document) (any, error) {
+				if doctypeName != "Task" || scriptName != "tenant-value" || got != doc {
+					t.Errorf("computed hook args = %q, %q, %p; want Task, tenant-value, %p", doctypeName, scriptName, got, doc)
+				}
+				return want, nil
+			})
+			if err != nil {
+				t.Errorf("compute scripted field: %v", err)
+				return
+			}
+			if got := doc.Get("tenant_value"); got != want {
+				t.Errorf("computed value = %#v, want %q", got, want)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // loadGoldenVectors reads and decodes the golden JSON file.

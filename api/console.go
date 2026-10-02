@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -29,11 +30,18 @@ var (
 
 // ConsoleHandler holds dependencies for console API endpoints.
 type ConsoleHandler struct {
-	SystemGuard        *auth.SystemGuard
-	SiteRouter         *net.SiteRouter
-	ProvisioningStore  *site.OnboardingStore
-	AllowOnboarding    bool
-	SiteStorages       map[string]storage.Backend
+	SystemGuard       *auth.SystemGuard
+	SiteRouter        *net.SiteRouter
+	ProvisioningStore *site.OnboardingStore
+	AllowOnboarding   bool
+	SiteStorages      map[string]storage.Backend
+	RuntimeServices   *SiteRuntimeServices
+	// PrepareRuntime installs the same sidecars used for directory hot-add before
+	// a newly-created site becomes routable.
+	PrepareRuntime func(site.DBSiteInfo, *net.LoadedSite) error
+	// DiscardRuntime releases any sidecars installed by PrepareRuntime when the
+	// router rejects the new site.
+	DiscardRuntime     func(*net.LoadedSite)
 	ResolveStorage     func(*site.SiteConfig) (storage.Backend, error)
 	queuedJobsMu       sync.Mutex
 	queuedJobs         map[string]bool
@@ -215,26 +223,29 @@ func (h *ConsoleHandler) HandleListSites(c *gin.Context) {
 		if dbSites, err := site.DiscoverSitesFromDB(h.PlatformDB); err == nil {
 			for _, info := range dbSites {
 				sites = append(sites, &net.LoadedSite{
-					Name:   info.Name,
+					SiteID: info.SiteID, ConfigRevision: info.ConfigRevision, Status: info.Status, DBType: info.DBType,
+					Name: info.Name,
 					Config: net.SiteRouterConfig{
 						Hostname:      info.Name,
 						Domains:       info.Domains,
 						FileStorage:   info.FileStorage,
 						StorageBucket: info.StorageBucket,
 					},
-					DB:     h.PlatformDB,
+					DB: h.PlatformDB,
 				})
 			}
 		}
 	}
 
 	type SiteEntry struct {
-		Name          string   `json:"name"`
-		Domains       []string `json:"domains"`
-		FileStorage   string   `json:"file_storage"`
-		StorageBucket string   `json:"storage_bucket,omitempty"`
-		DocTypes      int      `json:"doctypes"`
-		Status        string   `json:"status"`
+		SiteID         string   `json:"site_id"`
+		ConfigRevision uint64   `json:"config_revision"`
+		Name           string   `json:"name"`
+		Domains        []string `json:"domains"`
+		FileStorage    string   `json:"file_storage"`
+		StorageBucket  string   `json:"storage_bucket,omitempty"`
+		DocTypes       int      `json:"doctypes"`
+		Status         string   `json:"status"`
 	}
 	var result []SiteEntry
 	for _, s := range sites {
@@ -247,12 +258,14 @@ func (h *ConsoleHandler) HandleListSites(c *gin.Context) {
 			status = "unknown"
 		}
 		result = append(result, SiteEntry{
-			Name:          s.Name,
-			Domains:       s.Config.Domains,
-			FileStorage:   s.Config.FileStorage,
-			StorageBucket: s.Config.StorageBucket,
-			DocTypes:      len(s.Registry.All()),
-			Status:        status,
+			SiteID:         s.SiteID,
+			ConfigRevision: s.ConfigRevision,
+			Name:           s.Name,
+			Domains:        s.Config.Domains,
+			FileStorage:    s.Config.FileStorage,
+			StorageBucket:  s.Config.StorageBucket,
+			DocTypes:       len(s.Registry.All()),
+			Status:         status,
 		})
 	}
 	if result == nil {
@@ -285,6 +298,10 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 	}
 	if req.Hostname == "" || req.AdminEmail == "" || req.AdminPassword == "" {
 		writeError(c, http.StatusBadRequest, "validation.required_field", "hostname, admin_email, and admin_password are required", map[string]any{"fields": []string{"hostname", "admin_email", "admin_password"}})
+		return
+	}
+	if h.SiteRouter != nil && h.SiteRouter.SiteByName(req.Hostname) != nil {
+		writeError(c, http.StatusConflict, "site.already_exists", "A site with this hostname is already active", nil)
 		return
 	}
 
@@ -370,7 +387,9 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 	domains := []string{req.Hostname}
 	domains = append(domains, extraDomains...)
 	loaded := &net.LoadedSite{
-		Name: req.Hostname,
+		SiteID: result.SiteID,
+		DBType: result.Config.DBType,
+		Name:   req.Hostname,
 		Config: net.SiteRouterConfig{
 			Hostname:      req.Hostname,
 			Domains:       domains,
@@ -380,18 +399,36 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 		DB:       result.DB,
 		Registry: result.Registry,
 	}
-	if h.ResolveStorage != nil {
+	if err := h.prepareCreatedRuntime(loaded, result.SiteID, result.Config); err != nil {
+		_ = loaded.DB.Close()
+		writeError(c, http.StatusInternalServerError, "site.registry_read_failed", "Site was created but could not be loaded into the site directory", nil)
+		return
+	}
+	if h.ResolveStorage != nil && h.PrepareRuntime == nil {
 		st, err := h.ResolveStorage(result.Config)
 		if err != nil {
 			slog.Error("provisioning storage failed", "hostname", req.Hostname, "error", err)
 			writeError(c, http.StatusInternalServerError, "storage.provision_failed", "Site created, but storage provisioning failed", nil)
 			return
 		}
-		if h.SiteStorages != nil {
+		if h.RuntimeServices != nil {
+			h.RuntimeServices.SetStorage(req.Hostname, st)
+		}
+		if h.SiteStorages != nil && h.RuntimeServices == nil {
 			h.SiteStorages[req.Hostname] = st
 		}
 	}
-	h.SiteRouter.AddSite(loaded)
+	if err := h.SiteRouter.AddSite(loaded); err != nil {
+		if h.DiscardRuntime != nil {
+			h.DiscardRuntime(loaded)
+		}
+		if loaded.DB != nil {
+			_ = loaded.DB.Close()
+		}
+		slog.Error("site runtime registration failed", "hostname", req.Hostname, "error", err)
+		writeError(c, http.StatusConflict, "site.alias_conflict", "Site was created but could not be safely routed because an alias or site ID is already assigned", nil)
+		return
+	}
 
 	slog.Info("site created via console", "hostname", req.Hostname, "db_name", result.Config.DBName)
 	c.JSON(http.StatusCreated, Response{Data: consoleSiteCreateResponse{
@@ -437,11 +474,21 @@ func (h *ConsoleHandler) HandleOnboard(c *gin.Context) {
 	onboardLimiterMu.Unlock()
 
 	// Check if hostname is already taken.
-	var existing int
+	var existing bool
 	if h.PlatformDB != nil {
-		h.PlatformDB.QueryRow("SELECT COUNT(*) FROM _kora_config_version WHERE site = ?", req.Hostname).Scan(&existing)
+		registry := site.NewSQLSiteRegistry(h.PlatformDB, h.PlatformDBType)
+		_, err := registry.ResolveAlias(req.Hostname)
+		switch {
+		case err == nil:
+			existing = true
+		case errors.Is(err, sql.ErrNoRows):
+			// No canonical site currently owns this hostname; provisioning may proceed.
+		case err != nil:
+			internalError(c, "checking site availability", err)
+			return
+		}
 	}
-	if existing > 0 {
+	if existing {
 		writeError(c, http.StatusConflict, "site.already_exists", "This site name is already taken. Try another.", nil)
 		return
 	}
@@ -652,7 +699,9 @@ func (h *ConsoleHandler) processOnboardJob(job site.OnboardingJob, req onboardRe
 
 	domains := []string{req.Hostname}
 	loaded := &net.LoadedSite{
-		Name: req.Hostname,
+		SiteID: result.SiteID,
+		DBType: result.Config.DBType,
+		Name:   req.Hostname,
 		Config: net.SiteRouterConfig{
 			Hostname:      req.Hostname,
 			Domains:       domains,
@@ -662,7 +711,17 @@ func (h *ConsoleHandler) processOnboardJob(job site.OnboardingJob, req onboardRe
 		DB:       result.DB,
 		Registry: result.Registry,
 	}
-	if h.ResolveStorage != nil {
+	if err := h.prepareCreatedRuntime(loaded, result.SiteID, result.Config); err != nil {
+		_ = loaded.DB.Close()
+		job.State = site.OnboardingFailed
+		job.LastError = "site directory lookup failed after provisioning"
+		job.UpdatedAt = time.Now().UTC()
+		if h.ProvisioningStore != nil {
+			_ = h.ProvisioningStore.UpsertJob(job)
+		}
+		return
+	}
+	if h.ResolveStorage != nil && h.PrepareRuntime == nil {
 		st, err := h.ResolveStorage(result.Config)
 		if err != nil {
 			slog.Error("provisioning storage failed", "hostname", req.Hostname, "error", err)
@@ -674,11 +733,28 @@ func (h *ConsoleHandler) processOnboardJob(job site.OnboardingJob, req onboardRe
 			}
 			return
 		}
-		if h.SiteStorages != nil {
+		if h.RuntimeServices != nil {
+			h.RuntimeServices.SetStorage(req.Hostname, st)
+		}
+		if h.SiteStorages != nil && h.RuntimeServices == nil {
 			h.SiteStorages[req.Hostname] = st
 		}
 	}
-	h.SiteRouter.AddSite(loaded)
+	if err := h.SiteRouter.AddSite(loaded); err != nil {
+		if h.DiscardRuntime != nil {
+			h.DiscardRuntime(loaded)
+		}
+		if loaded.DB != nil {
+			_ = loaded.DB.Close()
+		}
+		job.State = site.OnboardingFailed
+		job.LastError = err.Error()
+		job.UpdatedAt = time.Now().UTC()
+		if h.ProvisioningStore != nil {
+			_ = h.ProvisioningStore.UpsertJob(job)
+		}
+		return
+	}
 
 	job.State = site.OnboardingActive
 	job.UpdatedAt = time.Now().UTC()
@@ -687,6 +763,38 @@ func (h *ConsoleHandler) processOnboardJob(job site.OnboardingJob, req onboardRe
 		_ = h.ProvisioningStore.UpsertCheckpoint(site.OnboardingCheckpoint{JobID: job.ID, Stage: "active", Completed: true, RecordedAt: time.Now().UTC()})
 	}
 	slog.Info("site created via self-service onboarding", "hostname", req.Hostname)
+}
+
+func (h *ConsoleHandler) prepareCreatedRuntime(loaded *net.LoadedSite, siteID string, cfg *site.SiteConfig) error {
+	info, err := h.createdSiteInfo(siteID, cfg)
+	if err != nil {
+		return err
+	}
+	loaded.ConfigRevision = info.ConfigRevision
+	loaded.Status = info.Status
+	if h.PrepareRuntime != nil {
+		if err := h.PrepareRuntime(info, loaded); err != nil {
+			if h.DiscardRuntime != nil {
+				h.DiscardRuntime(loaded)
+			}
+			return fmt.Errorf("prepare created runtime: %w", err)
+		}
+	}
+	return nil
+}
+
+func (h *ConsoleHandler) createdSiteInfo(siteID string, cfg *site.SiteConfig) (site.DBSiteInfo, error) {
+	if h.PlatformDB != nil {
+		return site.NewSQLSiteRegistry(h.PlatformDB, h.PlatformDBType).GetByID(siteID)
+	}
+	if cfg == nil {
+		return site.DBSiteInfo{}, errors.New("created site configuration is missing")
+	}
+	return site.DBSiteInfo{
+		SiteID: siteID, Name: cfg.Hostname, Domains: cfg.Domains(), Status: "active", ConfigRevision: 1,
+		DBType: cfg.DBType, DBHost: cfg.DBHost, DBPort: cfg.DBPort, DBName: cfg.DBName,
+		DBUser: cfg.DBUser, DBPassword: cfg.DBPassword, FileStorage: cfg.FileStorage, StorageBucket: cfg.StorageBucket,
+	}, nil
 }
 
 // HandleUpdateSite updates site metadata and file storage settings.
@@ -711,6 +819,10 @@ func (h *ConsoleHandler) HandleUpdateSite(c *gin.Context) {
 	loadedSite := h.SiteRouter.SiteByName(siteName)
 	if loadedSite == nil {
 		writeError(c, http.StatusNotFound, "site.not_found", "Site not found", map[string]any{"name": siteName})
+		return
+	}
+	if h.PlatformDB == nil {
+		writeError(c, http.StatusServiceUnavailable, "site.directory_unavailable", "Site directory is unavailable; changes were not saved", nil)
 		return
 	}
 
@@ -750,17 +862,14 @@ func (h *ConsoleHandler) HandleUpdateSite(c *gin.Context) {
 		}
 	}
 
-	// Persist to DB if platform DB is available.
-	if h.PlatformDB != nil {
-		if err := site.UpdatePlatformSiteRegistration(h.PlatformDB, h.PlatformDBType, siteName, newCfg.Domains, newCfg.FileStorage, newCfg.StorageBucket); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				writeError(c, http.StatusNotFound, "site.not_found", "Site not found", map[string]any{"name": siteName})
-				return
-			}
-			slog.Error("updating site registry failed", "hostname", siteName, "error", err)
-			writeError(c, http.StatusInternalServerError, "site.update_failed", "Failed to update site", map[string]any{"error": err.Error()})
+	if err := site.UpdatePlatformSiteRegistration(h.PlatformDB, h.PlatformDBType, siteName, newCfg.Domains, newCfg.FileStorage, newCfg.StorageBucket); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(c, http.StatusNotFound, "site.not_found", "Site not found", map[string]any{"name": siteName})
 			return
 		}
+		slog.Error("updating site registry failed", "hostname", siteName, "error", err)
+		writeError(c, http.StatusInternalServerError, "site.update_failed", "Failed to update site", map[string]any{"error": err.Error()})
+		return
 	}
 
 	updated := h.SiteRouter.UpdateSiteConfig(siteName, net.SiteRouterConfig{
@@ -773,8 +882,13 @@ func (h *ConsoleHandler) HandleUpdateSite(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "site.not_found", "Site not found", map[string]any{"name": siteName})
 		return
 	}
-	if resolvedStorage != nil && h.SiteStorages != nil {
-		h.SiteStorages[siteName] = resolvedStorage
+	if resolvedStorage != nil {
+		if h.RuntimeServices != nil {
+			h.RuntimeServices.SetStorage(siteName, resolvedStorage)
+		}
+		if h.SiteStorages != nil && h.RuntimeServices == nil {
+			h.SiteStorages[siteName] = resolvedStorage
+		}
 	}
 
 	slog.Info("site updated via console", "hostname", siteName, "domains", newCfg.Domains, "file_storage", newCfg.FileStorage, "storage_bucket", newCfg.StorageBucket)
@@ -813,32 +927,110 @@ func (h *ConsoleHandler) HandleDeleteSite(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "site.not_found", "Site not found", map[string]any{"name": siteName})
 		return
 	}
+	if h.PlatformDB == nil {
+		writeError(c, http.StatusServiceUnavailable, "site.directory_unavailable", "Site directory is unavailable; deletion was not started", nil)
+		return
+	}
+	siteID := loaded.SiteID
+	if siteID == "" {
+		info, err := site.NewSQLSiteRegistry(h.PlatformDB, h.PlatformDBType).ResolveAlias(siteName)
+		if err != nil {
+			slog.Error("resolving site identity before deletion failed", "hostname", siteName, "error", err)
+			writeError(c, http.StatusServiceUnavailable, "site.directory_unavailable", "Site directory is unavailable; deletion was not started", nil)
+			return
+		}
+		siteID = info.SiteID
+	}
+	if siteID == "" {
+		writeError(c, http.StatusConflict, "site.identity_missing", "Site has no canonical identity; deletion was not started", nil)
+		return
+	}
 
-	// Derive DB name from hostname.
-	dbName := strings.ReplaceAll(siteName, ".", "_")
+	// Persist the deleting state and outbox event before dropping tenant data.
+	// If the directory is unavailable, no destructive tenant action is allowed.
+	registry := site.NewSQLSiteRegistry(h.PlatformDB, h.PlatformDBType)
+	deleteInfo, err := registry.GetByID(siteID)
+	if err != nil {
+		slog.Error("reading site database coordinates before deletion failed", "hostname", siteName, "site_id", siteID, "error", err)
+		writeError(c, http.StatusServiceUnavailable, "site.directory_unavailable", "Site directory is unavailable; deletion was not started", nil)
+		return
+	}
+	descriptor, err := registry.SetStatusAndGetDescriptor(siteID, "deleting")
+	if err != nil {
+		slog.Error("marking site deleting failed", "hostname", siteName, "site_id", siteID, "error", err)
+		writeError(c, http.StatusServiceUnavailable, "site.directory_unavailable", "Site directory is unavailable; deletion was not started", nil)
+		return
+	}
+	if err := h.SiteRouter.ApplySiteDescriptor(descriptor); err != nil {
+		slog.Error("applying deleting state to local site router failed", "hostname", siteName, "site_id", siteID, "error", err)
+		writeError(c, http.StatusServiceUnavailable, "site.delete_pending", "Site is marked for deletion but local routing could not be updated; retry reconciliation", nil)
+		return
+	}
+	if h.DiscardRuntime != nil {
+		// Stop sidecars after the durable deleting intent and local traffic fence
+		// are in place. If data cleanup fails, the retained deleting record can
+		// be retried without background workers continuing to use the tenant.
+		h.DiscardRuntime(loaded)
+	}
+
+	// Use the authoritative per-site database coordinates, not a database name
+	// guessed from the ingress hostname. Older rows may lack db_name, so retain
+	// the historical derivation only as a fallback.
+	dbName := deleteInfo.DBName
+	if dbName == "" {
+		dbName = strings.ReplaceAll(deleteInfo.Name, ".", "_")
+	}
+	dbType := strings.TrimSpace(deleteInfo.DBType)
+	if dbType == "" {
+		dbType = h.PlatformDBType
+	}
+	dbHost := deleteInfo.DBHost
+	if dbHost == "" {
+		dbHost = h.PlatformDBHost
+	}
+	dbPort := deleteInfo.DBPort
+	if dbPort == 0 {
+		dbPort = h.PlatformDBPort
+	}
+	dbUser := deleteInfo.DBUser
+	if dbUser == "" {
+		dbUser = h.PlatformDBUser
+	}
+	dbPassword := deleteInfo.DBPassword
+	if dbPassword == "" {
+		dbPassword = h.PlatformDBPassword
+	}
+	dbConfig := &site.SiteConfig{DBType: dbType, DBHost: dbHost, DBPort: dbPort, DBName: dbName, DBUser: dbUser, DBPassword: dbPassword}
 
 	slog.Info("deleting site via console", "hostname", siteName)
 
 	if err := site.DeleteSite(site.DeleteSiteInput{
 		DB:             loaded.DB,
-		Dialect:        sqlDialect.Resolve(h.PlatformDBType),
-		Hostname:       siteName,
+		Dialect:        sqlDialect.Resolve(dbType),
+		Hostname:       deleteInfo.Name,
+		SiteID:         siteID,
 		PlatformDB:     h.PlatformDB,
 		PlatformDBType: h.PlatformDBType,
-		DBType:         h.PlatformDBType,
+		DBType:         dbType,
 		DBName:         dbName,
-		DBHost:         h.PlatformDBHost,
-		DBPort:         h.PlatformDBPort,
-		DBUser:         h.PlatformDBUser,
-		DBPassword:     h.PlatformDBPassword,
+		DBHost:         dbHost,
+		DBPort:         dbPort,
+		DBUser:         dbUser,
+		DBPassword:     dbPassword,
+		DBDSN:          dbConfig.DSN(),
 	}); err != nil {
 		slog.Error("deleting site failed", "hostname", siteName, "error", err)
-		writeError(c, http.StatusInternalServerError, "site.delete_failed", "Failed to delete site", map[string]any{"error": err.Error()})
+		writeError(c, http.StatusInternalServerError, "site.delete_pending", "Site is unavailable while deletion cleanup is pending; retry after database recovery", nil)
 		return
 	}
 
-	// Remove from the in-memory router.
-	h.SiteRouter.RemoveSite(siteName)
+	// Retire the local runtime only after tenant cleanup and directory removal
+	// both succeeded. A failed cleanup leaves the site in deleting state so an
+	// administrator can retry without reopening traffic.
+	removed := h.SiteRouter.RemoveSiteByID(siteID)
+	if removed == nil {
+		removed = h.SiteRouter.RemoveSite(siteName)
+	}
 
 	slog.Info("site deleted via console", "hostname", siteName)
 	c.JSON(http.StatusOK, Response{Data: consoleSiteDeleteResponse{
@@ -883,9 +1075,17 @@ func (h *ConsoleHandler) HandleResetSitePassword(c *gin.Context) {
 		return
 	}
 
-	// Update the user's password in the site's database.
-	result, err := loaded.DB.Exec(
-		"UPDATE _kora_user SET password_hash = ?, modified = CURRENT_TIMESTAMP WHERE email = ?",
+	// Update the password and revoke all active sessions atomically, using the
+	// tenant database's dialect rather than the platform/default dialect.
+	dialect := sqlDialect.Resolve(loaded.DBType)
+	tx, err := loaded.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		internalError(c, "resetting site password", err)
+		return
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(sqlDialect.Rebind(dialect,
+		"UPDATE _kora_user SET password_hash = ?, modified = CURRENT_TIMESTAMP WHERE email = ?"),
 		passwordHash, req.Email,
 	)
 	if err != nil {
@@ -894,14 +1094,25 @@ func (h *ConsoleHandler) HandleResetSitePassword(c *gin.Context) {
 		return
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		internalError(c, "checking reset site password", err)
+		return
+	}
 	if rowsAffected == 0 {
 		writeError(c, http.StatusNotFound, "user.not_found", "No user found with email", map[string]any{"email": req.Email})
 		return
 	}
 
-	// Invalidate all sessions for this user.
-	loaded.DB.Exec("DELETE FROM _kora_session WHERE user = (SELECT name FROM _kora_user WHERE email = ?)", req.Email)
+	revokeQuery := fmt.Sprintf("DELETE FROM _kora_session WHERE %s = (SELECT name FROM _kora_user WHERE email = ?)", dialect.QuoteIdent("user"))
+	if _, err := tx.Exec(sqlDialect.Rebind(dialect, revokeQuery), req.Email); err != nil {
+		internalError(c, "invalidating reset user sessions", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(c, "committing site password reset", err)
+		return
+	}
 
 	slog.Info("site user password reset via console", "site", siteName, "email", req.Email)
 	c.JSON(http.StatusOK, Response{Data: consoleMessageResponse{Message: "Password reset successfully. All existing sessions have been invalidated."}})

@@ -1,0 +1,65 @@
+name: POS Expense
+module: Retail POS Finance
+is_submittable: true
+title_field: reference
+search_fields: reference, payee, status
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: expense_date
+    fieldtype: Date
+    label: Expense date
+    reqd: true
+    in_list_view: true
+  - fieldname: payee
+    fieldtype: Data
+    label: Paid to
+    reqd: true
+    in_list_view: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+  - fieldname: account
+    fieldtype: Link
+    options: POS Account
+    label: Expense account
+    reqd: true
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till session
+  - fieldname: payment_method
+    fieldtype: Select
+    label: Payment method
+    options: |
+      Cash
+      Card
+      Mobile Money
+      Bank Transfer
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+    reqd: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Submitted
+      Approved
+      Paid
+      Rejected
+    default: Draft
+    in_list_view: true
+  - fieldname: submitted_by
+    fieldtype: User
+    label: Submitted by
+  - fieldname: approved_by
+    fieldtype: User
+    label: Approved by

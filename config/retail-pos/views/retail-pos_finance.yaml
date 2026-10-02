@@ -1,0 +1,31 @@
+name: Retail POS Finance
+route: /retail-pos-finance
+type: workspace
+layout: two_panel
+label: Finance
+module: Retail POS Finance
+components:
+  - id: till_sessions
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Till Session
+    label: Till sessions
+    desktop_columns: [name, reference, register, shift, assignee, status]
+    mobile_columns: [reference, register, status]
+  - id: cash_movements
+    type: record_table
+    region: side
+    position: 0
+    source_doctype: Cash Movement
+    label: Cash movements
+    desktop_columns: [name, reference, movement_type, amount, status]
+    mobile_columns: [movement_type, amount, status]
+  - id: settlements
+    type: record_table
+    region: side
+    position: 1
+    source_doctype: Payment Settlement
+    label: Payment settlements
+    desktop_columns: [name, reference, method, expected_amount, settled_amount, status]
+    mobile_columns: [method, expected_amount, status]

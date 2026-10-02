@@ -60,13 +60,13 @@ func insertChildExec(ex db.Queryer, parentDT *doctype.DocType, parentField strin
 
 	query := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES (%s) %s",
-		parentDT.ChildTableName(parentField),
+		quoteTableName(dialect, parentDT.RawChildTableName(parentField)),
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "),
 		dialect.UpsertClause([]string{"name"}, updateCols),
 	)
 
-	_, err := ex.Exec(query, values...)
+	_, err := ex.Exec(db.Rebind(dialect, query), values...)
 	return err
 }
 
@@ -77,7 +77,7 @@ func insertChildrenBatch(ex db.Queryer, parentDT *doctype.DocType, parentField s
 		return nil
 	}
 
-	childTableName := parentDT.ChildTableName(parentField)
+	childTableName := quoteTableName(dialect, parentDT.RawChildTableName(parentField))
 	prefix := derivePrefix(childDT.Name)
 
 	// Build column list once (same for all rows).
@@ -143,7 +143,7 @@ func insertChildrenBatch(ex db.Queryer, parentDT *doctype.DocType, parentField s
 			dialect.UpsertClause([]string{"name"}, updateCols),
 		)
 
-		if _, err := ex.Exec(query, values...); err != nil {
+		if _, err := ex.Exec(db.Rebind(dialect, query), values...); err != nil {
 			return fmt.Errorf("batch inserting child rows [%d-%d]: %w", start, end, err)
 		}
 	}
@@ -157,7 +157,7 @@ func insertChildrenBatch(ex db.Queryer, parentDT *doctype.DocType, parentField s
 //   - INSERT rows present in new but missing in old
 //   - UPDATE rows present in both with changed data
 func reconcileChildren(ex db.Queryer, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, oldChildren, newChildren []*doctype.Document, parentName string, dialect db.QueryDialect) error {
-	childTableName := parentDT.ChildTableName(parentField)
+	childTableName := quoteTableName(dialect, parentDT.RawChildTableName(parentField))
 
 	oldByName := make(map[string]*doctype.Document)
 	for _, c := range oldChildren {
@@ -189,7 +189,7 @@ func reconcileChildren(ex db.Queryer, parentDT *doctype.DocType, parentField str
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE name IN (%s)",
 			childTableName, strings.Join(placeholders, ", "))
-		if _, err := ex.Exec(query, args...); err != nil {
+		if _, err := ex.Exec(db.Rebind(dialect, query), args...); err != nil {
 			return fmt.Errorf("deleting removed child rows: %w", err)
 		}
 	}
@@ -216,7 +216,7 @@ func reconcileChildren(ex db.Queryer, parentDT *doctype.DocType, parentField str
 		if documentsEqual(oldChild, newChild, childDT) {
 			continue
 		}
-		if err := updateChildRow(ex, childTableName, childDT, newChild); err != nil {
+		if err := updateChildRow(ex, childTableName, childDT, newChild, dialect); err != nil {
 			return fmt.Errorf("updating child row %s: %w", name, err)
 		}
 	}
@@ -225,7 +225,7 @@ func reconcileChildren(ex db.Queryer, parentDT *doctype.DocType, parentField str
 }
 
 // updateChildRow issues an UPDATE for a single child row, setting all data columns.
-func updateChildRow(ex db.Queryer, tableName string, childDT *doctype.DocType, doc *doctype.Document) error {
+func updateChildRow(ex db.Queryer, tableName string, childDT *doctype.DocType, doc *doctype.Document, dialect db.QueryDialect) error {
 	var setClauses []string
 	var values []any
 
@@ -248,13 +248,13 @@ func updateChildRow(ex db.Queryer, tableName string, childDT *doctype.DocType, d
 	query := fmt.Sprintf("UPDATE %s SET %s WHERE name = ?",
 		tableName, strings.Join(setClauses, ", "))
 
-	_, err := ex.Exec(query, values...)
+	_, err := ex.Exec(db.Rebind(dialect, query), values...)
 	return err
 }
 
 // persistComputedChildFields writes computed child values back to the parent-owned
 // child table after ComputeFields has populated them in memory.
-func persistComputedChildFields(ex db.Queryer, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, children []*doctype.Document) error {
+func persistComputedChildFields(ex db.Queryer, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, children []*doctype.Document, dialect db.QueryDialect) error {
 	var computedFields []doctype.Field
 	for _, f := range childDT.DataFields() {
 		if f.Fieldtype != "Table" && f.Computed != "" {
@@ -265,7 +265,7 @@ func persistComputedChildFields(ex db.Queryer, parentDT *doctype.DocType, parent
 		return nil
 	}
 
-	tableName := parentDT.ChildTableName(parentField)
+	tableName := quoteTableName(dialect, parentDT.RawChildTableName(parentField))
 	for _, child := range children {
 		if child == nil || child.Name == "" {
 			continue
@@ -281,7 +281,7 @@ func persistComputedChildFields(ex db.Queryer, parentDT *doctype.DocType, parent
 		values = append(values, time.Now(), child.Name)
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE name = ?", tableName, strings.Join(setClauses, ", "))
-		if _, err := ex.Exec(query, values...); err != nil {
+		if _, err := ex.Exec(db.Rebind(dialect, query), values...); err != nil {
 			return fmt.Errorf("updating computed child row %s: %w", child.Name, err)
 		}
 	}
@@ -318,8 +318,8 @@ func (tx *TxManager) getChildRows(tableName string, childDT *doctype.DocType, pa
 	}
 	cols = append(cols, "name", "idx", "parent", "parentfield", "parenttype")
 
-	rows, err := tx.DB.Query(
-		fmt.Sprintf("SELECT %s FROM %s WHERE parent = ? ORDER BY idx", strings.Join(cols, ", "), tableName),
+	rows, err := tx.DB.Query(db.Rebind(tx.Dialect,
+		fmt.Sprintf("SELECT %s FROM %s WHERE parent = ? ORDER BY idx", strings.Join(cols, ", "), tableName)),
 		parentName,
 	)
 	if err != nil {

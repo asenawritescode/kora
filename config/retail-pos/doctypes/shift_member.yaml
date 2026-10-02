@@ -1,0 +1,33 @@
+name: Shift Member
+module: Retail POS and Store Operations
+is_child_table: true
+title_field: user
+fields:
+  - fieldname: user
+    fieldtype: User
+    label: Team member
+    reqd: true
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+  - fieldname: role
+    fieldtype: Select
+    label: Role
+    options: |
+      Cashier
+      Supervisor
+      Manager
+  - fieldname: joined_at
+    fieldtype: Datetime
+    label: Joined at
+  - fieldname: left_at
+    fieldtype: Datetime
+    label: Left at
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Left
+    default: Active

@@ -35,6 +35,7 @@ type ScriptSnapshot struct {
 	RunAs          string `json:"run_as,omitempty"`
 	TimeoutMs      int    `json:"timeout_ms"`
 	ScriptHash     string `json:"script_hash"` // SHA-256 of script body
+	Source         string `json:"source,omitempty"`
 }
 
 // ConfigSnapshot is the complete configuration state stored in _kora_config_version.config.

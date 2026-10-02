@@ -44,6 +44,7 @@ func (r *Registry) Register(dt *DocType) {
 	dt.ResourceName = normalizeResourceName(dt.ResourceName, dt.Name)
 	r.doctypes[dt.Name] = dt
 	r.aliases[dt.ResourceName] = dt.Name
+	r.aliases[apiResourceAlias(dt.Name)] = dt.Name
 }
 
 // Get returns a DocType by name, or nil if not found.
@@ -79,12 +80,14 @@ func (r *Registry) Unregister(name string) {
 	if dt, ok := r.doctypes[name]; ok {
 		delete(r.doctypes, dt.Name)
 		delete(r.aliases, dt.ResourceName)
+		delete(r.aliases, apiResourceAlias(dt.Name))
 		return
 	}
 	if primary, ok := r.aliases[name]; ok {
 		if dt, ok := r.doctypes[primary]; ok {
 			delete(r.doctypes, dt.Name)
 			delete(r.aliases, dt.ResourceName)
+			delete(r.aliases, apiResourceAlias(dt.Name))
 		}
 		delete(r.aliases, name)
 		return
@@ -144,6 +147,7 @@ func (r *Registry) LoadFromDB(doctypes []*DocType) {
 		dt.ResourceName = normalizeResourceName(dt.ResourceName, dt.Name)
 		r.doctypes[dt.Name] = dt
 		r.aliases[dt.ResourceName] = dt.Name
+		r.aliases[apiResourceAlias(dt.Name)] = dt.Name
 	}
 }
 
@@ -159,6 +163,7 @@ func (r *Registry) LoadFull(doctypes []*DocType, roles []*Role, permissions []*P
 		dt.ResourceName = normalizeResourceName(dt.ResourceName, dt.Name)
 		r.doctypes[dt.Name] = dt
 		r.aliases[dt.ResourceName] = dt.Name
+		r.aliases[apiResourceAlias(dt.Name)] = dt.Name
 	}
 	r.Permissions.LoadPermissionsFromDB(roles, permissions)
 }

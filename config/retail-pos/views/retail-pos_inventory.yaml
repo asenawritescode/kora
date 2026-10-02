@@ -1,0 +1,25 @@
+name: Retail POS Inventory
+route: /inventory
+type: workspace
+layout: single
+label: Inventory
+module: Retail Pos
+components:
+  - id: inventory_balance
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Inventory Balance
+    label: Inventory on hand
+    desktop_columns: [product, qty_on_hand, qty_reserved, reorder_level, reorder_qty, status]
+    mobile_columns: [product, qty_on_hand, reorder_level, status]
+    required_capabilities: [tables]
+  - id: stock_movements
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Stock Movement
+    label: Stock movement history
+    desktop_columns: [reference, product, movement_type, quantity, source_reference, posting_date, status]
+    mobile_columns: [product, movement_type, quantity, status]
+    required_capabilities: [tables]

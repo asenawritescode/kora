@@ -8,7 +8,7 @@ import (
 func TestNewTemplateConfigPacksParse(t *testing.T) {
 	for _, pack := range []string{"clinic", "logistics", "sacco", "school"} {
 		t.Run(pack, func(t *testing.T) {
-			packPath := filepath.Join("../config", pack)
+			packPath := filepath.Join("../config", "v0", pack)
 			doctypes, err := ParseConfigTree(packPath)
 			if err != nil {
 				t.Fatalf("parse config pack: %v", err)

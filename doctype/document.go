@@ -10,6 +10,7 @@ type Document struct {
 	Fields    map[string]any
 	IsNew     bool
 	DocStatus int
+	Revision  uint64
 }
 
 // NewDocument creates a new empty document for the given DocType.
@@ -118,6 +119,7 @@ func (d *Document) ToMap() map[string]any {
 		out["name"] = d.Name
 	}
 	out["doc_status"] = d.DocStatus
+	out["revision"] = d.Revision
 	return out
 }
 

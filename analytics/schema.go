@@ -2,17 +2,57 @@ package analytics
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/asenawritescode/kora/db"
 )
 
+// Increment this when rollupTableDDL gains or changes analytics schema DDL.
+const analyticsBootstrapVersion = 1
+
 // BootstrapTables creates the analytics rollup tables in the operational DB.
 // Idempotent — uses IF NOT EXISTS. Called once per site at startup.
 func BootstrapTables(database *sql.DB, dialect db.SchemaDialect) error {
+	// Rollup DDL is immutable between bootstrap versions. Persist completion per
+	// physical database so normal Engine starts don't issue six CREATE TABLE
+	// statements for every registered site. The marker is written only after
+	// all analytics tables have been created successfully.
+	if _, err := database.Exec(`CREATE TABLE IF NOT EXISTS _kora_analytics_bootstrap (
+		id INTEGER PRIMARY KEY,
+		version INTEGER NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("analytics bootstrap marker: %w", err)
+	}
+	var currentVersion int
+	err := database.QueryRow(`SELECT version FROM _kora_analytics_bootstrap WHERE id = 1`).Scan(&currentVersion)
+	if err == nil {
+		if currentVersion > analyticsBootstrapVersion {
+			return fmt.Errorf("analytics schema version %d is newer than supported version %d", currentVersion, analyticsBootstrapVersion)
+		}
+		if currentVersion == analyticsBootstrapVersion {
+			return nil
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("reading analytics bootstrap marker: %w", err)
+	}
+
 	for _, stmt := range rollupTableDDL(dialect) {
 		if _, err := database.Exec(stmt); err != nil {
 			return fmt.Errorf("analytics bootstrap: %w", err)
+		}
+	}
+	result, err := database.Exec(`UPDATE _kora_analytics_bootstrap SET version = 1 WHERE id = 1`)
+	if err != nil {
+		return fmt.Errorf("updating analytics bootstrap marker: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking analytics bootstrap marker update: %w", err)
+	}
+	if updated == 0 {
+		if _, err := database.Exec(`INSERT INTO _kora_analytics_bootstrap (id, version) VALUES (1, 1)`); err != nil {
+			return fmt.Errorf("writing analytics bootstrap marker: %w", err)
 		}
 	}
 	return nil

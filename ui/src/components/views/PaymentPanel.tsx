@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { ViewComponentProps } from './registry'
 import { Button } from '@/components/ui/button'
 import { useCartStore } from '@/lib/cart-store'
-import { Banknote, CreditCard, Smartphone, Loader2 } from 'lucide-react'
+import { Banknote, CreditCard, Smartphone, Loader2, Unlock } from 'lucide-react'
 
-const PAYMENT_ICONS: Record<string, React.ReactNode> = {
+const PAYMENT_ICONS: Record<string, ReactNode> = {
   cash: <Banknote className="h-5 w-5" />,
   card: <CreditCard className="h-5 w-5" />,
   mobile_money: <Smartphone className="h-5 w-5" />,
@@ -20,23 +20,85 @@ export default function PaymentPanel(props: ViewComponentProps) {
   const [operationId, setOperationId] = useState('')
   const [paymentStatus, setPaymentStatus] = useState('')
   const [phoneError, setPhoneError] = useState('')
+  const [openingCash, setOpeningCash] = useState('0')
+  const [activeShift, setActiveShift] = useState(() => sessionStorage.getItem('kora-pos-active-shift') || '')
+  const [activeTillSession, setActiveTillSession] = useState(() => sessionStorage.getItem('kora-pos-active-till-session') || '')
   const { items, total, clearCart } = useCartStore()
   const cartTotal = total()
 
-  const methods = (config.bindings?.methods || 'cash, card, mobile_money')
+  const methods = (config.bindings?.methods || '')
     .split(',').map((s) => s.trim()).filter(Boolean)
+  const register = config.bindings?.register || ''
+  const supportsOnlineMobilePayment = Boolean(config.actions?.some((item) => item.type === 'initiate_external_operation'))
+  const hasOpenShiftAction = Boolean(config.actions?.some((item) => item.id === 'open_shift'))
+  const hasOpenTillAction = Boolean(config.actions?.some((item) => item.id === 'open_till_session'))
+  const requiresTill = hasOpenShiftAction || hasOpenTillAction
+  const tillReady = !requiresTill || (hasOpenTillAction ? Boolean(activeTillSession) : Boolean(activeShift))
 
   const transactionContext = (method: string) => ({
+    reference: `POS-${Date.now()}`,
     cart: items,
-    customer: config.bindings?.customer || 'CUST-0001',
+    customer: config.bindings?.customer || '',
     invoice_date: config.bindings?.invoice_date || new Date().toISOString().slice(0, 10),
     due_date: config.bindings?.due_date || new Date().toISOString().slice(0, 10),
-    customer_name: 'Walk-in Customer',
+    customer_name: config.bindings?.customer_name || '',
+    register,
+    ...(activeShift ? { shift: activeShift } : {}),
+    ...(activeTillSession ? { till_session: activeTillSession } : {}),
     ...(isMobilePayment(method) ? { customer_phone: phoneNumber.trim() } : {}),
     payment_status: 'Paid',
     payment_method: normalizePaymentMethod(method),
+    status: 'Paid',
     total: cartTotal,
   })
+
+  const openShiftAndTill = async () => {
+    setProcessing(true)
+    try {
+      let shiftName = activeShift
+      if (!shiftName) {
+        const action = config.actions?.find((item) => item.id === 'open_shift')
+        if (action) {
+          const reference = `SHIFT-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}`
+          const result = await onAction(action.id, {
+            reference,
+            status: 'Open',
+            started_at: new Date().toISOString(),
+          })
+          const created = (result as any)?.data || result
+          shiftName = created?.name || created?.reference || reference
+          if (shiftName) {
+            setActiveShift(shiftName)
+            sessionStorage.setItem('kora-pos-active-shift', shiftName)
+          }
+        }
+      }
+
+      if (!activeTillSession) {
+        const action = config.actions?.find((item) => item.id === 'open_till_session')
+        if (action) {
+          if (!shiftName) return
+          const reference = `TS-${Date.now()}`
+          const result = await onAction(action.id, {
+            reference,
+            register,
+            shift: shiftName,
+            opening_cash: Number(openingCash || 0),
+            expected_cash: Number(openingCash || 0),
+            status: 'Open',
+          })
+          const created = (result as any)?.data || result
+          const tillName = created?.name || created?.reference || reference
+          if (tillName) {
+            setActiveTillSession(tillName)
+            sessionStorage.setItem('kora-pos-active-till-session', tillName)
+          }
+        }
+      }
+    } finally {
+      setProcessing(false)
+    }
+  }
 
   const completeSale = async (method: string, externalOperation?: string) => {
     const action = config.actions?.find((item) => item.type === 'create_transaction' && (externalOperation ? item.config?.requires_operation_status : !item.config?.requires_operation_status))
@@ -48,7 +110,8 @@ export default function PaymentPanel(props: ViewComponentProps) {
 
   const handlePayment = async (method: string) => {
     if (items.length === 0) return
-    if (isMobilePayment(method)) {
+    if (!tillReady) return
+    if (isMobilePayment(method) && supportsOnlineMobilePayment) {
       setSelectedMethod(method)
       setPhoneError('')
       return
@@ -107,9 +170,37 @@ export default function PaymentPanel(props: ViewComponentProps) {
         <h3 className="text-sm font-semibold">Payment</h3>
         <span className="text-lg font-bold">{cartTotal.toLocaleString()}</span>
       </div>
+      {requiresTill && (
+        <div className="rounded-md border bg-muted/20 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Shift</p>
+              <p className="text-sm font-medium">{activeTillSession ? `Till open · ${activeTillSession}` : activeShift ? `Shift open · ${activeShift}` : 'Open a shift before taking payment'}</p>
+            </div>
+            {!tillReady && <Unlock className="h-4 w-4 text-muted-foreground" />}
+          </div>
+          {!tillReady && (
+            <div className="mt-3 flex gap-2">
+              <input
+                type="number"
+                min="0"
+                inputMode="decimal"
+                value={openingCash}
+                onChange={(event) => setOpeningCash(event.target.value)}
+                className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="Opening cash"
+              />
+              <Button size="sm" disabled={processing} onClick={openShiftAndTill}>
+                {processing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Open shift
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-3 gap-2">
         {methods.map((method) => (
-          <Button key={method} variant="outline" className="flex h-auto flex-col items-center gap-1 py-3" disabled={items.length === 0 || processing} onClick={() => handlePayment(method)}>
+          <Button key={method} variant="outline" className="flex h-auto flex-col items-center gap-1 py-3" disabled={items.length === 0 || processing || !tillReady} onClick={() => handlePayment(method)}>
             {processing ? <Loader2 className="h-5 w-5 animate-spin" /> : PAYMENT_ICONS[method] || <Banknote className="h-5 w-5" />}
             <span className="text-xs capitalize">{method.replace('_', ' ')}</span>
           </Button>

@@ -44,16 +44,16 @@ func LoadStartupConfig() *StartupConfig {
 	return c
 }
 
-// Validate checks required fields and returns all errors at once.
-// If DB_DSN is set, KORA_DB_TYPE must be one of "mysql" or "libsql".
+// Validate checks required fields and returns all errors at once. If DB_DSN is
+// set, KORA_DB_TYPE must be a supported SQL dialect.
 func (c *StartupConfig) Validate() error {
 	var errs []string
 
 	if c.DBDSN != "" {
 		if c.DBType == "" {
-			errs = append(errs, "KORA_DB_TYPE is required when DB_DSN is set (must be 'mysql' or 'libsql')")
-		} else if c.DBType != "mysql" && c.DBType != "libsql" {
-			errs = append(errs, fmt.Sprintf("KORA_DB_TYPE must be 'mysql' or 'libsql', got '%s'", c.DBType))
+			errs = append(errs, "KORA_DB_TYPE is required when DB_DSN is set (must be 'mysql', 'postgres', or 'libsql')")
+		} else if c.DBType != "mysql" && c.DBType != "postgres" && c.DBType != "libsql" {
+			errs = append(errs, fmt.Sprintf("KORA_DB_TYPE must be 'mysql', 'postgres', or 'libsql', got '%s'", c.DBType))
 		}
 	}
 

@@ -1,6 +1,6 @@
 # Kora — Config-Driven Application Engine
 
-Kora is currently a DocType-centric application runtime with a real kernel, typed contracts, workflow runtime, AI/MCP surfaces, cloud primitives, and a React admin UI. The original RFC is broader than the codebase today, so this repository should be read as an implemented platform plus target-state architecture notes, not a finished match to the RFC.
+Kora is currently a DocType-centric application runtime with a real kernel, typed contracts, workflow runtime, AI/MCP surfaces, and a React admin UI. Some planned capabilities remain in progress; see the implementation and tests for the current behavior.
 
 [![Docker Hub](https://img.shields.io/badge/docker-smitdockerhub%2Fkora-blue?logo=docker)](https://hub.docker.com/r/smitdockerhub/kora)
 [![GitHub](https://img.shields.io/badge/github-asenawritescode%2Fkora-black?logo=github)](https://github.com/asenawritescode/kora)
@@ -71,8 +71,6 @@ KORA_DB_TYPE=mysql KORA_DB_HOST=127.0.0.1 KORA_DB_USER=root KORA_DB_PASSWORD=kor
 - **Go SDK + TypeScript SDK** — SDKs for integrations and extensions.
 - **API Versioning** — `/api/v1/` routes exist for the supported surface.
 - **Analytics** — automatic per-doctype metrics with rollups and time-series queries.
-- **Cloud Boundary** — Cloud is a control plane for deployment, package rollout, worker placement, NATS validation, backups, observability, billing, and deletion workflows. Tenant business truth remains in the engine/site databases.
-- **Cloud Ownership** — the proprietary Cloud implementation lives in the sibling `kora-cloud` repo; this repo only keeps the engine-facing seam, local site lifecycle, and shared contracts.
 
 ## Capability Status
 
@@ -97,9 +95,7 @@ experimental, and what is still planned.
 
 - The current engine is DocType-centric, not a fully generic resource engine.
 - The current frontend is a React SPA with an embedded page-manifest runtime, not an ES-module/Franken UI runtime.
-- The current kernel, contract surface, workflow runtime, AI/MCP surfaces, and cloud primitives are real, but they only partially cover the original RFC.
-- Cloud implementation lives in the sibling `kora-cloud` repository. It owns deployment orchestration and runtime management, but not tenant business truth or site schema source of truth.
-- The RFC in this repository should be treated as the target architecture and gap reference.
+- The current kernel, contract surface, workflow runtime, and AI/MCP surfaces are real, but still evolving.
 - PostgreSQL/MySQL parity work is excluded from the current implementation backlog and audit notes.
 
 ## Configuration

@@ -1,0 +1,6 @@
+- name: Business Owner
+  workspace_access: true
+  description: Manages the business catalogue, sales, and money records.
+- name: Cashier
+  workspace_access: true
+  description: Records sales and views the product catalogue.

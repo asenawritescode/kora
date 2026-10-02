@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -24,6 +25,7 @@ func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 	t.Parallel()
 
 	var got []map[string]any
+	var gotMu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer secret" {
 			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
@@ -33,7 +35,9 @@ func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
+		gotMu.Lock()
 		got = append(got, payload)
+		gotMu.Unlock()
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer server.Close()
@@ -60,10 +64,18 @@ func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 	_ = bus.Publish(ChangeEvent{Site: "tenant.example.com", Doctype: "_kora_script", DocName: "SCR-1", Operation: EventInsert, Timestamp: now.Add(2 * time.Second), ModifiedBy: "a@test"})
 
 	deadline := time.Now().Add(2 * time.Second)
-	for len(got) < 1 && time.Now().Before(deadline) {
+	for time.Now().Before(deadline) {
+		gotMu.Lock()
+		received := len(got)
+		gotMu.Unlock()
+		if received >= 1 {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	gotMu.Lock()
+	defer gotMu.Unlock()
 	if len(got) != 1 {
 		t.Fatalf("expected 1 relayed event, got %d", len(got))
 	}

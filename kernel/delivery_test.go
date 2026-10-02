@@ -50,7 +50,7 @@ func TestLocalProviderDeliveryAfterCommit(t *testing.T) {
 	mustComplete(t, res)
 
 	bus := &capturingBus{events: make(chan analytics.ChangeEvent, 4)}
-	pub := outbox.NewPublisher(s.DB, analytics.NewLocalProvider(bus))
+	pub := outbox.NewPublisher(s.DB, analytics.NewLocalProvider(bus), s.Dialect)
 	delivered, err := pub.PublishDue(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("publish: %v", err)
@@ -115,7 +115,7 @@ func TestNATSJetStreamDeliveryAfterCommit(t *testing.T) {
 	}
 
 	// Broker outage window: nothing published yet; rows stay pending.
-	pub := outbox.NewPublisher(s.DB, prov)
+	pub := outbox.NewPublisher(s.DB, prov, s.Dialect)
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE status='pending'"); n != 1 {
 		t.Fatalf("commit must leave exactly one pending row, got %d", n)
 	}

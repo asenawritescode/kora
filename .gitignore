@@ -5,6 +5,7 @@ node_modules/
 ui/dist/
 workspace/dist/
 kora
+*.test
 /tmp/
 
 # Binary

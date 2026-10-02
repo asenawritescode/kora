@@ -1,0 +1,75 @@
+name: External Operation Event
+module: Integrations
+title_field: event_type
+search_fields: operation, event_type, provider_reference, idempotency_key
+sort_field: creation
+sort_order: DESC
+fields:
+  - fieldname: operation
+    fieldtype: Link
+    label: External Operation
+    options: External Operation
+    reqd: true
+  - fieldname: direction
+    fieldtype: Select
+    label: Direction
+    options: |
+      Outbound
+      Inbound
+      Internal
+    reqd: true
+  - fieldname: event_type
+    fieldtype: Select
+    label: Event Type
+    options: |
+      Initiate
+      Status Check
+      Callback
+      Retry
+      Finalize
+      Reconcile
+    reqd: true
+  - fieldname: provider
+    fieldtype: Data
+    label: Provider
+  - fieldname: provider_reference
+    fieldtype: Data
+    label: Provider Reference
+  - fieldname: previous_status
+    fieldtype: Data
+    label: Previous Status
+  - fieldname: new_status
+    fieldtype: Data
+    label: New Status
+  - fieldname: request_payload
+    fieldtype: JSON
+    label: Request Payload
+  - fieldname: response_payload
+    fieldtype: JSON
+    label: Response Payload
+  - fieldname: idempotency_key
+    fieldtype: Data
+    label: Idempotency Key
+    unique: true
+  - fieldname: processing_status
+    fieldtype: Select
+    label: Processing Status
+    options: |
+      Received
+      Processed
+      Ignored
+      Failed
+      Duplicate
+    default: Received
+    reqd: true
+  - fieldname: error_message
+    fieldtype: Text
+    label: Error Message
+  - fieldname: received_at
+    fieldtype: Datetime
+    label: Received At
+    default: now
+  - fieldname: processed_at
+    fieldtype: Datetime
+    label: Processed At
+    default: now

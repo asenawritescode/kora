@@ -46,7 +46,22 @@ func (ve ValidationErrors) HasErrors() bool {
 
 // ValidateDocument runs all field-level and document-level constraints against a document.
 // Returns all violations as a ValidationErrors slice.
+// LinkedDocumentResolver loads a linked record for a declarative
+// linked_cross_field constraint. It is supplied by the persistence boundary;
+// the doctype package never opens a database itself.
+type LinkedDocumentResolver func(target *DocType, name string) (*Document, error)
+
+// ValidateDocument runs validation without loading linked records. Callers
+// that have a persistence boundary should use ValidateDocumentWithResolver so
+// linked declarative rules are enforced as well.
 func ValidateDocument(dt *DocType, doc *Document, registry *Registry, oldDoc *Document) ValidationErrors {
+	return ValidateDocumentWithResolver(dt, doc, registry, oldDoc, nil)
+}
+
+// ValidateDocumentWithResolver runs field, document, and linked document
+// constraints. Linked rules remain declarative and are never executed as
+// scripts.
+func ValidateDocumentWithResolver(dt *DocType, doc *Document, registry *Registry, oldDoc *Document, resolver LinkedDocumentResolver) ValidationErrors {
 	var errors ValidationErrors
 
 	// Evaluate predicate-based document constraints.
@@ -152,7 +167,7 @@ func ValidateDocument(dt *DocType, doc *Document, registry *Registry, oldDoc *Do
 			}
 		}
 
-		docErrs := validateDocConstraint(&dc, dt, doc, oldDoc)
+		docErrs := validateDocConstraint(&dc, dt, doc, oldDoc, registry, resolver)
 		errors = append(errors, docErrs...)
 	}
 
@@ -430,7 +445,7 @@ func validateRequiredIf(field *Field, c *Constraint, val any, dt *DocType, doc *
 	return nil
 }
 
-func validateDocConstraint(dc *DocConstraint, dt *DocType, doc *Document, oldDoc *Document) ValidationErrors {
+func validateDocConstraint(dc *DocConstraint, dt *DocType, doc *Document, oldDoc *Document, registry *Registry, resolver LinkedDocumentResolver) ValidationErrors {
 	var errors ValidationErrors
 
 	switch dc.Type {
@@ -528,6 +543,52 @@ func validateDocConstraint(dc *DocConstraint, dt *DocType, doc *Document, oldDoc
 					}
 				}
 			}
+		}
+
+	case "linked_cross_field":
+		if resolver == nil || registry == nil || dc.LinkField == "" || dc.RelatedField == "" {
+			break
+		}
+		link := dt.GetField(dc.LinkField)
+		if link == nil || link.Fieldtype != "Link" || link.Options == "" {
+			break
+		}
+		linkedName := fmt.Sprintf("%v", doc.Get(dc.LinkField))
+		if linkedName == "" {
+			break
+		}
+		target := registry.Get(link.Options)
+		if target == nil {
+			break
+		}
+		linkedDoc, err := resolver(target, linkedName)
+		if err != nil || linkedDoc == nil {
+			break
+		}
+		lhs := doc.Get(dc.Field)
+		rhs := linkedDoc.Get(dc.RelatedField)
+		if lhs == nil || rhs == nil {
+			break
+		}
+		valid := false
+		switch dc.Operator {
+		case "<=":
+			valid = compareValues(lhs, rhs) <= 0
+		case "<":
+			valid = compareValues(lhs, rhs) < 0
+		case ">=":
+			valid = compareValues(lhs, rhs) >= 0
+		case ">":
+			valid = compareValues(lhs, rhs) > 0
+		case "==":
+			valid = valuesEqual(lhs, rhs)
+		case "!=":
+			valid = !valuesEqual(lhs, rhs)
+		default:
+			break
+		}
+		if !valid {
+			errors = append(errors, &ValidationError{Type: "ValidationError", Message: dc.Message, Field: dc.Field, DocType: dt.Name})
 		}
 	}
 

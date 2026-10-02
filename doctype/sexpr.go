@@ -728,6 +728,9 @@ func writeSExprScriptSnapshot(b *strings.Builder, s *ScriptSnapshot, indent stri
 	if s.ScriptHash != "" {
 		props = append(props, sExprProp{"hash", quoteSExprString(s.ScriptHash)})
 	}
+	if s.Source != "" {
+		props = append(props, sExprProp{"source", quoteSExprString(s.Source)})
+	}
 
 	if len(props) > 0 {
 		b.WriteString("\n")
@@ -1851,6 +1854,7 @@ func parseScriptSnapshot(node *sNode) (*ScriptSnapshot, error) {
 	s.RunAs = kw["run-as"]
 	s.TimeoutMs = kwInt(kw, "timeout")
 	s.ScriptHash = kw["hash"]
+	s.Source = kw["source"]
 	return s, nil
 }
 

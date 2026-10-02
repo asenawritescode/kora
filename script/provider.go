@@ -27,6 +27,13 @@ type KoraProvider interface {
 	HTTPProvider
 }
 
+// LifecycleScopedProvider lets a provider carry the active lifecycle-script
+// stack into nested operations. Implementations use it to prevent a script
+// from recursively invoking itself while leaving other hooks enabled.
+type LifecycleScopedProvider interface {
+	WithLifecycleHook(doctype string, event Event, scriptName string) KoraProvider
+}
+
 // HTTPRequest represents an outgoing HTTP request from a script.
 type HTTPRequest struct {
 	Method  string

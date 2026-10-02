@@ -8,6 +8,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
+	kdb "github.com/asenawritescode/kora/db"
 )
 
 // TestDispatcherRoutesWithReceipts verifies the receipt dedup contract: a
@@ -21,7 +22,7 @@ func TestConsumerReceiptContract(t *testing.T) {
 	}
 	defer db.Close()
 
-	c := &Consumer{DB: db, Name: "analytics"}
+	c := &Consumer{DB: db, Name: "analytics", Dialect: kdb.Resolve("mysql")}
 
 	// HasSeen → returns false (0).
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_outbox_receipt`).
@@ -59,7 +60,7 @@ func TestDispatcherRegister(t *testing.T) {
 	}
 	defer db.Close()
 
-	d := NewDispatcher(db)
+	d := NewDispatcher(db, kdb.Resolve("mysql"))
 	d.Register("analytics", func(ctx context.Context, e contract.EventEnvelope) error { return nil })
 
 	if _, ok := d.Workers["analytics"]; !ok {
@@ -113,7 +114,7 @@ func TestDispatcherDuplicateDeliveryAcrossRestart(t *testing.T) {
 
 	var effects int32
 	run := func() int {
-		d := NewDispatcher(db)
+		d := NewDispatcher(db, kdb.Resolve("mysql"))
 		d.Register("analytics", func(ctx context.Context, e contract.EventEnvelope) error {
 			atomic.AddInt32(&effects, 1)
 			if e.ID != event.ID {

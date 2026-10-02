@@ -21,7 +21,7 @@ export type FieldType =
   | 'Data' | 'Text' | 'Text Editor'
   | 'Int' | 'Float' | 'Currency' | 'Percent'
   | 'Check' | 'Date' | 'Time' | 'Datetime'
-  | 'Select' | 'Link' | 'Dynamic Link'
+  | 'Select' | 'Link' | 'Dynamic Link' | 'User'
   | 'Table' | 'Attach' | 'Attach Image' | 'Attach Audio'
   | 'JSON' | 'Password'
   | 'Section Break' | 'Column Break' | 'Heading'

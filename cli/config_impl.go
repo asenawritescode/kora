@@ -403,7 +403,7 @@ func runConfigVersions(siteName string) error {
 	defer db.Close()
 
 	rows, err := db.Query(
-		"SELECT version, created_at, created_by, label, status FROM _kora_config_version WHERE site = ? ORDER BY version DESC",
+		kdb.Rebind(kdb.Resolve(siteCfg.DBType), "SELECT version, created_at, created_by, label, status FROM _kora_config_version WHERE site = ? ORDER BY version DESC"),
 		siteName,
 	)
 	if err != nil {
@@ -417,7 +417,9 @@ func runConfigVersions(siteName string) error {
 		var version int
 		var createdAt, createdBy, label string
 		var status string
-		rows.Scan(&version, &createdAt, &createdBy, &label, &status)
+		if err := rows.Scan(&version, &createdAt, &createdBy, &label, &status); err != nil {
+			return fmt.Errorf("reading config version row: %w", err)
+		}
 		active := ""
 		if status == "Active" {
 			active = " (active)"
@@ -425,6 +427,9 @@ func runConfigVersions(siteName string) error {
 			active = " (draft)"
 		}
 		fmt.Printf("%-8d %-20s %-15s %s%s\n", version, createdAt[:min19(createdAt)], createdBy, label, active)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating config versions: %w", err)
 	}
 	return nil
 }
@@ -442,18 +447,31 @@ func runConfigDiff(siteName, fromID, toID string) error {
 	}
 	common_cfg := site.CommonConfigFromEnv()
 	siteCfg := site.ReconstructSiteConfig(siteName, common_cfg, nil)
-	db, _ := site.Connect(siteCfg)
+	db, err := site.Connect(siteCfg)
+	if err != nil {
+		return fmt.Errorf("connecting to site database: %w", err)
+	}
 	defer db.Close()
 
 	var fromJSON, toJSON string
-	db.QueryRow("SELECT config FROM _kora_config_version WHERE id = ?", fromID).Scan(&fromJSON)
-	db.QueryRow("SELECT config FROM _kora_config_version WHERE id = ?", toID).Scan(&toJSON)
+	dialect := kdb.Resolve(siteCfg.DBType)
+	if err := db.QueryRow(kdb.Rebind(dialect, "SELECT config FROM _kora_config_version WHERE id = ?"), fromID).Scan(&fromJSON); err != nil {
+		return fmt.Errorf("reading source config version %q: %w", fromID, err)
+	}
+	if err := db.QueryRow(kdb.Rebind(dialect, "SELECT config FROM _kora_config_version WHERE id = ?"), toID).Scan(&toJSON); err != nil {
+		return fmt.Errorf("reading target config version %q: %w", toID, err)
+	}
 
-	var from, to []*doctype.DocType
-	yaml.Unmarshal([]byte(fromJSON), &from)
-	yaml.Unmarshal([]byte(toJSON), &to)
+	fromSnapshot, err := doctype.ParseConfig(fromJSON)
+	if err != nil {
+		return fmt.Errorf("parsing source config version %q: %w", fromID, err)
+	}
+	toSnapshot, err := doctype.ParseConfig(toJSON)
+	if err != nil {
+		return fmt.Errorf("parsing target config version %q: %w", toID, err)
+	}
 
-	diff := doctype.DiffConfigs(from, to)
+	diff := doctype.DiffConfigs(fromSnapshot.DocTypes, toSnapshot.DocTypes)
 	fmt.Printf("Changes from version %s to %s: %s\n", fromID, toID, diff.Summary())
 	for _, c := range diff.Changes {
 		flag := " "

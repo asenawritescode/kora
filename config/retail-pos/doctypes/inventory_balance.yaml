@@ -1,0 +1,41 @@
+name: Inventory Balance
+module: Retail Pos
+title_field: product
+search_fields: product, warehouse, status
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product
+    reqd: true
+    in_list_view: true
+  - fieldname: qty_on_hand
+    fieldtype: Float
+    label: On hand
+    default: 0
+    in_list_view: true
+  - fieldname: qty_reserved
+    fieldtype: Float
+    label: Reserved
+    default: 0
+    in_list_view: true
+  - fieldname: reorder_level
+    fieldtype: Float
+    label: Reorder level
+    default: 0
+    in_list_view: true
+  - fieldname: reorder_qty
+    fieldtype: Float
+    label: Reorder quantity
+    default: 0
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true

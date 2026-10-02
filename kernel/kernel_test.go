@@ -28,8 +28,10 @@ import (
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
+	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/schema"
+	"github.com/asenawritescode/kora/script"
 )
 
 func newSiteDB(t *testing.T) (*sql.DB, string) {
@@ -98,12 +100,14 @@ func newSite(t *testing.T, name string) *siteFixture {
 			{Fieldname: "title", Fieldtype: "Data", Label: "Title", Reqd: true},
 			{Fieldname: "serial", Fieldtype: "Data", Label: "Serial", Unique: true},
 			{Fieldname: "status", Fieldtype: "Select", Label: "Status", Options: "Open\nDone"},
+			{Fieldname: "priority", Fieldtype: "Data", Label: "Priority", Default: "Normal"},
 		},
 	}
-	roles := []*doctype.Role{{Name: "Administrator"}, {Name: "Creator"}}
+	roles := []*doctype.Role{{Name: "Administrator"}, {Name: "Creator"}, {Name: "OwnerEditor"}}
 	perms := []*doctype.Permission{
-		{Doctype: "Task", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true},
+		{Doctype: "Task", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true, Submit: true},
 		{Doctype: "Task", Role: "Creator", Read: true, Create: true}, // create-only: no write
+		{Doctype: "Task", Role: "OwnerEditor", Read: true, Write: true, Create: true, IfOwner: true},
 	}
 	reg := doctype.NewRegistry()
 	reg.LoadFull([]*doctype.DocType{taskDT}, roles, perms)
@@ -114,7 +118,269 @@ func newSite(t *testing.T, name string) *siteFixture {
 }
 
 func newKernel(s *siteFixture) *kernel.Kernel {
-	return kernel.New(s.Dialect, outbox.NewSQLWriter())
+	return kernel.New(s.Dialect, outbox.NewSQLWriter(s.Dialect))
+}
+
+type configuredCommandHookRunner struct {
+	db     *sql.DB
+	events []script.Event
+}
+
+func (r *configuredCommandHookRunner) Execute(_ context.Context, req script.ExecuteRequest) (*script.ExecuteResult, error) {
+	r.events = append(r.events, req.Event)
+	if req.Event == script.EventBeforeInsert {
+		document := make(map[string]any, len(req.Document))
+		for key, value := range req.Document {
+			document[key] = value
+		}
+		document["title"] = fmt.Sprint(document["title"]) + "-before-hook"
+		return &script.ExecuteResult{Document: document, Modified: true}, nil
+	}
+	if req.Event == script.EventBeforeSave {
+		document := make(map[string]any, len(req.Document))
+		for key, value := range req.Document {
+			document[key] = value
+		}
+		document["title"] = fmt.Sprint(document["title"]) + "-before-save-hook"
+		return &script.ExecuteResult{Document: document, Modified: true}, nil
+	}
+	if req.Event == script.EventAfterInsert {
+		var count int
+		if err := r.db.QueryRow("SELECT COUNT(*) FROM `tabTask` WHERE name = ?", req.Document["name"]).Scan(&count); err != nil {
+			return nil, err
+		}
+		if count != 1 {
+			return nil, fmt.Errorf("after_insert ran before commit; visible row count = %d", count)
+		}
+	}
+	if req.Event == script.EventAfterSave {
+		var title string
+		if err := r.db.QueryRow("SELECT title FROM `tabTask` WHERE name = ?", req.Document["name"]).Scan(&title); err != nil {
+			return nil, err
+		}
+		if title != req.Document["title"] {
+			return nil, fmt.Errorf("after_save observed %q; committed title is %q", req.Document["title"], title)
+		}
+	}
+	return &script.ExecuteResult{}, nil
+}
+func (*configuredCommandHookRunner) Validate(string) error { return nil }
+func (*configuredCommandHookRunner) Close() error          { return nil }
+
+type scopedComputedFieldRunner struct{}
+
+func (scopedComputedFieldRunner) Execute(_ context.Context, req script.ExecuteRequest) (*script.ExecuteResult, error) {
+	if req.Event != script.EventComputed || req.ScriptName != "site-name" {
+		return nil, fmt.Errorf("unexpected computed script request: event=%q name=%q", req.Event, req.ScriptName)
+	}
+	return &script.ExecuteResult{Result: req.Site}, nil
+}
+func (scopedComputedFieldRunner) Validate(string) error { return nil }
+func (scopedComputedFieldRunner) Close() error          { return nil }
+
+func TestRecordCreateUsesOperationScopedComputedScriptHook(t *testing.T) {
+	s := newSite(t, "computed-script-site")
+	defer s.DB.Close()
+	for _, ddl := range kdb.ExtensibilityTablesMySQL()[:2] {
+		if _, err := s.DB.Exec(ddl); err != nil {
+			t.Fatalf("create script tables: %v", err)
+		}
+	}
+	dt := &doctype.DocType{Name: "ComputedTask", Fields: []doctype.Field{
+		{Fieldname: "title", Fieldtype: "Data", Reqd: true},
+		{Fieldname: "site_value", Fieldtype: "Data", Computed: "@script:site-name"},
+	}}
+	registry := doctype.NewRegistry()
+	registry.LoadFull([]*doctype.DocType{dt}, []*doctype.Role{{Name: doctype.AdminRole}}, []*doctype.Permission{{
+		Doctype: dt.Name, Role: doctype.AdminRole, Read: true, Create: true, Write: true, Delete: true,
+	}})
+	if err := schema.MigrateSiteFromRegistry(s.DB, s.Name, registry, s.Dialect); err != nil {
+		t.Fatalf("migrate computed DocType: %v", err)
+	}
+	store := &script.Store{DB: s.DB, Dialect: s.Dialect}
+	if err := store.Insert(script.ScriptRecord{
+		Name: "site-name", Site: s.Name, ScriptType: script.TypeDocEvent,
+		DocType: dt.Name, Event: script.EventComputed, IsActive: true, Script: "return site",
+	}); err != nil {
+		t.Fatalf("insert computed script: %v", err)
+	}
+	k := newKernel(s)
+	k.TxManager = &orm.TxManager{ScriptRunner: scopedComputedFieldRunner{}, ScriptStore: store}
+	payload, _ := json.Marshal(map[string]any{"doctype": dt.Name, "data": map[string]any{"title": "computed"}})
+	result, err := k.Execute(context.Background(), s.DB, registry, kernel.Operation{
+		Command: kernel.CommandRecordCreate, Payload: payload, Context: opCtx(s.Name, doctype.AdminRole),
+	})
+	if err != nil {
+		t.Fatalf("execute record.create: %v", err)
+	}
+	mustComplete(t, result)
+	var data kernel.ResultData
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		t.Fatalf("decode create result: %v", err)
+	}
+	var siteValue string
+	query := "SELECT site_value FROM " + s.Dialect.QuoteIdent(dt.RawTableName()) + " WHERE name = ?"
+	if err := s.DB.QueryRow(query, data.Name).Scan(&siteValue); err != nil {
+		t.Fatalf("read computed value: %v", err)
+	}
+	if siteValue != s.Name {
+		t.Fatalf("computed script value = %q, want operation site %q", siteValue, s.Name)
+	}
+}
+
+func TestConfiguredCommandUsesRecordLifecyclePipeline(t *testing.T) {
+	s := newSite(t, "site-a")
+	defer s.DB.Close()
+	for _, ddl := range kdb.ExtensibilityTablesMySQL()[:2] {
+		if _, err := s.DB.Exec(ddl); err != nil {
+			t.Fatalf("create extensibility tables: %v", err)
+		}
+	}
+	store := &script.Store{DB: s.DB, Dialect: s.Dialect}
+	for _, record := range []script.ScriptRecord{
+		{Name: "task-before-insert", Site: s.Name, ScriptType: script.TypeDocEvent, DocType: "Task", Event: script.EventBeforeInsert, IsActive: true, Script: "return document"},
+		{Name: "task-after-insert", Site: s.Name, ScriptType: script.TypeDocEvent, DocType: "Task", Event: script.EventAfterInsert, IsActive: true, Script: "return document"},
+		{Name: "task-before-save", Site: s.Name, ScriptType: script.TypeDocEvent, DocType: "Task", Event: script.EventBeforeSave, IsActive: true, Script: "return document"},
+		{Name: "task-after-save", Site: s.Name, ScriptType: script.TypeDocEvent, DocType: "Task", Event: script.EventAfterSave, IsActive: true, Script: "return document"},
+	} {
+		if err := store.Insert(record); err != nil {
+			t.Fatalf("insert lifecycle script: %v", err)
+		}
+	}
+	runner := &configuredCommandHookRunner{db: s.DB}
+	k := newKernel(s)
+	k.TxManager = &orm.TxManager{ScriptRunner: runner, ScriptStore: store}
+	k.Commands = kernel.NewCommandRegistry()
+	mustRegister(t, k, `
+name: task.create
+namespace: test
+version: 1
+input:
+  record: Task
+transaction:
+  - create:
+      record: Task
+      values:
+        title: $input.title
+`)
+	payload, _ := json.Marshal(map[string]any{"data": map[string]any{"title": "from-command"}})
+	result := exec(t, s, k, kernel.Operation{Command: "test.task.create", Payload: payload, Context: opCtx(s.Name, "Administrator")})
+	mustComplete(t, result)
+	var storedTitle string
+	if err := s.DB.QueryRow("SELECT title FROM `tabTask` WHERE title LIKE 'from-command%' ORDER BY creation DESC LIMIT 1").Scan(&storedTitle); err != nil {
+		t.Fatal("load created task:", err)
+	}
+	if storedTitle != "from-command-before-hook-before-save-hook" {
+		t.Fatalf("before_insert result = %q, want hook-modified title", storedTitle)
+	}
+	var storedPriority string
+	if err := s.DB.QueryRow("SELECT priority FROM `tabTask` WHERE title = ?", storedTitle).Scan(&storedPriority); err != nil {
+		t.Fatal("load configured-command default:", err)
+	}
+	if storedPriority != "Normal" {
+		t.Fatalf("configured-command default priority = %q, want Normal", storedPriority)
+	}
+	wantCreateEvents := []script.Event{script.EventBeforeInsert, script.EventBeforeSave, script.EventAfterInsert, script.EventAfterSave}
+	if len(runner.events) != len(wantCreateEvents) {
+		t.Fatalf("create lifecycle events = %#v, want %#v", runner.events, wantCreateEvents)
+	}
+	for index, event := range wantCreateEvents {
+		if runner.events[index] != event {
+			t.Fatalf("create lifecycle events = %#v, want %#v", runner.events, wantCreateEvents)
+		}
+	}
+	var createdName string
+	if err := s.DB.QueryRow("SELECT name FROM `tabTask` WHERE title='from-command-before-hook-before-save-hook'").Scan(&createdName); err != nil {
+		t.Fatal("load created task name:", err)
+	}
+	runner.events = nil
+	mustRegister(t, k, `
+name: task.update
+namespace: test
+version: 1
+input:
+  record: Task
+transaction:
+  - update:
+      record: Task
+      name: $input.name
+      values:
+        title: $input.title
+`)
+	updatePayload, _ := json.Marshal(map[string]any{"data": map[string]any{"name": createdName, "title": "edited"}})
+	updated := exec(t, s, k, kernel.Operation{Command: "test.task.update", Payload: updatePayload, Context: opCtx(s.Name, "Administrator")})
+	mustComplete(t, updated)
+	if len(runner.events) != 2 || runner.events[0] != script.EventBeforeSave || runner.events[1] != script.EventAfterSave {
+		t.Fatalf("update lifecycle events = %#v, want before_save then after_save", runner.events)
+	}
+	var updatedTitle string
+	if err := s.DB.QueryRow("SELECT title FROM `tabTask` WHERE name = ?", createdName).Scan(&updatedTitle); err != nil {
+		t.Fatal("load updated task:", err)
+	}
+	if updatedTitle != "edited-before-save-hook" {
+		t.Fatalf("before_save result = %q, want hook-modified title", updatedTitle)
+	}
+	runner.events = nil
+	foreignCreate := createOp(map[string]any{"title": "foreign owner"})
+	foreignCreate.Context = opCtx(s.Name, "Administrator")
+	foreignCreate.Context.User = "another-owner"
+	foreignCreate.Context.Owner = "another-owner"
+	foreignCreated, err := k.Execute(context.Background(), s.DB, s.Registry, foreignCreate)
+	if err != nil || foreignCreated.Error != nil {
+		t.Fatalf("seed owner-scoped record: result=%+v err=%v", foreignCreated.Error, err)
+	}
+	var foreignRecord kernel.ResultData
+	if err := json.Unmarshal(foreignCreated.Data, &foreignRecord); err != nil {
+		t.Fatal("decode owner-scoped record:", err)
+	}
+	foreignUpdatePayload, _ := json.Marshal(map[string]any{"data": map[string]any{"name": foreignRecord.Name, "title": "unauthorized edit"}})
+	foreignUpdate := kernel.Operation{Command: "test.task.update", Payload: foreignUpdatePayload, Context: opCtx(s.Name, "OwnerEditor")}
+	unauthorized := exec(t, s, k, foreignUpdate)
+	if unauthorized.Error == nil || unauthorized.Error.Type != contract.CodeNotFound {
+		t.Fatalf("owner-scoped command update error = %+v, want not found", unauthorized.Error)
+	}
+	var unchangedTitle string
+	if err := s.DB.QueryRow("SELECT title FROM `tabTask` WHERE name = ?", foreignRecord.Name).Scan(&unchangedTitle); err != nil {
+		t.Fatal("load owner-scoped record after denied update:", err)
+	}
+	if unchangedTitle != "foreign owner-before-hook-before-save-hook" {
+		t.Fatalf("owner-scoped record changed to %q after denied command", unchangedTitle)
+	}
+	runner.events = nil
+	mustRegister(t, k, `
+name: task.create_then_fail
+namespace: test
+version: 1
+input:
+  record: Task
+transaction:
+  - create:
+      record: Task
+      values:
+        title: $input.title
+  - update:
+      record: Task
+      name: $input.missing_record
+      values:
+        status: Done
+`)
+	failedPayload, _ := json.Marshal(map[string]any{"data": map[string]any{"title": "must-rollback"}})
+	failed := exec(t, s, k, kernel.Operation{Command: "test.task.create_then_fail", Payload: failedPayload, Context: opCtx(s.Name, "Administrator")})
+	if failed.Error == nil {
+		t.Fatal("later failing step unexpectedly committed")
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM `tabTask` WHERE title='must-rollback-before-hook'"); got != 0 {
+		t.Fatalf("failed config command left %d created records", got)
+	}
+	wantFailedEvents := []script.Event{script.EventBeforeInsert, script.EventBeforeSave}
+	if len(runner.events) != len(wantFailedEvents) {
+		t.Fatalf("failed command lifecycle events = %#v; after hooks must not run before commit", runner.events)
+	}
+	for index, event := range wantFailedEvents {
+		if runner.events[index] != event {
+			t.Fatalf("failed command lifecycle events = %#v; after hooks must not run before commit", runner.events)
+		}
+	}
 }
 
 type opOpt func(*kernel.OperationContext)
@@ -151,6 +417,16 @@ func payloadOp(command, name string, data map[string]any, opts ...opOpt) kernel.
 	op.Context.Site = "TBD"
 	for _, o := range opts {
 		o(&op.Context)
+	}
+	return op
+}
+
+func bundleOp(payload kernel.RecordMutationBundlePayload, opts ...opOpt) kernel.Operation {
+	raw, _ := json.Marshal(payload)
+	op := kernel.Operation{Command: kernel.CommandRecordMutateBundle, Payload: raw}
+	op.Context.Site = "TBD"
+	for _, option := range opts {
+		option(&op.Context)
 	}
 	return op
 }
@@ -247,6 +523,9 @@ func TestIdempotencyReplayAndKeyReuse(t *testing.T) {
 	if !replay.Replayed {
 		t.Fatalf("second identical operation must be flagged Replayed")
 	}
+	if len(first.Data) == 0 || string(replay.Data) != string(first.Data) {
+		t.Fatalf("idempotent replay must return the original result data; first=%s replay=%s", first.Data, replay.Data)
+	}
 	if s.taskCount(t) != 1 {
 		t.Fatalf("replay must not create a second document")
 	}
@@ -257,6 +536,487 @@ func TestIdempotencyReplayAndKeyReuse(t *testing.T) {
 	}
 	if s.taskCount(t) != 1 {
 		t.Fatalf("key reuse must not mutate state")
+	}
+}
+
+func TestConcurrentSameKeyCreateCommitsExactlyOnce(t *testing.T) {
+	s := newSite(t, "site-a")
+	defer s.DB.Close()
+	k := newKernel(s)
+	op := createOp(map[string]any{"title": "concurrent retry"}, withKey("concurrent-create-key"))
+	op.Context = opCtx(s.Name, "Administrator")
+	op.Context.IdempotencyKey = "concurrent-create-key"
+	start := make(chan struct{})
+	type execution struct {
+		result contract.CommandResult
+		err    *contract.Error
+	}
+	results := make(chan execution, 2)
+	for range 2 {
+		go func() {
+			<-start
+			result, err := k.Execute(context.Background(), s.DB, s.Registry, op)
+			results <- execution{result: result, err: err}
+		}()
+	}
+	close(start)
+	one, two := <-results, <-results
+	for _, outcome := range []execution{one, two} {
+		if outcome.err != nil {
+			t.Fatalf("concurrent retry failed: %v", outcome.err)
+		}
+		if outcome.result.Status != contract.StatusCompleted {
+			t.Fatalf("concurrent retry status = %s; expected completed", outcome.result.Status)
+		}
+	}
+	if string(one.result.Data) != string(two.result.Data) {
+		t.Fatalf("concurrent same-key calls returned different results: %s / %s", one.result.Data, two.result.Data)
+	}
+	if one.result.Replayed == two.result.Replayed {
+		t.Fatalf("expected one original result and one replay, got replay flags %t/%t", one.result.Replayed, two.result.Replayed)
+	}
+	if got := s.taskCount(t); got != 1 {
+		t.Fatalf("records created = %d, want exactly one", got)
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site=? AND command_name='record.create' AND status='completed'", s.Name); got != 1 {
+		t.Fatalf("completed audits = %d, want exactly one", got)
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site=? AND aggregate_type='Task'", s.Name); got != 1 {
+		t.Fatalf("outbox events = %d, want exactly one", got)
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site=? AND idempotency_key=?", s.Name, "concurrent-create-key"); got != 1 {
+		t.Fatalf("idempotency receipts = %d, want exactly one", got)
+	}
+}
+
+func TestConcurrentSameKeyMutationBundleCommitsExactlyOnce(t *testing.T) {
+	s := newSite(t, "site-bundle-concurrent-retry")
+	defer s.DB.Close()
+	k := newKernel(s)
+
+	rootData, err := json.Marshal(map[string]any{"title": "bundle root"})
+	if err != nil {
+		t.Fatal("marshal root data:", err)
+	}
+	childData, err := json.Marshal(map[string]any{"title": "bundle child"})
+	if err != nil {
+		t.Fatal("marshal child data:", err)
+	}
+	op := bundleOp(kernel.RecordMutationBundlePayload{
+		Doctype: "Task",
+		Records: []kernel.RecordMutationBundleItem{
+			{Key: "root", Doctype: "Task", Data: rootData},
+			{Key: "child", Doctype: "Task", Data: childData},
+		},
+	}, withRoles("Administrator"), withKey("concurrent-bundle-retry"))
+	op.Context = opCtx(s.Name, "Administrator")
+	op.Context.IdempotencyKey = "concurrent-bundle-retry"
+
+	start := make(chan struct{})
+	type execution struct {
+		result contract.CommandResult
+		err    *contract.Error
+	}
+	results := make(chan execution, 2)
+	for range 2 {
+		go func() {
+			<-start
+			result, execErr := k.Execute(context.Background(), s.DB, s.Registry, op)
+			results <- execution{result: result, err: execErr}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	for _, outcome := range []execution{first, second} {
+		if outcome.err != nil {
+			t.Fatalf("concurrent bundle retry failed: %v", outcome.err)
+		}
+		if outcome.result.Status != contract.StatusCompleted {
+			t.Fatalf("concurrent bundle status = %s; want completed", outcome.result.Status)
+		}
+	}
+	if string(first.result.Data) != string(second.result.Data) {
+		t.Fatalf("concurrent bundle calls returned different results: %s / %s", first.result.Data, second.result.Data)
+	}
+	if first.result.Replayed == second.result.Replayed {
+		t.Fatalf("expected one original result and one replay, got replay flags %t/%t", first.result.Replayed, second.result.Replayed)
+	}
+	if got := s.taskCount(t); got != 2 {
+		t.Fatalf("bundle records=%d, want exactly two", got)
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site=? AND command_name='record.mutate_bundle' AND status='completed'", s.Name); got != 2 {
+		t.Fatalf("completed bundle audit rows=%d, want one per record (2)", got)
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site=?", s.Name); got != 2 {
+		t.Fatalf("bundle outbox events=%d, want exactly two", got)
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site=? AND idempotency_key=?", s.Name, "concurrent-bundle-retry"); got != 1 {
+		t.Fatalf("bundle receipts=%d, want exactly one", got)
+	}
+}
+
+// TestRecordDeleteUsesCanonicalPipeline verifies deletion has the same durable
+// operation guarantees as create/update and can be retried safely.
+func TestRecordDeleteUsesCanonicalPipeline(t *testing.T) {
+	s := newSite(t, "site-a")
+	defer s.DB.Close()
+	k := newKernel(s)
+
+	created := exec(t, s, k, createOp(map[string]any{"title": "Remove me"}, withKey("create-delete-target")))
+	mustComplete(t, created)
+	var createdData kernel.ResultData
+	if err := json.Unmarshal(created.Data, &createdData); err != nil {
+		t.Fatalf("decode create result: %v", err)
+	}
+
+	deleteOp := payloadOp("record.delete", createdData.Name, nil, withKey("delete-once"))
+	deleted := exec(t, s, k, deleteOp)
+	mustComplete(t, deleted)
+	if n := s.taskCount(t); n != 0 {
+		t.Fatalf("delete must remove the record, remaining=%d", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND command_name = 'record.delete' AND doc_name = ? AND status = 'completed'", s.Name, createdData.Name); n != 1 {
+		t.Fatalf("expected one completed delete audit, got %d", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", s.Name, "delete-once"); n != 1 {
+		t.Fatalf("expected one delete receipt, got %d", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", s.Name, createdData.Name); n != 2 {
+		t.Fatalf("expected create and delete events, got %d outbox rows", n)
+	}
+
+	replayed := exec(t, s, k, deleteOp)
+	mustComplete(t, replayed)
+	if !replayed.Replayed {
+		t.Fatal("repeated delete must return the committed result")
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND command_name = 'record.delete' AND doc_name = ? AND status = 'completed'", s.Name, createdData.Name); n != 1 {
+		t.Fatalf("delete replay wrote another audit record, got %d", n)
+	}
+}
+
+func TestRecordMutationBundleCommitsRelatedCreateAndUpdateOnce(t *testing.T) {
+	s := newSite(t, "site-mutation-bundle")
+	defer s.DB.Close()
+	k := newKernel(s)
+
+	seed := exec(t, s, k, createOp(map[string]any{"title": "Existing"}))
+	mustComplete(t, seed)
+	var existing kernel.ResultData
+	if err := json.Unmarshal(seed.Data, &existing); err != nil {
+		t.Fatal("decode seed result:", err)
+	}
+	firstData, _ := json.Marshal(map[string]any{"title": "$records.created.name"})
+	newData, _ := json.Marshal(map[string]any{"title": "Created in bundle"})
+	updateData, _ := json.Marshal(map[string]any{"title": "$records.first.name"})
+	operation := bundleOp(kernel.RecordMutationBundlePayload{
+		Doctype: "Task",
+		Records: []kernel.RecordMutationBundleItem{
+			{Key: "first", Doctype: "Task", Data: firstData},
+			{Key: "created", Doctype: "Task", Data: newData},
+			{Key: "updated", Operation: "update", Doctype: "Task", Name: existing.Name, Data: updateData},
+		},
+	}, withRoles("Administrator"), withKey("bundle-create-update"))
+	result := exec(t, s, k, operation)
+	mustComplete(t, result)
+	var bundle kernel.ResultData
+	if err := json.Unmarshal(result.Data, &bundle); err != nil {
+		t.Fatal("decode bundle result:", err)
+	}
+	if !bundle.Created || bundle.Name == "" || len(bundle.Related) != 2 || bundle.Related[0].Key != "created" || !bundle.Related[0].Created || bundle.Related[1].Key != "updated" || bundle.Related[1].Created {
+		t.Fatalf("unexpected bundle result: %+v", bundle)
+	}
+	var forwardTitle string
+	if err := s.DB.QueryRow("SELECT title FROM `tabTask` WHERE name = ?", bundle.Name).Scan(&forwardTitle); err != nil {
+		t.Fatal("read forward-referenced record:", err)
+	}
+	if forwardTitle != bundle.Related[0].Name {
+		t.Fatalf("forward bundle reference resolved to %q, want generated later name %q", forwardTitle, bundle.Related[0].Name)
+	}
+	var updatedTitle string
+	if err := s.DB.QueryRow("SELECT title FROM `tabTask` WHERE name = ?", existing.Name).Scan(&updatedTitle); err != nil {
+		t.Fatal("read updated record:", err)
+	}
+	if updatedTitle != bundle.Name {
+		t.Fatalf("bundle reference resolved to %q, want generated name %q", updatedTitle, bundle.Name)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM `tabTask`"); n != 3 {
+		t.Fatalf("bundle committed %d records, want 3", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND operation_id = ? AND status = 'completed'", s.Name, bundle.Operation); n != 3 {
+		t.Fatalf("bundle operation audit rows=%d, want one per changed record", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 4 {
+		t.Fatalf("bundle + seed outbox rows=%d, want 4", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", s.Name, "bundle-create-update"); n != 1 {
+		t.Fatalf("bundle receipt rows=%d, want 1", n)
+	}
+
+	replay := exec(t, s, k, operation)
+	mustComplete(t, replay)
+	if !replay.Replayed || string(replay.Data) != string(result.Data) {
+		t.Fatalf("bundle replay did not return original result: replayed=%v data=%s original=%s", replay.Replayed, replay.Data, result.Data)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM `tabTask`"); n != 3 {
+		t.Fatalf("bundle replay duplicated records: %d", n)
+	}
+	changedPayload := kernel.RecordMutationBundlePayload{
+		Doctype: "Task",
+		Records: []kernel.RecordMutationBundleItem{
+			{Key: "first", Doctype: "Task", Data: json.RawMessage(`{"title":"different"}`)},
+			{Key: "created", Doctype: "Task", Data: newData},
+			{Key: "updated", Operation: "update", Doctype: "Task", Name: existing.Name, Data: updateData},
+		},
+	}
+	reused := exec(t, s, k, bundleOp(changedPayload, withRoles("Administrator"), withKey("bundle-create-update")))
+	if reused.Error == nil || reused.Error.Type != contract.CodeIdempotencyKeyReused {
+		t.Fatalf("changed bundle payload should conflict on reused key, got %+v", reused.Error)
+	}
+}
+
+func TestRecordMutationBundleRejectsUnauthorizedRelatedRecord(t *testing.T) {
+	s := newSite(t, "site-bundle-auth")
+	defer s.DB.Close()
+	k := newKernel(s)
+	seed := exec(t, s, k, createOp(map[string]any{"title": "Protected"}))
+	mustComplete(t, seed)
+	var record kernel.ResultData
+	if err := json.Unmarshal(seed.Data, &record); err != nil {
+		t.Fatal("decode record result:", err)
+	}
+	newData, _ := json.Marshal(map[string]any{"title": "must roll back"})
+	updateData, _ := json.Marshal(map[string]any{"title": "unauthorized update"})
+	operation := bundleOp(kernel.RecordMutationBundlePayload{
+		Doctype: "Task",
+		Records: []kernel.RecordMutationBundleItem{
+			{Key: "new", Doctype: "Task", Data: newData},
+			{Key: "protected", Operation: "update", Doctype: "Task", Name: record.Name, Data: updateData},
+		},
+	}, withUser("creator"), withRoles("Creator"))
+	result := exec(t, s, k, operation)
+	if result.Error == nil || result.Error.Type != contract.CodePermissionDenied {
+		t.Fatalf("bundle related-record denial = status %s error %+v", result.Status, result.Error)
+	}
+	if n := s.taskCount(t); n != 1 {
+		t.Fatalf("unauthorized bundle created a record, count=%d", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 1 {
+		t.Fatalf("unauthorized bundle added outbox events, count=%d", n)
+	}
+}
+
+func TestRecordMutationBundleRollsBackEarlierWritesOnSQLFailure(t *testing.T) {
+	s := newSite(t, "site-bundle-rollback")
+	defer s.DB.Close()
+	k := newKernel(s)
+	existingResult := exec(t, s, k, createOp(map[string]any{"title": "keep unchanged"}))
+	mustComplete(t, existingResult)
+	duplicateResult := exec(t, s, k, createOp(map[string]any{"title": "unique seed", "serial": "DUPLICATE"}))
+	mustComplete(t, duplicateResult)
+	var existing kernel.ResultData
+	if err := json.Unmarshal(existingResult.Data, &existing); err != nil {
+		t.Fatal("decode existing result:", err)
+	}
+	updateData, _ := json.Marshal(map[string]any{"title": "must roll back"})
+	duplicateData, _ := json.Marshal(map[string]any{"title": "must not insert", "serial": "DUPLICATE"})
+	result := exec(t, s, k, bundleOp(kernel.RecordMutationBundlePayload{
+		Doctype: "Task",
+		Records: []kernel.RecordMutationBundleItem{
+			{Key: "update", Operation: "update", Doctype: "Task", Name: existing.Name, Data: updateData},
+			{Key: "duplicate", Doctype: "Task", Data: duplicateData},
+		},
+	}, withRoles("Administrator"), withKey("bundle-rollback")))
+	if result.Error == nil || result.Error.Type != contract.CodeConflict {
+		t.Fatalf("unique violation bundle result = status %s error %+v, want conflict", result.Status, result.Error)
+	}
+	var title string
+	if err := s.DB.QueryRow("SELECT title FROM `tabTask` WHERE name = ?", existing.Name).Scan(&title); err != nil {
+		t.Fatal("read rolled-back update:", err)
+	}
+	if title != "keep unchanged" || s.taskCount(t) != 2 {
+		t.Fatalf("failed bundle left partial business data: title=%q task_count=%d", title, s.taskCount(t))
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND command_name = 'record.mutate_bundle' AND status = 'completed'", s.Name); n != 0 {
+		t.Fatalf("failed bundle committed %d audit rows", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 2 {
+		t.Fatalf("failed bundle changed outbox count to %d, want only two seed events", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = 'bundle-rollback'", s.Name); n != 0 {
+		t.Fatalf("failed bundle committed an idempotency receipt")
+	}
+}
+
+func TestRecordMutationBundleRejectsMalformedReferencesAndDuplicateKeys(t *testing.T) {
+	s := newSite(t, "site-bundle-invalid")
+	defer s.DB.Close()
+	k := newKernel(s)
+	unknownRef, _ := json.Marshal(map[string]any{"title": "$records.missing.name"})
+	unknown := bundleOp(kernel.RecordMutationBundlePayload{
+		Doctype: "Task", Records: []kernel.RecordMutationBundleItem{{Key: "record", Doctype: "Task", Data: unknownRef}},
+	}, withRoles("Administrator"))
+	if result := exec(t, s, k, unknown); result.Error == nil || result.Error.Type != contract.CodeValidationFailed {
+		t.Fatalf("unknown reference result = %+v", result.Error)
+	}
+	data, _ := json.Marshal(map[string]any{"title": "duplicate key"})
+	duplicate := bundleOp(kernel.RecordMutationBundlePayload{
+		Doctype: "Task", Records: []kernel.RecordMutationBundleItem{
+			{Key: "same", Doctype: "Task", Data: data}, {Key: "same", Doctype: "Task", Data: data},
+		},
+	}, withRoles("Administrator"))
+	if result := exec(t, s, k, duplicate); result.Error == nil || result.Error.Type != contract.CodeValidationFailed {
+		t.Fatalf("duplicate key result = %+v", result.Error)
+	}
+	tooMany := kernel.RecordMutationBundlePayload{Doctype: "Task"}
+	for index := 0; index < 11; index++ {
+		tooMany.Records = append(tooMany.Records, kernel.RecordMutationBundleItem{Key: fmt.Sprintf("record-%02d", index), Doctype: "Task", Data: data})
+	}
+	if result := exec(t, s, k, bundleOp(tooMany, withRoles("Administrator"))); result.Error == nil || result.Error.Type != contract.CodeValidationFailed {
+		t.Fatalf("oversized bundle result = %+v", result.Error)
+	}
+	if n := s.taskCount(t); n != 0 {
+		t.Fatalf("invalid bundles wrote %d records", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND command_name = 'record.mutate_bundle' AND status = 'completed'", s.Name); n != 0 {
+		t.Fatalf("invalid bundle wrote %d completed audits", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 0 {
+		t.Fatalf("invalid bundle wrote %d outbox events", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ?", s.Name); n != 0 {
+		t.Fatalf("invalid bundle wrote %d receipts", n)
+	}
+}
+
+func TestRecordMutationBundleRejectsStaleRootVersion(t *testing.T) {
+	s := newSite(t, "site-bundle-version")
+	defer s.DB.Close()
+	k := newKernel(s)
+	created := exec(t, s, k, createOp(map[string]any{"title": "Concurrent"}))
+	mustComplete(t, created)
+	var record kernel.ResultData
+	if err := json.Unmarshal(created.Data, &record); err != nil {
+		t.Fatal("decode record result:", err)
+	}
+	updateData, _ := json.Marshal(map[string]any{"title": "must not win"})
+	operation := bundleOp(kernel.RecordMutationBundlePayload{
+		Doctype: "Task",
+		Records: []kernel.RecordMutationBundleItem{{Key: "root", Operation: "update", Doctype: "Task", Name: record.Name, Data: updateData}},
+	}, withRoles("Administrator"), withExpectedVersion("stale-version"))
+	result := exec(t, s, k, operation)
+	if result.Error == nil || result.Error.Type != contract.CodeConflict {
+		t.Fatalf("stale bundle expected-version = status %s error %+v, want conflict", result.Status, result.Error)
+	}
+	var title string
+	if err := s.DB.QueryRow("SELECT title FROM `tabTask` WHERE name = ?", record.Name).Scan(&title); err != nil {
+		t.Fatal("read unchanged bundle record:", err)
+	}
+	if title != "Concurrent" {
+		t.Fatalf("stale bundle changed title to %q", title)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND command_name = 'record.mutate_bundle' AND status = 'completed'", s.Name); n != 0 {
+		t.Fatalf("stale bundle committed %d completion audits", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 1 {
+		t.Fatalf("stale bundle changed outbox count to %d, want only the seed create event", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ?", s.Name); n != 0 {
+		t.Fatalf("stale bundle created a receipt, receipts=%d", n)
+	}
+}
+
+func TestRecordWorkflowTransitionUsesCanonicalPipeline(t *testing.T) {
+	s := newSite(t, "site-workflow")
+	defer s.DB.Close()
+	s.Registry.Workflows.Register(&doctype.Workflow{
+		Name: "Task Lifecycle", DocumentType: "Task", IsActive: true, WorkflowStateField: "status",
+		States: []doctype.WorkflowState{
+			{State: "Open", DocStatus: 0},
+			{State: "Done", DocStatus: 1},
+		},
+		Transitions: []doctype.WorkflowTransition{{Action: "Complete", From: "Open", To: "Done", Allowed: "Administrator", RequireFields: []string{"title"}}},
+	})
+	k := newKernel(s)
+	created := exec(t, s, k, createOp(map[string]any{"title": "Finish this", "status": "Open"}))
+	mustComplete(t, created)
+	var docName string
+	if err := s.DB.QueryRow("SELECT name FROM `tabTask` WHERE title = ?", "Finish this").Scan(&docName); err != nil {
+		t.Fatal("load task name:", err)
+	}
+	payload, err := json.Marshal(map[string]any{"doctype": "Task", "name": docName, "action": "Complete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := kernel.Operation{Command: kernel.CommandRecordWorkflowTransition, Payload: payload}
+	op.Context.Site = s.Name
+	op.Context.User = "Administrator"
+	op.Context.Roles = []string{"Administrator"}
+	op.Context.Actor = contract.ActorContext{PrincipalID: "Administrator", PrincipalType: contract.PrincipalHuman, Site: s.Name, Roles: op.Context.Roles, AuthenticatedAt: time.Now()}
+	result, cerr := k.Execute(context.Background(), s.DB, s.Registry, op)
+	if cerr != nil || result.Status != contract.StatusCompleted {
+		t.Fatalf("workflow command = status %q error %+v", result.Status, cerr)
+	}
+	var state string
+	var docStatus int
+	if err := s.DB.QueryRow("SELECT status, doc_status FROM `tabTask` WHERE name = ?", docName).Scan(&state, &docStatus); err != nil {
+		t.Fatal("read transitioned task:", err)
+	}
+	if state != "Done" || docStatus != 1 {
+		t.Fatalf("transitioned task = state %q doc_status %d, want Done/1", state, docStatus)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ?", s.Name, docName, kernel.CommandRecordWorkflowTransition); n != 1 {
+		t.Fatalf("workflow audit rows = %d, want 1", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", s.Name, docName); n != 2 {
+		t.Fatalf("create + transition outbox rows = %d, want 2", n)
+	}
+}
+
+func TestPublicFormSubmitUsesConfiguredAllowlistThroughKernel(t *testing.T) {
+	s := newSite(t, "site-public-form")
+	defer s.DB.Close()
+	dt := s.Registry.Get("Task")
+	dt.PublicAccess = &doctype.PublicAccess{Enabled: true, Fields: []string{"title"}}
+	s.Registry.Register(dt)
+	s.Registry.Views.Register(&doctype.View{
+		Name: "Public request", Route: "/request", SourceDocType: "Task",
+		PublicAccess: &doctype.ViewPublicAccess{Enabled: true, AllowMutations: true},
+	})
+	k := newKernel(s)
+	payload, err := json.Marshal(map[string]any{
+		"doctype": "Task", "public_route": "/request",
+		"data": map[string]any{"title": "Public ticket", "serial": "must-be-discarded"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := kernel.Operation{Command: kernel.CommandPublicFormSubmit, Payload: payload}
+	op.Context.Site = s.Name
+	op.Context.User = "public"
+	op.Context.Source = kernel.SourceHTTP
+	op.Context.Actor = contract.ActorContext{PrincipalID: "public-form", PrincipalType: contract.PrincipalPublic, Site: s.Name, AuthenticatedAt: time.Now()}
+	result, cerr := k.Execute(context.Background(), s.DB, s.Registry, op)
+	if cerr != nil || result.Status != contract.StatusCompleted {
+		t.Fatalf("public submit = status %q error %+v", result.Status, cerr)
+	}
+	var operation kernel.ResultData
+	if err := json.Unmarshal(result.Data, &operation); err != nil {
+		t.Fatal("decode public result:", err)
+	}
+	var title, serial sql.NullString
+	if err := s.DB.QueryRow("SELECT title, serial FROM `tabTask` WHERE name = ?", operation.Name).Scan(&title, &serial); err != nil {
+		t.Fatal("read public record:", err)
+	}
+	if title.String != "Public ticket" || serial.Valid {
+		t.Fatalf("public fields persisted title=%q serial=%#v", title.String, serial)
+	}
+
+	payload, _ = json.Marshal(map[string]any{"doctype": "Task", "public_route": "/disabled", "data": map[string]any{"title": "Denied"}})
+	op.Payload = payload
+	denied, cerr := k.Execute(context.Background(), s.DB, s.Registry, op)
+	if cerr == nil || cerr.Type != contract.CodePermissionDenied || denied.Status != contract.StatusRejected {
+		t.Fatalf("unconfigured public route must be denied, got status=%q error=%+v", denied.Status, cerr)
 	}
 }
 
@@ -364,6 +1124,73 @@ func TestStaleVersionConflict(t *testing.T) {
 	}
 }
 
+func TestConcurrentExpectedVersionAllowsOnlyOneUpdate(t *testing.T) {
+	s := newSite(t, "site-racing-update")
+	defer s.DB.Close()
+	k := newKernel(s)
+	created := exec(t, s, k, createOp(map[string]any{"title": "initial"}))
+	mustComplete(t, created)
+	var record kernel.ResultData
+	if err := json.Unmarshal(created.Data, &record); err != nil {
+		t.Fatal("decode create result:", err)
+	}
+	var modified time.Time
+	if err := s.DB.QueryRow("SELECT modified FROM `tabTask` WHERE name = ?", record.Name).Scan(&modified); err != nil {
+		t.Fatal("load expected version:", err)
+	}
+	expected := kernel.CanonicalVersion(modified)
+	start := make(chan struct{})
+	type execution struct {
+		result contract.CommandResult
+		err    *contract.Error
+	}
+	results := make(chan execution, 2)
+	for _, title := range []string{"first contender", "second contender"} {
+		title := title
+		op := updateOp(record.Name, map[string]any{"title": title}, withExpectedVersion(expected))
+		op.Context = opCtx(s.Name, "Administrator")
+		op.Context.ExpectedVersion = expected
+		go func() {
+			<-start
+			result, err := k.Execute(context.Background(), s.DB, s.Registry, op)
+			results <- execution{result: result, err: err}
+		}()
+	}
+	close(start)
+	successes, conflicts := 0, 0
+	for range 2 {
+		outcome := <-results
+		if outcome.err != nil {
+			if outcome.err.Type == contract.CodeConflict {
+				conflicts++
+				continue
+			}
+			t.Fatalf("concurrent version check failed unexpectedly: %v", outcome.err)
+		}
+		switch {
+		case outcome.result.Error == nil && outcome.result.Status == contract.StatusCompleted:
+			successes++
+		case outcome.result.Error != nil && outcome.result.Error.Type == contract.CodeConflict:
+			conflicts++
+		default:
+			t.Fatalf("unexpected concurrent update result: status=%s error=%+v", outcome.result.Status, outcome.result.Error)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent expected-version results: successes=%d conflicts=%d; want 1 each", successes, conflicts)
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site=? AND command_name='record.update' AND status='completed'", s.Name); got != 1 {
+		t.Fatalf("committed update audits = %d, want exactly one", got)
+	}
+	var finalTitle string
+	if err := s.DB.QueryRow("SELECT title FROM `tabTask` WHERE name = ?", record.Name).Scan(&finalTitle); err != nil {
+		t.Fatal("load final record:", err)
+	}
+	if finalTitle != "first contender" && finalTitle != "second contender" {
+		t.Fatalf("final title = %q, neither concurrent update won", finalTitle)
+	}
+}
+
 // TestStaleVersionConflictLegacyToken keeps backward compatibility with the
 // earlier causation-id convention while the explicit expected_version field is
 // being adopted by adapters.
@@ -461,7 +1288,7 @@ func TestOutboxDeliveryRetryAndRestart(t *testing.T) {
 	dest := &stubPublisher{}
 	dest.fail.Store(true)
 
-	pub := outbox.NewPublisher(s.DB, dest)
+	pub := outbox.NewPublisher(s.DB, dest, s.Dialect)
 	pub.LeaseOwner = "test-publisher"
 
 	// Outage window: publish attempts fail, rows stay pending.

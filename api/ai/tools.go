@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
 )
 
@@ -463,7 +465,37 @@ func defaultString(value, fallback string) string {
 }
 
 func ExecuteTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName string) string {
-	return executeSingleTool(tx, reg, toolName, args, owner, siteName, "", "")
+	return executeSingleToolWithMutationKey(tx, reg, toolName, args, owner, siteName, "", "", "", false, rolesForTool(tx))
+}
+
+// ExecuteConfirmedToolWithIdempotencyKey is for authenticated adapters that
+// already enforced the tool catalog and explicit confirmation at their
+// boundary. Kernel authorization still runs; the adapter must pass the
+// client's Idempotency-Key to make retried mutations replay-safe.
+func ExecuteConfirmedToolWithIdempotencyKey(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, idempotencyKey string) string {
+	key := channelToolMutationIdempotencyKey(siteName, idempotencyKey)
+	return executeSingleToolWithMutationKey(tx, reg, toolName, args, owner, siteName, "", "", key, true, rolesForTool(tx))
+}
+
+func rolesForTool(tx *orm.TxManager) []string {
+	if tx == nil {
+		return nil
+	}
+	if len(tx.CurrentUserRoles) > 0 {
+		return append([]string(nil), tx.CurrentUserRoles...)
+	}
+	if role := strings.TrimSpace(tx.CurrentUserRole); role != "" {
+		return []string{role}
+	}
+	return nil
+}
+
+func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID string) string {
+	return executeSingleToolWithRoles(tx, reg, toolName, args, owner, siteName, runID, stepID, rolesForTool(tx))
+}
+
+func executeSingleToolWithRoles(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID string, userRoles []string) string {
+	return executeSingleToolWithRolesAndCallID(tx, reg, toolName, args, owner, siteName, runID, stepID, "", userRoles)
 }
 
 func classifyToolSafety(name string) string {
@@ -853,7 +885,9 @@ fields:
 // ---------------------------------------------------------------------------
 
 // executeToolCallsForAI runs tool calls and returns results in OpenAI tool message format.
-func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner, siteName, runID, stepID, conversationID string) []map[string]any {
+func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner, siteName, runID, stepID, conversationID string, userRoles []string) []map[string]any {
+	ctx = WithDialect(ctx, tx.Dialect)
+	tx.Context = WithDialect(tx.Context, tx.Dialect)
 	var results []map[string]any
 	for _, tc := range toolCalls {
 		call, ok := tc.(map[string]any)
@@ -929,7 +963,7 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 			continue
 		}
 
-		result := executeSingleTool(tx, reg, name, args, owner, siteName, runID, stepID)
+		result := executeSingleToolWithRolesAndCallID(tx, reg, name, args, owner, siteName, runID, stepID, id, userRoles)
 		status := "completed"
 		if isToolError(result) {
 			status = "failed"
@@ -956,7 +990,15 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 	return results
 }
 
-func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID string) string {
+// executeSingleToolWithRolesAndCallID is the production AI tool path. DocType
+// tools use the same role permission matrix as human requests and derive a
+// mutation receipt key from the persisted run/step/tool-call identity.
+func executeSingleToolWithRolesAndCallID(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, toolCallID string, userRoles []string) string {
+	key := aiToolMutationIdempotencyKey(siteName, runID, stepID, toolCallID)
+	return executeSingleToolWithMutationKey(tx, reg, toolName, args, owner, siteName, runID, stepID, key, false, userRoles)
+}
+
+func executeSingleToolWithMutationKey(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, idempotencyKey string, adapterConfirmed bool, userRoles []string) string {
 	if err := requireRecentAuthForTool(tx.Context, toolName); err != nil {
 		return err.Error()
 	}
@@ -1081,6 +1123,18 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 	if dt == nil {
 		return fmt.Sprintf("DocType %q not found", doctypeName)
 	}
+	permissionOperation := map[string]string{"find": "read", "list": "read", "get": "read", "create": "create", "update": "write"}[operation]
+	if permissionOperation != "" {
+		if len(userRoles) == 0 && !adapterConfirmed {
+			return fmt.Sprintf("Permission denied: no roles assigned for %s", dt.Name)
+		}
+		if len(userRoles) > 0 && !adapterConfirmed {
+			allowed, _ := reg.CanUser(userRoles, dt.Name, permissionOperation)
+			if !allowed {
+				return fmt.Sprintf("Permission denied: cannot %s on %s", permissionOperation, dt.Name)
+			}
+		}
+	}
 
 	switch operation {
 	case "find":
@@ -1133,12 +1187,14 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 		}
 		return fmt.Sprintf("%s %q: %v", dt.Name, name, doc.Fields)
 	case "create":
-		if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
-			_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
-			if stepID != "" && runID != "" {
-				_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
+		if !adapterConfirmed {
+			if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
+				_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
+				if stepID != "" && runID != "" {
+					_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
+				}
+				return fmt.Sprintf("Approval required for %s_create. A durable approval has been recorded and the tool was not executed.", dt.Name)
 			}
-			return fmt.Sprintf("Approval required for %s_create. A durable approval has been recorded and the tool was not executed.", dt.Name)
 		}
 		// Validate field names — reject unknown fields with a helpful message.
 		if unknown := unknownFields(args, dt); len(unknown) > 0 {
@@ -1146,25 +1202,28 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string
 			return fmt.Sprintf("Error: unknown fields: %s. Valid fields: %s",
 				strings.Join(unknown, ", "), availableFieldNames(dt))
 		}
-		doc := doctype.NewDocument(dt.Name)
-		for k, v := range args {
-			doc.Set(k, v)
-		}
-		if err := tx.Insert(dt, doc, owner, "ai-assistant"); err != nil {
+		result, err := executeAIRecordMutationWithKey(tx, reg, kernel.CommandRecordCreate, dt.Name, "", args, owner, userRoles, idempotencyKey, adapterConfirmed)
+		if err != nil {
 			return fmt.Sprintf("Error creating %s: %v", dt.Name, err)
 		}
-		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
-		return fmt.Sprintf("Created %s %q.", dt.Name, doc.Name)
-	case "update":
-		if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
-			_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
-			if stepID != "" && runID != "" {
-				_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
-			}
-			return fmt.Sprintf("Approval required for %s_update. A durable approval has been recorded and the tool was not executed.", dt.Name)
+		if !adapterConfirmed {
+			_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
 		}
-		result := executeUpdateTool(tx, reg, dt, args, owner)
-		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
+		return fmt.Sprintf("Created %s %q.", dt.Name, result.Name)
+	case "update":
+		if !adapterConfirmed {
+			if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
+				_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
+				if stepID != "" && runID != "" {
+					_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
+				}
+				return fmt.Sprintf("Approval required for %s_update. A durable approval has been recorded and the tool was not executed.", dt.Name)
+			}
+		}
+		result := executeUpdateToolWithKey(tx, reg, dt, args, owner, userRoles, idempotencyKey, adapterConfirmed)
+		if !adapterConfirmed {
+			_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
+		}
 		return result
 	default:
 		return fmt.Sprintf("Unknown operation: %s", operation)
@@ -1200,7 +1259,7 @@ func toolDescriptorForName(toolName string) *ToolDescriptor {
 	return nil
 }
 
-func executeUpdateTool(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, args map[string]any, owner string) string {
+func executeUpdateToolWithKey(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, args map[string]any, owner string, userRoles []string, idempotencyKey string, adapterConfirmed bool) string {
 	name, _ := args["name"].(string)
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -1226,29 +1285,79 @@ func executeUpdateTool(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.Doc
 	if len(changes) == 0 {
 		return fmt.Sprintf("Error updating %s: provide at least one writable field.", dt.Name)
 	}
-	oldDoc, err := tx.GetDoc(dt, name, "")
+	result, err := executeAIRecordMutationWithKey(tx, reg, kernel.CommandRecordUpdate, dt.Name, name, changes, owner, userRoles, idempotencyKey, adapterConfirmed)
 	if err != nil {
-		return fmt.Sprintf("%s %q not found.", dt.Name, name)
-	}
-	doc := doctype.NewDocument(dt.Name)
-	doc.Name = name
-	doc.IsNew = false
-	for _, f := range dt.DataFields() {
-		doc.Set(f.Fieldname, oldDoc.Get(f.Fieldname))
-	}
-	for key, value := range changes {
-		doc.Set(key, value)
-	}
-	if err := tx.RunHooksForValidate(dt, doc, oldDoc); err != nil {
 		return fmt.Sprintf("Error updating %s: %v", dt.Name, err)
 	}
-	if validationErrs := doctype.ValidateDocument(dt, doc, reg, oldDoc); validationErrs.HasErrors() {
-		return fmt.Sprintf("Error updating %s: %v", dt.Name, validationErrs)
+	return fmt.Sprintf("Updated %s %q.", dt.Name, result.Name)
+}
+
+func executeAIRecordMutationWithKey(tx *orm.TxManager, reg *doctype.Registry, command, doctypeName, name string, fields map[string]any, owner string, roles []string, idempotencyKey string, allowDelegated bool) (*kernel.ResultData, error) {
+	payload := struct {
+		Doctype string         `json:"doctype"`
+		Name    string         `json:"name,omitempty"`
+		Data    map[string]any `json:"data"`
+	}{Doctype: doctypeName, Name: name, Data: fields}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode record operation: %w", err)
 	}
-	if err := tx.Save(dt, doc, "ai-assistant", "", oldDoc); err != nil {
-		return fmt.Sprintf("Error updating %s: %v", dt.Name, err)
+	site := tx.SiteName
+	if site == "" {
+		return nil, fmt.Errorf("operation site is missing")
 	}
-	return fmt.Sprintf("Updated %s %q.", dt.Name, doc.Name)
+	principal := owner
+	if principal == "" {
+		principal = "ai-assistant"
+	}
+	actorRoles := append([]string(nil), roles...)
+	if len(actorRoles) == 0 && !allowDelegated {
+		return nil, fmt.Errorf("permission denied: no actor roles")
+	}
+	role := tx.CurrentUserRole
+	if role == "" && len(actorRoles) > 0 {
+		role = actorRoles[0]
+	}
+	actor := contract.ActorContext{
+		PrincipalID: principal, PrincipalType: contract.PrincipalAgent, SubjectUserID: owner,
+		Site: site, Roles: actorRoles, AuthenticatedAt: time.Now().UTC(),
+	}
+	engine := kernel.New(tx.Dialect, tx.Outbox)
+	engine.TxManager = tx
+	ctx := tx.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, cerr := engine.Execute(ctx, tx.DB, reg, kernel.Operation{
+		Context: kernel.OperationContext{Site: site, Actor: actor, User: owner, UserRole: role, Roles: actorRoles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
+		Command: command, Payload: raw,
+	})
+	if cerr != nil {
+		return nil, cerr
+	}
+	var operation kernel.ResultData
+	if err := json.Unmarshal(result.Data, &operation); err != nil {
+		return nil, fmt.Errorf("decode record result: %w", err)
+	}
+	return &operation, nil
+}
+
+func aiToolMutationIdempotencyKey(site, runID, stepID, toolCallID string) string {
+	if site == "" || runID == "" || stepID == "" || toolCallID == "" {
+		return ""
+	}
+	identity := site + "\x00" + runID + "\x00" + stepID + "\x00" + toolCallID
+	digest := sha256.Sum256([]byte(identity))
+	return "ai-tool-" + hex.EncodeToString(digest[:])
+}
+
+func channelToolMutationIdempotencyKey(site, clientKey string) string {
+	clientKey = strings.TrimSpace(clientKey)
+	if site == "" || clientKey == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(site + "\x00" + clientKey))
+	return "channel-tool-" + hex.EncodeToString(digest[:])
 }
 
 func formatDocSummary(dt *doctype.DocType, doc *doctype.Document, index int) string {

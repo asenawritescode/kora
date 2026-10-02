@@ -15,12 +15,12 @@ func (h *Handler) HandleScriptList(c *gin.Context) {
 	siteName, _ := c.Get("site_name")
 	siteNameStr, _ := siteName.(string)
 
-	if h.SiteScriptStores == nil {
+	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
 		c.JSON(http.StatusOK, Response{Data: []any{}})
 		return
 	}
-	store, exists := h.SiteScriptStores[siteNameStr]
-	if !exists || store == nil {
+	store := h.runtimeService(c, siteNameStr).ScriptStore
+	if store == nil {
 		c.JSON(http.StatusOK, Response{Data: []any{}})
 		return
 	}
@@ -45,12 +45,12 @@ func (h *Handler) HandleScriptGet(c *gin.Context) {
 	siteNameStr, _ := siteName.(string)
 	name := c.Param("name")
 
-	if h.SiteScriptStores == nil {
+	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
 		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
 		return
 	}
-	store, exists := h.SiteScriptStores[siteNameStr]
-	if !exists || store == nil {
+	store := h.runtimeService(c, siteNameStr).ScriptStore
+	if store == nil {
 		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
 		return
 	}
@@ -75,12 +75,12 @@ func (h *Handler) HandleScriptCreate(c *gin.Context) {
 	user, _ := c.Get("user")
 	userStr, _ := user.(string)
 
-	if h.SiteScriptStores == nil {
+	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
 		writeError(c, http.StatusInternalServerError, "server.store_unavailable", "Script store not available", nil)
 		return
 	}
-	store, exists := h.SiteScriptStores[siteNameStr]
-	if !exists || store == nil {
+	store := h.runtimeService(c, siteNameStr).ScriptStore
+	if store == nil {
 		writeError(c, http.StatusInternalServerError, "server.store_unavailable", "Script store not available", nil)
 		return
 	}
@@ -211,12 +211,12 @@ func (h *Handler) HandleScriptUpdate(c *gin.Context) {
 	userStr, _ := user.(string)
 	name := c.Param("name")
 
-	if h.SiteScriptStores == nil {
+	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
 		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
 		return
 	}
-	store, exists := h.SiteScriptStores[siteNameStr]
-	if !exists || store == nil {
+	store := h.runtimeService(c, siteNameStr).ScriptStore
+	if store == nil {
 		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
 		return
 	}
@@ -269,12 +269,12 @@ func (h *Handler) HandleScriptDelete(c *gin.Context) {
 	siteNameStr, _ := siteName.(string)
 	name := c.Param("name")
 
-	if h.SiteScriptStores == nil {
+	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
 		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
 		return
 	}
-	store, exists := h.SiteScriptStores[siteNameStr]
-	if !exists || store == nil {
+	store := h.runtimeService(c, siteNameStr).ScriptStore
+	if store == nil {
 		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
 		return
 	}
@@ -322,12 +322,12 @@ func (h *Handler) HandleScriptExecutions(c *gin.Context) {
 	siteNameStr, _ := siteName.(string)
 	name := c.Param("name")
 
-	if h.SiteScriptStores == nil {
+	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
 		c.JSON(http.StatusOK, Response{Data: []any{}})
 		return
 	}
-	store, exists := h.SiteScriptStores[siteNameStr]
-	if !exists || store == nil {
+	store := h.runtimeService(c, siteNameStr).ScriptStore
+	if store == nil {
 		c.JSON(http.StatusOK, Response{Data: []any{}})
 		return
 	}

@@ -9,16 +9,26 @@ import (
 )
 
 // LibSQLDialect implements Dialect for LibSQL (Turso's SQLite fork).
-// LibSQL is deployed as a managed database in Dokploy — Kora connects
-// to it remotely via HTTP. This adapter handles SQL dialect differences:
+// LibSQL can be deployed as a managed database — Kora connects to it remotely
+// via HTTP. This adapter handles SQL dialect differences:
 // PRAGMA instead of INFORMATION_SCHEMA, SQLite types, and constraint errors.
 type LibSQLDialect struct{}
 
 func (d *LibSQLDialect) DriverName() string { return "libsql" }
 
+func (d *LibSQLDialect) IsWriteConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	// libsql-client-go currently converts the remote SQLite result into a
+	// plain errors.New value, so error codes are unavailable at this boundary.
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "sqlite_busy") || strings.Contains(message, "sqlite_locked") || strings.Contains(message, "database is locked")
+}
+
 func (d *LibSQLDialect) Open(cfg DBConfig) (*sql.DB, error) {
 	// LibSQL connection via the go-libsql driver.
-	// For remote LibSQL (Turso/Dokploy), use the URL form.
+	// For remote LibSQL providers, use the URL form.
 	// For local, use "file:/path/to/db?mode=rwc".
 	dsn := cfg.URL
 	if dsn == "" {
@@ -155,6 +165,7 @@ func (d *LibSQLDialect) CreateTable(dt *doctype.DocType) []string {
 		`"modified_by" TEXT NOT NULL DEFAULT ''`,
 		`"doc_status" INTEGER NOT NULL DEFAULT 0`,
 		`"idx" INTEGER NOT NULL DEFAULT 0`,
+		`"revision" INTEGER NOT NULL DEFAULT 1`,
 	)
 
 	// Data columns.
@@ -594,6 +605,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_site_registry" ADD COLUMN "updated_at" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))`,
 		`ALTER TABLE "_kora_site_registry" ADD COLUMN "file_storage" TEXT NOT NULL DEFAULT 'local'`,
 		`ALTER TABLE "_kora_site_registry" ADD COLUMN "storage_bucket" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_site_registry" ADD COLUMN "runtime_cell_id" TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS "idx_site_registry_status" ON "_kora_site_registry" ("status")`,
 
 		// _kora_user

@@ -1,20 +1,157 @@
 - doctype: POS Order
   role: Retail POS and Store Operations Operator
-  can_read: true
-  can_write: true
-  can_create: true
-  can_delete: false
-  can_submit: true
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
 - doctype: POS Order
   role: Retail POS and Store Operations Reviewer
-  can_read: true
-  can_write: true
-  can_create: false
-  can_delete: false
-  can_submit: true
+  read: true
+  write: true
+  create: false
+  delete: false
+  submit: true
 - doctype: Payment
   role: Retail POS and Store Operations Operator
-  can_read: true
-  can_write: true
-  can_create: true
-  can_delete: false
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+- doctype: Sale Item
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Payment
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Register
+  role: Cashier
+  read: true
+- doctype: Shift
+  role: Cashier
+  read: true
+  write: true
+  create: true
+- doctype: Shift Member
+  role: Cashier
+  read: true
+  write: true
+  create: true
+- doctype: Till Session
+  role: Cashier
+  read: true
+  write: true
+  create: true
+- doctype: Cash Movement
+  role: Cashier
+  read: true
+  write: true
+  create: true
+- doctype: POS Customer
+  role: Cashier
+  read: true
+  write: true
+  create: true
+- doctype: Product Category
+  role: Cashier
+  read: true
+- doctype: Product
+  role: Cashier
+  read: true
+- doctype: Inventory Balance
+  role: Cashier
+  read: true
+- doctype: Stock Movement
+  role: Cashier
+  read: true
+- doctype: Cash Movement
+  role: Supervisor
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: Till Session
+  role: Supervisor
+  read: true
+  write: true
+  submit: true
+- doctype: Shift
+  role: Supervisor
+  read: true
+  write: true
+  submit: true
+- doctype: POS Expense
+  role: Supervisor
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: Cash Movement
+  role: Manager
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: POS Expense
+  role: Manager
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: Inventory Balance
+  role: Manager
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: Stock Movement
+  role: Manager
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: POS Journal Entry
+  role: Manager
+  read: true
+  submit: true
+- doctype: POS Account
+  role: POS Accountant
+  read: true
+  write: true
+  create: true
+- doctype: POS Journal Entry
+  role: POS Accountant
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: POS Journal Line
+  role: POS Accountant
+  read: true
+  write: true
+  create: true
+- doctype: Payment Settlement
+  role: POS Accountant
+  read: true
+  write: true
+  create: true
+  submit: true
+- doctype: POS Expense
+  role: POS Accountant
+  read: true
+  write: true
+  create: true
+  submit: true

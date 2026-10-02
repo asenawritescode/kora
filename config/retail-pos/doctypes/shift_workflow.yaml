@@ -1,0 +1,38 @@
+name: Retail POS Shift Workflow
+document_type: Shift
+is_active: true
+workflow_state_field: status
+states:
+  - state: Planned
+    doc_status: 0
+    allow_edit: Cashier, Supervisor, Manager, Retail POS and Store Operations Administrator
+    style: default
+  - state: Open
+    doc_status: 0
+    allow_edit: Cashier, Supervisor, Manager, Retail POS and Store Operations Administrator
+    style: success
+  - state: Paused
+    doc_status: 0
+    allow_edit: Supervisor, Manager, Retail POS and Store Operations Administrator
+    style: warning
+  - state: Closed
+    doc_status: 1
+    allow_edit: Manager, POS Accountant, Retail POS and Store Operations Administrator
+    style: default
+transitions:
+  - action: Open shift
+    from: Planned
+    to: Open
+    allowed: Cashier, Supervisor, Manager, Retail POS and Store Operations Administrator
+  - action: Pause shift
+    from: Open
+    to: Paused
+    allowed: Supervisor, Manager, Retail POS and Store Operations Administrator
+  - action: Resume shift
+    from: Paused
+    to: Open
+    allowed: Supervisor, Manager, Retail POS and Store Operations Administrator
+  - action: Close shift
+    from: Open
+    to: Closed
+    allowed: Manager, POS Accountant, Retail POS and Store Operations Administrator

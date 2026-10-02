@@ -10,9 +10,31 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 )
+
+type deadlineResponseWriter struct {
+	http.ResponseWriter
+	deadline time.Time
+}
+
+func (w *deadlineResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return nil
+}
+
+func TestRefreshRealtimeWriteDeadline(t *testing.T) {
+	w := &deadlineResponseWriter{ResponseWriter: httptest.NewRecorder()}
+	if err := refreshRealtimeWriteDeadline(w); err != nil {
+		t.Fatalf("refreshRealtimeWriteDeadline: %v", err)
+	}
+	if !w.deadline.After(time.Now()) {
+		t.Fatalf("write deadline was not advanced: %v", w.deadline)
+	}
+}
 
 func TestReplayRealtimeReadsSiteScopedOutboxAfterCursor(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -78,5 +100,62 @@ func TestRealtimeOperationDefaultsSafely(t *testing.T) {
 	}
 	if got := realtimeOperation("unknown"); got != "update" {
 		t.Fatalf("unknown operation = %q, want update", got)
+	}
+}
+
+func TestRealtimeWorkflowNotificationsAreRecipientScoped(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"operation": string(analytics.EventNotification),
+		"payload":   map[string]any{"recipient": "owner@example.test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !realtimePayloadVisibleToUser(payload, "OWNER@example.test") {
+		t.Fatal("notification should be visible to its recipient")
+	}
+	if realtimePayloadVisibleToUser(payload, "other@example.test") {
+		t.Fatal("notification was visible to a different user")
+	}
+	if realtimePayloadVisibleToUser(payload, "") {
+		t.Fatal("notification was visible without an authenticated user")
+	}
+	if !realtimePayloadVisibleToUser([]byte(`{"operation":"update"}`), "other@example.test") {
+		t.Fatal("ordinary record updates should not be filtered as notifications")
+	}
+}
+
+func TestDispatchNotificationsPublishesConfiguredWorkflowMessage(t *testing.T) {
+	registry := doctype.NewRegistry()
+	registry.Workflows.Register(&doctype.Workflow{
+		DocumentType: "Sale",
+		Notifications: []doctype.WorkflowNotification{{
+			Event: "state_change", ToState: "Paid",
+			Recipients: []map[string]string{{"field": "customer_email"}},
+			Subject:    "Sale paid", Message: "Your payment was recorded.",
+		}},
+	})
+
+	bus := analytics.NewChannelBus(8, t.TempDir())
+	defer bus.Close()
+	events, err := bus.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	doc := doctype.NewDocument("Sale")
+	doc.Name = "SALE-1"
+	doc.Set("customer_email", "buyer@example.test")
+	dispatchNotifications(registry, "Sale", "Paid", doc, "demo", "cashier@example.test", bus)
+
+	select {
+	case event := <-events:
+		if event.Operation != analytics.EventNotification || event.Site != "demo" || event.DocName != "SALE-1" {
+			t.Fatalf("unexpected workflow notification event: %#v", event)
+		}
+		if event.Data["recipient"] != "buyer@example.test" || event.Data["title"] != "Sale paid" || event.Data["message"] != "Your payment was recorded." {
+			t.Fatalf("notification payload missing configured content: %#v", event.Data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("workflow notification was not published")
 	}
 }

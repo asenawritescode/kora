@@ -124,7 +124,10 @@ func ImportConfigFromSnapshot(db *sql.DB, registry *doctype.Registry, dbName, si
 
 	// Print changelog summary.
 	var changelogStr string
-	db.QueryRow("SELECT COALESCE(changelog, '') FROM _kora_config_version WHERE id = ?", versionID).Scan(&changelogStr)
+	if err := db.QueryRow(sqlDialect.Rebind(dialect, "SELECT COALESCE(changelog, '') FROM _kora_config_version WHERE id = ?"), versionID).Scan(&changelogStr); err != nil {
+		fmt.Printf("Warning: config was imported, but its changelog summary could not be read: %v\n", err)
+		return nil
+	}
 	if changelogStr != "" {
 		var diff doctype.ConfigDiff
 		if json.Unmarshal([]byte(changelogStr), &diff) == nil {

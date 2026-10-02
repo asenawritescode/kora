@@ -21,6 +21,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/script"
 )
 
 // Source identifies the adapter surface that produced an operation. It is
@@ -42,8 +43,12 @@ const (
 // Command names are canonical across all sources. Adapters resolve these
 // definitions from the registry; they never implement their own semantics.
 const (
-	CommandRecordCreate = "record.create"
-	CommandRecordUpdate = "record.update"
+	CommandRecordCreate             = "record.create"
+	CommandRecordMutateBundle       = "record.mutate_bundle"
+	CommandRecordUpdate             = "record.update"
+	CommandRecordDelete             = "record.delete"
+	CommandRecordWorkflowTransition = "record.workflow_transition"
+	CommandPublicFormSubmit         = "public_form.submit"
 )
 
 // RecordCreatePayload is the typed payload for record.create. Field values
@@ -51,8 +56,34 @@ const (
 // validated against the doctype definition before execution; invalid shapes
 // produce typed ValidationError lists, never silent acceptance.
 type RecordCreatePayload struct {
-	Doctype string          `json:"doctype"`
-	Data    json.RawMessage `json:"data"`
+	Doctype     string          `json:"doctype"`
+	Data        json.RawMessage `json:"data"`
+	PublicRoute string          `json:"public_route,omitempty"`
+}
+
+// RecordMutationBundlePayload creates and updates a small set of related
+// records as one business operation. Records may refer to each other's names
+// with values such as "$records.sale.name". The kernel owns validation, hooks,
+// audit, outbox, receipts, and the single transaction for the whole bundle.
+
+type RecordMutationBundlePayload struct {
+	Doctype string                     `json:"doctype"`
+	Records []RecordMutationBundleItem `json:"records"`
+}
+
+type RecordMutationBundleItem struct {
+	Key       string          `json:"key"`
+	Operation string          `json:"operation,omitempty"` // create (default) or update
+	Doctype   string          `json:"doctype"`
+	Name      string          `json:"name,omitempty"`
+	Data      json.RawMessage `json:"data"`
+}
+
+type RelatedRecordResult struct {
+	Key     string `json:"key"`
+	Doctype string `json:"doctype"`
+	Name    string `json:"name"`
+	Created bool   `json:"created"`
 }
 
 // RecordUpdatePayload is the typed payload for record.update.
@@ -60,6 +91,15 @@ type RecordUpdatePayload struct {
 	Doctype string          `json:"doctype"`
 	Name    string          `json:"name"`
 	Data    json.RawMessage `json:"data"`
+}
+
+// RecordWorkflowTransitionPayload applies a configured transition to one
+// record without exposing its workflow state as an ordinary field update.
+type RecordWorkflowTransitionPayload struct {
+	Doctype          string `json:"doctype"`
+	Name             string `json:"name"`
+	Action           string `json:"action"`
+	ExpectedRevision uint64 `json:"expected_revision,omitempty"`
 }
 
 // CommandDefinition is the single registered description of a command:
@@ -74,8 +114,12 @@ type CommandDefinition struct {
 // commandRegistry holds the canonical command definitions of the first
 // vertical slice. Additional commands register here as epics land.
 var commandRegistry = map[string]CommandDefinition{
-	CommandRecordCreate: {Name: CommandRecordCreate, Version: 1, AuthorizesWith: "create", IdempotentByKey: true},
-	CommandRecordUpdate: {Name: CommandRecordUpdate, Version: 1, AuthorizesWith: "write", IdempotentByKey: true},
+	CommandRecordCreate:             {Name: CommandRecordCreate, Version: 1, AuthorizesWith: "create", IdempotentByKey: true},
+	CommandRecordMutateBundle:       {Name: CommandRecordMutateBundle, Version: 1, AuthorizesWith: "create", IdempotentByKey: true},
+	CommandRecordUpdate:             {Name: CommandRecordUpdate, Version: 1, AuthorizesWith: "write", IdempotentByKey: true},
+	CommandRecordDelete:             {Name: CommandRecordDelete, Version: 1, AuthorizesWith: "delete", IdempotentByKey: true},
+	CommandRecordWorkflowTransition: {Name: CommandRecordWorkflowTransition, Version: 1, AuthorizesWith: "submit", IdempotentByKey: true},
+	CommandPublicFormSubmit:         {Name: CommandPublicFormSubmit, Version: 1, AuthorizesWith: "create", IdempotentByKey: true},
 }
 
 // LookupCommand returns the canonical definition for a command name.
@@ -87,15 +131,19 @@ func LookupCommand(name string) (CommandDefinition, bool) {
 // OperationContext carries everything an adapter must resolve before invoking
 // the kernel. It is an explicit value, never smuggled through context.Context.
 type OperationContext struct {
-	Site           string                // tenant identifier (site name)
-	Actor          contract.ActorContext // authenticated principal
-	User           string                // owner-attribution user ("" → "system")
-	Roles          []string              // roles used for permission-matrix lookup
-	Source         Source                // adapter surface
-	CorrelationID  string
-	CausationID    string
-	ExpectedVersion string
-	IdempotencyKey string
+	Site                string                // tenant identifier (site name)
+	Actor               contract.ActorContext // authenticated principal
+	User                string                // owner-attribution user ("" → "system")
+	Owner               string                // internal owner override; adapters must not populate this from user data
+	UserRole            string                // primary role used by workflow policy
+	Roles               []string              // roles used for permission-matrix lookup
+	SkipHookScripts     []string              // trusted internal stack prevents recursive execution of active lifecycle scripts
+	AllowReadOnlyFields bool                  // trusted internal writers may update UI-read-only fields
+	Source              Source                // adapter surface
+	CorrelationID       string
+	CausationID         string
+	ExpectedVersion     string
+	IdempotencyKey      string
 }
 
 // Operation is a fully specified invocation handed to Kernel.Execute.
@@ -108,11 +156,14 @@ type Operation struct {
 
 // ResultData is the typed success payload returned by record commands.
 type ResultData struct {
-	Doctype   string `json:"doctype"`
-	Name      string `json:"name"`
-	Created   bool   `json:"created"`
-	AuditID   string `json:"audit_id"`
-	Operation string `json:"operation_id"`
+	Doctype   string                `json:"doctype"`
+	Name      string                `json:"name"`
+	Created   bool                  `json:"created"`
+	Deleted   bool                  `json:"deleted,omitempty"`
+	Document  map[string]any        `json:"document,omitempty"`
+	AuditID   string                `json:"audit_id"`
+	Operation string                `json:"operation_id"`
+	Related   []RelatedRecordResult `json:"related,omitempty"`
 }
 
 // Kernel is the process-wide operation entry point. It is safe for concurrent
@@ -120,6 +171,10 @@ type ResultData struct {
 type Kernel struct {
 	Dialect db.Dialect
 	Outbox  outbox.Writer
+
+	// TxManager supplies request-scoped ORM lifecycle hooks and script runtime.
+	// Database, registry, dialect, site, user, and outbox are rebound per Execute.
+	TxManager *orm.TxManager
 
 	// Commands holds config-defined command resources (KERNEL-008). Nil means
 	// only built-in commands are available. Definitions are generation-scoped:
@@ -173,7 +228,7 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 
 	// Idempotency fast path: return a committed result without re-executing.
 	if op.Context.IdempotencyKey != "" {
-		res, found, err := k.lookupReceipt(ctx, siteDB, op, opID)
+		res, found, err := k.lookupReceipt(ctx, siteDB, op)
 		if err != nil {
 			return k.rejected(opID, op, err)
 		}
@@ -190,10 +245,28 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 		SiteName:    op.Context.Site,
 		CurrentUser: op.Context.User,
 	}
+	if k.TxManager != nil {
+		*txMgr = *k.TxManager
+		txMgr.DB = siteDB
+		txMgr.Registry = reg
+		txMgr.Dialect = k.Dialect
+		txMgr.Outbox = k.Outbox
+		txMgr.SiteName = op.Context.Site
+		txMgr.CurrentUser = op.Context.User
+	}
+	txMgr.SkipHookScripts = append([]string(nil), op.Context.SkipHookScripts...)
+	txMgr.HookScriptsByDoctype = make(map[string][]script.ScriptRecord)
 
 	if dyn != nil {
 		data, execErr := k.execDefinedCommand(ctx, siteDB, txMgr, reg, op, def, opID, dyn)
 		if execErr != nil {
+			if execErr == errConcurrentIdempotencyClaim {
+				if replay, found, lookupErr := k.lookupReceipt(ctx, siteDB, op); lookupErr != nil {
+					return k.rejected(opID, op, lookupErr)
+				} else if found {
+					return replay, nil
+				}
+			}
 			return k.rejected(opID, op, execErr)
 		}
 		result := contract.CommandResult{
@@ -202,14 +275,18 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 			Status:        contract.StatusCompleted,
 			Data:          data,
 		}
-		if op.Context.IdempotencyKey != "" && def.IdempotentByKey {
-			k.finalizeReceipt(ctx, siteDB, op, opID, resultHash(result))
-		}
 		return result, nil
 	}
 
 	data, execErr := k.executeInTx(ctx, siteDB, txMgr, reg, op, def, opID)
 	if execErr != nil {
+		if execErr == errConcurrentIdempotencyClaim {
+			if replay, found, lookupErr := k.lookupReceipt(ctx, siteDB, op); lookupErr != nil {
+				return k.rejected(opID, op, lookupErr)
+			} else if found {
+				return replay, nil
+			}
+		}
 		return k.rejected(opID, op, execErr)
 	}
 
@@ -221,11 +298,6 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 	if data != nil {
 		raw, _ := json.Marshal(data)
 		result.Data = raw
-	}
-
-	// Post-commit: finalize the receipt so replays return this exact result.
-	if op.Context.IdempotencyKey != "" && def.IdempotentByKey {
-		k.finalizeReceipt(ctx, siteDB, op, opID, resultHash(result))
 	}
 
 	return result, nil

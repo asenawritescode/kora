@@ -1,4 +1,5 @@
 import type { Field } from '@/types/kora'
+import { useEffect, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Textarea } from '@/components/ui/textarea'
@@ -7,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { LinkField } from './LinkField'
 import { ChildTableEditor } from './ChildTableEditor'
 import { AttachmentField } from './AttachmentField'
+import { fetchUsers } from '@/lib/api/system'
 import {
   Select,
   SelectContent,
@@ -55,6 +57,8 @@ export function FieldRenderer({
   }
 
   switch (field.fieldtype) {
+    case 'User':
+      return <UserField field={field} value={value} onChange={onChange} disabled={disabled} error={hint || undefined} compact={compact} />
     case 'Data': {
       const type =
         field.options === 'Email' ? 'email' :
@@ -357,4 +361,17 @@ export function FieldRenderer({
         </div>
       )
   }
+}
+
+function UserField({ field, value, onChange, disabled, error, compact }: FieldRendererProps) {
+  const [users, setUsers] = useState<Array<{ name: string; full_name?: string; email?: string }> | null>(null)
+  useEffect(() => { fetchUsers().then(setUsers).catch(() => setUsers([])) }, [])
+  return <div className={compact ? 'space-y-0.5' : 'space-y-1.5'}>
+    <Label htmlFor={`field-${field.fieldname}`}>{field.label}{field.reqd && <span className="ml-1 text-destructive">*</span>}</Label>
+    <select id={`field-${field.fieldname}`} className="uk-select" value={value ?? ''} onChange={(event) => onChange(field.fieldname, event.target.value)} disabled={disabled}>
+      <option value="">Choose a user</option>
+      {(users ?? []).map((user) => <option key={user.name} value={user.name}>{user.full_name || user.email || user.name}</option>)}
+    </select>
+    {error && <p className="mt-1 text-sm text-destructive">{error}</p>}
+  </div>
 }

@@ -1,0 +1,65 @@
+name: Point of Sale
+route: /pos
+type: register
+layout: two_panel
+label: Point of Sale
+module: Point of Sale
+source_doctype: Product
+components:
+  - id: categories
+    type: category_tabs
+    region: main
+    position: 0
+    label: Categories
+    source_doctype: Product
+    bindings:
+      group_field: category
+  - id: products
+    type: product_grid
+    region: main
+    position: 1
+    label: Products and services
+    source_doctype: Product
+    bindings:
+      title: product_name
+      subtitle: item_type
+      price: selling_price
+    actions:
+      - id: add_to_cart
+        trigger: on_click
+        type: local_cart_add
+  - id: cart
+    type: cart_panel
+    region: side
+    position: 0
+    label: Current sale
+  - id: payment
+    type: payment_panel
+    region: side
+    position: 1
+    label: Take payment
+    bindings:
+      methods: "literal:cash, card, mpesa, other"
+    actions:
+      - id: complete_sale
+        trigger: on_click
+        type: create_transaction
+        config:
+          target_doctype: Sale
+          reference_field: reference
+          reference_prefix: POS
+          child_table: Sale Item
+          line_source: cart
+          line_fields:
+            product: product
+            unit_price: rate
+            quantity: quantity
+          line_defaults:
+            quantity: 1
+          totals:
+            subtotal_field: subtotal
+            total_field: total
+            lines:
+              quantity_field: quantity
+              unit_price_field: unit_price
+              line_total_field: line_total

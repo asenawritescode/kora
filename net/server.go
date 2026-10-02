@@ -5,6 +5,7 @@ package net
 import (
 	"crypto/tls"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -85,11 +86,25 @@ func (s *Server) setupAutocert() {
 
 // ListenAndServe starts the server with TLS (if configured) or plain HTTP.
 func (s *Server) ListenAndServe() error {
+	return s.ListenAndServeReady(nil)
+}
+
+// ListenAndServeReady binds the socket before invoking onReady, allowing the
+// caller to publish readiness and startup measurements only after the server
+// can actually accept connections.
+func (s *Server) ListenAndServeReady(onReady func()) error {
+	listener, err := net.Listen("tcp", s.Addr)
+	if err != nil {
+		return err
+	}
 	slog.Info("server starting", "addr", s.Addr, "tls", s.tlsConfig.Mode)
+	if onReady != nil {
+		onReady()
+	}
 	if s.Server.TLSConfig != nil {
 		// TLS configured via autocert or manual certs — certFile/keyFile are empty
 		// because GetCertificate is set in TLSConfig.
-		return s.Server.ListenAndServeTLS("", "")
+		return s.Server.ServeTLS(listener, "", "")
 	}
-	return s.Server.ListenAndServe()
+	return s.Server.Serve(listener)
 }

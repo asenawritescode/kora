@@ -73,6 +73,7 @@ func (h *Handler) HandleSystemPageManifest(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "page_manifest.not_found", "Page manifest not found", map[string]any{"name": name})
 		return
 	}
+	normalizeManifestBindings(manifest, h.siteRegistry(c))
 
 	c.Header("ETag", pageManifestETag(manifest))
 	c.JSON(http.StatusOK, Response{Data: manifest})
@@ -249,11 +250,78 @@ func (h *Handler) HandlePageManifestByRoute(c *gin.Context) {
 	}
 	for _, manifest := range manifests {
 		if manifest != nil && manifest.Spec.Route == route {
+			normalizeManifestBindings(manifest, h.siteRegistry(c))
+			manifest.EnsurePrimaryDataBindings()
 			c.JSON(http.StatusOK, Response{Data: manifest})
 			return
 		}
 	}
 	notFoundError(c, "page_manifest.not_found", "Page manifest not found for route: "+route, map[string]any{"route": route})
+}
+
+// normalizeManifestBindings preserves the existing manifest format while
+// resolving its meaning at the Engine boundary. A binding that names a field
+// on the component's source DocType remains a field binding; an unknown value
+// is marked as a literal for the generic Studio runtime. This keeps legacy
+// manifests readable without component-specific frontend exceptions or new
+// YAML syntax.
+func normalizeManifestBindings(manifest *doctype.PageManifest, registry *doctype.Registry) {
+	if manifest == nil || registry == nil {
+		return
+	}
+	var visit func([]doctype.PageComponent)
+	visit = func(components []doctype.PageComponent) {
+		for i := range components {
+			component := &components[i]
+			source, _ := component.Props["source_doctype"].(string)
+			var fields map[string]struct{}
+			if dt := registry.Get(source); dt != nil {
+				fields = map[string]struct{}{"name": {}}
+				for _, field := range dt.Fields {
+					fields[field.Fieldname] = struct{}{}
+				}
+			}
+			bindings, ok := component.Props["bindings"].(map[string]any)
+			if ok {
+				for key, raw := range bindings {
+					value, ok := raw.(string)
+					if !ok || strings.HasPrefix(value, "literal:") || manifestLiteralBinding(key) {
+						continue
+					}
+					if fields != nil && bindingMatchesFields(value, fields) {
+						continue
+					}
+					if fields == nil || !bindingMatchesFields(value, fields) {
+						bindings[key] = "literal:" + value
+					}
+				}
+			}
+			visit(component.Children)
+		}
+	}
+	visit(manifest.Spec.Layout.Children)
+}
+
+func bindingMatchesFields(value string, fields map[string]struct{}) bool {
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := fields[part]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func manifestLiteralBinding(key string) bool {
+	switch key {
+	case "metric", "filter_value", "trend", "density", "variant", "format", "summary", "updated_at", "resource":
+		return true
+	default:
+		return false
+	}
 }
 
 func pageManifestETag(value any) string {

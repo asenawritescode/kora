@@ -19,7 +19,7 @@ import (
 func TestInventoryPackageIsDeclarative(t *testing.T) {
 	_, source, _, _ := runtime.Caller(0)
 	root := filepath.Dir(filepath.Dir(source))
-	packageRoot := filepath.Join(root, "config", "inventory")
+	packageRoot := filepath.Join(root, "config", "v0", "inventory")
 
 	doctypes, err := doctype.ParseConfigTree(packageRoot)
 	if err != nil {
@@ -83,7 +83,7 @@ func (e *packageStepExecutor) Execute(_ context.Context, capability string, _ co
 func TestInventoryPackageWorkflowRunsThroughGenericExecutor(t *testing.T) {
 	_, source, _, _ := runtime.Caller(0)
 	root := filepath.Dir(filepath.Dir(source))
-	packageRoot := filepath.Join(root, "config", "inventory")
+	packageRoot := filepath.Join(root, "config", "v0", "inventory")
 	raw, err := os.ReadFile(filepath.Join(packageRoot, "workflows", "low_stock_procurement.yaml"))
 	if err != nil {
 		t.Fatal(err)

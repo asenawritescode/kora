@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/asenawritescode/kora/doctype"
@@ -45,11 +46,32 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// Starting a web conversation is the public first step of onboarding.
+		// SiteRouter has already resolved the tenant before this middleware runs;
+		// subsequent reads and writes require the normal workspace session.
+		if c.Request.Method == http.MethodPost && (path == "/api/v1/cloud/conversations" || path == "/api/cloud/conversations") {
+			c.Next()
+			return
+		}
 
 		// Check Bearer token for channel-session or extension API auth.
 		authHeader := c.GetHeader("Authorization")
 		if strings.HasPrefix(authHeader, "Bearer ") {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
+			if token != "" && token == os.Getenv("KORA_ENGINE_PROVISIONING_TOKEN") && ((c.Request.Method == http.MethodPost && path == "/api/internal/channel/managed-client/rotate") || (c.Request.Method == http.MethodGet && path == "/api/internal/site/identity")) {
+				c.Set("auth_type", "engine_provisioner")
+				c.Set("user", "kora-cloud-provisioner")
+				c.Next()
+				return
+			}
+			if token != "" && token == os.Getenv("KORA_ENGINE_CONFIG_TOKEN") && (path == "/api/system/config/drafts" || path == "/api/v1/system/config/drafts" || path == "/api/system/config/validate" || path == "/api/system/config/dry-run") {
+				c.Set("auth_type", "engine_service")
+				c.Set("user", "cloud-proposal")
+				c.Set("user_role", "Administrator")
+				c.Set("user_roles", []string{"Administrator"})
+				c.Next()
+				return
+			}
 			if g.authenticateChannelSession(c, token) {
 				c.Next()
 				return

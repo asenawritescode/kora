@@ -4,3 +4,38 @@ records:
   - doctype: POS Order
     reference: DEMO-RETAIL-POS-001
     status: Draft
+  - doctype: Product Category
+    category_name: Drinks
+    display_order: 1
+    is_active: 1
+  - doctype: Product Category
+    category_name: Desserts
+    display_order: 2
+    is_active: 1
+  - doctype: Product Category
+    category_name: Coffee
+    display_order: 3
+    is_active: 1
+  - doctype: Register
+    reference: REG-001
+    register_name: Front counter
+    location: Main floor
+    status: Active
+  - doctype: POS Account
+    account_number: 1000
+    account_name: Cash Drawer
+    account_type: Asset
+    can_post: 1
+    is_active: 1
+  - doctype: POS Account
+    account_number: 1100
+    account_name: Mobile Money Clearing
+    account_type: Asset
+    can_post: 1
+    is_active: 1
+  - doctype: POS Account
+    account_number: 4000
+    account_name: Sales Revenue
+    account_type: Income
+    can_post: 1
+    is_active: 1

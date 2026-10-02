@@ -7,21 +7,21 @@ import (
 
 func TestParseFieldworkConfigs(t *testing.T) {
 	// Parse all Fieldwork doctypes.
-	doctypes, err := ParseDirectory("../config/fieldwork/doctypes")
+	doctypes, err := ParseDirectory("../config/v0/fieldwork/doctypes")
 	if err != nil {
 		t.Fatalf("parsing Fieldwork configs: %v", err)
 	}
 
 	expected := map[string]int{
-		"Customer":        9,
-		"Equipment":       7,
-		"Technician":      7,
-		"Work Order":      11,
-		"Work Order Item": 5,
-		"Service Report":  10,
-		"Service Request": 5,
-		"Visit":           5,
-		"Used Part":       5,
+		"Customer":         9,
+		"Equipment":        7,
+		"Technician":       7,
+		"Work Order":       11,
+		"Work Order Item":  5,
+		"Service Report":   10,
+		"Service Request":  5,
+		"Visit":            5,
+		"Used Part":        5,
 		"Customer Signoff": 5,
 	}
 
@@ -105,7 +105,7 @@ func TestParseFieldworkConfigs(t *testing.T) {
 }
 
 func TestParseContentConfigsWithPublicAccess(t *testing.T) {
-	doctypes, err := ParseDirectory("../config/content/doctypes")
+	doctypes, err := ParseDirectory("../config/v0/content/doctypes")
 	if err != nil {
 		t.Fatalf("parsing Content configs: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestParseContentConfigsWithPublicAccess(t *testing.T) {
 }
 
 func TestParseSingleFile(t *testing.T) {
-	dt, err := ParseFile("../config/fieldwork/doctypes/customer.yaml")
+	dt, err := ParseFile("../config/v0/fieldwork/doctypes/customer.yaml")
 	if err != nil {
 		t.Fatalf("parsing customer.yaml: %v", err)
 	}

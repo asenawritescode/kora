@@ -1,0 +1,39 @@
+name: POS Account
+module: Retail POS Finance
+title_field: account_name
+search_fields: account_name, account_number, account_type
+fields:
+  - fieldname: account_number
+    fieldtype: Data
+    label: Account number
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: account_name
+    fieldtype: Data
+    label: Account name
+    reqd: true
+    in_list_view: true
+  - fieldname: account_type
+    fieldtype: Select
+    label: Account type
+    options: |
+      Asset
+      Liability
+      Equity
+      Income
+      Expense
+    reqd: true
+    in_list_view: true
+  - fieldname: parent_account
+    fieldtype: Link
+    options: POS Account
+    label: Parent account
+  - fieldname: can_post
+    fieldtype: Check
+    label: Can post
+    default: 1
+  - fieldname: is_active
+    fieldtype: Check
+    label: Active
+    default: 1

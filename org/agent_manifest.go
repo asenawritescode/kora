@@ -9,18 +9,37 @@ import (
 )
 
 type AgentManifest struct {
-	ID                  string    `json:"id"`
-	Name                string    `json:"name"`
-	GrantedCapabilities []string  `json:"granted_capabilities"`
-	ProhibitedActions   []string  `json:"prohibited_actions,omitempty"`
-	ApprovalGates       []string  `json:"approval_gates,omitempty"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Roles and direct permissions are the canonical agent authorization policy.
+	// The capability fields below remain readable for migration only.
+	Roles               []string          `json:"roles,omitempty"`
+	DirectPermissions   []AgentPermission `json:"direct_permissions,omitempty"`
+	DeniedPermissions   []AgentPermission `json:"denied_permissions,omitempty"`
+	ApprovalRules       []AgentPermission `json:"approval_rules,omitempty"`
+	GrantedCapabilities []string          `json:"granted_capabilities"`
+	ProhibitedActions   []string          `json:"prohibited_actions,omitempty"`
+	ApprovalGates       []string          `json:"approval_gates,omitempty"`
+	UpdatedAt           time.Time         `json:"updated_at"`
+}
+
+// AgentPermission assigns one DocType operation to an agent policy. It uses
+// the same operation vocabulary as doctype.Permission and is deliberately
+// independent of the removed capability authorization model.
+type AgentPermission struct {
+	Doctype   string `json:"doctype"`
+	Operation string `json:"operation"`
+	IfOwner   bool   `json:"if_owner,omitempty"`
+	Scope     string `json:"scope,omitempty"`
 }
 type AgentRun struct {
-	ID               string    `json:"id"`
-	AgentID          string    `json:"agent_id"`
-	Status           string    `json:"status"`
-	Capability       string    `json:"capability"`
+	ID        string `json:"id"`
+	AgentID   string `json:"agent_id"`
+	Status    string `json:"status"`
+	Doctype   string `json:"doctype,omitempty"`
+	Operation string `json:"operation,omitempty"`
+	// Capability is read-only compatibility data for old run records.
+	Capability       string    `json:"capability,omitempty"`
 	ApprovalRequired bool      `json:"approval_required"`
 	HandoffTask      string    `json:"handoff_task,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
@@ -86,8 +105,8 @@ func (s *AgentStore) GetManifest(id string) (AgentManifest, bool) {
 	return m, ok
 }
 func (s *AgentStore) RecordRun(r AgentRun) (AgentRun, error) {
-	if r.ID == "" || r.AgentID == "" || r.Capability == "" {
-		return AgentRun{}, fmt.Errorf("agent run requires id, agent, and capability")
+	if r.ID == "" || r.AgentID == "" || (r.Capability == "" && (r.Doctype == "" || r.Operation == "")) {
+		return AgentRun{}, fmt.Errorf("agent run requires id, agent, and doctype operation")
 	}
 	if r.Status == "" {
 		r.Status = "requested"

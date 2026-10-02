@@ -13,19 +13,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
 )
 
-
-// computedScriptHook is set by the ORM before ComputeFields runs.
-// It bridges script-based computed fields (@script:name) to the JS runtime.
-var computedScriptHook func(doctypeName, scriptName string, doc *Document) (any, error)
-
-// SetComputedScriptHook sets the script hook for computed field evaluation.
-// Called by the ORM before Insert/Save to enable script-based computed fields.
-func SetComputedScriptHook(hook func(doctypeName, scriptName string, doc *Document) (any, error)) {
-	computedScriptHook = hook
-}
+// ComputedScriptHook evaluates a script-backed computed field for one document.
+// Passing it to ComputeFieldsWithHook keeps script context scoped to the current
+// mutation instead of storing tenant/request state in a package global.
+type ComputedScriptHook func(doctypeName, scriptName string, doc *Document) (any, error)
 
 // sumPattern matches SUM(field.column) — e.g., SUM(items.line_total).
 var sumPattern = regexp.MustCompile(`SUM\(\s*(\w+)\.(\w+)\s*\)`)
@@ -41,16 +34,23 @@ var datediffPattern = regexp.MustCompile(`DATEDIFF\(\s*([^,]+?)\s*,\s*([^)]+?)\s
 
 // cfInfo holds metadata about a computed field for dependency ordering.
 type cfInfo struct {
-	field        *Field
-	expr         string
-	hasSum       bool
-	hasRound     bool
-	hasCount     bool
-	hasDateDiff  bool
+	field       *Field
+	expr        string
+	hasSum      bool
+	hasRound    bool
+	hasCount    bool
+	hasDateDiff bool
 }
 
 // ComputeFields evaluates all computed fields on a document and sets their values.
 func ComputeFields(dt *DocType, doc *Document) error {
+	return ComputeFieldsWithHook(dt, doc, nil)
+}
+
+// ComputeFieldsWithHook evaluates computed fields, using hook only for
+// @script:name expressions. The hook is explicit and operation-scoped so
+// concurrent site mutations cannot overwrite one another's script context.
+func ComputeFieldsWithHook(dt *DocType, doc *Document, hook ComputedScriptHook) error {
 	if doc == nil || dt == nil {
 		return nil
 	}
@@ -77,8 +77,8 @@ func ComputeFields(dt *DocType, doc *Document) error {
 	for _, cf := range computed {
 		if strings.HasPrefix(cf.expr, "@script:") {
 			scriptName := strings.TrimPrefix(cf.expr, "@script:")
-			if computedScriptHook != nil {
-				val, err := computedScriptHook(dt.Name, scriptName, doc)
+			if hook != nil {
+				val, err := hook(dt.Name, scriptName, doc)
 				if err != nil {
 					slog.Warn("script computed field failed", "field", cf.field.Fieldname, "script", scriptName, "error", err)
 					continue

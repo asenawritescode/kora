@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from 'react'
+import { Suspense, useMemo, useState } from 'react'
 import { useQueries, keepPreviousData } from '@tanstack/react-query'
 import { AlertTriangle, Ban, CloudOff, Loader2, RefreshCcw, ShieldAlert, WifiOff } from 'lucide-react'
 import type { PageComponent, PageManifest, PageResource } from '@/manifest/schema/page'
@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/button'
 import { cn } from '../../lib/utils'
 import { fetchInsights } from '@/lib/api/analytics'
 import { isAllowedResourceQuery, resourcePolicyError } from './policy'
+import { useCartStore } from '@/lib/cart-store'
 
 export type ManifestRenderMode = 'editor' | 'preview' | 'runtime'
 export type ResourceSimulationKind = 'normal' | 'loading' | 'empty' | 'error' | 'permission_denied' | 'offline' | 'conflict' | 'stale'
@@ -26,7 +27,7 @@ export interface ManifestRendererProps {
   onSelectComponent?: (id: string | null) => void
   onDuplicateComponent?: (component: PageComponent) => void
   onRemoveComponent?: (id: string) => void
-  onAction?: (actionId: string, context: Record<string, unknown>) => void | Promise<void>
+  onAction?: (actionId: string, context: Record<string, unknown>) => unknown | Promise<unknown>
   className?: string
 }
 
@@ -43,7 +44,10 @@ export function ManifestRenderer({
 }: ManifestRendererProps) {
   const runtimeResources = useManifestRuntimeResources(manifest, !resourceState)
   const resources = resourceState ?? runtimeResources
+  const [filters, setFilters] = useState<Record<string, { field?: string; value?: string }>>({})
+  const filteredResources = useMemo(() => applyResourceFilters(manifest, resources, filters), [manifest, resources, filters])
   const regions = regionsForLayout(manifest.spec.layout.type)
+  const addCartItem = useCartStore((state) => state.addItem)
 
   return (
     <div className={cn('space-y-4', className)} data-manifest-render-mode={mode}>
@@ -76,12 +80,36 @@ export function ManifestRenderer({
                   component={component}
                   manifest={manifest}
                   mode={mode}
-                  resources={resources}
+                  resources={filteredResources}
                   selected={selectedComponentId === component.id}
                   onSelectComponent={onSelectComponent}
                   onDuplicateComponent={onDuplicateComponent}
                   onRemoveComponent={onRemoveComponent}
-                  onAction={onAction}
+                  onAction={(actionId, context) => {
+                    const action = manifest.spec.actions.find((item) => item.id === actionId)
+                    if (action?.command === 'local_cart_add') {
+                      addCartItem(context)
+                      return
+                    }
+                    if (actionId === 'filter' || actionId === 'search') {
+                      const resourceId = String(component.data || manifest.spec.resources[0]?.id || '').split('.')[0]
+                      if (resourceId) {
+                        const category = context.category
+                        const componentBindings = component.props.bindings as Record<string, unknown> | undefined
+                        const field = category !== undefined
+                          ? String(componentBindings?.group_field || 'category')
+                          : String(context.field || '')
+                        const value = category !== undefined ? String(category || '') : String(context.value || '')
+                        setFilters((current) => ({
+                          ...current,
+                          [resourceId]: actionId === 'filter'
+                            ? { field, value }
+                            : { field: '__search__', value: String(context.value || '') },
+                        }))
+                      }
+                    }
+                    return onAction?.(actionId, { ...context, _component: component.id })
+                  }}
                 />
               ))}
             </section>
@@ -111,10 +139,11 @@ export function ManifestComponentRenderer({
   onSelectComponent?: (id: string | null) => void
   onDuplicateComponent?: (component: PageComponent) => void
   onRemoveComponent?: (id: string) => void
-  onAction?: (actionId: string, context: Record<string, unknown>) => void | Promise<void>
+  onAction?: (actionId: string, context: Record<string, unknown>) => unknown | Promise<unknown>
 }) {
   const entry = resolveComponentEntry(component.component, manifest.spec.capabilities)
-  const registeredComponent = useMemo(() => pageComponentToRegisteredConfig(component), [component])
+  const actionsById = useMemo(() => new Map(manifest.spec.actions.map((action) => [action.id, action])), [manifest.spec.actions])
+  const registeredComponent = useMemo(() => pageComponentToRegisteredConfig(component, actionsById), [component, actionsById])
   const resource = resolveComponentResource(component, manifest.spec.resources, resources)
   const disabled = mode !== 'runtime'
   const showChrome = mode === 'editor'
@@ -217,7 +246,10 @@ export function ManifestComponentRenderer({
   )
 }
 
-function pageComponentToRegisteredConfig(component: PageComponent): RegisteredComponentConfig {
+function pageComponentToRegisteredConfig(
+  component: PageComponent,
+  actionsById: Map<string, PageManifest['spec']['actions'][number]> = new Map(),
+): RegisteredComponentConfig {
   return {
     id: component.id,
     type: component.component,
@@ -226,18 +258,44 @@ function pageComponentToRegisteredConfig(component: PageComponent): RegisteredCo
     source_doctype: String(component.props.source_doctype || ''),
     capabilities: component.required_capabilities,
     bindings: component.props.bindings as Record<string, string> | undefined,
-    actions: component.actions?.map((id) => ({
-      id,
-      trigger: 'on_click',
-      type: 'command',
-      config: {},
-    })),
+    actions: component.actions?.map((id) => {
+      const action = actionsById.get(id)
+      return {
+        id,
+        trigger: 'on_click',
+        type: action?.command || 'command',
+        config: action?.input || {},
+      }
+    }),
     desktop_columns: component.props.desktop_columns as string[] | undefined,
     mobile_columns: component.props.mobile_columns as string[] | undefined,
-    components: component.children?.map(pageComponentToRegisteredConfig),
+    filters: component.props.filters as Array<{ field: string; op?: string; value?: unknown }> | undefined,
+    components: component.children?.map((child) => pageComponentToRegisteredConfig(child, actionsById)),
     position: component.position,
     span: component.span,
   }
+}
+
+function applyResourceFilters(
+  manifest: PageManifest,
+  resources: Record<string, ManifestResourceState>,
+  filters: Record<string, { field?: string; value?: string }>,
+): Record<string, ManifestResourceState> {
+  const next = { ...resources }
+  for (const resource of manifest.spec.resources) {
+    const active = filters[resource.id]
+    const state = resources[resource.id]
+    if (!active || !state?.data || !Array.isArray(state.data.data)) continue
+    const rows = state.data.data as Array<Record<string, unknown>>
+    const value = (active.value || '').trim().toLowerCase()
+    const data = !value
+      ? rows
+      : active.field === '__search__'
+        ? rows.filter((row) => Object.values(row).some((entry) => String(entry ?? '').toLowerCase().includes(value)))
+        : rows.filter((row) => String(row[active.field || ''] ?? '').toLowerCase() === value)
+    next[resource.id] = { ...state, data: { ...state.data, data, meta: { ...state.data.meta, total: data.length } } }
+  }
+  return next
 }
 
 export function createSimulatedResourceState(

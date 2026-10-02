@@ -14,10 +14,14 @@ const (
 	EventDelete EventOp = "delete"
 	EventSubmit EventOp = "submit"
 	EventCancel EventOp = "cancel"
+	// EventNotification carries a recipient-scoped workflow notification over
+	// the realtime bridge; it is not a document mutation for analytics/webhooks.
+	EventNotification EventOp = "notification"
 )
 
-// ChangeEvent captures a document write for analytics ingestion.
-// Emitted by the ORM after every write — async, non-blocking.
+// ChangeEvent carries document mutations and internal realtime signals.
+// Document mutations are emitted by the ORM after every write; the notification
+// operation is recipient-scoped and must not be treated as a document mutation.
 type ChangeEvent struct {
 	ID         string         `json:"id,omitempty"`
 	Site       string         `json:"site"`

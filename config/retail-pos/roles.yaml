@@ -7,3 +7,15 @@
 - name: Retail POS and Store Operations Administrator
   workspace_access: true
   description: Configures Retail POS and Store Operations.
+- name: Cashier
+  workspace_access: true
+  description: Takes sales, payments, and permitted cash movements.
+- name: Supervisor
+  workspace_access: true
+  description: Supervises shifts, tills, handovers, and standard approvals.
+- name: Manager
+  workspace_access: true
+  description: Approves variances, refunds, expenses, and operational exceptions.
+- name: POS Accountant
+  workspace_access: true
+  description: Reviews settlements, journals, accounts, and finance reports.

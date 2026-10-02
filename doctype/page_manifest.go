@@ -120,13 +120,14 @@ func PageManifestFromView(v *View) *PageManifest {
 		}
 	}
 	resources := []PageResource{}
+	resourceByDocType := make(map[string]string)
 	if v.SourceDocType != "" {
-		resources = append(resources, PageResource{
-			ID:     "primary",
-			Query:  "document.list",
-			Params: map[string]any{"doctype": v.SourceDocType, "limit": 50},
-		})
+		resources = append(resources, pageResource("primary", v.SourceDocType))
+		resourceByDocType[v.SourceDocType] = "primary"
 	}
+	collectViewResources(v.Components, v.SourceDocType, &resources, resourceByDocType)
+	children := pageComponentsFromView(v.Components)
+	bindViewComponentResources(children, resourceByDocType)
 	return &PageManifest{
 		APIVersion: "ui.kora.dev/v1",
 		Kind:       "Page",
@@ -143,13 +144,52 @@ func PageManifestFromView(v *View) *PageManifest {
 			Capabilities: capabilities,
 			Offline:      offline,
 			Resources:    resources,
-			Actions:      []PageAction{},
+			Actions:      pageActionsFromView(v.Components, len(resources) > 0),
 			Layout: PageManifestLayout{
 				Type:     normalizePageLayout(v.Layout),
 				Columns:  12,
-				Children: pageComponentsFromView(v.Components),
+				Children: children,
 			},
 		},
+	}
+}
+
+func pageResource(id, doctypeName string) PageResource {
+	return PageResource{
+		ID:     id,
+		Query:  "document.list",
+		Params: map[string]any{"doctype": doctypeName, "limit": 50},
+	}
+}
+
+func collectViewResources(components []ViewComponent, primaryDocType string, resources *[]PageResource, resourceByDocType map[string]string) {
+	for _, component := range components {
+		docTypeName := strings.TrimSpace(component.SourceDocType)
+		if docTypeName != "" && docTypeName != primaryDocType {
+			if _, exists := resourceByDocType[docTypeName]; !exists {
+				resourceID := normalizeResourceName("", docTypeName)
+				if resourceID == "primary" {
+					resourceID = "doctype-primary"
+				}
+				resourceByDocType[docTypeName] = resourceID
+				*resources = append(*resources, pageResource(resourceID, docTypeName))
+			}
+		}
+		collectViewResources(component.Components, primaryDocType, resources, resourceByDocType)
+	}
+}
+
+func bindViewComponentResources(components []PageComponent, resourceByDocType map[string]string) {
+	for i := range components {
+		component := &components[i]
+		if component.Data == "" && componentNeedsDataBinding(component.Component) {
+			if docTypeName, ok := component.Props["source_doctype"].(string); ok {
+				if resourceID := resourceByDocType[strings.TrimSpace(docTypeName)]; resourceID != "" {
+					component.Data = resourceID + ".data"
+				}
+			}
+		}
+		bindViewComponentResources(component.Children, resourceByDocType)
 	}
 }
 
@@ -214,6 +254,18 @@ func pageComponentsFromView(components []ViewComponent) []PageComponent {
 			"bindings":        c.Bindings,
 			"desktop_columns": c.DesktopColumns,
 			"mobile_columns":  c.MobileColumns,
+		}
+		if len(c.Actions) > 0 {
+			actions := make([]map[string]any, 0, len(c.Actions))
+			for _, action := range c.Actions {
+				actions = append(actions, map[string]any{
+					"id":      action.ID,
+					"trigger": action.Trigger,
+					"type":    action.Type,
+					"config":  action.Config,
+				})
+			}
+			props["actions"] = actions
 		}
 		out = append(out, PageComponent{
 			ID:        c.ID,
@@ -285,7 +337,7 @@ func ensurePageComponentDataBindings(components []PageComponent, doctype string)
 			if component.Props == nil {
 				component.Props = map[string]any{}
 			}
-			if component.Props["source_doctype"] == nil {
+			if value, ok := component.Props["source_doctype"].(string); !ok || strings.TrimSpace(value) == "" {
 				component.Props["source_doctype"] = doctype
 			}
 		}
@@ -297,11 +349,35 @@ func ensurePageComponentDataBindings(components []PageComponent, doctype string)
 
 func componentNeedsDataBinding(component string) bool {
 	switch component {
-	case "record_table", "record_list", "record_cards", "record_form", "record_detail", "metric_card", "chart", "kanban_board", "calendar_view", "approval_queue", "product_grid":
+	case "record_table", "record_list", "record_cards", "record_form", "record_detail", "metric_card", "chart", "kanban_board", "calendar_view", "approval_queue", "product_grid", "category_tabs":
 		return true
 	default:
 		return false
 	}
+}
+
+func pageActionsFromView(components []ViewComponent, invalidatePrimary bool) []PageAction {
+	out := []PageAction{}
+	var walk func([]ViewComponent)
+	walk = func(items []ViewComponent) {
+		for _, component := range items {
+			for _, action := range component.Actions {
+				invalidate := []string{}
+				if invalidatePrimary && action.IsMutation() {
+					invalidate = []string{"primary"}
+				}
+				out = append(out, PageAction{
+					ID:         action.ID,
+					Command:    action.Type,
+					Input:      action.Config,
+					Invalidate: invalidate,
+				})
+			}
+			walk(component.Components)
+		}
+	}
+	walk(components)
+	return out
 }
 
 func actionIDsFromView(actions []ViewAction) []string {

@@ -60,7 +60,7 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 		"INSERT INTO _kora_doctype (name, module, is_submittable, is_child_table, is_single, track_changes, title_field, search_fields, sort_field, sort_order, description, config_json, version, site) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) %s",
 		s.Dialect.UpsertClause([]string{"name"}, []string{"module", "is_submittable", "is_child_table", "is_single", "track_changes", "title_field", "search_fields", "sort_field", "sort_order", "description", "config_json", "site"}),
 	)
-	_, err = ex.Exec(doctypeSQL,
+	_, err = ex.Exec(db.Rebind(s.Dialect, doctypeSQL),
 		dt.Name, dt.Module, boolToInt(dt.IsSubmittable), boolToInt(dt.IsChildTable),
 		boolToInt(dt.IsSingle), boolToInt(dt.TrackChanges),
 		dt.TitleField, dt.SearchFields, dt.SortField, dt.SortOrder,
@@ -72,7 +72,7 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 
 	if len(dt.Fields) == 0 {
 		// No fields — delete any stale rows and we're done.
-		_, err = ex.Exec("DELETE FROM _kora_field WHERE parent = ? AND site = ?", dt.Name, site)
+		_, err = ex.Exec(db.Rebind(s.Dialect, "DELETE FROM _kora_field WHERE parent = ? AND site = ?"), dt.Name, site)
 		if err != nil {
 			return fmt.Errorf("deleting fields for %s: %w", dt.Name, err)
 		}
@@ -82,7 +82,7 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 	// Delete all existing fields for this doctype in one shot,
 	// then re-insert all current fields with a batched multi-row INSERT.
 	// This replaces the old per-field diff/update/insert loop.
-	_, err = ex.Exec("DELETE FROM _kora_field WHERE parent = ? AND site = ?", dt.Name, site)
+	_, err = ex.Exec(db.Rebind(s.Dialect, "DELETE FROM _kora_field WHERE parent = ? AND site = ?"), dt.Name, site)
 	if err != nil {
 		return fmt.Errorf("deleting fields for %s: %w", dt.Name, err)
 	}
@@ -120,7 +120,7 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 			VALUES %s`,
 			strings.Join(placeholders, ", "),
 		)
-		if _, err := ex.Exec(insertSQL, args...); err != nil {
+		if _, err := ex.Exec(db.Rebind(s.Dialect, insertSQL), args...); err != nil {
 			return fmt.Errorf("inserting fields for %s: %w", dt.Name, err)
 		}
 	}
@@ -132,13 +132,13 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 // LoadAll loads all DocTypes from the database into the registry.
 // Uses two batched queries instead of N+1 (one for doctypes, one for all fields).
 func (s *Store) LoadAll(site string) ([]*doctype.DocType, error) {
-	rows, err := s.DB.Query(`
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, `
 		SELECT name, module, is_submittable, is_child_table, is_single,
-			track_changes, title_field, search_fields, sort_field, sort_order, description, COALESCE(config_json, '')
+			track_changes, title_field, search_fields, sort_field, sort_order, description, config_json
 		FROM _kora_doctype
 		WHERE site = ? OR site = ''
 		ORDER BY name
-	`, site)
+	`), site)
 	if err != nil {
 		return nil, fmt.Errorf("querying doctypes: %w", err)
 	}
@@ -148,7 +148,7 @@ func (s *Store) LoadAll(site string) ([]*doctype.DocType, error) {
 	for rows.Next() {
 		dt := &doctype.DocType{}
 		var isSubmittable, isChildTable, isSingle, trackChanges int
-		var configJSON string
+		var configJSON sql.NullString
 		err := rows.Scan(
 			&dt.Name, &dt.Module, &isSubmittable, &isChildTable, &isSingle,
 			&trackChanges, &dt.TitleField, &dt.SearchFields, &dt.SortField,
@@ -157,9 +157,9 @@ func (s *Store) LoadAll(site string) ([]*doctype.DocType, error) {
 		if err != nil {
 			return nil, fmt.Errorf("scanning doctype: %w", err)
 		}
-		if strings.TrimSpace(configJSON) != "" {
+		if configJSON.Valid && strings.TrimSpace(configJSON.String) != "" {
 			var configured doctype.DocType
-			if err := json.Unmarshal([]byte(configJSON), &configured); err != nil {
+			if err := json.Unmarshal([]byte(configJSON.String), &configured); err != nil {
 				return nil, fmt.Errorf("unmarshaling doctype config %s: %w", dt.Name, err)
 			}
 			dt = &configured
@@ -194,13 +194,13 @@ func (s *Store) LoadAll(site string) ([]*doctype.DocType, error) {
 // no version history, sql.ErrNoRows is returned.
 func (s *Store) LoadDraftHeadSnapshot(site string) (*doctype.ConfigSnapshot, string, error) {
 	var versionID, config string
-	err := s.DB.QueryRow(`
+	err := s.DB.QueryRow(db.Rebind(s.Dialect, `
 		SELECT id, config
 		FROM _kora_config_version
 		WHERE site = ? AND status IN ('Draft', 'Active')
 		ORDER BY CASE WHEN status = 'Draft' THEN 0 ELSE 1 END, version DESC
 		LIMIT 1
-	`, site).Scan(&versionID, &config)
+	`), site).Scan(&versionID, &config)
 	if err != nil {
 		return nil, "", err
 	}
@@ -234,7 +234,7 @@ func (s *Store) BuildDraftSnapshot(reg *doctype.Registry, siteName string, dt *d
 
 // loadAllFields fetches all fields for all doctypes in a single query.
 func (s *Store) loadAllFields(site string) (map[string][]doctype.Field, error) {
-	rows, err := s.DB.Query(`
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, `
 		SELECT parent, fieldname, fieldtype, label, options, reqd, unique_constraint,
 			default_value, hidden, read_only, bold, in_list_view, in_standard_filter,
 			search_index, description, depends_on, mandatory_depends_on,
@@ -242,7 +242,7 @@ func (s *Store) loadAllFields(site string) (map[string][]doctype.Field, error) {
 		FROM _kora_field
 		WHERE site = ? OR site = ''
 		ORDER BY parent, idx
-	`, site)
+	`), site)
 	if err != nil {
 		return nil, err
 	}
@@ -289,13 +289,20 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+func configVersionActiveFlag(dialect db.QueryDialect, active bool) any {
+	if driver, ok := dialect.(interface{ DriverName() string }); ok && driver.DriverName() == "postgres" {
+		return boolToInt(active)
+	}
+	return active
+}
+
 // SaveRoles saves role definitions to _kora_role.
 func (s *Store) SaveRoles(roles []*doctype.Role, site string) error {
 	for _, role := range roles {
 		upsertSQL := `INSERT INTO _kora_role (name, workspace_access, description, site)
 			VALUES (?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"workspace_access", "description", "site"})
-		_, err := s.DB.Exec(upsertSQL, role.Name, boolToInt(role.WorkspaceAccess), role.Description, site)
+		_, err := s.DB.Exec(db.Rebind(s.Dialect, upsertSQL), role.Name, boolToInt(role.WorkspaceAccess), role.Description, site)
 		if err != nil {
 			return fmt.Errorf("saving role %s: %w", role.Name, err)
 		}
@@ -309,7 +316,7 @@ func (s *Store) SaveRolesTx(tx *sql.Tx, roles []*doctype.Role, site string) erro
 		upsertSQL := `INSERT INTO _kora_role (name, workspace_access, description, site)
 			VALUES (?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"workspace_access", "description", "site"})
-		_, err := tx.Exec(upsertSQL, role.Name, boolToInt(role.WorkspaceAccess), role.Description, site)
+		_, err := tx.Exec(db.Rebind(s.Dialect, upsertSQL), role.Name, boolToInt(role.WorkspaceAccess), role.Description, site)
 		if err != nil {
 			return fmt.Errorf("saving role %s: %w", role.Name, err)
 		}
@@ -326,7 +333,7 @@ func (s *Store) SavePermissions(permissions []*doctype.Permission, site string) 
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
 				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "site"})
-		_, err := s.DB.Exec(upsertSQL, name, p.Doctype, p.Role,
+		_, err := s.DB.Exec(db.Rebind(s.Dialect, upsertSQL), name, p.Doctype, p.Role,
 			boolToInt(p.Read), boolToInt(p.Write), boolToInt(p.Create),
 			boolToInt(p.Delete), boolToInt(p.Submit), boolToInt(p.Cancel),
 			boolToInt(p.Amend), boolToInt(p.Export), boolToInt(p.Import),
@@ -348,7 +355,7 @@ func (s *Store) SavePermissionsTx(tx *sql.Tx, permissions []*doctype.Permission,
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
 				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "site"})
-		_, err := tx.Exec(upsertSQL, name, p.Doctype, p.Role,
+		_, err := tx.Exec(db.Rebind(s.Dialect, upsertSQL), name, p.Doctype, p.Role,
 			boolToInt(p.Read), boolToInt(p.Write), boolToInt(p.Create),
 			boolToInt(p.Delete), boolToInt(p.Submit), boolToInt(p.Cancel),
 			boolToInt(p.Amend), boolToInt(p.Export), boolToInt(p.Import),
@@ -366,7 +373,7 @@ func (s *Store) SavePermissionsTx(tx *sql.Tx, permissions []*doctype.Permission,
 // Permissions panel. This follows the principle: explicit is better than implicit.
 func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string, site string) error {
 	// Get all existing roles for this site.
-	rows, err := s.DB.Query("SELECT name FROM _kora_role WHERE site = ? OR site = ''", site)
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, "SELECT name FROM _kora_role WHERE site = ? OR site = ''"), site)
 	if err != nil {
 		return fmt.Errorf("querying roles: %w", err)
 	}
@@ -396,12 +403,12 @@ func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string, site string)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
 				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "site"})
-		_, err := s.DB.Exec(upsertSQL,
+		_, err := s.DB.Exec(db.Rebind(s.Dialect, upsertSQL),
 			name, doctypeName, role,
-			true, true, true, // read, write, create
-			true, true, true, // delete, submit, cancel
-			true, true, true, true, // amend, export, import, report
-			false, // if_owner
+			1, 1, 1, // read, write, create
+			1, 1, 1, // delete, submit, cancel
+			1, 1, 1, 1, // amend, export, import, report
+			0, // if_owner
 			site,
 		)
 		if err != nil {
@@ -423,7 +430,7 @@ func (s *Store) SaveWorkflows(workflows []*doctype.Workflow, site string) error 
 		upsertSQL := `INSERT INTO _kora_workflow (name, document_type, is_active, workflow_state_field, config_json, site)
 			VALUES (?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"is_active", "config_json", "site"})
-		_, err := s.DB.Exec(upsertSQL, wf.Name, wf.DocumentType, boolToInt(wf.IsActive), wf.WorkflowStateField, string(configJSON), site)
+		_, err := s.DB.Exec(db.Rebind(s.Dialect, upsertSQL), wf.Name, wf.DocumentType, boolToInt(wf.IsActive), wf.WorkflowStateField, string(configJSON), site)
 		if err != nil {
 			return fmt.Errorf("saving workflow %s: %w", wf.Name, err)
 		}
@@ -435,7 +442,7 @@ func (s *Store) SaveWorkflows(workflows []*doctype.Workflow, site string) error 
 			upsertSQL := `INSERT INTO _kora_workflow_state (name, workflow, state, doc_status, allow_edit, style, idx)
 				VALUES (?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 				[]string{"name"}, []string{"doc_status", "allow_edit", "style"})
-			_, err := s.DB.Exec(upsertSQL, stateName, wf.Name, state.State, state.DocStatus, allowEdit, state.Style, i)
+			_, err := s.DB.Exec(db.Rebind(s.Dialect, upsertSQL), stateName, wf.Name, state.State, state.DocStatus, allowEdit, state.Style, i)
 			if err != nil {
 				return fmt.Errorf("saving workflow state %s: %w", stateName, err)
 			}
@@ -448,7 +455,7 @@ func (s *Store) SaveWorkflows(workflows []*doctype.Workflow, site string) error 
 			upsertSQL := `INSERT INTO _kora_workflow_transition (name, workflow, action, from_state, to_state, allowed, condition_expr, require_fields, idx)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 				[]string{"name"}, []string{"from_state", "to_state", "allowed"})
-			_, err := s.DB.Exec(upsertSQL, transName, wf.Name, t.Action, t.From, t.To, t.Allowed, t.Condition, requireFields, i)
+			_, err := s.DB.Exec(db.Rebind(s.Dialect, upsertSQL), transName, wf.Name, t.Action, t.From, t.To, t.Allowed, t.Condition, requireFields, i)
 			if err != nil {
 				return fmt.Errorf("saving workflow transition %s: %w", transName, err)
 			}
@@ -465,7 +472,7 @@ func (s *Store) SaveWorkflowsTx(tx *sql.Tx, workflows []*doctype.Workflow, site 
 		upsertSQL := `INSERT INTO _kora_workflow (name, document_type, is_active, workflow_state_field, config_json, site)
 			VALUES (?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"is_active", "config_json", "site"})
-		_, err := tx.Exec(upsertSQL, wf.Name, wf.DocumentType, boolToInt(wf.IsActive), wf.WorkflowStateField, string(configJSON), site)
+		_, err := tx.Exec(db.Rebind(s.Dialect, upsertSQL), wf.Name, wf.DocumentType, boolToInt(wf.IsActive), wf.WorkflowStateField, string(configJSON), site)
 		if err != nil {
 			return fmt.Errorf("saving workflow %s: %w", wf.Name, err)
 		}
@@ -477,7 +484,7 @@ func (s *Store) SaveWorkflowsTx(tx *sql.Tx, workflows []*doctype.Workflow, site 
 			upsertSQL := `INSERT INTO _kora_workflow_state (name, workflow, state, doc_status, allow_edit, style, idx)
 				VALUES (?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 				[]string{"name"}, []string{"doc_status", "allow_edit", "style"})
-			_, err := tx.Exec(upsertSQL, stateName, wf.Name, state.State, state.DocStatus, allowEdit, state.Style, i)
+			_, err := tx.Exec(db.Rebind(s.Dialect, upsertSQL), stateName, wf.Name, state.State, state.DocStatus, allowEdit, state.Style, i)
 			if err != nil {
 				return fmt.Errorf("saving workflow state %s: %w", stateName, err)
 			}
@@ -490,7 +497,7 @@ func (s *Store) SaveWorkflowsTx(tx *sql.Tx, workflows []*doctype.Workflow, site 
 			upsertSQL := `INSERT INTO _kora_workflow_transition (name, workflow, action, from_state, to_state, allowed, condition_expr, require_fields, idx)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 				[]string{"name"}, []string{"from_state", "to_state", "allowed"})
-			_, err := tx.Exec(upsertSQL, transName, wf.Name, t.Action, t.From, t.To, t.Allowed, t.Condition, requireFields, i)
+			_, err := tx.Exec(db.Rebind(s.Dialect, upsertSQL), transName, wf.Name, t.Action, t.From, t.To, t.Allowed, t.Condition, requireFields, i)
 			if err != nil {
 				return fmt.Errorf("saving workflow transition %s: %w", transName, err)
 			}
@@ -501,7 +508,7 @@ func (s *Store) SaveWorkflowsTx(tx *sql.Tx, workflows []*doctype.Workflow, site 
 
 // LoadRoles loads all roles from _kora_role.
 func (s *Store) LoadRoles(site string) ([]*doctype.Role, error) {
-	rows, err := s.DB.Query("SELECT name, workspace_access, description FROM _kora_role WHERE site = ? OR site = '' ORDER BY name", site)
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, "SELECT name, workspace_access, description FROM _kora_role WHERE site = ? OR site = '' ORDER BY name"), site)
 	if err != nil {
 		return nil, err
 	}
@@ -522,13 +529,13 @@ func (s *Store) LoadRoles(site string) ([]*doctype.Role, error) {
 
 // LoadPermissions loads all permissions from _kora_permission.
 func (s *Store) LoadPermissions(site string) ([]*doctype.Permission, error) {
-	rows, err := s.DB.Query(`
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, `
 		SELECT doctype, role, can_read, can_write, can_create, can_delete,
 			can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner
 		FROM _kora_permission
 		WHERE site = ? OR site = ''
 		ORDER BY doctype, role
-	`, site)
+	`), site)
 	if err != nil {
 		return nil, err
 	}
@@ -564,7 +571,10 @@ func (s *Store) LoadPermissions(site string) ([]*doctype.Permission, error) {
 func (s *Store) CreateConfigVersion(siteName, createdBy, label, status string, snapshot *doctype.ConfigSnapshot) (string, int, error) {
 	var baseVersionID string
 	if status == "Draft" {
-		s.DB.QueryRow("SELECT id FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1", siteName).Scan(&baseVersionID)
+		err := s.DB.QueryRow(db.Rebind(s.Dialect, "SELECT id FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1"), siteName).Scan(&baseVersionID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", 0, fmt.Errorf("reading active config version: %w", err)
+		}
 	}
 	return s.CreateConfigVersionWithBase(siteName, createdBy, label, status, snapshot, baseVersionID)
 }
@@ -591,21 +601,83 @@ func (s *Store) CreateConfigVersionWithBase(siteName, createdBy, label, status s
 	return "", 0, fmt.Errorf("creating config version: %w", lastErr)
 }
 
+// UpdateDraftConfigVersion replaces the snapshot of an existing inactive
+// draft without creating another version. This is used when a conversational
+// candidate is repaired after a draft has already been prepared.
+func (s *Store) UpdateDraftConfigVersion(siteName, versionID, createdBy, label string, snapshot *doctype.ConfigSnapshot, baseVersionID string) (int, error) {
+	if snapshot == nil {
+		return 0, fmt.Errorf("snapshot is required")
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var version int
+	var status string
+	if err := tx.QueryRow(db.Rebind(s.Dialect, "SELECT version, status FROM _kora_config_version WHERE site = ? AND id = ?"), siteName, versionID).Scan(&version, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("draft config version %q not found", versionID)
+		}
+		return 0, fmt.Errorf("reading draft config version: %w", err)
+	}
+	if status != "Draft" {
+		return 0, fmt.Errorf("config version %q is %s, not Draft", versionID, status)
+	}
+
+	configSExpr := doctype.ToSExpr(snapshot)
+	h := sha256.Sum256([]byte(configSExpr))
+	if _, err := tx.Exec(
+		db.Rebind(s.Dialect, `UPDATE _kora_config_version
+		 SET created_by = ?, label = ?, config = ?, change_list = NULL,
+		     config_hash = ?, base_version_id = ?, min_kora_version = ?
+		 WHERE site = ? AND id = ? AND status = 'Draft'`),
+		createdBy, label, configSExpr, hex.EncodeToString(h[:]), baseVersionID,
+		snapshot.MinKoraVersion, siteName, versionID,
+	); err != nil {
+		return 0, fmt.Errorf("updating config version: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("committing config version update: %w", err)
+	}
+	return version, nil
+}
+
 func (s *Store) createConfigVersionOnce(siteName, createdBy, label, status string, snapshot *doctype.ConfigSnapshot, baseVersionID string) (string, int, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return "", 0, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
+	versionID, version, err := s.CreateConfigVersionTx(tx, siteName, createdBy, label, status, snapshot, baseVersionID)
+	if err != nil {
+		return "", 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", 0, fmt.Errorf("committing config version: %w", err)
+	}
+	return versionID, version, nil
+}
 
+// CreateConfigVersionTx writes a version using a caller-owned transaction.
+// It is used by activation and rollback so the live config and its version
+// history become visible together.
+func (s *Store) CreateConfigVersionTx(tx *sql.Tx, siteName, createdBy, label, status string, snapshot *doctype.ConfigSnapshot, baseVersionID string) (string, int, error) {
+	if tx == nil {
+		return "", 0, fmt.Errorf("transaction is required")
+	}
+	if snapshot == nil {
+		return "", 0, fmt.Errorf("snapshot is required")
+	}
 	var currentVersion int
-	if err := tx.QueryRow("SELECT COALESCE(MAX(version), 0) FROM _kora_config_version WHERE site = ?", siteName).Scan(&currentVersion); err != nil {
+	if err := tx.QueryRow(db.Rebind(s.Dialect, "SELECT COALESCE(MAX(version), 0) FROM _kora_config_version WHERE site = ?"), siteName).Scan(&currentVersion); err != nil {
 		return "", 0, fmt.Errorf("reading current version: %w", err)
 	}
 	newVersion := currentVersion + 1
 
 	if status == "Active" {
-		if _, err := tx.Exec("UPDATE _kora_config_version SET status = 'Superseded' WHERE site = ? AND status = 'Active'", siteName); err != nil {
+		if _, err := tx.Exec(db.Rebind(s.Dialect, "UPDATE _kora_config_version SET status = 'Superseded', is_active = ? WHERE site = ? AND status = 'Active'"), configVersionActiveFlag(s.Dialect, false), siteName); err != nil {
 			return "", 0, fmt.Errorf("superseding active versions: %w", err)
 		}
 	}
@@ -617,7 +689,7 @@ func (s *Store) createConfigVersionOnce(siteName, createdBy, label, status strin
 	var changelog any
 	var changeList any
 	var prevConfigRaw string
-	if err := tx.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND version = ?", siteName, currentVersion).Scan(&prevConfigRaw); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRow(db.Rebind(s.Dialect, "SELECT config FROM _kora_config_version WHERE site = ? AND version = ?"), siteName, currentVersion).Scan(&prevConfigRaw); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", 0, fmt.Errorf("reading previous version: %w", err)
 	}
 	if prevConfigRaw != "" {
@@ -639,10 +711,10 @@ func (s *Store) createConfigVersionOnce(siteName, createdBy, label, status strin
 
 	versionID := configVersionID(siteName, newVersion)
 	minKoraVersion := snapshot.MinKoraVersion
-	_, err = tx.Exec(
-		`INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, changelog, status, config, change_list, config_hash, base_version_id, min_kora_version)
-		 VALUES (?, ?, ?, `+s.Dialect.NowTimestamp()+`, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		versionID, siteName, newVersion, createdBy, label, changelog, status, configSExpr,
+	_, err := tx.Exec(
+		db.Rebind(s.Dialect, `INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, changelog, status, is_active, config, change_list, config_hash, base_version_id, min_kora_version)
+		 VALUES (?, ?, ?, `+s.Dialect.NowTimestamp()+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		versionID, siteName, newVersion, createdBy, label, changelog, status, configVersionActiveFlag(s.Dialect, status == "Active"), configSExpr,
 		changeList, configHash, baseVersionID, minKoraVersion,
 	)
 	if err != nil {
@@ -650,9 +722,6 @@ func (s *Store) createConfigVersionOnce(siteName, createdBy, label, status strin
 			return "", 0, err
 		}
 		return "", 0, fmt.Errorf("inserting config version: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return "", 0, fmt.Errorf("committing config version: %w", err)
 	}
 	return versionID, newVersion, nil
 }
@@ -693,10 +762,25 @@ func (s *Store) SupersedeSiblingDrafts(siteName, activatedVersionID, baseVersion
 	if baseVersionID == "" {
 		return nil
 	}
-	_, err := s.DB.Exec(
+	_, err := s.DB.Exec(db.Rebind(s.Dialect,
 		`UPDATE _kora_config_version
 		 SET status = 'Superseded'
-		 WHERE site = ? AND status = 'Draft' AND id <> ? AND base_version_id = ?`,
+		 WHERE site = ? AND status = 'Draft' AND id <> ? AND base_version_id = ?`),
+		siteName, activatedVersionID, baseVersionID,
+	)
+	return err
+}
+
+// SupersedeSiblingDraftsTx updates sibling drafts inside the caller's
+// activation transaction.
+func (s *Store) SupersedeSiblingDraftsTx(tx *sql.Tx, siteName, activatedVersionID, baseVersionID string) error {
+	if baseVersionID == "" {
+		return nil
+	}
+	_, err := tx.Exec(db.Rebind(s.Dialect,
+		`UPDATE _kora_config_version
+		 SET status = 'Superseded'
+		 WHERE site = ? AND status = 'Draft' AND id <> ? AND base_version_id = ?`),
 		siteName, activatedVersionID, baseVersionID,
 	)
 	return err
@@ -732,7 +816,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 
 // LoadAnalyticsMetrics loads all custom analytics metric definitions.
 func (s *Store) LoadAnalyticsMetrics(site string) ([]*doctype.AnalyticsMetricConfig, error) {
-	rows, err := s.DB.Query("SELECT name, label, type, doctype, field_name, link_field, group_by_field FROM _kora_analytics_metric WHERE site = ? OR site = ''", site)
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, "SELECT name, label, type, doctype, field_name, link_field, group_by_field FROM _kora_analytics_metric WHERE site = ? OR site = ''"), site)
 	if err != nil {
 		return nil, err
 	}
@@ -740,7 +824,9 @@ func (s *Store) LoadAnalyticsMetrics(site string) ([]*doctype.AnalyticsMetricCon
 	var metrics []*doctype.AnalyticsMetricConfig
 	for rows.Next() {
 		var m doctype.AnalyticsMetricConfig
-		rows.Scan(&m.Name, &m.Label, &m.Type, &m.DocType, &m.FieldName, &m.LinkField, &m.GroupByField)
+		if err := rows.Scan(&m.Name, &m.Label, &m.Type, &m.DocType, &m.FieldName, &m.LinkField, &m.GroupByField); err != nil {
+			return nil, fmt.Errorf("scanning analytics metric: %w", err)
+		}
 		m.AutoGenerated = false
 		metrics = append(metrics, &m)
 	}
@@ -755,8 +841,8 @@ func (s *Store) SaveAnalyticsMetrics(metrics []*doctype.AnalyticsMetricConfig, s
 		}
 		upsertSQL := `INSERT INTO _kora_analytics_metric (name, label, type, doctype, field_name, link_field, group_by_field, site)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			` + s.Dialect.UpsertClause([]string{"name"}, []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field", "site"})
-		_, err := s.DB.Exec(upsertSQL, m.Name, m.Label, m.Type, m.DocType, m.FieldName, m.LinkField, m.GroupByField, site)
+			` + s.Dialect.UpsertClause([]string{"site", "name"}, []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field"})
+		_, err := s.DB.Exec(db.Rebind(s.Dialect, upsertSQL), m.Name, m.Label, m.Type, m.DocType, m.FieldName, m.LinkField, m.GroupByField, site)
 		if err != nil {
 			return fmt.Errorf("saving analytics metric %s: %w", m.Name, err)
 		}
@@ -772,8 +858,8 @@ func (s *Store) SaveAnalyticsMetricsTx(tx *sql.Tx, metrics []*doctype.AnalyticsM
 		}
 		upsertSQL := `INSERT INTO _kora_analytics_metric (name, label, type, doctype, field_name, link_field, group_by_field, site)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			` + s.Dialect.UpsertClause([]string{"name"}, []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field", "site"})
-		_, err := tx.Exec(upsertSQL, m.Name, m.Label, m.Type, m.DocType, m.FieldName, m.LinkField, m.GroupByField, site)
+			` + s.Dialect.UpsertClause([]string{"site", "name"}, []string{"label", "type", "doctype", "field_name", "link_field", "group_by_field"})
+		_, err := tx.Exec(db.Rebind(s.Dialect, upsertSQL), m.Name, m.Label, m.Type, m.DocType, m.FieldName, m.LinkField, m.GroupByField, site)
 		if err != nil {
 			return fmt.Errorf("saving analytics metric %s: %w", m.Name, err)
 		}
@@ -793,8 +879,8 @@ func normalizeWorkflowAllowEdit(value string) int {
 // LoadScriptSnapshots loads all active scripts as snapshots for versioning.
 // Script bodies are hashed (SHA-256) rather than stored inline to avoid DB bloat.
 func (s *Store) LoadScriptSnapshots(site string) ([]*doctype.ScriptSnapshot, error) {
-	rows, err := s.DB.Query(`SELECT name, script_type, doctype, event, method_path, workflow_action, schedule,
-		priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = 1 AND (site = ? OR site = '')`, site)
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, `SELECT name, script_type, doctype, event, method_path, workflow_action, schedule,
+		priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = ? AND (site = ? OR site = '')`), true, site)
 	if err != nil {
 		return nil, err
 	}
@@ -809,11 +895,33 @@ func (s *Store) LoadScriptSnapshots(site string) ([]*doctype.ScriptSnapshot, err
 			&ss.TimeoutMs, &script); err != nil {
 			return nil, err
 		}
+		ss.Source = script
 		h := sha256.Sum256([]byte(script))
 		ss.ScriptHash = hex.EncodeToString(h[:])
 		scripts = append(scripts, &ss)
 	}
 	return scripts, rows.Err()
+}
+
+// SaveScriptsTx persists script definitions as part of config activation. The
+// source body is taken from the immutable version snapshot, so the reviewed
+// body and its metadata become live atomically with the rest of the snapshot.
+func (s *Store) SaveScriptsTx(tx *sql.Tx, scripts []*doctype.ScriptSnapshot, site string, dialect db.Dialect) error {
+	for _, ss := range scripts {
+		if ss == nil {
+			continue
+		}
+		upsertSQL := `INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, workflow_action, schedule,
+			priority, is_active, run_as, timeout_ms, script)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			` + dialect.UpsertClause([]string{"name"}, []string{"script_type", "doctype", "event", "method_path", "workflow_action", "schedule",
+			"priority", "is_active", "run_as", "timeout_ms", "script"})
+		if _, err := tx.Exec(db.Rebind(dialect, upsertSQL), ss.Name, site, ss.ScriptType, ss.DocType, ss.Event, ss.MethodPath,
+			ss.WorkflowAction, ss.Schedule, ss.Priority, ss.IsActive, ss.RunAs, ss.TimeoutMs, ss.Source); err != nil {
+			return fmt.Errorf("saving script %s during activation: %w", ss.Name, err)
+		}
+	}
+	return nil
 }
 
 // SaveScripts upserts active scripts from a config snapshot during site provisioning.
@@ -832,7 +940,7 @@ func (s *Store) SaveScripts(scripts []*doctype.ScriptSnapshot, scriptBodyByHash 
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			` + s.Dialect.UpsertClause([]string{"name"}, []string{"script_type", "doctype", "event", "method_path", "workflow_action", "schedule",
 			"priority", "is_active", "run_as", "timeout_ms", "script"})
-		_, err := s.DB.Exec(upsertSQL, ss.Name, site, ss.ScriptType, ss.DocType, ss.Event, ss.MethodPath,
+		_, err := s.DB.Exec(db.Rebind(s.Dialect, upsertSQL), ss.Name, site, ss.ScriptType, ss.DocType, ss.Event, ss.MethodPath,
 			ss.WorkflowAction, ss.Schedule, ss.Priority, ss.IsActive, ss.RunAs, ss.TimeoutMs, scriptBody)
 		if err != nil {
 			return fmt.Errorf("saving script %s: %w", ss.Name, err)
@@ -843,7 +951,7 @@ func (s *Store) SaveScripts(scripts []*doctype.ScriptSnapshot, scriptBodyByHash 
 
 // LoadWorkflows loads all workflows from the database.
 func (s *Store) LoadWorkflows(site string) ([]*doctype.Workflow, error) {
-	rows, err := s.DB.Query("SELECT config_json FROM _kora_workflow WHERE is_active = 1 AND (site = ? OR site = '')", site)
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, "SELECT config_json FROM _kora_workflow WHERE is_active = 1 AND (site = ? OR site = '')"), site)
 	if err != nil {
 		return nil, err
 	}
@@ -867,9 +975,10 @@ func (s *Store) LoadWorkflows(site string) ([]*doctype.Workflow, error) {
 // ActivateSnapshot runs the full activation in a single transaction.
 // 1. Writes all config rows (doctypes, roles, permissions, workflows, metrics)
 // 2. Applies DDL (caller must apply DDL after the tx, or use tx.Exec for SQLite)
-// 3. Rebuilds registry from the snapshot in memory
+// Registry mutation is intentionally left to the caller after commit so a
+// rolled-back SQL transaction cannot leave process-local config ahead of SQL.
 // On any failure, returns an error (caller should roll back the transaction).
-func (s *Store) ActivateSnapshot(tx *sql.Tx, snapshot *doctype.ConfigSnapshot, reg *doctype.Registry, siteName string, dialect db.Dialect) error {
+func (s *Store) ActivateSnapshot(tx *sql.Tx, snapshot *doctype.ConfigSnapshot, siteName string, dialect db.Dialect) error {
 	// Step 1: Save all doctypes using the transaction.
 	for _, dt := range snapshot.DocTypes {
 		if err := s.SaveDocTypeTx(tx, dt, siteName); err != nil {
@@ -903,13 +1012,25 @@ func (s *Store) ActivateSnapshot(tx *sql.Tx, snapshot *doctype.ConfigSnapshot, r
 			return fmt.Errorf("saving views during activation: %w", err)
 		}
 	}
+	if len(snapshot.Scripts) > 0 {
+		if err := s.SaveScriptsTx(tx, snapshot.Scripts, siteName, dialect); err != nil {
+			return err
+		}
+	}
 
-	// Step 3: Rebuild registry from snapshot (in-memory, no DB needed).
+	return nil
+}
+
+// ApplySnapshotToRegistry installs a committed configuration snapshot into
+// the process-local registry. Keep this separate from ActivateSnapshot so a
+// transaction rollback cannot leave in-memory routing/config ahead of SQL.
+func ApplySnapshotToRegistry(snapshot *doctype.ConfigSnapshot, reg *doctype.Registry) {
+	if snapshot == nil || reg == nil {
+		return
+	}
 	reg.LoadFull(snapshot.DocTypes, snapshot.Roles, snapshot.Permissions)
 	reg.Workflows.LoadFromDB(snapshot.Workflows)
 	reg.Views.LoadFromDB(snapshot.Views)
-
-	return nil
 }
 
 // ApplyDDLTx executes DDL statements using the given transaction.
@@ -931,7 +1052,7 @@ func ApplyDDLTx(tx *sql.Tx, statements []string) error {
 // Run at startup or on first access to config versions.
 func (s *Store) MigrateLegacyConfigs(site string) (int, error) {
 	rows, err := s.DB.Query(
-		"SELECT id, config FROM _kora_config_version WHERE site = ? AND config != '' AND config IS NOT NULL",
+		db.Rebind(s.Dialect, "SELECT id, config FROM _kora_config_version WHERE site = ? AND config != '' AND config IS NOT NULL"),
 		site,
 	)
 	if err != nil {
@@ -969,7 +1090,7 @@ func (s *Store) MigrateLegacyConfigs(site string) (int, error) {
 			continue
 		}
 		sexpr := doctype.ToSExpr(snapshot)
-		_, err = s.DB.Exec("UPDATE _kora_config_version SET config = ? WHERE id = ?", sexpr, m.id)
+		_, err = s.DB.Exec(db.Rebind(s.Dialect, "UPDATE _kora_config_version SET config = ? WHERE id = ?"), sexpr, m.id)
 		if err != nil {
 			return migrated, fmt.Errorf("updating migrated config for %s: %w", m.id, err)
 		}
@@ -984,7 +1105,7 @@ func (s *Store) MigrateLegacyConfigs(site string) (int, error) {
 
 // MigrateAllLegacyConfigs migrates legacy JSON configs for all sites.
 func (s *Store) MigrateAllLegacyConfigs() (int, error) {
-	rows, err := s.DB.Query("SELECT DISTINCT site FROM _kora_config_version WHERE config != '' AND config IS NOT NULL")
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, "SELECT DISTINCT site FROM _kora_config_version WHERE config != '' AND config IS NOT NULL"))
 	if err != nil {
 		return 0, fmt.Errorf("querying distinct sites for config migration: %w", err)
 	}

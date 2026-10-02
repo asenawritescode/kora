@@ -8,11 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"regexp"
 	"strings"
 	"time"
 
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/go-sql-driver/mysql"
 	"github.com/oklog/ulid/v2"
 )
@@ -99,10 +98,25 @@ func nullTime(t time.Time) any {
 	return t.UTC()
 }
 
-func EnsureAIRunTables(ctx context.Context, db *sql.DB) error {
+func timeFromNull(t sqlTime) time.Time {
+	if !t.Valid {
+		return time.Time{}
+	}
+	return t.Time
+}
+
+func EnsureAIRunTables(ctx context.Context, db *sql.DB, dialects ...kdb.Dialect) error {
 	if db == nil {
 		return nil
 	}
+	var dialect kdb.Dialect
+	if len(dialects) > 0 {
+		dialect = dialects[0]
+	}
+	if dialect == nil {
+		dialect = dialectFromContext(ctx)
+	}
+	ctx = WithDialect(ctx, dialect)
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS _kora_ai_conversation (
 			id VARCHAR(255) PRIMARY KEY,
@@ -264,7 +278,15 @@ func EnsureAIRunTables(ctx context.Context, db *sql.DB) error {
 		`CREATE INDEX idx_ai_budget_res_site ON _kora_ai_budget_reservation (site, model, status)`,
 	}
 	for _, stmt := range stmts {
-		if _, err := db.ExecContext(ctx, stmt); err != nil && !isDuplicateIndexError(err) {
+		switch dialect.DriverName() {
+		case "postgres":
+			stmt = strings.ReplaceAll(stmt, "LONGTEXT", "TEXT")
+			stmt = strings.ReplaceAll(stmt, "DATETIME", "TIMESTAMP")
+		case "libsql":
+			stmt = strings.ReplaceAll(stmt, "LONGTEXT", "TEXT")
+			stmt = strings.ReplaceAll(stmt, "DATETIME", "TEXT")
+		}
+		if _, err := (aiSQL{db}).ExecContext(ctx, stmt); err != nil && !isDuplicateIndexError(err) {
 			return err
 		}
 	}
@@ -272,20 +294,15 @@ func EnsureAIRunTables(ctx context.Context, db *sql.DB) error {
 }
 
 func isDuplicateIndexError(err error) bool {
-	var mysqlErr *mysql.MySQLError
-	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1061
-}
-
-var aiExcludedColumn = regexp.MustCompile(`excluded\.([a-zA-Z0-9_]+)`)
-
-// aiUpsertSQL keeps the store compatible with both Kora database dialects.
-// SQLite uses ON CONFLICT/excluded; MySQL uses ON DUPLICATE KEY/VALUES.
-func aiUpsertSQL(query string) string {
-	if !strings.EqualFold(os.Getenv("KORA_DB_TYPE"), "mysql") {
-		return query
+	if err == nil {
+		return false
 	}
-	query = strings.Replace(query, "ON CONFLICT(id) DO UPDATE SET", "ON DUPLICATE KEY UPDATE", 1)
-	return aiExcludedColumn.ReplaceAllString(query, "VALUES($1)")
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1061 {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "already exists") || strings.Contains(message, "duplicate key name")
 }
 
 func UpsertConversation(ctx context.Context, db *sql.DB, rec ConversationRecord) error {
@@ -299,7 +316,7 @@ func UpsertConversation(ctx context.Context, db *sql.DB, rec ConversationRecord)
 	if rec.Channel == "" {
 		rec.Channel = "chat"
 	}
-	_, err := db.ExecContext(ctx, aiUpsertSQL(`
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_conversation (
 	id, site, channel, subject_key, title, summary, status, last_run_id, last_message_at, retention_expires_at, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -313,7 +330,7 @@ ON CONFLICT(id) DO UPDATE SET
 	last_run_id=excluded.last_run_id,
 	last_message_at=excluded.last_message_at,
 	retention_expires_at=excluded.retention_expires_at,
-	updated_at=excluded.updated_at`),
+	updated_at=excluded.updated_at`,
 		rec.ID, rec.Site, rec.Channel, rec.SubjectKey, rec.Title, rec.Summary, rec.Status, rec.LastRunID, nullTime(rec.LastMessageAt), nullTime(rec.RetentionExpiresAt), now, now,
 	)
 	return err
@@ -324,18 +341,23 @@ func LoadConversation(ctx context.Context, db *sql.DB, site, subjectKey string) 
 		return ConversationRecord{}, fmt.Errorf("conversation store unavailable")
 	}
 	var rec ConversationRecord
-	err := db.QueryRowContext(ctx, `
+	var lastMessageAt, retentionExpiresAt, createdAt, updatedAt sqlTime
+	err := (aiSQL{db}).QueryRowContext(ctx, `
 SELECT id, site, channel, subject_key, title, summary, status, last_run_id, last_message_at, retention_expires_at, created_at, updated_at
 FROM _kora_ai_conversation
 WHERE site = ? AND subject_key = ?
 ORDER BY updated_at DESC
 LIMIT 1`, site, subjectKey).Scan(
 		&rec.ID, &rec.Site, &rec.Channel, &rec.SubjectKey, &rec.Title, &rec.Summary, &rec.Status, &rec.LastRunID,
-		&rec.LastMessageAt, &rec.RetentionExpiresAt, &rec.CreatedAt, &rec.UpdatedAt,
+		&lastMessageAt, &retentionExpiresAt, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return ConversationRecord{}, err
 	}
+	rec.LastMessageAt = timeFromNull(lastMessageAt)
+	rec.RetentionExpiresAt = timeFromNull(retentionExpiresAt)
+	rec.CreatedAt = timeFromNull(createdAt)
+	rec.UpdatedAt = timeFromNull(updatedAt)
 	return rec, nil
 }
 
@@ -344,16 +366,21 @@ func LoadConversationByID(ctx context.Context, db *sql.DB, conversationID string
 		return ConversationRecord{}, fmt.Errorf("conversation store unavailable")
 	}
 	var rec ConversationRecord
-	err := db.QueryRowContext(ctx, `
+	var lastMessageAt, retentionExpiresAt, createdAt, updatedAt sqlTime
+	err := (aiSQL{db}).QueryRowContext(ctx, `
 SELECT id, site, channel, subject_key, title, summary, status, last_run_id, last_message_at, retention_expires_at, created_at, updated_at
 FROM _kora_ai_conversation
 WHERE id = ?`, conversationID).Scan(
 		&rec.ID, &rec.Site, &rec.Channel, &rec.SubjectKey, &rec.Title, &rec.Summary, &rec.Status, &rec.LastRunID,
-		&rec.LastMessageAt, &rec.RetentionExpiresAt, &rec.CreatedAt, &rec.UpdatedAt,
+		&lastMessageAt, &retentionExpiresAt, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return ConversationRecord{}, err
 	}
+	rec.LastMessageAt = timeFromNull(lastMessageAt)
+	rec.RetentionExpiresAt = timeFromNull(retentionExpiresAt)
+	rec.CreatedAt = timeFromNull(createdAt)
+	rec.UpdatedAt = timeFromNull(updatedAt)
 	return rec, nil
 }
 
@@ -368,7 +395,7 @@ func UpsertRun(ctx context.Context, db *sql.DB, rec RunRecord) error {
 	if rec.Channel == "" {
 		rec.Channel = "chat"
 	}
-	_, err := db.ExecContext(ctx, aiUpsertSQL(`
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_run (
 	id, site, conversation_id, channel, status, model, provider, current_step_id, summary, input_message, output_message, error_message, cancel_reason, resume_token, created_at, updated_at, completed_at, cancelled_at, retention_expires_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -389,7 +416,7 @@ ON CONFLICT(id) DO UPDATE SET
 	updated_at=excluded.updated_at,
 	completed_at=excluded.completed_at,
 	cancelled_at=excluded.cancelled_at,
-	retention_expires_at=excluded.retention_expires_at`),
+	retention_expires_at=excluded.retention_expires_at`,
 		rec.ID, rec.Site, rec.ConversationID, rec.Channel, rec.Status, rec.Model, rec.Provider, rec.CurrentStepID, rec.Summary, rec.InputMessage, rec.OutputMessage, rec.ErrorMessage, rec.CancelReason, rec.ResumeToken, now, now, nullTime(rec.CompletedAt), nullTime(rec.CancelledAt), nullTime(rec.RetentionExpiresAt),
 	)
 	return err
@@ -400,15 +427,21 @@ func LoadRun(ctx context.Context, db *sql.DB, runID string) (RunRecord, error) {
 		return RunRecord{}, fmt.Errorf("run store unavailable")
 	}
 	var rec RunRecord
-	err := db.QueryRowContext(ctx, `
+	var createdAt, updatedAt, completedAt, cancelledAt, retentionExpiresAt sqlTime
+	err := (aiSQL{db}).QueryRowContext(ctx, `
 SELECT id, site, conversation_id, channel, status, model, provider, current_step_id, summary, input_message, output_message, error_message, cancel_reason, resume_token, created_at, updated_at, completed_at, cancelled_at, retention_expires_at
 FROM _kora_ai_run
 WHERE id = ?`, runID).Scan(
-		&rec.ID, &rec.Site, &rec.ConversationID, &rec.Channel, &rec.Status, &rec.Model, &rec.Provider, &rec.CurrentStepID, &rec.Summary, &rec.InputMessage, &rec.OutputMessage, &rec.ErrorMessage, &rec.CancelReason, &rec.ResumeToken, &rec.CreatedAt, &rec.UpdatedAt, &rec.CompletedAt, &rec.CancelledAt, &rec.RetentionExpiresAt,
+		&rec.ID, &rec.Site, &rec.ConversationID, &rec.Channel, &rec.Status, &rec.Model, &rec.Provider, &rec.CurrentStepID, &rec.Summary, &rec.InputMessage, &rec.OutputMessage, &rec.ErrorMessage, &rec.CancelReason, &rec.ResumeToken, &createdAt, &updatedAt, &completedAt, &cancelledAt, &retentionExpiresAt,
 	)
 	if err != nil {
 		return RunRecord{}, err
 	}
+	rec.CreatedAt = timeFromNull(createdAt)
+	rec.UpdatedAt = timeFromNull(updatedAt)
+	rec.CompletedAt = timeFromNull(completedAt)
+	rec.CancelledAt = timeFromNull(cancelledAt)
+	rec.RetentionExpiresAt = timeFromNull(retentionExpiresAt)
 	return rec, nil
 }
 
@@ -422,7 +455,7 @@ func AppendMessage(ctx context.Context, db *sql.DB, site, conversationID, runID,
 	if sequence <= 0 {
 		sequence = 1
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_message (id, site, conversation_id, run_id, role, content, message_kind, step_id, sequence, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ulid.Make().String(), site, conversationID, runID, role, content, kind, stepID, sequence, time.Now().UTC(),
@@ -438,7 +471,7 @@ func UpsertStep(ctx context.Context, db *sql.DB, stepID, site, runID, conversati
 	if stepID == "" {
 		stepID = ulid.Make().String()
 	}
-	_, err := db.ExecContext(ctx, aiUpsertSQL(`
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_step (
 	id, site, run_id, conversation_id, step_key, status, summary, tool_name, input_json, output_json, error_message, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -453,7 +486,7 @@ ON CONFLICT(id) DO UPDATE SET
 	input_json=excluded.input_json,
 	output_json=excluded.output_json,
 	error_message=excluded.error_message,
-	updated_at=excluded.updated_at`),
+	updated_at=excluded.updated_at`,
 		stepID, site, runID, conversationID, stepKey, status, summary, toolName, inputJSON, outputJSON, errorMessage, now, now,
 	)
 	return err
@@ -467,7 +500,7 @@ func UpsertTask(ctx context.Context, db *sql.DB, rec TaskRecord) error {
 	if rec.ID == "" {
 		rec.ID = ulid.Make().String()
 	}
-	_, err := db.ExecContext(ctx, aiUpsertSQL(`
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_task (
 	id, site, run_id, conversation_id, parent_task_id, kind, title, description, status, sort_order, notes, created_at, updated_at, completed_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -483,7 +516,7 @@ ON CONFLICT(id) DO UPDATE SET
 	sort_order=excluded.sort_order,
 	notes=excluded.notes,
 	updated_at=excluded.updated_at,
-	completed_at=excluded.completed_at`),
+	completed_at=excluded.completed_at`,
 		rec.ID, rec.Site, rec.RunID, rec.ConversationID, rec.ParentTaskID, rec.Kind, rec.Title, rec.Description, rec.Status, rec.SortOrder, rec.Notes, now, now, nullTime(rec.CompletedAt),
 	)
 	return err
@@ -493,7 +526,7 @@ func ListRunTasks(ctx context.Context, db *sql.DB, runID string) ([]TaskRecord, 
 	if db == nil {
 		return nil, nil
 	}
-	rows, err := db.QueryContext(ctx, `
+	rows, err := (aiSQL{db}).QueryContext(ctx, `
 SELECT id, site, run_id, conversation_id, parent_task_id, kind, title, description, status, sort_order, notes, created_at, updated_at, completed_at
 FROM _kora_ai_task
 WHERE run_id = ?
@@ -505,13 +538,13 @@ ORDER BY sort_order ASC, created_at ASC`, runID)
 	var out []TaskRecord
 	for rows.Next() {
 		var rec TaskRecord
-		var completed sql.NullTime
-		if err := rows.Scan(&rec.ID, &rec.Site, &rec.RunID, &rec.ConversationID, &rec.ParentTaskID, &rec.Kind, &rec.Title, &rec.Description, &rec.Status, &rec.SortOrder, &rec.Notes, &rec.CreatedAt, &rec.UpdatedAt, &completed); err != nil {
+		var created, updated, completed sqlTime
+		if err := rows.Scan(&rec.ID, &rec.Site, &rec.RunID, &rec.ConversationID, &rec.ParentTaskID, &rec.Kind, &rec.Title, &rec.Description, &rec.Status, &rec.SortOrder, &rec.Notes, &created, &updated, &completed); err != nil {
 			return nil, err
 		}
-		if completed.Valid {
-			rec.CompletedAt = completed.Time
-		}
+		rec.CreatedAt = timeFromNull(created)
+		rec.UpdatedAt = timeFromNull(updated)
+		rec.CompletedAt = timeFromNull(completed)
 		out = append(out, rec)
 	}
 	return out, rows.Err()
@@ -526,7 +559,7 @@ func MarkTaskStatus(ctx context.Context, db *sql.DB, taskID, status, notes strin
 	if strings.EqualFold(status, "done") || strings.EqualFold(status, "completed") {
 		completed = now
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 UPDATE _kora_ai_task
 SET status = COALESCE(NULLIF(?, ''), status),
 	notes = COALESCE(NULLIF(?, ''), notes),
@@ -558,7 +591,7 @@ func UpdateStepStatus(ctx context.Context, db *sql.DB, stepID, status, summary, 
 	if db == nil || stepID == "" {
 		return nil
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 UPDATE _kora_ai_step
 SET status = COALESCE(NULLIF(?, ''), status),
 	summary = COALESCE(NULLIF(?, ''), summary),
@@ -577,7 +610,7 @@ func ListRunSteps(ctx context.Context, db *sql.DB, runID string) ([]string, erro
 	if db == nil {
 		return nil, nil
 	}
-	rows, err := db.QueryContext(ctx, `
+	rows, err := (aiSQL{db}).QueryContext(ctx, `
 SELECT COALESCE(summary, '')
 FROM _kora_ai_step
 WHERE run_id = ?
@@ -633,7 +666,7 @@ func UpsertApproval(ctx context.Context, db *sql.DB, rec ApprovalRecord) error {
 	if rec.RequestedAt.IsZero() {
 		rec.RequestedAt = now
 	}
-	_, err := db.ExecContext(ctx, aiUpsertSQL(`
+	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_approval (
 	id, site, operation_id, actor_principal_id, actor_principal_type, tool_name, state, target_fingerprint, argument_hash, record_version, requested_at, expires_at, granted_at, granted_by, auth_session_id
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -651,7 +684,7 @@ ON CONFLICT(id) DO UPDATE SET
 	expires_at=excluded.expires_at,
 	granted_at=excluded.granted_at,
 	granted_by=excluded.granted_by,
-	auth_session_id=excluded.auth_session_id`),
+	auth_session_id=excluded.auth_session_id`,
 		rec.ID, rec.Site, rec.OperationID, rec.ActorPrincipalID, rec.ActorPrincipalType, rec.ToolName, rec.State, rec.TargetFingerprint, rec.ArgumentHash, rec.RecordVersion, rec.RequestedAt, nullTime(rec.ExpiresAt), nullTime(rec.GrantedAt), rec.GrantedBy, rec.AuthSessionID,
 	)
 	return err
@@ -662,22 +695,19 @@ func LoadApproval(ctx context.Context, db *sql.DB, approvalID string) (ApprovalR
 		return ApprovalRecord{}, fmt.Errorf("approval store unavailable")
 	}
 	var rec ApprovalRecord
-	var expiresAt, grantedAt sql.NullTime
-	err := db.QueryRowContext(ctx, `
+	var requestedAt, expiresAt, grantedAt sqlTime
+	err := (aiSQL{db}).QueryRowContext(ctx, `
 SELECT id, site, operation_id, actor_principal_id, actor_principal_type, tool_name, state, target_fingerprint, argument_hash, record_version, requested_at, expires_at, granted_at, granted_by, auth_session_id
 FROM _kora_ai_approval
 WHERE id = ?`, approvalID).Scan(
-		&rec.ID, &rec.Site, &rec.OperationID, &rec.ActorPrincipalID, &rec.ActorPrincipalType, &rec.ToolName, &rec.State, &rec.TargetFingerprint, &rec.ArgumentHash, &rec.RecordVersion, &rec.RequestedAt, &expiresAt, &grantedAt, &rec.GrantedBy, &rec.AuthSessionID,
+		&rec.ID, &rec.Site, &rec.OperationID, &rec.ActorPrincipalID, &rec.ActorPrincipalType, &rec.ToolName, &rec.State, &rec.TargetFingerprint, &rec.ArgumentHash, &rec.RecordVersion, &requestedAt, &expiresAt, &grantedAt, &rec.GrantedBy, &rec.AuthSessionID,
 	)
 	if err != nil {
 		return ApprovalRecord{}, err
 	}
-	if expiresAt.Valid {
-		rec.ExpiresAt = expiresAt.Time
-	}
-	if grantedAt.Valid {
-		rec.GrantedAt = grantedAt.Time
-	}
+	rec.RequestedAt = timeFromNull(requestedAt)
+	rec.ExpiresAt = timeFromNull(expiresAt)
+	rec.GrantedAt = timeFromNull(grantedAt)
 	return rec, nil
 }
 
@@ -711,7 +741,7 @@ func HasGrantedApproval(ctx context.Context, db *sql.DB, site, operationID, tool
 	}
 	fp := approvalFingerprint(toolName, args)
 	var count int
-	err := db.QueryRowContext(ctx, `
+	err := (aiSQL{db}).QueryRowContext(ctx, `
 SELECT COUNT(1)
 FROM _kora_ai_approval
 WHERE site = ? AND operation_id = ? AND tool_name = ? AND state = 'granted' AND target_fingerprint = ?`,
@@ -743,7 +773,7 @@ func GrantApprovalForOperation(ctx context.Context, db *sql.DB, site, operationI
 	}
 	fp := approvalFingerprint(toolName, args)
 	var approvalID string
-	err := db.QueryRowContext(ctx, `
+	err := (aiSQL{db}).QueryRowContext(ctx, `
 SELECT id
 FROM _kora_ai_approval
 WHERE site = ? AND operation_id = ? AND tool_name = ? AND state = 'pending_approval' AND target_fingerprint = ?
@@ -857,7 +887,7 @@ func RefreshRunSummary(ctx context.Context, db *sql.DB, runID string) error {
 		return err
 	}
 	var stepSummary string
-	_ = db.QueryRowContext(ctx, `
+	_ = (aiSQL{db}).QueryRowContext(ctx, `
 SELECT COALESCE(summary, '')
 FROM _kora_ai_step
 WHERE run_id = ?
@@ -917,7 +947,7 @@ func CleanupExpired(ctx context.Context, db *sql.DB, now time.Time) (removed int
 	}
 	now = now.UTC()
 	execDelete := func(query string, args ...any) error {
-		res, execErr := tx.ExecContext(ctx, query, args...)
+		res, execErr := tx.ExecContext(ctx, bindAIQuery(ctx, query), args...)
 		if execErr != nil {
 			return execErr
 		}

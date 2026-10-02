@@ -10,7 +10,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 )
 
-func TestInsert_AppliesDefaultsBeforeComputedFields(t *testing.T) {
+func TestInsertInTx_AppliesDefaultsBeforeComputedFields(t *testing.T) {
 	dbConn, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -58,8 +58,16 @@ func TestInsert_AppliesDefaultsBeforeComputedFields(t *testing.T) {
 	mock.ExpectCommit()
 
 	tx := &TxManager{DB: dbConn, Registry: reg, Dialect: db.Resolve("mysql")}
-	if err := tx.Insert(sale, doc, "tester", "tester"); err != nil {
-		t.Fatalf("Insert: %v", err)
+	dbTx, err := dbConn.Begin()
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	if err := tx.InsertInTx(dbTx, sale, doc, "tester", "tester"); err != nil {
+		dbTx.Rollback()
+		t.Fatalf("InsertInTx: %v", err)
+	}
+	if err := dbTx.Commit(); err != nil {
+		t.Fatalf("commit transaction: %v", err)
 	}
 	if got := doc.Get("discount_amount"); got != float64(0) {
 		t.Fatalf("discount_amount default: got %#v, want 0", got)

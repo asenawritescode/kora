@@ -8,6 +8,18 @@ function getCsrfToken(): string {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function buildApiURL(path: string): URL {
+  const runtime = loadRuntimeConfig()
+  const apiBase = runtime.apiBaseUrl.replace(/\/$/, '')
+  const requestPath = path.startsWith('/api/') ? path.slice(4) : path
+  const target = `${apiBase}${requestPath}`
+  const isAbsolute = /^https?:\/\//i.test(apiBase)
+  // A path-routed workspace must keep its site prefix on every API request.
+  // Otherwise localhost falls back to the globally scoped kora_site cookie,
+  // which may still point at a different site opened earlier in the browser.
+  return new URL(isAbsolute ? target : sitePath(target), window.location.origin)
+}
+
 export class KoraApiError extends Error {
   code: string
   field?: string
@@ -35,10 +47,7 @@ async function apiRequest<T>(
   body?: unknown,
   params?: Record<string, string | number | undefined>,
 ): Promise<T> {
-  const runtime = loadRuntimeConfig()
-  const apiBase = runtime.apiBaseUrl.replace(/\/$/, '')
-  const requestPath = path.startsWith('/api/') ? path.slice(4) : sitePath(path)
-  const url = new URL(apiBase + requestPath, window.location.origin)
+  const url = buildApiURL(path)
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined) {
@@ -172,10 +181,7 @@ async function apiRequestEnvelope<T>(
   body?: unknown,
   params?: Record<string, string | number | undefined>,
 ): Promise<{ data: T; meta?: { total?: number; doctype?: string; config_version?: number; capabilities_version?: string; next_cursor?: string | null; has_more?: boolean } }> {
-  const runtime = loadRuntimeConfig()
-  const apiBase = runtime.apiBaseUrl.replace(/\/$/, '')
-  const requestPath = path.startsWith('/api/') ? path.slice(4) : sitePath(path)
-  const url = new URL(apiBase + requestPath, window.location.origin)
+  const url = buildApiURL(path)
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined) {
@@ -224,10 +230,7 @@ async function rawApiRequest<T>(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<{ response: Response; json: T | undefined }> {
-  const runtime = loadRuntimeConfig()
-  const apiBase = runtime.apiBaseUrl.replace(/\/$/, '')
-  const requestPath = path.startsWith('/api/') ? path.slice(4) : sitePath(path)
-  const url = new URL(apiBase + requestPath, window.location.origin)
+  const url = buildApiURL(path)
   if (options.params) {
     for (const [key, value] of Object.entries(options.params)) {
       if (value !== undefined) {

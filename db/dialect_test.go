@@ -182,17 +182,54 @@ func TestMySQL_CreateTableTemporalDefaults(t *testing.T) {
 	}
 
 	stmt := d.CreateTable(dt)[0]
-	if !contains(stmt, "`sale_date` DATE DEFAULT NULL DEFAULT CURRENT_DATE") {
+	if !contains(stmt, "`sale_date` DATE DEFAULT CURRENT_DATE") || contains(stmt, "`sale_date` DATE DEFAULT NULL") {
 		t.Fatalf("expected CURRENT_DATE default, got: %s", stmt)
 	}
-	if !contains(stmt, "`sale_time` TIME(6) DEFAULT NULL DEFAULT CURRENT_TIME(6)") {
+	if !contains(stmt, "`sale_time` TIME(6) DEFAULT CURRENT_TIME(6)") || contains(stmt, "`sale_time` TIME(6) DEFAULT NULL") {
 		t.Fatalf("expected CURRENT_TIME(6) default, got: %s", stmt)
 	}
-	if !contains(stmt, "`created_at` DATETIME(6) DEFAULT NULL DEFAULT CURRENT_TIMESTAMP(6)") {
+	if !contains(stmt, "`created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6)") || contains(stmt, "`created_at` DATETIME(6) DEFAULT NULL") {
 		t.Fatalf("expected CURRENT_TIMESTAMP(6) default, got: %s", stmt)
 	}
 	if strings.Contains(stmt, "DEFAULT 'Today'") || strings.Contains(stmt, "DEFAULT 'Now'") {
 		t.Fatalf("temporal defaults should not be quoted literals: %s", stmt)
+	}
+}
+
+func TestMySQL_AddColumnUsesOnlySupportedDefault(t *testing.T) {
+	d := &MySQLDialect{}
+	dateStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "received_at", Fieldtype: "Datetime", Default: "Now"})
+	if !contains(dateStmt, "`received_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6)") || contains(dateStmt, "`received_at` DATETIME(6) DEFAULT NULL") {
+		t.Fatalf("nullable column should have one temporal default, got: %s", dateStmt)
+	}
+
+	textStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "payload", Fieldtype: "Text", Default: "ignored by mysql"})
+	if !contains(textStmt, "`payload` TEXT DEFAULT NULL") || contains(textStmt, "ignored by mysql") {
+		t.Fatalf("unsupported MySQL default should leave nullable column without value default, got: %s", textStmt)
+	}
+}
+
+func TestMySQLIsWriteConflict(t *testing.T) {
+	d := &MySQLDialect{}
+	for _, code := range []uint16{1205, 1213} {
+		if !d.IsWriteConflict(&mysql.MySQLError{Number: code}) {
+			t.Errorf("MySQL error %d should be a write conflict", code)
+		}
+	}
+	if d.IsWriteConflict(&mysql.MySQLError{Number: 1062}) {
+		t.Fatal("duplicate key should not be classified as serialization contention")
+	}
+}
+
+func TestLibSQLIsWriteConflict(t *testing.T) {
+	d := &LibSQLDialect{}
+	for _, message := range []string{"SQLITE_BUSY: database is locked", "SQLITE_LOCKED"} {
+		if !d.IsWriteConflict(errors.New(message)) {
+			t.Errorf("LibSQL error %q should be a write conflict", message)
+		}
+	}
+	if d.IsWriteConflict(errors.New("connection reset")) {
+		t.Fatal("connection error should not be classified as serialization contention")
 	}
 }
 

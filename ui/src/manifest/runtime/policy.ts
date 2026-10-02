@@ -9,6 +9,17 @@ export const ALLOWED_ACTION_COMMANDS = [
   'document.submit',
   'document.cancel',
   'workflow.transition',
+  'create_record',
+  'update_record',
+  'delete_record',
+  'navigate',
+  'workflow_transition',
+  'local_cart_add',
+  'local_cart_remove',
+  'local_state_set',
+  'create_transaction',
+  'initiate_external_operation',
+  'validate_external_operation',
 ] as const
 
 const DATA_DISPLAY_COMPONENTS = new Set([
@@ -23,6 +34,7 @@ const DATA_DISPLAY_COMPONENTS = new Set([
   'calendar_view',
   'approval_queue',
   'product_grid',
+  'category_tabs',
 ])
 
 const RESERVED_ROUTE_PREFIXES = [

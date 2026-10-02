@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/script"
 )
 
 // authorizeOp dispatches authorization: built-in commands authorize against
@@ -17,6 +20,54 @@ import (
 // record at per-step least privilege — create steps need "create", update
 // steps need "write" on their target record (default-deny, spec §51/§108).
 func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn *CommandResource) *contract.Error {
+	if op.Command == CommandPublicFormSubmit {
+		return authorizePublicForm(reg, op)
+	}
+	if op.Command == CommandRecordMutateBundle {
+		if reg == nil {
+			return ErrPermission
+		}
+		var payload RecordMutationBundlePayload
+		if err := json.Unmarshal(op.Payload, &payload); err != nil || payload.Doctype == "" || len(payload.Records) == 0 || len(payload.Records) > 10 {
+			return contract.NewError(contract.CodeValidationFailed, "record.mutate_bundle requires 1 to 10 records")
+		}
+		roles := op.Context.Roles
+		if len(roles) == 0 {
+			roles = []string{doctype.AdminRole}
+		}
+		for _, record := range payload.Records {
+			if record.Doctype == "" {
+				return contract.NewError(contract.CodeValidationFailed, "bundle record doctype is required")
+			}
+			dt := reg.Get(record.Doctype)
+			if dt == nil {
+				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", record.Doctype))
+			}
+			if dt.IsChildTable {
+				return contract.NewError(contract.CodeValidationFailed, "child doctypes cannot be standalone bundle records")
+			}
+			permission := record.Operation
+			if permission == "" {
+				permission = "create"
+			}
+			if permission != "create" && permission != "update" {
+				return contract.NewError(contract.CodeValidationFailed, "bundle operation must be create or update")
+			}
+			if permission == "update" && record.Name == "" {
+				return contract.NewError(contract.CodeValidationFailed, "bundle update requires a record name")
+			}
+			if permission == "update" {
+				permission = "write"
+			}
+			if allowed, _ := reg.CanUser(roles, record.Doctype, permission); !allowed {
+				return ErrPermission
+			}
+		}
+		if payload.Records[0].Doctype != payload.Doctype {
+			return contract.NewError(contract.CodeValidationFailed, "bundle root doctype must match the first record")
+		}
+		return nil
+	}
 	if dyn == nil {
 		return authorize(reg, op, def)
 	}
@@ -38,6 +89,25 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 	return nil
 }
 
+func authorizePublicForm(reg *doctype.Registry, op Operation) *contract.Error {
+	if reg == nil || op.Context.Actor.PrincipalType != contract.PrincipalPublic {
+		return ErrPermission
+	}
+	var payload RecordCreatePayload
+	if err := json.Unmarshal(op.Payload, &payload); err != nil || payload.PublicRoute == "" || payload.Doctype == "" {
+		return contract.NewError(contract.CodeValidationFailed, "public form route and doctype are required")
+	}
+	if reg.Views == nil {
+		return ErrPermission
+	}
+	view := reg.Views.GetByRoute(payload.PublicRoute)
+	dt := reg.Get(payload.Doctype)
+	if view == nil || view.PublicAccess == nil || !view.PublicAccess.Enabled || !view.PublicAccess.AllowMutations || view.SourceDocType != payload.Doctype || dt == nil || dt.PublicAccess == nil || !dt.PublicAccess.Enabled {
+		return ErrPermission
+	}
+	return nil
+}
+
 type stepOutcome struct {
 	Record  string `json:"record"`
 	Name    string `json:"name"`
@@ -49,11 +119,30 @@ type stepOutcome struct {
 // schema), emitted events into the outbox, and the audit row — all commit or
 // roll back together.
 func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, def CommandDefinition, opID string, cmd *CommandResource) (json.RawMessage, *contract.Error) {
-	dbTx, err := siteDB.Begin()
+	dbTx, err := siteDB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
 	}
 	defer dbTx.Rollback()
+	priorMutationExecutor := txMgr.ScriptMutationExecutor
+	priorPostCommitHooks := txMgr.PostCommitHooks
+	priorUser, priorRole, priorRoles, priorContext := txMgr.CurrentUser, txMgr.CurrentUserRole, txMgr.CurrentUserRoles, txMgr.Context
+	priorSkipHooks := txMgr.SkipHookScripts
+	txMgr.PostCommitHooks = nil
+	txMgr.CurrentUser = op.Context.User
+	txMgr.CurrentUserRole = op.Context.UserRole
+	txMgr.CurrentUserRoles = append([]string(nil), op.Context.Roles...)
+	txMgr.SkipHookScripts = append([]string(nil), op.Context.SkipHookScripts...)
+	txMgr.Context = ctx
+	txMgr.ScriptMutationExecutor = script.MutationExecutorFunc(func(nestedCtx context.Context, request script.MutationRequest) (json.RawMessage, error) {
+		return k.executeScriptMutationInTx(nestedCtx, dbTx, txMgr, request)
+	})
+	defer func() {
+		txMgr.ScriptMutationExecutor = priorMutationExecutor
+		txMgr.PostCommitHooks = priorPostCommitHooks
+		txMgr.CurrentUser, txMgr.CurrentUserRole, txMgr.CurrentUserRoles, txMgr.Context = priorUser, priorRole, priorRoles, priorContext
+		txMgr.SkipHookScripts = priorSkipHooks
+	}()
 
 	input, cerr := decodeInput(op.Payload)
 	if cerr != nil {
@@ -64,6 +153,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 	if user == "" {
 		user = "system"
 	}
+	txMgr.CurrentUser = user
 
 	outcomes := make([]stepOutcome, 0, len(cmd.Steps))
 	lastRecord, lastName := "", ""
@@ -83,18 +173,34 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 				}
 				doc.Set(field, v)
 			}
-			if verrs := doctype.ValidateDocument(dt, doc, reg, nil); verrs.HasErrors() {
+			setDefaultValues(dt, doc)
+			if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
+				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+			}
+			if verrs := validateOperationDocument(txMgr, dt, doc, reg, nil); verrs.HasErrors() {
 				return nil, validationContractError(verrs)
+			}
+			if err := txMgr.PrepareInsert(dt, doc); err != nil {
+				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 			}
 			if op.Context.IdempotencyKey != "" && def.IdempotentByKey && len(outcomes) == 0 {
 				if cerr := k.claimReceipt(dbTx, op, def, opID, payloadHash(op.Payload)); cerr != nil {
 					return nil, cerr
 				}
 			}
-			if err := txMgr.InsertInTx(dbTx, dt, doc, user, user); err != nil {
+			owner := op.Context.Owner
+			if owner == "" {
+				owner = user
+			}
+			if err := txMgr.InsertInTx(dbTx, dt, doc, owner, user); err != nil {
 				return nil, wrapORMError(err)
 			}
 			doc.IsNew = false
+			completeTx := *txMgr
+			completeTx.ScriptMutationExecutor = nil
+			completeTx.PostCommitHooks = nil
+			completeTx.SkipHookScripts = nil
+			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteInsert(dt, doc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: doc.Name, Created: true})
 			lastRecord, lastName = dt.Name, doc.Name
 
@@ -107,7 +213,8 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 			if rerr != nil || targetName == "" {
 				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 			}
-			oldDoc, err := txMgr.GetDoc(dt, targetName, "")
+			owner := ownerForOperation(reg, op, dt.Name, "write")
+			oldDoc, err := txMgr.GetDoc(dt, targetName, owner)
 			if err != nil {
 				if err == sql.ErrNoRows || strings.Contains(err.Error(), orm.ErrNotFound.Error()) {
 					return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("record %q not found", targetName))
@@ -115,7 +222,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 				return nil, contract.NewError(contract.CodeDependencyUnavailable, "load document failed")
 			}
 			if ev := expectedVersionFrom(op); ev != "" {
-				prior, perr := readRowVersion(dbTx, dt.TableName(), targetName)
+				prior, perr := readRowVersion(dbTx, k.dialect(), dt.RawTableName(), targetName)
 				if perr != nil {
 					return nil, contract.NewError(contract.CodeNotFound, "document not found")
 				}
@@ -133,17 +240,25 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 				doc.Set(field, v)
 			}
 			doc.IsNew = false
-			if verrs := doctype.ValidateDocument(dt, doc, reg, oldDoc); verrs.HasErrors() {
+			if verrs := validateOperationDocument(txMgr, dt, doc, reg, oldDoc); verrs.HasErrors() {
 				return nil, validationContractError(verrs)
+			}
+			if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {
+				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 			}
 			if op.Context.IdempotencyKey != "" && def.IdempotentByKey && len(outcomes) == 0 {
 				if cerr := k.claimReceipt(dbTx, op, def, opID, payloadHash(op.Payload)); cerr != nil {
 					return nil, cerr
 				}
 			}
-			if err := txMgr.SaveInTx(dbTx, dt, doc, user, "", oldDoc); err != nil {
-				return nil, wrapORMError(err)
+			if err := txMgr.SaveInTx(dbTx, dt, doc, user, owner, oldDoc); err != nil {
+				return nil, wrapExpectedVersionORMError(err, op, k.dialect())
 			}
+			completeTx := *txMgr
+			completeTx.ScriptMutationExecutor = nil
+			completeTx.PostCommitHooks = nil
+			completeTx.SkipHookScripts = nil
+			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteSave(dt, doc, oldDoc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: targetName, Created: false})
 			lastRecord, lastName = dt.Name, targetName
 		}
@@ -178,11 +293,26 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 		return nil, contract.NewError(contract.CodeInternal, "audit write failed")
 	}
 
+	raw, _ := json.Marshal(map[string]any{"command": def.Name, "steps": outcomes})
+	if op.Context.IdempotencyKey != "" && def.IdempotentByKey {
+		if cerr := k.storeReceiptResult(dbTx, op, contract.CommandResult{
+			OperationID: opID, CorrelationID: op.Context.CorrelationID,
+			Status: contract.StatusCompleted, Data: raw,
+		}); cerr != nil {
+			return nil, cerr
+		}
+	}
+
 	if err := dbTx.Commit(); err != nil {
 		return nil, contract.NewError(contract.CodeInternal, "commit failed")
 	}
+	postCommitHooks := append([]func(){}, txMgr.PostCommitHooks...)
+	txMgr.ScriptMutationExecutor = nil
+	txMgr.PostCommitHooks = nil
+	for _, hook := range postCommitHooks {
+		hook()
+	}
 
-	raw, _ := json.Marshal(map[string]any{"command": def.Name, "steps": outcomes})
 	return raw, nil
 }
 
@@ -232,12 +362,28 @@ func resolveStringRef(ref string, input map[string]any) (string, error) {
 }
 
 // readRowVersion reads the canonical version token for optimistic concurrency.
-func readRowVersion(dbTx *sql.Tx, table, name string) (string, error) {
-	var m sql.NullTime
-	if err := dbTx.QueryRow(
-		fmt.Sprintf("SELECT modified FROM %s WHERE name = ?", table), name,
-	).Scan(&m); err != nil {
+func readRowVersion(dbTx *sql.Tx, dialect db.Dialect, table, name string) (string, error) {
+	var modified any
+	query := fmt.Sprintf("SELECT modified FROM %s WHERE name = ?", dialect.QuoteIdent(table))
+	if err := dbTx.QueryRow(db.Rebind(dialect, query), name).Scan(&modified); err != nil {
 		return "", err
 	}
-	return CanonicalVersion(m.Time), nil
+	switch value := modified.(type) {
+	case time.Time:
+		return CanonicalVersion(value), nil
+	case string:
+		parsed, err := parseVersionTimestamp(value)
+		if err != nil {
+			return "", err
+		}
+		return CanonicalVersion(parsed), nil
+	case []byte:
+		parsed, err := parseVersionTimestamp(string(value))
+		if err != nil {
+			return "", err
+		}
+		return CanonicalVersion(parsed), nil
+	default:
+		return "", fmt.Errorf("unsupported modified timestamp type %T", modified)
+	}
 }
