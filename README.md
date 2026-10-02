@@ -121,7 +121,7 @@ Runtime config comes from environment variables plus site metadata in the databa
 | `KORA_SHARED_ANTHROPIC_API_KEY` | — | Shared Anthropic key |
 | `KORA_SCRIPTS_ENABLED` | `false` | Enable JS script engine for extensions |
 | `KORA_SCRIPTS_MAX_RAM` | `64` | Max RAM per script (MB) |
-| `KORA_ANALYTICS` | `false` | Enable analytics event bus and rollup tables |
+| `KORA_OUTBOX` | `true` | Enable transactional kernel events; set `false` only if reports and event-driven integrations are intentionally disabled |
 | `KORA_DB_PORT` | `3306` | Database port (MySQL) |
 | `KORA_RELOAD_TOKEN` | — | Bearer token for `/_kora/admin/reload-site` endpoint |
 | `KORA_SCRIPTS_HTTP_ALLOWLIST` | — | Comma-separated domains allowed for script HTTP requests |

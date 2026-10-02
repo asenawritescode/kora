@@ -71,6 +71,20 @@ func firstEnvBool(def bool, names ...string) bool {
 	return def
 }
 
+func outboxEnabledFromEnv(value string, brokerEnabled bool) bool {
+	if brokerEnabled {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "false", "0", "off", "disabled":
+		return false
+	default:
+		// Analytics workers are active by default, so kernel writes must enter
+		// the transactional outbox even when no external broker is configured.
+		return true
+	}
+}
+
 // resolveStorage builds the storage backend (local or S3-compatible) for a site.
 // Per-site FileStorage from the registry overrides the global KORA_STORAGE_BACKEND.
 func resolveStorage(siteCfg *site.SiteConfig) (storage.Backend, error) {
@@ -816,10 +830,9 @@ func runServe() error {
 			go runAnalyticsRebuildConsumer(siteRuntimeContext(runtimeContextKey(s.Name, s.ConfigRevision)), s.Name, provider, s.DB, kdb.Resolve(s.DBType), s.Registry)
 		}
 	}
-	// Transactional outbox (RFC §8.1). It is enabled explicitly or whenever NATS
-	// is enabled, because broker-backed deployments need durable cross-instance
-	// event delivery.
-	outboxEnabled := os.Getenv("KORA_OUTBOX") == "true" || os.Getenv("KORA_OUTBOX") == "1" || natsEnabled()
+	// Analytics and kernel mutations share the outbox path. Local deployments
+	// use the in-process provider; NATS deployments use the broker provider.
+	outboxEnabled := outboxEnabledFromEnv(os.Getenv("KORA_OUTBOX"), natsEnabled())
 	if outboxEnabled {
 		for _, s := range loadedSites {
 			if s.DB == nil {

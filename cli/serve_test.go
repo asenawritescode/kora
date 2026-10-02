@@ -86,3 +86,25 @@ func TestRouterRejectsInvalidTrustedProxyConfiguration(t *testing.T) {
 		t.Fatal("invalid trusted proxy configuration was accepted")
 	}
 }
+
+func TestOutboxEnabledByDefaultForLocalAnalytics(t *testing.T) {
+	tests := []struct {
+		name   string
+		value  string
+		broker bool
+		want   bool
+	}{
+		{name: "unset uses local transactional delivery", want: true},
+		{name: "explicit true", value: "true", want: true},
+		{name: "explicit false disables local delivery", value: "false", want: false},
+		{name: "zero disables local delivery", value: "0", want: false},
+		{name: "broker requires durable delivery", value: "false", broker: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := outboxEnabledFromEnv(tt.value, tt.broker); got != tt.want {
+				t.Fatalf("outboxEnabledFromEnv(%q, %t) = %t, want %t", tt.value, tt.broker, got, tt.want)
+			}
+		})
+	}
+}
