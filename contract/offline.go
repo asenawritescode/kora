@@ -8,6 +8,8 @@ import (
 // OfflineOperationStatus is the local and server-side lifecycle of an offline
 // operation. The RFC requires rejected operations to remain visible as conflict
 // records rather than disappear.
+//
+//contract:enum
 type OfflineOperationStatus string
 
 const (
@@ -20,6 +22,8 @@ const (
 )
 
 // OfflineSchemaGate records whether a client schema bundle is accepted.
+//
+//contract:enum
 type OfflineSchemaGate string
 
 const (
@@ -29,6 +33,8 @@ const (
 )
 
 // OfflineOperation records one device/branch operation for later sync.
+//
+//contract:wire
 type OfflineOperation struct {
 	ID            string                 `json:"id"`
 	DeviceID      string                 `json:"device_id"`
@@ -41,30 +47,36 @@ type OfflineOperation struct {
 	OccurredAt    time.Time              `json:"occurred_at"`
 	SchemaVersion string                 `json:"schema_version"`
 	Status        OfflineOperationStatus `json:"status"`
-	Payload       json.RawMessage        `json:"payload,omitempty"`
-	Metadata      map[string]string      `json:"metadata,omitempty"`
+	//contract:json
+	Payload  json.RawMessage   `json:"payload,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // OfflineConflict captures a rejected or stale operation and the server-side
 // reason that must stay auditable.
+//
+//contract:wire
 type OfflineConflict struct {
-	ID             string          `json:"id"`
-	OperationID    string          `json:"operation_id"`
-	DeviceID       string          `json:"device_id"`
-	BranchID       string          `json:"branch_id"`
-	Site           string          `json:"site"`
-	EntityType     string          `json:"entity_type"`
-	EntityID       string          `json:"entity_id,omitempty"`
-	ReasonCode     Code            `json:"reason_code"`
-	ResolutionMode string          `json:"resolution_mode"`
-	ServerVersion  int             `json:"server_version"`
-	RecordedAt     time.Time       `json:"recorded_at"`
-	Snapshot       json.RawMessage `json:"snapshot,omitempty"`
+	ID             string    `json:"id"`
+	OperationID    string    `json:"operation_id"`
+	DeviceID       string    `json:"device_id"`
+	BranchID       string    `json:"branch_id"`
+	Site           string    `json:"site"`
+	EntityType     string    `json:"entity_type"`
+	EntityID       string    `json:"entity_id,omitempty"`
+	ReasonCode     Code      `json:"reason_code"`
+	ResolutionMode string    `json:"resolution_mode"`
+	ServerVersion  int       `json:"server_version"`
+	RecordedAt     time.Time `json:"recorded_at"`
+	//contract:json
+	Snapshot json.RawMessage `json:"snapshot,omitempty"`
 }
 
 // OfflineTombstone records a retained delete marker. Tombstones remain visible
 // for the supported offline window so deletes can be replayed, retried, and
 // rejected deterministically.
+//
+//contract:wire
 type OfflineTombstone struct {
 	ID            string    `json:"id"`
 	DeviceID      string    `json:"device_id"`
@@ -78,6 +90,8 @@ type OfflineTombstone struct {
 }
 
 // SyncCursor is the opaque cursor shared by pull and acknowledgement flows.
+//
+//contract:wire
 type SyncCursor struct {
 	Token    string    `json:"token"`
 	BranchID string    `json:"branch_id"`
@@ -87,6 +101,8 @@ type SyncCursor struct {
 }
 
 // OfflineSyncBatch groups operations under one schema gate result.
+//
+//contract:wire
 type OfflineSyncBatch struct {
 	SchemaVersion string             `json:"schema_version"`
 	Gate          OfflineSchemaGate  `json:"gate"`
@@ -192,6 +208,8 @@ func OperationCanTransition(from, to OfflineOperationStatus) bool {
 // GenerationInfo identifies the projection generation a client holds
 // (OFFLINE-001). ConfigVersion bumps on every activated config change;
 // ProjectionHash identifies the derived local schema.
+//
+//contract:wire
 type GenerationInfo struct {
 	Site           string `json:"site"`
 	ConfigVersion  int64  `json:"config_version"`

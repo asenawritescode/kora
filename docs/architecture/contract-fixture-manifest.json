@@ -1,0 +1,45 @@
+{
+  "manifest_version": 1,
+  "snapshot_date": "2026-10-15",
+  "release_status": "unreleased-working-tree-snapshot",
+  "fixtures": [
+    {
+      "name": "organizational-runtime-v1",
+      "sha256": "bc30a78dbd25151c57262c24722c637ed2f69efc76dbe2f250a062868c9c8b5c",
+      "consumers": [
+        "kora/contract-fixtures/organizational-runtime-v1.json",
+        "kora-cloud/contract-fixtures/organizational-runtime-v1.json",
+        "kora-studio-mvp/contract-fixtures/organizational-runtime-v1.json"
+      ]
+    },
+    {
+      "name": "site-directory-v1",
+      "sha256": "53c4368eef86f1eebc7cb9c085642889c0bb0fdc6433186f3522d59c0ca681ee",
+      "consumers": [
+        "kora/contract-fixtures/site-directory-v1.json"
+      ]
+    }
+  ],
+  "engine_contracts": [
+    {
+      "version": "v1",
+      "schema": "kora/contract/schema/engine-v1.json",
+      "schema_sha256": "9d5c044e01f14706cd3d33ea841bfb352599008d122666a176f0430a5cb35af1",
+      "typescript": "kora/contract/generated/engine-v1.ts",
+      "typescript_sha256": "6916646c8f196ffddd053efa85a943e7257c76e8c2ecbfc1ac16a34bcdfc439c"
+    },
+    {
+      "version": "v2",
+      "schema": "kora/contract/schema/engine-v2.json",
+      "schema_sha256": "e7510bb2a43d4de285ebe6ee462baeadf3c8bef8185308b39e62b76d3c9da30d",
+      "typescript": "kora/contract/generated/engine-v2.ts",
+      "typescript_sha256": "097ef41615b608b62c4fa26407c0a948788c47c86027d8af71de7c3227fc576a",
+      "embedded_ui_copy": "kora/ui/src/generated/engine-v2.ts",
+      "embedded_ui_copy_sha256": "097ef41615b608b62c4fa26407c0a948788c47c86027d8af71de7c3227fc576a",
+      "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
+      "studio_copy_sha256": "097ef41615b608b62c4fa26407c0a948788c47c86027d8af71de7c3227fc576a",
+      "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
+      "sdk_copy_sha256": "097ef41615b608b62c4fa26407c0a948788c47c86027d8af71de7c3227fc576a"
+    }
+  ]
+}

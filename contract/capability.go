@@ -8,6 +8,8 @@ import "sort"
 //	experimental  implemented behind an explicit feature flag, no compatibility promise
 //	supported     contract, recovery, security, and observability tests pass in a stated mode
 //	retired       no new callers may depend on it
+//
+//contract:enum
 type CapabilityStatus string
 
 const (
@@ -19,6 +21,8 @@ const (
 
 // BlockingRisk marks a capability whose risk (from RFC §18.1) prevents it from
 // being advertised as supported.
+//
+//contract:enum
 type BlockingRisk string
 
 const (
@@ -31,6 +35,8 @@ const (
 
 // Capability is a named, versioned contract or feature whose implementation and
 // production-readiness must be tracked per the RFC handoff rule.
+//
+//contract:wire
 type Capability struct {
 	Name        string
 	Description string
@@ -147,7 +153,7 @@ func BaselineCapabilities() []Capability {
 		},
 		{
 			Name:        "ai.chat",
-			Description: "AI chat tool execution (RFC §10.4).",
+			Description: "Context-scoped AI chat with durable transcripts, run tracking, and approval workflow (RFC §10.4).",
 			Status:      CapabilityExperimental,
 			Risks:       []BlockingRisk{RiskAuthorization, RiskDurableEffects},
 		},

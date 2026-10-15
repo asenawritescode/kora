@@ -24,6 +24,8 @@ import (
 //
 // The RFC defines exactly these five states. They are stable machine-readable
 // values used uniformly across all externally callable operations.
+//
+//contract:enum
 type Status string
 
 const (
@@ -37,6 +39,8 @@ const (
 
 // Code is a stable, machine-readable error code. These values must not be
 // renamed or repurposed once frozen, because callers depend on them.
+//
+//contract:enum
 type Code string
 
 const (
@@ -48,12 +52,19 @@ const (
 	CodeDependencyUnavailable Code = "DEPENDENCY_UNAVAILABLE"
 	CodeIdempotencyKeyReused  Code = "IDEMPOTENCY_KEY_REUSED"
 	CodeUnauthenticated       Code = "UNAUTHENTICATED"
+	CodeResourceExhausted     Code = "RESOURCE_EXHAUSTED"
+	CodeStaleSubject          Code = "STALE_SUBJECT"
+	CodeLeaseLost             Code = "LEASE_LOST"
+	CodeOutcomeUnknown        Code = "OUTCOME_UNKNOWN"
+	CodeUnsupportedVersion    Code = "UNSUPPORTED_VERSION"
 	CodeInternal              Code = "INTERNAL_ERROR"
 )
 
 // PrincipalType classifies the kind of authenticated principal carrying out an
 // operation. ai-assistant, mcp-agent, and similar strings are not implicit
 // users, roles, or owners; they are always resolved to a typed principal.
+//
+//contract:enum
 type PrincipalType string
 
 const (
@@ -66,6 +77,8 @@ const (
 // Projection is the consumer-approved data projection that an event payload may
 // carry (RFC §8.3). Full documents and old-document snapshots are restricted to
 // explicitly authorized audit or rebuild consumers.
+//
+//contract:enum
 type Projection string
 
 const (
@@ -96,6 +109,16 @@ func NormalizeCode(s string) Code {
 		return CodeIdempotencyKeyReused
 	case "UNAUTHENTICATED":
 		return CodeUnauthenticated
+	case "RESOURCE_EXHAUSTED":
+		return CodeResourceExhausted
+	case "STALE_SUBJECT":
+		return CodeStaleSubject
+	case "LEASE_LOST":
+		return CodeLeaseLost
+	case "OUTCOME_UNKNOWN":
+		return CodeOutcomeUnknown
+	case "UNSUPPORTED_VERSION":
+		return CodeUnsupportedVersion
 	default:
 		return CodeInternal
 	}
@@ -103,10 +126,13 @@ func NormalizeCode(s string) Code {
 
 // Error is the structured, versioned error contract. Error codes are stable
 // machine-readable values per RFC §7.1.
+//
+//contract:wire
 type Error struct {
-	Type    Code            `json:"type"`
-	Message string          `json:"message"`
-	Field   string          `json:"field,omitempty"`
+	Type    Code   `json:"type"`
+	Message string `json:"message"`
+	Field   string `json:"field,omitempty"`
+	//contract:json
 	Details json.RawMessage `json:"details,omitempty"`
 }
 
@@ -121,6 +147,8 @@ func NewError(code Code, message string) *Error {
 // ActorContext is the versioned identity/delegation context attached to every
 // command (RFC §7.3). It records who is executing and, where applicable, the
 // human on whose behalf a service or agent acts.
+//
+//contract:wire
 type ActorContext struct {
 	PrincipalID     string        `json:"principal_id"`
 	PrincipalType   PrincipalType `json:"principal_type"` // human|service|agent
@@ -144,17 +172,21 @@ func (a ActorContext) Authenticated() bool {
 
 // CommandEnvelope is the versioned transport for a command (RFC §7). It is
 // serialized as the command is dispatched through any provider.
+//
+//contract:wire
 type CommandEnvelope struct {
-	Type           string          `json:"type"`
-	Version        int             `json:"version"`
-	ID             string          `json:"id"`
-	Site           string          `json:"site"`
-	Actor          ActorContext    `json:"actor"`
-	CorrelationID  string          `json:"correlation_id,omitempty"`
-	CausationID    string          `json:"causation_id,omitempty"`
-	IdempotencyKey string          `json:"idempotency_key,omitempty"`
-	Deadline       time.Time       `json:"deadline"`
-	Data           json.RawMessage `json:"data,omitempty"`
+	Type string `json:"type"`
+	//contract:min=1
+	Version        int          `json:"version"`
+	ID             string       `json:"id"`
+	Site           string       `json:"site"`
+	Actor          ActorContext `json:"actor"`
+	CorrelationID  string       `json:"correlation_id,omitempty"`
+	CausationID    string       `json:"causation_id,omitempty"`
+	IdempotencyKey string       `json:"idempotency_key,omitempty"`
+	Deadline       time.Time    `json:"deadline"`
+	//contract:json
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // Expired reports whether the command deadline has passed. A missing or expired
@@ -164,23 +196,31 @@ func (c CommandEnvelope) Expired(now time.Time) bool {
 }
 
 // EventEnvelope is the versioned transport for a domain event (RFC §7/§8.3).
+//
+//contract:wire
 type EventEnvelope struct {
-	ID            string          `json:"id"`
-	Type          string          `json:"type"`
-	Version       int             `json:"version"`
-	Source        string          `json:"source"`
-	Site          string          `json:"site"`
-	AggregateType string          `json:"aggregate_type,omitempty"`
-	AggregateID   string          `json:"aggregate_id,omitempty"`
-	OccurredAt    time.Time       `json:"occurred_at"`
-	CorrelationID string          `json:"correlation_id,omitempty"`
-	CausationID   string          `json:"causation_id,omitempty"`
-	Actor         ActorContext    `json:"actor,omitempty"`
-	Capability    ResourceRef     `json:"capability,omitempty"`
-	Skill         ResourceRef     `json:"skill,omitempty"`
-	ModelRevision string          `json:"model_revision,omitempty"`
-	ProvenanceIDs []string        `json:"provenance_ids,omitempty"`
-	Data          json.RawMessage `json:"data"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	//contract:min=1
+	Version int `json:"version"`
+	// Sequence is assigned by the tenant outbox transaction and orders source
+	// events for rebuild cutoffs. It remains a decimal string to avoid JSON
+	// number precision loss in JavaScript consumers.
+	Sequence      Revision     `json:"sequence,omitempty"`
+	Source        string       `json:"source"`
+	Site          string       `json:"site"`
+	AggregateType string       `json:"aggregate_type,omitempty"`
+	AggregateID   string       `json:"aggregate_id,omitempty"`
+	OccurredAt    time.Time    `json:"occurred_at"`
+	CorrelationID string       `json:"correlation_id,omitempty"`
+	CausationID   string       `json:"causation_id,omitempty"`
+	Actor         ActorContext `json:"actor,omitempty"`
+	Capability    ResourceRef  `json:"capability,omitempty"`
+	Skill         ResourceRef  `json:"skill,omitempty"`
+	ModelRevision string       `json:"model_revision,omitempty"`
+	ProvenanceIDs []string     `json:"provenance_ids,omitempty"`
+	//contract:json
+	Data json.RawMessage `json:"data"`
 }
 
 // Validate checks the minimum semantic envelope required for durable delivery.
@@ -201,6 +241,11 @@ func (e EventEnvelope) Validate() error {
 	case len(e.Data) == 0 || string(e.Data) == "null":
 		return NewError(CodeValidationFailed, "event data is required")
 	}
+	if e.Sequence != "" {
+		if _, err := ParseRevision(string(e.Sequence)); err != nil {
+			return NewError(CodeValidationFailed, "event sequence must be a canonical non-negative decimal")
+		}
+	}
 	if !json.Valid(e.Data) {
 		return NewError(CodeValidationFailed, "event data must be valid JSON")
 	}
@@ -208,17 +253,22 @@ func (e EventEnvelope) Validate() error {
 }
 
 // CommandResult is the versioned result of a synchronous command (RFC §7.1).
+//
+//contract:wire
 type CommandResult struct {
-	OperationID   string          `json:"operation_id"`
-	CorrelationID string          `json:"correlation_id"`
-	Status        Status          `json:"status"`
-	Data          json.RawMessage `json:"data,omitempty"`
-	Error         *Error          `json:"error,omitempty"`
-	Replayed      bool            `json:"replayed,omitempty"`
+	OperationID   string `json:"operation_id"`
+	CorrelationID string `json:"correlation_id"`
+	Status        Status `json:"status"`
+	//contract:json
+	Data     json.RawMessage `json:"data,omitempty"`
+	Error    *Error          `json:"error,omitempty"`
+	Replayed bool            `json:"replayed,omitempty"`
 }
 
 // TaskReceipt acknowledges a submitted (asynchronous) command. Receiving a
 // receipt does not imply completion (RFC §7).
+//
+//contract:wire
 type TaskReceipt struct {
 	OperationID   string    `json:"operation_id"`
 	CorrelationID string    `json:"correlation_id"`
@@ -227,10 +277,13 @@ type TaskReceipt struct {
 }
 
 // Delivery carries a message to a Consumer handler (RFC §7).
+//
+//contract:wire
 type Delivery struct {
-	ID      string          `json:"id"`
-	Type    string          `json:"type"`
-	Site    string          `json:"site"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	Site string `json:"site"`
+	//contract:json
 	Data    json.RawMessage `json:"data"`
 	Attempt int             `json:"attempt"`
 }
@@ -261,6 +314,8 @@ type Consumer interface {
 // SurfaceStatus summarizes how a contract area should be treated by callers.
 // The values mirror the repo-wide capability vocabulary so the inventory can be
 // used directly in docs and handoff notes.
+//
+//contract:enum
 type SurfaceStatus string
 
 const (
@@ -272,6 +327,8 @@ const (
 )
 
 // Surface describes one public contract area in this package.
+//
+//contract:wire
 type Surface struct {
 	Name        string        `json:"name"`
 	Status      SurfaceStatus `json:"status"`

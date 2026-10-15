@@ -1,0 +1,4178 @@
+{
+  "$defs": {
+    "ActionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "next": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "name",
+        "next",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ApplyPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_ref": {
+          "maxLength": 160,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$",
+          "type": "string"
+        },
+        "digest": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "expected_config_revision": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_ref",
+        "digest",
+        "expected_config_revision",
+        "meta",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "Assignee": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "user",
+            "role",
+            "group"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "AssignmentSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "assignees": {
+          "items": {
+            "$ref": "#/$defs/Assignee"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "mode": {
+          "enum": [
+            "any",
+            "all",
+            "sequential"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignees",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "AssignmentView": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_responses": {
+          "items": {
+            "enum": [
+              "approve",
+              "reject",
+              "return_for_changes",
+              "provide_information",
+              "acknowledge",
+              "complete"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "assignee": {
+          "$ref": "#/$defs/Assignee"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "blocked",
+            "pending",
+            "responded",
+            "superseded",
+            "cancelled"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_responses",
+        "assignee",
+        "id",
+        "stage",
+        "status"
+      ],
+      "type": "object"
+    },
+    "CancelRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "CancelWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "CommandMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key"
+      ],
+      "type": "object"
+    },
+    "ConditionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "expression": {
+          "maxLength": 8192,
+          "type": "string"
+        },
+        "if_false": {
+          "type": "string"
+        },
+        "if_true": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression",
+        "if_false",
+        "if_true"
+      ],
+      "type": "object"
+    },
+    "ContinuationView": {
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "requested",
+            "running",
+            "succeeded",
+            "failed",
+            "recovery_required"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "DefinitionVersionRef": {
+      "additionalProperties": false,
+      "properties": {
+        "definition_id": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "definition_id",
+        "digest",
+        "version"
+      ],
+      "type": "object"
+    },
+    "DeleteTenant": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "recovery_checkpoint_ref": {
+          "maxLength": 160,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "recovery_checkpoint_ref"
+      ],
+      "type": "object"
+    },
+    "EndSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "Error": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "x-open-json-value": true
+        },
+        "field": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "type"
+      ],
+      "type": "object"
+    },
+    "HumanRequestTemplate": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment": {
+          "$ref": "#/$defs/AssignmentSpec",
+          "x-optional-pointer": true
+        },
+        "due_after_seconds": {
+          "maximum": 2678400,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "information_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "review",
+            "information",
+            "acknowledgment",
+            "task"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "policy_id": {
+          "type": "string"
+        },
+        "subject": {
+          "enum": [
+            "instance_subject"
+          ],
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "due_after_seconds",
+        "kind",
+        "message",
+        "subject",
+        "title"
+      ],
+      "type": "object"
+    },
+    "HumanSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "on_cancelled": {
+          "type": "string"
+        },
+        "on_expired": {
+          "type": "string"
+        },
+        "on_stale": {
+          "type": "string"
+        },
+        "outcomes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "enum": [
+              "approve",
+              "reject",
+              "return_for_changes",
+              "provide_information",
+              "acknowledge",
+              "complete"
+            ],
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "request": {
+          "$ref": "#/$defs/HumanRequestTemplate"
+        }
+      },
+      "required": [
+        "on_cancelled",
+        "on_expired",
+        "on_stale",
+        "outcomes",
+        "request"
+      ],
+      "type": "object"
+    },
+    "InformationResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "values": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "values"
+      ],
+      "type": "object"
+    },
+    "ManagedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/Error",
+          "x-optional-pointer": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "observed_revision": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "requested",
+            "running",
+            "succeeded",
+            "failed",
+            "recovery_required"
+          ],
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "ManagementCapabilitiesV2": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "enum": [
+              "tenant.provision",
+              "tenant.provision.reconcile",
+              "tenant.package.apply",
+              "tenant.package.reconcile",
+              "tenant.state.set",
+              "tenant.state.reconcile",
+              "tenant.delete",
+              "tenant.delete.reconcile",
+              "tenant.invitation.deliver",
+              "tenant.invitation.reconcile",
+              "operation.read"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "capabilities",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ManifestComponent": {
+      "additionalProperties": false,
+      "properties": {
+        "release_id": {
+          "type": "string"
+        },
+        "selection": {
+          "type": "string"
+        },
+        "unlocks": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "release_id",
+        "selection"
+      ],
+      "type": "object"
+    },
+    "ManifestEngine": {
+      "additionalProperties": false,
+      "properties": {
+        "min_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "min_version"
+      ],
+      "type": "object"
+    },
+    "ManifestExports": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "commands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "doctypes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "events": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ManifestPackRef": {
+      "additionalProperties": false,
+      "properties": {
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_id"
+      ],
+      "type": "object"
+    },
+    "ManifestPrice": {
+      "additionalProperties": false,
+      "properties": {
+        "amount_minor": {
+          "type": "integer"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string"
+        },
+        "plan_code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "ManifestPublic": {
+      "additionalProperties": false,
+      "properties": {
+        "audiences": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "category": {
+          "type": "string"
+        },
+        "detail_page": {
+          "$ref": "#/$defs/TemplateDetailPageContent",
+          "x-optional-pointer": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "outcomes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "price": {
+          "$ref": "#/$defs/ManifestPrice",
+          "x-optional-pointer": true
+        },
+        "requirements": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "slug": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "slug",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "MarketplacePackageManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "composition": {
+          "items": {
+            "$ref": "#/$defs/ManifestComponent"
+          },
+          "type": "array"
+        },
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "engine": {
+          "$ref": "#/$defs/ManifestEngine"
+        },
+        "exports": {
+          "$ref": "#/$defs/ManifestExports"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "package_id": {
+          "type": "string"
+        },
+        "public": {
+          "$ref": "#/$defs/ManifestPublic"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "engine",
+        "kind",
+        "package_id",
+        "public",
+        "release_id",
+        "schema_version",
+        "version"
+      ],
+      "type": "object"
+    },
+    "PackFile": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string",
+          "x-max-utf8-bytes": 262144
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "content_type",
+        "path"
+      ],
+      "type": "object"
+    },
+    "PackFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "severity"
+      ],
+      "type": "object"
+    },
+    "PackManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "exports": {
+          "$ref": "#/$defs/ManifestExports"
+        },
+        "name": {
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "exports",
+        "name",
+        "schema_version",
+        "version"
+      ],
+      "type": "object"
+    },
+    "PackValidation": {
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/PackFinding"
+          },
+          "type": "array"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "findings",
+        "valid"
+      ],
+      "type": "object"
+    },
+    "PageRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "type": "object"
+    },
+    "PermissionGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "amend": {
+          "type": "boolean"
+        },
+        "cancel": {
+          "type": "boolean"
+        },
+        "create": {
+          "type": "boolean"
+        },
+        "delete": {
+          "type": "boolean"
+        },
+        "doctype": {
+          "type": "string"
+        },
+        "export": {
+          "type": "boolean"
+        },
+        "if_owner": {
+          "type": "boolean"
+        },
+        "import": {
+          "type": "boolean"
+        },
+        "read": {
+          "type": "boolean"
+        },
+        "report": {
+          "type": "boolean"
+        },
+        "role": {
+          "type": "string"
+        },
+        "submit": {
+          "type": "boolean"
+        },
+        "write": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "amend",
+        "cancel",
+        "create",
+        "delete",
+        "doctype",
+        "export",
+        "if_owner",
+        "import",
+        "read",
+        "report",
+        "role",
+        "submit",
+        "write"
+      ],
+      "type": "object"
+    },
+    "ProvisionTenant": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",
+            "type": "string"
+          },
+          "maxItems": 49,
+          "type": "array"
+        },
+        "bootstrap_admin_email": {
+          "maxLength": 254,
+          "minLength": 3,
+          "type": "string"
+        },
+        "database_allocation_ref": {
+          "maxLength": 160,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$",
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "package_digest": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "primary_alias": {
+          "maxLength": 253,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "aliases",
+        "bootstrap_admin_email",
+        "database_allocation_ref",
+        "deployment_id",
+        "meta",
+        "primary_alias",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "ReassignRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_id": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "to": {
+          "$ref": "#/$defs/Assignee"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "meta",
+        "reason",
+        "to"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantDeleteOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantInvitationOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "outcome": {
+          "enum": [
+            "delivered",
+            "not_delivered"
+          ],
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 1000,
+          "minLength": 8,
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "outcome",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantPackageOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantProvisionOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantStateOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_ref": {
+          "maxLength": 512,
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "outcome": {
+          "enum": [
+            "confirmed_succeeded",
+            "confirmed_not_applied",
+            "abandon"
+          ],
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "step_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_ref",
+        "meta",
+        "outcome",
+        "reason",
+        "step_id"
+      ],
+      "type": "object"
+    },
+    "RequestFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "approval",
+            "review",
+            "information",
+            "acknowledgment",
+            "task"
+          ],
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "overdue_only": {
+          "type": "boolean"
+        },
+        "page": {
+          "$ref": "#/$defs/PageRequest"
+        },
+        "view": {
+          "enum": [
+            "needs_action",
+            "sent",
+            "waiting",
+            "completed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "overdue_only",
+        "page",
+        "view"
+      ],
+      "type": "object"
+    },
+    "RequestHistoryEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "assignment_id": {
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "created",
+            "assigned",
+            "responded",
+            "reassigned",
+            "resolved",
+            "cancelled",
+            "expired",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "new_assignee": {
+          "$ref": "#/$defs/Assignee",
+          "x-optional-pointer": true
+        },
+        "previous_assignee": {
+          "$ref": "#/$defs/Assignee",
+          "x-optional-pointer": true
+        },
+        "response": {
+          "enum": [
+            "approve",
+            "reject",
+            "return_for_changes",
+            "provide_information",
+            "acknowledge",
+            "complete"
+          ],
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "sequence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "kind",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "RequestSource": {
+      "additionalProperties": false,
+      "properties": {
+        "instance_id": {
+          "type": "string"
+        },
+        "step_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RequestTenantInvitation": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "maxLength": 254,
+          "minLength": 3,
+          "type": "string",
+          "x-max-utf8-bytes": 254
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        }
+      },
+      "required": [
+        "email",
+        "meta"
+      ],
+      "type": "object"
+    },
+    "RequestView": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_responses": {
+          "items": {
+            "enum": [
+              "approve",
+              "reject",
+              "return_for_changes",
+              "provide_information",
+              "acknowledge",
+              "complete"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "assignments": {
+          "items": {
+            "$ref": "#/$defs/AssignmentView"
+          },
+          "type": "array"
+        },
+        "continuation": {
+          "$ref": "#/$defs/ContinuationView",
+          "x-optional-pointer": true
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "due_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "information_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "review",
+            "information",
+            "acknowledgment",
+            "task"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "approved",
+            "rejected",
+            "returned_for_changes",
+            "information_provided",
+            "acknowledged",
+            "completed"
+          ],
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "requester": {
+          "type": "string"
+        },
+        "resolved_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "revision": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/RequestSource",
+          "x-optional-pointer": true
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "resolved",
+            "cancelled",
+            "expired",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/$defs/SubjectRef",
+          "x-optional-pointer": true
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_responses",
+        "assignments",
+        "created_at",
+        "id",
+        "kind",
+        "message",
+        "requester",
+        "revision",
+        "status",
+        "title",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "RespondRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_id": {
+          "type": "string"
+        },
+        "comment": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "information": {
+          "$ref": "#/$defs/InformationResponse",
+          "x-optional-pointer": true
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "response": {
+          "enum": [
+            "approve",
+            "reject",
+            "return_for_changes",
+            "provide_information",
+            "acknowledge",
+            "complete"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "meta",
+        "response"
+      ],
+      "type": "object"
+    },
+    "ResponseDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_id": {
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "information": {
+          "$ref": "#/$defs/InformationResponse",
+          "x-optional-pointer": true
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "response": {
+          "enum": [
+            "approve",
+            "reject",
+            "return_for_changes",
+            "provide_information",
+            "acknowledge",
+            "complete"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "at",
+        "decision_id",
+        "request_id",
+        "response"
+      ],
+      "type": "object"
+    },
+    "ResponseReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "continuation": {
+          "$ref": "#/$defs/ContinuationView",
+          "x-optional-pointer": true
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "approved",
+            "rejected",
+            "returned_for_changes",
+            "information_provided",
+            "acknowledged",
+            "completed"
+          ],
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "resolved",
+            "cancelled",
+            "expired",
+            "stale"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_id",
+        "request_id",
+        "revision",
+        "status"
+      ],
+      "type": "object"
+    },
+    "SchemaRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SetTenantState": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_config_revision": {
+          "maxLength": 20,
+          "minLength": 1,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "state": {
+          "enum": [
+            "provisioning",
+            "active",
+            "suspended",
+            "deleting",
+            "failed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_config_revision",
+        "meta",
+        "reason",
+        "state"
+      ],
+      "type": "object"
+    },
+    "StartWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "definition_id": {
+          "type": "string"
+        },
+        "definition_version": {
+          "type": "integer"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "subject": {
+          "$ref": "#/$defs/SubjectRef"
+        }
+      },
+      "required": [
+        "definition_id",
+        "definition_version",
+        "meta",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "StepDefinition": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/ActionSpec",
+              "x-optional-pointer": true
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "action",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "condition": {
+              "$ref": "#/$defs/ConditionSpec",
+              "x-optional-pointer": true
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "condition",
+              "type": "string"
+            }
+          },
+          "required": [
+            "condition",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "human": {
+              "$ref": "#/$defs/HumanSpec",
+              "x-optional-pointer": true
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "human",
+              "type": "string"
+            }
+          },
+          "required": [
+            "human",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "wait",
+              "type": "string"
+            },
+            "wait": {
+              "$ref": "#/$defs/WaitSpec",
+              "x-optional-pointer": true
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "wait"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "end": {
+              "$ref": "#/$defs/EndSpec",
+              "x-optional-pointer": true
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "end",
+              "type": "string"
+            }
+          },
+          "required": [
+            "end",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ],
+      "x-discriminator": "Kind"
+    },
+    "SubjectRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "SubmitRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment": {
+          "$ref": "#/$defs/AssignmentSpec",
+          "x-optional-pointer": true
+        },
+        "due_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "information_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "review",
+            "information",
+            "acknowledgment",
+            "task"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "policy_id": {
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/$defs/SubjectRef",
+          "x-optional-pointer": true
+        },
+        "title": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message",
+        "meta",
+        "title"
+      ],
+      "type": "object"
+    },
+    "TemplateDetailPageContent": {
+      "additionalProperties": false,
+      "properties": {
+        "breadcrumb_label": {
+          "type": "string"
+        },
+        "composition_heading": {
+          "type": "string"
+        },
+        "included_label": {
+          "type": "string"
+        },
+        "optional_continue_action": {
+          "type": "string"
+        },
+        "optional_label": {
+          "type": "string"
+        },
+        "outcomes_heading": {
+          "type": "string"
+        },
+        "part_label": {
+          "type": "string"
+        },
+        "parts_label": {
+          "type": "string"
+        },
+        "preparation_heading": {
+          "type": "string"
+        },
+        "primary_action": {
+          "type": "string"
+        },
+        "primary_reassurance": {
+          "type": "string"
+        },
+        "templates_link": {
+          "type": "string"
+        },
+        "unavailable_description": {
+          "type": "string"
+        },
+        "unavailable_heading": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "breadcrumb_label",
+        "composition_heading",
+        "included_label",
+        "optional_continue_action",
+        "optional_label",
+        "outcomes_heading",
+        "part_label",
+        "parts_label",
+        "preparation_heading",
+        "primary_action",
+        "primary_reassurance",
+        "templates_link",
+        "unavailable_description",
+        "unavailable_heading"
+      ],
+      "type": "object"
+    },
+    "TenantDescriptorV2": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "string"
+        },
+        "data_plane_ref": {
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$",
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "directory_revision": {
+          "type": "string"
+        },
+        "site_id": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "provisioning",
+            "active",
+            "suspended",
+            "deleting",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "tenant_config_revision": {
+          "type": "string"
+        },
+        "version": {
+          "const": 2,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "aliases",
+        "config_revision",
+        "deployment_id",
+        "directory_revision",
+        "site_id",
+        "status",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ValidationIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ValidationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/ValidationIssue"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "issues",
+        "valid"
+      ],
+      "type": "object"
+    },
+    "WaitSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_field": {
+          "type": "string"
+        },
+        "event_type": {
+          "type": "string"
+        },
+        "on_event": {
+          "type": "string"
+        },
+        "on_timeout": {
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "maximum": 2678400,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "on_timeout",
+        "timeout_seconds"
+      ],
+      "type": "object"
+    },
+    "WorkflowDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/StepDefinition"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entry",
+        "id",
+        "steps",
+        "version"
+      ],
+      "type": "object"
+    },
+    "WorkflowEventData": {
+      "additionalProperties": false,
+      "properties": {
+        "change_kind": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "change_kind",
+        "instance_id",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "WorkflowInstance": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "current_step": {
+          "type": "string"
+        },
+        "definition_id": {
+          "type": "string"
+        },
+        "definition_version": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "next_wake_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "revision": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "running",
+            "waiting",
+            "retrying",
+            "completed",
+            "cancelled",
+            "failed",
+            "outcome_unknown"
+          ],
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "current_step",
+        "definition_id",
+        "definition_version",
+        "id",
+        "revision",
+        "status",
+        "subject",
+        "updated_at"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://kora.dev/schema/engine-v2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ActionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "next": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "name",
+        "next",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ApplyPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_ref": {
+          "maxLength": 160,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$",
+          "type": "string"
+        },
+        "digest": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "expected_config_revision": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_ref",
+        "digest",
+        "expected_config_revision",
+        "meta",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "Assignee": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "user",
+            "role",
+            "group"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "AssignmentSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "assignees": {
+          "items": {
+            "$ref": "#/$defs/Assignee"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "mode": {
+          "enum": [
+            "any",
+            "all",
+            "sequential"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignees",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "AssignmentView": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_responses": {
+          "items": {
+            "enum": [
+              "approve",
+              "reject",
+              "return_for_changes",
+              "provide_information",
+              "acknowledge",
+              "complete"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "assignee": {
+          "$ref": "#/$defs/Assignee"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "blocked",
+            "pending",
+            "responded",
+            "superseded",
+            "cancelled"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_responses",
+        "assignee",
+        "id",
+        "stage",
+        "status"
+      ],
+      "type": "object"
+    },
+    "CancelRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "CancelWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "CommandMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key"
+      ],
+      "type": "object"
+    },
+    "ConditionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "expression": {
+          "maxLength": 8192,
+          "type": "string"
+        },
+        "if_false": {
+          "type": "string"
+        },
+        "if_true": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression",
+        "if_false",
+        "if_true"
+      ],
+      "type": "object"
+    },
+    "ContinuationView": {
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "requested",
+            "running",
+            "succeeded",
+            "failed",
+            "recovery_required"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "DefinitionVersionRef": {
+      "additionalProperties": false,
+      "properties": {
+        "definition_id": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "definition_id",
+        "digest",
+        "version"
+      ],
+      "type": "object"
+    },
+    "DeleteTenant": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "recovery_checkpoint_ref": {
+          "maxLength": 160,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "recovery_checkpoint_ref"
+      ],
+      "type": "object"
+    },
+    "EndSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "HumanRequestTemplate": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment": {
+          "$ref": "#/$defs/AssignmentSpec",
+          "x-optional-pointer": true
+        },
+        "due_after_seconds": {
+          "maximum": 2678400,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "information_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "review",
+            "information",
+            "acknowledgment",
+            "task"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "policy_id": {
+          "type": "string"
+        },
+        "subject": {
+          "enum": [
+            "instance_subject"
+          ],
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "due_after_seconds",
+        "kind",
+        "message",
+        "subject",
+        "title"
+      ],
+      "type": "object"
+    },
+    "HumanSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "on_cancelled": {
+          "type": "string"
+        },
+        "on_expired": {
+          "type": "string"
+        },
+        "on_stale": {
+          "type": "string"
+        },
+        "outcomes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "enum": [
+              "approve",
+              "reject",
+              "return_for_changes",
+              "provide_information",
+              "acknowledge",
+              "complete"
+            ],
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "request": {
+          "$ref": "#/$defs/HumanRequestTemplate"
+        }
+      },
+      "required": [
+        "on_cancelled",
+        "on_expired",
+        "on_stale",
+        "outcomes",
+        "request"
+      ],
+      "type": "object"
+    },
+    "InformationResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "values": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "values"
+      ],
+      "type": "object"
+    },
+    "ManagedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/Error",
+          "x-optional-pointer": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "observed_revision": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "requested",
+            "running",
+            "succeeded",
+            "failed",
+            "recovery_required"
+          ],
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "ManagementCapabilitiesV2": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "enum": [
+              "tenant.provision",
+              "tenant.provision.reconcile",
+              "tenant.package.apply",
+              "tenant.package.reconcile",
+              "tenant.state.set",
+              "tenant.state.reconcile",
+              "tenant.delete",
+              "tenant.delete.reconcile",
+              "tenant.invitation.deliver",
+              "tenant.invitation.reconcile",
+              "operation.read"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "capabilities",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ManifestComponent": {
+      "additionalProperties": false,
+      "properties": {
+        "release_id": {
+          "type": "string"
+        },
+        "selection": {
+          "type": "string"
+        },
+        "unlocks": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "release_id",
+        "selection"
+      ],
+      "type": "object"
+    },
+    "ManifestEngine": {
+      "additionalProperties": false,
+      "properties": {
+        "min_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "min_version"
+      ],
+      "type": "object"
+    },
+    "ManifestExports": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "commands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "doctypes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "events": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ManifestPackRef": {
+      "additionalProperties": false,
+      "properties": {
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_id"
+      ],
+      "type": "object"
+    },
+    "ManifestPrice": {
+      "additionalProperties": false,
+      "properties": {
+        "amount_minor": {
+          "type": "integer"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string"
+        },
+        "plan_code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "ManifestPublic": {
+      "additionalProperties": false,
+      "properties": {
+        "audiences": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "category": {
+          "type": "string"
+        },
+        "detail_page": {
+          "$ref": "#/$defs/TemplateDetailPageContent",
+          "x-optional-pointer": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "outcomes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "price": {
+          "$ref": "#/$defs/ManifestPrice",
+          "x-optional-pointer": true
+        },
+        "requirements": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "slug": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "slug",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "MarketplacePackageManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "composition": {
+          "items": {
+            "$ref": "#/$defs/ManifestComponent"
+          },
+          "type": "array"
+        },
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "engine": {
+          "$ref": "#/$defs/ManifestEngine"
+        },
+        "exports": {
+          "$ref": "#/$defs/ManifestExports"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "package_id": {
+          "type": "string"
+        },
+        "public": {
+          "$ref": "#/$defs/ManifestPublic"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "engine",
+        "kind",
+        "package_id",
+        "public",
+        "release_id",
+        "schema_version",
+        "version"
+      ],
+      "type": "object"
+    },
+    "PackFile": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string",
+          "x-max-utf8-bytes": 262144
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "content_type",
+        "path"
+      ],
+      "type": "object"
+    },
+    "PackFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "severity"
+      ],
+      "type": "object"
+    },
+    "PackManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "exports": {
+          "$ref": "#/$defs/ManifestExports"
+        },
+        "name": {
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "exports",
+        "name",
+        "schema_version",
+        "version"
+      ],
+      "type": "object"
+    },
+    "PackValidation": {
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/PackFinding"
+          },
+          "type": "array"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "findings",
+        "valid"
+      ],
+      "type": "object"
+    },
+    "PageRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "type": "object"
+    },
+    "PermissionGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "amend": {
+          "type": "boolean"
+        },
+        "cancel": {
+          "type": "boolean"
+        },
+        "create": {
+          "type": "boolean"
+        },
+        "delete": {
+          "type": "boolean"
+        },
+        "doctype": {
+          "type": "string"
+        },
+        "export": {
+          "type": "boolean"
+        },
+        "if_owner": {
+          "type": "boolean"
+        },
+        "import": {
+          "type": "boolean"
+        },
+        "read": {
+          "type": "boolean"
+        },
+        "report": {
+          "type": "boolean"
+        },
+        "role": {
+          "type": "string"
+        },
+        "submit": {
+          "type": "boolean"
+        },
+        "write": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "amend",
+        "cancel",
+        "create",
+        "delete",
+        "doctype",
+        "export",
+        "if_owner",
+        "import",
+        "read",
+        "report",
+        "role",
+        "submit",
+        "write"
+      ],
+      "type": "object"
+    },
+    "ProvisionTenant": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",
+            "type": "string"
+          },
+          "maxItems": 49,
+          "type": "array"
+        },
+        "bootstrap_admin_email": {
+          "maxLength": 254,
+          "minLength": 3,
+          "type": "string"
+        },
+        "database_allocation_ref": {
+          "maxLength": 160,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$",
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "package_digest": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "primary_alias": {
+          "maxLength": 253,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "aliases",
+        "bootstrap_admin_email",
+        "database_allocation_ref",
+        "deployment_id",
+        "meta",
+        "primary_alias",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "ReassignRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_id": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "to": {
+          "$ref": "#/$defs/Assignee"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "meta",
+        "reason",
+        "to"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantDeleteOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantInvitationOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "outcome": {
+          "enum": [
+            "delivered",
+            "not_delivered"
+          ],
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 1000,
+          "minLength": 8,
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "outcome",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantPackageOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantProvisionOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileTenantStateOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "meta",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ReconcileWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_ref": {
+          "maxLength": 512,
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "outcome": {
+          "enum": [
+            "confirmed_succeeded",
+            "confirmed_not_applied",
+            "abandon"
+          ],
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "step_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_ref",
+        "meta",
+        "outcome",
+        "reason",
+        "step_id"
+      ],
+      "type": "object"
+    },
+    "RequestFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "approval",
+            "review",
+            "information",
+            "acknowledgment",
+            "task"
+          ],
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "overdue_only": {
+          "type": "boolean"
+        },
+        "page": {
+          "$ref": "#/$defs/PageRequest"
+        },
+        "view": {
+          "enum": [
+            "needs_action",
+            "sent",
+            "waiting",
+            "completed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "overdue_only",
+        "page",
+        "view"
+      ],
+      "type": "object"
+    },
+    "RequestHistoryEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "assignment_id": {
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "created",
+            "assigned",
+            "responded",
+            "reassigned",
+            "resolved",
+            "cancelled",
+            "expired",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "new_assignee": {
+          "$ref": "#/$defs/Assignee",
+          "x-optional-pointer": true
+        },
+        "previous_assignee": {
+          "$ref": "#/$defs/Assignee",
+          "x-optional-pointer": true
+        },
+        "response": {
+          "enum": [
+            "approve",
+            "reject",
+            "return_for_changes",
+            "provide_information",
+            "acknowledge",
+            "complete"
+          ],
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "sequence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "kind",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "RequestSource": {
+      "additionalProperties": false,
+      "properties": {
+        "instance_id": {
+          "type": "string"
+        },
+        "step_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RequestTenantInvitation": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "maxLength": 254,
+          "minLength": 3,
+          "type": "string",
+          "x-max-utf8-bytes": 254
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        }
+      },
+      "required": [
+        "email",
+        "meta"
+      ],
+      "type": "object"
+    },
+    "RequestView": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_responses": {
+          "items": {
+            "enum": [
+              "approve",
+              "reject",
+              "return_for_changes",
+              "provide_information",
+              "acknowledge",
+              "complete"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "assignments": {
+          "items": {
+            "$ref": "#/$defs/AssignmentView"
+          },
+          "type": "array"
+        },
+        "continuation": {
+          "$ref": "#/$defs/ContinuationView",
+          "x-optional-pointer": true
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "due_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "information_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "review",
+            "information",
+            "acknowledgment",
+            "task"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "approved",
+            "rejected",
+            "returned_for_changes",
+            "information_provided",
+            "acknowledged",
+            "completed"
+          ],
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "requester": {
+          "type": "string"
+        },
+        "resolved_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "revision": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/RequestSource",
+          "x-optional-pointer": true
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "resolved",
+            "cancelled",
+            "expired",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/$defs/SubjectRef",
+          "x-optional-pointer": true
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_responses",
+        "assignments",
+        "created_at",
+        "id",
+        "kind",
+        "message",
+        "requester",
+        "revision",
+        "status",
+        "title",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "RespondRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_id": {
+          "type": "string"
+        },
+        "comment": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "information": {
+          "$ref": "#/$defs/InformationResponse",
+          "x-optional-pointer": true
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "response": {
+          "enum": [
+            "approve",
+            "reject",
+            "return_for_changes",
+            "provide_information",
+            "acknowledge",
+            "complete"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "meta",
+        "response"
+      ],
+      "type": "object"
+    },
+    "ResponseDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_id": {
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "information": {
+          "$ref": "#/$defs/InformationResponse",
+          "x-optional-pointer": true
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "response": {
+          "enum": [
+            "approve",
+            "reject",
+            "return_for_changes",
+            "provide_information",
+            "acknowledge",
+            "complete"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "at",
+        "decision_id",
+        "request_id",
+        "response"
+      ],
+      "type": "object"
+    },
+    "ResponseReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "continuation": {
+          "$ref": "#/$defs/ContinuationView",
+          "x-optional-pointer": true
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "approved",
+            "rejected",
+            "returned_for_changes",
+            "information_provided",
+            "acknowledged",
+            "completed"
+          ],
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "resolved",
+            "cancelled",
+            "expired",
+            "stale"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_id",
+        "request_id",
+        "revision",
+        "status"
+      ],
+      "type": "object"
+    },
+    "SchemaRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SetTenantState": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_config_revision": {
+          "maxLength": 20,
+          "minLength": 1,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "state": {
+          "enum": [
+            "provisioning",
+            "active",
+            "suspended",
+            "deleting",
+            "failed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_config_revision",
+        "meta",
+        "reason",
+        "state"
+      ],
+      "type": "object"
+    },
+    "StartWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "definition_id": {
+          "type": "string"
+        },
+        "definition_version": {
+          "type": "integer"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "subject": {
+          "$ref": "#/$defs/SubjectRef"
+        }
+      },
+      "required": [
+        "definition_id",
+        "definition_version",
+        "meta",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "StepDefinition": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/ActionSpec",
+              "x-optional-pointer": true
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "action",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "condition": {
+              "$ref": "#/$defs/ConditionSpec",
+              "x-optional-pointer": true
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "condition",
+              "type": "string"
+            }
+          },
+          "required": [
+            "condition",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "human": {
+              "$ref": "#/$defs/HumanSpec",
+              "x-optional-pointer": true
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "human",
+              "type": "string"
+            }
+          },
+          "required": [
+            "human",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "wait",
+              "type": "string"
+            },
+            "wait": {
+              "$ref": "#/$defs/WaitSpec",
+              "x-optional-pointer": true
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "wait"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "end": {
+              "$ref": "#/$defs/EndSpec",
+              "x-optional-pointer": true
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "end",
+              "type": "string"
+            }
+          },
+          "required": [
+            "end",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ],
+      "x-discriminator": "Kind"
+    },
+    "SubjectRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "SubmitRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment": {
+          "$ref": "#/$defs/AssignmentSpec",
+          "x-optional-pointer": true
+        },
+        "due_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "information_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "review",
+            "information",
+            "acknowledgment",
+            "task"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "policy_id": {
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/$defs/SubjectRef",
+          "x-optional-pointer": true
+        },
+        "title": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message",
+        "meta",
+        "title"
+      ],
+      "type": "object"
+    },
+    "TemplateDetailPageContent": {
+      "additionalProperties": false,
+      "properties": {
+        "breadcrumb_label": {
+          "type": "string"
+        },
+        "composition_heading": {
+          "type": "string"
+        },
+        "included_label": {
+          "type": "string"
+        },
+        "optional_continue_action": {
+          "type": "string"
+        },
+        "optional_label": {
+          "type": "string"
+        },
+        "outcomes_heading": {
+          "type": "string"
+        },
+        "part_label": {
+          "type": "string"
+        },
+        "parts_label": {
+          "type": "string"
+        },
+        "preparation_heading": {
+          "type": "string"
+        },
+        "primary_action": {
+          "type": "string"
+        },
+        "primary_reassurance": {
+          "type": "string"
+        },
+        "templates_link": {
+          "type": "string"
+        },
+        "unavailable_description": {
+          "type": "string"
+        },
+        "unavailable_heading": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "breadcrumb_label",
+        "composition_heading",
+        "included_label",
+        "optional_continue_action",
+        "optional_label",
+        "outcomes_heading",
+        "part_label",
+        "parts_label",
+        "preparation_heading",
+        "primary_action",
+        "primary_reassurance",
+        "templates_link",
+        "unavailable_description",
+        "unavailable_heading"
+      ],
+      "type": "object"
+    },
+    "TenantDescriptorV2": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "string"
+        },
+        "data_plane_ref": {
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$",
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "directory_revision": {
+          "type": "string"
+        },
+        "site_id": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "provisioning",
+            "active",
+            "suspended",
+            "deleting",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "tenant_config_revision": {
+          "type": "string"
+        },
+        "version": {
+          "const": 2,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "aliases",
+        "config_revision",
+        "deployment_id",
+        "directory_revision",
+        "site_id",
+        "status",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ValidationIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ValidationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/ValidationIssue"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "issues",
+        "valid"
+      ],
+      "type": "object"
+    },
+    "WaitSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_field": {
+          "type": "string"
+        },
+        "event_type": {
+          "type": "string"
+        },
+        "on_event": {
+          "type": "string"
+        },
+        "on_timeout": {
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "maximum": 2678400,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "on_timeout",
+        "timeout_seconds"
+      ],
+      "type": "object"
+    },
+    "WorkflowDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/StepDefinition"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entry",
+        "id",
+        "steps",
+        "version"
+      ],
+      "type": "object"
+    },
+    "WorkflowEventData": {
+      "additionalProperties": false,
+      "properties": {
+        "change_kind": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "change_kind",
+        "instance_id",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "WorkflowInstance": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "current_step": {
+          "type": "string"
+        },
+        "definition_id": {
+          "type": "string"
+        },
+        "definition_version": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "next_wake_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "revision": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "running",
+            "waiting",
+            "retrying",
+            "completed",
+            "cancelled",
+            "failed",
+            "outcome_unknown"
+          ],
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "current_step",
+        "definition_id",
+        "definition_version",
+        "id",
+        "revision",
+        "status",
+        "subject",
+        "updated_at"
+      ],
+      "type": "object"
+    }
+  },
+  "title": "Kora Engine v2 wire contracts",
+  "type": "object",
+  "x-enums": {
+    "AssigneeKind": [
+      "user",
+      "role",
+      "group"
+    ],
+    "AssignmentMode": [
+      "any",
+      "all",
+      "sequential"
+    ],
+    "AssignmentStatus": [
+      "blocked",
+      "pending",
+      "responded",
+      "superseded",
+      "cancelled"
+    ],
+    "InboxView": [
+      "needs_action",
+      "sent",
+      "waiting",
+      "completed"
+    ],
+    "InstanceStatus": [
+      "ready",
+      "running",
+      "waiting",
+      "retrying",
+      "completed",
+      "cancelled",
+      "failed",
+      "outcome_unknown"
+    ],
+    "InvitationDeliveryOutcome": [
+      "delivered",
+      "not_delivered"
+    ],
+    "ManagementCapability": [
+      "tenant.provision",
+      "tenant.provision.reconcile",
+      "tenant.package.apply",
+      "tenant.package.reconcile",
+      "tenant.state.set",
+      "tenant.state.reconcile",
+      "tenant.delete",
+      "tenant.delete.reconcile",
+      "tenant.invitation.deliver",
+      "tenant.invitation.reconcile",
+      "operation.read"
+    ],
+    "OperationState": [
+      "requested",
+      "running",
+      "succeeded",
+      "failed",
+      "recovery_required"
+    ],
+    "ReconciliationOutcome": [
+      "confirmed_succeeded",
+      "confirmed_not_applied",
+      "abandon"
+    ],
+    "RequestHistoryKind": [
+      "created",
+      "assigned",
+      "responded",
+      "reassigned",
+      "resolved",
+      "cancelled",
+      "expired",
+      "stale"
+    ],
+    "RequestKind": [
+      "approval",
+      "review",
+      "information",
+      "acknowledgment",
+      "task"
+    ],
+    "RequestOutcome": [
+      "approved",
+      "rejected",
+      "returned_for_changes",
+      "information_provided",
+      "acknowledged",
+      "completed"
+    ],
+    "RequestStatus": [
+      "pending",
+      "resolved",
+      "cancelled",
+      "expired",
+      "stale"
+    ],
+    "ResponseKind": [
+      "approve",
+      "reject",
+      "return_for_changes",
+      "provide_information",
+      "acknowledge",
+      "complete"
+    ],
+    "StepKind": [
+      "action",
+      "condition",
+      "human",
+      "wait",
+      "end"
+    ],
+    "SubjectBinding": [
+      "instance_subject"
+    ],
+    "TenantState": [
+      "provisioning",
+      "active",
+      "suspended",
+      "deleting",
+      "failed"
+    ]
+  }
+}

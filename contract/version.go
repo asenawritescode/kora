@@ -5,6 +5,8 @@ import "time"
 // VersionMismatchError is the typed result of a failed document-level
 // optimistic-concurrency write (OFFLINE-003). ExpectedVersion is what the
 // writer assumed; ActualVersion is the current committed version.
+//
+//contract:wire
 type VersionMismatchError struct {
 	Kind            string `json:"kind"` // "version_mismatch"
 	Doctype         string `json:"-"`
@@ -19,6 +21,8 @@ func (e *VersionMismatchError) Error() string {
 
 // ConflictRecord is the durable record of a losing offline write
 // (OFFLINE-003). It survives restarts until acknowledged or merged.
+//
+//contract:wire
 type ConflictRecord struct {
 	Name            string    `json:"name"`
 	Site            string    `json:"site"`
