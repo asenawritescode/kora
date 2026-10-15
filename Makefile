@@ -56,6 +56,7 @@ restart:                           ## Rebuild UI + Go, kill old server, start fr
 ## Quality
 check-contracts:                  ## Verify generated Engine contract artifacts
 	go run ./cmd/contractgen -check
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_sync_contract_consumers.py
 	python3 scripts/check-contract-fixture-manifest.py --local-only
 
 sync-contracts:                   ## Regenerate Engine contract artifacts and sync first-party consumers
