@@ -27,13 +27,16 @@ class SourceRevisionTest(unittest.TestCase):
             subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
             subprocess.run(["git", "-C", str(repo), "commit", "-qm", "baseline"], check=True)
 
-            (repo / "README.md").write_text("unrelated change\n")
-            revision, tree_state = MODULE.source_revision(repo)
-            self.assertEqual(tree_state, "clean")
-            self.assertEqual(revision, subprocess.run(
+            baseline_revision = subprocess.run(
                 ["git", "-C", str(repo), "rev-parse", "HEAD"],
                 check=True, capture_output=True, text=True,
-            ).stdout.strip())
+            ).stdout.strip()
+            (repo / "README.md").write_text("unrelated change\n")
+            subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "unrelated"], check=True)
+            revision, tree_state = MODULE.source_revision(repo)
+            self.assertEqual(tree_state, "clean")
+            self.assertEqual(revision, baseline_revision)
 
             (repo / "contract/types.go").write_text("package contract // changed\n")
             self.assertEqual(MODULE.source_revision(repo)[1], "uncommitted")

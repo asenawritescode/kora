@@ -36,15 +36,14 @@ def sha256(data: bytes) -> str:
 
 def source_revision(engine: Path = ENGINE) -> tuple[str, str]:
     revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=engine, check=True,
+        ["git", "log", "-1", "--format=%H", "--", ":(glob)contract/**/*.go", ":(glob)cmd/contractgen/**/*.go"], cwd=engine, check=True,
         capture_output=True, text=True,
     ).stdout.strip()
     dirty = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all", "--", "contract", "cmd/contractgen"], cwd=engine, check=True,
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", ":(glob)contract/**/*.go", ":(glob)cmd/contractgen/**/*.go"], cwd=engine, check=True,
         capture_output=True, text=True,
     ).stdout
-    source_changes = [line for line in dirty.splitlines() if line[3:].strip('"').endswith(".go")]
-    return revision, "uncommitted" if source_changes else "clean"
+    return revision, "uncommitted" if dirty else "clean"
 
 
 def render_manifest(revision: str, source_tree: str, artifact_hash: str) -> bytes:
