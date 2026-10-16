@@ -379,6 +379,11 @@ func isRawJSON(expr ast.Expr) bool {
 	return ok && pkg.Name == "json"
 }
 
+func isRawJSONList(expr ast.Expr) bool {
+	array, ok := expr.(*ast.ArrayType)
+	return ok && array.Len == nil && isRawJSON(array.Elt)
+}
+
 func rawComments(group *ast.CommentGroup) string {
 	var b strings.Builder
 	for _, comment := range group.List {
@@ -407,6 +412,9 @@ func visitType(expr ast.Expr, defs map[string]ast.Expr, include func(string) err
 		return include(t.Name)
 	case *ast.SelectorExpr:
 		if x, ok := t.X.(*ast.Ident); ok && x.Name == "time" && t.Sel.Name == "Time" {
+			return nil
+		}
+		if isRawJSON(t) {
 			return nil
 		}
 		return fmt.Errorf("unsupported selector")
@@ -587,6 +595,11 @@ func typeSchema(expr ast.Expr, owner string, defs map[string]ast.Expr, enums map
 						return nil, fmt.Errorf("field %s: json.RawMessage requires //contract:json", name.Name)
 					}
 					s = schema{"x-open-json-value": true}
+				} else if isRawJSONList(field.Type) {
+					if !hasDirective(field, "contract:json") {
+						return nil, fmt.Errorf("field %s: []json.RawMessage requires //contract:json", name.Name)
+					}
+					s = schema{"type": "array", "items": schema{"x-open-json-value": true}}
 				} else {
 					s, e = typeSchema(field.Type, owner, defs, enums)
 				}
