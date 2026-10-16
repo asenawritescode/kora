@@ -16,6 +16,8 @@ import (
 
 // ProviderFamily classifies a sign-in provider family. Families are advertised
 // by capability, never inferred from a rendered button.
+//
+//contract:enum
 type ProviderFamily string
 
 const (
@@ -30,6 +32,8 @@ const (
 // ProviderProfile is the public capability surface of a provider. It must never
 // carry secret references or credentials. Status uses the shared
 // CapabilityStatus vocabulary (planned/experimental/supported/retired).
+//
+//contract:wire
 type ProviderProfile struct {
 	Family         ProviderFamily   `json:"family"`
 	Status         CapabilityStatus `json:"status"`
@@ -40,6 +44,8 @@ type ProviderProfile struct {
 // AuthFlow is the intermediate state handed to the client to begin a redirect
 // or challenge flow. State is a server-issued, single-use, short-TTL opaque
 // token; clients never mint it.
+//
+//contract:wire
 type AuthFlow struct {
 	State    string `json:"state"`
 	Redirect string `json:"redirect_url,omitempty"`
@@ -47,6 +53,8 @@ type AuthFlow struct {
 
 // Claim is one verified, bounded identity claim. Claims are typed and limited;
 // raw provider payloads are never propagated.
+//
+//contract:wire
 type Claim struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
@@ -55,6 +63,8 @@ type Claim struct {
 // IdentityAssertion is the single normalized identity result every provider
 // produces. ProviderInstanceID + Issuer + Subject form the canonical identity
 // key; Email is a verification hint only, never a merge key.
+//
+//contract:wire
 type IdentityAssertion struct {
 	ProviderInstanceID string    `json:"provider_instance_id"`
 	Issuer             string    `json:"issuer"`
@@ -72,6 +82,8 @@ type IdentityAssertion struct {
 // PKCEVerifier carries the proof-of-key code exchange material for OAuth2
 // authorization-code flows. CodeVerifier is the client secret; CodeChallenge
 // is the S256-transformed value sent in the authorization request.
+//
+//contract:wire
 type PKCEVerifier struct {
 	CodeVerifier  string
 	CodeChallenge string

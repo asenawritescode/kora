@@ -16,6 +16,8 @@ import (
 
 // ResourceKind enumerates the resource classes the engine addresses through a
 // ResourceRef. New kinds are added only with a contract version bump.
+//
+//contract:enum
 type ResourceKind string
 
 const (
@@ -42,6 +44,7 @@ const (
 	ResourceKindComponent   ResourceKind = "component"
 )
 
+//contract:enum
 type ResourceLifecycle string
 
 const (
@@ -67,6 +70,8 @@ type TypedField struct {
 // ResourceRef is the namespaced, versioned identity of a resource. Namespace
 // is the tenant or system scope and is never empty; Version is monotonic per
 // (namespace, name).
+//
+//contract:wire
 type ResourceRef struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
@@ -81,6 +86,8 @@ func (r ResourceRef) String() string {
 // ResourceDescriptor is the immutable desired-state definition of one resource
 // version. Hash is the canonical SHA-256 of the descriptor content (excluding
 // the Hash field itself).
+//
+//contract:wire
 type ResourceDescriptor struct {
 	Ref          ResourceRef       `json:"ref"`
 	Kind         ResourceKind      `json:"kind"`

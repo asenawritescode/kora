@@ -4,6 +4,8 @@ import "time"
 
 // CapabilityContract describes what may be done without prescribing its
 // executor.
+//
+//contract:wire
 type CapabilityContract struct {
 	Ref         ResourceRef     `json:"ref"`
 	Description string          `json:"description,omitempty"`
@@ -15,6 +17,8 @@ type CapabilityContract struct {
 }
 
 // SkillContract is a versioned procedure attached to a capability.
+//
+//contract:wire
 type SkillContract struct {
 	Ref        ResourceRef `json:"ref"`
 	Capability ResourceRef `json:"capability"`
@@ -22,6 +26,7 @@ type SkillContract struct {
 	Escalation string      `json:"escalation,omitempty"`
 }
 
+//contract:enum
 type PolicyDecision string
 
 const (
@@ -31,6 +36,8 @@ const (
 )
 
 // PolicyEvaluation is safe to persist as provenance for an operation.
+//
+//contract:wire
 type PolicyEvaluation struct {
 	Decision    PolicyDecision `json:"decision"`
 	Capability  ResourceRef    `json:"capability"`
@@ -40,6 +47,7 @@ type PolicyEvaluation struct {
 	EvaluatedAt time.Time      `json:"evaluated_at"`
 }
 
+//contract:enum
 type ServiceScope string
 
 const (
@@ -49,6 +57,7 @@ const (
 	ScopeExecution ServiceScope = "execution"
 )
 
+//contract:wire
 type PluginService struct {
 	Name        string       `json:"name"`
 	Provider    ResourceRef  `json:"provider"`
@@ -57,6 +66,7 @@ type PluginService struct {
 	Cleanup     []string     `json:"cleanup,omitempty"`
 }
 
+//contract:wire
 type ProvenanceRecord struct {
 	ID         string        `json:"id"`
 	Resource   ResourceRef   `json:"resource"`
@@ -69,6 +79,7 @@ type ProvenanceRecord struct {
 	RecordedAt time.Time     `json:"recorded_at"`
 }
 
+//contract:wire
 type AgentManifest struct {
 	Ref              ResourceRef   `json:"ref"`
 	Allowed          []ResourceRef `json:"allowed,omitempty"`
@@ -78,6 +89,7 @@ type AgentManifest struct {
 	MaxRetries       int           `json:"max_retries,omitempty"`
 }
 
+//contract:wire
 type ToolCall struct {
 	ID         string      `json:"id"`
 	Agent      ResourceRef `json:"agent"`
@@ -110,6 +122,7 @@ func (m AgentManifest) AgentAllows(ref ResourceRef) (allowed bool, approvalRequi
 	return false, false
 }
 
+//contract:wire
 type PackageManifest struct {
 	Ref         ResourceRef   `json:"ref"`
 	Provides    []ResourceRef `json:"provides,omitempty"`
@@ -119,6 +132,7 @@ type PackageManifest struct {
 	Cleanup     []string      `json:"cleanup,omitempty"`
 }
 
+//contract:wire
 type Profile struct {
 	Ref          ResourceRef   `json:"ref"`
 	Packages     []ResourceRef `json:"packages,omitempty"`
@@ -139,6 +153,7 @@ type ConfigurationPatch struct {
 	Reason     string           `json:"reason"`
 }
 
+//contract:wire
 type PackageComposition struct {
 	Base     ResourceRef   `json:"base"`
 	Packages []ResourceRef `json:"packages,omitempty"`

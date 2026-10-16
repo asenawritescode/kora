@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-go dev setup serve test lint clean release
+.PHONY: build build-ui build-go dev setup serve test lint clean release check-contracts sync-contracts
 
 # Defaults
 SITE ?= airtime.local
@@ -54,6 +54,15 @@ restart:                           ## Rebuild UI + Go, kill old server, start fr
 	./kora serve --port $(PORT)
 
 ## Quality
+check-contracts:                  ## Verify generated Engine contract artifacts
+	go run ./cmd/contractgen -check
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_sync_contract_consumers.py
+	python3 scripts/check-contract-fixture-manifest.py --local-only
+
+sync-contracts:                   ## Regenerate Engine contract artifacts and sync first-party consumers
+	go run ./cmd/contractgen -write
+	python3 scripts/sync-contract-consumers.py
+
 test:                              ## Run Go tests
 	go test ./... -v -count=1
 

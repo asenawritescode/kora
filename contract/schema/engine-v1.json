@@ -1,0 +1,4030 @@
+{
+  "$defs": {
+    "ActionRef": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "requires": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "idempotency_key",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ActorContext": {
+      "additionalProperties": false,
+      "properties": {
+        "auth_session_id": {
+          "type": "string"
+        },
+        "authenticated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "delegation_id": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "organization_id": {
+          "type": "string"
+        },
+        "principal_id": {
+          "type": "string"
+        },
+        "principal_type": {
+          "enum": [
+            "human",
+            "service",
+            "agent",
+            "public"
+          ],
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "site": {
+          "type": "string"
+        },
+        "subject_user_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authenticated_at",
+        "principal_id",
+        "principal_type",
+        "site"
+      ],
+      "type": "object"
+    },
+    "AgentManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "approval_required": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "max_retries": {
+          "type": "integer"
+        },
+        "prohibited": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "timeout_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "Approval": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "argument_hash": {
+          "type": "string"
+        },
+        "auth_session_id": {
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "granted_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "granted_by": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "record_version": {
+          "type": "integer"
+        },
+        "requested_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "pending_approval",
+            "granted",
+            "denied",
+            "expired",
+            "revoked"
+          ],
+          "type": "string"
+        },
+        "target_fingerprint": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "argument_hash",
+        "id",
+        "operation_id",
+        "requested_at",
+        "site",
+        "state",
+        "target_fingerprint",
+        "tool_name"
+      ],
+      "type": "object"
+    },
+    "AuthFlow": {
+      "additionalProperties": false,
+      "properties": {
+        "redirect_url": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "Block": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/ActionRef"
+          },
+          "type": "array"
+        },
+        "collection": {
+          "type": "string"
+        },
+        "feature_flag": {
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FieldRef"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Capability": {
+      "additionalProperties": false,
+      "properties": {
+        "Description": {
+          "type": "string"
+        },
+        "Name": {
+          "type": "string"
+        },
+        "Risks": {
+          "items": {
+            "enum": [
+              "tenant-isolation",
+              "authorization",
+              "identity",
+              "credential-scope",
+              "durable-business-effects"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "Status": {
+          "enum": [
+            "planned",
+            "experimental",
+            "supported",
+            "retired"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "Description",
+        "Name",
+        "Risks",
+        "Status"
+      ],
+      "type": "object"
+    },
+    "CapabilityContract": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "effects": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/TypedField"
+          },
+          "type": "array"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/TypedField"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "risk": {
+          "enum": [
+            "safe",
+            "standard",
+            "elevated",
+            "high",
+            "system"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "Claim": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    },
+    "CommandEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "causation_id": {
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "deadline": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "actor",
+        "deadline",
+        "id",
+        "site",
+        "type",
+        "version"
+      ],
+      "type": "object"
+    },
+    "CommandResult": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "error": {
+          "$ref": "#/$defs/Error",
+          "x-optional-pointer": true
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "replayed": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "accepted",
+            "rejected",
+            "conflict",
+            "failed",
+            "pending"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "correlation_id",
+        "operation_id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ComponentObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "seen_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "healthy",
+            "degraded",
+            "failed",
+            "waiting"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "ref",
+        "seen_at",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ConflictRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "detected_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "doc_name": {
+          "type": "string"
+        },
+        "doctype": {
+          "type": "string"
+        },
+        "loser_command_key": {
+          "type": "string"
+        },
+        "losing_expected_version": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "winning_actual_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "detected_at",
+        "doc_name",
+        "doctype",
+        "loser_command_key",
+        "losing_expected_version",
+        "name",
+        "site",
+        "state",
+        "winning_actual_version"
+      ],
+      "type": "object"
+    },
+    "Cursor": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "nonce": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "token"
+      ],
+      "type": "object"
+    },
+    "Delivery": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt",
+        "data",
+        "id",
+        "site",
+        "type"
+      ],
+      "type": "object"
+    },
+    "DesiredReport": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/DesiredResource"
+          },
+          "type": "array"
+        },
+        "signature": {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "active",
+            "blocked",
+            "superseded"
+          ],
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "deployment_id",
+        "generation",
+        "resources",
+        "status",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "DesiredResource": {
+      "additionalProperties": false,
+      "properties": {
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "Error": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "x-open-json-value": true
+        },
+        "field": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "PERMISSION_DENIED",
+            "VALIDATION_FAILED",
+            "NOT_FOUND",
+            "CONFLICT",
+            "DEADLINE_EXCEEDED",
+            "DEPENDENCY_UNAVAILABLE",
+            "IDEMPOTENCY_KEY_REUSED",
+            "UNAUTHENTICATED",
+            "RESOURCE_EXHAUSTED",
+            "STALE_SUBJECT",
+            "LEASE_LOST",
+            "OUTCOME_UNKNOWN",
+            "UNSUPPORTED_VERSION",
+            "INTERNAL_ERROR"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "type"
+      ],
+      "type": "object"
+    },
+    "EventEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "aggregate_id": {
+          "type": "string"
+        },
+        "aggregate_type": {
+          "type": "string"
+        },
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "causation_id": {
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "model_revision": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "provenance_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sequence": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "skill": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "source": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "data",
+        "id",
+        "occurred_at",
+        "site",
+        "source",
+        "type",
+        "version"
+      ],
+      "type": "object"
+    },
+    "FieldHint": {
+      "additionalProperties": false,
+      "properties": {
+        "computed": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "fieldtype": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "in_list_view": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "link_target": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "read_only": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "search_index": {
+          "type": "boolean"
+        },
+        "standard_filter": {
+          "type": "boolean"
+        },
+        "table_target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "unique": {
+          "type": "boolean"
+        },
+        "writable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fieldtype",
+        "name",
+        "writable"
+      ],
+      "type": "object"
+    },
+    "FieldRef": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "GenerationInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "config_version": {
+          "type": "integer"
+        },
+        "projection_hash": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_version",
+        "projection_hash",
+        "site"
+      ],
+      "type": "object"
+    },
+    "IdentityAssertion": {
+      "additionalProperties": false,
+      "properties": {
+        "acr": {
+          "type": "string"
+        },
+        "amr": {
+          "type": "string"
+        },
+        "authenticated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "email": {
+          "type": "string"
+        },
+        "email_verified": {
+          "type": "boolean"
+        },
+        "full_name": {
+          "type": "string"
+        },
+        "issuer": {
+          "type": "string"
+        },
+        "provider_instance_id": {
+          "type": "string"
+        },
+        "session_binding": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authenticated_at",
+        "email_verified",
+        "issuer",
+        "provider_instance_id",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "Layout": {
+      "additionalProperties": false,
+      "properties": {
+        "desktop": {
+          "type": "integer"
+        },
+        "mobile": {
+          "type": "integer"
+        },
+        "tablet": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "desktop",
+        "mobile",
+        "tablet"
+      ],
+      "type": "object"
+    },
+    "ManifestStates": {
+      "additionalProperties": false,
+      "properties": {
+        "empty": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "loading": {
+          "type": "string"
+        },
+        "offline": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "empty",
+        "error",
+        "loading",
+        "offline"
+      ],
+      "type": "object"
+    },
+    "ObservationReport": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "items": {
+            "$ref": "#/$defs/ComponentObservation"
+          },
+          "type": "array"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "reported_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "runtime_id": {
+          "type": "string"
+        },
+        "signature": {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "components",
+        "generation",
+        "reported_at",
+        "runtime_id",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "OfflineConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "branch_id": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "entity_id": {
+          "type": "string"
+        },
+        "entity_type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "reason_code": {
+          "enum": [
+            "PERMISSION_DENIED",
+            "VALIDATION_FAILED",
+            "NOT_FOUND",
+            "CONFLICT",
+            "DEADLINE_EXCEEDED",
+            "DEPENDENCY_UNAVAILABLE",
+            "IDEMPOTENCY_KEY_REUSED",
+            "UNAUTHENTICATED",
+            "RESOURCE_EXHAUSTED",
+            "STALE_SUBJECT",
+            "LEASE_LOST",
+            "OUTCOME_UNKNOWN",
+            "UNSUPPORTED_VERSION",
+            "INTERNAL_ERROR"
+          ],
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "resolution_mode": {
+          "type": "string"
+        },
+        "server_version": {
+          "type": "integer"
+        },
+        "site": {
+          "type": "string"
+        },
+        "snapshot": {
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "branch_id",
+        "device_id",
+        "entity_type",
+        "id",
+        "operation_id",
+        "reason_code",
+        "recorded_at",
+        "resolution_mode",
+        "server_version",
+        "site"
+      ],
+      "type": "object"
+    },
+    "OfflineOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "base_version": {
+          "type": "integer"
+        },
+        "branch_id": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "entity_id": {
+          "type": "string"
+        },
+        "entity_type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "operation_type": {
+          "type": "string"
+        },
+        "payload": {
+          "x-open-json-value": true
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "sent",
+            "acked",
+            "conflict",
+            "rejected",
+            "discarded"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_version",
+        "branch_id",
+        "device_id",
+        "entity_type",
+        "id",
+        "occurred_at",
+        "operation_type",
+        "schema_version",
+        "site",
+        "status"
+      ],
+      "type": "object"
+    },
+    "OfflinePullPage": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OfflineOperation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cursor",
+        "next_cursor",
+        "operations"
+      ],
+      "type": "object"
+    },
+    "OfflineReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "conflict": {
+          "$ref": "#/$defs/OfflineConflict",
+          "x-optional-pointer": true
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "received_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "sent",
+            "acked",
+            "conflict",
+            "rejected",
+            "discarded"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "next_cursor",
+        "operation_id",
+        "received_at",
+        "status"
+      ],
+      "type": "object"
+    },
+    "OfflineSyncBatch": {
+      "additionalProperties": false,
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/OfflineConflict"
+          },
+          "type": "array"
+        },
+        "cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "gate": {
+          "enum": [
+            "accepted",
+            "rejected",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OfflineOperation"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "gate",
+        "operations",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "OfflineTombstone": {
+      "additionalProperties": false,
+      "properties": {
+        "branch_id": {
+          "type": "string"
+        },
+        "deleted_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "entity_id": {
+          "type": "string"
+        },
+        "entity_type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "retain_until": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "branch_id",
+        "deleted_at",
+        "device_id",
+        "entity_id",
+        "entity_type",
+        "id",
+        "retain_until",
+        "schema_version",
+        "site"
+      ],
+      "type": "object"
+    },
+    "PKCEVerifier": {
+      "additionalProperties": false,
+      "properties": {
+        "CodeChallenge": {
+          "type": "string"
+        },
+        "CodeVerifier": {
+          "type": "string"
+        },
+        "Method": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "CodeChallenge",
+        "CodeVerifier",
+        "Method"
+      ],
+      "type": "object"
+    },
+    "PackageComposition": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "patches": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "plugins": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "profiles": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "base"
+      ],
+      "type": "object"
+    },
+    "PackageManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "cleanup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "migrations": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "provides": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "PageManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "page": {
+          "type": "string"
+        },
+        "regions": {
+          "items": {
+            "$ref": "#/$defs/Region"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "states": {
+          "$ref": "#/$defs/ManifestStates"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "page",
+        "regions",
+        "schema_version",
+        "states",
+        "title"
+      ],
+      "type": "object"
+    },
+    "PluginService": {
+      "additionalProperties": false,
+      "properties": {
+        "cleanup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "provider": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "scope": {
+          "enum": [
+            "tenant",
+            "session",
+            "workflow",
+            "execution"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "provider",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "PolicyEvaluation": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "decision": {
+          "enum": [
+            "allow",
+            "deny",
+            "requires_approval"
+          ],
+          "type": "string"
+        },
+        "evaluated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "capability",
+        "decision",
+        "evaluated_at"
+      ],
+      "type": "object"
+    },
+    "Profile": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "ProvenanceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "output": {
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "rule": {
+          "$ref": "#/$defs/ResourceRef"
+        }
+      },
+      "required": [
+        "actor",
+        "event_id",
+        "id",
+        "recorded_at",
+        "resource"
+      ],
+      "type": "object"
+    },
+    "ProviderProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "family": {
+          "enum": [
+            "oidc",
+            "saml",
+            "ldap",
+            "webauthn",
+            "social",
+            "scim"
+          ],
+          "type": "string"
+        },
+        "required_checks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "experimental",
+            "supported",
+            "retired"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "family",
+        "status"
+      ],
+      "type": "object"
+    },
+    "Region": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/Block"
+          },
+          "type": "array"
+        },
+        "layout": {
+          "$ref": "#/$defs/Layout"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "blocks",
+        "layout",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ResourceDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/TypedField"
+          },
+          "type": "array"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "doctype",
+            "collection",
+            "command",
+            "query",
+            "relation",
+            "computation",
+            "rule",
+            "policy",
+            "action",
+            "workflow",
+            "capability",
+            "skill",
+            "role",
+            "agent",
+            "view",
+            "event",
+            "integration",
+            "plugin",
+            "package",
+            "page",
+            "component"
+          ],
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "preview",
+            "active",
+            "disabled",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "superseded_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "hash",
+        "kind",
+        "ref"
+      ],
+      "type": "object"
+    },
+    "ResourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "namespace",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SiteAggregateKey": {
+      "additionalProperties": false,
+      "properties": {
+        "AggregateID": {
+          "type": "string"
+        },
+        "AggregateType": {
+          "type": "string"
+        },
+        "Site": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "AggregateID",
+        "AggregateType",
+        "Site"
+      ],
+      "type": "object"
+    },
+    "SiteDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "integer"
+        },
+        "data_plane_ref": {
+          "type": "string"
+        },
+        "directory_revision": {
+          "type": "integer"
+        },
+        "runtime_cell_id": {
+          "type": "string"
+        },
+        "site_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "aliases",
+        "site_id",
+        "status",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SkillContract": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "escalation": {
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "steps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "capability",
+        "ref"
+      ],
+      "type": "object"
+    },
+    "Surface": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "supported",
+            "experimental",
+            "planned",
+            "partial",
+            "diverged"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "name",
+        "status"
+      ],
+      "type": "object"
+    },
+    "SyncCursor": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "branch_id": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "branch_id",
+        "device_id",
+        "token",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SystemFieldHint": {
+      "additionalProperties": false,
+      "properties": {
+        "fieldtype": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "writable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fieldtype",
+        "name",
+        "writable"
+      ],
+      "type": "object"
+    },
+    "TaskReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "accepted",
+            "rejected",
+            "conflict",
+            "failed",
+            "pending"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted_at",
+        "correlation_id",
+        "operation_id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "approval_id": {
+          "type": "string"
+        },
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "finished_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "capability",
+        "id",
+        "started_at",
+        "state"
+      ],
+      "type": "object"
+    },
+    "TypedField": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string"
+        },
+        "unique": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "type": "object"
+    },
+    "VersionMismatchError": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_version": {
+          "type": "integer"
+        },
+        "expected_version": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actual_version",
+        "expected_version",
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://kora.dev/schema/engine-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ActionRef": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "requires": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "idempotency_key",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ActorContext": {
+      "additionalProperties": false,
+      "properties": {
+        "auth_session_id": {
+          "type": "string"
+        },
+        "authenticated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "delegation_id": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "organization_id": {
+          "type": "string"
+        },
+        "principal_id": {
+          "type": "string"
+        },
+        "principal_type": {
+          "enum": [
+            "human",
+            "service",
+            "agent",
+            "public"
+          ],
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "site": {
+          "type": "string"
+        },
+        "subject_user_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authenticated_at",
+        "principal_id",
+        "principal_type",
+        "site"
+      ],
+      "type": "object"
+    },
+    "AgentManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "approval_required": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "max_retries": {
+          "type": "integer"
+        },
+        "prohibited": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "timeout_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "Approval": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "argument_hash": {
+          "type": "string"
+        },
+        "auth_session_id": {
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "granted_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "granted_by": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "record_version": {
+          "type": "integer"
+        },
+        "requested_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "pending_approval",
+            "granted",
+            "denied",
+            "expired",
+            "revoked"
+          ],
+          "type": "string"
+        },
+        "target_fingerprint": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "argument_hash",
+        "id",
+        "operation_id",
+        "requested_at",
+        "site",
+        "state",
+        "target_fingerprint",
+        "tool_name"
+      ],
+      "type": "object"
+    },
+    "AuthFlow": {
+      "additionalProperties": false,
+      "properties": {
+        "redirect_url": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "Block": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/ActionRef"
+          },
+          "type": "array"
+        },
+        "collection": {
+          "type": "string"
+        },
+        "feature_flag": {
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FieldRef"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Capability": {
+      "additionalProperties": false,
+      "properties": {
+        "Description": {
+          "type": "string"
+        },
+        "Name": {
+          "type": "string"
+        },
+        "Risks": {
+          "items": {
+            "enum": [
+              "tenant-isolation",
+              "authorization",
+              "identity",
+              "credential-scope",
+              "durable-business-effects"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "Status": {
+          "enum": [
+            "planned",
+            "experimental",
+            "supported",
+            "retired"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "Description",
+        "Name",
+        "Risks",
+        "Status"
+      ],
+      "type": "object"
+    },
+    "CapabilityContract": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "effects": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/TypedField"
+          },
+          "type": "array"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/TypedField"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "risk": {
+          "enum": [
+            "safe",
+            "standard",
+            "elevated",
+            "high",
+            "system"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "Claim": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    },
+    "CommandEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "causation_id": {
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "deadline": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "actor",
+        "deadline",
+        "id",
+        "site",
+        "type",
+        "version"
+      ],
+      "type": "object"
+    },
+    "CommandResult": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "error": {
+          "$ref": "#/$defs/Error",
+          "x-optional-pointer": true
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "replayed": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "accepted",
+            "rejected",
+            "conflict",
+            "failed",
+            "pending"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "correlation_id",
+        "operation_id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ComponentObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "seen_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "healthy",
+            "degraded",
+            "failed",
+            "waiting"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "ref",
+        "seen_at",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ConflictRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "detected_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "doc_name": {
+          "type": "string"
+        },
+        "doctype": {
+          "type": "string"
+        },
+        "loser_command_key": {
+          "type": "string"
+        },
+        "losing_expected_version": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "winning_actual_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "detected_at",
+        "doc_name",
+        "doctype",
+        "loser_command_key",
+        "losing_expected_version",
+        "name",
+        "site",
+        "state",
+        "winning_actual_version"
+      ],
+      "type": "object"
+    },
+    "Cursor": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "nonce": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "token"
+      ],
+      "type": "object"
+    },
+    "Delivery": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt",
+        "data",
+        "id",
+        "site",
+        "type"
+      ],
+      "type": "object"
+    },
+    "DesiredReport": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/DesiredResource"
+          },
+          "type": "array"
+        },
+        "signature": {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "active",
+            "blocked",
+            "superseded"
+          ],
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "deployment_id",
+        "generation",
+        "resources",
+        "status",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "DesiredResource": {
+      "additionalProperties": false,
+      "properties": {
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "Error": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "x-open-json-value": true
+        },
+        "field": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "PERMISSION_DENIED",
+            "VALIDATION_FAILED",
+            "NOT_FOUND",
+            "CONFLICT",
+            "DEADLINE_EXCEEDED",
+            "DEPENDENCY_UNAVAILABLE",
+            "IDEMPOTENCY_KEY_REUSED",
+            "UNAUTHENTICATED",
+            "RESOURCE_EXHAUSTED",
+            "STALE_SUBJECT",
+            "LEASE_LOST",
+            "OUTCOME_UNKNOWN",
+            "UNSUPPORTED_VERSION",
+            "INTERNAL_ERROR"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "type"
+      ],
+      "type": "object"
+    },
+    "EventEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "aggregate_id": {
+          "type": "string"
+        },
+        "aggregate_type": {
+          "type": "string"
+        },
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "causation_id": {
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "model_revision": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "provenance_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sequence": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "skill": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "source": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "data",
+        "id",
+        "occurred_at",
+        "site",
+        "source",
+        "type",
+        "version"
+      ],
+      "type": "object"
+    },
+    "FieldHint": {
+      "additionalProperties": false,
+      "properties": {
+        "computed": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "fieldtype": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "in_list_view": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "link_target": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "read_only": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "search_index": {
+          "type": "boolean"
+        },
+        "standard_filter": {
+          "type": "boolean"
+        },
+        "table_target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "unique": {
+          "type": "boolean"
+        },
+        "writable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fieldtype",
+        "name",
+        "writable"
+      ],
+      "type": "object"
+    },
+    "FieldRef": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "GenerationInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "config_version": {
+          "type": "integer"
+        },
+        "projection_hash": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_version",
+        "projection_hash",
+        "site"
+      ],
+      "type": "object"
+    },
+    "IdentityAssertion": {
+      "additionalProperties": false,
+      "properties": {
+        "acr": {
+          "type": "string"
+        },
+        "amr": {
+          "type": "string"
+        },
+        "authenticated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "email": {
+          "type": "string"
+        },
+        "email_verified": {
+          "type": "boolean"
+        },
+        "full_name": {
+          "type": "string"
+        },
+        "issuer": {
+          "type": "string"
+        },
+        "provider_instance_id": {
+          "type": "string"
+        },
+        "session_binding": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authenticated_at",
+        "email_verified",
+        "issuer",
+        "provider_instance_id",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "Layout": {
+      "additionalProperties": false,
+      "properties": {
+        "desktop": {
+          "type": "integer"
+        },
+        "mobile": {
+          "type": "integer"
+        },
+        "tablet": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "desktop",
+        "mobile",
+        "tablet"
+      ],
+      "type": "object"
+    },
+    "ObservationReport": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "items": {
+            "$ref": "#/$defs/ComponentObservation"
+          },
+          "type": "array"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "reported_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "runtime_id": {
+          "type": "string"
+        },
+        "signature": {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "components",
+        "generation",
+        "reported_at",
+        "runtime_id",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "OfflineConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "branch_id": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "entity_id": {
+          "type": "string"
+        },
+        "entity_type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "reason_code": {
+          "enum": [
+            "PERMISSION_DENIED",
+            "VALIDATION_FAILED",
+            "NOT_FOUND",
+            "CONFLICT",
+            "DEADLINE_EXCEEDED",
+            "DEPENDENCY_UNAVAILABLE",
+            "IDEMPOTENCY_KEY_REUSED",
+            "UNAUTHENTICATED",
+            "RESOURCE_EXHAUSTED",
+            "STALE_SUBJECT",
+            "LEASE_LOST",
+            "OUTCOME_UNKNOWN",
+            "UNSUPPORTED_VERSION",
+            "INTERNAL_ERROR"
+          ],
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "resolution_mode": {
+          "type": "string"
+        },
+        "server_version": {
+          "type": "integer"
+        },
+        "site": {
+          "type": "string"
+        },
+        "snapshot": {
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "branch_id",
+        "device_id",
+        "entity_type",
+        "id",
+        "operation_id",
+        "reason_code",
+        "recorded_at",
+        "resolution_mode",
+        "server_version",
+        "site"
+      ],
+      "type": "object"
+    },
+    "OfflineOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "base_version": {
+          "type": "integer"
+        },
+        "branch_id": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "entity_id": {
+          "type": "string"
+        },
+        "entity_type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "operation_type": {
+          "type": "string"
+        },
+        "payload": {
+          "x-open-json-value": true
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "sent",
+            "acked",
+            "conflict",
+            "rejected",
+            "discarded"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_version",
+        "branch_id",
+        "device_id",
+        "entity_type",
+        "id",
+        "occurred_at",
+        "operation_type",
+        "schema_version",
+        "site",
+        "status"
+      ],
+      "type": "object"
+    },
+    "OfflinePullPage": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OfflineOperation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cursor",
+        "next_cursor",
+        "operations"
+      ],
+      "type": "object"
+    },
+    "OfflineReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "conflict": {
+          "$ref": "#/$defs/OfflineConflict",
+          "x-optional-pointer": true
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "received_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "sent",
+            "acked",
+            "conflict",
+            "rejected",
+            "discarded"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "next_cursor",
+        "operation_id",
+        "received_at",
+        "status"
+      ],
+      "type": "object"
+    },
+    "OfflineSyncBatch": {
+      "additionalProperties": false,
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/OfflineConflict"
+          },
+          "type": "array"
+        },
+        "cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "gate": {
+          "enum": [
+            "accepted",
+            "rejected",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/SyncCursor"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OfflineOperation"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "gate",
+        "operations",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "OfflineTombstone": {
+      "additionalProperties": false,
+      "properties": {
+        "branch_id": {
+          "type": "string"
+        },
+        "deleted_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "entity_id": {
+          "type": "string"
+        },
+        "entity_type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "retain_until": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "branch_id",
+        "deleted_at",
+        "device_id",
+        "entity_id",
+        "entity_type",
+        "id",
+        "retain_until",
+        "schema_version",
+        "site"
+      ],
+      "type": "object"
+    },
+    "PKCEVerifier": {
+      "additionalProperties": false,
+      "properties": {
+        "CodeChallenge": {
+          "type": "string"
+        },
+        "CodeVerifier": {
+          "type": "string"
+        },
+        "Method": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "CodeChallenge",
+        "CodeVerifier",
+        "Method"
+      ],
+      "type": "object"
+    },
+    "PackageComposition": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "patches": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "plugins": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "profiles": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "base"
+      ],
+      "type": "object"
+    },
+    "PackageManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "cleanup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "migrations": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "provides": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "PageManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "page": {
+          "type": "string"
+        },
+        "regions": {
+          "items": {
+            "$ref": "#/$defs/Region"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "states": {
+          "$ref": "#/$defs/ManifestStates"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "page",
+        "regions",
+        "schema_version",
+        "states",
+        "title"
+      ],
+      "type": "object"
+    },
+    "PluginService": {
+      "additionalProperties": false,
+      "properties": {
+        "cleanup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "provider": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "scope": {
+          "enum": [
+            "tenant",
+            "session",
+            "workflow",
+            "execution"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "provider",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "PolicyEvaluation": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "decision": {
+          "enum": [
+            "allow",
+            "deny",
+            "requires_approval"
+          ],
+          "type": "string"
+        },
+        "evaluated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "capability",
+        "decision",
+        "evaluated_at"
+      ],
+      "type": "object"
+    },
+    "Profile": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "ProvenanceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorContext"
+        },
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "output": {
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "rule": {
+          "$ref": "#/$defs/ResourceRef"
+        }
+      },
+      "required": [
+        "actor",
+        "event_id",
+        "id",
+        "recorded_at",
+        "resource"
+      ],
+      "type": "object"
+    },
+    "ProviderProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "family": {
+          "enum": [
+            "oidc",
+            "saml",
+            "ldap",
+            "webauthn",
+            "social",
+            "scim"
+          ],
+          "type": "string"
+        },
+        "required_checks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "experimental",
+            "supported",
+            "retired"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "family",
+        "status"
+      ],
+      "type": "object"
+    },
+    "Region": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/Block"
+          },
+          "type": "array"
+        },
+        "layout": {
+          "$ref": "#/$defs/Layout"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "blocks",
+        "layout",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ResourceDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "$ref": "#/$defs/ResourceRef"
+          },
+          "type": "array"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/TypedField"
+          },
+          "type": "array"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "doctype",
+            "collection",
+            "command",
+            "query",
+            "relation",
+            "computation",
+            "rule",
+            "policy",
+            "action",
+            "workflow",
+            "capability",
+            "skill",
+            "role",
+            "agent",
+            "view",
+            "event",
+            "integration",
+            "plugin",
+            "package",
+            "page",
+            "component"
+          ],
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "preview",
+            "active",
+            "disabled",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "superseded_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "hash",
+        "kind",
+        "ref"
+      ],
+      "type": "object"
+    },
+    "ResourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "namespace",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SiteAggregateKey": {
+      "additionalProperties": false,
+      "properties": {
+        "AggregateID": {
+          "type": "string"
+        },
+        "AggregateType": {
+          "type": "string"
+        },
+        "Site": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "AggregateID",
+        "AggregateType",
+        "Site"
+      ],
+      "type": "object"
+    },
+    "SiteDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "integer"
+        },
+        "data_plane_ref": {
+          "type": "string"
+        },
+        "directory_revision": {
+          "type": "integer"
+        },
+        "runtime_cell_id": {
+          "type": "string"
+        },
+        "site_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "aliases",
+        "site_id",
+        "status",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SkillContract": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "escalation": {
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "steps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "capability",
+        "ref"
+      ],
+      "type": "object"
+    },
+    "Surface": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "supported",
+            "experimental",
+            "planned",
+            "partial",
+            "diverged"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "name",
+        "status"
+      ],
+      "type": "object"
+    },
+    "SyncCursor": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "branch_id": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "branch_id",
+        "device_id",
+        "token",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SystemFieldHint": {
+      "additionalProperties": false,
+      "properties": {
+        "fieldtype": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "writable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fieldtype",
+        "name",
+        "writable"
+      ],
+      "type": "object"
+    },
+    "TaskReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "accepted",
+            "rejected",
+            "conflict",
+            "failed",
+            "pending"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted_at",
+        "correlation_id",
+        "operation_id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "approval_id": {
+          "type": "string"
+        },
+        "capability": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "finished_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "capability",
+        "id",
+        "started_at",
+        "state"
+      ],
+      "type": "object"
+    },
+    "VersionMismatchError": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_version": {
+          "type": "integer"
+        },
+        "expected_version": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actual_version",
+        "expected_version",
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "title": "Kora Engine v1 wire contracts",
+  "type": "object",
+  "x-enums": {
+    "ApprovalState": [
+      "pending_approval",
+      "granted",
+      "denied",
+      "expired",
+      "revoked"
+    ],
+    "BlockingRisk": [
+      "tenant-isolation",
+      "authorization",
+      "identity",
+      "credential-scope",
+      "durable-business-effects"
+    ],
+    "CapabilityStatus": [
+      "planned",
+      "experimental",
+      "supported",
+      "retired"
+    ],
+    "Code": [
+      "PERMISSION_DENIED",
+      "VALIDATION_FAILED",
+      "NOT_FOUND",
+      "CONFLICT",
+      "DEADLINE_EXCEEDED",
+      "DEPENDENCY_UNAVAILABLE",
+      "IDEMPOTENCY_KEY_REUSED",
+      "UNAUTHENTICATED",
+      "RESOURCE_EXHAUSTED",
+      "STALE_SUBJECT",
+      "LEASE_LOST",
+      "OUTCOME_UNKNOWN",
+      "UNSUPPORTED_VERSION",
+      "INTERNAL_ERROR"
+    ],
+    "DesiredStatus": [
+      "planned",
+      "active",
+      "blocked",
+      "superseded"
+    ],
+    "GrantScope": [
+      "component",
+      "operation",
+      "call"
+    ],
+    "ObservationStatus": [
+      "healthy",
+      "degraded",
+      "failed",
+      "waiting"
+    ],
+    "OfflineOperationStatus": [
+      "queued",
+      "sent",
+      "acked",
+      "conflict",
+      "rejected",
+      "discarded"
+    ],
+    "OfflineSchemaGate": [
+      "accepted",
+      "rejected",
+      "stale"
+    ],
+    "PolicyDecision": [
+      "allow",
+      "deny",
+      "requires_approval"
+    ],
+    "PrincipalType": [
+      "human",
+      "service",
+      "agent",
+      "public"
+    ],
+    "Projection": [
+      "metadata",
+      "changed_fields",
+      "summary",
+      "full_document"
+    ],
+    "ProviderFamily": [
+      "oidc",
+      "saml",
+      "ldap",
+      "webauthn",
+      "social",
+      "scim"
+    ],
+    "ResourceKind": [
+      "doctype",
+      "collection",
+      "command",
+      "query",
+      "relation",
+      "computation",
+      "rule",
+      "policy",
+      "action",
+      "workflow",
+      "capability",
+      "skill",
+      "role",
+      "agent",
+      "view",
+      "event",
+      "integration",
+      "plugin",
+      "package",
+      "page",
+      "component"
+    ],
+    "ResourceLifecycle": [
+      "draft",
+      "preview",
+      "active",
+      "disabled",
+      "retired"
+    ],
+    "ServiceScope": [
+      "tenant",
+      "session",
+      "workflow",
+      "execution"
+    ],
+    "Status": [
+      "completed",
+      "accepted",
+      "rejected",
+      "conflict",
+      "failed",
+      "pending"
+    ],
+    "SurfaceStatus": [
+      "supported",
+      "experimental",
+      "planned",
+      "partial",
+      "diverged"
+    ],
+    "ToolSafetyLevel": [
+      "safe",
+      "standard",
+      "elevated",
+      "high",
+      "system"
+    ],
+    "UsageClass": [
+      "input",
+      "output",
+      "reasoning",
+      "total",
+      "partial"
+    ]
+  }
+}
