@@ -231,6 +231,37 @@ type Bad struct { Value json.RawMessage ` + "`json:\"value\"`" + ` }
 	}
 }
 
+func TestGeneratorAllowsExplicitRawJSONLists(t *testing.T) {
+	dir := t.TempDir()
+	src := `package contract
+import "encoding/json"
+//contract:wire:v2
+type Candidate struct {
+  //contract:json
+  Resources []json.RawMessage ` + "`json:\"resources\"`" + `
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "wire.go"), []byte(src), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := generateVersion(dir, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"resources"`, `"items"`, `"x-open-json-value": true`} {
+		if !strings.Contains(string(got), expected) {
+			t.Errorf("schema omitted %s: %s", expected, got)
+		}
+	}
+	ts, err := generateTypeScript(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ts), `"resources": Array<unknown>`) {
+		t.Errorf("TypeScript did not preserve the JSON list shape: %s", ts)
+	}
+}
+
 func TestUnsupportedContractTypeFailsInsteadOfEmittingAny(t *testing.T) {
 	fset := token.NewFileSet()
 	src := "package contract\ntype Bad struct { Value chan string `json:\"value\"` }\n"

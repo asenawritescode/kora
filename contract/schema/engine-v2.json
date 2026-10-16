@@ -189,6 +189,74 @@
       ],
       "type": "object"
     },
+    "ChannelSessionIssueRequestV2": {
+      "additionalProperties": false,
+      "properties": {
+        "client_name": {
+          "type": "string"
+        },
+        "conversation_key": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/$defs/PermissionGrant"
+          },
+          "type": "array"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "sender_address": {
+          "type": "string"
+        },
+        "sensitive_until": {
+          "type": "string"
+        },
+        "trusted_until": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "client_name",
+        "conversation_key",
+        "permissions",
+        "provider",
+        "sender_address",
+        "trusted_until"
+      ],
+      "type": "object"
+    },
+    "ChannelSessionIssueResponseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "access_token": {
+          "type": "string"
+        },
+        "conversation_key": {
+          "type": "string"
+        },
+        "sensitive_until": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "trusted_until": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "access_token",
+        "conversation_key",
+        "session_id",
+        "trusted_until"
+      ],
+      "type": "object"
+    },
     "CommandMeta": {
       "additionalProperties": false,
       "properties": {
@@ -222,6 +290,245 @@
         "expression",
         "if_false",
         "if_true"
+      ],
+      "type": "object"
+    },
+    "ConfigurationCandidateV2": {
+      "additionalProperties": false,
+      "properties": {
+        "base_config_version_id": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "doctypes": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "permissions": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "scripts": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "views": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "workflows": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "doctypes"
+      ],
+      "type": "object"
+    },
+    "ConfigurationCheckV2": {
+      "additionalProperties": false,
+      "properties": {
+        "base_config_version_id": {
+          "type": "string"
+        },
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationConflict"
+          },
+          "type": "array"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "impact": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationImpact"
+          },
+          "type": "array"
+        },
+        "ordered_doctypes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ordered_doctypes",
+        "valid"
+      ],
+      "type": "object"
+    },
+    "ConfigurationConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail",
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ConfigurationDraftResultV2": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "draft_config_version_id": {
+          "type": "string"
+        },
+        "ordered_doctypes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version_num": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "draft_config_version_id",
+        "ordered_doctypes",
+        "proposal_id",
+        "status",
+        "version_num"
+      ],
+      "type": "object"
+    },
+    "ConfigurationDraftV2": {
+      "additionalProperties": false,
+      "properties": {
+        "base_config_version_id": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "doctypes": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "draft_config_version_id": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "scripts": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "views": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "workflows": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "doctypes",
+        "proposal_id"
+      ],
+      "type": "object"
+    },
+    "ConfigurationImpact": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "safe": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "kind",
+        "name",
+        "safe"
       ],
       "type": "object"
     },
@@ -440,6 +747,26 @@
       ],
       "type": "object"
     },
+    "ManagedChannelClientV2": {
+      "additionalProperties": false,
+      "properties": {
+        "access_token": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "access_token",
+        "name",
+        "warning"
+      ],
+      "type": "object"
+    },
     "ManagedOperation": {
       "additionalProperties": false,
       "properties": {
@@ -471,6 +798,30 @@
         "id",
         "state",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "ManagedSiteIdentityV2": {
+      "additionalProperties": false,
+      "properties": {
+        "config_revision": {
+          "type": "integer"
+        },
+        "healthy": {
+          "type": "boolean"
+        },
+        "site_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_revision",
+        "healthy",
+        "site_id",
+        "status"
       ],
       "type": "object"
     },
@@ -1471,6 +1822,33 @@
       ],
       "type": "object"
     },
+    "RevokeManagedChannelClientResultV2": {
+      "additionalProperties": false,
+      "properties": {
+        "revoked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "revoked"
+      ],
+      "type": "object"
+    },
+    "RevokeManagedChannelClientV2": {
+      "additionalProperties": false,
+      "properties": {
+        "credential_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "credential_fingerprint"
+      ],
+      "type": "object"
+    },
     "SchemaRef": {
       "additionalProperties": false,
       "properties": {
@@ -1519,6 +1897,48 @@
         "meta",
         "reason",
         "state"
+      ],
+      "type": "object"
+    },
+    "SiteDirectoryEntryV2": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "string"
+        },
+        "data_plane_ref": {
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "directory_revision": {
+          "type": "string"
+        },
+        "site_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "aliases",
+        "config_revision",
+        "deployment_id",
+        "directory_revision",
+        "site_id",
+        "status",
+        "version"
       ],
       "type": "object"
     },
@@ -2228,6 +2648,74 @@
       ],
       "type": "object"
     },
+    "ChannelSessionIssueRequestV2": {
+      "additionalProperties": false,
+      "properties": {
+        "client_name": {
+          "type": "string"
+        },
+        "conversation_key": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/$defs/PermissionGrant"
+          },
+          "type": "array"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "sender_address": {
+          "type": "string"
+        },
+        "sensitive_until": {
+          "type": "string"
+        },
+        "trusted_until": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "client_name",
+        "conversation_key",
+        "permissions",
+        "provider",
+        "sender_address",
+        "trusted_until"
+      ],
+      "type": "object"
+    },
+    "ChannelSessionIssueResponseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "access_token": {
+          "type": "string"
+        },
+        "conversation_key": {
+          "type": "string"
+        },
+        "sensitive_until": {
+          "format": "date-time",
+          "type": "string",
+          "x-optional-pointer": true
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "trusted_until": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "access_token",
+        "conversation_key",
+        "session_id",
+        "trusted_until"
+      ],
+      "type": "object"
+    },
     "CommandMeta": {
       "additionalProperties": false,
       "properties": {
@@ -2261,6 +2749,245 @@
         "expression",
         "if_false",
         "if_true"
+      ],
+      "type": "object"
+    },
+    "ConfigurationCandidateV2": {
+      "additionalProperties": false,
+      "properties": {
+        "base_config_version_id": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "doctypes": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "permissions": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "scripts": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "views": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "workflows": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "doctypes"
+      ],
+      "type": "object"
+    },
+    "ConfigurationCheckV2": {
+      "additionalProperties": false,
+      "properties": {
+        "base_config_version_id": {
+          "type": "string"
+        },
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationConflict"
+          },
+          "type": "array"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "impact": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationImpact"
+          },
+          "type": "array"
+        },
+        "ordered_doctypes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ordered_doctypes",
+        "valid"
+      ],
+      "type": "object"
+    },
+    "ConfigurationConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail",
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ConfigurationDraftResultV2": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "draft_config_version_id": {
+          "type": "string"
+        },
+        "ordered_doctypes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version_num": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "draft_config_version_id",
+        "ordered_doctypes",
+        "proposal_id",
+        "status",
+        "version_num"
+      ],
+      "type": "object"
+    },
+    "ConfigurationDraftV2": {
+      "additionalProperties": false,
+      "properties": {
+        "base_config_version_id": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "doctypes": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "draft_config_version_id": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "scripts": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "views": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "workflows": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "doctypes",
+        "proposal_id"
+      ],
+      "type": "object"
+    },
+    "ConfigurationImpact": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "safe": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "kind",
+        "name",
+        "safe"
       ],
       "type": "object"
     },
@@ -2457,6 +3184,26 @@
       ],
       "type": "object"
     },
+    "ManagedChannelClientV2": {
+      "additionalProperties": false,
+      "properties": {
+        "access_token": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "access_token",
+        "name",
+        "warning"
+      ],
+      "type": "object"
+    },
     "ManagedOperation": {
       "additionalProperties": false,
       "properties": {
@@ -2488,6 +3235,30 @@
         "id",
         "state",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "ManagedSiteIdentityV2": {
+      "additionalProperties": false,
+      "properties": {
+        "config_revision": {
+          "type": "integer"
+        },
+        "healthy": {
+          "type": "boolean"
+        },
+        "site_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_revision",
+        "healthy",
+        "site_id",
+        "status"
       ],
       "type": "object"
     },
@@ -3488,6 +4259,33 @@
       ],
       "type": "object"
     },
+    "RevokeManagedChannelClientResultV2": {
+      "additionalProperties": false,
+      "properties": {
+        "revoked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "revoked"
+      ],
+      "type": "object"
+    },
+    "RevokeManagedChannelClientV2": {
+      "additionalProperties": false,
+      "properties": {
+        "credential_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "credential_fingerprint"
+      ],
+      "type": "object"
+    },
     "SchemaRef": {
       "additionalProperties": false,
       "properties": {
@@ -3536,6 +4334,48 @@
         "meta",
         "reason",
         "state"
+      ],
+      "type": "object"
+    },
+    "SiteDirectoryEntryV2": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "string"
+        },
+        "data_plane_ref": {
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "directory_revision": {
+          "type": "string"
+        },
+        "site_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "aliases",
+        "config_revision",
+        "deployment_id",
+        "directory_revision",
+        "site_id",
+        "status",
+        "version"
       ],
       "type": "object"
     },

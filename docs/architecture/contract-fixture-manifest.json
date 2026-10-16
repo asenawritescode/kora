@@ -18,6 +18,16 @@
       "consumers": [
         "kora/contract-fixtures/site-directory-v1.json"
       ]
+    },
+    {
+      "name": "site-directory-v2",
+      "sha256": "5442a2419ceb913bb75d714d44a600b20075262f7d3100a0c2431743deb918b4",
+      "consumers": [
+        "kora/contract-fixtures/site-directory-v2.json",
+        "kora-cloud/contract-fixtures/site-directory-v2.json",
+        "kora-studio-mvp/contract-fixtures/site-directory-v2.json",
+        "kora-ts-sdk/contract-fixtures/site-directory-v2.json"
+      ]
     }
   ],
   "engine_contracts": [
@@ -31,15 +41,15 @@
     {
       "version": "v2",
       "schema": "kora/contract/schema/engine-v2.json",
-      "schema_sha256": "e7510bb2a43d4de285ebe6ee462baeadf3c8bef8185308b39e62b76d3c9da30d",
+      "schema_sha256": "644f1f416dcb2dbbc5af47b04cea143307c82281ec5b04c7dd95393002c346cc",
       "typescript": "kora/contract/generated/engine-v2.ts",
-      "typescript_sha256": "097ef41615b608b62c4fa26407c0a948788c47c86027d8af71de7c3227fc576a",
+      "typescript_sha256": "1d0fc0cdb31433db902591ccb2c2a1e251da88be898708e40e164dce6670be3f",
       "embedded_ui_copy": "kora/ui/src/generated/engine-v2.ts",
-      "embedded_ui_copy_sha256": "097ef41615b608b62c4fa26407c0a948788c47c86027d8af71de7c3227fc576a",
+      "embedded_ui_copy_sha256": "1d0fc0cdb31433db902591ccb2c2a1e251da88be898708e40e164dce6670be3f",
       "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
-      "studio_copy_sha256": "097ef41615b608b62c4fa26407c0a948788c47c86027d8af71de7c3227fc576a",
+      "studio_copy_sha256": "1d0fc0cdb31433db902591ccb2c2a1e251da88be898708e40e164dce6670be3f",
       "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
-      "sdk_copy_sha256": "097ef41615b608b62c4fa26407c0a948788c47c86027d8af71de7c3227fc576a"
+      "sdk_copy_sha256": "1d0fc0cdb31433db902591ccb2c2a1e251da88be898708e40e164dce6670be3f"
     }
   ]
 }
