@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
+	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/secret"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,6 +22,30 @@ import (
 // operation is terminal, repeated callbacks are recorded but do not mutate
 // the payment again.
 func (h *Handler) HandleMPesaSTKCallback(c *gin.Context) {
+	db := h.queryDB(c)
+	site := c.GetString("site_name")
+	if site == "" || db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site database unavailable"})
+		return
+	}
+	expected, err := secret.NewStore(db, h.siteDialect(c)).Get(site, "mpesa_callback_token")
+	if err != nil || expected == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "M-Pesa callback token is not configured"})
+		return
+	}
+	provided := c.Param("token")
+	if provided == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid M-Pesa callback credential"})
+		return
+	}
+	if !bindProviderCallbackExecution(c, "provider:mpesa", []policy.Grant{
+		{Resource: "External Operation", Operation: "write"},
+		{Resource: "Payment", Operation: "write"},
+		{Resource: "External Operation Event", Operation: "create"},
+	}) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "verified tenant callback identity unavailable"})
+		return
+	}
 	var envelope mpesaCallbackEnvelope
 	if err := c.ShouldBindJSON(&envelope); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid M-Pesa callback"})
@@ -29,19 +56,6 @@ func (h *Handler) HandleMPesaSTKCallback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "CheckoutRequestID is required"})
 		return
 	}
-
-	db := h.queryDB(c)
-	if db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site database unavailable"})
-		return
-	}
-	// This public provider callback has no Kora session. The route currently
-	// trusts deployment/provider ingress controls to authenticate the sender;
-	// the service actor here is attribution, not proof of callback authenticity.
-	c.Set("user", "mpesa-callback")
-	c.Set("user_role", doctype.AdminRole)
-	c.Set("user_roles", []string{doctype.AdminRole})
-	c.Set("auth_type", "service")
 	operationName, err := externalOperationName(h, c, db, callback.CheckoutRequestID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "payment operation not found"})

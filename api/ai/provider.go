@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -37,6 +38,11 @@ func ValidateProviderProfile(p ProviderProfile) error {
 		return fmt.Errorf("provider profile http timeout must be positive")
 	}
 	switch p.ProviderKey {
+	case "kora_cloud":
+		gatewayURL, err := url.Parse(p.BaseURL)
+		if err != nil || (gatewayURL.Scheme != "http" && gatewayURL.Scheme != "https") || gatewayURL.Host == "" {
+			return fmt.Errorf("provider profile has an invalid Kigae Cloud gateway URL")
+		}
 	case "openai_api_key":
 		if !strings.Contains(p.BaseURL, "openai.com") {
 			return fmt.Errorf("provider profile base url mismatch for openai")
@@ -190,6 +196,25 @@ func applyFloat(store *secret.Store, site, key string, dst *float64) {
 // ---------------------------------------------------------------------------
 
 func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.Dialect) (providerKey, apiKey, baseURL, model string) {
+	// When Cloud is configured as the shared provider, keep the external
+	// credential there. The Engine sends its completion request to Cloud using
+	// a private service token. If no Cloud gateway is configured, self-hosted
+	// sites may still use a provider key stored in their own Secrets page.
+	if gatewayURL := strings.TrimRight(strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_URL")), "/"); gatewayURL != "" {
+		gatewayToken := strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_TOKEN"))
+		if gatewayToken == "" {
+			return "", "", "", ""
+		}
+		gatewayModel := strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_MODEL"))
+		if gatewayModel == "" {
+			gatewayModel = "cloud-managed"
+		}
+		if modelOverride != "" {
+			gatewayModel = modelOverride
+		}
+		return "kora_cloud", gatewayToken, gatewayURL, gatewayModel
+	}
+
 	store := secret.NewStore(db, dialect...)
 
 	providers := []struct{ key, base, defaultModel string }{
@@ -207,24 +232,6 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.
 		}
 	}
 
-	// Fallback: shared AI keys from environment (superadmin-configured).
-	if os.Getenv("KORA_SHARED_AI_ENABLED") != "true" {
-		return "", "", "", ""
-	}
-	sharedProviders := []struct{ providerKey, envKey, base, defaultModel string }{
-		{"openai_api_key", "KORA_SHARED_OPENAI_API_KEY", "https://api.openai.com/v1", "gpt-4o"},
-		{"deepseek_api_key", "KORA_SHARED_DEEPSEEK_API_KEY", "https://api.deepseek.com", "deepseek-chat"},
-		{"anthropic_api_key", "KORA_SHARED_ANTHROPIC_API_KEY", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
-	}
-	for _, p := range sharedProviders {
-		if k := os.Getenv(p.envKey); k != "" {
-			m := p.defaultModel
-			if modelOverride != "" {
-				m = modelOverride
-			}
-			return p.providerKey, k, p.base, m
-		}
-	}
 	return "", "", "", ""
 }
 

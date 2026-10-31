@@ -21,7 +21,7 @@ describe('runtime config', () => {
         }
         return {
           tagName: 'SCRIPT',
-          textContent: '{"apiBaseUrl":"https://example.test/api","appName":"Standalone Kora","environment":"standalone","buildVersion":"1.2.3"}',
+          textContent: '{"apiBaseUrl":"https://example.test/api","appName":"Standalone Kigae","environment":"standalone","buildVersion":"1.2.3"}',
         }
       },
     }
@@ -30,7 +30,7 @@ describe('runtime config', () => {
 
     const cfg = loadRuntimeConfig()
     expect(cfg.apiBaseUrl).toBe('https://example.test/api')
-    expect(cfg.appName).toBe('Standalone Kora')
+    expect(cfg.appName).toBe('Standalone Kigae')
     expect(cfg.environment).toBe('standalone')
     expect(cfg.buildVersion).toBe('1.2.3')
   })

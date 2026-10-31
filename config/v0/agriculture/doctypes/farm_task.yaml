@@ -1,28 +1,65 @@
 name: Farm Task
 module: Agriculture
+description: Assigned field work generated from a crop plan.
 title_field: reference
-search_fields: reference, status
-sort_field: modified
-sort_order: DESC
+search_fields: reference, task_type, status
+sort_field: due_date
+sort_order: ASC
 
 fields:
   - fieldname: reference
     fieldtype: Data
-    label: Reference
+    label: Task reference
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
-    fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
+    search_index: true
+  - fieldname: crop_plan
+    fieldtype: Link
+    label: Crop plan
+    options: Crop Plan
+    reqd: true
+    in_list_view: true
+  - fieldname: task_type
+    fieldtype: Select
+    label: Work to do
+    options: |
+      Prepare field
+      Plant
+      Irrigate
+      Apply input
+      Inspect crop
+      Harvest
+      Other
+    reqd: true
+    in_list_view: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due date
+    reqd: true
+    in_list_view: true
+  - fieldname: assigned_to
+    fieldtype: User
+    label: Assigned to
+    reqd: true
+    in_list_view: true
+    description: Choose a person who already has a workspace account.
+  - fieldname: completed_on
+    fieldtype: Date
+    label: Completed on
+  - fieldname: work_notes
     fieldtype: Text
-    label: Evidence
+    label: Work notes
+  - fieldname: evidence
+    fieldtype: Attach
+    label: Photo or document
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
-    default: Draft
+    options: |
+      To do
+      In progress
+      Blocked
+      Done
+    default: To do
     in_list_view: true

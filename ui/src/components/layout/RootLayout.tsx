@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Sidebar } from './Sidebar'
 import { ChatWidget } from '@/components/chat/ChatWidget'
 import { useUIStore } from '@/lib/ui-store'
-import { fetchNavigation } from '@/lib/api/system'
+import { fetchNavigation, navigationQueryKey } from '@/lib/api/system'
 import { Button } from '@/components/ui/button'
 import { Menu, X, Bell, ExternalLink } from 'lucide-react'
 import { ToastContainer } from '@/components/ui/Toast'
@@ -12,6 +12,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { loadRuntimeConfig } from '@/lib/runtime-config'
 import { attachRealtimeInvalidation, type RealtimeEvent } from '@/lib/realtime'
+import { removeStaleWorkspaceQueries } from '@/lib/workspace-cache'
 import type { RealtimeConnectionState } from '@/types/api'
 import { toast } from '@/components/ui/Toast'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -45,10 +46,21 @@ export function RootLayout() {
   const queryClient = useQueryClient()
 
   const { data: navigation } = useQuery({
-    queryKey: ['navigation'],
+    queryKey: navigationQueryKey(),
     queryFn: fetchNavigation,
     staleTime: 5 * 60_000,
   })
+  const tenantActorScope = `${navigationQueryKey()[1]}::${navigation?.user?.name ?? ''}`
+  const previousTenantActorScope = useRef(tenantActorScope)
+
+  useEffect(() => {
+    if (previousTenantActorScope.current === tenantActorScope) return
+    previousTenantActorScope.current = tenantActorScope
+    // Workspace projections are not uniformly tenant-qualified yet. Remove
+    // stale entries but retain the active tenant's navigation query so it can
+    // continue loading capabilities and actor identity.
+    removeStaleWorkspaceQueries(queryClient, navigationQueryKey()[1])
+  }, [queryClient, tenantActorScope])
 
   useEffect(() => {
     if (!pathname.startsWith('/workspace')) return
@@ -74,7 +86,7 @@ export function RootLayout() {
     setActiveModule(module?.module ?? null)
   }, [navigation?.modules, pathname, setActiveModule, setShellMode])
 
-  useEffect(() => attachRealtimeInvalidation(runtime.realtimeBaseUrl, queryClient, setRealtime), [runtime.realtimeBaseUrl, queryClient])
+  useEffect(() => attachRealtimeInvalidation(runtime.realtimeBaseUrl, queryClient, setRealtime), [runtime.realtimeBaseUrl, queryClient, tenantActorScope])
 
   useEffect(() => {
     if (realtime.state !== 'connected' || lastRealtimeState.current === 'connected') {
@@ -148,7 +160,7 @@ export function RootLayout() {
           <Button variant="ghost" size="icon" aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'} onClick={toggleSidebar}>
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
-          <span className="font-semibold text-sm">Kora</span>
+          <span className="font-semibold text-sm">Kigae</span>
           <div className="ml-auto flex items-center gap-2">
             <Badge variant={online ? 'outline' : 'destructive'}>
               {online ? 'Online' : 'Offline'}

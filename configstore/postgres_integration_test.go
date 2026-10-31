@@ -99,17 +99,6 @@ func TestLivePostgresConfigStoreLifecycle(t *testing.T) {
 		t.Fatalf("loaded permissions = %#v, want read/create access for Inventory Item", loadedPermissions)
 	}
 
-	workflow := &doctype.Workflow{Name: "Inventory Review", DocumentType: dt.Name, IsActive: true}
-	if err := store.SaveWorkflows([]*doctype.Workflow{workflow}, "tenant.example.test"); err != nil {
-		t.Fatal("save PostgreSQL workflow:", err)
-	}
-	loadedWorkflows, err := store.LoadWorkflows("tenant.example.test")
-	if err != nil {
-		t.Fatal("load PostgreSQL workflows:", err)
-	}
-	if len(loadedWorkflows) != 1 || loadedWorkflows[0].Name != workflow.Name {
-		t.Fatalf("loaded workflows = %#v, want Inventory Review", loadedWorkflows)
-	}
 
 	view := &doctype.View{Name: "Inventory", Route: "/inventory", Type: "list", SourceDocType: dt.Name}
 	if err := store.SaveViews([]*doctype.View{view}, "tenant.example.test"); err != nil {

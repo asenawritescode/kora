@@ -1,8 +1,11 @@
 package site
 
 import (
+	"context"
+	"errors"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/db"
@@ -33,5 +36,24 @@ func TestPlatformBootstrapAdvisoryLockIsReleasedAndRestoresSingleConnectionPool(
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal("unmet SQL expectations:", err)
+	}
+}
+
+func TestPlatformRegistryBootstrapLocalWaitHonorsContext(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create SQL mock:", err)
+	}
+	defer database.Close()
+	platformRegistryBootstrapGate <- struct{}{}
+	defer func() { <-platformRegistryBootstrapGate }()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err = bootstrapPlatformRegistryWithLockContext(ctx, database, db.Resolve("libsql"))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("bootstrap waiting for local gate error = %v, want deadline exceeded", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected database access while waiting for local gate: %v", err)
 	}
 }

@@ -2,11 +2,14 @@ package orm
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
 
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 )
 
@@ -18,19 +21,27 @@ var hookEnqueueFailed atomic.Int64
 // handed to the worker sink since process start.
 func HookEnqueueFailedCount() int64 { return hookEnqueueFailed.Load() }
 
-// AsyncHookRequest is a deferred hook execution. It is a serializable DTO: the
-// doctype and documents are carried by name and as maps rather than as pointers so
-// the request can cross a queue/process boundary and be reconstructed on the
-// worker side (RFC Phase 0).
+// RecordHookEnqueueFailure increments the process-level count when a supported
+// asynchronous hook invocation could not be queued.
+func RecordHookEnqueueFailure() int64 { return hookEnqueueFailed.Add(1) }
+
+// AsyncHookRequest is a process-local deferred hook execution. The verified
+// execution is deliberately not JSON-serializable; a future durable or remote
+// worker must establish identity through an explicit service contract.
 type AsyncHookRequest struct {
-	Doctype  string // doctype name, re-hydrated via the registry
-	Event    script.Event
-	Doc      map[string]any // serializable current document (may include child rows)
-	OldDoc   map[string]any // serializable previous document (nil for inserts)
-	Rec      script.ScriptRecord
-	User     string
-	UserRole string
-	Site     string
+	Doctype   string // doctype name, re-hydrated via the registry
+	Event     script.Event
+	Doc       map[string]any // serializable current document (may include child rows)
+	OldDoc    map[string]any // serializable previous document (nil for inserts)
+	Rec       script.ScriptRecord
+	User      string
+	UserRole  string
+	UserRoles []string
+	Site      string
+	Execution policy.Execution `json:"-"`
+	// DisableProvider preserves workflow-action scripts' synchronous execution
+	// contract when they are submitted to the shared async worker.
+	DisableProvider bool
 	// SkipHookScripts prevents an async after-hook from recursively invoking
 	// itself when its provider performs a nested document mutation.
 	SkipHookScripts []string
@@ -59,7 +70,7 @@ func (tx *TxManager) computedScriptHook() doctype.ComputedScriptHook {
 			if containsHookScript(tx.SkipHookScripts, rec.Name) {
 				continue
 			}
-			if rec.Name == scriptName || rec.WorkflowAction == scriptName {
+			if rec.Name == scriptName {
 				provider := scopedHookProvider(tx, tx.ScriptProvider, doctypeName, script.EventComputed, rec.Name)
 				userRoles := append([]string(nil), tx.CurrentUserRoles...)
 				if len(userRoles) == 0 && tx.CurrentUserRole != "" {
@@ -95,6 +106,63 @@ func (tx *TxManager) computedScriptHook() doctype.ComputedScriptHook {
 // This is a public entry point so API handlers can trigger validation scripts.
 func (tx *TxManager) RunHooksForValidate(dt *doctype.DocType, doc *doctype.Document, oldDoc *doctype.Document) error {
 	return tx.runHooks(dt, script.EventValidate, doc, oldDoc)
+}
+
+// CaptureAsyncAfterHooksTx freezes the selected lifecycle scripts, document
+// values, and verified execution identity into the caller's business
+// transaction. When durable storage is configured, callers must invoke this
+// before committing their record mutation.
+func (tx *TxManager) CaptureAsyncAfterHooksTx(ctx context.Context, dbTx *sql.Tx, dt *doctype.DocType, event script.Event, doc, oldDoc *doctype.Document) error {
+	if tx == nil || tx.AsyncHookInvocations == nil {
+		return nil
+	}
+	if ctx == nil || dbTx == nil || dt == nil || doc == nil || tx.ScriptStore == nil || !tx.Execution.Valid() || tx.AsyncHookTenantID == "" || tx.AsyncHookSourceOperation == "" || tx.AsyncHookConfigRevision == 0 {
+		return fmt.Errorf("durable async hook capture requires transaction, script store and verified operation identity")
+	}
+	if !script.IsAfterEvent(event) {
+		return fmt.Errorf("durable async hook capture does not accept event %q", event)
+	}
+	scripts, err := tx.activeHookScripts(dt.Name)
+	if err != nil {
+		return fmt.Errorf("load lifecycle scripts in source transaction: %w", err)
+	}
+	current, err := json.Marshal(doc.ToMap())
+	if err != nil {
+		return fmt.Errorf("encode lifecycle document snapshot: %w", err)
+	}
+	var previous json.RawMessage
+	if oldDoc != nil {
+		previous, err = json.Marshal(oldDoc.ToMap())
+		if err != nil {
+			return fmt.Errorf("encode previous lifecycle document snapshot: %w", err)
+		}
+	}
+	actor := tx.Execution.Actor()
+	for _, record := range scripts {
+		if record.Event != event || containsHookScript(tx.SkipHookScripts, record.Name) {
+			continue
+		}
+		tx.AsyncHookSequence++
+		if tx.AsyncHookSequence == 0 {
+			return fmt.Errorf("too many async lifecycle invocations in one source operation")
+		}
+		invocation := script.AsyncHookInvocation{
+			TenantID: tx.AsyncHookTenantID, Site: tx.SiteName,
+			SourceOperation: tx.AsyncHookSourceOperation,
+			ConfigRevision:  tx.AsyncHookConfigRevision, Sequence: tx.AsyncHookSequence,
+			Doctype: dt.Name, Event: event, Record: record,
+			Document:    append(json.RawMessage(nil), current...),
+			OldDocument: append(json.RawMessage(nil), previous...),
+			Actor:       actor, Grants: tx.Execution.Grants(),
+		}
+		if err := tx.AsyncHookInvocations.AppendAsyncHookTx(ctx, dbTx, invocation); err != nil {
+			return fmt.Errorf("persist async lifecycle hook %q: %w", record.Name, err)
+		}
+	}
+	// Do not reload after commit: a newly activated script must not receive an
+	// old event whose source transaction committed before that activation.
+	tx.SuppressAsyncHookEvents = true
+	return nil
 }
 
 // runHooks executes all active scripts for a given doctype + event.
@@ -148,15 +216,23 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 			continue
 		}
 		// Route after_* events to the async sink if available.
+		if script.IsAfterEvent(event) && tx.SuppressAsyncHookEvents {
+			continue
+		}
 		if script.IsAfterEvent(event) && tx.AsyncHookSink != nil {
 			var docMap, oldDocMap map[string]any
 			docMap = doc.ToMap()
 			if oldDoc != nil {
 				oldDocMap = oldDoc.ToMap()
 			}
+			hookRoles := append([]string(nil), userRoles...)
+			if tx.Execution.Valid() {
+				hookRoles = append([]string(nil), tx.Execution.Actor().Roles...)
+			}
 			if err := tx.AsyncHookSink.Enqueue(ctx, AsyncHookRequest{
 				Doctype: dt.Name, Event: event, Doc: docMap, OldDoc: oldDocMap, Rec: rec,
-				User: tx.CurrentUser, UserRole: tx.CurrentUserRole, Site: tx.SiteName,
+				User: tx.CurrentUser, UserRole: tx.CurrentUserRole, UserRoles: hookRoles, Site: tx.SiteName,
+				Execution:       tx.Execution,
 				SkipHookScripts: append(append([]string(nil), tx.SkipHookScripts...), rec.Name),
 			}); err != nil {
 				hookEnqueueFailed.Add(1)
@@ -235,7 +311,17 @@ func (tx *TxManager) activeHookScripts(doctypeName string) ([]script.ScriptRecor
 	if scripts, loaded := tx.HookScriptsByDoctype[doctypeName]; loaded {
 		return scripts, nil
 	}
-	scripts, err := tx.ScriptStore.LoadActiveScripts(tx.SiteName, doctypeName, "")
+	var scripts []script.ScriptRecord
+	var err error
+	if tx.Transaction != nil {
+		ctx := tx.Context
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		scripts, err = tx.ScriptStore.LoadActiveScriptsTx(ctx, tx.Transaction, tx.SiteName, doctypeName, "")
+	} else {
+		scripts, err = tx.ScriptStore.LoadActiveScripts(tx.SiteName, doctypeName, "")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("loading scripts: %w", err)
 	}

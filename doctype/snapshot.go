@@ -2,8 +2,13 @@ package doctype
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
+	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 // AnalyticsMetricConfig is the config-level representation of an analytics metric,
@@ -23,33 +28,33 @@ type AnalyticsMetricConfig struct {
 // It captures enough information to identify and restore the script without storing the full body
 // (the full body is in _kora_script and can be looked up by name+hash).
 type ScriptSnapshot struct {
-	Name           string `json:"name"`
-	ScriptType     string `json:"script_type"`
-	DocType        string `json:"doctype,omitempty"`
-	Event          string `json:"event,omitempty"`
-	MethodPath     string `json:"method_path,omitempty"`
-	WorkflowAction string `json:"workflow_action,omitempty"`
-	Schedule       string `json:"schedule,omitempty"`
-	Priority       int    `json:"priority"`
-	IsActive       bool   `json:"is_active"`
-	RunAs          string `json:"run_as,omitempty"`
-	TimeoutMs      int    `json:"timeout_ms"`
-	ScriptHash     string `json:"script_hash"` // SHA-256 of script body
-	Source         string `json:"source,omitempty"`
+	Name       string `json:"name"`
+	ScriptType string `json:"script_type"`
+	DocType    string `json:"doctype,omitempty"`
+	Event      string `json:"event,omitempty"`
+	MethodPath string `json:"method_path,omitempty"`
+	Schedule   string `json:"schedule,omitempty"`
+	Priority   int    `json:"priority"`
+	IsActive   bool   `json:"is_active"`
+	RunAs      string `json:"run_as,omitempty"`
+	TimeoutMs  int    `json:"timeout_ms"`
+	ScriptHash string `json:"script_hash"` // SHA-256 of script body
+	Source     string `json:"source,omitempty"`
 }
 
 // ConfigSnapshot is the complete configuration state stored in _kora_config_version.config.
 // It replaces the doctypes-only JSON array with a versioned snapshot of every config entity.
 type ConfigSnapshot struct {
-	DocTypes         []*DocType               `json:"doctypes"`
-	Roles            []*Role                  `json:"roles"`
-	Permissions      []*Permission            `json:"permissions"`
-	Workflows        []*Workflow              `json:"workflows"`
-	Views            []*View                  `json:"views,omitempty"`
-	AnalyticsMetrics []*AnalyticsMetricConfig `json:"analytics_metrics,omitempty"`
-	Reports          []json.RawMessage        `json:"reports,omitempty"`
-	Scripts          []*ScriptSnapshot        `json:"scripts,omitempty"`
-	MinKoraVersion   string                   `json:"min_kora_version,omitempty"`
+	DocTypes            []*DocType                        `json:"doctypes"`
+	Roles               []*Role                           `json:"roles"`
+	Permissions         []*Permission                     `json:"permissions"`
+	WorkflowDefinitions []contract.WorkflowDefinition     `json:"workflow_definitions,omitempty"`
+	Views               []*View                           `json:"views,omitempty"`
+	AnalyticsMetrics    []*AnalyticsMetricConfig          `json:"analytics_metrics,omitempty"`
+	Reports             []json.RawMessage                 `json:"reports,omitempty"`
+	Scripts             []*ScriptSnapshot                 `json:"scripts,omitempty"`
+	ScheduledJobs       []contract.ScheduledJobDefinition `json:"scheduled_jobs,omitempty"`
+	MinKoraVersion      string                            `json:"min_kora_version,omitempty"`
 }
 
 // ParseSnapshot parses a config snapshot from stored JSON, handling both:
@@ -66,9 +71,18 @@ func ParseSnapshot(configJSON string) (*ConfigSnapshot, error) {
 		return &ConfigSnapshot{DocTypes: doctypes}, nil
 	}
 
-	// New format: full ConfigSnapshot.
+	// New format: full ConfigSnapshot. Reject unsupported keys so a removed
+	// configuration section cannot be silently discarded during an import.
 	var snapshot ConfigSnapshot
-	if err := json.Unmarshal([]byte(configJSON), &snapshot); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(configJSON))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&snapshot); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("configuration snapshot contains multiple JSON values")
+		}
 		return nil, err
 	}
 	return &snapshot, nil
@@ -101,8 +115,50 @@ func ParseConfig(config string) (*ConfigSnapshot, error) {
 		return FromSExpr(trimmed)
 	}
 
-	// Fall back to JSON parsing (handles both old and new JSON formats).
-	return ParseSnapshot(trimmed)
+	return ParseStoredConfigSnapshot(trimmed)
+}
+
+// ParseStoredConfigSnapshot reads historical JSON snapshots while
+// ignoring unrelated top-level metadata unknown to the current ConfigSnapshot
+// contract. Call ParseSnapshot for new external snapshots, where unknown keys
+// must be rejected. Nested known structures remain strict in both paths.
+func ParseStoredConfigSnapshot(config string) (*ConfigSnapshot, error) {
+	trimmed := strings.TrimSpace(config)
+	if IsSExprConfig(trimmed) {
+		return FromSExpr(trimmed)
+	}
+	if strings.HasPrefix(trimmed, "[") {
+		return ParseSnapshot(trimmed)
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		return nil, fmt.Errorf("stored config snapshot must be a JSON object or array")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &fields); err != nil {
+		return nil, err
+	}
+	if _, exists := fields["workflows"]; exists {
+		return nil, fmt.Errorf("stored config field %q is no longer supported", "workflows")
+	}
+	known := make(map[string]struct{})
+	typeOfSnapshot := reflect.TypeOf(ConfigSnapshot{})
+	for i := 0; i < typeOfSnapshot.NumField(); i++ {
+		name := strings.Split(typeOfSnapshot.Field(i).Tag.Get("json"), ",")[0]
+		if name != "" && name != "-" {
+			known[name] = struct{}{}
+		}
+	}
+	knownFields := make(map[string]json.RawMessage, len(known))
+	for name, value := range fields {
+		if _, ok := known[name]; ok {
+			knownFields[name] = value
+		}
+	}
+	filtered, err := json.Marshal(knownFields)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSnapshot(string(filtered))
 }
 
 // MustParseConfig is like ParseConfig but panics on error (for use in tests).

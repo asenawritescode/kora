@@ -1,9 +1,17 @@
-# Kora — Config-Driven Application Engine
+# Kigae — Config-Driven Application Engine
 
-Kora is currently a DocType-centric application runtime with a real kernel, typed contracts, workflow runtime, AI/MCP surfaces, and a React admin UI. Some planned capabilities remain in progress; see the implementation and tests for the current behavior.
+Kigae is the open-source modular business software project and application engine. It currently provides a DocType-centric runtime with a kernel, typed contracts, workflow runtime, AI/MCP surfaces, and a React admin UI. Some planned capabilities remain in progress; see the implementation and tests for the current behavior.
+
+**Kigae Cloud** is the managed hosting offering, and **Senumi** is the company and sponsor. Some compatibility-sensitive code identifiers still use the former Kora spelling; see [the brand architecture](docs/brand-architecture.md) before copying technical names from this README.
 
 [![Docker Hub](https://img.shields.io/badge/docker-smitdockerhub%2Fkora-blue?logo=docker)](https://hub.docker.com/r/smitdockerhub/kora)
 [![GitHub](https://img.shields.io/badge/github-asenawritescode%2Fkora-black?logo=github)](https://github.com/asenawritescode/kora)
+
+## Architecture target
+
+The [architecture specification](docs/architecture/target-state-spec.md) defines the planned module boundaries, runtime ownership, database budgets, requests and workflows, consumer contracts, implementation order and deployment gates. It describes a target; current support remains governed by the capability registry and tested implementation.
+
+See the [database support matrix](docs/architecture/database-support-matrix.md) for tested backend evidence and its current limits.
 
 ## Quick Start (Docker)
 
@@ -56,17 +64,17 @@ KORA_DB_TYPE=mysql KORA_DB_HOST=127.0.0.1 KORA_DB_USER=root KORA_DB_PASSWORD=kor
 
 ## Features
 
-- **AI Chat Assistant** — floating chat widget with tool execution over the current contract surface. Marked experimental in the capability registry.
+- **AI Chat Assistant** — floating, page-aware chat with durable transcripts, tracked runs, and catalog-backed tool execution at `/api/v1/ai/chat`. A site or enabled shared provider key is required. Marked experimental in the capability registry.
 - **AI Doctype Generator** — AI-assisted draft creation for DocType YAML.
 - **Config-Driven Admin** — forms, lists, filters, workflows, and page manifests are rendered from configuration, but the runtime remains DocType-centric rather than fully generic-resource-based.
 - **Multi-Site** — path-based (`/s/:site/workspace`) by default, with host-based routing only for configured domains. Sites created from the console are persisted in the database.
-- **Multi-Database** — MySQL, MariaDB, or remote LibSQL are implemented. PostgreSQL/MySQL parity work is intentionally excluded from this audit.
+- **Multi-Database** — MySQL is the primary self-host backend. PostgreSQL and remote LibSQL have dialect and package-level integration coverage with remaining gaps; MariaDB is not separately validated. See the [database support matrix](docs/architecture/database-support-matrix.md).
 - **Console UI** — `/console` for system admin: create/edit sites, view health, manage all sites.
 - **Self-Service Onboarding** — public site creation at `/onboard` when `KORA_CONSOLE_ONBOARDING_ENABLED=true`. Users create their own sites with admin accounts. Rate-limited (3/hr/IP).
-- **Shared AI Keys** — superadmins can set global AI provider keys so new sites can use AI chat immediately. Toggle with `KORA_SHARED_AI_ENABLED`.
+- **Cloud-managed AI** — when connected to Kigae Cloud, workspace chat uses the provider configured by Cloud. Per-site provider keys remain available for standalone deployments.
 - **Swagger/OpenAPI** — auto-generated API docs at `/api/swagger-ui`.
 - **Mobile Responsive** — tables become stacked cards in the current React UI.
-- **Extensibility** — JS runtime, event hooks, webhook extensions, custom API methods, workflow actions, scheduled scripts, computed fields. This surface is constrained and permission-gated, not a free-form plugin system.
+- **Extensibility** — trigger-based automations, a permission-gated JS runtime for document hooks and custom API methods, webhook extensions, scheduled scripts, and computed fields. Automation effects use registered Engine actions.
 - **MCP Server** — Model Context Protocol server for Claude Desktop and similar tooling. Capability is experimental, and tenant tool execution is still projection-based rather than a full standalone agent runtime.
 - **Go SDK + TypeScript SDK** — SDKs for integrations and extensions.
 - **API Versioning** — `/api/v1/` routes exist for the supported surface.
@@ -88,7 +96,6 @@ experimental, and what is still planned.
 | `auth.oidc` | supported |
 | `ai.chat` | experimental |
 | `ai.mcp` | experimental |
-| `workflow.actor` | supported |
 | `offline.sync` | supported |
 
 ## Current Architecture Truth
@@ -96,7 +103,7 @@ experimental, and what is still planned.
 - The current engine is DocType-centric, not a fully generic resource engine.
 - The current frontend is a React SPA with an embedded page-manifest runtime, not an ES-module/Franken UI runtime.
 - The current kernel, contract surface, workflow runtime, and AI/MCP surfaces are real, but still evolving.
-- PostgreSQL/MySQL parity work is excluded from the current implementation backlog and audit notes.
+- PostgreSQL and LibSQL coverage is partial; the [database support matrix](docs/architecture/database-support-matrix.md) records current evidence and open validation gates.
 
 ## Configuration
 
@@ -104,7 +111,7 @@ Runtime config comes from environment variables plus site metadata in the databa
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KORA_DB_TYPE` | `mysql` | `mysql` or `libsql` |
+| `KORA_DB_TYPE` | `mysql` | `mysql`, `postgres`, or `libsql`; backend evidence and limits are in the [database support matrix](docs/architecture/database-support-matrix.md) |
 | `KORA_DB_HOST` | `127.0.0.1` | DB host (or HTTP URL for LibSQL) |
 | `KORA_DB_USER` | — | DB user |
 | `KORA_DB_PASSWORD` | — | DB password |
@@ -115,13 +122,13 @@ Runtime config comes from environment variables plus site metadata in the databa
 | `KORA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `KORA_SESSION_HOURS` | `72` | Session lifetime in hours |
 | `KORA_HOST` | — | Public app hostname (e.g., `app.kora.mradiafrica.com`) |
-| `KORA_SHARED_AI_ENABLED` | `false` | Enable shared AI provider keys for all sites |
-| `KORA_SHARED_OPENAI_API_KEY` | — | Shared OpenAI key (fallback when site has none) |
-| `KORA_SHARED_DEEPSEEK_API_KEY` | — | Shared DeepSeek key |
-| `KORA_SHARED_ANTHROPIC_API_KEY` | — | Shared Anthropic key |
+| `KORA_CLOUD_AI_GATEWAY_URL` | — | Private Kigae Cloud AI gateway base URL (for example `http://127.0.0.1:8081/internal/engine/ai`) |
+| `KORA_CLOUD_AI_GATEWAY_TOKEN` | — | Private Engine-to-Cloud bearer token; configure the matching `KORA_CLOUD_ENGINE_AI_TOKEN` in Cloud |
+| `KORA_CLOUD_AI_GATEWAY_MODEL` | `cloud-managed` | Model label sent to Cloud; Cloud selects the actual provider model |
 | `KORA_SCRIPTS_ENABLED` | `false` | Enable JS script engine for extensions |
-| `KORA_SCRIPTS_MAX_RAM` | `64` | Max RAM per script (MB) |
 | `KORA_OUTBOX` | `true` | Enable transactional kernel events; set `false` only if reports and event-driven integrations are intentionally disabled |
+| `KORA_NATS_STREAM_MAX_BYTES` | `1073741824` | Maximum bytes retained by the JetStream event stream (1 GiB default; requires NATS) |
+| `KORA_NATS_STREAM_MAX_MESSAGES` | `1000000` | Maximum messages retained by the JetStream event stream (requires NATS) |
 | `KORA_DB_PORT` | `3306` | Database port (MySQL) |
 | `KORA_RELOAD_TOKEN` | — | Bearer token for `/_kora/admin/reload-site` endpoint |
 | `KORA_SCRIPTS_HTTP_ALLOWLIST` | — | Comma-separated domains allowed for script HTTP requests |
@@ -133,7 +140,7 @@ Runtime config comes from environment variables plus site metadata in the databa
 
 ## SDK Quick Start
 
-Add Kora to your Go project:
+Add Kigae to your Go project:
 
 ```go
 import "github.com/asenawritescode/kora/sdk"
@@ -187,7 +194,7 @@ Ten admin views — all config-driven, all mobile-responsive:
 
 - **DocTypes** — visual form builder + live YAML preview
 - **Permissions** — role × doctype matrix, inline editing
-- **Workflows** — state machine editor
+- **Automations** — record-triggered workflows and status transitions
 - **Versions** — config version history, diff, rollback
 - **Users** — CRUD, roles, enable/disable, password reset
 - **Scripts** — JS script editor, test runner, console logs
@@ -202,7 +209,7 @@ Ten admin views — all config-driven, all mobile-responsive:
 |---|---|
 | [CLAUDE.md](CLAUDE.md) | Full architecture guide, build & run commands, package map |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, project structure, PR guidelines |
-| [skills/create-config.md](skills/create-config.md) | YAML config reference — doctypes, fields, workflows, permissions, roles |
+| [skills/create-config.md](skills/create-config.md) | YAML config reference — doctypes, fields, permissions, roles; Engine v2 workflow JSON and Automations UI |
 
 ## Tech Stack
 

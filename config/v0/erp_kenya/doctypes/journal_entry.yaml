@@ -7,6 +7,20 @@ search_fields: reference, voucher_type
 sort_field: entry_date
 sort_order: DESC
 fields:
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Submitted
+      Approved
+      Posted
+      Reversed
+      Cancelled
+    default: Draft
+    read_only: true
+    in_list_view: true
+
   - fieldname: entry_date
     fieldtype: Date
     label: Entry Date

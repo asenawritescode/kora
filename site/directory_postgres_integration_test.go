@@ -88,8 +88,16 @@ func TestLivePostgresSiteDirectoryLifecycle(t *testing.T) {
 	if count, err := replica.ProcessBatch(context.Background()); err != nil || count != 1 {
 		t.Fatalf("second replica initial batch = %d, %v", count, err)
 	}
-	if err := registry.SetStatus(info.SiteID, "suspended"); err != nil {
-		t.Fatal("set status:", err)
+	suspended, err := registry.SetStatusAtRevision(context.Background(), info.SiteID, "suspended", info.ConfigRevision)
+	if err != nil || suspended.Status != "suspended" || suspended.ConfigRevision != info.ConfigRevision+1 {
+		t.Fatalf("revision-fenced suspend = %+v, %v", suspended, err)
+	}
+	replayed, err := registry.SetStatusAtRevision(context.Background(), info.SiteID, "suspended", info.ConfigRevision)
+	if err != nil || replayed.ConfigRevision != suspended.ConfigRevision {
+		t.Fatalf("idempotent suspend replay = %+v, %v", replayed, err)
+	}
+	if _, err := registry.SetStatusAtRevision(context.Background(), info.SiteID, "active", info.ConfigRevision); !errors.Is(err, ErrSiteRevisionConflict) {
+		t.Fatalf("stale resume = %v, want revision conflict", err)
 	}
 	// A new consumer object with the same identity models a process restart.
 	consumer.releaseLease()
@@ -166,17 +174,66 @@ func TestLivePostgresSiteBootstrapWrites(t *testing.T) {
 	if _, err := database.Exec(`SET search_path TO "` + schemaName + `"`); err != nil {
 		t.Fatal("select isolated schema:", err)
 	}
+	if _, err := database.Exec(`CREATE TABLE "_kora_outbox" (
+		"id" VARCHAR(26) PRIMARY KEY, "site" VARCHAR(140) NOT NULL DEFAULT '',
+		"event_type" VARCHAR(255) NOT NULL, "event_version" INTEGER NOT NULL DEFAULT 1,
+		"aggregate_type" VARCHAR(140) NOT NULL DEFAULT '', "aggregate_id" VARCHAR(255) NOT NULL DEFAULT '',
+		"payload" JSONB, "status" VARCHAR(20) NOT NULL DEFAULT 'pending', "attempts" INTEGER NOT NULL DEFAULT 0,
+		"next_attempt_at" TIMESTAMP, "lease_owner" VARCHAR(140) NOT NULL DEFAULT '', "lease_until" TIMESTAMP,
+		"created_at" TIMESTAMP NOT NULL DEFAULT NOW(), "published_at" TIMESTAMP, "last_error" TEXT
+	)`); err != nil {
+		t.Fatal("create pre-migration PostgreSQL outbox table:", err)
+	}
+	if _, err := database.Exec(`INSERT INTO "_kora_outbox" ("id","site","event_type","status") VALUES ('00000000000000000000000001','bootstrap-test','request.created','pending')`); err != nil {
+		t.Fatal("seed pre-migration PostgreSQL outbox event:", err)
+	}
+	if _, err := database.Exec(`CREATE TABLE "_kora_outbox_receipt" (
+		"consumer_name" VARCHAR(140) NOT NULL, "event_id" VARCHAR(255) NOT NULL,
+		"site" VARCHAR(140) NOT NULL DEFAULT '', "received_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+		PRIMARY KEY ("consumer_name", "event_id")
+	)`); err != nil {
+		t.Fatal("create pre-migration PostgreSQL outbox receipt table:", err)
+	}
+	if _, err := database.Exec(`INSERT INTO "_kora_outbox_receipt" ("consumer_name","event_id","site") VALUES ('legacy-consumer','legacy-event','bootstrap-test')`); err != nil {
+		t.Fatal("seed pre-migration PostgreSQL outbox receipt:", err)
+	}
 	dialect := db.Resolve("postgres")
 	if err := BootstrapSystemTables(database, dialect); err != nil {
 		t.Fatal("bootstrap Engine system tables:", err)
 	}
+	var sourceSequenceColumns, backlogIndexes, retainedEvents, tenantSequenceTables, receiptSequenceColumns, retainedReceipts int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='_kora_outbox' AND column_name='source_sequence'`).Scan(&sourceSequenceColumns); err != nil {
+		t.Fatal("check migrated PostgreSQL outbox source sequence:", err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM pg_indexes WHERE schemaname=current_schema() AND tablename='_kora_outbox' AND indexname='idx_outbox_status_created_at'`).Scan(&backlogIndexes); err != nil {
+		t.Fatal("check migrated PostgreSQL outbox backlog index:", err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM "_kora_outbox" WHERE "id"='00000000000000000000000001'`).Scan(&retainedEvents); err != nil {
+		t.Fatal("check migrated PostgreSQL outbox event:", err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='_kora_tenant_event_sequence'`).Scan(&tenantSequenceTables); err != nil {
+		t.Fatal("check PostgreSQL tenant event-sequence singleton table:", err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='_kora_outbox_receipt' AND column_name='source_sequence'`).Scan(&receiptSequenceColumns); err != nil {
+		t.Fatal("check migrated PostgreSQL receipt source sequence:", err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM "_kora_outbox_receipt" WHERE "consumer_name"='legacy-consumer' AND "event_id"='legacy-event' AND "source_sequence" IS NULL`).Scan(&retainedReceipts); err != nil {
+		t.Fatal("check retained PostgreSQL outbox receipt:", err)
+	}
+	if sourceSequenceColumns != 1 || backlogIndexes != 1 || retainedEvents != 1 || tenantSequenceTables != 1 || receiptSequenceColumns != 1 || retainedReceipts != 1 {
+		t.Fatalf("PostgreSQL outbox migration columns/index/retained events/sequence singleton/receipt sequence/retained receipts = %d/%d/%d/%d/%d/%d, want 1/1/1/1/1/1", sourceSequenceColumns, backlogIndexes, retainedEvents, tenantSequenceTables, receiptSequenceColumns, retainedReceipts)
+	}
 
 	const siteName = "bootstrap-postgres.example.invalid"
-	if err := createAdminUser(database, dialect, "owner@example.invalid", "", "Owner", siteName); err != nil {
+	if err := createPasswordlessAdminUserContext(context.Background(), database, dialect, "owner@example.invalid", "Owner", siteName, "cloud-user-postgres"); err != nil {
 		t.Fatal("create admin user:", err)
 	}
-	ensureConfigVersion(database, dialect, siteName, []string{siteName, "pos.example.invalid"})
-	ensureConfigVersion(database, dialect, siteName, []string{siteName, "pos.example.invalid"})
+	if err := ensureConfigVersion(database, dialect, siteName, []string{siteName, "pos.example.invalid"}); err != nil {
+		t.Fatal("create initial config version:", err)
+	}
+	if err := ensureConfigVersion(database, dialect, siteName, []string{siteName, "pos.example.invalid"}); err != nil {
+		t.Fatal("reuse initial config version:", err)
+	}
 
 	var users, versions, active int
 	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_user WHERE site = $1`, siteName).Scan(&users); err != nil {
@@ -226,6 +283,7 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 	stamp := time.Now().UnixNano()
 	hostname := fmt.Sprintf("create-site-%d.example.invalid", stamp)
 	databaseName := fmt.Sprintf("kora_create_%d", stamp)
+	canonicalTenantID := fmt.Sprintf("tenant-provisioned-%d", stamp)
 	var result *CreateSiteResult
 	t.Cleanup(func() {
 		if result != nil && result.DB != nil {
@@ -236,24 +294,38 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 		_, _ = platformDB.Exec(`DROP DATABASE IF EXISTS ` + quotedName)
 	})
 	result, err = CreateSite(CreateSiteInput{
-		Hostname: hostname, DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
+		Hostname: hostname, SiteID: canonicalTenantID, DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
 		DBName: databaseName, DBUser: user, DBPassword: password,
-		AdminEmail: "owner@" + hostname, PlatformDBType: "postgres", PlatformDB: platformDB,
+		RuntimeCellID: "deployment-postgres-test",
+		AdminEmail:    "owner@" + hostname, PlatformDBType: "postgres", PlatformDB: platformDB,
 	})
 	if err != nil {
 		t.Fatal("create PostgreSQL site:", err)
 	}
-	if result.SiteID == "" || result.Config == nil || result.Config.DBName != databaseName {
+	if result.SiteID != canonicalTenantID || result.Config == nil || result.Config.DBName != databaseName {
 		t.Fatalf("created site result = %#v, want canonical ID and database %q", result, databaseName)
+	}
+	descriptor, err := NewSQLSiteRegistry(platformDB, "postgres").GetDescriptorByIDContext(t.Context(), canonicalTenantID)
+	if err != nil || descriptor.RuntimeCellID != "deployment-postgres-test" {
+		t.Fatalf("created site's deployment assignment = %q, %v; want deployment-postgres-test", descriptor.RuntimeCellID, err)
+	}
+	_, mismatchErr := CreateSite(CreateSiteInput{
+		Hostname: hostname, SiteID: "tenant-replacement-001", DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
+		DBName: databaseName + "_must_not_be_created", DBUser: user, DBPassword: password,
+		AdminEmail: "owner@" + hostname, PlatformDBType: "postgres", PlatformDB: platformDB,
+	})
+	if mismatchErr == nil || !strings.Contains(mismatchErr.Error(), "different canonical tenant ID") {
+		t.Fatalf("replacing a stable tenant identity returned %v", mismatchErr)
 	}
 	firstSiteID := result.SiteID
 	if err := result.DB.Close(); err != nil {
 		t.Fatal("close first tenant handle before retry:", err)
 	}
 	result, err = CreateSite(CreateSiteInput{
-		Hostname: hostname, DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
+		Hostname: hostname, SiteID: canonicalTenantID, DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
 		DBName: databaseName, DBUser: user, DBPassword: password,
-		AdminEmail: "owner@" + hostname, PlatformDBType: "postgres", PlatformDB: platformDB,
+		RuntimeCellID: "deployment-postgres-test",
+		AdminEmail:    "owner@" + hostname, PlatformDBType: "postgres", PlatformDB: platformDB,
 	})
 	if err != nil {
 		t.Fatal("retry PostgreSQL site creation:", err)
@@ -274,6 +346,50 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 	}
 	if admins != 1 || activeVersions != 1 {
 		t.Fatalf("created site rows: admins=%d active_versions=%d; want 1/1", admins, activeVersions)
+	}
+}
+
+func TestLivePostgresProvisioningRegistrationBackfillsOnlyUnassignedRows(t *testing.T) {
+	dsn := os.Getenv("KORA_SITE_DIRECTORY_LIVE_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set KORA_SITE_DIRECTORY_LIVE_POSTGRES_DSN to a disposable PostgreSQL database")
+	}
+	database, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal("open disposable PostgreSQL database:", err)
+	}
+	defer database.Close()
+	if err := database.PingContext(t.Context()); err != nil {
+		t.Fatal("ping disposable PostgreSQL database:", err)
+	}
+	if err := BootstrapPlatformRegistryContext(t.Context(), database, db.Resolve("postgres")); err != nil {
+		t.Fatal("bootstrap PostgreSQL platform registry:", err)
+	}
+
+	stamp := time.Now().UnixNano()
+	hostname := fmt.Sprintf("provisioning-assignment-%d.example.invalid", stamp)
+	tenantID := fmt.Sprintf("tenant-provisioning-assignment-%d", stamp)
+	t.Cleanup(func() { _ = removePlatformSiteRegistration(database, "postgres", hostname) })
+	config := &SiteConfig{Hostname: hostname, DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432, DBName: "tenant_db", DomainsList: []string{hostname}}
+	register := func(status, assignment string) error {
+		return ensurePlatformSiteRegistrationAssignmentContext(t.Context(), database, "postgres", config, status, assignment, tenantID)
+	}
+	if err := register("provisioning", ""); err != nil {
+		t.Fatal("create legacy provisioning row:", err)
+	}
+	if err := register("provisioning", "deployment-recovery"); err != nil {
+		t.Fatal("recover provisioning assignment:", err)
+	}
+	descriptor, err := NewSQLSiteRegistry(database, "postgres").GetDescriptorByIDContext(t.Context(), tenantID)
+	if err != nil || descriptor.RuntimeCellID != "deployment-recovery" {
+		t.Fatalf("recovered assignment = %q, %v; want deployment-recovery", descriptor.RuntimeCellID, err)
+	}
+	if err := register("active", "deployment-other"); err != nil {
+		t.Fatal("activate existing assignment row:", err)
+	}
+	descriptor, err = NewSQLSiteRegistry(database, "postgres").GetDescriptorByIDContext(t.Context(), tenantID)
+	if err != nil || descriptor.RuntimeCellID != "deployment-recovery" || descriptor.Status != "active" {
+		t.Fatalf("active assignment changed = %q status=%q err=%v; want deployment-recovery/active", descriptor.RuntimeCellID, descriptor.Status, err)
 	}
 }
 

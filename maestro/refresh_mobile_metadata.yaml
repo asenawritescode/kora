@@ -1,0 +1,7 @@
+appId: com.kora.mobile
+---
+- launchApp
+- tapOn: Connected. Open sync
+- waitForAnimationToEnd
+- tapOn: Update download
+- waitForAnimationToEnd

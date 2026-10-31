@@ -18,10 +18,10 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func TestLivePostgresUserLifecycle(t *testing.T) {
+func TestLivePostgresUserAccessUpdateKeepsCloudIdentityImmutable(t *testing.T) {
 	dsn := os.Getenv("KORA_API_LIVE_POSTGRES_DSN")
 	if dsn == "" {
-		t.Skip("set KORA_API_LIVE_POSTGRES_DSN to test user lifecycle routes against a disposable PostgreSQL database")
+		t.Skip("set KORA_API_LIVE_POSTGRES_DSN to test tenant user access against a disposable PostgreSQL database")
 	}
 	database, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -48,38 +48,28 @@ func TestLivePostgresUserLifecycle(t *testing.T) {
 	)`); err != nil {
 		t.Fatal("create user fixture:", err)
 	}
-	if _, err := database.Exec(`CREATE TABLE _kora_session (id TEXT PRIMARY KEY, site TEXT NOT NULL, "user" TEXT NOT NULL)`); err != nil {
-		t.Fatal("create session fixture:", err)
+	if _, err := database.Exec(`CREATE TABLE _kora_auth_revision (id INTEGER PRIMARY KEY, policy_revision BIGINT NOT NULL, membership_revision BIGINT NOT NULL)`); err != nil {
+		t.Fatal("create authorization revision fixture:", err)
+	}
+	if _, err := database.Exec(`INSERT INTO _kora_auth_revision (id, policy_revision, membership_revision) VALUES (1,0,0)`); err != nil {
+		t.Fatal("seed authorization revision fixture:", err)
 	}
 	registry := doctype.NewRegistry()
 	handler := NewHandler(registry, &orm.TxManager{DB: database, Registry: registry, Dialect: kdb.Resolve("postgres")})
-
-	createRecorder := httptest.NewRecorder()
-	handler.HandleUserCreate(userPostgresContext(createRecorder, database, registry, "site-pg", http.MethodPost, `/api/system/users`, `{"email":"operator@example.test","password":"initial-password","full_name":"Operator","roles":["Store Manager"]}`, ""))
-	if createRecorder.Code != http.StatusCreated {
-		t.Fatalf("PostgreSQL user create returned HTTP %d: %s", createRecorder.Code, createRecorder.Body.String())
-	}
-	var created struct {
-		Data UserResponse `json:"data"`
-	}
-	if err := json.Unmarshal(createRecorder.Body.Bytes(), &created); err != nil {
-		t.Fatal("decode created user:", err)
-	}
-	userName := created.Data.Name
-	if userName == "" || len(created.Data.Roles) != 1 || created.Data.Roles[0] != "Store Manager" {
-		t.Fatalf("created PostgreSQL user = %#v", created.Data)
+	if _, err := database.Exec(`INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, email_verified_at, roles) VALUES ($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP,$7)`, "cloud-user-1", "site-pg", "owner@example.test", "$kora$passwordless$disabled", "Cloud Owner", true, "Owner"); err != nil {
+		t.Fatal("insert Cloud-linked principal fixture:", err)
 	}
 
 	listRecorder := httptest.NewRecorder()
 	handler.HandleUserList(userPostgresContext(listRecorder, database, registry, "site-pg", http.MethodGet, "/api/system/users", "", ""))
-	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), userName) {
+	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), "cloud-user-1") {
 		t.Fatalf("PostgreSQL user list returned HTTP %d: %s", listRecorder.Code, listRecorder.Body.String())
 	}
 
 	updateRecorder := httptest.NewRecorder()
-	handler.HandleUserUpdate(userPostgresContext(updateRecorder, database, registry, "site-pg", http.MethodPut, "/api/system/users/"+userName, `{"full_name":"Shift Lead","roles":["Store Manager","Inventory Clerk"],"enabled":false,"password":"updated-password"}`, userName))
+	handler.HandleUserUpdate(userPostgresContext(updateRecorder, database, registry, "site-pg", http.MethodPut, "/api/system/users/cloud-user-1", `{"roles":["Owner","Inventory Clerk"],"enabled":false}`, "cloud-user-1"))
 	if updateRecorder.Code != http.StatusOK {
-		t.Fatalf("PostgreSQL user update returned HTTP %d: %s", updateRecorder.Code, updateRecorder.Body.String())
+		t.Fatalf("PostgreSQL access update returned HTTP %d: %s", updateRecorder.Code, updateRecorder.Body.String())
 	}
 	var updated struct {
 		Data UserResponse `json:"data"`
@@ -87,64 +77,21 @@ func TestLivePostgresUserLifecycle(t *testing.T) {
 	if err := json.Unmarshal(updateRecorder.Body.Bytes(), &updated); err != nil {
 		t.Fatal("decode updated user:", err)
 	}
-	if updated.Data.FullName != "Shift Lead" || updated.Data.Enabled || len(updated.Data.Roles) != 2 {
-		t.Fatalf("updated PostgreSQL user = %#v", updated.Data)
+	if updated.Data.Name != "cloud-user-1" || updated.Data.Email != "owner@example.test" || updated.Data.FullName != "Cloud Owner" || updated.Data.Enabled || len(updated.Data.Roles) != 2 {
+		t.Fatalf("updated Cloud-linked principal = %#v", updated.Data)
+	}
+	var passwordHash string
+	if err := database.QueryRow(`SELECT password_hash FROM _kora_user WHERE site = $1 AND name = $2`, "site-pg", "cloud-user-1").Scan(&passwordHash); err != nil {
+		t.Fatal("read Engine password hash:", err)
+	}
+	if passwordHash != "$kora$passwordless$disabled" {
+		t.Fatal("workspace role update changed the Cloud-owned credential state")
 	}
 
-	if _, err := database.Exec(`INSERT INTO _kora_session (id, site, "user") VALUES ($1,$2,$3)`, "session-reset", "site-pg", userName); err != nil {
-		t.Fatal("insert reset session:", err)
-	}
-	resetRecorder := httptest.NewRecorder()
-	handler.HandleUserResetPassword(userPostgresContext(resetRecorder, database, registry, "site-pg", http.MethodPost, "/api/system/users/"+userName+"/reset-password", `{"password":"reset-password-1"}`, userName))
-	if resetRecorder.Code != http.StatusOK {
-		t.Fatalf("PostgreSQL user password reset returned HTTP %d: %s", resetRecorder.Code, resetRecorder.Body.String())
-	}
-	var sessions int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_session WHERE site = $1 AND "user" = $2`, "site-pg", userName).Scan(&sessions); err != nil {
-		t.Fatal("count reset sessions:", err)
-	}
-	if sessions != 0 {
-		t.Fatalf("sessions after reset = %d, want 0", sessions)
-	}
-	var hashBeforeFailure string
-	if err := database.QueryRow(`SELECT password_hash FROM _kora_user WHERE site = $1 AND name = $2`, "site-pg", userName).Scan(&hashBeforeFailure); err != nil {
-		t.Fatal("read reset password hash:", err)
-	}
-
-	if _, err := database.Exec(`INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, roles) VALUES ($1,$2,$3,$4,$5,$6,$7)`, "delete-target", "site-pg", "delete@example.test", "hash", "Delete Target", true, ""); err != nil {
-		t.Fatal("insert delete target:", err)
-	}
-	if _, err := database.Exec(`INSERT INTO _kora_session (id, site, "user") VALUES ($1,$2,$3)`, "session-delete", "site-pg", "delete-target"); err != nil {
-		t.Fatal("insert delete session:", err)
-	}
-	if _, err := database.Exec(`DROP TABLE _kora_session`); err != nil {
-		t.Fatal("drop session table for failure-path tests:", err)
-	}
-
-	failedResetRecorder := httptest.NewRecorder()
-	handler.HandleUserResetPassword(userPostgresContext(failedResetRecorder, database, registry, "site-pg", http.MethodPost, "/api/system/users/"+userName+"/reset-password", `{"password":"reset-password-2"}`, userName))
-	if failedResetRecorder.Code != http.StatusInternalServerError {
-		t.Fatalf("reset with session storage unavailable returned HTTP %d: %s", failedResetRecorder.Code, failedResetRecorder.Body.String())
-	}
-	var hashAfterFailure string
-	if err := database.QueryRow(`SELECT password_hash FROM _kora_user WHERE site = $1 AND name = $2`, "site-pg", userName).Scan(&hashAfterFailure); err != nil {
-		t.Fatal("read password hash after failed reset:", err)
-	}
-	if hashAfterFailure != hashBeforeFailure {
-		t.Fatal("password changed despite session-revocation failure")
-	}
-
-	deleteRecorder := httptest.NewRecorder()
-	handler.HandleUserDelete(userPostgresContext(deleteRecorder, database, registry, "site-pg", http.MethodDelete, "/api/system/users/delete-target", "", "delete-target"))
-	if deleteRecorder.Code != http.StatusInternalServerError {
-		t.Fatalf("delete with session storage unavailable returned HTTP %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
-	}
-	var deleteTargetCount int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_user WHERE site = $1 AND name = $2`, "site-pg", "delete-target").Scan(&deleteTargetCount); err != nil {
-		t.Fatal("count user after failed delete:", err)
-	}
-	if deleteTargetCount != 1 {
-		t.Fatal("user was deleted despite session-revocation failure")
+	identityUpdate := httptest.NewRecorder()
+	handler.HandleUserUpdate(userPostgresContext(identityUpdate, database, registry, "site-pg", http.MethodPut, "/api/system/users/cloud-user-1", `{"email":"other@example.test","password":"new-password","full_name":"Other"}`, "cloud-user-1"))
+	if identityUpdate.Code != http.StatusBadRequest {
+		t.Fatalf("Engine identity mutation returned HTTP %d, want 400: %s", identityUpdate.Code, identityUpdate.Body.String())
 	}
 }
 

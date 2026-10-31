@@ -435,11 +435,6 @@ func ParseDirectory(path string) ([]*DocType, error) {
 
 		filePath := filepath.Join(path, entry.Name())
 
-		// Skip workflow files (they have "document_type" and "states", not "module" and "fields").
-		if isWorkflowFile(filePath) {
-			continue
-		}
-
 		dt, err := ParseFile(filePath)
 		if err != nil {
 			return nil, err
@@ -450,41 +445,12 @@ func ParseDirectory(path string) ([]*DocType, error) {
 	return doctypes, nil
 }
 
-// isWorkflowFile checks if a YAML file is a workflow definition by peeking at its top-level keys.
-func isWorkflowFile(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	hasDocType := containsKey(data, "document_type")
-	hasStates := containsKey(data, "states")
-	hasModule := containsKey(data, "module")
-	hasFields := containsKey(data, "fields")
-	if hasDocType && hasStates && !hasModule && !hasFields {
-		return true
-	}
-	return false
-}
-
-// containsKey does a simple string check for a top-level YAML key.
-func containsKey(data []byte, key string) bool {
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, key+":") || strings.HasPrefix(trimmed, key+" :") {
-			return true
-		}
-	}
-	return false
-}
-
 // ParseConfigTree reads the full config directory structure:
 //
 //	config/<app>/
 //	  app.yaml
 //	  roles.yaml
 //	  permissions.yaml
-//	  scheduler.yaml
 //	  doctypes/
 //	    *.yaml
 //
@@ -555,6 +521,9 @@ func (d *DocType) Validate() error {
 		if err := validateFieldType(f.Fieldtype); err != nil {
 			return fmt.Errorf("doctype %s, field %s: %w", d.Name, f.Fieldname, err)
 		}
+		if f.Fieldtype == "User" && f.SearchIndex {
+			return fmt.Errorf("doctype %s, field %s: User fields are authenticated user pickers and cannot use the generic DocType search index", d.Name, f.Fieldname)
+		}
 
 		// Set default label.
 		if f.Label == "" {
@@ -620,16 +589,20 @@ func (d *DocType) Validate() error {
 			return fmt.Errorf("doctype %s, field %s: %w", d.Name, f.Fieldname, err)
 		}
 
-		// Validate depends_on references real fields.
-		if f.DependsOn != "" {
-			if err := validateDependsOn(f.DependsOn, fieldnames); err != nil {
-				return fmt.Errorf("doctype %s, field %s: %w", d.Name, f.Fieldname, err)
-			}
-		}
-
 		// Validate mandatory_depends_on doesn't conflict with reqd.
 		if f.MandatoryDependsOn != "" && f.Reqd {
 			return fmt.Errorf("doctype %s, field %s: mandatory_depends_on and reqd are redundant — use one or the other", d.Name, f.Fieldname)
+		}
+	}
+
+	// Resolve dependencies after collecting every field name so a dependent
+	// field may appear before the field that controls its visibility.
+	for _, f := range d.Fields {
+		if f.DependsOn == "" {
+			continue
+		}
+		if err := validateDependsOn(f.DependsOn, fieldnames); err != nil {
+			return fmt.Errorf("doctype %s, field %s: %w", d.Name, f.Fieldname, err)
 		}
 	}
 

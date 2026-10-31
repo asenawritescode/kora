@@ -1,28 +1,48 @@
 name: Farm
 module: Agriculture
-title_field: reference
-search_fields: reference, status
+description: A farm or independently managed production site.
+title_field: farm_name
+search_fields: farm_name, location
 sort_field: modified
 sort_order: DESC
 
 fields:
-  - fieldname: reference
+  - fieldname: farm_name
     fieldtype: Data
-    label: Reference
+    label: Farm name
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
+    search_index: true
+  - fieldname: location
     fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
-  - fieldname: status
-    fieldtype: Data
-    label: Status
-    default: Draft
+    label: Town or area
+    reqd: true
     in_list_view: true
+  - fieldname: production_type
+    fieldtype: Select
+    label: Production type
+    options: |
+      Crops
+      Horticulture
+      Livestock
+      Mixed
+      Other
+    default: Crops
+  - fieldname: farm_manager
+    fieldtype: User
+    label: Farm manager
+    description: Select an existing workspace user; leave blank for an owner-operated farm.
+  - fieldname: area
+    fieldtype: Float
+    label: Total area
+  - fieldname: area_unit
+    fieldtype: Select
+    label: Area unit
+    options: |
+      Acre
+      Hectare
+      Other
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

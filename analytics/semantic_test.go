@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -84,7 +85,7 @@ func TestAnalyticsQueryValidatesAgainstCatalog(t *testing.T) {
 		Queries: []ModelQuery{{
 			Model:      "cake_orders",
 			Measures:   []string{"sales"},
-			Dimensions: []string{"order_date", "flavour"},
+			Dimensions: []string{"order_date"},
 		}},
 		Time: QueryTime{From: "2026-01-01", To: "2026-12-31", Granularity: "month"},
 	}
@@ -102,6 +103,48 @@ func TestAnalyticsQueryRejectsUnknownMeasureAndLimit(t *testing.T) {
 
 	if err := request.Validate(testCatalog()); err == nil {
 		t.Fatal("expected invalid query to be rejected")
+	}
+}
+
+func TestAnalyticsQueryEnforcesAdvertisedBudgetsAndStrictDates(t *testing.T) {
+	base := AnalyticsQueryRequest{
+		Queries: []ModelQuery{{Model: "cake_orders", Measures: []string{"sales"}}},
+		Time:    QueryTime{From: "2026-01-01", To: "2026-12-31", Granularity: "month"},
+	}
+	cases := []struct {
+		name   string
+		change func(*AnalyticsQueryRequest)
+	}{
+		{name: "query count", change: func(q *AnalyticsQueryRequest) { q.Queries = make([]ModelQuery, MaxSemanticQueries+1) }},
+		{name: "result rows", change: func(q *AnalyticsQueryRequest) { q.Limit = MaxSemanticResultRows + 1 }},
+		{name: "invalid date", change: func(q *AnalyticsQueryRequest) { q.Time.From = "2026-02-30" }},
+		{name: "excessive date range", change: func(q *AnalyticsQueryRequest) { q.Time = QueryTime{From: "2000-01-01", To: "2026-01-01"} }},
+		{name: "multiple dimensions", change: func(q *AnalyticsQueryRequest) { q.Queries[0].Dimensions = []string{"order_date", "flavour"} }},
+		{name: "filter count", change: func(q *AnalyticsQueryRequest) {
+			for range MaxSemanticFilters + 1 {
+				q.Queries[0].Filters = append(q.Queries[0].Filters, SemanticFilter{Field: "flavour", Operator: "=", Values: []string{"vanilla"}})
+			}
+		}},
+		{name: "filter value count", change: func(q *AnalyticsQueryRequest) {
+			q.Queries[0].Dimensions = []string{"flavour"}
+			values := make([]string, MaxSemanticFilterValues+1)
+			q.Queries[0].Filters = []SemanticFilter{{Field: "flavour", Operator: "in", Values: values}}
+		}},
+		{name: "filter value bytes", change: func(q *AnalyticsQueryRequest) {
+			q.Queries[0].Dimensions = []string{"flavour"}
+			q.Queries[0].Filters = []SemanticFilter{{Field: "flavour", Operator: "=", Values: []string{strings.Repeat("x", MaxSemanticFilterBytes+1)}}}
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			request := base
+			request.Queries = append([]ModelQuery(nil), base.Queries...)
+			request.Queries[0].Filters = append([]SemanticFilter(nil), base.Queries[0].Filters...)
+			test.change(&request)
+			if err := request.Validate(testCatalog()); err == nil {
+				t.Fatal("unsafe or over-budget request was accepted")
+			}
+		})
 	}
 }
 
@@ -125,6 +168,38 @@ func TestBuildSemanticModelUsesDocTypeFieldMetadata(t *testing.T) {
 	}
 	if model.Measures[1].Format != "currency" {
 		t.Fatalf("expected currency format, got %q", model.Measures[1].Format)
+	}
+}
+
+func TestBuildSemanticModelTreatsWorkspaceUserFieldsAsCategoricalDimensions(t *testing.T) {
+	model := BuildSemanticModel(&doctype.DocType{
+		Name:   "Deal",
+		Fields: []doctype.Field{{Fieldname: "owner_user", Label: "Deal owner", Fieldtype: "User"}},
+	})
+	for _, dimension := range model.Dimensions {
+		if dimension.Name == "owner_user" && dimension.Type == "category" {
+			return
+		}
+	}
+	t.Fatalf("User assignment dimension missing from %#v", model.Dimensions)
+}
+
+func TestBuildSemanticModelOmitsHiddenAndPasswordFields(t *testing.T) {
+	dt := &doctype.DocType{Name: "Account", Fields: []doctype.Field{
+		{Fieldname: "created_on", Fieldtype: "Date"},
+		{Fieldname: "private_amount", Fieldtype: "Currency", Hidden: true},
+		{Fieldname: "credential", Fieldtype: "Password"},
+	}}
+	model := BuildSemanticModel(dt)
+	for _, dimension := range model.Dimensions {
+		if dimension.Field == "private_amount" || dimension.Field == "credential" {
+			t.Fatalf("semantic model exposed private dimension: %#v", dimension)
+		}
+	}
+	for _, measure := range model.Measures {
+		if measure.Field == "private_amount" || measure.Field == "credential" {
+			t.Fatalf("semantic model exposed private measure: %#v", measure)
+		}
 	}
 }
 

@@ -9,7 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,20 +106,17 @@ func (h *Handler) HandleSystemViewCreate(c *gin.Context) {
 		return
 	}
 
-	if err := store.SaveView(&view, site); err != nil {
-		internalError(c, "saving view", err)
-		return
-	}
-
-	// Create a config version for this change.
 	reg := h.siteRegistry(c)
 	snapshot, err := store.CollectSnapshot(reg, site)
 	if err != nil {
 		internalError(c, "collecting snapshot", err)
 		return
 	}
-
-	versionID, versionNum, err := store.CreateConfigVersion(site, currentUser(c), "Created view "+view.Name, "Draft", snapshot)
+	upsertView(snapshot, &view)
+	if rejectInvalidSnapshotReferences(c, snapshot, reg) {
+		return
+	}
+	versionID, versionNum, err := saveViewDraft(store, &view, site, currentUser(c), "Created view "+view.Name, snapshot)
 	if err != nil {
 		internalError(c, "creating config version", err)
 		return
@@ -155,20 +155,17 @@ func (h *Handler) HandleSystemViewUpdate(c *gin.Context) {
 		return
 	}
 
-	if err := store.SaveView(&view, site); err != nil {
-		internalError(c, "saving view", err)
-		return
-	}
-
-	// Create a config version.
 	reg := h.siteRegistry(c)
 	snapshot, err := store.CollectSnapshot(reg, site)
 	if err != nil {
 		internalError(c, "collecting snapshot", err)
 		return
 	}
-
-	versionID, versionNum, err := store.CreateConfigVersion(site, currentUser(c), "Updated view "+view.Name, "Draft", snapshot)
+	upsertView(snapshot, &view)
+	if rejectInvalidSnapshotReferences(c, snapshot, reg) {
+		return
+	}
+	versionID, versionNum, err := saveViewDraft(store, &view, site, currentUser(c), "Updated view "+view.Name, snapshot)
 	if err != nil {
 		internalError(c, "creating config version", err)
 		return
@@ -180,6 +177,25 @@ func (h *Handler) HandleSystemViewUpdate(c *gin.Context) {
 		"version_num": versionNum,
 		"status":      "Draft",
 	}})
+}
+
+func saveViewDraft(store *configstore.Store, view *doctype.View, site, user, label string, snapshot *doctype.ConfigSnapshot) (string, int, error) {
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return "", 0, fmt.Errorf("begin view draft transaction: %w", err)
+	}
+	defer tx.Rollback()
+	if err := store.SaveViewTx(tx, view, site); err != nil {
+		return "", 0, err
+	}
+	versionID, versionNum, err := store.CreateConfigVersionTx(tx, site, user, label, "Draft", snapshot, "")
+	if err != nil {
+		return "", 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", 0, fmt.Errorf("commit view draft transaction: %w", err)
+	}
+	return versionID, versionNum, nil
 }
 
 // HandleSystemViewDelete removes a view and returns a config version.
@@ -261,6 +277,7 @@ func (h *Handler) HandleViewValidate(c *gin.Context) {
 // validateViewAgainstRegistry checks that component bindings reference real doctypes and fields.
 func validateViewAgainstRegistry(view *doctype.View, reg *doctype.Registry) []string {
 	var errors []string
+	errors = append(errors, validateViewTaskDocTypes(view, nil, reg)...)
 
 	for i := range view.Components {
 		comp := &view.Components[i]
@@ -484,6 +501,19 @@ func (h *Handler) HandlePublicView(c *gin.Context) {
 // POST /api/v1/view/action/:actionId
 // The server resolves the action type and config from the stored view config.
 // The client sends only context data — never chooses the action type.
+type pageActionRuntime func(*Handler, *gin.Context, *doctype.ViewAction, map[string]any)
+
+// serverPageActionRegistry is the server execution registry. Contract parity
+// tests require every entry to have a matching Engine validation contract.
+var serverPageActionRegistry = map[string]pageActionRuntime{
+	"create_record":               (*Handler).executeCreateRecord,
+	"update_record":               (*Handler).executeUpdateRecord,
+	"create_transaction":          (*Handler).executeCreateTransaction,
+	"create_quantity_effect":      (*Handler).executeCreateQuantityEffect,
+	"initiate_external_operation": (*Handler).executeInitiateExternalOperation,
+	"validate_external_operation": (*Handler).executeValidateExternalOperation,
+}
+
 func (h *Handler) HandleViewAction(c *gin.Context) {
 	actionID := c.Param("actionId")
 
@@ -532,21 +562,10 @@ func (h *Handler) HandleViewAction(c *gin.Context) {
 		return
 	}
 
-	// Execute the action based on resolved type (from stored config, not client).
-	switch targetAction.Type {
-	case "create_record":
-		h.executeCreateRecord(c, targetAction, req.Context)
-	case "update_record":
-		h.executeUpdateRecord(c, targetAction, req.Context)
-	case "workflow_transition":
-		h.executeWorkflowTransition(c, targetAction, req.Context)
-	case "create_transaction":
-		h.executeCreateTransaction(c, targetAction, req.Context)
-	case "initiate_external_operation":
-		h.executeInitiateExternalOperation(c, targetAction, req.Context)
-	case "validate_external_operation":
-		h.executeValidateExternalOperation(c, targetAction, req.Context)
-	default:
+	// Resolve through the server registry based on stored config, never the client.
+	if runtime, ok := serverPageActionRegistry[targetAction.Type]; ok {
+		runtime(h, c, targetAction, req.Context)
+	} else {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{
 			"message": fmt.Sprintf("Action type %q must be executed client-side", targetAction.Type),
 		}})
@@ -626,58 +645,24 @@ func (h *Handler) executeUpdateRecord(c *gin.Context, action *doctype.ViewAction
 	c.JSON(http.StatusOK, Response{Data: documentToMap(existing, dt)})
 }
 
-func (h *Handler) executeWorkflowTransition(c *gin.Context, action *doctype.ViewAction, ctx map[string]any) {
-	transition := getString(action.Config, "transition")
-	doctypeName := getString(action.Config, "doctype")
-	name := getString(ctx, "name")
-
-	if doctypeName == "" || name == "" || transition == "" {
-		writeError(c, http.StatusBadRequest, "validation.required_field", "doctype, name, and transition are required", map[string]any{"fields": []string{"doctype", "name", "transition"}})
-		return
-	}
-
-	reg := h.siteRegistry(c)
-	wf := reg.Workflows.Get(doctypeName)
-	if wf == nil {
-		writeError(c, http.StatusBadRequest, "workflow.not_found", "No workflow for doctype", map[string]any{"doctype": doctypeName})
-		return
-	}
-
-	dt := reg.Get(doctypeName)
-	if dt == nil {
-		writeError(c, http.StatusBadRequest, "resource.doctype_not_found", "Doctype not found", map[string]any{"name": doctypeName})
-		return
-	}
-
-	tm := h.siteTx(c)
-	doc, err := tm.GetDoc(dt, name, "")
-	if err != nil {
-		writeError(c, http.StatusNotFound, "resource.document_not_found", "Document not found", map[string]any{"name": name})
-		return
-	}
-
-	transitioned, cerr := h.runKernelWorkflowTransition(c, doctypeName, name, transition, doc.Revision)
-	if cerr != nil {
-		status := http.StatusBadRequest
-		code := "workflow.transition_failed"
-		switch cerr.Type {
-		case contract.CodePermissionDenied:
-			status, code = http.StatusForbidden, "permission.denied"
-		case contract.CodeNotFound:
-			status, code = http.StatusNotFound, "resource.document_not_found"
-		case contract.CodeConflict, contract.CodeIdempotencyKeyReused:
-			status, code = http.StatusConflict, "resource.conflict"
-		case contract.CodeInternal, contract.CodeDependencyUnavailable:
-			status, code = http.StatusInternalServerError, "internal.error"
-		}
-		writeError(c, status, code, cerr.Message, nil)
-		return
-	}
-
-	c.JSON(http.StatusOK, Response{Data: documentToMap(transitioned, dt)})
-}
-
 func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewAction, ctx map[string]any) {
+	if allowed, ok := action.Config["allowed_context_values"].(map[string]any); ok {
+		for field, raw := range allowed {
+			choices, ok := raw.([]any)
+			if !ok || len(choices) == 0 {
+				writeError(c, http.StatusBadRequest, "validation.invalid_configuration", "Transaction eligibility has no allowed values", map[string]any{"field": field})
+				return
+			}
+			accepted := false
+			for _, choice := range choices {
+				accepted = accepted || fmt.Sprint(ctx[field]) == fmt.Sprint(choice)
+			}
+			if !accepted {
+				writeError(c, http.StatusBadRequest, "validation.failed", "This transaction option is not available", map[string]any{"field": field})
+				return
+			}
+		}
+	}
 	targetDoctype := getString(action.Config, "target_doctype")
 	if targetDoctype == "" {
 		writeError(c, http.StatusBadRequest, "validation.required_field", "target_doctype is required", map[string]any{"field": "target_doctype"})
@@ -710,6 +695,20 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 		}
 		doc.Set(referenceField, fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()))
 	}
+	if configuredFields, ok := action.Config["fields"].(map[string]any); ok {
+		for field, value := range configuredFields {
+			switch value {
+			case "$today":
+				value = time.Now().Format("2006-01-02")
+			case "$now":
+				value = time.Now().Format(time.RFC3339)
+			}
+			if doc.Get(field) == nil {
+				doc.Set(field, value)
+			}
+		}
+	}
+	stockUpdates := make([]kernel.RecordMutationBundleItem, 0)
 
 	parentField, childDT, err := resolveTransactionChildTable(reg, dt, action)
 	if err != nil {
@@ -731,8 +730,56 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 			writeError(c, http.StatusBadRequest, "validation.required_field", "transaction requires at least one item", map[string]any{"field": "items"})
 			return
 		}
+		if err := applyTransactionLinkedFields(tm, reg, childDT, children); err != nil {
+			writeError(c, http.StatusBadRequest, "validation.failed", err.Error(), nil)
+			return
+		}
 		doc.SetTable(parentField, children)
-		applyTransactionTotals(dt, doc, children, action.Config)
+		if totalErrs := applyTransactionTotals(dt, doc, children, action.Config); totalErrs.HasErrors() {
+			writeError(c, http.StatusBadRequest, "validation.failed", "One or more transaction amounts are invalid", map[string]any{"fields": validationErrorDetails(totalErrs)})
+			return
+		}
+		if validationErrs := validateTransactionChildren(childDT, children, reg); validationErrs.HasErrors() {
+			writeError(c, http.StatusBadRequest, "validation.failed", "One or more transaction lines are invalid", map[string]any{"fields": validationErrorDetails(validationErrs)})
+			return
+		}
+		if action.Config["decrement_stock"] == true && action.Config["related_quantity_updates"] == nil {
+			writeError(c, http.StatusBadRequest, "validation.invalid_configuration", "Transaction action requires related quantity bindings", nil)
+			return
+		}
+		if bindings, ok := action.Config["related_quantity_updates"].(map[string]any); ok {
+			typeName := getString(bindings, "target_doctype")
+			quantityField := getString(bindings, "target_quantity_field")
+			recordField := getString(bindings, "source_record_field")
+			lineQuantityField := getString(bindings, "source_quantity_field")
+			targetDT := reg.Get(typeName)
+			if typeName == "" || quantityField == "" || recordField == "" || lineQuantityField == "" || targetDT == nil || targetDT.GetField(quantityField) == nil {
+				writeError(c, http.StatusBadRequest, "validation.invalid_configuration", "Transaction action has invalid related quantity bindings", nil)
+				return
+			}
+			quantities := make(map[string]float64)
+			for _, line := range children {
+				quantities[line.GetString(recordField)] += line.GetFloat(lineQuantityField)
+			}
+			names := make([]string, 0, len(quantities))
+			for name := range quantities {
+				names = append(names, name)
+			}
+			sort.Strings(names) // stable kernel payload for idempotent replay
+			for _, name := range names {
+				quantity := quantities[name]
+				if name == "" || quantity <= 0 || bindings["whole_units"] == true && quantity != float64(int64(quantity)) {
+					writeError(c, http.StatusBadRequest, "validation.failed", "Related quantities must be positive and valid", map[string]any{"record": name})
+					return
+				}
+				data, marshalErr := json.Marshal(map[string]any{quantityField: quantity})
+				if marshalErr != nil {
+					writeError(c, http.StatusInternalServerError, "internal.error", "Could not prepare related quantity update", nil)
+					return
+				}
+				stockUpdates = append(stockUpdates, kernel.RecordMutationBundleItem{Key: "quantity_" + name, Operation: "decrement", Doctype: targetDT.Name, Name: name, Data: data})
+			}
+		}
 	}
 
 	if requiredStatus := getString(action.Config, "requires_operation_status"); requiredStatus != "" {
@@ -770,7 +817,6 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 	}
 
 	operationName := getString(ctx, "external_operation")
-	paymentDT := reg.Get("Payment")
 	saleData, dataErr := transactionDocumentData(dt, doc)
 	if dataErr != nil {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid transaction data", nil)
@@ -780,18 +826,15 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 		Doctype: dt.Name,
 		Records: []kernel.RecordMutationBundleItem{{Key: "sale", Doctype: dt.Name, Data: saleData}},
 	}
-	if operationName == "" && paymentDT != nil {
-		paymentData, dataErr := json.Marshal(map[string]any{
-			"reference": "PAY-$records.sale.name", "sale": "$records.sale.name",
-			"amount": ctx["total"], "method": ctx["payment_method"],
-			"status": "Succeeded", "assignee": user,
-		})
-		if dataErr != nil {
-			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid payment data", nil)
+	bundle.Records = append(bundle.Records, stockUpdates...)
+	if operationName == "" {
+		related, relatedErr := configuredTransactionRelatedRecords(reg, action.Config, ctx, user)
+		if relatedErr != nil {
+			writeError(c, http.StatusBadRequest, "validation.invalid_configuration", relatedErr.Error(), nil)
 			return
 		}
-		bundle.Records = append(bundle.Records, kernel.RecordMutationBundleItem{Key: "payment", Doctype: paymentDT.Name, Data: paymentData})
-	} else if operationName != "" && paymentDT != nil {
+		bundle.Records = append(bundle.Records, related...)
+	} else if paymentDT := reg.Get("Payment"); paymentDT != nil {
 		// The provider operation and its Payment already exist. Complete the
 		// Sale and link Payment atomically so either both become final or neither.
 		if paymentName, lookupErr := linkedPaymentName(h, c, h.queryDB(c), operationName); lookupErr == nil && paymentName != "" {
@@ -805,7 +848,11 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 			})
 		}
 	}
-	idempotencyKey := "pos-sale:" + doc.GetString(getString(action.Config, "reference_field"))
+	idempotencyKey, keyErr := transactionIdempotencyKey(c, action, doc)
+	if keyErr != nil {
+		writeError(c, http.StatusBadRequest, "validation.required_field", keyErr.Error(), map[string]any{"field": "Idempotency-Key"})
+		return
+	}
 	result, _, cerr := h.runKernelMutationBundle(c, bundle, idempotencyKey)
 	if cerr != nil {
 		h.writeKernelError(c, cerr)
@@ -814,6 +861,198 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 	doc = orm.DocumentFromMap(reg, dt.Name, result.Document)
 
 	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
+}
+
+func transactionIdempotencyKey(c *gin.Context, action *doctype.ViewAction, doc *doctype.Document) (string, error) {
+	prefix := getString(action.Config, "idempotency_prefix")
+	if prefix == "" {
+		prefix = "view-action:" + action.ID
+	}
+	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(key) > 256 {
+		return "", fmt.Errorf("Idempotency-Key must be at most 256 bytes")
+	}
+	if key == "" {
+		referenceField := getString(action.Config, "reference_field")
+		if referenceField == "" || doc.GetString(referenceField) == "" {
+			return "", fmt.Errorf("Idempotency-Key is required unless the transaction has a configured reference field")
+		}
+		key = doc.GetString(referenceField)
+	}
+	return prefix + ":" + key, nil
+}
+
+// applyTransactionLinkedFields makes configured linked values authoritative at
+// checkout. A child field such as unit_price can declare linked_field:
+// "product.selling_price"; the browser's cart value is then ignored.
+func applyTransactionLinkedFields(tx *orm.TxManager, registry *doctype.Registry, childDT *doctype.DocType, children []*doctype.Document) error {
+	if tx == nil || childDT == nil {
+		return nil
+	}
+	type linkedValue struct {
+		doc *doctype.Document
+	}
+	cache := make(map[string]linkedValue)
+	for _, targetField := range childDT.NonTableDataFields() {
+		if strings.TrimSpace(targetField.LinkedField) == "" {
+			continue
+		}
+		linkName, sourceName, ok := strings.Cut(targetField.LinkedField, ".")
+		linkField := childDT.GetField(linkName)
+		if !ok || linkName == "" || sourceName == "" || linkField == nil || !strings.EqualFold(linkField.Fieldtype, "Link") {
+			return fmt.Errorf("linked field configuration for %s.%s must use a Link field and source field", childDT.Name, targetField.Fieldname)
+		}
+		linkedDT := registry.Get(linkField.Options)
+		if linkedDT == nil || linkedDT.GetField(sourceName) == nil {
+			return fmt.Errorf("linked field configuration for %s.%s references an unavailable field", childDT.Name, targetField.Fieldname)
+		}
+		for index, child := range children {
+			name := child.GetString(linkName)
+			if name == "" {
+				continue
+			}
+			cacheKey := linkedDT.Name + "\x00" + name
+			entry, exists := cache[cacheKey]
+			if !exists {
+				doc, err := tx.GetDoc(linkedDT, name, "")
+				if err != nil || doc == nil {
+					return fmt.Errorf("transaction line %d references a product that is no longer available", index+1)
+				}
+				entry = linkedValue{doc: doc}
+				cache[cacheKey] = entry
+			}
+			child.Set(targetField.Fieldname, entry.doc.Get(sourceName))
+		}
+	}
+	return nil
+}
+
+func validateTransactionChildren(childDT *doctype.DocType, children []*doctype.Document, registry *doctype.Registry) doctype.ValidationErrors {
+	var all doctype.ValidationErrors
+	for index, child := range children {
+		for _, field := range childDT.NonTableDataFields() {
+			if !field.IsNumeric() {
+				continue
+			}
+			value := child.Get(field.Fieldname)
+			if value == nil || value == "" {
+				continue
+			}
+			parsed, err := strconv.ParseFloat(fmt.Sprint(value), 64)
+			if err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0) && (!strings.EqualFold(field.Fieldtype, "Int") || parsed == math.Trunc(parsed)) {
+				continue
+			}
+			message := fmt.Sprintf("Item %d: %s must be a finite number.", index+1, field.Label)
+			if strings.EqualFold(field.Fieldtype, "Int") {
+				message = fmt.Sprintf("Item %d: %s must be a whole number.", index+1, field.Label)
+			}
+			all = append(all, &doctype.ValidationError{
+				Type: "ValidationError", Message: message,
+				Field: field.Fieldname, DocType: childDT.Name,
+			})
+		}
+		for _, validationErr := range doctype.ValidateDocument(childDT, child, registry, nil) {
+			all = append(all, &doctype.ValidationError{
+				Type: validationErr.Type, Message: fmt.Sprintf("Item %d: %s", index+1, validationErr.Message),
+				Field: validationErr.Field, DocType: validationErr.DocType, Predicate: validationErr.Predicate,
+			})
+		}
+	}
+	return all
+}
+
+// configuredTransactionRelatedRecords builds companion records from the view
+// contract. Context bindings preserve the source JSON value type; record-name
+// placeholders are resolved later by the kernel within the same transaction.
+func configuredTransactionRelatedRecords(reg *doctype.Registry, config, ctx map[string]any, actor string) ([]kernel.RecordMutationBundleItem, error) {
+	raw, ok := config["related_records"].([]any)
+	if !ok || len(raw) == 0 {
+		return nil, nil
+	}
+	items := make([]kernel.RecordMutationBundleItem, 0, len(raw))
+	for _, value := range raw {
+		binding, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("related record binding must be an object")
+		}
+		key, typeName := getString(binding, "key"), getString(binding, "doctype")
+		if key == "" || typeName == "" || reg.Get(typeName) == nil {
+			return nil, fmt.Errorf("related record key and configured doctype are required")
+		}
+		fields, ok := binding["fields"].(map[string]any)
+		if !ok || len(fields) == 0 {
+			return nil, fmt.Errorf("related record fields are required")
+		}
+		data := make(map[string]any, len(fields))
+		for field, source := range fields {
+			if expression, ok := source.(string); ok {
+				switch {
+				case expression == "$actor":
+					data[field] = actor
+				case strings.HasPrefix(expression, "$context."):
+					name := strings.TrimPrefix(expression, "$context.")
+					value, exists := ctx[name]
+					if !exists {
+						return nil, fmt.Errorf("related record context field %q is missing", name)
+					}
+					data[field] = value
+				default:
+					data[field] = source
+				}
+			} else {
+				data[field] = source
+			}
+		}
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			return nil, fmt.Errorf("encode related record %q: %w", key, err)
+		}
+		items = append(items, kernel.RecordMutationBundleItem{Key: key, Doctype: typeName, Data: encoded})
+	}
+	return items, nil
+}
+
+// executeCreateQuantityEffect records a signed, reasoned adjustment and its
+// configured quantity change as one idempotent kernel operation.
+func (h *Handler) executeCreateQuantityEffect(c *gin.Context, action *doctype.ViewAction, ctx map[string]any) {
+	config := action.Config
+	reg := h.siteRegistry(c)
+	rootName := getString(config, "target_doctype")
+	relatedName := getString(config, "related_doctype")
+	recordField := getString(config, "source_record_field")
+	deltaField := getString(config, "delta_field")
+	reasonField := getString(config, "reason_field")
+	quantityField := getString(config, "related_quantity_field")
+	rootDT, relatedDT := reg.Get(rootName), reg.Get(relatedName)
+	if rootDT == nil || relatedDT == nil || rootDT.GetField(recordField) == nil || rootDT.GetField(deltaField) == nil || rootDT.GetField(reasonField) == nil || relatedDT.GetField(quantityField) == nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_configuration", "Quantity effect bindings are incomplete", nil)
+		return
+	}
+	itemName := getString(ctx, recordField)
+	reason := strings.TrimSpace(getString(ctx, reasonField))
+	delta, err := strconv.ParseFloat(fmt.Sprint(ctx[deltaField]), 64)
+	if itemName == "" || reason == "" || err != nil || delta == 0 || math.IsNaN(delta) || math.IsInf(delta, 0) || relatedDT.GetField(quantityField).Fieldtype == "Int" && math.Trunc(delta) != delta {
+		writeError(c, http.StatusBadRequest, "validation.failed", "A linked record, nonzero signed quantity, and reason are required", nil)
+		return
+	}
+	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if key == "" {
+		writeError(c, http.StatusBadRequest, "validation.required_field", "Idempotency-Key is required", nil)
+		return
+	}
+	data, _ := json.Marshal(ctx)
+	change, _ := json.Marshal(map[string]any{quantityField: delta})
+	bundle := kernel.RecordMutationBundlePayload{Doctype: rootDT.Name, Records: []kernel.RecordMutationBundleItem{
+		{Key: "record", Doctype: rootDT.Name, Data: data},
+		{Key: "quantity", Operation: "adjust", Doctype: relatedDT.Name, Name: itemName, Data: change},
+	}}
+	result, _, cerr := h.runKernelMutationBundle(c, bundle, key)
+	if cerr != nil {
+		h.writeKernelError(c, cerr)
+		return
+	}
+	doc := orm.DocumentFromMap(reg, rootDT.Name, result.Document)
+	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, rootDT)})
 }
 
 func (h *Handler) executeInitiateExternalOperation(c *gin.Context, action *doctype.ViewAction, ctx map[string]any) {
@@ -865,10 +1104,10 @@ func (h *Handler) executeInitiateExternalOperation(c *gin.Context, action *docty
 		doc.Set("idempotency_key", value)
 	}
 	if doc.GetString("idempotency_key") == "" {
-		doc.Set("idempotency_key", fmt.Sprintf("%s-%d", c.GetString("user"), time.Now().UnixNano()))
+		doc.Set("idempotency_key", fmt.Sprintf("%s-%d", currentUser(c), time.Now().UnixNano()))
 	}
 	doc.Set("request_payload", ctx)
-	doc.Set("initiated_by", c.GetString("user"))
+	doc.Set("initiated_by", currentUser(c))
 
 	tm := h.siteTx(c)
 	user := currentUser(c)
@@ -1188,7 +1427,7 @@ func configuredFieldData(dt *doctype.DocType, values map[string]any) (json.RawMe
 
 func (h *Handler) executeNamedOperationScript(c *gin.Context, scriptName string, doc *doctype.Document) (map[string]any, error) {
 	site := siteName(c)
-	if h.ScriptRunner == nil || (h.SiteScriptStores == nil && h.RuntimeServices == nil) || h.runtimeService(c, site).ScriptStore == nil {
+	if h.ScriptRunner == nil || h.runtimeService(c, site).ScriptStore == nil {
 		return nil, fmt.Errorf("operation script runner is not available")
 	}
 	store := h.runtimeService(c, site).ScriptStore
@@ -1202,14 +1441,19 @@ func (h *Handler) executeNamedOperationScript(c *gin.Context, scriptName string,
 	timeout := paymentScriptTimeout(rec.TimeoutMs)
 	execCtx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 	defer cancel()
+	tx := h.siteTx(c)
+	user, roles, verified := scriptIdentity(tx.Execution, site)
+	if !verified {
+		return nil, contract.NewError(contract.CodeUnauthenticated, "verified payment-script execution identity required")
+	}
 	result, err := h.ScriptRunner.Execute(execCtx, script.ExecuteRequest{
 		Script: rec.Script, ScriptType: script.TypeAPIMethod, ScriptName: rec.Name,
 		DocType: "External Operation", Event: script.EventPayment, Document: doc.ToMap(),
-		User: c.GetString("user"), UserRoles: []string{c.GetString("user_role")}, Site: site,
-		Timeout: timeout, Provider: h.siteTx(c).ScriptProvider,
+		User: user, UserRoles: roles, Site: site,
+		Timeout: timeout, Provider: tx.ScriptProvider,
 	})
 	if err != nil {
-		_ = store.LogExecution(site, *rec, "External Operation", doc.Name, script.EventPayment, c.GetString("user"), int(resultDuration(result).Milliseconds()), "error", err.Error())
+		_ = store.LogExecution(site, *rec, "External Operation", doc.Name, script.EventPayment, user, int(resultDuration(result).Milliseconds()), "error", err.Error())
 		return nil, err
 	}
 	value, ok := result.Result.(map[string]any)
@@ -1221,7 +1465,7 @@ func (h *Handler) executeNamedOperationScript(c *gin.Context, scriptName string,
 			return nil, fmt.Errorf("operation rejected: %s", getString(value, "message"))
 		}
 	}
-	_ = store.LogExecution(site, *rec, "External Operation", doc.Name, script.EventPayment, c.GetString("user"), int(resultDuration(result).Milliseconds()), "success", "")
+	_ = store.LogExecution(site, *rec, "External Operation", doc.Name, script.EventPayment, user, int(resultDuration(result).Milliseconds()), "success", "")
 	return value, nil
 }
 
@@ -1255,7 +1499,7 @@ func (h *Handler) executeTransactionPaymentScript(c *gin.Context, scriptName str
 	if h.ScriptRunner == nil {
 		return fmt.Errorf("payment script runner is not available")
 	}
-	if (h.SiteScriptStores == nil && h.RuntimeServices == nil) || h.runtimeService(c, site).ScriptStore == nil {
+	if h.runtimeService(c, site).ScriptStore == nil {
 		return fmt.Errorf("payment script store is not available")
 	}
 	store := h.runtimeService(c, site).ScriptStore
@@ -1267,16 +1511,18 @@ func (h *Handler) executeTransactionPaymentScript(c *gin.Context, scriptName str
 		return fmt.Errorf("payment script %q is not active", scriptName)
 	}
 
-	user := c.GetString("user")
-	userRole := c.GetString("user_role")
 	tm := h.siteTx(c)
+	user, roles, verified := scriptIdentity(tm.Execution, site)
+	if !verified {
+		return contract.NewError(contract.CodeUnauthenticated, "verified payment-script execution identity required")
+	}
 	timeout := paymentScriptTimeout(rec.TimeoutMs)
 	execCtx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 	defer cancel()
 	result, execErr := h.ScriptRunner.Execute(execCtx, script.ExecuteRequest{
 		Script: rec.Script, ScriptType: script.TypeAPIMethod, ScriptName: rec.Name,
 		DocType: dt.Name, Event: script.EventPayment, Document: doc.ToMap(),
-		User: user, UserRoles: []string{userRole}, Site: site,
+		User: user, UserRoles: roles, Site: site,
 		Timeout: timeout, Provider: tm.ScriptProvider,
 	})
 	durationMs := 0
@@ -1362,9 +1608,9 @@ func buildTransactionChildren(rawItems any, childDT *doctype.DocType, actionConf
 			return nil, fmt.Errorf("item %d must be an object", i+1)
 		}
 
-		child := doctype.NewDocument("")
+		child := doctype.NewDocument(childDT.Name)
 		for _, field := range childDT.NonTableDataFields() {
-			if field.ReadOnly && field.Computed != "" {
+			if field.ReadOnly {
 				continue
 			}
 			sourceField := field.Fieldname
@@ -1384,13 +1630,14 @@ func buildTransactionChildren(rawItems any, childDT *doctype.DocType, actionConf
 	return children, nil
 }
 
-func applyTransactionTotals(parentDT *doctype.DocType, doc *doctype.Document, children []*doctype.Document, actionConfig map[string]any) {
+func applyTransactionTotals(parentDT *doctype.DocType, doc *doctype.Document, children []*doctype.Document, actionConfig map[string]any) doctype.ValidationErrors {
+	var errors doctype.ValidationErrors
 	if parentDT == nil || doc == nil || len(children) == 0 {
-		return
+		return errors
 	}
 	totalsConfig, ok := actionConfig["totals"].(map[string]any)
 	if !ok || len(totalsConfig) == 0 {
-		return
+		return errors
 	}
 	linesConfig, _ := totalsConfig["lines"].(map[string]any)
 	quantityField := getString(linesConfig, "quantity_field")
@@ -1402,13 +1649,13 @@ func applyTransactionTotals(parentDT *doctype.DocType, doc *doctype.Document, ch
 	discountTotalField := getString(totalsConfig, "discount_total_field")
 	taxTotalField := getString(totalsConfig, "tax_total_field")
 	totalField := getString(totalsConfig, "total_field")
-	if quantityField == "" || unitPriceField == "" || subtotalField == "" || totalField == "" {
-		return
+	if quantityField == "" || unitPriceField == "" || (subtotalField == "" && totalField == "") {
+		return errors
 	}
 	var subtotal float64
 	var taxTotal float64
 	var discountTotal float64
-	for _, child := range children {
+	for index, child := range children {
 		if child == nil {
 			continue
 		}
@@ -1417,8 +1664,15 @@ func applyTransactionTotals(parentDT *doctype.DocType, doc *doctype.Document, ch
 		discount := numberOrDefault(child.Get(discountField), 0)
 		tax := numberOrDefault(child.Get(taxField), 0)
 		lineTotal := quantity*unitPrice - discount + tax
+		if math.IsNaN(lineTotal) || math.IsInf(lineTotal, 0) {
+			field := lineTotalField
+			if field == "" {
+				field = unitPriceField
+			}
+			errors = append(errors, &doctype.ValidationError{Type: "ValidationError", Message: fmt.Sprintf("Item %d amount must be a finite number.", index+1), Field: field, DocType: child.DocType})
+			continue
+		}
 		if lineTotalField != "" {
-			lineTotal = numberOrDefault(child.Get(lineTotalField), lineTotal)
 			child.Set(lineTotalField, lineTotal)
 		}
 		subtotal += quantity * unitPrice
@@ -1426,18 +1680,27 @@ func applyTransactionTotals(parentDT *doctype.DocType, doc *doctype.Document, ch
 		taxTotal += tax
 	}
 	total := subtotal - discountTotal + taxTotal
-	if parentDT.GetField(subtotalField) != nil && isEmptyNumber(doc.Get(subtotalField)) {
+	if math.IsNaN(total) || math.IsInf(total, 0) {
+		field := totalField
+		if field == "" {
+			field = subtotalField
+		}
+		errors = append(errors, &doctype.ValidationError{Type: "ValidationError", Message: "Transaction total must be a finite number.", Field: field, DocType: parentDT.Name})
+		return errors
+	}
+	if subtotalField != "" && parentDT.GetField(subtotalField) != nil {
 		doc.Set(subtotalField, subtotal)
 	}
-	if discountTotalField != "" && parentDT.GetField(discountTotalField) != nil && isEmptyNumber(doc.Get(discountTotalField)) {
+	if discountTotalField != "" && parentDT.GetField(discountTotalField) != nil {
 		doc.Set(discountTotalField, discountTotal)
 	}
-	if taxTotalField != "" && parentDT.GetField(taxTotalField) != nil && isEmptyNumber(doc.Get(taxTotalField)) {
+	if taxTotalField != "" && parentDT.GetField(taxTotalField) != nil {
 		doc.Set(taxTotalField, taxTotal)
 	}
-	if parentDT.GetField(totalField) != nil && isEmptyNumber(doc.Get(totalField)) {
+	if totalField != "" && parentDT.GetField(totalField) != nil {
 		doc.Set(totalField, total)
 	}
+	return errors
 }
 
 func numberOrDefault(value any, fallback float64) float64 {
@@ -1638,12 +1901,11 @@ func (h *Handler) viewStore(c *gin.Context) *configstore.Store {
 	return configstore.NewStore(sqlDB, h.siteDialect(c))
 }
 
-// currentUser returns the authenticated user identifier from context.
+// currentUser returns an attribution identity derived from the verified
+// execution. The legacy Gin user field is presentation/compatibility data.
 func currentUser(c *gin.Context) string {
-	if user, ok := c.Get("user"); ok {
-		if s, ok := user.(string); ok && s != "" {
-			return s
-		}
+	if user, ok := requestUserID(c); ok {
+		return user
 	}
 	return "system"
 }
@@ -1681,7 +1943,7 @@ func documentToMap(doc *doctype.Document, dt *doctype.DocType) map[string]any {
 	result["modified_by"] = doc.Get("modified_by")
 	result["doc_status"] = doc.DocStatus
 	for _, f := range dt.DataFields() {
-		if f.Fieldtype != "Table" {
+		if f.Fieldtype != "Table" && !f.Hidden && f.Fieldtype != "Password" {
 			result[f.Fieldname] = doc.Get(f.Fieldname)
 		}
 	}

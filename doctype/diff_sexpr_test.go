@@ -12,7 +12,6 @@ func TestDiffSExpr_AddField(t *testing.T) {
         :required true :type Data)))
   (roles)
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -25,7 +24,6 @@ func TestDiffSExpr_AddField(t *testing.T) {
         :required true :type Data)))
   (roles)
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -57,7 +55,6 @@ func TestDiffSExpr_RemoveDoctype(t *testing.T) {
         :type Data)))
   (roles)
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -68,7 +65,6 @@ func TestDiffSExpr_RemoveDoctype(t *testing.T) {
         :type Data)))
   (roles)
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -94,7 +90,6 @@ func TestDiffSExpr_NoChange(t *testing.T) {
   (doctypes)
   (roles)
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -114,7 +109,6 @@ func TestDiffSExpr_RolePermWorkflow(t *testing.T) {
     (role Administrator
       :workspace true))
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -128,7 +122,6 @@ func TestDiffSExpr_RolePermWorkflow(t *testing.T) {
   (permissions
     (perm Task Administrator
       :read true))
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -174,7 +167,6 @@ func TestDiffSExpr_ModifiedFieldAttr(t *testing.T) {
         :type Data)))
   (roles)
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -185,7 +177,6 @@ func TestDiffSExpr_ModifiedFieldAttr(t *testing.T) {
         :required true :type Data)))
   (roles)
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -203,69 +194,6 @@ func TestDiffSExpr_ModifiedFieldAttr(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected modify-field for title, got changes: %+v", changes)
-	}
-}
-
-func TestDiffSExpr_WorkflowStateChange(t *testing.T) {
-	oldSExpr := `(config
-  (doctypes)
-  (roles)
-  (permissions)
-  (workflows
-    (workflow OrderWorkflow
-      :active true :on Order
-      (state Draft
-        :doc-status 0)
-      (state Submitted
-        :doc-status 1)))
-  (analytics-metrics)
-  (scripts))`
-
-	newSExpr := `(config
-  (doctypes)
-  (roles)
-  (permissions)
-  (workflows
-    (workflow OrderWorkflow
-      :active true :on Order
-      (state Draft
-        :doc-status 0)
-      (state Approved
-        :doc-status 1 :style "success")
-      (state Cancelled
-        :doc-status 2 :style "danger")))
-  (analytics-metrics)
-  (scripts))`
-
-	changes, err := DiffSExpr(oldSExpr, newSExpr)
-	if err != nil {
-		t.Fatalf("DiffSExpr error = %v", err)
-	}
-
-	t.Logf("Workflow state changes: %+v", changes)
-
-	removedSubmitted := false
-	addedApproved := false
-	addedCancelled := false
-	for _, c := range changes {
-		switch {
-		case c.Type == "remove-state" && c.Entity == "OrderWorkflow" && c.Field == "Submitted":
-			removedSubmitted = true
-		case c.Type == "add-state" && c.Entity == "OrderWorkflow" && c.Field == "Approved":
-			addedApproved = true
-		case c.Type == "add-state" && c.Entity == "OrderWorkflow" && c.Field == "Cancelled":
-			addedCancelled = true
-		}
-	}
-
-	if !removedSubmitted {
-		t.Error("expected remove-state for Submitted")
-	}
-	if !addedApproved {
-		t.Error("expected add-state for Approved")
-	}
-	if !addedCancelled {
-		t.Error("expected add-state for Cancelled")
 	}
 }
 
@@ -307,7 +235,6 @@ func TestDiffSExpr_RenameReuseName(t *testing.T) {
         :type Data)))
   (roles)
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 
@@ -320,7 +247,6 @@ func TestDiffSExpr_RenameReuseName(t *testing.T) {
         :required true :type Data)))
   (roles)
   (permissions)
-  (workflows)
   (analytics-metrics)
   (scripts))`
 

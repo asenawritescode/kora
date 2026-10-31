@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type React from 'react'
 import type { PageManifest } from '@/manifest/schema/page'
 import { createSimulatedResourceState, ManifestRenderer } from './ManifestRenderer'
+import { documentListParams, documentListResourceWithFilter } from './policy'
 
 vi.mock('../../components/views/registry', () => ({
   resolveComponentEntry: (component: string) => {
@@ -89,7 +90,57 @@ function renderManifest(
 }
 
 describe('ManifestRenderer', () => {
-  it('resolves PageComponent types through the registered Kora component registry', () => {
+  it('sends bounded list criteria and visible-name search to the server query', () => {
+    const resource = manifest().spec.resources[0]
+    resource.params = {
+      ...resource.params,
+      limit: 25,
+      filters: [{ field: 'status', op: '=', value: 'Open' }],
+      order_by: 'modified DESC',
+      fields: ['name', 'title'],
+      search: 'Northwind',
+    }
+    expect(documentListParams(resource)).toEqual({
+      limit: 25,
+      filters: '[["status","=","Open"]]',
+      order_by: 'modified DESC',
+      fields: ['name', 'title'],
+      search: 'Northwind',
+    })
+  })
+
+  it('sends interactive search and filters as database list-query parameters', () => {
+    const resource = manifest().spec.resources[0]
+    resource.params = {
+      ...resource.params,
+      filters: [{ field: 'status', op: '=', value: 'Open' }],
+    }
+
+    const searched = documentListResourceWithFilter(resource, { field: '__search__', value: '  Northwind  ' })
+    expect(documentListParams(searched)).toMatchObject({
+      filters: '[["status","=","Open"]]',
+      search: 'Northwind',
+    })
+
+    const filtered = documentListResourceWithFilter(resource, { field: 'category', value: 'Hardware' })
+    expect(documentListParams(filtered).filters).toBe('[["status","=","Open"],["category","=","Hardware"]]')
+  })
+
+  it('retains configured status filters in the database list query', () => {
+    const configured = manifest({
+      spec: {
+        ...manifest().spec,
+        resources: [{ id: 'activities', query: 'document.list', params: {
+          doctype: 'Activity', limit: 50,
+          filters: [{ field: 'status', op: 'in', value: ['Open', 'In Progress'] }],
+        } }],
+      },
+    })
+    expect(documentListParams(configured.spec.resources[0]).filters)
+      .toBe('[["status","in",["Open","In Progress"]]]')
+  })
+
+  it('resolves PageComponent types through the registered Kigae component registry', () => {
     const markup = renderManifest(manifest())
 
     expect(markup).toContain('data-manifest-render-mode="preview"')

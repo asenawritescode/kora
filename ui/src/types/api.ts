@@ -20,29 +20,11 @@ export interface ApiErrorResponse {
   error: ApiError | string | { errors: ApiError[] }
 }
 
-export interface AuthProvider {
-  name: string
-  label: string
-}
-
 export interface CurrentUser {
   name: string
   email: string
   full_name: string
   roles: string[]
-}
-
-export interface LoginRequest {
-  email: string
-  password: string
-}
-
-export interface MagicLinkRequest {
-  email: string
-}
-
-export interface MagicLinkVerifyRequest {
-  token: string
 }
 
 export interface NavigationConfig {
@@ -95,6 +77,7 @@ export interface ListParams {
   offset?: number
   order_by?: string
   filters?: string
+  search?: string
   fields?: string[]
 }
 

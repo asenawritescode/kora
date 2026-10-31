@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -74,7 +75,7 @@ func TestLiveMySQLSiteDirectoryAssignCellWorkflow(t *testing.T) {
 		t.Fatal("resolve disposable entry:", err)
 	}
 
-	preview, err := applySiteCellAssignment(registry, info.SiteID, "cell-b", false, nil)
+	preview, err := applySiteCellAssignment(context.Background(), registry, info.SiteID, "cell-b", false, nil, "cell")
 	if err != nil {
 		t.Fatal("preview SQL-backed assignment:", err)
 	}
@@ -82,7 +83,7 @@ func TestLiveMySQLSiteDirectoryAssignCellWorkflow(t *testing.T) {
 		t.Fatalf("SQL-backed preview = %+v; want unchanged revision %d and no apply", preview, info.ConfigRevision)
 	}
 
-	applied, err := applySiteCellAssignment(registry, info.SiteID, "cell-b", true, map[string]string{"cell-b": "http://127.0.0.1:8002"})
+	applied, err := applySiteCellAssignment(context.Background(), registry, info.SiteID, "cell-b", true, map[string]string{"cell-b": "http://127.0.0.1:8002"}, "cell")
 	if err != nil {
 		t.Fatal("apply SQL-backed assignment:", err)
 	}

@@ -1,28 +1,39 @@
 name: Field
 module: Agriculture
-title_field: reference
-search_fields: reference, status
+description: A named plot or field that belongs to one farm.
+title_field: field_name
+search_fields: field_name, farm
 sort_field: modified
 sort_order: DESC
 
 fields:
-  - fieldname: reference
+  - fieldname: field_name
     fieldtype: Data
-    label: Reference
+    label: Field name
     reqd: true
-    unique: true
     in_list_view: true
-  - fieldname: source_record
-    fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
+    search_index: true
+  - fieldname: farm
+    fieldtype: Link
+    label: Farm
+    options: Farm
+    reqd: true
+    in_list_view: true
+  - fieldname: area
+    fieldtype: Float
+    label: Area
+  - fieldname: area_unit
+    fieldtype: Select
+    label: Area unit
+    options: |
+      Acre
+      Hectare
+      Other
+  - fieldname: soil_or_location_notes
     fieldtype: Text
-    label: Evidence
-  - fieldname: status
-    fieldtype: Data
-    label: Status
-    default: Draft
+    label: Field notes
+  - fieldname: active
+    fieldtype: Check
+    label: In use
+    default: "1"
     in_list_view: true

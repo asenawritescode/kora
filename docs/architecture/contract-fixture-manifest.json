@@ -1,0 +1,55 @@
+{
+  "manifest_version": 1,
+  "snapshot_date": "2026-10-30",
+  "release_status": "unreleased-working-tree-snapshot",
+  "fixtures": [
+    {
+      "name": "organizational-runtime-v1",
+      "sha256": "bc30a78dbd25151c57262c24722c637ed2f69efc76dbe2f250a062868c9c8b5c",
+      "consumers": [
+        "kora/contract-fixtures/organizational-runtime-v1.json",
+        "kora-cloud/contract-fixtures/organizational-runtime-v1.json",
+        "kora-studio-mvp/contract-fixtures/organizational-runtime-v1.json"
+      ]
+    },
+    {
+      "name": "site-directory-v1",
+      "sha256": "53c4368eef86f1eebc7cb9c085642889c0bb0fdc6433186f3522d59c0ca681ee",
+      "consumers": [
+        "kora/contract-fixtures/site-directory-v1.json"
+      ]
+    },
+    {
+      "name": "site-directory-v2",
+      "sha256": "5442a2419ceb913bb75d714d44a600b20075262f7d3100a0c2431743deb918b4",
+      "consumers": [
+        "kora/contract-fixtures/site-directory-v2.json",
+        "kora-cloud/contract-fixtures/site-directory-v2.json",
+        "kora-studio-mvp/contract-fixtures/site-directory-v2.json",
+        "kora-ts-sdk/contract-fixtures/site-directory-v2.json"
+      ]
+    }
+  ],
+  "engine_contracts": [
+    {
+      "version": "v1",
+      "schema": "kora/contract/schema/engine-v1.json",
+      "schema_sha256": "9d5c044e01f14706cd3d33ea841bfb352599008d122666a176f0430a5cb35af1",
+      "typescript": "kora/contract/generated/engine-v1.ts",
+      "typescript_sha256": "6916646c8f196ffddd053efa85a943e7257c76e8c2ecbfc1ac16a34bcdfc439c"
+    },
+    {
+      "version": "v2",
+      "schema": "kora/contract/schema/engine-v2.json",
+      "schema_sha256": "0a803635b28a24d6005a7ef9752322e05e11a6ba2ace57acdc55a595eb72a2b9",
+      "typescript": "kora/contract/generated/engine-v2.ts",
+      "typescript_sha256": "c702fbbdc1672814069b8742175b904dc5e843a1c141a2d945671a04d1442bf8",
+      "embedded_ui_copy": "kora/ui/src/generated/engine-v2.ts",
+      "embedded_ui_copy_sha256": "c702fbbdc1672814069b8742175b904dc5e843a1c141a2d945671a04d1442bf8",
+      "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
+      "studio_copy_sha256": "c702fbbdc1672814069b8742175b904dc5e843a1c141a2d945671a04d1442bf8",
+      "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
+      "sdk_copy_sha256": "c702fbbdc1672814069b8742175b904dc5e843a1c141a2d945671a04d1442bf8"
+    }
+  ]
+}

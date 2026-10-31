@@ -1,0 +1,6 @@
+- name: Administrator
+  workspace_access: true
+  description: Full access to all doctypes
+- name: Cashier
+  workspace_access: true
+  description: Rings up sales at the counter and records payment.

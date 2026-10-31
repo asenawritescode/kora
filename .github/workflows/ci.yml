@@ -12,9 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:8.0
+        image: mysql:8.4.11
         env:
           MYSQL_ROOT_PASSWORD: kora123
+          MYSQL_DATABASE: kora_dbaccess_test
         ports:
           - 3306:3306
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
@@ -37,6 +38,27 @@ jobs:
       - name: Test
         run: go test ./... -v -count=1
 
+      - name: Test disposable MySQL integration packages
+        env:
+          KORA_TEST_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_ANALYTICS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_OUTBOX_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_CONFIG_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_DBACCESS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
+        run: >-
+          go test -tags=integration -p 1
+          ./internal/dbaccess ./api ./analytics ./outbox ./site ./requests/sqlstore ./workflow/sqlstore
+          ./notifications/sqlstore ./management/sqlstore -count=1 -timeout=15m
+
+      - name: Check generated contracts
+        run: go run ./cmd/contractgen -check
+
+      - name: Test Go SDK module
+        run: cd sdk && go test ./... -count=1
+
+      - name: Vet Go SDK module
+        run: cd sdk && go vet ./...
+
       - name: Build
         run: go build -o /dev/null .
 
@@ -52,6 +74,9 @@ jobs:
 
       - name: Install
         run: cd ui && bun install --frozen-lockfile
+
+      - name: Check Engine contract bundle
+        run: cd ui && KORA_ENGINE_CONTRACT_PATH=../contract/generated/engine-v2.ts bun run check:contracts
 
       - name: TypeScript check
         run: cd ui && bunx tsc -b --noEmit

@@ -4,59 +4,71 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/script"
 	"github.com/gin-gonic/gin"
 )
 
-// DraftConfigurationRequest is the Engine boundary for Cloud-generated
-// onboarding configuration. The complete package is composed into one draft;
-// callers must not create each DocType independently.
+// DraftConfigurationRequest is Engine's domain-typed view of the generated
+// configuration-draft wire contract. The complete package is composed into
+// one draft; callers must not create each DocType independently.
 type DraftConfigurationRequest struct {
-	ProposalID           string                `json:"proposal_id"`
-	DraftConfigVersionID string                `json:"draft_config_version_id,omitempty"`
-	ConversationID       string                `json:"conversation_id,omitempty"`
-	InterviewSnapshot    map[string]any        `json:"interview_snapshot,omitempty"`
-	PrimaryWorkflow      string                `json:"primary_workflow,omitempty"`
-	StructuredInput      map[string]any        `json:"structured_input,omitempty"`
-	OpenQuestions        []string              `json:"open_questions,omitempty"`
-	ChannelOrigin        string                `json:"channel_origin,omitempty"`
-	BaseConfigVersionID  string                `json:"base_config_version_id,omitempty"`
-	CreatedBy            string                `json:"created_by,omitempty"`
-	DocTypes             []*doctype.DocType    `json:"doctypes"`
-	Roles                []*doctype.Role       `json:"roles,omitempty"`
-	Permissions          []*doctype.Permission `json:"permissions,omitempty"`
-	Workflows            []*doctype.Workflow   `json:"workflows,omitempty"`
-	Views                []*doctype.View       `json:"views,omitempty"`
-	Scripts              []*ScriptCandidate    `json:"scripts,omitempty"`
+	ProposalID           string                            `json:"proposal_id"`
+	DraftConfigVersionID string                            `json:"draft_config_version_id,omitempty"`
+	ConversationID       string                            `json:"conversation_id,omitempty"`
+	InterviewSnapshot    map[string]any                    `json:"interview_snapshot,omitempty"`
+	PrimaryWorkflow      string                            `json:"primary_workflow,omitempty"`
+	StructuredInput      map[string]any                    `json:"structured_input,omitempty"`
+	OpenQuestions        []string                          `json:"open_questions,omitempty"`
+	ChannelOrigin        string                            `json:"channel_origin,omitempty"`
+	BaseConfigVersionID  string                            `json:"base_config_version_id,omitempty"`
+	CreatedBy            string                            `json:"created_by,omitempty"` // legacy input; attribution uses verified execution
+	DocTypes             []*doctype.DocType                `json:"doctypes"`
+	Roles                []*doctype.Role                   `json:"roles,omitempty"`
+	Permissions          []*DraftPermission                `json:"permissions,omitempty"`
+	Views                []*doctype.View                   `json:"views,omitempty"`
+	Scripts              []*ScriptCandidate                `json:"scripts,omitempty"`
+	ScheduledJobs        []contract.ScheduledJobDefinition `json:"scheduled_jobs,omitempty"`
+	WorkflowDefinitions  []contract.WorkflowDefinition     `json:"workflow_definitions,omitempty"`
+}
+
+// DraftPermission includes the legacy public flag so the Engine can reject an
+// unsupported access grant instead of silently dropping it during decoding.
+type DraftPermission struct {
+	doctype.Permission
+	Public bool `json:"public,omitempty"`
 }
 
 type ScriptCandidate struct {
-	Name           string `json:"name"`
-	ScriptType     string `json:"script_type"`
-	DocType        string `json:"doctype,omitempty"`
-	Event          string `json:"event,omitempty"`
-	MethodPath     string `json:"method_path,omitempty"`
-	WorkflowAction string `json:"workflow_action,omitempty"`
-	Schedule       string `json:"schedule,omitempty"`
-	RunAs          string `json:"run_as,omitempty"`
-	TimeoutMs      int    `json:"timeout_ms,omitempty"`
-	Source         string `json:"source"`
+	Name       string `json:"name"`
+	ScriptType string `json:"script_type"`
+	DocType    string `json:"doctype,omitempty"`
+	Event      string `json:"event,omitempty"`
+	MethodPath string `json:"method_path,omitempty"`
+	Schedule   string `json:"schedule,omitempty"`
+	RunAs      string `json:"run_as,omitempty"`
+	TimeoutMs  int    `json:"timeout_ms,omitempty"`
+	Source     string `json:"source"`
 }
 
 // HandleConfigurationDraft composes an ordered, validated package into one
 // Draft ConfigVersion. It never writes live DocType tables or activates code.
 func (h *Handler) HandleConfigurationDraft(c *gin.Context) {
-	var req DraftConfigurationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequestError(c, "validation.invalid_json", "Invalid request format: "+err.Error(), nil)
+	req, ok := decodeDraftConfigurationRequest(c)
+	if !ok {
 		return
 	}
 	if strings.TrimSpace(req.ProposalID) == "" {
 		badRequestError(c, "proposal.required", "proposal_id is required", nil)
+		return
+	}
+	if err := contract.ValidateScheduledJobDefinitions(req.ScheduledJobs); err != nil {
+		badRequestError(c, "proposal.invalid_scheduled_jobs", err.Error(), nil)
 		return
 	}
 	if len(req.DocTypes) == 0 {
@@ -79,18 +91,24 @@ func (h *Handler) HandleConfigurationDraft(c *gin.Context) {
 			return
 		}
 		if reg != nil && reg.Has(dt.Name) {
-			conflictError(c, "doctype.already_exists", "DocType already exists: "+dt.Name, map[string]any{"doctype": dt.Name})
-			return
+			// Conversational clients may include existing definitions in a
+			// complete candidate so the draft snapshot remains self-contained.
+			// Reusing an identical definition is safe; changed definitions still
+			// require the explicit schema-review path and must not be smuggled in
+			// as a create operation.
+			_, _, conflict := classifyCandidateDocType(reg, dt)
+			if conflict != nil {
+				conflictError(c, "doctype.already_exists", conflict.Detail, map[string]any{"doctype": dt.Name})
+				return
+			}
 		}
 	}
-	for _, role := range req.Roles {
-		if role == nil || strings.TrimSpace(role.Name) == "" {
-			badRequestError(c, "proposal.invalid_role", "Every generated role must have a name", nil)
-			return
-		}
+	if issues := validateWorkflowDefinitionCandidates(h, c, req.WorkflowDefinitions, reg, ordered); len(issues) > 0 {
+		badRequestError(c, "proposal.invalid_workflow_definitions", strings.Join(issues, "; "), nil)
+		return
 	}
-	if err := validateScriptCandidates(h, req.Scripts); err != nil {
-		badRequestError(c, "proposal.invalid_script", err.Error(), nil)
+	if messages, _ := validateConfigurationCandidateRules(req, ordered, reg, h); len(messages) > 0 {
+		badRequestError(c, "proposal.invalid_configuration", strings.Join(messages, "; "), nil)
 		return
 	}
 
@@ -118,10 +136,11 @@ func (h *Handler) HandleConfigurationDraft(c *gin.Context) {
 		upsertRole(snapshot, role)
 	}
 	for _, permission := range req.Permissions {
-		upsertPermission(snapshot, permission)
-	}
-	for _, workflow := range req.Workflows {
-		upsertWorkflow(snapshot, workflow)
+		if permission != nil && permission.Public {
+			badRequestError(c, "proposal.public_permission_unsupported", "Public permission grants are unsupported; configure an explicit reviewed public-access policy", nil)
+			return
+		}
+		upsertPermission(snapshot, &permission.Permission)
 	}
 	for _, view := range req.Views {
 		upsertView(snapshot, view)
@@ -130,20 +149,34 @@ func (h *Handler) HandleConfigurationDraft(c *gin.Context) {
 		hash := sha256.Sum256([]byte(candidate.Source))
 		snapshot.Scripts = append(snapshot.Scripts, &doctype.ScriptSnapshot{
 			Name: candidate.Name, ScriptType: candidate.ScriptType, DocType: candidate.DocType,
-			Event: candidate.Event, MethodPath: candidate.MethodPath, WorkflowAction: candidate.WorkflowAction,
+			Event: candidate.Event, MethodPath: candidate.MethodPath,
 			Schedule: candidate.Schedule, Priority: 10, IsActive: false, RunAs: candidate.RunAs,
 			TimeoutMs: candidate.TimeoutMs, ScriptHash: fmt.Sprintf("%x", hash[:]), Source: candidate.Source,
 		})
 	}
+	for _, definition := range req.WorkflowDefinitions {
+		upsertWorkflowDefinition(snapshot, definition)
+	}
+	if len(req.ScheduledJobs) > 0 {
+		byName := make(map[string]contract.ScheduledJobDefinition, len(snapshot.ScheduledJobs)+len(req.ScheduledJobs))
+		for _, job := range snapshot.ScheduledJobs {
+			byName[job.Name] = job
+		}
+		for _, job := range req.ScheduledJobs {
+			byName[job.Name] = job
+		}
+		snapshot.ScheduledJobs = snapshot.ScheduledJobs[:0]
+		for _, job := range byName {
+			snapshot.ScheduledJobs = append(snapshot.ScheduledJobs, job)
+		}
+		sort.Slice(snapshot.ScheduledJobs, func(i, j int) bool { return snapshot.ScheduledJobs[i].Name < snapshot.ScheduledJobs[j].Name })
+	}
+	if rejectInvalidSnapshotReferences(c, snapshot, reg) {
+		return
+	}
 
-	createdBy := strings.TrimSpace(req.CreatedBy)
-	if createdBy == "" {
-		createdBy = c.GetString("user")
-	}
-	if createdBy == "" {
-		createdBy = "cloud-proposal"
-	}
-	label := "Proposal " + req.ProposalID + " configuration draft"
+	createdBy := currentUser(c)
+	label := configurationDraftLabel(req)
 	versionID := req.DraftConfigVersionID
 	versionNum := 0
 	if versionID != "" {
@@ -155,14 +188,40 @@ func (h *Handler) HandleConfigurationDraft(c *gin.Context) {
 		internalError(c, "saving configuration draft", err)
 		return
 	}
-	c.JSON(http.StatusOK, Response{Data: map[string]any{
-		"proposal_id":             req.ProposalID,
-		"conversation_id":         req.ConversationID,
-		"draft_config_version_id": versionID,
-		"version_num":             versionNum,
-		"status":                  "Draft",
-		"ordered_doctypes":        orderedDocTypeNames(ordered),
+	c.JSON(http.StatusOK, Response{Data: contract.ConfigurationDraftResultV2{
+		ProposalID: req.ProposalID, ConversationID: req.ConversationID,
+		DraftConfigVersionID: versionID, VersionNum: versionNum,
+		Status: "Draft", OrderedDocTypes: orderedDocTypeNames(ordered),
 	}})
+}
+
+func configurationDraftLabel(req DraftConfigurationRequest) string {
+	context, _ := req.InterviewSnapshot["industry"].(string)
+	context = strings.Join(strings.Fields(strings.TrimSpace(context)), " ")
+	if context == "" {
+		context = strings.Join(strings.Fields(strings.TrimSpace(req.PrimaryWorkflow)), " ")
+	}
+	if context == "" {
+		return "Workspace setup draft"
+	}
+	runes := []rune(context)
+	if len(runes) > 52 {
+		context = strings.TrimSpace(string(runes[:52])) + "…"
+	}
+	return context + " setup draft"
+}
+
+func upsertWorkflowDefinition(snapshot *doctype.ConfigSnapshot, definition contract.WorkflowDefinition) {
+	if snapshot == nil {
+		return
+	}
+	for i := range snapshot.WorkflowDefinitions {
+		if snapshot.WorkflowDefinitions[i].ID == definition.ID {
+			snapshot.WorkflowDefinitions[i] = definition
+			return
+		}
+	}
+	snapshot.WorkflowDefinitions = append(snapshot.WorkflowDefinitions, definition)
 }
 
 func validateScriptCandidates(h *Handler, candidates []*ScriptCandidate) error {
@@ -179,7 +238,7 @@ func validateScriptCandidates(h *Handler, candidates []*ScriptCandidate) error {
 			return fmt.Errorf("script %q has no source", candidate.Name)
 		}
 		switch script.Type(candidate.ScriptType) {
-		case script.TypeDocEvent, script.TypeAPIMethod, script.TypeWorkflowAction, script.TypeScheduled:
+		case script.TypeDocEvent, script.TypeAPIMethod, script.TypeScheduled:
 		default:
 			return fmt.Errorf("script %q has unsupported script_type %q", candidate.Name, candidate.ScriptType)
 		}
@@ -219,16 +278,6 @@ func upsertPermission(snapshot *doctype.ConfigSnapshot, permission *doctype.Perm
 		}
 	}
 	snapshot.Permissions = append(snapshot.Permissions, permission)
-}
-
-func upsertWorkflow(snapshot *doctype.ConfigSnapshot, workflow *doctype.Workflow) {
-	for i, existing := range snapshot.Workflows {
-		if existing != nil && existing.Name == workflow.Name {
-			snapshot.Workflows[i] = workflow
-			return
-		}
-	}
-	snapshot.Workflows = append(snapshot.Workflows, workflow)
 }
 
 func upsertView(snapshot *doctype.ConfigSnapshot, view *doctype.View) {

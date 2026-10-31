@@ -3,6 +3,7 @@ package api
 import (
 	"testing"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -18,6 +19,26 @@ func TestOrderDraftDocTypesChildBeforeParent(t *testing.T) {
 	}
 }
 
+func TestUpsertWorkflowDefinitionReplacesByStableID(t *testing.T) {
+	snapshot := &doctype.ConfigSnapshot{WorkflowDefinitions: []contract.WorkflowDefinition{{
+		ID: "record-notify", Version: 1, Entry: "finish",
+		Steps: []contract.StepDefinition{{ID: "finish", Kind: contract.StepEnd, End: &contract.EndSpec{Outcome: "complete"}}},
+	}}}
+	updated := contract.WorkflowDefinition{
+		ID: "record-notify", Version: 2, Entry: "finish",
+		Steps: []contract.StepDefinition{{ID: "finish", Kind: contract.StepEnd, End: &contract.EndSpec{Outcome: "updated"}}},
+	}
+	upsertWorkflowDefinition(snapshot, updated)
+	if len(snapshot.WorkflowDefinitions) != 1 || snapshot.WorkflowDefinitions[0].Version != 2 || snapshot.WorkflowDefinitions[0].Steps[0].End.Outcome != "updated" {
+		t.Fatalf("workflow definition was not replaced by stable ID: %#v", snapshot.WorkflowDefinitions)
+	}
+	updated.ID = "another-workflow"
+	upsertWorkflowDefinition(snapshot, updated)
+	if len(snapshot.WorkflowDefinitions) != 2 {
+		t.Fatalf("new workflow definition was not appended: %#v", snapshot.WorkflowDefinitions)
+	}
+}
+
 func TestOrderDraftDocTypesRejectsNormalizedDuplicate(t *testing.T) {
 	_, err := orderDraftDocTypes([]*doctype.DocType{{Name: "Supplier"}, {Name: " supplier "}})
 	if err == nil {
@@ -30,6 +51,19 @@ func TestOrderDraftDocTypesRejectsCycle(t *testing.T) {
 	b := &doctype.DocType{Name: "B", Fields: []doctype.Field{{Fieldname: "a", Fieldtype: "Link", Options: "A"}}}
 	if _, err := orderDraftDocTypes([]*doctype.DocType{a, b}); err == nil {
 		t.Fatal("expected dependency cycle")
+	}
+}
+
+func TestConfigurationDraftLabelUsesWorkspaceContextInsteadOfProposalID(t *testing.T) {
+	label := configurationDraftLabel(DraftConfigurationRequest{
+		ProposalID:        "setup-opaque-123456",
+		InterviewSnapshot: map[string]any{"industry": "  Neighbourhood   coffee shop  "},
+	})
+	if label != "Neighbourhood coffee shop setup draft" {
+		t.Fatalf("draft label = %q", label)
+	}
+	if got := configurationDraftLabel(DraftConfigurationRequest{ProposalID: "opaque-id"}); got != "Workspace setup draft" {
+		t.Fatalf("fallback label = %q", got)
 	}
 }
 

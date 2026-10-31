@@ -1,0 +1,81 @@
+name: Field Observation
+module: Farm Team Controls
+description: A dated, evidence-backed observation recorded by the field team.
+title_field: reference
+search_fields: reference, field, observation_type, status
+sort_field: observed_on
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Observation reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: field
+    fieldtype: Link
+    label: Field
+    options: Field
+    reqd: true
+    in_list_view: true
+  - fieldname: crop_plan
+    fieldtype: Link
+    label: Crop plan
+    options: Crop Plan
+  - fieldname: observed_on
+    fieldtype: Date
+    label: Observed on
+    reqd: true
+    in_list_view: true
+  - fieldname: observed_by
+    fieldtype: User
+    label: Observed by
+    reqd: true
+  - fieldname: observation_type
+    fieldtype: Select
+    label: Observation type
+    options: |
+      Crop condition
+      Pest or disease symptoms
+      Water or irrigation
+      Weather impact
+      Soil or field issue
+      Other
+    reqd: true
+    in_list_view: true
+    description: Record what was observed; this does not diagnose a cause.
+  - fieldname: severity
+    fieldtype: Select
+    label: Urgency
+    options: |
+      Routine
+      Needs attention
+      Urgent
+    default: Routine
+    in_list_view: true
+  - fieldname: observation
+    fieldtype: Text
+    label: What did you see?
+    reqd: true
+  - fieldname: action_needed
+    fieldtype: Text
+    label: Follow-up needed
+  - fieldname: follow_up_owner
+    fieldtype: User
+    label: Follow-up owner
+  - fieldname: follow_up_due
+    fieldtype: Date
+    label: Follow-up date
+  - fieldname: evidence
+    fieldtype: Attach
+    label: Photo or document
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Open
+      In progress
+      Resolved
+    default: Open
+    in_list_view: true

@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/analytics"
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/conversation"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -55,6 +58,33 @@ func TestLivePostgresConfigVersionRoutes(t *testing.T) {
 	)`)
 	if err != nil {
 		t.Fatal("create config-version fixture table:", err)
+	}
+	for _, statement := range configstore.ActivationJournalSchema(kdb.Resolve("postgres")) {
+		if _, err := database.Exec(statement); err != nil {
+			t.Fatal("create config activation journal fixture:", err)
+		}
+	}
+	for _, statement := range configstore.ConfigRevisionSchema(kdb.Resolve("postgres")) {
+		if _, err := database.Exec(statement); err != nil {
+			t.Fatal("create tenant config revision fixture:", err)
+		}
+	}
+	if err := configstore.SeedConfigRevision(context.Background(), database, kdb.Resolve("postgres")); err != nil {
+		t.Fatal("seed tenant config revision fixture:", err)
+	}
+	readTenantConfigRevision := func() uint64 {
+		t.Helper()
+		revision, err := configstore.CurrentConfigRevision(context.Background(), database, kdb.Resolve("postgres"))
+		if err != nil {
+			t.Fatal("read tenant config revision:", err)
+		}
+		return revision
+	}
+	if _, err := database.Exec(`CREATE TABLE _kora_auth_revision (
+		id INTEGER PRIMARY KEY CHECK (id = 1), policy_revision BIGINT NOT NULL,
+		membership_revision BIGINT NOT NULL);
+		INSERT INTO _kora_auth_revision (id, policy_revision, membership_revision) VALUES (1, 1, 1)`); err != nil {
+		t.Fatal("create authorization revision fixture:", err)
 	}
 	if _, err := database.Exec(`INSERT INTO _kora_config_version (id, site, version, created_at, created_by, label, status, is_active)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, "draft-pg", "site-pg", 1, "2026-09-29T00:00:00Z", "tester", "Draft", "Draft", 0); err != nil {
@@ -121,12 +151,43 @@ func TestLivePostgresConfigVersionRoutes(t *testing.T) {
 	if activateRecorder.Code != http.StatusOK {
 		t.Fatalf("live PostgreSQL config-version activation returned HTTP %d: %s", activateRecorder.Code, activateRecorder.Body.String())
 	}
+	if got := readTenantConfigRevision(); got != 2 {
+		t.Fatalf("tenant config revision after activation = %d, want 2", got)
+	}
 	var activeCount, staleActiveFlagCount int
 	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_config_version WHERE site = $1 AND status = 'Active' AND is_active = 1`, "site-pg").Scan(&activeCount); err != nil {
 		t.Fatal("count active versions after activation:", err)
 	}
 	if activeCount != 1 {
 		t.Fatalf("active config version count after activation = %d, want exactly one", activeCount)
+	}
+	var activationPhase string
+	if err := database.QueryRow(`SELECT phase FROM _kora_config_operation WHERE site = $1 AND version_id = $2 AND kind = 'activate'`, "site-pg", "activate-draft-pg").Scan(&activationPhase); err != nil {
+		t.Fatal("read activation journal phase:", err)
+	}
+	if activationPhase != configstore.ActivationCompleted {
+		t.Fatalf("activation journal phase = %q, want completed", activationPhase)
+	}
+	// Simulate a crash after the metadata transaction committed but before the
+	// final journal transition; retry must rebuild the in-memory view and finish.
+	if _, err := database.Exec(`UPDATE _kora_config_operation SET phase = $1 WHERE site = $2 AND version_id = $3 AND kind = 'activate'`, configstore.ActivationActivated, "site-pg", "activate-draft-pg"); err != nil {
+		t.Fatal("simulate interrupted activation finalization:", err)
+	}
+	retryRecorder := httptest.NewRecorder()
+	retryContext := postgresConfigVersionContext(retryRecorder, database, registry, http.MethodPost)
+	retryContext.Params = gin.Params{{Key: "id", Value: "activate-draft-pg"}}
+	handler.HandleConfigVersionActivate(retryContext)
+	if retryRecorder.Code != http.StatusOK || !strings.Contains(retryRecorder.Body.String(), `"recovered":true`) {
+		t.Fatalf("completed activation retry returned HTTP %d: %s", retryRecorder.Code, retryRecorder.Body.String())
+	}
+	if got := readTenantConfigRevision(); got != 2 {
+		t.Fatalf("tenant config revision after activation retry = %d, want exactly-once value 2", got)
+	}
+	if err := database.QueryRow(`SELECT phase FROM _kora_config_operation WHERE site = $1 AND version_id = $2 AND kind = 'activate'`, "site-pg", "activate-draft-pg").Scan(&activationPhase); err != nil {
+		t.Fatal("read replayed activation journal phase:", err)
+	}
+	if activationPhase != configstore.ActivationCompleted {
+		t.Fatalf("replayed activation journal phase = %q, want completed", activationPhase)
 	}
 	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_config_version WHERE id = $1 AND status = 'Superseded' AND is_active = 1`, "active-before-pg").Scan(&staleActiveFlagCount); err != nil {
 		t.Fatal("check superseded version flag:", err)
@@ -141,6 +202,9 @@ func TestLivePostgresConfigVersionRoutes(t *testing.T) {
 	handler.HandleConfigVersionRollback(rollbackContext)
 	if rollbackRecorder.Code != http.StatusOK {
 		t.Fatalf("live PostgreSQL config-version rollback returned HTTP %d: %s", rollbackRecorder.Code, rollbackRecorder.Body.String())
+	}
+	if got := readTenantConfigRevision(); got != 3 {
+		t.Fatalf("tenant config revision after rollback = %d, want 3", got)
 	}
 	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_config_version WHERE site = $1 AND status = 'Active' AND is_active = 1`, "site-pg").Scan(&activeCount); err != nil {
 		t.Fatal("count active versions after rollback:", err)
@@ -176,6 +240,9 @@ func TestLivePostgresConfigVersionRoutes(t *testing.T) {
 	if failRecorder.Code != http.StatusInternalServerError {
 		t.Fatalf("activation with active-history write failure returned HTTP %d, want 500: %s", failRecorder.Code, failRecorder.Body.String())
 	}
+	if got := readTenantConfigRevision(); got != 3 {
+		t.Fatalf("failed activation advanced tenant config revision to %d, want 3", got)
+	}
 	var failedDraftStatus string
 	if err := database.QueryRow(`SELECT status FROM _kora_config_version WHERE id = $1`, "activate-fails-pg").Scan(&failedDraftStatus); err != nil {
 		t.Fatal("read failed activation draft status:", err)
@@ -189,9 +256,28 @@ func TestLivePostgresConfigVersionRoutes(t *testing.T) {
 	if activeCount != 1 {
 		t.Fatalf("failed activation left %d active versions, want the previous single active version", activeCount)
 	}
+	if _, err := database.Exec(`DROP TRIGGER reject_config_activation_version ON _kora_config_version; DROP FUNCTION reject_config_activation_version()`); err != nil {
+		t.Fatal("remove activation failure-injection trigger:", err)
+	}
+	recoveryRecorder := httptest.NewRecorder()
+	recoveryContext := postgresConfigVersionContext(recoveryRecorder, database, registry, http.MethodPost)
+	recoveryContext.Params = gin.Params{{Key: "id", Value: "activate-fails-pg"}}
+	handler.HandleConfigVersionActivate(recoveryContext)
+	if recoveryRecorder.Code != http.StatusOK {
+		t.Fatalf("retry after activation transaction failure returned HTTP %d: %s", recoveryRecorder.Code, recoveryRecorder.Body.String())
+	}
+	if got := readTenantConfigRevision(); got != 4 {
+		t.Fatalf("recovered activation revision = %d, want 4", got)
+	}
+	if err := database.QueryRow(`SELECT phase FROM _kora_config_operation WHERE site = $1 AND version_id = $2 AND kind = 'activate'`, "site-pg", "activate-fails-pg").Scan(&activationPhase); err != nil {
+		t.Fatal("read recovered activation journal phase:", err)
+	}
+	if activationPhase != configstore.ActivationCompleted {
+		t.Fatalf("recovered activation journal phase = %q, want completed", activationPhase)
+	}
 
 	_, err = database.Exec(`CREATE TABLE _kora_user (roles TEXT NOT NULL);
-		CREATE TABLE _kora_role (name TEXT PRIMARY KEY);
+		CREATE TABLE _kora_role (name TEXT PRIMARY KEY, workspace_access SMALLINT NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', site TEXT NOT NULL DEFAULT '');
 		CREATE TABLE _kora_permission (role TEXT NOT NULL);
 		INSERT INTO _kora_user (roles) VALUES ('Store Manager,Manager'), ('Assistant Store Manager');
 		INSERT INTO _kora_role (name) VALUES ('Store Manager');
@@ -216,6 +302,39 @@ func TestLivePostgresConfigVersionRoutes(t *testing.T) {
 	}
 	if roleResponse.Data.UsersWithRole != 1 {
 		t.Fatalf("PostgreSQL role-delete user count = %d, want exact-token count 1", roleResponse.Data.UsersWithRole)
+	}
+
+	// Exercise package/config activation's transaction-bound CAS using the
+	// tenant-local revision after the HTTP activation/recovery sequence.
+	casStore := configstore.NewStore(database, kdb.Resolve("postgres"))
+	casSnapshot := &doctype.ConfigSnapshot{Roles: []*doctype.Role{{Name: "Management CAS Role", WorkspaceAccess: true}}}
+	activateAtRevision := func(snapshot *doctype.ConfigSnapshot, expected uint64) error {
+		tx, txErr := database.BeginTx(context.Background(), nil)
+		if txErr != nil {
+			return txErr
+		}
+		defer tx.Rollback()
+		if txErr = casStore.ActivateSnapshotAtConfigRevision(tx, snapshot, "site-pg", kdb.Resolve("postgres"), expected); txErr != nil {
+			return txErr
+		}
+		return tx.Commit()
+	}
+	currentConfigRevision := readTenantConfigRevision()
+	if err := activateAtRevision(casSnapshot, currentConfigRevision); err != nil {
+		t.Fatal("activate at current tenant revision:", err)
+	}
+	if err := activateAtRevision(&doctype.ConfigSnapshot{Roles: []*doctype.Role{{Name: "Stale Management CAS Role"}}}, currentConfigRevision); !errors.Is(err, configstore.ErrConfigRevisionConflict) {
+		t.Fatalf("stale management activation error = %v, want revision conflict", err)
+	}
+	if got := readTenantConfigRevision(); got != currentConfigRevision+1 {
+		t.Fatalf("tenant revision after current/stale management activation = %d, want %d", got, currentConfigRevision+1)
+	}
+	var staleRoleCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_role WHERE name = $1`, "Stale Management CAS Role").Scan(&staleRoleCount); err != nil {
+		t.Fatal("check stale management role rollback:", err)
+	}
+	if staleRoleCount != 0 {
+		t.Fatal("stale management activation persisted a role")
 	}
 
 	if _, err := database.Exec(`DROP TABLE _kora_config_version`); err != nil {

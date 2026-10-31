@@ -7,6 +7,7 @@ import { TimeSeriesChart } from '../charts/TimeSeriesChart'
 export interface ViewComponentProps {
   config: RegisteredComponentConfig
   data?: any
+  resources?: Record<string, { kind: string; data?: any; message?: string } | undefined>
   isLoading?: boolean
   disabled?: boolean
   readonly?: boolean
@@ -26,6 +27,7 @@ export interface RegisteredComponentConfig {
   desktop_columns?: string[]
   mobile_columns?: string[]
   filters?: Array<{ field: string; op?: string; value?: unknown }>
+  resource_bindings?: Record<string, string>
   components?: RegisteredComponentConfig[]
   position: number
   span?: number
@@ -60,16 +62,19 @@ type LazyEntry = {
 type ComponentEntry = {
   component: ComponentType<ViewComponentProps>
   requiredCapabilities?: ViewCapability[]
+  resourceRoles?: Array<{ name: string; label: string; dataBinding?: boolean }>
   preload?: () => Promise<unknown>
 }
 
 const createLazyEntry = (
   loader: () => Promise<{ default: ComponentType<ViewComponentProps> }>,
   requiredCapabilities: ViewCapability[] = [],
+  resourceRoles?: ComponentEntry['resourceRoles'],
 ): ComponentEntry => ({
   component: React.lazy(loader),
   preload: loader,
   requiredCapabilities,
+  resourceRoles,
 })
 
 const createStaticEntry = (
@@ -233,22 +238,14 @@ function SearchBox(props: ViewComponentProps) {
   return (
     <input
       type="text"
-    placeholder="Search..."
+      maxLength={128}
+      placeholder="Search..."
     aria-label={props.config.label || 'Search records'}
       className="w-full rounded-md border px-3 py-2 text-sm"
       autoFocus
       onChange={(e) => props.onAction('search', { value: e.target.value })}
     />
   )
-}
-
-function WorkflowActions(props: ViewComponentProps) {
-  const record = Array.isArray(props.data?.data) ? props.data.data[0] : props.data?.data || props.data
-  const context = record?.name ? { name: record.name, row: record } : {}
-  return <div className="flex gap-2">
-    <button className="rounded-md bg-primary px-4 py-1.5 text-sm text-primary-foreground" onClick={() => props.onAction('submit', context)}>Send</button>
-    <button className="rounded-md border px-4 py-1.5 text-sm" onClick={() => props.onAction('cancel', context)}>Cancel</button>
-  </div>
 }
 
 function InsightsPanel(props: ViewComponentProps) {
@@ -318,7 +315,6 @@ export const COMPONENT_REGISTRY = {
   record_cards: createStaticEntry(RecordCards, ['cards']),
   filter_bar: createStaticEntry(FilterBar, ['filters']),
   search_box: createStaticEntry(SearchBox, ['filters']),
-  workflow_actions: createStaticEntry(WorkflowActions, ['workflow']),
   insights_panel: createStaticEntry(InsightsPanel, ['dashboard', 'charts', 'analytics']),
   split_view: createStaticEntry(SplitView, ['split']),
   kanban_board: createLazyEntry(() => import('./KanbanBoard'), ['kanban']),
@@ -336,7 +332,10 @@ export const COMPONENT_REGISTRY = {
   confirmation_step: createLazyEntry(() => import('./ConfirmationStep'), ['wizard']),
   receipt_preview: createLazyEntry(() => import('./ReceiptPreview'), ['document']),
   drawer: createLazyEntry(() => import('./Drawer'), ['split']),
-  category_tabs: createLazyEntry(() => import('./CategoryTabs'), ['commerce']),
+  category_tabs: createLazyEntry(() => import('./CategoryTabs'), ['commerce'], [
+    { name: 'products', label: 'Product rows', dataBinding: true },
+    { name: 'categories', label: 'Category records' },
+  ]),
   tabs: createLazyEntry(() => import('./Tabs'), ['split']),
   line_item_builder: createLazyEntry(() => import('./LineItemBuilder'), ['commerce']),
   wizard: createLazyEntry(() => import('./Wizard'), ['wizard']),

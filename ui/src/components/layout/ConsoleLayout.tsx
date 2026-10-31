@@ -19,7 +19,7 @@ export function ConsoleLayout() {
           <div className="flex items-center gap-3">
             <LogoMark size={20} />
             <Link to="/console" className="font-semibold text-sm">
-              Kora Console
+              Kigae Console
             </Link>
           </div>
           <div className="flex items-center gap-4">

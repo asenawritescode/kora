@@ -8,24 +8,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/workflow"
 )
 
 var createBundleReference = regexp.MustCompile(`\$records\.([A-Za-z0-9_-]+)\.name`)
 
 type savedBundleDocument struct {
-	dt     *doctype.DocType
-	doc    *doctype.Document
-	oldDoc *doctype.Document
+	dt                 *doctype.DocType
+	doc                *doctype.Document
+	oldDoc             *doctype.Document
+	workflowTransition bool
 }
 
 // Typed sentinel errors. Adapters map these to wire errors via contract.Code;
@@ -65,14 +72,27 @@ func authorize(reg *doctype.Registry, op Operation, def CommandDefinition) *cont
 	if doctypeName == "" {
 		return contract.NewError(contract.CodeValidationFailed, "payload missing doctype")
 	}
-	roles := op.Context.Roles
-	if len(roles) == 0 {
-		roles = []string{doctype.AdminRole}
+	if resolved := reg.Get(doctypeName); resolved != nil {
+		doctypeName = resolved.Name
+		if resolved.AppendOnly && op.Command != CommandRecordCreate && op.Command != CommandPublicFormSubmit && op.Command != CommandRecordMutateBundle {
+			return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
+		}
 	}
-	if allowed, _ := reg.CanUser(roles, doctypeName, def.AuthorizesWith); !allowed {
-		return ErrPermission
+	permission := def.AuthorizesWith
+	var bundle RecordMutationBundlePayload
+	if op.Command == CommandRecordMutateBundle && json.Unmarshal(op.Payload, &bundle) == nil && len(bundle.Records) > 0 {
+		permission = bundle.Records[0].Operation
+		if permission == "" {
+			permission = "create"
+		}
+		if permission == "update" && bundle.Records[0].TransitionAction != "" {
+			if _, err := policy.Decide(op.Context.Execution, reg, doctypeName, "submit"); err != nil {
+				return err
+			}
+		}
 	}
-	return nil
+	_, err := policy.Decide(op.Context.Execution, reg, doctypeName, permission)
+	return err
 }
 
 // payloadDoctype extracts the target doctype from either typed payload.
@@ -86,18 +106,35 @@ func payloadDoctype(raw json.RawMessage) string {
 	return probe.Doctype
 }
 
+func captureLifecycleHooks(ctx context.Context, txMgr *orm.TxManager, tx *sql.Tx, dt *doctype.DocType, event script.Event, doc, oldDoc *doctype.Document) *contract.Error {
+	if err := txMgr.CaptureAsyncAfterHooksTx(ctx, tx, dt, event, doc, oldDoc); err != nil {
+		return contract.NewError(contract.CodeDependencyUnavailable, "persisting async lifecycle hooks failed: "+err.Error())
+	}
+	return nil
+}
+
 // executeInTx runs mutation + receipt claim + audit write inside ONE SQL
 // transaction (the mutation itself writes its outbox rows via orm InTx
 // variants). Any failure rolls back everything; a commit implies all of it.
-func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, def CommandDefinition, opID string) (*ResultData, *contract.Error) {
-
-	dbTx, err := siteDB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
+func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, def CommandDefinition, opID string, afterCommit *func()) (*ResultData, *contract.Error) {
+	ownsTransaction := dbTx == nil
+	auditFailure := func(code contract.Code) {
+		if ownsTransaction {
+			k.writeFailureAudit(siteDB, op, def, opID, code)
+		}
 	}
-	defer dbTx.Rollback()
+	if ownsTransaction {
+		var err error
+		dbTx, err = siteDB.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
+		}
+		defer dbTx.Rollback()
+	}
 	priorMutationExecutor := txMgr.ScriptMutationExecutor
 	priorPostCommitHooks := txMgr.PostCommitHooks
+	priorTransaction := txMgr.Transaction
+	txMgr.Transaction = dbTx
 	txMgr.PostCommitHooks = nil
 	txMgr.ScriptMutationExecutor = script.MutationExecutorFunc(func(nestedCtx context.Context, request script.MutationRequest) (json.RawMessage, error) {
 		return k.executeScriptMutationInTx(nestedCtx, dbTx, txMgr, request)
@@ -105,6 +142,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 	defer func() {
 		txMgr.ScriptMutationExecutor = priorMutationExecutor
 		txMgr.PostCommitHooks = priorPostCommitHooks
+		txMgr.Transaction = priorTransaction
 	}()
 
 	doctypeName := payloadDoctype(op.Payload)
@@ -131,7 +169,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 	switch op.Command {
 	case CommandRecordMutateBundle:
 		var p RecordMutationBundlePayload
-		if err := json.Unmarshal(op.Payload, &p); err != nil || len(p.Records) == 0 || len(p.Records) > 10 || p.Doctype != dt.Name || p.Records[0].Doctype != dt.Name {
+		if err := json.Unmarshal(op.Payload, &p); err != nil || len(p.Records) == 0 || len(p.Records) > MaxMutationBundleRecords || p.Doctype != dt.Name || p.Records[0].Doctype != dt.Name {
 			return nil, contract.NewError(contract.CodeValidationFailed, "invalid record.mutate_bundle payload")
 		}
 		keySet := make(map[string]struct{}, len(p.Records))
@@ -184,24 +222,62 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		pendingLinks := make(map[string]*doctype.Document, len(p.Records))
 		for i, item := range p.Records {
 			recordDT := reg.Get(item.Doctype)
-			data, err := resolveCreateBundleData(item.Data, recordNames)
-			if err != nil {
-				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("bundle record %q: %v", item.Key, err))
-			}
-			doc := doctype.NewDocument(recordDT.Name)
-			doc.Name = recordNames[item.Key]
 			operation := item.Operation
 			if operation == "" {
 				operation = "create"
 			}
+			if operation != "create" && operation != "update" && operation != "decrement" && operation != "adjust" {
+				return nil, contract.NewError(contract.CodeValidationFailed, "bundle operation must be create, update, decrement, or adjust")
+			}
+			permission := "create"
+			if operation != "create" {
+				permission = "write"
+			}
+			if _, permissionErr := policy.Decide(op.Context.Execution, reg, recordDT.Name, permission); permissionErr != nil {
+				return nil, permissionErr
+			}
+			if item.TransitionAction != "" {
+				if operation != "update" {
+					return nil, contract.NewError(contract.CodeValidationFailed, "transition actions require an update bundle item")
+				}
+				if _, permissionErr := policy.Decide(op.Context.Execution, reg, recordDT.Name, "submit"); permissionErr != nil {
+					return nil, permissionErr
+				}
+			}
+			data, err := resolveCreateBundleData(item.Data, recordNames)
+			if err != nil {
+				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("bundle record %q: %v", item.Key, err))
+			}
+			if operation == "create" {
+				if err := k.rejectWorkflowStateOnCreate(ctx, dbTx, op, recordDT, reg, data); err != nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("bundle record %q: %v", item.Key, err))
+				}
+			}
+			doc := doctype.NewDocument(recordDT.Name)
+			doc.Name = recordNames[item.Key]
 			var oldDoc *doctype.Document
-			if operation == "update" {
-				oldDoc, err = txMgr.GetDoc(recordDT, doc.Name, ownerForOperation(reg, op, recordDT.Name, "write"))
+			if operation != "create" {
+				if err := k.rejectWorkflowStateMutation(ctx, dbTx, op, recordDT, reg, data); err != nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+				}
+				oldDoc, err = txMgr.GetDocWithScope(recordDT, doc.Name, scopeForOperation(reg, op, recordDT.Name, "write"))
 				if err != nil {
 					if errors.Is(err, orm.ErrNotFound) {
 						return nil, contract.NewError(contract.CodeNotFound, "document not found")
 					}
 					return nil, contract.NewError(contract.CodeDependencyUnavailable, "load bundle document failed")
+				}
+				if item.TransitionAction != "" {
+					if _, err = txMgr.GetDocWithScope(recordDT, doc.Name, scopeForOperation(reg, op, recordDT.Name, "submit")); err != nil {
+						if errors.Is(err, orm.ErrNotFound) {
+							return nil, contract.NewError(contract.CodeNotFound, "document not found")
+						}
+						return nil, contract.NewError(contract.CodeDependencyUnavailable, "load workflow document failed")
+					}
+				}
+				if item.ExpectedRevision > 0 && oldDoc.Revision != item.ExpectedRevision {
+					auditFailure(ErrStaleVersion.Type)
+					return nil, ErrStaleVersion
 				}
 				if i == 0 {
 					if expectedVersion := expectedVersionFrom(op); expectedVersion != "" {
@@ -210,15 +286,74 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 							return nil, contract.NewError(contract.CodeDependencyUnavailable, "read bundle record version failed")
 						}
 						if currentVersion != expectedVersion {
-							k.writeFailureAudit(siteDB, op, def, opID, ErrStaleVersion.Type)
+							auditFailure(ErrStaleVersion.Type)
 							return nil, ErrStaleVersion
 						}
 					}
 				}
 				doc = cloneDoc(oldDoc)
 			}
+			if operation == "decrement" || operation == "adjust" {
+				var deltas map[string]float64
+				if err := json.Unmarshal(data, &deltas); err != nil || len(deltas) != 1 {
+					return nil, contract.NewError(contract.CodeValidationFailed, "quantity adjustment requires one numeric field")
+				}
+				for field, amount := range deltas {
+					definition := recordDT.GetField(field)
+					if definition == nil || (definition.Fieldtype != "Int" && definition.Fieldtype != "Float" && definition.Fieldtype != "Currency") || amount == 0 || math.IsNaN(amount) || math.IsInf(amount, 0) || definition.Fieldtype == "Int" && math.Trunc(amount) != amount || operation == "decrement" && amount < 0 {
+						return nil, contract.NewError(contract.CodeValidationFailed, "invalid or insufficient quantity")
+					}
+					newValue := oldDoc.GetFloat(field) + amount
+					if operation == "decrement" {
+						newValue = oldDoc.GetFloat(field) - amount
+					}
+					if newValue < 0 {
+						return nil, contract.NewError(contract.CodeValidationFailed, "invalid or insufficient quantity")
+					}
+					data, _ = json.Marshal(map[string]any{field: newValue})
+				}
+			}
 			if err := applyData(recordDT, doc, data, reg, operation == "update" && !op.Context.AllowReadOnlyFields); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+			}
+			if item.TransitionAction != "" {
+				statusPolicy, unified, policyErr := k.workflowStatusPolicy(ctx, dbTx, op, recordDT.Name)
+				if policyErr != nil {
+					return nil, contract.NewError(contract.CodeDependencyUnavailable, "load workflow status policy failed")
+				}
+				if !unified || statusPolicy == nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, "no published status transition policy for table")
+				}
+				stateField := statusPolicy.StateField
+				if recordDT.GetField(stateField) == nil || oldDoc == nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, "workflow state field is not defined on doctype")
+				}
+				currentState := fmt.Sprint(oldDoc.Get(stateField))
+				if currentState == "<nil>" || currentState == "" {
+					currentState = statusPolicy.InitialState
+				}
+				roles := append([]string(nil), op.Context.Roles...)
+				if op.Context.UserRole != "" {
+					found := false
+					for _, role := range roles {
+						found = found || role == op.Context.UserRole
+					}
+					if !found {
+						roles = append([]string{op.Context.UserRole}, roles...)
+					}
+				}
+				if len(roles) == 0 {
+					return nil, contract.NewError(contract.CodePermissionDenied, "workflow transition requires an assigned role")
+				}
+				var newState string
+				var newStatus int
+				var transitionErr error
+				newState, newStatus, transitionErr = workflow.ApplyStatusTransition(statusPolicy, currentState, item.TransitionAction, roles, doc)
+				if transitionErr != nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, transitionErr.Error())
+				}
+				doc.Set(stateField, newState)
+				doc.DocStatus = newStatus
 			}
 			if operation == "create" {
 				setDefaultValues(recordDT, doc)
@@ -227,7 +362,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 			}
 			bundleDocs[i], bundleTypes[i] = doc, recordDT
 			pendingLinks[recordDT.Name+"\x00"+doc.Name] = doc
-			bundleSavedDocs = append(bundleSavedDocs, savedBundleDocument{dt: recordDT, doc: doc, oldDoc: oldDoc})
+			bundleSavedDocs = append(bundleSavedDocs, savedBundleDocument{dt: recordDT, doc: doc, oldDoc: oldDoc, workflowTransition: item.TransitionAction != ""})
 		}
 		resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
 			if target != nil {
@@ -242,6 +377,16 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 			oldDoc := bundleSavedDocs[i].oldDoc
 			if err := txMgr.RunHooksForValidate(recordDT, doc, oldDoc); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+			}
+			if oldDoc == nil {
+				if err := k.initializeWorkflowStateOnCreate(ctx, dbTx, op, recordDT, doc); err != nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+				}
+			}
+			if oldDoc != nil && !bundleSavedDocs[i].workflowTransition {
+				if err := k.rejectWorkflowStateChange(ctx, dbTx, op, recordDT, reg, oldDoc, doc); err != nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+				}
 			}
 			if verrs := validateOperationDocumentWithResolver(recordDT, doc, reg, oldDoc, resolver); verrs.HasErrors() {
 				return nil, validationContractError(verrs)
@@ -263,11 +408,20 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 				if err := txMgr.InsertInTx(dbTx, recordDT, doc, owner, user); err != nil {
 					return nil, wrapORMError(err)
 				}
+				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, script.EventAfterInsert, doc, nil); hookErr != nil {
+					return nil, hookErr
+				}
+				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, script.EventAfterSave, doc, nil); hookErr != nil {
+					return nil, hookErr
+				}
 				insertedDocs = append(insertedDocs, doc)
 			} else {
 				beforeHash = CanonicalDocHash(oldDoc.Fields)
-				if err := txMgr.SaveInTx(dbTx, recordDT, doc, user, ownerForOperation(reg, op, recordDT.Name, "write"), oldDoc); err != nil {
+				if err := txMgr.SaveInTxWithScope(dbTx, recordDT, doc, user, scopeForOperation(reg, op, recordDT.Name, "write"), oldDoc); err != nil {
 					return nil, wrapExpectedVersionORMError(err, op, k.dialect())
+				}
+				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+					return nil, hookErr
 				}
 				bundleSavedDocs[i].oldDoc = oldDoc
 			}
@@ -280,6 +434,9 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 			if auditErr != nil {
 				return nil, contract.NewError(contract.CodeInternal, "audit write failed")
 			}
+			if historyErr := k.writeRecordHistory(dbTx, row, recordDT, oldDoc, doc); historyErr != nil {
+				return nil, contract.NewError(contract.CodeInternal, "record history write failed")
+			}
 			if i == 0 {
 				result = &ResultData{Doctype: recordDT.Name, Name: doc.Name, Created: oldDoc == nil, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
 			} else {
@@ -287,6 +444,11 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 			}
 		}
 		result.Related = related
+		for _, saved := range bundleSavedDocs {
+			if err := k.appendRecordChangeEvent(ctx, dbTx, op, saved.dt, saved.doc, saved.oldDoc); err != nil {
+				return nil, contract.NewError(contract.CodeDependencyUnavailable, "recording workflow trigger event failed")
+			}
+		}
 
 	case CommandRecordCreate, CommandPublicFormSubmit:
 		var p RecordCreatePayload
@@ -308,11 +470,17 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 			p.Data, _ = json.Marshal(filtered)
 		}
 		doc := doctype.NewDocument(dt.Name)
+		if err := k.rejectWorkflowStateOnCreate(ctx, dbTx, op, dt, reg, p.Data); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
 		if err := applyData(dt, doc, p.Data, reg, false); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		setDefaultValues(dt, doc)
 		if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+		if err := k.initializeWorkflowStateOnCreate(ctx, dbTx, op, dt, doc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		if verrs := validateOperationDocument(txMgr, dt, doc, reg, nil); verrs.HasErrors() {
@@ -330,6 +498,12 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		if err := txMgr.InsertInTx(dbTx, dt, doc, owner, user); err != nil {
 			return nil, wrapORMError(err)
 		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterInsert, doc, nil); hookErr != nil {
+			return nil, hookErr
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, nil); hookErr != nil {
+			return nil, hookErr
+		}
 		doc.IsNew = false
 		row := k.buildAuditRow(op, def, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
 		row.AfterHash = afterHash
@@ -337,8 +511,14 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		if aerr != nil {
 			return nil, contract.NewError(contract.CodeInternal, "audit write failed")
 		}
+		if err := k.writeRecordHistory(dbTx, row, dt, nil, doc); err != nil {
+			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
+		}
 		result = &ResultData{Doctype: dt.Name, Name: doc.Name, Created: true, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
 		insertedDocs = append(insertedDocs, doc)
+		if err := k.appendRecordChangeEvent(ctx, dbTx, op, dt, doc, nil); err != nil {
+			return nil, contract.NewError(contract.CodeDependencyUnavailable, "recording workflow trigger event failed")
+		}
 
 	case CommandRecordUpdate:
 		var p RecordUpdatePayload
@@ -348,8 +528,11 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		if p.Name == "" {
 			return nil, contract.NewError(contract.CodeValidationFailed, "record.update missing name")
 		}
-		owner := ownerForOperation(reg, op, dt.Name, "write")
-		oldDoc, err := txMgr.GetDoc(dt, p.Name, owner)
+		if err := k.rejectWorkflowStateMutation(ctx, dbTx, op, dt, reg, p.Data); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+		scope := scopeForOperation(reg, op, dt.Name, "write")
+		oldDoc, err := txMgr.GetDocWithScope(dt, p.Name, scope)
 		if err != nil {
 			if errors.Is(err, orm.ErrNotFound) {
 				return nil, contract.NewError(contract.CodeNotFound, "document not found")
@@ -364,7 +547,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 				return nil, contract.NewError(contract.CodeDependencyUnavailable, "read document version failed")
 			}
 			if prior != ev {
-				k.writeFailureAudit(siteDB, op, def, opID, ErrStaleVersion.Type)
+				auditFailure(ErrStaleVersion.Type)
 				return nil, ErrStaleVersion
 			}
 		}
@@ -374,6 +557,9 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		}
 		doc.IsNew = false
 		if err := txMgr.RunHooksForValidate(dt, doc, oldDoc); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+		if err := k.rejectWorkflowStateChange(ctx, dbTx, op, dt, reg, oldDoc, doc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		if verrs := validateOperationDocument(txMgr, dt, doc, reg, oldDoc); verrs.HasErrors() {
@@ -389,8 +575,11 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		}
 		beforeHash := CanonicalDocHash(oldDoc.Fields)
 		afterHash := CanonicalDocHash(doc.Fields)
-		if err := txMgr.SaveInTx(dbTx, dt, doc, user, owner, oldDoc); err != nil {
+		if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, user, scope, oldDoc); err != nil {
 			return nil, wrapExpectedVersionORMError(err, op, k.dialect())
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, def, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
 		row.BeforeHash = beforeHash
@@ -399,8 +588,14 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		if aerr != nil {
 			return nil, contract.NewError(contract.CodeInternal, "audit write failed")
 		}
+		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, doc); err != nil {
+			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
+		}
 		result = &ResultData{Doctype: dt.Name, Name: doc.Name, Created: false, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
 		savedDoc, savedOldDoc = doc, oldDoc
+		if err := k.appendRecordChangeEvent(ctx, dbTx, op, dt, doc, oldDoc); err != nil {
+			return nil, contract.NewError(contract.CodeDependencyUnavailable, "recording workflow trigger event failed")
+		}
 
 	case CommandRecordDelete:
 		var p RecordUpdatePayload
@@ -410,8 +605,8 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		if p.Name == "" {
 			return nil, contract.NewError(contract.CodeValidationFailed, "record.delete missing name")
 		}
-		owner := ownerForOperation(reg, op, dt.Name, "delete")
-		oldDoc, err := txMgr.GetDoc(dt, p.Name, owner)
+		scope := scopeForOperation(reg, op, dt.Name, "delete")
+		oldDoc, err := txMgr.GetDocWithScope(dt, p.Name, scope)
 		if err != nil {
 			if errors.Is(err, orm.ErrNotFound) {
 				return nil, contract.NewError(contract.CodeNotFound, "document not found")
@@ -427,8 +622,11 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 			}
 		}
 		beforeHash := CanonicalDocHash(oldDoc.Fields)
-		if err := txMgr.DeleteInTx(dbTx, dt, p.Name, owner, oldDoc); err != nil {
+		if err := txMgr.DeleteInTxWithScope(dbTx, dt, p.Name, scope, oldDoc); err != nil {
 			return nil, wrapORMError(err)
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterDelete, oldDoc, nil); hookErr != nil {
+			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, def, opID, dt.Name, oldDoc.Name, contract.StatusCompleted, "")
 		row.BeforeHash = beforeHash
@@ -436,27 +634,39 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		if aerr != nil {
 			return nil, contract.NewError(contract.CodeInternal, "audit write failed")
 		}
+		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, nil); err != nil {
+			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
+		}
 		deletedDoc = oldDoc
 		result = &ResultData{Doctype: dt.Name, Name: oldDoc.Name, Deleted: true, AuditID: auditID, Operation: opID}
 
-	case CommandRecordWorkflowTransition:
-		var p RecordWorkflowTransitionPayload
+	case CommandWorkflowStatusTransition:
+		var p WorkflowStatusTransitionPayload
 		if err := json.Unmarshal(op.Payload, &p); err != nil || p.Name == "" || p.Action == "" {
-			return nil, contract.NewError(contract.CodeValidationFailed, "record.workflow_transition requires name and action")
+			return nil, contract.NewError(contract.CodeValidationFailed, "workflow.status_transition requires name and action")
 		}
-		workflow := reg.Workflows.Get(dt.Name)
-		if workflow == nil || !workflow.IsActive {
-			return nil, contract.NewError(contract.CodeValidationFailed, "no active workflow for doctype")
+		if op.Context.ExpectedConfigRevision > 0 {
+			if err := configstore.FenceConfigRevisionTx(ctx, dbTx, k.dialect(), op.Context.ExpectedConfigRevision); err != nil {
+				if errors.Is(err, configstore.ErrConfigRevisionConflict) {
+					auditFailure(ErrStaleVersion.Type)
+					return nil, contract.NewError(contract.CodeConflict, "tenant configuration changed while the workflow transition was being prepared")
+				}
+				return nil, contract.NewError(contract.CodeDependencyUnavailable, "lock workflow configuration revision failed")
+			}
 		}
-		stateField := workflow.WorkflowStateField
-		if stateField == "" {
-			stateField = "status"
+		statusPolicy, hasStatusPolicy, statusPolicyErr := k.workflowStatusPolicy(ctx, dbTx, op, dt.Name)
+		if statusPolicyErr != nil {
+			return nil, contract.NewError(contract.CodeDependencyUnavailable, "load workflow status policy failed")
 		}
+		if !hasStatusPolicy || statusPolicy == nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, "no published status transition policy for table")
+		}
+		stateField := statusPolicy.StateField
 		if dt.GetField(stateField) == nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, "workflow state field is not defined on doctype")
 		}
-		owner := ownerForOperation(reg, op, dt.Name, "submit")
-		oldDoc, err := txMgr.GetDoc(dt, p.Name, owner)
+		scope := scopeForOperation(reg, op, dt.Name, "submit")
+		oldDoc, err := txMgr.GetDocWithScope(dt, p.Name, scope)
 		if err != nil {
 			if errors.Is(err, orm.ErrNotFound) {
 				return nil, contract.NewError(contract.CodeNotFound, "document not found")
@@ -464,7 +674,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 			return nil, contract.NewError(contract.CodeDependencyUnavailable, "load document failed")
 		}
 		if p.ExpectedRevision > 0 && oldDoc.Revision != p.ExpectedRevision {
-			k.writeFailureAudit(siteDB, op, def, opID, ErrStaleVersion.Type)
+			auditFailure(ErrStaleVersion.Type)
 			return nil, ErrStaleVersion
 		}
 		if ev := expectedVersionFrom(op); ev != "" {
@@ -473,22 +683,31 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 				return nil, contract.NewError(contract.CodeDependencyUnavailable, "read document version failed")
 			}
 			if prior != ev {
-				k.writeFailureAudit(siteDB, op, def, opID, ErrStaleVersion.Type)
+				auditFailure(ErrStaleVersion.Type)
 				return nil, ErrStaleVersion
 			}
 		}
 		currentState := fmt.Sprint(oldDoc.Get(stateField))
 		if currentState == "<nil>" || currentState == "" {
-			currentState = "Draft"
+			currentState = statusPolicy.InitialState
 		}
-		role := op.Context.UserRole
-		if role == "" && len(op.Context.Roles) > 0 {
-			role = op.Context.Roles[0]
+		roles := append([]string(nil), op.Context.Roles...)
+		if op.Context.UserRole != "" {
+			found := false
+			for _, role := range roles {
+				found = found || role == op.Context.UserRole
+			}
+			if !found {
+				roles = append([]string{op.Context.UserRole}, roles...)
+			}
 		}
-		if role == "" {
-			role = doctype.AdminRole
+		if len(roles) == 0 {
+			return nil, contract.NewError(contract.CodePermissionDenied, "workflow transition requires an assigned role")
 		}
-		newState, newStatus, transitionErr := reg.Workflows.ApplyTransition(dt.Name, currentState, p.Action, role, oldDoc)
+		var newState string
+		var newStatus int
+		var transitionErr error
+		newState, newStatus, transitionErr = workflow.ApplyStatusTransition(statusPolicy, currentState, p.Action, roles, oldDoc)
 		if transitionErr != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, transitionErr.Error())
 		}
@@ -505,8 +724,11 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		}
 		beforeHash := CanonicalDocHash(oldDoc.Fields)
 		afterHash := CanonicalDocHash(doc.Fields)
-		if err := txMgr.SaveInTx(dbTx, dt, doc, user, owner, oldDoc); err != nil {
+		if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, user, scope, oldDoc); err != nil {
 			return nil, wrapORMError(err)
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, def, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
 		row.BeforeHash = beforeHash
@@ -515,8 +737,14 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		if aerr != nil {
 			return nil, contract.NewError(contract.CodeInternal, "audit write failed")
 		}
+		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, doc); err != nil {
+			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
+		}
 		result = &ResultData{Doctype: dt.Name, Name: doc.Name, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
 		savedDoc, savedOldDoc = doc, oldDoc
+		if err := k.appendRecordChangeEvent(ctx, dbTx, op, dt, doc, oldDoc); err != nil {
+			return nil, contract.NewError(contract.CodeDependencyUnavailable, "recording workflow trigger event failed")
+		}
 
 	default:
 		return nil, contract.NewError(contract.CodeValidationFailed, "unknown command "+op.Command)
@@ -534,28 +762,39 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxM
 		}
 	}
 
-	if err := dbTx.Commit(); err != nil {
-		return nil, contract.NewError(contract.CodeInternal, "commit failed")
-	}
 	nestedPostCommitHooks := append([]func(){}, txMgr.PostCommitHooks...)
-	txMgr.ScriptMutationExecutor = nil
-	txMgr.PostCommitHooks = nil
-	for _, hook := range nestedPostCommitHooks {
-		hook()
-	}
-	if deletedDoc != nil {
-		txMgr.CompleteDelete(dt, deletedDoc)
-	}
-	for _, doc := range insertedDocs {
-		txMgr.CompleteInsert(reg.Get(doc.DocType), doc)
-	}
-	for _, saved := range bundleSavedDocs {
-		if saved.oldDoc != nil {
-			txMgr.CompleteSave(saved.dt, saved.doc, saved.oldDoc)
+	completionManager := *txMgr
+	completionManager.ScriptMutationExecutor = nil
+	completionManager.PostCommitHooks = nil
+	completionManager.Transaction = nil
+	complete := func() {
+		for _, hook := range nestedPostCommitHooks {
+			hook()
+		}
+		if deletedDoc != nil {
+			completionManager.CompleteDelete(dt, deletedDoc)
+		}
+		for _, doc := range insertedDocs {
+			completionManager.CompleteInsert(reg.Get(doc.DocType), doc)
+		}
+		for _, saved := range bundleSavedDocs {
+			if saved.oldDoc != nil {
+				completionManager.CompleteSave(saved.dt, saved.doc, saved.oldDoc)
+			}
+		}
+		if savedDoc != nil {
+			completionManager.CompleteSave(dt, savedDoc, savedOldDoc)
 		}
 	}
-	if savedDoc != nil {
-		txMgr.CompleteSave(dt, savedDoc, savedOldDoc)
+	if ownsTransaction {
+		if err := dbTx.Commit(); err != nil {
+			return nil, contract.NewError(contract.CodeInternal, "commit failed")
+		}
+		txMgr.ScriptMutationExecutor = nil
+		txMgr.PostCommitHooks = nil
+		complete()
+	} else if afterCommit != nil {
+		*afterCommit = complete
 	}
 	return result, nil
 }
@@ -678,15 +917,17 @@ func setDefaultValues(dt *doctype.DocType, doc *doctype.Document) {
 	}
 }
 
-func ownerForOperation(reg *doctype.Registry, op Operation, doctypeName, permission string) string {
-	roles := op.Context.Roles
-	if len(roles) == 0 {
-		roles = []string{doctype.AdminRole}
+func scopeForOperation(reg *doctype.Registry, op Operation, doctypeName, permission string) policy.RowScope {
+	decision, err := policy.Decide(op.Context.Execution, reg, doctypeName, permission)
+	if err != nil || (!decision.OwnerOnly && len(decision.AssignedFields) == 0) {
+		return policy.RowScope{}
 	}
-	if _, ownerOnly := reg.CanUser(roles, doctypeName, permission); ownerOnly {
-		return op.Context.User
+	actor := op.Context.Execution.Actor()
+	userID := actor.SubjectUserID
+	if userID == "" {
+		userID = actor.PrincipalID
 	}
-	return ""
+	return policy.RowScope{UserID: userID, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...)}
 }
 
 // cloneDoc copies a loaded document so mutation attempts never alias the
@@ -746,6 +987,175 @@ func applyData(dt *doctype.DocType, doc *doctype.Document, raw json.RawMessage, 
 			continue
 		}
 		doc.Set(key, val)
+	}
+	return nil
+}
+
+func (k *Kernel) workflowStatusPolicy(ctx context.Context, tx *sql.Tx, op Operation, table string) (*workflow.StatusPolicy, bool, error) {
+	if k == nil {
+		return nil, false, nil
+	}
+	repository := k.WorkflowStatusPolicies
+	if repository == nil && k.TxManager != nil {
+		repository = k.TxManager.WorkflowStatusPolicies
+	}
+	if repository == nil {
+		return nil, false, nil
+	}
+	if _, err := contract.ParseTenantID(string(op.Context.TenantID)); err != nil {
+		return nil, false, contract.NewError(contract.CodeUnauthenticated, "workflow policy tenant is unavailable")
+	}
+	return repository.GetStatusPolicyInTx(ctx, tx, op.Context.TenantID, table)
+}
+
+func (k *Kernel) rejectWorkflowStateMutation(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, reg *doctype.Registry, raw json.RawMessage) error {
+	if dt == nil || len(raw) == 0 {
+		return nil
+	}
+	statusPolicy, found, err := k.workflowStatusPolicy(ctx, tx, op, dt.Name)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil
+	}
+	if _, supplied := fields[statusPolicy.StateField]; supplied {
+		return fmt.Errorf("workflow-managed status field %q can only be changed through a status action", statusPolicy.StateField)
+	}
+	return nil
+}
+
+func (k *Kernel) rejectWorkflowStateOnCreate(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, reg *doctype.Registry, raw json.RawMessage) error {
+	if dt == nil || len(raw) == 0 {
+		return nil
+	}
+	statusPolicy, found, err := k.workflowStatusPolicy(ctx, tx, op, dt.Name)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if statusPolicy.InitialState == "" {
+		return fmt.Errorf("workflow-managed status field %q has no configured initial value", statusPolicy.StateField)
+	}
+	field := dt.GetField(statusPolicy.StateField)
+	if field == nil {
+		return fmt.Errorf("workflow status field %q is not configured on DocType %s", statusPolicy.StateField, dt.Name)
+	}
+	initial := statusPolicy.InitialState
+	if defaultState := strings.TrimSpace(field.Default); defaultState != "" && defaultState != initial {
+		return fmt.Errorf("DocType default for workflow status field %q must match initial value %q", statusPolicy.StateField, initial)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil
+	}
+	value, supplied := fields[statusPolicy.StateField]
+	if !supplied {
+		return nil
+	}
+	var state string
+	if err := json.Unmarshal(value, &state); err != nil || state != initial {
+		return fmt.Errorf("new records must start in initial workflow status %q; later values require a status action", initial)
+	}
+	return nil
+}
+
+func (k *Kernel) rejectWorkflowStateChange(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, reg *doctype.Registry, before, after *doctype.Document) error {
+	if dt == nil || before == nil || after == nil {
+		return nil
+	}
+	statusPolicy, found, err := k.workflowStatusPolicy(ctx, tx, op, dt.Name)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if fmt.Sprint(before.Get(statusPolicy.StateField)) != fmt.Sprint(after.Get(statusPolicy.StateField)) {
+		return fmt.Errorf("workflow-managed status field %q can only be changed through a status action", statusPolicy.StateField)
+	}
+	return nil
+}
+
+func (k *Kernel) initializeWorkflowStateOnCreate(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, doc *doctype.Document) error {
+	if dt == nil || doc == nil {
+		return nil
+	}
+	statusPolicy, found, err := k.workflowStatusPolicy(ctx, tx, op, dt.Name)
+	if err != nil || !found {
+		return err
+	}
+	if statusPolicy.InitialState == "" {
+		return fmt.Errorf("workflow status field %q has no configured initial value", statusPolicy.StateField)
+	}
+	if dt.GetField(statusPolicy.StateField) == nil {
+		return fmt.Errorf("workflow status field %q is not configured on DocType %s", statusPolicy.StateField, dt.Name)
+	}
+	stateName := strings.TrimSpace(fmt.Sprint(doc.Get(statusPolicy.StateField)))
+	if stateName == "<nil>" || stateName == "" {
+		doc.Set(statusPolicy.StateField, statusPolicy.InitialState)
+	} else if stateName != statusPolicy.InitialState {
+		return fmt.Errorf("new records must start in initial workflow status %q; later values require a status action", statusPolicy.InitialState)
+	}
+	return nil
+}
+
+// appendRecordChangeEvent makes record-trigger workflows observe the exact
+// committed grid mutation. The event shares the record transaction, contains
+// only stable record identity and changed field names, and is delivered at
+// least once through the tenant outbox.
+func (k *Kernel) appendRecordChangeEvent(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, doc, oldDoc *doctype.Document) error {
+	if k == nil || k.Outbox == nil || tx == nil || dt == nil || doc == nil {
+		return nil
+	}
+	kind := "record.created"
+	changed := make([]string, 0)
+	if oldDoc != nil {
+		kind = "record.updated"
+		for field, value := range doc.Fields {
+			if field == "modified" || field == "modified_by" || field == "owner" {
+				continue
+			}
+			before, beforeErr := json.Marshal(oldDoc.Fields[field])
+			after, afterErr := json.Marshal(value)
+			if beforeErr != nil || afterErr != nil || string(before) != string(after) {
+				changed = append(changed, field)
+			}
+		}
+		for field := range oldDoc.Fields {
+			if _, exists := doc.Fields[field]; !exists {
+				changed = append(changed, field)
+			}
+		}
+		sort.Strings(changed)
+		if len(changed) == 0 {
+			return nil
+		}
+	}
+	data, err := json.Marshal(contract.RecordChangeEventData{
+		Table: dt.Name, RecordID: doc.Name, Revision: strconv.FormatUint(doc.Revision, 10), ChangedFields: changed,
+	})
+	if err != nil {
+		return fmt.Errorf("encode record trigger event: %w", err)
+	}
+	event := contract.EventEnvelope{
+		ID: contract.NewEventID(), Type: kind, Version: contract.CurrentVersion,
+		Source: "kora.kernel", Site: op.Context.Site, AggregateType: dt.Name,
+		AggregateID: doc.Name, OccurredAt: time.Now().UTC(),
+		CorrelationID: op.Context.CorrelationID, CausationID: op.Context.CausationID, Actor: op.Context.Actor,
+		Data: data,
+	}
+	if err := event.Validate(); err != nil {
+		return fmt.Errorf("validate record trigger event: %w", err)
+	}
+	if err := k.Outbox.Append(ctx, tx, event); err != nil {
+		return fmt.Errorf("append record trigger event: %w", err)
 	}
 	return nil
 }
@@ -886,8 +1296,34 @@ func CanonicalDocHash(fields map[string]any) string {
 }
 
 func payloadHash(raw json.RawMessage) string {
+	canonical, err := canonicalJSON(raw)
+	if err == nil {
+		raw = canonical
+	}
 	h := sha256.Sum256(raw)
 	return hex.EncodeToString(h[:])
+}
+
+func rawPayloadHash(raw json.RawMessage) string {
+	h := sha256.Sum256(raw)
+	return hex.EncodeToString(h[:])
+}
+
+func canonicalJSON(raw json.RawMessage) ([]byte, error) {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("multiple JSON values")
+		}
+		return nil, err
+	}
+	return json.Marshal(value)
 }
 
 func resultHash(r contract.CommandResult) string {

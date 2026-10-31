@@ -1,0 +1,63 @@
+name: Farm Labor Entry
+module: Farm Team Controls
+description: Work time and completed quantity linked to a crop plan or field task.
+title_field: reference
+search_fields: reference, crop_plan, status
+sort_field: work_date
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Work entry reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: crop_plan
+    fieldtype: Link
+    label: Crop plan
+    options: Crop Plan
+    reqd: true
+    in_list_view: true
+  - fieldname: farm_task
+    fieldtype: Link
+    label: Field task
+    options: Farm Task
+  - fieldname: work_date
+    fieldtype: Date
+    label: Work date
+    reqd: true
+    in_list_view: true
+  - fieldname: worker
+    fieldtype: User
+    label: Team member
+    reqd: true
+    in_list_view: true
+  - fieldname: hours
+    fieldtype: Float
+    label: Hours worked
+    reqd: true
+  - fieldname: completed_quantity
+    fieldtype: Float
+    label: Completed quantity
+  - fieldname: quantity_unit
+    fieldtype: Data
+    label: Quantity unit
+  - fieldname: recorded_by
+    fieldtype: User
+    label: Recorded by
+    reqd: true
+  - fieldname: evidence
+    fieldtype: Attach
+    label: Photo or document
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Recorded
+      Cancelled
+    default: Recorded
+    in_list_view: true

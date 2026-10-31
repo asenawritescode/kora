@@ -1,0 +1,56 @@
+name: Product
+module: Products
+title_field: product_name
+search_fields: product_name, reference, category, status
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: product_name
+    fieldtype: Data
+    label: Product name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    in_standard_filter: true
+    in_list_view: true
+    options: |
+      Pantry
+      Drinks
+      Household
+      Personal care
+      Stationery
+      Other
+  - fieldname: selling_price
+    fieldtype: Currency
+    label: Selling price
+    reqd: true
+    in_list_view: true
+  - fieldname: stock_qty
+    fieldtype: Int
+    label: Stock quantity
+    default: 0
+    read_only: true
+    in_list_view: true
+  - fieldname: stock_adjustment_reason
+    fieldtype: Data
+    label: Reason for stock change
+    description: Record why the stock quantity changed whenever you update it.
+    hidden: true
+  - fieldname: status
+    fieldtype: Select
+    label: Availability
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true

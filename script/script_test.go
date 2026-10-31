@@ -52,8 +52,8 @@ func TestEventTypes(t *testing.T) {
 }
 
 func TestTypeConstants(t *testing.T) {
-	types := []Type{TypeDocEvent, TypeAPIMethod, TypeWorkflowAction, TypeScheduled}
-	names := []string{"doc_event", "api_method", "workflow_action", "scheduled"}
+	types := []Type{TypeDocEvent, TypeAPIMethod, TypeScheduled}
+	names := []string{"doc_event", "api_method", "scheduled"}
 	for i, typ := range types {
 		if string(typ) != names[i] {
 			t.Errorf("Type %s != %s", typ, names[i])

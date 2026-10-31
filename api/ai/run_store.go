@@ -463,6 +463,44 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return err
 }
 
+// ListConversationMessages returns the durable user-visible transcript in order.
+func ListConversationMessages(ctx context.Context, db *sql.DB, site, conversationID string) ([]ChatMessage, error) {
+	rows, err := (aiSQL{db}).QueryContext(ctx, `
+SELECT role, content
+FROM _kora_ai_message
+WHERE site = ? AND conversation_id = ? AND message_kind IN ('message', 'summary')
+ORDER BY sequence, created_at, id`, site, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	messages := make([]ChatMessage, 0)
+	for rows.Next() {
+		var message ChatMessage
+		if err := rows.Scan(&message.Role, &message.Content); err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
+// AppendConversationMessage assigns the next sequence inside the tenant's
+// conversation so refreshes and multiple turns preserve transcript order.
+func AppendConversationMessage(ctx context.Context, db *sql.DB, site, conversationID, runID, role, content, kind, stepID string) error {
+	var sequence int
+	if err := (aiSQL{db}).QueryRowContext(ctx, `
+SELECT COALESCE(MAX(sequence), 0) + 1
+FROM _kora_ai_message
+WHERE site = ? AND conversation_id = ?`, site, conversationID).Scan(&sequence); err != nil {
+		return err
+	}
+	return AppendMessage(ctx, db, site, conversationID, runID, role, content, kind, stepID, sequence)
+}
+
 func UpsertStep(ctx context.Context, db *sql.DB, stepID, site, runID, conversationID, stepKey, status, summary, toolName, inputJSON, outputJSON, errorMessage string) error {
 	if db == nil {
 		return nil
@@ -765,6 +803,42 @@ func GrantApproval(ctx context.Context, db *sql.DB, approvalID, grantedBy string
 		return ApprovalRecord{}, err
 	}
 	return LoadApproval(ctx, db, approvalID)
+}
+
+// GrantApprovalForOwner atomically grants a pending AI execution approval only
+// when it belongs to the verified owner in the current tenant. The conditional
+// update avoids a read/modify/write race and prevents a caller who learns an
+// approval ID from granting another owner's execution.
+func GrantApprovalForOwner(ctx context.Context, db *sql.DB, site, approvalID, ownerID string) (ApprovalRecord, error) {
+	if db == nil {
+		return ApprovalRecord{}, fmt.Errorf("approval store unavailable")
+	}
+	if site == "" || approvalID == "" || ownerID == "" {
+		return ApprovalRecord{}, sql.ErrNoRows
+	}
+	result, err := (aiSQL{db}).ExecContext(ctx, `
+UPDATE _kora_ai_approval
+SET state = 'granted', granted_at = ?, granted_by = ?
+WHERE id = ? AND site = ? AND actor_principal_id = ? AND state = 'pending_approval'`,
+		time.Now().UTC(), ownerID, approvalID, site, ownerID)
+	if err != nil {
+		return ApprovalRecord{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return ApprovalRecord{}, err
+	}
+	if changed != 1 {
+		return ApprovalRecord{}, sql.ErrNoRows
+	}
+	rec, err := LoadApproval(ctx, db, approvalID)
+	if err != nil {
+		return ApprovalRecord{}, err
+	}
+	if rec.Site != site || rec.ActorPrincipalID != ownerID || !strings.EqualFold(rec.State, "granted") {
+		return ApprovalRecord{}, sql.ErrNoRows
+	}
+	return rec, nil
 }
 
 func GrantApprovalForOperation(ctx context.Context, db *sql.DB, site, operationID, toolName string, args map[string]any, grantedBy string) (ApprovalRecord, error) {

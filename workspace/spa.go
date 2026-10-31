@@ -2,12 +2,14 @@ package workspace
 
 import (
 	"embed"
+	"errors"
 	"io/fs"
 	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
 
+	"github.com/asenawritescode/kora/internal/tenantruntime"
 	knet "github.com/asenawritescode/kora/net"
 	"github.com/gin-gonic/gin"
 )
@@ -78,21 +80,43 @@ func handlePathSite(c *gin.Context, sub fs.FS, sr *knet.SiteRouter, router *gin.
 		rest = "/"
 	}
 
-	site := sr.SiteByName(siteName)
+	known, err := sr.EnsureName(c.Request.Context(), siteName)
+	if err != nil {
+		if errors.Is(err, tenantruntime.ErrResidentCapacity) || errors.Is(err, tenantruntime.ErrActivationCapacity) {
+			c.Header("Retry-After", "1")
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "resident_capacity", "message": "Tenant runtime capacity is temporarily full"})
+			return
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site runtime could not be activated"})
+		return
+	}
+	if !known {
+		c.JSON(http.StatusNotFound, gin.H{"error": "site_not_found", "message": "No site: " + siteName})
+		return
+	}
+	site, handle, acquired := sr.AcquireByName(c.Request.Context(), siteName)
 	if site == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site_not_found", "message": "No site: " + siteName})
 		return
 	}
+	if !acquired {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site_draining", "message": "Site runtime is being replaced"})
+		return
+	}
+	defer handle.Release()
+	snapshot := handle.Snapshot()
+	if snapshot == nil || (snapshot.Status != "" && snapshot.Status != "active" && snapshot.Status != "degraded") {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site is not accepting traffic"})
+		return
+	}
 
 	// Inject site context and set persistent cookie for API calls.
-	c.Set("site_name", site.Name)
-	c.Set("site_db", site.DB)
-	c.Set("site_registry", site.Registry)
-	knet.SetSecureCookie(c, "kora_site", site.Name, 86400, "/", false)
+	knet.InjectSiteRuntimeContext(c, snapshot)
+	knet.SetSecureCookie(c, "kora_site", snapshot.Name, 86400, "/", false)
 
 	// API requests: re-dispatch through router so /api/* routes match.
 	if strings.HasPrefix(rest, "/api/") || rest == "/api" {
-		c.Request.AddCookie(&http.Cookie{Name: "kora_site", Value: site.Name, Path: "/"})
+		c.Request.AddCookie(&http.Cookie{Name: "kora_site", Value: snapshot.Name, Path: "/"})
 		c.Request.URL.Path = rest
 		router.HandleContext(c)
 		return

@@ -198,7 +198,7 @@ func (h *Handler) HandleConversationProgress(c *gin.Context) {
 func (h *Handler) HandleConversationSupport(c *gin.Context) {
 	var req supportRequest
 	if err := c.ShouldBindJSON(&req); err != nil || !req.Confirm {
-		badRequestError(c, "support.confirmation_required", "Please confirm before sending this conversation to Kora support.", nil)
+		badRequestError(c, "support.confirmation_required", "Please confirm before sending this conversation to Kigae support.", nil)
 		return
 	}
 	tenant := h.conversationTenant(c)
@@ -217,7 +217,7 @@ func (h *Handler) HandleConversationSupport(c *gin.Context) {
 		internalError(c, "creating support ticket", err)
 		return
 	}
-	c.JSON(http.StatusCreated, Response{Data: gin.H{"status": "created", "message": "We’ll send a short summary to the Kora team so they can help without making you repeat yourself.", "correlation_id": conv.CorrelationID}})
+	c.JSON(http.StatusCreated, Response{Data: gin.H{"status": "created", "message": "We’ll send a short summary to the Kigae team so they can help without making you repeat yourself.", "correlation_id": conv.CorrelationID}})
 }
 
 var secretPattern = regexp.MustCompile(`(?i)(password|secret|token|api[_ -]?key)\s*[:=]\s*[^,\s]+`)

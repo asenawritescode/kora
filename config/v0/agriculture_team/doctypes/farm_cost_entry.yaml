@@ -1,0 +1,70 @@
+name: Farm Cost Entry
+module: Farm Team Controls
+description: A sourced, crop-cycle cost record for operational visibility.
+title_field: reference
+search_fields: reference, crop_plan, cost_category
+sort_field: incurred_on
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Cost reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: crop_plan
+    fieldtype: Link
+    label: Crop plan
+    options: Crop Plan
+    reqd: true
+    in_list_view: true
+  - fieldname: field
+    fieldtype: Link
+    label: Field
+    options: Field
+  - fieldname: incurred_on
+    fieldtype: Date
+    label: Cost date
+    reqd: true
+    in_list_view: true
+  - fieldname: cost_category
+    fieldtype: Select
+    label: Cost category
+    options: |
+      Seed or planting material
+      Fertilizer or soil input
+      Crop protection input
+      Labor
+      Equipment or fuel
+      Water or irrigation
+      Transport
+      Other
+    reqd: true
+    in_list_view: true
+  - fieldname: description
+    fieldtype: Data
+    label: Description
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    description: Enter in the workspace base currency. This is an operational estimate until reconciled with accounting.
+  - fieldname: source_reference
+    fieldtype: Data
+    label: Receipt or source reference
+  - fieldname: recorded_by
+    fieldtype: User
+    label: Recorded by
+    reqd: true
+  - fieldname: evidence
+    fieldtype: Attach
+    label: Receipt or document
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Recorded
+      Cancelled
+    default: Recorded
+    in_list_view: true

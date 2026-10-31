@@ -3,6 +3,7 @@ module: Point of Sale
 title_field: category_name
 sort_field: display_order
 sort_order: ASC
+search_fields: category_name
 fields:
   - fieldname: category_name
     fieldtype: Data
@@ -10,6 +11,7 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
+    search_index: true
   - fieldname: display_order
     fieldtype: Int
     label: Display order

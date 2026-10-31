@@ -1,0 +1,3 @@
+- name: Ticket User
+  workspace_access: true
+  description: Creates and tracks tickets.

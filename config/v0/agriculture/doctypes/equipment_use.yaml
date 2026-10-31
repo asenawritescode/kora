@@ -1,28 +1,46 @@
 name: Equipment Use
 module: Agriculture
+description: Equipment and time recorded against a crop plan or field task.
 title_field: reference
-search_fields: reference, status
-sort_field: modified
+search_fields: reference, equipment_name
+sort_field: work_date
 sort_order: DESC
 
 fields:
   - fieldname: reference
     fieldtype: Data
-    label: Reference
+    label: Equipment use reference
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
+  - fieldname: equipment_name
     fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
-  - fieldname: status
-    fieldtype: Data
-    label: Status
-    default: Draft
+    label: Equipment
+    reqd: true
     in_list_view: true
+  - fieldname: crop_plan
+    fieldtype: Link
+    label: Crop plan
+    options: Crop Plan
+    reqd: true
+  - fieldname: farm_task
+    fieldtype: Link
+    label: Related task
+    options: Farm Task
+  - fieldname: operator
+    fieldtype: User
+    label: Operator
+    reqd: true
+  - fieldname: work_date
+    fieldtype: Date
+    label: Work date
+    reqd: true
+  - fieldname: hours_used
+    fieldtype: Float
+    label: Hours used
+  - fieldname: meter_reading
+    fieldtype: Float
+    label: Meter reading
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

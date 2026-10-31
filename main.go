@@ -1,6 +1,6 @@
-// Package main — Kora Fieldwork Sample Application
+// Package main — Kigae Fieldwork Sample Application
 //
-// This is the entry point for the Kora Fieldwork app. It starts the Kora engine
+// This is the entry point for the Kigae Fieldwork app. It starts the Kigae engine
 // which loads site configs, bootstraps the database, builds the DocType registry,
 // runs schema migrations, and starts the HTTP server.
 //

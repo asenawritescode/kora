@@ -18,23 +18,25 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
-	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/auth"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/natsprovider"
 	"github.com/asenawritescode/kora/org"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 	"github.com/asenawritescode/kora/secret"
 	"github.com/asenawritescode/kora/storage"
 	"github.com/asenawritescode/kora/webhook"
 	"github.com/gin-gonic/gin"
-	"gopkg.in/yaml.v3"
 )
 
 // BinaryVersion is set at startup from cli.Version to avoid circular imports.
@@ -43,17 +45,20 @@ var BinaryVersion = "dev"
 
 // fallbackStorage is used when no site-specific storage backend is configured.
 var fallbackStorage storage.Backend
+var fallbackStorageOnce sync.Once
+var fallbackStorageErr error
 
 // Handler holds dependencies for API handlers.
 // Registry and TxManager are fallbacks; handlers read site context from the request.
 type Handler struct {
-	Registry        *doctype.Registry
-	TxManager       *orm.TxManager
-	AuthProviders   *auth.ProviderRegistry
-	RuntimeServices *SiteRuntimeServices
+	Registry            *doctype.Registry
+	TxManager           *orm.TxManager
+	AuthProviders       *auth.ProviderRegistry
+	RuntimeServices     *SiteRuntimeServices
+	RealtimeConnections *RealtimeConnectionOwner
 
 	// SiteEventBuses maps site name → EventBus for analytics/realtime services.
-	SiteEventBuses map[string]analytics.EventBus
+	SiteEventBuses map[string]eventstream.Bus
 
 	// SiteOutboxes maps site name → outbox.Writer for transactional outbox recording.
 	// When a site has a writer, its document writes record an event in _kora_outbox
@@ -94,15 +99,24 @@ type Handler struct {
 }
 
 func (h *Handler) runtimeService(c *gin.Context, site string) SiteRuntimeService {
-	if h.RuntimeServices != nil {
+	// A router-pinned snapshot belongs to the loaded tenant generation and is
+	// authoritative even when compatibility registries are configured.
+	if c != nil {
 		if value, ok := c.Get("site_runtime_services"); ok {
 			if services, ok := value.(SiteRuntimeService); ok {
 				return services
 			}
 		}
-		services, _ := h.RuntimeServices.Get(site)
-		return services
 	}
+	if h.RuntimeServices != nil {
+		if services, ok := h.RuntimeServices.Get(site); ok {
+			return services
+		}
+	}
+	return h.legacyRuntimeService(site)
+}
+
+func (h *Handler) legacyRuntimeService(site string) SiteRuntimeService {
 	return SiteRuntimeService{
 		EventBus: h.SiteEventBuses[site], Realtime: h.SiteRealtimeProviders[site],
 		ScriptStore: h.SiteScriptStores[site], SecretStore: h.SiteSecretStores[site],
@@ -144,27 +158,33 @@ func (h *Handler) siteRegistry(c *gin.Context) *doctype.Registry {
 }
 
 // siteStorage returns the storage backend for the current request's site.
-func (h *Handler) siteStorage(c *gin.Context) storage.Backend {
-	if h.SiteStorages != nil || h.RuntimeServices != nil {
+func (h *Handler) siteStorage(c *gin.Context) (storage.Backend, error) {
+	if c != nil {
 		if siteName := c.GetString("site_name"); siteName != "" {
 			if b := h.runtimeService(c, siteName).Storage; b != nil {
-				return b
+				return b, nil
 			}
 		}
 	}
 	if h.Storage != nil {
-		return h.Storage
+		return h.Storage, nil
 	}
-	if fallbackStorage == nil {
-		fallbackStorage, _ = storage.New(storage.Config{Backend: "local"})
-	}
-	return fallbackStorage
+	fallbackStorageOnce.Do(func() {
+		fallbackStorage, fallbackStorageErr = storage.New(storage.Config{Backend: "local"})
+	})
+	return fallbackStorage, fallbackStorageErr
 }
 
 // siteAnalyticsWorker returns the analytics worker for the current request's site, or nil.
-func (h *Handler) siteAnalyticsWorker(c *gin.Context) *analytics.Worker {
+type analyticsWorker interface {
+	InvalidateMetrics(string)
+	InvalidateAllMetrics()
+	Flush() error
+}
+
+func (h *Handler) siteAnalyticsWorker(c *gin.Context) analyticsWorker {
 	if w, ok := c.Get("site_analytics_worker"); ok {
-		if worker, ok := w.(*analytics.Worker); ok {
+		if worker, ok := w.(analyticsWorker); ok {
 			return worker
 		}
 	}
@@ -184,14 +204,31 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 	db, _ := c.Get("site_db")
 	reg, _ := c.Get("site_registry")
 	siteName, _ := c.Get("site_name")
-	user, _ := c.Get("user")
-	userRole, _ := c.Get("user_role")
-	userRoles := c.GetStringSlice("user_roles")
+	execution, verified := requestExecution(c)
+	user, userRole := "", ""
+	var userRoles []string
+	if verified {
+		actor := execution.Actor()
+		user, userRoles = actor.SubjectUserID, append([]string(nil), actor.Roles...)
+		if user == "" {
+			user = actor.PrincipalID
+		}
+		if len(userRoles) > 0 {
+			userRole = userRoles[0]
+		}
+	}
 	if db != nil && reg != nil {
 		if sqlDB, ok := db.(*sql.DB); ok {
 			if r, ok := reg.(*doctype.Registry); ok {
 				tm := &orm.TxManager{DB: sqlDB, Registry: r, Dialect: h.siteDialect(c)}
 				tm.Context = c.Request.Context()
+				if verified {
+					// Durable after-hooks must be captured with the verified tenant
+					// identity and the exact configuration revision pinned by the
+					// site router for this request.
+					tm.AsyncHookTenantID = execution.Tenant()
+					tm.AsyncHookConfigRevision = c.GetUint64("site_config_revision")
+				}
 				if createdAt, ok := c.Get("session_created_at"); ok {
 					if ts, ok := createdAt.(time.Time); ok && !ts.IsZero() {
 						tm.Context = context.WithValue(tm.Context, "session_created_at", ts)
@@ -202,12 +239,16 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 				}
 				// Wire the transactional outbox writer for this site.
 				if siteNameStr, ok := siteName.(string); ok {
-					tm.Outbox = h.runtimeService(c, siteNameStr).Outbox
+					services := h.runtimeService(c, siteNameStr)
+					tm.Outbox = services.Outbox
+					tm.WorkflowStatusPolicies = services.WorkflowStatusPolicies
 				}
 				// Wire script runner and store.
 				tm.ScriptRunner = h.ScriptRunner
 				if siteNameStr, ok := siteName.(string); ok {
-					tm.ScriptStore = h.runtimeService(c, siteNameStr).ScriptStore
+					services := h.runtimeService(c, siteNameStr)
+					tm.ScriptStore = services.ScriptStore
+					tm.AsyncHookInvocations = services.AsyncHookInvocations
 				}
 				// Wire async hook queue.
 				tm.AsyncHookSink = h.AsyncHookSink
@@ -215,23 +256,19 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 				// Create script provider for this request (bridges JS → engine).
 				if h.ScriptRunner != nil {
 					var ss *secret.Store
-					if h.SiteSecretStores != nil || h.RuntimeServices != nil {
-						if siteNameStr, ok := siteName.(string); ok {
-							ss = h.runtimeService(c, siteNameStr).SecretStore
-						}
+					if siteNameStr, ok := siteName.(string); ok {
+						ss = h.runtimeService(c, siteNameStr).SecretStore
 					}
 					if siteNameStr, ok := siteName.(string); ok {
-						tm.ScriptProvider = NewScriptProvider(tm, r, siteNameStr, ss, h.ScriptHTTPAllowlist)
+						tm.ScriptProviderFactory = ScriptProviderFactory(r, siteNameStr, ss, h.ScriptHTTPAllowlist)
+						tm.ScriptProvider = tm.ScriptProviderFactory(tm)
 					}
 				}
 				// Set current user context for scripts.
-				if u, ok := user.(string); ok {
-					tm.CurrentUser = u
-				}
-				if r, ok := userRole.(string); ok {
-					tm.CurrentUserRole = r
-				}
+				tm.CurrentUser = user
+				tm.CurrentUserRole = userRole
 				tm.CurrentUserRoles = append([]string(nil), userRoles...)
+				tm.Execution = execution
 				return tm
 			}
 		}
@@ -294,6 +331,11 @@ func SetAPILimits(def, max int) {
 // internalError logs the real error server-side and returns a generic 500 response.
 // This prevents sensitive DB/internal details from leaking to API clients.
 func internalError(c *gin.Context, msg string, err error) {
+	var referenceErr *doctype.ReferenceValidationError
+	if errors.As(err, &referenceErr) {
+		writeError(c, http.StatusBadRequest, "configuration.references_invalid", "Configuration contains unresolved references", map[string]any{"findings": referenceErr.Findings})
+		return
+	}
 	slog.Error(msg, "error", err)
 	writeError(c, http.StatusInternalServerError, "server.internal_error", "An internal error occurred", nil)
 }
@@ -350,61 +392,73 @@ func conflictError(c *gin.Context, code, message string, details map[string]any)
 
 // checkPerm is a helper that checks permission for the current user and returns
 // whether the operation is owner-scoped. Returns true if forbidden (and writes response).
-func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation string) (ownerOnly bool, forbidden bool) {
-	// Extension auth: check scoped api_permissions.
+func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation string) (policy.RowScope, bool) {
+	// Resource routes accept both the canonical DocType name ("Lead") and its
+	// URL-safe alias ("lead"). The permission matrix is keyed by the canonical
+	// name, so resolve aliases before asking the policy engine. Without this,
+	// non-admin users can be denied on ordinary CRUD routes despite having a
+	// matching tenant permission.
+	if registry != nil {
+		if resolved := registry.Get(docType); resolved != nil {
+			docType = resolved.Name
+		}
+	}
+	// Authorization consumes only the verified execution installed by the
+	// authentication adapter. Roleless sessions do not receive an implicit
+	// bootstrap/admin grant.
+	execution, valid := requestExecution(c)
+	if !valid {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{"message": "verified execution is required"}})
+		return policy.RowScope{}, true
+	}
+
 	authType := c.GetString("auth_type")
 	if authType == "extension" || authType == "channel_session" {
-		permsKey := "extension_permissions"
-		if authType == "channel_session" {
-			permsKey = "channel_permissions"
-		}
-		permsVal, exists := c.Get(permsKey)
-		perms, ok := permsVal.([]doctype.Permission)
-		if !exists || !ok || !auth.HasExtensionPermission(perms, docType, operation) {
+		decision, decideErr := policy.Decide(execution, registry, docType, operation)
+		if decideErr != nil {
 			c.JSON(http.StatusForbidden, ErrorResponse{
 				Error: map[string]string{
 					"message": fmt.Sprintf("Token does not have %s permission on %s", operation, docType),
 				},
 			})
-			return false, true
+			return policy.RowScope{}, true
 		}
-		return false, false
+		return requestRowScope(c, decision), false
 	}
-
-	userRoles := c.GetStringSlice("user_roles")
-	if len(userRoles) == 0 {
-		// Fallback: if no roles set, allow (bootstrapping / system user).
-		return false, false
-	}
-	allowed, ownerScoped := registry.CanUser(userRoles, docType, operation)
-	if !allowed {
+	decision, decideErr := policy.Decide(execution, registry, docType, operation)
+	if decideErr != nil {
 		c.JSON(http.StatusForbidden, ErrorResponse{
 			Error: map[string]string{
 				"message": fmt.Sprintf("Permission denied: cannot %s on %s", operation, docType),
 			},
 		})
-		return false, true
+		return policy.RowScope{}, true
 	}
-	return ownerScoped, false
+	return requestRowScope(c, decision), false
+}
+
+func requestRowScope(c *gin.Context, decision policy.Decision) policy.RowScope {
+	if !decision.OwnerOnly && len(decision.AssignedFields) == 0 {
+		return policy.RowScope{}
+	}
+	user, _ := requestUserID(c)
+	return policy.RowScope{UserID: user, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...)}
 }
 
 // HandleList handles GET /api/resource/{doctype}
 func (h *Handler) HandleList(c *gin.Context) {
 	doctypeName := c.Param("doctype")
-	dt := h.siteRegistry(c).Get(doctypeName)
+	registry := h.siteRegistry(c)
+	dt := registry.Get(doctypeName)
 	if dt == nil {
 		notFoundError(c, "resource.doctype_not_found", fmt.Sprintf("DocType %q not found", doctypeName), map[string]any{"doctype": doctypeName})
 		return
 	}
 
 	// Check read permission.
-	ownerOnly, forbidden := checkPerm(c, h.Registry, doctypeName, "read")
+	scope, forbidden := checkPerm(c, registry, doctypeName, "read")
 	if forbidden {
 		return
-	}
-	owner := ""
-	if ownerOnly {
-		owner = c.GetString("user")
 	}
 
 	// Parse query parameters.
@@ -419,6 +473,10 @@ func (h *Handler) HandleList(c *gin.Context) {
 	orderBy := c.Query("order_by")
 	filters := c.Query("filters")
 	search := c.Query("search")
+	if utf8.RuneCountInString(search) > 128 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "search must not exceed 128 characters"}})
+		return
+	}
 
 	if limit < 1 {
 		limit = APIDefaultLimit
@@ -440,7 +498,7 @@ func (h *Handler) HandleList(c *gin.Context) {
 		}
 	}
 
-	docs, total, err := h.siteTx(c).GetListWithOptions(dt, filters, orderBy, limit, offset, owner, requestedFields, search)
+	docs, total, err := h.siteTx(c).GetListWithScope(dt, filters, orderBy, limit, offset, scope, requestedFields, search)
 	if err != nil {
 		internalError(c, "list query failed", err)
 		return
@@ -469,7 +527,8 @@ func (h *Handler) HandleGet(c *gin.Context) {
 	doctypeName := c.Param("doctype")
 	name := c.Param("name")
 
-	dt := h.siteRegistry(c).Get(doctypeName)
+	registry := h.siteRegistry(c)
+	dt := registry.Get(doctypeName)
 	if dt == nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: map[string]string{"message": fmt.Sprintf("DocType %q not found", doctypeName)},
@@ -478,16 +537,11 @@ func (h *Handler) HandleGet(c *gin.Context) {
 	}
 
 	// Check read permission.
-	ownerOnly, forbidden := checkPerm(c, h.Registry, doctypeName, "read")
+	scope, forbidden := checkPerm(c, registry, doctypeName, "read")
 	if forbidden {
 		return
 	}
-	owner := ""
-	if ownerOnly {
-		owner = c.GetString("user")
-	}
-
-	doc, err := h.siteTx(c).GetDoc(dt, name, owner)
+	doc, err := h.siteTx(c).GetDocWithScope(dt, name, scope)
 	if err != nil {
 		if errors.Is(err, orm.ErrNotFound) {
 			c.JSON(http.StatusNotFound, ErrorResponse{
@@ -527,13 +581,17 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 		badRequestError(c, "validation.invalid_json", "Invalid request format", nil)
 		return
 	}
-
 	data, err := json.Marshal(rawData)
 	if err != nil {
 		badRequestError(c, "validation.invalid_json", "Invalid request format", nil)
 		return
 	}
-	h.executeResourceMutation(c, kernel.CommandRecordCreate, doctypeName, "", data, http.StatusCreated)
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(idempotencyKey) > 256 {
+		badRequestError(c, "validation.invalid_idempotency_key", "Idempotency-Key must be at most 256 bytes", nil)
+		return
+	}
+	h.executeResourceMutationWithKey(c, kernel.CommandRecordCreate, doctypeName, "", data, http.StatusCreated, idempotencyKey)
 	if c.Writer.Status() != http.StatusCreated {
 		return
 	}
@@ -562,13 +620,30 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 		badRequestError(c, "validation.invalid_json", "Invalid request format", nil)
 		return
 	}
+	// Reads expose this opaque token for optimistic writes. Keep it outside the
+	// document payload so it cannot be mistaken for a user field.
+	expectedVersion := ""
+	if rawVersion, exists := rawData["_version"]; exists {
+		version, ok := rawVersion.(string)
+		if !ok || strings.TrimSpace(version) == "" {
+			badRequestError(c, "validation.invalid_version", "Record version is invalid. Refresh the record and try again.", nil)
+			return
+		}
+		expectedVersion = strings.TrimSpace(version)
+		delete(rawData, "_version")
+	}
 
 	data, err := json.Marshal(rawData)
 	if err != nil {
 		badRequestError(c, "validation.invalid_json", "Invalid request format", nil)
 		return
 	}
-	h.executeResourceMutation(c, kernel.CommandRecordUpdate, doctypeName, name, data, http.StatusOK)
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(idempotencyKey) > 256 {
+		badRequestError(c, "validation.invalid_idempotency_key", "Idempotency-Key must be at most 256 bytes", nil)
+		return
+	}
+	h.executeResourceMutationWithKey(c, kernel.CommandRecordUpdate, doctypeName, name, data, http.StatusOK, idempotencyKey, expectedVersion)
 	if c.Writer.Status() != http.StatusOK {
 		return
 	}
@@ -608,8 +683,14 @@ func docToMap(doc *doctype.Document, dt *doctype.DocType, registry *doctype.Regi
 	result := make(map[string]any, len(dt.DataFields())+2)
 	result["name"] = doc.Name
 	result["doc_status"] = doc.DocStatus
+	// Offline clients must echo this token to the kernel's expected_version
+	// field. It is derived from the same value checked inside the write transaction.
+	result["_version"] = kernel.CanonicalVersion(doc.Get("modified"))
 
 	for _, f := range dt.DataFields() {
+		if f.Hidden || f.Fieldtype == "Password" {
+			continue
+		}
 		if f.Fieldtype == "Table" {
 			children := doc.GetTable(f.Fieldname)
 			if children != nil {
@@ -769,6 +850,7 @@ func RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, r
 	handler := NewHandler(registry, txManager)
 	handler.SiteStorages = siteStorages
 	handler.RuntimeServices = runtimeServices
+	apiGroup.Use(WorkAdmissionMiddleware(runtimeServices))
 	public := apiGroup.Group("/public/resource")
 	{
 		public.GET("/:doctype", handler.HandlePublicList)
@@ -781,28 +863,42 @@ func RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, r
 	apiGroup.GET("/system/branding", handler.HandleSystemBranding)
 	apiGroup.GET("/public/files/*path", handler.HandlePublicFileServe)
 
-	// DigiTax cannot use a Kora session/CSRF token. The handler authenticates
-	// this callback with the site's digitax_webhook_secret instead.
-	apiGroup.POST("/webhooks/digitax/etims", handler.HandleDigiTaxWebhook)
-	// Safaricom calls this endpoint asynchronously after an STK prompt is
-	// accepted or declined. The site-scoped operation ID is resolved from the
-	// provider CheckoutRequestID and callbacks are idempotently recorded.
+	// M-Pesa callback mutations require the per-tenant token in the callback
+	// path. Keep the tokenless path registered for the migration window; its
+	// handler rejects unauthenticated callbacks.
 	apiGroup.POST("/webhooks/mpesa/stk", handler.HandleMPesaSTKCallback)
+	apiGroup.POST("/webhooks/mpesa/stk/:token", handler.HandleMPesaSTKCallback)
 }
 
 // RegisterRoutesOnGroupWithAnalytics registers all CRUD routes with optional
 // analytics event propagation. siteBuses maps site name → EventBus; if nil or
 // empty, analytics event emission is a no-op.
-func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry) {
+func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]eventstream.Bus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry) {
 	RegisterRoutesOnGroupWithRuntimeServices(apiGroup, registry, txManager, siteBuses, realtimeProviders, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookSink, siteOutboxes, siteStorages, kernelCommands, nil)
 }
 
-// RegisterRoutesOnGroupWithRuntimeServices is the directory-aware form of
-// RegisterRoutesOnGroupWithAnalytics. New Engine deployments should pass the
-// shared synchronized service registry so hot-added sites become visible to
-// handlers without mutating maps concurrently.
-func RegisterRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry, runtimeServices *SiteRuntimeServices) {
+// RegisterRoutesOnGroupWithRuntimeServices is the compatibility registration
+// form of RegisterRoutesOnGroupWithAnalytics. Engine production composition
+// uses tenant middleware's pinned service snapshot and the explicit cache
+// owner below; external callers may continue to pass this fallback registry.
+func RegisterRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]eventstream.Bus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry, runtimeServices *SiteRuntimeServices) {
+	RegisterRoutesOnGroupWithAnalyticsCache(apiGroup, registry, txManager, siteBuses, realtimeProviders, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookSink, siteOutboxes, siteStorages, kernelCommands, runtimeServices, nil)
+}
+
+// RegisterRoutesOnGroupWithAnalyticsCache is the Engine composition form that
+// supplies process-level analytics cache ownership separately from tenant
+// runtime services.
+func RegisterRoutesOnGroupWithAnalyticsCache(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]eventstream.Bus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry, runtimeServices *SiteRuntimeServices, analyticsCache *AnalyticsQueryCache) {
+	RegisterRoutesOnGroupWithRealtimeOwner(apiGroup, registry, txManager, siteBuses, realtimeProviders, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookSink, siteOutboxes, siteStorages, kernelCommands, runtimeServices, analyticsCache, nil)
+}
+
+// RegisterRoutesOnGroupWithRealtimeOwner installs the production routes with
+// an explicit owner for hijacked WebSocket connections. The Engine closes
+// these before retiring tenant runtime generations.
+func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]eventstream.Bus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry, runtimeServices *SiteRuntimeServices, analyticsCache *AnalyticsQueryCache, realtimeConnections *RealtimeConnectionOwner) {
 	handler := NewHandler(registry, txManager)
+	handler.RealtimeConnections = realtimeConnections
+	apiGroup.Use(WorkAdmissionMiddleware(runtimeServices))
 	handler.RuntimeServices = runtimeServices
 	handler.SiteEventBuses = siteBuses
 	handler.SiteRealtimeProviders = realtimeProviders
@@ -827,9 +923,9 @@ func RegisterRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registr
 		resource.GET("/:doctype", handler.HandleList)
 		resource.POST("/:doctype", handler.HandleCreate)
 		resource.GET("/:doctype/:name", handler.HandleGet)
+		resource.GET("/:doctype/:name/history", handler.HandleRecordHistory)
 		resource.PUT("/:doctype/:name", handler.HandleUpdate)
 		resource.DELETE("/:doctype/:name", handler.HandleDelete)
-		resource.POST("/:doctype/:name/workflow_action", handler.HandleWorkflowAction)
 	}
 
 	// Operation kernel: canonical command path shared by every adapter
@@ -837,26 +933,38 @@ func RegisterRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registr
 	// config-defined command registry (KERNEL-008).
 	apiGroup.POST("/kernel/:command", handler.HandleKernelOperation)
 	apiGroup.GET("/kernel/_registry", handler.HandleKernelRegistry)
+	if apiGroup.BasePath() == "/api/v1" {
+		apiGroup.GET("/offline/capabilities", handler.HandleOfflineCapabilities)
+		apiGroup.POST("/offline/push", handler.HandleOfflinePush)
+		apiGroup.POST("/offline/bootstrap", handler.HandleOfflineBootstrap)
+		apiGroup.POST("/offline/pull", handler.HandleOfflinePull)
+	}
 
 	// OpenAPI docs.
 	apiGroup.GET("/openapi.json", handler.HandleOpenAPI)
 	apiGroup.GET("/swagger-ui", handler.HandleSwaggerUI)
 
-	// AI Chat.
-	apiGroup.POST("/chat", handler.HandleChat)
-	aiGroup := apiGroup.Group("/ai")
-	{
-		aiGroup.GET("/approvals", handler.HandleAIListApprovals)
-		aiGroup.POST("/approvals/:id/grant", handler.HandleAIGrantApproval)
-		aiGroup.POST("/runs/:id/cancel", handler.HandleAICancel)
-		aiGroup.POST("/runs/:id/resume", handler.HandleAIResume)
-		aiGroup.POST("/retention/cleanup", handler.HandleAIRetentionCleanup)
+	// AI operations are exposed only on the canonical, versioned API. The old
+	// /api/chat and /api/v1/chat paths are retired; callers use /api/v1/ai/chat
+	// and its run/approval endpoints together.
+	if apiGroup.BasePath() == "/api/v1" {
+		aiGroup := apiGroup.Group("/ai")
+		{
+			aiGroup.GET("/chat", handler.HandleAIChatConversation)
+			aiGroup.POST("/chat", handler.HandleChat)
+			aiGroup.GET("/approvals", handler.HandleAIListApprovals)
+			aiGroup.POST("/approvals/:id/grant", handler.HandleAIGrantApproval)
+			aiGroup.POST("/runs/:id/cancel", handler.HandleAICancel)
+			aiGroup.POST("/runs/:id/resume", handler.HandleAIResume)
+			aiGroup.POST("/retention/cleanup", handler.HandleAIRetentionCleanup)
+		}
 	}
 
 	channel := apiGroup.Group("/internal/channel")
 	{
 		channel.POST("/sessions/issue", handler.HandleChannelSessionIssue)
 		channel.POST("/managed-client/rotate", handler.HandleManagedChannelClientRotate)
+		channel.POST("/managed-client/revoke", handler.HandleManagedChannelClientRevoke)
 		channel.POST("/sessions/revoke", handler.HandleChannelSessionRevoke)
 		channel.GET("/tools", handler.HandleChannelTools)
 		channel.POST("/query", handler.HandleChannelQuery)
@@ -897,6 +1005,8 @@ func RegisterRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registr
 	apiGroup.GET("/system/permissions/catalog", handler.HandleAgentPermissionCatalog)
 	{
 		system.GET("/versions", handler.HandleConfigVersions)
+		system.GET("/versions/head/snapshot", handler.HandleConfigHeadSnapshot)
+		system.GET("/versions/active/snapshot", handler.HandleActiveConfigSnapshot)
 		system.GET("/versions/:id", handler.HandleConfigVersion)
 		system.GET("/diff", handler.HandleConfigDiff)
 	}
@@ -930,310 +1040,7 @@ func RegisterRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registr
 	}
 
 	// Analytics endpoints (no-op if siteBuses is empty).
-	RegisterAnalyticsRoutesWithRuntimeServices(apiGroup, registry, txManager.DB, siteBuses, realtimeProviders, txManager.Dialect, runtimeServices)
-}
-
-// HandleWorkflowAction handles POST /api/resource/{doctype}/{name}/workflow_action
-func (h *Handler) HandleWorkflowAction(c *gin.Context) {
-	doctypeName := c.Param("doctype")
-	name := c.Param("name")
-
-	dt := h.siteRegistry(c).Get(doctypeName)
-	if dt == nil {
-		c.JSON(http.StatusNotFound, ErrorResponse{
-			Error: map[string]string{"message": fmt.Sprintf("DocType %q not found", doctypeName)},
-		})
-		return
-	}
-
-	// Check workflow exists.
-	if !h.siteRegistry(c).Workflows.Has(doctypeName) {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": fmt.Sprintf("No workflow defined for %s", doctypeName)},
-		})
-		return
-	}
-
-	// Check submit permission.
-	ownerOnly, forbidden := checkPerm(c, h.siteRegistry(c), doctypeName, "submit")
-	if forbidden {
-		return
-	}
-	owner := ""
-	if ownerOnly {
-		owner = c.GetString("user")
-	}
-
-	// Parse request.
-	var req struct {
-		Action string `json:"action"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		slog.Warn("invalid JSON in workflow action", "error", err)
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": "Invalid request format"},
-		})
-		return
-	}
-
-	if req.Action == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": "action is required"},
-		})
-		return
-	}
-
-	// Load document.
-	doc, err := h.siteTx(c).GetDoc(dt, name, owner)
-	if err != nil {
-		slog.Warn("document get failed for workflow", "doctype", doctypeName, "name", name, "error", err)
-		c.JSON(http.StatusNotFound, ErrorResponse{
-			Error: map[string]string{"message": "Document not found"},
-		})
-		return
-	}
-
-	// Get current state.
-	wf := h.siteRegistry(c).Workflows.Get(doctypeName)
-	stateField := "status"
-	if wf.WorkflowStateField != "" {
-		stateField = wf.WorkflowStateField
-	}
-	currentState := doc.GetString(stateField)
-	if currentState == "" {
-		currentState = "Draft"
-	}
-
-	// Get user role.
-	userRole := c.GetString("user_role")
-	if userRole == "" {
-		userRole = doctype.AdminRole
-	}
-
-	// Check available transitions.
-	available := h.siteRegistry(c).Workflows.GetAvailableTransitions(doctypeName, currentState, userRole, doc)
-	found := false
-	for _, t := range available {
-		if t.Action == req.Action {
-			found = true
-			break
-		}
-	}
-	if !found {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{
-				"message": fmt.Sprintf("Transition %q is not available from state %q for role %q", req.Action, currentState, userRole),
-			},
-		})
-		return
-	}
-
-	// Execute on_transition actions BEFORE state change (can abort).
-	transition := h.siteRegistry(c).Workflows.GetTransition(doctypeName, currentState, req.Action)
-	if transition != nil {
-		if err := h.executeWorkflowActionsSync(c, transition.OnTransition, doctypeName, doc, userRole); err != nil {
-			// Run on_failure actions if transition is blocked by a script.
-			h.executeWorkflowActions(c, transition.OnFailure, doctypeName, doc, userRole)
-			c.JSON(http.StatusBadRequest, ErrorResponse{
-				Error: map[string]string{"message": fmt.Sprintf("Transition blocked: %v", err)},
-			})
-			return
-		}
-	}
-
-	// The kernel reloads the document and applies the transition in its write
-	// transaction. The revision fences the earlier checks and pre-transition
-	// scripts against a concurrent update.
-	transitioned, cerr := h.runKernelWorkflowTransition(c, doctypeName, name, req.Action, doc.Revision)
-	if cerr != nil {
-		if transition != nil {
-			h.executeWorkflowActions(c, transition.OnFailure, doctypeName, doc, userRole)
-		}
-		h.writeWorkflowKernelError(c, cerr)
-		return
-	}
-	doc = transitioned
-	newState := doc.GetString(stateField)
-
-	// Dispatch configured workflow notifications after the kernel commit. They
-	// share the site's live event transport but are filtered to each recipient.
-	siteName := c.GetString("site_name")
-	services := h.runtimeService(c, siteName)
-	dispatchNotifications(h.siteRegistry(c), doctypeName, newState, doc, siteName, c.GetString("user"), services.EventBus)
-
-	// Execute workflow on_success actions (best-effort, after state change committed).
-	if transition != nil {
-		h.executeWorkflowActions(c, transition.OnSuccess, doctypeName, doc, userRole)
-	}
-
-	c.JSON(http.StatusOK, Response{
-		Data: docToMap(doc, dt, h.siteRegistry(c), nil),
-		Meta: &Meta{DocType: doctypeName},
-	})
-}
-
-// executeWorkflowActionsSync runs workflow on_transition actions synchronously.
-// Returns the first error encountered (which aborts the transition).
-func (h *Handler) executeWorkflowActionsSync(c *gin.Context, actions []doctype.WorkflowAction, doctypeName string, doc *doctype.Document, userRole string) error {
-	if len(actions) == 0 || h.ScriptRunner == nil {
-		return nil
-	}
-	siteName, _ := c.Get("site_name")
-	siteNameStr, _ := siteName.(string)
-	user, _ := c.Get("user")
-	userStr, _ := user.(string)
-
-	for _, action := range actions {
-		if action.Type != "script" || action.Script == "" {
-			continue
-		}
-		if h.SiteScriptStores == nil && h.RuntimeServices == nil {
-			continue
-		}
-		store := h.runtimeService(c, siteNameStr).ScriptStore
-		if store == nil {
-			continue
-		}
-
-		scripts, err := store.LoadWorkflowActionScripts(siteNameStr, action.Script)
-		if err != nil {
-			return fmt.Errorf("loading workflow action %q: %w", action.Script, err)
-		}
-
-		for _, rec := range scripts {
-			execReq := script.ExecuteRequest{
-				Script:     rec.Script,
-				ScriptType: script.TypeWorkflowAction,
-				ScriptName: rec.Name,
-				DocType:    doctypeName,
-				Document:   doc.Fields,
-				User:       userStr,
-				UserRoles:  []string{userRole},
-				Site:       siteNameStr,
-				Timeout:    time.Duration(rec.TimeoutMs) * time.Millisecond,
-				Provider:   nil, // on_transition scripts validate/reject; CRUD not needed here
-			}
-
-			ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(rec.TimeoutMs)*time.Millisecond)
-			defer cancel()
-
-			_, execErr := h.ScriptRunner.Execute(ctx, execReq)
-			if execErr != nil {
-				if store != nil {
-					_ = store.LogExecution(siteNameStr, rec, doctypeName, doc.Name, "", userStr, 0, "error", execErr.Error())
-				}
-				return fmt.Errorf("script %q: %w", rec.Name, execErr)
-			}
-			if store != nil {
-				_ = store.LogExecution(siteNameStr, rec, doctypeName, doc.Name, "", userStr, 0, "success", "")
-			}
-		}
-	}
-	return nil
-}
-
-// executeWorkflowActions runs workflow action scripts (best-effort, errors logged).
-func (h *Handler) executeWorkflowActions(c *gin.Context, actions []doctype.WorkflowAction, doctypeName string, doc *doctype.Document, userRole string) {
-	if len(actions) == 0 || h.ScriptRunner == nil {
-		return
-	}
-	siteName, _ := c.Get("site_name")
-	siteNameStr, _ := siteName.(string)
-	user, _ := c.Get("user")
-	userStr, _ := user.(string)
-
-	for _, action := range actions {
-		if action.Type != "script" || action.Script == "" {
-			continue
-		}
-
-		// Look up the script.
-		if h.SiteScriptStores == nil && h.RuntimeServices == nil {
-			continue
-		}
-		store := h.runtimeService(c, siteNameStr).ScriptStore
-		if store == nil {
-			continue
-		}
-
-		scripts, err := store.LoadWorkflowActionScripts(siteNameStr, action.Script)
-		if err != nil {
-			slog.Warn("loading workflow action script", "action", action.Script, "error", err)
-			continue
-		}
-
-		for _, rec := range scripts {
-			execReq := script.ExecuteRequest{
-				Script:     rec.Script,
-				ScriptType: script.TypeWorkflowAction,
-				ScriptName: rec.Name,
-				DocType:    doctypeName,
-				Document:   doc.Fields,
-				User:       userStr,
-				UserRoles:  []string{userRole},
-				Site:       siteNameStr,
-				Timeout:    time.Duration(rec.TimeoutMs) * time.Millisecond,
-			}
-
-			ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(rec.TimeoutMs)*time.Millisecond)
-			defer cancel()
-
-			result, execErr := h.ScriptRunner.Execute(ctx, execReq)
-			durationMs := 0
-			status := "success"
-			var errMsg string
-			if result != nil {
-				durationMs = int(result.Duration.Milliseconds())
-			}
-			if execErr != nil {
-				status = "error"
-				errMsg = execErr.Error()
-				slog.Warn("workflow action script failed", "action", action.Script, "script", rec.Name, "error", execErr)
-			}
-			if store != nil {
-				_ = store.LogExecution(siteNameStr, rec, doctypeName, doc.Name, "", userStr, durationMs, status, errMsg)
-			}
-		}
-	}
-}
-
-// dispatchNotifications fires workflow notifications for a state change.
-func dispatchNotifications(registry *doctype.Registry, doctypeName, toState string, doc *doctype.Document, site, actor string, bus analytics.EventBus) {
-	wf := registry.Workflows.Get(doctypeName)
-	if wf == nil {
-		return
-	}
-	for _, n := range wf.Notifications {
-		if n.Event != "state_change" || n.ToState != toState {
-			continue
-		}
-		for _, r := range n.Recipients {
-			if field, ok := r["field"]; ok {
-				recipient := doc.GetString(field)
-				if recipient != "" {
-					if bus == nil {
-						slog.Warn("workflow notification not delivered; realtime event bus unavailable", "doctype", doctypeName, "state", toState)
-						continue
-					}
-					title := strings.TrimSpace(n.Subject)
-					if title == "" {
-						title = doctypeName + " updated"
-					}
-					message := strings.TrimSpace(n.Message)
-					if message == "" {
-						message = fmt.Sprintf("%s %s moved to %s", doctypeName, doc.Name, toState)
-					}
-					if err := bus.Publish(analytics.ChangeEvent{
-						Site: site, Doctype: doctypeName, DocName: doc.Name,
-						Operation: analytics.EventNotification, Timestamp: time.Now().UTC(), ModifiedBy: actor,
-						Data: map[string]any{"recipient": recipient, "title": title, "message": message, "state": toState, "source": "workflow"},
-					}); err != nil {
-						slog.Warn("workflow notification publish failed", "doctype", doctypeName, "state", toState, "error", err)
-					}
-				}
-			}
-		}
-	}
+	RegisterAnalyticsRoutesWithQueryCache(apiGroup, registry, txManager.DB, siteBuses, realtimeProviders, txManager.Dialect, runtimeServices, analyticsCache)
 }
 
 // HandleConfigVersions lists all config versions.
@@ -1289,36 +1096,30 @@ func (h *Handler) HandleConfigDiff(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.required_field", "from and to required", map[string]any{"fields": []string{"from", "to"}})
 		return
 	}
-	// First check if the "to" version has a stored change_list.
-	var changeList string
-	h.siteTx(c).DB.QueryRow(h.siteQuery(c, "SELECT COALESCE(change_list, '') FROM _kora_config_version WHERE id = ?"), toID).Scan(&changeList)
-	if changeList != "" {
-		var diff doctype.ConfigDiffFull
-		if err := json.Unmarshal([]byte(changeList), &diff); err == nil && diff.Doctypes != nil && len(diff.Doctypes.Changes) > 0 {
-			c.JSON(http.StatusOK, Response{Data: diff.Doctypes})
-			return
-		}
-	}
-	// Fallback: parse config columns (handles JSON and s-expression).
+	// Compare full snapshots. change_list is an execution-oriented S-expression
+	// change array used by activation and is not the review API's ConfigDiffFull.
 	var fromConfig, toConfig string
-	h.siteTx(c).DB.QueryRow(h.siteQuery(c, "SELECT config FROM _kora_config_version WHERE id = ?"), fromID).Scan(&fromConfig)
-	h.siteTx(c).DB.QueryRow(h.siteQuery(c, "SELECT config FROM _kora_config_version WHERE id = ?"), toID).Scan(&toConfig)
-	if fromConfig == "" || toConfig == "" {
+	if err := h.siteTx(c).DB.QueryRow(h.siteQuery(c, "SELECT config FROM _kora_config_version WHERE id = ?"), fromID).Scan(&fromConfig); err != nil {
+		writeError(c, http.StatusNotFound, "version.not_found", "Version not found", nil)
+		return
+	}
+	if err := h.siteTx(c).DB.QueryRow(h.siteQuery(c, "SELECT config FROM _kora_config_version WHERE id = ?"), toID).Scan(&toConfig); err != nil {
 		writeError(c, http.StatusNotFound, "version.not_found", "Version not found", nil)
 		return
 	}
 	fromSnapshot, fromErr := doctype.ParseConfig(fromConfig)
 	toSnapshot, toErr := doctype.ParseConfig(toConfig)
 	if fromErr != nil || toErr != nil {
-		var from, to []*doctype.DocType
-		yaml.Unmarshal([]byte(fromConfig), &from)
-		yaml.Unmarshal([]byte(toConfig), &to)
-		diff := doctype.DiffConfigs(from, to)
-		c.JSON(http.StatusOK, Response{Data: diff})
+		writeError(c, http.StatusInternalServerError, "version.parse_failed", "Failed to compare version snapshots", nil)
 		return
 	}
-	diff := doctype.DiffConfigs(fromSnapshot.DocTypes, toSnapshot.DocTypes)
-	c.JSON(http.StatusOK, Response{Data: diff})
+	diff := doctype.DiffFullSnapshots(fromSnapshot, toSnapshot)
+	c.JSON(http.StatusOK, Response{Data: map[string]any{
+		"changes":         diff.Doctypes.Changes,
+		"section_changes": diff.SectionChanges,
+		"diff_summary":    diff.Summary(),
+		"is_breaking":     diff.Doctypes.IsBreaking,
+	}})
 }
 
 // HandleUpload handles file uploads via multipart form.
@@ -1327,6 +1128,22 @@ func (h *Handler) HandleConfigDiff(c *gin.Context) {
 // (path + metadata) for storage in an Attach / Attach Image / Attach Audio field.
 func (h *Handler) HandleUpload(c *gin.Context) {
 	maxBytes := maxUploadBytes()
+	services := h.runtimeService(c, c.GetString("site_name"))
+	if services.UploadAdmission != nil {
+		const conservativeProcessingCopies = 3
+		reservationBytes := uint64(maxBytes) * conservativeProcessingCopies
+		release, err := services.UploadAdmission.Acquire(c.Request.Context(), reservationBytes)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				c.Abort()
+				return
+			}
+			c.Header("Retry-After", "1")
+			writeError(c, http.StatusServiceUnavailable, "upload.capacity_exhausted", "Upload processing capacity is temporarily exhausted", nil)
+			return
+		}
+		defer release()
+	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 	// Use a modest in-memory threshold; larger uploads spill to temp files.
 	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
@@ -1383,7 +1200,11 @@ func (h *Handler) HandleUpload(c *gin.Context) {
 		fmt.Sprintf("%02d", now.Month()))
 	key := filepath.Join(dir, filename)
 
-	backend := h.siteStorage(c)
+	backend, err := h.siteStorage(c)
+	if err != nil {
+		internalError(c, "initializing file storage", err)
+		return
+	}
 
 	// Avoid collisions by appending _1, _2, ... until the key is free.
 	for i := 1; ; i++ {
@@ -1423,7 +1244,7 @@ func (h *Handler) HandleUpload(c *gin.Context) {
 	meta, err := backend.Put(c.Request.Context(), filepath.ToSlash(key), bytes.NewReader(raw), int64(len(raw)), storage.FileMeta{
 		Filename:   filename,
 		MIMEType:   mimeType,
-		UploadedBy: c.GetString("user"),
+		UploadedBy: currentUser(c),
 		UploadedAt: now,
 	})
 	if err != nil {
@@ -1510,6 +1331,7 @@ func hasAlphaChannel(img image.Image) bool {
 // can seek within audio/video. Access is enforced by the SiteGuard middleware.
 // GET /files/*path
 func (h *Handler) HandleFileServe(c *gin.Context) {
+	ReleaseTenantStreamAuthWork(c)
 	h.serveStoredFile(c)
 }
 
@@ -1528,7 +1350,11 @@ func (h *Handler) serveStoredFile(c *gin.Context) {
 		return
 	}
 
-	backend := h.siteStorage(c)
+	backend, err := h.siteStorage(c)
+	if err != nil {
+		internalError(c, "initializing file storage", err)
+		return
+	}
 	meta, err := backend.Head(c.Request.Context(), key)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -1601,7 +1427,11 @@ func (h *Handler) HandleFileDelete(c *gin.Context) {
 		})
 		return
 	}
-	backend := h.siteStorage(c)
+	backend, err := h.siteStorage(c)
+	if err != nil {
+		internalError(c, "initializing file storage", err)
+		return
+	}
 	if err := backend.Delete(c.Request.Context(), key); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			c.JSON(http.StatusNotFound, ErrorResponse{
@@ -1701,6 +1531,9 @@ func parseRange(s string, size int64) (int64, int64, bool) {
 func maxUploadBytes() int64 {
 	if v := os.Getenv("KORA_MAX_UPLOAD_MB"); v != "" {
 		if mb, err := strconv.ParseInt(v, 10, 64); err == nil && mb > 0 {
+			if mb > 1024 {
+				mb = 1024
+			}
 			return mb << 20
 		}
 	}
@@ -1787,12 +1620,6 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 	siteNameStr, _ := siteName.(string)
 
 	// Look up the script.
-	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
-		c.JSON(http.StatusNotFound, ErrorResponse{
-			Error: map[string]string{"message": fmt.Sprintf("method %q not found", methodName)},
-		})
-		return
-	}
 	store := h.runtimeService(c, siteNameStr).ScriptStore
 	if store == nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
@@ -1827,12 +1654,6 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 		reqBody = make(map[string]any)
 	}
 
-	// Get user context.
-	user, _ := c.Get("user")
-	userRole, _ := c.Get("user_role")
-	userStr, _ := user.(string)
-	userRoleStr, _ := userRole.(string)
-
 	// Execute the script.
 	if h.ScriptRunner == nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
@@ -1843,10 +1664,13 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 
 	// Build a provider for API method scripts (enables kora.getDoc, kora.http, etc.)
 	tx := h.siteTx(c)
-	var ss *secret.Store
-	if h.SiteSecretStores != nil || h.RuntimeServices != nil {
-		ss = h.runtimeService(c, siteNameStr).SecretStore
+	userStr, roles, verified := scriptIdentity(tx.Execution, siteNameStr)
+	if !verified {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: map[string]string{"code": "auth.unauthenticated", "message": "Verified script execution identity required"}})
+		return
 	}
+	var ss *secret.Store
+	ss = h.runtimeService(c, siteNameStr).SecretStore
 	provider := NewScriptProvider(tx, h.siteRegistry(c), siteNameStr, ss, h.ScriptHTTPAllowlist)
 
 	execReq := script.ExecuteRequest{
@@ -1856,7 +1680,7 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 		DocType:    rec.DocType,
 		Document:   reqBody,
 		User:       userStr,
-		UserRoles:  []string{userRoleStr},
+		UserRoles:  roles,
 		Site:       siteNameStr,
 		Timeout:    time.Duration(rec.TimeoutMs) * time.Millisecond,
 		Provider:   provider,

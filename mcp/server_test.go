@@ -1,10 +1,17 @@
 package mcp
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/api/ai"
+	"github.com/asenawritescode/kora/contract"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestToolGeneration_ForDoctype(t *testing.T) {
@@ -21,7 +28,7 @@ func TestToolGeneration_ForDoctype(t *testing.T) {
 	}
 	reg.Register(dt)
 
-	server := New(reg, "test-site", ModeExecutable)
+	server := NewWithExecutor(reg, "test-site", ModeExecutable, testExecutor)
 
 	if server == nil {
 		t.Fatal("New returned nil")
@@ -43,7 +50,7 @@ func TestToolNames_FollowPattern(t *testing.T) {
 	}
 	reg.Register(dt)
 
-	server := New(reg, "test-site", ModeExecutable)
+	server := NewWithExecutor(reg, "test-site", ModeExecutable, testExecutor)
 	if server == nil {
 		t.Fatal("New returned nil")
 	}
@@ -90,7 +97,7 @@ func TestAddDoctypeTools_ExcludesChildTables(t *testing.T) {
 	}
 	reg.Register(child)
 
-	server := New(reg, "test-site", ModeExecutable)
+	server := NewWithExecutor(reg, "test-site", ModeExecutable, testExecutor)
 	if server == nil {
 		t.Fatal("New returned nil")
 	}
@@ -140,7 +147,7 @@ func TestProjectedMCPToolsMirrorCatalog(t *testing.T) {
 		},
 	})
 
-	server := New(reg, "test-site", ModeExecutable)
+	server := NewWithExecutor(reg, "test-site", ModeExecutable, testExecutor)
 	if server == nil || server.srv == nil {
 		t.Fatal("expected server to initialize")
 	}
@@ -149,4 +156,132 @@ func TestProjectedMCPToolsMirrorCatalog(t *testing.T) {
 	if len(catalog.Tools) == 0 {
 		t.Fatal("expected tool catalog entries")
 	}
+}
+
+func TestExecutableModeRequiresVerifiedExecutor(t *testing.T) {
+	server := New(registryWithTask(), "test-site", ModeExecutable)
+	if err := server.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "authenticated verified tool executor") {
+		t.Fatalf("Run error = %v, want missing verified executor error", err)
+	}
+}
+
+func TestDefaultModeIsValidationOnly(t *testing.T) {
+	server := New(registryWithTask(), "test-site", "")
+	if server.mode != ModeValidationOnly {
+		t.Fatalf("default mode = %q, want %q", server.mode, ModeValidationOnly)
+	}
+	if server.executor != nil {
+		t.Fatal("default mode unexpectedly has an executor")
+	}
+}
+
+func TestReadOnlyModePublishesOnlyFindListGetTools(t *testing.T) {
+	registry := registryWithTask()
+	server := NewReadOnlyWithExecutor(registry, "tenant.example", testExecutor)
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+	serverSession, err := server.srv.Connect(context.Background(), serverTransport, nil)
+	if err != nil {
+		t.Fatal("connect MCP server:", err)
+	}
+	defer serverSession.Close()
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "1"}, nil)
+	clientSession, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatal("connect MCP client:", err)
+	}
+	defer clientSession.Close()
+
+	result, err := clientSession.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal("list MCP tools:", err)
+	}
+	got := map[string]bool{}
+	for _, tool := range result.Tools {
+		got[tool.Name] = true
+	}
+	for _, name := range []string{"validate_yaml", "task_find", "task_list", "task_get"} {
+		if !got[name] {
+			t.Errorf("read-only MCP tools omit %q: %#v", name, got)
+		}
+	}
+	for _, name := range []string{"task_create", "task_update"} {
+		if got[name] {
+			t.Errorf("read-only MCP tools expose mutation %q", name)
+		}
+	}
+}
+
+func TestExtensionReadExecutorRejectsMutationBeforeAuthentication(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("sqlmock.New:", err)
+	}
+	defer database.Close()
+	executor, err := NewExtensionReadExecutor(database, kdb.Resolve("mysql"), registryWithTask(), contract.TenantID("stable-tenant"), "tenant.example", "extension-token")
+	if err != nil {
+		t.Fatal("NewExtensionReadExecutor:", err)
+	}
+	_, err = executor(context.Background(), ai.ToolDescriptor{
+		ID: "tenant.task_create", Source: "tenant", Name: "task_create", Operation: "create", Doctype: "Task",
+	}, map[string]any{"title": "untrusted"})
+	if err == nil || !strings.Contains(err.Error(), "not an authorized DocType read") {
+		t.Fatalf("mutation tool error = %v, want read-only rejection", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("mutation reached auth/database:", err)
+	}
+}
+
+func TestExtensionReadExecutorRejectsRevokedCredential(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("sqlmock.New:", err)
+	}
+	defer database.Close()
+	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token = \\? AND is_active = 1").
+		WithArgs("tenant.example", "revoked-token").
+		WillReturnRows(sqlmock.NewRows([]string{"name", "api_permissions"}))
+	executor, err := NewExtensionReadExecutor(database, kdb.Resolve("mysql"), registryWithTask(), contract.TenantID("stable-tenant"), "tenant.example", "revoked-token")
+	if err != nil {
+		t.Fatal("NewExtensionReadExecutor:", err)
+	}
+	_, err = executor(context.Background(), ai.ToolDescriptor{
+		ID: "tenant.task_list", Source: "tenant", Name: "task_list", Operation: "list", Doctype: "Task",
+	}, map[string]any{})
+	if err == nil || !strings.Contains(err.Error(), "authentication failed") {
+		t.Fatalf("revoked extension credential error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("revoked credential query mismatch:", err)
+	}
+}
+
+func TestExtensionReadExecutorWaitHonorsCallerCancellation(t *testing.T) {
+	database, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("sqlmock.New:", err)
+	}
+	defer database.Close()
+	executor, err := NewExtensionReadExecutor(database, kdb.Resolve("mysql"), registryWithTask(), contract.TenantID("stable-tenant"), "tenant.example", "extension-token")
+	if err != nil {
+		t.Fatal("NewExtensionReadExecutor:", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = executor(ctx, ai.ToolDescriptor{
+		ID: "tenant.task_list", Source: "tenant", Name: "task_list", Operation: "list", Doctype: "Task",
+	}, map[string]any{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled MCP read error = %v", err)
+	}
+}
+
+func registryWithTask() *doctype.Registry {
+	reg := doctype.NewRegistry()
+	reg.Register(&doctype.DocType{Name: "Task"})
+	return reg
+}
+
+func testExecutor(context.Context, ai.ToolDescriptor, map[string]any) (string, error) {
+	return "ok", nil
 }

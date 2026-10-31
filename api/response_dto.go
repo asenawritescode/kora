@@ -1,10 +1,10 @@
 package api
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/asenawritescode/kora/api/ai"
+	"github.com/asenawritescode/kora/contract"
 )
 
 type aiCancelResponse struct {
@@ -37,18 +37,9 @@ type extensionCreatedResponse struct {
 	Warning     string `json:"warning"`
 }
 
-type managedChannelClientResponse struct {
-	Name        string `json:"name"`
-	AccessToken string `json:"access_token"`
-	Warning     string `json:"warning"`
-}
+type managedChannelClientResponse = contract.ManagedChannelClientV2
 
-type managedSiteIdentityResponse struct {
-	SiteID         string `json:"site_id"`
-	Status         string `json:"status"`
-	ConfigRevision uint64 `json:"config_revision"`
-	Healthy        bool   `json:"healthy"`
-}
+type managedSiteIdentityResponse = contract.ManagedSiteIdentityV2
 
 type extensionReplayedResponse struct {
 	Status string `json:"status"`
@@ -116,13 +107,7 @@ type aiApproveListResponse struct {
 	Approvals []aiApprovalListItem `json:"approvals"`
 }
 
-type channelSessionIssueResponse struct {
-	SessionID       string     `json:"session_id"`
-	AccessToken     string     `json:"access_token"`
-	TrustedUntil    time.Time  `json:"trusted_until"`
-	SensitiveUntil  *time.Time `json:"sensitive_until,omitempty"`
-	ConversationKey string     `json:"conversation_key"`
-}
+type channelSessionIssueResponse = contract.ChannelSessionIssueResponseV2
 
 type channelSessionRevokeResponse struct {
 	Status string `json:"status"`
@@ -138,25 +123,9 @@ type channelToolResponse struct {
 	Result string `json:"result"`
 }
 
-type configVersionSnapshotFile struct {
-	Path        string `json:"path"`
-	Content     string `json:"content"`
-	ContentType string `json:"content_type"`
-}
+type configVersionSnapshotFile = contract.ConfigurationSnapshotFileV2
 
-type configVersionSnapshotResponse struct {
-	VersionID        string                      `json:"version_id"`
-	Version          int                         `json:"version"`
-	Site             string                      `json:"site"`
-	Label            string                      `json:"label"`
-	DoctypeNames     []string                    `json:"doctype_names"`
-	DoctypeCount     int                         `json:"doctype_count"`
-	RolesCount       int                         `json:"roles_count"`
-	PermissionsCount int                         `json:"permissions_count"`
-	WorkflowsCount   int                         `json:"workflows_count"`
-	Snapshot         json.RawMessage             `json:"snapshot"`
-	PackFiles        []configVersionSnapshotFile `json:"pack_files"`
-}
+type configVersionSnapshotResponse = contract.ConfigurationSnapshotResponseV2
 
 type deletedResponse struct {
 	Message       string `json:"message"`

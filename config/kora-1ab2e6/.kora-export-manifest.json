@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "transaction": "08bcb60a43331026b3ce68d69b0c035e",
+  "files": [
+    {
+      "path": "doctypes/product.yaml",
+      "sha256": "774fb859d9f913eb26b34c0b2ff8bc7d668cc78502e364e00373400c8ee4e244"
+    },
+    {
+      "path": "doctypes/sale.yaml",
+      "sha256": "a42590e570e6be323ee14e592367ccbd4498fa8afe6e0bfb0b5ea879bb253777"
+    },
+    {
+      "path": "doctypes/sale_item.yaml",
+      "sha256": "8ab9bd5254e75da3b9ae4cf763a9d09df0eacf8ae3d94d920fb1c666009b0110"
+    },
+    {
+      "path": "pages/point_of_sale.yaml",
+      "sha256": "0d6b8daf9ffb9dcdc55db64b32fcf7afced4e32bf27de0ca28747df2e7d58eaa"
+    },
+    {
+      "path": "permissions.yaml",
+      "sha256": "412b54d300e2f6a0a02144233adfd176e0910311f74e9f25f691770afbc61903"
+    },
+    {
+      "path": "roles.yaml",
+      "sha256": "8c0ca56f0fe826a44797e4a976d510aafc588d27ee4cb04bb74e622b5632632b"
+    }
+  ]
+}

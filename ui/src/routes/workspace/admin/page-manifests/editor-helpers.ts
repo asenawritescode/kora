@@ -59,9 +59,9 @@ export function manifestDraftStorageKey(name: string | undefined | null): string
 
 export function readManifestDraft(name: string | undefined | null): ManifestDraftSnapshot | null {
   if (typeof window === 'undefined') return null
+  const raw = localStorage.getItem(manifestDraftStorageKey(name))
+  if (!raw) return null
   try {
-    const raw = localStorage.getItem(manifestDraftStorageKey(name))
-    if (!raw) return null
     const parsed = JSON.parse(raw) as ManifestDraftSnapshot
     if (!parsed || typeof parsed !== 'object' || !parsed.manifest || typeof parsed.savedAt !== 'string') return null
     return parsed
@@ -72,20 +72,12 @@ export function readManifestDraft(name: string | undefined | null): ManifestDraf
 
 export function writeManifestDraft(name: string | undefined | null, snapshot: ManifestDraftSnapshot): void {
   if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(manifestDraftStorageKey(name), JSON.stringify(snapshot))
-  } catch {
-    // Best-effort only.
-  }
+  localStorage.setItem(manifestDraftStorageKey(name), JSON.stringify(snapshot))
 }
 
 export function clearManifestDraft(name: string | undefined | null): void {
   if (typeof window === 'undefined') return
-  try {
-    localStorage.removeItem(manifestDraftStorageKey(name))
-  } catch {
-    // Best-effort only.
-  }
+  localStorage.removeItem(manifestDraftStorageKey(name))
 }
 
 export function previewViewportOptions(): PickerOption[] {

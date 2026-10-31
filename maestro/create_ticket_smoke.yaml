@@ -1,0 +1,5 @@
+appId: com.kora.mobile
+---
+- assertVisible: 0 records
+- tapOn: + New
+- waitForAnimationToEnd

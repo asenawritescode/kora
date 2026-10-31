@@ -2,6 +2,7 @@ name: Purchase Order Item
 module: Purchasing
 is_child_table: true
 title_field: item
+search_fields: item, description
 sort_field: idx
 sort_order: ASC
 
@@ -11,6 +12,7 @@ fields:
     label: Item
     options: Item
     reqd: true
+    search_index: true
     in_list_view: true
 
   - fieldname: description

@@ -1,4 +1,4 @@
-// Package orm provides the generic ORM layer for Kora.
+// Package orm provides the generic ORM layer for Kigae.
 // All documents are represented as doctype.Document (map[string]any).
 package orm
 
@@ -13,11 +13,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asenawritescode/kora/analytics"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/workflow"
 	"github.com/go-sql-driver/mysql"
 )
 
@@ -27,6 +30,39 @@ func derivePrefix(name string) string {
 
 func (tx *TxManager) tableName(dt *doctype.DocType) string {
 	return quoteTableName(tx.Dialect, dt.RawTableName())
+}
+
+// configuredSearchFieldNames returns configured fields in declaration order.
+// Legacy DocTypes without search_fields retain their declared broad field set,
+// but the query caller uses only explicitly indexed fields for quick search.
+// Hidden and password fields are filtered from the result in both modes.
+func configuredSearchFieldNames(d *doctype.DocType) []string {
+	var fields []string
+	seen := make(map[string]struct{})
+	for _, name := range strings.Split(d.SearchFields, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		fields = append(fields, name)
+	}
+	if len(fields) == 0 {
+		for _, field := range d.NonTableDataFields() {
+			if searchableFieldType(field.Fieldtype) {
+				fields = append(fields, field.Fieldname)
+			}
+		}
+	}
+	if title := strings.TrimSpace(d.TitleField); title != "" {
+		if _, ok := seen[title]; !ok {
+			fields = append(fields, title)
+		}
+	}
+	return fields
 }
 
 func (tx *TxManager) childTableName(dt *doctype.DocType, field string) string {
@@ -70,9 +106,12 @@ func DerivePrefix(name string) string {
 
 // TxManager provides transactional operations on documents.
 type TxManager struct {
-	DB       *sql.DB
-	Registry *doctype.Registry
-	Dialect  db.Dialect
+	DB *sql.DB
+	// Transaction binds reads performed during a kernel operation to its owner
+	// transaction. The kernel sets and clears this only for the operation scope.
+	Transaction *sql.Tx
+	Registry    *doctype.Registry
+	Dialect     db.Dialect
 
 	// Context carries the request-scoped context for script execution and
 	// other cancellable operations. If nil, context.Background() is used.
@@ -82,6 +121,9 @@ type TxManager struct {
 	// as the business write (RFC §8.1). Mutation entry points are owned by the
 	// kernel; a missing outbox is therefore an explicit disabled-delivery mode.
 	Outbox outbox.Writer
+	// WorkflowStatusPolicies resolves published status policies for every
+	// request-scoped kernel mutation path.
+	WorkflowStatusPolicies workflow.StatusPolicyRepository
 
 	// ScriptRunner executes JavaScript hooks (before_save, after_insert, etc.).
 	// If nil, script execution is disabled.
@@ -94,6 +136,10 @@ type TxManager struct {
 	// ScriptProvider bridges scripts to the engine (ORM, secrets, HTTP).
 	// Created per-request by siteTx() with the site's DB and registry.
 	ScriptProvider script.KoraProvider
+	// ScriptProviderFactory rebinds a request or tenant provider to the copied,
+	// operation-scoped TxManager created by the kernel. Providers must return a
+	// lightweight scoped copy; they may share immutable clients and transports.
+	ScriptProviderFactory func(*TxManager) script.KoraProvider
 
 	// SiteName is the tenant identifier used in analytics events.
 	SiteName string
@@ -101,12 +147,23 @@ type TxManager struct {
 	// AsyncHookSink receives after_* hooks for fire-and-forget execution.
 	// If non-nil, after_* events are handed to the async worker contract.
 	AsyncHookSink AsyncHookSink
+	// AsyncHookInvocations is the durable hook store installed by the tenant
+	// runtime. Kernel commands append frozen hooks in their source transaction.
+	AsyncHookInvocations     script.AsyncHookInvocationStore
+	AsyncHookTenantID        contract.TenantID
+	AsyncHookSourceOperation contract.OperationID
+	AsyncHookConfigRevision  uint64
+	AsyncHookSequence        uint16
+	SuppressAsyncHookEvents  bool
 
 	// User and UserRole from the current request context, used for script execution.
 	CurrentUser      string
 	CurrentUserRole  string
 	CurrentUserRoles []string
-	SkipHookScripts  []string
+	// Execution is copied from the verified operation at the command boundary
+	// and inherited by nested script-provider mutations.
+	Execution       policy.Execution
+	SkipHookScripts []string
 	// ScriptMutationExecutor is scoped to the active kernel transaction and is
 	// attached to the provider passed into lifecycle scripts. It is nil outside
 	// an uncommitted operation, so post-commit scripts start a fresh command.
@@ -120,9 +177,28 @@ type TxManager struct {
 	HookScriptsByDoctype map[string][]script.ScriptRecord
 }
 
+type contextQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (tx *TxManager) queryer() contextQueryer {
+	if tx != nil && tx.Transaction != nil {
+		return tx.Transaction
+	}
+	return tx.DB
+}
+
+func (tx *TxManager) queryContext() context.Context {
+	if tx != nil && tx.Context != nil {
+		return tx.Context
+	}
+	return context.Background()
+}
+
 // writeOutbox records a change event into the transactional outbox within the
 // given transaction. It is a no-op when no outbox writer is configured.
-func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op analytics.EventOp, dt *doctype.DocType, docName, modifiedBy string, data, oldData map[string]any) error {
+func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op eventstream.EventOp, dt *doctype.DocType, docName, modifiedBy string, data, oldData map[string]any) error {
 	if tx.Outbox == nil {
 		return nil
 	}
@@ -130,7 +206,7 @@ func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op analytics.EventOp, dt *doctype
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	change := analytics.ChangeEvent{
+	change := eventstream.ChangeEvent{
 		Site:       tx.SiteName,
 		Doctype:    dt.Name,
 		DocName:    docName,
@@ -174,8 +250,12 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		doc.Name = fmt.Sprintf("%s-%04d", prefix, nextNum)
 	}
 
-	now := time.Now()
+	// Match the precision persisted by the supported SQL dialects so the
+	// optimistic-concurrency token returned in the same response can be echoed
+	// back without being newer than the stored value.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	doc.DocStatus = 0
+	doc.Set("modified", now)
 
 	dataFields := dt.NonTableDataFields()
 	var columns []string
@@ -280,7 +360,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		return fmt.Errorf("persisting derived fields: %w", err)
 	}
 
-	if err := tx.writeOutbox(dbTx, analytics.EventInsert, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), nil); err != nil {
+	if err := tx.writeOutbox(dbTx, eventstream.EventInsert, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), nil); err != nil {
 		return fmt.Errorf("recording insert to outbox: %w", err)
 	}
 
@@ -409,7 +489,14 @@ func (tx *TxManager) CompleteSave(dt *doctype.DocType, doc, oldDoc *doctype.Docu
 // its receipt, audit row, and outbox events. Returns orm.ErrNotFound wrapped
 // error when the row vanished or is owner-hidden.
 func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document, modifiedBy string, owner string, oldDoc *doctype.Document) error {
-	now := time.Now()
+	return tx.SaveInTxWithScope(dbTx, dt, doc, modifiedBy, policy.RowScope{UserID: owner, Owner: owner != ""}, oldDoc)
+}
+
+// SaveInTxWithScope applies optimistic revision matching and the actor's
+// current owner-or-assignee predicate in the same write statement.
+func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document, modifiedBy string, scope policy.RowScope, oldDoc *doctype.Document) error {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	doc.Set("modified", now)
 	dataFields := dt.NonTableDataFields()
 
 	var setClauses []string
@@ -443,9 +530,16 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 		where += " AND revision = ?"
 		values = append(values, oldDoc.Revision)
 	}
-	if owner != "" {
+	scopedWhere, scopedArgs, scopeErr := tx.rowScopePredicate(dt, scope)
+	if scopeErr != nil {
+		return scopeErr
+	}
+	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" {
 		where += " AND owner = ?"
-		values = append(values, owner)
+		values = append(values, scope.UserID)
+	} else if scopedWhere != "" {
+		where += " AND (" + scopedWhere + ")"
+		values = append(values, scopedArgs...)
 	}
 
 	query := fmt.Sprintf(
@@ -559,7 +653,7 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 	if oldDoc != nil {
 		oldOutboxData = copyFieldsWithStatus(oldDoc.Fields, oldDoc.DocStatus)
 	}
-	if err := tx.writeOutbox(dbTx, analytics.EventUpdate, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), oldOutboxData); err != nil {
+	if err := tx.writeOutbox(dbTx, eventstream.EventUpdate, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), oldOutboxData); err != nil {
 		return fmt.Errorf("recording save to outbox: %w", err)
 	}
 
@@ -569,6 +663,12 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 // GetDoc loads a single document by name, including child table expansion.
 // If owner is non-empty, only returns the document if owned by that user.
 func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*doctype.Document, error) {
+	return tx.GetDocWithScope(dt, name, policy.RowScope{UserID: owner, Owner: owner != ""})
+}
+
+// GetDocWithScope reads a document only when the verified actor is its owner
+// or matches one of the explicitly configured assignment fields.
+func (tx *TxManager) GetDocWithScope(dt *doctype.DocType, name string, scope policy.RowScope) (*doctype.Document, error) {
 	dataFields := dt.NonTableDataFields()
 
 	var cols []string
@@ -585,9 +685,18 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 
 	where := "name = ?"
 	args := []any{name}
-	if owner != "" {
+	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" {
 		where += " AND owner = ?"
-		args = append(args, owner)
+		args = append(args, scope.UserID)
+		scope.Owner = false
+	}
+	scopedWhere, scopedArgs, err := tx.rowScopePredicate(dt, scope)
+	if err != nil {
+		return nil, err
+	}
+	if scopedWhere != "" {
+		where += " AND (" + scopedWhere + ")"
+		args = append(args, scopedArgs...)
 	}
 
 	query := fmt.Sprintf(
@@ -597,7 +706,7 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 		where,
 	)
 
-	row := tx.DB.QueryRow(db.Rebind(tx.Dialect, query), args...)
+	row := tx.queryer().QueryRowContext(tx.queryContext(), db.Rebind(tx.Dialect, query), args...)
 	if err := row.Scan(scanTargets...); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("%w: document %q not found in %s", ErrNotFound, name, dt.Name)
@@ -618,10 +727,15 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 			doc.DocStatus = intVal(val)
 		case "revision":
 			doc.Revision = uint64(intVal(val))
-		case "owner", "creation", "modified", "modified_by":
+		case "modified":
+			// Resource reads expose this as the optimistic-concurrency token.
+			// Keep the persisted database value so the token from GET can be
+			// echoed back on the next update.
+			doc.Set("modified", val)
+		case "owner", "creation", "modified_by":
 			// System columns.
 		default:
-			doc.Fields[col] = byteSliceToString(val)
+			doc.Fields[col] = normalizeScannedFieldValue(dt.GetField(col), val)
 		}
 	}
 
@@ -640,6 +754,39 @@ func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*do
 	return doc, nil
 }
 
+func (tx *TxManager) rowScopePredicate(dt *doctype.DocType, scope policy.RowScope) (string, []any, error) {
+	if scope.UserID == "" {
+		if scope.Owner || len(scope.AssignedFields) > 0 {
+			return "", nil, fmt.Errorf("row scope requires an actor identity")
+		}
+		return "", nil, nil
+	}
+	var clauses []string
+	var args []any
+	if scope.Owner {
+		clauses = append(clauses, "owner = ?")
+		args = append(args, scope.UserID)
+	}
+	seen := map[string]bool{}
+	for _, fieldName := range scope.AssignedFields {
+		fieldName = strings.TrimSpace(fieldName)
+		if fieldName == "" || seen[fieldName] {
+			continue
+		}
+		seen[fieldName] = true
+		field := dt.GetField(fieldName)
+		if field == nil || field.Fieldtype != "User" {
+			return "", nil, fmt.Errorf("assignment scope field %q on %s must be a User field", fieldName, dt.Name)
+		}
+		clauses = append(clauses, tx.Dialect.QuoteIdent(fieldName)+" = ?")
+		args = append(args, scope.UserID)
+	}
+	if len(clauses) == 0 {
+		return "", nil, nil
+	}
+	return strings.Join(clauses, " OR "), args, nil
+}
+
 // GetList returns a paginated list of documents with optional filtering.
 // If owner is non-empty, only returns documents owned by that user.
 func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string, limit, offset int, owner string) ([]*doctype.Document, int, error) {
@@ -649,6 +796,12 @@ func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string
 // GetListWithOptions is the projected/searchable form of GetList used by HTTP
 // list endpoints. requestedFields is applied in SQL, not after scanning rows.
 func (tx *TxManager) GetListWithOptions(dt *doctype.DocType, filters string, orderBy string, limit, offset int, owner string, requestedFields []string, search string) ([]*doctype.Document, int, error) {
+	return tx.GetListWithScope(dt, filters, orderBy, limit, offset, policy.RowScope{UserID: owner, Owner: owner != ""}, requestedFields, search)
+}
+
+// GetListWithScope is the row-scoped list query used by authenticated
+// resource consumers. Assignment field names come only from tenant policy.
+func (tx *TxManager) GetListWithScope(dt *doctype.DocType, filters string, orderBy string, limit, offset int, scope policy.RowScope, requestedFields []string, search string) ([]*doctype.Document, int, error) {
 	where := "1=1"
 	var whereArgs []any
 	if filters != "" && filters != "[]" {
@@ -665,27 +818,57 @@ func (tx *TxManager) GetListWithOptions(dt *doctype.DocType, filters string, ord
 			return nil, 0, fmt.Errorf("building filter SQL: %w", err)
 		}
 	}
-	if owner != "" {
+	scopedWhere, scopedArgs, scopeErr := tx.rowScopePredicate(dt, scope)
+	if scopeErr != nil {
+		return nil, 0, scopeErr
+	}
+	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" {
 		where += " AND owner = ?"
-		whereArgs = append(whereArgs, owner)
+		whereArgs = append(whereArgs, scope.UserID)
+	} else if scopedWhere != "" {
+		where += " AND (" + scopedWhere + ")"
+		whereArgs = append(whereArgs, scopedArgs...)
 	}
 	if search = strings.TrimSpace(search); search != "" {
 		var searchClauses []string
-		searchValue := "%" + search + "%"
-		for _, f := range dt.NonTableDataFields() {
-			if searchableFieldType(f.Fieldtype) {
-				searchClauses = append(searchClauses, fmt.Sprintf("%s LIKE ?", tx.Dialect.QuoteIdent(f.Fieldname)))
-				whereArgs = append(whereArgs, searchValue)
+		// Document names are opaque system identifiers. Exact comparison uses
+		// their primary-key index and avoids weakening the configured business
+		// field matching rules.
+		nameSearchValue := search
+		for _, fieldName := range configuredSearchFieldNames(dt) {
+			f := dt.GetField(fieldName)
+			if f == nil || f.Hidden || strings.EqualFold(f.Fieldtype, "Password") || !searchableFieldType(f.Fieldtype) || !f.SearchIndex {
+				continue
 			}
+			// Quick search only targets indexed fields and uses prefix matching,
+			// allowing the database to use the configured B-tree search index.
+			searchValue := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(search) + "%"
+			if strings.EqualFold(f.Fieldtype, "Link") && tx.Registry != nil {
+				if target := tx.Registry.Get(strings.TrimSpace(f.Options)); target != nil {
+					title := strings.TrimSpace(target.TitleField)
+					if titleField := target.GetField(title); title != "" && titleField != nil && !titleField.Hidden && searchableFieldType(titleField.Fieldtype) && titleField.SearchIndex {
+						searchClauses = append(searchClauses, fmt.Sprintf("%s LIKE ? ESCAPE '!' OR %s IN (SELECT %s FROM %s WHERE %s LIKE ? ESCAPE '!')",
+							tx.Dialect.QuoteIdent(f.Fieldname),
+							tx.Dialect.QuoteIdent(f.Fieldname),
+							tx.Dialect.QuoteIdent("name"),
+							tx.tableName(target),
+							tx.Dialect.QuoteIdent(title)))
+						whereArgs = append(whereArgs, searchValue, searchValue)
+						continue
+					}
+				}
+			}
+			searchClauses = append(searchClauses, fmt.Sprintf("%s LIKE ? ESCAPE '!'", tx.Dialect.QuoteIdent(f.Fieldname)))
+			whereArgs = append(whereArgs, searchValue)
 		}
-		searchClauses = append(searchClauses, fmt.Sprintf("%s LIKE ?", tx.Dialect.QuoteIdent("name")))
-		whereArgs = append(whereArgs, searchValue)
+		searchClauses = append(searchClauses, fmt.Sprintf("%s = ?", tx.Dialect.QuoteIdent("name")))
+		whereArgs = append(whereArgs, nameSearchValue)
 		where += " AND (" + strings.Join(searchClauses, " OR ") + ")"
 	}
 
 	var total int
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tx.tableName(dt), where)
-	err := tx.DB.QueryRow(db.Rebind(tx.Dialect, countQuery), whereArgs...).Scan(&total)
+	err := tx.queryer().QueryRowContext(tx.queryContext(), db.Rebind(tx.Dialect, countQuery), whereArgs...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("counting documents: %w", err)
 	}
@@ -726,7 +909,7 @@ func (tx *TxManager) GetListWithOptions(dt *doctype.DocType, filters string, ord
 	}
 
 	// Validate orderBy against known columns to prevent SQL injection.
-	safeOrderBy, err := validateOrderBy(orderBy, dt)
+	safeOrderBy, err := validateOrderBy(orderBy, dt, tx.Dialect.QuoteIdent)
 	if err != nil {
 		return nil, 0, fmt.Errorf("invalid order_by: %w", err)
 	}
@@ -741,7 +924,7 @@ func (tx *TxManager) GetListWithOptions(dt *doctype.DocType, filters string, ord
 
 	args := append(whereArgs, limit, offset)
 
-	rows, err := tx.DB.Query(db.Rebind(tx.Dialect, query), args...)
+	rows, err := tx.queryer().QueryContext(tx.queryContext(), db.Rebind(tx.Dialect, query), args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("querying documents: %w", err)
 	}
@@ -770,7 +953,7 @@ func (tx *TxManager) GetListWithOptions(dt *doctype.DocType, filters string, ord
 			case "doc_status":
 				doc.DocStatus = intVal(val)
 			default:
-				doc.Fields[col] = byteSliceToString(val)
+				doc.Fields[col] = normalizeScannedFieldValue(dt.GetField(col), val)
 			}
 		}
 
@@ -791,7 +974,7 @@ func containsString(values []string, target string) bool {
 
 func searchableFieldType(fieldType string) bool {
 	switch fieldType {
-	case "Data", "User", "Text", "Small Text", "Long Text", "Link", "Dynamic Link", "Select", "Email", "Phone", "Code", "Autocomplete":
+	case "Data", "Text", "Small Text", "Long Text", "Link", "Dynamic Link", "Select", "Email", "Phone", "Code", "Autocomplete":
 		return true
 	default:
 		return false
@@ -816,6 +999,12 @@ func (tx *TxManager) CompleteDelete(dt *doctype.DocType, oldDoc *doctype.Documen
 // DeleteInTx removes a business record and its child rows in the operation
 // kernel's transaction. The kernel owns commit and lifecycle-hook scheduling.
 func (tx *TxManager) DeleteInTx(dbTx *sql.Tx, dt *doctype.DocType, name, owner string, oldDoc *doctype.Document) error {
+	return tx.DeleteInTxWithScope(dbTx, dt, name, policy.RowScope{UserID: owner, Owner: owner != ""}, oldDoc)
+}
+
+// DeleteInTxWithScope deletes only when the current persisted row remains
+// visible to the actor under the transaction's assignment policy.
+func (tx *TxManager) DeleteInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, name string, scope policy.RowScope, oldDoc *doctype.Document) error {
 	for _, f := range dt.TableFields() {
 		childTable := tx.childTableName(dt, f.Fieldname)
 		if _, err := dbTx.Exec(
@@ -828,9 +1017,16 @@ func (tx *TxManager) DeleteInTx(dbTx *sql.Tx, dt *doctype.DocType, name, owner s
 
 	where := "name = ?"
 	args := []any{name}
-	if owner != "" {
+	scopedWhere, scopedArgs, scopeErr := tx.rowScopePredicate(dt, scope)
+	if scopeErr != nil {
+		return scopeErr
+	}
+	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" {
 		where += " AND owner = ?"
-		args = append(args, owner)
+		args = append(args, scope.UserID)
+	} else if scopedWhere != "" {
+		where += " AND (" + scopedWhere + ")"
+		args = append(args, scopedArgs...)
 	}
 	result, err := dbTx.Exec(db.Rebind(tx.Dialect, fmt.Sprintf("DELETE FROM %s WHERE %s", tx.tableName(dt), where)), args...)
 	if err != nil {
@@ -844,7 +1040,7 @@ func (tx *TxManager) DeleteInTx(dbTx *sql.Tx, dt *doctype.DocType, name, owner s
 	if oldDoc != nil {
 		oldFields = oldDoc.Fields
 	}
-	if err := tx.writeOutbox(dbTx, analytics.EventDelete, dt, name, "", oldFields, nil); err != nil {
+	if err := tx.writeOutbox(dbTx, eventstream.EventDelete, dt, name, "", oldFields, nil); err != nil {
 		return fmt.Errorf("recording delete to outbox: %w", err)
 	}
 	return nil
@@ -859,7 +1055,7 @@ func validSortColumns(dt *doctype.DocType) map[string]bool {
 // validateOrderBy parses and validates an ORDER BY clause against known columns.
 // It returns a safe, backtick-quoted ORDER BY string suitable for SQL interpolation.
 // This prevents SQL injection via the order_by query parameter.
-func validateOrderBy(orderBy string, dt *doctype.DocType) (string, error) {
+func validateOrderBy(orderBy string, dt *doctype.DocType, quoteIdent func(string) string) (string, error) {
 	if orderBy == "" {
 		return "", fmt.Errorf("order_by must not be empty")
 	}
@@ -893,7 +1089,7 @@ func validateOrderBy(orderBy string, dt *doctype.DocType) (string, error) {
 			return "", fmt.Errorf("unknown column %q in ORDER BY", col)
 		}
 
-		safeParts = append(safeParts, fmt.Sprintf("`%s` %s", col, dir))
+		safeParts = append(safeParts, fmt.Sprintf("%s %s", quoteIdent(col), dir))
 	}
 
 	if len(safeParts) == 0 {
@@ -1017,6 +1213,45 @@ func byteSliceToString(v any) any {
 		return string(b)
 	}
 	return v
+}
+
+// normalizeScannedFieldValue gives temporal database values the same canonical
+// string representation used by document mutations. MySQL's parseTime option
+// returns DATE/TIME/DATETIME columns as time.Time; preserving that value makes
+// Document.GetString return an empty string, which can silently skip date-based
+// domain work such as recurring invoice generation.
+func normalizeScannedFieldValue(field *doctype.Field, value any) any {
+	if field == nil {
+		return byteSliceToString(value)
+	}
+	if parsed, ok := value.(time.Time); ok {
+		switch field.Fieldtype {
+		case "Date":
+			return parsed.Format("2006-01-02")
+		case "Time":
+			return parsed.Format("15:04:05.999999999")
+		case "Datetime":
+			return parsed.Format(time.RFC3339Nano)
+		default:
+			return value
+		}
+	}
+	bytes, ok := value.([]byte)
+	if !ok {
+		return value
+	}
+	text := string(bytes)
+	switch field.Fieldtype {
+	case "Int":
+		if number, err := strconv.ParseInt(text, 10, 64); err == nil {
+			return number
+		}
+	case "Float", "Currency", "Percent":
+		if number, err := strconv.ParseFloat(text, 64); err == nil {
+			return number
+		}
+	}
+	return text
 }
 
 func intVal(v any) int {

@@ -2,12 +2,18 @@ package orm
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 )
 
@@ -30,6 +36,34 @@ type hookFailureRunner struct {
 	panicValue any
 	err        error
 	seenCtxErr error
+}
+
+type capturedAsyncHookStore struct {
+	invocations []script.AsyncHookInvocation
+	err         error
+}
+
+func (s *capturedAsyncHookStore) AppendAsyncHookTx(_ context.Context, _ *sql.Tx, invocation script.AsyncHookInvocation) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.invocations = append(s.invocations, invocation)
+	return nil
+}
+func (*capturedAsyncHookStore) ClaimAsyncHooks(context.Context, contract.TenantID, string, uint16, time.Duration) ([]script.AsyncHookClaim, error) {
+	return nil, nil
+}
+func (*capturedAsyncHookStore) BeginAsyncHook(context.Context, script.AsyncHookClaim) (*sql.Tx, error) {
+	return nil, nil
+}
+func (*capturedAsyncHookStore) MarkAsyncHookExternalEffect(context.Context, script.AsyncHookClaim) error {
+	return nil
+}
+func (*capturedAsyncHookStore) SucceedAsyncHookTx(context.Context, *sql.Tx, script.AsyncHookClaim) error {
+	return nil
+}
+func (*capturedAsyncHookStore) FinishAsyncHook(context.Context, script.AsyncHookClaim, script.AsyncHookOutcome) error {
+	return nil
 }
 
 func (r *hookFailureRunner) Execute(ctx context.Context, _ script.ExecuteRequest) (*script.ExecuteResult, error) {
@@ -141,6 +175,33 @@ func TestAsyncAfterHookCarriesRecursionGuard(t *testing.T) {
 	}
 }
 
+func TestAsyncAfterHookCarriesVerifiedExecution(t *testing.T) {
+	sink := &hookRequestSink{}
+	execution, err := policy.NewVerifiedExecution("test-site", contract.ActorContext{
+		PrincipalID: "alice@example.test", PrincipalType: contract.PrincipalHuman,
+		SubjectUserID: "alice@example.test", Site: "test-site", Roles: []string{"Reader", "Auditor"},
+	})
+	if err != nil {
+		t.Fatal("create execution:", err)
+	}
+	tx := &TxManager{
+		Registry: doctype.NewRegistry(), ScriptRunner: hookTestRunner{}, ScriptStore: &script.Store{},
+		AsyncHookSink: sink, SiteName: "test-site", CurrentUser: "alice@example.test", Execution: execution,
+		HookScriptsByDoctype: map[string][]script.ScriptRecord{
+			"Task": {{Name: "task-after-save", Event: script.EventAfterSave}},
+		},
+	}
+	if err := tx.runHooks(&doctype.DocType{Name: "Task"}, script.EventAfterSave, doctype.NewDocument("Task"), nil); err != nil {
+		t.Fatal("queue async hook:", err)
+	}
+	if !sink.request.Execution.Valid() || sink.request.Execution.Actor().PrincipalID != "alice@example.test" {
+		t.Fatalf("async hook execution = %#v, want verified originating actor", sink.request.Execution)
+	}
+	if got, want := sink.request.UserRoles, []string{"Reader", "Auditor"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("async hook roles = %#v, want full verified role set %#v", got, want)
+	}
+}
+
 func TestNormalizeHookDocumentFields_RestoresChildTables(t *testing.T) {
 	reg := doctype.NewRegistry()
 	reg.Register(&doctype.DocType{Name: "Sale Item", IsChildTable: true, Fields: []doctype.Field{
@@ -234,7 +295,7 @@ func TestActiveHookScriptsLoadsOneDocTypeSnapshot(t *testing.T) {
 	}
 	defer database.Close()
 	columns := []string{
-		"name", "site", "script_type", "doctype", "event", "method_path", "workflow_action", "schedule",
+		"name", "site", "script_type", "doctype", "event", "method_path", "schedule",
 		"priority", "is_active", "run_as", "timeout_ms", "script", "compiled_at", "compile_error",
 		"created_by", "updated_by", "creation", "modified",
 	}
@@ -249,5 +310,102 @@ func TestActiveHookScriptsLoadsOneDocTypeSnapshot(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expected one script-table query per DocType and command: %v", err)
+	}
+}
+
+func TestCaptureAsyncAfterHooksTxFreezesScriptAndVerifiedExecution(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create SQL mock:", err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	dbTx, err := database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal("begin source transaction:", err)
+	}
+	columns := []string{"name", "site", "script_type", "doctype", "event", "method_path", "schedule", "priority", "is_active", "run_as", "timeout_ms", "script", "compiled_at", "compile_error", "created_by", "updated_by", "creation", "modified"}
+	mock.ExpectQuery("SELECT name, site, script_type, doctype, event, method_path").
+		WithArgs("tenant-a", true, string(script.TypeDocEvent), "Task").
+		WillReturnRows(sqlmock.NewRows(columns).AddRow("task-after-save", "tenant-a", script.TypeDocEvent, "Task", script.EventAfterSave, "", "", 10, true, "", 5000, "return true", nil, nil, "", "", time.Now(), time.Now()))
+	tenant := contract.TenantID("tenant-a")
+	actor := contract.ActorContext{PrincipalID: "alice", PrincipalType: contract.PrincipalHuman, SubjectUserID: "alice", Site: "tenant-a"}
+	execution, err := policy.NewVerifiedExecution(tenant, actor)
+	if err != nil {
+		t.Fatal("create verified execution:", err)
+	}
+	store := &capturedAsyncHookStore{}
+	manager := &TxManager{
+		DB: database, Transaction: dbTx, ScriptStore: &script.Store{DB: database, Dialect: kdb.Resolve("mysql")},
+		AsyncHookInvocations: store, AsyncHookTenantID: tenant,
+		AsyncHookSourceOperation: contract.OperationID(contract.NewOperationID()), AsyncHookConfigRevision: 42,
+		Execution: execution, SiteName: "tenant-a", SkipHookScripts: []string{"other"},
+	}
+	dt := &doctype.DocType{Name: "Task"}
+	doc := &doctype.Document{DocType: "Task", Name: "TASK-001", Fields: map[string]any{"title": "Ship"}}
+	oldDoc := &doctype.Document{DocType: "Task", Name: "TASK-001", Fields: map[string]any{"title": "Draft"}}
+	if err := manager.CaptureAsyncAfterHooksTx(context.Background(), dbTx, dt, script.EventAfterSave, doc, oldDoc); err != nil {
+		t.Fatal("capture lifecycle invocation:", err)
+	}
+	if len(store.invocations) != 1 {
+		t.Fatalf("captured invocations = %d, want 1", len(store.invocations))
+	}
+	got := store.invocations[0]
+	var current, previous map[string]any
+	if json.Unmarshal(got.Document, &current) != nil || json.Unmarshal(got.OldDocument, &previous) != nil {
+		t.Fatal("captured document snapshots are invalid JSON")
+	}
+	if got.TenantID != tenant || got.SourceOperation != manager.AsyncHookSourceOperation || got.ConfigRevision != 42 || got.Sequence != 1 || got.Actor.PrincipalID != actor.PrincipalID || got.Record.Name != "task-after-save" || current["title"] != "Ship" || previous["title"] != "Draft" {
+		t.Fatalf("captured invocation does not freeze source and execution: %+v current=%v previous=%v", got, current, previous)
+	}
+	if !manager.SuppressAsyncHookEvents {
+		t.Fatal("durable capture must suppress post-commit compatibility enqueue")
+	}
+	mock.ExpectRollback()
+	if err := dbTx.Rollback(); err != nil {
+		t.Fatal("rollback source transaction:", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("SQL expectations:", err)
+	}
+}
+
+func TestCaptureAsyncAfterHooksTxPropagatesAppendFailure(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create SQL mock:", err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	dbTx, err := database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal("begin source transaction:", err)
+	}
+	columns := []string{"name", "site", "script_type", "doctype", "event", "method_path", "schedule", "priority", "is_active", "run_as", "timeout_ms", "script", "compiled_at", "compile_error", "created_by", "updated_by", "creation", "modified"}
+	mock.ExpectQuery("SELECT name, site, script_type, doctype, event, method_path").
+		WithArgs("tenant-a", true, string(script.TypeDocEvent), "Task").
+		WillReturnRows(sqlmock.NewRows(columns).AddRow("task-after-save", "tenant-a", script.TypeDocEvent, "Task", script.EventAfterSave, "", "", 10, true, "", 5000, "return true", nil, nil, "", "", time.Now(), time.Now()))
+	actor := contract.ActorContext{PrincipalID: "alice", PrincipalType: contract.PrincipalHuman, SubjectUserID: "alice", Site: "tenant-a"}
+	execution, err := policy.NewVerifiedExecution(contract.TenantID("tenant-a"), actor)
+	if err != nil {
+		t.Fatal("create verified execution:", err)
+	}
+	manager := &TxManager{
+		Transaction: dbTx, ScriptStore: &script.Store{DB: database, Dialect: kdb.Resolve("mysql")},
+		AsyncHookInvocations: &capturedAsyncHookStore{err: errors.New("append failed")}, AsyncHookTenantID: "tenant-a",
+		AsyncHookSourceOperation: contract.OperationID(contract.NewOperationID()), AsyncHookConfigRevision: 42,
+		Execution: execution, SiteName: "tenant-a",
+	}
+	err = manager.CaptureAsyncAfterHooksTx(context.Background(), dbTx, &doctype.DocType{Name: "Task"}, script.EventAfterSave,
+		&doctype.Document{DocType: "Task", Name: "TASK-001", Fields: map[string]any{"title": "Ship"}}, nil)
+	if err == nil {
+		t.Fatal("append failure must abort the source operation")
+	}
+	mock.ExpectRollback()
+	if err := dbTx.Rollback(); err != nil {
+		t.Fatal("rollback source transaction:", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("SQL expectations:", err)
 	}
 }

@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why Tree</title>
+<!--
+  WHY-TREE VISUALIZATION  ·  "The Diagnostician's Bench"  ·  v2 (spine + side rail)
+  Design from the Goldratt/Feynman/Tufte/Victor/Minto council (see ../council-viz-design.md):
+    - SPINE  : a stable top-down convergence funnel (apex -> stages -> roots -> ONE constraint).
+               Always visible = DECIDE + "you are here" minimap. Click a box to inspect it.
+    - RAIL   : a selection-driven reader on the right. Full statement + evidence + lineage; drill
+               into causes here = FOLLOW & VALIDATE. Prose lives in the rail, never in the boxes
+               (this kills the two-expand wart AND the width sprawl).
+    - The constraint's CONFIDENCE is shown (solid vs dashed) so a hypothesised constraint never
+      reads as a proven one. Refuted causes appear as ghost-stubs in the rail.
+    - verdictStatus ('verdict'|'map') styles the HEADER: a 'map' tree wears an amber working-hypothesis
+      banner naming the deciding test — the census honesty must reach the headline.
+    - MEASURED nodes carry a validation state (raw/validated/triangulated/contested) rendered as a tag —
+      an unaudited number must not wear the same solid green as a triangulated one.
+  Data-driven: swap the JSON in <script id="tree-data">. Self-contained vanilla JS.
+  ⚠ UPDATE RULE: to refresh an already-delivered run, replace ONLY the tree-data block inside the STYLED
+    output file. Do NOT regenerate that file from this bare template after the frontend-design pass — the
+    rebuild silently drops the aesthetic layer (observed in the field: 58k → 51k bytes, design gone).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#14161b; --panel:#1b1e25; --panel-2:#232730; --raise:#2a2f3a;
+    --ink:#e7e9ec; --muted:#8b93a0; --faint:#7b8494; --line:#2e333d;
+    --target:#f5a524; --target-soft:rgba(245,165,36,.16);
+    --k-meas:#46d08a; --k-inst:#e08a4a; --k-ext:#5ba8f5; --k-claim:#f0697e;
+    --k-inf:#b98af0; --k-hyp:#e0c24a; --k-frame:#8b93a0;
+    --display:"Space Grotesk",ui-sans-serif,system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  @media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--display);font-size:15px;line-height:1.55;
+    padding:0 0 96px;-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(1100px 480px at 78% -8%,rgba(245,165,36,.07),transparent 60%);}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+  a{color:var(--k-ext);text-decoration:none} a:hover{text-decoration:underline}
+  code,.mono{font-family:var(--mono)}
+
+  header{padding:46px 0 30px;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--target);margin:0 0 14px;display:flex;align-items:center;gap:10px}
+  .eyebrow::before{content:"";width:26px;height:1px;background:var(--target);display:inline-block}
+  h1.apex{font-size:clamp(24px,4vw,40px);line-height:1.12;font-weight:700;letter-spacing:-.018em;margin:0;max-width:22ch}
+  .apex .frame{color:var(--faint);font-weight:500}
+  .verdict{font-size:clamp(15px,1.7vw,19px);line-height:1.45;color:var(--target);font-weight:500;margin:16px 0 0;max-width:64ch}
+  .provenance{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:18px;display:flex;flex-wrap:wrap;gap:6px 20px}
+  .provenance b{color:var(--ink);font-weight:600}
+
+  /* verdictStatus — the headline may not outrun the census */
+  .vbadge{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;padding:5px 12px;border-radius:7px;margin:14px 0 0}
+  .vbadge.v-verdict{color:#9ff0c2;background:rgba(70,208,138,.13);border:1px solid rgba(70,208,138,.4)}
+  .vbadge.v-map{color:#141414;background:var(--k-hyp);border:1px solid var(--k-hyp)}
+  .vmap-note{font-family:var(--mono);font-size:12px;color:var(--k-hyp);margin:8px 0 0;max-width:70ch}
+  header.hdr-map .wrap{border-left:3px dashed rgba(224,194,74,.55);padding-left:21px}
+  .vhyp{color:var(--k-hyp);font-weight:700;letter-spacing:.05em}
+  .verdict.mapv{color:var(--k-hyp)}
+
+  /* MEASURED validation state — raw must not wear the same solid green as triangulated */
+  .vt{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:0 6px;border-radius:4px;margin-left:5px;white-space:nowrap}
+  .vt-raw{color:var(--k-hyp);border:1px dashed rgba(224,194,74,.55)}
+  .vt-validated{color:var(--k-meas);border:1px solid rgba(70,208,138,.4)}
+  .vt-triangulated{color:#141414;background:var(--k-meas)}
+  .vt-contested{color:#f6a6b2;background:rgba(110,34,51,.5);border:1px solid rgba(240,105,126,.5)}
+
+  .banner{background:linear-gradient(180deg,rgba(240,105,126,.10),rgba(240,105,126,.04));border:1px solid rgba(240,105,126,.32);border-left:3px solid var(--k-claim);border-radius:12px;padding:16px 20px;margin:26px 0}
+  .banner h3{margin:0 0 9px;font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:#f3909f}
+  .banner ul{margin:0;padding-left:18px} .banner li{margin:6px 0;font-size:13.5px;color:#dfe2e6}
+
+  .legend{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin:26px 0 8px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .legend .sep{width:1px;height:16px;background:var(--line);margin:0 4px}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.03em;padding:2px 8px;border-radius:999px;white-space:nowrap;border:1px solid transparent}
+  .chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.9}
+  .k-meas{color:var(--k-meas);background:rgba(70,208,138,.12)} .k-inst{color:var(--k-inst);background:rgba(224,138,74,.13)}
+  .k-ext{color:var(--k-ext);background:rgba(91,168,245,.12)} .k-claim{color:var(--k-claim);background:rgba(240,105,126,.12)}
+  .k-inf{color:var(--k-inf);background:rgba(185,138,240,.13)} .k-frame{color:var(--k-frame);background:rgba(139,147,160,.12)}
+  .k-hyp{color:var(--k-hyp);background:rgba(224,194,74,.10);border:1px dashed rgba(224,194,74,.55)}
+  .k-hyp::before{background:transparent;border:1px solid var(--k-hyp);width:6px;height:6px}
+  .grade{font-family:var(--mono);font-size:9.5px;color:var(--faint);font-weight:500}
+  .role{display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.04em;padding:1px 7px;border-radius:5px;text-transform:uppercase}
+  .role-root{color:#cdb3ff;background:rgba(130,80,223,.22);border:1px solid rgba(130,80,223,.4)}
+  .role-con{color:#141414;background:var(--target)}
+  .role-lever{color:#9ff0c2;background:rgba(70,208,138,.18);border:1px solid rgba(70,208,138,.34)}
+  .role-neg{color:#f6a6b2;background:rgba(110,34,51,.5);border:1px solid rgba(240,105,126,.4)}
+  .role-ref{color:var(--faint);background:transparent;border:1px solid var(--line)}
+  .role-down{color:var(--k-hyp);background:transparent;border:1px solid rgba(224,194,74,.5)}
+  .role-new{color:#bcdcff;background:rgba(91,168,245,.16);border:1px solid rgba(91,168,245,.34)}
+  .role-any{color:var(--muted);background:transparent;border:1px solid var(--line)}
+  .role-conq{color:var(--target);background:transparent;border:1px dashed rgba(245,165,36,.6)}
+
+  h2.sec{font-size:13px;font-family:var(--mono);font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:50px 0 4px;display:flex;align-items:center;gap:12px}
+  h2.sec .n{color:var(--target);font-size:12px}
+  h2.sec::after{content:"";flex:1;height:1px;background:var(--line)}
+  .sec-sub{color:var(--faint);font-size:13px;margin:2px 0 16px;font-family:var(--display)}
+
+  /* ===================== WORKBENCH: spine + rail ===================== */
+  .workbench{display:grid;grid-template-columns:1fr 372px;gap:20px;align-items:start;margin-top:10px}
+
+  .spine{position:relative;border:1px solid var(--line);border-radius:16px;
+    background:radial-gradient(620px 360px at 50% 118%,var(--target-soft),transparent 60%),var(--panel);
+    padding:22px 18px 28px;overflow:hidden}
+  .spine.focusing .knode{opacity:.34;filter:saturate(.6)} .spine.focusing .knode.on{opacity:1;filter:none}
+  .band{position:relative;display:flex;flex-wrap:wrap;justify-content:center;gap:9px 11px;z-index:2}
+  .band + .band{margin-top:44px}
+  .band-label{position:absolute;left:0;top:-17px;font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+  .knode{position:relative;cursor:pointer;background:var(--panel-2);border:1px solid var(--raise);border-left:4px solid var(--faint);border-radius:10px;padding:9px 12px;max-width:230px;min-width:118px;transition:opacity .2s,filter .2s,border-color .15s,transform .1s,box-shadow .15s}
+  .knode:hover{transform:translateY(-1px);border-color:var(--muted)}
+  .knode:focus-visible{outline:2px solid var(--target);outline-offset:2px}
+  .knode.sel{box-shadow:0 0 0 2px var(--target),0 8px 24px -10px rgba(245,165,36,.5)}
+  .knode .kl{font-size:12.5px;line-height:1.3;font-weight:500;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .knode .km{display:flex;align-items:center;gap:6px;margin-top:6px}
+  .knode .kdot{width:7px;height:7px;border-radius:50%;flex:none}
+  .knode .kcount{font-family:var(--mono);font-size:9px;color:var(--faint);margin-left:auto}
+  .knode.apex{border-left-color:var(--k-frame);background:#0f1217;max-width:none;flex:1 1 100%;text-align:center}
+  .knode.apex .kl{-webkit-line-clamp:2;font-weight:600;font-size:14px}
+  .knode.stage{border-left-color:var(--k-ext)}
+  .knode.root{border-left-color:var(--k-inf)}
+  .knode.weak{border-left-style:dashed} /* support rests on soft evidence */
+  .knode.constraint{border:1.5px solid var(--target);border-left:4px solid var(--target);background:linear-gradient(160deg,rgba(245,165,36,.22),rgba(245,165,36,.05));box-shadow:0 0 0 1px rgba(245,165,36,.15),0 14px 46px -16px rgba(245,165,36,.5);max-width:540px}
+  .knode.constraint.weak{border-style:dashed}
+  .knode.constraint .kl{font-weight:700;font-size:14px;-webkit-line-clamp:3}
+  .knode.constraint .lock{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--target);margin-bottom:4px}
+  .knode.constraint .lock::before{content:"◎ "}
+  .knode .conf{font-family:var(--mono);font-size:9.5px;color:var(--faint);margin-top:6px}
+  /* constraint chain to bedrock — the multi-level drill, rendered IN the spine (not the rail) */
+  .chain-label{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:30px 0 2px;text-align:center;z-index:2;position:relative}
+  .chain{display:flex;flex-direction:column;align-items:center;z-index:2;position:relative}
+  .cwhy{font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:8px 0 7px;position:relative}
+  .cwhy::before{content:"";position:absolute;left:50%;top:-9px;width:1.5px;height:9px;background:var(--target);opacity:.5;transform:translateX(-50%)}
+  .knode.clevel{max-width:470px;border-left:4px solid var(--k-inf);background:var(--panel-2)}
+  .knode.clevel .kl{-webkit-line-clamp:3;font-size:12px;font-weight:500}
+  .knode.clevel.bedrock{border-left-color:var(--target);background:linear-gradient(160deg,rgba(245,165,36,.13),transparent)}
+  /* #9 weakest-link flag + #10 stress-test (poke the load-bearing node, watch the verdict move) */
+  .knode.lb{border-left-color:var(--k-hyp);border-left-style:dashed}
+  .knode.lbsolid{border-left-color:var(--target)}
+  .lbtag{display:inline-block;font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.04em;color:var(--k-hyp);border:1px dashed rgba(224,194,74,.55);border-radius:5px;padding:0 6px;margin-left:auto;text-transform:uppercase}
+  .knode.lb.struck{opacity:.4;border-left-color:var(--k-claim)} .knode.lb.struck .kl{text-decoration:line-through;text-decoration-color:var(--k-claim)}
+  .knode.constraint.mapped{border-style:dashed;filter:saturate(.7)}
+  .stress-btn{display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--target);background:var(--target-soft);border:1px dashed rgba(245,165,36,.5);border-radius:9px;padding:9px 12px;margin-top:14px}
+  .stress-btn:hover{background:rgba(245,165,36,.16)}
+  .stress-out{font-size:13px;line-height:1.5;color:#e9d8b8;background:rgba(240,105,126,.08);border:1px solid rgba(240,105,126,.3);border-left:3px solid var(--k-claim);border-radius:0 9px 9px 0;padding:11px 13px;margin-top:10px}
+  .stress-out b{color:#f3909f}
+  svg.edges{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;overflow:visible}
+  svg.edges path{fill:none;stroke:var(--line);stroke-width:1.3;transition:stroke .2s,stroke-width .2s,opacity .2s}
+  .spine.focusing svg.edges path{opacity:.16} svg.edges path.on{stroke:var(--target);stroke-width:1.9;opacity:1}
+
+  /* ---- the rail (follow & validate) ---- */
+  .rail{position:sticky;top:14px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 18px 20px;min-height:340px}
+  .rail .crumb{font-family:var(--mono);font-size:10.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px}
+  .rail .crumb a{cursor:pointer;color:var(--muted)} .rail .crumb a:hover{color:var(--ink);text-decoration:none}
+  .rail .crumb .sepc{color:var(--faint)}
+  .rail .rtype{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--target);margin-bottom:6px}
+  .rail .rtitle{font-size:16px;font-weight:600;line-height:1.3;letter-spacing:-.01em;margin:0 0 10px}
+  .rail .rchips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+  .rail .rstmt{font-size:13.5px;line-height:1.5;color:#dfe2e6;margin:0 0 12px}
+  .rail .rcite{font-family:var(--mono);font-size:11.5px;color:var(--muted);background:rgba(255,255,255,.02);border-left:2px solid var(--raise);border-radius:0 7px 7px 0;padding:8px 11px;margin:0 0 14px}
+  .rail .rcite .cl{display:block;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
+  .rail .rlineage{font-family:var(--mono);font-size:11px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+  .rail .rlineage b{color:var(--target);font-weight:600}
+  .rail h5{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin:14px 0 8px}
+  .rail .child{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin:6px 0;cursor:pointer;transition:.12s;background:var(--panel-2)}
+  .rail .child:hover{border-color:var(--target);background:var(--raise)}
+  .rail .child .cdot{width:7px;height:7px;border-radius:50%;flex:none;margin-top:4px}
+  .rail .child .ctext{font-size:12.5px;line-height:1.35;flex:1}
+  .rail .child.ghost{opacity:.5} .rail .child.ghost .ctext{text-decoration:line-through;text-decoration-color:var(--line);color:var(--faint)}
+  .rail .rempty{color:var(--faint);font-size:13px;line-height:1.5}
+  .rail .raction{font-size:13px;color:#e9d8b8;background:var(--target-soft);border:1px solid rgba(245,165,36,.3);border-radius:9px;padding:10px 12px;margin-top:6px}
+  .rail .raction b{color:var(--target)}
+
+  /* panels / census */
+  .panels{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+  .panel h4{margin:0 0 12px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .neg li{margin:9px 0;font-size:13.5px;color:#dfe2e6;list-style:none;padding-left:24px;position:relative}
+  .neg li::before{content:"✕";position:absolute;left:0;color:var(--k-claim);font-family:var(--mono);font-weight:700}
+  .test{margin:0 0 14px;padding-bottom:14px;border-bottom:1px solid var(--line)} .test:last-child{border:none;margin:0;padding:0}
+  .test .t{font-size:13.5px;font-weight:600;color:var(--ink)} .test .d{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .test .rank{font-family:var(--mono);font-size:10px;color:var(--target);float:right;border:1px solid rgba(245,165,36,.4);border-radius:5px;padding:1px 7px;margin-left:8px}
+  /* data request — "what I need from you to turn this map into a verdict" */
+  .dreq{margin:0 0 14px;padding-bottom:14px;border-bottom:1px solid var(--line)} .dreq:last-child{border:none;margin:0;padding:0}
+  .dreq .w{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .dreq .rank{font-family:var(--mono);font-size:10px;color:var(--target);border:1px solid rgba(245,165,36,.4);border-radius:5px;padding:1px 7px;margin-left:6px}
+  .dreq .i{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .dreq .meta{font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:5px;display:flex;gap:8px 14px;flex-wrap:wrap}
+  .dreq .gap{text-transform:uppercase;letter-spacing:.08em;color:var(--k-hyp)}
+  .census-bar{display:flex;height:30px;border-radius:8px;overflow:hidden;margin:6px 0 12px;border:1px solid var(--line)}
+  .census-bar span{display:block;height:100%}
+  .census-key{display:flex;flex-wrap:wrap;gap:6px 14px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .census-key i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px;vertical-align:middle}
+  .census .bottom{font-size:13.5px;color:#dfe2e6;margin-top:14px;line-height:1.5;border-left:2px solid var(--target);padding-left:12px}
+
+  /* narrative — the "read first" memo, rendered at the top so the artifact self-explains */
+  .narrative{background:linear-gradient(180deg,rgba(245,165,36,.07),transparent 70%),var(--panel);border:1px solid var(--line);border-left:3px solid var(--target);border-radius:14px;padding:4px 24px 6px;margin:26px 0 0}
+  .narrative>summary{cursor:pointer;font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--target);padding:16px 0;list-style:none;user-select:none}
+  .narrative>summary::-webkit-details-marker{display:none}
+  .narrative>summary::before{content:"▸ ";font-size:11px}
+  .narrative[open]>summary::before{content:"▾ "}
+  .narrative h4{font-size:15.5px;font-weight:600;color:var(--ink);margin:18px 0 4px;letter-spacing:-.01em}
+  .narrative h4:first-of-type{margin-top:2px}
+  .narrative p{font-size:14px;line-height:1.62;color:#cfd3da;margin:0 0 8px;max-width:76ch}
+  .narrative .nfoot{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin:14px 0 12px}
+
+  /* lever portfolio — the additive paths to a TARGET apex (hidden for a symptom apex) */
+  .levers{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;margin-top:10px}
+  .lever{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px 17px;border-top:3px solid var(--k-meas)}
+  .lever.dropped{opacity:.62;border-top-color:var(--faint)}
+  .lever .lh{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .lever .ln{font-size:14.5px;font-weight:600;color:var(--ink);line-height:1.25}
+  .lever .lpath{font-size:12px;color:var(--muted);margin-bottom:9px;line-height:1.4}
+  .lever .lsize{font-family:var(--mono);font-size:12px;color:var(--k-meas);margin-bottom:4px}
+  .lever .lbasis{font-size:11px;color:var(--faint);margin-bottom:9px;line-height:1.4}
+  .lever .lmeta{display:flex;gap:6px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px}
+  .lbadge{padding:1.5px 7px;border-radius:5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:var(--panel-2)}
+  .lb-own{color:#9ff0c2;background:rgba(70,208,138,.16)} .lb-win{color:#bcdcff;background:rgba(91,168,245,.16)} .lb-buy{color:#f6c89a;background:rgba(224,138,74,.16)}
+  .lever .ldrop{font-size:12px;color:var(--k-hyp);margin-top:10px;border-top:1px dashed var(--line);padding-top:9px;line-height:1.45}
+  .sizing{font-size:14px;color:#e9d8b8;background:var(--target-soft);border:1px solid rgba(245,165,36,.32);border-left:3px solid var(--target);border-radius:0 10px 10px 0;padding:14px 16px;margin-top:16px;line-height:1.5}
+  .sizing b{color:var(--target)}
+
+  /* idea on trial — Idea Audit only (hidden when ideaFit absent) */
+  .idea-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:10px}
+  .idea-panel .iv{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;padding:3px 10px;border-radius:6px;margin-bottom:10px}
+  .iv-pass{color:#9ff0c2;background:rgba(70,208,138,.16);border:1px solid rgba(70,208,138,.4)}
+  .iv-mid{color:#e9d8b8;background:var(--target-soft);border:1px solid rgba(245,165,36,.4)}
+  .iv-kill{color:#f6a9b8;background:rgba(240,105,126,.13);border:1px solid rgba(240,105,126,.45)}
+  .idea-panel .istmt{font-size:14.5px;font-weight:600;color:var(--ink);margin-bottom:6px;line-height:1.4}
+  .idea-panel .iwhy{font-size:13.5px;color:#cfd3da;line-height:1.55;margin-bottom:4px;max-width:76ch}
+  .idea-panel .irow{font-size:12.5px;color:var(--muted);line-height:1.55;margin-top:9px;border-top:1px dashed var(--line);padding-top:9px}
+  .idea-panel .irow b{color:var(--ink);font-weight:600}
+  .idea-panel .itest{font-family:var(--mono);font-size:11px;color:var(--k-hyp);margin-top:3px}
+  .idea-panel .icontest{font-size:12.5px;color:#f6a9b8;border-left:2px solid var(--k-claim);padding-left:10px;margin-top:12px;line-height:1.5}
+
+  .foot{color:var(--faint);font-family:var(--mono);font-size:11.5px;margin-top:46px;padding-top:18px;border-top:1px solid var(--line)}
+
+  @media (max-width:900px){
+    .workbench{grid-template-columns:1fr} .rail{position:static}
+    .panels{grid-template-columns:1fr}
+    svg.edges{display:none} .band{flex-direction:column;align-items:stretch} .band+.band{margin-top:20px}
+    .knode,.knode.constraint{max-width:none}
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .knode.constraint{animation:lock 2.4s ease-out 1}
+    @keyframes lock{0%{box-shadow:0 0 0 1px rgba(245,165,36,.15),0 0 0 0 rgba(245,165,36,0)}40%{box-shadow:0 0 0 1px rgba(245,165,36,.4),0 0 60px -8px rgba(245,165,36,.7)}100%{box-shadow:0 0 0 1px rgba(245,165,36,.15),0 14px 46px -16px rgba(245,165,36,.5)}}
+  }
+</style>
+</head>
+<body>
+
+<!-- ====================== TREE DATA (swap this block per run) ====================== -->
+<script id="tree-data" type="application/json">
+{
+  "apex": "Too few net-new teams reach a first shared workspace, vs the 1,000-by-Q4 goal",
+  "verdict": "The constraint is ownership + incentive (policy), not product: name a DRI for team-activation and re-comp Growth on activated teams. The funnel constraint (arrival-starved vs activation-leak) is still unlocated - one event-instrumentation pull pins it.",
+  "provenance": { "method": "Goldratt CRT", "depth": "standard", "agents": 14, "date": "sample" },
+  "corrections": [
+    "\"Onboarding is too long\" — DOWNGRADED. Median time-to-first-workspace is 6 min; the drop is pre-onboarding.",
+    "\"Pricing scares teams off\" — REFUTED in-slice. 0 of 31 churned trials ever opened the pricing page."
+  ],
+  "stages": [
+    { "id":"S0","title":"Stage 0 · Measure — is the shortfall even real?","nodes":[
+      { "id":"G","text":"KPI counts \"workspaces created\", not \"workspaces with a 2nd member\" — solo workspaces inflate the number","kind":"MEASURED","grade":"Strong","role":"ROOT","validation":"triangulated","cite":"src:product-db: 61% of \"workspaces\" have exactly 1 member (n=2,140, 30d) — matches the finance MAU dashboard within 2%" }
+    ]},
+    { "id":"S1","title":"Stage 1 · Arrive — do net-new teams find us?","nodes":[
+      { "id":"A","text":"Discovery gap — the collaboration use-case is invisible in search","kind":"INFERENCE","grade":"Strong","role":"LEVER","cite":"3 competitors rank p1 for \"team workspace\"; we rank p4 for \"notes app\" only","children":[
+        { "id":"A1","text":"Landing copy sells single-player notes; the team value prop is below the fold","kind":"MEASURED","grade":"Mod","validation":"raw","cite":"src:heatmap (pipeline unchecked — bots not filtered): 2.1% scroll to the \"invite your team\" section" }
+      ]},
+      { "id":"N","text":"Net-new arrival rate is UNVERIFIED — analytics can't separate new orgs from returning users","kind":"CLAIM","grade":"Weak","role":"CONSTRAINT?","gap":"external","cite":"No org-creation event in the warehouse. Test: instrument org_created + first_invite." }
+    ]},
+    { "id":"S2","title":"Stage 2 · Activate — do they invite a teammate?","nodes":[
+      { "id":"W","text":"Cold-start: an empty workspace gives a solo user no reason to invite anyone yet","kind":"INFERENCE","grade":"Strong","role":"LEVER","cite":"Invite rate jumps 3.4x once a user creates ≥3 docs (n=880)" },
+      { "id":"C","text":"Invite flow buried two menus deep; no contextual nudge at the high-intent moment","kind":"INSTANCE","grade":"Mod","role":"LEVER","cite":"Walkthrough of 4 trial accounts; invite CTA never surfaced inline" },
+      { "id":"P","text":"\"Onboarding is too long\" — the drop is pre-onboarding, not inside the flow","kind":"MEASURED","grade":"Strong","role":"REFUTED","cite":"Median time-to-first-workspace = 6 min; abandonment is at activation intent" }
+    ]},
+    { "id":"X","title":"Cross-cutting (acts at every stage) — incl. THE constraint","crosscut":true,"nodes":[
+      { "id":"M","text":"No one owns \"net-new team activation\" — it's split across Growth and Product, measured by neither","kind":"MEASURED","grade":"Strong","role":"CONSTRAINT","validation":"validated","cite":"src:okr-doc: 0 OKR rows name team-activation; de-facto owner is whoever's on call" },
+      { "id":"Q","text":"Growth is comped on signups, not activated teams — the incentive points at the wrong number","kind":"MEASURED","grade":"Strong","role":"ROOT","validation":"validated","cite":"src:comp-plan (curated, finance-approved): 100% of growth bonus tied to signup volume" }
+    ]}
+  ],
+  "roots": [
+    { "id":"R0","title":"No owner + misaligned incentive (POLICY, not product)","from":["M","Q"],"action":"Name a DRI for team-activation; re-comp Growth on activated teams","restsOn":["M","Q","R0a"],"isConstraint":true,
+      "children":[
+        { "id":"R0a","text":"Team-activation falls between Growth and Product, so neither team is accountable for it","kind":"INFERENCE","grade":"Mod","cite":"0 OKR rows name team-activation (Q3 planning doc)","children":[
+          { "id":"R0b","text":"Each org is measured only on its own KPI, so the cross-org handoff is nobody's number","kind":"MEASURED","grade":"Strong","cite":"Growth OKR=signups; Product OKR=ship-rate; neither = activated teams","children":[
+            { "id":"R0c","text":"BEDROCK — the comp plan deliberately rewards per-team KPIs, not the shared funnel","kind":"EXTERNAL","grade":"Strong","cite":"Q3 comp plan, finance-approved — a policy choice, outside this team's control" }
+          ]}
+        ]}
+      ]},
+    { "id":"R1","title":"Surface sells single-player; team value is hidden","from":["A","A1","C"],"action":"Reframe landing + inline invite nudge at high-intent moment" },
+    { "id":"R2","title":"Retention metric mis-counted as acquisition","from":["G","N"],"action":"Re-meter to \"workspace with ≥2 active members\"" }
+  ],
+  "constraint": { "rootId":"R0","type":"policy",
+    "statement":"System constraint = ownership + incentive (policy). Located; needs no more data — name a DRI and re-comp.",
+    "unlocated":"The funnel constraint (arrival-starved vs activation-leak) is still UNLOCATED — one event-instrumentation pull pins it.",
+    "loadBearing":"R0a",
+    "ifFalse":"If R0a is wrong — a DRI *does* already own team-activation — the policy chain breaks and the constraint re-roots to R1 (the surface sells single-player). The verdict reverts to a MAP: instrument org_created + first_invite (test #1) before acting." },
+  "negatives": [
+    "Auto-invite a user's contacts to boost the metric → spam complaints + a hard deliverability cliff",
+    "Optimize raw signups harder → inflates the vanity number the real constraint already games",
+    { "text": "Rebuild the onboarding flow → the drop is pre-onboarding (correction #1); effort lands where the leak isn't", "restsOn": ["P"] }
+  ],
+  "tests": [
+    { "test":"Instrument org_created + first_invite + 2nd-member-joined events","decides":"Splits arrival-starvation from activation-leak — adjudicates N, G, W at once","rank":"#1" },
+    { "test":"A/B the inline invite nudge at the ≥3-docs moment","decides":"Confirms the cold-start lever (W) is real and sizes it","rank":"#2" }
+  ],
+  "dataRequest": [
+    { "want":"org_created + first_invite + 2nd-member-joined events (not currently logged)","upgrades":["N","G"],
+      "from":"add instrumentation in product analytics","kind":"external","rank":"#1",
+      "impact":"Locates the funnel constraint (arrival-starved vs activation-leak) — flips the mechanism from map to verdict" },
+    { "want":"Whether a DRI already owns team-activation today","upgrades":["R0a","M"],
+      "from":"ask the Growth + Product leads (in-head, not in any system)","kind":"ask-owner","rank":"#2",
+      "impact":"If someone already owns it, the policy constraint re-roots — confirm before re-comping" }
+  ],
+  "census": { "measured":0.5,"inference":0.25,"claim":0.13,"instance":0.12,"external":0,"hypothesis":0,
+    "bottomLine":"Half measured — but the node that would locate the funnel constraint (N, arrival rate) is unverified. The POLICY constraint is settled; the mechanism constraint is a map, not a verdict. Run test #1 before building." },
+  "apexType": "symptom",
+  "verdictStatus": "verdict",
+  "narrative": [
+    { "heading":"The problem", "body":"We set a goal of 1,000 net-new team workspaces by Q4 and we're well short — but the number itself is suspect first: 61% of \"workspaces\" have a single member, so the KPI is partly counting solo users, not teams." },
+    { "heading":"What the evidence forces", "body":"The binding cause is not product polish or pricing — both were refuted in-slice (median time-to-first-workspace is 6 min; 0 of 31 churned trials ever opened the pricing page). It is policy: net-new team activation has no owner, and Growth is comped on raw signups, so the number we care about is nobody's job." },
+    { "heading":"What we know — and what we don't", "body":"Measured: the solo-workspace inflation, the single-player landing copy, the 3.4× invite lift after a user creates three docs, and the comp plan. Unmeasured and decisive: the net-new arrival rate — the warehouse logs no org-creation event, so whether we are arrival-starved or activation-leaky is still a map, not a verdict." },
+    { "heading":"What to do, and the honest risk", "body":"Name a DRI for team-activation and re-comp Growth on activated teams; don't rebuild onboarding (the drop is pre-onboarding) or auto-invite contacts (a deliverability cliff). The whole verdict rests on one node — that no DRI already owns this. If one does, the constraint re-roots to the single-player surface, and the one-query event-instrumentation pull becomes the first move." }
+  ]
+}
+</script>
+<!-- ====================== /TREE DATA ====================== -->
+
+<header><div class="wrap">
+  <p class="eyebrow">Why Tree · Current-Reality diagnosis</p>
+  <h1 class="apex" id="apex"></h1>
+  <p class="verdict" id="verdict"></p>
+  <div class="provenance" id="provenance"></div>
+</div></header>
+
+<div class="wrap">
+  <details class="narrative" id="narrative" open>
+    <summary>Read first — the diagnosis in plain words</summary>
+    <div id="narrative-body"></div>
+  </details>
+  <div id="idea-sec">
+    <h2 class="sec"><span class="n">◇</span> The idea on trial — judged against the tree, not the symptom</h2>
+    <p class="sec-sub">The idea was quarantined while the tree was built; this is the fit-check. A kill is graded like any claim — the willingness-to-pay call carries its own test.</p>
+    <div class="idea-panel" id="ideafit"></div>
+  </div>
+  <div id="levers-sec">
+    <h2 class="sec"><span class="n">◆</span> The levers — paths to the target</h2>
+    <p class="sec-sub">The additive paths to the number, each sized (volume × conversion → contribution). A dropped lever stays visible with its reason — a path deprioritized, not a cause refuted.</p>
+    <div class="levers" id="levers"></div>
+    <div id="sizing"></div>
+  </div>
+  <div id="banner"></div>
+  <div class="legend" id="legend"></div>
+
+  <h2 class="sec"><span class="n">01</span> The tree — decide on the left, validate on the right</h2>
+  <p class="sec-sub">Reads top-down as one "why" chain: <b>the problem</b>, because <b>these root causes</b>, narrowing to <b>the one binding constraint</b>. Click any box to inspect it in the rail and trace its path; drill into the evidence to follow & validate.</p>
+  <div class="workbench">
+    <div class="spine" id="spine"><svg class="edges" id="edges"></svg></div>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <h2 class="sec"><span class="n">02</span> Don't do this · cheapest test</h2>
+  <div class="panels">
+    <div class="panel"><h4>Negative branches — fixes that backfire</h4><ul class="neg" id="negatives"></ul></div>
+    <div class="panel"><h4>Cheapest fork-deciding tests</h4><div id="tests"></div></div>
+  </div>
+
+  <h2 class="sec" id="dreq-sec"><span class="n">03</span> What I need from you · to turn this map into a verdict</h2>
+  <p class="sec-sub">The evidence still missing — ranked by how much it would move the verdict. Each item upgrades a HYPOTHESIS node to MEASURED.</p>
+  <div class="panel" id="dreq-panel"><div id="dataRequest"></div></div>
+
+  <h2 class="sec"><span class="n">04</span> How grounded is this?</h2>
+  <div class="panel census" id="census"></div>
+  <p class="foot" id="foot"></p>
+</div>
+
+<script>
+const KIND={MEASURED:{c:"k-meas",col:"var(--k-meas)",soft:0},INSTANCE:{c:"k-inst",col:"var(--k-inst)",soft:2},EXTERNAL:{c:"k-ext",col:"var(--k-ext)",soft:3},INFERENCE:{c:"k-inf",col:"var(--k-inf)",soft:4},CLAIM:{c:"k-claim",col:"var(--k-claim)",soft:5},HYPOTHESIS:{c:"k-hyp",col:"var(--k-hyp)",soft:6},FRAMING:{c:"k-frame",col:"var(--k-frame)",soft:1}};
+const ROLE={ROOT:"role-root",CONSTRAINT:"role-con","CONSTRAINT?":"role-conq",LEVER:"role-lever",NEGATIVE:"role-neg",REFUTED:"role-ref",DOWNGRADED:"role-down","critic-added":"role-new"};
+const esc=s=>(s==null?"":String(s)).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+const D=JSON.parse(document.getElementById('tree-data').textContent);
+function short(s,n){s=(s||'').replace(/^\s*Stage\s*\d+\s*[·:.\-]\s*/i,'').trim();let c=s.split(/—|–| - |[;:(]/)[0].trim();if(c.length<30)c=s;if(c.length>n)c=c.slice(0,n-1).trim()+'…';return c;}
+function firstClause(s){return (s||'').split(/ - | — |\. /)[0].trim();}
+/* The funnel top must be the undesirable effect as a STATEMENT, not a question.
+   Prefer an explicit `problem`; else if apex is phrased as a question, use the verdict's first clause. */
+const problemStatement = D.problem || (/\?\s*$/.test(D.apex||'') ? ((firstClause(D.verdict||'')||D.apex).replace(/^\s*(Because|Потому что)\s+/i,'')) : D.apex) || '';
+function kchip(k,v){if(!k)return '';const extra=(k==='MEASURED'&&v==='raw')?' style="background:transparent;border:1px dashed rgba(70,208,138,.55)"':(k==='MEASURED'&&v==='contested')?' style="color:var(--k-claim);background:rgba(240,105,126,.12);border:1px solid rgba(240,105,126,.5)"':'';return `<span class="chip ${(KIND[k]||{}).c||'k-frame'}"${extra}>${esc(k)}</span>`;}
+/* validation tag — only meaningful on MEASURED nodes; absent field on a MEASURED node renders as raw-by-default is NOT assumed (legacy trees stay clean) */
+function vtag(n){return (n&&n.kind==='MEASURED'&&n.validation)?`<span class="vt vt-${esc(n.validation)}">${esc(n.validation)}</span>`:'';}
+function dot(k,v){const col=(KIND[k]||{}).col||'var(--faint)';return (k==='MEASURED'&&v==='raw')?`<span class="kdot" style="background:transparent;border:1px solid ${col}"></span>`:`<span class="kdot" style="background:${col}"></span>`;}
+function rdot(k,v){const col=(KIND[k]||{}).col||'var(--faint)';return (k==='MEASURED'&&v==='raw')?`<span class="cdot" style="background:transparent;border:1px solid ${col}"></span>`:`<span class="cdot" style="background:${col}"></span>`;}
+
+/* header / banner / legend */
+document.getElementById('apex').innerHTML=esc(problemStatement)+' <span class="frame">— the problem</span>';
+const vEl=document.getElementById('verdict'); if(D.verdict)vEl.textContent=D.verdict; else vEl.style.display='none';
+/* verdictStatus banner — a 'map' tree must say so IN THE HEADER, naming the deciding test (absent field = legacy tree, no banner) */
+const vStat=D.verdictStatus;
+if(vStat==='map'){vEl.classList.add('mapv');
+  vEl.insertAdjacentHTML('afterbegin','<span class="vhyp">WORKING HYPOTHESIS: </span>');
+  const hd=document.querySelector('header'); if(hd)hd.classList.add('hdr-map');
+  vEl.insertAdjacentHTML('afterend',`<div class="vbadge v-map">⚠ working hypothesis — map, not verdict</div>`+
+    ((D.tests&&D.tests[0])?`<p class="vmap-note">Decided by: ${esc(D.tests[0].test)}</p>`:''));}
+/* the 'verdict' badge is inserted AFTER loadBearing/lbFragile are computed (below) so its copy can be honest about the weakest link */
+const p=D.provenance||{};
+document.getElementById('provenance').innerHTML=[["Method",p.method],["Depth",p.depth],["Mode",p.mode],["Agents",p.agents],["Built",p.date],["Triage",p.triage&&p.triage.decision||null]].filter(x=>x[1]!=null&&x[1]!==false).map(x=>`${esc(x[0])} <b>${esc(x[1])}</b>`).join('<span></span>')+((p.triage&&p.triage.receipt)?`<span style="color:var(--faint)">${esc(p.triage.receipt)}</span>`:'');
+if(D.corrections&&D.corrections.length)document.getElementById('banner').innerHTML=`<div class="banner"><h3>⚠ Read first — live corrections from the data</h3><ul>${D.corrections.map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div>`;
+const lgG=(label,inner)=>`<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap"><span>${label}</span>${inner}</span>`;
+document.getElementById('legend').innerHTML=lgG('EVIDENCE',Object.keys(KIND).map(k=>`<span class="chip ${KIND[k].c}">${k}</span>`).join(''))+'<span class="sep"></span>'+lgG('ROLE',['ROOT','CONSTRAINT','LEVER','REFUTED'].map(r=>`<span class="role ${ROLE[r]}">${r}</span>`).join(''))+'<span class="sep"></span>'+lgG('MEASURED PIPELINE',['raw','validated','triangulated','contested'].map(v=>`<span class="vt vt-${v}">${v}</span>`).join(''))+'<span class="grade">· grade Strong/Mod/Weak · dashed = rests on soft evidence · raw = pipeline unchecked, caps at Mod</span>';
+
+/* indexes — declarations hoisted so panels below survive a tree-build failure (agent JSON can be malformed) */
+const stages=D.stages||[], roots=D.roots||[], con=D.constraint||{};
+const nodeById={}, nodeStage={}, topNodesOfStage={}; let _cid=0;
+try{ /* TREE BUILD — a throw here must not kill the narrative/panels/census below */
+function indexNode(n,stageId){ if(!n.id)n.id='c'+(++_cid); nodeById[n.id]=n; if(stageId)nodeStage[n.id]=stageId; (n.children||[]).forEach(c=>indexNode(c,stageId)); }
+stages.forEach(s=>{ topNodesOfStage[s.id]=(s.nodes||[]).map(n=>n.id); (s.nodes||[]).forEach(n=>indexNode(n,s.id)); });
+roots.forEach(r=>(r.children||[]).forEach(c=>indexNode(c,null)));   /* index the constraint-branch chain too */
+const conRoot=roots.find(r=>r.isConstraint)||roots.find(r=>r.id===con.rootId)||roots[roots.length-1];
+const otherRoots=roots.filter(r=>r!==conRoot);
+/* #10/#9 — the single node the constraint most rests on (its weakest-evidence support), for the stress-test */
+const conChain=[]; (function cc(ns){(ns||[]).forEach(n=>{conChain.push(n);cc(n.children);});})(conRoot.children);
+function softRank(n){return (KIND[(n||{}).kind]||{}).soft||0;}
+const gradeOrd={Weak:0,Mod:1,Strong:2};
+const lbPool=(conRoot.from||[]).map(id=>nodeById[id]).filter(Boolean).concat(conChain);
+const loadBearing=(con.loadBearing&&nodeById[con.loadBearing]) ||
+  lbPool.slice().sort((a,b)=> softRank(b)-softRank(a) || ((gradeOrd[a.grade]??1)-(gradeOrd[b.grade]??1)))[0] || null;
+const lbFragile=!!loadBearing && (softRank(loadBearing)>=4 || loadBearing.grade!=='Strong');
+if(vStat==='verdict'){vEl.insertAdjacentHTML('afterend',`<div class="vbadge v-verdict">✓ verdict — ${(lbFragile&&loadBearing)?`decisive chain validated · weakest link ${esc(loadBearing.kind)}/${esc(loadBearing.grade)} — see the stress-test`:'the decisive nodes are validated'}</div>`);}
+let stressed=false;
+function applyStress(){const cc=spine.querySelector('.knode.constraint');if(cc)cc.classList.toggle('mapped',stressed||vStat==='map');
+  if(loadBearing){const ln=spine.querySelector(`.knode[data-sk="nd:${CSS.escape(loadBearing.id)}"]`);if(ln)ln.classList.toggle('struck',stressed);}}
+const rootsByNode={}; roots.forEach(r=>(r.from||[]).forEach(nid=>{(rootsByNode[nid]=rootsByNode[nid]||[]).push(r.id);}));
+function weakestKind(ids){let w=null,ws=-1; (ids||[]).forEach(id=>{const k=(nodeById[id]||{}).kind; const s=(KIND[k]||{}).soft||0; if(s>ws){ws=s;w=k;}}); return w;}
+function isWeak(k){return (KIND[k]||{}).soft>=5;} /* CLAIM/HYPOTHESIS */
+
+/* ===== SPINE ===== */
+const spine=document.getElementById('spine');
+function card(cls,sk,inner,extra){return `<div class="knode ${cls} ${extra||''}" data-sk="${esc(sk)}" tabindex="0">${inner}</div>`;}
+const apexCard=card('apex','APEX',`<div class="kl">${esc(problemStatement)}</div>`);
+const rootBand=otherRoots.map(r=>{const wk=weakestKind(r.from);
+  return card('root','rt:'+r.id,`<div class="kl">${esc(r.shortLabel||short(r.title,70))}</div><div class="km">${dot(wk)}<span class="kcount">${(r.from||[]).length} cause${(r.from||[]).length!==1?'s':''}</span></div>`, isWeak(wk)?'weak':'');}).join('');
+const conWk=weakestKind(conRoot.from);
+const conCard=card('constraint','rt:'+conRoot.id,`<div class="lock">System constraint · ${esc(con.type||'located')}</div><div class="kl">${esc(conRoot.title||'The constraint')}</div><div class="conf">${conSupport()}</div>`, (isWeak(conWk)?'weak ':'')+(vStat==='map'?'mapped':''));
+/* the constraint-branch chain to bedrock — rendered as visible levels IN the spine (fixes the "1-level-deep" look) */
+function chainCards(nodes){ if(!nodes||!nodes.length)return '';
+  return nodes.map(n=>{const bedrock=!(n.children&&n.children.length);const lb=!!loadBearing&&n.id===loadBearing.id;
+    return `<div class="cwhy">because</div>`+
+      `<div class="knode clevel${bedrock?' bedrock':''}${lb?(lbFragile?' lb':' lbsolid'):''}" data-sk="nd:${esc(n.id)}" tabindex="0">`+
+        `<div class="kl">${esc(short(n.text,130))}</div>`+
+        `<div class="km">${dot(n.kind,n.validation)}<span class="grade">${esc(n.kind||'')}${n.grade?' · '+esc(n.grade):''}</span>${vtag(n)}`+
+        `${n.role?`<span class="role ${ROLE[n.role]||'role-any'}">${esc(n.role)}</span>`:''}${bedrock&&!lb?'<span class="kcount">bedrock</span>':''}${lb?(lbFragile?'<span class="lbtag">weakest link</span>':'<span class="lbtag" style="color:var(--muted);border:1px solid var(--line)">load-bearing</span>'):''}</div>`+
+      `</div>`+chainCards(n.children);}).join(''); }
+const chainHtml=(conRoot.children&&conRoot.children.length)
+  ? `<div class="chain-label">↓ why it exists — the chain to bedrock</div><div class="chain">${chainCards(conRoot.children)}</div>` : '';
+spine.insertAdjacentHTML('beforeend',
+  `<div class="band"><span class="band-label">The problem · undesirable effect</span>${apexCard}</div>`+
+  (otherRoots.length?`<div class="band"><span class="band-label">Because — root causes</span>${rootBand}</div>`:'')+
+  `<div class="band"><span class="band-label">The binding constraint</span>${conCard}</div>`+
+  chainHtml);
+
+function conSupport(){const ids=conRoot.from||[];const tally={};ids.forEach(id=>{const k=(nodeById[id]||{}).kind||'?';tally[k]=(tally[k]||0)+1;});
+  const parts=Object.keys(tally).map(k=>`${tally[k]} ${k.toLowerCase()}`).join(' · ');
+  return (isWeak(conWk)?'⚠ rests on soft evidence — ':'rests on — ')+esc(parts||'—');}
+
+/* edges */
+const E=[]; roots.forEach(r=>E.push({f:'APEX',t:'rt:'+r.id}));
+otherRoots.forEach(r=>E.push({f:'rt:'+r.id,t:'rt:'+conRoot.id}));
+const svg=document.getElementById('edges');
+function rc(sk){const el=spine.querySelector(`.knode[data-sk="${CSS.escape(sk)}"]`);if(!el)return null;const b=spine.getBoundingClientRect(),r=el.getBoundingClientRect();return {cx:(r.left+r.right)/2-b.left,top:r.top-b.top,bot:r.bottom-b.top};}
+function drawEdges(){let p='';E.forEach((e,i)=>{const a=rc(e.f),c=rc(e.t);if(!a||!c)return;const x1=a.cx,y1=a.bot,x2=c.cx,y2=c.top,my=(y1+y2)/2;p+=`<path data-i="${i}" d="M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}"/>`;});svg.innerHTML=p;}
+drawEdges();window.addEventListener('resize',drawEdges);setTimeout(drawEdges,400);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(drawEdges);
+
+/* light the path for a set of spine sk-ids (down to constraint) */
+function lightSpine(seedSks){
+  const set=new Set(seedSks);
+  // walk downward to constraint
+  let fr=[...seedSks]; while(fr.length){const nx=[];E.forEach(e=>{if(set.has(e.f)&&!set.has(e.t)){set.add(e.t);nx.push(e.t);}});fr=nx;}
+  spine.classList.add('focusing');
+  spine.querySelectorAll('.knode').forEach(n=>n.classList.toggle('on',set.has(n.dataset.sk)));
+  svg.querySelectorAll('path').forEach(pa=>{const e=E[+pa.dataset.i];pa.classList.toggle('on',e&&set.has(e.f)&&set.has(e.t));});
+}
+function clearLight(){spine.classList.remove('focusing');spine.querySelectorAll('.knode').forEach(n=>n.classList.remove('on'));svg.querySelectorAll('path').forEach(p=>p.classList.remove('on'));}
+function markSel(sk){spine.querySelectorAll('.knode').forEach(n=>n.classList.toggle('sel',n.dataset.sk===sk));}
+
+/* ===== RAIL (follow & validate) ===== */
+const rail=document.getElementById('rail');
+function crumb(items){return `<div class="crumb">${items.map((it,i)=>(i?'<span class="sepc">›</span>':'')+(it.go?`<a href="#" data-go='${esc(JSON.stringify(it.go))}'>${esc(it.label)}</a>`:`<span>${esc(it.label)}</span>`)).join('')}</div>`;}
+function childRow(n){const g=n.role==='REFUTED'?'ghost':'';const st=(stages.find(s=>s.id===nodeStage[n.id])||{}).title;return `<div class="child ${g}" data-node="${esc(n.id)}" tabindex="0" role="button">${rdot(n.kind,n.validation)}<div class="ctext">${esc(short(n.text,120))} ${n.role?`<span class="role ${ROLE[n.role]||'role-any'}">${esc(n.role)}</span>`:''}${vtag(n)}${st?` <span class="grade">· ${esc(short(st,18))}</span>`:''}</div></div>`;}
+
+function inspectApex(){clearLight();markSel('APEX');spine.classList.add('focusing');spine.querySelectorAll('.knode').forEach(n=>n.classList.add('on'));svg.querySelectorAll('path').forEach(p=>p.classList.add('on'));
+  rail.innerHTML=crumb([{label:'The problem'}])+`<div class="rtype">Problem · undesirable effect</div><div class="rtitle">${esc(problemStatement)}</div>`+(D.verdict?`<div class="rstmt">${esc(D.verdict)}</div>`:'')+`<h5>Because — root causes</h5>`+roots.map(r=>`<div class="child" data-root="${esc(r.id)}">${rdot(weakestKind(r.from))}<div class="ctext">${esc(r.title)} ${r.isConstraint?'<span class="role role-con">CONSTRAINT</span>':''}</div></div>`).join('');}
+
+function lineage(nid){const rs=(rootsByNode[nid]||[]).map(rid=>(roots.find(r=>r.id===rid)||{}).title).filter(Boolean);
+  return `feeds <b>${rs.map(esc).join('</b>, <b>')||'—'}</b> → <b>${esc(conRoot.title)}</b>`;}
+function inspectNode(nid){const n=nodeById[nid];if(!n)return;const rid=(rootsByNode[nid]||[])[0];const r=roots.find(x=>x.id===rid);const st=(stages.find(s=>s.id===nodeStage[nid])||{}).title;
+  const inChain=conChain.some(c=>c.id===nid);
+  if(inChain){markSel('nd:'+nid);lightSpine(['rt:'+conRoot.id].concat(conChain.map(c=>'nd:'+c.id)));}
+  else{markSel(rid?'rt:'+rid:'APEX');lightSpine(rid?['rt:'+rid]:['APEX']);}
+  const kids=n.children||[];
+  rail.innerHTML=crumb([{label:'Problem',go:{t:'apex'}}].concat(r?[{label:short(r.title,20),go:{t:'root',id:rid}}]:[]).concat([{label:short(n.text,22)}]))
+    +`<div class="rtype">${n.role==='REFUTED'?'Refuted cause (kept as evidence)':'Cause'}${st?` · ${esc(short(st,22))}`:''}</div>`
+    +`<div class="rtitle">${esc(n.text)}</div>`
+    +`<div class="rchips">${kchip(n.kind,n.validation)}${vtag(n)}${n.grade?`<span class="grade">${esc(n.grade)}</span>`:''}${n.role?`<span class="role ${ROLE[n.role]||'role-any'}">${esc(n.role)}</span>`:''}</div>`
+    +(n.cite?`<div class="rcite"><span class="cl">evidence</span>${esc(n.cite)}</div>`:'')
+    +`<div class="rlineage">${lineage(nid)}</div>`
+    +(kids.length?`<h5>Because of (sub-causes)</h5>`+kids.map(childRow).join(''):'');}
+
+function inspectRoot(rid){const r=roots.find(x=>x.id===rid);if(!r)return;
+  if(r.isConstraint)return inspectConstraint();
+  markSel('rt:'+rid);lightSpine(['rt:'+rid]);
+  rail.innerHTML=crumb([{label:'Problem',go:{t:'apex'}},{label:'Root: '+short(r.title,20)}])+`<div class="rtype">Root cause</div><div class="rtitle">${esc(r.title)}</div>`
+    +(r.action?`<div class="raction"><b>→</b> ${r.actionOrphaned?`<span class="role role-down">ORPHANED</span> <span style="opacity:.55;text-decoration:line-through">${esc(r.action)}</span>`:esc(r.action)}${''}${(r.restsOn&&r.restsOn.length)?`<div class="grade" style="margin-top:5px">rests on: ${r.restsOn.map(id=>`<span title="${esc(short(((nodeById[id]||{}).text)||id,70))}">${esc(id)}</span>`).join(', ')}</div>`:''}</div>`:'')
+    +`<h5>Converges from</h5>`+(r.from||[]).map(id=>nodeById[id]?childRow(nodeById[id]):'').join('');}
+
+function inspectConstraint(){markSel('rt:'+conRoot.id);spine.classList.add('focusing');spine.querySelectorAll('.knode').forEach(n=>n.classList.add('on'));svg.querySelectorAll('path').forEach(p=>p.classList.add('on'));
+  rail.innerHTML=crumb([{label:'Problem',go:{t:'apex'}},{label:'The constraint'}])+`<div class="rtype">System constraint · ${esc(con.type||'located')}</div><div class="rtitle">${esc(conRoot.title)}</div>`
+    +(conRoot.action?`<div class="raction"><b>→ do this:</b> ${conRoot.actionOrphaned?`<span class="role role-down">ORPHANED</span> <span style="opacity:.55;text-decoration:line-through">${esc(conRoot.action)}</span>`:esc(conRoot.action)}${''}${(conRoot.restsOn&&conRoot.restsOn.length)?`<div class="grade" style="margin-top:5px">rests on: ${conRoot.restsOn.map(id=>`<span title="${esc(short(((nodeById[id]||{}).text)||id,70))}">${esc(id)}</span>`).join(', ')}</div>`:''}</div>`:'')
+    +(con.statement?`<div class="rstmt" style="margin-top:12px">${esc(con.statement)}</div>`:'')
+    +`<div class="rcite"><span class="cl">confidence</span>${conSupport()}</div>`
+    +(con.unlocated?`<div class="rstmt" style="color:var(--muted)">${esc(con.unlocated)}</div>`:'')
+    +`<h5>Converges from</h5>`+(conRoot.from||[]).map(id=>nodeById[id]?childRow(nodeById[id]):'').join('')
+    +(lbFragile?`<div class="stress-btn" id="stresstest" tabindex="0" role="button">⚡ ${stressed?'Reset the stress-test':'Stress-test — what if the weakest evidence is wrong?'}</div>`
+      +(stressed?`<div class="stress-out"><b>Then the verdict moves.</b> The whole constraint rests on one node — “${esc(short(loadBearing.text,64))}” (${esc(loadBearing.kind)}/${esc(loadBearing.grade)}). ${esc(con.ifFalse||'If it falls, this is a MAP, not a verdict — run test #1 to re-settle.')}</div>`:''):'');}
+
+/* events */
+spine.addEventListener('click',e=>{const c=e.target.closest('.knode');if(!c)return;const sk=c.dataset.sk;
+  if(sk==='APEX')inspectApex(); else if(sk.startsWith('nd:'))inspectNode(sk.slice(3)); else if(sk.startsWith('rt:'))inspectRoot(sk.slice(3));
+  if(matchMedia('(max-width:900px)').matches)rail.scrollIntoView({behavior:'smooth',block:'nearest'});});
+spine.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.classList.contains('knode')){e.preventDefault();e.target.click();}});
+rail.addEventListener('click',e=>{
+  const st=e.target.closest('#stresstest'); if(st){stressed=!stressed;applyStress();inspectConstraint();return;}
+  const go=e.target.closest('[data-go]'); if(go){e.preventDefault();const g=JSON.parse(go.dataset.go);if(g.t==='apex')inspectApex();else if(g.t==='root')inspectRoot(g.id);return;}
+  const rt=e.target.closest('[data-root]'); if(rt){inspectRoot(rt.dataset.root);return;}
+  const nd=e.target.closest('[data-node]'); if(nd){inspectNode(nd.dataset.node);return;}
+});
+rail.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.closest('.child,[data-go],#stresstest')){e.preventDefault();e.target.click();}});
+}catch(err){ /* tree build failed — keep the memo/panels/census alive and say so where the tree would be */
+  const sp=document.getElementById('spine'); if(sp)sp.innerHTML='<div style="padding:28px;color:var(--muted);font-family:var(--mono);font-size:12.5px">⚠ tree render failed on this data ('+esc(err&&err.message)+') — the narrative, panels and census below are unaffected.</div>';
+  const rl=document.getElementById('rail'); if(rl)rl.innerHTML='<div class="rempty">Tree unavailable — see the panels below.</div>';
+  console.error('why-tree render:',err);
+}
+
+/* panels / census / foot */
+/* negatives: strings or {text, restsOn, orphaned} — restsOn ties the anti-recommendation to its evidence; orphaned = its node died */
+const restsOnHtml=ids=>ids.map(id=>`<span title="${esc(short(((nodeById[id]||{}).text)||id,70))}">${esc(id)}</span>`).join(', ');
+document.getElementById('negatives').innerHTML=(D.negatives||[]).filter(n=>typeof n==='string'?n:(n&&n.text)).map(n=>{const o=typeof n==='object'&&n;const t=o?(n.text||''):n;const ro=(o&&n.restsOn)||[];
+  return `<li>${o&&n.orphaned?`<span class="role role-down">ORPHANED${n.orphanedBy?' — rested on '+esc(n.orphanedBy):''}</span> <span style="opacity:.55;text-decoration:line-through">${esc(t)}</span>`:esc(t)}${ro.length?` <span class="grade">· rests on ${restsOnHtml(ro)}</span>`:''}</li>`}).join('');
+document.getElementById('tests').innerHTML=(D.tests||[]).map(t=>`<div class="test"><div class="t">${t.rank?`<span class="rank">${esc(t.rank)}</span>`:''}${esc(t.test)}</div><div class="d">${esc(t.decides)}</div>${t.result?`<div class="d" style="color:var(--k-meas);margin-top:4px">✓ ${esc(t.result)}</div>`:''}</div>`).join('');
+/* data request — hide the whole section if empty */
+const dreq=(D.dataRequest||[]).slice().sort((a,b)=>(parseInt(String(a.rank||'').replace(/\D/g,''))||99)-(parseInt(String(b.rank||'').replace(/\D/g,''))||99));
+if(dreq.length){
+  document.getElementById('dataRequest').innerHTML=dreq.map(r=>`<div class="dreq"><div class="w">${esc(r.want)}${r.rank?`<span class="rank">${esc(r.rank)}</span>`:''}</div>${r.impact?`<div class="i">${esc(r.impact)}</div>`:''}<div class="meta">${r.kind?`<span class="gap">${esc(r.kind)}</span>`:''}${r.from?`<span>from: ${esc(r.from)}</span>`:''}${(r.upgrades&&r.upgrades.length)?`<span>upgrades: ${r.upgrades.map(esc).join(', ')}</span>`:''}</div></div>`).join('');
+}else{
+  const s=document.getElementById('dreq-sec'),p=document.getElementById('dreq-panel'),sub=s&&s.nextElementSibling;
+  if(s)s.style.display='none'; if(p)p.style.display='none'; if(sub&&sub.classList.contains('sec-sub'))sub.style.display='none';
+}
+const cs=D.census||{};const order=[["measured","MEASURED","--k-meas"],["inference","INFERENCE","--k-inf"],["hypothesis","HYPOTHESIS","--k-hyp"],["instance","INSTANCE","--k-inst"],["claim","CLAIM","--k-claim"],["external","EXTERNAL","--k-ext"]].filter(o=>cs[o[0]]>0);
+const csTot=order.reduce((a,o)=>a+(cs[o[0]]||0),0)||1; /* normalize defensively — converge sometimes emits raw counts, not fractions */
+document.getElementById('census').innerHTML=`<h4>Answer-kind census</h4><div class="census-bar">${order.map(o=>`<span style="flex:${(cs[o[0]]||0)/csTot*100};background:var(${o[2]})"></span>`).join('')}</div><div class="census-key">${order.map(o=>`<span><i style="background:var(${o[2]})"></i>${o[1]} ${Math.round(cs[o[0]]/csTot*100)}%</span>`).join('')}</div>${cs.bottomLine?`<div class="bottom">${esc(cs.bottomLine)}</div>`:''}`;
+document.getElementById('foot').textContent=`Why Tree · ${p.method||'Goldratt CRT'} · spine = decide, rail = follow & validate · a map of where to look, not a verdict when evidence is thin.`;
+
+/* narrative — the read-first memo at the top (hide if absent) */
+const narr=(D.narrative||[]);
+if(narr.length){document.getElementById('narrative-body').innerHTML=narr.map(s=>`<h4>${esc(s.heading)}</h4><p>${esc(s.body)}</p>`).join('')+`<div class="nfoot">↓ the interactive tree below shows the graded evidence behind each claim</div>`;}
+else{const n=document.getElementById('narrative');if(n)n.style.display='none';}
+
+/* lever portfolio — TARGET apex only (hide the whole section for a symptom apex) */
+const levers=(D.levers||[]);
+if(levers.length){
+  const sizeLine=l=>{const s=l.sizing||{};return [s.volume, s.conversion&&'× '+s.conversion, s.contribution&&'→ '+s.contribution].filter(Boolean).map(esc).join(' ');};
+  document.getElementById('levers').innerHTML=levers.map(l=>{const owb=(l.ownWinBuy||'').toLowerCase();const s=l.sizing||{};const sl=sizeLine(l);
+    return `<div class="lever ${l.role==='dropped'?'dropped':''}"><div class="lh"><span class="ln">${esc(l.name)}</span>${l.bindsConstraint?'<span class="role role-con">CONSTRAINT</span>':''}</div>`
+      +(l.path?`<div class="lpath">${esc(l.path)}</div>`:'')
+      +(sl?`<div class="lsize">${sl}</div>`:'')
+      +(s.basis?`<div class="lbasis">${esc(s.basis)}</div>`:'')
+      +`<div class="lmeta">${owb?`<span class="lbadge lb-${owb}">${esc(owb)}</span>`:''}${l.effort?`<span class="lbadge">effort ${esc(l.effort)}</span>`:''}${l.role?`<span class="lbadge">${esc(l.role)}</span>`:''}</div>`
+      +(l.role==='dropped'&&l.droppedReason?`<div class="ldrop">✕ dropped — ${esc(l.droppedReason)}</div>`:'')
+    +`</div>`;}).join('');
+  if(D.sizing)document.getElementById('sizing').innerHTML=`<div class="sizing"><b>Do the levers sum to the target?</b> ${esc(D.sizing.bottomLine||'')}${D.sizing.gapToTarget?` <span style="color:var(--muted)">· gap: ${esc(D.sizing.gapToTarget)}</span>`:''}</div>`;
+}else{const ls=document.getElementById('levers-sec');if(ls)ls.style.display='none';}
+
+/* idea on trial — Idea Audit only (hide the whole section when ideaFit is absent).
+   A deferred (test-plan) or failed fit-check still renders a notice — the user's question must never silently vanish. */
+const IF=D.ideaFit;
+if(IF&&IF.verdict){
+  const vcls={'dissolves-constraint':'iv-pass','relieves-symptom':'iv-mid','misses-constraint':'iv-kill','negative-branch':'iv-kill'}[IF.verdict]||'iv-mid';
+  /* census honesty reaches the badge: a fit verdict resting on hypothesis/claim or raw/contested nodes — or one
+     the skeptic contested — is not act-ready. 'scout-consensus' is the ship-direct sentinel: always verify-first. */
+  const weakFit=!!IF.contested||(IF.restsOn||[]).some(id=>{if(id==='scout-consensus')return true;const n=nodeById[id];return !n||['HYPOTHESIS','CLAIM'].includes(n.kind)||(n.kind==='MEASURED'&&['raw','contested'].includes(n.validation));});
+  /* "includes the constraint" is COMPUTED from the constraint chain, never asserted from the verdict enum */
+  const conIdSet=new Set();(function(){const cr=(D.roots||[]).find(r=>r.isConstraint);if(!cr)return;if(cr.id)conIdSet.add(cr.id);(cr.from||[]).forEach(i=>conIdSet.add(i));(function w(ns){(ns||[]).forEach(n=>{if(n&&n.id)conIdSet.add(n.id);if(n)w(n.children)})})(cr.children);})();
+  const hitsCon=(IF.addresses||[]).some(id=>conIdSet.has(id));
+  const ap=IF.absorbedPain||{},sf=IF.segmentFork||{},rd=IF.redirect||{},pm=IF.policyToolMismatch||{},rf=IF.refutation||{};
+  const orphBy=IF.orphanedBy||(typeof IF.orphaned==='string'?IF.orphaned:'');
+  document.getElementById('ideafit').innerHTML=
+    `<span class="iv ${weakFit?'iv-mid':vcls}">${esc(IF.verdict||'')}${weakFit?' · verify first':''}</span>`
+    +((D.idea&&D.idea.statement)?`<div class="istmt">${esc(D.idea.statement)}</div>`:'')
+    +((D.idea&&(D.idea.claimedProblem||D.idea.buyer))?`<div class="irow" style="border-top:none;padding-top:0;margin-top:2px">${D.idea.claimedProblem?`<b>Claimed problem</b> ${esc(D.idea.claimedProblem)} <span class="grade">· CLAIM until measured</span>`:''}${D.idea.buyer?`${D.idea.claimedProblem?' · ':''}<b>Buyer</b> ${esc(D.idea.buyer)}`:''}</div>`:'')
+    +(IF.why?`<div class="iwhy">${esc(IF.why)}${(IF.restsOn&&IF.restsOn.length)?` <span class="grade">· rests on ${restsOnHtml(IF.restsOn)}</span>`:''}</div>`:'')
+    +((IF.addresses&&IF.addresses.length)?`<div class="irow"><b>Addresses</b> ${restsOnHtml(IF.addresses)}${hitsCon?' — including the constraint':' — none of these is the constraint'}</div>`:'')
+    +(pm.flag?`<div class="irow"><b>Policy–tool mismatch</b> ${esc(pm.note||'the constraint is policy/ownership; a tool that leaves ownership untouched cannot dissolve it')}</div>`:'')
+    +(ap.state?`<div class="irow"><b>Absorbed pain</b> ${esc(ap.state)} ${kchip(ap.kind)}${ap.grade?`<span class="grade">${esc(ap.grade)}</span>`:''}${ap.cite?` — ${esc(ap.cite)}`:''}${ap.test?`<div class="itest">test: ${esc(ap.test)}</div>`:''}</div>`:'')
+    +((sf.diesWhere||sf.livesWhere)?`<div class="irow"><b>Segment fork</b> dies where: ${esc(sf.diesWhere||'—')} · may live where: ${esc(sf.livesWhere||'—')} ${kchip(sf.kind)}${sf.gap?`<span class="grade">gap: ${esc(sf.gap)}</span>`:''}${sf.test?`<div class="itest">test: ${esc(sf.test)}</div>`:''}</div>`:'')
+    +((rd.reframedProblem||rd.whatWouldDissolve)?`<div class="irow"><b>Redirect</b> ${rd.reframedProblem?`the reframed problem — ${esc(rd.reframedProblem)}`:''}${rd.whatWouldDissolve?`${rd.reframedProblem?' · ':''}what would dissolve it — ${esc(rd.whatWouldDissolve)}`:''}</div>`:'')
+    +(IF.contested?`<div class="icontest">⚖ contested by the fit skeptic — ${esc(IF.contested)}</div>`:'')
+    +(rf.survived?`<div class="irow" style="color:var(--k-meas)">⚖ survived one refutation attempt — ${esc(rf.survived)}</div>`:'')
+    +(rf.skipped?`<div class="icontest">⚠ un-refuted — ${esc(rf.skipped)}</div>`:'')
+    +(IF.orphaned?`<div class="icontest"><span class="role role-down">ORPHANED</span>${orphBy?` rested on ${esc(orphBy)} —`:''} a node this verdict stood on fell; re-derive or retract.</div>`:'');
+}else if(D.ideaFitDeferred||D.ideaFitError){
+  document.getElementById('ideafit').innerHTML=`<div class="icontest">${D.ideaFitError?'⚠ ':'ℹ '}${esc(D.ideaFitError||D.ideaFitDeferred)}${D.idea&&D.idea.statement?`<div class="istmt" style="margin-top:8px">${esc(D.idea.statement)}</div>`:''}</div>`;
+}else{const is=document.getElementById('idea-sec');if(is)is.style.display='none';}
+
+/* open on the answer (answer-first), chain fully lit */
+try{inspectConstraint();}catch(e){}
+</script>
+</body>
+</html>

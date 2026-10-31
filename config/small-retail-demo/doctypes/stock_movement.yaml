@@ -1,0 +1,50 @@
+name: Stock Movement
+module: Inventory
+title_field: name
+search_fields: product, movement_type, reason
+sort_field: adjusted_at
+sort_order: DESC
+description: Signed stock change with a recorded reason.
+append_only: true
+quantity_effect:
+  view: Record Stock Movement
+  component: adjustment
+  action: apply
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  source_record_field: product
+  delta_field: delta
+  reason_field: reason
+fields:
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product
+    reqd: true
+    in_list_view: true
+  - fieldname: movement_type
+    fieldtype: Select
+    label: Movement type
+    options: |
+      Receipt
+      Adjustment
+      Recount
+    reqd: true
+    in_list_view: true
+  - fieldname: delta
+    fieldtype: Int
+    label: Quantity change
+    description: Positive to add stock, negative to remove stock.
+    reqd: true
+    in_list_view: true
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+    reqd: true
+    in_list_view: true
+  - fieldname: adjusted_at
+    fieldtype: Datetime
+    label: Movement date & time
+    default: now
+    read_only: true
+    in_list_view: true

@@ -9,7 +9,7 @@ import (
 // It receives the doctype name, field name, and document, and returns the computed value.
 type ComputedHookFunc func(doctypeName, fieldName string, doc *Document) (any, error)
 
-// Registry holds all DocType definitions, permissions, and workflows.
+// Registry holds all DocType definitions and permissions.
 // It is rebuilt from the active config version on startup and after config
 // changes. This is the current application model: DocType-centric with views
 // and page manifests projected on top. It is not yet the RFC's full generic
@@ -19,18 +19,16 @@ type Registry struct {
 	doctypes      map[string]*DocType // keyed by doctype name
 	aliases       map[string]string   // resource-safe aliases → primary doctype name
 	Permissions   *PermissionMatrix
-	Workflows     *WorkflowMap
 	Views         *ViewRegistry
 	ComputedHooks ComputedHookFunc // optional — runs script-based computed fields
 }
 
-// NewRegistry creates an empty registry with blank permission matrix and workflow map.
+// NewRegistry creates an empty registry with a blank permission matrix.
 func NewRegistry() *Registry {
 	return &Registry{
 		doctypes:    make(map[string]*DocType),
 		aliases:     make(map[string]string),
 		Permissions: NewPermissionMatrix(),
-		Workflows:   NewWorkflowMap(),
 		Views:       NewViewRegistry(),
 	}
 }
@@ -190,4 +188,13 @@ func (r *Registry) Remove(name string) {
 // CanUser checks permission for a user with given roles.
 func (r *Registry) CanUser(userRoles []string, doctype, operation string) (allowed bool, ownerOnly bool) {
 	return r.Permissions.UserCan(userRoles, doctype, operation)
+}
+
+// RowScopeFor returns operation-specific row restrictions from the current
+// tenant permission matrix.
+func (r *Registry) RowScopeFor(userRoles []string, doctype, operation string) (bool, []string) {
+	if r == nil || r.Permissions == nil {
+		return false, nil
+	}
+	return r.Permissions.RowScopeFor(userRoles, doctype, operation)
 }

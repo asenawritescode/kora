@@ -2,7 +2,7 @@ package doctype
 
 import "fmt"
 
-// Document is the generic runtime representation of any Kora document.
+// Document is the generic runtime representation of any Kigae document.
 // All documents are stored as map[string]any at runtime.
 type Document struct {
 	DocType   string

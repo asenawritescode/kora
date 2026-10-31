@@ -18,8 +18,11 @@ import (
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/schema"
 	ksite "github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/workflow"
+	workflowsql "github.com/asenawritescode/kora/workflow/sqlstore"
 	_ "github.com/lib/pq"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
@@ -92,12 +95,9 @@ func TestLiveRecordMutationBundleCommitsAndReplaysAcrossDialects(t *testing.T) {
 			for label, query := range map[string]string{
 				"completed audit": "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND status = 'completed'",
 				"outbox":          "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?",
-				"receipt":         "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?",
+				"receipt":         "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'",
 			} {
 				args := []any{siteName}
-				if label == "receipt" {
-					args = append(args, "invalid-reference-"+suffix)
-				}
 				if got := countDialectRows(t, database, dialect, query, args...); got != 0 {
 					t.Fatalf("%s invalid bundle left %d %s rows", tc.driver, got, label)
 				}
@@ -113,12 +113,9 @@ func TestLiveRecordMutationBundleCommitsAndReplaysAcrossDialects(t *testing.T) {
 			for table, query := range map[string]string{
 				"completed audit": "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND status = 'completed'",
 				"outbox":          "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?",
-				"receipt":         "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?",
+				"receipt":         "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'",
 			} {
 				args := []any{siteName}
-				if table == "receipt" {
-					args = append(args, "failed-pos-bundle-"+suffix)
-				}
 				if got := countDialectRows(t, database, dialect, query, args...); got != 0 {
 					t.Fatalf("%s failed bundle left %d %s rows", tc.driver, got, table)
 				}
@@ -151,7 +148,7 @@ func TestLiveRecordMutationBundleCommitsAndReplaysAcrossDialects(t *testing.T) {
 			paymentCount = queryCount("SELECT COUNT(*) FROM "+dialect.QuoteIdent(payment.RawTableName())+" WHERE name = ? AND sales_invoice = ?", first.Related[0].Name, first.Name)
 			auditCount = queryCount("SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND operation_id = ? AND status = 'completed'", siteName, first.Operation)
 			outboxCount = queryCount("SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", siteName)
-			receiptCount = queryCount("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", siteName, idempotencyKey)
+			receiptCount = queryCount("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'", siteName)
 			if saleCount != 1 || paymentCount != 1 || auditCount != 2 || outboxCount != 2 || receiptCount != 1 {
 				t.Fatalf("%s bundle persisted sale=%d payment=%d audit=%d outbox=%d receipts=%d; want 1/1/2/2/1", tc.driver, saleCount, paymentCount, auditCount, outboxCount, receiptCount)
 			}
@@ -163,6 +160,7 @@ func TestLiveRecordMutationBundleCommitsAndReplaysAcrossDialects(t *testing.T) {
 				{Key: "sale", Doctype: saleType, Data: json.RawMessage(`{"title":"Concurrent sale","total_amount":700}`)},
 				{Key: "payment", Doctype: paymentType, Data: json.RawMessage(`{"sales_invoice":"$records.sale.name","amount":700,"method":"Card"}`)},
 			}}
+			baselineReceipts := queryCount("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'", siteName)
 			start := make(chan struct{})
 			type bundleResult struct {
 				data     *kernel.ResultData
@@ -194,8 +192,8 @@ func TestLiveRecordMutationBundleCommitsAndReplaysAcrossDialects(t *testing.T) {
 			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(payment.RawTableName())+" WHERE sales_invoice = ?", firstRace.data.Name); got != 1 {
 				t.Fatalf("%s concurrent payment rows=%d, want exactly one", tc.driver, got)
 			}
-			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", siteName, raceKey); got != 1 {
-				t.Fatalf("%s concurrent bundle receipts=%d, want exactly one", tc.driver, got)
+			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'", siteName); got != baselineReceipts+1 {
+				t.Fatalf("%s concurrent bundle receipts=%d, want one new receipt over baseline %d", tc.driver, got, baselineReceipts)
 			}
 			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND operation_id = ? AND status = 'completed'", siteName, firstRace.data.Operation); got != 2 {
 				t.Fatalf("%s concurrent bundle completed audit rows=%d, want two", tc.driver, got)
@@ -354,11 +352,36 @@ func TestLiveWorkflowTransitionUsesKernelAcrossDialects(t *testing.T) {
 			}, {
 				Doctype: doctypeName, Role: "Reader", Read: true,
 			}})
-			registry.Workflows.Register(&doctype.Workflow{
-				Name: "Kernel Workflow " + suffix, DocumentType: doctypeName, IsActive: true, WorkflowStateField: "status",
-				States:      []doctype.WorkflowState{{State: "Draft", DocStatus: 0}, {State: "Done", DocStatus: 1}},
-				Transitions: []doctype.WorkflowTransition{{Action: "Complete", From: "Draft", To: "Done", Allowed: doctype.AdminRole}},
-			})
+			definitionStore, err := workflowsql.NewDefinitionStore(database, dialect)
+			if err != nil {
+				t.Fatalf("create %s workflow definition store: %v", tc.driver, err)
+			}
+			if err := definitionStore.Ensure(t.Context()); err != nil {
+				t.Fatalf("ensure %s workflow definition store: %v", tc.driver, err)
+			}
+			statusInput, err := json.Marshal(workflow.StatusActionConfig{StateField: "status", InitialState: "Draft", StatusTransition: workflow.StatusTransition{Action: "Complete", From: "Draft", To: "Done", AllowedRoles: []string{doctype.AdminRole}, DocStatus: 1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			statusDefinition := contract.WorkflowDefinition{
+				ID: contract.DefinitionID("kernel-status-" + suffix[:12]), Version: 1, Entry: "finish",
+				Trigger: &contract.RecordTrigger{Kind: "record.updated", Table: doctypeName, WatchedFields: []string{"status"}},
+				Steps: []contract.StepDefinition{
+					{ID: "transition", Kind: contract.StepAction, Action: &contract.ActionSpec{Name: "record.update_status", Version: 1, InputSchema: "kora.record.update_status", Input: statusInput, Next: "finish"}},
+					{ID: "finish", Kind: contract.StepEnd, End: &contract.EndSpec{Outcome: "complete"}},
+				},
+			}
+			tenant, err := contract.ParseTenantID(siteName)
+			if err != nil {
+				t.Fatalf("parse %s workflow tenant: %v", tc.driver, err)
+			}
+			actor, err := contract.ParsePrincipalID("system-workflow-integration")
+			if err != nil {
+				t.Fatalf("parse workflow publisher: %v", err)
+			}
+			if err := definitionStore.PublishImportedBatch(t.Context(), tenant, actor, []contract.WorkflowDefinition{statusDefinition}, time.Now().UTC()); err != nil {
+				t.Fatalf("publish %s v2 status workflow: %v", tc.driver, err)
+			}
 			cleanupKernelDialectRecords(t, database, dialect, siteName, doctypeName)
 			if err := schema.MigrateSiteFromRegistry(database, siteName, registry, dialect); err != nil {
 				t.Fatalf("migrate %s workflow DocType: %v", tc.driver, err)
@@ -366,6 +389,9 @@ func TestLiveWorkflowTransitionUsesKernelAcrossDialects(t *testing.T) {
 			writer := outbox.NewSQLWriter(dialect)
 			handler := NewHandler(registry, &orm.TxManager{DB: database, Registry: registry, Dialect: dialect, Outbox: writer, SiteName: siteName})
 			handler.SiteOutboxes = map[string]outbox.Writer{siteName: writer}
+			runtimeServices := NewSiteRuntimeServices()
+			runtimeServices.Replace(siteName, SiteRuntimeService{WorkflowStatusPolicies: definitionStore, Outbox: writer})
+			handler.RuntimeServices = runtimeServices
 			path := "/api/resource/" + url.PathEscape(doctypeName)
 			created := serveResourceMutationBodyWithDBType(t, handler, database, registry, siteName,
 				httpMethodPost, path, `{"title":"Workflow test","status":"Draft"}`, "", []string{doctype.AdminRole}, tc.driver)
@@ -390,7 +416,7 @@ func TestLiveWorkflowTransitionUsesKernelAcrossDialects(t *testing.T) {
 			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(dt.RawTableName())+" WHERE name = ? AND status = 'Draft'", name); got != 1 {
 				t.Fatalf("%s rejected workflow calls changed the document", tc.driver)
 			}
-			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ? AND status = 'completed'", siteName, name, kernel.CommandRecordWorkflowTransition); got != 0 {
+			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ? AND status = 'completed'", siteName, name, kernel.CommandWorkflowStatusTransition); got != 0 {
 				t.Fatalf("%s rejected workflow calls wrote %d completed transition audits", tc.driver, got)
 			}
 			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", siteName, name); got != 1 {
@@ -409,7 +435,7 @@ func TestLiveWorkflowTransitionUsesKernelAcrossDialects(t *testing.T) {
 			if err := database.QueryRow(kdb.Rebind(dialect, "SELECT status, doc_status FROM "+dialect.QuoteIdent(dt.RawTableName())+" WHERE name = ?"), name).Scan(&state, &docStatus); err != nil {
 				t.Fatalf("read %s workflow record: %v", tc.driver, err)
 			}
-			if err := database.QueryRow(kdb.Rebind(dialect, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ? AND status = 'completed'"), siteName, name, kernel.CommandRecordWorkflowTransition).Scan(&auditCount); err != nil {
+			if err := database.QueryRow(kdb.Rebind(dialect, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ? AND status = 'completed'"), siteName, name, kernel.CommandWorkflowStatusTransition).Scan(&auditCount); err != nil {
 				t.Fatalf("count %s workflow audit: %v", tc.driver, err)
 			}
 			if err := database.QueryRow(kdb.Rebind(dialect, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?"), siteName, name).Scan(&outboxCount); err != nil {
@@ -453,9 +479,16 @@ func TestScriptProviderCRUDUsesKernelAcrossDialects(t *testing.T) {
 				t.Fatalf("migrate %s script DocType: %v", tc.driver, err)
 			}
 			writer := outbox.NewSQLWriter(dialect)
+			execution, err := policy.NewVerifiedExecution(contract.TenantID(siteName), contract.ActorContext{
+				PrincipalID: "script@example.test", PrincipalType: contract.PrincipalHuman,
+				SubjectUserID: "script@example.test", Site: siteName, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				t.Fatalf("create script provider execution: %v", err)
+			}
 			tx := &orm.TxManager{
 				DB: database, Registry: registry, Dialect: dialect, Outbox: writer, SiteName: siteName,
-				CurrentUser: "script@example.test", CurrentUserRole: doctype.AdminRole, CurrentUserRoles: []string{doctype.AdminRole},
+				CurrentUser: "script@example.test", CurrentUserRole: doctype.AdminRole, CurrentUserRoles: []string{doctype.AdminRole}, Execution: execution,
 			}
 			provider := NewScriptProvider(tx, registry, siteName, nil, nil)
 			created, err := provider.CreateDoc(dt.Name, map[string]any{"title": "script create", "unlisted": "not stored"}, "owner@example.test", "script@example.test")
@@ -465,6 +498,13 @@ func TestScriptProviderCRUDUsesKernelAcrossDialects(t *testing.T) {
 			name, _ := created["name"].(string)
 			if name == "" || created["title"] != "script create" || created["unlisted"] != "not stored" {
 				t.Fatalf("%s script create response = %#v", tc.driver, created)
+			}
+			var owner string
+			if err := database.QueryRow(kdb.Rebind(dialect, "SELECT owner FROM "+dialect.QuoteIdent(dt.RawTableName())+" WHERE name = ?"), name).Scan(&owner); err != nil {
+				t.Fatalf("%s read script-created owner: %v", tc.driver, err)
+			}
+			if owner != "script@example.test" {
+				t.Fatalf("%s script create trusted supplied owner %q, want verified execution principal", tc.driver, owner)
 			}
 			if err := provider.SaveDoc(dt.Name, map[string]any{"name": name, "title": "script update", "unlisted": "discarded"}, "script@example.test"); err != nil {
 				t.Fatalf("%s script update: %v", tc.driver, err)

@@ -1,10 +1,10 @@
-// Package api provides shared schema mapping from Kora field types to JSON Schema.
+// Package api provides shared schema mapping from Kigae field types to JSON Schema.
 // Used by OpenAPI, MCP, and Chat to generate consistent tool/schema definitions.
 package api
 
 import "github.com/asenawritescode/kora/doctype"
 
-// FieldToJSONSchema maps a Kora field definition to a JSON Schema property.
+// FieldToJSONSchema maps a Kigae field definition to a JSON Schema property.
 func FieldToJSONSchema(f *doctype.Field) map[string]any {
 	schema := map[string]any{}
 

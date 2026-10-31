@@ -8,10 +8,10 @@ import "strings"
 type EventCategory string
 
 const (
-	EventCategoryTechnical  EventCategory = "technical"
-	EventCategoryDomain     EventCategory = "domain"
+	EventCategoryTechnical   EventCategory = "technical"
+	EventCategoryDomain      EventCategory = "domain"
 	EventCategoryOperational EventCategory = "operational"
-	EventCategoryUnknown    EventCategory = "unknown"
+	EventCategoryUnknown     EventCategory = "unknown"
 )
 
 // ClassifyEventType maps a canonical event type to a coarse category.

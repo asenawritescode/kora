@@ -38,7 +38,6 @@ function useIsMobile() {
 const SCRIPT_TYPES = [
   { value: 'doc_event', label: 'Doc Event' },
   { value: 'api_method', label: 'API Method' },
-  { value: 'workflow_action', label: 'Workflow Action' },
   { value: 'scheduled', label: 'Scheduled' },
 ]
 
@@ -80,11 +79,11 @@ export default function AdminScriptsPage() {
   const [editName, setEditName] = useState('')
   const [formData, setFormData] = useState<{
     name: string; script_type: string; doctype: string; event: string;
-    method_path: string; workflow_action: string; schedule: string;
+    method_path: string; schedule: string;
     priority: number; timeout_ms: number; run_as: string; script: string;
   }>({
     name: '', script_type: 'doc_event', doctype: '', event: '',
-    method_path: '', workflow_action: '', schedule: '',
+    method_path: '', schedule: '',
     priority: 10, timeout_ms: 5000, run_as: '', script: '// Write your JavaScript here\n',
   })
   const [saving, setSaving] = useState(false)
@@ -106,7 +105,7 @@ export default function AdminScriptsPage() {
   const openCreate = () => {
     setEditName('')
     setFormData({ name: '', script_type: 'doc_event', doctype: '', event: '',
-      method_path: '', workflow_action: '', schedule: '', priority: 10, timeout_ms: 5000, run_as: '', script: '// Write your JavaScript here\n' })
+      method_path: '', schedule: '', priority: 10, timeout_ms: 5000, run_as: '', script: '// Write your JavaScript here\n' })
     setFormError('')
     setDialogOpen(true)
   }
@@ -115,7 +114,7 @@ export default function AdminScriptsPage() {
     setEditName(s.name)
     setFormData({
       name: s.name, script_type: s.script_type, doctype: s.doctype, event: s.event,
-      method_path: s.method_path, workflow_action: s.workflow_action, schedule: s.schedule,
+      method_path: s.method_path, schedule: s.schedule,
       priority: s.priority, timeout_ms: s.timeout_ms, run_as: s.run_as, script: s.script,
     })
     setFormError('')
@@ -130,7 +129,7 @@ export default function AdminScriptsPage() {
       if (editName) {
         await updateScript(editName, {
           script_type: formData.script_type, doctype: formData.doctype, event: formData.event,
-          method_path: formData.method_path, workflow_action: formData.workflow_action,
+          method_path: formData.method_path,
           schedule: formData.schedule, priority: formData.priority, timeout_ms: formData.timeout_ms,
           run_as: formData.run_as, script: formData.script,
         })
@@ -138,7 +137,7 @@ export default function AdminScriptsPage() {
         await createScript({
           name: formData.name, script_type: formData.script_type, doctype: formData.doctype,
           event: formData.event, method_path: formData.method_path,
-          workflow_action: formData.workflow_action, schedule: formData.schedule,
+          schedule: formData.schedule,
           priority: formData.priority, timeout_ms: formData.timeout_ms,
           run_as: formData.run_as, script: formData.script,
         })
@@ -193,7 +192,7 @@ export default function AdminScriptsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Code2 className="h-6 w-6" /> Scripts
-            <HelpTooltip label="Scripts help">JavaScript hooks, custom API methods, and workflow actions.</HelpTooltip>
+            <HelpTooltip label="Scripts help">JavaScript document hooks and custom API methods. Use Automations for record triggered workflows.</HelpTooltip>
           </h1>
         </div>
         <Button onClick={openCreate}><Plus className="h-4 w-4 mr-2" /> New Script</Button>
@@ -224,7 +223,7 @@ export default function AdminScriptsPage() {
                   <TableCell className="font-medium">{s.name}</TableCell>
                   <TableCell><Badge variant="outline">{s.script_type}</Badge></TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {s.doctype || s.method_path || s.workflow_action || s.schedule || '—'}
+                    {s.doctype || s.method_path || s.schedule || '—'}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{s.event || '—'}</TableCell>
                   <TableCell>
@@ -267,7 +266,6 @@ export default function AdminScriptsPage() {
                 {s.doctype && <span className="bg-muted px-1.5 py-0.5 rounded">Doctype: {s.doctype}</span>}
                 {s.event && <span className="bg-muted px-1.5 py-0.5 rounded">Event: {s.event}</span>}
                 {s.method_path && <span className="bg-muted px-1.5 py-0.5 rounded">Path: {s.method_path}</span>}
-                {s.workflow_action && <span className="bg-muted px-1.5 py-0.5 rounded">Action: {s.workflow_action}</span>}
                 {s.schedule && <span className="bg-muted px-1.5 py-0.5 rounded">Cron: {s.schedule}</span>}
               </div>
               <div className="flex gap-1 justify-end">
@@ -350,7 +348,7 @@ export default function AdminScriptsPage() {
         <SheetContent side={isMobile ? 'bottom' : 'right'} className={isMobile ? 'w-full max-h-[85vh] rounded-t-xl flex flex-col' : 'w-full sm:max-w-xl flex flex-col'}>
           <SheetHeader className="border-b pb-4">
             <SheetTitle className="text-lg">{editName ? `Edit: ${editName}` : 'New Script'}</SheetTitle>
-            <SheetDescription>Scripts run inside the Kora engine with access to <code>kora.*</code> APIs.</SheetDescription>
+            <SheetDescription>Scripts run inside the Kigae engine with access to <code>kora.*</code> APIs.</SheetDescription>
           </SheetHeader>
           <form onSubmit={handleSave} className="flex-1 flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto p-4 space-y-5">
@@ -400,13 +398,6 @@ export default function AdminScriptsPage() {
                 <Input value={formData.method_path} onChange={e => setFormData({...formData, method_path: e.target.value})}
                   placeholder="e.g., mpesa.callback" />
                 <p className="text-xs text-muted-foreground">Accessible at POST /api/method/{'{name}'}</p>
-              </div>
-            )}
-            {scriptType === 'workflow_action' && (
-              <div className="grid gap-2">
-                <Label>Action Name</Label>
-                <Input value={formData.workflow_action} onChange={e => setFormData({...formData, workflow_action: e.target.value})}
-                  placeholder="e.g., create_service_report" />
               </div>
             )}
             {scriptType === 'scheduled' && (

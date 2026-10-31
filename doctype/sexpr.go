@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 // ---------------------------------------------------------------------------
@@ -31,11 +33,11 @@ func ToSExpr(snapshot *ConfigSnapshot) string {
 	writeDoctypesSection(&b, snapshot.DocTypes)
 	writeRolesSection(&b, snapshot.Roles)
 	writePermissionsSection(&b, snapshot.Permissions)
-	writeWorkflowsSection(&b, snapshot.Workflows)
 	writeViewsSection(&b, snapshot.Views)
 	writeAnalyticsMetricsSection(&b, snapshot.AnalyticsMetrics)
 	writeReportsSection(&b, snapshot.Reports)
 	writeScriptsSection(&b, snapshot.Scripts)
+	writeScheduledJobsSection(&b, snapshot.ScheduledJobs)
 
 	b.WriteString(")")
 	return b.String()
@@ -87,19 +89,6 @@ func writePermissionsSection(b *strings.Builder, perms []*Permission) {
 	b.WriteString(")")
 }
 
-func writeWorkflowsSection(b *strings.Builder, workflows []*Workflow) {
-	if len(workflows) == 0 {
-		b.WriteString("\n  (workflows)")
-		return
-	}
-	sorted := sortedWorkflows(workflows)
-	b.WriteString("\n  (workflows")
-	for _, w := range sorted {
-		writeSExprWorkflow(b, w, "    ")
-	}
-	b.WriteString(")")
-}
-
 func writeAnalyticsMetricsSection(b *strings.Builder, metrics []*AnalyticsMetricConfig) {
 	if len(metrics) == 0 {
 		b.WriteString("\n  (analytics-metrics)")
@@ -135,6 +124,22 @@ func writeScriptsSection(b *strings.Builder, scripts []*ScriptSnapshot) {
 	b.WriteString("\n  (scripts")
 	for _, s := range sorted {
 		writeSExprScriptSnapshot(b, s, "    ")
+	}
+	b.WriteString(")")
+}
+
+func writeScheduledJobsSection(b *strings.Builder, jobs []contract.ScheduledJobDefinition) {
+	sorted := append([]contract.ScheduledJobDefinition(nil), jobs...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+	b.WriteString("\n  (scheduled-jobs")
+	for _, job := range sorted {
+		encoded, err := json.Marshal(job)
+		if err != nil {
+			continue // ConfigSnapshot jobs contain JSON wire values by contract.
+		}
+		b.WriteString("\n    (scheduled-job-json ")
+		b.WriteString(quoteSExprString(string(encoded)))
+		b.WriteString(")")
 	}
 	b.WriteString(")")
 }
@@ -467,189 +472,26 @@ func writeSExprPermission(b *strings.Builder, p *Permission, indent string) {
 	if p.IfOwner {
 		props = append(props, sExprProp{"if-owner", "true"})
 	}
-
-	if len(props) > 0 {
-		b.WriteString("\n")
-		writeSortedProps(b, indent+"  ", props)
-	}
-	b.WriteString(")")
-}
-
-func writeSExprWorkflow(b *strings.Builder, w *Workflow, indent string) {
-	b.WriteString("\n")
-	b.WriteString(indent)
-	b.WriteString("(workflow ")
-	b.WriteString(symbolName(w.Name))
-
-	var props []sExprProp
-	if w.DocumentType != "" {
-		props = append(props, sExprProp{"on", symbolName(w.DocumentType)})
-	}
-	props = append(props, sExprProp{"active", formatBool(w.IsActive)})
-	if w.WorkflowStateField != "" && w.WorkflowStateField != "status" {
-		props = append(props, sExprProp{"state-field", quoteSExprString(w.WorkflowStateField)})
-	}
-
-	subIndent := indent + "  "
-	if len(props) > 0 {
-		b.WriteString("\n")
-		writeSortedProps(b, subIndent, props)
-	}
-
-	// States sorted by DocStatus
-	sortedStates := sortedWorkflowStates(w.States)
-	for _, s := range sortedStates {
-		writeSExprWorkflowState(b, s, subIndent)
-	}
-
-	// Transitions sorted by action name
-	sortedTrans := sortedWorkflowTransitions(w.Transitions)
-	for _, t := range sortedTrans {
-		writeSExprWorkflowTransition(b, t, subIndent)
-	}
-
-	// Notifications sorted by event+toState
-	sortedNotifs := sortedWorkflowNotifications(w.Notifications)
-	for _, n := range sortedNotifs {
-		writeSExprWorkflowNotification(b, n, subIndent)
-	}
-
-	b.WriteString(")")
-}
-
-func writeSExprWorkflowState(b *strings.Builder, s WorkflowState, indent string) {
-	b.WriteString("\n")
-	b.WriteString(indent)
-	b.WriteString("(state ")
-	b.WriteString(symbolName(s.State))
-
-	var props []sExprProp
-	props = append(props, sExprProp{"doc-status", strconv.Itoa(s.DocStatus)})
-	if s.AllowEdit != "" {
-		props = append(props, sExprProp{"allow-edit", quoteSExprString(s.AllowEdit)})
-	}
-	if s.Style != "" && s.Style != "default" {
-		props = append(props, sExprProp{"style", quoteSExprString(s.Style)})
-	}
-
-	b.WriteString("\n")
-	writeSortedProps(b, indent+"  ", props)
-	b.WriteString(")")
-}
-
-func writeSExprWorkflowTransition(b *strings.Builder, t WorkflowTransition, indent string) {
-	b.WriteString("\n")
-	b.WriteString(indent)
-	b.WriteString("(action ")
-	b.WriteString(symbolName(t.Action))
-
-	var props []sExprProp
-	if t.From != "" {
-		props = append(props, sExprProp{"from", symbolName(t.From)})
-	}
-	if t.To != "" {
-		props = append(props, sExprProp{"to", symbolName(t.To)})
-	}
-	if t.Allowed != "" {
-		props = append(props, sExprProp{"allowed", quoteSExprString(t.Allowed)})
-	}
-	if t.Condition != "" {
-		props = append(props, sExprProp{"condition", quoteSExprString(t.Condition)})
-	}
-	if len(t.RequireFields) > 0 {
-		props = append(props, sExprProp{"require-fields", quoteSExprString(strings.Join(t.RequireFields, " "))})
-	}
-
-	subIndent := indent + "  "
-	if len(props) > 0 {
-		b.WriteString("\n")
-		writeSortedProps(b, subIndent, props)
-	}
-
-	// Workflow actions on transition, on success, on failure
-	for _, a := range t.OnTransition {
-		writeSExprWorkflowAction(b, a, "on-transition", subIndent)
-	}
-	for _, a := range t.OnSuccess {
-		writeSExprWorkflowAction(b, a, "on-success", subIndent)
-	}
-	for _, a := range t.OnFailure {
-		writeSExprWorkflowAction(b, a, "on-failure", subIndent)
-	}
-
-	b.WriteString(")")
-}
-
-func writeSExprWorkflowAction(b *strings.Builder, a WorkflowAction, label, indent string) {
-	b.WriteString("\n")
-	b.WriteString(indent)
-	b.WriteString("(")
-	b.WriteString(label)
-
-	var props []sExprProp
-	if a.Type != "" {
-		props = append(props, sExprProp{"type", quoteSExprString(a.Type)})
-	}
-	if a.Script != "" {
-		props = append(props, sExprProp{"script", quoteSExprString(a.Script)})
-	}
-	if a.WebhookURL != "" {
-		props = append(props, sExprProp{"webhook-url", quoteSExprString(a.WebhookURL)})
-	}
-	if a.Condition != "" {
-		props = append(props, sExprProp{"condition", quoteSExprString(a.Condition)})
-	}
-	if a.Async {
-		props = append(props, sExprProp{"async", "true"})
-	}
-
-	b.WriteString("\n")
-	writeSortedProps(b, indent+"  ", props)
-	b.WriteString(")")
-}
-
-func writeSExprWorkflowNotification(b *strings.Builder, n WorkflowNotification, indent string) {
-	b.WriteString("\n")
-	b.WriteString(indent)
-	b.WriteString("(notification")
-
-	var props []sExprProp
-	if n.Event != "" {
-		props = append(props, sExprProp{"event", quoteSExprString(n.Event)})
-	}
-	if n.ToState != "" {
-		props = append(props, sExprProp{"to-state", quoteSExprString(n.ToState)})
-	}
-	if len(n.Recipients) > 0 {
-		props = append(props, sExprProp{"recipients", formatRecipients(n.Recipients)})
-	}
-	if n.Subject != "" {
-		props = append(props, sExprProp{"subject", quoteSExprString(n.Subject)})
-	}
-	if n.Message != "" {
-		props = append(props, sExprProp{"message", quoteSExprString(n.Message)})
-	}
-
-	if len(props) > 0 {
-		b.WriteString("\n")
-		writeSortedProps(b, indent+"  ", props)
-	}
-	b.WriteString(")")
-}
-
-func formatRecipients(recipients []map[string]string) string {
-	if len(recipients) == 0 {
-		return "()"
-	}
-	var parts []string
-	for _, m := range recipients {
-		var kvs []string
-		for k, v := range m {
-			kvs = append(kvs, "("+quoteSExprString(k)+" "+quoteSExprString(v)+")")
+	if len(p.IfAssigned) > 0 {
+		assigned := append([]string(nil), p.IfAssigned...)
+		sort.Strings(assigned)
+		var values strings.Builder
+		values.WriteString("(")
+		for i, field := range assigned {
+			if i > 0 {
+				values.WriteString(" ")
+			}
+			values.WriteString(quoteSExprString(field))
 		}
-		parts = append(parts, strings.Join(kvs, " "))
+		values.WriteString(")")
+		props = append(props, sExprProp{"if-assigned", values.String()})
 	}
-	return "(" + strings.Join(parts, " ") + ")"
+
+	if len(props) > 0 {
+		b.WriteString("\n")
+		writeSortedProps(b, indent+"  ", props)
+	}
+	b.WriteString(")")
 }
 
 func writeSExprAnalyticsMetric(b *strings.Builder, m *AnalyticsMetricConfig, indent string) {
@@ -706,9 +548,6 @@ func writeSExprScriptSnapshot(b *strings.Builder, s *ScriptSnapshot, indent stri
 	}
 	if s.MethodPath != "" {
 		props = append(props, sExprProp{"method", quoteSExprString(s.MethodPath)})
-	}
-	if s.WorkflowAction != "" {
-		props = append(props, sExprProp{"action", quoteSExprString(s.WorkflowAction)})
 	}
 	if s.Schedule != "" {
 		props = append(props, sExprProp{"schedule", quoteSExprString(s.Schedule)})
@@ -875,44 +714,6 @@ func sortedPerms(perms []*Permission) []*Permission {
 			return perms[i].Doctype < perms[j].Doctype
 		}
 		return perms[i].Role < perms[j].Role
-	})
-	return out
-}
-
-func sortedWorkflows(ws []*Workflow) []*Workflow {
-	out := make([]*Workflow, len(ws))
-	copy(out, ws)
-	sort.Slice(out, func(i, j int) bool { return ws[i].Name < ws[j].Name })
-	return out
-}
-
-func sortedWorkflowStates(states []WorkflowState) []WorkflowState {
-	out := make([]WorkflowState, len(states))
-	copy(out, states)
-	sort.Slice(out, func(i, j int) bool { return states[i].DocStatus < states[j].DocStatus })
-	return out
-}
-
-func sortedWorkflowTransitions(trans []WorkflowTransition) []WorkflowTransition {
-	out := make([]WorkflowTransition, len(trans))
-	copy(out, trans)
-	sort.Slice(out, func(i, j int) bool {
-		if trans[i].From != trans[j].From {
-			return trans[i].From < trans[j].From
-		}
-		return trans[i].To < trans[j].To
-	})
-	return out
-}
-
-func sortedWorkflowNotifications(ns []WorkflowNotification) []WorkflowNotification {
-	out := make([]WorkflowNotification, len(ns))
-	copy(out, ns)
-	sort.Slice(out, func(i, j int) bool {
-		if ns[i].Event != ns[j].Event {
-			return ns[i].Event < ns[j].Event
-		}
-		return ns[i].ToState < ns[j].ToState
 	})
 	return out
 }
@@ -1228,12 +1029,6 @@ func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 					return nil, err
 				}
 				snapshot.Permissions = perms
-			case "workflows":
-				wfs, err := parseWorkflows(child.Children[1:])
-				if err != nil {
-					return nil, err
-				}
-				snapshot.Workflows = wfs
 			case "analytics-metrics":
 				metrics, err := parseAnalyticsMetrics(child.Children[1:])
 				if err != nil {
@@ -1252,12 +1047,20 @@ func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 					return nil, err
 				}
 				snapshot.Scripts = scripts
+			case "scheduled-jobs":
+				jobs, err := parseScheduledJobs(child.Children[1:])
+				if err != nil {
+					return nil, err
+				}
+				snapshot.ScheduledJobs = jobs
 			case "views":
 				views, err := parseViews(child.Children[1:])
 				if err != nil {
 					return nil, err
 				}
 				snapshot.Views = views
+			default:
+				return nil, fmt.Errorf("unsupported config section %q", sectionHead)
 			}
 		} else if child.AtomType == sTokKeyword {
 			// Config-level keyword
@@ -1271,6 +1074,21 @@ func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 		}
 	}
 	return snapshot, nil
+}
+
+func parseScheduledJobs(nodes []*sNode) ([]contract.ScheduledJobDefinition, error) {
+	jobs := make([]contract.ScheduledJobDefinition, 0, len(nodes))
+	for _, node := range nodes {
+		if !node.IsList || len(node.Children) != 2 || nodeStr(node.Children[0]) != "scheduled-job-json" {
+			return nil, fmt.Errorf("invalid scheduled job form")
+		}
+		var job contract.ScheduledJobDefinition
+		if err := json.Unmarshal([]byte(nodeStr(node.Children[1])), &job); err != nil {
+			return nil, fmt.Errorf("invalid scheduled job JSON: %w", err)
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1583,197 +1401,31 @@ func parsePermission(node *sNode) (*Permission, error) {
 	p.Import = kwBool(kw, "import")
 	p.Report = kwBool(kw, "report")
 	p.IfOwner = kwBool(kw, "if-owner")
+	p.IfAssigned = kwStringList(node.Children[3:], "if-assigned")
 	return p, nil
 }
 
-func parseWorkflows(nodes []*sNode) ([]*Workflow, error) {
-	var result []*Workflow
-	for _, n := range nodes {
-		wf, err := parseWorkflow(n)
-		if err != nil {
-			return nil, err
+func kwStringList(nodes []*sNode, key string) []string {
+	for i := 0; i+1 < len(nodes); i++ {
+		if nodes[i].AtomType != sTokKeyword || nodes[i].Atom != key {
+			continue
 		}
-		result = append(result, wf)
-	}
-	return result, nil
-}
-
-func parseWorkflow(node *sNode) (*Workflow, error) {
-	if !node.IsList || len(node.Children) < 2 {
-		return nil, fmt.Errorf("invalid workflow form")
-	}
-	if nodeStr(node.Children[0]) != "workflow" {
-		return nil, fmt.Errorf("expected workflow, got %s", nodeStr(node.Children[0]))
-	}
-
-	wf := &Workflow{Name: nodeStr(node.Children[1])}
-	wf.WorkflowStateField = "status" // default
-
-	kw := make(map[string]string)
-	for i := 2; i < len(node.Children); i++ {
-		child := node.Children[i]
-		if child.IsList {
-			if len(child.Children) == 0 {
-				continue
-			}
-			subHead := nodeStr(child.Children[0])
-			switch subHead {
-			case "state":
-				s, err := parseWorkflowState(child)
-				if err != nil {
-					return nil, err
+		value := nodes[i+1]
+		if value.IsList {
+			items := make([]string, 0, len(value.Children))
+			for _, child := range value.Children {
+				if child != nil && !child.IsList && strings.TrimSpace(child.Atom) != "" {
+					items = append(items, child.Atom)
 				}
-				wf.States = append(wf.States, *s)
-			case "action":
-				t, err := parseWorkflowTransition(child)
-				if err != nil {
-					return nil, err
-				}
-				wf.Transitions = append(wf.Transitions, *t)
-			case "notification":
-				n, err := parseWorkflowNotification(child)
-				if err != nil {
-					return nil, err
-				}
-				wf.Notifications = append(wf.Notifications, *n)
 			}
-		} else if child.AtomType == sTokKeyword {
-			if i+1 < len(node.Children) {
-				kw[child.Atom] = nodeStr(node.Children[i+1])
-				i++
-			}
+			return items
 		}
-	}
-
-	if v, ok := kw["on"]; ok {
-		wf.DocumentType = v
-	}
-	if v, ok := kw["active"]; ok {
-		wf.IsActive = v == "true"
-	}
-	if v, ok := kw["state-field"]; ok {
-		wf.WorkflowStateField = v
-	}
-
-	return wf, nil
-}
-
-func parseWorkflowState(node *sNode) (*WorkflowState, error) {
-	if !node.IsList || len(node.Children) < 2 {
-		return nil, fmt.Errorf("invalid state form")
-	}
-	s := &WorkflowState{State: nodeStr(node.Children[1])}
-	kw := extractKeywords(node.Children[2:])
-	s.DocStatus = kwInt(kw, "doc-status")
-	s.AllowEdit = kw["allow-edit"]
-	s.Style = kw["style"]
-	return s, nil
-}
-
-func parseWorkflowTransition(node *sNode) (*WorkflowTransition, error) {
-	if !node.IsList || len(node.Children) < 2 {
-		return nil, fmt.Errorf("invalid action form")
-	}
-	t := &WorkflowTransition{Action: nodeStr(node.Children[1])}
-	kw := make(map[string]string)
-	for i := 2; i < len(node.Children); i++ {
-		child := node.Children[i]
-		if child.IsList {
-			if len(child.Children) == 0 {
-				continue
-			}
-			subHead := nodeStr(child.Children[0])
-			var wa *WorkflowAction
-			switch subHead {
-			case "on-transition":
-				wa = parseWorkflowActionInner(child)
-				if wa != nil {
-					t.OnTransition = append(t.OnTransition, *wa)
-				}
-			case "on-success":
-				wa = parseWorkflowActionInner(child)
-				if wa != nil {
-					t.OnSuccess = append(t.OnSuccess, *wa)
-				}
-			case "on-failure":
-				wa = parseWorkflowActionInner(child)
-				if wa != nil {
-					t.OnFailure = append(t.OnFailure, *wa)
-				}
-			}
-		} else if child.AtomType == sTokKeyword {
-			if i+1 < len(node.Children) {
-				kw[child.Atom] = nodeStr(node.Children[i+1])
-				i++
-			}
+		if value != nil && strings.TrimSpace(value.Atom) != "" {
+			return []string{value.Atom}
 		}
-	}
-	t.From = kw["from"]
-	t.To = kw["to"]
-	t.Allowed = kw["allowed"]
-	t.Condition = kw["condition"]
-	if v, ok := kw["require-fields"]; ok {
-		t.RequireFields = splitSpace(v)
-	}
-	return t, nil
-}
-
-func parseWorkflowActionInner(node *sNode) *WorkflowAction {
-	if len(node.Children) < 1 {
 		return nil
 	}
-	wa := &WorkflowAction{}
-	kw := extractKeywords(node.Children[1:])
-	wa.Type = kw["type"]
-	wa.Script = kw["script"]
-	wa.WebhookURL = kw["webhook-url"]
-	wa.Condition = kw["condition"]
-	wa.Async = kwBool(kw, "async")
-	return wa
-}
-
-func parseWorkflowNotification(node *sNode) (*WorkflowNotification, error) {
-	if len(node.Children) < 1 {
-		return nil, fmt.Errorf("invalid notification form")
-	}
-	n := &WorkflowNotification{}
-	kw := make(map[string]string)
-	for i := 1; i < len(node.Children); i++ {
-		child := node.Children[i]
-		if child.AtomType == sTokKeyword {
-			if child.Atom == "recipients" {
-				if i+1 < len(node.Children) && node.Children[i+1].IsList {
-					n.Recipients = parseRecipients(node.Children[i+1])
-					i++
-				}
-			} else if i+1 < len(node.Children) {
-				kw[child.Atom] = nodeStr(node.Children[i+1])
-				i++
-			}
-		}
-	}
-	n.Event = kw["event"]
-	n.ToState = kw["to-state"]
-	n.Subject = kw["subject"]
-	n.Message = kw["message"]
-	return n, nil
-}
-
-func parseRecipients(node *sNode) []map[string]string {
-	var result []map[string]string
-	for _, child := range node.Children {
-		if child.IsList && len(child.Children) >= 2 {
-			m := make(map[string]string)
-			// Inner list is (key value) pairs
-			for j := 0; j+1 < len(child.Children); j += 2 {
-				m[nodeStr(child.Children[j])] = nodeStr(child.Children[j+1])
-			}
-			if len(m) > 0 {
-				result = append(result, m)
-			}
-		}
-	}
-	return result
+	return nil
 }
 
 func parseAnalyticsMetrics(nodes []*sNode) ([]*AnalyticsMetricConfig, error) {
@@ -1847,7 +1499,6 @@ func parseScriptSnapshot(node *sNode) (*ScriptSnapshot, error) {
 	s.DocType = symbolOrString(kw, "doctype")
 	s.Event = kw["event"]
 	s.MethodPath = kw["method"]
-	s.WorkflowAction = kw["action"]
 	s.Schedule = kw["schedule"]
 	s.Priority = kwInt(kw, "priority")
 	s.IsActive = kwBool(kw, "active")
@@ -1978,11 +1629,13 @@ func parseView(node *sNode) (*View, error) {
 		}
 	}
 
-	applyViewKeywords(v, kw)
+	if err := applyViewKeywords(v, kw); err != nil {
+		return nil, err
+	}
 	return v, nil
 }
 
-func applyViewKeywords(v *View, kw map[string]string) {
+func applyViewKeywords(v *View, kw map[string]string) error {
 	if s, ok := kw["route"]; ok {
 		v.Route = s
 	}
@@ -2001,6 +1654,19 @@ func applyViewKeywords(v *View, kw map[string]string) {
 	if s, ok := kw["source-doctype"]; ok {
 		v.SourceDocType = s
 	}
+	if encoded, ok := kw["resources-json"]; ok && encoded != "" {
+		if err := json.Unmarshal([]byte(encoded), &v.Resources); err != nil {
+			return fmt.Errorf("parsing view resources: %w", err)
+		}
+	}
+	if encoded, ok := kw["page-manifest-json"]; ok && encoded != "" {
+		var manifest PageManifest
+		if err := json.Unmarshal([]byte(encoded), &manifest); err != nil {
+			return fmt.Errorf("parsing view page manifest: %w", err)
+		}
+		v.PageManifest = &manifest
+	}
+	return nil
 }
 
 func parseViewComponent(node *sNode) (*ViewComponent, error) {
@@ -2067,6 +1733,14 @@ func parseViewComponent(node *sNode) (*ViewComponent, error) {
 	}
 	if s, ok := kw["source-doctype"]; ok {
 		c.SourceDocType = s
+	}
+	if s, ok := kw["data"]; ok {
+		c.Data = s
+	}
+	if encoded, ok := kw["resource-bindings-json"]; ok && encoded != "" {
+		if err := json.Unmarshal([]byte(encoded), &c.ResourceBindings); err != nil {
+			return nil, fmt.Errorf("parsing component resource bindings: %w", err)
+		}
 	}
 	if s, ok := kw["span"]; ok {
 		if n, err := strconv.Atoi(s); err == nil {

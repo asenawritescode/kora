@@ -56,6 +56,13 @@ func RetryPendingSiteDeletions(ctx context.Context, platformDB *sql.DB, platform
 // tenant storage. Repeated calls are safe and never derive a database name
 // from a hostname.
 func DeleteRegisteredSite(ctx context.Context, platformDB *sql.DB, platformDBType, siteID, expectedHostname string, common *CommonConfig) error {
+	return DeleteRegisteredSiteWithAllocation(ctx, platformDB, platformDBType, siteID, expectedHostname, "", common)
+}
+
+// DeleteRegisteredSiteWithAllocation performs canonical tenant deletion only
+// when the current registry allocation still matches the checkpoint-verified
+// reference supplied by the management operation.
+func DeleteRegisteredSiteWithAllocation(ctx context.Context, platformDB *sql.DB, platformDBType, siteID, expectedHostname, expectedDataPlaneRef string, common *CommonConfig) error {
 	if platformDB == nil || strings.TrimSpace(siteID) == "" || strings.TrimSpace(expectedHostname) == "" {
 		return errors.New("platform registry, canonical site id, and expected hostname are required")
 	}
@@ -66,6 +73,9 @@ func DeleteRegisteredSite(ctx context.Context, platformDB *sql.DB, platformDBTyp
 			return nil // already deleted; this makes a Cloud retry idempotent
 		}
 		return fmt.Errorf("read canonical site before deletion: %w", err)
+	}
+	if expectedDataPlaneRef != "" && DataPlaneReference(info) != expectedDataPlaneRef {
+		return ErrSiteAllocationConflict
 	}
 	matchedHostname := strings.EqualFold(NormalizeSiteAlias(info.Name), NormalizeSiteAlias(expectedHostname))
 	for _, alias := range info.Domains {
@@ -78,7 +88,13 @@ func DeleteRegisteredSite(ctx context.Context, platformDB *sql.DB, platformDBTyp
 		return fmt.Errorf("site %s remains in the registry with deleted status; manual reconciliation is required", siteID)
 	}
 	if info.Status != "deleting" {
-		if _, err := registry.SetStatusAndGetDescriptor(siteID, "deleting"); err != nil {
+		var err error
+		if expectedDataPlaneRef != "" {
+			_, err = registry.SetDeletingAtAllocation(ctx, siteID, info.ConfigRevision, expectedDataPlaneRef)
+		} else {
+			_, err = registry.SetStatusAndGetDescriptor(siteID, "deleting")
+		}
+		if err != nil {
 			return fmt.Errorf("persist site deletion intent: %w", err)
 		}
 	}
@@ -94,10 +110,14 @@ func DeleteRegisteredSite(ctx context.Context, platformDB *sql.DB, platformDBTyp
 		return fmt.Errorf("site deletion is already running for %s; retry shortly", siteID)
 	}
 	defer release()
-	return retryOneSiteDeletion(registry, siteID, platformDB, platformDBType, common)
+	return retryOneSiteDeletionWithAllocation(registry, siteID, platformDB, platformDBType, expectedDataPlaneRef, common)
 }
 
 func retryOneSiteDeletion(registry *SQLSiteRegistry, siteID string, platformDB *sql.DB, platformDBType string, common *CommonConfig) error {
+	return retryOneSiteDeletionWithAllocation(registry, siteID, platformDB, platformDBType, "", common)
+}
+
+func retryOneSiteDeletionWithAllocation(registry *SQLSiteRegistry, siteID string, platformDB *sql.DB, platformDBType, expectedDataPlaneRef string, common *CommonConfig) error {
 	info, err := registry.GetByID(siteID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -107,6 +127,9 @@ func retryOneSiteDeletion(registry *SQLSiteRegistry, siteID string, platformDB *
 	}
 	if info.Status != "deleting" {
 		return nil
+	}
+	if expectedDataPlaneRef != "" && DataPlaneReference(info) != expectedDataPlaneRef {
+		return ErrSiteAllocationConflict
 	}
 	cfg := ReconstructSiteConfigFromDBInfo(info, common)
 	dbName := strings.TrimSpace(info.DBName)

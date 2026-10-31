@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -48,9 +49,13 @@ func (qe *QueryEngine) CachedResolve(metric *Metric, req QueryRequest, ttl time.
 }
 
 func (qe *QueryEngine) cacheKey(metric string, req QueryRequest) string {
-	// Simple concatenation — much faster than SHA-256 for a cache key.
-	// The key is only used for in-memory map lookups, not security-sensitive.
-	return qe.SiteName + "\x00" + metric + "\x00" + req.From + "\x00" + req.To + "\x00" + req.GroupBy
+	// Include every query input. Omitting filters or limits can return a cached
+	// result for a different authorized query in the same tenant.
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		return qe.SiteName + "\x00" + metric + "\x00invalid"
+	}
+	return qe.SiteName + "\x00" + metric + "\x00" + string(encoded)
 }
 
 // InvalidateCache clears all cached results for this engine.
@@ -63,11 +68,13 @@ func (qe *QueryEngine) InvalidateCache() {
 
 // QueryRequest holds parameters for a metric query.
 type QueryRequest struct {
-	Metric  string `json:"metric"`
-	From    string `json:"from,omitempty"`     // ISO date, inclusive
-	To      string `json:"to,omitempty"`       // ISO date, inclusive
-	GroupBy string `json:"group_by,omitempty"` // "day" | "week" | "month"
-	Limit   int    `json:"limit,omitempty"`
+	Metric    string           `json:"metric"`
+	From      string           `json:"from,omitempty"`     // ISO date, inclusive
+	To        string           `json:"to,omitempty"`       // ISO date, inclusive
+	GroupBy   string           `json:"group_by,omitempty"` // "day" | "week" | "month"
+	Dimension string           `json:"dimension,omitempty"`
+	Filters   []SemanticFilter `json:"filters,omitempty"`
+	Limit     int              `json:"limit,omitempty"`
 }
 
 // QueryResult holds the result of a metric query.
@@ -78,16 +85,72 @@ type QueryResult struct {
 	Total   int              `json:"total"`
 }
 
+func (req QueryRequest) Validate() error {
+	if req.Limit < 0 || req.Limit > MaxSemanticResultRows {
+		return fmt.Errorf("analytics result limit must be between 0 and %d", MaxSemanticResultRows)
+	}
+	if req.GroupBy != "" && !validGranularity(req.GroupBy) {
+		return fmt.Errorf("unsupported analytics grouping %q", req.GroupBy)
+	}
+	from, to := parseDateRange(req.From, req.To)
+	if (req.From != "" && from.Format("2006-01-02") != req.From) || (req.To != "" && to.Format("2006-01-02") != req.To) {
+		return fmt.Errorf("analytics dates must be valid ISO dates")
+	}
+	if from.After(to) {
+		return fmt.Errorf("analytics start date must not be after end date")
+	}
+	if int(to.Sub(from).Hours()/24)+1 > MaxSemanticDateRangeDays {
+		return fmt.Errorf("analytics date range exceeds %d days", MaxSemanticDateRangeDays)
+	}
+	if len(req.Filters) > MaxSemanticFilters || (len(req.Filters) > 0 && req.Dimension == "") {
+		return fmt.Errorf("analytics filters require one declared dimension and no more than %d filters", MaxSemanticFilters)
+	}
+	for _, filter := range req.Filters {
+		if filter.Field != req.Dimension || len(filter.Values) == 0 || len(filter.Values) > MaxSemanticFilterValues || !validSemanticFilterOperator(filter.Operator) {
+			return fmt.Errorf("analytics filter is invalid")
+		}
+		op := strings.ToLower(strings.TrimSpace(filter.Operator))
+		if (op == "=" || op == "==" || op == "!=" || op == "<>" || op == "like" || op == "not like") && len(filter.Values) != 1 {
+			return fmt.Errorf("analytics filter operator %q requires exactly one value", filter.Operator)
+		}
+		for _, value := range filter.Values {
+			if len(value) > MaxSemanticFilterBytes {
+				return fmt.Errorf("analytics filter value exceeds %d bytes", MaxSemanticFilterBytes)
+			}
+		}
+	}
+	return nil
+}
+
 // Resolve executes a pre-computed metric query against the rollup tables.
 // Metrics are stored as rows in _kora_analytics_daily (or _monthly for month+ ranges).
 // The query is a simple read of pre-aggregated values — no scanning of business tables.
 func (qe *QueryEngine) Resolve(metric *Metric, req QueryRequest) (*QueryResult, error) {
+	if metric == nil {
+		return nil, fmt.Errorf("analytics metric is required")
+	}
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	limit := req.Limit
+	if limit == 0 {
+		limit = MaxSemanticResultRows
+	}
 	from, to := parseDateRange(req.From, req.To)
 	table := "_kora_analytics_daily"
 	dateCol := "date"
 
-	// Use monthly table for ranges >= 60 days.
-	if to.Sub(from) >= 60*24*time.Hour {
+	// Monthly rollups preserve an exact requested range only when it starts on
+	// the first day and ends on the last day of a month. All other ranges use
+	// daily rollups so inclusive boundary dates remain exact.
+	hasTimeFilter := false
+	for _, filter := range req.Filters {
+		if filter.Field == metric.TimeField {
+			hasTimeFilter = true
+			break
+		}
+	}
+	if req.GroupBy != "day" && req.GroupBy != "week" && !hasTimeFilter && monthlyRangeAligned(from, to) && to.Sub(from) >= 60*24*time.Hour {
 		table = "_kora_analytics_monthly"
 		dateCol = "month"
 	}
@@ -98,14 +161,17 @@ func (qe *QueryEngine) Resolve(metric *Metric, req QueryRequest) (*QueryResult, 
 	switch metric.Type {
 	case MetricCount, MetricCountByField, MetricCountByLinkedField, MetricCountByTime,
 		MetricSum, MetricStateDistribution:
-		rows, err = qe.queryAggregate(table, dateCol, metric, from, to, req.GroupBy)
+		rows, err = qe.queryAggregate(table, dateCol, metric, from, to, req, limit)
 
 	case MetricAvg:
+		if req.GroupBy != "" || req.Dimension != "" || len(req.Filters) != 0 {
+			return nil, fmt.Errorf("average metrics support only an overall time-range query")
+		}
 		// Average requires two queries: sum / count.
 		return qe.queryAvg(table, dateCol, metric, from, to, req.GroupBy)
 
 	default:
-		rows, err = qe.queryAggregate(table, dateCol, metric, from, to, req.GroupBy)
+		rows, err = qe.queryAggregate(table, dateCol, metric, from, to, req, limit)
 	}
 
 	if err != nil {
@@ -144,6 +210,10 @@ func (qe *QueryEngine) Resolve(metric *Metric, req QueryRequest) (*QueryResult, 
 	result.Total = len(result.Rows)
 
 	return result, nil
+}
+
+func monthlyRangeAligned(from, to time.Time) bool {
+	return from.Day() == 1 && to.AddDate(0, 0, 1).Day() == 1
 }
 
 // ResolveInsights returns pre-computed numbers for a doctype — designed for AI consumption.
@@ -208,7 +278,7 @@ func (qe *QueryEngine) ResolveInsights(doctype string, metrics []*Metric) (map[s
 }
 
 // queryAggregate runs a simple aggregate query against a rollup table.
-func (qe *QueryEngine) queryAggregate(table, dateCol string, metric *Metric, from, to time.Time, groupBy string) (*sql.Rows, error) {
+func (qe *QueryEngine) queryAggregate(table, dateCol string, metric *Metric, from, to time.Time, req QueryRequest, limit int) (*sql.Rows, error) {
 	fromStr := from.Format("2006-01-02")
 	toStr := to.Format("2006-01-02")
 
@@ -216,22 +286,109 @@ func (qe *QueryEngine) queryAggregate(table, dateCol string, metric *Metric, fro
 	groupClause := "dimension"
 	orderClause := "value DESC"
 
-	if groupBy == "day" || groupBy == "week" || groupBy == "month" {
-		selectClause = fmt.Sprintf("%s AS bucket, SUM(value) AS value", dateCol)
-		groupClause = dateCol
+	if req.GroupBy != "" {
+		bucketExpr, err := analyticsPeriodExpression(qe.Dialect, dateCol, req.GroupBy)
+		if err != nil {
+			return nil, err
+		}
+		selectClause = fmt.Sprintf("%s AS bucket, SUM(value) AS value", bucketExpr)
+		groupClause = bucketExpr
 		orderClause = "bucket ASC"
 	}
 
+	where := []string{"site = ?", "doctype = ?", "metric = ?", dateCol + " >= ?", dateCol + " <= ?"}
+	args := []any{qe.SiteName, metric.DocType, metric.Name, fromStr, toStr}
+	if len(req.Filters) > 0 {
+		column := "dimension"
+		prefix := req.Dimension + "="
+		if req.Dimension == metric.TimeField {
+			column = dateCol
+			prefix = ""
+		}
+		for _, filter := range req.Filters {
+			clause, values := semanticFilterSQL(qe.Dialect, column, prefix, filter)
+			where = append(where, clause)
+			args = append(args, values...)
+		}
+	}
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s
-		 WHERE site = ? AND doctype = ? AND metric = ?
-		   AND %s >= ? AND %s <= ?
-		 GROUP BY %s
-		 ORDER BY %s`,
-		selectClause, table, dateCol, dateCol, groupClause, orderClause,
+		`SELECT %s FROM %s WHERE %s GROUP BY %s ORDER BY %s LIMIT ?`,
+		selectClause, table, strings.Join(where, " AND "), groupClause, orderClause,
 	)
+	args = append(args, limit)
+	return qe.DB.Query(kdb.Rebind(qe.Dialect, query), args...)
+}
 
-	return qe.DB.Query(kdb.Rebind(qe.Dialect, query), qe.SiteName, metric.DocType, metric.Name, fromStr, toStr)
+func analyticsPeriodExpression(dialect kdb.Dialect, dateCol, granularity string) (string, error) {
+	column := dialect.QuoteIdent(dateCol)
+	switch dialect.DriverName() {
+	case "mysql":
+		switch granularity {
+		case "day":
+			return "DATE_FORMAT(" + column + ", '%Y-%m-%d')", nil
+		case "week":
+			return "DATE_FORMAT(DATE_SUB(" + column + ", INTERVAL WEEKDAY(" + column + ") DAY), '%Y-%m-%d')", nil
+		case "month":
+			return "DATE_FORMAT(" + column + ", '%Y-%m-01')", nil
+		case "quarter":
+			return "CONCAT(YEAR(" + column + "), '-Q', QUARTER(" + column + "))", nil
+		case "year":
+			return "CAST(YEAR(" + column + ") AS CHAR)", nil
+		}
+	case "postgres":
+		switch granularity {
+		case "day":
+			return "TO_CHAR(" + column + ", 'YYYY-MM-DD')", nil
+		case "week":
+			return "TO_CHAR((" + column + "::date - (EXTRACT(ISODOW FROM " + column + ")::int - 1)), 'YYYY-MM-DD')", nil
+		case "month":
+			return "TO_CHAR(" + column + ", 'YYYY-MM') || '-01'", nil
+		case "quarter":
+			return "TO_CHAR(" + column + ", 'YYYY') || '-Q' || EXTRACT(QUARTER FROM " + column + ")::int::text", nil
+		case "year":
+			return "TO_CHAR(" + column + ", 'YYYY')", nil
+		}
+	case "libsql":
+		switch granularity {
+		case "day":
+			return "STRFTIME('%Y-%m-%d', " + column + ")", nil
+		case "week":
+			return "DATE(" + column + ", '-' || ((CAST(STRFTIME('%w', " + column + ") AS INTEGER) + 6) % 7) || ' days')", nil
+		case "month":
+			return "STRFTIME('%Y-%m', " + column + ") || '-01'", nil
+		case "quarter":
+			return "STRFTIME('%Y', " + column + ") || '-Q' || CAST(((CAST(STRFTIME('%m', " + column + ") AS INTEGER) - 1) / 3 + 1) AS TEXT)", nil
+		case "year":
+			return "STRFTIME('%Y', " + column + ")", nil
+		}
+	}
+	return "", fmt.Errorf("unsupported analytics time grouping %q for %s", granularity, dialect.DriverName())
+}
+
+func semanticFilterSQL(dialect kdb.Dialect, column, prefix string, filter SemanticFilter) (string, []any) {
+	q := dialect.QuoteIdent
+	column = q(column)
+	op := strings.ToLower(strings.TrimSpace(filter.Operator))
+	values := make([]any, len(filter.Values))
+	for i, value := range filter.Values {
+		values[i] = prefix + value
+	}
+	switch op {
+	case "=", "==", "!=", "<>":
+		if op == "==" {
+			op = "="
+		}
+		return column + " " + op + " ?", values[:1]
+	case "in", "not in":
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")
+		return column + " " + strings.ToUpper(op) + " (" + placeholders + ")", values
+	case "like", "not like":
+		escape := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
+		pattern := escape.Replace(prefix) + "%" + escape.Replace(filter.Values[0]) + "%"
+		return "LOWER(" + column + ") " + strings.ToUpper(op) + " LOWER(?) ESCAPE '!'", []any{pattern}
+	default:
+		return "1 = 0", nil
+	}
 }
 
 // queryAvg computes average by dividing sum by count for a time range.

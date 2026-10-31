@@ -1,0 +1,126 @@
+name: Sale Item
+resource_name: sale-item
+module: Workspace
+is_submittable: false
+is_child_table: true
+is_single: false
+track_changes: false
+append_only: false
+title_field: product
+search_fields: ""
+sort_field: modified
+sort_order: DESC
+description: ""
+fields:
+    - fieldname: product
+      fieldtype: Link
+      label: Product
+      options: Product
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: quantity
+      fieldtype: Int
+      label: Quantity
+      options: ""
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints:
+        - type: min
+          value: 1
+          values: []
+          pattern: ""
+          message: Quantity must be at least 1.
+          condition: ""
+          scope: ""
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: unit_price
+      fieldtype: Currency
+      label: Unit Price
+      options: ""
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: "Autofilled from the product selling price; you can adjust it for this sale."
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints:
+        - type: min
+          value: 0
+          values: []
+          pattern: ""
+          message: Unit price cannot be negative.
+          condition: ""
+          scope: ""
+      renamed_from: ""
+      linked_field: product.selling_price
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: line_amount
+      fieldtype: Currency
+      label: Line Amount
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: "Calculated from quantity and unit price."
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints:
+        - type: min
+          value: 0
+          values: []
+          pattern: ""
+          message: Line amount cannot be negative.
+          condition: ""
+          scope: ""
+      renamed_from: ""
+      linked_field: ""
+      computed: quantity * unit_price
+      dependency_scope: ""
+      accept: ""
+doc_constraints: []
+public_access: null
+quantity_effect: null

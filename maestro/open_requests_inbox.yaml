@@ -1,0 +1,5 @@
+appId: com.kora.mobile
+---
+- assertVisible: Internal Requests Uat Workspace
+- tapOn: Requests
+- waitForAnimationToEnd

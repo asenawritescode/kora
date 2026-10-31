@@ -2,7 +2,7 @@ name: Purchase Order
 module: Purchasing
 is_submittable: true
 track_changes: true
-title_field: name
+title_field: supplier
 search_fields: supplier, order_date
 sort_field: order_date
 sort_order: DESC
@@ -16,6 +16,7 @@ fields:
     label: Supplier
     options: Supplier
     reqd: true
+    search_index: true
     in_list_view: true
     in_standard_filter: true
 

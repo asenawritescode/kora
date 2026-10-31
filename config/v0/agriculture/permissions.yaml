@@ -1,3 +1,95 @@
+# All business records retain their history. Corrections happen through an
+# audited change or status action; this starter does not grant deletes.
+- doctype: Farm
+  role: Agriculture and Farm Operations Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm
+  role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm
+  role: Agriculture and Farm Operations Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Field
+  role: Agriculture and Farm Operations Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Field
+  role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Field
+  role: Agriculture and Farm Operations Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Season
+  role: Agriculture and Farm Operations Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Season
+  role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Season
+  role: Agriculture and Farm Operations Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Crop
+  role: Agriculture and Farm Operations Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Crop
+  role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Crop
+  role: Agriculture and Farm Operations Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm Input
+  role: Agriculture and Farm Operations Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm Input
+  role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm Input
+  role: Agriculture and Farm Operations Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
 - doctype: Crop Plan
   role: Agriculture and Farm Operations Operator
   can_read: true
@@ -9,7 +101,7 @@
   role: Agriculture and Farm Operations Reviewer
   can_read: true
   can_write: true
-  can_create: false
+  can_create: true
   can_delete: false
   can_submit: true
 - doctype: Crop Plan
@@ -17,7 +109,7 @@
   can_read: true
   can_write: true
   can_create: true
-  can_delete: true
+  can_delete: false
   can_submit: true
 - doctype: Farm Task
   role: Agriculture and Farm Operations Operator
@@ -25,8 +117,86 @@
   can_write: true
   can_create: true
   can_delete: false
+- doctype: Farm Task
+  role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm Task
+  role: Agriculture and Farm Operations Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Input Application
+  role: Agriculture and Farm Operations Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Input Application
+  role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Input Application
+  role: Agriculture and Farm Operations Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Equipment Use
+  role: Agriculture and Farm Operations Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Equipment Use
+  role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Equipment Use
+  role: Agriculture and Farm Operations Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Harvest Batch
+  role: Agriculture and Farm Operations Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
 - doctype: Harvest Batch
   role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Harvest Batch
+  role: Agriculture and Farm Operations Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Storage Lot
+  role: Agriculture and Farm Operations Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Storage Lot
+  role: Agriculture and Farm Operations Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Storage Lot
+  role: Agriculture and Farm Operations Administrator
   can_read: true
   can_write: true
   can_create: true

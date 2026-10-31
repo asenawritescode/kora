@@ -1,7 +1,11 @@
 package doctype
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 )
 
 // DDLDialect is the subset of the db.Dialect interface needed for DDL generation.
@@ -54,7 +58,7 @@ func ddlFuncMap(driverName string) map[string]func(Change, DDLDialect) []string 
 var mysqlDDLMap = map[string]func(Change, DDLDialect) []string{
 	"add-doctype":       mysqlCreateTable,
 	"add-field":         mysqlAddColumn,
-	"remove-field":      mysqlDropColumn,
+	"remove-field":      mysqlQuarantineColumn,
 	"rename-field":      mysqlRenameColumn,
 	"change-field-type": mysqlAlterColumnDDL,
 	"add-index":         mysqlCreateIndex,
@@ -65,7 +69,7 @@ var mysqlDDLMap = map[string]func(Change, DDLDialect) []string{
 var libsqlDDLMap = map[string]func(Change, DDLDialect) []string{
 	"add-doctype":       libsqlCreateTable,
 	"add-field":         libsqlAddColumn,
-	"remove-field":      libsqlDropColumn,
+	"remove-field":      libsqlQuarantineColumn,
 	"rename-field":      libsqlRenameColumn,
 	"change-field-type": libsqlAlterColumnDDL,
 	"add-index":         libsqlCreateIndex,
@@ -78,7 +82,7 @@ var libsqlDDLMap = map[string]func(Change, DDLDialect) []string{
 var postgresDDLMap = map[string]func(Change, DDLDialect) []string{
 	"add-doctype":       libsqlCreateTable,
 	"add-field":         libsqlAddColumn,
-	"remove-field":      libsqlDropColumn,
+	"remove-field":      libsqlQuarantineColumn,
 	"rename-field":      libsqlRenameColumn,
 	"change-field-type": libsqlAlterColumnDDL,
 	"add-index":         libsqlCreateIndex,
@@ -179,10 +183,10 @@ func mysqlAddColumn(c Change, d DDLDialect) []string {
 	return result
 }
 
-func mysqlDropColumn(c Change, d DDLDialect) []string {
+func mysqlQuarantineColumn(c Change, d DDLDialect) []string {
 	tableName := "tab" + c.Entity
-	ddl := d.DropColumn(tableName, c.Field)
-	return []string{ddl + " /* quarantine: data preserved for rollback */"}
+	quarantine := getStringAttr(c.Attrs, ":quarantine-name", QuarantineName(c.Field))
+	return []string{d.RenameColumn(tableName, c.Field, quarantine)}
 }
 
 func mysqlRenameColumn(c Change, d DDLDialect) []string {
@@ -245,10 +249,38 @@ func libsqlAddColumn(c Change, d DDLDialect) []string {
 	return result
 }
 
-func libsqlDropColumn(c Change, d DDLDialect) []string {
+func libsqlQuarantineColumn(c Change, d DDLDialect) []string {
 	tableName := "tab" + c.Entity
-	ddl := d.DropColumn(tableName, c.Field)
-	return []string{ddl}
+	quarantine := getStringAttr(c.Attrs, ":quarantine-name", QuarantineName(c.Field))
+	return []string{d.RenameColumn(tableName, c.Field, quarantine)}
+}
+
+// QuarantineNameForRevision returns a bounded, collision-resistant column name
+// for retaining removed field data. The same field in different config
+// revisions receives a different name so a later remove/re-add cycle cannot
+// collide with older quarantined data.
+func QuarantineNameForRevision(field, revision string) string {
+	sum := sha256.Sum256([]byte(revision + "/" + field))
+	suffix := hex.EncodeToString(sum[:4])
+	field = strings.Trim(field, "_ ")
+	for len(field) > 45 {
+		_, size := utf8.DecodeLastRuneInString(field)
+		field = field[:len(field)-size]
+	}
+	return "_dropquar_" + field + "_" + suffix
+}
+
+// QuarantineTableNameForRevision returns a MySQL-safe, revision-scoped table
+// name so interrupted rollback retries do not collide with earlier restores.
+func QuarantineTableNameForRevision(table, revision string) string {
+	sum := sha256.Sum256([]byte(revision + "/" + table))
+	suffix := hex.EncodeToString(sum[:4])
+	table = strings.TrimPrefix(strings.TrimSpace(table), "tab")
+	for len(table) > 42 {
+		_, size := utf8.DecodeLastRuneInString(table)
+		table = table[:len(table)-size]
+	}
+	return "_dropquar_tab" + table + "_" + suffix
 }
 
 func libsqlRenameColumn(c Change, d DDLDialect) []string {

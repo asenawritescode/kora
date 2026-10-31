@@ -1,0 +1,20 @@
+appId: com.kora.mobile
+---
+- launchApp
+- assertVisible: Connect your workspace
+- assertVisible: http://localhost:8000
+- assertVisible: internal-requests-uat.local
+- tapOn: Check server
+- waitForAnimationToEnd
+- assertVisible: Welcome back
+- tapOn:
+    id: input-email
+- inputText: ${MAESTRO_TICKETING_EMAIL}
+- assertVisible: admin@internal-requests-uat.local
+- tapOn:
+    id: input-password
+- inputText: ${MAESTRO_TICKETING_PASSWORD}
+- hideKeyboard
+- assertVisible: Sign in
+- tapOn: Sign in
+- waitForAnimationToEnd

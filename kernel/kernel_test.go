@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,8 +31,10 @@ import (
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/workflow"
 )
 
 func newSiteDB(t *testing.T) (*sql.DB, string) {
@@ -64,10 +67,35 @@ func newSiteDB(t *testing.T) (*sql.DB, string) {
 }
 
 type siteFixture struct {
-	DB       *sql.DB
-	Name     string
-	Registry *doctype.Registry
-	Dialect  kdb.Dialect
+	DB             *sql.DB
+	Name           string
+	Registry       *doctype.Registry
+	Dialect        kdb.Dialect
+	StatusPolicies *testStatusPolicyRepository
+}
+
+type testStatusPolicyRepository struct {
+	mu       sync.RWMutex
+	policies map[string]workflow.StatusPolicy
+}
+
+func (r *testStatusPolicyRepository) GetStatusPolicyInTx(_ context.Context, _ *sql.Tx, _ contract.TenantID, table string) (*workflow.StatusPolicy, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	statusPolicy, found := r.policies[table]
+	if !found {
+		return nil, false, nil
+	}
+	return &statusPolicy, true, nil
+}
+
+func (r *testStatusPolicyRepository) Set(statusPolicy workflow.StatusPolicy) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.policies == nil {
+		r.policies = make(map[string]workflow.StatusPolicy)
+	}
+	r.policies[statusPolicy.Table] = statusPolicy
 }
 
 func newSite(t *testing.T, name string) *siteFixture {
@@ -101,24 +129,29 @@ func newSite(t *testing.T, name string) *siteFixture {
 			{Fieldname: "serial", Fieldtype: "Data", Label: "Serial", Unique: true},
 			{Fieldname: "status", Fieldtype: "Select", Label: "Status", Options: "Open\nDone"},
 			{Fieldname: "priority", Fieldtype: "Data", Label: "Priority", Default: "Normal"},
+			{Fieldname: "related_task", Fieldtype: "Link", Label: "Related Task", Options: "Task"},
 		},
 	}
 	roles := []*doctype.Role{{Name: "Administrator"}, {Name: "Creator"}, {Name: "OwnerEditor"}}
+	roles = append(roles, &doctype.Role{Name: "Writer"})
 	perms := []*doctype.Permission{
 		{Doctype: "Task", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true, Submit: true},
 		{Doctype: "Task", Role: "Creator", Read: true, Create: true}, // create-only: no write
 		{Doctype: "Task", Role: "OwnerEditor", Read: true, Write: true, Create: true, IfOwner: true},
+		{Doctype: "Task", Role: "Writer", Read: true, Write: true, Create: true},
 	}
 	reg := doctype.NewRegistry()
 	reg.LoadFull([]*doctype.DocType{taskDT}, roles, perms)
 	if err := schema.MigrateSiteFromRegistry(sdb, dbName, reg, dialect); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return &siteFixture{DB: sdb, Name: name, Registry: reg, Dialect: dialect}
+	return &siteFixture{DB: sdb, Name: name, Registry: reg, Dialect: dialect, StatusPolicies: &testStatusPolicyRepository{}}
 }
 
 func newKernel(s *siteFixture) *kernel.Kernel {
-	return kernel.New(s.Dialect, outbox.NewSQLWriter(s.Dialect))
+	engine := kernel.New(s.Dialect, outbox.NewSQLWriter(s.Dialect))
+	engine.WorkflowStatusPolicies = s.StatusPolicies
+	return engine
 }
 
 type configuredCommandHookRunner struct {
@@ -439,13 +472,26 @@ func exec(t *testing.T, s *siteFixture, k *kernel.Kernel, op kernel.Operation) c
 		if user == "" {
 			user = "Administrator"
 		}
+		roles := op.Context.Roles
+		if len(roles) == 0 && user == "Administrator" {
+			roles = []string{"Administrator"}
+			op.Context.Roles = roles
+		}
 		op.Context.Actor = contract.ActorContext{
 			PrincipalID:     user,
 			PrincipalType:   contract.PrincipalHuman,
 			Site:            s.Name,
-			Roles:           op.Context.Roles,
+			Roles:           roles,
 			AuthenticatedAt: time.Now(),
 		}
+	}
+	if !op.Context.Execution.Valid() {
+		execution, err := policy.NewVerifiedExecution(contract.TenantID(s.Name), op.Context.Actor)
+		if err != nil {
+			t.Fatalf("create verified kernel-test execution: %v", err)
+		}
+		op.Context.TenantID = execution.Tenant()
+		op.Context.Execution = execution
 	}
 	res, cerr := k.Execute(context.Background(), s.DB, s.Registry, op)
 	t.Logf("op %s → status=%s err=%v replayed=%v", op.Command, res.Status, cerr, res.Replayed)
@@ -489,11 +535,18 @@ func TestRecordCreateHappyPath(t *testing.T) {
 	if s.taskCount(t) != 1 {
 		t.Fatalf("expected exactly 1 task")
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", s.Name, "idem-1"); n != 1 {
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.create'", s.Name); n != 1 {
 		t.Fatalf("expected 1 receipt, got %d", n)
 	}
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND status = 'completed'", s.Name, docName); n != 1 {
 		t.Fatalf("expected 1 audit row, got %d", n)
+	}
+	var initialChanges string
+	if err := s.DB.QueryRow("SELECT changes_json FROM _kora_record_history WHERE site = ? AND doctype = 'Task' AND doc_name = ?", s.Name, docName).Scan(&initialChanges); err != nil {
+		t.Fatalf("record create history not persisted: %v", err)
+	}
+	if !strings.Contains(initialChanges, `"field":"title"`) || !strings.Contains(initialChanges, `"after":"First"`) {
+		t.Fatalf("create history omitted initial visible values: %s", initialChanges)
 	}
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", s.Name, docName); n != 1 {
 		t.Fatalf("expected 1 pending outbox event, got %d", n)
@@ -536,6 +589,129 @@ func TestIdempotencyReplayAndKeyReuse(t *testing.T) {
 	}
 	if s.taskCount(t) != 1 {
 		t.Fatalf("key reuse must not mutate state")
+	}
+}
+
+func TestIdempotencyReplaySurvivesTenantRouteRename(t *testing.T) {
+	s := newSite(t, "tenant-route-before")
+	defer s.DB.Close()
+	k := newKernel(s)
+	data, _ := json.Marshal(map[string]any{"title": "created once across route rename"})
+	payload, _ := json.Marshal(kernel.RecordCreatePayload{Doctype: "Task", Data: data})
+	const stableTenant = "stable-tenant-route-rename"
+	const idempotencyKey = "route-rename-retry-key"
+	perform := func(route string) contract.CommandResult {
+		t.Helper()
+		actor := contract.ActorContext{
+			PrincipalID: "route-rename-user", PrincipalType: contract.PrincipalHuman,
+			Site: route, Roles: []string{"Administrator"}, AuthenticatedAt: time.Now().UTC(),
+		}
+		execution, err := policy.NewVerifiedExecution(contract.TenantID(stableTenant), actor)
+		if err != nil {
+			t.Fatal("create route-specific execution:", err)
+		}
+		result, commandErr := k.Execute(context.Background(), s.DB, s.Registry, kernel.Operation{
+			Command: kernel.CommandRecordCreate, Payload: payload,
+			Context: kernel.OperationContext{
+				Site: route, TenantID: contract.TenantID(stableTenant), Execution: execution,
+				User: actor.PrincipalID, Roles: actor.Roles, IdempotencyKey: idempotencyKey,
+			},
+		})
+		if commandErr != nil {
+			t.Fatalf("execute create for route %q: %v", route, commandErr)
+		}
+		return result
+	}
+	first := perform("tenant-route-before")
+	second := perform("tenant-route-after")
+	if first.Status != contract.StatusCompleted || !second.Replayed || second.OperationID != first.OperationID || string(second.Data) != string(first.Data) {
+		t.Fatalf("route rename changed receipt: first=%+v second=%+v", first, second)
+	}
+	if got := s.taskCount(t); got != 1 {
+		t.Fatalf("route rename retry created %d records, want one", got)
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.create'", stableTenant); got != 1 {
+		t.Fatalf("stable-tenant receipt rows = %d, want one", got)
+	}
+}
+
+func TestIdempotencyReplayRequiresCurrentAuthorization(t *testing.T) {
+	s := newSite(t, "permission-revoked-replay")
+	defer s.DB.Close()
+	k := newKernel(s)
+	op := createOp(map[string]any{"title": "authorized once"}, withKey("revoked-permission-key"))
+	op.Context = opCtx(s.Name, "Creator")
+	first := exec(t, s, k, op)
+	mustComplete(t, first)
+	if s.taskCount(t) != 1 {
+		t.Fatalf("initial command task count = %d, want 1", s.taskCount(t))
+	}
+
+	// Simulate the active tenant policy after Create permission has been revoked.
+	s.Registry.Permissions.LoadPermissionsFromDB(
+		[]*doctype.Role{{Name: "Administrator"}, {Name: "Creator"}},
+		[]*doctype.Permission{{Doctype: "Task", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true, Submit: true}},
+	)
+	retry := exec(t, s, k, op)
+	if retry.Error == nil || retry.Error.Type != contract.CodePermissionDenied || retry.Replayed {
+		t.Fatalf("revoked actor replay result=%#v error=%#v; want permission denied without replay", retry, retry.Error)
+	}
+	if s.taskCount(t) != 1 {
+		t.Fatalf("revoked retry changed task count to %d", s.taskCount(t))
+	}
+}
+
+func TestIdempotencyScopeIncludesPrincipalAndCommand(t *testing.T) {
+	s := newSite(t, "idempotency-scope")
+	defer s.DB.Close()
+	k := newKernel(s)
+	key := "shared-client-key"
+
+	// The same user-visible key and byte-identical payload represent distinct
+	// operations for distinct verified principals.
+	alice := kernel.Operation{Command: kernel.CommandRecordCreate, Payload: json.RawMessage(`{"doctype":"Task","data":{"title":"Alice"}}`), Context: opCtx(s.Name, "Administrator")}
+	alice.Context.IdempotencyKey = key
+	alice.Context.Actor.PrincipalID = "alice"
+	alice.Context.User = "alice"
+	alice.Context.Execution, _ = policy.NewVerifiedExecution(contract.TenantID(s.Name), alice.Context.Actor)
+	mustComplete(t, exec(t, s, k, alice))
+	aliceRetry := alice
+	aliceRetry.Payload = json.RawMessage("{ \"data\": { \"title\": \"Alice\" }, \"doctype\": \"Task\" }\n")
+	canonicalReplay := exec(t, s, k, aliceRetry)
+	mustComplete(t, canonicalReplay)
+	if !canonicalReplay.Replayed || s.taskCount(t) != 1 {
+		t.Fatalf("equivalent JSON formatting should replay Alice's receipt: replay=%v records=%d", canonicalReplay.Replayed, s.taskCount(t))
+	}
+
+	bob := alice
+	bob.Context = opCtx(s.Name, "Administrator")
+	bob.Context.Actor.PrincipalID = "bob"
+	bob.Context.User = "bob"
+	bob.Context.Execution, _ = policy.NewVerifiedExecution(contract.TenantID(s.Name), bob.Context.Actor)
+	bobResult := exec(t, s, k, bob)
+	mustComplete(t, bobResult)
+	if bobResult.Replayed || s.taskCount(t) != 2 {
+		t.Fatalf("another principal's receipt was reused: replay=%v records=%d", bobResult.Replayed, s.taskCount(t))
+	}
+
+	// Reuse the same key, actor, and raw payload for a different command. The
+	// payload intentionally contains both command shapes; command identity is
+	// part of the receipt scope.
+	raw := json.RawMessage(`{"doctype":"Task","data":{"title":"create-shape"},"records":[{"key":"bundle","doctype":"Task","data":{"title":"bundle-shape"}}]}`)
+	create := kernel.Operation{Command: kernel.CommandRecordCreate, Payload: raw, Context: opCtx(s.Name, "Administrator")}
+	create.Context.IdempotencyKey = "cross-command-key"
+	mustComplete(t, exec(t, s, k, create))
+	bundle := kernel.Operation{Command: kernel.CommandRecordMutateBundle, Payload: raw, Context: opCtx(s.Name, "Administrator")}
+	bundle.Context.IdempotencyKey = "cross-command-key"
+	bundleResult := exec(t, s, k, bundle)
+	mustComplete(t, bundleResult)
+	if bundleResult.Replayed || s.taskCount(t) != 4 {
+		t.Fatalf("another command's receipt was reused: replay=%v records=%d", bundleResult.Replayed, s.taskCount(t))
+	}
+	retry := exec(t, s, k, bundle)
+	mustComplete(t, retry)
+	if !retry.Replayed || s.taskCount(t) != 4 {
+		t.Fatalf("same scoped command retry should replay once: replay=%v records=%d", retry.Replayed, s.taskCount(t))
 	}
 }
 
@@ -584,7 +760,7 @@ func TestConcurrentSameKeyCreateCommitsExactlyOnce(t *testing.T) {
 	if got := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site=? AND aggregate_type='Task'", s.Name); got != 1 {
 		t.Fatalf("outbox events = %d, want exactly one", got)
 	}
-	if got := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site=? AND idempotency_key=?", s.Name, "concurrent-create-key"); got != 1 {
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site=? AND command_name='record.create'", s.Name); got != 1 {
 		t.Fatalf("idempotency receipts = %d, want exactly one", got)
 	}
 }
@@ -650,7 +826,7 @@ func TestConcurrentSameKeyMutationBundleCommitsExactlyOnce(t *testing.T) {
 	if got := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site=?", s.Name); got != 2 {
 		t.Fatalf("bundle outbox events=%d, want exactly two", got)
 	}
-	if got := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site=? AND idempotency_key=?", s.Name, "concurrent-bundle-retry"); got != 1 {
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site=? AND command_name='record.mutate_bundle'", s.Name); got != 1 {
 		t.Fatalf("bundle receipts=%d, want exactly one", got)
 	}
 }
@@ -678,7 +854,7 @@ func TestRecordDeleteUsesCanonicalPipeline(t *testing.T) {
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND command_name = 'record.delete' AND doc_name = ? AND status = 'completed'", s.Name, createdData.Name); n != 1 {
 		t.Fatalf("expected one completed delete audit, got %d", n)
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", s.Name, "delete-once"); n != 1 {
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.delete'", s.Name); n != 1 {
 		t.Fatalf("expected one delete receipt, got %d", n)
 	}
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", s.Name, createdData.Name); n != 2 {
@@ -749,7 +925,7 @@ func TestRecordMutationBundleCommitsRelatedCreateAndUpdateOnce(t *testing.T) {
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 4 {
 		t.Fatalf("bundle + seed outbox rows=%d, want 4", n)
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", s.Name, "bundle-create-update"); n != 1 {
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'", s.Name); n != 1 {
 		t.Fatalf("bundle receipt rows=%d, want 1", n)
 	}
 
@@ -843,7 +1019,7 @@ func TestRecordMutationBundleRollsBackEarlierWritesOnSQLFailure(t *testing.T) {
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 2 {
 		t.Fatalf("failed bundle changed outbox count to %d, want only two seed events", n)
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = 'bundle-rollback'", s.Name); n != 0 {
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'", s.Name); n != 0 {
 		t.Fatalf("failed bundle committed an idempotency receipt")
 	}
 }
@@ -869,7 +1045,7 @@ func TestRecordMutationBundleRejectsMalformedReferencesAndDuplicateKeys(t *testi
 		t.Fatalf("duplicate key result = %+v", result.Error)
 	}
 	tooMany := kernel.RecordMutationBundlePayload{Doctype: "Task"}
-	for index := 0; index < 11; index++ {
+	for index := 0; index <= kernel.MaxMutationBundleRecords; index++ {
 		tooMany.Records = append(tooMany.Records, kernel.RecordMutationBundleItem{Key: fmt.Sprintf("record-%02d", index), Doctype: "Task", Data: data})
 	}
 	if result := exec(t, s, k, bundleOp(tooMany, withRoles("Administrator"))); result.Error == nil || result.Error.Type != contract.CodeValidationFailed {
@@ -926,16 +1102,76 @@ func TestRecordMutationBundleRejectsStaleRootVersion(t *testing.T) {
 	}
 }
 
+func TestConcurrentMutationBundleRejectsStaleRelatedRevision(t *testing.T) {
+	s := newSite(t, "site-bundle-racing-related-update")
+	defer s.DB.Close()
+	k := newKernel(s)
+	created := exec(t, s, k, createOp(map[string]any{"title": "Inventory balance"}))
+	mustComplete(t, created)
+	var record kernel.ResultData
+	if err := json.Unmarshal(created.Data, &record); err != nil {
+		t.Fatal("decode create result:", err)
+	}
+	var expectedRevision uint64
+	if err := s.DB.QueryRow("SELECT revision FROM `tabTask` WHERE name = ?", record.Name).Scan(&expectedRevision); err != nil {
+		t.Fatal("load related record revision:", err)
+	}
+
+	start := make(chan struct{})
+	type execution struct {
+		result contract.CommandResult
+		err    *contract.Error
+	}
+	results := make(chan execution, 2)
+	for index, title := range []string{"first bundle update", "second bundle update"} {
+		payload := kernel.RecordMutationBundlePayload{Doctype: "Task", Records: []kernel.RecordMutationBundleItem{{
+			Key: "balance", Operation: "update", Doctype: "Task", Name: record.Name,
+			ExpectedRevision: expectedRevision, Data: json.RawMessage(fmt.Sprintf(`{"title":%q}`, title)),
+		}}}
+		op := bundleOp(payload, withRoles("Administrator"), withKey(fmt.Sprintf("bundle-related-update-%d", index)))
+		op.Context = opCtx(s.Name, "Administrator")
+		op.Context.IdempotencyKey = fmt.Sprintf("bundle-related-update-%d", index)
+		go func() {
+			<-start
+			result, err := k.Execute(context.Background(), s.DB, s.Registry, op)
+			results <- execution{result: result, err: err}
+		}()
+	}
+	close(start)
+	successes, conflicts := 0, 0
+	for range 2 {
+		outcome := <-results
+		if outcome.err != nil {
+			if outcome.err.Type == contract.CodeConflict {
+				conflicts++
+				continue
+			}
+			t.Fatalf("concurrent related-record update failed unexpectedly: %v", outcome.err)
+		}
+		switch {
+		case outcome.result.Error == nil && outcome.result.Status == contract.StatusCompleted:
+			successes++
+		case outcome.result.Error != nil && outcome.result.Error.Type == contract.CodeConflict:
+			conflicts++
+		default:
+			t.Fatalf("unexpected concurrent related update: status=%s error=%+v", outcome.result.Status, outcome.result.Error)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent bundle revision results: successes=%d conflicts=%d; want 1 each", successes, conflicts)
+	}
+	if got := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site=? AND command_name='record.mutate_bundle' AND status='completed'", s.Name); got != 1 {
+		t.Fatalf("completed bundle audits = %d, want exactly one", got)
+	}
+}
+
 func TestRecordWorkflowTransitionUsesCanonicalPipeline(t *testing.T) {
 	s := newSite(t, "site-workflow")
 	defer s.DB.Close()
-	s.Registry.Workflows.Register(&doctype.Workflow{
-		Name: "Task Lifecycle", DocumentType: "Task", IsActive: true, WorkflowStateField: "status",
-		States: []doctype.WorkflowState{
-			{State: "Open", DocStatus: 0},
-			{State: "Done", DocStatus: 1},
-		},
-		Transitions: []doctype.WorkflowTransition{{Action: "Complete", From: "Open", To: "Done", Allowed: "Administrator", RequireFields: []string{"title"}}},
+	s.StatusPolicies.Set(workflow.StatusPolicy{
+		Table: "Task", StateField: "status",
+		InitialState: "Open",
+		Transitions:  []workflow.StatusTransition{{Action: "Complete", From: "Open", To: "Done", DocStatus: 1, AllowedRoles: []string{"Administrator"}, RequireFields: []string{"title"}}},
 	})
 	k := newKernel(s)
 	created := exec(t, s, k, createOp(map[string]any{"title": "Finish this", "status": "Open"}))
@@ -948,11 +1184,13 @@ func TestRecordWorkflowTransitionUsesCanonicalPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	op := kernel.Operation{Command: kernel.CommandRecordWorkflowTransition, Payload: payload}
+	op := kernel.Operation{Command: kernel.CommandWorkflowStatusTransition, Payload: payload}
 	op.Context.Site = s.Name
 	op.Context.User = "Administrator"
 	op.Context.Roles = []string{"Administrator"}
 	op.Context.Actor = contract.ActorContext{PrincipalID: "Administrator", PrincipalType: contract.PrincipalHuman, Site: s.Name, Roles: op.Context.Roles, AuthenticatedAt: time.Now()}
+	op.Context.Execution, _ = policy.NewVerifiedExecution(contract.TenantID(s.Name), op.Context.Actor)
+	op.Context.TenantID = contract.TenantID(s.Name)
 	result, cerr := k.Execute(context.Background(), s.DB, s.Registry, op)
 	if cerr != nil || result.Status != contract.StatusCompleted {
 		t.Fatalf("workflow command = status %q error %+v", result.Status, cerr)
@@ -965,11 +1203,187 @@ func TestRecordWorkflowTransitionUsesCanonicalPipeline(t *testing.T) {
 	if state != "Done" || docStatus != 1 {
 		t.Fatalf("transitioned task = state %q doc_status %d, want Done/1", state, docStatus)
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ?", s.Name, docName, kernel.CommandRecordWorkflowTransition); n != 1 {
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ?", s.Name, docName, kernel.CommandWorkflowStatusTransition); n != 1 {
 		t.Fatalf("workflow audit rows = %d, want 1", n)
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", s.Name, docName); n != 2 {
-		t.Fatalf("create + transition outbox rows = %d, want 2", n)
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", s.Name, docName); n != 4 {
+		t.Fatalf("create + transition outbox rows = %d, want two business events and two record trigger events", n)
+	}
+}
+
+func TestGenericRecordWritesCannotBypassActiveWorkflow(t *testing.T) {
+	s := newSite(t, "site-workflow-protected-state")
+	defer s.DB.Close()
+	s.StatusPolicies.Set(workflow.StatusPolicy{
+		Table: "Task", StateField: "status",
+		InitialState: "Open",
+		Transitions:  []workflow.StatusTransition{{Action: "Complete", From: "Open", To: "Done", DocStatus: 1, AllowedRoles: []string{"Administrator"}}},
+	})
+	k := newKernel(s)
+	createdTerminal := createOp(map[string]any{"title": "Must not start completed", "status": "Done"}, withRoles("Administrator"), withKey("protected-workflow-create"))
+	createdTerminal.Context = opCtx(s.Name, "Administrator")
+	createdTerminal.Context.IdempotencyKey = "protected-workflow-create"
+	_, createErr := k.Execute(context.Background(), s.DB, s.Registry, createdTerminal)
+	if createErr == nil || createErr.Type != contract.CodeValidationFailed {
+		t.Fatalf("generic record.create terminal state error = %#v, want validation failure", createErr)
+	}
+	bundleCreate := bundleOp(kernel.RecordMutationBundlePayload{Doctype: "Task", Records: []kernel.RecordMutationBundleItem{{
+		Key: "task", Doctype: "Task", Data: json.RawMessage(`{"title":"Must not start completed","status":"Done"}`),
+	}}}, withRoles("Administrator"), withKey("protected-workflow-bundle-create"))
+	bundleCreate.Context = opCtx(s.Name, "Administrator")
+	bundleCreate.Context.IdempotencyKey = "protected-workflow-bundle-create"
+	_, bundleCreateErr := k.Execute(context.Background(), s.DB, s.Registry, bundleCreate)
+	if bundleCreateErr == nil || bundleCreateErr.Type != contract.CodeValidationFailed {
+		t.Fatalf("bundle create terminal state error = %#v, want validation failure", bundleCreateErr)
+	}
+	created := exec(t, s, k, createOp(map[string]any{"title": "Protected state", "status": "Open"}))
+	mustComplete(t, created)
+	var name string
+	if err := s.DB.QueryRow("SELECT name FROM `tabTask` WHERE title = ?", "Protected state").Scan(&name); err != nil {
+		t.Fatal("load seeded task:", err)
+	}
+
+	updatePayload, _ := json.Marshal(kernel.RecordUpdatePayload{Doctype: "Task", Name: name, Data: json.RawMessage(`{"status":"Done"}`)})
+	_, updateErr := k.Execute(context.Background(), s.DB, s.Registry, kernel.Operation{
+		Command: kernel.CommandRecordUpdate, Payload: updatePayload, Context: opCtx(s.Name, "Administrator"),
+	})
+	if updateErr == nil || updateErr.Type != contract.CodeValidationFailed {
+		t.Fatalf("generic record.update error = %#v, want validation failure", updateErr)
+	}
+
+	bundlePayload := kernel.RecordMutationBundlePayload{Doctype: "Task", Records: []kernel.RecordMutationBundleItem{{
+		Key: "task", Operation: "update", Doctype: "Task", Name: name, Data: json.RawMessage(`{"status":"Done"}`),
+	}}}
+	bundleOperation := bundleOp(bundlePayload)
+	bundleOperation.Context = opCtx(s.Name, "Administrator")
+	bundleOperation.Context.IdempotencyKey = "protected-workflow-state"
+	_, bundleErr := k.Execute(context.Background(), s.DB, s.Registry, bundleOperation)
+	if bundleErr == nil || bundleErr.Type != contract.CodeValidationFailed {
+		t.Fatalf("bundle state update error = %#v, want validation failure", bundleErr)
+	}
+	var state string
+	if err := s.DB.QueryRow("SELECT status FROM `tabTask` WHERE name = ?", name).Scan(&state); err != nil {
+		t.Fatal("read task state:", err)
+	}
+	if state != "Open" {
+		t.Fatalf("generic writes changed workflow state to %q; want Open", state)
+	}
+}
+
+func TestMutationBundleRunsAuthorizedWorkflowTransitionAtomically(t *testing.T) {
+	s := newSite(t, "site-bundle-workflow")
+	defer s.DB.Close()
+	s.StatusPolicies.Set(workflow.StatusPolicy{
+		Table: "Task", StateField: "status",
+		InitialState: "Open",
+		Transitions:  []workflow.StatusTransition{{Action: "Complete", From: "Open", To: "Done", DocStatus: 1, AllowedRoles: []string{"Administrator"}, RequireFields: []string{"title"}}},
+	})
+	k := newKernel(s)
+	created := exec(t, s, k, createOp(map[string]any{"title": "Complete with a related record", "status": "Open"}))
+	mustComplete(t, created)
+	var original kernel.ResultData
+	if err := json.Unmarshal(created.Data, &original); err != nil {
+		t.Fatal("decode created record:", err)
+	}
+	childData, _ := json.Marshal(map[string]any{"title": "$records.root.name"})
+	bundle := kernel.RecordMutationBundlePayload{Doctype: "Task", Records: []kernel.RecordMutationBundleItem{
+		{Key: "root", Operation: "update", Doctype: "Task", Name: original.Name, TransitionAction: "Complete", Data: json.RawMessage(`{"title":"Completed","related_task":"$records.related.name"}`)},
+		{Key: "related", Doctype: "Task", Data: childData},
+	}}
+	op := bundleOp(bundle, withRoles("Administrator"), withKey("bundle-workflow-complete"))
+	result := exec(t, s, k, op)
+	mustComplete(t, result)
+	var data kernel.ResultData
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		t.Fatal("decode bundle result:", err)
+	}
+	var state, title, linkedRecord string
+	if err := s.DB.QueryRow("SELECT status, title, related_task FROM `tabTask` WHERE name = ?", original.Name).Scan(&state, &title, &linkedRecord); err != nil {
+		t.Fatal("read transitioned record:", err)
+	}
+	if state != "Done" || title != "Completed" || len(data.Related) != 1 || linkedRecord != data.Related[0].Name {
+		t.Fatalf("transition bundle state=%q title=%q linked=%q related=%+v", state, title, linkedRecord, data.Related)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM `tabTask`"); n != 2 {
+		t.Fatalf("bundle rows=%d, want two atomic records", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 6 {
+		t.Fatalf("bundle outbox rows=%d, want four record-trigger events and two business events", n)
+	}
+}
+
+func TestMutationBundleRequiresSubmitPermissionForTransitionAction(t *testing.T) {
+	s := newSite(t, "site-bundle-workflow-submit-denied")
+	defer s.DB.Close()
+	s.StatusPolicies.Set(workflow.StatusPolicy{
+		Table: "Task", StateField: "status",
+		InitialState: "Open",
+		Transitions:  []workflow.StatusTransition{{Action: "Complete", From: "Open", To: "Done", DocStatus: 1, AllowedRoles: []string{"Writer"}}},
+	})
+	k := newKernel(s)
+	created := exec(t, s, k, createOp(map[string]any{"title": "Protected", "status": "Open"}))
+	mustComplete(t, created)
+	var original kernel.ResultData
+	if err := json.Unmarshal(created.Data, &original); err != nil {
+		t.Fatal("decode created record:", err)
+	}
+	bundle := kernel.RecordMutationBundlePayload{Doctype: "Task", Records: []kernel.RecordMutationBundleItem{
+		{Key: "root", Operation: "update", Doctype: "Task", Name: original.Name, TransitionAction: "Complete", Data: json.RawMessage(`{"title":"must not save"}`)},
+		{Key: "related", Doctype: "Task", Data: json.RawMessage(`{"title":"must not create"}`)},
+	}}
+	op := bundleOp(bundle, withRoles("Writer"), withKey("bundle-workflow-denied"))
+	result := exec(t, s, k, op)
+	if result.Error == nil || result.Error.Type != contract.CodePermissionDenied {
+		t.Fatalf("workflow bundle error = %+v, want permission denied", result.Error)
+	}
+	var state, title string
+	if err := s.DB.QueryRow("SELECT status, title FROM `tabTask` WHERE name = ?", original.Name).Scan(&state, &title); err != nil {
+		t.Fatal("read unchanged record:", err)
+	}
+	if state != "Open" || title != "Protected" || s.taskCount(t) != 1 {
+		t.Fatalf("unauthorized bundle left effects: state=%q title=%q count=%d", state, title, s.taskCount(t))
+	}
+}
+
+func TestMutationBundleRollsBackTransitionWhenRelatedWriteFails(t *testing.T) {
+	s := newSite(t, "site-bundle-workflow-rollback")
+	defer s.DB.Close()
+	s.StatusPolicies.Set(workflow.StatusPolicy{
+		Table: "Task", StateField: "status",
+		InitialState: "Open",
+		Transitions:  []workflow.StatusTransition{{Action: "Complete", From: "Open", To: "Done", DocStatus: 1, AllowedRoles: []string{"Administrator"}}},
+	})
+	k := newKernel(s)
+	created := exec(t, s, k, createOp(map[string]any{"title": "Original", "status": "Open"}))
+	mustComplete(t, created)
+	if duplicate := exec(t, s, k, createOp(map[string]any{"title": "Unique seed", "serial": "DUPLICATE"})); duplicate.Error != nil {
+		t.Fatalf("seed duplicate value: %+v", duplicate.Error)
+	}
+	var original kernel.ResultData
+	if err := json.Unmarshal(created.Data, &original); err != nil {
+		t.Fatal("decode created record:", err)
+	}
+	bundle := kernel.RecordMutationBundlePayload{Doctype: "Task", Records: []kernel.RecordMutationBundleItem{
+		{Key: "root", Operation: "update", Doctype: "Task", Name: original.Name, TransitionAction: "Complete", Data: json.RawMessage(`{"title":"must roll back"}`)},
+		{Key: "related", Doctype: "Task", Data: json.RawMessage(`{"title":"must fail","serial":"DUPLICATE"}`)},
+	}}
+	op := bundleOp(bundle, withRoles("Administrator"), withKey("bundle-workflow-rollback"))
+	result := exec(t, s, k, op)
+	if result.Error == nil || result.Error.Type != contract.CodeConflict {
+		t.Fatalf("conflicting bundle error = %+v, want conflict", result.Error)
+	}
+	var state, title string
+	if err := s.DB.QueryRow("SELECT status, title FROM `tabTask` WHERE name = ?", original.Name).Scan(&state, &title); err != nil {
+		t.Fatal("read rolled-back record:", err)
+	}
+	if state != "Open" || title != "Original" || s.taskCount(t) != 2 {
+		t.Fatalf("failed bundle left business effects: state=%q title=%q count=%d", state, title, s.taskCount(t))
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 4 {
+		t.Fatalf("failed bundle changed outbox count to %d, want only four committed seed events", n)
+	}
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'", s.Name); n != 0 {
+		t.Fatalf("failed bundle committed %d operation receipts", n)
 	}
 }
 
@@ -996,6 +1410,11 @@ func TestPublicFormSubmitUsesConfiguredAllowlistThroughKernel(t *testing.T) {
 	op.Context.User = "public"
 	op.Context.Source = kernel.SourceHTTP
 	op.Context.Actor = contract.ActorContext{PrincipalID: "public-form", PrincipalType: contract.PrincipalPublic, Site: s.Name, AuthenticatedAt: time.Now()}
+	op.Context.Execution, err = policy.NewVerifiedExecution(contract.TenantID(s.Name), op.Context.Actor)
+	if err != nil {
+		t.Fatalf("create verified public-form execution: %v", err)
+	}
+	op.Context.TenantID = op.Context.Execution.Tenant()
 	result, cerr := k.Execute(context.Background(), s.DB, s.Registry, op)
 	if cerr != nil || result.Status != contract.StatusCompleted {
 		t.Fatalf("public submit = status %q error %+v", result.Status, cerr)
@@ -1061,7 +1480,7 @@ func TestAuthorizationParityAcrossSources(t *testing.T) {
 	s := newSite(t, "site-a")
 	defer s.DB.Close()
 
-	sources := []kernel.Source{kernel.SourceHTTP, kernel.SourceSDK, kernel.SourceMCP, kernel.SourceAI, kernel.SourceCLI}
+	sources := []kernel.Source{kernel.SourceHTTP, kernel.SourceSDK, kernel.SourceMCP, kernel.SourceAI, kernel.SourceCLI, kernel.SourceUI, kernel.SourceWorker, kernel.SourceIntegration}
 	for _, src := range sources {
 		k := newKernel(s)
 
@@ -1077,9 +1496,32 @@ func TestAuthorizationParityAcrossSources(t *testing.T) {
 		if denied.Error == nil || denied.Error.Type != contract.CodePermissionDenied {
 			t.Fatalf("%s: unknown role must be denied, got %+v", src, denied.Error)
 		}
+
+		// Exact delegated grants must follow the same operation policy for every
+		// adapter source and must not turn a create grant into write permission.
+		serviceExecution, err := policy.NewVerifiedExecutionWithGrants(contract.TenantID(s.Name), contract.ActorContext{
+			PrincipalID: "extension:" + string(src), PrincipalType: contract.PrincipalService, Site: s.Name,
+		}, []policy.Grant{{Resource: "Task", Operation: "create"}})
+		if err != nil {
+			t.Fatalf("%s: create verified service execution: %v", src, err)
+		}
+		create := createOp(map[string]any{"title": "grant by " + string(src)}, withSource(src))
+		create.Context.Execution = serviceExecution
+		created := exec(t, s, k, create)
+		mustComplete(t, created)
+		var createdRecord kernel.ResultData
+		if err := json.Unmarshal(created.Data, &createdRecord); err != nil {
+			t.Fatalf("%s: decode delegated create: %v", src, err)
+		}
+		update := updateOp(createdRecord.Name, map[string]any{"title": "must remain unchanged"}, withSource(src))
+		update.Context.Execution = serviceExecution
+		deniedWrite := exec(t, s, k, update)
+		if deniedWrite.Error == nil || deniedWrite.Error.Type != contract.CodePermissionDenied {
+			t.Fatalf("%s: exact create grant authorized write: %+v", src, deniedWrite.Error)
+		}
 	}
-	if s.taskCount(t) != len(sources) {
-		t.Fatalf("parity drift: expected one doc per allowed source execution")
+	if s.taskCount(t) != len(sources)*2 {
+		t.Fatalf("parity drift: expected role and exact-grant creates for each source, got %d documents", s.taskCount(t))
 	}
 }
 
@@ -1189,6 +1631,15 @@ func TestConcurrentExpectedVersionAllowsOnlyOneUpdate(t *testing.T) {
 	if finalTitle != "first contender" && finalTitle != "second contender" {
 		t.Fatalf("final title = %q, neither concurrent update won", finalTitle)
 	}
+	var updateChanges string
+	if err := s.DB.QueryRow(`SELECT h.changes_json FROM _kora_record_history h
+		JOIN _kora_operation_audit a ON a.site = h.site AND a.operation_id = h.operation_id
+		WHERE a.site = ? AND a.command_name = 'record.update' AND a.status = 'completed' AND a.doc_name = ?`, s.Name, record.Name).Scan(&updateChanges); err != nil {
+		t.Fatalf("record update history not persisted: %v", err)
+	}
+	if !strings.Contains(updateChanges, `"field":"title"`) || !strings.Contains(updateChanges, "initial") {
+		t.Fatalf("update history omitted before/after values: %s", updateChanges)
+	}
 }
 
 // TestStaleVersionConflictLegacyToken keeps backward compatibility with the
@@ -1229,7 +1680,7 @@ func TestRollbackAtomicity(t *testing.T) {
 	if s.taskCount(t) != 1 {
 		t.Fatalf("failed operation must not persist the business row")
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE idempotency_key = 'dup-key'"); n != 0 {
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE status = 'completed' AND result_json IS NOT NULL"); n != 0 {
 		t.Fatalf("failed operation rolled back its receipt claim (found %d)", n)
 	}
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox"); n != 1 {
@@ -1407,11 +1858,13 @@ func TestConfiguredCommandEndToEnd(t *testing.T) {
 }
 
 func opCtx(site, role string) kernel.OperationContext {
+	actor := contract.ActorContext{PrincipalID: "tester", PrincipalType: contract.PrincipalHuman, Site: site, Roles: []string{role}, AuthenticatedAt: time.Now()}
+	execution, _ := policy.NewVerifiedExecution(contract.TenantID(site), actor)
 	return kernel.OperationContext{
 		Site:  site,
 		User:  "tester",
 		Roles: []string{role},
-		Actor: contract.ActorContext{PrincipalID: "tester", PrincipalType: contract.PrincipalHuman, Site: site, AuthenticatedAt: time.Now()},
+		Actor: actor, Execution: execution, TenantID: contract.TenantID(site),
 	}
 }
 

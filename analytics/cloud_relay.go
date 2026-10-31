@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,15 +39,36 @@ func LoadCloudRelayConfig() *CloudRelayConfig {
 }
 
 type CloudRelay struct {
-	Bus        *MultiBus
-	Site       string
-	Config     CloudRelayConfig
-	client     *http.Client
-	closeCh    chan struct{}
-	listenerCh chan ChangeEvent
+	Bus                  *MultiBus
+	Site                 string
+	Config               CloudRelayConfig
+	client               *http.Client
+	closeCh              chan struct{}
+	listenerCh           chan ChangeEvent
+	productEvents        chan queuedCloudProductEvent
+	startOnce            sync.Once
+	stopOnce             sync.Once
+	done                 chan struct{}
+	productEventsDropped atomic.Uint64
 
 	mu                sync.Mutex
 	firstRecordByType map[string]bool
+}
+
+const (
+	cloudProductEventQueueCapacity = 32
+	maxCloudProductEventBytes      = 16 << 10
+)
+
+type queuedCloudProductEvent struct {
+	event     CloudProductEventDTO
+	dedupeKey string
+}
+
+type ProductEventQueueSnapshot struct {
+	Queued   int
+	Capacity int
+	Dropped  uint64
 }
 
 func NewCloudRelay(bus *MultiBus, site string, cfg CloudRelayConfig) *CloudRelay {
@@ -62,33 +84,162 @@ func NewCloudRelay(bus *MultiBus, site string, cfg CloudRelayConfig) *CloudRelay
 			},
 		},
 		closeCh:           make(chan struct{}),
+		done:              make(chan struct{}),
+		productEvents:     make(chan queuedCloudProductEvent, cloudProductEventQueueCapacity),
 		firstRecordByType: map[string]bool{},
 	}
 }
 
-func (r *CloudRelay) Start() {
-	r.listenerCh = make(chan ChangeEvent, 1000)
-	r.Bus.AddListener(r.listenerCh)
+// EnqueueProductEvent adds optional Cloud telemetry to the tenant-owned relay
+// worker. It never performs network I/O on the caller's request path. The
+// bounded queue drops excess or oversized telemetry rather than delaying
+// tenant operations.
+func (r *CloudRelay) EnqueueProductEvent(event CloudProductEventDTO, dedupeKey string) bool {
+	if r == nil || event.Kind == "" {
+		return false
+	}
+	if event.AccountID == "" {
+		event.AccountID = r.Config.AccountID
+	}
+	if event.SiteID == "" {
+		event.SiteID = r.siteID()
+	}
+	if event.AccountID == "" {
+		return false
+	}
+	if !cloudProductEventWithinLimit(event) {
+		r.productEventsDropped.Add(1)
+		return false
+	}
+	payload, err := json.Marshal(event)
+	if err != nil || len(payload) > maxCloudProductEventBytes {
+		r.productEventsDropped.Add(1)
+		return false
+	}
+	queued := queuedCloudProductEvent{event: event, dedupeKey: dedupeKey}
+	select {
+	case <-r.closeCh:
+		return false
+	default:
+	}
+	select {
+	case <-r.closeCh:
+		return false
+	case r.productEvents <- queued:
+		return true
+	default:
+		r.productEventsDropped.Add(1)
+		return false
+	}
+}
 
-	go func() {
-		for {
-			select {
-			case <-r.closeCh:
-				return
-			case event := <-r.listenerCh:
-				r.handleEvent(event)
-			}
+// cloudProductEventWithinLimit rejects unknown payload types and bounds all
+// string data before JSON encoding. The conservative six-times expansion
+// accounts for JSON escaping of control characters.
+func cloudProductEventWithinLimit(event CloudProductEventDTO) bool {
+	stringBytes := len(event.SiteID) + len(event.AccountID) + len(event.Kind)
+	add := func(value string) {
+		stringBytes += len(value)
+	}
+	switch event.Kind {
+	case "first_login":
+		properties, ok := event.Properties.(FirstLoginPropertiesDTO)
+		if !ok {
+			return false
 		}
-	}()
+		add(properties.User)
+		add(properties.Site)
+		add(properties.Login)
+	case "first_doctype":
+		properties, ok := event.Properties.(FirstDocTypePropertiesDTO)
+		if !ok {
+			return false
+		}
+		add(properties.DocType)
+		add(properties.Site)
+		add(properties.Status)
+	case "first_record":
+		properties, ok := event.Properties.(FirstRecordPropertiesDTO)
+		if !ok {
+			return false
+		}
+		add(properties.DocType)
+		add(properties.DocName)
+		add(properties.Operation)
+		add(properties.ModifiedBy)
+		add(properties.Site)
+	default:
+		return false
+	}
+	return stringBytes*6+256 <= maxCloudProductEventBytes
+}
+
+// ProductEventsDropped reports optional telemetry events discarded because
+// they exceeded the payload limit or the bounded queue was full.
+func (r *CloudRelay) ProductEventsDropped() uint64 {
+	if r == nil {
+		return 0
+	}
+	return r.productEventsDropped.Load()
+}
+
+func (r *CloudRelay) ProductEventQueueSnapshot() ProductEventQueueSnapshot {
+	if r == nil {
+		return ProductEventQueueSnapshot{}
+	}
+	return ProductEventQueueSnapshot{Queued: len(r.productEvents), Capacity: cap(r.productEvents), Dropped: r.productEventsDropped.Load()}
+}
+
+func (r *CloudRelay) Start() {
+	r.startOnce.Do(func() {
+		select {
+		case <-r.closeCh:
+			close(r.done)
+			return
+		default:
+		}
+		r.listenerCh = r.Bus.NewListenerQueue(false)
+		if err := r.Bus.TryAddListener(r.listenerCh); err != nil {
+			slog.Warn("cloud telemetry relay subscription rejected", "site", r.Site, "error", err)
+			r.stopOnce.Do(func() { close(r.closeCh) })
+			close(r.done)
+			return
+		}
+		go func() {
+			defer close(r.done)
+			for {
+				select {
+				case <-r.closeCh:
+					return
+				default:
+				}
+				select {
+				case <-r.closeCh:
+					return
+				case event := <-r.productEvents:
+					SendCloudProductEvent(r.client, r.Config, event.event, event.dedupeKey)
+				case event, ok := <-r.listenerCh:
+					if !ok {
+						return
+					}
+					r.handleEvent(event)
+				}
+			}
+		}()
+	})
 
 	slog.Info("cloud telemetry relay started", "site", r.Site, "events_url", r.Config.EventsURL)
 }
 
 func (r *CloudRelay) Stop() {
-	if r.listenerCh != nil {
-		r.Bus.RemoveListener(r.listenerCh)
-	}
-	close(r.closeCh)
+	r.stopOnce.Do(func() {
+		close(r.closeCh)
+		r.startOnce.Do(func() { close(r.done) })
+		if r.listenerCh != nil {
+			r.Bus.RemoveListener(r.listenerCh)
+		}
+	})
+	<-r.done
 }
 
 func (r *CloudRelay) handleEvent(event ChangeEvent) {

@@ -30,8 +30,21 @@ Thumbs.db
 # Claude
 .claude/
 
-# Docs (private — not part of the public repo)
-docs/
+# Docs are private except the reviewed architecture specification.
+docs/*
+!docs/architecture/
+docs/architecture/*
+!docs/architecture/README.md
+!docs/architecture/target-state-spec.md
+!docs/architecture/documentation-changes.md
+!docs/architecture/implementation-status.md
+!docs/architecture/implementation-evidence-archive.md
+!docs/architecture/resource-budgets.md
+!docs/architecture/import-graph.json
+!docs/architecture/database-support-matrix.md
+!docs/architecture/g0-inventory.md
+!docs/architecture/contract-fixture-manifest.json
+!docs/architecture/worker-admission-inventory.md
 
 # Docker
 mysql_data/

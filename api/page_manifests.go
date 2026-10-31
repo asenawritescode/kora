@@ -5,21 +5,48 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/doctype"
 )
 
 type pageManifestListEntry struct {
-	Name   string `json:"name"`
-	Route  string `json:"route"`
-	Layout string `json:"layout"`
-	Label  string `json:"label"`
-	Module string `json:"module"`
-	Status string `json:"status"`
+	Name          string `json:"name"`
+	Route         string `json:"route"`
+	Layout        string `json:"layout"`
+	Label         string `json:"label"`
+	Module        string `json:"module"`
+	Status        string `json:"status"`
+	Purpose       string `json:"purpose"`
+	SourceDocType string `json:"source_doctype,omitempty"`
+	TaskOutcome   string `json:"task_outcome,omitempty"`
+}
+
+func savePageManifestDraft(store *configstore.Store, manifest *doctype.PageManifest, site, actor, label string, snapshot *doctype.ConfigSnapshot) (string, int, error) {
+	if store == nil || snapshot == nil {
+		return "", 0, fmt.Errorf("page manifest store and snapshot are required")
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return "", 0, fmt.Errorf("beginning page manifest draft transaction: %w", err)
+	}
+	defer tx.Rollback()
+	if err := store.SavePageManifestTx(tx, manifest, site, 0); err != nil {
+		return "", 0, err
+	}
+	versionID, versionNum, err := store.CreateConfigVersionTx(tx, site, actor, label, "Draft", snapshot, "")
+	if err != nil {
+		return "", 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", 0, fmt.Errorf("committing page manifest draft: %w", err)
+	}
+	return versionID, versionNum, nil
 }
 
 // HandleSystemPageManifests lists RFC-native page manifests.
@@ -44,17 +71,91 @@ func (h *Handler) HandleSystemPageManifests(c *gin.Context) {
 			continue
 		}
 		items = append(items, pageManifestListEntry{
-			Name:   manifest.Metadata.Name,
-			Route:  manifest.Spec.Route,
-			Layout: manifest.Spec.Layout.Type,
-			Label:  manifest.Metadata.Name,
-			Module: manifest.Metadata.Package,
-			Status: manifest.Metadata.Status,
+			Name:          manifest.Metadata.Name,
+			Route:         manifest.Spec.Route,
+			Layout:        manifest.Spec.Layout.Type,
+			Label:         manifest.Metadata.Name,
+			Module:        manifest.Metadata.Package,
+			Status:        manifest.Metadata.Status,
+			Purpose:       pageManifestPurpose(manifest),
+			SourceDocType: pageManifestSourceDocType(manifest),
+			TaskOutcome:   pageManifestTaskOutcome(manifest),
 		})
 	}
 
 	c.Header("ETag", pageManifestETag(items))
 	c.JSON(http.StatusOK, Response{Data: items})
+}
+
+func pageManifestTaskOutcome(manifest *doctype.PageManifest) string {
+	if manifest == nil || manifest.Spec.Task == nil {
+		return ""
+	}
+	return strings.TrimSpace(manifest.Spec.Task.Outcome)
+}
+
+// pageManifestPurpose keeps a plain table listing from being presented as a
+// second destination when the doctype already has its spreadsheet page. A
+// screen earns a separate navigation entry when it adds a distinct workflow
+// or combines more than one view/component.
+func pageManifestPurpose(manifest *doctype.PageManifest) string {
+	if manifest == nil || len(manifest.Spec.Actions) > 0 || len(manifest.Spec.Layout.Children) != 1 {
+		return "workflow"
+	}
+	component := manifest.Spec.Layout.Children[0]
+	if component.Component != "record_table" || len(component.Children) > 0 || len(component.Actions) > 0 {
+		return "workflow"
+	}
+	if actions, ok := component.Props["actions"].([]any); ok && len(actions) > 0 {
+		return "workflow"
+	}
+	if len(manifest.Spec.Resources) != 1 || manifest.Spec.Resources[0].Query != "document.list" {
+		return "workflow"
+	}
+	resource := manifest.Spec.Resources[0]
+	if component.Data != "" && component.Data != resource.ID+".data" {
+		return "workflow"
+	}
+	doctypeName, ok := resource.Params["doctype"].(string)
+	if source, sourceOK := component.Props["source_doctype"].(string); sourceOK && source != "" {
+		if !ok || doctypeName != source {
+			return "workflow"
+		}
+	}
+	if !ok || strings.TrimSpace(doctypeName) == "" {
+		return "workflow"
+	}
+	if hasPageManifestFilters(resource.Params["filters"]) {
+		return "table_view"
+	}
+	return "record_list"
+}
+
+func pageManifestSourceDocType(manifest *doctype.PageManifest) string {
+	if manifest == nil {
+		return ""
+	}
+	for _, resource := range manifest.Spec.Resources {
+		if resource.Query == "document.list" {
+			if name, ok := resource.Params["doctype"].(string); ok {
+				return strings.TrimSpace(name)
+			}
+		}
+	}
+	return ""
+}
+
+func hasPageManifestFilters(value any) bool {
+	switch filters := value.(type) {
+	case []any:
+		return len(filters) > 0
+	case []map[string]any:
+		return len(filters) > 0
+	case string:
+		return strings.TrimSpace(filters) != "" && strings.TrimSpace(filters) != "[]" && strings.TrimSpace(filters) != "null"
+	default:
+		return false
+	}
 }
 
 // HandleSystemPageManifest returns a single RFC page manifest by name.
@@ -92,6 +193,7 @@ func (h *Handler) HandleSystemPageManifestCreate(c *gin.Context) {
 		badRequestError(c, "validation.failed", err.Error(), nil)
 		return
 	}
+	manifest.EnsurePrimaryDataBindings()
 
 	site := siteName(c)
 	store := h.viewStore(c)
@@ -99,21 +201,19 @@ func (h *Handler) HandleSystemPageManifestCreate(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "server.store_unavailable", "page manifest store not available", nil)
 		return
 	}
-
-	if err := store.SavePageManifest(&manifest, site); err != nil {
-		internalError(c, "saving page manifest", err)
+	if rejectInvalidPageManifestReferences(c, &manifest, h.siteRegistry(c)) {
 		return
 	}
-
 	reg := h.siteRegistry(c)
 	snapshot, err := store.CollectSnapshot(reg, site)
 	if err != nil {
 		internalError(c, "collecting snapshot", err)
 		return
 	}
-	versionID, versionNum, err := store.CreateConfigVersion(site, currentUser(c), "Created page manifest "+manifest.Metadata.Name, "Draft", snapshot)
+	upsertView(snapshot, manifest.ToView())
+	versionID, versionNum, err := savePageManifestDraft(store, &manifest, site, currentUser(c), "Created page manifest "+manifest.Metadata.Name, snapshot)
 	if err != nil {
-		internalError(c, "creating config version", err)
+		internalError(c, "saving page manifest draft", err)
 		return
 	}
 
@@ -147,7 +247,6 @@ func (h *Handler) HandleSystemPageManifestUpdate(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "server.store_unavailable", "page manifest store not available", nil)
 		return
 	}
-
 	existing, err := store.LoadPageManifest(name, site)
 	if err != nil {
 		writeError(c, http.StatusNotFound, "page_manifest.not_found", "Page manifest not found", map[string]any{"name": name})
@@ -165,9 +264,7 @@ func (h *Handler) HandleSystemPageManifestUpdate(c *gin.Context) {
 		}})
 		return
 	}
-
-	if err := store.SavePageManifest(&manifest, site); err != nil {
-		internalError(c, "saving page manifest", err)
+	if rejectInvalidPageManifestReferences(c, &manifest, h.siteRegistry(c)) {
 		return
 	}
 
@@ -177,9 +274,10 @@ func (h *Handler) HandleSystemPageManifestUpdate(c *gin.Context) {
 		internalError(c, "collecting snapshot", err)
 		return
 	}
-	versionID, versionNum, err := store.CreateConfigVersion(site, currentUser(c), "Updated page manifest "+manifest.Metadata.Name, "Draft", snapshot)
+	upsertView(snapshot, manifest.ToView())
+	versionID, versionNum, err := savePageManifestDraft(store, &manifest, site, currentUser(c), "Updated page manifest "+manifest.Metadata.Name, snapshot)
 	if err != nil {
-		internalError(c, "creating config version", err)
+		internalError(c, "saving page manifest draft", err)
 		return
 	}
 

@@ -26,8 +26,8 @@ fields:
     fieldtype: Select
     label: eTIMS Provider
     options: |
-      DigiTax
-    default: DigiTax
+      eTIMS
+    default: eTIMS
     read_only: true
     description: Integration partner used to submit this invoice.
 
@@ -37,7 +37,7 @@ fields:
     read_only: true
     in_list_view: true
     search_index: true
-    description: Kora invoice reference sent to DigiTax. Generated from the Sales Invoice name.
+    description: Tenant invoice reference submitted to eTIMS. Generated from the Sales Invoice name.
 
   - fieldname: provider_status
     fieldtype: Select
@@ -50,7 +50,7 @@ fields:
     read_only: true
     in_list_view: true
     in_standard_filter: true
-    description: Raw asynchronous status reported by DigiTax.
+    description: Raw asynchronous status reported by the configured provider.
 
   - fieldname: status
     fieldtype: Select
@@ -74,20 +74,20 @@ fields:
     in_list_view: true
     search_index: true
     read_only: true
-    description: eTIMS control unit serial number from the DigiTax callback.
+    description: eTIMS control unit serial number reported by the provider.
 
   - fieldname: invoice_number
     fieldtype: Data
     label: Invoice Number
     read_only: true
-    description: KRA invoice number from the DigiTax callback.
+    description: KRA invoice number reported by the provider.
 
   - fieldname: provider_sale_id
     fieldtype: Data
-    label: DigiTax Sale ID
+    label: Provider Sale ID
     read_only: true
     search_index: true
-    description: DigiTax sale identifier returned by the provider.
+    description: Sale identifier returned by the provider.
 
   - fieldname: receipt_number
     fieldtype: Data
@@ -99,7 +99,7 @@ fields:
     fieldtype: Data
     label: Control Unit Serial Number
     read_only: true
-    description: Control unit serial number returned by DigiTax/eTIMS.
+    description: Control unit serial number returned by the provider.
 
   - fieldname: receipt_signature
     fieldtype: Data
@@ -129,15 +129,15 @@ fields:
   - fieldname: sale_detail_url
     fieldtype: Data
     options: URL
-    label: DigiTax Sale URL
+    label: Provider Sale URL
     read_only: true
-    description: DigiTax detail page for this sale.
+    description: Provider detail page for this sale.
 
   - fieldname: submission_response
     fieldtype: JSON
     label: Submission Response
     read_only: true
-    description: Full initial response returned by DigiTax when the sale was queued.
+    description: Full initial response returned when the sale was queued.
 
   - fieldname: callback_event
     fieldtype: Data
@@ -149,13 +149,13 @@ fields:
     fieldtype: Datetime
     label: Webhook Received At
     read_only: true
-    description: When Kora received the provider callback.
+    description: When Kigae received the provider callback.
 
   - fieldname: signed_at
     fieldtype: Datetime
     label: Signed At
     read_only: true
-    description: Timestamp when DigiTax reported the invoice as signed.
+    description: Timestamp when the provider reported the invoice as signed.
 
   - fieldname: customer_pin
     fieldtype: Data
@@ -167,7 +167,7 @@ fields:
     fieldtype: JSON
     label: Provider Tax Summary
     read_only: true
-    description: Tax breakdown returned by DigiTax/eTIMS.
+    description: Tax breakdown returned by the provider.
 
   - fieldname: error_message
     fieldtype: Text

@@ -157,6 +157,9 @@ export const api = {
   post<T>(path: string, body?: unknown) {
     return apiRequest<T>('POST', path, body)
   },
+  postWithHeaders<T>(path: string, body: unknown, extraHeaders: Record<string, string>) {
+    return apiRequestWithHeaders<T>('POST', path, body, extraHeaders)
+  },
   put<T>(path: string, body?: unknown) {
     return apiRequest<T>('PUT', path, body)
   },
@@ -172,6 +175,35 @@ export const api = {
   ) {
     return apiRequestOperation<T>(method, path, body, params, idempotencyKey)
   },
+}
+
+async function apiRequestWithHeaders<T>(method: string, path: string, body: unknown, extraHeaders: Record<string, string>): Promise<T> {
+  const url = buildApiURL(path)
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extraHeaders }
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    const csrf = getCsrfToken()
+    if (csrf) headers['X-Kora-CSRF-Token'] = csrf
+  }
+  const response = await fetch(url.toString(), { method, headers, credentials: 'same-origin', body: JSON.stringify(body) })
+  if (!response.ok) {
+    let errorData: ApiErrorResponse
+    try { errorData = await response.json() } catch {
+      throw new KoraApiError(`Request failed with status ${response.status}`, 'network_error', response.status)
+    }
+    const err = errorData.error as any
+    if (typeof err === 'string') throw new KoraApiError(err, 'error', response.status)
+    if (err?.message || err?.code || err?.type) {
+      throw new KoraApiError(getApiErrorMessage(err), getApiErrorCode(err), response.status, err.field, err.details)
+    }
+    if (err?.errors?.[0]) {
+      const first = err.errors[0]
+      throw new KoraApiError(getApiErrorMessage(first), getApiErrorCode(first), response.status, first.field, first.details)
+    }
+    throw new KoraApiError('Unknown error', 'unknown', response.status)
+  }
+  if (response.status === 204) return undefined as T
+  const json: ApiResponse<T> = await response.json()
+  return json.data
 }
 
 // Like apiRequest but returns the full envelope.

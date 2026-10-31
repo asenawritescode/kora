@@ -3,6 +3,7 @@ package email
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
@@ -33,6 +34,12 @@ type Sender struct {
 	Config *Config
 }
 
+// Configured reports whether this sender has an SMTP host. A sender without
+// one logs messages for local development and cannot deliver invitations.
+func (s *Sender) Configured() bool {
+	return s != nil && s.Config != nil && strings.TrimSpace(s.Config.Host) != ""
+}
+
 // NewSender creates a new email sender.
 func NewSender(cfg *Config) *Sender {
 	return &Sender{Config: cfg}
@@ -51,6 +58,21 @@ type Message struct {
 // Send sends an email message.
 // Falls back to logging only when no SMTP host is configured.
 func (s *Sender) Send(msg *Message) error {
+	return s.SendContext(context.Background(), msg)
+}
+
+// SendContext sends a message and closes the SMTP connection if ctx is
+// canceled. The deadline bounds the complete SMTP operation, not only dial.
+func (s *Sender) SendContext(ctx context.Context, msg *Message) error {
+	if ctx == nil {
+		return fmt.Errorf("email send requires a context")
+	}
+	if msg == nil {
+		return fmt.Errorf("email message is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if s == nil || s.Config == nil {
 		return fmt.Errorf("email sender is not configured")
 	}
@@ -78,7 +100,7 @@ func (s *Sender) Send(msg *Message) error {
 		return fmt.Errorf("email message has no recipients")
 	}
 
-	if err := sendSMTP(s.Config, from, msg.To, buildMessage(from, msg)); err != nil {
+	if err := sendSMTPContext(ctx, s.Config, from, msg.To, buildMessage(from, msg)); err != nil {
 		return err
 	}
 
@@ -95,10 +117,16 @@ func (s *Sender) Send(msg *Message) error {
 // SendTemplate sends an email using template interpolation.
 // Replaces {fieldname} placeholders with values from the data map.
 func (s *Sender) SendTemplate(to []string, subject, body string, data map[string]string) error {
+	return s.SendTemplateContext(context.Background(), to, subject, body, data)
+}
+
+// SendTemplateContext renders and sends a template under the caller's
+// cancellation and deadline.
+func (s *Sender) SendTemplateContext(ctx context.Context, to []string, subject, body string, data map[string]string) error {
 	renderedSubject := interpolate(subject, data)
 	renderedBody := interpolate(body, data)
 
-	return s.Send(&Message{
+	return s.SendContext(ctx, &Message{
 		To:      to,
 		Subject: renderedSubject,
 		Body:    renderedBody,
@@ -184,6 +212,10 @@ func stripHTML(input string) string {
 }
 
 func sendSMTP(cfg *Config, from string, to []string, data []byte) error {
+	return sendSMTPContext(context.Background(), cfg, from, to, data)
+}
+
+func sendSMTPContext(ctx context.Context, cfg *Config, from string, to []string, data []byte) (resultErr error) {
 	host := strings.TrimSpace(cfg.Host)
 	port := smtpPort(cfg.Port)
 	mode := strings.ToLower(strings.TrimSpace(cfg.TLSMode))
@@ -196,7 +228,13 @@ func sendSMTP(cfg *Config, from string, to []string, data []byte) error {
 	}
 
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	timeout := 10 * time.Second
+	opCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	defer func() {
+		if err := opCtx.Err(); err != nil {
+			resultErr = err
+		}
+	}()
 
 	var client *smtp.Client
 	var conn net.Conn
@@ -204,20 +242,27 @@ func sendSMTP(cfg *Config, from string, to []string, data []byte) error {
 
 	switch mode {
 	case "implicit":
-		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: timeout}, "tcp", addr, &tls.Config{ServerName: host})
+		conn, err = (&net.Dialer{}).DialContext(opCtx, "tcp", addr)
 		if err != nil {
 			return fmt.Errorf("dialing smtp tls: %w", err)
 		}
-		client, err = smtp.NewClient(conn, host)
+		tlsConn := tls.Client(conn, &tls.Config{ServerName: host})
+		if err := tlsConn.HandshakeContext(opCtx); err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("smtp tls handshake: %w", err)
+		}
+		conn = tlsConn
 	case "plain", "starttls":
-		conn, err = net.DialTimeout("tcp", addr, timeout)
+		conn, err = (&net.Dialer{}).DialContext(opCtx, "tcp", addr)
 		if err != nil {
 			return fmt.Errorf("dialing smtp: %w", err)
 		}
-		client, err = smtp.NewClient(conn, host)
 	default:
 		return fmt.Errorf("unsupported smtp tls mode %q", cfg.TLSMode)
 	}
+	stopClose := context.AfterFunc(opCtx, func() { _ = conn.Close() })
+	defer stopClose()
+	client, err = smtp.NewClient(conn, host)
 	if err != nil {
 		if conn != nil {
 			conn.Close()

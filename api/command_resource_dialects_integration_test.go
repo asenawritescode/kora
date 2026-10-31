@@ -125,7 +125,7 @@ emit:
 			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", siteName); got != baselineOutbox {
 				t.Fatalf("failed command changed outbox count: got=%d baseline=%d", got, baselineOutbox)
 			}
-			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", siteName, failedKey); got != 0 {
+			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = ?", siteName, definition.FullName()); got != 0 {
 				t.Fatalf("failed command left %d idempotency receipts", got)
 			}
 
@@ -154,7 +154,7 @@ emit:
 			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND command_name = ? AND status = 'completed'", siteName, definition.FullName()); got != 1 {
 				t.Fatalf("configured command audit rows=%d, want 1", got)
 			}
-			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", siteName, successKey); got != 1 {
+			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = ?", siteName, definition.FullName()); got != 1 {
 				t.Fatalf("configured command receipts=%d, want 1", got)
 			}
 			if got := countDialectRows(t, database, dialect, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", siteName); got <= baselineOutbox {

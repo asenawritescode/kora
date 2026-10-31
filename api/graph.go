@@ -3,10 +3,8 @@ package api
 import (
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 
-	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/gin-gonic/gin"
 )
@@ -34,9 +32,9 @@ type SystemGraphResponse struct {
 	Edges []SystemGraphEdge `json:"edges"`
 }
 
-// BuildSystemGraph projects the active DocType registry and workflows into a
-// stable inspection graph. It intentionally has no second Entity schema.
-func BuildSystemGraph(reg *doctype.Registry, workflows []*doctype.Workflow) SystemGraphResponse {
+// BuildSystemGraph projects the active DocType registry into a stable
+// inspection graph. It intentionally has no second Entity schema.
+func BuildSystemGraph(reg *doctype.Registry) SystemGraphResponse {
 	if reg == nil {
 		return SystemGraphResponse{Nodes: []SystemGraphNode{}, Edges: []SystemGraphEdge{}}
 	}
@@ -67,19 +65,6 @@ func BuildSystemGraph(reg *doctype.Registry, workflows []*doctype.Workflow) Syst
 			edges = append(edges, SystemGraphEdge{From: "doctype:" + dt.Name, To: "doctype:" + field.Options, Relation: "links to", Via: field.Fieldname})
 		}
 	}
-	for _, wf := range workflows {
-		if wf == nil || !wf.IsActive || !doctypeNames[wf.DocumentType] {
-			continue
-		}
-		workflowID := "workflow:" + wf.DocumentType
-		nodes = append(nodes, SystemGraphNode{ID: workflowID, Kind: "workflow", Label: wf.Name, Detail: formatWorkflowDetail(wf), Doctype: wf.DocumentType})
-		edges = append(edges, SystemGraphEdge{From: workflowID, To: "doctype:" + wf.DocumentType, Relation: "operates on"})
-		for _, transition := range wf.Transitions {
-			fieldID := "field:" + wf.DocumentType + ":" + transition.Action
-			nodes = append(nodes, SystemGraphNode{ID: fieldID, Kind: "field", Label: transition.Action, Detail: transition.From + " → " + transition.To, Doctype: wf.DocumentType})
-			edges = append(edges, SystemGraphEdge{From: workflowID, To: fieldID, Relation: "authorized by", Via: transition.Allowed})
-		}
-	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	sort.Slice(edges, func(i, j int) bool {
 		if edges[i].From != edges[j].From {
@@ -96,20 +81,5 @@ func BuildSystemGraph(reg *doctype.Registry, workflows []*doctype.Workflow) Syst
 // HandleSystemGraph returns the canonical DocType-backed inspection graph.
 // GET /api/system/graph
 func (h *Handler) HandleSystemGraph(c *gin.Context) {
-	db := h.siteTx(c).DB
-	store := configstore.NewStore(db, h.siteDialect(c))
-	workflows, err := store.LoadWorkflows(c.GetString("site_name"))
-	if err != nil {
-		internalError(c, "loading graph workflows", err)
-		return
-	}
-	c.JSON(http.StatusOK, Response{Data: BuildSystemGraph(h.siteRegistry(c), workflows)})
-}
-
-func formatWorkflowDetail(wf *doctype.Workflow) string {
-	return strings.TrimSpace(strings.Join([]string{itoa(len(wf.States)), "states ·", itoa(len(wf.Transitions)), "transitions"}, " "))
-}
-
-func itoa(value int) string {
-	return strconv.Itoa(value)
+	c.JSON(http.StatusOK, Response{Data: BuildSystemGraph(h.siteRegistry(c))})
 }

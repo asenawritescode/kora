@@ -1,6 +1,7 @@
 package site
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 )
 
@@ -33,13 +35,31 @@ func ensurePlatformSiteRegistration(platformDB *sql.DB, platformDBType string, c
 	return ensurePlatformSiteRegistrationStatus(platformDB, platformDBType, cfg, "active")
 }
 
-func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType string, cfg *SiteConfig, status string) error {
+func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType string, cfg *SiteConfig, status string, requestedIDs ...string) error {
+	return ensurePlatformSiteRegistrationStatusContext(context.Background(), platformDB, platformDBType, cfg, status, requestedIDs...)
+}
+
+func ensurePlatformSiteRegistrationStatusContext(ctx context.Context, platformDB *sql.DB, platformDBType string, cfg *SiteConfig, status string, requestedIDs ...string) error {
+	return ensurePlatformSiteRegistrationAssignmentContext(ctx, platformDB, platformDBType, cfg, status, "", requestedIDs...)
+}
+
+func ensurePlatformSiteRegistrationAssignmentContext(ctx context.Context, platformDB *sql.DB, platformDBType string, cfg *SiteConfig, status, runtimeCellID string, requestedIDs ...string) error {
 	if platformDB == nil || cfg == nil {
 		return nil
+	}
+	if ctx == nil {
+		return errors.New("site registration requires context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	status = strings.ToLower(strings.TrimSpace(status))
 	if status != "provisioning" && status != "active" {
 		return fmt.Errorf("unsupported site registration status %q", status)
+	}
+	runtimeCellID, err := normalizeRuntimeCellID(runtimeCellID)
+	if err != nil {
+		return fmt.Errorf("invalid site deployment assignment: %w", err)
 	}
 
 	aliases := normalizedSiteAliases(cfg.Hostname, cfg.Domains())
@@ -66,27 +86,34 @@ func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType str
 		storageBucket = BucketNameForSite(cfg.Hostname)
 	}
 
-	now := time.Now().UTC()
-	siteID, err := newCanonicalSiteID()
-	if err != nil {
-		return fmt.Errorf("generate canonical site id: %w", err)
+	requestedID := ""
+	if len(requestedIDs) > 0 {
+		requestedID = strings.TrimSpace(requestedIDs[0])
 	}
-	if err := invalidateSiteAliasIndex(platformDB, db.Resolve(platformDBType)); err != nil {
-		return fmt.Errorf("mark alias projection dirty before site upsert: %w", err)
+	if requestedID != "" {
+		if _, err := contract.ParseTenantID(requestedID); err != nil {
+			return fmt.Errorf("invalid requested canonical site id: %w", err)
+		}
 	}
-	tx, err := platformDB.Begin()
+	tx, err := platformDB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin platform site registration: %w", err)
 	}
 	defer tx.Rollback()
+	siteID, err := canonicalSiteIDForRegistration(tx, platformDBType, cfg.Hostname, requestedID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
 	switch strings.ToLower(platformDBType) {
 	case "postgres":
 		if _, err := tx.Exec(
 			`INSERT INTO _kora_site_registry
-				(site, site_id, db_type, db_host, db_port, db_name, db_user, db_password, db_password_encrypted, file_storage, storage_bucket, domains_json, status, created_at, updated_at)
+				(site, site_id, db_type, db_host, db_port, db_name, db_user, db_password, db_password_encrypted, file_storage, storage_bucket, domains_json, status, created_at, updated_at, runtime_cell_id)
 			 VALUES
-				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15)
+				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16)
 			 ON CONFLICT (site) DO UPDATE SET
+				runtime_cell_id = CASE WHEN _kora_site_registry.status = 'provisioning' AND COALESCE(_kora_site_registry.runtime_cell_id, '') = '' AND EXCLUDED.runtime_cell_id <> '' THEN EXCLUDED.runtime_cell_id ELSE _kora_site_registry.runtime_cell_id END,
 				db_type = EXCLUDED.db_type,
 				db_host = EXCLUDED.db_host,
 				db_port = EXCLUDED.db_port,
@@ -100,17 +127,18 @@ func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType str
 				status = EXCLUDED.status,
 				config_revision = _kora_site_registry.config_revision + 1,
 				updated_at = EXCLUDED.updated_at`,
-			cfg.Hostname, siteID, cfg.DBType, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, dbPassword, boolToInt(encrypted), fileStorage, storageBucket, string(domainsJSON), status, now, now,
+			cfg.Hostname, siteID, cfg.DBType, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, dbPassword, boolToInt(encrypted), fileStorage, storageBucket, string(domainsJSON), status, now, now, runtimeCellID,
 		); err != nil {
 			return fmt.Errorf("upsert platform site registry: %w", err)
 		}
 	default:
 		_, upsertErr := tx.Exec(
 			`INSERT INTO _kora_site_registry
-				(site, site_id, db_type, db_host, db_port, db_name, db_user, db_password, db_password_encrypted, file_storage, storage_bucket, domains_json, status, created_at, updated_at)
+				(site, site_id, db_type, db_host, db_port, db_name, db_user, db_password, db_password_encrypted, file_storage, storage_bucket, domains_json, status, created_at, updated_at, runtime_cell_id)
 			 VALUES
-				(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON DUPLICATE KEY UPDATE
+				runtime_cell_id = CASE WHEN status = 'provisioning' AND COALESCE(runtime_cell_id, '') = '' AND VALUES(runtime_cell_id) <> '' THEN VALUES(runtime_cell_id) ELSE runtime_cell_id END,
 				db_type = VALUES(db_type),
 				db_host = VALUES(db_host),
 				db_port = VALUES(db_port),
@@ -124,7 +152,7 @@ func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType str
 				status = VALUES(status),
 				config_revision = config_revision + 1,
 				updated_at = VALUES(updated_at)`,
-			cfg.Hostname, siteID, cfg.DBType, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, dbPassword, boolToInt(encrypted), fileStorage, storageBucket, string(domainsJSON), status, now, now,
+			cfg.Hostname, siteID, cfg.DBType, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, dbPassword, boolToInt(encrypted), fileStorage, storageBucket, string(domainsJSON), status, now, now, runtimeCellID,
 		)
 		if upsertErr != nil {
 			if !isDuplicateUpsertUnsupported(upsertErr) {
@@ -132,9 +160,10 @@ func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType str
 			}
 			res, err := tx.Exec(
 				`UPDATE _kora_site_registry
-				 SET db_type = ?, db_host = ?, db_port = ?, db_name = ?, db_user = ?, db_password = ?, db_password_encrypted = ?, file_storage = ?, storage_bucket = ?, domains_json = ?, status = ?, config_revision = config_revision + 1, updated_at = ?
+				 SET runtime_cell_id = CASE WHEN status = 'provisioning' AND COALESCE(runtime_cell_id, '') = '' AND ? <> '' THEN ? ELSE runtime_cell_id END,
+				 db_type = ?, db_host = ?, db_port = ?, db_name = ?, db_user = ?, db_password = ?, db_password_encrypted = ?, file_storage = ?, storage_bucket = ?, domains_json = ?, status = ?, config_revision = config_revision + 1, updated_at = ?
 				 WHERE site = ?`,
-				cfg.DBType, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, dbPassword, boolToInt(encrypted), fileStorage, storageBucket, string(domainsJSON), status, now, cfg.Hostname,
+				runtimeCellID, runtimeCellID, cfg.DBType, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, dbPassword, boolToInt(encrypted), fileStorage, storageBucket, string(domainsJSON), status, now, cfg.Hostname,
 			)
 			if err != nil {
 				return fmt.Errorf("update platform site registry: %w", err)
@@ -146,15 +175,22 @@ func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType str
 			if rows == 0 {
 				if _, err := tx.Exec(
 					`INSERT INTO _kora_site_registry
-				(site, site_id, db_type, db_host, db_port, db_name, db_user, db_password, db_password_encrypted, file_storage, storage_bucket, domains_json, status, created_at, updated_at)
+						(site, site_id, db_type, db_host, db_port, db_name, db_user, db_password, db_password_encrypted, file_storage, storage_bucket, domains_json, status, created_at, updated_at, runtime_cell_id)
 					 VALUES
-					(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-					cfg.Hostname, siteID, cfg.DBType, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, dbPassword, boolToInt(encrypted), fileStorage, storageBucket, string(domainsJSON), status, now, now,
+						(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					cfg.Hostname, siteID, cfg.DBType, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBUser, dbPassword, boolToInt(encrypted), fileStorage, storageBucket, string(domainsJSON), status, now, now, runtimeCellID,
 				); err != nil {
 					return fmt.Errorf("insert platform site registry: %w", err)
 				}
 			}
 		}
+	}
+	dialect := db.Resolve(platformDBType)
+	if err := replaceSiteAliasesTx(tx, dialect, siteID, aliases...); err != nil {
+		return err
+	}
+	if err := setSiteAliasIndexStateTx(tx, dialect, true); err != nil {
+		return fmt.Errorf("mark alias projection synchronized: %w", err)
 	}
 	if err := appendCurrentSiteDirectoryChange(tx, platformDBType, cfg.Hostname); err != nil {
 		return err
@@ -162,7 +198,40 @@ func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType str
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit platform site registration: %w", err)
 	}
-	return syncRegisteredSiteAliases(platformDB, platformDBType, cfg.Hostname, aliases)
+	return nil
+}
+
+func canonicalSiteIDForRegistration(tx *sql.Tx, platformDBType, hostname, requested string) (string, error) {
+	query := `SELECT site_id, status FROM _kora_site_registry WHERE site = ?`
+	dialect := strings.ToLower(strings.TrimSpace(platformDBType))
+	if dialect == "postgres" {
+		query = `SELECT site_id, status FROM _kora_site_registry WHERE site = $1`
+	}
+	if dialect == "mysql" || dialect == "postgres" {
+		query += ` FOR UPDATE`
+	}
+	var existing, status string
+	err := tx.QueryRow(query, hostname).Scan(&existing, &status)
+	if err == nil {
+		if status == "deleting" || status == "deleted" {
+			return "", fmt.Errorf("site %q is %s and cannot be re-registered", hostname, status)
+		}
+		if requested != "" && requested != existing {
+			return "", fmt.Errorf("hostname %q is already assigned to a different canonical tenant ID", hostname)
+		}
+		return existing, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("read canonical tenant identity before registration: %w", err)
+	}
+	if requested != "" {
+		return requested, nil
+	}
+	siteID, err := newCanonicalSiteID()
+	if err != nil {
+		return "", fmt.Errorf("generate canonical site id: %w", err)
+	}
+	return siteID, nil
 }
 
 func appendCurrentSiteDirectoryChange(tx *sql.Tx, platformDBType, hostname string) error {
@@ -204,9 +273,6 @@ func UpdatePlatformSiteRegistration(platformDB *sql.DB, platformDBType string, h
 
 	now := time.Now().UTC()
 	dialect := db.Resolve(platformDBType)
-	if err := invalidateSiteAliasIndex(platformDB, dialect); err != nil {
-		return fmt.Errorf("mark alias projection dirty before site update: %w", err)
-	}
 	tx, err := platformDB.Begin()
 	if err != nil {
 		return fmt.Errorf("begin platform site update: %w", err)
@@ -253,28 +319,25 @@ func UpdatePlatformSiteRegistration(platformDB *sql.DB, platformDBType string, h
 			return sql.ErrNoRows
 		}
 	}
+	lookup := `SELECT site_id FROM _kora_site_registry WHERE site = ?`
+	if strings.EqualFold(platformDBType, "postgres") {
+		lookup = `SELECT site_id FROM _kora_site_registry WHERE site = $1`
+	}
+	var siteID string
+	if err := tx.QueryRow(lookup, hostname).Scan(&siteID); err != nil {
+		return fmt.Errorf("read canonical id for alias update: %w", err)
+	}
+	if err := replaceSiteAliasesTx(tx, dialect, siteID, aliases...); err != nil {
+		return err
+	}
+	if err := setSiteAliasIndexStateTx(tx, dialect, true); err != nil {
+		return fmt.Errorf("mark alias projection synchronized: %w", err)
+	}
 	if err := appendCurrentSiteDirectoryChange(tx, platformDBType, hostname); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit platform site update: %w", err)
-	}
-	return syncRegisteredSiteAliases(platformDB, platformDBType, hostname, aliases)
-}
-
-func syncRegisteredSiteAliases(platformDB *sql.DB, platformDBType, hostname string, aliases []string) error {
-	siteID, err := registeredSiteID(platformDB, platformDBType, hostname)
-	if err != nil {
-		return fmt.Errorf("read canonical id before alias update: %w", err)
-	}
-	dialect := db.Resolve(platformDBType)
-	if err := syncSiteAliases(platformDB, dialect, siteID, aliases...); err != nil {
-		_ = invalidateSiteAliasIndex(platformDB, dialect)
-		return err
-	}
-	if err := setSiteAliasIndexState(platformDB, dialect, true); err != nil {
-		_ = invalidateSiteAliasIndex(platformDB, dialect)
-		return fmt.Errorf("mark alias projection synchronized: %w", err)
 	}
 	return nil
 }
@@ -312,14 +375,20 @@ func removePlatformSiteRegistrationByID(platformDB *sql.DB, platformDBType, site
 		return nil
 	}
 	dialect := db.Resolve(platformDBType)
-	if err := invalidateSiteAliasIndex(platformDB, dialect); err != nil {
-		return fmt.Errorf("mark alias projection dirty before site removal: %w", err)
-	}
 	tx, err := platformDB.Begin()
 	if err != nil {
 		return fmt.Errorf("begin platform site removal: %w", err)
 	}
 	defer tx.Rollback()
+	if siteID == "" && hostname != "" {
+		lookup := `SELECT site_id FROM _kora_site_registry WHERE site = ?`
+		if strings.EqualFold(platformDBType, "postgres") {
+			lookup = `SELECT site_id FROM _kora_site_registry WHERE site = $1`
+		}
+		if err := tx.QueryRow(lookup, hostname).Scan(&siteID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("read canonical id before site removal: %w", err)
+		}
+	}
 	if siteID != "" {
 		var info DBSiteInfo
 		var domainsJSON []byte
@@ -338,6 +407,9 @@ func removePlatformSiteRegistrationByID(platformDB *sql.DB, platformDBType, site
 		if err := appendDirectoryChange(tx, platformDBType, info); err != nil {
 			return err
 		}
+		if err := replaceSiteAliasesTx(tx, dialect, siteID); err != nil {
+			return err
+		}
 	}
 	if siteID != "" {
 		query := `DELETE FROM _kora_site_registry WHERE site_id = ?`
@@ -354,24 +426,21 @@ func removePlatformSiteRegistrationByID(platformDB *sql.DB, platformDBType, site
 	} else if _, err := tx.Exec(`DELETE FROM _kora_site_registry WHERE site = ?`, hostname); err != nil {
 		return err
 	}
+	if err := setSiteAliasIndexStateTx(tx, dialect, true); err != nil {
+		return fmt.Errorf("mark alias projection synchronized: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit platform site removal: %w", err)
-	}
-	if siteID != "" {
-		if err := syncSiteAliases(platformDB, dialect, siteID); err != nil {
-			_ = invalidateSiteAliasIndex(platformDB, dialect)
-			return err
-		}
-	}
-	if err := setSiteAliasIndexState(platformDB, dialect, true); err != nil {
-		_ = invalidateSiteAliasIndex(platformDB, dialect)
-		return fmt.Errorf("mark alias projection synchronized: %w", err)
 	}
 	return nil
 }
 
 func discoverSitesFromRegistry(db *sql.DB) ([]DBSiteInfo, error) {
-	return discoverRegistrySites(db, true)
+	return discoverSitesFromRegistryContext(context.Background(), db)
+}
+
+func discoverSitesFromRegistryContext(ctx context.Context, db *sql.DB) ([]DBSiteInfo, error) {
+	return discoverRegistrySitesContext(ctx, db, true)
 }
 
 func discoverAllSitesFromRegistry(db *sql.DB) ([]DBSiteInfo, error) {
@@ -379,10 +448,21 @@ func discoverAllSitesFromRegistry(db *sql.DB) ([]DBSiteInfo, error) {
 }
 
 func discoverRegistrySites(db *sql.DB, activeOnly bool) ([]DBSiteInfo, error) {
-	return discoverRegistrySitesForCell(db, activeOnly, "", "")
+	return discoverRegistrySitesContext(context.Background(), db, activeOnly)
 }
 
 func discoverRegistrySitesForCell(db *sql.DB, activeOnly bool, cellID, dialect string) ([]DBSiteInfo, error) {
+	return discoverRegistrySitesForCellContext(context.Background(), db, activeOnly, cellID, dialect)
+}
+
+func discoverRegistrySitesContext(ctx context.Context, db *sql.DB, activeOnly bool) ([]DBSiteInfo, error) {
+	return discoverRegistrySitesForCellContext(ctx, db, activeOnly, "", "")
+}
+
+func discoverRegistrySitesForCellContext(ctx context.Context, db *sql.DB, activeOnly bool, cellID, dialect string) ([]DBSiteInfo, error) {
+	if ctx == nil || db == nil {
+		return nil, fmt.Errorf("discover site registry requires context and database")
+	}
 	query := `SELECT site_id, COALESCE(runtime_cell_id, ''), site, db_type, db_host, db_port, db_name, db_user, COALESCE(db_password, ''), db_password_encrypted, COALESCE(domains_json, '[]'), COALESCE(file_storage, 'local'), COALESCE(storage_bucket, ''), status, config_revision FROM _kora_site_registry ORDER BY site`
 	if activeOnly {
 		query = `SELECT site_id, COALESCE(runtime_cell_id, ''), site, db_type, db_host, db_port, db_name, db_user, COALESCE(db_password, ''), db_password_encrypted, COALESCE(domains_json, '[]'), COALESCE(file_storage, 'local'), COALESCE(storage_bucket, ''), status, config_revision FROM _kora_site_registry WHERE status = 'active' ORDER BY site`
@@ -406,9 +486,9 @@ func discoverRegistrySitesForCell(db *sql.DB, activeOnly bool, cellID, dialect s
 	var rows *sql.Rows
 	var err error
 	if strings.TrimSpace(cellID) != "" && cellID != "default" {
-		rows, err = db.Query(query, cellID)
+		rows, err = db.QueryContext(ctx, query, cellID)
 	} else {
-		rows, err = db.Query(query)
+		rows, err = db.QueryContext(ctx, query)
 	}
 	if err != nil {
 		return nil, err

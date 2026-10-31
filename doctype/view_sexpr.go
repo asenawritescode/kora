@@ -49,6 +49,16 @@ func writeSExprView(b *strings.Builder, v *View, indent string) {
 	if v.SourceDocType != "" {
 		props = append(props, sExprProp{"source-doctype", quoteSExprString(v.SourceDocType)})
 	}
+	if len(v.Resources) > 0 {
+		if encoded, err := json.Marshal(v.Resources); err == nil {
+			props = append(props, sExprProp{"resources-json", quoteSExprString(string(encoded))})
+		}
+	}
+	if v.PageManifest != nil {
+		if encoded, err := json.Marshal(v.PageManifest); err == nil {
+			props = append(props, sExprProp{"page-manifest-json", quoteSExprString(string(encoded))})
+		}
+	}
 
 	subIndent := indent + "  "
 	if len(props) > 0 {
@@ -86,6 +96,14 @@ func writeSExprViewComponent(b *strings.Builder, c *ViewComponent, indent string
 	}
 	if c.SourceDocType != "" {
 		props = append(props, sExprProp{"source-doctype", quoteSExprString(c.SourceDocType)})
+	}
+	if c.Data != "" {
+		props = append(props, sExprProp{"data", quoteSExprString(c.Data)})
+	}
+	if len(c.ResourceBindings) > 0 {
+		if encoded, err := json.Marshal(c.ResourceBindings); err == nil {
+			props = append(props, sExprProp{"resource-bindings-json", quoteSExprString(string(encoded))})
+		}
 	}
 	if c.Span > 0 {
 		props = append(props, sExprProp{"span", fmt.Sprintf("%d", c.Span)})

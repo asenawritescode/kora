@@ -1,6 +1,6 @@
-# Kora SDK for Go
+# Kigae SDK for Go
 
-Go types and interfaces for building script extensions, provider integrations, and tools for Kora.
+Go types and interfaces for building script extensions, provider integrations, and tools for Kigae.
 
 ## Installation
 
@@ -16,7 +16,45 @@ import "github.com/asenawritescode/kora/sdk"
 
 The SDK provides interfaces that scripts and extensions implement against:
 
-### DocProvider — CRUD on Kora documents
+### Tenant management client
+
+Cloud and self-hosted operators use the typed HTTP client in
+`github.com/asenawritescode/kora/sdk/management`. It accepts a service token
+source, uses bounded HTTP response reads, validates commands and response
+identity, and requires HTTPS except for loopback development endpoints. The
+token source must provide a management-scoped credential; managed-channel
+tenant credentials are not interchangeable.
+
+```go
+import (
+    "context"
+
+    "github.com/asenawritescode/kora/contract"
+    "github.com/asenawritescode/kora/sdk/management"
+)
+
+client, err := management.NewClient(management.Config{
+    BaseURL: "https://engine.example.test",
+    Tokens: management.TokenSourceFunc(func(context.Context) (string, error) {
+        return managementToken, nil
+    }),
+})
+if err != nil {
+    return err
+}
+operation, err := client.ApplyPackage(ctx, contract.ApplyPackage{
+    Meta: contract.CommandMeta{IdempotencyKey: operationKey},
+    Tenant: tenantID,
+    ArtifactRef: artifactRef,
+    Digest: packageDigest,
+    ExpectedConfigRevision: configRevision,
+})
+```
+
+The client targets `/api/management/v2`; it does not make these capabilities
+available until the Engine exposes their authenticated, durable handlers.
+
+### DocProvider — CRUD on Kigae documents
 
 ```go
 type DocProvider interface {
@@ -56,7 +94,7 @@ type KoraProvider interface {
 
 ### Script support
 
-Pre-defined constants for script types (`DocEvent`, `APIMethod`, `WorkflowAction`, `Scheduled`, `Computed`, `Validate`) and events (`BeforeInsert`, `AfterInsert`, `BeforeSave`, `AfterSave`, `BeforeDelete`, `AfterDelete`).
+Pre-defined constants for supported script types and events (`BeforeInsert`, `AfterInsert`, `BeforeSave`, `AfterSave`, `BeforeDelete`, `AfterDelete`).
 
 ### Extension types
 

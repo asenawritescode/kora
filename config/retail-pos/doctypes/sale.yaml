@@ -1,5 +1,5 @@
 name: Sale
-module: Retail POS and Store Operations
+module: Sales
 is_submittable: true
 title_field: reference
 search_fields: reference, status, customer_name
@@ -12,6 +12,21 @@ fields:
     label: Reference
     reqd: true
     unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: sale_date
+    fieldtype: Date
+    label: Sale date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: entry_source
+    fieldtype: Select
+    label: Entry source
+    options: |
+      POS
+      Book entry
+    default: Book entry
     in_list_view: true
   - fieldname: status
     fieldtype: Select
@@ -26,11 +41,6 @@ fields:
       Closed
     default: Draft
     in_list_view: true
-  - fieldname: customer
-    fieldtype: Link
-    options: POS Customer
-    label: Customer
-    in_list_view: true
   - fieldname: cashier
     fieldtype: User
     label: Cashier
@@ -40,16 +50,6 @@ fields:
     fieldtype: Link
     options: Register
     label: Register
-    in_list_view: true
-  - fieldname: shift
-    fieldtype: Link
-    options: Shift
-    label: Shift
-    in_list_view: true
-  - fieldname: till_session
-    fieldtype: Link
-    options: Till Session
-    label: Till session
     in_list_view: true
   - fieldname: subtotal
     fieldtype: Currency

@@ -1,0 +1,27 @@
+name: Ticket
+module: Tickets
+title_field: title
+search_fields: title, status, assignee
+sort_field: creation
+sort_order: DESC
+fields:
+  - fieldname: title
+    fieldtype: Data
+    label: Ticket
+    reqd: true
+    in_list_view: true
+  - fieldname: assignee
+    fieldtype: User
+    label: Assignee
+    reqd: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Open
+      In Progress
+      Resolved
+      Closed
+    default: Open
+    in_list_view: true

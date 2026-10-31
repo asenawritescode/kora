@@ -1,8 +1,8 @@
-# Skill: Create Kora Config Files
+# Skill: Create Kigae Config Files
 
-You are generating YAML configuration files for Kora, a config-driven application engine. These files define the entire application: data model, permissions, roles, and workflows. The engine reads them and provides database schema, REST API, and a React admin UI automatically.
+You are generating Kora application configuration. Doctypes, roles, permissions, and views use YAML. Automations use Engine v2 workflow JSON definitions under `workflows/`.
 
-> **Alternative:** Config can also be created via the **Administrator tab** in the workspace UI — a visual form builder with live YAML preview at `/workspace/admin/doctypes`. Users, permissions, workflows, API keys, and site management are also available from the browser. This guide covers the YAML format used by both the visual builder and manual file creation.
+> **Alternative:** Doctypes can also be created through the visual builder at `/workspace/admin/doctypes`. Automations are created in Workspace → Settings → Automations, where table fields and supported actions are discovered from Engine.
 
 ## Directory Structure
 
@@ -10,7 +10,8 @@ You are generating YAML configuration files for Kora, a config-driven applicatio
 config/<app-name>/
   doctypes/
     <entity>.yaml         # One file per DocType
-    <entity>_workflow.yaml # Optional workflow definitions
+  workflows/
+    <automation>.json     # Engine v2 automation definition
   roles.yaml              # User roles (flat YAML array)
   permissions.yaml         # Access control rules (flat YAML array)
 ```
@@ -225,49 +226,14 @@ Flat YAML array — NOT a map with a `permissions:` key:
 
 Operations: `can_read`, `can_write`, `can_create`, `can_delete`, `can_submit`, `can_cancel`, `can_amend`, `can_export`, `can_import`, `can_report`.
 
-## Workflow (`doctypes/<name>_workflow.yaml`)
+## Automations
 
-Defines a document lifecycle with states and transitions:
-
-```yaml
-name: Order Workflow
-document_type: Order          # Which doctype this applies to
-is_active: true
-workflow_state_field: status  # Field that stores the current state
-
-states:
-  - state: Draft
-    doc_status: 0             # 0 = Saved, 1 = Submitted, 2 = Cancelled
-    allow_edit: Sales Agent   # Role allowed to edit in this state
-    style: default            # Badge color: default | warning | success | danger | info
-
-  - state: Confirmed
-    doc_status: 0
-    allow_edit: Sales Agent
-    style: warning
-
-  - state: Completed
-    doc_status: 1
-    allow_edit: ""            # No one can edit after submission
-    style: success
-
-transitions:
-  - action: Confirm Order
-    from: Draft
-    to: Confirmed
-    allowed: Sales Agent,Administrator    # Roles allowed to perform this
-    condition: "len(doc.items) > 0"       # Expression that must be true
-    require_fields:                       # Fields that must be non-empty
-      - payment_method
-
-notifications:                           # Optional — email on state change
-  - event: state_change
-    to_state: Shipped
-    recipients:
-      - field: customer.email
-    subject: "Your order {name} has shipped"
-    message: "Order {name} is on its way."
-```
+Create and edit automations in Workspace → Settings → Automations. For versioned
+application packs, use Engine v2 JSON definitions at `workflows/<id>.json` and
+validate them with the Engine workflow validator before publishing. Definitions
+support record-created/updated triggers, registered actions, typed field
+conditions, approval and wait steps, plus an optional lifecycle policy for
+server-enforced status transitions.
 
 ## Complete Example: Todo App
 

@@ -62,6 +62,17 @@ func TestLiveMySQLAIRunStoreLifecycle(t *testing.T) {
 	if got, err := LoadRun(ctx, database, run.ID); err != nil || got.OutputMessage != "world" {
 		t.Fatalf("load MySQL AI run = %#v, %v", got, err)
 	}
+	otherSiteRun := RunRecord{ID: "run-mysql-other-site", Site: "other-site", Status: "completed", InputMessage: "must remain outside the selected site count"}
+	if err := UpsertRun(ctx, database, otherSiteRun); err != nil {
+		t.Fatal("insert other-site MySQL AI run:", err)
+	}
+	statusInventory, err := InspectRunStatusInventory(ctx, database, kdb.Resolve("mysql"), conversation.Site)
+	if err != nil {
+		t.Fatal("inspect MySQL AI run statuses:", err)
+	}
+	if !statusInventory.TablePresent || len(statusInventory.Statuses) != 1 || statusInventory.Statuses[0] != (RunStatusCount{Status: "planning", Rows: 1}) {
+		t.Fatalf("site-scoped MySQL AI run status inventory = %#v", statusInventory)
+	}
 	if err := AppendMessage(ctx, database, conversation.Site, conversation.ID, run.ID, "user", "hello", "message", "", 1); err != nil {
 		t.Fatal("append MySQL AI message:", err)
 	}

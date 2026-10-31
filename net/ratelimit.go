@@ -11,11 +11,14 @@ import (
 
 // RateLimiter implements per-user token bucket rate limiting.
 type RateLimiter struct {
-	mu       sync.Mutex
-	limiters map[string]*rateLimiterEntry
-	rate     rate.Limit
-	burst    int
+	mu          sync.Mutex
+	limiters    map[string]*rateLimiterEntry
+	rate        rate.Limit
+	burst       int
+	nextCleanup time.Time
 }
+
+const rateLimiterCleanupInterval = 5 * time.Minute
 
 type rateLimiterEntry struct {
 	limiter  *rate.Limiter
@@ -33,13 +36,11 @@ func NewRateLimiter(rps float64, burst int) *RateLimiter {
 	}
 
 	rl := &RateLimiter{
-		limiters: make(map[string]*rateLimiterEntry),
-		rate:     rate.Limit(rps),
-		burst:    burst,
+		limiters:    make(map[string]*rateLimiterEntry),
+		rate:        rate.Limit(rps),
+		burst:       burst,
+		nextCleanup: time.Now().Add(rateLimiterCleanupInterval),
 	}
-
-	// Background cleanup of stale entries every 5 minutes.
-	go rl.cleanup(5 * time.Minute)
 
 	return rl
 }
@@ -71,6 +72,16 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 func (rl *RateLimiter) getLimiter(key string) *rate.Limiter {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+	now := time.Now()
+	if !now.Before(rl.nextCleanup) {
+		cutoff := now.Add(-rateLimiterCleanupInterval)
+		for existingKey, entry := range rl.limiters {
+			if entry.lastUsed.Before(cutoff) {
+				delete(rl.limiters, existingKey)
+			}
+		}
+		rl.nextCleanup = now.Add(rateLimiterCleanupInterval)
+	}
 
 	entry, ok := rl.limiters[key]
 	if !ok {
@@ -79,21 +90,6 @@ func (rl *RateLimiter) getLimiter(key string) *rate.Limiter {
 		}
 		rl.limiters[key] = entry
 	}
-	entry.lastUsed = time.Now()
+	entry.lastUsed = now
 	return entry.limiter
-}
-
-func (rl *RateLimiter) cleanup(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for range ticker.C {
-		rl.mu.Lock()
-		cutoff := time.Now().Add(-interval)
-		for key, entry := range rl.limiters {
-			if entry.lastUsed.Before(cutoff) {
-				delete(rl.limiters, key)
-			}
-		}
-		rl.mu.Unlock()
-	}
 }

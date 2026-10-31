@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "site_id": "site_0123456789abcdef0123456789abcdef",
+  "aliases": ["pos.example.test", "register.example.test"],
+  "status": "active",
+  "config_revision": "9007199254740993",
+  "directory_revision": "18446744073709551615",
+  "deployment_id": "deployment-west",
+  "data_plane_ref": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}

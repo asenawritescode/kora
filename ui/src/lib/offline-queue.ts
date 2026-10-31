@@ -27,8 +27,15 @@ export async function loadOfflineQueue(): Promise<OfflineQueueItem[]> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly')
     const request = tx.objectStore(STORE_NAME).getAll()
-    request.onsuccess = () => resolve((request.result as OfflineQueueItem[]).sort(sortByCreatedAt))
+    let result: OfflineQueueItem[] | undefined
+    request.onsuccess = () => { result = request.result as OfflineQueueItem[] }
     request.onerror = () => reject(request.error)
+    tx.oncomplete = () => {
+      if (!result) reject(new Error('Offline queue read completed without a result'))
+      else resolve(result.sort(sortByCreatedAt))
+    }
+    tx.onerror = () => reject(tx.error ?? new Error('Offline queue read failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('Offline queue read was aborted'))
   })
 }
 
@@ -70,13 +77,20 @@ export async function recordOfflineConflict(
 
 export async function clearOfflineQueue(): Promise<void> {
   const db = await openOfflineDb()
-  memoryQueue.clear()
-  if (!db) return
+  if (!db) {
+    memoryQueue.clear()
+    return
+  }
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite')
     const request = tx.objectStore(STORE_NAME).clear()
-    request.onsuccess = () => resolve()
+    tx.oncomplete = () => {
+      memoryQueue.clear()
+      resolve()
+    }
     request.onerror = () => reject(request.error)
+    tx.onerror = () => reject(tx.error ?? new Error('Offline queue clear failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('Offline queue clear was aborted'))
   })
 }
 
@@ -90,8 +104,10 @@ async function putOfflineItem(item: OfflineQueueItem): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite')
     const request = tx.objectStore(STORE_NAME).put(item)
-    request.onsuccess = () => resolve()
     request.onerror = () => reject(request.error)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error('Offline queue write failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('Offline queue write was aborted'))
   })
 }
 
@@ -100,6 +116,7 @@ function openOfflineDb(): Promise<IDBDatabase | null> {
 
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
+    let blocked = false
     request.onupgradeneeded = () => {
       const db = request.result
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -109,9 +126,18 @@ function openOfflineDb(): Promise<IDBDatabase | null> {
         store.createIndex('operationId', 'operationId', { unique: false })
       }
     }
-    request.onsuccess = () => resolve(request.result)
+    request.onsuccess = () => {
+      if (blocked) request.result.close()
+      else {
+        request.result.onversionchange = () => request.result.close()
+        resolve(request.result)
+      }
+    }
     request.onerror = () => reject(request.error)
-    request.onblocked = () => resolve(null)
+    request.onblocked = () => {
+      blocked = true
+      reject(new Error('Offline queue database upgrade is blocked'))
+    }
   })
 }
 

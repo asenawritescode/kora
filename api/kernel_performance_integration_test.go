@@ -23,9 +23,11 @@ import (
 	"time"
 
 	koraai "github.com/asenawritescode/kora/api/ai"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/secret"
 	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
 )
@@ -488,6 +490,9 @@ func TestMPesaCallbackLoad(t *testing.T) {
 	const workers, callbacksPerWorker = 8, 12
 	handler, database, registry, site := newResourceIntegrationHandler(t, kernelMeasuredMySQLDriverName)
 	registerPOSIntegrationTypes(t, database, site, registry)
+	if err := secret.NewStore(database, kdb.Resolve("mysql")).Set(site, "mpesa_callback_token", "test-callback-token"); err != nil {
+		t.Fatalf("configure M-Pesa callback load token: %v", err)
+	}
 	operationTable := "`" + registry.Get("External Operation").RawTableName() + "`"
 	paymentTable := "`" + registry.Get("Payment").RawTableName() + "`"
 	for index := 0; index < workers*callbacksPerWorker; index++ {
@@ -516,7 +521,7 @@ func TestMPesaCallbackLoad(t *testing.T) {
 				suffix := fmt.Sprintf("mpesa-load-%03d", index)
 				body := fmt.Sprintf(`{"Body":{"stkCallback":{"CheckoutRequestID":"checkout-%s","ResultCode":0,"ResultDesc":"Success","CallbackMetadata":{"Item":[{"Name":"MpesaReceiptNumber","Value":"RCP-%s"}]}}}}`, suffix, suffix)
 				started := time.Now()
-				response := serveMPesaCallbackDialect(t, handler, database, registry, site, "mysql", body)
+				response := serveMPesaCallbackConfiguredDialect(t, handler, database, registry, site, "mysql", body)
 				latencies <- time.Since(started)
 				if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"payment_status":"Succeeded"`) {
 					errors <- fmt.Errorf("callback %s returned HTTP %d: %s", suffix, response.Code, response.Body.String())
@@ -572,6 +577,7 @@ func TestAIMutationLoad(t *testing.T) {
 		tx.CurrentUser = fmt.Sprintf("ai-load-%02d@example.test", worker)
 		tx.CurrentUserRole = doctype.AdminRole
 		tx.CurrentUserRoles = []string{doctype.AdminRole}
+		tx.Execution = integrationTestExecution(t, site, tx.CurrentUser, tx.CurrentUserRoles)
 		transactions[worker] = &tx
 	}
 	kernelLoadMetrics.reset()
@@ -738,6 +744,7 @@ func kernelAdapterContext(tb testing.TB, database *sql.DB, registry *doctype.Reg
 	ctx.Set("user", "pos-benchmark@example.test")
 	ctx.Set("user_role", doctype.AdminRole)
 	ctx.Set("user_roles", []string{doctype.AdminRole})
+	ctx.Set("policy_execution", integrationTestExecution(tb, site, "pos-benchmark@example.test", []string{doctype.AdminRole}))
 	return ctx
 }
 

@@ -20,11 +20,23 @@ const TOKEN_KEY = 'kora_console_token'
 const EMAIL_KEY = 'kora_console_email'
 
 function loadToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  try {
+    return localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return null
+  }
 }
 
 function loadEmail(): string | null {
-  return localStorage.getItem(EMAIL_KEY)
+  try {
+    return localStorage.getItem(EMAIL_KEY)
+  } catch {
+    return null
+  }
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback
 }
 
 export const useConsoleAuthStore = create<ConsoleAuthState>((set, get) => ({
@@ -39,8 +51,18 @@ export const useConsoleAuthStore = create<ConsoleAuthState>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const result = await consoleApi.login(email, password)
-      localStorage.setItem(TOKEN_KEY, result.token)
-      localStorage.setItem(EMAIL_KEY, result.email)
+      try {
+        localStorage.setItem(TOKEN_KEY, result.token)
+        localStorage.setItem(EMAIL_KEY, result.email)
+      } catch {
+        try {
+          localStorage.removeItem(TOKEN_KEY)
+          localStorage.removeItem(EMAIL_KEY)
+        } catch {
+          // Storage is unavailable; the unauthenticated in-memory state remains authoritative.
+        }
+        throw new Error('Console login succeeded, but browser storage is unavailable so the session could not be saved.')
+      }
       set({
         token: result.token,
         email: result.email,
@@ -48,15 +70,19 @@ export const useConsoleAuthStore = create<ConsoleAuthState>((set, get) => ({
         isAuthenticated: true,
         isLoading: false,
       })
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Login failed' })
+    } catch (err: unknown) {
+      set({ isLoading: false, error: errorMessage(err, 'Login failed') })
       throw err
     }
   },
 
   logout: () => {
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(EMAIL_KEY)
+    try {
+      localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(EMAIL_KEY)
+    } catch {
+      // Clear in-memory credentials even when the browser blocks persistence.
+    }
     set({ token: null, email: null, isAuthenticated: false, needsPasswordChange: false })
   },
 
@@ -65,8 +91,8 @@ export const useConsoleAuthStore = create<ConsoleAuthState>((set, get) => ({
     try {
       await consoleApi.changePassword(newPassword)
       set({ needsPasswordChange: false, isLoading: false })
-    } catch (err: any) {
-      set({ isLoading: false, error: err.message || 'Failed' })
+    } catch (err: unknown) {
+      set({ isLoading: false, error: errorMessage(err, 'Failed') })
       throw err
     }
   },
@@ -84,8 +110,12 @@ export const useConsoleAuthStore = create<ConsoleAuthState>((set, get) => ({
       set({ isAuthenticated: true, isLoading: false })
       return true
     } catch {
-      localStorage.removeItem(TOKEN_KEY)
-      localStorage.removeItem(EMAIL_KEY)
+      try {
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.removeItem(EMAIL_KEY)
+      } catch {
+        // Clear in-memory credentials even when the browser blocks persistence.
+      }
       set({ token: null, email: null, isAuthenticated: false, isLoading: false })
       return false
     }

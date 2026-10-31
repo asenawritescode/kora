@@ -12,13 +12,12 @@ import (
 
 // HandleScriptList returns all scripts for the current site.
 func (h *Handler) HandleScriptList(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	siteName, _ := c.Get("site_name")
 	siteNameStr, _ := siteName.(string)
 
-	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
-		c.JSON(http.StatusOK, Response{Data: []any{}})
-		return
-	}
 	store := h.runtimeService(c, siteNameStr).ScriptStore
 	if store == nil {
 		c.JSON(http.StatusOK, Response{Data: []any{}})
@@ -41,14 +40,13 @@ func (h *Handler) HandleScriptList(c *gin.Context) {
 
 // HandleScriptGet returns a single script.
 func (h *Handler) HandleScriptGet(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	siteName, _ := c.Get("site_name")
 	siteNameStr, _ := siteName.(string)
 	name := c.Param("name")
 
-	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
-		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
-		return
-	}
 	store := h.runtimeService(c, siteNameStr).ScriptStore
 	if store == nil {
 		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
@@ -70,15 +68,13 @@ func (h *Handler) HandleScriptGet(c *gin.Context) {
 
 // HandleScriptCreate creates a new script.
 func (h *Handler) HandleScriptCreate(c *gin.Context) {
-	siteName, _ := c.Get("site_name")
-	siteNameStr, _ := siteName.(string)
-	user, _ := c.Get("user")
-	userStr, _ := user.(string)
-
-	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
-		writeError(c, http.StatusInternalServerError, "server.store_unavailable", "Script store not available", nil)
+	if !requireAdmin(c) {
 		return
 	}
+	siteName, _ := c.Get("site_name")
+	siteNameStr, _ := siteName.(string)
+	userStr := currentUser(c)
+
 	store := h.runtimeService(c, siteNameStr).ScriptStore
 	if store == nil {
 		writeError(c, http.StatusInternalServerError, "server.store_unavailable", "Script store not available", nil)
@@ -86,17 +82,16 @@ func (h *Handler) HandleScriptCreate(c *gin.Context) {
 	}
 
 	var req struct {
-		Name           string `json:"name"`
-		ScriptType     string `json:"script_type"`
-		DocType        string `json:"doctype"`
-		Event          string `json:"event"`
-		MethodPath     string `json:"method_path"`
-		WorkflowAction string `json:"workflow_action"`
-		Schedule       string `json:"schedule"`
-		Priority       int    `json:"priority"`
-		RunAs          string `json:"run_as"`
-		TimeoutMs      int    `json:"timeout_ms"`
-		Script         string `json:"script"`
+		Name       string `json:"name"`
+		ScriptType string `json:"script_type"`
+		DocType    string `json:"doctype"`
+		Event      string `json:"event"`
+		MethodPath string `json:"method_path"`
+		Schedule   string `json:"schedule"`
+		Priority   int    `json:"priority"`
+		RunAs      string `json:"run_as"`
+		TimeoutMs  int    `json:"timeout_ms"`
+		Script     string `json:"script"`
 	}
 	// DEBUG: Check Content-Length and body state
 	slog.Info("HandleScriptCreate", "contentLength", c.Request.ContentLength, "method", c.Request.Method, "path", c.Request.URL.Path)
@@ -142,16 +137,14 @@ func (h *Handler) HandleScriptCreate(c *gin.Context) {
 			writeError(c, http.StatusBadRequest, "validation.required_field", "method_path is required for api_method scripts", map[string]any{"field": "method_path"})
 			return
 		}
-	case "workflow_action":
-		if req.WorkflowAction == "" {
-			writeError(c, http.StatusBadRequest, "validation.required_field", "workflow_action is required for workflow_action scripts", map[string]any{"field": "workflow_action"})
-			return
-		}
 	case "scheduled":
 		if req.Schedule == "" {
 			writeError(c, http.StatusBadRequest, "validation.required_field", "schedule is required for scheduled scripts", map[string]any{"field": "schedule"})
 			return
 		}
+	default:
+		writeError(c, http.StatusBadRequest, "validation.invalid_choice", "script_type must be doc_event, api_method, or scheduled", map[string]any{"field": "script_type"})
+		return
 	}
 	if req.Priority <= 0 {
 		req.Priority = 10
@@ -174,23 +167,22 @@ func (h *Handler) HandleScriptCreate(c *gin.Context) {
 	}
 
 	rec := script.ScriptRecord{
-		Name:           req.Name,
-		Site:           siteNameStr,
-		ScriptType:     script.Type(req.ScriptType),
-		DocType:        req.DocType,
-		Event:          script.Event(req.Event),
-		MethodPath:     req.MethodPath,
-		WorkflowAction: req.WorkflowAction,
-		Schedule:       req.Schedule,
-		Priority:       req.Priority,
-		IsActive:       false, // Always create as inactive — user must explicitly activate.
-		RunAs:          req.RunAs,
-		TimeoutMs:      req.TimeoutMs,
-		Script:         req.Script,
-		CreatedBy:      userStr,
-		UpdatedBy:      userStr,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		Name:       req.Name,
+		Site:       siteNameStr,
+		ScriptType: script.Type(req.ScriptType),
+		DocType:    req.DocType,
+		Event:      script.Event(req.Event),
+		MethodPath: req.MethodPath,
+		Schedule:   req.Schedule,
+		Priority:   req.Priority,
+		IsActive:   false, // Always create as inactive — user must explicitly activate.
+		RunAs:      req.RunAs,
+		TimeoutMs:  req.TimeoutMs,
+		Script:     req.Script,
+		CreatedBy:  userStr,
+		UpdatedBy:  userStr,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 
 	if err := store.Insert(rec); err != nil {
@@ -205,16 +197,14 @@ func (h *Handler) HandleScriptCreate(c *gin.Context) {
 
 // HandleScriptUpdate updates an existing script.
 func (h *Handler) HandleScriptUpdate(c *gin.Context) {
-	siteName, _ := c.Get("site_name")
-	siteNameStr, _ := siteName.(string)
-	user, _ := c.Get("user")
-	userStr, _ := user.(string)
-	name := c.Param("name")
-
-	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
-		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
+	if !requireAdmin(c) {
 		return
 	}
+	siteName, _ := c.Get("site_name")
+	siteNameStr, _ := siteName.(string)
+	userStr := currentUser(c)
+	name := c.Param("name")
+
 	store := h.runtimeService(c, siteNameStr).ScriptStore
 	if store == nil {
 		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
@@ -222,20 +212,23 @@ func (h *Handler) HandleScriptUpdate(c *gin.Context) {
 	}
 
 	var req struct {
-		ScriptType     *string `json:"script_type"`
-		DocType        *string `json:"doctype"`
-		Event          *string `json:"event"`
-		MethodPath     *string `json:"method_path"`
-		WorkflowAction *string `json:"workflow_action"`
-		Schedule       *string `json:"schedule"`
-		Priority       *int    `json:"priority"`
-		IsActive       *bool   `json:"is_active"`
-		RunAs          *string `json:"run_as"`
-		TimeoutMs      *int    `json:"timeout_ms"`
-		Script         *string `json:"script"`
+		ScriptType *string `json:"script_type"`
+		DocType    *string `json:"doctype"`
+		Event      *string `json:"event"`
+		MethodPath *string `json:"method_path"`
+		Schedule   *string `json:"schedule"`
+		Priority   *int    `json:"priority"`
+		IsActive   *bool   `json:"is_active"`
+		RunAs      *string `json:"run_as"`
+		TimeoutMs  *int    `json:"timeout_ms"`
+		Script     *string `json:"script"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid request body", nil)
+		return
+	}
+	if req.ScriptType != nil && *req.ScriptType != "doc_event" && *req.ScriptType != "api_method" && *req.ScriptType != "scheduled" {
+		writeError(c, http.StatusBadRequest, "validation.invalid_choice", "script_type must be doc_event, api_method, or scheduled", map[string]any{"field": "script_type"})
 		return
 	}
 
@@ -250,8 +243,8 @@ func (h *Handler) HandleScriptUpdate(c *gin.Context) {
 	}
 	updateReq := script.ScriptUpdateRequest{
 		ScriptType: req.ScriptType, DocType: req.DocType, Event: req.Event,
-		MethodPath: req.MethodPath, WorkflowAction: req.WorkflowAction,
-		Schedule: req.Schedule, Priority: req.Priority, IsActive: req.IsActive,
+		MethodPath: req.MethodPath,
+		Schedule:   req.Schedule, Priority: req.Priority, IsActive: req.IsActive,
 		RunAs: req.RunAs, TimeoutMs: req.TimeoutMs, Script: req.Script,
 	}
 	if err := store.Update(siteNameStr, name, updateReq, userStr); err != nil {
@@ -265,14 +258,13 @@ func (h *Handler) HandleScriptUpdate(c *gin.Context) {
 
 // HandleScriptDelete deletes a script.
 func (h *Handler) HandleScriptDelete(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	siteName, _ := c.Get("site_name")
 	siteNameStr, _ := siteName.(string)
 	name := c.Param("name")
 
-	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
-		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
-		return
-	}
 	store := h.runtimeService(c, siteNameStr).ScriptStore
 	if store == nil {
 		writeError(c, http.StatusNotFound, "script.not_found", "Script not found", nil)
@@ -290,6 +282,9 @@ func (h *Handler) HandleScriptDelete(c *gin.Context) {
 
 // HandleScriptValidate validates a script without saving it.
 func (h *Handler) HandleScriptValidate(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	var req struct {
 		Script string `json:"script"`
 	}
@@ -318,14 +313,13 @@ func (h *Handler) HandleScriptValidate(c *gin.Context) {
 
 // HandleScriptExecutions returns the execution log for a script.
 func (h *Handler) HandleScriptExecutions(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	siteName, _ := c.Get("site_name")
 	siteNameStr, _ := siteName.(string)
 	name := c.Param("name")
 
-	if h.SiteScriptStores == nil && h.RuntimeServices == nil {
-		c.JSON(http.StatusOK, Response{Data: []any{}})
-		return
-	}
 	store := h.runtimeService(c, siteNameStr).ScriptStore
 	if store == nil {
 		c.JSON(http.StatusOK, Response{Data: []any{}})

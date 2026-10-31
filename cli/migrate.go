@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -23,7 +24,10 @@ func init() {
 	migrateCmd.Flags().BoolVar(&allowBreakingFlag, "allow-breaking", false, "Allow breaking schema changes")
 }
 
-func runMigrate() error {
+func runMigrate(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if migrateSiteFlag == "" && !migrateAllFlag {
 		return fmt.Errorf("specify --site <info.Name> or --all")
 	}
@@ -34,14 +38,23 @@ func runMigrate() error {
 	if migrateAllFlag {
 		// Discover sites from database.
 		cfg := site.ReconstructSiteConfig("_discovery_", common, nil)
-		db, err := site.Connect(cfg)
+		release, err := acquireSiteCLIWork(ctx, cfg, false)
 		if err != nil {
+			return err
+		}
+		db, err := site.ConnectContext(ctx, cfg)
+		if err != nil {
+			release()
 			return fmt.Errorf("connecting to platform db: %w", err)
 		}
-		dbSites, err = site.DiscoverSitesFromDB(db)
-		db.Close()
+		dbSites, err = site.DiscoverSitesFromDBContext(ctx, db)
+		closeErr := db.Close()
+		release()
 		if err != nil {
 			return fmt.Errorf("discovering sites: %w", err)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("closing platform db: %w", closeErr)
 		}
 	} else {
 		dbSites = []site.DBSiteInfo{{Name: migrateSiteFlag}}
@@ -51,15 +64,20 @@ func runMigrate() error {
 		slog.Info("migrating site", "site", info.Name)
 
 		siteCfg := site.ReconstructSiteConfig(info.Name, common, info.Domains)
-
-		db, err := site.Connect(siteCfg)
+		release, err := acquireSiteCLIWork(ctx, siteCfg, true)
 		if err != nil {
+			return err
+		}
+		db, err := site.ConnectContext(ctx, siteCfg)
+		if err != nil {
+			release()
 			return fmt.Errorf("connecting to %s: %w", info.Name, err)
 		}
 
 		// Bootstrap system tables.
 		if err := site.BootstrapSystemTables(db, kdb.Resolve(siteCfg.DBType)); err != nil {
 			db.Close()
+			release()
 			return fmt.Errorf("bootstrapping %s: %w", info.Name, err)
 		}
 
@@ -68,12 +86,14 @@ func runMigrate() error {
 		doctypes, err := store.LoadAll(info.Name)
 		if err != nil {
 			db.Close()
+			release()
 			return fmt.Errorf("loading config for %s: %w", info.Name, err)
 		}
 
 		if len(doctypes) == 0 {
 			slog.Warn("no DocTypes found", "site", info.Name)
 			db.Close()
+			release()
 			continue
 		}
 
@@ -82,10 +102,15 @@ func runMigrate() error {
 
 		if err := schema.MigrateSiteFromRegistry(db, siteCfg.DBName, registry, kdb.Resolve(siteCfg.DBType)); err != nil {
 			db.Close()
+			release()
 			return fmt.Errorf("migrating %s: %w", info.Name, err)
 		}
 
-		db.Close()
+		if err := db.Close(); err != nil {
+			release()
+			return fmt.Errorf("closing %s database: %w", info.Name, err)
+		}
+		release()
 		fmt.Printf("  ✓ %s migrated\n", info.Name)
 	}
 

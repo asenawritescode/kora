@@ -19,6 +19,12 @@ func (s *Store) SaveViewsTx(tx *sql.Tx, views []*doctype.View, site string) erro
 	}
 
 	for i, v := range views {
+		if v != nil && v.PageManifest != nil {
+			if err := s.SavePageManifestTx(tx, v.PageManifest, site, i); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := s.saveViewRowTx(tx, v, site, i); err != nil {
 			return err
 		}
@@ -92,10 +98,22 @@ func (s *Store) SaveView(view *doctype.View, site string) error {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
-	if err := s.saveViewRowTx(tx, view, site, 0); err != nil {
+	if err := s.SaveViewTx(tx, view, site); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// SaveViewTx writes one View using a caller-owned transaction so callers can
+// commit the persisted View and its config-version snapshot atomically.
+func (s *Store) SaveViewTx(tx *sql.Tx, view *doctype.View, site string) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is required")
+	}
+	if err := s.saveViewRowTx(tx, view, site, 0); err != nil {
+		return err
+	}
+	return BumpConfigRevisionTx(tx, s.Dialect)
 }
 
 // SaveViews replaces all views in a single transaction (for import/export batch operations).
@@ -106,6 +124,9 @@ func (s *Store) SaveViews(views []*doctype.View, site string) error {
 	}
 	defer tx.Rollback()
 	if err := s.SaveViewsTx(tx, views, site); err != nil {
+		return err
+	}
+	if err := BumpConfigRevisionTx(tx, s.Dialect); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -249,9 +270,19 @@ func isPageManifestJSON(value string) bool {
 
 // DeleteView removes a View by name.
 func (s *Store) DeleteView(name, site string) error {
-	_, err := s.DB.Exec(db.Rebind(s.Dialect, "DELETE FROM _kora_view WHERE name = ? AND site = ?"), name, site)
+	tx, err := s.DB.Begin()
 	if err != nil {
+		return fmt.Errorf("begin view deletion: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(db.Rebind(s.Dialect, "DELETE FROM _kora_view WHERE name = ? AND site = ?"), name, site); err != nil {
 		return fmt.Errorf("deleting view %q: %w", name, err)
+	}
+	if err := BumpConfigRevisionTx(tx, s.Dialect); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit view deletion: %w", err)
 	}
 	return nil
 }

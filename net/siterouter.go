@@ -3,7 +3,7 @@ package net
 import (
 	"bytes"
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -11,488 +11,390 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/tenantruntime"
 	"github.com/gin-gonic/gin"
 )
 
-// LoadedSite holds the runtime state for a single site.
-type LoadedSite struct {
-	SiteID         string
-	ConfigRevision uint64
-	Status         string
-	DBType         string
-	Name           string
-	Config         SiteRouterConfig
-	DB             *sql.DB
-	Registry       *doctype.Registry
+// LoadedSite and SiteRouterConfig are compatibility aliases for the tenant
+// runtime model owned by internal/tenantruntime.
+type LoadedSite = tenantruntime.Runtime
+type SiteRouterConfig = tenantruntime.SiteConfig
+type RuntimeSnapshot = tenantruntime.Snapshot
 
-	// AnalyticsEventBus receives change events from the ORM layer.
-	// nil if analytics is disabled for this site.
-	AnalyticsEventBus analytics.EventBus
+// SiteRouter is the HTTP facade over the tenant runtime manager. It owns no
+// competing tenant registry or generation state.
+type SiteRouter struct {
+	manager *tenantruntime.Manager
 
-	// AnalyticsWorker processes change events into rollup tables.
-	// nil if analytics is disabled for this site.
-	AnalyticsWorker *analytics.Worker
-	// RuntimeServices is an opaque immutable handler-service bundle. It is
-	// copied into each request context with this runtime snapshot.
-	RuntimeServices any
-	requestMu       sync.Mutex
-	requestRefs     int
-	draining        bool
-	requestsDrained chan struct{}
+	lazyMu          sync.RWMutex
+	lazyDescriptors map[string]contract.SiteDescriptor
+	lazyAliases     map[string]string
+	lazyAmbiguous   map[string]bool
+	lazyDefaultID   string
+	lazyActivate    func(context.Context, string) error
 }
 
-func (s *LoadedSite) acquireRequest() bool {
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
-	if s.draining {
+const defaultMaxRetiringGenerations uint16 = 32
+
+func NewSiteRouter(sites []*LoadedSite) *SiteRouter {
+	router, err := NewSiteRouterWithRetirementLimit(sites, defaultMaxRetiringGenerations)
+	if err != nil {
+		panic(err)
+	}
+	return router
+}
+
+func NewSiteRouterWithRetirementLimit(sites []*LoadedSite, maxRetiring uint16, maxResident ...uint32) (*SiteRouter, error) {
+	manager, err := tenantruntime.NewManager(sites, maxRetiring, maxResident...)
+	if err != nil {
+		return nil, err
+	}
+	return &SiteRouter{manager: manager}, nil
+}
+
+func (sr *SiteRouter) RuntimeManager() *tenantruntime.Manager {
+	if sr == nil {
+		return nil
+	}
+	return sr.manager
+}
+
+// SetLazyDirectory installs the credential-free alias projection used to
+// activate a tenant only after it receives routed work. The activator fetches
+// tenant credentials from the authoritative Engine directory for one ID.
+func (sr *SiteRouter) SetLazyDirectory(descriptors []contract.SiteDescriptor, activate func(context.Context, string) error) {
+	if sr == nil {
+		return
+	}
+	sr.lazyMu.Lock()
+	defer sr.lazyMu.Unlock()
+	sr.lazyDescriptors = make(map[string]contract.SiteDescriptor, len(descriptors))
+	sr.lazyAliases = make(map[string]string, len(descriptors)*2)
+	sr.lazyAmbiguous = make(map[string]bool)
+	sr.lazyDefaultID = ""
+	sr.lazyActivate = activate
+	for _, descriptor := range descriptors {
+		sr.addLazyDescriptorLocked(descriptor)
+	}
+}
+
+func (sr *SiteRouter) SetLazyActivator(activate func(context.Context, string) error) {
+	if sr == nil {
+		return
+	}
+	sr.lazyMu.Lock()
+	sr.lazyActivate = activate
+	sr.lazyMu.Unlock()
+}
+
+// UpdateLazyDescriptor advances the credential-free projection without
+// changing a currently published runtime generation.
+func (sr *SiteRouter) UpdateLazyDescriptor(descriptor contract.SiteDescriptor) {
+	if sr == nil || descriptor.SiteID == "" {
+		return
+	}
+	sr.lazyMu.Lock()
+	defer sr.lazyMu.Unlock()
+	if sr.lazyDescriptors == nil {
+		sr.lazyDescriptors = make(map[string]contract.SiteDescriptor)
+		sr.lazyAliases = make(map[string]string)
+		sr.lazyAmbiguous = make(map[string]bool)
+	}
+	sr.removeLazyDescriptorLocked(descriptor.SiteID)
+	if descriptor.Status != "deleted" {
+		sr.addLazyDescriptorLocked(descriptor)
+	}
+}
+
+func (sr *SiteRouter) RemoveLazyDescriptor(siteID string) {
+	if sr == nil || siteID == "" {
+		return
+	}
+	sr.lazyMu.Lock()
+	defer sr.lazyMu.Unlock()
+	sr.removeLazyDescriptorLocked(siteID)
+}
+
+func (sr *SiteRouter) addLazyDescriptorLocked(descriptor contract.SiteDescriptor) {
+	if descriptor.SiteID == "" || descriptor.Status == "deleted" {
+		return
+	}
+	descriptor.Aliases = append([]string(nil), descriptor.Aliases...)
+	sr.lazyDescriptors[descriptor.SiteID] = descriptor
+	if sr.lazyDefaultID == "" && lazyDescriptorAcceptsTraffic(descriptor) {
+		sr.lazyDefaultID = descriptor.SiteID
+	}
+	aliases := append([]string{descriptor.SiteID}, descriptor.Aliases...)
+	for _, alias := range aliases {
+		alias = normalizeSiteHost(alias)
+		if alias == "" {
+			continue
+		}
+		if current := sr.lazyAliases[alias]; current != "" && current != descriptor.SiteID {
+			delete(sr.lazyAliases, alias)
+			sr.lazyAmbiguous[alias] = true
+			continue
+		}
+		if !sr.lazyAmbiguous[alias] {
+			sr.lazyAliases[alias] = descriptor.SiteID
+		}
+	}
+}
+
+func (sr *SiteRouter) removeLazyDescriptorLocked(siteID string) {
+	delete(sr.lazyDescriptors, siteID)
+	for alias, owner := range sr.lazyAliases {
+		if owner == siteID {
+			delete(sr.lazyAliases, alias)
+		}
+	}
+	// Rebuild aliases because a formerly ambiguous name may become unique.
+	ids := make([]string, 0, len(sr.lazyDescriptors))
+	for id := range sr.lazyDescriptors {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	sr.lazyAliases = make(map[string]string, len(ids)*2)
+	sr.lazyAmbiguous = make(map[string]bool)
+	sr.lazyDefaultID = ""
+	for _, id := range ids {
+		sr.addLazyDescriptorLocked(sr.lazyDescriptors[id])
+	}
+}
+
+func lazyDescriptorAcceptsTraffic(descriptor contract.SiteDescriptor) bool {
+	return descriptor.Status == "" || descriptor.Status == "active" || descriptor.Status == "degraded"
+}
+
+// EnsureHost activates a known cold tenant before routing. It returns known
+// false when the host is not in the Engine's credential-free directory view.
+func (sr *SiteRouter) EnsureHost(ctx context.Context, host string, fallback bool) (known bool, err error) {
+	if sr == nil {
+		return false, nil
+	}
+	host = normalizeSiteHost(host)
+	if runtime, _ := sr.manager.ByHost(host); runtime != nil {
+		return true, nil
+	}
+	sr.lazyMu.RLock()
+	siteID := sr.lazyAliases[host]
+	if siteID == "" && fallback && (net.ParseIP(host) != nil || host == "localhost" || host == "127.0.0.1") {
+		siteID = sr.lazyDefaultID
+	}
+	descriptor, found := sr.lazyDescriptors[siteID]
+	activate := sr.lazyActivate
+	ambiguous := sr.lazyAmbiguous[host]
+	sr.lazyMu.RUnlock()
+	if ambiguous {
+		return true, fmt.Errorf("site alias conflict")
+	}
+	if siteID == "" || !found {
+		return false, nil
+	}
+	return true, sr.activateLazyDescriptor(ctx, descriptor, activate)
+}
+
+// EnsureName activates a known cold tenant selected by its stable ID or alias.
+func (sr *SiteRouter) EnsureName(ctx context.Context, name string) (known bool, err error) {
+	if sr == nil {
+		return false, nil
+	}
+	if runtime := sr.manager.ByName(name); runtime != nil {
+		return true, nil
+	}
+	name = normalizeSiteHost(name)
+	sr.lazyMu.RLock()
+	siteID := sr.lazyAliases[name]
+	descriptor, found := sr.lazyDescriptors[siteID]
+	activate := sr.lazyActivate
+	ambiguous := sr.lazyAmbiguous[name]
+	sr.lazyMu.RUnlock()
+	if ambiguous {
+		return true, fmt.Errorf("site alias conflict")
+	}
+	if siteID == "" || !found {
+		return false, nil
+	}
+	return true, sr.activateLazyDescriptor(ctx, descriptor, activate)
+}
+
+func (sr *SiteRouter) activateLazyDescriptor(ctx context.Context, descriptor contract.SiteDescriptor, activate func(context.Context, string) error) error {
+	if !lazyDescriptorAcceptsTraffic(descriptor) {
+		return fmt.Errorf("tenant is not accepting traffic")
+	}
+	if activate == nil {
+		return fmt.Errorf("tenant activation is unavailable")
+	}
+	if err := activate(ctx, descriptor.SiteID); err != nil {
+		slog.Error("tenant runtime activation failed", "site_id", descriptor.SiteID, "error", err)
+		return err
+	}
+	return nil
+}
+
+func (sr *SiteRouter) IsLazyAliasAmbiguous(host string) bool {
+	if sr == nil {
 		return false
 	}
-	s.requestRefs++
-	return true
+	sr.lazyMu.RLock()
+	defer sr.lazyMu.RUnlock()
+	return sr.lazyAmbiguous[normalizeSiteHost(host)]
 }
-
-func (s *LoadedSite) releaseRequest() {
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
-	s.requestRefs--
-	if s.requestRefs == 0 && s.draining && s.requestsDrained != nil {
-		close(s.requestsDrained)
-		s.requestsDrained = nil
+func (sr *SiteRouter) ResourceCounts() (active, retiring int) {
+	if sr == nil || sr.manager == nil {
+		return 0, 0
 	}
+	return sr.manager.ResourceCounts()
 }
-
-func (s *LoadedSite) beginDrain() <-chan struct{} {
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
-	s.draining = true
-	if s.requestRefs == 0 {
-		ch := make(chan struct{})
-		close(ch)
-		return ch
+func (sr *SiteRouter) ResidentCapacity() int {
+	if sr == nil || sr.manager == nil {
+		return 0
 	}
-	if s.requestsDrained == nil {
-		s.requestsDrained = make(chan struct{})
-	}
-	return s.requestsDrained
+	return sr.manager.ResidentCapacity()
 }
-
-// WaitForRequests waits until all requests admitted against this runtime finish.
-func (s *LoadedSite) WaitForRequests(ctx context.Context) error {
-	if s == nil {
-		return nil
-	}
-	ch := s.beginDrain()
-	select {
-	case <-ch:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// AllSites returns all loaded sites (for console, path-based routing, etc.).
 func (sr *SiteRouter) AllSites() []*LoadedSite {
-	sr.mu.RLock()
-	defer sr.mu.RUnlock()
-	return append([]*LoadedSite(nil), sr.allSites...)
+	if sr == nil {
+		return nil
+	}
+	return sr.manager.All()
 }
-
-// AddSite hot-adds a site to the running router without a restart.
-// Used by the console when creating a new site via API.
-func (sr *SiteRouter) AddSite(s *LoadedSite) error {
-	_, err := sr.addOrReplaceSite(s, false)
-	return err
+func (sr *SiteRouter) AllSnapshots() []*RuntimeSnapshot {
+	if sr == nil || sr.manager == nil {
+		return nil
+	}
+	return sr.manager.AllSnapshots()
 }
-
-// ReplaceSite atomically publishes a new runtime for an existing canonical
-// site and marks the prior runtime draining so its DB can be closed only after
-// requests admitted on the old snapshot have completed.
-func (sr *SiteRouter) ReplaceSite(s *LoadedSite) (*LoadedSite, error) {
-	return sr.addOrReplaceSite(s, true)
+func (sr *SiteRouter) SnapshotByID(siteID string) *RuntimeSnapshot {
+	if sr == nil || sr.manager == nil {
+		return nil
+	}
+	return sr.manager.SnapshotByID(contract.TenantID(siteID))
 }
-
-func (sr *SiteRouter) addOrReplaceSite(s *LoadedSite, drainExisting bool) (*LoadedSite, error) {
-	if s == nil {
+func (sr *SiteRouter) SnapshotByName(name string) *RuntimeSnapshot {
+	if sr == nil || sr.manager == nil {
+		return nil
+	}
+	return sr.manager.SnapshotByName(name)
+}
+func (sr *SiteRouter) AddSite(site *LoadedSite) error {
+	return sr.manager.Add(context.Background(), site)
+}
+func (sr *SiteRouter) ReplaceSite(site *LoadedSite) (*LoadedSite, error) {
+	return sr.ReplaceSiteContext(context.Background(), site)
+}
+func (sr *SiteRouter) ReplaceSiteContext(ctx context.Context, site *LoadedSite) (*LoadedSite, error) {
+	if site == nil {
 		return nil, fmt.Errorf("cannot add nil site")
 	}
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	existing := sr.siteByNameLocked(s.Name)
-	if existing == nil && s.SiteID != "" && !sr.ambiguousIDs[s.SiteID] {
-		existing = sr.byID[s.SiteID]
-	}
-	for _, alias := range siteAliases(s.Config) {
-		normalized := normalizeSiteHost(alias)
-		if normalized == "" {
-			continue
-		}
-		for _, owner := range sr.allSites {
-			if owner == existing {
-				continue
-			}
-			for _, ownerAlias := range siteAliases(owner.Config) {
-				if normalizeSiteHost(ownerAlias) == normalized {
-					return nil, fmt.Errorf("site alias %q is already assigned to %q", normalized, owner.Name)
-				}
-			}
-		}
-	}
-	if s.SiteID != "" {
-		for _, owner := range sr.allSites {
-			if owner != existing && owner.SiteID == s.SiteID {
-				return nil, fmt.Errorf("canonical site id %q is already assigned to %q", s.SiteID, owner.Name)
-			}
-		}
-	}
-	var retired *LoadedSite
-	if existing != nil {
-		retired = existing
-		if drainExisting {
-			existing.beginDrain()
-		}
-		sr.removeSiteLocked(existing.Name)
-	}
-	sr.allSites = append(sr.allSites, s)
-	sr.rebuildIndexesLocked()
-	if sr.defaultSite == nil {
-		sr.defaultSite = s
-	}
-	return retired, nil
+	return sr.manager.Activate(ctx, runtimeActivation(site), site)
 }
-
-// RemoveSiteByID removes a runtime from new routing decisions and returns its
-// resources to the caller for graceful close. Existing database operations are
-// allowed to finish by database/sql when DB.Close is called after removal.
+func runtimeActivation(site *LoadedSite) tenantruntime.Activation {
+	return tenantruntime.Activation{
+		Tenant:            contract.TenantID(site.SiteID),
+		ConfigRevision:    contract.Revision(strconv.FormatUint(site.ConfigRevision, 10)),
+		DirectoryRevision: site.DirectoryRevision,
+		ResourceRevision:  contract.Revision(site.DatabaseIdentity),
+	}
+}
 func (sr *SiteRouter) RemoveSiteByID(siteID string) *LoadedSite {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	loaded := sr.byID[siteID]
-	if loaded == nil || sr.ambiguousIDs[siteID] {
-		return nil
-	}
-	loaded.beginDrain()
-	kept := sr.allSites[:0]
-	for _, candidate := range sr.allSites {
-		if candidate != loaded {
-			kept = append(kept, candidate)
-		}
-	}
-	sr.allSites = kept
-	if sr.defaultSite == loaded {
-		sr.defaultSite = nil
-		for _, candidate := range sr.allSites {
-			if siteAcceptsTraffic(candidate) {
-				sr.defaultSite = candidate
-				break
-			}
-		}
-	}
-	sr.rebuildIndexesLocked()
-	return loaded
-}
-
-func siteAliases(config SiteRouterConfig) []string {
-	aliases := append([]string(nil), config.Domains...)
-	aliases = append(aliases, config.Hostname)
-	return aliases
-}
-
-// ValidateAliases refuses to start serving if eager-loaded site aliases are
-// ambiguous. The router never lets ordering choose a tenant at runtime.
-func (sr *SiteRouter) ValidateAliases() error {
-	sr.mu.RLock()
-	defer sr.mu.RUnlock()
-	owners := make(map[string]string)
-	ids := make(map[string]string)
-	for _, loaded := range sr.allSites {
-		if loaded.SiteID != "" {
-			if owner, exists := ids[loaded.SiteID]; exists && owner != loaded.Name {
-				return fmt.Errorf("canonical site id %q is assigned to both %q and %q", loaded.SiteID, owner, loaded.Name)
-			}
-			ids[loaded.SiteID] = loaded.Name
-		}
-		for _, alias := range siteAliases(loaded.Config) {
-			alias = normalizeSiteHost(alias)
-			if alias == "" {
-				continue
-			}
-			if owner, exists := owners[alias]; exists && owner != loaded.Name {
-				return fmt.Errorf("site alias %q is assigned to both %q and %q", alias, owner, loaded.Name)
-			}
-			owners[alias] = loaded.Name
-		}
-	}
-	return nil
-}
-
-// UpdateSiteConfig updates the routing metadata for an already loaded site.
-// It preserves the existing LoadedSite pointer so DB/registry handles remain valid.
-func (sr *SiteRouter) UpdateSiteConfig(name string, cfg SiteRouterConfig) *LoadedSite {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-
-	site := sr.siteByNameLocked(name)
-	if site == nil {
-		return nil
-	}
-	for _, alias := range siteAliases(cfg) {
-		normalized := normalizeSiteHost(alias)
-		for _, owner := range sr.allSites {
-			if owner == site {
-				continue
-			}
-			for _, ownerAlias := range siteAliases(owner.Config) {
-				if normalized != "" && normalizeSiteHost(ownerAlias) == normalized {
-					return nil
-				}
-			}
-		}
-	}
-	site.Config = cfg
-	sr.rebuildIndexesLocked()
-	if sr.defaultSite == nil {
-		sr.defaultSite = site
-	}
+	site, _ := sr.RemoveSiteByIDContext(context.Background(), siteID)
 	return site
 }
-
-// RemoveSite removes a site from the router by name. Returns the removed site
-// or nil if not found. Updates the default site if the removed site was the default.
-func (sr *SiteRouter) RemoveSite(name string) *LoadedSite {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	return sr.removeSiteLocked(name)
+func (sr *SiteRouter) RemoveSiteByIDContext(ctx context.Context, siteID string) (*LoadedSite, error) {
+	return sr.manager.Retire(ctx, contract.TenantID(siteID))
 }
-
-func (sr *SiteRouter) removeSiteLocked(name string) *LoadedSite {
-	// Find the site in allSites.
-	idx := -1
-	for i, s := range sr.allSites {
-		if s.Name == name {
-			idx = i
-			break
-		}
+func (sr *SiteRouter) EvictLeastRecentlyUsedIdle(ctx context.Context) (*LoadedSite, error) {
+	if sr == nil || sr.manager == nil {
+		return nil, tenantruntime.ErrManagerClosed
 	}
-	if idx < 0 {
-		return nil
-	}
-	site := sr.allSites[idx]
-	// Remove from allSites slice.
-	sr.allSites = append(sr.allSites[:idx], sr.allSites[idx+1:]...)
-	sr.rebuildIndexesLocked()
-
-	// Update default site if needed.
-	if sr.defaultSite == site {
-		if len(sr.allSites) > 0 {
-			sr.defaultSite = sr.allSites[0]
-		} else {
-			sr.defaultSite = nil
-		}
-	}
-
-	return site
+	return sr.manager.EvictLeastRecentlyUsedIdle(ctx)
 }
-
-// SiteByName returns a site by its name or short name.
-// E.g., both "airtime.local" and "airtime" match the airtime site.
-func (sr *SiteRouter) SiteByName(name string) *LoadedSite {
-	sr.mu.RLock()
-	defer sr.mu.RUnlock()
-	return sr.siteByNameLocked(name)
-}
-
-func (sr *SiteRouter) siteByNameLocked(name string) *LoadedSite {
-	// Canonical IDs are stable path selectors for Cloud workers and generated
-	// links. Keep hostname/short-name lookup for customer-facing compatibility.
-	if sr.ambiguousIDs[name] {
-		return nil
-	}
-	if site := sr.byID[name]; site != nil {
-		return site
-	}
-	for _, s := range sr.allSites {
-		if s.Name == name {
-			return s
-		}
-	}
-	for _, s := range sr.allSites {
-		short := strings.TrimSuffix(s.Name, ".local")
-		short = strings.TrimSuffix(short, ".com")
-		short = strings.TrimSuffix(short, ".app")
-		if short == name {
-			return s
-		}
-	}
-	return nil
-}
-
-// SiteRouterConfig is the minimal config needed for routing.
-type SiteRouterConfig struct {
-	Hostname      string
-	Domains       []string
-	FileStorage   string
-	StorageBucket string
-}
-
-// SiteRouter maps Host headers to loaded sites.
-type SiteRouter struct {
-	mu               sync.RWMutex
-	sites            map[string]*LoadedSite
-	byID             map[string]*LoadedSite
-	ambiguousAliases map[string]bool
-	ambiguousIDs     map[string]bool
-	allSites         []*LoadedSite
-	defaultSite      *LoadedSite
-}
-
-// NewSiteRouter creates a site router from loaded sites.
-func NewSiteRouter(sites []*LoadedSite) *SiteRouter {
-	sr := &SiteRouter{
-		sites:            make(map[string]*LoadedSite),
-		byID:             make(map[string]*LoadedSite),
-		ambiguousAliases: make(map[string]bool),
-		ambiguousIDs:     make(map[string]bool),
-		allSites:         sites,
-	}
-	sr.rebuildIndexesLocked()
-	if len(sites) > 0 {
-		sr.defaultSite = sites[0]
-	}
-	return sr
-}
-
-func (sr *SiteRouter) rebuildIndexesLocked() {
-	sr.sites = make(map[string]*LoadedSite)
-	sr.byID = make(map[string]*LoadedSite)
-	sr.ambiguousAliases = make(map[string]bool)
-	sr.ambiguousIDs = make(map[string]bool)
-	for _, s := range sr.allSites {
-		if s == nil {
-			continue
-		}
-		if s.Status == "" {
-			s.Status = "active"
-		}
-		if s.SiteID != "" {
-			if prev := sr.byID[s.SiteID]; prev != nil && prev != s {
-				delete(sr.byID, s.SiteID)
-				sr.ambiguousIDs[s.SiteID] = true
-			} else if !sr.ambiguousIDs[s.SiteID] {
-				sr.byID[s.SiteID] = s
-			}
-		}
-		for _, alias := range siteAliases(s.Config) {
-			alias = normalizeSiteHost(alias)
-			if alias == "" {
-				continue
-			}
-			if prev := sr.sites[alias]; prev != nil && prev != s {
-				delete(sr.sites, alias)
-				sr.ambiguousAliases[alias] = true
-			} else if !sr.ambiguousAliases[alias] {
-				sr.sites[alias] = s
-			}
-		}
+func (sr *SiteRouter) FinishRetirement(site *LoadedSite) {
+	if sr != nil {
+		sr.manager.FinishRetirement(site)
 	}
 }
-
-// SiteByID resolves a canonical site identity from the eagerly loaded local
-// runtime snapshot. It performs no database or control-plane request.
-func (sr *SiteRouter) SiteByID(siteID string) *LoadedSite {
-	sr.mu.RLock()
-	defer sr.mu.RUnlock()
-	if sr.ambiguousIDs[siteID] {
-		return nil
-	}
-	return sr.byID[siteID]
+func (sr *SiteRouter) ValidateAliases() error { return sr.manager.ValidateAliases() }
+func (sr *SiteRouter) UpdateSiteConfig(name string, config SiteRouterConfig) *LoadedSite {
+	return sr.manager.UpdateConfig(name, config)
 }
-
-// ApplySiteStatus applies a revisioned directory update to the local eager
-// runtime. It is idempotent and refuses stale updates after a newer revision.
+func (sr *SiteRouter) RemoveSite(name string) *LoadedSite         { return sr.manager.RemoveByName(name) }
+func (sr *SiteRouter) SiteByName(name string) *LoadedSite         { return sr.manager.ByName(name) }
+func (sr *SiteRouter) SiteByID(siteID string) *LoadedSite         { return sr.manager.ByID(siteID) }
+func (sr *SiteRouter) SiteByHost(host string) (*LoadedSite, bool) { return sr.manager.ByHost(host) }
 func (sr *SiteRouter) ApplySiteStatus(siteID, status string, revision uint64) error {
-	status = strings.ToLower(strings.TrimSpace(status))
-	switch status {
-	case "provisioning", "active", "degraded", "suspended", "deleting", "deleted":
-	default:
-		return fmt.Errorf("unsupported site status %q", status)
-	}
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	site := sr.byID[siteID]
-	if site == nil || sr.ambiguousIDs[siteID] {
-		return fmt.Errorf("site id %q is not loaded", siteID)
-	}
-	if revision < site.ConfigRevision || (revision == site.ConfigRevision && status != site.Status) {
-		return fmt.Errorf("stale or conflicting site revision %d; current revision is %d", revision, site.ConfigRevision)
-	}
-	site.Status = status
-	site.ConfigRevision = revision
-	return nil
+	return sr.manager.SetStatus(contract.TenantID(siteID), status, revision)
 }
-
-// ApplySiteDescriptor applies the credential-free routing projection from the
-// directory feed. It refreshes aliases and status in-place, preserving the
-// tenant DB pool, schema registry, analytics worker, and other live handles.
 func (sr *SiteRouter) ApplySiteDescriptor(descriptor contract.SiteDescriptor) error {
-	if strings.TrimSpace(descriptor.SiteID) == "" {
-		return fmt.Errorf("site descriptor id is required")
+	return sr.manager.ApplyDescriptor(contract.TenantID(descriptor.SiteID), descriptor.DirectoryRevision, descriptor.ConfigRevision, descriptor.Status, descriptor.Aliases)
+}
+func (sr *SiteRouter) AdvanceDirectoryRevision(siteID string, revision uint64) error {
+	return sr.manager.AdvanceDirectoryRevision(contract.TenantID(siteID), revision)
+}
+func (sr *SiteRouter) WaitForTenantIdle(ctx context.Context, siteID string) error {
+	return sr.manager.WaitForIdle(ctx, contract.TenantID(siteID))
+}
+func (sr *SiteRouter) RetireUnavailable(ctx context.Context, siteID string) (*LoadedSite, error) {
+	return sr.manager.RetireUnavailable(ctx, contract.TenantID(siteID))
+}
+func (sr *SiteRouter) AllDomains() []string {
+	if sr == nil {
+		return nil
 	}
-	status := strings.ToLower(strings.TrimSpace(descriptor.Status))
-	switch status {
-	case "provisioning", "active", "degraded", "suspended", "deleting", "deleted":
-	default:
-		return fmt.Errorf("unsupported site status %q", status)
+	seen := make(map[string]struct{})
+	domains := sr.manager.Domains()
+	for _, domain := range domains {
+		seen[normalizeSiteHost(domain)] = struct{}{}
 	}
-	if len(descriptor.Aliases) == 0 {
-		return fmt.Errorf("site descriptor aliases are required")
-	}
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	loaded := sr.byID[descriptor.SiteID]
-	if loaded == nil || sr.ambiguousIDs[descriptor.SiteID] {
-		return fmt.Errorf("site id %q is not loaded", descriptor.SiteID)
-	}
-	if descriptor.ConfigRevision < loaded.ConfigRevision || (descriptor.ConfigRevision == loaded.ConfigRevision && status != loaded.Status) {
-		return fmt.Errorf("stale or conflicting site revision %d; current revision is %d", descriptor.ConfigRevision, loaded.ConfigRevision)
-	}
-	domains := make([]string, 0, len(descriptor.Aliases))
-	seen := make(map[string]struct{}, len(descriptor.Aliases))
-	for _, alias := range descriptor.Aliases {
-		alias = normalizeSiteHost(alias)
-		if alias == "" || alias == normalizeSiteHost(loaded.Name) {
-			continue
-		}
-		if _, ok := seen[alias]; ok {
-			continue
-		}
-		seen[alias] = struct{}{}
-		for _, owner := range sr.allSites {
-			if owner == loaded {
+	sr.lazyMu.RLock()
+	for _, descriptor := range sr.lazyDescriptors {
+		for _, alias := range descriptor.Aliases {
+			alias = normalizeSiteHost(alias)
+			if alias == "" {
 				continue
 			}
-			for _, ownerAlias := range siteAliases(owner.Config) {
-				if normalizeSiteHost(ownerAlias) == alias {
-					return fmt.Errorf("site alias %q is already assigned to %q", alias, owner.Name)
-				}
+			if _, ok := seen[alias]; !ok {
+				seen[alias] = struct{}{}
+				domains = append(domains, alias)
 			}
 		}
-		domains = append(domains, alias)
 	}
-	loaded.Config.Domains = domains
-	loaded.Status = status
-	loaded.ConfigRevision = descriptor.ConfigRevision
-	sr.rebuildIndexesLocked()
-	return nil
+	sr.lazyMu.RUnlock()
+	return domains
+}
+func (sr *SiteRouter) IsAmbiguousHost(host string) bool {
+	return sr != nil && (sr.manager.IsAmbiguousHost(host) || sr.IsLazyAliasAmbiguous(host))
+}
+func (sr *SiteRouter) AcquireByName(ctx context.Context, name string) (*LoadedSite, *tenantruntime.Handle, bool) {
+	_, _ = sr.EnsureName(ctx, name)
+	return sr.manager.AcquireByName(ctx, name)
+}
+func (sr *SiteRouter) PinExistingByID(ctx context.Context, siteID string) (*LoadedSite, *tenantruntime.Handle, error) {
+	if sr == nil || sr.manager == nil {
+		return nil, nil, tenantruntime.ErrTenantNotActive
+	}
+	return sr.manager.PinExisting(ctx, contract.TenantID(siteID))
+}
+func (sr *SiteRouter) AcquireByID(ctx context.Context, siteID string) (*tenantruntime.Handle, error) {
+	if sr == nil || sr.manager == nil {
+		return nil, tenantruntime.ErrTenantNotActive
+	}
+	_, _ = sr.EnsureName(ctx, siteID)
+	return sr.manager.Acquire(ctx, contract.TenantID(siteID))
+}
+func (sr *SiteRouter) AcquireByHost(ctx context.Context, host string, fallback bool) (*LoadedSite, *tenantruntime.Handle, bool, bool) {
+	_, _ = sr.EnsureHost(ctx, host, fallback)
+	return sr.manager.AcquireByHost(ctx, host, fallback)
 }
 
-func siteAcceptsTraffic(site *LoadedSite) bool {
-	return site != nil && (site.Status == "" || site.Status == "active" || site.Status == "degraded")
+func siteAcceptsTrafficSnapshot(snapshot *tenantruntime.Snapshot) bool {
+	return snapshot != nil && (snapshot.Status == "" || snapshot.Status == "active" || snapshot.Status == "degraded")
 }
 
 func normalizeSiteHost(host string) string {
@@ -500,17 +402,38 @@ func normalizeSiteHost(host string) string {
 }
 
 type pathRoutedSiteContextKey struct{}
+type pathRoutedRuntime struct {
+	site     *LoadedSite
+	snapshot *tenantruntime.Snapshot
+}
 
-func injectSiteRuntimeContext(c *gin.Context, site *LoadedSite) {
-	c.Set("site_name", site.Name)
-	c.Set("site_id", site.SiteID)
-	c.Set("site_status", site.Status)
-	c.Set("site_config_revision", site.ConfigRevision)
-	c.Set("site_db_type", site.DBType)
-	c.Set("site_db", site.DB)
-	c.Set("site_registry", site.Registry)
-	c.Set("site_analytics_worker", site.AnalyticsWorker)
-	c.Set("site_runtime_services", site.RuntimeServices)
+// InjectSiteRuntimeContext restores the tenant-scoped request state from the
+// pinned runtime snapshot. Shared path-based consumers such as the embedded
+// workspace use it before re-dispatching a request through Gin.
+func InjectSiteRuntimeContext(c *gin.Context, snapshot *tenantruntime.Snapshot) {
+	if snapshot == nil {
+		return
+	}
+	c.Set("site_runtime_snapshot", snapshot)
+	c.Set("site_name", snapshot.Name)
+	c.Set("site_id", string(snapshot.Activation.Tenant))
+	c.Set("site_status", snapshot.Status)
+	c.Set("site_config_revision", snapshot.ConfigRevision)
+	c.Set("site_directory_revision", snapshot.Activation.DirectoryRevision)
+	c.Set("site_db_type", snapshot.DBType)
+	c.Set("site_db", snapshot.DB)
+	c.Set("site_registry", snapshot.Registry)
+	if snapshot.SessionManager != nil {
+		c.Set("site_session_manager", snapshot.SessionManager)
+	}
+	c.Set("site_analytics_worker", snapshot.AnalyticsWorker)
+	if snapshot.HasServices {
+		c.Set("site_runtime_services", snapshot.Services)
+	}
+}
+
+func injectSiteRuntimeContext(c *gin.Context, snapshot *tenantruntime.Snapshot) {
+	InjectSiteRuntimeContext(c, snapshot)
 }
 
 // Middleware returns a Gin middleware that resolves the Host header to a site.
@@ -520,15 +443,15 @@ func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 		// Gin re-dispatches a rewritten /s/<id>/api request. The typed context key
 		// cannot be supplied by a client and deliberately bypasses Host checks for
 		// the shared-ingress hostname while restoring tenant context.
-		if routedSite, ok := c.Request.Context().Value(pathRoutedSiteContextKey{}).(*LoadedSite); ok && routedSite != nil {
-			injectSiteRuntimeContext(c, routedSite)
+		if routed, ok := c.Request.Context().Value(pathRoutedSiteContextKey{}).(pathRoutedRuntime); ok && routed.site != nil {
+			injectSiteRuntimeContext(c, routed.snapshot)
 			c.Next()
 			return
 		}
 
 		// Skip site resolution for console, health, and other system paths.
 		path := c.Request.URL.Path
-		if path == "/health" || strings.HasPrefix(path, "/_kora/") || strings.HasPrefix(path, "/api/console") || strings.HasPrefix(path, "/console") || strings.HasPrefix(path, "/assets/") || path == "/api/ping" || strings.HasPrefix(path, "/s/") {
+		if path == "/health" || path == "/readyz" || strings.HasPrefix(path, "/_kora/") || strings.HasPrefix(path, "/api/console") || strings.HasPrefix(path, "/api/management/v2/") || strings.HasPrefix(path, "/console") || strings.HasPrefix(path, "/assets/") || path == "/api/ping" || strings.HasPrefix(path, "/s/") {
 			c.Next()
 			return
 		}
@@ -540,86 +463,108 @@ func (sr *SiteRouter) Middleware() gin.HandlerFunc {
 		}
 
 		host := normalizeSiteHost(stripPort(c.Request.Host))
-		sr.mu.RLock()
-		if sr.ambiguousAliases[host] {
-			sr.mu.RUnlock()
+		if sr.IsAmbiguousHost(host) {
 			c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "site_alias_conflict", "message": "Host maps to more than one site"})
 			return
 		}
-
-		// Check site cookie (set by /s/:site/... redirect).
-		// Validate that the request Host is trusted when using this cookie to prevent
-		// cross-site access via cookie injection on shared networks.
+		// A site cookie selects an alias only after the manager pins the active
+		// snapshot; authorization then evaluates the same snapshot as the handler.
 		if siteName, _ := c.Cookie("kora_site"); siteName != "" {
-			if s := sr.siteByNameLocked(siteName); s != nil {
-				if sr.isHostAllowedForSite(host, s) {
-					if !siteAcceptsTraffic(s) {
-						sr.mu.RUnlock()
-						c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site is not accepting traffic"})
-						return
-					}
-					if !s.acquireRequest() {
-						sr.mu.RUnlock()
-						c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_draining", "message": "Site runtime is being replaced"})
-						return
-					}
-					injectSiteRuntimeContext(c, s)
-					sr.mu.RUnlock()
-					defer s.releaseRequest()
-					c.Next()
+			known, err := sr.EnsureName(c.Request.Context(), siteName)
+			if err != nil {
+				if errors.Is(err, tenantruntime.ErrResidentCapacity) || errors.Is(err, tenantruntime.ErrActivationCapacity) {
+					c.Header("Retry-After", "1")
+					code, message := tenantCapacityError(err)
+					c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": code, "message": message})
 					return
 				}
-				sr.mu.RUnlock()
-				c.AbortWithStatusJSON(403, gin.H{
-					"error":   "site_access_denied",
-					"message": fmt.Sprintf("Site %q cannot be accessed via host %q", siteName, host),
-				})
+				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site runtime could not be activated"})
 				return
 			}
-		}
-
-		site, ok := sr.sites[host]
-		if !ok {
-			if net.ParseIP(host) != nil || host == "localhost" || host == "127.0.0.1" {
-				site = sr.defaultSite
+			// An explicit tenant cookie is an identity selector, not a hint. If
+			// it is stale or unknown, falling through to localhost's default site
+			// can expose a different tenant's branding and data under this URL.
+			if !known {
+				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "site_not_found", "message": "No site configured for the selected tenant"})
+				return
 			}
-		}
-		acceptsTraffic := siteAcceptsTraffic(site)
-		acquired := site != nil && acceptsTraffic && site.acquireRequest()
-		sr.mu.RUnlock()
-		if site != nil && !acceptsTraffic {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site is not accepting traffic"})
+			if site, handle, acquired := sr.manager.AcquireByName(c.Request.Context(), siteName); site != nil {
+				if !acquired {
+					c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_draining", "message": "Site runtime is being replaced"})
+					return
+				}
+				snapshot := handle.Snapshot()
+				if !sr.isHostAllowedForSite(host, snapshot.Config) {
+					handle.Release()
+					c.AbortWithStatusJSON(403, gin.H{"error": "site_access_denied", "message": fmt.Sprintf("Site %q cannot be accessed via host %q", siteName, host)})
+					return
+				}
+				if !siteAcceptsTrafficSnapshot(snapshot) {
+					handle.Release()
+					c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site is not accepting traffic"})
+					return
+				}
+				injectSiteRuntimeContext(c, snapshot)
+				defer handle.Release()
+				c.Next()
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "The selected tenant runtime is unavailable"})
 			return
 		}
 
+		if _, err := sr.EnsureHost(c.Request.Context(), host, true); err != nil {
+			if errors.Is(err, tenantruntime.ErrResidentCapacity) || errors.Is(err, tenantruntime.ErrActivationCapacity) {
+				c.Header("Retry-After", "1")
+				code, message := tenantCapacityError(err)
+				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": code, "message": message})
+				return
+			}
+			if sr.IsAmbiguousHost(host) {
+				c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "site_alias_conflict", "message": "Host maps to more than one site"})
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site runtime could not be activated"})
+			return
+		}
+		site, handle, ambiguous, acquired := sr.manager.AcquireByHost(c.Request.Context(), host, true)
+		if ambiguous {
+			c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "site_alias_conflict", "message": "Host maps to more than one site"})
+			return
+		}
 		if site == nil {
-			c.AbortWithStatusJSON(404, gin.H{
-				"error":   "site_not_found",
-				"message": fmt.Sprintf("No site configured for host: %s", host),
-			})
+			c.AbortWithStatusJSON(404, gin.H{"error": "site_not_found", "message": fmt.Sprintf("No site configured for host: %s", host)})
 			return
 		}
 		if !acquired {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_draining", "message": "Site runtime is being replaced"})
 			return
 		}
-
-		injectSiteRuntimeContext(c, site)
-
-		// Set kora_site cookie so the frontend can read the site name.
-		// Only set if not already present or value differs (avoid redundant Set-Cookie).
+		snapshot := handle.Snapshot()
+		if !siteAcceptsTrafficSnapshot(snapshot) {
+			handle.Release()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site is not accepting traffic"})
+			return
+		}
+		injectSiteRuntimeContext(c, snapshot)
 		if existing, _ := c.Cookie("kora_site"); existing != site.Name {
 			SetSecureCookie(c, "kora_site", site.Name, 86400, "/", false)
 		}
-
-		defer site.releaseRequest()
+		defer handle.Release()
 		c.Next()
 	}
 }
 
+func tenantCapacityError(err error) (string, string) {
+	if errors.Is(err, tenantruntime.ErrActivationCapacity) {
+		return "activation_capacity", "Tenant activation is temporarily busy"
+	}
+	return "resident_capacity", "Tenant runtime capacity is temporarily full"
+}
+
 // isHostAllowedForSite checks if the given host is allowed to access a site via the kora_site cookie.
 // Allowed: localhost, loopback IPs, any parsed IP (dev/testing), the KORA_HOST env var, or a domain configured for the site.
-func (sr *SiteRouter) isHostAllowedForSite(host string, site *LoadedSite) bool {
+func (sr *SiteRouter) isHostAllowedForSite(host string, config SiteRouterConfig) bool {
 	if net.ParseIP(host) != nil || host == "localhost" || host == "127.0.0.1" {
 		return true
 	}
@@ -627,30 +572,12 @@ func (sr *SiteRouter) isHostAllowedForSite(host string, site *LoadedSite) bool {
 	if appHost := os.Getenv("KORA_HOST"); appHost != "" && normalizeSiteHost(appHost) == host {
 		return true
 	}
-	for _, d := range site.Config.Domains {
+	for _, d := range config.Domains {
 		if normalizeSiteHost(d) == host {
 			return true
 		}
 	}
 	return false
-}
-
-// AllDomains returns every domain across all sites (for autocert).
-func (sr *SiteRouter) AllDomains() []string {
-	sr.mu.RLock()
-	defer sr.mu.RUnlock()
-	var domains []string
-	seen := make(map[string]bool)
-	for _, s := range sr.allSites {
-		for _, d := range s.Config.Domains {
-			d = normalizeSiteHost(d)
-			if !seen[d] {
-				seen[d] = true
-				domains = append(domains, d)
-			}
-		}
-	}
-	return domains
 }
 
 // RegisterPathSiteRoutes adds a NoRoute handler that intercepts /s/:site/*
@@ -682,34 +609,45 @@ func RegisterPathSiteRoutes(router *gin.Engine, sr *SiteRouter, spaFS fs.FS) {
 			rest = "/"
 		}
 
-		sr.mu.RLock()
-		site := sr.siteByNameLocked(siteName)
-		acceptsTraffic := siteAcceptsTraffic(site)
-		acquired := site != nil && acceptsTraffic && site.acquireRequest()
-		sr.mu.RUnlock()
-		if site == nil {
-			c.JSON(404, gin.H{"error": "site_not_found", "message": "No site: " + siteName})
+		known, activationErr := sr.EnsureName(c.Request.Context(), siteName)
+		if !known && activationErr == nil {
+			slog.Debug("path-based site is absent from the local tenant directory", "site", siteName)
+		}
+		if activationErr != nil {
+			if errors.Is(activationErr, tenantruntime.ErrResidentCapacity) || errors.Is(activationErr, tenantruntime.ErrActivationCapacity) {
+				c.Header("Retry-After", "1")
+				code, message := tenantCapacityError(activationErr)
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": code, "message": message})
+				return
+			}
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site runtime could not be activated"})
 			return
 		}
-		if !acceptsTraffic {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site is not accepting traffic"})
+		site, handle, acquired := sr.manager.AcquireByName(c.Request.Context(), siteName)
+		if site == nil {
+			c.JSON(404, gin.H{"error": "site_not_found", "message": "No site: " + siteName})
 			return
 		}
 		if !acquired {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site_draining", "message": "Site runtime is being replaced"})
 			return
 		}
-		defer site.releaseRequest()
+		defer handle.Release()
 
 		// Inject site context.
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), pathRoutedSiteContextKey{}, site))
-		injectSiteRuntimeContext(c, site)
+		snapshot := handle.Snapshot()
+		if !siteAcceptsTrafficSnapshot(snapshot) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site_unavailable", "message": "Site is not accepting traffic"})
+			return
+		}
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), pathRoutedSiteContextKey{}, pathRoutedRuntime{site: site, snapshot: snapshot}))
+		injectSiteRuntimeContext(c, snapshot)
 
 		// Handle API and workspace paths.
 		if strings.HasPrefix(rest, "/api/") || rest == "/api" {
 			// API requests: rewrite path and let Gin re-dispatch.
 			// We need to re-enter the router for API routes to match.
-			c.Request.AddCookie(&http.Cookie{Name: "kora_site", Value: site.Name, Path: "/"})
+			c.Request.AddCookie(&http.Cookie{Name: "kora_site", Value: snapshot.Name, Path: "/"})
 			c.Request.URL.Path = rest
 			// Buffer the request body for re-dispatch — HandleContext
 			// re-processes the middleware chain, so we need a fresh body reader.
@@ -733,7 +671,7 @@ func RegisterPathSiteRoutes(router *gin.Engine, sr *SiteRouter, spaFS fs.FS) {
 		if rest == "/workspace" || strings.HasPrefix(rest, "/workspace/") || rest == "/" {
 			// Serve SPA directly at the /s/:site/workspace URL.
 			// Set a site cookie so API calls know which site to use.
-			SetSecureCookie(c, "kora_site", site.Name, 86400, "/", false)
+			SetSecureCookie(c, "kora_site", snapshot.Name, 86400, "/", false)
 			// Serve index.html from the SPA FS.
 			if spaFS != nil {
 				serveSPAFromFS(c, spaFS, "/index.html")

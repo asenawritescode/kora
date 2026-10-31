@@ -102,18 +102,6 @@ fields:
     fieldtype: Data
     label: Barcode
 
-  - fieldname: digitax_item_id
-    fieldtype: Data
-    label: DigiTax Item ID
-    read_only: true
-    search_index: true
-    description: DigiTax item identifier populated after item synchronization.
-
-  - fieldname: digitax_item_code
-    fieldtype: Data
-    label: eTIMS Item Code
-    read_only: true
-    description: eTIMS item code returned by DigiTax.
   - fieldname: description
     fieldtype: Text
     label: Description

@@ -30,6 +30,13 @@ export type DraftListScope = Partial<DraftScope>
 type DraftStore = Record<string, DocumentDraft<unknown>>
 type DraftMetaStore = Record<string, DocumentDraftMeta>
 
+export class DraftPersistenceError extends Error {
+  constructor(message: string, readonly draftStored: boolean) {
+    super(message)
+    this.name = 'DraftPersistenceError'
+  }
+}
+
 function draftKey(scope: DraftScope): string {
   return `${scope.doctype}:${scope.name || '__new__'}`
 }
@@ -77,16 +84,6 @@ function isDocumentDraftMeta(draft: unknown): draft is DocumentDraftMeta {
       typeof (draft as DocumentDraftMeta).doctype === 'string' &&
       typeof (draft as DocumentDraftMeta).createdAt === 'string' &&
       typeof (draft as DocumentDraftMeta).updatedAt === 'string',
-  )
-}
-
-function isDocumentDraft(draft: unknown): draft is DocumentDraft<unknown> {
-  return Boolean(
-    draft &&
-      typeof draft === 'object' &&
-      typeof (draft as DocumentDraft<unknown>).doctype === 'string' &&
-      typeof (draft as DocumentDraft<unknown>).createdAt === 'string' &&
-      typeof (draft as DocumentDraft<unknown>).updatedAt === 'string',
   )
 }
 
@@ -146,14 +143,26 @@ async function writeDraftRecord(key: string, draft: DocumentDraft<unknown>): Pro
   }
 
   return await new Promise((resolve) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    const request = store.put({ key, value: draft })
-    request.onsuccess = () => resolve(true)
-    request.onerror = () => {
+    let settled = false
+    const fallback = () => {
+      if (settled) return
+      settled = true
       const store = readFallbackStore()
       store[key] = draft
       resolve(writeFallbackStore(store))
+    }
+    try {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      tx.objectStore(STORE_NAME).put({ key, value: draft })
+      tx.oncomplete = () => {
+        if (settled) return
+        settled = true
+        resolve(true)
+      }
+      tx.onabort = fallback
+      tx.onerror = fallback
+    } catch {
+      fallback()
     }
   })
 }
@@ -164,30 +173,49 @@ async function deleteDraftRecord(key: string): Promise<boolean> {
     const store = readFallbackStore()
     if (!store[key]) return false
     delete store[key]
-    return writeFallbackStore(store)
+    if (!writeFallbackStore(store)) {
+      throw new DraftPersistenceError('The browser draft could not be deleted.', false)
+    }
+    return true
   }
 
-  return await new Promise((resolve) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    const request = store.delete(key)
-    request.onsuccess = () => resolve(true)
-    request.onerror = () => {
+  return await new Promise((resolve, reject) => {
+    let settled = false
+    const fallback = () => {
+      if (settled) return
+      settled = true
       const store = readFallbackStore()
       if (!store[key]) {
-        resolve(false)
+        reject(new DraftPersistenceError('The browser draft could not be confirmed as deleted.', false))
         return
       }
       delete store[key]
-      resolve(writeFallbackStore(store))
+      if (!writeFallbackStore(store)) {
+        reject(new DraftPersistenceError('The browser draft could not be deleted.', false))
+        return
+      }
+      resolve(true)
+    }
+    try {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      tx.objectStore(STORE_NAME).delete(key)
+      tx.oncomplete = () => {
+        if (settled) return
+        settled = true
+        resolve(true)
+      }
+      tx.onabort = fallback
+      tx.onerror = fallback
+    } catch {
+      fallback()
     }
   })
 }
 
-function persistMeta(draft: DocumentDraftMeta) {
+function persistMeta(draft: DocumentDraftMeta): boolean {
   const metaStore = readMetaStore()
   metaStore[draftKey(draft)] = draft
-  writeMetaStore(metaStore)
+  return writeMetaStore(metaStore)
 }
 
 function deleteMeta(scope: DraftScope): boolean {
@@ -214,8 +242,11 @@ export async function saveDocumentDraft<TValue = Record<string, unknown>>(
   }
 
   const stored = await writeDraftRecord(key, draft)
-  if (stored) {
-    persistMeta(metaRecordFromDraft(draft))
+  if (!stored) {
+    throw new DraftPersistenceError('The draft could not be saved in this browser.', false)
+  }
+  if (!persistMeta(metaRecordFromDraft(draft))) {
+    throw new DraftPersistenceError('The draft was saved, but its local draft list could not be updated.', true)
   }
 
   return draft
@@ -231,7 +262,9 @@ export async function loadDocumentDraft<TValue = Record<string, unknown>>(
 export async function clearDocumentDraft(scope: DraftScope): Promise<boolean> {
   const key = draftKey(scope)
   const deleted = await deleteDraftRecord(key)
-  deleteMeta(scope)
+  if (!deleteMeta(scope)) {
+    throw new DraftPersistenceError('The draft was deleted, but its local draft list could not be updated.', deleted)
+  }
   return deleted
 }
 

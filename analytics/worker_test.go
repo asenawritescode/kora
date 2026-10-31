@@ -1,12 +1,167 @@
 package analytics
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
+
+	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 )
+
+type trackedFlushBus struct {
+	*fakeBus
+	acknowledged bool
+}
+
+func (b *trackedFlushBus) CommitWALRotation(path string) error { b.acknowledged = true; return nil }
+
+type recordingWorkAdmission struct {
+	err      error
+	calls    int
+	releases int
+}
+
+func (a *recordingWorkAdmission) Acquire(context.Context) (func(), error) {
+	a.calls++
+	if a.err != nil {
+		return nil, a.err
+	}
+	return func() { a.releases++ }, nil
+}
+
+type recordingMaintenanceAdmission struct {
+	ordinaryCalls    int
+	maintenanceCalls int
+	releases         int
+}
+
+func (a *recordingMaintenanceAdmission) Acquire(context.Context) (func(), error) {
+	a.ordinaryCalls++
+	return func() { a.releases++ }, nil
+}
+
+func (a *recordingMaintenanceAdmission) AcquireMaintenance(context.Context) (func(), error) {
+	a.maintenanceCalls++
+	return func() { a.releases++ }, nil
+}
+
+func TestNewWorkerCapsAnalyticsBatchSize(t *testing.T) {
+	worker := NewWorker(nil, nil, nil, nil, "tenant", &Config{BatchSize: MaxAnalyticsBatchSize + 1})
+	if worker.batchSize != MaxAnalyticsBatchSize {
+		t.Fatalf("worker batch size = %d, want hard maximum %d", worker.batchSize, MaxAnalyticsBatchSize)
+	}
+	if worker.flushEvery != time.Second {
+		t.Fatalf("worker flush interval = %s, want safe default %s", worker.flushEvery, time.Second)
+	}
+}
+
+func TestAnalyticsRollupAndRetentionUseHeavyMaintenanceAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*Worker)
+	}{
+		{name: "monthly rollup", run: func(w *Worker) { w.rollupMonthly(context.Background()) }},
+		{name: "retention cleanup", run: func(w *Worker) { w.cleanupRetention(context.Background()) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal("sqlmock.New:", err)
+			}
+			defer database.Close()
+			if tc.name == "monthly rollup" {
+				mock.ExpectExec(`INSERT INTO _kora_analytics_monthly`).WithArgs(sqlmock.AnyArg(), "tenant", sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
+			} else {
+				mock.ExpectExec(`DELETE FROM _kora_analytics_daily`).WithArgs("tenant", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectExec(`DELETE FROM _kora_analytics_monthly`).WithArgs("tenant", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
+			}
+			admission := &recordingMaintenanceAdmission{}
+			worker := NewWorker(newFakeBus(), database, db.Resolve("mysql"), doctype.NewRegistry(), "tenant", LoadConfig())
+			worker.SetWorkAdmission(admission)
+			tc.run(worker)
+			if admission.ordinaryCalls != 0 || admission.maintenanceCalls != 1 || admission.releases != 1 {
+				t.Fatalf("ordinary/maintenance/release calls = %d/%d/%d, want 0/1/1", admission.ordinaryCalls, admission.maintenanceCalls, admission.releases)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal("maintenance SQL expectations:", err)
+			}
+		})
+	}
+}
+
+func TestFlushFailureReturnsErrorAndRetainsBatchAndWAL(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin().WillReturnError(errors.New("database unavailable"))
+	bus := &trackedFlushBus{fakeBus: &fakeBus{ch: make(chan ChangeEvent, 100)}}
+	w := NewWorker(bus, database, db.Resolve("postgres"), doctype.NewRegistry(), "tenant", LoadConfig())
+	admission := &recordingWorkAdmission{}
+	w.SetWorkAdmission(admission)
+	w.addDelta("Invoice", "count", "", "2026-10-13", 1)
+	if err := w.Flush(); err == nil {
+		t.Fatal("Flush succeeded after transaction begin failed")
+	}
+	if bus.acknowledged {
+		t.Fatal("WAL rotation acknowledged after database failure")
+	}
+	if admission.calls != 1 || admission.releases != 1 {
+		t.Fatalf("flush admission calls/releases = %d/%d, want 1/1", admission.calls, admission.releases)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.deltas[deltaKey{Doctype: "Invoice", Metric: "count", Date: "2026-10-13"}] != 1 {
+		t.Fatalf("failed batch was not retained: %#v", w.deltas)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFlushAdmissionRejectionPreservesBatch(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	admission := &recordingWorkAdmission{err: dbaccess.ErrExhausted}
+	w := NewWorker(newFakeBus(), database, db.Resolve("postgres"), doctype.NewRegistry(), "tenant", LoadConfig())
+	w.SetWorkAdmission(admission)
+	w.addDelta("Invoice", "count", "", "2026-10-13", 1)
+	if err := w.Flush(); !errors.Is(err, dbaccess.ErrExhausted) {
+		t.Fatalf("Flush error = %v, want admission rejection", err)
+	}
+	if len(w.manualDeltas) != 1 {
+		t.Fatalf("admission rejection lost pending batch: %#v", w.manualDeltas)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if admission.calls != 1 || admission.releases != 0 {
+		t.Fatalf("rejected flush admission calls/releases = %d/%d, want 1/0", admission.calls, admission.releases)
+	}
+}
+
+func TestWorkerStopsWhenLifecycleContextIsCanceled(t *testing.T) {
+	worker := NewWorker(newFakeBus(), nil, nil, doctype.NewRegistry(), "tenant", LoadConfig())
+	ctx, cancel := context.WithCancel(context.Background())
+	worker.StartAsyncContext(ctx)
+	cancel()
+	worker.Stop()
+	select {
+	case <-worker.done:
+	case <-time.After(time.Second):
+		t.Fatal("analytics worker did not stop after context cancellation")
+	}
+}
 
 // fakeBus implements EventBus for testing — captures published events in a channel.
 type fakeBus struct {
@@ -86,6 +241,114 @@ func TestWorker_InsertIncrementsCount(t *testing.T) {
 		t.Error("expected count delta after insert")
 	} else if delta != 1.0 {
 		t.Errorf("expected count delta 1, got %f", delta)
+	}
+}
+
+func TestWorkerDoesNotAccumulateSameUnacknowledgedEventTwice(t *testing.T) {
+	dt := buildTestDocType("Customer", false, field("name", "Data", "Name", true))
+	w := testWorker(testRegistry(dt), "tenant")
+	event := ChangeEvent{
+		ID: "evt-replayed", Site: "tenant", Doctype: "Customer", DocName: "CUST-1",
+		Operation: EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
+		Data: map[string]any{"name": "Acme"},
+	}
+	w.process(event)
+	sequencedReplay := event
+	sequencedReplay.Sequence = "17"
+	w.process(sequencedReplay)
+	conflictingReplay := sequencedReplay
+	conflictingReplay.Sequence = "18"
+	w.process(conflictingReplay)
+	key := deltaKey{Doctype: "Customer", Metric: "customer_count", Date: "2026-10-14"}
+	if got := w.deltas[key]; got != 1 {
+		t.Fatalf("duplicate pending event accumulated count=%v, want 1", got)
+	}
+	if len(w.pendingEventIDs) != 1 || w.pendingEventIDs[0] != event.ID {
+		t.Fatalf("pending event IDs = %v, want one ID %q", w.pendingEventIDs, event.ID)
+	}
+	if sequence := w.pendingSequences[event.ID]; sequence.value != "" || !sequence.conflict {
+		t.Fatalf("conflicting duplicate source sequence = %+v, want explicitly unknown", sequence)
+	}
+}
+
+func TestFlushSkipsEffectsWhenReplayReceiptAlreadyExists(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO _kora_analytics_rebuild_lock`).WithArgs("tenant").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE _kora_analytics_rebuild_lock SET fence = fence \+ 1 WHERE site = \?`).WithArgs("tenant").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT doctype, from_date, last_source_sequence FROM _kora_analytics_rebuild_checkpoint WHERE site = \?`).
+		WithArgs("tenant").WillReturnRows(sqlmock.NewRows([]string{"doctype", "from_date", "last_source_sequence"}))
+	mock.ExpectExec(`INSERT INTO _kora_analytics_event_receipt`).
+		WithArgs("tenant", "event-already-committed", int64(17), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	bus := &trackedFlushBus{fakeBus: newFakeBus()}
+	w := NewWorker(bus, database, db.Resolve("mysql"), testRegistry(buildTestDocType("Customer", false, field("name", "Data", "Name", true))), "tenant", LoadConfig())
+	event := ChangeEvent{
+		ID: "event-already-committed", Site: "tenant", Doctype: "Customer", DocName: "CUST-1",
+		Sequence: "17", Operation: EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
+		Data: map[string]any{"name": "Acme"},
+	}
+	w.process(event)
+	if err := w.Flush(); err != nil {
+		t.Fatalf("flush replay: %v", err)
+	}
+	if !bus.acknowledged {
+		t.Fatal("durably receipted replay was not acknowledged")
+	}
+	if len(w.deltas) != 0 {
+		t.Fatalf("duplicate replay retained effects: %#v", w.deltas)
+	}
+	if len(w.contributions) != 0 {
+		t.Fatalf("committed replay contribution retained after flush: %#v", w.contributions)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReceiptFailureRetainsEffectsAndDoesNotAcknowledgeWAL(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO _kora_analytics_rebuild_lock`).WithArgs("tenant").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE _kora_analytics_rebuild_lock SET fence = fence \+ 1 WHERE site = \?`).WithArgs("tenant").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT doctype, from_date, last_source_sequence FROM _kora_analytics_rebuild_checkpoint WHERE site = \?`).
+		WithArgs("tenant").WillReturnRows(sqlmock.NewRows([]string{"doctype", "from_date", "last_source_sequence"}))
+	mock.ExpectExec(`INSERT INTO _kora_analytics_event_receipt`).WillReturnError(errors.New("receipt table unavailable"))
+	mock.ExpectRollback()
+	bus := &trackedFlushBus{fakeBus: newFakeBus()}
+	w := NewWorker(bus, database, db.Resolve("mysql"), testRegistry(buildTestDocType("Customer", false, field("name", "Data", "Name", true))), "tenant", LoadConfig())
+	event := ChangeEvent{
+		ID: "event-retryable", Site: "tenant", Doctype: "Customer", DocName: "CUST-1",
+		Sequence: "18", Operation: EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
+		Data: map[string]any{"name": "Acme"},
+	}
+	w.process(event)
+	if err := w.Flush(); err == nil {
+		t.Fatal("flush succeeded after event receipt failed")
+	}
+	if bus.acknowledged {
+		t.Fatal("WAL acknowledged after receipt failure")
+	}
+	key := deltaKey{Doctype: "Customer", Metric: "customer_count", Date: "2026-10-14"}
+	if got := w.deltas[key]; got != 1 {
+		t.Fatalf("failed event effects = %v, want 1 retained", got)
+	}
+	if _, ok := w.contributions[event.ID]; !ok {
+		t.Fatal("failed event contribution was not retained for retry")
+	}
+	if w.pendingSequences[event.ID].value != event.Sequence {
+		t.Fatalf("failed event source sequence = %q, want %q retained for retry", w.pendingSequences[event.ID].value, event.Sequence)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -1,0 +1,16 @@
+{
+  "apex": "Why do most personal OKRs get abandoned by week 3?",
+  "provenance": { "method": "Goldratt CRT", "depth": "standard", "agents": 5, "date": "test-minimal" },
+  "stages": [
+    { "id": "S1", "title": "Stage 1 · Set", "nodes": [
+      { "id": "A", "text": "Goals are framed as outcomes, not weekly behaviors", "kind": "INFERENCE", "grade": "Mod", "role": "LEVER", "cite": "reasoning only (smoke fixture)" },
+      { "id": "B", "text": "No review ritual on the calendar (node with no citation — tests empty meta)", "kind": "HYPOTHESIS", "grade": "Weak", "role": "CONSTRAINT?" }
+    ]}
+  ],
+  "roots": [
+    { "id": "R0", "title": "No recurring review loop (process gap)", "from": ["A","B"], "action": "Put a 10-min weekly review on the calendar", "isConstraint": true }
+  ],
+  "constraint": { "rootId": "R0", "type": "process", "statement": "Located: a missing review loop. Cheap to fix.", "unlocated": "" },
+  "census": { "measured": 0, "inference": 0.5, "hypothesis": 0.5, "instance": 0, "claim": 0, "external": 0,
+    "bottomLine": "All inference/hypothesis — a map, not a verdict. (Single-root case: convergence map shows just the constraint.)" }
+}

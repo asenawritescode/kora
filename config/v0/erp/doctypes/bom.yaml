@@ -1,6 +1,6 @@
 name: BOM
 module: Manufacturing
-title_field: product
+title_field: bom_name
 search_fields: product, bom_name
 fields:
   - fieldname: product
@@ -14,4 +14,5 @@ fields:
     fieldtype: Data
     label: BOM Name
     reqd: true
+    search_index: true
     in_list_view: true

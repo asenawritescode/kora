@@ -4,7 +4,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,12 +21,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
 
+	aiadapter "github.com/asenawritescode/kora/api/ai"
+	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/eventstream"
+	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/secret"
+	"github.com/asenawritescode/kora/workflow"
+	workflowsql "github.com/asenawritescode/kora/workflow/sqlstore"
 )
 
 // TestResourceCRUDUsesKernelAndPreservesRESTContract exercises the actual
@@ -40,6 +51,10 @@ func TestResourceCRUDUsesKernelAndPreservesRESTContract(t *testing.T) {
 	name, _ := createdDoc["name"].(string)
 	if name == "" || createdDoc["title"] != "New from MVP" {
 		t.Fatalf("create response lost REST document fields: %#v", createdDoc)
+	}
+	version, ok := createdDoc["_version"].(string)
+	if !ok || version == "" {
+		t.Fatalf("create response did not include an optimistic concurrency token: %#v", createdDoc)
 	}
 	replayed := serveResourceMutation(t, handler, db, reg, site, httpMethodPost, "/api/resource/TestDoc", "New from MVP", "create-key-1")
 	if replayed.Code != 201 || replayed.Header().Get("X-Kora-Replay") != "true" {
@@ -62,13 +77,41 @@ func TestResourceCRUDUsesKernelAndPreservesRESTContract(t *testing.T) {
 		t.Fatalf("idempotency conflict code = %#v, want kernel.IDEMPOTENCY_KEY_REUSED", conflictBody["error"])
 	}
 
-	updated := serveResourceMutation(t, handler, db, reg, site, httpMethodPut, "/api/resource/TestDoc/"+name, "Updated by MVP", "")
+	updateBody, err := json.Marshal(map[string]string{"title": "Updated by MVP", "_version": version})
+	if err != nil {
+		t.Fatal("encode versioned update:", err)
+	}
+	updated := serveResourceMutationBody(t, handler, db, reg, site, httpMethodPut, "/api/resource/TestDoc/"+name, string(updateBody), "", []string{doctype.AdminRole})
 	if updated.Code != 200 {
 		t.Fatalf("update status = %d, want 200: %s", updated.Code, updated.Body.String())
 	}
 	updatedDoc := requireRESTDocument(t, updated.Body.Bytes(), "TestDoc")
 	if updatedDoc["name"] != name || updatedDoc["title"] != "Updated by MVP" {
 		t.Fatalf("update response contract mismatch: %#v", updatedDoc)
+	}
+	updatedVersion, ok := updatedDoc["_version"].(string)
+	if !ok || updatedVersion == "" || updatedVersion == version {
+		t.Fatalf("update response did not advance the version token: previous=%q response=%#v", version, updatedDoc)
+	}
+	latestBody, err := json.Marshal(map[string]string{"title": "Updated again", "_version": updatedVersion})
+	if err != nil {
+		t.Fatal("encode latest-version update:", err)
+	}
+	latestUpdate := serveResourceMutationBody(t, handler, db, reg, site, httpMethodPut, "/api/resource/TestDoc/"+name, string(latestBody), "", []string{doctype.AdminRole})
+	if latestUpdate.Code != http.StatusOK {
+		t.Fatalf("update with latest response token status = %d, want 200: %s", latestUpdate.Code, latestUpdate.Body.String())
+	}
+	staleBody, err := json.Marshal(map[string]string{"title": "Stale update must not win", "_version": version})
+	if err != nil {
+		t.Fatal("encode stale update:", err)
+	}
+	staleUpdate := serveResourceMutationBody(t, handler, db, reg, site, httpMethodPut, "/api/resource/TestDoc/"+name, string(staleBody), "", []string{doctype.AdminRole})
+	if staleUpdate.Code != http.StatusConflict {
+		t.Fatalf("stale update status = %d, want %d: %s", staleUpdate.Code, http.StatusConflict, staleUpdate.Body.String())
+	}
+	var persistedTitle string
+	if err := db.QueryRow("SELECT title FROM `tabTestDoc` WHERE name = ?", name).Scan(&persistedTitle); err != nil || persistedTitle != "Updated again" {
+		t.Fatalf("stale update overwrote the newer value: title=%q err=%v", persistedTitle, err)
 	}
 
 	deleted := serveResourceMutation(t, handler, db, reg, site, httpMethodDelete, "/api/resource/TestDoc/"+name, "", "")
@@ -94,11 +137,11 @@ func TestResourceCRUDUsesKernelAndPreservesRESTContract(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, name).Scan(&events); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 0 || audits != 3 || events != 3 {
-		t.Fatalf("CRUD side effects = rows:%d audits:%d outbox:%d, want rows:0 audits:3 outbox:3 (changed-payload retry must not write)", rows, audits, events)
+	if rows != 0 || audits != 4 || events != 7 {
+		t.Fatalf("CRUD side effects = rows:%d audits:%d outbox:%d, want rows:0 audits:4 outbox:7 (four operation events plus three committed record-change events)", rows, audits, events)
 	}
 	var receipts int
-	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", site, "create-key-1").Scan(&receipts); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.create'", site).Scan(&receipts); err != nil {
 		t.Fatalf("count create idempotency receipts: %v", err)
 	}
 	if receipts != 1 {
@@ -144,6 +187,113 @@ func TestResourceCRUDKernelErrorMappingsRemainCompatible(t *testing.T) {
 	}
 	if rows != 0 {
 		t.Fatalf("error cases wrote %d records", rows)
+	}
+}
+
+func TestResourceAdapterHonorsExactGrantAndIdempotentReplay(t *testing.T) {
+	handler, database, registry, site := newResourceIntegrationHandler(t)
+	execution, err := policy.NewVerifiedExecutionWithGrants(contract.TenantID(site), contract.ActorContext{
+		PrincipalID: "service:resource-writer", PrincipalType: contract.PrincipalService,
+		Site: site, AuthenticatedAt: time.Now().UTC(),
+	}, []policy.Grant{{Resource: "TestDoc", Operation: "create"}})
+	if err != nil {
+		t.Fatal("create verified service execution:", err)
+	}
+	create := func() *httptest.ResponseRecorder {
+		return serveResourceMutationWithExecution(t, handler, database, registry, site, httpMethodPost,
+			"/api/resource/TestDoc", `{"title":"delegated create"}`, "http-exact-grant-create-1", "mysql", execution)
+	}
+	first := create()
+	if first.Code != http.StatusCreated {
+		t.Fatalf("exact-grant create status = %d, want %d: %s", first.Code, http.StatusCreated, first.Body.String())
+	}
+	createdDoc := requireRESTDocument(t, first.Body.Bytes(), "TestDoc")
+	name, _ := createdDoc["name"].(string)
+	if name == "" {
+		t.Fatalf("exact-grant create response omitted document name: %#v", createdDoc)
+	}
+	replay := create()
+	if replay.Code != http.StatusCreated || replay.Header().Get("X-Kora-Replay") != "true" {
+		t.Fatalf("exact-grant replay = HTTP %d, replay=%q: %s", replay.Code, replay.Header().Get("X-Kora-Replay"), replay.Body.String())
+	}
+
+	update := serveResourceMutationWithExecution(t, handler, database, registry, site, httpMethodPut,
+		"/api/resource/TestDoc/"+url.PathEscape(name), `{"title":"unauthorized update"}`, "", "mysql", execution)
+	if update.Code != http.StatusForbidden {
+		t.Fatalf("create-only service grant authorized update: HTTP %d: %s", update.Code, update.Body.String())
+	}
+	var records, audits, outboxEvents, receipts int
+	if err := database.QueryRow("SELECT COUNT(*) FROM `tabTestDoc` WHERE title = ?", "delegated create").Scan(&records); err != nil {
+		t.Fatalf("count delegated records: %v", err)
+	}
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND status = 'completed'", site).Scan(&audits); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", site).Scan(&outboxEvents); err != nil {
+		t.Fatalf("count outbox events: %v", err)
+	}
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.create'", site).Scan(&receipts); err != nil {
+		t.Fatalf("count idempotency receipts: %v", err)
+	}
+	if records != 1 || audits != 1 || outboxEvents != 2 || receipts != 1 {
+		t.Fatalf("exact-grant create/replay effects = records:%d audits:%d outbox:%d receipts:%d, want one record, audit, receipt and two outbox events", records, audits, outboxEvents, receipts)
+	}
+}
+
+func TestAIAndHTTPAdaptersShareMutationReceipt(t *testing.T) {
+	handler, database, registry, site := newResourceIntegrationHandler(t)
+	execution, err := policy.NewVerifiedExecutionWithGrants(contract.TenantID(site), contract.ActorContext{
+		PrincipalID: "service:shared-writer", PrincipalType: contract.PrincipalService,
+		Site: site, AuthenticatedAt: time.Now().UTC(),
+	}, []policy.Grant{{Resource: "TestDoc", Operation: "create"}})
+	if err != nil {
+		t.Fatal("create verified service execution:", err)
+	}
+	const clientKey = "shared-ai-http-retry-1"
+	const title = "created once across adapters"
+	aiKey := "channel-tool-" + func() string {
+		digest := sha256.Sum256([]byte(site + "\x00" + clientKey))
+		return hex.EncodeToString(digest[:])
+	}()
+	manager := &orm.TxManager{
+		DB: database, Registry: registry, Dialect: kdb.Resolve("mysql"),
+		SiteName: site, Outbox: outbox.NewSQLWriter(kdb.Resolve("mysql")), Execution: execution,
+	}
+	aiResult := aiadapter.ExecuteConfirmedToolWithExecution(manager, registry, "testdoc_create", map[string]any{"title": title}, execution.Actor().PrincipalID, site, clientKey, execution)
+	if !strings.HasPrefix(aiResult, "Created TestDoc \"") {
+		t.Fatalf("AI create failed: %s", aiResult)
+	}
+
+	retry := serveResourceMutationWithExecution(t, handler, database, registry, site, httpMethodPost,
+		"/api/resource/TestDoc", `{"title":"created once across adapters"}`, aiKey, "mysql", execution)
+	if retry.Code != http.StatusCreated || retry.Header().Get("X-Kora-Replay") != "true" {
+		t.Fatalf("HTTP retry did not replay AI receipt: HTTP %d replay=%q body=%s", retry.Code, retry.Header().Get("X-Kora-Replay"), retry.Body.String())
+	}
+	if document := requireRESTDocument(t, retry.Body.Bytes(), "TestDoc"); document["title"] != title {
+		t.Fatalf("HTTP replay returned a different command result: %#v", document)
+	}
+	changed := serveResourceMutationWithExecution(t, handler, database, registry, site, httpMethodPost,
+		"/api/resource/TestDoc", `{"title":"changed command"}`, aiKey, "mysql", execution)
+	if changed.Code != http.StatusConflict {
+		t.Fatalf("cross-adapter key reuse with changed command = HTTP %d, want conflict: %s", changed.Code, changed.Body.String())
+	}
+	for query, want := range map[string]int{
+		"SELECT COUNT(*) FROM `tabTestDoc` WHERE title = ?":                                                1,
+		"SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND status = 'completed'":               1,
+		"SELECT COUNT(*) FROM _kora_outbox WHERE site = ?":                                                 2,
+		"SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.create'": 1,
+	} {
+		var count int
+		args := []any{site}
+		if strings.Contains(query, "WHERE title = ?") {
+			args = []any{title}
+		}
+		if err := database.QueryRow(query, args...).Scan(&count); err != nil {
+			t.Fatalf("count shared adapter effects: %v", err)
+		}
+		if count != want {
+			t.Errorf("shared adapter effect count for %q = %d, want %d", query, count, want)
+		}
 	}
 }
 
@@ -223,6 +373,19 @@ func TestScriptProviderMutationsUseKernelAndPreserveDocumentContract(t *testing.
 	tx.CurrentUser = "script@example.test"
 	tx.CurrentUserRole = doctype.AdminRole
 	tx.CurrentUserRoles = []string{doctype.AdminRole}
+	execution, err := policy.NewVerifiedExecutionWithGrants(contract.TenantID(site), contract.ActorContext{
+		PrincipalID: "service:script-test", PrincipalType: contract.PrincipalService,
+		Site: site, AuthenticatedAt: time.Now().UTC(),
+	}, []policy.Grant{
+		{Resource: "TestDoc", Operation: "read"},
+		{Resource: "TestDoc", Operation: "create"},
+		{Resource: "TestDoc", Operation: "write"},
+		{Resource: "TestDoc", Operation: "delete"},
+	})
+	if err != nil {
+		t.Fatal("create script service execution:", err)
+	}
+	tx.Execution = execution
 	provider := NewScriptProvider(&tx, reg, site, nil, nil)
 
 	created, err := provider.CreateDoc("TestDoc", map[string]any{
@@ -242,8 +405,8 @@ func TestScriptProviderMutationsUseKernelAndPreserveDocumentContract(t *testing.
 	if err := db.QueryRow("SELECT owner, modified_by FROM `tabTestDoc` WHERE name = ?", name).Scan(&owner, &modifiedBy); err != nil {
 		t.Fatal("read script-created attribution:", err)
 	}
-	if owner != "owner@example.test" || modifiedBy != "script@example.test" {
-		t.Fatalf("script create attribution owner=%q modified_by=%q", owner, modifiedBy)
+	if owner != "service:script-test" || modifiedBy != "service:script-test" {
+		t.Fatalf("script create attribution used non-verified identity: owner=%q modified_by=%q", owner, modifiedBy)
 	}
 
 	if err := provider.SaveDoc("TestDoc", map[string]any{
@@ -275,13 +438,13 @@ func TestScriptProviderMutationsUseKernelAndPreserveDocumentContract(t *testing.
 	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, name).Scan(&events); err != nil {
 		t.Fatal("count script outbox events:", err)
 	}
-	if rows != 0 || audits != 3 || events != 3 {
-		t.Fatalf("script CRUD side effects = rows:%d audits:%d outbox:%d; want rows:0 audits:3 outbox:3", rows, audits, events)
+	if rows != 0 || audits != 3 || events != 5 {
+		t.Fatalf("script CRUD side effects = rows:%d audits:%d outbox:%d; want rows:0 audits:3 outbox:5 including create/update trigger events", rows, audits, events)
 	}
 	var canonicalAudits int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM _kora_operation_audit
-		WHERE site = ? AND source = 'integration' AND actor_user = 'script@example.test'
-		AND principal_id = 'script@example.test'
+		WHERE site = ? AND source = 'integration' AND actor_user = 'service:script-test'
+		AND principal_id = 'service:script-test'
 		AND command_name IN ('record.create', 'record.update', 'record.delete')`, site).Scan(&canonicalAudits); err != nil {
 		t.Fatal("verify script actor and command audit:", err)
 	}
@@ -297,6 +460,7 @@ func TestScriptProviderDeniedMutationWritesNoRecord(t *testing.T) {
 	tx.CurrentUser = "reader@example.test"
 	tx.CurrentUserRole = "Reader"
 	tx.CurrentUserRoles = []string{"Reader"}
+	tx.Execution = integrationTestExecution(t, site, tx.CurrentUser, tx.CurrentUserRoles)
 	provider := NewScriptProvider(&tx, reg, site, nil, nil)
 	if _, err := provider.CreateDoc("TestDoc", map[string]any{"title": "denied"}, "reader@example.test", "reader@example.test"); err == nil {
 		t.Fatal("script provider created a record without the create grant")
@@ -320,12 +484,21 @@ func TestScriptHookSnapshotRefreshesForEachCommand(t *testing.T) {
 			t.Fatalf("create script tables: %v", err)
 		}
 	}
+	for _, statement := range configstore.ConfigRevisionSchema(kdb.Resolve("mysql")) {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("create config revision table: %v", err)
+		}
+	}
+	if err := configstore.SeedConfigRevision(t.Context(), db, kdb.Resolve("mysql")); err != nil {
+		t.Fatalf("seed config revision: %v", err)
+	}
 	store := &script.Store{DB: db, Dialect: kdb.Resolve("mysql")}
 	runner := &nestedScriptMutationRunner{}
 	tx := *handler.TxManager
 	tx.CurrentUser = "script@example.test"
 	tx.CurrentUserRole = doctype.AdminRole
 	tx.CurrentUserRoles = []string{doctype.AdminRole}
+	tx.Execution = integrationTestExecution(t, site, tx.CurrentUser, tx.CurrentUserRoles)
 	tx.ScriptRunner, tx.ScriptStore = runner, store
 	provider := NewScriptProvider(&tx, reg, site, nil, nil)
 	tx.ScriptProvider = provider
@@ -368,6 +541,7 @@ func TestScriptHookProviderSkipsOnlyTheActiveLifecycleScript(t *testing.T) {
 	tx.CurrentUser = "script@example.test"
 	tx.CurrentUserRole = doctype.AdminRole
 	tx.CurrentUserRoles = []string{doctype.AdminRole}
+	tx.Execution = integrationTestExecution(t, site, tx.CurrentUser, tx.CurrentUserRoles)
 	tx.ScriptRunner = runner
 	tx.ScriptStore = store
 	provider := NewScriptProvider(&tx, reg, site, nil, nil)
@@ -418,6 +592,7 @@ func TestScriptHookNestedMutationRollsBackWithParent(t *testing.T) {
 	tx.CurrentUser = "script@example.test"
 	tx.CurrentUserRole = doctype.AdminRole
 	tx.CurrentUserRoles = []string{doctype.AdminRole}
+	tx.Execution = integrationTestExecution(t, site, tx.CurrentUser, tx.CurrentUserRoles)
 	tx.ScriptRunner, tx.ScriptStore = runner, store
 	provider := NewScriptProvider(&tx, reg, site, nil, nil)
 	tx.ScriptProvider = provider
@@ -477,128 +652,361 @@ func (r *nestedScriptMutationRunner) Execute(_ context.Context, req script.Execu
 func (*nestedScriptMutationRunner) Validate(string) error { return nil }
 func (*nestedScriptMutationRunner) Close() error          { return nil }
 
-func TestWorkflowActionRouteUsesKernelAndPreservesRESTContract(t *testing.T) {
-	handler, db, reg, site := newResourceIntegrationHandler(t)
-	reg.Workflows.Register(&doctype.Workflow{
-		Name: "TestDoc Lifecycle", DocumentType: "TestDoc", IsActive: true, WorkflowStateField: "status",
-		States:      []doctype.WorkflowState{{State: "Draft", DocStatus: 0}, {State: "Done", DocStatus: 1}},
-		Transitions: []doctype.WorkflowTransition{{Action: "Complete", From: "Draft", To: "Done", Allowed: doctype.AdminRole}},
-	})
-	created := serveResourceMutation(t, handler, db, reg, site, httpMethodPost, "/api/resource/TestDoc", "Workflow record", "")
+func TestUnifiedWorkflowPolicyBlocksDirectStateWriteAndKeepsInternalTransitionAtomic(t *testing.T) {
+	handler, database, registry, site := newResourceIntegrationHandler(t)
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "TestDoc", Role: "Reader", Read: true, Write: true, Create: true, Submit: true})
+	dialect := kdb.Resolve("mysql")
+	for _, statement := range configstore.ConfigRevisionSchema(dialect) {
+		if _, err := database.Exec(statement); err != nil {
+			t.Fatalf("create config revision table: %v", err)
+		}
+	}
+	if err := configstore.SeedConfigRevision(t.Context(), database, dialect); err != nil {
+		t.Fatalf("seed config revision: %v", err)
+	}
+	definitionStore, err := workflowsql.NewDefinitionStore(database, dialect)
+	if err != nil {
+		t.Fatalf("create workflow definition store: %v", err)
+	}
+	if err := definitionStore.Ensure(t.Context()); err != nil {
+		t.Fatalf("create workflow definition tables: %v", err)
+	}
+	statusInput, err := json.Marshal(workflow.StatusActionConfig{StateField: "status", InitialState: "Draft", StatusTransition: workflow.StatusTransition{Action: "Complete", From: "Draft", To: "Done", AllowedRoles: []string{doctype.AdminRole}, RequireFields: []string{"serial"}, DocStatus: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := contract.WorkflowDefinition{
+		ID: "testdoc-status-action", Version: 1, Entry: "transition",
+		Trigger: &contract.RecordTrigger{Kind: "record.updated", Table: "TestDoc", WatchedFields: []string{"status"}},
+		Steps: []contract.StepDefinition{
+			{ID: "transition", Kind: contract.StepAction, Action: &contract.ActionSpec{Name: "record.update_status", Version: 1, InputSchema: "kora.record.update_status", Input: statusInput, Next: "finish"}},
+			{ID: "finish", Kind: contract.StepEnd, End: &contract.EndSpec{Outcome: "complete"}},
+		},
+	}
+	tenant, err := contract.ParseTenantID(site)
+	if err != nil {
+		t.Fatalf("parse workflow tenant: %v", err)
+	}
+	actor, err := contract.ParsePrincipalID("system-workflow-integration")
+	if err != nil {
+		t.Fatalf("parse workflow migration actor: %v", err)
+	}
+	if err := definitionStore.PublishImportedBatch(t.Context(), tenant, actor, []contract.WorkflowDefinition{definition}, time.Now().UTC()); err != nil {
+		t.Fatalf("publish v2 status-action definition: %v", err)
+	}
+	runtimeServices := NewSiteRuntimeServices()
+	runtimeServices.Replace(site, SiteRuntimeService{WorkflowStatusPolicies: definitionStore, Outbox: outbox.NewSQLWriter(dialect)})
+	handler.RuntimeServices = runtimeServices
+
+	created := serveResourceMutationBody(t, handler, database, registry, site, httpMethodPost,
+		"/api/resource/TestDoc", `{"title":"Transition policy integration"}`, "v2-lifecycle-create", []string{doctype.AdminRole})
 	if created.Code != http.StatusCreated {
-		t.Fatalf("create status = %d: %s", created.Code, created.Body.String())
+		t.Fatalf("create TestDoc status=%d body=%s", created.Code, created.Body.String())
 	}
 	createdDoc := requireRESTDocument(t, created.Body.Bytes(), "TestDoc")
-	name := createdDoc["name"].(string)
-
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/resource/TestDoc/"+name+"/workflow_action", strings.NewReader(`{"action":"Complete"}`))
-	ctx.Request.Header.Set("Content-Type", "application/json")
-	ctx.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}, {Key: "name", Value: name}}
-	ctx.Set("site_name", site)
-	ctx.Set("site_db", db)
-	ctx.Set("site_registry", reg)
-	ctx.Set("site_db_type", "mysql")
-	ctx.Set("user", "admin@example.test")
-	ctx.Set("user_role", doctype.AdminRole)
-	ctx.Set("user_roles", []string{doctype.AdminRole})
-	handler.HandleWorkflowAction(ctx)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("workflow action status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	name, ok := createdDoc["name"].(string)
+	if !ok || name == "" {
+		t.Fatalf("created record omitted its name: %#v", createdDoc)
 	}
-	var response Response
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode workflow response: %v", err)
+	var initialState string
+	var initialDocStatus int
+	if err := database.QueryRow("SELECT status, doc_status FROM `tabTestDoc` WHERE name = ?", name).Scan(&initialState, &initialDocStatus); err != nil {
+		t.Fatalf("read initial lifecycle state: %v", err)
 	}
-	if response.Meta == nil || response.Meta.DocType != "TestDoc" {
-		t.Fatalf("workflow response metadata = %#v", response.Meta)
+	if initialState != "Draft" || initialDocStatus != 0 {
+		t.Fatalf("new record lifecycle state=%q doc_status=%d, want Draft/0", initialState, initialDocStatus)
 	}
-	data, ok := response.Data.(map[string]any)
-	if !ok || data["name"] != name || data["status"] != "Done" || data["doc_status"] != float64(1) {
-		t.Fatalf("workflow response data = %#v", response.Data)
+	transition := func(roles []string, key string) *httptest.ResponseRecorder {
+		t.Helper()
+		execution := integrationTestExecution(t, site, "workflow@example.test", roles)
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/test/workflow-action", strings.NewReader(`{"action":"Complete"}`))
+		ctx.Request.Header.Set("Content-Type", "application/json")
+		ctx.Request.Header.Set("Idempotency-Key", key)
+		ctx.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}, {Key: "name", Value: name}}
+		ctx.Set("site_name", site)
+		ctx.Set("site_id", site)
+		ctx.Set("site_db", database)
+		ctx.Set("site_registry", registry)
+		ctx.Set("site_db_type", "mysql")
+		ctx.Set("policy_execution", execution)
+		_, transitionErr := handler.runKernelWorkflowTransition(ctx, "TestDoc", name, "Complete", 1)
+		if transitionErr != nil {
+			recorder.Body.WriteString(transitionErr.Message)
+			recorder.Code = http.StatusBadRequest
+		} else {
+			recorder.Code = http.StatusOK
+		}
+		return recorder
 	}
-	var state string
-	var auditCount, outboxCount int
-	if err := db.QueryRow("SELECT status FROM `tabTestDoc` WHERE name = ?", name).Scan(&state); err != nil {
-		t.Fatal(err)
+	if response := transition([]string{"Reader"}, "v2-lifecycle-reader-denied"); response.Code != http.StatusBadRequest {
+		t.Fatalf("unauthorized lifecycle action status=%d, want 400: %s", response.Code, response.Body.String())
 	}
-	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_operation_audit WHERE doc_name = ? AND command_name = ?", name, "record.workflow_transition").Scan(&auditCount); err != nil {
-		t.Fatal(err)
+	if response := serveResourceMutationBody(t, handler, database, registry, site, httpMethodPut,
+		"/api/resource/TestDoc/"+url.PathEscape(name), `{"status":"Done"}`, "v2-lifecycle-direct-status", []string{doctype.AdminRole}); response.Code != http.StatusBadRequest {
+		t.Fatalf("direct status write status=%d, want 400: %s", response.Code, response.Body.String())
 	}
-	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, name).Scan(&outboxCount); err != nil {
-		t.Fatal(err)
+	if response := transition([]string{doctype.AdminRole}, "v2-lifecycle-required-field"); response.Code != http.StatusBadRequest {
+		t.Fatalf("transition without required field status=%d, want 400: %s", response.Code, response.Body.String())
 	}
-	if state != "Done" || auditCount != 1 || outboxCount != 2 {
-		t.Fatalf("workflow mutation state=%q audit=%d outbox=%d; want Done/1/2", state, auditCount, outboxCount)
+	if response := serveResourceMutationBody(t, handler, database, registry, site, httpMethodPut,
+		"/api/resource/TestDoc/"+url.PathEscape(name), `{"serial":"SERIAL-1"}`, "v2-lifecycle-set-required-field", []string{doctype.AdminRole}); response.Code != http.StatusOK {
+		t.Fatalf("set required field status=%d, want 200: %s", response.Code, response.Body.String())
+	}
+	if response := transition([]string{doctype.AdminRole}, "v2-lifecycle-complete"); response.Code != http.StatusOK {
+		t.Fatalf("authorized lifecycle action status=%d, want 200: %s", response.Code, response.Body.String())
+	}
+	var status string
+	var docStatus int
+	if err := database.QueryRow("SELECT status, doc_status FROM `tabTestDoc` WHERE name = ?", name).Scan(&status, &docStatus); err != nil {
+		t.Fatalf("read transitioned status: %v", err)
+	}
+	if status != "Done" || docStatus != 1 {
+		t.Fatalf("record status=%q doc_status=%d, want Done/1", status, docStatus)
+	}
+	var transitions int
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ? AND status = 'completed'", site, name, kernel.CommandWorkflowStatusTransition).Scan(&transitions); err != nil {
+		t.Fatalf("count transition audit rows: %v", err)
+	}
+	if transitions != 1 {
+		t.Fatalf("completed transition audit rows=%d, want 1", transitions)
 	}
 }
 
-func TestWorkflowActionRejectionsDoNotWriteOrEmitEffects(t *testing.T) {
+func TestCRMLeadAssignmentReadScopeHTTP(t *testing.T) {
 	handler, database, registry, site := newResourceIntegrationHandler(t)
-	registry.Workflows.Register(&doctype.Workflow{
-		Name: "TestDoc Lifecycle", DocumentType: "TestDoc", IsActive: true, WorkflowStateField: "status",
-		States:      []doctype.WorkflowState{{State: "Draft", DocStatus: 0}, {State: "Done", DocStatus: 1}},
-		Transitions: []doctype.WorkflowTransition{{Action: "Complete", From: "Draft", To: "Done", Allowed: doctype.AdminRole}},
-	})
-	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "TestDoc", Role: "Reader", Read: true, Write: true})
-	created := serveResourceMutation(t, handler, database, registry, site, httpMethodPost, "/api/resource/TestDoc", "Workflow rejection", "")
-	if created.Code != http.StatusCreated {
-		t.Fatalf("seed create status = %d: %s", created.Code, created.Body.String())
-	}
-	createdDoc := requireRESTDocument(t, created.Body.Bytes(), "TestDoc")
-	name := createdDoc["name"].(string)
 
-	invoke := func(action string, roles []string) *httptest.ResponseRecorder {
+	leadYAML, err := os.ReadFile("../config/v0/crm/doctypes/lead.yaml")
+	if err != nil {
+		t.Fatal("read CRM Lead config:", err)
+	}
+	leadType, err := doctype.ParseYAML(leadYAML, "lead.yaml")
+	if err != nil {
+		t.Fatal("parse CRM Lead config:", err)
+	}
+	registry.Register(leadType)
+	permissionsYAML, err := os.ReadFile("../config/v0/crm/permissions.yaml")
+	if err != nil {
+		t.Fatal("read CRM permissions:", err)
+	}
+	permissions, err := doctype.ParsePermissionsYAML(permissionsYAML)
+	if err != nil {
+		t.Fatal("parse CRM permissions:", err)
+	}
+	for _, permission := range permissions {
+		if permission.Doctype == "Lead" {
+			registry.Permissions.SetPermission(permission)
+		}
+	}
+	if err := schema.MigrateSiteFromRegistry(database, site, registry, kdb.Resolve("mysql")); err != nil {
+		t.Fatal("migrate CRM Lead table:", err)
+	}
+
+	for _, record := range []struct {
+		name, owner, leadName, assignee string
+	}{
+		{"LEAD-REP1", "manager@example.test", "Rep One Lead", "rep-one@example.test"},
+		{"LEAD-REP2", "manager@example.test", "Rep Two Lead", "rep-two@example.test"},
+		{"LEAD-REP1-OWN", "rep-one@example.test", "Rep One Owned Lead", ""},
+		{"LEAD-REP2-OWN", "rep-two@example.test", "Rep Two Owned Lead", ""},
+		{"LEAD-UNASSIGNED", "manager@example.test", "Unassigned Lead", ""},
+	} {
+		if _, err := database.Exec(`INSERT INTO `+"`tabLead`"+` (name, owner, lead_name, assignee_user) VALUES (?, ?, ?, ?)`, record.name, record.owner, record.leadName, record.assignee); err != nil {
+			t.Fatalf("insert Lead %s fixture: %v", record.name, err)
+		}
+	}
+
+	request := func(user, role, route string, list bool) *httptest.ResponseRecorder {
 		t.Helper()
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
-		ctx.Request = httptest.NewRequest(http.MethodPost, "/api/resource/TestDoc/"+url.PathEscape(name)+"/workflow_action", strings.NewReader(`{"action":"`+action+`"}`))
-		ctx.Request.Header.Set("Content-Type", "application/json")
-		ctx.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}, {Key: "name", Value: name}}
+		ctx.Request = httptest.NewRequest(http.MethodGet, route, nil)
+		ctx.Params = gin.Params{{Key: "doctype", Value: "Lead"}}
+		if !list {
+			ctx.Params = append(ctx.Params, gin.Param{Key: "name", Value: strings.TrimPrefix(route, "/api/resource/Lead/")})
+		}
 		ctx.Set("site_name", site)
 		ctx.Set("site_db", database)
 		ctx.Set("site_registry", registry)
 		ctx.Set("site_db_type", "mysql")
-		ctx.Set("user", "workflow@example.test")
-		if len(roles) > 0 {
-			ctx.Set("user_role", roles[0])
+		ctx.Set("user", user)
+		ctx.Set("user_role", role)
+		ctx.Set("user_roles", []string{role})
+		ctx.Set("policy_execution", integrationTestExecution(t, site, user, []string{role}))
+		if list {
+			handler.HandleList(ctx)
+		} else {
+			handler.HandleGet(ctx)
 		}
-		ctx.Set("user_roles", roles)
-		handler.HandleWorkflowAction(ctx)
 		return recorder
 	}
 
+	decodeNames := func(response *httptest.ResponseRecorder) map[string]bool {
+		t.Helper()
+		if response.Code != http.StatusOK {
+			t.Fatalf("Lead list status = %d, want 200: %s", response.Code, response.Body.String())
+		}
+		var payload struct {
+			Data []struct {
+				Name string `json:"name"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal("decode Lead list:", err)
+		}
+		names := make(map[string]bool, len(payload.Data))
+		for _, row := range payload.Data {
+			names[row.Name] = true
+		}
+		return names
+	}
+
 	for _, test := range []struct {
-		name       string
-		action     string
-		roles      []string
-		wantStatus int
+		user, own, ownByOwner, other, otherOwned string
 	}{
-		{name: "unavailable transition", action: "Archive", roles: []string{doctype.AdminRole}, wantStatus: http.StatusBadRequest},
-		{name: "submit denied", action: "Complete", roles: []string{"Reader"}, wantStatus: http.StatusForbidden},
+		{"rep-one@example.test", "LEAD-REP1", "LEAD-REP1-OWN", "LEAD-REP2", "LEAD-REP2-OWN"},
+		{"rep-two@example.test", "LEAD-REP2", "LEAD-REP2-OWN", "LEAD-REP1", "LEAD-REP1-OWN"},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			response := invoke(test.action, test.roles)
-			if response.Code != test.wantStatus {
-				t.Fatalf("workflow response status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+		names := decodeNames(request(test.user, "Sales Rep", "/api/resource/Lead", true))
+		if !names[test.own] || !names[test.ownByOwner] || names[test.other] || names[test.otherOwned] || names["LEAD-UNASSIGNED"] || len(names) != 2 {
+			t.Errorf("Sales Rep %s list names = %#v, want only assigned %s and owned %s", test.user, names, test.own, test.ownByOwner)
+		}
+		for _, allowed := range []string{test.own, test.ownByOwner} {
+			if response := request(test.user, "Sales Rep", "/api/resource/Lead/"+allowed, false); response.Code != http.StatusOK {
+				t.Errorf("Sales Rep %s allowed Lead %s status = %d, want 200: %s", test.user, allowed, response.Code, response.Body.String())
 			}
-		})
+		}
+		for _, denied := range []string{test.other, test.otherOwned, "LEAD-UNASSIGNED"} {
+			if response := request(test.user, "Sales Rep", "/api/resource/Lead/"+denied, false); response.Code != http.StatusNotFound {
+				t.Errorf("Sales Rep %s other Lead %s status = %d, want 404: %s", test.user, denied, response.Code, response.Body.String())
+			}
+		}
 	}
-	var state string
-	var docStatus, audits, events int
-	if err := database.QueryRow("SELECT COALESCE(status, 'Draft'), doc_status FROM `tabTestDoc` WHERE name = ?", name).Scan(&state, &docStatus); err != nil {
-		t.Fatal(err)
+
+	managerNames := decodeNames(request("manager@example.test", "Sales Manager", "/api/resource/Lead", true))
+	if len(managerNames) != 5 || !managerNames["LEAD-REP1"] || !managerNames["LEAD-REP2"] || !managerNames["LEAD-REP1-OWN"] || !managerNames["LEAD-REP2-OWN"] || !managerNames["LEAD-UNASSIGNED"] {
+		t.Errorf("Sales Manager list names = %#v, want all five Leads", managerNames)
 	}
-	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND status = 'completed'", site, name).Scan(&audits); err != nil {
-		t.Fatal(err)
+}
+
+type captureAsyncWorkflowSink struct {
+	requests []orm.AsyncHookRequest
+	err      error
+}
+
+type workflowActionScriptMutationBus struct {
+	onPublish func() error
+}
+
+type workflowConfigMutationRunner struct {
+	update func() error
+}
+
+func (r workflowConfigMutationRunner) Execute(_ context.Context, req script.ExecuteRequest) (*script.ExecuteResult, error) {
+	if req.ScriptName == "workflow-gate" && r.update != nil {
+		if err := r.update(); err != nil {
+			return nil, err
+		}
 	}
-	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, name).Scan(&events); err != nil {
-		t.Fatal(err)
+	return &script.ExecuteResult{}, nil
+}
+func (workflowConfigMutationRunner) Validate(string) error { return nil }
+func (workflowConfigMutationRunner) Close() error          { return nil }
+
+func (b workflowActionScriptMutationBus) Publish(eventstream.ChangeEvent) error {
+	if b.onPublish != nil {
+		return b.onPublish()
 	}
-	if state != "Draft" || docStatus != 0 || audits != 1 || events != 1 {
-		t.Fatalf("rejected workflow attempts changed state=%q doc_status=%d audits=%d outbox=%d; want Draft/0/1/1", state, docStatus, audits, events)
+	return nil
+}
+func (workflowActionScriptMutationBus) Subscribe() (<-chan eventstream.ChangeEvent, error) {
+	return make(chan eventstream.ChangeEvent), nil
+}
+func (workflowActionScriptMutationBus) DrainWAL(func(eventstream.ChangeEvent)) (int, error) {
+	return 0, nil
+}
+func (workflowActionScriptMutationBus) RotateWAL() (string, error)     { return "", nil }
+func (workflowActionScriptMutationBus) CommitWALRotation(string) error { return nil }
+func (workflowActionScriptMutationBus) Dropped() int64                 { return 0 }
+func (workflowActionScriptMutationBus) Close() error                   { return nil }
+
+func (s *captureAsyncWorkflowSink) Enqueue(_ context.Context, request orm.AsyncHookRequest) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.requests = append(s.requests, request)
+	return nil
+}
+
+type workflowTransitionFailureRunner struct{ calls []string }
+
+func (r *workflowTransitionFailureRunner) Execute(_ context.Context, request script.ExecuteRequest) (*script.ExecuteResult, error) {
+	r.calls = append(r.calls, request.ScriptName)
+	if request.ScriptName == "workflow-gate" {
+		return nil, errors.New("gate rejected transition")
+	}
+	return &script.ExecuteResult{}, nil
+}
+func (*workflowTransitionFailureRunner) Validate(string) error { return nil }
+func (*workflowTransitionFailureRunner) Close() error          { return nil }
+
+func TestConfigRevisionFenceSerializesConcurrentTenantConfigWrite(t *testing.T) {
+	_, database, _, _ := newResourceIntegrationHandler(t)
+	for _, statement := range configstore.ConfigRevisionSchema(kdb.Resolve("mysql")) {
+		if _, err := database.Exec(statement); err != nil {
+			t.Fatalf("create config revision table: %v", err)
+		}
+	}
+	if err := configstore.SeedConfigRevision(t.Context(), database, kdb.Resolve("mysql")); err != nil {
+		t.Fatalf("seed config revision: %v", err)
+	}
+
+	fenceTx, err := database.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("begin transition transaction: %v", err)
+	}
+	defer fenceTx.Rollback()
+	if err := configstore.FenceConfigRevisionTx(t.Context(), fenceTx, kdb.Resolve("mysql"), 1); err != nil {
+		t.Fatalf("lock selected config revision: %v", err)
+	}
+
+	started := make(chan struct{})
+	writeDone := make(chan error, 1)
+	go func() {
+		writeTx, beginErr := database.BeginTx(t.Context(), nil)
+		if beginErr != nil {
+			writeDone <- fmt.Errorf("begin competing config write: %w", beginErr)
+			return
+		}
+		defer writeTx.Rollback()
+		close(started)
+		if bumpErr := configstore.BumpConfigRevisionTx(writeTx, kdb.Resolve("mysql")); bumpErr != nil {
+			writeDone <- fmt.Errorf("bump competing config revision: %w", bumpErr)
+			return
+		}
+		writeDone <- writeTx.Commit()
+	}()
+	<-started
+	select {
+	case err := <-writeDone:
+		t.Fatalf("competing config write completed while transition held the revision fence: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := fenceTx.Commit(); err != nil {
+		t.Fatalf("commit fenced transition: %v", err)
+	}
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("competing config write after transition commit: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("config write remained blocked after transition released the fence")
+	}
+	revision, err := configstore.CurrentConfigRevision(t.Context(), database, kdb.Resolve("mysql"))
+	if err != nil || revision != 2 {
+		t.Fatalf("tenant config revision after serialized write = %d, err=%v; want 2", revision, err)
 	}
 }
 
@@ -645,8 +1053,8 @@ func TestManifestRecordActionsUseKernelAndFilterTransportFields(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, name).Scan(&outboxCount); err != nil {
 		t.Fatal(err)
 	}
-	if auditCount != 2 || outboxCount != 2 {
-		t.Fatalf("manifest action side effects = audit:%d outbox:%d; want 2/2", auditCount, outboxCount)
+	if auditCount != 2 || outboxCount != 4 {
+		t.Fatalf("manifest action side effects = audit:%d outbox:%d; want two audit and two record-trigger events", auditCount, outboxCount)
 	}
 }
 
@@ -681,11 +1089,14 @@ func TestPOSCreateTransactionPreservesSaleAndPaymentContract(t *testing.T) {
 		t.Fatalf("POS sale item persistence count=%d product=%q quantity=%v unit_price=%v", itemCount, product, quantity, unitPrice)
 	}
 	var paymentCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM `tabPayment` WHERE sale = ? AND method = ? AND amount = ? AND status = ?", saleName, "cash", 250, "Succeeded").Scan(&paymentCount); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM `tabPayment` WHERE sale = ? AND method = ? AND amount = ? AND status = ?", saleName, "cash", 250, "Draft").Scan(&paymentCount); err != nil {
 		t.Fatal("query POS payment:", err)
 	}
 	if paymentCount != 1 {
-		t.Fatalf("POS completed sale payment count = %d, want 1", paymentCount)
+		var saleValue, methodValue, statusValue string
+		var amountValue float64
+		_ = db.QueryRow("SELECT COALESCE(sale,''), COALESCE(method,''), COALESCE(status,''), COALESCE(amount,0) FROM `tabPayment` LIMIT 1").Scan(&saleValue, &methodValue, &statusValue, &amountValue)
+		t.Fatalf("POS bundled payment initial-state count = %d, want 1 (sale=%q method=%q status=%q amount=%v)", paymentCount, saleValue, methodValue, statusValue, amountValue)
 	}
 	replayed := serveManifestAction(t, handler, site, db, reg, "complete", checkout)
 	if replayed.Code != http.StatusOK || replayed.Header().Get("X-Kora-Replay") != "true" {
@@ -705,7 +1116,7 @@ func TestPOSCreateTransactionPreservesSaleAndPaymentContract(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, saleName).Scan(&outboxCount); err != nil {
 		t.Fatal(err)
 	}
-	if saleCount != 1 || auditCount != 2 || outboxCount != 1 {
+	if saleCount != 1 || auditCount != 2 || outboxCount != 2 {
 		t.Fatalf("POS retry duplicated or lost effects: sales=%d operation_audit=%d sale_outbox=%d", saleCount, auditCount, outboxCount)
 	}
 }
@@ -770,6 +1181,7 @@ func TestConfirmedChannelMutationUsesKernelReceiptAndPreservesResponse(t *testin
 		ctx.Set("channel_session_id", "channel-session-1")
 		ctx.Set("channel_conversation_key", "channel-conversation-1")
 		ctx.Set("user", "alice@example.test")
+		ctx.Set("policy_execution", integrationTestExecution(t, site, "alice@example.test", []string{doctype.AdminRole}))
 		handler.HandleChannelMutate(ctx)
 		return recorder
 	}
@@ -801,7 +1213,7 @@ func TestConfirmedChannelMutationUsesKernelReceiptAndPreservesResponse(t *testin
 	if replayBody.Data.Result != firstBody.Data.Result {
 		t.Fatalf("channel retry response changed: first=%q replay=%q", firstBody.Data.Result, replayBody.Data.Result)
 	}
-	for table, want := range map[string]int{"tabTestDoc": 1, "_kora_operation_audit": 1, "_kora_outbox": 1, "_kora_idempotency_receipt": 1, "_kora_channel_audit": 2} {
+	for table, want := range map[string]int{"tabTestDoc": 1, "_kora_operation_audit": 1, "_kora_outbox": 2, "_kora_idempotency_receipt": 1, "_kora_channel_audit": 2} {
 		var count int
 		query := "SELECT COUNT(*) FROM `" + table + "`"
 		if table != "tabTestDoc" && table != "_kora_channel_audit" {
@@ -908,15 +1320,12 @@ func TestExternalOperationInitiationEventFailureIsAtomic(t *testing.T) {
 		"event":     "SELECT COUNT(*) FROM `tabExternal Operation Event`",
 		"audit":     "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND status = 'completed'",
 		"outbox":    "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?",
-		"receipt":   "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?",
+		"receipt":   "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'",
 	} {
 		var count int
 		args := []any(nil)
-		if table == "audit" || table == "outbox" {
+		if table == "audit" || table == "outbox" || table == "receipt" {
 			args = []any{site}
-		}
-		if table == "receipt" {
-			args = []any{site, "external-operation:pos-test-initiation-event-failure"}
 		}
 		if err := database.QueryRow(query, args...).Scan(&count); err != nil {
 			t.Fatalf("count %s after initiation event failure: %v", table, err)
@@ -984,6 +1393,10 @@ func TestExternalOperationProviderSuccessCommitsPaymentAndEventTogether(t *testi
 		"client_reference": "pos-test-initiation-success-event-failure", "total": 250.0,
 		"payment_method": "mpesa", "customer_phone": "+254700000001",
 	}
+	var receiptsBeforeOutcome int
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'", site).Scan(&receiptsBeforeOutcome); err != nil {
+		t.Fatalf("count receipts before failed provider outcome: %v", err)
+	}
 	failingResponse := serveManifestAction(t, handler, site, database, registry, "initiate", failingRequest)
 	if failingResponse.Code == http.StatusOK {
 		t.Fatalf("provider success returned HTTP success although its result event failed: %s", failingResponse.Body.String())
@@ -1002,11 +1415,11 @@ func TestExternalOperationProviderSuccessCommitsPaymentAndEventTogether(t *testi
 	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doctype = 'External Operation' AND doc_name = ? AND status = 'completed'", site, failedOperationName).Scan(&completedOperationAudits); err != nil {
 		t.Fatalf("count failed outcome operation audits: %v", err)
 	}
-	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND idempotency_key = ?", site, "external-operation-result:"+failedOperationName).Scan(&outcomeReceipts); err != nil {
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'", site).Scan(&outcomeReceipts); err != nil {
 		t.Fatalf("count failed outcome receipts: %v", err)
 	}
-	if failedOperationStatus != "Initiating" || failedPaymentStatus != "Pending" || failedEvents != 0 || completedOperationAudits != 1 || outcomeReceipts != 0 {
-		t.Fatalf("failed outcome bundle left operation=%s payment=%s events=%d operation_audits=%d outcome_receipts=%d", failedOperationStatus, failedPaymentStatus, failedEvents, completedOperationAudits, outcomeReceipts)
+	if failedOperationStatus != "Initiating" || failedPaymentStatus != "Pending" || failedEvents != 0 || completedOperationAudits != 1 || outcomeReceipts != receiptsBeforeOutcome+1 {
+		t.Fatalf("failed outcome bundle left operation=%s payment=%s events=%d operation_audits=%d receipts=%d (before=%d; only the initiating receipt should be added)", failedOperationStatus, failedPaymentStatus, failedEvents, completedOperationAudits, outcomeReceipts, receiptsBeforeOutcome)
 	}
 }
 
@@ -1077,8 +1490,8 @@ func TestExternalOperationProviderFailureKeepsPaymentAndEventConsistent(t *testi
 	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", site).Scan(&totalOutbox); err != nil {
 		t.Fatal("count total outbox events:", err)
 	}
-	if operationStatus != "Failed" || paymentStatus != "Failed" || operationError == "" || eventCount != 1 || operationAudits != 2 || paymentAudits != 2 || operationEvents != 4 || totalOutbox != 5 {
-		t.Fatalf("failed provider state operation=(%q,%q) payment=%q failure_events=%d operation_audits=%d payment_audits=%d record_outbox=%d total_outbox=%d; want Failed/Failed with error, 1 event, 2/2 audits and 4/5 outbox", operationStatus, operationError, paymentStatus, eventCount, operationAudits, paymentAudits, operationEvents, totalOutbox)
+	if operationStatus != "Failed" || paymentStatus != "Failed" || operationError == "" || eventCount != 1 || operationAudits != 2 || paymentAudits != 2 || operationEvents != 8 || totalOutbox != 10 {
+		t.Fatalf("failed provider state operation=(%q,%q) payment=%q failure_events=%d operation_audits=%d payment_audits=%d record_outbox=%d total_outbox=%d; want Failed/Failed with error, 1 event, 2/2 audits and 8/10 outbox including committed record create/update triggers", operationStatus, operationError, paymentStatus, eventCount, operationAudits, paymentAudits, operationEvents, totalOutbox)
 	}
 
 	if _, err := database.Exec("CREATE TRIGGER reject_operation_failure_event BEFORE INSERT ON `tabExternal Operation Event` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'simulated event write failure'"); err != nil {
@@ -1086,8 +1499,8 @@ func TestExternalOperationProviderFailureKeepsPaymentAndEventConsistent(t *testi
 	}
 	secondRequest := map[string]any{"client_reference": "pos-test-operation-event-failure", "total": 125.0, "payment_method": "mpesa", "customer_phone": "+254700000002"}
 	failedPersistence := serveManifestAction(t, handler, site, database, registry, "initiate-failing", secondRequest)
-	if failedPersistence.Code != http.StatusInternalServerError {
-		t.Fatalf("failure-event persistence response = %d, want 500: %s", failedPersistence.Code, failedPersistence.Body.String())
+	if failedPersistence.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failure-event persistence response = %d, want 503 for dependency unavailability: %s", failedPersistence.Code, failedPersistence.Body.String())
 	}
 	if _, err := database.Exec("DROP TRIGGER reject_operation_failure_event"); err != nil {
 		t.Fatalf("remove event failure trigger: %v", err)
@@ -1114,8 +1527,8 @@ func TestExternalOperationProviderFailureKeepsPaymentAndEventConsistent(t *testi
 	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id IN (?, (SELECT name FROM `tabPayment` WHERE external_operation = ?))", site, secondOperationName, secondOperationName).Scan(&operationEvents); err != nil {
 		t.Fatal("count operation bundle outbox after event failure:", err)
 	}
-	if eventCount != 0 || operationAudits != 2 || operationEvents != 2 {
-		t.Fatalf("event-write rollback left events=%d audits=%d record_outbox=%d; want 0/2/2 (only initial create bundle)", eventCount, operationAudits, operationEvents)
+	if eventCount != 0 || operationAudits != 2 || operationEvents != 4 {
+		t.Fatalf("event-write rollback left events=%d audits=%d record_outbox=%d; want 0/2/4 (initial operation events plus record-created events only)", eventCount, operationAudits, operationEvents)
 	}
 }
 
@@ -1150,9 +1563,11 @@ func TestMPesaCallbackDoesNotSplitOperationAndPaymentOnWriteFailure(t *testing.T
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/payments/mpesa/callback", strings.NewReader(body))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/mpesa/stk/test-callback-token", strings.NewReader(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	ctx.Set("site_name", site)
+	configureMPesaCallbackTestToken(t, db, site, kdb.Resolve("mysql"))
+	bindMPesaCallbackTestIdentity(ctx, site)
 	ctx.Set("site_db", db)
 	ctx.Set("site_registry", reg)
 	ctx.Set("site_db_type", "mysql")
@@ -1173,6 +1588,38 @@ func TestMPesaCallbackDoesNotSplitOperationAndPaymentOnWriteFailure(t *testing.T
 	}
 	if operationStatus != "Pending" || paymentStatus != "Pending" || callbackEvents != 0 {
 		t.Fatalf("failed callback partially committed: operation=%q payment=%q events=%d", operationStatus, paymentStatus, callbackEvents)
+	}
+}
+
+func TestMPesaCallbackRejectsWrongTenantTokenBeforeMutation(t *testing.T) {
+	handler, database, registry, site := newResourceIntegrationHandler(t)
+	registerPOSIntegrationTypes(t, database, site, registry)
+	configureMPesaCallbackTestToken(t, database, site, kdb.Resolve("mysql"))
+	body := `{"Body":{"stkCallback":{"CheckoutRequestID":"unknown-checkout","ResultCode":0,"ResultDesc":"Success"}}}`
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/mpesa/stk/wrong-token", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Params = gin.Params{{Key: "token", Value: "wrong-token"}}
+	ctx.Set("site_name", site)
+	ctx.Set("site_id", site)
+	ctx.Set("site_db", database)
+	ctx.Set("site_registry", registry)
+	ctx.Set("site_db_type", "mysql")
+	handler.HandleMPesaSTKCallback(ctx)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("callback with wrong tenant token returned %d, want 401: %s", recorder.Code, recorder.Body.String())
+	}
+	var audits, events int
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ?", site).Scan(&audits); err != nil {
+		t.Fatal("count operation audit after rejected callback:", err)
+	}
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", site).Scan(&events); err != nil {
+		t.Fatal("count outbox after rejected callback:", err)
+	}
+	if audits != 0 || events != 0 {
+		t.Fatalf("rejected callback wrote audit=%d outbox=%d; want none", audits, events)
 	}
 }
 
@@ -1244,6 +1691,7 @@ func TestMPesaConcurrentCallbacksHaveOneTerminalTransition(t *testing.T) {
 		t.Fatal("seed payment:", err)
 	}
 	body := `{"Body":{"stkCallback":{"CheckoutRequestID":"checkout-concurrent","ResultCode":0,"ResultDesc":"Success","CallbackMetadata":{"Item":[{"Name":"MpesaReceiptNumber","Value":"RCP-CONCURRENT"}]}}}}`
+	configureMPesaCallbackTestToken(t, database, site, kdb.Resolve("mysql"))
 	gin.SetMode(gin.TestMode)
 	start := make(chan struct{})
 	responses := make(chan *httptest.ResponseRecorder, 2)
@@ -1252,9 +1700,10 @@ func TestMPesaConcurrentCallbacksHaveOneTerminalTransition(t *testing.T) {
 			<-start
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)
-			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/payments/mpesa/callback", strings.NewReader(body))
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/mpesa/stk/test-callback-token", strings.NewReader(body))
 			ctx.Request.Header.Set("Content-Type", "application/json")
 			ctx.Set("site_name", site)
+			bindMPesaCallbackTestIdentity(ctx, site)
 			ctx.Set("site_db", database)
 			ctx.Set("site_registry", registry)
 			ctx.Set("site_db_type", "mysql")
@@ -1432,14 +1881,29 @@ func serveMPesaCallback(t *testing.T, handler *Handler, db *sql.DB, reg *doctype
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/payments/mpesa/callback", strings.NewReader(body))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/mpesa/stk/test-callback-token", strings.NewReader(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	ctx.Set("site_name", site)
+	configureMPesaCallbackTestToken(t, db, site, kdb.Resolve("mysql"))
+	bindMPesaCallbackTestIdentity(ctx, site)
 	ctx.Set("site_db", db)
 	ctx.Set("site_registry", reg)
 	ctx.Set("site_db_type", "mysql")
 	handler.HandleMPesaSTKCallback(ctx)
 	return recorder
+}
+
+func configureMPesaCallbackTestToken(t *testing.T, db *sql.DB, site string, dialect kdb.Dialect) {
+	t.Helper()
+	if err := secret.NewStore(db, dialect).Set(site, "mpesa_callback_token", "test-callback-token"); err != nil {
+		t.Fatalf("configure M-Pesa callback token: %v", err)
+	}
+	return
+}
+
+func bindMPesaCallbackTestIdentity(c *gin.Context, site string) {
+	c.Set("site_id", site)
+	c.Params = gin.Params{{Key: "token", Value: "test-callback-token"}}
 }
 
 func registerPOSIntegrationView(reg *doctype.Registry) {
@@ -1449,6 +1913,9 @@ func registerPOSIntegrationView(reg *doctype.Registry) {
 			ID: "complete", Trigger: "on_click", Type: "create_transaction",
 			Config: map[string]any{
 				"target_doctype": "Sale", "reference_field": "reference", "reference_prefix": "POS",
+				"related_records": []any{map[string]any{"key": "payment", "doctype": "Payment", "fields": map[string]any{
+					"reference": "PAY-$records.sale.name", "sale": "$records.sale.name", "amount": "$context.total", "method": "$context.payment_method", "assignee": "$actor",
+				}}},
 				"child_table": "Sale Item", "line_source": "cart",
 				"line_fields":   map[string]any{"product": "product", "unit_price": "rate", "quantity": "quantity"},
 				"line_defaults": map[string]any{"quantity": 1},
@@ -1485,7 +1952,7 @@ func registerPOSIntegrationTypes(t *testing.T, db *sql.DB, site string, reg *doc
 		{Fieldname: "sale", Fieldtype: "Link", Options: "Sale"},
 		{Fieldname: "amount", Fieldtype: "Currency"},
 		{Fieldname: "method", Fieldtype: "Data"},
-		{Fieldname: "status", Fieldtype: "Data"},
+		{Fieldname: "status", Fieldtype: "Data", Default: "Draft"},
 		{Fieldname: "assignee", Fieldtype: "Data"},
 		{Fieldname: "external_operation", Fieldtype: "Link", Options: "External Operation"},
 		{Fieldname: "phone_number", Fieldtype: "Data"},
@@ -1603,7 +2070,15 @@ func serveResourceMutationBody(t testing.TB, handler *Handler, db *sql.DB, reg *
 }
 
 func serveResourceMutationBodyWithDBType(t testing.TB, handler *Handler, db *sql.DB, reg *doctype.Registry, site string, method resourceHTTPMethod, path, body, idempotencyKey string, roles []string, dbType string) *httptest.ResponseRecorder {
+	execution := integrationTestExecution(t, site, "admin@example.test", roles)
+	return serveResourceMutationWithExecution(t, handler, db, reg, site, method, path, body, idempotencyKey, dbType, execution)
+}
+
+func serveResourceMutationWithExecution(t testing.TB, handler *Handler, db *sql.DB, reg *doctype.Registry, site string, method resourceHTTPMethod, path, body, idempotencyKey, dbType string, execution policy.Execution) *httptest.ResponseRecorder {
 	t.Helper()
+	if !execution.Valid() || execution.Actor().Site != site {
+		t.Fatalf("resource mutation test execution is missing or bound to a different route: tenant=%q site=%q", execution.Tenant(), execution.Actor().Site)
+	}
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -1631,13 +2106,19 @@ func serveResourceMutationBodyWithDBType(t testing.TB, handler *Handler, db *sql
 	ctx.Set("site_db", db)
 	ctx.Set("site_registry", reg)
 	ctx.Set("site_db_type", dbType)
-	ctx.Set("user", "admin@example.test")
+	actor := execution.Actor()
+	user := actor.SubjectUserID
+	if user == "" {
+		user = actor.PrincipalID
+	}
+	ctx.Set("user", user)
 	primaryRole := ""
-	if len(roles) > 0 {
-		primaryRole = roles[0]
+	if len(actor.Roles) > 0 {
+		primaryRole = actor.Roles[0]
 	}
 	ctx.Set("user_role", primaryRole)
-	ctx.Set("user_roles", roles)
+	ctx.Set("user_roles", append([]string(nil), actor.Roles...))
+	ctx.Set("policy_execution", execution)
 	switch method {
 	case httpMethodPost:
 		handler.HandleCreate(ctx)
@@ -1686,6 +2167,14 @@ func serveManifestAction(t *testing.T, handler *Handler, site string, db *sql.DB
 	ctx.Set("user", "admin@example.test")
 	ctx.Set("user_role", doctype.AdminRole)
 	ctx.Set("user_roles", []string{doctype.AdminRole})
+	execution, err := policy.NewVerifiedExecution(contract.TenantID(site), contract.ActorContext{
+		PrincipalID: "admin@example.test", PrincipalType: contract.PrincipalHuman,
+		SubjectUserID: "admin@example.test", Site: site, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("create verified manifest-action test execution: %v", err)
+	}
+	ctx.Set("policy_execution", execution)
 	handler.HandleViewAction(ctx)
 	return recorder
 }
@@ -1769,6 +2258,14 @@ func newResourceIntegrationHandler(t testing.TB, measuredDriver ...string) (*Han
 			t.Fatalf("create kernel tables: %v", err)
 		}
 	}
+	for _, ddl := range configstore.ConfigRevisionSchema(dialect) {
+		if _, err := database.Exec(ddl); err != nil {
+			t.Fatalf("create tenant config revision table: %v", err)
+		}
+	}
+	if err := configstore.SeedConfigRevision(t.Context(), database, dialect); err != nil {
+		t.Fatalf("seed tenant config revision: %v", err)
+	}
 	if err := schema.MigrateSiteFromRegistry(database, site, reg, dialect); err != nil {
 		t.Fatalf("migrate site schema: %v", err)
 	}
@@ -1777,6 +2274,18 @@ func newResourceIntegrationHandler(t testing.TB, measuredDriver ...string) (*Han
 	handler.SiteOutboxes = map[string]outbox.Writer{site: writer}
 	t.Cleanup(func() { _ = database.Close() })
 	return handler, database, reg, site
+}
+
+func integrationTestExecution(t testing.TB, site, user string, roles []string) policy.Execution {
+	t.Helper()
+	execution, err := policy.NewVerifiedExecution(contract.TenantID(site), contract.ActorContext{
+		PrincipalID: user, PrincipalType: contract.PrincipalHuman,
+		SubjectUserID: user, Site: site, Roles: roles, AuthenticatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("create verified integration execution: %v", err)
+	}
+	return execution
 }
 
 func newResourceIntegrationDB(t testing.TB, measuredDriver ...string) (*sql.DB, string) {

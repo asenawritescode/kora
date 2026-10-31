@@ -28,7 +28,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
   return {
     apiBaseUrl,
     realtimeBaseUrl,
-    appName: readString(injected.appName, 'Kora'),
+    appName: readString(injected.appName, 'Kigae'),
     environment: readString(injected.environment, 'embedded'),
     buildVersion: readOptionalString(injected.buildVersion),
     capabilitiesVersion: readOptionalString(injected.capabilitiesVersion),

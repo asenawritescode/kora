@@ -2,8 +2,10 @@ package analytics
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/asenawritescode/kora/doctype"
 )
@@ -29,6 +31,32 @@ func BuildSemanticCatalog(docTypes []*doctype.DocType) *SemanticCatalog {
 	return catalog
 }
 
+// AddReportModels adds explicitly configured business models to a catalog.
+// This lets a report expose a parent/child concept without making every child
+// DocType an independent analytics dataset.
+func AddReportModels(catalog *SemanticCatalog, reports []ReportDefinition) error {
+	if catalog == nil {
+		return fmt.Errorf("analytics catalog is required")
+	}
+	seen := make(map[string]SemanticModel, len(catalog.Models))
+	for _, model := range catalog.Models {
+		seen[model.Name] = model
+	}
+	for _, report := range reports {
+		for _, model := range report.Models {
+			if existing, ok := seen[model.Name]; ok {
+				if !reflect.DeepEqual(existing, model) {
+					return fmt.Errorf("report model %q conflicts with an existing model", model.Name)
+				}
+				continue
+			}
+			catalog.Models = append(catalog.Models, model)
+			seen[model.Name] = model
+		}
+	}
+	return nil
+}
+
 // BuildSemanticModel creates a conservative catalog model from DocType
 // metadata. Explicit semantic configuration can later enrich or replace this
 // projection without changing the query contract.
@@ -39,7 +67,7 @@ func BuildSemanticModel(dt *doctype.DocType) SemanticModel {
 		SourceDoctype: dt.Name,
 	}
 	for _, field := range dt.Fields {
-		if field.IsLayoutField() || field.Fieldtype == "Table" || field.Fieldname == "" {
+		if field.IsLayoutField() || field.Fieldtype == "Table" || field.Fieldname == "" || field.Hidden || field.Fieldtype == "Password" {
 			continue
 		}
 		label := field.Label
@@ -55,7 +83,7 @@ func BuildSemanticModel(dt *doctype.DocType) SemanticModel {
 			if model.TimeDimension == "" || field.Fieldname == dt.SortField {
 				model.TimeDimension = field.Fieldname
 			}
-		case "Select", "Link", "Dynamic Link":
+		case "Select", "Link", "Dynamic Link", "User":
 			model.Dimensions = append(model.Dimensions, SemanticDimension{
 				Name: field.Fieldname, Label: label, Field: field.Fieldname, Type: "category",
 			})
@@ -134,6 +162,25 @@ type SemanticModel struct {
 	Dimensions    []SemanticDimension `json:"dimensions,omitempty" yaml:"dimensions,omitempty"`
 	Measures      []SemanticMeasure   `json:"measures,omitempty" yaml:"measures,omitempty"`
 	Rollups       []RollupDefinition  `json:"rollups,omitempty" yaml:"rollups,omitempty"`
+	Relation      *SemanticRelation   `json:"relation,omitempty" yaml:"relation,omitempty"`
+}
+
+// SemanticRelation describes a business-level parent/child source. Child
+// DocTypes are not exposed as independent models; a report must explicitly
+// declare the parent table field through which its rows are interpreted.
+type SemanticRelation struct {
+	ParentDoctype   string                   `json:"parent_doctype" yaml:"parent_doctype"`
+	ChildDoctype    string                   `json:"child_doctype" yaml:"child_doctype"`
+	ChildTableField string                   `json:"child_table_field" yaml:"child_table_field"`
+	ParentTimeField string                   `json:"parent_time_field" yaml:"parent_time_field"`
+	Filters         []SemanticRelationFilter `json:"filters,omitempty" yaml:"filters,omitempty"`
+}
+
+type SemanticRelationFilter struct {
+	Source   string `json:"source" yaml:"source"` // parent or child
+	Field    string `json:"field" yaml:"field"`
+	Operator string `json:"operator" yaml:"operator"`
+	Value    string `json:"value" yaml:"value"`
 }
 
 type SemanticDimension struct {
@@ -142,6 +189,9 @@ type SemanticDimension struct {
 	Field                  string   `json:"field" yaml:"field"`
 	Type                   string   `json:"type" yaml:"type"` // category, time, number, boolean, text
 	SupportedGranularities []string `json:"supported_granularities,omitempty" yaml:"supported_granularities,omitempty"`
+	Source                 string   `json:"source,omitempty" yaml:"source,omitempty"` // parent or child for related models
+	LinkDoctype            string   `json:"link_doctype,omitempty" yaml:"link_doctype,omitempty"`
+	LinkLabelField         string   `json:"link_label_field,omitempty" yaml:"link_label_field,omitempty"`
 }
 
 type SemanticMeasure struct {
@@ -151,6 +201,7 @@ type SemanticMeasure struct {
 	Aggregation string           `json:"aggregation" yaml:"aggregation"`           // count, sum, avg, min, max
 	Format      string           `json:"format,omitempty" yaml:"format,omitempty"` // number, currency, percent
 	Filters     []SemanticFilter `json:"filters,omitempty" yaml:"filters,omitempty"`
+	Source      string           `json:"source,omitempty" yaml:"source,omitempty"` // parent or child for related models
 }
 
 type SemanticFilter struct {
@@ -174,6 +225,7 @@ type ReportDefinition struct {
 	Label       string          `json:"label" yaml:"label"`
 	Route       string          `json:"route,omitempty" yaml:"route,omitempty"`
 	Permissions []string        `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	Models      []SemanticModel `json:"models,omitempty" yaml:"models,omitempty"`
 	Queries     []ReportQuery   `json:"queries" yaml:"queries"`
 	Derived     []DerivedMetric `json:"derived,omitempty" yaml:"derived,omitempty"`
 	Visuals     []ReportVisual  `json:"visuals,omitempty" yaml:"visuals,omitempty"`
@@ -230,6 +282,16 @@ type QueryTime struct {
 
 var semanticIdentifier = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
+const (
+	MaxSemanticQueries       = 5
+	MaxSemanticResultRows    = 200
+	MaxSemanticMeasures      = 20
+	MaxSemanticFilters       = 20
+	MaxSemanticFilterValues  = 20
+	MaxSemanticFilterBytes   = 256
+	MaxSemanticDateRangeDays = 3660
+)
+
 func (c *SemanticCatalog) Validate() error {
 	if c == nil {
 		return fmt.Errorf("analytics catalog is required")
@@ -263,6 +325,25 @@ func (m *SemanticModel) Validate() error {
 	if m.TimeDimension != "" && !hasDimensionField(m.Dimensions, m.TimeDimension) {
 		return fmt.Errorf("time_dimension %q is not a declared dimension field", m.TimeDimension)
 	}
+	if relation := m.Relation; relation != nil {
+		if relation.ParentDoctype == "" || relation.ChildDoctype == "" || relation.ChildTableField == "" || relation.ParentTimeField == "" {
+			return fmt.Errorf("related model %q requires parent, child, child_table_field, and parent_time_field", m.Name)
+		}
+		if m.SourceDoctype != relation.ParentDoctype {
+			return fmt.Errorf("related model %q source_doctype must match its parent doctype", m.Name)
+		}
+		if m.TimeDimension == "" {
+			return fmt.Errorf("related model %q requires a parent time dimension", m.Name)
+		}
+		for _, filter := range relation.Filters {
+			if (filter.Source != "parent" && filter.Source != "child") || filter.Field == "" || filter.Value == "" {
+				return fmt.Errorf("related model %q has an invalid fixed filter", m.Name)
+			}
+			if filter.Operator != "=" && filter.Operator != "!=" {
+				return fmt.Errorf("related model %q has unsupported fixed filter operator %q", m.Name, filter.Operator)
+			}
+		}
+	}
 
 	dimensions := map[string]bool{}
 	for _, dimension := range m.Dimensions {
@@ -271,6 +352,12 @@ func (m *SemanticModel) Validate() error {
 		}
 		if dimension.Field == "" || dimension.Type == "" {
 			return fmt.Errorf("dimension %q requires field and type", dimension.Name)
+		}
+		if m.Relation != nil && dimension.Source != "parent" && dimension.Source != "child" {
+			return fmt.Errorf("related model dimension %q must declare parent or child source", dimension.Name)
+		}
+		if (dimension.LinkDoctype == "") != (dimension.LinkLabelField == "") {
+			return fmt.Errorf("dimension %q must declare both link_doctype and link_label_field", dimension.Name)
 		}
 		if dimensions[dimension.Name] {
 			return fmt.Errorf("duplicate dimension %q", dimension.Name)
@@ -288,6 +375,9 @@ func (m *SemanticModel) Validate() error {
 		}
 		if measure.Aggregation != "count" && measure.Field == "" {
 			return fmt.Errorf("measure %q requires a field", measure.Name)
+		}
+		if m.Relation != nil && measure.Source != "parent" && measure.Source != "child" {
+			return fmt.Errorf("related model measure %q must declare parent or child source", measure.Name)
 		}
 		if measures[measure.Name] {
 			return fmt.Errorf("duplicate measure %q", measure.Name)
@@ -336,22 +426,49 @@ func (q *AnalyticsQueryRequest) Validate(catalog *SemanticCatalog) error {
 	if catalog == nil {
 		return fmt.Errorf("analytics catalog is required")
 	}
-	if len(q.Queries) == 0 {
-		return fmt.Errorf("at least one query is required")
+	if len(q.Queries) == 0 || len(q.Queries) > MaxSemanticQueries {
+		return fmt.Errorf("query count must be between 1 and %d", MaxSemanticQueries)
 	}
-	if q.Limit < 0 || q.Limit > 10000 {
-		return fmt.Errorf("limit must be between 0 and 10000")
+	if q.Limit < 0 || q.Limit > MaxSemanticResultRows {
+		return fmt.Errorf("limit must be between 0 and %d", MaxSemanticResultRows)
 	}
 	if q.Time.From == "" || q.Time.To == "" {
 		return fmt.Errorf("time.from and time.to are required")
 	}
-	if q.Time.From > q.Time.To {
+	from, fromErr := time.Parse("2006-01-02", q.Time.From)
+	to, toErr := time.Parse("2006-01-02", q.Time.To)
+	if fromErr != nil || toErr != nil {
+		return fmt.Errorf("time.from and time.to must be valid ISO dates")
+	}
+	if from.After(to) {
 		return fmt.Errorf("time.from must not be after time.to")
+	}
+	if int(to.Sub(from).Hours()/24)+1 > MaxSemanticDateRangeDays {
+		return fmt.Errorf("date range must not exceed %d days", MaxSemanticDateRangeDays)
 	}
 	if q.Time.Granularity != "" && !validGranularity(q.Time.Granularity) {
 		return fmt.Errorf("unsupported query granularity %q", q.Time.Granularity)
 	}
+	totalMeasures := 0
+	totalFilters := 0
 	for i, query := range q.Queries {
+		if len(query.Measures) == 0 || len(query.Measures) > MaxSemanticMeasures {
+			return fmt.Errorf("queries[%d]: measure count must be between 1 and %d", i, MaxSemanticMeasures)
+		}
+		totalMeasures += len(query.Measures)
+		if totalMeasures > MaxSemanticMeasures {
+			return fmt.Errorf("request measure count exceeds %d", MaxSemanticMeasures)
+		}
+		if len(query.Dimensions) > 1 {
+			return fmt.Errorf("queries[%d]: at most one dimension is supported", i)
+		}
+		if len(query.Filters) > MaxSemanticFilters {
+			return fmt.Errorf("queries[%d]: filter count exceeds %d", i, MaxSemanticFilters)
+		}
+		totalFilters += len(query.Filters)
+		if totalFilters > MaxSemanticFilters {
+			return fmt.Errorf("request filter count exceeds %d", MaxSemanticFilters)
+		}
 		model := catalog.model(query.Model)
 		if model == nil {
 			return fmt.Errorf("queries[%d]: unknown model %q", i, query.Model)
@@ -381,13 +498,21 @@ func (q *AnalyticsQueryRequest) Validate(catalog *SemanticCatalog) error {
 			if !dimensions[filter.Field] {
 				return fmt.Errorf("queries[%d]: unknown filter field %q", i, filter.Field)
 			}
-			if len(filter.Values) == 0 {
-				return fmt.Errorf("queries[%d]: filter %q requires at least one value", i, filter.Field)
+			if len(filter.Values) == 0 || len(filter.Values) > MaxSemanticFilterValues {
+				return fmt.Errorf("queries[%d]: filter %q must have between 1 and %d values", i, filter.Field, MaxSemanticFilterValues)
+			}
+			for _, value := range filter.Values {
+				if len(value) > MaxSemanticFilterBytes {
+					return fmt.Errorf("queries[%d]: filter %q value exceeds %d bytes", i, filter.Field, MaxSemanticFilterBytes)
+				}
 			}
 			operator := strings.ToLower(strings.TrimSpace(filter.Operator))
 			allowedOperators := map[string]bool{"=": true, "==": true, "!=": true, "<>": true, "in": true, "not in": true, "like": true, "not like": true}
 			if !allowedOperators[operator] {
 				return fmt.Errorf("queries[%d]: unsupported filter operator %q", i, filter.Operator)
+			}
+			if (operator == "=" || operator == "==" || operator == "!=" || operator == "<>" || operator == "like" || operator == "not like") && len(filter.Values) != 1 {
+				return fmt.Errorf("queries[%d]: filter operator %q requires exactly one value", i, filter.Operator)
 			}
 		}
 	}
@@ -413,6 +538,15 @@ func validateIdentifier(label, value string) error {
 func validAggregation(value string) bool {
 	switch strings.ToLower(value) {
 	case "count", "sum", "avg", "min", "max":
+		return true
+	default:
+		return false
+	}
+}
+
+func validSemanticFilterOperator(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "=", "==", "!=", "<>", "in", "not in", "like", "not like":
 		return true
 	default:
 		return false

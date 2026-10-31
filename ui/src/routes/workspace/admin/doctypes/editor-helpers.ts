@@ -1,4 +1,22 @@
-import type { DocType } from '../../../../types/kora'
+import type { DocType, Field } from '../../../../types/kora'
+
+export type GenericEditorDraft = {
+  reply: string
+  fields: Array<[string, Field['fieldtype']]>
+  screens: Array<'table' | 'form'>
+}
+
+export function buildGenericEditorDraft(name: string): GenericEditorDraft {
+  return {
+    reply: name ? `I drafted a general ${name} data object. Review the fields and adjust them to your process.` : 'I drafted a general data object. Review the fields and adjust them to your process.',
+    fields: [['Title', 'Data'], ['Status', 'Select'], ['Date', 'Date'], ['Details', 'Text'], ['Notes', 'Text']],
+    screens: ['table', 'form'],
+  }
+}
+
+export function genericEditorDefaults(): { name: string; module: string } {
+  return { name: 'Workspace Record', module: 'Workspace' }
+}
 
 export type DraftIssue = {
   field?: string

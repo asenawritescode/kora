@@ -1,10 +1,15 @@
 package ai
 
 import (
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -14,16 +19,16 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/secret"
 )
 
-// ChatRequest is the JSON body for POST /api/chat.
+// ChatRequest is the JSON body for POST /api/v1/ai/chat.
 type ChatRequest struct {
-	Message string        `json:"message"`
-	History []ChatMessage `json:"history,omitempty"`
-	Model   string        `json:"model,omitempty"` // override default model
-	RunID   string        `json:"run_id,omitempty"`
-	Context ChatContext   `json:"context,omitempty"`
+	Message      string      `json:"message"`
+	Model        string      `json:"model,omitempty"` // override default model
+	Context      ChatContext `json:"context,omitempty"`
+	DisableTools bool        `json:"disable_tools,omitempty"` // allow safe planning without workspace mutations
 }
 
 // ChatContext carries lightweight UI context from the workspace shell.
@@ -32,6 +37,7 @@ type ChatContext struct {
 	ShellMode    string `json:"shellMode,omitempty"`
 	Doctype      string `json:"doctype,omitempty"`
 	DocumentName string `json:"documentName,omitempty"`
+	ThreadID     string `json:"threadId,omitempty"`
 }
 
 // ChatMessage is a single turn in the conversation.
@@ -40,11 +46,25 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
-// ChatResponse is the JSON response from POST /api/chat.
+// ConversationSubjectKey scopes a durable chat thread to one user and UI context.
+func ConversationSubjectKey(currentUser string, context ChatContext) string {
+	key := currentUser + ":" + context.Pathname + ":" + context.Doctype + ":" + context.DocumentName
+	if context.ThreadID != "" {
+		digest := sha256.Sum256([]byte(key + "\x00" + context.ThreadID))
+		return "thread:" + hex.EncodeToString(digest[:])
+	}
+	return key
+}
+
+// ChatResponse is the data payload for POST /api/v1/ai/chat.
 type ChatResponse struct {
 	Reply  string `json:"reply"`
 	Action string `json:"action,omitempty"` // what the AI did (e.g., "listed 3 customers")
 	RunID  string `json:"run_id,omitempty"`
+}
+
+func writeChatResponse(c *gin.Context, response ChatResponse) {
+	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
 // HandleChat processes a chat message, calls the AI provider with function definitions,
@@ -58,22 +78,26 @@ func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteNa
 		})
 		return
 	}
-	runID := req.RunID
-	if runID == "" {
-		runID = ulid.Make().String()
+	if len(req.Context.ThreadID) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Invalid conversation identifier."}})
+		return
 	}
-	subjectKey := currentUser + ":" + req.Context.Pathname + ":" + req.Context.Doctype + ":" + req.Context.DocumentName
+	runID := ulid.Make().String()
+	subjectKey := ConversationSubjectKey(currentUser, req.Context)
 	auditCtx := enrichAuditContext(requestCtx, currentUser, c.GetString("session_sid"), c.GetString("correlation_id"), c.GetString("idempotency_key"))
-	var existingRun *RunRecord
-	if rec, err := LoadRun(requestCtx, tx.DB, runID); err == nil {
-		existingRun = &rec
-	}
 
 	// Read the configured AI provider key.
 	providerKey, apiKey, baseURL, model := resolveProvider(tx.DB, siteName, req.Model, tx.Dialect)
 	if apiKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{"message": "No AI provider configured. Go to /workspace/admin/secrets to add your API key (OpenAI, DeepSeek, or Anthropic)."},
+		message := "AI chat needs a provider key. Add an OpenAI, DeepSeek, or Anthropic key in Workspace → Admin → Secrets, or ask your administrator whether a shared provider is configured."
+		if strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_URL")) != "" {
+			message = "Kigae Cloud's shared AI provider is unavailable. Ask your administrator to reconnect the Cloud provider."
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": gin.H{
+				"code":    "ai.provider_not_configured",
+				"message": message,
+			},
 		})
 		return
 	}
@@ -98,11 +122,17 @@ func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteNa
 		return
 	}
 	conversationID := runID
-	if existingRun != nil && existingRun.ConversationID != "" {
-		conversationID = existingRun.ConversationID
-	} else if conv, err := LoadConversation(requestCtx, tx.DB, siteName, subjectKey); err == nil {
+	var transcript []ChatMessage
+	conv, conversationErr := LoadConversation(requestCtx, tx.DB, siteName, subjectKey)
+	if conversationErr == nil {
 		conversationID = conv.ID
-	} else {
+		loadedTranscript, err := ListConversationMessages(requestCtx, tx.DB, siteName, conversationID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to load AI conversation."}})
+			return
+		}
+		transcript = loadedTranscript
+	} else if errors.Is(conversationErr, sql.ErrNoRows) {
 		if err := UpsertConversation(requestCtx, tx.DB, ConversationRecord{
 			ID:         conversationID,
 			Site:       siteName,
@@ -116,6 +146,9 @@ func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteNa
 			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to persist AI conversation."}})
 			return
 		}
+	} else {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to load AI conversation."}})
+		return
 	}
 	if err := UpsertRun(requestCtx, tx.DB, RunRecord{
 		ID:             runID,
@@ -130,17 +163,19 @@ func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteNa
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to persist AI run."}})
 		return
 	}
-	if existingRun == nil {
-		_ = AppendMessage(requestCtx, tx.DB, siteName, conversationID, runID, "user", req.Message, "message", "", 1)
-	} else if existingRun.InputMessage != "" {
-		req.Message = existingRun.InputMessage
+	if err := AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "user", req.Message, "message", ""); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to save your message."}})
+		return
 	}
 
 	// Build function definitions from the canonical tool catalog projection.
-	functions := buildOpenAIToolsFromCatalog(BuildToolCatalog(reg))
+	var functions []map[string]any
+	if !req.DisableTools {
+		functions = buildOpenAIToolsFromCatalog(BuildToolCatalog(reg))
+	}
 
-	// Validate and cap incoming history.
-	sanitizedHistory := sanitizeHistory(req.History, cfg.HistoryLimit)
+	// Durable server history is the source of truth for the conversation.
+	sanitizedHistory := sanitizeHistory(transcript, cfg.HistoryLimit)
 
 	// Build messages array with system instructions.
 	contextBlurb := ""
@@ -159,9 +194,7 @@ Use this context to stay grounded in the current screen and avoid asking the use
 			req.Context.DocumentName,
 		)
 	}
-	messages := []map[string]any{{
-		"role": "system",
-		"content": `You are a helpful AI assistant for a business application called Kora. Help users manage their data — create, find, update, and analyze business records.` + contextBlurb + `
+	genericSystemPrompt := `You are a helpful AI assistant for a business application called Kigae. Help users manage their data — create, find, update, and analyze business records.
 
 RULES (follow strictly):
 - Be CONCISE. One sentence when possible. No markdown tables unless showing actual data results.
@@ -189,13 +222,19 @@ DOCTYPE CREATION (special rules):
 - CHILD TABLES: if a doctype has a Table field, create the child doctype FIRST (with is_child_table: true), then create the parent doctype.
 - Never show the YAML to the user unless they explicitly ask "show me the YAML."
 
-SYSTEM KNOWLEDGE (what Kora can do — use this to guide users):
+SCRIPT AUTHORING (special rules):
+- Help nontechnical users describe the automation in plain language. Ask for the trigger and expected outcome if either is unclear.
+- Draft JavaScript only through script_validate and script_create. Explain what event or trigger will run it, then validate it before saving.
+- script_create saves an INACTIVE draft. Never claim a script is live or activate it; tell the user an Administrator can review and activate it in Workspace → Admin → Scripts.
+- Scripts must use authorized Kora APIs and the same domain operations as the workspace. Never generate direct database access or bypass business workflows or approvals.
+
+SYSTEM KNOWLEDGE (what Kigae can do — use this to guide users):
 
 ANALYTICS: Every doctype automatically gets analytics. Metrics include total count, daily/monthly trends, breakdowns by Select/Link fields, and sums of Currency/Int/Float fields. Submittable doctypes get workflow state distribution and funnel tracking. Users don't configure analytics — it just works. Direct users to the Insights tab.
 
 VERSIONING & ACTIVATION: Doctype changes save as Draft config versions. Activation runs schema migration — database tables are created/updated. Three safety tiers: Safe (auto-apply), Warning (requires review), Blocked (requires fix). Users activate from /workspace/admin/versions. Draft changes don't affect the live database.
 
-WORKFLOWS: Submittable doctypes support state-machine workflows. States (Draft, Submitted, Approved) with role-gated transitions and optional conditions. Notifications per event. Suggest workflows when users describe approval or lifecycle needs.
+AUTOMATIONS: Workflows use Engine v2 definitions. They can start when a record is created or updated, evaluate typed conditions, request approval, send notifications, and invoke registered actions. Status transitions are policy-checked by Engine. Suggest an automation when users describe a repeated task, notification, approval, or status change; do not describe workflow YAML or document-workflow configuration.
 
 PERMISSIONS: 10 operations per role × doctype: Read, Write, Create, Delete, Submit, Cancel, Amend, Export, Import, Report. 'if_owner' scopes to creator. Administrator bypasses all. Manage at /workspace/admin/permissions.
 
@@ -209,7 +248,10 @@ MULTI-TENANT: Isolated sites with own database, users, doctypes. Created from /c
 
 REPORTING AND ANALYTICS: For a reporting or facts question, call get_analytics_catalog first when the model, measure, or dimension is not already clear. Use query_analytics for new questions and run_analytics_report for an approved report. Explain what each measure means, the date range, grouping, units (count, currency, percent), and whether a zero means no matching activity or no rollup data. Use list_analytics_reports for existing report names. Never invent fields, metrics, trends, or causes; say when the site does not have enough data. Results are governed rollups, not arbitrary database queries.
 
-AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and query analytics. Everything scoped to the current site.`,
+AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and query analytics. Everything scoped to the current site.`
+	messages := []map[string]any{{
+		"role":    "system",
+		"content": genericSystemPrompt + contextBlurb,
 	}}
 	for _, h := range sanitizedHistory {
 		messages = append(messages, map[string]any{"role": h.Role, "content": h.Content})
@@ -340,7 +382,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if lastContent := findLastAssistantContent(messages); lastContent != "" {
 				fallbackReply = lastContent
 			}
-			_ = AppendMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", fallbackReply, "summary", stepID, round+2)
+			_ = AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", fallbackReply, "summary", stepID)
 			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "partial", fallbackReply, "", "", "", err.Error())
 			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "partial", err.Error())
 			_ = UpsertRun(requestCtx, tx.DB, RunRecord{
@@ -355,7 +397,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 				Model:          model,
 				Provider:       providerKey,
 			})
-			c.JSON(http.StatusOK, ChatResponse{Reply: fallbackReply, Action: "partial", RunID: runID})
+			writeChatResponse(c, ChatResponse{Reply: fallbackReply, Action: "partial", RunID: runID})
 			return
 		}
 
@@ -453,7 +495,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if content == "" {
 				content = "I processed your request."
 			}
-			_ = AppendMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", content, "summary", stepID, round+2)
+			_ = AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", content, "summary", stepID)
 			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "completed", content, "", "", content, "")
 			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "done", content)
 			_ = QueueFollowUpTasks(requestCtx, tx.DB, siteName, runID, conversationID, deriveFollowUpTasks(content, toolResultsFromMessages(messages)))
@@ -481,7 +523,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 				LastMessageAt: time.Now().UTC(),
 			})
 			_ = SummarizeRun(requestCtx, tx.DB, runID)
-			c.JSON(http.StatusOK, ChatResponse{Reply: content, RunID: runID})
+			writeChatResponse(c, ChatResponse{Reply: content, RunID: runID})
 			return
 
 		case "tool_calls":
@@ -489,7 +531,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if len(toolCalls) == 0 {
 				// finish_reason says tool_calls but none present — treat as stop.
 				if content != "" {
-					c.JSON(http.StatusOK, ChatResponse{Reply: content, RunID: runID})
+					writeChatResponse(c, ChatResponse{Reply: content, RunID: runID})
 					return
 				}
 				continue
@@ -529,7 +571,11 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 					slog.Info("AI tool call", "name", safeGetString(fn, "name"), "args", safeGetString(fn, "arguments"))
 				}
 			}
-			toolResults := executeToolCallsForAI(auditCtx, tx, reg, toolCalls, currentUser, siteName, runID, stepID, conversationID, c.GetStringSlice("user_roles"))
+			var execution policy.Execution
+			if verified, ok := c.Get("policy_execution"); ok {
+				execution, _ = verified.(policy.Execution)
+			}
+			toolResults := executeToolCallsForAIWithExecution(auditCtx, tx, reg, toolCalls, currentUser, siteName, runID, stepID, conversationID, nil, execution)
 			for i, tr := range toolResults {
 				raw := tr["content"].(string)
 				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])
@@ -588,7 +634,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if content == "" {
 				content = "I ran out of space processing your request. Could you try a more specific query?"
 			}
-			_ = AppendMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", content, "summary", stepID, round+2)
+			_ = AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", content, "summary", stepID)
 			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "failed", content, "", "", content, "length")
 			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "failed", "length")
 			_ = UpsertRun(requestCtx, tx.DB, RunRecord{
@@ -603,11 +649,11 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 				Model:          model,
 				Provider:       providerKey,
 			})
-			c.JSON(http.StatusOK, ChatResponse{Reply: content, Action: "truncated", RunID: runID})
+			writeChatResponse(c, ChatResponse{Reply: content, Action: "truncated", RunID: runID})
 			return
 
 		case "content_filter":
-			c.JSON(http.StatusOK, ChatResponse{
+			writeChatResponse(c, ChatResponse{
 				Reply: "I can't respond to that request due to content policies.",
 				RunID: runID,
 			})
@@ -629,7 +675,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 		default:
 			// Unknown finish_reason. If there's content, return it.
 			if content != "" {
-				_ = AppendMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", content, "summary", stepID, round+2)
+				_ = AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", content, "summary", stepID)
 				_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "completed", content, "", "", content, "")
 				_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "done", content)
 				_ = QueueFollowUpTasks(requestCtx, tx.DB, siteName, runID, conversationID, deriveFollowUpTasks(content, toolResultsFromMessages(messages)))
@@ -646,7 +692,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 					Provider:       providerKey,
 				})
 				_ = SummarizeRun(requestCtx, tx.DB, runID)
-				c.JSON(http.StatusOK, ChatResponse{Reply: content, RunID: runID})
+				writeChatResponse(c, ChatResponse{Reply: content, RunID: runID})
 				return
 			}
 			// Otherwise continue the loop.
@@ -657,7 +703,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 
 	// --- SAFETY NET: Max rounds exhausted ---
 	slog.Warn("Max rounds exhausted in chat loop", "max_rounds", cfg.MaxRounds)
-	c.JSON(http.StatusOK, ChatResponse{
+	writeChatResponse(c, ChatResponse{
 		Reply:  "I've taken several actions but wasn't able to complete the task. Could you break this into smaller steps?",
 		Action: "max_rounds_reached",
 		RunID:  runID,

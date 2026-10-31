@@ -17,6 +17,7 @@ import (
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/schema"
+	"github.com/asenawritescode/kora/secret"
 	ksite "github.com/asenawritescode/kora/site"
 	"github.com/gin-gonic/gin"
 )
@@ -234,12 +235,23 @@ func installPaymentUpdateFailureTrigger(t *testing.T, database *sql.DB, dialect 
 
 func serveMPesaCallbackDialect(t *testing.T, handler *Handler, database *sql.DB, registry *doctype.Registry, site, driver, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	dialect := kdb.Resolve(driver)
+	if err := secret.NewStore(database, dialect).Set(site, "mpesa_callback_token", "test-callback-token"); err != nil {
+		t.Fatalf("configure %s M-Pesa callback token: %v", driver, err)
+	}
+	return serveMPesaCallbackConfiguredDialect(t, handler, database, registry, site, driver, body)
+}
+
+func serveMPesaCallbackConfiguredDialect(t *testing.T, handler *Handler, database *sql.DB, registry *doctype.Registry, site, driver, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/payments/mpesa/callback", strings.NewReader(body))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/mpesa/stk/test-callback-token", strings.NewReader(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	ctx.Set("site_name", site)
+	ctx.Set("site_id", site)
+	ctx.Params = gin.Params{{Key: "token", Value: "test-callback-token"}}
 	ctx.Set("site_db", database)
 	ctx.Set("site_registry", registry)
 	ctx.Set("site_db_type", driver)

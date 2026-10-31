@@ -1,0 +1,141 @@
+name: Product
+resource_name: product
+module: Workspace
+is_submittable: false
+is_child_table: false
+is_single: false
+track_changes: false
+append_only: false
+title_field: product_name
+search_fields: ""
+sort_field: modified
+sort_order: DESC
+description: ""
+fields:
+    - fieldname: category
+      fieldtype: Data
+      label: Category
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: product_name
+      fieldtype: Data
+      label: Product Name
+      options: ""
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: selling_price
+      fieldtype: Currency
+      label: Selling Price
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints:
+        - type: min
+          value: 0
+          values: []
+          pattern: ""
+          message: Selling price cannot be negative.
+          condition: ""
+          scope: ""
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: sku
+      fieldtype: Data
+      label: SKU
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: stock_qty
+      fieldtype: Int
+      label: Stock Quantity
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints:
+        - type: min
+          value: 0
+          values: []
+          pattern: ""
+          message: Stock quantity cannot be negative.
+          condition: ""
+          scope: ""
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+doc_constraints: []
+public_access: null
+quantity_effect: null

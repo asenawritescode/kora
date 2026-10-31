@@ -1,4 +1,4 @@
-# Kora Common Site Configuration
+# Kigae Common Site Configuration
 # Settings shared across all sites. Override per-site in site_config.yaml.
 
 # Infrastructure
@@ -16,7 +16,7 @@ log_level: info          # debug | info | warn | error
 log_format: json         # json | text
 
 # Branding
-app_name: Kora
+app_name: Kigae
 version: "0.2.0"
 primary_color: "#2563eb"
 
@@ -30,7 +30,8 @@ rate_limit_rps: 100      # Requests per second per user
 rate_limit_burst: 20
 trusted_proxies: []      # CIDRs allowed to supply X-Forwarded-For (empty trusts no forwarded headers)
 
-# Database connection pool
+# Per-tenant database/sql pool defaults; the Engine connector budget caps
+# aggregate physical connections per endpoint across all pools in this process.
 db_max_open_conns: 25
 db_max_idle_conns: 5
 

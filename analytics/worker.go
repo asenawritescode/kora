@@ -1,9 +1,11 @@
 package analytics
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,30 +25,79 @@ import (
 // (new transition) are accumulated in memory and flushed in the same transaction
 // as the daily rollup deltas, eliminating 2 extra DB round-trips per transition.
 type Worker struct {
-	bus      EventBus
-	db       *sql.DB
-	dialect  db.QueryDialect
-	registry *doctype.Registry
-	siteName string
+	bus           EventBus
+	db            *sql.DB
+	dialect       db.QueryDialect
+	registry      *doctype.Registry
+	siteName      string
+	workAdmission interface {
+		Acquire(context.Context) (func(), error)
+	}
+	flushMu sync.Mutex // serializes database commits and WAL acknowledgments
 
 	// Accumulated deltas, keyed by (doctype, metric, dimension, date).
-	mu     sync.Mutex
-	deltas map[deltaKey]float64
+	processMu    sync.Mutex // prevents flush from snapshotting a partially processed event
+	mu           sync.Mutex
+	deltas       map[deltaKey]float64
+	manualDeltas map[deltaKey]float64 // additions without an event receipt identity
+	// Contributions retain the association between each durable event ID and
+	// the rollup mutations it produced. Flush uses this to apply only the events
+	// whose SQL receipt was newly inserted in the same transaction.
+	contributions        map[string]eventContribution
+	unkeyedContributions []eventContribution
 
 	// Accumulated workflow transition operations.
 	// workflowCloses: UPDATE to set exited_at on the previous transition.
 	// workflowOpens: INSERT the new transition row.
-	workflowCloses []workflowCloseOp
-	workflowOpens  []workflowOpenOp
+	workflowCloses    []workflowCloseOp
+	workflowOpens     []workflowOpenOp
+	pendingEventIDs   []string
+	pendingEventIDSet map[string]struct{}
+	pendingSequences  map[string]pendingEventSequence
 
-	batchSize  int
-	flushEvery time.Duration
-	stopCh     chan struct{}
-	stopped    bool
+	batchSize     int
+	flushEvery    time.Duration
+	retentionDays int
+	walPending    bool
+	stopCh        chan struct{}
+	stopped       bool
+	started       bool
+	done          chan struct{}
+	ctx           context.Context
+	cancel        context.CancelFunc
 
 	// Metrics cache: auto-generated metrics per doctype, resolved once.
 	metricsMu sync.RWMutex
 	metrics   map[string][]*Metric // doctype → metrics
+}
+
+// SetWorkAdmission attaches the endpoint-shared active-work limiter. It must
+// be called before the worker starts; each flush or maintenance operation
+// acquires exactly one slot for its complete unit of database work.
+func (w *Worker) SetWorkAdmission(admission interface {
+	Acquire(context.Context) (func(), error)
+}) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.started {
+		w.workAdmission = admission
+	}
+}
+
+func (w *Worker) acquireMaintenance(ctx context.Context) (func(), error) {
+	if w == nil || w.workAdmission == nil {
+		return func() {}, nil
+	}
+	acquire := w.workAdmission.Acquire
+	if maintenance, ok := w.workAdmission.(interface {
+		AcquireMaintenance(context.Context) (func(), error)
+	}); ok {
+		acquire = maintenance.AcquireMaintenance
+	}
+	return acquire(ctx)
 }
 
 type deltaKey struct {
@@ -54,6 +105,26 @@ type deltaKey struct {
 	Metric    string
 	Dimension string
 	Date      string // "2006-01-02" format
+}
+
+type eventContribution struct {
+	sequence string
+	deltas   map[deltaKey]float64
+	closes   []workflowCloseOp
+	opens    []workflowOpenOp
+}
+
+type pendingEventSequence struct {
+	value    string
+	conflict bool
+}
+
+func (c *eventContribution) addDelta(doctype, metric, dimension, date string, delta float64) {
+	key := deltaKey{Doctype: doctype, Metric: metric, Dimension: dimension, Date: date}
+	if c.deltas == nil {
+		c.deltas = make(map[deltaKey]float64)
+	}
+	c.deltas[key] += delta
 }
 
 // workflowCloseOp closes the previous workflow transition (sets exited_at + duration).
@@ -78,27 +149,83 @@ type workflowOpenOp struct {
 
 // NewWorker creates an analytics worker for a single site.
 func NewWorker(bus EventBus, database *sql.DB, dialect db.QueryDialect, registry *doctype.Registry, siteName string, cfg *Config) *Worker {
+	if cfg == nil {
+		cfg = LoadConfig()
+	}
 	d, _ := time.ParseDuration(cfg.FlushInterval)
 	if d <= 0 {
 		d = 1 * time.Second
 	}
+	batchSize := cfg.BatchSize
+	if batchSize <= 0 {
+		batchSize = DefaultAnalyticsBatchSize
+	}
+	if batchSize > MaxAnalyticsBatchSize {
+		batchSize = MaxAnalyticsBatchSize
+	}
 	return &Worker{
-		bus:        bus,
-		db:         database,
-		dialect:    dialect,
-		registry:   registry,
-		siteName:   siteName,
-		deltas:     make(map[deltaKey]float64),
-		batchSize:  cfg.BatchSize,
-		flushEvery: d,
-		stopCh:     make(chan struct{}),
-		metrics:    make(map[string][]*Metric),
+		bus:               bus,
+		db:                database,
+		dialect:           dialect,
+		registry:          registry,
+		siteName:          siteName,
+		deltas:            make(map[deltaKey]float64),
+		manualDeltas:      make(map[deltaKey]float64),
+		batchSize:         batchSize,
+		flushEvery:        d,
+		retentionDays:     cfg.RetentionDays,
+		stopCh:            make(chan struct{}),
+		done:              make(chan struct{}),
+		metrics:           make(map[string][]*Metric),
+		pendingEventIDSet: make(map[string]struct{}),
+		pendingSequences:  make(map[string]pendingEventSequence),
+		contributions:     make(map[string]eventContribution),
 	}
 }
 
-// Start begins consuming events. Runs in a background goroutine.
-// On startup, drains any WAL backlog from a previous unclean shutdown.
+// Start consumes events until stopped. Use StartAsync for goroutine startup.
 func (w *Worker) Start() {
+	ctx, ok := w.markStarted(context.Background())
+	if !ok {
+		return
+	}
+	w.run(ctx)
+}
+
+// StartAsync marks the worker started before launching its goroutine so Stop
+// can wait for its final flush before closing the database and event bus.
+func (w *Worker) StartAsync() {
+	w.StartAsyncContext(context.Background())
+}
+
+// StartAsyncContext runs the worker under ctx. Canceling ctx stops event
+// consumption and runs a bounded final flush before the worker exits.
+func (w *Worker) StartAsyncContext(parent context.Context) {
+	ctx, ok := w.markStarted(parent)
+	if ok {
+		go w.run(ctx)
+	}
+}
+
+func (w *Worker) markStarted(parent context.Context) (context.Context, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.started || w.stopped {
+		return nil, false
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	w.ctx, w.cancel = context.WithCancel(parent)
+	w.started = true
+	return w.ctx, true
+}
+
+func (w *Worker) run(ctx context.Context) {
+	defer close(w.done)
+	if w.cancel != nil {
+		defer w.cancel()
+	}
 	// Recover from panics in the analytics worker. Without this, a nil pointer
 	// or type assertion panic in process() or flush() crashes the ENTIRE Go process,
 	// taking down all sites. We log the panic and let the goroutine die — the HTTP
@@ -121,7 +248,7 @@ func (w *Worker) Start() {
 		"batch_size", w.batchSize, "flush_interval", w.flushEvery)
 
 	// Drain any WAL backlog before consuming live events.
-	w.drainWAL()
+	w.drainWAL(ctx)
 
 	flushTicker := time.NewTicker(w.flushEvery)
 	defer flushTicker.Stop()
@@ -129,35 +256,54 @@ func (w *Worker) Start() {
 	// Retention cleanup + monthly rollup: run once at startup and then daily.
 	retentionTicker := time.NewTicker(24 * time.Hour)
 	defer retentionTicker.Stop()
-	go w.cleanupRetention()
-	go w.rollupMonthly()
+	w.cleanupRetention(ctx)
+	w.rollupMonthly(ctx)
 
 	count := 0
+	_, walDriven := w.bus.(WALBatchDrainer)
 	for {
 		select {
 		case event, ok := <-ch:
 			if !ok {
-				w.flush()
+				w.flushOnShutdown()
 				return
 			}
-			w.process(event)
-			count++
-			if count >= w.batchSize {
-				w.flush()
+			if ctx.Err() != nil {
+				w.flushOnShutdown()
+				return
+			}
+			if walDriven {
+				// The local channel is a wake-up hint. WAL is the authoritative
+				// queue, so overflow and fanout competition recover on the next
+				// bounded scan without replaying this channel copy twice.
+				w.drainWAL(ctx)
 				count = 0
+			} else {
+				w.process(event)
+				count++
+				if count >= w.batchSize {
+					w.flushAndLog(ctx)
+					count = 0
+				}
 			}
 
 		case <-flushTicker.C:
-			if count > 0 {
-				w.flush()
-				count = 0
+			if walDriven {
+				w.drainWAL(ctx)
+			} else {
+				w.flushAndLog(ctx)
 			}
+			count = 0
 
 		case <-retentionTicker.C:
-			go w.cleanupRetention()
+			w.cleanupRetention(ctx)
 
 		case <-w.stopCh:
-			w.flush()
+			w.flushOnShutdown()
+			return
+
+		case <-ctx.Done():
+			w.flushOnShutdown()
 			return
 		}
 	}
@@ -181,23 +327,49 @@ func (w *Worker) InvalidateAllMetrics() {
 
 // Flush forces any buffered analytics deltas to persist immediately.
 // It is safe to call even if no events are pending.
-func (w *Worker) Flush() {
-	w.flush()
+func (w *Worker) Flush() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return w.flush(ctx)
+}
+
+func (w *Worker) flushAndLog(ctx context.Context) {
+	if err := w.flush(ctx); err != nil {
+		slog.Error("analytics worker flush failed; batch retained for retry", "site", w.siteName, "error", err)
+	}
+}
+
+func (w *Worker) flushOnShutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	w.flushAndLog(ctx)
 }
 
 // Stop signals the worker to flush and exit.
 func (w *Worker) Stop() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	if !w.stopped {
 		w.stopped = true
 		close(w.stopCh)
+		if w.cancel != nil {
+			w.cancel()
+		}
+	}
+	started := w.started
+	w.mu.Unlock()
+	if started {
+		<-w.done
 	}
 }
 
 // process handles a single ChangeEvent, resolving metrics and accumulating deltas.
 func (w *Worker) process(event ChangeEvent) {
-	if event.Operation == EventNotification {
+	w.processMu.Lock()
+	defer w.processMu.Unlock()
+	if !w.trackEventID(event.ID, event.Sequence) {
+		return
+	}
+	if event.Operation != EventInsert && event.Operation != EventUpdate && event.Operation != EventDelete && event.Operation != EventSubmit && event.Operation != EventCancel {
 		return
 	}
 	dt := w.registry.Get(event.Doctype)
@@ -211,12 +383,13 @@ func (w *Worker) process(event ChangeEvent) {
 	if len(metrics) == 0 {
 		return
 	}
+	contribution := eventContribution{sequence: event.Sequence}
 
 	for _, m := range metrics {
 		date := eventDate(event, m.TimeField)
 		switch m.Type {
 		case MetricCount:
-			w.addDelta(event.Doctype, m.Name, "", date, 1)
+			contribution.addDelta(event.Doctype, m.Name, "", date, 1)
 
 		case MetricCountByField:
 			if m.Field == "" {
@@ -224,20 +397,20 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 			val := event.Data[m.Field]
 			dim := m.Field + "=" + anyToString(val)
-			w.addDelta(event.Doctype, m.Name, dim, date, 1)
+			contribution.addDelta(event.Doctype, m.Name, dim, date, 1)
 
 			// On update: decrement old dimension if the field changed.
 			if event.Operation == EventUpdate && event.OldData != nil {
 				oldVal := event.OldData[m.Field]
 				if anyToString(oldVal) != anyToString(val) {
 					oldDim := m.Field + "=" + anyToString(oldVal)
-					w.addDelta(event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
+					contribution.addDelta(event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
 				}
 			}
 
 		case MetricCountByTime:
 			if event.Operation == EventInsert {
-				w.addDelta(event.Doctype, m.Name, "", event.Timestamp.Format("2006-01-02"), 1)
+				contribution.addDelta(event.Doctype, m.Name, "", event.Timestamp.Format("2006-01-02"), 1)
 			}
 
 		case MetricSum:
@@ -254,7 +427,7 @@ func (w *Worker) process(event ChangeEvent) {
 			if event.Operation == EventDelete {
 				netDelta = -newVal
 			}
-			w.addDelta(event.Doctype, m.Name, "", date, netDelta)
+			contribution.addDelta(event.Doctype, m.Name, "", date, netDelta)
 
 		case MetricSumByField:
 			if m.Field == "" || m.GroupByField == "" {
@@ -269,25 +442,25 @@ func (w *Worker) process(event ChangeEvent) {
 			if event.Operation == EventDelete {
 				netDelta = -newVal
 			}
-			w.addDelta(event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.Data[m.GroupByField]), date, netDelta)
+			contribution.addDelta(event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.Data[m.GroupByField]), date, netDelta)
 			if event.Operation == EventUpdate && event.OldData != nil && anyToString(event.OldData[m.GroupByField]) != anyToString(event.Data[m.GroupByField]) {
-				w.addDelta(event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.OldData[m.GroupByField]), eventOldDate(event, m.TimeField), -oldVal)
+				contribution.addDelta(event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.OldData[m.GroupByField]), eventOldDate(event, m.TimeField), -oldVal)
 			}
 
 		case MetricStateDistribution:
 			// Track document counts by workflow state.
 			newState := anyToString(event.Data["doc_status"])
 			newDim := "state=" + newState
-			w.addDelta(event.Doctype, m.Name, newDim, date, 1)
+			contribution.addDelta(event.Doctype, m.Name, newDim, date, 1)
 
 			if event.Operation == EventUpdate && event.OldData != nil {
 				oldState := anyToString(event.OldData["doc_status"])
 				if oldState != newState {
 					oldDim := "state=" + oldState
-					w.addDelta(event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
+					contribution.addDelta(event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
 
 					// Accumulate workflow transition for batch flush.
-					w.addWorkflowTransition(event, oldState, newState)
+					contribution.addWorkflowTransition(event, oldState, newState)
 				}
 			}
 
@@ -297,9 +470,33 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 			val := event.Data[m.LinkField]
 			dim := m.LinkField + "=" + anyToString(val)
-			w.addDelta(event.Doctype, m.Name, dim, date, 1)
+			contribution.addDelta(event.Doctype, m.Name, dim, date, 1)
 		}
 	}
+	w.recordContribution(event.ID, contribution)
+}
+
+func (c *eventContribution) addWorkflowTransition(event ChangeEvent, oldState, newState string) {
+	c.closes = append(c.closes, workflowCloseOp{Site: event.Site, Doctype: event.Doctype, DocName: event.DocName, OldState: oldState, Now: event.Timestamp})
+	c.opens = append(c.opens, workflowOpenOp{Site: event.Site, Doctype: event.Doctype, DocName: event.DocName, FromState: oldState, ToState: newState, Now: event.Timestamp, ModifiedBy: event.ModifiedBy})
+}
+
+func (w *Worker) recordContribution(id string, contribution eventContribution) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for key, value := range contribution.deltas {
+		w.deltas[key] += value
+	}
+	w.workflowCloses = append(w.workflowCloses, contribution.closes...)
+	w.workflowOpens = append(w.workflowOpens, contribution.opens...)
+	if id == "" {
+		w.unkeyedContributions = append(w.unkeyedContributions, contribution)
+		return
+	}
+	if w.contributions == nil {
+		w.contributions = make(map[string]eventContribution)
+	}
+	w.contributions[id] = contribution
 }
 
 // getMetrics returns all metrics for a doctype, resolving auto-generated ones on first call.
@@ -319,11 +516,7 @@ func (w *Worker) getMetrics(dt *doctype.DocType) []*Metric {
 	}
 
 	metrics := GenerateMetrics(dt)
-	if dt.IsSubmittable {
-		if wf := w.registry.Workflows.Get(dt.Name); wf != nil {
-			metrics = append(metrics, GenerateWorkflowMetrics(dt, wf)...)
-		}
-	}
+
 	w.metrics[dt.Name] = metrics
 	return metrics
 }
@@ -334,6 +527,42 @@ func (w *Worker) addDelta(doctype, metric, dimension, date string, delta float64
 	defer w.mu.Unlock()
 	key := deltaKey{Doctype: doctype, Metric: metric, Dimension: dimension, Date: date}
 	w.deltas[key] += delta
+	if w.manualDeltas == nil {
+		w.manualDeltas = make(map[deltaKey]float64)
+	}
+	w.manualDeltas[key] += delta
+}
+
+func (w *Worker) trackEventID(id, sequence string) bool {
+	if id == "" {
+		return true
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.pendingEventIDSet == nil {
+		w.pendingEventIDSet = make(map[string]struct{})
+	}
+	if w.pendingSequences == nil {
+		w.pendingSequences = make(map[string]pendingEventSequence)
+	}
+	if _, exists := w.pendingEventIDSet[id]; exists {
+		pending := w.pendingSequences[id]
+		if !pending.conflict && sequence != "" {
+			if pending.value == "" {
+				pending.value = sequence
+			} else if pending.value != sequence {
+				pending.value, pending.conflict = "", true
+			}
+		}
+		w.pendingSequences[id] = pending
+		return false
+	}
+	w.pendingEventIDSet[id] = struct{}{}
+	w.pendingEventIDs = append(w.pendingEventIDs, id)
+	if sequence != "" {
+		w.pendingSequences[id] = pendingEventSequence{value: sequence}
+	}
+	return true
 }
 
 // flush writes all accumulated deltas and workflow transitions to the DB
@@ -343,73 +572,263 @@ func (w *Worker) addDelta(doctype, metric, dimension, date string, delta float64
 // we build a single multi-VALUES INSERT (split into chunks for SQLite compat).
 // Workflow transitions are also flushed in the same transaction instead of
 // being fired as separate auto-commit db.Exec() calls from the hot path.
-func (w *Worker) flush() {
+func (w *Worker) flush(ctx context.Context) error {
+	// A second flush must not acknowledge WAL or publish workflow deltas while
+	// the first transaction's commit/acknowledgment boundary is unresolved.
+	w.flushMu.Lock()
+	defer w.flushMu.Unlock()
+	if w.db != nil {
+		w.mu.Lock()
+		hasWork := len(w.deltas) > 0 || len(w.manualDeltas) > 0 || len(w.workflowCloses) > 0 || len(w.workflowOpens) > 0 || len(w.pendingEventIDs) > 0 || len(w.unkeyedContributions) > 0 || w.walPending
+		w.mu.Unlock()
+		if !hasWork {
+			return nil
+		}
+	}
+	if w.db != nil && w.workAdmission != nil {
+		release, err := w.workAdmission.Acquire(ctx)
+		if err != nil {
+			return fmt.Errorf("analytics flush work admission: %w", err)
+		}
+		defer release()
+	}
+	w.processMu.Lock()
+
 	if w.db == nil {
 		// No DB connection — discard accumulated state (test mode).
 		w.mu.Lock()
 		w.deltas = make(map[deltaKey]float64)
+		w.manualDeltas = make(map[deltaKey]float64)
 		w.workflowCloses = nil
 		w.workflowOpens = nil
+		w.pendingEventIDs = nil
+		w.pendingEventIDSet = make(map[string]struct{})
+		w.contributions = make(map[string]eventContribution)
+		w.unkeyedContributions = nil
+		w.walPending = false
 		w.mu.Unlock()
-		return
+		w.processMu.Unlock()
+		return nil
 	}
 
 	w.mu.Lock()
-	if len(w.deltas) == 0 && len(w.workflowOpens) == 0 {
+	if len(w.deltas) == 0 && len(w.workflowCloses) == 0 && len(w.workflowOpens) == 0 && len(w.pendingEventIDs) == 0 && !w.walPending {
 		w.mu.Unlock()
-		return
+		w.processMu.Unlock()
+		return nil
 	}
 	deltas := w.deltas
 	w.deltas = make(map[deltaKey]float64)
+	manualDeltas := w.manualDeltas
+	w.manualDeltas = make(map[deltaKey]float64)
 	closes := w.workflowCloses
 	w.workflowCloses = nil
 	opens := w.workflowOpens
 	w.workflowOpens = nil
+	eventIDs := w.pendingEventIDs
+	w.pendingEventIDs = nil
+	eventSequences := w.pendingSequences
+	w.pendingSequences = make(map[string]pendingEventSequence)
+	contributions := w.contributions
+	w.contributions = make(map[string]eventContribution)
+	unkeyed := w.unkeyedContributions
+	w.unkeyedContributions = nil
 	w.mu.Unlock()
+	w.processMu.Unlock()
 
-	// Rotate the WAL BEFORE committing to the DB. This atomically swaps
-	// the current WAL file for a fresh one. If we crash after the DB commit
-	// but before deleting the old WAL, the old WAL (.flushing file) is
-	// replayed on restart — causing a bounded double-count, which is
-	// acceptable for analytics.
-	oldWAL, _ := w.bus.RotateWAL()
+	txDeltas := make(map[deltaKey]float64, len(manualDeltas))
+	for key, value := range manualDeltas {
+		txDeltas[key] = value
+	}
+	txCloses := make([]workflowCloseOp, 0, len(closes))
+	txOpens := make([]workflowOpenOp, 0, len(opens))
+	for _, contribution := range unkeyed {
+		txCloses = append(txCloses, contribution.closes...)
+		txOpens = append(txOpens, contribution.opens...)
+	}
+
+	// Legacy buses rotate their WAL before the transaction. The local WAL bus
+	// uses per-event acknowledgment after commit so queued events remain intact.
+	var oldWAL string
+	var err error
+	_, perEventAck := w.bus.(EventWALAcknowledger)
+	if !perEventAck && w.bus != nil {
+		oldWAL, err = w.bus.RotateWAL()
+		if err != nil {
+			w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
+			return fmt.Errorf("rotate analytics WAL: %w", err)
+		}
+	}
 
 	// Wrap in a transaction so deltas + workflow ops are atomic.
-	tx, err := w.db.Begin()
+	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
-		slog.Error("analytics worker: begin tx for flush", "error", err)
-		return
+		w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
+		return fmt.Errorf("begin analytics flush: %w", err)
 	}
 	defer tx.Rollback()
+	checkpoints, err := lockRebuildStateTx(ctx, tx, w.dialect, w.siteName)
+	if err != nil {
+		w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
+		return err
+	}
+	for _, contribution := range unkeyed {
+		accepted, err := contributionOutsideRebuiltRange(contribution, contribution.sequence, checkpoints)
+		if err != nil {
+			w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
+			return err
+		}
+		for key, value := range accepted {
+			txDeltas[key] += value
+		}
+	}
+
+	for _, id := range eventIDs {
+		inserted, err := insertEventReceiptTx(ctx, tx, w.dialect, w.siteName, id, eventSequences[id].value)
+		if err != nil {
+			w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
+			return fmt.Errorf("record analytics event receipt %q: %w", id, err)
+		}
+		if !inserted {
+			continue
+		}
+		if contribution, ok := contributions[id]; ok {
+			accepted, err := contributionOutsideRebuiltRange(contribution, contribution.sequence, checkpoints)
+			if err != nil {
+				w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
+				return fmt.Errorf("filter analytics event %q by rebuild cutoff: %w", id, err)
+			}
+			for key, value := range accepted {
+				txDeltas[key] += value
+			}
+			txCloses = append(txCloses, contribution.closes...)
+			txOpens = append(txOpens, contribution.opens...)
+		}
+	}
 
 	// Flush daily rollup deltas (split into chunks for SQLite variable limit).
-	if len(deltas) > 0 {
-		w.flushDeltasTx(tx, deltas)
+	if len(txDeltas) > 0 {
+		if err := w.flushDeltasTx(tx, txDeltas); err != nil {
+			w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
+			return err
+		}
 	}
 
 	// Flush workflow transitions within the same transaction.
-	for i := range closes {
-		w.flushWorkflowCloseTx(tx, &closes[i])
+	for i := range txCloses {
+		if err := w.flushWorkflowCloseTx(tx, &txCloses[i]); err != nil {
+			w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
+			return err
+		}
 	}
-	for i := range opens {
-		w.flushWorkflowOpenTx(tx, &opens[i])
+	for i := range txOpens {
+		if err := w.flushWorkflowOpenTx(tx, &txOpens[i]); err != nil {
+			w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		slog.Error("analytics worker: commit flush", "error", err)
+		w.restoreBatch(deltas, manualDeltas, closes, opens, eventIDs, eventSequences, contributions, unkeyed)
 		// Don't commit WAL rotation — the .flushing file remains and will be
 		// drained on next restart.
-		return
+		return fmt.Errorf("commit analytics flush: %w", err)
 	}
 
-	// DB commit succeeded — safely delete the old WAL file.
-	if err := w.bus.CommitWALRotation(oldWAL); err != nil {
-		slog.Warn("analytics worker: commit WAL rotation failed", "error", err)
+	// Acknowledge only event IDs included in this committed batch. This avoids
+	// deleting later events that have reached the WAL but are still queued.
+	var ackErr error
+	if ack, ok := w.bus.(EventWALAcknowledger); ok {
+		ackErr = ack.AcknowledgeWAL(eventIDs)
+	} else if w.bus != nil {
+		ackErr = w.bus.CommitWALRotation(oldWAL)
 	}
+	if ackErr != nil {
+		slog.Warn("analytics worker: WAL acknowledgment failed after database commit", "error", ackErr)
+		w.mu.Lock()
+		w.pendingEventIDs = append(eventIDs, w.pendingEventIDs...)
+		w.walPending = true
+		w.mu.Unlock()
+		return fmt.Errorf("acknowledge analytics WAL: %w", ackErr)
+	}
+	w.mu.Lock()
+	w.walPending = false
+	for _, id := range eventIDs {
+		delete(w.pendingEventIDSet, id)
+		delete(w.pendingSequences, id)
+	}
+	w.mu.Unlock()
 
 	slog.Debug("analytics worker: flushed",
-		"site", w.siteName, "deltas", len(deltas),
-		"workflow_closes", len(closes), "workflow_opens", len(opens))
+		"site", w.siteName, "deltas", len(txDeltas),
+		"workflow_closes", len(txCloses), "workflow_opens", len(txOpens))
+	return nil
+}
+
+func (w *Worker) restoreBatch(deltas, manualDeltas map[deltaKey]float64, closes []workflowCloseOp, opens []workflowOpenOp, eventIDs []string, eventSequences map[string]pendingEventSequence, contributions map[string]eventContribution, unkeyed []eventContribution) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for k, v := range deltas {
+		w.deltas[k] += v
+	}
+	if w.manualDeltas == nil {
+		w.manualDeltas = make(map[deltaKey]float64)
+	}
+	for k, v := range manualDeltas {
+		w.manualDeltas[k] += v
+	}
+	w.workflowCloses = append(closes, w.workflowCloses...)
+	w.workflowOpens = append(opens, w.workflowOpens...)
+	w.pendingEventIDs = append(eventIDs, w.pendingEventIDs...)
+	if w.pendingSequences == nil {
+		w.pendingSequences = make(map[string]pendingEventSequence)
+	}
+	for id, sequence := range eventSequences {
+		if current, exists := w.pendingSequences[id]; !exists {
+			w.pendingSequences[id] = sequence
+		} else if current.conflict || sequence.conflict || (current.value != "" && sequence.value != "" && current.value != sequence.value) {
+			w.pendingSequences[id] = pendingEventSequence{conflict: true}
+		} else if current.value == "" {
+			w.pendingSequences[id] = sequence
+		}
+	}
+	if w.contributions == nil {
+		w.contributions = make(map[string]eventContribution)
+	}
+	for id, contribution := range contributions {
+		w.contributions[id] = contribution
+	}
+	w.unkeyedContributions = append(unkeyed, w.unkeyedContributions...)
+}
+
+func insertEventReceiptTx(ctx context.Context, tx *sql.Tx, dialect db.QueryDialect, site, eventID, sourceSequence string) (bool, error) {
+	var sequence any
+	if sourceSequence != "" {
+		parsed, err := strconv.ParseInt(sourceSequence, 10, 64)
+		if err != nil || parsed < 0 || strconv.FormatInt(parsed, 10) != sourceSequence {
+			return false, fmt.Errorf("invalid analytics event source sequence %q", sourceSequence)
+		}
+		sequence = parsed
+	}
+	query := `INSERT INTO _kora_analytics_event_receipt (site, event_id, source_sequence, processed_at) VALUES (?, ?, ?, ?)`
+	driver := ""
+	if named, ok := dialect.(interface{ DriverName() string }); ok {
+		driver = named.DriverName()
+	}
+	if driver == "mysql" {
+		query = `INSERT INTO _kora_analytics_event_receipt (site, event_id, source_sequence, processed_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE event_id = event_id`
+	} else {
+		query += ` ON CONFLICT (site, event_id) DO NOTHING`
+	}
+	result, err := tx.ExecContext(ctx, db.Rebind(dialect, query), site, eventID, sequence, time.Now().UTC())
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
 }
 
 // maxBatchRows is the maximum rows per multi-VALUES INSERT.
@@ -418,10 +837,17 @@ func (w *Worker) flush() {
 // much larger batches, but capping at 150 keeps both dialects happy.
 const maxBatchRows = 150
 
+func incrementUpsert(dialect db.QueryDialect, tableName string, conflictCols, incrementCols []string) string {
+	if qualified, ok := dialect.(db.TableQualifiedIncrementDialect); ok {
+		return qualified.UpsertIncrementForTable(tableName, conflictCols, incrementCols)
+	}
+	return dialect.UpsertIncrement(conflictCols, incrementCols)
+}
+
 // flushDeltasTx writes daily rollup deltas in multi-row UPSERT chunks within tx.
-func (w *Worker) flushDeltasTx(tx *sql.Tx, deltas map[deltaKey]float64) {
+func (w *Worker) flushDeltasTx(tx *sql.Tx, deltas map[deltaKey]float64) error {
 	const rowCols = 6
-	upsertSuffix := w.dialect.UpsertIncrement(
+	upsertSuffix := incrementUpsert(w.dialect, "_kora_analytics_daily",
 		[]string{"site", "doctype", "metric", "dimension", "date"},
 		[]string{"value"},
 	)
@@ -443,8 +869,8 @@ func (w *Worker) flushDeltasTx(tx *sql.Tx, deltas map[deltaKey]float64) {
 		chunk := flat[start:end]
 		n := len(chunk)
 
-		rowPlaceholder := "(" + strings.Repeat("?,", rowCols-1) + "?)"
-		placeholders := strings.Repeat(rowPlaceholder+",", n-1) + rowPlaceholder
+		rowPlaceholder := "(" + strings.TrimSuffix(strings.Repeat("?,", rowCols), ",") + ")"
+		placeholders := strings.TrimSuffix(strings.Repeat(rowPlaceholder+",", n), ",")
 
 		args := make([]any, 0, n*rowCols)
 		for _, e := range chunk {
@@ -454,39 +880,46 @@ func (w *Worker) flushDeltasTx(tx *sql.Tx, deltas map[deltaKey]float64) {
 		query := "INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value) VALUES " +
 			placeholders + " " + upsertSuffix
 
-		if _, err := tx.Exec(query, args...); err != nil {
-			slog.Error("analytics worker: batch upsert chunk failed",
-				"site", w.siteName, "chunk_rows", n, "error", err)
-			// Continue with remaining chunks — don't lose all data because of one chunk.
+		if _, err := tx.Exec(db.Rebind(w.dialect, query), args...); err != nil {
+			return fmt.Errorf("upsert analytics chunk (%d rows): %w", n, err)
 		}
 	}
+	return nil
 }
 
 // flushWorkflowCloseTx executes the UPDATE to close a previous workflow transition.
-func (w *Worker) flushWorkflowCloseTx(tx *sql.Tx, op *workflowCloseOp) {
+func (w *Worker) flushWorkflowCloseTx(tx *sql.Tx, op *workflowCloseOp) error {
+	duration := "TIMESTAMPDIFF(SECOND, entered_at, ?)"
+	if d, ok := w.dialect.(interface{ DriverName() string }); ok && d.DriverName() == "postgres" {
+		duration = "EXTRACT(EPOCH FROM (? - entered_at))"
+	}
+	if d, ok := w.dialect.(interface{ DriverName() string }); ok && d.DriverName() == "libsql" {
+		duration = "CAST((julianday(?) - julianday(entered_at))*86400 AS INTEGER)"
+	}
 	_, err := tx.Exec(
-		`UPDATE _kora_analytics_workflow
-		 SET exited_at = ?, duration_seconds = TIMESTAMPDIFF(SECOND, entered_at, ?)
+		db.Rebind(w.dialect, fmt.Sprintf(`UPDATE _kora_analytics_workflow
+		 SET exited_at = ?, duration_seconds = %s
 		 WHERE site = ? AND doctype = ? AND doc_name = ? AND to_state = ? AND exited_at IS NULL`,
+			duration)),
 		op.Now, op.Now, op.Site, op.Doctype, op.DocName, op.OldState,
 	)
 	if err != nil {
-		slog.Warn("analytics worker: workflow close failed",
-			"doctype", op.Doctype, "doc", op.DocName, "old_state", op.OldState, "error", err)
+		return fmt.Errorf("close analytics workflow %s/%s: %w", op.Doctype, op.DocName, err)
 	}
+	return nil
 }
 
 // flushWorkflowOpenTx executes the INSERT for a new workflow transition.
-func (w *Worker) flushWorkflowOpenTx(tx *sql.Tx, op *workflowOpenOp) {
+func (w *Worker) flushWorkflowOpenTx(tx *sql.Tx, op *workflowOpenOp) error {
 	_, err := tx.Exec(
-		`INSERT INTO _kora_analytics_workflow (site, doctype, doc_name, from_state, to_state, entered_at, actor)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		db.Rebind(w.dialect, `INSERT INTO _kora_analytics_workflow (site, doctype, doc_name, from_state, to_state, entered_at, actor)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`),
 		op.Site, op.Doctype, op.DocName, op.FromState, op.ToState, op.Now, op.ModifiedBy,
 	)
 	if err != nil {
-		slog.Warn("analytics worker: workflow open failed",
-			"doctype", op.Doctype, "doc", op.DocName, "from", op.FromState, "to", op.ToState, "error", err)
+		return fmt.Errorf("open analytics workflow %s/%s: %w", op.Doctype, op.DocName, err)
 	}
+	return nil
 }
 
 // toFloat safely converts an interface{} to float64.
@@ -507,21 +940,32 @@ func toFloat(v any) float64 {
 	}
 }
 
-// drainWAL replays any events spilled to disk from a previous unclean shutdown.
-func (w *Worker) drainWAL() {
-	count, err := w.bus.DrainWAL(func(event ChangeEvent) {
+// drainWAL processes one bounded durable batch. The WAL, rather than the
+// in-memory channel, is authoritative for local analytics delivery.
+func (w *Worker) drainWAL(ctx context.Context) {
+	handler := func(event ChangeEvent) {
 		w.process(event)
-	})
+	}
+	var count int
+	var err error
+	if drainer, ok := w.bus.(WALBatchDrainer); ok {
+		count, err = drainer.DrainWALBatch(w.batchSize, handler)
+	} else {
+		count, err = w.bus.DrainWAL(handler)
+	}
 	if err != nil {
 		slog.Error("analytics worker: WAL drain failed", "error", err)
 	}
 	if count > 0 {
-		w.flush()
+		w.mu.Lock()
+		w.walPending = true
+		w.mu.Unlock()
+		w.flushAndLog(ctx)
 	}
 }
 
 // rollupMonthly aggregates daily rows into _kora_analytics_monthly for the previous month.
-func (w *Worker) rollupMonthly() {
+func (w *Worker) rollupMonthly(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("analytics worker: rollupMonthly panicked", "site", w.siteName, "panic", r)
@@ -530,25 +974,33 @@ func (w *Worker) rollupMonthly() {
 	if w.db == nil {
 		return
 	}
+	release, err := w.acquireMaintenance(ctx)
+	if err != nil {
+		slog.Warn("analytics: monthly rollup work admission failed", "site", w.siteName, "error", err)
+		return
+	}
+	defer release()
 	// Aggregate the previous month.
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, now.Location())
 	monthEnd := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	monthStartDate := monthStart.Format("2006-01-02")
+	monthEndDate := monthEnd.Format("2006-01-02")
 
-	upsert := w.dialect.UpsertIncrement(
+	upsert := incrementUpsert(w.dialect, "_kora_analytics_monthly",
 		[]string{"site", "doctype", "metric", "dimension", "month"},
 		[]string{"value"},
 	)
 
-	query := fmt.Sprintf(
+	query := db.Rebind(w.dialect, fmt.Sprintf(
 		`INSERT INTO _kora_analytics_monthly (site, doctype, metric, dimension, month, value)
 		 SELECT site, doctype, metric, dimension, ? AS month, SUM(value)
 		 FROM _kora_analytics_daily
 		 WHERE site = ? AND date >= ? AND date < ?
 		 GROUP BY site, doctype, metric, dimension
-		 %s`, upsert)
+		 %s`, upsert))
 
-	result, err := w.db.Exec(query, monthStart, w.siteName, monthStart, monthEnd)
+	result, err := w.db.ExecContext(ctx, query, monthStartDate, w.siteName, monthStartDate, monthEndDate)
 	if err != nil {
 		slog.Warn("analytics: monthly rollup failed", "site", w.siteName, "error", err)
 		return
@@ -559,7 +1011,7 @@ func (w *Worker) rollupMonthly() {
 }
 
 // cleanupRetention deletes rollup rows older than the configured retention period.
-func (w *Worker) cleanupRetention() {
+func (w *Worker) cleanupRetention(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("analytics worker: cleanupRetention panicked", "site", w.siteName, "panic", r)
@@ -568,7 +1020,16 @@ func (w *Worker) cleanupRetention() {
 	if w.db == nil {
 		return
 	}
-	dateCutoff := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
+	release, err := w.acquireMaintenance(ctx)
+	if err != nil {
+		slog.Warn("analytics: retention cleanup work admission failed", "site", w.siteName, "error", err)
+		return
+	}
+	defer release()
+	dateCutoff, retain := retentionCutoff(time.Now(), w.retentionDays)
+	if !retain {
+		return
+	}
 
 	// Each table uses a different date column.
 	tables := []struct {
@@ -578,8 +1039,8 @@ func (w *Worker) cleanupRetention() {
 		{"_kora_analytics_monthly", "month"},
 	}
 	for _, t := range tables {
-		result, err := w.db.Exec(
-			fmt.Sprintf("DELETE FROM %s WHERE site = ? AND %s < ?", t.name, t.dateCol),
+		result, err := w.db.ExecContext(ctx,
+			db.Rebind(w.dialect, fmt.Sprintf("DELETE FROM %s WHERE site = ? AND %s < ?", t.name, t.dateCol)),
 			w.siteName, dateCutoff,
 		)
 		if err != nil {
@@ -590,8 +1051,8 @@ func (w *Worker) cleanupRetention() {
 	}
 
 	// Events table uses 'event_at' (datetime, not date).
-	result, err := w.db.Exec(
-		"DELETE FROM _kora_analytics_events WHERE site = ? AND event_at < ?",
+	result, err := w.db.ExecContext(ctx,
+		db.Rebind(w.dialect, "DELETE FROM _kora_analytics_events WHERE site = ? AND event_at < ?"),
 		w.siteName, dateCutoff+" 00:00:00",
 	)
 	if err != nil {
@@ -599,34 +1060,6 @@ func (w *Worker) cleanupRetention() {
 	} else if n, _ := result.RowsAffected(); n > 0 {
 		slog.Info("analytics: retention cleanup", "table", "_kora_analytics_events", "deleted", n)
 	}
-}
-
-// addWorkflowTransition accumulates a workflow state transition for batch flush.
-// Replaces the old trackWorkflowTransition which did 2 separate db.Exec() calls
-// per transition — now they are batched into the flush transaction.
-func (w *Worker) addWorkflowTransition(event ChangeEvent, oldState, newState string) {
-	if w.db == nil {
-		return
-	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.workflowCloses = append(w.workflowCloses, workflowCloseOp{
-		Site:     event.Site,
-		Doctype:  event.Doctype,
-		DocName:  event.DocName,
-		OldState: oldState,
-		Now:      event.Timestamp,
-	})
-	w.workflowOpens = append(w.workflowOpens, workflowOpenOp{
-		Site:       event.Site,
-		Doctype:    event.Doctype,
-		DocName:    event.DocName,
-		FromState:  oldState,
-		ToState:    newState,
-		Now:        event.Timestamp,
-		ModifiedBy: event.ModifiedBy,
-	})
 }
 
 // anyToString converts an interface{} to string without fmt.Sprintf allocation.

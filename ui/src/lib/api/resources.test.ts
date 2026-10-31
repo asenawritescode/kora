@@ -16,7 +16,6 @@ import {
   deleteDocument,
   fetchDocument,
   fetchList,
-  submitWorkflowAction,
   updateDocument,
 } from './resources'
 
@@ -49,14 +48,11 @@ describe('MVP resource client contract', () => {
     expect(api.delete).toHaveBeenCalledWith('/api/v1/resource/Product/PROD-0001')
   })
 
-  it('keeps workflow actions on the established route and response shape', async () => {
-    const document = { name: 'SALE-0001', status: 'Paid' }
-    vi.mocked(api.post).mockResolvedValueOnce(document)
-
-    await expect(submitWorkflowAction('Sale', document.name, 'mark_paid')).resolves.toEqual(document)
-    expect(api.post).toHaveBeenCalledWith(
-      '/api/v1/resource/Sale/SALE-0001/workflow_action',
-      { action: 'mark_paid' },
-    )
+  it('passes visible-name search terms through the list API', async () => {
+    vi.mocked(api.getEnvelope).mockResolvedValueOnce({ data: [], meta: { doctype: 'Contact', total: 0 } })
+    await fetchList('Contact', { search: 'Amina Njeri', fields: ['name', 'full_name', 'email'] })
+    expect(api.getEnvelope).toHaveBeenCalledWith('/api/v1/resource/Contact', {
+      limit: 50, offset: 0, search: 'Amina Njeri', fields: '["name","full_name","email"]',
+    })
   })
 })

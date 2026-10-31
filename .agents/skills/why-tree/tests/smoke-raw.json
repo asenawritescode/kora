@@ -1,0 +1,145 @@
+{
+  "summary": "Tiny bounded smoke test of the Why Tree engine (no web, ~4 agents)",
+  "agentCount": 4,
+  "logs": [],
+  "result": {
+    "apex": "Why do most New Year's resolutions fail by February?",
+    "stages": [
+      {
+        "stage": "behavior-formation",
+        "summary": "Resolutions are framed as outcome goals with no concrete cue-action-reward loop or implementation intention, so there is nothing for the brain to trigger.",
+        "branches": [
+          "habit-loop / implementation-intention"
+        ]
+      },
+      {
+        "stage": "motivation-decay",
+        "summary": "Goals are set at a peak-motivation calendar spike (fresh-start effect) and over-commit; once motivation regresses to baseline by February the behavior is too costly to sustain.",
+        "branches": [
+          "fresh-start + willpower-depletion"
+        ]
+      },
+      {
+        "stage": "context-and-identity",
+        "summary": "Environment still cues old habits and the person still self-identifies as their old self; without restructuring either, defaults reassert.",
+        "branches": [
+          "identity-based habits + cue-environment"
+        ]
+      },
+      {
+        "stage": "root-cause",
+        "summary": "Cost is front-loaded (Jan effort/deprivation) while reward is back-loaded (months out); the daily incentive gradient favors defection.",
+        "branches": [
+          "hyperbolic discounting"
+        ]
+      },
+      {
+        "stage": "contributing",
+        "summary": "No external accountability/stake (internal willpower only, easily renegotiated) plus the social-signaling reward of declaring a 'new me' is collected up front at declaration.",
+        "branches": [
+          "missing commitment devices",
+          "symbolic-goal substitution"
+        ]
+      },
+      {
+        "stage": "smoke-test",
+        "summary": "Outcome-framing leaves no daily metric, so adherence silently drifts; the calendar-boundary motivation burst is unreinforced by feedback and fades in 4-6 weeks; too many/too ambitious goals overload willpower budget.",
+        "branches": [
+          "no measurement loop",
+          "unreinforced deadline spike",
+          "capacity overload"
+        ]
+      }
+    ],
+    "roots": [
+      {
+        "root": "Hyperbolic discounting / front-loaded cost vs back-loaded reward",
+        "grade": "A",
+        "stage": "root-cause",
+        "note": "At every daily decision point the immediate payoff of skipping beats the discounted distant payoff of complying. This is the load-bearing mechanism the other roots feed into.",
+        "absorbs": [
+          "root-cause INFERENCE"
+        ]
+      },
+      {
+        "root": "No behavior-level loop or measurement (outcome-framing, no implementation intention, no tracking)",
+        "grade": "B",
+        "stage": "behavior-formation",
+        "note": "Vague outcome goals provide no cue-action-reward to execute and no metric to notice drift.",
+        "absorbs": [
+          "behavior-formation HYPOTHESIS",
+          "smoke-test outcome-framing HYPOTHESIS"
+        ]
+      },
+      {
+        "root": "Motivation spike at calendar boundary regresses to baseline, unreinforced",
+        "grade": "B",
+        "stage": "motivation-decay",
+        "note": "Fresh-start high + over-commitment, no feedback signal to sustain it past ~4-6 weeks.",
+        "absorbs": [
+          "motivation-decay INFERENCE",
+          "smoke-test unreinforced-deadline INFERENCE"
+        ]
+      },
+      {
+        "root": "No external accountability / stake; symbolic reward collected at declaration",
+        "grade": "B",
+        "stage": "contributing",
+        "note": "Only depletable internal willpower enforces; declaring 'new me' prematurely satisfies the identity reward.",
+        "absorbs": [
+          "missing commitment device HYPOTHESIS",
+          "symbolic-goal substitution HYPOTHESIS"
+        ]
+      },
+      {
+        "root": "Unchanged environment + identity / willpower overload",
+        "grade": "C",
+        "stage": "context-and-identity",
+        "note": "Old cues persist, old self-concept persists, too many goals exceed the budget. Weakest/most contested evidence.",
+        "absorbs": [
+          "context-and-identity HYPOTHESIS",
+          "capacity-overload HYPOTHESIS"
+        ]
+      }
+    ],
+    "constraint": {
+      "the_constraint": "Hyperbolic discounting — front-loaded cost vs back-loaded reward",
+      "why": "It is the only A-grade root and the convergence point: every other root (no loop, decaying motivation, no stake, unchanged environment) is a way the daily defection-favoring incentive gradient goes unopposed. Fix the gradient (shrink/immediacy of cost, bring reward forward, add immediate stake) and the others become survivable. Leave it unfixed and willpower alone loses by February.",
+      "leverage": "Add an immediate reward/stake at the daily decision point and shrink the per-day cost so compliance wins the present-biased comparison."
+    },
+    "census": {
+      "total_branches": 9,
+      "by_kind": {
+        "HYPOTHESIS": 6,
+        "INFERENCE": 3,
+        "OBSERVATION": 0,
+        "FACT": 0
+      },
+      "by_grade": {
+        "A": 1,
+        "B": 5,
+        "C": 3
+      },
+      "roots_after_collapse": 5,
+      "bottom_line": "Honest read: this is a reasoning-only tree — zero OBSERVATIONs and zero FACTs, so nothing here is grounded in case-specific evidence; it is entirely priors from behavioral-science general knowledge. 6 of 9 branches are HYPOTHESIS-grade and only one branch (hyperbolic discounting) earns an A, and it earns it on logical force, not on data. The constraint call is theory-driven and would need real adherence/dropout data to confirm. Plumbing works; diagnosis is unverified by design."
+    },
+    "negatives": [
+      "Not primarily a knowledge/information gap — people know how to exercise or save; failure is at execution, not understanding.",
+      "Not mainly goal difficulty per se — even modest resolutions fail, so 'too hard' is contributing, not root.",
+      "Not a one-off motivation failure of weak-willed individuals — failure rate is near-universal, pointing to structural incentive design, not personal defect.",
+      "No evidence here that external shocks (illness, life events) drive the February cliff; the cliff tracks the motivation/incentive curve, not random events."
+    ],
+    "tests": [
+      {
+        "test": "Implementation-intention + immediacy A/B: have one cohort attach the behavior to a fixed daily cue with a same-day micro-reward, compare 6-week adherence vs plain resolution cohort.",
+        "targets": "hyperbolic discounting + no-loop roots",
+        "cost": "cheap — self-report adherence diary, no instrumentation"
+      },
+      {
+        "test": "Stake test: small refundable financial deposit forfeited on a missed day (commitment device); compare February survival vs no-stake control.",
+        "targets": "no-accountability root + confirms front-loaded-cost mechanism by adding immediate cost to defection",
+        "cost": "cheap — one form + escrow rule"
+      }
+    ]
+  }
+}

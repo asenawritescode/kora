@@ -1,11 +1,13 @@
 package doctype
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/asenawritescode/kora/contract"
 	"gopkg.in/yaml.v3"
 )
 
@@ -114,28 +116,31 @@ func auditConfigPack(t *testing.T, root string) {
 		checkConfigPackViewBindings(t, view.Components, doctypeNames)
 	}
 
-	workflows, err := ParseWorkflowDirectory(filepath.Join(root, "doctypes"))
+	workflowFiles, err := filepath.Glob(filepath.Join(root, "workflows", "*.json"))
 	if err != nil {
-		t.Fatalf("parse workflows: %v", err)
+		t.Fatalf("find workflow definitions: %v", err)
 	}
-	for _, workflow := range workflows {
-		if !doctypeNames[workflow.DocumentType] {
-			t.Errorf("workflow %q references unknown doctype %q", workflow.Name, workflow.DocumentType)
+	for _, workflowPath := range workflowFiles {
+		body, err := os.ReadFile(workflowPath)
+		if err != nil {
+			t.Fatalf("read workflow definition %s: %v", workflowPath, err)
 		}
-		states := make(map[string]bool, len(workflow.States))
-		for _, state := range workflow.States {
-			if strings.TrimSpace(state.State) == "" {
-				t.Errorf("workflow %q has an unnamed state", workflow.Name)
-			}
-			if states[state.State] {
-				t.Errorf("workflow %q repeats state %q", workflow.Name, state.State)
-			}
-			states[state.State] = true
+		var definition contract.WorkflowDefinition
+		if err := json.Unmarshal(body, &definition); err != nil {
+			t.Fatalf("parse workflow definition %s: %v", workflowPath, err)
 		}
-		for _, transition := range workflow.Transitions {
-			if transition.Action == "" || !states[transition.From] || !states[transition.To] {
-				t.Errorf("workflow %q has invalid transition %q (%q -> %q)", workflow.Name, transition.Action, transition.From, transition.To)
-			}
+		if definition.ID == "" || definition.Version == 0 || len(definition.Steps) == 0 {
+			t.Errorf("workflow definition %q has no ID, version, or steps", workflowPath)
+		}
+		if definition.Trigger != nil && !doctypeNames[definition.Trigger.Table] {
+			t.Errorf("workflow definition %q references unknown trigger table %q", workflowPath, definition.Trigger.Table)
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Fatalf("parse workflow definition fields %s: %v", workflowPath, err)
+		}
+		if _, retired := raw["lifecycle"]; retired {
+			t.Errorf("workflow definition %q uses retired lifecycle policy configuration", workflowPath)
 		}
 	}
 

@@ -4,6 +4,7 @@ title_field: venue_name
 sort_field: venue_name
 sort_order: ASC
 
+search_fields: venue_name
 fields:
   - fieldname: venue_name
     fieldtype: Data
@@ -11,7 +12,7 @@ fields:
     reqd: true
     bold: true
     in_list_view: true
-
+    search_index: true
   - fieldname: address
     fieldtype: Text
     label: Address

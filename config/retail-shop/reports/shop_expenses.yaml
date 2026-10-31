@@ -1,0 +1,31 @@
+name: expense_overview
+label: Expenses
+route: /reports/expenses
+queries:
+  - id: expenses_by_date
+    model: expense
+    measures: [count, amount_sum]
+    dimensions: [expense_date]
+  - id: expenses_by_category
+    model: expense
+    measures: [count, amount_sum]
+    dimensions: [category]
+visuals:
+  - id: expense_trend
+    type: line
+    source: expenses_by_date
+    x_field: expense_date
+    series:
+      - field: amount_sum
+        label: Expenses
+        type: line
+        format: currency
+  - id: expense_categories
+    type: bar
+    source: expenses_by_category
+    x_field: category
+    series:
+      - field: amount_sum
+        label: Expenses
+        type: bar
+        format: currency

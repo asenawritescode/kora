@@ -1,0 +1,144 @@
+apiVersion: ui.kora.dev/v1
+kind: Page
+metadata:
+    name: Point of Sale
+    package: tenant.workspace
+    status: draft
+    version: 0.1.0
+spec:
+    actions:
+        - command: local_cart_add
+          id: tap
+          input: null
+          invalidate: []
+        - command: create_transaction
+          id: complete_sale
+          input:
+            child_table: Sale Item
+            decrement_stock: true
+            fields:
+                sale_datetime: $now
+            reference_field: reference
+            reference_prefix: POS
+            idempotency_prefix: pos-sale
+            line_defaults:
+                quantity: 1
+            line_fields:
+                product: product
+                quantity: quantity
+                unit_price: rate
+            line_source: cart
+            related_quantity_updates:
+                source_quantity_field: quantity
+                source_record_field: product
+                target_doctype: Product
+                target_quantity_field: stock_qty
+                whole_units: true
+            target_doctype: Sale
+            totals:
+                lines:
+                    line_total_field: line_amount
+                    quantity_field: quantity
+                    unit_price_field: unit_price
+                total_field: total_amount
+          invalidate:
+            - primary
+    capabilities: []
+    layout:
+        children:
+            - component: category_tabs
+              data: primary.data
+              id: categories
+              position: 0
+              props:
+                bindings:
+                    group_field: category
+                source_doctype: Product
+                title: Categories
+              region: main
+              version: 1
+            - actions:
+                - tap
+              component: product_grid
+              data: primary.data
+              id: products
+              position: 1
+              props:
+                actions:
+                    - config: null
+                      id: tap
+                      trigger: on_click
+                      type: local_cart_add
+                bindings:
+                    badge: stock_qty
+                    price: selling_price
+                    subtitle: category
+                    title: product_name
+                source_doctype: Product
+                title: Products
+              region: main
+              version: 1
+            - component: cart_panel
+              id: cart
+              position: 0
+              props:
+                source_doctype: ""
+                title: Current basket
+              region: side
+              version: 1
+            - actions:
+                - complete_sale
+              component: payment_panel
+              id: payment
+              position: 0
+              props:
+                actions:
+                    - config:
+                        child_table: Sale Item
+                        decrement_stock: true
+                        fields:
+                            sale_datetime: $now
+                        reference_field: reference
+                        reference_prefix: POS
+                        idempotency_prefix: pos-sale
+                        line_defaults:
+                            quantity: 1
+                        line_fields:
+                            product: product
+                            quantity: quantity
+                            unit_price: rate
+                        line_source: cart
+                        related_quantity_updates:
+                            source_quantity_field: quantity
+                            source_record_field: product
+                            target_doctype: Product
+                            target_quantity_field: stock_qty
+                            whole_units: true
+                        target_doctype: Sale
+                        totals:
+                            lines:
+                                line_total_field: line_amount
+                                quantity_field: quantity
+                                unit_price_field: unit_price
+                            total_field: total_amount
+                      id: complete_sale
+                      trigger: on_click
+                      type: create_transaction
+                bindings:
+                    methods: literal:cash
+                source_doctype: ""
+                title: Take payment
+              region: side
+              version: 1
+        columns: 12
+        type: two_panel
+    offline: read_only
+    permissions: []
+    resources:
+        - id: primary
+          params:
+            doctype: Product
+            limit: 50
+          query: document.list
+    route: /pos
+    runtime: '>=2.0.0 <3.0.0'

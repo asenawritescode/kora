@@ -1,0 +1,51 @@
+name: Expense
+module: Expenses
+is_submittable: false
+title_field: reference
+search_fields: reference, payee, status
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: expense_date
+    fieldtype: Date
+    label: Expense date
+    reqd: true
+    in_list_view: true
+  - fieldname: payee
+    fieldtype: Data
+    label: Paid to
+    reqd: true
+    in_list_view: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Stock purchase
+      Rent
+      Utilities
+      Transport
+      Wages
+      Other
+    reqd: true
+    in_list_view: true
+  - fieldname: payment_method
+    fieldtype: Select
+    label: Payment method
+    options: |
+      Cash
+      Card
+      M-Pesa
+      Bank Transfer
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+    reqd: true

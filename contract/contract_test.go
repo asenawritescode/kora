@@ -22,6 +22,11 @@ func TestErrorCodesAreStable(t *testing.T) {
 		{CodeDependencyUnavailable, "DEPENDENCY_UNAVAILABLE"},
 		{CodeIdempotencyKeyReused, "IDEMPOTENCY_KEY_REUSED"},
 		{CodeUnauthenticated, "UNAUTHENTICATED"},
+		{CodeResourceExhausted, "RESOURCE_EXHAUSTED"},
+		{CodeStaleSubject, "STALE_SUBJECT"},
+		{CodeLeaseLost, "LEASE_LOST"},
+		{CodeOutcomeUnknown, "OUTCOME_UNKNOWN"},
+		{CodeUnsupportedVersion, "UNSUPPORTED_VERSION"},
 		{CodeInternal, "INTERNAL_ERROR"},
 	}
 	for _, tt := range tests {
@@ -144,6 +149,23 @@ func TestEventEnvelopeValidateRejectsMalformedEvents(t *testing.T) {
 	}
 }
 
+func TestEventEnvelopeSequenceIsOptionalAndCanonical(t *testing.T) {
+	event := EventEnvelope{ID: "evt-sequence", Type: "record.updated", Version: 1, Source: "engine", Site: "acme", OccurredAt: time.Now(), Data: json.RawMessage(`{}`)}
+	if err := event.Validate(); err != nil {
+		t.Fatalf("legacy envelope without sequence rejected: %v", err)
+	}
+	event.Sequence = "42"
+	if err := event.Validate(); err != nil {
+		t.Fatalf("canonical sequence rejected: %v", err)
+	}
+	for _, invalid := range []Revision{"01", "-1", "1.0", "18446744073709551616"} {
+		event.Sequence = invalid
+		if err := event.Validate(); err == nil {
+			t.Errorf("invalid source sequence %q accepted", invalid)
+		}
+	}
+}
+
 // TestCommandDeadlineSemantics verifies bounded-request behavior (RFC §7).
 func TestCommandDeadlineSemantics(t *testing.T) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
@@ -196,6 +218,11 @@ func TestNormalizeCode(t *testing.T) {
 		{"VALIDATION_FAILED", CodeValidationFailed},
 		{"NOT_FOUND", CodeNotFound},
 		{"CONFLICT", CodeConflict},
+		{"RESOURCE_EXHAUSTED", CodeResourceExhausted},
+		{"STALE_SUBJECT", CodeStaleSubject},
+		{"LEASE_LOST", CodeLeaseLost},
+		{"OUTCOME_UNKNOWN", CodeOutcomeUnknown},
+		{"UNSUPPORTED_VERSION", CodeUnsupportedVersion},
 		{"something unknown", CodeInternal},
 		{"", CodeInternal},
 	}

@@ -1,0 +1,85 @@
+name: Payment
+module: Till records
+title_field: reference
+search_fields: reference, status
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: source_record
+    fieldtype: Data
+    label: Source Record
+    description: The original order, import, or external reference this payment came from.
+    hidden: true
+  - fieldname: assignee
+    fieldtype: User
+    label: Assignee
+    read_only: true
+    hidden: true
+  - fieldname: evidence
+    fieldtype: Text
+    label: Evidence
+    hidden: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Initiated
+      Pending
+      Succeeded
+      Failed
+      Cancelled
+      Finalized
+    default: Draft
+    in_list_view: true
+  - fieldname: sale
+    fieldtype: Link
+    options: Sale
+    label: POS order
+    in_list_view: true
+  - fieldname: register
+    fieldtype: Data
+    label: Till
+  - fieldname: shift
+    fieldtype: Link
+    options: Shift
+    label: Shift
+    hidden: true
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till session
+    hidden: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    in_list_view: true
+  - fieldname: method
+    fieldtype: Select
+    label: Method
+    options: |
+      Cash
+      Card
+      M-Pesa
+    in_list_view: true
+  - fieldname: phone_number
+    fieldtype: Data
+    label: Customer phone number
+    options: Phone
+    hidden: true
+  - fieldname: external_operation
+    fieldtype: Link
+    options: External Operation
+    label: STK operation
+    hidden: true
+  - fieldname: provider_reference
+    fieldtype: Data
+    label: Provider reference
+    read_only: true

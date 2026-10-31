@@ -21,7 +21,7 @@ import { Badge } from '@/components/ui/badge'
 import { FieldLabelWithHelp, HelpTooltip } from '@/components/ui/help-tooltip'
 import { cn } from '@/lib/utils'
 import { createStandardPageManifest, STANDARD_PAGE_KINDS, type StandardPageKind } from '@/manifest/runtime/standard-pages'
-import { validateWizardDoctype, titleCase, slugField, type DraftIssue } from './editor-helpers'
+import { buildGenericEditorDraft, genericEditorDefaults, validateWizardDoctype, titleCase, slugField, type DraftIssue } from './editor-helpers'
 
 // --- Field type groups ---
 const FIELD_TYPE_GROUPS: { label: string; types: string[] }[] = [
@@ -127,14 +127,14 @@ type AssistantDraft = {
 
 const STARTER_TEMPLATES: Array<{ label: string; description: string; fields: Array<[string, Field['fieldtype']]> }> = [
   {
-    label: 'Customer record',
-    description: 'Names, contacts, status, and notes.',
-    fields: [['Customer name', 'Data'], ['Email', 'Data'], ['Phone', 'Data'], ['Status', 'Select'], ['Notes', 'Text']],
+    label: 'Basic record',
+    description: 'A title, status, and notes.',
+    fields: [['Title', 'Data'], ['Status', 'Select'], ['Notes', 'Text']],
   },
   {
-    label: 'Order workflow',
-    description: 'Customer, due date, amount, and status.',
-    fields: [['Customer', 'Link'], ['Order date', 'Date'], ['Due date', 'Date'], ['Status', 'Select'], ['Total', 'Currency']],
+    label: 'Request record',
+    description: 'A requester, date, status, and details.',
+    fields: [['Title', 'Data'], ['Requester', 'Link'], ['Submitted date', 'Date'], ['Status', 'Select'], ['Details', 'Text']],
   },
   {
     label: 'Task tracker',
@@ -376,7 +376,7 @@ export default function AdminDoctypeEditorPage() {
                 id="name"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Invoice"
+                placeholder="Workspace Record"
                 disabled={isEdit}
               />
             </div>
@@ -461,7 +461,7 @@ export default function AdminDoctypeEditorPage() {
               <Plus className="h-4 w-4 mr-1" /> Add Field
             </Button>
           </div>
-          <p className="text-sm text-muted-foreground mb-3">Give each field a clear label. Kora will keep the internal field key in sync for you.</p>
+          <p className="text-sm text-muted-foreground mb-3">Give each field a clear label. Kigae will keep the internal field key in sync for you.</p>
 
           <div className="space-y-1">
             {form.fields.map((field, index) => (
@@ -779,19 +779,19 @@ function DoctypeCreationWizard({
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2">
                   What are you tracking?
-                  <HelpTooltip label="Basics help">Use business words. Kora handles the safe internal doctype name.</HelpTooltip>
+                  <HelpTooltip label="Basics help">Use business words. Kigae handles the safe internal doctype name.</HelpTooltip>
                 </CardTitle>
               </CardHeader>
               <CardContent className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1.5">
-                  <FieldLabelWithHelp label="Name" help="The thing users will recognize in navigation, like Customer Visit or Invoice." />
+                  <FieldLabelWithHelp label="Name" help="Choose a short name users will recognize in navigation." />
                   <Input
                     value={form.name}
                     onChange={(event) => setForm((previous) => ({
                       ...previous,
                       name: titleCase(event.target.value),
                     }))}
-                    placeholder="Customer Visit"
+                    placeholder="Workspace Record"
                     autoFocus
                   />
                 </div>
@@ -800,7 +800,7 @@ function DoctypeCreationWizard({
                   <Input
                     value={form.module}
                     onChange={(event) => setForm((previous) => ({ ...previous, module: titleCase(event.target.value) }))}
-                    placeholder="Field Service"
+                    placeholder="Workspace"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -951,7 +951,7 @@ function DoctypeCreationWizard({
             <Card className="shadow-none">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2">
-                  Which screens should Kora create?
+                  Which screens should Kigae create?
                   <HelpTooltip label="Screens help">These are generated page manifests connected to this doctype.</HelpTooltip>
                 </CardTitle>
               </CardHeader>
@@ -1124,7 +1124,7 @@ function WizardAssistantPanel({
   const [showImport, setShowImport] = useState(false)
 
   const generateDraft = () => {
-    const next = material.trim() ? inferMaterialDraft(material, form) : inferAssistantDraft(prompt, form)
+    const next = material.trim() ? inferMaterialDraft(material, form) : buildGenericEditorDraft(form.name)
     setDraft(next)
   }
 
@@ -1144,8 +1144,8 @@ function WizardAssistantPanel({
     setForm((previous) => {
       const base = previous.name.trim() ? previous : {
         ...previous,
-        name: inferObjectName(prompt),
-        module: previous.module || inferModule(prompt),
+        name: genericEditorDefaults().name,
+        module: previous.module || genericEditorDefaults().module,
       }
       return applyStarterTemplate(base, draft.fields)
     })
@@ -1684,43 +1684,6 @@ function PreflightSummary({ preview }: { preview: Awaited<ReturnType<typeof dryR
   )
 }
 
-function inferAssistantDraft(prompt: string, form: DocType): AssistantDraft {
-  const text = prompt.toLowerCase()
-  if (text.includes('inventory') || text.includes('stock') || text.includes('warehouse')) {
-    return {
-      reply: 'I would model this as an inventory item with stock and reorder visibility.',
-      fields: [['Item name', 'Data'], ['SKU', 'Data'], ['Category', 'Select'], ['Stock quantity', 'Int'], ['Reorder level', 'Int'], ['Selling price', 'Currency']],
-      screens: ['table', 'cards', 'form'],
-    }
-  }
-  if (text.includes('order') || text.includes('invoice') || text.includes('payment')) {
-    return {
-      reply: 'I would start with an order workflow and keep amount, dates, customer, and status visible.',
-      fields: [['Customer', 'Link'], ['Order date', 'Date'], ['Due date', 'Date'], ['Status', 'Select'], ['Total', 'Currency'], ['Paid', 'Check']],
-      screens: ['table', 'detail', 'form'],
-    }
-  }
-  if (text.includes('visit') || text.includes('appointment') || text.includes('field')) {
-    return {
-      reply: 'I would track who was visited, the assigned owner, outcome, next action, and date.',
-      fields: [['Customer', 'Link'], ['Assigned to', 'Link'], ['Visit date', 'Date'], ['Outcome', 'Select'], ['Next action', 'Text'], ['Next action date', 'Date']],
-      screens: ['table', 'cards', 'form', 'detail'],
-    }
-  }
-  if (text.includes('task') || text.includes('ticket') || text.includes('issue')) {
-    return {
-      reply: 'I would use a task-style tracker with owner, priority, due date, and completion status.',
-      fields: [['Subject', 'Data'], ['Owner', 'Link'], ['Priority', 'Select'], ['Due date', 'Date'], ['Status', 'Select'], ['Done', 'Check']],
-      screens: ['table', 'cards', 'form'],
-    }
-  }
-  return {
-    reply: form.name ? `I drafted a general ${form.name} data object with common operational fields.` : 'I drafted a general operational data object.',
-    fields: [['Title', 'Data'], ['Owner', 'Link'], ['Status', 'Select'], ['Date', 'Date'], ['Amount', 'Currency'], ['Notes', 'Text']],
-    screens: ['table', 'form'],
-  }
-}
-
 function inferMaterialDraft(material: string, form: DocType): AssistantDraft {
   const fields = extractMaterialFields(material)
   return {
@@ -1756,19 +1719,19 @@ function inferFieldType(name: string): Field['fieldtype'] {
   if (normalized.includes('percent') || normalized.includes('percentage') || normalized.includes('margin')) return 'Percent'
   if (normalized.includes('rate') || normalized.includes('ratio') || normalized.includes('precision') || normalized.includes('factor')) return 'Float'
   if (normalized.includes('amount') || normalized.includes('price') || normalized.includes('cost') || normalized.includes('total')) return 'Currency'
-  if (normalized.includes('qty') || normalized.includes('quantity') || normalized.includes('count') || normalized.includes('stock')) return 'Int'
+  if (normalized.includes('qty') || normalized.includes('quantity') || normalized.includes('count')) return 'Int'
   if (normalized.includes('status') || normalized.includes('stage') || normalized.includes('priority') || normalized.includes('type')) return 'Select'
   if (normalized.includes('secret') || normalized.includes('password') || normalized.includes('token')) return 'Password'
   if (normalized.includes('json') || normalized.includes('config') || normalized.includes('metadata') || normalized.includes('payload')) return 'JSON'
   if (normalized.includes('details') || normalized.includes('description') || normalized.includes('body') || normalized.includes('content') || normalized.includes('notes') || normalized.includes('remarks')) return 'Text Editor'
   if (normalized.includes('table') || normalized.includes('items') || normalized.includes('lines') || normalized.includes('rows')) return 'Table'
   if (normalized.includes('reference') || normalized.includes('related doctype') || normalized.includes('dynamic link')) return 'Dynamic Link'
-  if (normalized.includes('customer') || normalized.includes('owner') || normalized.includes('user') || normalized.includes('supplier')) return 'Link'
+  if (normalized.includes('owner') || normalized.includes('user')) return 'Link'
   if (normalized.includes('note') || normalized.includes('description') || normalized.includes('comment')) return 'Text'
   if (normalized.includes('audio') || normalized.includes('voice') || normalized.includes('recording') || normalized.includes('sound')) return 'Attach Audio'
   if (normalized.includes('photo') || normalized.includes('image') || normalized.includes('picture') || normalized.includes('avatar') || normalized.includes('logo')) return 'Attach Image'
-  if (normalized.includes('file') || normalized.includes('attachment') || normalized.includes('document') || normalized.includes('invoice') || normalized.includes('pdf')) return 'Attach'
-  if (normalized.startsWith('is_') || normalized.includes('done') || normalized.includes('paid')) return 'Check'
+  if (normalized.includes('file') || normalized.includes('attachment') || normalized.includes('document') || normalized.includes('pdf')) return 'Attach'
+  if (normalized.startsWith('is_') || normalized.includes('done')) return 'Check'
   return 'Data'
 }
 
@@ -1778,27 +1741,6 @@ function chooseScreensForFields(fields: Array<[string, Field['fieldtype']]>, for
   if (form.is_submittable || hasMoney) return ['table', 'detail', 'form']
   if (hasManyFields) return ['table', 'form']
   return ['table', 'cards', 'form']
-}
-
-function inferObjectName(prompt: string): string {
-  const text = prompt.toLowerCase()
-  if (text.includes('inventory') || text.includes('stock')) return 'Inventory Item'
-  if (text.includes('invoice')) return 'Invoice'
-  if (text.includes('order')) return 'Order'
-  if (text.includes('visit')) return 'Customer Visit'
-  if (text.includes('ticket') || text.includes('issue')) return 'Support Ticket'
-  if (text.includes('task')) return 'Task'
-  return 'Workspace Record'
-}
-
-function inferModule(prompt: string): string {
-  const text = prompt.toLowerCase()
-  if (text.includes('inventory') || text.includes('stock') || text.includes('warehouse')) return 'Inventory'
-  if (text.includes('invoice') || text.includes('payment')) return 'Finance'
-  if (text.includes('order')) return 'Sales'
-  if (text.includes('visit') || text.includes('field')) return 'Field Service'
-  if (text.includes('ticket') || text.includes('issue')) return 'Support'
-  return 'Workspace'
 }
 
 function normalizeWizardDoctype(form: DocType): DocType {
@@ -2141,7 +2083,7 @@ function FieldRow({
                 className="mt-1"
                 value={field.options}
                 onChange={(e) => onChange({ options: e.target.value })}
-                placeholder="Order Item"
+                placeholder="Related Record"
               />
             </div>
           )}

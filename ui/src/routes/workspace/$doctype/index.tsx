@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { fetchDoctypeSchema } from '@/lib/api/system'
@@ -10,15 +10,24 @@ import type { DocType } from '@/types/kora'
 import { ManifestRenderer } from '@/manifest/runtime/ManifestRenderer'
 import { createStandardPageManifest } from '@/manifest/runtime/standard-pages'
 import { validatePageManifestContract } from '@/manifest/schema/page'
+import { fetchPageManifestByRoute, executeViewAction } from '@/lib/api/page-manifests'
+import { KoraApiError } from '@/lib/api/client'
 
 export default function ListPage() {
   const { doctype } = useParams({ from: '/workspace/$doctype' })
   const navigate = useNavigate()
+  const pageQuery = useQuery({
+    queryKey: ['page-manifest-route', `/${doctype}`],
+    queryFn: () => fetchPageManifestByRoute(`/${doctype}`),
+    retry: false,
+  })
+  const isManifestNotFound = pageQuery.error instanceof KoraApiError && pageQuery.error.status === 404
 
   const schemaQuery = useQuery({
     queryKey: ['doctype', doctype],
     queryFn: () => fetchDoctypeSchema(doctype),
     staleTime: 5 * 60_000,
+    enabled: isManifestNotFound,
   })
 
   const dt: DocType | undefined = schemaQuery.data?.doctype
@@ -30,6 +39,41 @@ export default function ListPage() {
     if (!name) return
     navigate({ to: '/workspace/$doctype/$name', params: { doctype, name } })
   }, [doctype, navigate])
+  const handleManifestAction = useCallback(async (actionId: string, context: Record<string, unknown>) => {
+    const component = typeof context._component === 'string' ? context._component : ''
+    if (!pageQuery.data || !component) return
+    return executeViewAction(actionId, {
+      view: pageQuery.data.metadata.name,
+      component,
+      context,
+    })
+  }, [pageQuery.data])
+
+  if (pageQuery.isLoading) {
+    return (
+      <div className="p-8 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    )
+  }
+
+  if (pageQuery.data) {
+    return (
+      <div className="p-4 md:p-8 space-y-6">
+        <div>
+          <Breadcrumbs items={[{ label: pageQuery.data.metadata.package }, { label: pageQuery.data.metadata.name }]} className="mb-2" />
+          <h1 className="text-2xl font-bold tracking-tight">{pageQuery.data.metadata.name}</h1>
+        </div>
+        <ManifestRenderer manifest={pageQuery.data} mode="runtime" onAction={handleManifestAction} />
+      </div>
+    )
+  }
+
+  if (!isManifestNotFound && pageQuery.isError) {
+    return <div className="p-8 text-destructive" role="alert">Unable to resolve this workspace page: {pageQuery.error.message}</div>
+  }
 
   if (schemaQuery.isLoading || !manifest) {
     return (
@@ -52,17 +96,11 @@ export default function ListPage() {
   return (
     <div className="p-4 md:p-8 space-y-6">
       <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          Overview / {dt.name}
-        </p>
-        <Breadcrumbs items={[{ label: dt.module }, { label: dt.name }]} className="mb-2" />
+        <Breadcrumbs items={[...(dt.module ? [{ label: dt.module }] : []), { label: dt.name }]} className="mb-2" />
 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">{dt.name}</h1>
-            <p className="text-sm text-muted-foreground">
-              Manifest-driven workspace with list and insights sections.
-            </p>
           </div>
           <Button
             onClick={() => navigate({ to: '/workspace/$doctype/new', params: { doctype } })}

@@ -1,23 +1,30 @@
-name: CRM and Sales Pipeline Workspace
+name: Sales Pipeline
 route: /crm
 type: workspace
-layout: two_panel
-label: Pipeline and Handoffs
-module: CRM and Sales Pipeline
+layout: single
+label: Sales Pipeline
+module: CRM
 components:
-  - id: primary_queue
-    type: record_table
+  - id: pipeline_board
+    type: kanban_board
     region: main
     position: 0
     source_doctype: Deal
-    label: Pipeline and Handoffs
-    desktop_columns: [name, status, modified]
-    mobile_columns: [name, status]
-  - id: exception_queue
+    label: Deals by stage
+    bindings:
+      status: pipeline_stage
+      title: deal_name
+      summary: next_step
+      due: next_step_due_date
+  - id: follow_up_queue
     type: record_table
-    region: side
-    position: 0
-    source_doctype: Deal
-    label: Exceptions
-    desktop_columns: [name, status, modified]
-    mobile_columns: [name, status]
+    region: main
+    position: 1
+    source_doctype: Activity
+    label: Next actions
+    filters:
+      - field: status
+        op: in
+        value: [Open, In Progress]
+    desktop_columns: [subject, assigned_to, due_date, priority, status]
+    mobile_columns: [subject, due_date, priority]

@@ -1,9 +1,11 @@
 package net
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,6 +43,44 @@ func TestListenAndServeReadyRunsAfterSuccessfulBind(t *testing.T) {
 	}
 	if err := <-serveDone; !errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("ListenAndServeReady returned %v, want ErrServerClosed", err)
+	}
+}
+
+func TestServerShutdownOwnsAndJoinsRedirectListener(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal("listen for redirect test:", err)
+	}
+	srv := NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), "127.0.0.1:0", &TLSConfig{Mode: "off"})
+	srv.redirectHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusMovedPermanently)
+	})
+	if err := srv.startRedirectServer(listener); err != nil {
+		t.Fatal("start redirect listener:", err)
+	}
+	done := srv.redirectDone
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := client.Get("http://" + listener.Addr().String() + "/workspace?tenant=acme")
+	if err != nil {
+		t.Fatal("request redirect listener:", err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusMovedPermanently || response.Header.Get("Location") != "https://"+listener.Addr().String()+"/workspace?tenant=acme" {
+		t.Fatalf("redirect response status=%d location=%q", response.StatusCode, response.Header.Get("Location"))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatal("shutdown server and redirect listener:", err)
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("server shutdown returned before redirect serve loop exited")
+	}
+	_, err = http.Get("http://" + strings.TrimSpace(listener.Addr().String()))
+	if err == nil {
+		t.Fatal("redirect listener accepted a request after shutdown")
 	}
 }
 

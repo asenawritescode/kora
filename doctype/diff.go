@@ -2,6 +2,9 @@ package doctype
 
 import (
 	"fmt"
+	"reflect"
+	"sort"
+	"strings"
 )
 
 // ChangeType categorizes a config change.
@@ -92,6 +95,16 @@ func DiffConfigs(old, new []*DocType) *ConfigDiff {
 			break
 		}
 	}
+	sort.Slice(diff.Changes, func(i, j int) bool {
+		left, right := diff.Changes[i], diff.Changes[j]
+		if left.DocType != right.DocType {
+			return left.DocType < right.DocType
+		}
+		if left.Field != right.Field {
+			return left.Field < right.Field
+		}
+		return left.Type < right.Type
+	})
 
 	return diff
 }
@@ -305,161 +318,46 @@ type ConfigDiffFull struct {
 
 // SectionChange describes a change to a non-doctype config section.
 type SectionChange struct {
-	Section string `json:"section"` // "roles", "permissions", "workflows", "views", "analytics_metrics", "scripts"
+	Section string `json:"section"` // "roles", "permissions", "views", "analytics_metrics", "scripts"
 	Change  string `json:"change"`  // "added", "removed", "modified"
 	Name    string `json:"name"`    // name of the changed entity
 	Details string `json:"details"` // human-readable description
 }
 
 // DiffFullSnapshots compares two ConfigSnapshots and produces a complete diff
-// covering doctypes, roles, permissions, workflows, analytics metrics, and scripts.
+// covering doctypes, roles, permissions, analytics metrics, and scripts.
 func DiffFullSnapshots(old, new *ConfigSnapshot) *ConfigDiffFull {
 	result := &ConfigDiffFull{
 		Doctypes: DiffConfigs(old.DocTypes, new.DocTypes),
 	}
 
-	// Compare Roles by name.
-	oldRoleNames := make(map[string]bool)
-	for _, r := range old.Roles {
-		oldRoleNames[r.Name] = true
-	}
-	for _, r := range new.Roles {
-		if !oldRoleNames[r.Name] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "roles",
-				Change:  "added",
-				Name:    r.Name,
-				Details: fmt.Sprintf("Role %q added", r.Name),
-			})
-		}
-	}
-	newRoleNames := make(map[string]bool)
-	for _, r := range new.Roles {
-		newRoleNames[r.Name] = true
-	}
-	for _, r := range old.Roles {
-		if !newRoleNames[r.Name] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "roles",
-				Change:  "removed",
-				Name:    r.Name,
-				Details: fmt.Sprintf("Role %q removed", r.Name),
-			})
-		}
-	}
+	result.SectionChanges = append(result.SectionChanges, diffNamedSection("roles", old.Roles, new.Roles, func(r *Role) string { return r.Name })...)
 
 	// Compare Permissions by doctype+role key.
-	oldPermKeys := make(map[string]bool)
-	for _, p := range old.Permissions {
-		key := p.Doctype + "|" + p.Role
-		oldPermKeys[key] = true
-	}
-	for _, p := range new.Permissions {
-		key := p.Doctype + "|" + p.Role
-		if !oldPermKeys[key] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "permissions",
-				Change:  "added",
-				Name:    key,
-				Details: fmt.Sprintf("Permission added for doctype %q, role %q", p.Doctype, p.Role),
-			})
-		}
-	}
-	newPermKeys := make(map[string]bool)
-	for _, p := range new.Permissions {
-		key := p.Doctype + "|" + p.Role
-		newPermKeys[key] = true
-	}
-	for _, p := range old.Permissions {
-		key := p.Doctype + "|" + p.Role
-		if !newPermKeys[key] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "permissions",
-				Change:  "removed",
-				Name:    key,
-				Details: fmt.Sprintf("Permission removed for doctype %q, role %q", p.Doctype, p.Role),
-			})
-		}
-	}
-
-	// Compare Workflows by name.
-	oldWorkflowNames := make(map[string]bool)
-	for _, w := range old.Workflows {
-		oldWorkflowNames[w.Name] = true
-	}
-	for _, w := range new.Workflows {
-		if !oldWorkflowNames[w.Name] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "workflows",
-				Change:  "added",
-				Name:    w.Name,
-				Details: fmt.Sprintf("Workflow %q added", w.Name),
-			})
-		}
-	}
-	newWorkflowNames := make(map[string]bool)
-	for _, w := range new.Workflows {
-		newWorkflowNames[w.Name] = true
-	}
-	for _, w := range old.Workflows {
-		if !newWorkflowNames[w.Name] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "workflows",
-				Change:  "removed",
-				Name:    w.Name,
-				Details: fmt.Sprintf("Workflow %q removed", w.Name),
-			})
-		}
-	}
+	result.SectionChanges = append(result.SectionChanges, diffNamedSection("permissions", old.Permissions, new.Permissions, func(p *Permission) string { return p.Doctype + "|" + p.Role })...)
 
 	// Compare AnalyticsMetrics by name.
-	oldMetricNames := make(map[string]bool)
-	for _, m := range old.AnalyticsMetrics {
-		oldMetricNames[m.Name] = true
-	}
-	for _, m := range new.AnalyticsMetrics {
-		if !oldMetricNames[m.Name] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "analytics_metrics",
-				Change:  "added",
-				Name:    m.Name,
-				Details: fmt.Sprintf("Analytics metric %q added", m.Name),
-			})
-		}
-	}
-	newMetricNames := make(map[string]bool)
-	for _, m := range new.AnalyticsMetrics {
-		newMetricNames[m.Name] = true
-	}
-	for _, m := range old.AnalyticsMetrics {
-		if !newMetricNames[m.Name] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "analytics_metrics",
-				Change:  "removed",
-				Name:    m.Name,
-				Details: fmt.Sprintf("Analytics metric %q removed", m.Name),
-			})
-		}
-	}
+	result.SectionChanges = append(result.SectionChanges, diffNamedSection("analytics_metrics", old.AnalyticsMetrics, new.AnalyticsMetrics, func(m *AnalyticsMetricConfig) string { return m.Name })...)
 
-	// Compare Scripts by name+hash (modified if hash differs).
-	oldScripts := make(map[string]string)
+	// Compare Scripts by name and all versioned metadata, including the body hash.
+	newScriptMap := make(map[string]struct{}, len(new.Scripts))
+	for _, s := range new.Scripts {
+		newScriptMap[s.Name] = struct{}{}
+	}
+	oldScriptByName := make(map[string]*ScriptSnapshot, len(old.Scripts))
 	for _, s := range old.Scripts {
-		oldScripts[s.Name] = s.ScriptHash
-	}
-	newScriptMap := make(map[string]string)
-	for _, s := range new.Scripts {
-		newScriptMap[s.Name] = s.ScriptHash
+		oldScriptByName[s.Name] = s
 	}
 	for _, s := range new.Scripts {
-		if oldHash, exists := oldScripts[s.Name]; !exists {
+		oldScript, exists := oldScriptByName[s.Name]
+		if !exists {
 			result.SectionChanges = append(result.SectionChanges, SectionChange{
 				Section: "scripts",
 				Change:  "added",
 				Name:    s.Name,
 				Details: fmt.Sprintf("Script %q added", s.Name),
 			})
-		} else if oldHash != s.ScriptHash {
+		} else if !reflect.DeepEqual(oldScript, s) {
 			result.SectionChanges = append(result.SectionChanges, SectionChange{
 				Section: "scripts",
 				Change:  "modified",
@@ -480,36 +378,71 @@ func DiffFullSnapshots(old, new *ConfigSnapshot) *ConfigDiffFull {
 	}
 
 	// Compare Views by name.
-	oldViewNames := make(map[string]bool)
-	for _, v := range old.Views {
-		oldViewNames[v.Name] = true
-	}
-	for _, v := range new.Views {
-		if !oldViewNames[v.Name] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "views",
-				Change:  "added",
-				Name:    v.Name,
-				Details: fmt.Sprintf("View %q added", v.Name),
-			})
+	result.SectionChanges = append(result.SectionChanges, diffNamedSection("views", old.Views, new.Views, func(v *View) string { return v.Name })...)
+
+	sort.Slice(result.SectionChanges, func(i, j int) bool {
+		left, right := result.SectionChanges[i], result.SectionChanges[j]
+		if left.Section != right.Section {
+			return left.Section < right.Section
+		}
+		if left.Name != right.Name {
+			return left.Name < right.Name
+		}
+		return left.Change < right.Change
+	})
+
+	return result
+}
+
+func diffNamedSection[T any](section string, old, next []*T, nameOf func(*T) string) []SectionChange {
+	oldByName := make(map[string]*T, len(old))
+	newByName := make(map[string]*T, len(next))
+	for _, item := range old {
+		if item != nil {
+			oldByName[nameOf(item)] = item
 		}
 	}
-	newViewNames := make(map[string]bool)
-	for _, v := range new.Views {
-		newViewNames[v.Name] = true
-	}
-	for _, v := range old.Views {
-		if !newViewNames[v.Name] {
-			result.SectionChanges = append(result.SectionChanges, SectionChange{
-				Section: "views",
-				Change:  "removed",
-				Name:    v.Name,
-				Details: fmt.Sprintf("View %q removed", v.Name),
-			})
+	for _, item := range next {
+		if item != nil {
+			newByName[nameOf(item)] = item
 		}
 	}
 
-	return result
+	changes := make([]SectionChange, 0)
+	for name, item := range newByName {
+		previous, exists := oldByName[name]
+		if !exists {
+			changes = append(changes, SectionChange{
+				Section: section, Change: "added", Name: name,
+				Details: fmt.Sprintf("%s %q added", sectionEntityLabel(section), name),
+			})
+		} else if !reflect.DeepEqual(previous, item) {
+			changes = append(changes, SectionChange{
+				Section: section, Change: "modified", Name: name,
+				Details: fmt.Sprintf("%s %q updated", sectionEntityLabel(section), name),
+			})
+		}
+	}
+	for name := range oldByName {
+		if _, exists := newByName[name]; !exists {
+			changes = append(changes, SectionChange{
+				Section: section, Change: "removed", Name: name,
+				Details: fmt.Sprintf("%s %q removed", sectionEntityLabel(section), name),
+			})
+		}
+	}
+	return changes
+}
+
+func sectionEntityLabel(section string) string {
+	switch section {
+	case "analytics_metrics":
+		return "Analytics metric"
+	case "permissions":
+		return "Permission"
+	default:
+		return strings.TrimSuffix(section, "s")
+	}
 }
 
 // Summary returns a human-readable summary of the full diff.

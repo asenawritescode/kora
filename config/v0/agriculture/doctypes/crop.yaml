@@ -1,0 +1,27 @@
+name: Crop
+module: Agriculture
+description: A crop type maintained by the farm for consistent planning and reporting.
+title_field: crop_name
+search_fields: crop_name
+sort_field: crop_name
+sort_order: ASC
+
+fields:
+  - fieldname: crop_name
+    fieldtype: Data
+    label: Crop name
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: default_harvest_unit
+    fieldtype: Data
+    label: Usual harvest unit
+    description: Optional example such as kg, crate, or bag. The team can record another unit on an individual harvest.
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+  - fieldname: active
+    fieldtype: Check
+    label: Available for new plans
+    default: "1"

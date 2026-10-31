@@ -61,15 +61,16 @@ func newRemoteCommand() *cobra.Command {
 	opts := &remoteOptions{Timeout: 30 * time.Second}
 	cmd := &cobra.Command{
 		Use:   "remote",
-		Short: "Manage a remote Kora site through its API",
-		Long: `Manage records and inspect schemas on a remote Kora site.
+		Short: "Manage a remote Kigae site through its API",
+		Long: `Manage a remote Kora site through typed API commands.
 
-Credentials are read from an environment variable and are never stored in the
-profile file. Use a least-privilege extension or delegated channel token; the
-remote site applies its normal role and DocType permission checks.`,
+Use a least-privilege extension or delegated token from an environment variable,
+or sign in interactively with email magic-link authentication. Saved user
+sessions are kept separately from profiles in a mode-0600 local credential
+file. The remote site applies its normal role and DocType permission checks.`,
 	}
 	cmd.PersistentFlags().StringVar(&opts.Profile, "profile", "", "Remote profile name (defaults to the current profile)")
-	cmd.PersistentFlags().StringVar(&opts.URL, "url", "", "Kora base URL (overrides the profile)")
+	cmd.PersistentFlags().StringVar(&opts.URL, "url", "", "Kigae base URL (overrides the profile)")
 	cmd.PersistentFlags().StringVar(&opts.Site, "site", "", "Site name for a shared /s/<site> endpoint")
 	cmd.PersistentFlags().StringVar(&opts.TokenEnv, "token-env", "", "Environment variable containing the bearer token")
 	cmd.PersistentFlags().BoolVar(&opts.AllowHTTP, "allow-http", false, "Allow unencrypted HTTP for a non-local host")
@@ -77,8 +78,10 @@ remote site applies its normal role and DocType permission checks.`,
 	cmd.PersistentFlags().StringVar(&opts.Config, "config", "", "Profile file path (defaults to the user config directory)")
 
 	cmd.AddCommand(newRemoteProfileCommand(opts))
+	cmd.AddCommand(newRemoteAuthCommand(opts))
 	cmd.AddCommand(newRemoteStatusCommand(opts))
 	cmd.AddCommand(newRemoteSchemaCommand(opts))
+	cmd.AddCommand(newRemotePageManifestCommand(opts))
 	cmd.AddCommand(newRemoteRecordsCommand(opts))
 	return cmd
 }
@@ -125,7 +128,7 @@ func newRemoteProfileCommand(opts *remoteOptions) *cobra.Command {
 			return err
 		},
 	}
-	set.Flags().StringVar(&setURL, "url", "", "Kora base URL")
+	set.Flags().StringVar(&setURL, "url", "", "Kigae base URL")
 	set.Flags().StringVar(&setSite, "site", "", "Site name for shared-host routing")
 	set.Flags().StringVar(&setTokenEnv, "token-env", defaultRemoteTokenEnv, "Environment variable containing the bearer token")
 	set.Flags().BoolVar(&setAllowHTTP, "allow-http", false, "Allow HTTP for a non-local host")
@@ -203,6 +206,9 @@ func newRemoteProfileCommand(opts *remoteOptions) *cobra.Command {
 				return fmt.Errorf("remote profile %q does not exist", args[0])
 			}
 			delete(cfg.Profiles, args[0])
+			if err := removeRemoteCredential(opts.Config, args[0]); err != nil {
+				return err
+			}
 			if cfg.Current == args[0] {
 				cfg.Current = ""
 			}
@@ -254,7 +260,7 @@ func newRemoteSchemaCommand(opts *remoteOptions) *cobra.Command {
 }
 
 func newRemoteRecordsCommand(opts *remoteOptions) *cobra.Command {
-	records := &cobra.Command{Use: "records", Short: "Read and write remote records using normal Kora permissions"}
+	records := &cobra.Command{Use: "records", Short: "Read and write remote records using normal Kigae permissions"}
 
 	var limit, offset int
 	var filters, fields, orderBy, search string
@@ -275,7 +281,7 @@ func newRemoteRecordsCommand(opts *remoteOptions) *cobra.Command {
 	}
 	list.Flags().IntVar(&limit, "limit", 20, "Maximum records to return")
 	list.Flags().IntVar(&offset, "offset", 0, "Records to skip")
-	list.Flags().StringVar(&filters, "filters", "", "Kora filter expression")
+	list.Flags().StringVar(&filters, "filters", "", "Kigae filter expression")
 	list.Flags().StringVar(&fields, "fields", "", "JSON array of fields to return")
 	list.Flags().StringVar(&orderBy, "order-by", "", "Sort expression")
 	list.Flags().StringVar(&search, "search", "", "Search text")
@@ -403,7 +409,16 @@ func (o *remoteOptions) client() (*remoteClient, string, error) {
 	}
 	token := strings.TrimSpace(os.Getenv(p.TokenEnv))
 	if token == "" {
-		return nil, "", fmt.Errorf("%s is not set; Kora never stores remote bearer tokens in profiles", p.TokenEnv)
+		credential, found, credentialErr := loadRemoteCredential(o.Config, name)
+		if credentialErr != nil {
+			return nil, "", credentialErr
+		}
+		if found && credential.URL == strings.TrimRight(p.URL, "/") && credential.Site == p.Site && time.Now().Before(credential.Expires) {
+			token = credential.Session
+		}
+	}
+	if token == "" {
+		return nil, "", fmt.Errorf("%s is not set and profile %q has no valid saved session; run `kora remote auth login`", p.TokenEnv, name)
 	}
 	base, err := validatedRemoteBaseURL(p.URL, p.AllowHTTP)
 	if err != nil {
@@ -418,12 +433,18 @@ func (c *remoteClient) do(ctx context.Context, method, path string, body []byte,
 
 func (c *remoteClient) doWithHeaders(ctx context.Context, method, path string, body []byte, headers map[string]string, result any) error {
 	target := *c.baseURL
-	prefix := strings.TrimRight(target.Path, "/")
+	prefix := strings.TrimRight(target.EscapedPath(), "/")
 	if c.site != "" && !strings.HasSuffix(prefix, "/s/"+url.PathEscape(c.site)) {
 		prefix += "/s/" + url.PathEscape(c.site)
 	}
 	pathParts := strings.SplitN(path, "?", 2)
-	target.Path = prefix + pathParts[0]
+	escapedPath := prefix + pathParts[0]
+	decodedPath, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		return fmt.Errorf("invalid remote API path: %w", err)
+	}
+	target.Path = decodedPath
+	target.RawPath = escapedPath
 	if len(pathParts) == 2 {
 		target.RawQuery = pathParts[1]
 	}
@@ -436,7 +457,9 @@ func (c *remoteClient) doWithHeaders(ctx context.Context, method, path string, b
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

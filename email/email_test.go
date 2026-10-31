@@ -2,6 +2,8 @@ package email
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -244,15 +246,73 @@ func TestSend_WithPlainSMTPServer(t *testing.T) {
 	}
 }
 
+func TestSendContextCancellationClosesSMTPConnection(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal("listen:", err)
+	}
+	defer listener.Close()
+	accepted := make(chan struct{})
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		close(accepted)
+		var b [1]byte
+		_, _ = conn.Read(b[:]) // SMTP greeting is withheld until cancellation.
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	sender := NewSender(&Config{Host: listener.Addr().(*net.TCPAddr).IP.String(), Port: listener.Addr().(*net.TCPAddr).Port, TLSMode: "plain"})
+	go func() {
+		result <- sender.SendContext(ctx, &Message{To: []string{"recipient@example.test"}, Subject: "Action required", Body: "Review your inbox."})
+	}()
+	select {
+	case <-accepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SMTP connection was not accepted")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("SendContext error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SendContext did not stop after cancellation")
+	}
+	select {
+	case <-serverDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled SMTP connection remained open")
+	}
+}
+
+func TestSendTemplateContextHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sender := NewSender(&Config{From: "kora@example.test"})
+	err := sender.SendTemplateContext(ctx, []string{"recipient@example.test"}, "Hello {name}", "Hi {name}", map[string]string{"name": "Ari"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SendTemplateContext error = %v, want context.Canceled", err)
+	}
+}
+
 func TestMagicLinkTemplate(t *testing.T) {
-	subject, textBody, htmlBody := MagicLinkTemplate("Kora", "https://example.com/link", 15)
-	if !strings.Contains(subject, "Kora") {
+	subject, textBody, htmlBody := MagicLinkTemplate("Kigae", "https://example.com/link", 15)
+	if !strings.Contains(subject, "Kigae") {
 		t.Fatalf("expected subject to mention app name, got %q", subject)
 	}
 	if !strings.Contains(textBody, "https://example.com/link") {
 		t.Fatalf("expected text body to contain link, got %q", textBody)
 	}
-	if !strings.Contains(htmlBody, "Sign in to Kora") {
+	if !strings.Contains(htmlBody, "Sign in to Kigae") {
 		t.Fatalf("expected html body to contain heading, got %q", htmlBody)
 	}
 }

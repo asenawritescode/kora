@@ -1,28 +1,55 @@
 name: Storage Lot
 module: Agriculture
-title_field: reference
-search_fields: reference, status
-sort_field: modified
+description: A stored portion of a harvest batch with quantity and location.
+title_field: lot_reference
+search_fields: lot_reference, storage_location, status
+sort_field: received_on
 sort_order: DESC
 
 fields:
-  - fieldname: reference
+  - fieldname: lot_reference
     fieldtype: Data
-    label: Reference
+    label: Storage lot reference
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
-    fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
-  - fieldname: status
-    fieldtype: Data
-    label: Status
-    default: Draft
+  - fieldname: harvest_batch
+    fieldtype: Link
+    label: Harvest batch
+    options: Harvest Batch
+    reqd: true
     in_list_view: true
+  - fieldname: storage_location
+    fieldtype: Data
+    label: Store, room, or location
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity stored
+    reqd: true
+  - fieldname: unit
+    fieldtype: Data
+    label: Unit
+    reqd: true
+  - fieldname: received_on
+    fieldtype: Date
+    label: Stored on
+    reqd: true
+  - fieldname: recorded_by
+    fieldtype: User
+    label: Recorded by
+    reqd: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      In storage
+      Partly issued
+      Depleted
+      Rejected
+    default: In storage
+    in_list_view: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

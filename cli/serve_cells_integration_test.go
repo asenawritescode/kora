@@ -22,26 +22,42 @@ import (
 )
 
 // TestLiveEngineCellsMoveAndRecover runs two real Engine processes against a
-// tmpfs-backed MySQL directory and tenant database. It verifies default-cell
-// forwarding, revisioned reassignment/hot-add, forwarding after a cell outage,
-// and recovery after both cells restart. Existing local databases are never
-// used by this opt-in acceptance test.
+// tmpfs-backed MySQL directory and tenant database. Its
+// KORA_SITE_DIRECTORY_LIVE_ENGINE_CELLS opt-in is test-only; it exercises the
+// retained legacy-cell compatibility adapter, not production configuration
+// for the target deployment-ingress architecture. Existing local databases
+// are never used by this acceptance test.
 func TestLiveEngineCellsMoveAndRecover(t *testing.T) {
 	if os.Getenv("KORA_SITE_DIRECTORY_LIVE_ENGINE_CELLS") != "1" {
-		t.Skip("set KORA_SITE_DIRECTORY_LIVE_ENGINE_CELLS=1 to run two-cell live acceptance")
+		t.Skip("set KORA_SITE_DIRECTORY_LIVE_ENGINE_CELLS=1 to run legacy-cell compatibility acceptance")
 	}
+	runLiveEnginePlacementMoveAndRecover(t, false)
+}
+
+// TestLiveEngineDeploymentsMoveAndRecover runs the same disposable two-process
+// ownership and recovery scenario through deployment-named environment
+// settings. It is intentionally opt-in with the compatibility test above.
+func TestLiveEngineDeploymentsMoveAndRecover(t *testing.T) {
+	if os.Getenv("KORA_SITE_DIRECTORY_LIVE_ENGINE_DEPLOYMENTS") != "1" {
+		t.Skip("set KORA_SITE_DIRECTORY_LIVE_ENGINE_DEPLOYMENTS=1 to run two-deployment live acceptance")
+	}
+	runLiveEnginePlacementMoveAndRecover(t, true)
+}
+
+func runLiveEnginePlacementMoveAndRecover(t *testing.T, deploymentNames bool) {
+	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required for the disposable MySQL container")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	container := "kora-engine-cells-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	container := "kora-engine-placement-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	startDB := exec.CommandContext(ctx, "docker", "run", "--rm", "-d", "--name", container,
 		"--tmpfs", "/var/lib/mysql:rw,size=512m", "-e", "MYSQL_ROOT_PASSWORD=acceptance-only",
-		"-e", "MYSQL_DATABASE=kora_platform", "-p", "127.0.0.1::3306", "mysql:8.0")
+		"-e", "MYSQL_DATABASE=kora_platform", "-p", "127.0.0.1::3306", "mysql:8.4.11")
 	if output, err := startDB.CombinedOutput(); err != nil {
-		t.Fatalf("start disposable Engine-cell MySQL: %v (%s)", err, strings.TrimSpace(string(output)))
+		t.Fatalf("start disposable Engine-placement MySQL: %v (%s)", err, strings.TrimSpace(string(output)))
 	}
 	defer func() { _ = exec.Command("docker", "rm", "-f", container).Run() }()
 	platformPort := inspectDockerPort(ctx, t, container, "3306/tcp")
@@ -66,7 +82,7 @@ func TestLiveEngineCellsMoveAndRecover(t *testing.T) {
 	if err := site.BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap disposable platform registry:", err)
 	}
-	tenantDBName := "kora_cell_tenant_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	tenantDBName := "kora_placement_tenant_" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	if _, err := database.ExecContext(ctx, "CREATE DATABASE `"+tenantDBName+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
 		t.Fatal("create disposable tenant database:", err)
 	}
@@ -81,7 +97,7 @@ func TestLiveEngineCellsMoveAndRecover(t *testing.T) {
 		}
 	}()
 	registry := site.NewSQLSiteRegistry(database, "mysql")
-	hostname := "cell-move-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".example.invalid"
+	hostname := "deployment-move-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".example.invalid"
 	if err := registry.Upsert(&site.SiteConfig{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1",
 		DBPort: mustPort(t, platformPort), DBName: tenantDBName, DBUser: "root", DBPassword: "acceptance-only",
@@ -98,12 +114,12 @@ func TestLiveEngineCellsMoveAndRecover(t *testing.T) {
 		t.Fatal("resolve Engine source directory")
 	}
 	root := filepath.Dir(filepath.Dir(sourceFile))
-	binary := filepath.Join(t.TempDir(), "kora-engine-cell-acceptance")
+	binary := filepath.Join(t.TempDir(), "kora-engine-placement-acceptance")
 	build := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
 	build.Dir = root
 	build.Stdout, build.Stderr = io.Discard, io.Discard
 	if err := build.Run(); err != nil {
-		t.Fatal("build Engine for two-cell acceptance:", err)
+		t.Fatal("build Engine for two-process placement acceptance:", err)
 	}
 	defaultPort, cellAPort := freeTCPPort(t), freeTCPPort(t)
 	for cellAPort == defaultPort {
@@ -111,10 +127,16 @@ func TestLiveEngineCellsMoveAndRecover(t *testing.T) {
 	}
 	configDir := t.TempDir()
 	consumerSuffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	localID, remoteID := "default", "cell-a"
+	if deploymentNames {
+		remoteID = "deployment-a"
+	}
+	t.Logf("two-process placement scenario: deployment_names=%t site_id=%s source=%s destination=%s", deploymentNames, info.SiteID, localID, remoteID)
+	placementURLsName := "http://127.0.0.1:"
 	defaultEnv := isolatedCellEngineEnvironment(dsn, platformPort, configDir,
-		"engine:acceptance-default:"+consumerSuffix, "default", "cell-a=http://127.0.0.1:"+strconv.Itoa(cellAPort))
+		"engine:acceptance-default:"+consumerSuffix, localID, remoteID+"="+placementURLsName+strconv.Itoa(cellAPort), deploymentNames)
 	cellAEnv := isolatedCellEngineEnvironment(dsn, platformPort, configDir,
-		"engine:acceptance-cell-a:"+consumerSuffix, "cell-a", "default=http://127.0.0.1:"+strconv.Itoa(defaultPort))
+		"engine:acceptance-remote:"+consumerSuffix, remoteID, localID+"="+placementURLsName+strconv.Itoa(defaultPort), deploymentNames)
 	var processes []*cellAcceptanceProcess
 	defer func() {
 		for index := len(processes) - 1; index >= 0; index-- {
@@ -134,7 +156,7 @@ func TestLiveEngineCellsMoveAndRecover(t *testing.T) {
 		t.Fatalf("initial default-cell path through cell-a = HTTP %d, want 200", status)
 	}
 
-	assignment, err := registry.SetRuntimeCellID(info.SiteID, "cell-a")
+	assignment, err := registry.SetRuntimeCellID(info.SiteID, remoteID)
 	if err != nil {
 		t.Fatal("move disposable site to cell-a:", err)
 	}
@@ -142,10 +164,11 @@ func TestLiveEngineCellsMoveAndRecover(t *testing.T) {
 		t.Fatalf("assignment revision = %d, want %d", assignment.ConfigRevision, info.ConfigRevision+1)
 	}
 
-	// Take the source cell down. Once the destination applied the outbox event
-	// and eagerly loaded the tenant, its path must keep working without source.
+	// Take the source down after the destination consumes the assignment event.
+	// Its first local request should lazily activate the tenant and work without
+	// depending on the old owner.
 	defaultCell.stop(t)
-	waitForCellPath(t, ctx, client, cellAPort, info.SiteID, http.StatusOK)
+	waitForCellPath(t, ctx, client, cellAPort, info.SiteID, http.StatusOK, "destination serves after source shutdown", cellA)
 
 	// Restart the old source with the same durable cursor. It should now proxy
 	// the site to cell-a instead of loading the tenant locally.
@@ -159,20 +182,20 @@ func TestLiveEngineCellsMoveAndRecover(t *testing.T) {
 	// A destination outage is visible as 502 at shared ingress, and the same
 	// route becomes healthy again when the assigned cell restarts and warms up.
 	cellA.stop(t)
-	waitForCellPath(t, ctx, client, defaultPort, info.SiteID, http.StatusBadGateway)
+	waitForCellPath(t, ctx, client, defaultPort, info.SiteID, http.StatusBadGateway, "source returns gateway error during destination outage")
 	cellA = startCellAcceptanceEngine(t, ctx, root, binary, cellAPort, cellAEnv)
 	processes = append(processes, cellA)
 	waitCellListener(t, ctx, cellAPort)
-	waitForCellPath(t, ctx, client, defaultPort, info.SiteID, http.StatusOK)
+	waitForCellPath(t, ctx, client, defaultPort, info.SiteID, http.StatusOK, "source recovers after destination restart", cellA)
 
 	current, err := registry.GetDescriptorByID(info.SiteID)
 	if err != nil {
 		t.Fatal("read final disposable placement:", err)
 	}
-	if current.RuntimeCellID != "cell-a" || current.ConfigRevision != assignment.ConfigRevision {
-		t.Fatalf("final placement = %+v; want cell-a at revision %d", current, assignment.ConfigRevision)
+	if current.RuntimeCellID != remoteID || current.ConfigRevision != assignment.ConfigRevision {
+		t.Fatalf("final placement = %+v; want %s at revision %d", current, remoteID, assignment.ConfigRevision)
 	}
-	t.Logf("two Engine cells moved and recovered disposable site %s at revision %d", info.SiteID, current.ConfigRevision)
+	t.Logf("two Engine placements moved and recovered disposable site %s at revision %d", info.SiteID, current.ConfigRevision)
 }
 
 type cellAcceptanceProcess struct {
@@ -189,14 +212,14 @@ func startCellAcceptanceEngine(t *testing.T, ctx context.Context, root, binary s
 	dir := t.TempDir()
 	logFile, err := os.Create(filepath.Join(dir, "engine.log"))
 	if err != nil {
-		t.Fatal("create cell Engine log:", err)
+		t.Fatal("create placement Engine log:", err)
 	}
 	cmd := exec.CommandContext(ctx, binary, "serve", "--port", strconv.Itoa(port))
 	cmd.Dir, cmd.Env = root, env
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
-		t.Fatal("start cell Engine:", err)
+		t.Fatal("start placement Engine:", err)
 	}
 	process := &cellAcceptanceProcess{cmd: cmd, done: make(chan struct{}), log: logFile, logDir: dir, port: port}
 	go func() {
@@ -211,10 +234,10 @@ func (p *cellAcceptanceProcess) waitPing(t *testing.T, ctx context.Context, clie
 	for {
 		select {
 		case <-p.done:
-			t.Fatalf("cell Engine on port %d exited before ping (err=%v; logs=%s)", p.port, p.err, redactedCellEngineLogs(p))
+			t.Fatalf("Engine on port %d exited before ping (err=%v; logs=%s)", p.port, p.err, redactedCellEngineLogs(p))
 		default:
 		}
-		response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/v1/ping", p.port))
+		response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/ping", p.port))
 		if err == nil {
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
@@ -224,7 +247,7 @@ func (p *cellAcceptanceProcess) waitPing(t *testing.T, ctx context.Context, clie
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("cell Engine on port %d did not become ready: %v; logs=%s", p.port, ctx.Err(), redactedCellEngineLogs(p))
+			t.Fatalf("Engine on port %d did not become ready: %v; logs=%s", p.port, ctx.Err(), redactedCellEngineLogs(p))
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
@@ -242,20 +265,20 @@ func (p *cellAcceptanceProcess) stop(t *testing.T) {
 	default:
 	}
 	if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
-		t.Errorf("signal cell Engine on port %d: %v", p.port, err)
+		t.Errorf("signal Engine on port %d: %v", p.port, err)
 	}
 	select {
 	case <-p.done:
 	case <-time.After(15 * time.Second):
 		_ = p.cmd.Process.Kill()
 		<-p.done
-		t.Errorf("cell Engine on port %d did not stop gracefully; logs=%s", p.port, redactedCellEngineLogs(p))
+		t.Errorf("Engine on port %d did not stop gracefully; logs=%s", p.port, redactedCellEngineLogs(p))
 	}
 	_ = p.log.Close()
 }
 
 func sitePathPing(client *http.Client, port int, siteID string) int {
-	target := fmt.Sprintf("http://127.0.0.1:%d/s/%s/api/v1/ping?cell_acceptance=1", port, url.PathEscape(siteID))
+	target := fmt.Sprintf("http://127.0.0.1:%d/s/%s/api/v1/ping?placement_acceptance=1", port, url.PathEscape(siteID))
 	response, err := client.Get(target)
 	if err != nil {
 		return 0
@@ -265,15 +288,32 @@ func sitePathPing(client *http.Client, port int, siteID string) int {
 	return response.StatusCode
 }
 
-func waitForCellPath(t *testing.T, ctx context.Context, client *http.Client, port int, siteID string, want int) {
+func waitForCellPath(t *testing.T, ctx context.Context, client *http.Client, port int, siteID string, want int, diagnostic ...any) {
 	t.Helper()
+	detail := fmt.Sprintf("site route through port %d", port)
+	var process *cellAcceptanceProcess
+	for _, value := range diagnostic {
+		switch typed := value.(type) {
+		case string:
+			detail = typed
+		case *cellAcceptanceProcess:
+			process = typed
+		}
+	}
 	for {
 		if got := sitePathPing(client, port, siteID); got == want {
 			return
 		}
+		if process != nil {
+			select {
+			case <-process.done:
+				t.Fatalf("%s: Engine exited (err=%v; logs=%s)", detail, process.err, redactedCellEngineLogs(process))
+			default:
+			}
+		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("site route through port %d did not become HTTP %d: %v", port, want, ctx.Err())
+			t.Fatalf("%s did not become HTTP %d: %v", detail, want, ctx.Err())
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
@@ -284,7 +324,7 @@ func waitCellListener(t *testing.T, ctx context.Context, port int) {
 	waitTCP(ctx, t, fmt.Sprintf("127.0.0.1:%d", port))
 }
 
-func isolatedCellEngineEnvironment(dsn, platformPort, configDir, consumerID, cellID, cellURLs string) []string {
+func isolatedCellEngineEnvironment(dsn, platformPort, configDir, consumerID, deploymentID, deploymentURLs string, deploymentNames bool) []string {
 	allowed := map[string]bool{"PATH": true, "HOME": true, "TMPDIR": true, "LANG": true, "LC_ALL": true}
 	filtered := make([]string, 0, len(allowed)+12)
 	for _, entry := range os.Environ() {
@@ -293,23 +333,27 @@ func isolatedCellEngineEnvironment(dsn, platformPort, configDir, consumerID, cel
 			filtered = append(filtered, entry)
 		}
 	}
-	return append(filtered,
-		"DB_DSN="+dsn,
+	env := []string{
+		"DB_DSN=" + dsn,
 		"KORA_DB_TYPE=mysql",
 		"KORA_DB_HOST=127.0.0.1",
-		"KORA_DB_PORT="+platformPort,
+		"KORA_DB_PORT=" + platformPort,
 		"KORA_DB_USER=root",
 		"KORA_DB_PASSWORD=acceptance-only",
-		"KORA_CONFIG_DIR="+configDir,
-		"KORA_SITE_DIRECTORY_CONSUMER_ID="+consumerID,
-		"KORA_ENGINE_CELL_ID="+cellID,
-		"KORA_ENGINE_CELL_URLS="+cellURLs,
+		"KORA_CONFIG_DIR=" + configDir,
+		"KORA_SITE_DIRECTORY_CONSUMER_ID=" + consumerID,
 		"KORA_DB_MAX_OPEN=2",
 		"KORA_DB_MAX_IDLE=1",
 		"KORA_SCRIPTS_ENABLED=false",
 		"KORA_LOG_LEVEL=warn",
 		"KORA_LOG_FORMAT=json",
-	)
+	}
+	if deploymentNames {
+		env = append(env, "KORA_ENGINE_LOCAL_DEPLOYMENT_ID="+deploymentID, "KORA_ENGINE_DEPLOYMENT_URLS="+deploymentURLs)
+	} else {
+		env = append(env, "KORA_ENGINE_CELL_ID="+deploymentID, "KORA_ENGINE_CELL_URLS="+deploymentURLs)
+	}
+	return append(filtered, env...)
 }
 
 func redactedCellEngineLogs(p *cellAcceptanceProcess) string {
@@ -318,6 +362,4 @@ func redactedCellEngineLogs(p *cellAcceptanceProcess) string {
 	return strings.TrimSpace(strings.ReplaceAll(string(data), "acceptance-only", "[redacted]"))
 }
 
-func netJoinLoopback(port string) string {
-	return "127.0.0.1:" + port
-}
+func netJoinLoopback(port string) string { return "127.0.0.1:" + port }

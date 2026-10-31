@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/doctype"
@@ -145,11 +148,15 @@ func TestHandleDeleteSiteKeepsRouteUnavailableWhenTenantCleanupFails(t *testing.
 		Config: knet.SiteRouterConfig{Hostname: "delete-test.example.invalid"}, DB: tenantDB, Registry: doctype.NewRegistry(),
 	}
 	router := knet.NewSiteRouter([]*knet.LoadedSite{loaded})
-	discarded := false
+	var discarded atomic.Bool
 	handler := &ConsoleHandler{
 		SiteRouter: router, PlatformDB: platformDB, PlatformDBType: "mysql",
 		PlatformDBHost: "127.0.0.1", PlatformDBPort: 1, PlatformDBUser: "unused",
-		DiscardRuntime: func(runtime *knet.LoadedSite) { discarded = runtime == loaded },
+		DiscardRuntime: func(runtime *knet.LoadedSite) { discarded.Store(runtime == loaded) },
+	}
+	_, activeHandle, ok := router.AcquireByName(context.Background(), loaded.Name)
+	if !ok {
+		t.Fatal("failed to acquire tenant request handle")
 	}
 	request := httptest.NewRequest(http.MethodDelete, "/api/console/sites/"+loaded.Name, strings.NewReader(`{"confirm":"delete-test.example.invalid"}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -157,7 +164,32 @@ func TestHandleDeleteSiteKeepsRouteUnavailableWhenTenantCleanupFails(t *testing.
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = request
 	ctx.Params = gin.Params{{Key: "name", Value: loaded.Name}}
-	handler.HandleDeleteSite(ctx)
+	deleteDone := make(chan struct{})
+	go func() {
+		handler.HandleDeleteSite(ctx)
+		close(deleteDone)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		current, handle, admitted := router.AcquireByName(context.Background(), loaded.Name)
+		if handle != nil {
+			handle.Release()
+		}
+		if current != nil && !admitted {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if discarded.Load() {
+		activeHandle.Release()
+		t.Fatal("request-visible services were closed before admitted requests drained")
+	}
+	activeHandle.Release()
+	select {
+	case <-deleteDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("delete handler did not finish after tenant request drained")
+	}
 
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("delete response status = %d, body=%s; want pending cleanup error", recorder.Code, recorder.Body.String())
@@ -165,7 +197,7 @@ func TestHandleDeleteSiteKeepsRouteUnavailableWhenTenantCleanupFails(t *testing.
 	if router.SiteByID(loaded.SiteID) != loaded || loaded.Status != "deleting" || loaded.ConfigRevision != 5 {
 		t.Fatalf("failed cleanup did not preserve unavailable retry state: loaded=%#v", loaded)
 	}
-	if !discarded {
+	if !discarded.Load() {
 		t.Fatal("sidecars were left running after durable deletion intent")
 	}
 	traffic := gin.New()

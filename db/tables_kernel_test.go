@@ -23,3 +23,21 @@ func TestKernelReceiptDDLStoresReplayableResultForEveryDialect(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordHistoryDDLExistsForEveryDialect(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		ddl  []string
+	}{
+		{name: "mysql", ddl: KernelTablesMySQL()},
+		{name: "libsql", ddl: KernelTablesLibSQL()},
+		{name: "postgres", ddl: KernelTablesPostgres()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			joined := strings.Join(test.ddl, "\n")
+			if !strings.Contains(joined, "_kora_record_history") || !strings.Contains(joined, "changes_json") {
+				t.Fatal("record history schema is missing")
+			}
+		})
+	}
+}

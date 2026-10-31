@@ -10,6 +10,7 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
+    search_index: true
   - fieldname: status
     fieldtype: Select
     label: Status
@@ -18,7 +19,7 @@ fields:
       Open
       Paused
       Closed
-    default: Open
+    default: Planned
     in_list_view: true
   - fieldname: supervisor
     fieldtype: User

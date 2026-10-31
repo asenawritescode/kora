@@ -611,6 +611,9 @@ func isNilOrEmpty(val any) bool {
 	case []*Document:
 		return len(v) == 0
 	}
+	if length, ok := sliceLen(val); ok {
+		return length == 0
+	}
 	return false
 }
 

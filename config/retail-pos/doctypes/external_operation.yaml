@@ -21,6 +21,7 @@ fields:
     fieldtype: Data
     label: Purpose
     reqd: true
+    search_index: true
   - fieldname: source_doctype
     fieldtype: Data
     label: Source DocType

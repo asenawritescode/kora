@@ -4,7 +4,7 @@ package doctype
 // Change represents a single config change for impact analysis and DDL generation.
 // Type uses kebab-case: add-field, remove-field, rename-field, change-field-type,
 // change-field-property, add-doctype, remove-doctype, add-role, remove-role,
-// add-perm, remove-perm, add-workflow, remove-workflow, add-metric, remove-metric,
+// add-perm, remove-perm, add-metric, remove-metric,
 // add-script-ref, remove-script-ref.
 //
 // The Attrs map uses keyword-style keys like ":required", ":type", ":default",
@@ -38,16 +38,14 @@ var configChangeTypeMap = map[ChangeType]string{
 
 // sectionChangeTypeKey builds a lookup key from section and change direction.
 var sectionChangeTypeMap = map[string]string{
-	"roles.added":                 "add-role",
-	"roles.removed":               "remove-role",
-	"permissions.added":           "add-perm",
-	"permissions.removed":         "remove-perm",
-	"workflows.added":             "add-workflow",
-	"workflows.removed":           "remove-workflow",
-	"analytics_metrics.added":     "add-metric",
-	"analytics_metrics.removed":   "remove-metric",
-	"scripts.added":               "add-script-ref",
-	"scripts.removed":             "remove-script-ref",
+	"roles.added":               "add-role",
+	"roles.removed":             "remove-role",
+	"permissions.added":         "add-perm",
+	"permissions.removed":       "remove-perm",
+	"analytics_metrics.added":   "add-metric",
+	"analytics_metrics.removed": "remove-metric",
+	"scripts.added":             "add-script-ref",
+	"scripts.removed":           "remove-script-ref",
 }
 
 // ConvertConfigChanges converts the existing ConfigChange and SectionChange slices

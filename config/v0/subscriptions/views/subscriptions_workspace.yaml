@@ -10,14 +10,30 @@ components:
     region: main
     position: 0
     source_doctype: Subscription
-    label: Subscription Queue
-    desktop_columns: [name, reference, owner, status, due_date]
-    mobile_columns: [reference, status]
+    label: Subscriptions
+    desktop_columns: [reference, customer, plan, status, unit_price, currency, next_billing_date]
+    mobile_columns: [reference, customer, status]
   - id: evidence_queue
     type: record_table
     region: side
     position: 0
+    source_doctype: Recurring Invoice
+    label: Invoices
+    desktop_columns: [invoice_number, customer, due_date, total, currency, balance, status]
+    mobile_columns: [invoice_number, balance, status]
+  - id: payment_queue
+    type: record_table
+    region: side
+    position: 1
+    source_doctype: Payment
+    label: Recent payments
+    desktop_columns: [payment_reference, invoice, amount, currency, paid_at, status]
+    mobile_columns: [payment_reference, amount, status]
+  - id: billing_schedule
+    type: record_table
+    region: main
+    position: 1
     source_doctype: Billing Schedule
-    label: Billing Schedule Queue
-    desktop_columns: [name, reference, source_record, status]
-    mobile_columns: [reference, status]
+    label: Upcoming billing
+    desktop_columns: [reference, subscription, billing_date, amount, currency, status]
+    mobile_columns: [reference, billing_date, status]

@@ -15,11 +15,12 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 	"github.com/asenawritescode/kora/secret"
 )
 
-// scriptProvider bridges the JS runtime to Kora's canonical query and command APIs.
+// scriptProvider bridges the JS runtime to Kigae's canonical query and command APIs.
 type scriptProvider struct {
 	tx          *orm.TxManager
 	registry    *doctype.Registry
@@ -32,6 +33,7 @@ type scriptProvider struct {
 	httpClient       *http.Client
 	activeHooks      []string
 	mutationExecutor script.MutationExecutor
+	externalJournal  script.ExternalEffectJournal
 }
 
 // NewScriptProvider creates a provider with a scoped HTTP client.
@@ -60,20 +62,34 @@ func NewScriptProvider(tx *orm.TxManager, registry *doctype.Registry, site strin
 	}
 }
 
+// ScriptProviderFactory creates a provider bound to the TxManager supplied by
+// each kernel operation. The provider's HTTP client and transport are shared
+// safely across scoped copies for the owning tenant/request lifetime.
+func ScriptProviderFactory(registry *doctype.Registry, site string, secretStore *secret.Store, httpAllowlist []string) func(*orm.TxManager) script.KoraProvider {
+	base := NewScriptProvider(nil, registry, site, secretStore, httpAllowlist).(*scriptProvider)
+	return func(tx *orm.TxManager) script.KoraProvider {
+		return base.WithTxManager(tx)
+	}
+}
+
 // GetDoc fetches a single document by doctype and name.
 func (p *scriptProvider) GetDoc(doctypeName, name string) (map[string]any, error) {
 	dt := p.registry.Get(doctypeName)
 	if dt == nil {
 		return nil, fmt.Errorf("doctype %q not found", doctypeName)
 	}
-	doc, err := p.tx.GetDoc(dt, name, "")
+	scope, err := p.authorizeRead(dt)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := p.tx.GetDocWithScope(dt, name, scope)
 	if err != nil {
 		return nil, err
 	}
 	if doc == nil {
 		return nil, nil
 	}
-	return doc.ToMap(), nil
+	return projectScriptReadDocument(dt, p.registry, doc.ToMap()), nil
 }
 
 // GetList fetches documents with optional filters, ordering, and pagination.
@@ -88,29 +104,88 @@ func (p *scriptProvider) GetList(doctypeName string, filters map[string]any, ord
 	if limit > 500 {
 		limit = 500 // cap to prevent memory exhaustion
 	}
+	scope, err := p.authorizeRead(dt)
+	if err != nil {
+		return nil, err
+	}
 
-	// Convert map filters to JSON filter string (Kora ORM format).
-	filterStr := mapToFilterString(filters)
+	// Convert map filters to JSON filter string (Kigae ORM format).
+	filterStr, err := mapToFilterString(filters)
+	if err != nil {
+		return nil, err
+	}
 
-	docs, _, err := p.tx.GetList(dt, filterStr, orderBy, limit, offset, "")
+	docs, _, err := p.tx.GetListWithScope(dt, filterStr, orderBy, limit, offset, scope, nil, "")
 	if err != nil {
 		return nil, err
 	}
 
 	result := make([]map[string]any, len(docs))
 	for i, doc := range docs {
-		result[i] = doc.ToMap()
+		result[i] = projectScriptReadDocument(dt, p.registry, doc.ToMap())
 	}
 	return result, nil
 }
 
+func projectScriptReadDocument(dt *doctype.DocType, registry *doctype.Registry, raw map[string]any) map[string]any {
+	projected := make(map[string]any, len(raw))
+	for _, key := range []string{"name", "owner", "creation", "modified", "modified_by", "doc_status", "revision"} {
+		if value, ok := raw[key]; ok {
+			projected[key] = value
+		}
+	}
+	if dt == nil {
+		return projected
+	}
+	for _, field := range dt.DataFields() {
+		if field.Hidden || field.Fieldtype == "Password" {
+			continue
+		}
+		value, exists := raw[field.Fieldname]
+		if !exists {
+			continue
+		}
+		if field.Fieldtype == "Table" {
+			if registry == nil {
+				continue
+			}
+			child := registry.Get(field.Options)
+			if child == nil {
+				continue
+			}
+			var rows []any
+			switch typed := value.(type) {
+			case []any:
+				rows = typed
+			case []map[string]any:
+				rows = make([]any, len(typed))
+				for index := range typed {
+					rows[index] = typed[index]
+				}
+			default:
+				continue
+			}
+			visibleRows := make([]any, 0, len(rows))
+			for _, row := range rows {
+				if rowMap, ok := row.(map[string]any); ok {
+					visibleRows = append(visibleRows, projectScriptReadDocument(child, registry, rowMap))
+				}
+			}
+			projected[field.Fieldname] = visibleRows
+			continue
+		}
+		projected[field.Fieldname] = value
+	}
+	return projected
+}
+
 // mapToFilterString converts a map of field→value pairs to JSON filter format.
 // Example: {customer: "CUST-0001", status: "Open"} → [["customer","=","CUST-0001"],["status","=","Open"]]
-func mapToFilterString(filters map[string]any) string {
+func mapToFilterString(filters map[string]any) (string, error) {
 	if len(filters) == 0 {
-		return ""
+		return "", nil
 	}
-	var parts []string
+	conditions := make([][]any, 0, len(filters))
 	for k, v := range filters {
 		// Support operators via special map keys: {"status": ["!=", "Completed"]}
 		op := "="
@@ -121,10 +196,38 @@ func mapToFilterString(filters map[string]any) string {
 			}
 			val = arr[1]
 		}
-		valStr := fmt.Sprintf("%v", val)
-		parts = append(parts, fmt.Sprintf(`["%s","%s","%s"]`, k, op, valStr))
+		conditions = append(conditions, []any{k, op, val})
 	}
-	return "[" + strings.Join(parts, ",") + "]"
+	encoded, err := json.Marshal(conditions)
+	if err != nil {
+		return "", fmt.Errorf("encode script filters: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func (p *scriptProvider) authorizeRead(dt *doctype.DocType) (policy.RowScope, error) {
+	if p == nil || p.tx == nil || p.registry == nil || dt == nil || !p.tx.Execution.Valid() {
+		return policy.RowScope{}, contract.NewError(contract.CodeUnauthenticated, "script record read requires verified execution identity")
+	}
+	actor := p.tx.Execution.Actor()
+	if actor.Site != p.site {
+		return policy.RowScope{}, contract.NewError(contract.CodePermissionDenied, "script provider tenant does not match verified execution")
+	}
+	decision, err := policy.Decide(p.tx.Execution, p.registry, dt.Name, "read")
+	if err != nil {
+		return policy.RowScope{}, err
+	}
+	if !decision.OwnerOnly && len(decision.AssignedFields) == 0 {
+		return policy.RowScope{}, nil
+	}
+	owner := actor.SubjectUserID
+	if owner == "" {
+		owner = actor.PrincipalID
+	}
+	if strings.TrimSpace(owner) == "" {
+		return policy.RowScope{}, contract.NewError(contract.CodePermissionDenied, "row-scoped script read requires an actor subject")
+	}
+	return policy.RowScope{UserID: owner, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...)}, nil
 }
 
 // SaveDoc updates an existing document.
@@ -188,31 +291,53 @@ func (p *scriptProvider) WithLifecycleHook(_ string, _ script.Event, scriptName 
 	return &copyProvider
 }
 
+func (p *scriptProvider) WithTxManager(tx *orm.TxManager) *scriptProvider {
+	copyProvider := *p
+	copyProvider.tx = tx
+	return &copyProvider
+}
+
 func (p *scriptProvider) WithMutationExecutor(executor script.MutationExecutor) script.KoraProvider {
 	copyProvider := *p
 	copyProvider.mutationExecutor = executor
 	return &copyProvider
 }
 
+func (p *scriptProvider) WithExternalEffectJournal(journal script.ExternalEffectJournal) script.KoraProvider {
+	copyProvider := *p
+	copyProvider.externalJournal = journal
+	return &copyProvider
+}
+
+func (p *scriptProvider) Close() {
+	if p == nil || p.httpClient == nil {
+		return
+	}
+	if transport, ok := p.httpClient.Transport.(*http.Transport); ok {
+		transport.CloseIdleConnections()
+	}
+}
+
 func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string, fields json.RawMessage, actorUser, owner string) (map[string]any, error) {
 	if p.tx == nil || p.tx.DB == nil || p.registry == nil {
 		return nil, fmt.Errorf("script provider is not bound to a site database")
 	}
-	if strings.TrimSpace(actorUser) == "" {
-		actorUser = p.tx.CurrentUser
+	execution := p.tx.Execution
+	if !execution.Valid() {
+		return nil, contract.NewError(contract.CodeUnauthenticated, "script record mutation requires verified execution identity")
 	}
-	if strings.TrimSpace(actorUser) == "" {
-		actorUser = "script-runtime"
+	verifiedActor := execution.Actor()
+	if verifiedActor.Site != p.site {
+		return nil, contract.NewError(contract.CodePermissionDenied, "script provider tenant does not match verified execution")
 	}
-	roles := append([]string(nil), p.tx.CurrentUserRoles...)
-	if len(roles) == 0 && p.tx.CurrentUserRole != "" {
-		roles = []string{p.tx.CurrentUserRole}
+	roles := verifiedActor.Roles
+	actorUser = verifiedActor.SubjectUserID
+	if actorUser == "" {
+		actorUser = verifiedActor.PrincipalID
 	}
-	if len(roles) == 0 {
-		// Lifecycle scripts historically ran with the system's unrestricted ORM
-		// capability. Preserve that trusted internal behavior explicitly rather
-		// than making an unauthenticated public adapter permissive.
-		roles = []string{doctype.AdminRole}
+	userRole := ""
+	if len(roles) > 0 {
+		userRole = roles[0]
 	}
 
 	rawPayload, err := json.Marshal(struct {
@@ -224,15 +349,15 @@ func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string
 		return nil, fmt.Errorf("encode script record payload: %w", err)
 	}
 
-	principalType := contract.PrincipalHuman
-	if actorUser == "script-runtime" || actorUser == "system" {
-		principalType = contract.PrincipalService
-	}
-	actor := contract.ActorContext{
-		PrincipalID: actorUser, PrincipalType: principalType,
-		SubjectUserID: p.tx.CurrentUser, Site: p.site, Roles: roles,
-	}
+	actor := verifiedActor
 	user := actorUser
+	// Document ownership is execution identity, never an adapter argument.
+	// The script API currently passes the verified invocation user here for
+	// compatibility, but internal callers cannot assign another principal by
+	// choosing CreateDoc's owner parameter.
+	if command == kernel.CommandRecordCreate {
+		owner = user
+	}
 	ctx := p.tx.Context
 	if ctx == nil {
 		ctx = context.Background()
@@ -240,7 +365,7 @@ func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string
 	mutation := script.MutationRequest{
 		Command: command, Payload: rawPayload, Site: p.site, User: user, Owner: owner,
 		PrincipalID: actor.PrincipalID, PrincipalType: string(actor.PrincipalType),
-		SubjectUserID: actor.SubjectUserID, UserRole: p.tx.CurrentUserRole, Roles: roles,
+		SubjectUserID: actor.SubjectUserID, UserRole: userRole, Roles: roles,
 		SkipHookScripts: append([]string(nil), p.activeHooks...), AllowReadOnly: true,
 	}
 	var resultData json.RawMessage
@@ -252,8 +377,8 @@ func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string
 		var result contract.CommandResult
 		result, cerr := k.Execute(ctx, p.tx.DB, p.registry, kernel.Operation{
 			Context: kernel.OperationContext{
-				Site: p.site, Actor: actor, User: user, Owner: owner,
-				UserRole: p.tx.CurrentUserRole, Roles: roles,
+				Site: p.site, TenantID: execution.Tenant(), Execution: execution, Actor: actor, User: user, Owner: owner,
+				UserRole: userRole, Roles: roles,
 				SkipHookScripts:     append([]string(nil), p.activeHooks...),
 				AllowReadOnlyFields: true, Source: kernel.SourceIntegration,
 			},
@@ -325,6 +450,9 @@ func (p *scriptProvider) GetSecret(key string) (string, error) {
 
 // DoHTTP executes an external HTTP request with domain allowlist enforcement.
 func (p *scriptProvider) DoHTTP(req *script.HTTPRequest) (*script.HTTPResponse, error) {
+	if req == nil {
+		return nil, fmt.Errorf("http: request is required")
+	}
 	if err := p.checkHTTPAllowlist(req.URL); err != nil {
 		return nil, err
 	}
@@ -339,7 +467,11 @@ func (p *scriptProvider) DoHTTP(req *script.HTTPRequest) (*script.HTTPResponse, 
 		body = strings.NewReader(req.Body)
 	}
 
-	httpReq, err := http.NewRequest(method, req.URL, body)
+	ctx := context.Background()
+	if p.tx != nil && p.tx.Context != nil {
+		ctx = p.tx.Context
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, req.URL, body)
 	if err != nil {
 		return nil, fmt.Errorf("http: %w", err)
 	}
@@ -349,6 +481,11 @@ func (p *scriptProvider) DoHTTP(req *script.HTTPRequest) (*script.HTTPResponse, 
 	}
 	if httpReq.Header.Get("Content-Type") == "" && req.Body != "" {
 		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	if p.externalJournal != nil {
+		if err := p.externalJournal.BeforeExternalEffect(ctx); err != nil {
+			return nil, fmt.Errorf("http: durable effect marker failed: %w", err)
+		}
 	}
 
 	resp, err := p.httpClient.Do(httpReq)

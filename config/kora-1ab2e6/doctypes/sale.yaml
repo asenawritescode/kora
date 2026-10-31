@@ -1,0 +1,206 @@
+name: Sale
+resource_name: sale
+module: Workspace
+is_submittable: false
+is_child_table: false
+is_single: false
+track_changes: false
+append_only: false
+title_field: reference
+search_fields: reference, customer_name, sale_datetime
+sort_field: modified
+sort_order: DESC
+description: ""
+fields:
+    - fieldname: sale_datetime
+      fieldtype: Datetime
+      label: Sale Date & Time
+      options: ""
+      reqd: true
+      unique: false
+      default: now
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: payment_method
+      fieldtype: Select
+      label: Payment Method
+      options: |-
+        Cash
+        Card
+        Other
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: payment_status
+      fieldtype: Select
+      label: Payment Status
+      options: |-
+        Paid
+        Pending
+        Refunded
+      reqd: true
+      unique: false
+      default: Paid
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: true
+      search_index: false
+      description: "Payment state captured for this sale."
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: customer_name
+      fieldtype: Data
+      label: Customer
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: "Customer name recorded at checkout, when provided."
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: items
+      fieldtype: Table
+      label: Items
+      options: Sale Item
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: total_amount
+      fieldtype: Currency
+      label: Total Amount
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints:
+        - type: min
+          value: 0
+          values: []
+          pattern: ""
+          message: Sale total cannot be negative.
+          condition: ""
+          scope: ""
+      renamed_from: ""
+      linked_field: ""
+      computed: SUM(items.line_amount)
+      dependency_scope: ""
+      accept: ""
+    - fieldname: reference
+      fieldtype: Data
+      label: Receipt
+      options: ""
+      reqd: false
+      unique: true
+      default: ""
+      hidden: false
+      read_only: false
+      bold: true
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: "Unique receipt reference generated at checkout."
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: cashier
+      fieldtype: User
+      label: Cashier
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: false
+      in_standard_filter: false
+      search_index: false
+      description: "Workspace user who completed the sale."
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+doc_constraints: []
+public_access: null
+quantity_effect: null

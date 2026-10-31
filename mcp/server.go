@@ -1,5 +1,5 @@
 // Package mcp provides a Model Context Protocol server that auto-generates
-// tools from Kora's doctype registry. Supports stdio (for Claude Desktop) and
+// tools from Kigae's doctype registry. Supports stdio (for Claude Desktop) and
 // HTTP (embedded in kora serve) transports.
 package mcp
 
@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/api/ai"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type Mode string
@@ -18,41 +18,66 @@ type Mode string
 const (
 	ModeValidationOnly Mode = "validation_only"
 	ModeExecutable     Mode = "executable"
+	ModeReadOnly       Mode = "read_only"
 )
 
-// Server wraps the MCP server with Kora registry awareness.
+// Server wraps the MCP server with Kigae registry awareness.
 type Server struct {
 	srv      *mcp.Server
 	registry *doctype.Registry
 	mode     Mode
+	executor VerifiedToolExecutor
 }
 
-// New creates a new MCP server populated with tools for all doctypes in the registry.
+// VerifiedToolExecutor is supplied only by an adapter that authenticates the
+// MCP caller, constructs policy.Execution, and delegates every tool operation
+// to the same authorized domain operation used by other transports.
+type VerifiedToolExecutor func(context.Context, ai.ToolDescriptor, map[string]any) (string, error)
+
+// New creates an MCP server. Executable tenant tools require NewWithExecutor.
 func New(reg *doctype.Registry, siteName string, mode Mode) *Server {
+	return NewWithExecutor(reg, siteName, mode, nil)
+}
+
+// NewWithExecutor enables tenant tools only when the caller provides the
+// authenticated execution adapter. Without it, executable mode cannot start.
+func NewWithExecutor(reg *doctype.Registry, siteName string, mode Mode, executor VerifiedToolExecutor) *Server {
 	if mode == "" {
-		mode = ModeExecutable
+		mode = ModeValidationOnly
 	}
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "kora-" + siteName,
 		Version: "1.0.0",
 	}, nil)
 
-	ks := &Server{srv: srv, registry: reg, mode: mode}
+	ks := &Server{srv: srv, registry: reg, mode: mode, executor: executor}
 	ks.registerTools()
 	return ks
 }
 
-// Run starts the MCP server on stdio transport (for Claude Desktop).
-func (s *Server) Run(ctx context.Context) error {
-	return s.srv.Run(ctx, &mcp.StdioTransport{})
+// NewReadOnlyWithExecutor registers only generated DocType find/list/get
+// tools. The executor must authenticate every call and enforce current tenant
+// grants. Mutating and system tools are deliberately absent from this mode.
+func NewReadOnlyWithExecutor(reg *doctype.Registry, siteName string, executor VerifiedToolExecutor) *Server {
+	return NewWithExecutor(reg, siteName, ModeReadOnly, executor)
 }
 
+// Run starts the MCP server on stdio transport (for Claude Desktop).
+func (s *Server) Run(ctx context.Context) error {
+	if (s.mode == ModeExecutable || s.mode == ModeReadOnly) && s.executor == nil {
+		return fmt.Errorf("executable MCP mode requires an authenticated verified tool executor")
+	}
+	return s.srv.Run(ctx, &mcp.StdioTransport{})
+}
 
 func (s *Server) registerTools() {
 	// Config generation tools.
 	s.addConfigTools()
 
-	if s.mode != ModeExecutable {
+	if s.mode != ModeExecutable && s.mode != ModeReadOnly {
+		return
+	}
+	if s.executor == nil {
 		return
 	}
 
@@ -61,14 +86,26 @@ func (s *Server) registerTools() {
 		if tool.Source != "tenant" {
 			continue
 		}
+		if s.mode == ModeReadOnly && !isReadOperation(tool.Operation) {
+			continue
+		}
 		s.addProjectedTool(tool)
+	}
+}
+
+func isReadOperation(operation string) bool {
+	switch operation {
+	case "find", "list", "get":
+		return true
+	default:
+		return false
 	}
 }
 
 func (s *Server) addConfigTools() {
 	mcp.AddTool(s.srv, &mcp.Tool{
 		Name:        "validate_yaml",
-		Description: "Validate a Kora YAML configuration. Returns syntax errors with line numbers and 'did you mean?' suggestions.",
+		Description: "Validate a Kigae YAML configuration. Returns syntax errors with line numbers and 'did you mean?' suggestions.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -110,20 +147,13 @@ func (s *Server) addProjectedTool(tool ai.ToolDescriptor) {
 		Description: tool.Description,
 		InputSchema: tool.InputSchema,
 	}
-	switch tool.Operation {
-	case "find", "list", "get":
-		mcp.AddTool(s.srv, mcpTool, func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: "Validation-only MCP deployment: execute this tool through the chat or API path."}},
-			}, nil, nil
-		})
-	default:
-		mcp.AddTool(s.srv, mcpTool, func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Would call the %s path for %s.", tool.Operation, tool.Name)}},
-			}, nil, nil
-		})
-	}
+	mcp.AddTool(s.srv, mcpTool, func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
+		result, err := s.executor(ctx, tool, args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: result}}}, nil, nil
+	})
 }
 
 func sanitizeName(name string) string {

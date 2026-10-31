@@ -12,6 +12,7 @@ import (
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 )
 
@@ -28,12 +29,8 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			return ErrPermission
 		}
 		var payload RecordMutationBundlePayload
-		if err := json.Unmarshal(op.Payload, &payload); err != nil || payload.Doctype == "" || len(payload.Records) == 0 || len(payload.Records) > 10 {
-			return contract.NewError(contract.CodeValidationFailed, "record.mutate_bundle requires 1 to 10 records")
-		}
-		roles := op.Context.Roles
-		if len(roles) == 0 {
-			roles = []string{doctype.AdminRole}
+		if err := json.Unmarshal(op.Payload, &payload); err != nil || payload.Doctype == "" || len(payload.Records) == 0 || len(payload.Records) > MaxMutationBundleRecords {
+			return contract.NewError(contract.CodeValidationFailed, "record.mutate_bundle requires 1 to 50 records")
 		}
 		for _, record := range payload.Records {
 			if record.Doctype == "" {
@@ -50,20 +47,24 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if permission == "" {
 				permission = "create"
 			}
-			if permission != "create" && permission != "update" {
-				return contract.NewError(contract.CodeValidationFailed, "bundle operation must be create or update")
+			if permission != "create" && permission != "update" && permission != "decrement" && permission != "adjust" {
+				return contract.NewError(contract.CodeValidationFailed, "bundle operation must be create, update, decrement, or adjust")
 			}
-			if permission == "update" && record.Name == "" {
+			if permission != "create" && record.Name == "" {
 				return contract.NewError(contract.CodeValidationFailed, "bundle update requires a record name")
 			}
-			if permission == "update" {
+			if dt.AppendOnly && permission != "create" {
+				return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
+			}
+			if permission != "create" {
 				permission = "write"
 			}
-			if allowed, _ := reg.CanUser(roles, record.Doctype, permission); !allowed {
-				return ErrPermission
+			if _, err := policy.Decide(op.Context.Execution, reg, dt.Name, permission); err != nil {
+				return err
 			}
 		}
-		if payload.Records[0].Doctype != payload.Doctype {
+		root := reg.Get(payload.Doctype)
+		if root == nil || root.Name != reg.Get(payload.Records[0].Doctype).Name {
 			return contract.NewError(contract.CodeValidationFailed, "bundle root doctype must match the first record")
 		}
 		return nil
@@ -77,12 +78,23 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 	for _, step := range dyn.Steps {
 		switch {
 		case step.Create != nil:
-			if allowed, _ := reg.CanUser(op.Context.Roles, step.Create.Record, "create"); !allowed {
-				return ErrPermission
+			dt := reg.Get(step.Create.Record)
+			if dt == nil {
+				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", step.Create.Record))
+			}
+			if _, err := policy.Decide(op.Context.Execution, reg, dt.Name, "create"); err != nil {
+				return err
 			}
 		case step.Update != nil:
-			if allowed, _ := reg.CanUser(op.Context.Roles, step.Update.Record, "write"); !allowed {
-				return ErrPermission
+			dt := reg.Get(step.Update.Record)
+			if dt == nil {
+				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", step.Update.Record))
+			}
+			if dt.AppendOnly {
+				return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
+			}
+			if _, err := policy.Decide(op.Context.Execution, reg, dt.Name, "write"); err != nil {
+				return err
 			}
 		}
 	}
@@ -118,17 +130,28 @@ type stepOutcome struct {
 // receipt claim, per-step writes (each validated against its target record
 // schema), emitted events into the outbox, and the audit row — all commit or
 // roll back together.
-func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, def CommandDefinition, opID string, cmd *CommandResource) (json.RawMessage, *contract.Error) {
-	dbTx, err := siteDB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
+func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, def CommandDefinition, opID string, cmd *CommandResource, afterCommit *func()) (json.RawMessage, *contract.Error) {
+	ownsTransaction := dbTx == nil
+	auditFailure := func(code contract.Code) {
+		if ownsTransaction {
+			k.writeFailureAudit(siteDB, op, def, opID, code)
+		}
 	}
-	defer dbTx.Rollback()
+	if ownsTransaction {
+		var err error
+		dbTx, err = siteDB.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
+		}
+		defer dbTx.Rollback()
+	}
 	priorMutationExecutor := txMgr.ScriptMutationExecutor
 	priorPostCommitHooks := txMgr.PostCommitHooks
+	priorTransaction := txMgr.Transaction
 	priorUser, priorRole, priorRoles, priorContext := txMgr.CurrentUser, txMgr.CurrentUserRole, txMgr.CurrentUserRoles, txMgr.Context
 	priorSkipHooks := txMgr.SkipHookScripts
 	txMgr.PostCommitHooks = nil
+	txMgr.Transaction = dbTx
 	txMgr.CurrentUser = op.Context.User
 	txMgr.CurrentUserRole = op.Context.UserRole
 	txMgr.CurrentUserRoles = append([]string(nil), op.Context.Roles...)
@@ -140,6 +163,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 	defer func() {
 		txMgr.ScriptMutationExecutor = priorMutationExecutor
 		txMgr.PostCommitHooks = priorPostCommitHooks
+		txMgr.Transaction = priorTransaction
 		txMgr.CurrentUser, txMgr.CurrentUserRole, txMgr.CurrentUserRoles, txMgr.Context = priorUser, priorRole, priorRoles, priorContext
 		txMgr.SkipHookScripts = priorSkipHooks
 	}()
@@ -195,10 +219,17 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 			if err := txMgr.InsertInTx(dbTx, dt, doc, owner, user); err != nil {
 				return nil, wrapORMError(err)
 			}
+			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterInsert, doc, nil); hookErr != nil {
+				return nil, hookErr
+			}
+			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, nil); hookErr != nil {
+				return nil, hookErr
+			}
 			doc.IsNew = false
 			completeTx := *txMgr
 			completeTx.ScriptMutationExecutor = nil
 			completeTx.PostCommitHooks = nil
+			completeTx.Transaction = nil
 			completeTx.SkipHookScripts = nil
 			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteInsert(dt, doc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: doc.Name, Created: true})
@@ -213,8 +244,8 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 			if rerr != nil || targetName == "" {
 				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 			}
-			owner := ownerForOperation(reg, op, dt.Name, "write")
-			oldDoc, err := txMgr.GetDoc(dt, targetName, owner)
+			scope := scopeForOperation(reg, op, dt.Name, "write")
+			oldDoc, err := txMgr.GetDocWithScope(dt, targetName, scope)
 			if err != nil {
 				if err == sql.ErrNoRows || strings.Contains(err.Error(), orm.ErrNotFound.Error()) {
 					return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("record %q not found", targetName))
@@ -227,7 +258,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 					return nil, contract.NewError(contract.CodeNotFound, "document not found")
 				}
 				if prior != ev {
-					k.writeFailureAudit(siteDB, op, def, opID, ErrStaleVersion.Type)
+					auditFailure(ErrStaleVersion.Type)
 					return nil, ErrStaleVersion
 				}
 			}
@@ -251,12 +282,16 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 					return nil, cerr
 				}
 			}
-			if err := txMgr.SaveInTx(dbTx, dt, doc, user, owner, oldDoc); err != nil {
+			if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, user, scope, oldDoc); err != nil {
 				return nil, wrapExpectedVersionORMError(err, op, k.dialect())
+			}
+			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+				return nil, hookErr
 			}
 			completeTx := *txMgr
 			completeTx.ScriptMutationExecutor = nil
 			completeTx.PostCommitHooks = nil
+			completeTx.Transaction = nil
 			completeTx.SkipHookScripts = nil
 			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteSave(dt, doc, oldDoc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: targetName, Created: false})
@@ -303,14 +338,22 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, txMgr *
 		}
 	}
 
-	if err := dbTx.Commit(); err != nil {
-		return nil, contract.NewError(contract.CodeInternal, "commit failed")
-	}
 	postCommitHooks := append([]func(){}, txMgr.PostCommitHooks...)
-	txMgr.ScriptMutationExecutor = nil
-	txMgr.PostCommitHooks = nil
-	for _, hook := range postCommitHooks {
-		hook()
+	complete := func() {
+		for _, hook := range postCommitHooks {
+			hook()
+		}
+	}
+	if ownsTransaction {
+		if err := dbTx.Commit(); err != nil {
+			return nil, contract.NewError(contract.CodeInternal, "commit failed")
+		}
+		txMgr.ScriptMutationExecutor = nil
+		txMgr.PostCommitHooks = nil
+		txMgr.Transaction = nil
+		complete()
+	} else if afterCommit != nil {
+		*afterCommit = complete
 	}
 
 	return raw, nil

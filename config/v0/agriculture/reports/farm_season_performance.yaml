@@ -1,0 +1,61 @@
+name: farm_season_performance
+label: Farm and season performance
+route: /reports/farm-season-performance
+queries:
+  - id: plans
+    model: crop_plan
+    measures: [count, target_quantity_sum]
+    dimensions: [crop]
+  - id: harvest_by_crop
+    model: harvest_batch
+    measures: [count, quantity_sum]
+    dimensions: [crop]
+  - id: harvest_by_date
+    model: harvest_batch
+    measures: [count, quantity_sum]
+    dimensions: [harvest_date]
+  - id: field_work_by_status
+    model: farm_task
+    measures: [count]
+    dimensions: [status]
+  - id: inputs_by_name
+    model: input_application
+    measures: [count, quantity_sum]
+    dimensions: [input_name]
+visuals:
+  - id: harvest_by_crop_chart
+    type: bar
+    source: harvest_by_crop
+    x_field: crop
+    series:
+      - field: quantity_sum
+        label: Harvest quantity
+        type: bar
+        format: number
+  - id: harvest_over_time
+    type: line
+    source: harvest_by_date
+    x_field: harvest_date
+    series:
+      - field: quantity_sum
+        label: Harvest quantity
+        type: line
+        format: number
+  - id: open_work
+    type: bar
+    source: field_work_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Field tasks
+        type: bar
+        format: number
+  - id: input_use_by_name
+    type: bar
+    source: inputs_by_name
+    x_field: input_name
+    series:
+      - field: quantity_sum
+        label: Input quantity used
+        type: bar
+        format: number

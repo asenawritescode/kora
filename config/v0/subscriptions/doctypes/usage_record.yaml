@@ -1,8 +1,9 @@
 name: Usage Record
-module: Subscriptions
+module: Subscription and Recurring Services
+description: A measured usage event for metered subscription billing.
 title_field: reference
-search_fields: reference, status
-sort_field: modified
+search_fields: reference, metric, external_event_id, status
+sort_field: recorded_at
 sort_order: DESC
 
 fields:
@@ -12,17 +13,52 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
+  - fieldname: subscription
+    fieldtype: Link
+    options: Subscription
+    label: Subscription
+    reqd: true
+    in_list_view: true
+  - fieldname: entitlement
+    fieldtype: Link
+    options: Entitlement
+    label: Entitlement
+  - fieldname: metric
     fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
+    label: Usage metric
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    in_list_view: true
+  - fieldname: unit
     fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
+    label: Unit
+    reqd: true
+  - fieldname: period_start
+    fieldtype: Datetime
+    label: Period start
+    reqd: true
+  - fieldname: period_end
+    fieldtype: Datetime
+    label: Period end
+    reqd: true
+  - fieldname: recorded_at
+    fieldtype: Datetime
+    label: Recorded at
+    reqd: true
+  - fieldname: external_event_id
+    fieldtype: Data
+    label: External event ID
+    unique: true
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
-    default: Draft
+    options: |
+      Recorded
+      Billed
+      Rejected
+    default: Recorded
     in_list_view: true

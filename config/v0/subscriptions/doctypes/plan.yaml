@@ -1,9 +1,10 @@
 name: Plan
-module: Subscriptions
-title_field: reference
-search_fields: reference, status
-sort_field: modified
-sort_order: DESC
+module: Subscription and Recurring Services
+description: A sellable recurring plan with its commercial billing terms.
+title_field: plan_name
+search_fields: plan_name, plan_code, status
+sort_field: plan_name
+sort_order: ASC
 
 fields:
   - fieldname: reference
@@ -12,17 +13,68 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
+  - fieldname: plan_code
     fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
+    label: Plan code
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: plan_name
     fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
+    label: Plan name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: description
     fieldtype: Text
-    label: Evidence
+    label: Description
+  - fieldname: billing_interval
+    fieldtype: Select
+    label: Billing interval
+    options: |
+      Weekly
+      Monthly
+      Quarterly
+      Annually
+    default: Monthly
+    reqd: true
+    in_list_view: true
+  - fieldname: interval_count
+    fieldtype: Int
+    label: Interval count
+    default: 1
+    reqd: true
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit price
+    reqd: true
+    in_list_view: true
+  - fieldname: currency
+    fieldtype: Select
+    label: Currency
+    options: |
+      KES
+      USD
+      EUR
+      GBP
+    default: KES
+    reqd: true
+    in_list_view: true
+  - fieldname: trial_days
+    fieldtype: Int
+    label: Trial days
+    default: 0
+  - fieldname: tax_rate
+    fieldtype: Float
+    label: Tax rate (%)
+    default: 0
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
-    default: Draft
+    options: |
+      Draft
+      Active
+      Retired
+    default: Active
     in_list_view: true

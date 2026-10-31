@@ -4,7 +4,8 @@ package db
 // tables (KERNEL-006, KERNEL-007): the idempotency receipt store (RFC §8.2)
 // and the unified operation audit ledger. Both are written inside the same
 // SQL transaction as the business mutation so that a commit implies exactly
-// one receipt, one audit row, and the outbox events for that operation.
+// one receipt, one audit row, and the outbox events for that operation. New
+// scoped receipts store stable tenant identity in the legacy "site" column.
 func KernelTablesMySQL() []string {
 	return []string{
 		`CREATE TABLE IF NOT EXISTS _kora_idempotency_receipt (
@@ -19,6 +20,7 @@ func KernelTablesMySQL() []string {
 			actor_user VARCHAR(140) NOT NULL DEFAULT '',
 			created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 			PRIMARY KEY (site, idempotency_key),
+			INDEX idx_idem_key (idempotency_key),
 			INDEX idx_idem_operation (operation_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -49,6 +51,17 @@ func KernelTablesMySQL() []string {
 			INDEX idx_audit_doctype_doc (doctype, doc_name),
 			INDEX idx_audit_actor (actor_user)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS _kora_record_history (
+			id VARCHAR(26) PRIMARY KEY,
+			site VARCHAR(140) NOT NULL,
+			operation_id VARCHAR(26) NOT NULL,
+			doctype VARCHAR(140) NOT NULL,
+			doc_name VARCHAR(255) NOT NULL,
+			changes_json MEDIUMTEXT NOT NULL,
+			created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+			INDEX idx_record_history_lookup (site, doctype, doc_name, created_at),
+			INDEX idx_record_history_operation (site, operation_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 }
 
@@ -68,6 +81,7 @@ func KernelTablesLibSQL() []string {
 			created_at TEXT NOT NULL DEFAULT (datetime('now')),
 			PRIMARY KEY (site, idempotency_key)
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_idem_key ON _kora_idempotency_receipt (idempotency_key)`,
 		`CREATE INDEX IF NOT EXISTS idx_idem_operation ON _kora_idempotency_receipt (operation_id)`,
 
 		`CREATE TABLE IF NOT EXISTS _kora_operation_audit (
@@ -97,6 +111,17 @@ func KernelTablesLibSQL() []string {
 		`CREATE INDEX IF NOT EXISTS idx_audit_operation ON _kora_operation_audit (operation_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_doctype_doc ON _kora_operation_audit (doctype, doc_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_actor ON _kora_operation_audit (actor_user)`,
+		`CREATE TABLE IF NOT EXISTS _kora_record_history (
+			id TEXT PRIMARY KEY,
+			site TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			doctype TEXT NOT NULL,
+			doc_name TEXT NOT NULL,
+			changes_json TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_record_history_lookup ON _kora_record_history (site, doctype, doc_name, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_record_history_operation ON _kora_record_history (site, operation_id)`,
 	}
 }
 
@@ -117,6 +142,7 @@ func KernelTablesPostgres() []string {
 			"created_at" TIMESTAMP NOT NULL DEFAULT NOW(),
 			PRIMARY KEY ("site", "idempotency_key")
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_idem_key ON "_kora_idempotency_receipt" ("idempotency_key")`,
 		`CREATE INDEX IF NOT EXISTS idx_idem_operation ON "_kora_idempotency_receipt" ("operation_id")`,
 
 		`CREATE TABLE IF NOT EXISTS "_kora_operation_audit" (
@@ -146,5 +172,16 @@ func KernelTablesPostgres() []string {
 		`CREATE INDEX IF NOT EXISTS idx_audit_operation ON "_kora_operation_audit" ("operation_id")`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_doctype_doc ON "_kora_operation_audit" ("doctype", "doc_name")`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_actor ON "_kora_operation_audit" ("actor_user")`,
+		`CREATE TABLE IF NOT EXISTS "_kora_record_history" (
+			"id" VARCHAR(26) PRIMARY KEY,
+			"site" VARCHAR(140) NOT NULL,
+			"operation_id" VARCHAR(26) NOT NULL,
+			"doctype" VARCHAR(140) NOT NULL,
+			"doc_name" VARCHAR(255) NOT NULL,
+			"changes_json" TEXT NOT NULL,
+			"created_at" TIMESTAMP NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_record_history_lookup ON "_kora_record_history" ("site", "doctype", "doc_name", "created_at")`,
+		`CREATE INDEX IF NOT EXISTS idx_record_history_operation ON "_kora_record_history" ("site", "operation_id")`,
 	}
 }

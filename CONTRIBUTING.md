@@ -1,6 +1,6 @@
-# Contributing to Kora
+# Contributing to Kigae
 
-Kora is a config-driven application engine — define your data model in YAML, get a database, REST API, and React admin UI. We welcome contributions of all kinds.
+Kigae is a config-driven application engine — define your data model in YAML, get a database, REST API, and React admin UI. We welcome contributions of all kinds.
 
 ## What You Need Installed
 
@@ -25,7 +25,7 @@ docker ps       # Docker running
 
 ### The Two Halves
 
-Kora is a **single Go binary** that embeds a React SPA inside itself:
+Kigae is a **single Go binary** that embeds a React SPA inside itself:
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -59,10 +59,10 @@ Browser → :8000 → Gin router
 
 ### Key Concept: Config-Driven
 
-Kora has **no per-entity code**. There's no `invoice.go` or `CustomerForm.tsx`. Everything is generic:
+Kigae has **no per-entity code**. There's no `invoice.go` or `CustomerForm.tsx`. Everything is generic:
 
 1. You define a DocType in YAML (or via the Administrator panel in the browser)
-2. Kora creates the MySQL table, builds the REST API, renders the React forms
+2. Kigae creates the MySQL table, builds the REST API, renders the React forms
 3. All views — list, create, edit — are rendered from the DocType field definitions
 
 ```
@@ -247,4 +247,4 @@ Use this checklist when reviewing Go code in pull requests.
 
 ## License
 
-Kora is licensed under the GNU Affero General Public License v3.0. By contributing, you agree that your contributions will be licensed under the same terms.
+Kigae is licensed under the GNU Affero General Public License v3.0. By contributing, you agree that your contributions will be licensed under the same terms.

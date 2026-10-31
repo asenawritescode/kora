@@ -12,7 +12,7 @@ fields:
     reqd: true
     bold: true
     in_list_view: true
-
+    search_index: true
   - fieldname: patient
     fieldtype: Link
     label: Patient

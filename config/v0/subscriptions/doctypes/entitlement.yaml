@@ -1,7 +1,8 @@
 name: Entitlement
-module: Subscriptions
+module: Subscription and Recurring Services
+description: A benefit or usage allowance granted by an active subscription.
 title_field: reference
-search_fields: reference, status
+search_fields: reference, entitlement_name, status
 sort_field: modified
 sort_order: DESC
 
@@ -12,17 +13,42 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
+    search_index: true
+  - fieldname: subscription
+    fieldtype: Link
+    options: Subscription
+    label: Subscription
+    reqd: true
+    in_list_view: true
+  - fieldname: entitlement_name
     fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
+    label: Entitlement
+    reqd: true
+    in_list_view: true
+  - fieldname: allowance
+    fieldtype: Float
+    label: Allowance
+  - fieldname: used_quantity
+    fieldtype: Float
+    label: Used quantity
+    default: 0
+  - fieldname: unit
     fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
+    label: Unit
+  - fieldname: valid_from
+    fieldtype: Date
+    label: Valid from
+    reqd: true
+  - fieldname: valid_until
+    fieldtype: Date
+    label: Valid until
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
-    default: Draft
+    options: |
+      Active
+      Suspended
+      Expired
+      Cancelled
+    default: Active
     in_list_view: true

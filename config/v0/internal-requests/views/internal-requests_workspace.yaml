@@ -1,23 +1,15 @@
-name: Internal Requests and Approvals Workspace
+name: Ticket Workspace
 route: /internal-requests
 type: workspace
 layout: two_panel
-label: Internal Requests and Approvals
-module: Internal Requests and Approvals
+label: Tickets
+module: Tickets
 components:
-  - id: primary_queue
+  - id: ticket_queue
     type: record_table
     region: main
     position: 0
     source_doctype: Internal Request
-    label: Internal Request Queue
-    desktop_columns: [name, reference, owner, status, due_date]
-    mobile_columns: [reference, status]
-  - id: evidence_queue
-    type: record_table
-    region: side
-    position: 0
-    source_doctype: Approval Step
-    label: Approval Step Queue
-    desktop_columns: [name, reference, source_record, status]
-    mobile_columns: [reference, status]
+    label: Tickets
+    desktop_columns: [name, title, creation, status, assignee]
+    mobile_columns: [title, status, assignee]

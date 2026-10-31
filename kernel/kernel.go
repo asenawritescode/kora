@@ -21,7 +21,9 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/workflow"
 )
 
 // Source identifies the adapter surface that produced an operation. It is
@@ -47,7 +49,7 @@ const (
 	CommandRecordMutateBundle       = "record.mutate_bundle"
 	CommandRecordUpdate             = "record.update"
 	CommandRecordDelete             = "record.delete"
-	CommandRecordWorkflowTransition = "record.workflow_transition"
+	CommandWorkflowStatusTransition = "workflow.status_transition"
 	CommandPublicFormSubmit         = "public_form.submit"
 )
 
@@ -71,12 +73,18 @@ type RecordMutationBundlePayload struct {
 	Records []RecordMutationBundleItem `json:"records"`
 }
 
+// MaxMutationBundleRecords bounds the number of related writes in one
+// transactional command while leaving room for ordinary multi-line checkouts.
+const MaxMutationBundleRecords = 50
+
 type RecordMutationBundleItem struct {
-	Key       string          `json:"key"`
-	Operation string          `json:"operation,omitempty"` // create (default) or update
-	Doctype   string          `json:"doctype"`
-	Name      string          `json:"name,omitempty"`
-	Data      json.RawMessage `json:"data"`
+	Key              string          `json:"key"`
+	Operation        string          `json:"operation,omitempty"` // create (default), update, decrement, or adjust
+	Doctype          string          `json:"doctype"`
+	Name             string          `json:"name,omitempty"`
+	ExpectedRevision uint64          `json:"expected_revision,omitempty"`
+	TransitionAction string          `json:"transition_action,omitempty"` // configured transition, only valid on updates
+	Data             json.RawMessage `json:"data"`
 }
 
 type RelatedRecordResult struct {
@@ -93,9 +101,9 @@ type RecordUpdatePayload struct {
 	Data    json.RawMessage `json:"data"`
 }
 
-// RecordWorkflowTransitionPayload applies a configured transition to one
+// WorkflowStatusTransitionPayload applies a configured transition to one
 // record without exposing its workflow state as an ordinary field update.
-type RecordWorkflowTransitionPayload struct {
+type WorkflowStatusTransitionPayload struct {
 	Doctype          string `json:"doctype"`
 	Name             string `json:"name"`
 	Action           string `json:"action"`
@@ -118,7 +126,7 @@ var commandRegistry = map[string]CommandDefinition{
 	CommandRecordMutateBundle:       {Name: CommandRecordMutateBundle, Version: 1, AuthorizesWith: "create", IdempotentByKey: true},
 	CommandRecordUpdate:             {Name: CommandRecordUpdate, Version: 1, AuthorizesWith: "write", IdempotentByKey: true},
 	CommandRecordDelete:             {Name: CommandRecordDelete, Version: 1, AuthorizesWith: "delete", IdempotentByKey: true},
-	CommandRecordWorkflowTransition: {Name: CommandRecordWorkflowTransition, Version: 1, AuthorizesWith: "submit", IdempotentByKey: true},
+	CommandWorkflowStatusTransition: {Name: CommandWorkflowStatusTransition, Version: 1, AuthorizesWith: "submit", IdempotentByKey: true},
 	CommandPublicFormSubmit:         {Name: CommandPublicFormSubmit, Version: 1, AuthorizesWith: "create", IdempotentByKey: true},
 }
 
@@ -131,7 +139,9 @@ func LookupCommand(name string) (CommandDefinition, bool) {
 // OperationContext carries everything an adapter must resolve before invoking
 // the kernel. It is an explicit value, never smuggled through context.Context.
 type OperationContext struct {
-	Site                string                // tenant identifier (site name)
+	Site                string                // authenticated tenant route, retained for audit and compatibility
+	TenantID            contract.TenantID     // stable tenant identity from routed runtime
+	Execution           policy.Execution      // verified identity; legacy internal callers are being migrated
 	Actor               contract.ActorContext // authenticated principal
 	User                string                // owner-attribution user ("" → "system")
 	Owner               string                // internal owner override; adapters must not populate this from user data
@@ -143,7 +153,13 @@ type OperationContext struct {
 	CorrelationID       string
 	CausationID         string
 	ExpectedVersion     string
-	IdempotencyKey      string
+	// ExpectedConfigRevision fences internal operations that selected behavior
+	// from tenant configuration before entering the source transaction.
+	ExpectedConfigRevision uint64
+	// ConfigRevision pins immutable behavior for durable asynchronous effects;
+	// it is distinct from the caller's expected-revision precondition.
+	ConfigRevision uint64
+	IdempotencyKey string
 }
 
 // Operation is a fully specified invocation handed to Kernel.Execute.
@@ -169,8 +185,9 @@ type ResultData struct {
 // Kernel is the process-wide operation entry point. It is safe for concurrent
 // use; per-site state (DB handle, registry) is supplied per call via SiteDB.
 type Kernel struct {
-	Dialect db.Dialect
-	Outbox  outbox.Writer
+	Dialect                db.Dialect
+	Outbox                 outbox.Writer
+	WorkflowStatusPolicies workflow.StatusPolicyRepository
 
 	// TxManager supplies request-scoped ORM lifecycle hooks and script runtime.
 	// Database, registry, dialect, site, user, and outbox are rebound per Execute.
@@ -192,10 +209,16 @@ func New(dialect db.Dialect, w outbox.Writer) *Kernel {
 // registry. Exactly one of the following occurs:
 //
 //   - completed: business row + receipt + audit + outbox rows committed atomically;
-//   - replayed:  a prior committed result for the same site+idempotency key is returned;
+//   - replayed:  a prior committed result for the same stable tenant+idempotency key is returned;
 //   - rejected:  a typed error; nothing is persisted (transaction rolled back).
 func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Registry, op Operation) (contract.CommandResult, *contract.Error) {
 	opID := contract.NewOperationID()
+	if !op.Context.Execution.Valid() {
+		return k.rejected(opID, op, contract.NewError(contract.CodeUnauthenticated, "operation requires verified execution identity"))
+	}
+	if err := normalizeVerifiedExecution(&op); err != nil {
+		return k.rejected(opID, op, err)
+	}
 
 	if err := k.validateContext(op); err != nil {
 		return k.rejected(opID, op, err)
@@ -238,12 +261,15 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 	}
 
 	txMgr := &orm.TxManager{
-		DB:          siteDB,
-		Registry:    reg,
-		Dialect:     k.Dialect,
-		Outbox:      k.Outbox,
-		SiteName:    op.Context.Site,
-		CurrentUser: op.Context.User,
+		DB:               siteDB,
+		Registry:         reg,
+		Dialect:          k.Dialect,
+		Outbox:           k.Outbox,
+		SiteName:         op.Context.Site,
+		CurrentUser:      op.Context.User,
+		Execution:        op.Context.Execution,
+		CurrentUserRole:  op.Context.UserRole,
+		CurrentUserRoles: append([]string(nil), op.Context.Roles...),
 	}
 	if k.TxManager != nil {
 		*txMgr = *k.TxManager
@@ -254,11 +280,30 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 		txMgr.SiteName = op.Context.Site
 		txMgr.CurrentUser = op.Context.User
 	}
+	if txMgr.WorkflowStatusPolicies == nil {
+		txMgr.WorkflowStatusPolicies = k.WorkflowStatusPolicies
+	}
+	baseAsyncConfigRevision := txMgr.AsyncHookConfigRevision
+	txMgr.Execution = op.Context.Execution
+	txMgr.CurrentUserRole = op.Context.UserRole
+	txMgr.CurrentUserRoles = append([]string(nil), op.Context.Roles...)
 	txMgr.SkipHookScripts = append([]string(nil), op.Context.SkipHookScripts...)
 	txMgr.HookScriptsByDoctype = make(map[string][]script.ScriptRecord)
+	txMgr.AsyncHookTenantID = op.Context.TenantID
+	txMgr.AsyncHookSourceOperation = contract.OperationID(opID)
+	txMgr.AsyncHookConfigRevision = op.Context.ConfigRevision
+	if txMgr.AsyncHookConfigRevision == 0 {
+		txMgr.AsyncHookConfigRevision = op.Context.ExpectedConfigRevision
+	}
+	if txMgr.AsyncHookConfigRevision == 0 {
+		txMgr.AsyncHookConfigRevision = baseAsyncConfigRevision
+	}
+	txMgr.AsyncHookSequence = 0
+	txMgr.SuppressAsyncHookEvents = false
+	bindScriptProvider(txMgr)
 
 	if dyn != nil {
-		data, execErr := k.execDefinedCommand(ctx, siteDB, txMgr, reg, op, def, opID, dyn)
+		data, execErr := k.execDefinedCommand(ctx, siteDB, nil, txMgr, reg, op, def, opID, dyn, nil)
 		if execErr != nil {
 			if execErr == errConcurrentIdempotencyClaim {
 				if replay, found, lookupErr := k.lookupReceipt(ctx, siteDB, op); lookupErr != nil {
@@ -278,7 +323,7 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 		return result, nil
 	}
 
-	data, execErr := k.executeInTx(ctx, siteDB, txMgr, reg, op, def, opID)
+	data, execErr := k.executeInTx(ctx, siteDB, nil, txMgr, reg, op, def, opID, nil)
 	if execErr != nil {
 		if execErr == errConcurrentIdempotencyClaim {
 			if replay, found, lookupErr := k.lookupReceipt(ctx, siteDB, op); lookupErr != nil {
@@ -301,6 +346,127 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 	}
 
 	return result, nil
+}
+
+// ExecuteInTx prepares and executes an authorized command inside a transaction
+// owned by a higher-level unit of work. It does not commit or roll back dbTx.
+// The caller must roll back on error, commit on success, and invoke afterCommit
+// only after that commit succeeds. The verified execution is mandatory so a
+// caller-supplied actor cannot acquire authority through this internal seam.
+func (k *Kernel) ExecuteInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, reg *doctype.Registry, op Operation) (contract.CommandResult, func(), *contract.Error) {
+	if ctx == nil || siteDB == nil || dbTx == nil {
+		return contract.CommandResult{}, nil, contract.NewError(contract.CodeValidationFailed, "transaction-bound command requires context, database and transaction")
+	}
+	if !op.Context.Execution.Valid() {
+		return contract.CommandResult{}, nil, contract.NewError(contract.CodeUnauthenticated, "transaction-bound command requires verified execution identity")
+	}
+	opID := contract.NewOperationID()
+	if err := normalizeVerifiedExecution(&op); err != nil {
+		return contract.CommandResult{}, nil, err
+	}
+	if err := k.validateContext(op); err != nil {
+		return contract.CommandResult{}, nil, err
+	}
+	if !op.Deadline.IsZero() && !time.Now().Before(op.Deadline) {
+		return contract.CommandResult{}, nil, contract.NewError(contract.CodeDeadlineExceeded, "operation deadline exceeded")
+	}
+	def, ok := LookupCommand(op.Command)
+	var dyn *CommandResource
+	if !ok {
+		if command, found := k.Commands.Lookup(op.Command); found {
+			dyn = command
+			def = CommandDefinition{Name: command.FullName(), Version: command.Version, AuthorizesWith: command.PermOperation(), IdempotentByKey: true}
+		} else {
+			return contract.CommandResult{}, nil, contract.NewError(contract.CodeValidationFailed, "unknown command "+op.Command)
+		}
+	}
+	if authzErr := authorizeOp(reg, op, def, dyn); authzErr != nil {
+		return contract.CommandResult{}, nil, authzErr
+	}
+	if op.Context.IdempotencyKey != "" {
+		result, found, lookupErr := k.lookupReceiptTx(ctx, dbTx, op)
+		if lookupErr != nil {
+			return contract.CommandResult{}, nil, lookupErr
+		}
+		if found {
+			return result, func() {}, nil
+		}
+	}
+
+	txMgr := &orm.TxManager{DB: siteDB, Registry: reg, Dialect: k.Dialect, Outbox: k.Outbox,
+		SiteName: op.Context.Site, CurrentUser: op.Context.User, Context: ctx,
+		CurrentUserRole: op.Context.UserRole, CurrentUserRoles: append([]string(nil), op.Context.Roles...), Execution: op.Context.Execution}
+	if k.TxManager != nil {
+		*txMgr = *k.TxManager
+		txMgr.DB, txMgr.Registry, txMgr.Dialect, txMgr.Outbox = siteDB, reg, k.Dialect, k.Outbox
+		txMgr.SiteName, txMgr.CurrentUser, txMgr.Context = op.Context.Site, op.Context.User, ctx
+		txMgr.CurrentUserRole = op.Context.UserRole
+		txMgr.CurrentUserRoles = append([]string(nil), op.Context.Roles...)
+		txMgr.Execution = op.Context.Execution
+	}
+	baseAsyncConfigRevision := txMgr.AsyncHookConfigRevision
+	txMgr.SkipHookScripts = append([]string(nil), op.Context.SkipHookScripts...)
+	txMgr.HookScriptsByDoctype = make(map[string][]script.ScriptRecord)
+	txMgr.AsyncHookTenantID = op.Context.TenantID
+	txMgr.AsyncHookSourceOperation = contract.OperationID(opID)
+	txMgr.AsyncHookConfigRevision = op.Context.ConfigRevision
+	if txMgr.AsyncHookConfigRevision == 0 {
+		txMgr.AsyncHookConfigRevision = op.Context.ExpectedConfigRevision
+	}
+	if txMgr.AsyncHookConfigRevision == 0 {
+		txMgr.AsyncHookConfigRevision = baseAsyncConfigRevision
+	}
+	txMgr.AsyncHookSequence = 0
+	txMgr.SuppressAsyncHookEvents = false
+	bindScriptProvider(txMgr)
+	var afterCommit func()
+	if dyn != nil {
+		data, execErr := k.execDefinedCommand(ctx, siteDB, dbTx, txMgr, reg, op, def, opID, dyn, &afterCommit)
+		if execErr != nil {
+			return contract.CommandResult{}, nil, execErr
+		}
+		return contract.CommandResult{OperationID: opID, CorrelationID: op.Context.CorrelationID, Status: contract.StatusCompleted, Data: data}, afterCommit, nil
+	}
+	data, execErr := k.executeInTx(ctx, siteDB, dbTx, txMgr, reg, op, def, opID, &afterCommit)
+	if execErr != nil {
+		return contract.CommandResult{}, nil, execErr
+	}
+	result := contract.CommandResult{OperationID: opID, CorrelationID: op.Context.CorrelationID, Status: contract.StatusCompleted}
+	if data != nil {
+		result.Data, _ = json.Marshal(data)
+	}
+	return result, afterCommit, nil
+}
+
+func bindScriptProvider(txMgr *orm.TxManager) {
+	if txMgr != nil && txMgr.ScriptProviderFactory != nil {
+		txMgr.ScriptProvider = txMgr.ScriptProviderFactory(txMgr)
+	}
+}
+
+func normalizeVerifiedExecution(op *Operation) *contract.Error {
+	if op == nil || !op.Context.Execution.Valid() {
+		return nil
+	}
+	execution := op.Context.Execution
+	actor := execution.Actor()
+	if op.Context.TenantID != "" && op.Context.TenantID != execution.Tenant() {
+		return contract.NewError(contract.CodePermissionDenied, "operation tenant ID does not match verified execution")
+	}
+	if op.Context.Site != "" && op.Context.Site != actor.Site {
+		return contract.NewError(contract.CodePermissionDenied, "operation tenant route does not match verified actor")
+	}
+	op.Context.TenantID, op.Context.Site, op.Context.Actor = execution.Tenant(), actor.Site, actor
+	op.Context.Roles = append([]string(nil), actor.Roles...)
+	op.Context.UserRole = ""
+	if len(actor.Roles) > 0 {
+		op.Context.UserRole = actor.Roles[0]
+	}
+	op.Context.User = actor.SubjectUserID
+	if op.Context.User == "" {
+		op.Context.User = actor.PrincipalID
+	}
+	return nil
 }
 
 // dialect returns the configured SQL dialect for placeholder rewriting.

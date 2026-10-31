@@ -5,6 +5,7 @@ title_field: task_name
 sort_field: order
 sort_order: ASC
 
+search_fields: task_name
 fields:
   - fieldname: task_name
     fieldtype: Data
@@ -12,7 +13,7 @@ fields:
     reqd: true
     bold: true
     in_list_view: true
-
+    search_index: true
   - fieldname: description
     fieldtype: Text
     label: Description

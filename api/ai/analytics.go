@@ -1,8 +1,10 @@
 package ai
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 )
 
 // analyticsToolDef returns the function definition for get_analytics_insights.
@@ -49,35 +52,61 @@ func analyticsQueryToolDef() map[string]any {
 		"type": "function",
 		"function": map[string]any{
 			"name":        "query_analytics",
-			"description": "Answer a reporting question with governed, pre-computed analytics rollups. Query only models, measures, and dimensions returned by get_analytics_catalog. Use a time range; defaults to the last 30 days when omitted. Results include rows suitable for explanation or charts.",
+			"description": "Answer a reporting question with governed, pre-computed analytics rollups. Query only models, measures, and dimensions returned by get_analytics_catalog. Use a time range; defaults to the last 30 days when omitted. A request is limited to 5 queries, 20 measures and filters total, 200 rows per query, and a 10-year range. Results include rows suitable for explanation or charts.",
 			"parameters": map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"queries": map[string]any{
 						"type":     "array",
-						"maxItems": 5,
+						"minItems": 1,
+						"maxItems": analytics.MaxSemanticQueries,
 						"items": map[string]any{
 							"type":                 "object",
 							"additionalProperties": false,
 							"properties": map[string]any{
 								"model":      map[string]any{"type": "string", "description": "Analytics model from the catalog"},
-								"measures":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Measures from the model, such as count or a numeric total"},
-								"dimensions": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "At most one time or category dimension"},
-								"filters":    map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"field": map[string]any{"type": "string"}, "operator": map[string]any{"type": "string"}, "values": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "required": []string{"field", "operator", "values"}}},
+								"measures":   map[string]any{"type": "array", "minItems": 1, "maxItems": analytics.MaxSemanticMeasures, "items": map[string]any{"type": "string", "maxLength": 128}, "description": "Measures from the model, such as count or a numeric total"},
+								"dimensions": map[string]any{"type": "array", "maxItems": 1, "items": map[string]any{"type": "string", "maxLength": 128}, "description": "At most one time or category dimension"},
+								"filters":    map[string]any{"type": "array", "maxItems": analytics.MaxSemanticFilters, "items": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"field": map[string]any{"type": "string", "maxLength": 128}, "operator": map[string]any{"type": "string", "maxLength": 16}, "values": map[string]any{"type": "array", "minItems": 1, "maxItems": analytics.MaxSemanticFilterValues, "items": map[string]any{"type": "string", "maxLength": analytics.MaxSemanticFilterBytes}}}, "required": []string{"field", "operator", "values"}}},
 							},
 							"required": []string{"model", "measures"},
 						},
 					},
-					"from":        map[string]any{"type": "string", "format": "date", "description": "Inclusive ISO date"},
-					"to":          map[string]any{"type": "string", "format": "date", "description": "Inclusive ISO date"},
+					"from":        map[string]any{"type": "string", "format": "date", "description": "Inclusive ISO date; query ranges are limited to 10 years"},
+					"to":          map[string]any{"type": "string", "format": "date", "description": "Inclusive ISO date; query ranges are limited to 10 years"},
 					"granularity": map[string]any{"type": "string", "enum": []string{"day", "week", "month", "quarter", "year"}},
-					"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": 200},
+					"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": analytics.MaxSemanticResultRows},
 				},
 				"required": []string{"queries"},
 			},
 		},
 	}
+}
+
+type analyticsQueryToolArgs struct {
+	Queries     []analytics.ModelQuery `json:"queries"`
+	From        string                 `json:"from,omitempty"`
+	To          string                 `json:"to,omitempty"`
+	Granularity string                 `json:"granularity,omitempty"`
+	Limit       int                    `json:"limit,omitempty"`
+}
+
+func decodeAnalyticsQueryToolArgs(args map[string]any) (analyticsQueryToolArgs, error) {
+	data, err := json.Marshal(args)
+	if err != nil {
+		return analyticsQueryToolArgs{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var parsed analyticsQueryToolArgs
+	if err := decoder.Decode(&parsed); err != nil {
+		return analyticsQueryToolArgs{}, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return analyticsQueryToolArgs{}, fmt.Errorf("analytics query arguments contain trailing data")
+	}
+	return parsed, nil
 }
 
 func analyticsReportsToolDef() map[string]any {
@@ -112,22 +141,33 @@ func runReportToolDef() map[string]any {
 	}
 }
 
-func buildAnalyticsCatalog(reg *doctype.Registry) *analytics.SemanticCatalog {
+func buildAnalyticsCatalog(reg *doctype.Registry, reports []analytics.ReportDefinition) (*analytics.SemanticCatalog, error) {
 	docTypes := make([]*doctype.DocType, 0, len(reg.Names()))
 	for _, name := range reg.Names() {
 		docTypes = append(docTypes, reg.Get(name))
 	}
-	return analytics.BuildSemanticCatalog(docTypes)
-}
-
-func analyticsCatalogJSON(reg *doctype.Registry, reports []analytics.ReportDefinition) string {
-	catalog := buildAnalyticsCatalog(reg)
+	catalog := analytics.BuildSemanticCatalog(docTypes)
+	if err := analytics.AddReportModels(catalog, reports); err != nil {
+		return nil, err
+	}
+	if err := analytics.ValidateReportModels(reg, reports); err != nil {
+		return nil, err
+	}
 	catalog.Reports = reports
 	if err := catalog.Validate(); err != nil {
+		return nil, err
+	}
+	return catalog, nil
+}
+
+func analyticsCatalogJSON(reg *doctype.Registry, reports []analytics.ReportDefinition, execution policy.Execution) string {
+	catalog, err := buildAnalyticsCatalog(reg, reports)
+	if err != nil {
 		return fmt.Sprintf("Analytics catalog is temporarily unavailable: %v", err)
 	}
+	catalog = filterAnalyticsCatalog(reg, execution, catalog)
 	data, err := json.Marshal(map[string]any{
-		"meaning": "Models are business entities. Measures are numeric facts that can be counted or totaled. Dimensions are ways to group those facts. Values come from Kora's pre-computed analytics rollups.",
+		"meaning": "Models are business entities. Measures are numeric facts that can be counted or totaled. Dimensions are ways to group those facts. Related report models read governed live records; other models use Kigae's analytics rollups.",
 		"catalog": catalog,
 	})
 	if err != nil {
@@ -136,41 +176,157 @@ func analyticsCatalogJSON(reg *doctype.Registry, reports []analytics.ReportDefin
 	return string(data)
 }
 
-func executeAnalyticsCatalog(reg *doctype.Registry, tx *orm.TxManager, siteName string) string {
-	return analyticsCatalogJSON(reg, loadAnalyticsReports(tx, siteName))
+func executeAnalyticsCatalog(reg *doctype.Registry, tx *orm.TxManager, siteName string, execution policy.Execution) string {
+	return analyticsCatalogJSON(reg, loadAnalyticsReports(tx, siteName), execution)
 }
 
-func executeAnalyticsQuery(reg *doctype.Registry, tx *orm.TxManager, siteName string, args map[string]any) string {
+func filterAnalyticsCatalog(reg *doctype.Registry, execution policy.Execution, catalog *analytics.SemanticCatalog) *analytics.SemanticCatalog {
+	filtered := &analytics.SemanticCatalog{Models: []analytics.SemanticModel{}, Reports: []analytics.ReportDefinition{}}
+	if catalog == nil {
+		return filtered
+	}
+	models := make(map[string]analytics.SemanticModel, len(catalog.Models))
+	for _, model := range catalog.Models {
+		models[model.Name] = model
+		if analyticsModelReadable(reg, execution, model) {
+			filtered.Models = append(filtered.Models, model)
+		}
+	}
+	for _, report := range catalog.Reports {
+		queried := make(map[string]bool)
+		for _, query := range report.Queries {
+			queried[query.Model] = true
+		}
+		if len(queried) == 0 {
+			continue
+		}
+		visible := true
+		for modelName := range queried {
+			model, exists := models[modelName]
+			if !exists || !analyticsModelReadable(reg, execution, model) {
+				visible = false
+				break
+			}
+		}
+		if visible {
+			filtered.Reports = append(filtered.Reports, report)
+		}
+	}
+	return filtered
+}
+
+func analyticsModelReadable(reg *doctype.Registry, execution policy.Execution, model analytics.SemanticModel) bool {
+	if reg == nil || !execution.Valid() {
+		return false
+	}
+	sources := []string{model.SourceDoctype}
+	if model.Relation != nil {
+		sources = append(sources, model.Relation.ParentDoctype, model.Relation.ChildDoctype)
+	}
+	for _, dimension := range model.Dimensions {
+		if dimension.LinkDoctype != "" {
+			sources = append(sources, dimension.LinkDoctype)
+		}
+	}
+	checked := map[string]bool{}
+	for _, source := range sources {
+		if source == "" || checked[source] {
+			continue
+		}
+		checked[source] = true
+		decision, err := policy.Decide(execution, reg, source, "read")
+		if err != nil || decision.OwnerOnly || len(decision.AssignedFields) > 0 {
+			return false
+		}
+	}
+	sourceDocType := func(source string) *doctype.DocType {
+		if model.Relation == nil {
+			return reg.Get(model.SourceDoctype)
+		}
+		switch source {
+		case "parent":
+			return reg.Get(model.Relation.ParentDoctype)
+		case "child":
+			return reg.Get(model.Relation.ChildDoctype)
+		default:
+			return nil
+		}
+	}
+	readableField := func(dt *doctype.DocType, name string) bool {
+		if dt == nil || strings.TrimSpace(name) == "" {
+			return false
+		}
+		field := dt.GetField(name)
+		if field == nil {
+			// Generated models may use the canonical creation timestamp even
+			// when it is not declared in user DocType YAML.
+			return name == "creation"
+		}
+		return !field.Hidden && field.Fieldtype != "Password" && !field.IsLayoutField() && field.Fieldtype != "Table"
+	}
+	for _, measure := range model.Measures {
+		if measure.Field != "" && !readableField(sourceDocType(measure.Source), measure.Field) {
+			return false
+		}
+	}
+	for _, dimension := range model.Dimensions {
+		if !readableField(sourceDocType(dimension.Source), dimension.Field) {
+			return false
+		}
+		if dimension.LinkDoctype != "" && !readableField(reg.Get(dimension.LinkDoctype), dimension.LinkLabelField) {
+			return false
+		}
+	}
+	if model.Relation != nil {
+		for _, filter := range model.Relation.Filters {
+			if !readableField(sourceDocType(filter.Source), filter.Field) {
+				return false
+			}
+		}
+	}
+	return len(checked) > 0
+}
+
+func executeAnalyticsQuery(reg *doctype.Registry, tx *orm.TxManager, siteName string, args map[string]any, execution policy.Execution) string {
 	if tx == nil || tx.DB == nil {
 		return "Analytics is not available because this site has no database connection."
 	}
-	var request analytics.AnalyticsQueryRequest
-	data, err := json.Marshal(args)
-	if err != nil || json.Unmarshal(data, &request) != nil {
+	parsed, err := decodeAnalyticsQueryToolArgs(args)
+	if err != nil {
 		return "I could not understand that analytics question. Choose a model and measures from the analytics catalog."
 	}
 	now := time.Now()
-	if request.Time.From == "" {
-		request.Time.From = now.AddDate(0, 0, -30).Format("2006-01-02")
+	if parsed.From == "" {
+		parsed.From = now.AddDate(0, 0, -30).Format("2006-01-02")
 	}
-	if request.Time.To == "" {
-		request.Time.To = now.Format("2006-01-02")
+	if parsed.To == "" {
+		parsed.To = now.Format("2006-01-02")
 	}
-	if request.Time.Granularity == "" {
-		request.Time.Granularity = "day"
+	if parsed.Granularity == "" {
+		parsed.Granularity = "day"
 	}
-	if request.Limit == 0 {
-		request.Limit = 200
+	if parsed.Limit == 0 {
+		parsed.Limit = analytics.MaxSemanticResultRows
 	}
-	catalog := buildAnalyticsCatalog(reg)
+	request := analytics.AnalyticsQueryRequest{
+		Queries: parsed.Queries, Time: analytics.QueryTime{From: parsed.From, To: parsed.To, Granularity: parsed.Granularity}, Limit: parsed.Limit,
+	}
+	reports := loadAnalyticsReports(tx, siteName)
+	catalog, err := buildAnalyticsCatalog(reg, reports)
+	if err != nil {
+		return fmt.Sprintf("Analytics catalog is temporarily unavailable: %v", err)
+	}
 	if err := request.Validate(catalog); err != nil {
 		return fmt.Sprintf("I could not run that report: %v. Use the analytics catalog to choose valid models, measures, and dimensions.", err)
 	}
-	result, err := (&analytics.QueryEngine{DB: tx.DB, SiteName: siteName, Dialect: tx.Dialect}).ResolveSemanticQuery(catalog, request)
+	if err := checkRelatedAnalyticsPermissions(reg, reports, request, execution); err != nil {
+		return err.Error()
+	}
+	result, err := (&analytics.QueryEngine{DB: tx.DB, SiteName: siteName, Dialect: tx.Dialect}).ResolveSemanticQuery(catalog, request, reg)
 	if err != nil {
 		return fmt.Sprintf("Analytics query failed: %v", err)
 	}
-	data, _ = json.Marshal(map[string]any{
+	data, _ := json.Marshal(map[string]any{
 		"meaning": "Explain the result in business terms, state the period and grouping, and distinguish zero results from missing data. Do not imply causation from a count or trend alone.",
 		"result":  result,
 	})
@@ -200,15 +356,21 @@ func loadAnalyticsReports(tx *orm.TxManager, siteName string) []analytics.Report
 	return reports
 }
 
-func executeAnalyticsReports(reg *doctype.Registry, tx *orm.TxManager, siteName string) string {
+func executeAnalyticsReports(reg *doctype.Registry, tx *orm.TxManager, siteName string, execution policy.Execution) string {
+	reports := loadAnalyticsReports(tx, siteName)
+	catalog, err := buildAnalyticsCatalog(reg, reports)
+	if err != nil {
+		return "Approved analytics reports are temporarily unavailable."
+	}
+	filtered := filterAnalyticsCatalog(reg, execution, catalog)
 	data, _ := json.Marshal(map[string]any{
 		"meaning": "These are approved report definitions. Each report describes governed queries and intended visuals; it is not arbitrary SQL.",
-		"reports": loadAnalyticsReports(tx, siteName),
+		"reports": filtered.Reports,
 	})
 	return string(data)
 }
 
-func executeAnalyticsReport(reg *doctype.Registry, tx *orm.TxManager, siteName string, args map[string]any) string {
+func executeAnalyticsReport(reg *doctype.Registry, tx *orm.TxManager, siteName string, args map[string]any, execution policy.Execution) string {
 	name, _ := args["name"].(string)
 	var report *analytics.ReportDefinition
 	for _, candidate := range loadAnalyticsReports(tx, siteName) {
@@ -221,13 +383,85 @@ func executeAnalyticsReport(reg *doctype.Registry, tx *orm.TxManager, siteName s
 		return fmt.Sprintf("Approved report %q was not found. Use list_analytics_reports first.", name)
 	}
 	queryArgs := map[string]any{"queries": report.Queries, "from": args["from"], "to": args["to"], "granularity": args["granularity"]}
-	return executeAnalyticsQuery(reg, tx, siteName, queryArgs)
+	return executeAnalyticsQuery(reg, tx, siteName, queryArgs, execution)
+}
+
+func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.AnalyticsQueryRequest, execution policy.Execution) error {
+	if reg == nil || reg.Permissions == nil || !execution.Valid() {
+		return fmt.Errorf("verified execution is required to query related report records")
+	}
+	catalog, err := buildAnalyticsCatalog(reg, reports)
+	if err != nil {
+		return fmt.Errorf("analytics catalog is unavailable: %w", err)
+	}
+	queriedModels := make(map[string]bool, len(request.Queries))
+	for _, query := range request.Queries {
+		queriedModels[query.Model] = true
+	}
+	checked := make(map[string]bool)
+	matched := make(map[string]bool, len(queriedModels))
+	for _, model := range catalog.Models {
+		if !queriedModels[model.Name] {
+			continue
+		}
+		if !analyticsModelReadable(reg, execution, model) {
+			return fmt.Errorf("The analytics model %q is unavailable for this actor.", model.Name)
+		}
+		matched[model.Name] = true
+		doctypes := []string{model.SourceDoctype}
+		if model.Relation != nil {
+			doctypes = append(doctypes, model.Relation.ParentDoctype, model.Relation.ChildDoctype)
+		}
+		for _, dimension := range model.Dimensions {
+			if dimension.LinkDoctype != "" {
+				doctypes = append(doctypes, dimension.LinkDoctype)
+			}
+		}
+		for _, name := range doctypes {
+			if name == "" || checked[name] {
+				continue
+			}
+			checked[name] = true
+			decision, err := policy.Decide(execution, reg, name, "read")
+			if err != nil {
+				return fmt.Errorf("You do not have permission to read %s records for this report.", name)
+			}
+			if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
+				return fmt.Errorf("This report requires unscoped read access to its source records.")
+			}
+		}
+	}
+	for modelName := range queriedModels {
+		if !matched[modelName] {
+			return fmt.Errorf("The analytics model %q is unavailable.", modelName)
+		}
+	}
+	return nil
 }
 
 // executeAnalyticsInsights runs an analytics query against rollup tables.
-func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeName, siteName string) string {
+func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeName, siteName string, execution policy.Execution) string {
 	if tx == nil || tx.DB == nil {
 		return "Analytics not available — no database connection."
+	}
+	if doctypeName != "all" {
+		if err := authorizeAnalyticsInsight(reg, execution, doctypeName); err != nil {
+			return err.Error()
+		}
+	}
+	readable := make(map[string]struct{})
+	if doctypeName == "all" {
+		if reg == nil || !execution.Valid() {
+			return "Permission denied: verified execution is required for analytics."
+		}
+		for _, candidate := range reg.Names() {
+			if authorizeAnalyticsInsight(reg, execution, candidate) == nil {
+				readable[candidate] = struct{}{}
+			}
+		}
+		if len(readable) == 0 {
+			return "Permission denied: no unscoped analytics source is readable."
+		}
 	}
 
 	// "all" → list doctypes with data.
@@ -244,7 +478,13 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 		for rows.Next() {
 			var d string
 			rows.Scan(&d)
-			dts = append(dts, d)
+			if doctypeName != "all" {
+				dts = append(dts, d)
+				continue
+			}
+			if _, allowed := readable[d]; allowed {
+				dts = append(dts, d)
+			}
 		}
 		if len(dts) == 0 {
 			return "No analytics data yet. Create documents and metrics will appear within seconds."
@@ -303,6 +543,20 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 		}
 	}
 	return sb.String()
+}
+
+func authorizeAnalyticsInsight(reg *doctype.Registry, execution policy.Execution, doctypeName string) error {
+	if reg == nil || reg.Get(doctypeName) == nil || !execution.Valid() {
+		return fmt.Errorf("Permission denied: verified read access is required for analytics source %q.", doctypeName)
+	}
+	decision, err := policy.Decide(execution, reg, doctypeName, "read")
+	if err != nil {
+		return fmt.Errorf("Permission denied: you cannot read analytics for %s.", doctypeName)
+	}
+	if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
+		return fmt.Errorf("Permission denied: owner-scoped records cannot be queried through aggregate analytics for %s.", doctypeName)
+	}
+	return nil
 }
 
 func formatAnalyticsLabel(metric, doctype string) string {

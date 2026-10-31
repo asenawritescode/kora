@@ -22,7 +22,7 @@ var configImportCmd = &cobra.Command{
 		if configPathFlag == "" {
 			return fmt.Errorf("--path flag is required")
 		}
-		return runConfigImport(configSiteFlag, configPathFlag, configDBNameFlag)
+		return runConfigImportContext(cmd.Context(), configSiteFlag, configPathFlag, configDBNameFlag)
 	},
 }
 

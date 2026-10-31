@@ -1,0 +1,9 @@
+- name: Farm Team Operator
+  workspace_access: true
+  description: Records assigned field work, observations, labor, and crop-cycle costs.
+- name: Farm Team Supervisor
+  workspace_access: true
+  description: Reviews field team records and monitors cross-farm work and exceptions.
+- name: Farm Team Administrator
+  workspace_access: true
+  description: Configures the optional farm team workspace and manages its access.

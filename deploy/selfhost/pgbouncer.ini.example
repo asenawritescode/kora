@@ -1,0 +1,17 @@
+; Optional PostgreSQL transaction-pooling example. It is not enabled by the
+; supported compose stack and is not a production recommendation until the
+; target-spec pooler compatibility tests pass. Keep session-dependent
+; bootstrap/deletion locks on a separately capped direct/session pool.
+[databases]
+kora_platform = host=postgres.internal port=5432 dbname=kora_platform
+
+[pgbouncer]
+listen_addr = 127.0.0.1
+listen_port = 6432
+auth_type = scram-sha-256
+auth_file = /etc/pgbouncer/userlist.txt
+pool_mode = transaction
+max_client_conn = 200
+default_pool_size = 32
+reserve_pool_size = 4
+server_reset_query = DISCARD ALL

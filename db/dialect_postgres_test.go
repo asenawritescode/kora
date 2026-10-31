@@ -161,6 +161,9 @@ func TestPostgres_CreateTableWithIndexes(t *testing.T) {
 	for _, s := range stmts[1:] {
 		if strings.Contains(s, "CREATE INDEX") && strings.Contains(s, "title") {
 			foundSearchIndex = true
+			if !strings.Contains(s, "text_pattern_ops") || !strings.Contains(s, "sidx_tabTest DocType_title") {
+				t.Errorf("search index must be prefix-search compatible and distinctly named: %s", s)
+			}
 		}
 		if strings.Contains(s, "CREATE UNIQUE INDEX") && strings.Contains(s, "sku") {
 			foundUniqueIndex = true
@@ -356,6 +359,15 @@ func TestPostgres_UpsertIncrement(t *testing.T) {
 				t.Errorf("UpsertIncrement = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPostgres_UpsertIncrementForTableQualifiesCurrentValue(t *testing.T) {
+	d := &PostgresDialect{}
+	got := d.UpsertIncrementForTable("rollups", []string{"site", "date"}, []string{"count"})
+	want := `ON CONFLICT("site", "date") DO UPDATE SET "count" = "rollups"."count" + EXCLUDED."count"`
+	if got != want {
+		t.Fatalf("UpsertIncrementForTable = %q, want %q", got, want)
 	}
 }
 
@@ -598,9 +610,6 @@ func TestPostgres_SystemTablesCreateAll(t *testing.T) {
 		"_kora_config_version",
 		"_kora_user",
 		"_kora_session",
-		"_kora_workflow",
-		"_kora_workflow_state",
-		"_kora_workflow_transition",
 		"_kora_secret",
 	}
 
@@ -614,6 +623,13 @@ func TestPostgres_SystemTablesCreateAll(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("SystemTableSQL missing CREATE TABLE for %s", table)
+		}
+	}
+	for _, retired := range []string{"_kora_workflow", "_kora_workflow_state", "_kora_workflow_transition"} {
+		for _, stmt := range stmts {
+			if strings.Contains(stmt, `"`+retired+`"`) {
+				t.Errorf("SystemTableSQL still creates or alters retired workflow storage %s: %s", retired, stmt)
+			}
 		}
 	}
 }

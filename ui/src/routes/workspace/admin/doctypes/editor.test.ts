@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateWizardDoctype } from './editor-helpers'
+import { buildGenericEditorDraft, genericEditorDefaults, validateWizardDoctype } from './editor-helpers'
 import type { DocType } from '../../../../types/kora'
 
 function makeDocType(overrides: Partial<DocType> = {}): DocType {
@@ -65,5 +65,19 @@ describe('validateWizardDoctype', () => {
   it('flags duplicate object names against existing doctypes', () => {
     const issues = validateWizardDoctype(makeDocType(), [makeDocType()])
     expect(issues.some((issue) => issue.message === 'A data object with this name already exists.')).toBe(true)
+  })
+})
+
+describe('generic doctype editor defaults', () => {
+  it('keeps the offline assistant independent of business verticals', () => {
+    expect(buildGenericEditorDraft('Stock Item')).toEqual({
+      reply: 'I drafted a general Stock Item data object. Review the fields and adjust them to your process.',
+      fields: [['Title', 'Data'], ['Status', 'Select'], ['Date', 'Date'], ['Details', 'Text'], ['Notes', 'Text']],
+      screens: ['table', 'form'],
+    })
+  })
+
+  it('uses stable generic names for unspecific records', () => {
+    expect(genericEditorDefaults()).toEqual({ name: 'Workspace Record', module: 'Workspace' })
   })
 })

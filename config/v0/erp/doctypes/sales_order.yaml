@@ -11,6 +11,7 @@ fields:
     label: Customer
     options: Customer
     reqd: true
+    search_index: true
     in_list_view: true
   - fieldname: order_date
     fieldtype: Date

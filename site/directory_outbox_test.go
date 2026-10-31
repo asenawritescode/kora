@@ -56,6 +56,26 @@ func TestSiteBelongsToRuntimeCell(t *testing.T) {
 	}
 }
 
+func TestSiteBelongsToDeploymentValidatesPlacement(t *testing.T) {
+	for _, test := range []struct {
+		name, siteDeployment, processDeployment string
+		want                                    bool
+	}{
+		{name: "blank maps to default", processDeployment: "default", want: true},
+		{name: "blank is not another deployment", processDeployment: "deployment-a"},
+		{name: "matching case insensitive deployment", siteDeployment: "DEPLOYMENT-A", processDeployment: "deployment-a", want: true},
+		{name: "other deployment", siteDeployment: "deployment-b", processDeployment: "deployment-a"},
+		{name: "invalid stored assignment", siteDeployment: "deployment/a", processDeployment: "deployment-a"},
+		{name: "invalid local assignment", siteDeployment: "deployment-a", processDeployment: "deployment/a"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := SiteBelongsToDeployment(test.siteDeployment, test.processDeployment); got != test.want {
+				t.Fatalf("SiteBelongsToDeployment(%q, %q) = %t, want %t", test.siteDeployment, test.processDeployment, got, test.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeRuntimeCellID(t *testing.T) {
 	if got, err := normalizeRuntimeCellID("  CELL-A.prod_1 "); err != nil || got != "cell-a.prod_1" {
 		t.Fatalf("normalize valid cell = %q, %v", got, err)

@@ -9,7 +9,7 @@ import (
 // MagicLinkTemplate returns a branded magic-link email in both text and HTML form.
 func MagicLinkTemplate(appName, link string, expiresMinutes int) (subject, textBody, htmlBody string) {
 	if strings.TrimSpace(appName) == "" {
-		appName = "Kora"
+		appName = "Kigae"
 	}
 	if expiresMinutes <= 0 {
 		expiresMinutes = 15

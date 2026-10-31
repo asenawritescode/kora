@@ -5,7 +5,7 @@
  * Checks that all template_files have valid structure, correct content_types,
  * and that the config_hash matches the actual file contents.
  *
- * Setup in Kora CMS Admin → Scripts:
+ * Setup in Kigae CMS Admin → Scripts:
  *   Name:                validate_template_pack
  *   Script Type:         doc_event
  *   DocType:             Template Pack
@@ -27,7 +27,7 @@ if (!files || !Array.isArray(files) || files.length === 0) {
 }
 
 // ── 2. Validate each file ──
-var allowedTypes = ["doctype", "roles", "permissions", "workflow", "view", "script"];
+var allowedTypes = ["doctype", "roles", "permissions", "workflow_definition", "view", "report", "script"];
 var contentTypes = {};
 var yamlErrors = [];
 var totalSize = 0;
@@ -70,8 +70,14 @@ for (var i = 0; i < files.length; i++) {
   if (ct === "permissions" && path !== "permissions.yaml") {
     errors.push(path + ": content_type 'permissions' requires path 'permissions.yaml'");
   }
+  if (ct === "workflow_definition" && path.indexOf("workflows/") !== 0) {
+    errors.push(path + ": content_type 'workflow_definition' requires path under workflows/");
+  }
   if (ct === "view" && path.indexOf("views/") !== 0) {
     errors.push(path + ": content_type 'view' requires path under views/");
+  }
+  if (ct === "report" && path.indexOf("reports/") !== 0) {
+    errors.push(path + ": content_type 'report' requires path under reports/");
   }
   if (ct === "script" && path.indexOf("scripts/") !== 0) {
     errors.push(path + ": content_type 'script' requires path under scripts/");

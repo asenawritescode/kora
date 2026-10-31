@@ -15,6 +15,7 @@ import (
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 )
@@ -50,8 +51,12 @@ func TestLivePostgresAIApprovalListBootstrap(t *testing.T) {
 	}
 	requestedAt := time.Now().UTC().Truncate(time.Microsecond)
 	if _, err := database.Exec(`INSERT INTO _kora_ai_approval (id, site, operation_id, actor_principal_id, actor_principal_type, tool_name, state, target_fingerprint, argument_hash, record_version, requested_at, granted_by, auth_session_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		"approval-pg", "site-pg", "operation-pg", "operator-pg", "user", "update_record", "pending_approval", "target-hash", "argument-hash", 1, requestedAt, "", "session-pg"); err != nil {
+		"approval-pg", "site-pg", "operation-pg", "operator-pg", "agent", "update_record", "pending_approval", "target-hash", "argument-hash", 1, requestedAt, "", "session-pg"); err != nil {
 		t.Fatal("insert PostgreSQL AI approval fixture:", err)
+	}
+	if _, err := database.Exec(`INSERT INTO _kora_ai_approval (id, site, operation_id, actor_principal_id, actor_principal_type, tool_name, state, target_fingerprint, argument_hash, record_version, requested_at, granted_by, auth_session_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		"approval-pg-other", "site-pg", "operation-other", "another-owner", "agent", "update_record", "pending_approval", "target-hash", "argument-hash", 1, requestedAt, "", "session-pg"); err != nil {
+		t.Fatal("insert other owner's PostgreSQL AI approval fixture:", err)
 	}
 
 	registry := doctype.NewRegistry()
@@ -63,6 +68,13 @@ func TestLivePostgresAIApprovalListBootstrap(t *testing.T) {
 	ctx.Set("site_registry", registry)
 	ctx.Set("site_name", "site-pg")
 	ctx.Set("site_db_type", "postgres")
+	execution, err := policy.NewVerifiedExecution("site-pg", contract.ActorContext{
+		PrincipalID: "operator-pg", PrincipalType: contract.PrincipalHuman, SubjectUserID: "operator-pg", Site: "site-pg",
+	})
+	if err != nil {
+		t.Fatal("create verified approval-list execution:", err)
+	}
+	ctx.Set("policy_execution", execution)
 	handler.HandleAIListApprovals(ctx)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("PostgreSQL AI approval list returned HTTP %d: %s", recorder.Code, recorder.Body.String())

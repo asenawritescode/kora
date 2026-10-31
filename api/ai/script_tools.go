@@ -3,6 +3,7 @@ package ai
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/script"
@@ -21,7 +22,7 @@ func executeScriptCreate(tx *orm.TxManager, args map[string]any, siteName, owner
 
 	scriptType, _ := args["script_type"].(string)
 	if scriptType == "" {
-		return "Error: 'script_type' is required. Must be one of: doc_event, api_method, workflow_action, scheduled, computed, validate."
+		return "Error: 'script_type' is required. Must be one of: doc_event, api_method, scheduled, computed, validate."
 	}
 
 	code, _ := args["script"].(string)
@@ -50,11 +51,8 @@ func executeScriptCreate(tx *orm.TxManager, args map[string]any, siteName, owner
 		if schedule == "" {
 			return "Error: 'schedule' is required for scheduled scripts (e.g., '0 9 * * *' for daily at 9am)."
 		}
-	case "workflow_action":
-		workflowAction, _ := args["workflow_action"].(string)
-		if workflowAction == "" {
-			return "Error: 'workflow_action' is required for workflow_action scripts."
-		}
+	default:
+		return "Error: unsupported script_type. Use doc_event, api_method, or scheduled."
 	}
 
 	// Check for duplicate name.
@@ -70,39 +68,45 @@ func executeScriptCreate(tx *orm.TxManager, args map[string]any, siteName, owner
 		}
 	}
 
-	priority := 10
-	if p, ok := args["priority"].(float64); ok {
-		priority = int(p)
-	}
-	timeoutMs := 5000
-	if t, ok := args["timeout_ms"].(float64); ok {
-		timeoutMs = int(t)
-	}
 	if owner == "" || owner == "mcp-agent" {
-		owner = "ai-assistant"
+		return "Error: a verified administrator identity is required to create a script draft."
 	}
-
-	rec := script.ScriptRecord{
-		Name:           name,
-		ScriptType:     script.Type(scriptType),
-		Script:         code,
-		DocType:        stringOr(args, "doctype"),
-		Event:          script.Event(stringOr(args, "event")),
-		MethodPath:     stringOr(args, "method_path"),
-		WorkflowAction: stringOr(args, "workflow_action"),
-		Schedule:       stringOr(args, "schedule"),
-		Priority:       priority,
-		TimeoutMs:      timeoutMs,
-		IsActive:       true,
-		RunAs:          stringOr(args, "run_as"),
-		Site:           siteName,
-	}
+	rec := newAIScriptDraft(args, siteName, owner, time.Now().UTC())
 
 	if err := tx.ScriptStore.Insert(rec); err != nil {
 		return fmt.Sprintf("Error creating script: %v", err)
 	}
 
-	return fmt.Sprintf("✓ Created script %q (type: %s). The script will run on the configured event/trigger. View it at /workspace/admin/scripts.", name, scriptType)
+	return fmt.Sprintf("✓ Created inactive script draft %q (type: %s). It will not run until a workspace Administrator reviews and activates it in Workspace → Admin → Scripts.", name, scriptType)
+}
+
+func newAIScriptDraft(args map[string]any, siteName, owner string, now time.Time) script.ScriptRecord {
+	priority := 10
+	if value, ok := args["priority"].(float64); ok {
+		priority = int(value)
+	}
+	timeoutMs := 5000
+	if value, ok := args["timeout_ms"].(float64); ok {
+		timeoutMs = int(value)
+	}
+	return script.ScriptRecord{
+		Name:       stringOr(args, "name"),
+		ScriptType: script.Type(stringOr(args, "script_type")),
+		Script:     stringOr(args, "script"),
+		DocType:    stringOr(args, "doctype"),
+		Event:      script.Event(stringOr(args, "event")),
+		MethodPath: stringOr(args, "method_path"),
+		Schedule:   stringOr(args, "schedule"),
+		Priority:   priority,
+		TimeoutMs:  timeoutMs,
+		IsActive:   false,
+		RunAs:      stringOr(args, "run_as"),
+		Site:       siteName,
+		CreatedBy:  owner,
+		UpdatedBy:  owner,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
 }
 
 // executeScriptList lists all scripts for the current site.

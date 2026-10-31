@@ -90,7 +90,7 @@ func TestComputeDiff_DropField(t *testing.T) {
 	// Registry without a field that exists in the live schema.
 	reg := doctype.NewRegistry()
 	dt := &doctype.DocType{
-		Name:   "Task",
+		Name: "Task",
 		Fields: []doctype.Field{
 			{Fieldname: "title", Fieldtype: "Data", Label: "Title"},
 		},
@@ -188,6 +188,34 @@ func TestComputeDiff_NewIndex(t *testing.T) {
 	}
 	if diff.NewIndexes["tabTask"][0].Columns[0] != "email" {
 		t.Errorf("index column = %q, want %q", diff.NewIndexes["tabTask"][0].Columns[0], "email")
+	}
+}
+
+func TestComputeDiff_RelaxUniquePreservesSearchIndex(t *testing.T) {
+	dialect := &db.LibSQLDialect{}
+	dt := &doctype.DocType{
+		Name: "Company",
+		Fields: []doctype.Field{{
+			Fieldname: "company_name", Fieldtype: "Data", SearchIndex: true, Unique: false,
+		}},
+	}
+	live := map[string]*TableInfo{
+		"tabCompany": {Name: "tabCompany", Columns: map[string]*ColumnInfo{
+			"company_name": {Name: "company_name", Indexed: true, IndexNames: []string{"uq_tabCompany_company_name"}, UniqueIndexNames: []string{"uq_tabCompany_company_name"}},
+		}},
+	}
+
+	diff := ComputeDiff([]*doctype.DocType{dt}, func(string) *doctype.DocType { return nil }, live, dialect)
+	if got := diff.NewIndexes["tabCompany"]; len(got) != 1 || got[0].Unique || got[0].Columns[0] != "company_name" {
+		t.Fatalf("NewIndexes = %#v, want one non-unique company_name index", got)
+	}
+	if len(diff.DropIndexes) != 1 || diff.DropIndexes[0].Name != "uq_tabCompany_company_name" {
+		t.Fatalf("DropIndexes = %#v, want old unique index", diff.DropIndexes)
+	}
+
+	statements := diff.GenerateDDL([]*doctype.DocType{dt}, func(string) *doctype.DocType { return nil }, dialect)
+	if len(statements) != 2 || !contains(statements[0], "CREATE INDEX IF NOT EXISTS") || !contains(statements[1], "DROP INDEX") {
+		t.Fatalf("DDL = %#v, want replacement index created before old unique index is dropped", statements)
 	}
 }
 

@@ -318,7 +318,7 @@ func (tx *TxManager) getChildRows(tableName string, childDT *doctype.DocType, pa
 	}
 	cols = append(cols, "name", "idx", "parent", "parentfield", "parenttype")
 
-	rows, err := tx.DB.Query(db.Rebind(tx.Dialect,
+	rows, err := tx.queryer().QueryContext(tx.queryContext(), db.Rebind(tx.Dialect,
 		fmt.Sprintf("SELECT %s FROM %s WHERE parent = ? ORDER BY idx", strings.Join(cols, ", "), tableName)),
 		parentName,
 	)
@@ -348,7 +348,7 @@ func (tx *TxManager) getChildRows(tableName string, childDT *doctype.DocType, pa
 			case "name":
 				child.Name = stringVal(val)
 			default:
-				child.Fields[col] = byteSliceToString(val)
+				child.Fields[col] = normalizeScannedFieldValue(childDT.GetField(col), val)
 			}
 		}
 

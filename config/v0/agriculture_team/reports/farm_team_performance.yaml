@@ -1,0 +1,52 @@
+name: farm_team_performance
+label: Farm team and crop-cycle performance
+route: /reports/farm-team-performance
+queries:
+  - id: labor
+    model: farm_labor_entry
+    measures: [count, hours_sum, completed_quantity_sum]
+    dimensions: [crop_plan]
+  - id: labor_by_date
+    model: farm_labor_entry
+    measures: [count, hours_sum]
+    dimensions: [work_date]
+  - id: costs_by_category
+    model: farm_cost_entry
+    measures: [count, amount_sum]
+    dimensions: [cost_category]
+  - id: costs_by_date
+    model: farm_cost_entry
+    measures: [count, amount_sum]
+    dimensions: [incurred_on]
+  - id: observations_by_severity
+    model: field_observation
+    measures: [count]
+    dimensions: [severity]
+visuals:
+  - id: labor_by_day
+    type: bar
+    source: labor_by_date
+    x_field: work_date
+    series:
+      - field: hours_sum
+        label: Hours recorded
+        type: bar
+        format: number
+  - id: cost_by_day
+    type: line
+    source: costs_by_date
+    x_field: incurred_on
+    series:
+      - field: amount_sum
+        label: Recorded crop-cycle costs
+        type: line
+        format: currency
+  - id: open_observations
+    type: bar
+    source: observations_by_severity
+    x_field: severity
+    series:
+      - field: count
+        label: Observations
+        type: bar
+        format: number

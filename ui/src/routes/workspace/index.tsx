@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { fetchNavigation } from '@/lib/api/system'
+import { fetchNavigation, navigationQueryKey } from '@/lib/api/system'
 import { useAuthStore } from '@/lib/auth-store'
 import { useUIStore } from '@/lib/ui-store'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,7 +18,7 @@ import { WORKSPACE_DASHBOARD_MANIFEST } from '@/lib/page-manifests'
 
 export default function DashboardPage() {
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['navigation'],
+    queryKey: navigationQueryKey(),
     queryFn: fetchNavigation,
     staleTime: 5 * 60_000,
   })
@@ -100,7 +100,7 @@ export default function DashboardPage() {
           Welcome{user?.full_name ? `, ${user.full_name}` : ''}
         </h1>
         <p className="mt-1 text-muted-foreground">
-          Start with one task, one record, or one workflow. Kora keeps your work in one place so the team can move faster.
+          Start with one task, one record, or one workflow. Kigae keeps your work in one place so the team can move faster.
         </p>
       </div>
 
@@ -130,7 +130,7 @@ export default function DashboardPage() {
               Start with the next useful task
             </CardTitle>
             <CardDescription>
-              Open the record or workflow you need now. Kora keeps the rest ready when you need it.
+              Open the record or workflow you need now. Kigae keeps the rest ready when you need it.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-3">

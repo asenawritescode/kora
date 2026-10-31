@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/go-sql-driver/mysql"
 )
 
@@ -26,7 +27,7 @@ func (d *MySQLDialect) IsWriteConflict(err error) bool {
 func (d *MySQLDialect) Open(cfg DBConfig) (*sql.DB, error) {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci",
 		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Name)
-	db, err := sql.Open("mysql", dsn)
+	db, err := dbaccess.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -355,6 +356,10 @@ func (d *MySQLDialect) UpsertClause(conflictCols []string, updateCols []string) 
 }
 
 func (d *MySQLDialect) UpsertIncrement(conflictCols []string, incrementCols []string) string {
+	return d.UpsertIncrementForTable("", conflictCols, incrementCols)
+}
+
+func (d *MySQLDialect) UpsertIncrementForTable(_ string, conflictCols []string, incrementCols []string) string {
 	var parts []string
 	for _, col := range incrementCols {
 		q := d.QuoteIdent(col)
@@ -442,7 +447,6 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_doctype ADD COLUMN version INT NOT NULL DEFAULT 1",
 		"ALTER TABLE _kora_doctype ADD COLUMN config_json JSON",
 		"ALTER TABLE _kora_doctype ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
-		"ALTER TABLE _kora_workflow ADD COLUMN config_json JSON",
 
 		// _kora_field
 		"CREATE TABLE IF NOT EXISTS _kora_field (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tparent VARCHAR(140) NOT NULL,\n\t\t\tfieldname VARCHAR(140) NOT NULL,\n\t\t\tfieldtype VARCHAR(50) NOT NULL,\n\t\t\tlabel VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\toptions TEXT,\n\t\t\treqd TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tunique_constraint TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdefault_value VARCHAR(255),\n\t\t\thidden TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tread_only TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tbold TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tin_list_view TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tin_standard_filter TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tsearch_index TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdescription TEXT,\n\t\t\tdepends_on TEXT,\n\t\t\tmandatory_depends_on TEXT,\n\t\t\tconstraints_json JSON,\n\t\t\trenamed_from VARCHAR(140),\n\t\t\tlinked_field VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tcomputed TEXT,\n\t\t\tidx INT NOT NULL DEFAULT 0,\n\t\t\tINDEX idx_parent (parent),\n\t\t\tINDEX idx_parent_fieldname (parent, fieldname)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
@@ -458,8 +462,9 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_role ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
 
 		// _kora_permission
-		"CREATE TABLE IF NOT EXISTS _kora_permission (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\trole VARCHAR(140) NOT NULL,\n\t\t\tcan_read TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_write TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_create TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_delete TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_submit TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_cancel TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_amend TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_export TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_import TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_report TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tif_owner TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tUNIQUE KEY idx_doctype_role (doctype, role)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+		"CREATE TABLE IF NOT EXISTS _kora_permission (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\trole VARCHAR(140) NOT NULL,\n\t\t\tcan_read TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_write TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_create TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_delete TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_submit TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_cancel TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_amend TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_export TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_import TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_report TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tif_owner TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tif_assigned TEXT NULL,\n\t\t\tUNIQUE KEY idx_doctype_role (doctype, role)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 		"ALTER TABLE _kora_permission ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
+		"ALTER TABLE _kora_permission ADD COLUMN if_assigned TEXT NULL",
 
 		// _kora_config_version
 		"CREATE TABLE IF NOT EXISTS _kora_config_version (\n\t\t\tid VARCHAR(36) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL,\n\t\t\tversion INT NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tcreated_by VARCHAR(140) NOT NULL DEFAULT 'system',\n\t\t\tlabel VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tchangelog JSON,\n\t\t\tstatus VARCHAR(20) NOT NULL DEFAULT 'Draft',\n\t\t\tconfig LONGTEXT,\n\t\t\tchange_list JSON,\n\t\t\tconfig_hash VARCHAR(64) NOT NULL DEFAULT '',\n\t\t\tbase_version_id VARCHAR(36) NOT NULL DEFAULT '',\n\t\t\tmin_kora_version VARCHAR(20) NOT NULL DEFAULT '',\n\t\t\tINDEX idx_site_status (site, status),\n\t\t\tUNIQUE INDEX idx_site_version_unique (site, version)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
@@ -494,6 +499,8 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_user ADD COLUMN email_verified_at DATETIME(6)",
 		"ALTER TABLE _kora_user DROP INDEX idx_email",
 		"ALTER TABLE _kora_user ADD UNIQUE KEY idx_site_email (site, email)",
+		"CREATE INDEX idx_user_picker_name ON _kora_user (site, enabled, full_name)",
+		"CREATE INDEX idx_user_picker_email ON _kora_user (site, enabled, email)",
 
 		// _kora_session
 		"CREATE TABLE IF NOT EXISTS _kora_session (\n\t\t\tsid VARCHAR(255) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tuser VARCHAR(140) NOT NULL,\n\t\t\tdata JSON,\n\t\t\texpires_at DATETIME(6) NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tINDEX idx_user (user),\n\t\t\tINDEX idx_expires (expires_at)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
@@ -501,18 +508,7 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 
 		// _kora_magic_link
 		"CREATE TABLE IF NOT EXISTS _kora_magic_link (\n\t\t\tid VARCHAR(255) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\temail VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\ttoken_hash VARCHAR(64) NOT NULL,\n\t\t\texpires_at DATETIME(6) NOT NULL,\n\t\t\tused_at DATETIME(6),\n\t\t\trevoked_at DATETIME(6),\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tUNIQUE KEY idx_magic_token_hash (token_hash),\n\t\t\tINDEX idx_magic_site_email (site, email),\n\t\t\tINDEX idx_magic_expires (expires_at)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-		// _kora_workflow
-		"CREATE TABLE IF NOT EXISTS _kora_workflow (\n\t\t\tname VARCHAR(140) NOT NULL,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tdocument_type VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tis_active TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\tworkflow_state_field VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tconfig_json JSON,\n\t\t\tPRIMARY KEY (name)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-		"ALTER TABLE _kora_workflow ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
-
-		// _kora_workflow_state
-		"CREATE TABLE IF NOT EXISTS _kora_workflow_state (\n\t\t\tname VARCHAR(255) NOT NULL,\n\t\t\tworkflow VARCHAR(140) NOT NULL,\n\t\t\tstate VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tdoc_status TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tallow_edit TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\tstyle VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tidx INT NOT NULL DEFAULT 0,\n\t\t\tPRIMARY KEY (name)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-		"ALTER TABLE _kora_workflow_state ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
-
-		// _kora_workflow_transition
-		"CREATE TABLE IF NOT EXISTS _kora_workflow_transition (\n\t\t\tname VARCHAR(255) NOT NULL,\n\t\t\tworkflow VARCHAR(140) NOT NULL,\n\t\t\taction VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tfrom_state VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tto_state VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tallowed VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tcondition_expr TEXT,\n\t\t\trequire_fields TEXT,\n\t\t\tidx INT NOT NULL DEFAULT 0,\n\t\t\tPRIMARY KEY (name)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-		"ALTER TABLE _kora_workflow_transition ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
+		"CREATE TABLE IF NOT EXISTS _kora_magic_link_delivery (\n\t\t\toperation_id VARCHAR(255) PRIMARY KEY,\n\t\t\ttenant_id VARCHAR(140) NOT NULL,\n\t\t\temail VARCHAR(255) NOT NULL,\n\t\t\tmagic_link_id VARCHAR(255) NOT NULL,\n\t\t\tstatus VARCHAR(20) NOT NULL,\n\t\t\tworker_fence BIGINT NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tupdated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tINDEX idx_magic_delivery_tenant_status (tenant_id, status)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
 		// _kora_secret
 		"CREATE TABLE IF NOT EXISTS _kora_secret (\n\t\t\tsite VARCHAR(140) NOT NULL,\n\t\t\tkey_name VARCHAR(140) NOT NULL,\n\t\t\tencrypted_value BLOB NOT NULL,\n\t\t\tcreated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tupdated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tPRIMARY KEY (site, key_name)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",

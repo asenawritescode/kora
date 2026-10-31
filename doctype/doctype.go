@@ -1,4 +1,4 @@
-// Package doctype defines the core types for Kora's config-driven data model.
+// Package doctype defines the core types for Kigae's config-driven data model.
 package doctype
 
 // DocType represents a data entity definition. It defines the fields,
@@ -11,6 +11,7 @@ type DocType struct {
 	IsChildTable   bool            `yaml:"is_child_table" json:"is_child_table"`
 	IsSingle       bool            `yaml:"is_single"      json:"is_single"`
 	TrackChanges   bool            `yaml:"track_changes"  json:"track_changes"`
+	AppendOnly     bool            `yaml:"append_only"    json:"append_only,omitempty"`
 	TitleField     string          `yaml:"title_field"    json:"title_field"`
 	SearchFields   string          `yaml:"search_fields"  json:"search_fields"`
 	SortField      string          `yaml:"sort_field"     json:"sort_field"`
@@ -19,6 +20,7 @@ type DocType struct {
 	Fields         []Field         `yaml:"fields"         json:"fields"`
 	DocConstraints []DocConstraint `yaml:"doc_constraints" json:"doc_constraints"`
 	PublicAccess   *PublicAccess   `yaml:"public_access" json:"public_access,omitempty"`
+	QuantityEffect *QuantityEffect `yaml:"quantity_effect" json:"quantity_effect,omitempty"`
 
 	metadataReady      bool
 	dataFields         []Field
@@ -26,6 +28,19 @@ type DocType struct {
 	tableFields        []Field
 	listFields         []Field
 	validSortColumns   map[string]bool
+}
+
+// QuantityEffect binds a record form to a configured transactional view action.
+// Clients may use the same binding to project the signed effect before sync.
+type QuantityEffect struct {
+	View                string `yaml:"view" json:"view"`
+	Component           string `yaml:"component" json:"component"`
+	Action              string `yaml:"action" json:"action"`
+	TargetDocType       string `yaml:"target_doctype" json:"target_doctype"`
+	TargetQuantityField string `yaml:"target_quantity_field" json:"target_quantity_field"`
+	SourceRecordField   string `yaml:"source_record_field" json:"source_record_field"`
+	DeltaField          string `yaml:"delta_field" json:"delta_field"`
+	ReasonField         string `yaml:"reason_field" json:"reason_field"`
 }
 
 // PublicAccess defines the explicit unauthenticated read surface for a DocType.

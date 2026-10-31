@@ -3,27 +3,32 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/mcp"
 	"github.com/asenawritescode/kora/site"
+	"github.com/spf13/cobra"
 )
 
 var mcpCmd = &cobra.Command{
 	Use:   "mcp",
-	Short: "Start MCP server (stdio mode for Claude Desktop, Cursor, etc.)",
-	Long: `Starts a Model Context Protocol server on stdio that auto-generates
-tools from the site's doctype registry.
+	Short: "Start the MCP YAML validation and optional read-only tenant server",
+	Long: `Starts a Model Context Protocol server on stdio with YAML validation.
+
+Tenant DocType read tools are enabled only when KORA_MCP_EXTENSION_TOKEN and
+--tenant-id are configured. The extension credential is revalidated for every
+call; only find, list, and get operations are exposed.
 
 Configure Claude Desktop to use it:
   {
     "mcpServers": {
       "airtime": {
         "command": "/path/to/kora",
-        "args": ["mcp", "--site", "airtime.local"]
+        "args": ["mcp", "--site", "airtime.local", "--tenant-id", "<stable-tenant-id>"]
       }
     }
   }`,
@@ -48,18 +53,37 @@ Configure Claude Desktop to use it:
 		if err != nil {
 			return fmt.Errorf("loading doctypes: %w", err)
 		}
-		roles, _ := store.LoadRoles(siteName)
-		permissions, _ := store.LoadPermissions(siteName)
+		roles, err := store.LoadRoles(siteName)
+		if err != nil {
+			return fmt.Errorf("loading roles: %w", err)
+		}
+		permissions, err := store.LoadPermissions(siteName)
+		if err != nil {
+			return fmt.Errorf("loading permissions: %w", err)
+		}
 
 		reg := doctype.NewRegistry()
 		reg.LoadFull(doctypes, roles, permissions)
 
-		server := mcp.New(reg, siteName, mcp.ModeExecutable)
+		server := mcp.New(reg, siteName, mcp.ModeValidationOnly)
+		token := os.Getenv("KORA_MCP_EXTENSION_TOKEN")
+		if token != "" {
+			tenantID, _ := cmd.Flags().GetString("tenant-id")
+			if tenantID == "" {
+				return fmt.Errorf("--tenant-id is required when KORA_MCP_EXTENSION_TOKEN is configured")
+			}
+			executor, err := mcp.NewExtensionReadExecutor(db, kdb.Resolve(cfg.DBType), reg, contract.TenantID(tenantID), siteName, token)
+			if err != nil {
+				return fmt.Errorf("configuring authenticated read-only MCP tools: %w", err)
+			}
+			server = mcp.NewReadOnlyWithExecutor(reg, siteName, executor)
+		}
 		return server.Run(context.Background())
 	},
 }
 
 func init() {
 	mcpCmd.Flags().String("site", "", "Site hostname (e.g., airtime.local)")
+	mcpCmd.Flags().String("tenant-id", "", "Stable tenant ID (required for authenticated MCP reads)")
 	rootCmd.AddCommand(mcpCmd)
 }

@@ -182,7 +182,7 @@ export default function AdminExtensionsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Webhook className="h-6 w-6" /> Extensions
-            <HelpTooltip label="Extensions help">Register webhooks that receive Kora events.</HelpTooltip>
+            <HelpTooltip label="Extensions help">Register webhooks that receive Kigae events.</HelpTooltip>
           </h1>
         </div>
         <Button onClick={openCreate}><Plus className="h-4 w-4 mr-2" /> Register Extension</Button>
@@ -328,7 +328,7 @@ export default function AdminExtensionsPage() {
         <SheetContent side={isMobile ? 'bottom' : 'right'} className={isMobile ? 'w-full max-h-[85vh] rounded-t-xl flex flex-col' : 'w-full sm:max-w-xl flex flex-col'}>
           <SheetHeader className="border-b pb-4">
             <SheetTitle className="text-lg">Register Extension</SheetTitle>
-            <SheetDescription>Extensions receive webhooks when events occur in Kora. Create one to start receiving events.</SheetDescription>
+            <SheetDescription>Extensions receive webhooks when events occur in Kigae. Create one to start receiving events.</SheetDescription>
           </SheetHeader>
 
           {newCredentials ? (
@@ -348,7 +348,7 @@ export default function AdminExtensionsPage() {
                   )}
                   <OneTimeCredential
                     label="Webhook signing secret"
-                    description="Use this to verify webhook payloads sent by Kora to your endpoint."
+                    description="Use this to verify webhook payloads sent by Kigae to your endpoint."
                     value={newCredentials.secret}
                   />
                 </div>
@@ -369,7 +369,7 @@ export default function AdminExtensionsPage() {
                 <div className="space-y-1.5">
                   <Label htmlFor="ext-url" className="text-sm font-medium">Endpoint URL <span className="text-red-500">*</span></Label>
                   <Input id="ext-url" type="url" value={form.endpoint_url} onChange={e => setForm({...form, endpoint_url: e.target.value})} placeholder="https://my-worker.workers.dev/webhook" required />
-                  <p className="text-[11px] text-muted-foreground">Kora will POST event payloads to this URL.</p>
+                  <p className="text-[11px] text-muted-foreground">Kigae will POST event payloads to this URL.</p>
                 </div>
                 {/* Event Subscriptions — structured builder */}
                 <div className="space-y-2">
@@ -379,7 +379,7 @@ export default function AdminExtensionsPage() {
                       <Plus className="h-3 w-3 mr-1" /> Add
                     </Button>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">Choose which Kora events trigger this webhook.</p>
+                  <p className="text-[11px] text-muted-foreground">Choose which Kigae events trigger this webhook.</p>
                   {subs.length === 0 && (
                     <p className="text-xs text-muted-foreground italic py-2">No subscriptions yet. Click Add to subscribe to an event.</p>
                   )}
@@ -417,7 +417,7 @@ export default function AdminExtensionsPage() {
                       <Plus className="h-3 w-3 mr-1" /> Add
                     </Button>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">Grant this extension permission to read or modify data via the Kora API.</p>
+                  <p className="text-[11px] text-muted-foreground">Grant this extension permission to read or modify data via the Kigae API.</p>
                   <p className="text-[11px] text-amber-600">Permissions are enforced on every API call. An extension with no permissions cannot access any data.</p>
                   {perms.length === 0 && (
                     <p className="text-xs text-muted-foreground italic py-2">No permissions yet. Click Add to grant API access.</p>

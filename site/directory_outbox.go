@@ -1,6 +1,7 @@
 package site
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
@@ -82,6 +83,10 @@ func newDirectoryChangeID() (string, error) {
 // callers persist the last fully-applied cursor and periodically reconcile a full
 // snapshot to recover from retention or consumer mistakes.
 func (r *SQLSiteRegistry) ChangesAfter(cursor uint64, limit int) ([]SiteDirectoryChange, error) {
+	return r.ChangesAfterContext(context.Background(), cursor, limit)
+}
+
+func (r *SQLSiteRegistry) ChangesAfterContext(ctx context.Context, cursor uint64, limit int) ([]SiteDirectoryChange, error) {
 	if r == nil || r.database == nil {
 		return nil, errors.New("site registry unavailable")
 	}
@@ -92,7 +97,7 @@ func (r *SQLSiteRegistry) ChangesAfter(cursor uint64, limit int) ([]SiteDirector
 	if strings.EqualFold(r.dialect, "postgres") {
 		query = `SELECT directory_revision, id, payload, created_at FROM _kora_site_directory_outbox WHERE directory_revision > $1 ORDER BY directory_revision LIMIT $2`
 	}
-	rows, err := r.database.Query(query, cursor, limit)
+	rows, err := r.database.QueryContext(ctx, query, cursor, limit)
 	if err != nil {
 		return nil, err
 	}

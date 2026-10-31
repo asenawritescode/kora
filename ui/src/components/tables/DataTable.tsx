@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   useReactTable,
   getCoreRowModel,
@@ -20,6 +21,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { format } from 'date-fns'
 import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, FileX, AlertCircle } from 'lucide-react'
 import type { Field, Document } from '@/types/kora'
+import { fetchUserDirectoryByNames, type UserDirectoryEntry } from '@/lib/api/system'
+import { getSitePrefix } from '@/lib/basepath'
 
 interface DataTableProps {
   columns: Field[]
@@ -45,7 +48,12 @@ interface DataTableProps {
 
 const columnHelper = createColumnHelper<Document>()
 
-function renderCellValue(value: any, field: Field): React.ReactNode {
+export function resolveUserDirectoryLabel(value: string, users: readonly UserDirectoryEntry[]): string {
+  const user = users.find((candidate) => candidate.name === value)
+  return user ? (user.full_name || user.email || user.name) : 'Workspace user unavailable'
+}
+
+function renderCellValue(value: any, field: Field, userLabels?: ReadonlyMap<string, string>): React.ReactNode {
   if (value == null || value === '') return <span className="text-muted-foreground">—</span>
 
   switch (field.fieldtype) {
@@ -67,6 +75,8 @@ function renderCellValue(value: any, field: Field): React.ReactNode {
       return Number(value).toFixed(2)
     case 'Link':
       return <span className="text-primary underline">{String(value)}</span>
+    case 'User':
+      return userLabels?.get(String(value)) || 'Loading user…'
     default:
       return String(value).length > 80 ? String(value).slice(0, 80) + '…' : String(value)
   }
@@ -93,6 +103,21 @@ export function DataTable({
   filteredEmptyTitle = 'No matching records',
   filteredEmptyDescription = 'Try clearing filters or broadening the search.',
 }: DataTableProps) {
+  const userValues = useMemo(() => {
+    const fields = columns.filter((field) => field.fieldtype === 'User').map((field) => field.fieldname)
+    return [...new Set(data.flatMap((row) => fields.map((field) => String(row[field] ?? '')).filter(Boolean)))].slice(0, 100)
+  }, [columns, data])
+  const userQuery = useQuery({
+    queryKey: ['user-directory', getSitePrefix(), 'names', userValues],
+    queryFn: () => fetchUserDirectoryByNames(userValues),
+    enabled: userValues.length > 0,
+    staleTime: 60_000,
+    retry: false,
+  })
+  const userLabels = useMemo(() => new Map(userValues.map((name) => {
+    const user = userQuery.data?.find((candidate) => candidate.name === name)
+    return [name, user ? resolveUserDirectoryLabel(name, [user]) : userQuery.isPending ? 'Loading user…' : 'Workspace user unavailable']
+  })), [userValues, userQuery.data, userQuery.isPending])
   const tableColumns = useMemo(
     () => [
       columnHelper.accessor('name', {
@@ -102,11 +127,11 @@ export function DataTable({
       ...columns.map((field) =>
         columnHelper.accessor(field.fieldname, {
           header: field.label,
-          cell: (info) => renderCellValue(info.getValue(), field),
+          cell: (info) => renderCellValue(info.getValue(), field, userLabels),
         }),
       ),
     ],
-    [columns],
+    [columns, userLabels],
   )
 
   const tableSorting: SortingState = sorting

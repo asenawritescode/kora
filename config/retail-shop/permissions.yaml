@@ -1,0 +1,39 @@
+- doctype: Product
+  role: Shop Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale
+  role: Shop Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  report: true
+- doctype: Sale Item
+  role: Shop Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Expense
+  role: Shop Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+  report: true
+- doctype: Payment
+  role: Shop Owner
+  create: true
+- doctype: Register
+  role: Shop Owner
+  create: true
+- doctype: Stock Adjustment
+  role: Shop Owner
+  read: true
+  write: false
+  create: true
+  delete: false

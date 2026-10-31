@@ -1,11 +1,14 @@
 package workspace
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/gin-gonic/gin"
 
 	knet "github.com/asenawritescode/kora/net"
@@ -113,6 +116,32 @@ func TestServesFavicon(t *testing.T) {
 	// {"error":"not_found"} with 404. Either response is valid.
 	if w.Code == http.StatusInternalServerError {
 		t.Fatalf("favicon request returned 500: %s", w.Body.String())
+	}
+}
+
+func TestPathSiteRouteActivatesColdTenantBeforeServingEmbeddedWorkspace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sr := knet.NewSiteRouter(nil)
+	var activations atomic.Int32
+	sr.SetLazyDirectory([]contract.SiteDescriptor{{
+		SiteID: "tenant-cold", Aliases: []string{"cold.example.test"}, Status: "active", ConfigRevision: 1,
+	}}, func(_ context.Context, siteID string) error {
+		activations.Add(1)
+		return sr.AddSite(&knet.LoadedSite{
+			SiteID: siteID, Name: "cold.example.test", ConfigRevision: 1,
+			Status: "active", Config: knet.SiteRouterConfig{Hostname: "cold.example.test"},
+		})
+	})
+	r := gin.New()
+	RegisterSPARoutes(r, sr)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/s/tenant-cold/workspace", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("cold path workspace status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if activations.Load() != 1 || sr.SnapshotByID("tenant-cold") == nil {
+		t.Fatalf("cold path activation count/runtime = %d/%v, want 1/published", activations.Load(), sr.SnapshotByID("tenant-cold"))
 	}
 }
 

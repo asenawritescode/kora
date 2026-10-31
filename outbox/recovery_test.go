@@ -39,21 +39,22 @@ func TestPublishDueReclaimsExpiredPublishingLeaseAfterRestart(t *testing.T) {
 			       \(status = 'pending' AND \(next_attempt_at IS NULL OR next_attempt_at <= \?\)\)
 			       OR \(status = 'publishing' AND lease_until IS NOT NULL AND lease_until < \?\)
 			   \)`).
-		WithArgs(string(StatusPublishing), "lease-owner", sqlmock.AnyArg(), event.ID, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(string(StatusPublishing), sqlmock.AnyArg(), sqlmock.AnyArg(), event.ID, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(`SELECT attempts FROM _kora_outbox WHERE id = \?`).
-		WithArgs(event.ID).
+	mock.ExpectQuery(`SELECT attempts FROM _kora_outbox WHERE id = \? AND status = 'publishing' AND lease_owner = \?`).
+		WithArgs(event.ID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"attempts"}).AddRow(1))
-	mock.ExpectQuery(`SELECT payload FROM _kora_outbox WHERE id = \?`).
+	mock.ExpectQuery(`SELECT payload, source_sequence FROM _kora_outbox WHERE id = \?`).
 		WithArgs(event.ID).
-		WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow(`{"id":"EVT-1","type":"kora.sales_invoice.after_insert","version":1,"source":"kora.kernel","site":"test.local","aggregate_type":"Sales Invoice","aggregate_id":"SINV-0001","occurred_at":"` + event.OccurredAt.Format(time.RFC3339Nano) + `","data":{"doctype":"Sales Invoice"}}`))
-	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \?`).
-		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID).
+		WillReturnRows(sqlmock.NewRows([]string{"payload", "source_sequence"}).AddRow(`{"id":"EVT-1","type":"kora.sales_invoice.after_insert","version":1,"source":"kora.kernel","site":"test.local","aggregate_type":"Sales Invoice","aggregate_id":"SINV-0001","occurred_at":"`+event.OccurredAt.Format(time.RFC3339Nano)+`","data":{"doctype":"Sales Invoice"}}`, 17))
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \? AND status = 'publishing' AND lease_owner = \?`).
+		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
+	var delivered contract.EventEnvelope
 	p := &Publisher{
 		DB:          db,
-		Destination: eventPublisherFunc(func(ctx context.Context, got contract.EventEnvelope) error { return nil }),
+		Destination: eventPublisherFunc(func(ctx context.Context, got contract.EventEnvelope) error { delivered = got; return nil }),
 		LeaseOwner:  "lease-owner",
 		LeaseTTL:    time.Minute,
 		MaxAttempts: 8,
@@ -65,6 +66,9 @@ func TestPublishDueReclaimsExpiredPublishingLeaseAfterRestart(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("PublishDue = %d, want 1 published row", n)
+	}
+	if delivered.Sequence != "17" {
+		t.Fatalf("legacy envelope sequence = %q, want source column sequence 17", delivered.Sequence)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)

@@ -1,12 +1,28 @@
 package site
 
 import (
+	"context"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
+
+func TestSQLSiteRegistryConsumerLagHonorsCancellation(t *testing.T) {
+	database, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create SQL mock:", err)
+	}
+	defer database.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = NewSQLSiteRegistry(database, "mysql").ConsumerLagContext(ctx, "engine:test")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ConsumerLagContext error = %v, want context.Canceled", err)
+	}
+}
 
 func TestSQLSiteRegistryConsumerLagReportsPendingRevisionAndAge(t *testing.T) {
 	database, mock, err := sqlmock.New()

@@ -15,16 +15,21 @@ import (
 // EmbeddedRunner executes scripts in-process using goja.
 // It maintains a pool of prewarmed runtimes for concurrent execution.
 type EmbeddedRunner struct {
-	pool   chan *goja.Runtime
-	config EmbeddedConfig
-	mu     sync.Mutex
-	closed bool
+	pool      chan *goja.Runtime
+	admission chan struct{}
+	config    EmbeddedConfig
+	mu        sync.Mutex
+	closed    bool
+	stop      chan struct{}
+	ctx       context.Context
+	cancel    context.CancelFunc
+	active    sync.WaitGroup
 }
 
 // EmbeddedConfig configures the embedded runner.
 type EmbeddedConfig struct {
 	PoolSize int           // number of prewarmed runtimes (default: 15)
-	MaxRAM   int64         // soft memory target in bytes
+	MaxRAM   int64         // advisory target only; Goja has no enforced heap limit
 	Timeout  time.Duration // default execution timeout
 }
 
@@ -47,9 +52,12 @@ func NewEmbeddedRunner(cfg EmbeddedConfig) *EmbeddedRunner {
 	}
 
 	r := &EmbeddedRunner{
-		pool:   make(chan *goja.Runtime, cfg.PoolSize),
-		config: cfg,
+		pool:      make(chan *goja.Runtime, cfg.PoolSize),
+		admission: make(chan struct{}, cfg.PoolSize*2),
+		config:    cfg,
+		stop:      make(chan struct{}),
 	}
+	r.ctx, r.cancel = context.WithCancel(context.Background())
 
 	// Prewarm the pool.
 	for i := 0; i < cfg.PoolSize; i++ {
@@ -58,16 +66,15 @@ func NewEmbeddedRunner(cfg EmbeddedConfig) *EmbeddedRunner {
 	return r
 }
 
-// newRuntime creates a fresh goja runtime with Kora API and security hardening.
+// newRuntime creates a fresh goja runtime with Kigae API and security hardening.
 func (r *EmbeddedRunner) newRuntime() *goja.Runtime {
 	vm := goja.New()
 
 	// Freeze prototypes to prevent prototype pollution.
 	r.freezePrototypes(vm)
 
-	// Set memory limits via the runtime's internal limits.
-	// goja doesn't expose memory limits directly, but we can set
-	// a timer-based interrupt for long-running scripts.
+	// Goja has no hard heap limit. Execution time is bounded below, and the
+	// configured MaxRAM value remains advisory rather than an enforced cap.
 	return vm
 }
 
@@ -100,7 +107,18 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 		r.mu.Unlock()
 		return nil, fmt.Errorf("script runner is closed")
 	}
+	select {
+	case r.admission <- struct{}{}:
+	default:
+		r.mu.Unlock()
+		return nil, fmt.Errorf("script runner is at capacity")
+	}
+	r.active.Add(1)
 	r.mu.Unlock()
+	defer func() {
+		<-r.admission
+		r.active.Done()
+	}()
 
 	// Acquire a runtime from the pool.
 	var vm *goja.Runtime
@@ -108,13 +126,26 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	case vm = <-r.pool:
 	case <-ctx.Done():
 		return nil, fmt.Errorf("script: no runtime available: %w", ctx.Err())
+	case <-r.stop:
+		return nil, fmt.Errorf("script runner is closed")
 	}
 	defer func() {
 		// Reset the runtime and return it to the pool.
 		// Create a fresh runtime to avoid state leakage between executions.
 		newVM := r.newRuntime()
-		r.pool <- newVM
+		r.mu.Lock()
+		if !r.closed {
+			r.pool <- newVM
+		}
+		r.mu.Unlock()
 	}()
+
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	if closed {
+		return nil, fmt.Errorf("script runner is closed")
+	}
 
 	// Apply timeout.
 	timeout := req.Timeout
@@ -123,12 +154,18 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	stopRunnerCancellation := context.AfterFunc(r.ctx, cancel)
+	defer stopRunnerCancellation()
 
 	// Set up an interrupt via a timer.
 	timer := time.AfterFunc(timeout, func() {
 		vm.Interrupt("script execution timed out")
 	})
 	defer timer.Stop()
+	stopExecutionInterrupt := context.AfterFunc(execCtx, func() {
+		vm.Interrupt("script execution canceled")
+	})
+	defer stopExecutionInterrupt()
 
 	// Inject the kora API into the runtime.
 	api := &koraAPI{
@@ -252,8 +289,18 @@ func (r *EmbeddedRunner) Validate(script string) error {
 // Close shuts down all runtimes in the pool.
 func (r *EmbeddedRunner) Close() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r.closed {
+		r.mu.Unlock()
+		r.active.Wait()
+		return nil
+	}
 	r.closed = true
+	close(r.stop)
+	r.cancel()
+	r.mu.Unlock()
+	// Execute registers with active while holding mu, so after closed is set no
+	// new Add can race this Wait. Running scripts are interrupted through ctx.
+	r.active.Wait()
 	close(r.pool)
 	for vm := range r.pool {
 		vm.Interrupt("runner closed")

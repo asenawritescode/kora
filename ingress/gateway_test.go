@@ -17,10 +17,11 @@ func TestGatewayForwardsHostAndPathRoutesToAssignedCell(t *testing.T) {
 		Path  string `json:"path"`
 		Host  string `json:"host"`
 		Query string `json:"query"`
+		Hop   string `json:"hop"`
 	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(observed{Path: r.URL.Path, Host: r.Host, Query: r.URL.RawQuery})
+		_ = json.NewEncoder(w).Encode(observed{Path: r.URL.Path, Host: r.Host, Query: r.URL.RawQuery, Hop: r.Header.Get(ingressHopHeader)})
 	}))
 	defer upstream.Close()
 
@@ -58,7 +59,105 @@ func TestGatewayForwardsHostAndPathRoutesToAssignedCell(t *testing.T) {
 			if got.Host != test.host {
 				t.Fatalf("upstream Host = %q, want original %q", got.Host, test.host)
 			}
+			if got.Hop != "1" {
+				t.Fatalf("upstream ingress hop = %q, want gateway marker", got.Hop)
+			}
 		})
+	}
+}
+
+func TestGatewayAllowsOneForwardAndRejectsSecondForward(t *testing.T) {
+	var gatewayA, gatewayB *Gateway
+	engineA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gatewayA.Wrap(http.NotFoundHandler()).ServeHTTP(w, r)
+	}))
+	defer engineA.Close()
+	engineB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gatewayB.Wrap(http.NotFoundHandler()).ServeHTTP(w, r)
+	}))
+	defer engineB.Close()
+
+	var err error
+	gatewayA, err = New("cell-a", map[string]string{"cell-b": engineB.URL})
+	if err != nil {
+		t.Fatal("configure gateway A:", err)
+	}
+	gatewayB, err = New("cell-b", map[string]string{"cell-a": engineA.URL, "cell-c": "http://127.0.0.1:9003"})
+	if err != nil {
+		t.Fatal("configure gateway B:", err)
+	}
+	gatewayA.ReplaceDirectory([]contract.SiteDescriptor{{SiteID: "site-a", Aliases: []string{"loop.example.test"}, Status: "active", RuntimeCellID: "cell-b"}})
+	gatewayB.ReplaceDirectory([]contract.SiteDescriptor{{SiteID: "site-b", Aliases: []string{"loop.example.test"}, Status: "active", RuntimeCellID: "cell-c"}})
+
+	request, err := http.NewRequest(http.MethodGet, engineA.URL+"/api/v1/ping", nil)
+	if err != nil {
+		t.Fatal("build request:", err)
+	}
+	request.Host = "loop.example.test"
+	response, err := engineA.Client().Do(request)
+	if err != nil {
+		t.Fatal("request through ingress:", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusLoopDetected {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("response = %d %s, want loop rejection", response.StatusCode, body)
+	}
+}
+
+func TestGatewayStripsForwardingMarkerBeforeLocalHandler(t *testing.T) {
+	router, err := New("cell-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.ReplaceDirectory([]contract.SiteDescriptor{{SiteID: "site-a", Aliases: []string{"local.example.test"}, Status: "active", RuntimeCellID: "cell-a"}})
+	router.MarkLocalReady("site-a", true)
+	handler := router.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(ingressHopHeader) != "" {
+			t.Errorf("forwarding marker leaked to local handler")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/ping", nil)
+	request.Host = "local.example.test"
+	request.Header.Set(ingressHopHeader, "1")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want local handler", recorder.Code)
+	}
+}
+
+func TestGatewayPublishesV2AssignmentAtomically(t *testing.T) {
+	router, err := New("deployment-a", nil)
+	if err != nil {
+		t.Fatal("configure gateway:", err)
+	}
+	valid := contract.SiteDescriptor{
+		SiteID: "site_0123456789abcdef0123456789abcdef", Aliases: []string{"tenant.example.test"},
+		Status: "active", RuntimeCellID: "deployment-a", ConfigRevision: 3, DirectoryRevision: 9,
+	}
+	if err := router.ReplaceDirectory([]contract.SiteDescriptor{valid}); err != nil {
+		t.Fatal("publish valid directory:", err)
+	}
+	entry := router.snapshot.Load().byID[valid.SiteID]
+	if entry.Version != 2 || entry.DeploymentID != "deployment-a" || entry.ConfigRevision != "3" || entry.DirectoryRevision != "9" {
+		t.Fatalf("gateway stored v2 entry = %#v", entry)
+	}
+
+	invalid := valid
+	invalid.RuntimeCellID = "bad/deployment"
+	if err := router.ReplaceDirectory([]contract.SiteDescriptor{invalid}); err == nil {
+		t.Fatal("invalid replacement unexpectedly succeeded")
+	}
+	if got := router.snapshot.Load().byID[valid.SiteID]; got.DeploymentID != "deployment-a" {
+		t.Fatalf("invalid replacement partially changed active snapshot: %#v", got)
+	}
+	if err := router.ApplyDescriptor(invalid); err == nil {
+		t.Fatal("invalid feed update unexpectedly succeeded")
+	}
+	if got := router.snapshot.Load().byID[valid.SiteID]; got.DeploymentID != "deployment-a" {
+		t.Fatalf("invalid feed update changed active snapshot: %#v", got)
 	}
 }
 

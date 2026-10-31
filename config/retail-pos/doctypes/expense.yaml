@@ -1,6 +1,6 @@
 name: POS Expense
-module: Retail POS Finance
-is_submittable: true
+module: Expenses
+is_submittable: false
 title_field: reference
 search_fields: reference, payee, status
 fields:
@@ -25,41 +25,27 @@ fields:
     label: Amount
     reqd: true
     in_list_view: true
-  - fieldname: account
-    fieldtype: Link
-    options: POS Account
-    label: Expense account
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Stock purchase
+      Rent
+      Utilities
+      Transport
+      Wages
+      Other
     reqd: true
-  - fieldname: till_session
-    fieldtype: Link
-    options: Till Session
-    label: Till session
+    in_list_view: true
   - fieldname: payment_method
     fieldtype: Select
     label: Payment method
     options: |
       Cash
       Card
-      Mobile Money
+      M-Pesa
       Bank Transfer
   - fieldname: reason
     fieldtype: Text
     label: Reason
     reqd: true
-  - fieldname: status
-    fieldtype: Select
-    label: Status
-    options: |
-      Draft
-      Submitted
-      Approved
-      Paid
-      Rejected
-    default: Draft
-    in_list_view: true
-  - fieldname: submitted_by
-    fieldtype: User
-    label: Submitted by
-  - fieldname: approved_by
-    fieldtype: User
-    label: Approved by

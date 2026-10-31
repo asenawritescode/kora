@@ -12,6 +12,55 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestPageManifestPurposeSeparatesPlainListsFromCustomWorkflows(t *testing.T) {
+	plainList := &doctype.PageManifest{Metadata: doctype.PageManifestMetadata{Name: "Daily Sales"}, Spec: doctype.PageManifestSpec{
+		Route:     "/daily-sales",
+		Resources: []doctype.PageResource{{ID: "primary", Query: "document.list", Params: map[string]any{"doctype": "Daily Sale"}}},
+		Layout: doctype.PageManifestLayout{Children: []doctype.PageComponent{{
+			Component: "record_table", Data: "primary.data", Props: map[string]any{"source_doctype": "Daily Sale"},
+		}}},
+	}}
+	if got := pageManifestPurpose(plainList); got != "record_list" {
+		t.Fatalf("plain table purpose = %q, want record_list", got)
+	}
+	if got := pageManifestSourceDocType(plainList); got != "Daily Sale" {
+		t.Fatalf("table source = %q, want Daily Sale", got)
+	}
+
+	filteredTable := *plainList
+	filteredTable.Spec.Resources = []doctype.PageResource{{ID: "primary", Query: "document.list", Params: map[string]any{
+		"doctype": "Daily Sale", "filters": []map[string]any{{"field": "status", "op": "=", "value": "Open"}},
+	}}}
+	if got := pageManifestPurpose(&filteredTable); got != "table_view" {
+		t.Fatalf("filtered table purpose = %q, want table_view", got)
+	}
+
+	custom := *plainList
+	custom.Spec.Layout.Children = append(custom.Spec.Layout.Children, doctype.PageComponent{Component: "payment_panel"})
+	if got := pageManifestPurpose(&custom); got != "workflow" {
+		t.Fatalf("multi-component purpose = %q, want workflow", got)
+	}
+
+	withAction := *plainList
+	withAction.Spec.Actions = []doctype.PageAction{{ID: "checkout", Command: "create_transaction"}}
+	if got := pageManifestPurpose(&withAction); got != "workflow" {
+		t.Fatalf("action screen purpose = %q, want workflow", got)
+	}
+}
+
+func TestPageManifestTaskOutcomeIsAvailableForAdministratorReview(t *testing.T) {
+	manifest := &doctype.PageManifest{Spec: doctype.PageManifestSpec{Task: &doctype.ViewTask{
+		User: "Cashier", Trigger: "At shift close", Outcome: "Reconcile cash and M-Pesa totals",
+		Reads: []string{"Sale"}, CompletionSignal: "Shift marked reviewed",
+	}}}
+	if got := pageManifestTaskOutcome(manifest); got != "Reconcile cash and M-Pesa totals" {
+		t.Fatalf("task outcome = %q", got)
+	}
+	if got := pageManifestTaskOutcome(&doctype.PageManifest{}); got != "" {
+		t.Fatalf("taskless page outcome = %q, want empty", got)
+	}
+}
+
 func TestPageManifestEquivalent_UsesSemanticNormalization(t *testing.T) {
 	a := &doctype.PageManifest{
 		APIVersion: "ui.kora.dev/v1",

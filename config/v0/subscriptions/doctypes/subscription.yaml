@@ -1,8 +1,10 @@
 name: Subscription
-module: Subscriptions
+module: Subscription and Recurring Services
+description: A customer's agreement to receive and pay for a recurring plan. New subscriptions copy the selected active plan's price and billing terms unless negotiated terms are enabled.
+is_submittable: true
 title_field: reference
-search_fields: reference, status
-sort_field: modified
+search_fields: reference, external_subscription_id, status
+sort_field: next_billing_date
 sort_order: DESC
 
 fields:
@@ -12,17 +14,96 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
-    fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
-  - fieldname: status
-    fieldtype: Data
-    label: Status
-    default: Draft
+    search_index: true
+  - fieldname: customer
+    fieldtype: Link
+    options: Billing Customer
+    label: Customer
+    reqd: true
     in_list_view: true
+  - fieldname: plan
+    fieldtype: Link
+    options: Plan
+    label: Plan
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    default: 1
+    reqd: true
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Agreed unit price
+    default: 0
+    reqd: true
+    description: Copied from the selected plan; enter a negotiated amount only when plan-term override is enabled.
+  - fieldname: override_plan_terms
+    fieldtype: Check
+    label: Override plan price and billing terms
+    default: 0
+    description: Enable to use negotiated terms instead of copying the selected plan.
+  - fieldname: currency
+    fieldtype: Select
+    label: Currency
+    options: |
+      KES
+      USD
+      EUR
+      GBP
+    default: KES
+    reqd: true
+  - fieldname: billing_interval
+    fieldtype: Select
+    label: Billing interval
+    options: |
+      Weekly
+      Monthly
+      Quarterly
+      Annually
+    default: Monthly
+    reqd: true
+  - fieldname: interval_count
+    fieldtype: Int
+    label: Interval count
+    default: 1
+    reqd: true
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start date
+    reqd: true
+    in_list_view: true
+  - fieldname: next_billing_date
+    fieldtype: Date
+    label: Next billing date
+    reqd: true
+    in_list_view: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: End date
+  - fieldname: assignee
+    fieldtype: User
+    label: Assignee
+  - fieldname: provider
+    fieldtype: Data
+    label: Billing provider
+  - fieldname: external_subscription_id
+    fieldtype: Data
+    label: External subscription ID
+    unique: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Quoted
+      Active
+      Paused
+      Past Due
+      Cancelled
+      Expired
+    default: Quoted
+    read_only: true
+    in_list_view: true
+  - fieldname: exception_reason
+    fieldtype: Text
+    label: Exception or cancellation reason

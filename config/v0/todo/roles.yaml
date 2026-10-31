@@ -1,6 +1,10 @@
 - name: Todo User
   workspace_access: true
-  description: Can create and manage todos.
+  description: Can create tasks and manage tasks they own or are assigned to.
+
+- name: Task Manager
+  workspace_access: true
+  description: Can review and manage tasks across the workspace, including reopening completed work.
 
 - name: Administrator
   workspace_access: true
