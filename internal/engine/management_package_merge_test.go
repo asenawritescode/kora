@@ -2,12 +2,32 @@ package engine
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 )
+
+func TestMergeManagementPackageConstraintsIsIdempotentAndImmutable(t *testing.T) {
+	installed := contract.InstalledPackage{PackageID: "inventory", ReleaseID: "inventory-1", Version: "1.0.0", Digest: "digest", Requires: []contract.ManifestPackRef{{PackageID: "warehouse", ReleaseID: "warehouse-1", Version: "1.0.0"}}}
+	merged, err := mergeManagementPackageConstraints([]contract.InstalledPackage{installed}, installed)
+	if err != nil || !reflect.DeepEqual(merged, []contract.InstalledPackage{installed}) {
+		t.Fatalf("same package release was not idempotent: %#v, %v", merged, err)
+	}
+	changed := installed
+	changed.Digest = "different-digest"
+	if _, err := mergeManagementPackageConstraints([]contract.InstalledPackage{installed}, changed); err == nil {
+		t.Fatal("same package release with changed immutable digest was accepted")
+	}
+	other := installed
+	other.ReleaseID = "warehouse-1"
+	merged, err = mergeManagementPackageConstraints([]contract.InstalledPackage{installed}, other)
+	if err != nil || len(merged) != 2 || merged[0].ReleaseID != "inventory-1" || merged[1].ReleaseID != "warehouse-1" {
+		t.Fatalf("distinct package release was not appended deterministically: %#v, %v", merged, err)
+	}
+}
 
 func TestMergeManagementPackageSnapshotPreservesAndUpsertsTenantConfig(t *testing.T) {
 	current := &doctype.ConfigSnapshot{

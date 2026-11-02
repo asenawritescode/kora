@@ -3,12 +3,29 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 )
+
+func mergeManagementPackageConstraints(existing []contract.InstalledPackage, incoming contract.InstalledPackage) ([]contract.InstalledPackage, error) {
+	merged := append([]contract.InstalledPackage(nil), existing...)
+	for _, installed := range existing {
+		if installed.ReleaseID != incoming.ReleaseID {
+			continue
+		}
+		if !reflect.DeepEqual(installed, incoming) {
+			return nil, fmt.Errorf("installed package release %q does not match the verified artifact", incoming.ReleaseID)
+		}
+		return merged, nil
+	}
+	merged = append(merged, incoming)
+	sort.Slice(merged, func(i, j int) bool { return merged[i].ReleaseID < merged[j].ReleaseID })
+	return merged, nil
+}
 
 // mergeManagementPackageSnapshot preserves tenant-owned configuration and
 // overlays only entities named by the package. Package import is additive and

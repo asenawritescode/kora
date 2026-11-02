@@ -133,7 +133,12 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		handle.Release()
 		return packageRecoveryRequired("module ownership snapshot read needs recovery"), nil
 	}
-	candidatePackages := append(append([]contract.InstalledPackage(nil), moduleSnapshot.Packages...), packageConstraint)
+	candidatePackages, packageMergeErr := mergeManagementPackageConstraints(moduleSnapshot.Packages, packageConstraint)
+	if packageMergeErr != nil {
+		releaseTenantWork()
+		handle.Release()
+		return failed(contract.CodeConflict, "verified package release differs from the installed tenant composition"), nil
+	}
 	if err := contract.ValidateInstalledPackages(candidatePackages); err != nil {
 		releaseTenantWork()
 		handle.Release()
