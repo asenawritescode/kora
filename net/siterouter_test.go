@@ -13,6 +13,7 @@ import (
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/script"
 	"github.com/gin-gonic/gin"
 
@@ -918,6 +919,49 @@ func TestReplaceSiteDrainsRequestsAgainstRetiredRuntime(t *testing.T) {
 	request.Release()
 	if err := old.WaitForRequests(context.Background()); err != nil {
 		t.Fatalf("WaitForRequests after release: %v", err)
+	}
+}
+
+func TestReplaceSiteKeepsProviderBindingPinnedToAdmittedGeneration(t *testing.T) {
+	tenant := contract.TenantID("site-provider-generation")
+	scope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
+	key := plugin.BindingKey{Scope: scope, ConsumerModuleID: "sales.orders", CapabilityName: "billing.issue"}
+	plan := func(providerID string, revision uint64) plugin.BindingPlan {
+		return plugin.BindingPlan{Revision: revision, Bindings: []plugin.ResolvedBinding{{
+			Key: key, ProviderID: providerID, Revision: revision,
+		}}}
+	}
+	oldPlan := plan("billing-a", 7)
+	oldServices := tenantruntime.Services{ModuleBindings: &oldPlan}
+	old := &LoadedSite{SiteID: string(tenant), ConfigRevision: 1, Status: "active", Name: "provider.example", Config: SiteRouterConfig{Hostname: "provider.example"}, RuntimeServices: &oldServices}
+	router := NewSiteRouter([]*LoadedSite{old})
+	request, acquired := old.AcquireRuntime()
+	if !acquired {
+		t.Fatal("failed to acquire request on provider generation 7")
+	}
+	defer request.Release()
+	requestSnapshot := request.Snapshot()
+
+	newPlan := plan("billing-b", 8)
+	newServices := tenantruntime.Services{ModuleBindings: &newPlan}
+	replacement := &LoadedSite{SiteID: string(tenant), ConfigRevision: 2, Status: "active", Name: old.Name, Config: SiteRouterConfig{Hostname: old.Name}, RuntimeServices: &newServices}
+	retired, err := router.ReplaceSite(replacement)
+	if err != nil || retired != old {
+		t.Fatalf("replace provider generation = retired %p, err %v", retired, err)
+	}
+
+	oldBinding, ok := requestSnapshot.Services.ModuleBindings.Resolve(key)
+	if !ok || oldBinding.ProviderID != "billing-a" || oldBinding.Revision != 7 || requestSnapshot.Generation != old.EnsureRuntimeGeneration() {
+		t.Fatalf("admitted request lost its pinned provider plan: snapshot generation=%d binding=%+v found=%t", requestSnapshot.Generation, oldBinding, ok)
+	}
+	newRequest, ok := replacement.AcquireRuntime()
+	if !ok {
+		t.Fatal("replacement rejected a request in generation 8")
+	}
+	defer newRequest.Release()
+	newBinding, found := newRequest.Snapshot().Services.ModuleBindings.Resolve(key)
+	if !found || newBinding.ProviderID != "billing-b" || newBinding.Revision != 8 || newRequest.Snapshot().Generation == requestSnapshot.Generation {
+		t.Fatalf("new request did not receive replacement provider plan: snapshot generation=%d binding=%+v found=%t", newRequest.Snapshot().Generation, newBinding, found)
 	}
 }
 
