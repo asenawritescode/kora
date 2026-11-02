@@ -92,3 +92,12 @@ func TestBusinessRunWaiverRequiresAuthorizationAndAuditsAtomically(t *testing.T)
 		t.Fatal(err)
 	}
 }
+
+func TestBusinessRepairIdempotencyIdentityIsStableAndFindingScoped(t *testing.T) {
+	a := businessRepairIdempotencyKey("tenant-a", "run-1", "finding-1")
+	b := businessRepairIdempotencyKey("tenant-a", "run-1", "finding-1")
+	c := businessRepairIdempotencyKey("tenant-a", "run-1", "finding-2")
+	if a == "" || a != b || a == c {
+		t.Fatalf("repair idempotency identity: %q %q %q", a, b, c)
+	}
+}
