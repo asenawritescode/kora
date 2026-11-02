@@ -29,15 +29,39 @@ type BindingKey struct {
 	CapabilityName   contract.CapabilityName
 }
 type ProviderRegistration struct {
-	TenantID       contract.TenantID
-	Scope          contract.BusinessScope
-	ProviderID     string
-	OwnerModuleID  contract.ModuleID
-	Kind           ProviderKind
-	Offers         []contract.CapabilityOffer
-	Factories      map[contract.CapabilityName]ProviderFactory
-	Queries        map[string]PublishedQueryExecutor
-	ValidateSchema func(contract.SchemaRef, []byte) error
+	TenantID                    contract.TenantID
+	Scope                       contract.BusinessScope
+	ProviderID                  string
+	OwnerModuleID               contract.ModuleID
+	Kind                        ProviderKind
+	Offers                      []contract.CapabilityOffer
+	Factories                   map[contract.CapabilityName]ProviderFactory
+	Queries                     map[string]PublishedQueryExecutor
+	BusinessReconciliationRules []BusinessReconciliationRule
+	ValidateSchema              func(contract.SchemaRef, []byte) error
+}
+
+// BusinessReconciliationRule is registered with its owning module provider.
+// Source and target data still flow through the declared published-query
+// contracts in the resolved binding plan.
+type BusinessReconciliationRule struct {
+	OwnerModuleID            contract.ModuleID
+	ID                       string
+	Version                  uint32
+	SourceQueryOwnerModuleID contract.ModuleID
+	SourceQueryName          string
+	SourceQueryInput         json.RawMessage
+	SourcePageLimit          uint16
+	TargetQueryOwnerModuleID contract.ModuleID
+	TargetQueryName          string
+	TargetQueryInput         json.RawMessage
+	TargetPageLimit          uint16
+	GracePeriod              time.Duration
+	MaxRows                  int
+	RepairCallerModuleID     contract.ModuleID
+	RepairCapability         contract.CapabilityName
+	RepairOperation          string
+	RepairLeaseID            string
 }
 type ProviderSelection struct {
 	Key        BindingKey
@@ -131,18 +155,20 @@ type BindingDiagnostic struct {
 	Code string
 }
 type BindingPlan struct {
-	Revision         uint64
-	Composition      contract.CompositionPlan
-	Packages         []contract.InstalledPackage
-	Extensions       []contract.ResolvedModuleExtension
-	Bindings         []ResolvedBinding
-	Queries          map[PublishedQueryKey]ResolvedPublishedQuery
-	QueryDefinitions map[PublishedQueryKey]contract.PublishedQuery
-	Projections      map[PublishedProjectionKey]contract.ProjectionDefinition
-	ProjectionScopes map[PublishedProjectionKey]contract.ResourceScopeKind
-	Blockers         []BindingDiagnostic
-	Warnings         []BindingDiagnostic
-	LeaseAdmission   CapabilityLeaseAdmission
+	Revision                    uint64
+	Composition                 contract.CompositionPlan
+	Packages                    []contract.InstalledPackage
+	Extensions                  []contract.ResolvedModuleExtension
+	Bindings                    []ResolvedBinding
+	Queries                     map[PublishedQueryKey]ResolvedPublishedQuery
+	QueryDefinitions            map[PublishedQueryKey]contract.PublishedQuery
+	BusinessReconciliationRules []BusinessReconciliationRule
+	Projections                 map[PublishedProjectionKey]contract.ProjectionDefinition
+	ProjectionScopes            map[PublishedProjectionKey]contract.ResourceScopeKind
+	Blockers                    []BindingDiagnostic
+	Warnings                    []BindingDiagnostic
+	LeaseAdmission              CapabilityLeaseAdmission
+	LeaseReader                 CapabilityLeaseReader
 }
 
 // CapabilityLeaseAdmission is the tenant module store's durable pre-effect
@@ -811,6 +837,47 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 			plan.ProjectionScopes[projectionKey] = projection.ScopePolicy
 		}
 	}
+	reconciliationRuleIDs := make(map[string]bool)
+	for _, provider := range providers {
+		if provider.TenantID != scope.TenantID {
+			continue
+		}
+		for _, rule := range provider.BusinessReconciliationRules {
+			if rule.OwnerModuleID == "" {
+				rule.OwnerModuleID = provider.OwnerModuleID
+			}
+			key := string(rule.OwnerModuleID) + "/" + rule.ID
+			if rule.OwnerModuleID != provider.OwnerModuleID || installedModules[rule.OwnerModuleID].ID == "" || !validReconciliationRegistrationName(rule.ID) || rule.Version == 0 || rule.GracePeriod < 0 || rule.MaxRows < 1 || rule.MaxRows > 10000 || rule.RepairCallerModuleID == "" || rule.RepairCapability == "" || !validReconciliationRegistrationName(rule.RepairOperation) || rule.RepairLeaseID == "" || len(rule.RepairLeaseID) > 160 || reconciliationRuleIDs[key] {
+				return plan, fmt.Errorf("provider %q has an invalid or duplicate owner reconciliation rule", provider.ProviderID)
+			}
+			if !validBusinessQueryRegistration(rule.SourceQueryOwnerModuleID, rule.SourceQueryName, rule.SourceQueryInput, rule.SourcePageLimit) || !validBusinessQueryRegistration(rule.TargetQueryOwnerModuleID, rule.TargetQueryName, rule.TargetQueryInput, rule.TargetPageLimit) {
+				return plan, fmt.Errorf("owner reconciliation rule %s has invalid published-query references", key)
+			}
+			callerModule := installedModules[rule.RepairCallerModuleID]
+			requiresRepairCapability := false
+			for _, requirement := range callerModule.Requires {
+				if requirement.Name == rule.RepairCapability && requirement.Required {
+					requiresRepairCapability = true
+				}
+			}
+			if !requiresRepairCapability {
+				return plan, fmt.Errorf("owner reconciliation rule %s repair command must use a declared mandatory module capability", key)
+			}
+			source, sourceOK := plan.QueryDefinitions[PublishedQueryKey{Scope: scope, OwnerModuleID: rule.SourceQueryOwnerModuleID, Name: rule.SourceQueryName}]
+			target, targetOK := plan.QueryDefinitions[PublishedQueryKey{Scope: scope, OwnerModuleID: rule.TargetQueryOwnerModuleID, Name: rule.TargetQueryName}]
+			if !sourceOK || !targetOK || rule.SourcePageLimit > source.PageLimit || rule.TargetPageLimit > target.PageLimit || !queryAllowsBusinessFields(source, true) || !queryAllowsBusinessFields(target, false) {
+				return plan, fmt.Errorf("owner reconciliation rule %s references unavailable queries or incomplete business fields", key)
+			}
+			reconciliationRuleIDs[key] = true
+			plan.BusinessReconciliationRules = append(plan.BusinessReconciliationRules, rule)
+		}
+	}
+	sort.Slice(plan.BusinessReconciliationRules, func(i, j int) bool {
+		if plan.BusinessReconciliationRules[i].OwnerModuleID != plan.BusinessReconciliationRules[j].OwnerModuleID {
+			return plan.BusinessReconciliationRules[i].OwnerModuleID < plan.BusinessReconciliationRules[j].OwnerModuleID
+		}
+		return plan.BusinessReconciliationRules[i].ID < plan.BusinessReconciliationRules[j].ID
+	})
 	orderedProviders := append([]ProviderRegistration(nil), providers...)
 	sort.Slice(orderedProviders, func(i, j int) bool { return orderedProviders[i].ProviderID < orderedProviders[j].ProviderID })
 	for _, module := range modules {
@@ -886,6 +953,21 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 			plan.Bindings = append(plan.Bindings, ResolvedBinding{Key: key, ProviderID: chosen.ProviderID, OwnerModuleID: chosen.OwnerModuleID, Kind: chosen.Kind, Contract: offer.Contract, Operations: append([]contract.OperationSpec(nil), offer.Operations...), Revision: revision, Factory: factory, validateSchema: chosen.ValidateSchema})
 		}
 	}
+	for _, rule := range plan.BusinessReconciliationRules {
+		binding, ok := plan.Resolve(BindingKey{Scope: scope, ConsumerModuleID: rule.RepairCallerModuleID, CapabilityName: rule.RepairCapability})
+		if !ok {
+			continue // The existing capability resolver already reports a blocker.
+		}
+		operationFound := false
+		for _, operation := range binding.Operations {
+			if operation.Name == rule.RepairOperation && (operation.Effect == contract.EffectLocal || operation.Effect == contract.EffectExternal) {
+				operationFound = true
+			}
+		}
+		if !operationFound {
+			return plan, fmt.Errorf("owner reconciliation rule %s repair operation is not a declared command", string(rule.OwnerModuleID)+"/"+rule.ID)
+		}
+	}
 	if len(plan.Blockers) == 0 {
 		compositionProviders := make([]contract.ProviderRegistration, 0, len(providers))
 		for _, provider := range providers {
@@ -921,6 +1003,41 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 		return plan.Warnings[i].Key.ConsumerModuleID < plan.Warnings[j].Key.ConsumerModuleID
 	})
 	return plan, nil
+}
+
+func validReconciliationRegistrationName(value string) bool {
+	if len(value) == 0 || len(value) > 128 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for _, char := range value[1:] {
+		if !(char == '_' || char == '-' || char == '.' || char >= 'a' && char <= 'z' || char >= '0' && char <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func validBusinessQueryRegistration(owner contract.ModuleID, name string, input json.RawMessage, pageLimit uint16) bool {
+	return owner != "" && validReconciliationRegistrationName(name) && len(input) > 0 && len(input) <= 65536 && json.Valid(input) && pageLimit > 0 && pageLimit <= 1000
+}
+
+func queryAllowsBusinessFields(query contract.PublishedQuery, source bool) bool {
+	fields := make(map[string]bool, len(query.AllowedFields))
+	for _, field := range query.AllowedFields {
+		fields[field] = true
+	}
+	required := []string{"key", "entity_id", "amount", "currency", "occurred_at"}
+	if source {
+		required = append(required, "source_ref")
+	} else {
+		required = append(required, "target_ref")
+	}
+	for _, field := range required {
+		if !fields[field] {
+			return false
+		}
+	}
+	return true
 }
 
 func moduleDeclaresOffer(module contract.ModuleDescriptor, offer contract.CapabilityOffer) bool {

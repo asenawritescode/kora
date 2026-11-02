@@ -120,6 +120,43 @@ func TestResolvedPlanExportsUniquePublishedQueryProviderSelection(t *testing.T) 
 	}
 }
 
+func TestResolveModulesIncludesOwnerRegisteredBusinessReconciliationRules(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	input, output := contract.SchemaRef{ID: "recon.input", Version: 1}, contract.SchemaRef{ID: "recon.output", Version: 1}
+	queryModule := func(id, queryName, capability string, fields []string) (contract.ModuleDescriptor, ProviderRegistration) {
+		operation := contract.OperationSpec{Name: "list", Effect: contract.EffectQuery, Input: input, Output: output}
+		offer := contract.CapabilityOffer{Name: contract.CapabilityName(capability), Contract: output, Operations: []contract.OperationSpec{operation}}
+		query := contract.PublishedQuery{OwnerModuleID: contract.ModuleID(id), Name: queryName, Capability: offer.Name, Operation: operation.Name, InputSchema: input, OutputSchema: output, ScopePolicy: contract.ScopeTenantShared, AllowedFields: fields, PageLimit: 20}
+		module := contract.ModuleDescriptor{ID: contract.ModuleID(id), Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}, Queries: []contract.PublishedQuery{query}}
+		provider := ProviderRegistration{TenantID: scope.TenantID, ProviderID: id + "-provider", OwnerModuleID: module.ID, Kind: ProviderInternal, Offers: []contract.CapabilityOffer{offer}, Queries: map[string]PublishedQueryExecutor{queryName: testPublishedQueryExecutor{}}, ValidateSchema: func(contract.SchemaRef, []byte) error { return nil }}
+		return module, provider
+	}
+	source, sourceProvider := queryModule("sales.orders", "billable", "sales.reconcile", []string{"key", "source_ref", "entity_id", "amount", "currency", "occurred_at"})
+	target, targetProvider := queryModule("accounts.receivable", "invoices", "ar.reconcile", []string{"key", "target_ref", "entity_id", "amount", "currency", "occurred_at"})
+	repairOffer := contract.CapabilityOffer{Name: "ar.repair", Contract: output, Operations: []contract.OperationSpec{{Name: "issue", Input: input, Output: output, Effect: contract.EffectLocal}}}
+	target.Provides = append(target.Provides, repairOffer)
+	targetProvider.Offers = append(targetProvider.Offers, repairOffer)
+	targetProvider.Factories = map[contract.CapabilityName]ProviderFactory{"ar.repair": NewStaticFactory("ar.repair", nil)}
+	owner := contract.ModuleDescriptor{ID: "finance.reconciliation", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: "ar.repair", Contract: output, Required: true}}}
+	ownerProvider := ProviderRegistration{TenantID: scope.TenantID, ProviderID: "recon-owner", OwnerModuleID: owner.ID, Kind: ProviderInternal, BusinessReconciliationRules: []BusinessReconciliationRule{{
+		OwnerModuleID: owner.ID, ID: "sales-ar", Version: 1,
+		SourceQueryOwnerModuleID: source.ID, SourceQueryName: "billable", SourceQueryInput: json.RawMessage(`{}`), SourcePageLimit: 10,
+		TargetQueryOwnerModuleID: target.ID, TargetQueryName: "invoices", TargetQueryInput: json.RawMessage(`{}`), TargetPageLimit: 10,
+		MaxRows: 100, RepairCallerModuleID: owner.ID, RepairCapability: "ar.repair", RepairOperation: "issue", RepairLeaseID: "lease-repair",
+	}}}
+	plan, err := ResolveModules(scope, []contract.ModuleDescriptor{source, target, owner}, []ProviderRegistration{targetProvider, ownerProvider, sourceProvider}, nil, 4)
+	if err != nil {
+		t.Fatal("resolve owner reconciliation rule:", err)
+	}
+	if len(plan.BusinessReconciliationRules) != 1 || plan.BusinessReconciliationRules[0].OwnerModuleID != owner.ID || plan.BusinessReconciliationRules[0].TargetQueryName != "invoices" {
+		t.Fatalf("owner reconciliation rules in plan = %+v", plan.BusinessReconciliationRules)
+	}
+	ownerProvider.BusinessReconciliationRules[0].SourceQueryName = "private_rows"
+	if _, err := ResolveModules(scope, []contract.ModuleDescriptor{source, target, owner}, []ProviderRegistration{sourceProvider, targetProvider, ownerProvider}, nil, 4); err == nil {
+		t.Fatal("reconciliation rule referencing an unpublished query was accepted")
+	}
+}
+
 func TestResolveModulesCanShareProviderRegistrationsAcrossGenerations(t *testing.T) {
 	schema := contract.SchemaRef{ID: "billing.invoice", Version: 1}
 	consumer := contract.ModuleDescriptor{ID: "sales.order", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: "billing.issue", Contract: schema, Required: true}}}

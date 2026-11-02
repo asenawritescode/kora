@@ -961,6 +961,10 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 	}
 	apiGroup.POST("/modules/:module/queries/:query", handler.HandlePublishedModuleQuery)
 	apiGroup.GET("/modules/reconciliation/findings", handler.HandleBusinessReconciliationSummary)
+	apiGroup.POST("/modules/reconciliation/runs", handler.HandleBusinessReconciliationRun)
+	apiGroup.GET("/modules/reconciliation/runs/:owner/:rule/:run", handler.HandleBusinessReconciliationRead)
+	apiGroup.POST("/modules/reconciliation/runs/:owner/:rule/:run/waive", handler.HandleBusinessReconciliationWaive)
+	apiGroup.POST("/modules/reconciliation/runs/:owner/:rule/:run/repair", handler.HandleBusinessReconciliationRepair)
 	apiGroup.GET("/modules/:module/projections/:projection", handler.HandlePublishedModuleProjection)
 	apiGroup.POST("/modules/:module/projections/:projection/rebuild", handler.HandleRebuildPublishedModuleProjection)
 

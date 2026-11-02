@@ -205,6 +205,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return plan, err
 		}
 		plan.LeaseAdmission = moduleStore
+		plan.LeaseReader = moduleStore
 		return plan, nil
 	}
 	resolveCandidateModuleBindings := func(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, extra []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
@@ -225,6 +226,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return plan, err
 		}
 		plan.LeaseAdmission = moduleStore
+		plan.LeaseReader = moduleStore
 		return plan, nil
 	}
 	tenantScope := contract.BusinessScope{TenantID: contract.TenantID(loaded.SiteID), Kind: contract.ScopeKindTenant}
