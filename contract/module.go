@@ -88,6 +88,7 @@ type ResourceOwnership struct {
 type ModuleSnapshot struct {
 	TenantID      TenantID             `json:"tenant_id"`
 	Revision      uint64               `json:"revision"`
+	Modules       []ModuleDescriptor   `json:"modules,omitempty"`
 	Installations []ModuleInstallation `json:"installations"`
 	Ownership     []ResourceOwnership  `json:"ownership"`
 }

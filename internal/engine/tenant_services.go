@@ -25,6 +25,7 @@ import (
 	knet "github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/requests"
 	requestsql "github.com/asenawritescode/kora/requests/sqlstore"
 	"github.com/asenawritescode/kora/scheduler"
@@ -60,6 +61,7 @@ type TenantServiceConfig struct {
 	Workflow                *WorkflowTenantConfig
 	RequestAuthorizer       RequestAuthorizerFactory
 	WorkflowApprovals       map[string]process.WorkflowApproval
+	ModuleProviders         func(site.DBSiteInfo, *sql.DB) ([]plugin.ProviderRegistration, []plugin.ProviderSelection, error)
 	SchedulerHandlerFactory ScheduledJobHandlerFactory
 	Mailer                  *email.Sender
 	ResolveStorage          func(*site.SiteConfig) (storage.Backend, error)
@@ -135,6 +137,26 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("resolve storage: %w", err)
 	}
 	services.Storage = backend
+	moduleSnapshot, moduleErr := configstore.NewModuleStore(loaded.DB, dialect).Load(contract.TenantID(loaded.SiteID))
+	if moduleErr != nil {
+		return fmt.Errorf("load module ownership snapshot for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	var providers []plugin.ProviderRegistration
+	var selections []plugin.ProviderSelection
+	if config.ModuleProviders != nil {
+		providers, selections, moduleErr = config.ModuleProviders(info, loaded.DB)
+		if moduleErr != nil {
+			return fmt.Errorf("load module providers for tenant %s: %w", loaded.Name, moduleErr)
+		}
+	}
+	bindingPlan, moduleErr := plugin.ResolveModules(contract.TenantID(loaded.SiteID), "tenant", moduleSnapshot.Modules, providers, selections, moduleSnapshot.Revision)
+	if moduleErr != nil {
+		return fmt.Errorf("resolve module providers for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	if len(bindingPlan.Blockers) > 0 {
+		return fmt.Errorf("tenant %s has %d required module provider blockers", loaded.Name, len(bindingPlan.Blockers))
+	}
+	services.ModuleBindings = &bindingPlan
 	workAdmission, err := site.ConnectionAdmission(cfg)
 	if err != nil {
 		return fmt.Errorf("resolve tenant work admission: %w", err)

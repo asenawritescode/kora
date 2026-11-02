@@ -872,6 +872,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 	var reports []json.RawMessage
 	var minKoraVersion string
 	var scheduledJobs []contract.ScheduledJobDefinition
+	var modules []contract.ModuleDescriptor
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("loading active config snapshot metadata: %w", err)
 	}
@@ -883,6 +884,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 		reports = append([]json.RawMessage(nil), activeSnapshot.Reports...)
 		minKoraVersion = activeSnapshot.MinKoraVersion
 		scheduledJobs = append([]contract.ScheduledJobDefinition(nil), activeSnapshot.ScheduledJobs...)
+		modules = append([]contract.ModuleDescriptor(nil), activeSnapshot.Modules...)
 	}
 	return &doctype.ConfigSnapshot{
 		DocTypes:         doctypes,
@@ -894,6 +896,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 		Reports:          reports,
 		MinKoraVersion:   minKoraVersion,
 		ScheduledJobs:    scheduledJobs,
+		Modules:          modules,
 	}, nil
 }
 
@@ -1129,7 +1132,8 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 		if existing.Revision != commit.ModuleSnapshotRevision {
 			return "", 0, fmt.Errorf("module snapshot revision conflict: expected %d, actual %d", commit.ModuleSnapshotRevision, existing.Revision)
 		}
-		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: replaceModuleOwnership(existing.Ownership, tenantID, snapshot.Modules)}
+		allModules := mergeInstalledDescriptors(existing.Modules, snapshot.Modules)
+		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Modules: allModules, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: replaceModuleOwnership(existing.Ownership, tenantID, snapshot.Modules)}
 		if err := validateModuleSnapshot(moduleSnapshot); err != nil {
 			return "", 0, err
 		}

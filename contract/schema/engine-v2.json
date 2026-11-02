@@ -1296,6 +1296,74 @@
       ],
       "type": "object"
     },
+    "ModuleInstallation": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_digest": {
+          "type": "string"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_digest",
+        "module_id",
+        "revision",
+        "state",
+        "tenant_id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ModuleSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "installations": {
+          "items": {
+            "$ref": "#/$defs/ModuleInstallation"
+          },
+          "type": "array"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
+        "ownership": {
+          "items": {
+            "$ref": "#/$defs/ResourceOwnership"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "installations",
+        "ownership",
+        "revision",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
     "OperationSpec": {
       "additionalProperties": false,
       "properties": {
@@ -2045,6 +2113,26 @@
         "status",
         "title",
         "updated_at"
+      ],
+      "type": "object"
+    },
+    "ResourceOwnership": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "resource",
+        "tenant_id"
       ],
       "type": "object"
     },
@@ -4133,6 +4221,74 @@
       ],
       "type": "object"
     },
+    "ModuleInstallation": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_digest": {
+          "type": "string"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_digest",
+        "module_id",
+        "revision",
+        "state",
+        "tenant_id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ModuleSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "installations": {
+          "items": {
+            "$ref": "#/$defs/ModuleInstallation"
+          },
+          "type": "array"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
+        "ownership": {
+          "items": {
+            "$ref": "#/$defs/ResourceOwnership"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "installations",
+        "ownership",
+        "revision",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
     "OperationSpec": {
       "additionalProperties": false,
       "properties": {
@@ -4882,6 +5038,26 @@
         "status",
         "title",
         "updated_at"
+      ],
+      "type": "object"
+    },
+    "ResourceOwnership": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "resource",
+        "tenant_id"
       ],
       "type": "object"
     },

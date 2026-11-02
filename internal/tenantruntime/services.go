@@ -11,6 +11,7 @@ import (
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/natsprovider"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/requests"
 	"github.com/asenawritescode/kora/scheduler"
@@ -24,6 +25,7 @@ import (
 // Services is the immutable service snapshot owned by a single tenant runtime.
 // Constructors and lifecycle ownership stay in Engine composition.
 type Services struct {
+	ModuleBindings    *plugin.BindingPlan
 	WorkAdmission     *dbaccess.Admission
 	RealtimeAdmission interface {
 		Acquire(context.Context) (func(), error)

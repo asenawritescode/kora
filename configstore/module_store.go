@@ -26,6 +26,22 @@ func replaceModuleInstallations(existing []contract.ModuleInstallation, tenant c
 	return out
 }
 
+func mergeInstalledDescriptors(existing, incoming []contract.ModuleDescriptor) []contract.ModuleDescriptor {
+	byID := make(map[contract.ModuleID]contract.ModuleDescriptor, len(existing)+len(incoming))
+	for _, m := range existing {
+		byID[m.ID] = m
+	}
+	for _, m := range incoming {
+		byID[m.ID] = m
+	}
+	out := make([]contract.ModuleDescriptor, 0, len(byID))
+	for _, m := range byID {
+		out = append(out, m)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 func replaceModuleOwnership(existing []contract.ResourceOwnership, tenant contract.TenantID, modules []contract.ModuleDescriptor) []contract.ResourceOwnership {
 	byResource := make(map[string]contract.ResourceOwnership, len(existing))
 	moduleIDs := make(map[contract.ModuleID]bool, len(modules))
@@ -67,6 +83,14 @@ func replaceModuleOwnership(existing []contract.ResourceOwnership, tenant contra
 type ModuleStore struct {
 	DB      *sql.DB
 	Dialect db.QueryDialect
+}
+
+func (s *ModuleStore) LoadDescriptors(tenant contract.TenantID) ([]contract.ModuleDescriptor, uint64, error) {
+	snapshot, err := s.Load(tenant)
+	if err != nil {
+		return nil, 0, err
+	}
+	return append([]contract.ModuleDescriptor(nil), snapshot.Modules...), snapshot.Revision, nil
 }
 
 func NewModuleStore(database *sql.DB, dialect db.QueryDialect) *ModuleStore {
@@ -189,6 +213,18 @@ func validateModuleSnapshot(snapshot contract.ModuleSnapshot) error {
 			return fmt.Errorf("duplicate installed module %q", installation.ModuleID)
 		}
 		modules[installation.ModuleID] = true
+	}
+	if err := contract.ValidateModuleSet(snapshot.Modules, nil); err != nil {
+		return err
+	}
+	installed := make(map[contract.ModuleID]bool, len(snapshot.Installations))
+	for _, installation := range snapshot.Installations {
+		installed[installation.ModuleID] = true
+	}
+	for _, module := range snapshot.Modules {
+		if !installed[module.ID] {
+			return fmt.Errorf("module descriptor %q has no installation", module.ID)
+		}
 	}
 	owners := map[string]contract.ModuleID{}
 	for _, owner := range snapshot.Ownership {

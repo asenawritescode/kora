@@ -58,6 +58,9 @@ type ConfigSnapshot struct {
 	MinKoraVersion      string                            `json:"min_kora_version,omitempty"`
 }
 
+// ModuleDescriptors returns a defensive copy of installed module contracts.
+func (s ConfigSnapshot) ModuleDescriptors() []contract.ModuleDescriptor { return append([]contract.ModuleDescriptor(nil), s.Modules...) }
+
 // ParseSnapshot parses a config snapshot from stored JSON, handling both:
 //   - Old format: [...] (JSON array of doctypes only)
 //   - New format: {"doctypes":[...], "roles":[...], ...}
