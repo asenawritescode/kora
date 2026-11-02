@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,9 +23,11 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/tenantruntime"
 	"github.com/asenawritescode/kora/management"
 	"github.com/asenawritescode/kora/management/sqlstore"
 	knet "github.com/asenawritescode/kora/net"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/site"
 	"github.com/go-sql-driver/mysql"
@@ -111,6 +114,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				Engine: contract.ManifestEngine{MinVersion: "1.0.0"},
 				Modules: []contract.ModuleDescriptor{{
 					ID: "inventory.stock", Version: "1.0.0",
+					Requires: []contract.CapabilityRequirement{{Name: "warehouse.lookup", Contract: contract.SchemaRef{ID: "warehouse.stock", Version: 1}, Required: false}},
 					Resources: []contract.OwnedResource{{
 						Ref:    contract.ResourceRef{Namespace: "tenant", Name: "Stock", Version: 1},
 						Access: contract.ModulePrivate, MutationMode: contract.MutationCRUD,
@@ -137,6 +141,11 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				Tenant: tenant, ArtifactRef: manifest.ReleaseID, Digest: digest,
 				ExpectedConfigRevision: contract.Revision(fmt.Sprint(initialRevision)),
 			}
+			providerSelection := contract.ProviderSelection{Key: contract.BindingKey{
+				Scope:            contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant},
+				ConsumerModuleID: "inventory.stock", CapabilityName: "warehouse.lookup",
+			}, ProviderID: "external-warehouse"}
+			command.ProviderSelections = []contract.ProviderSelection{providerSelection}
 			artifactServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet || r.URL.Path != "/internal/engine/marketplace/releases/"+command.ArtifactRef || r.URL.Query().Get("digest") != digest {
 					http.NotFound(w, r)
@@ -192,10 +201,27 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 			if err := schema.ApplySnapshotActivationDDL(ctx, database, dialect, plannedDDL[:1]); err != nil {
 				t.Fatal("apply DDL prefix before simulated crash:", err)
 			}
+			providerAvailable := true
+			candidatePreflights := 0
 			runtime := &knet.LoadedSite{
 				SiteID: info.SiteID, Name: info.Name, Status: "active", DBType: test.driver,
 				DB: database, Registry: doctype.NewRegistry(), ConfigRevision: initialRevision,
 				Config: knet.SiteRouterConfig{Hostname: info.Name, Domains: []string{info.Name}},
+				RuntimeServices: &tenantruntime.Services{ResolveCandidateModuleBindings: func(scope contract.BusinessScope, modules []contract.ModuleDescriptor, selections []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
+					candidatePreflights++
+					if !providerAvailable {
+						return plugin.BindingPlan{}, errors.New("external warehouse is offline")
+					}
+					pluginSelections := make([]plugin.ProviderSelection, 0, len(selections))
+					for _, selection := range selections {
+						pluginSelections = append(pluginSelections, plugin.ProviderSelection{Key: plugin.BindingKey{Scope: selection.Key.Scope, ConsumerModuleID: selection.Key.ConsumerModuleID, CapabilityName: selection.Key.CapabilityName}, ProviderID: selection.ProviderID})
+					}
+					return plugin.ResolveModules(scope, modules, []plugin.ProviderRegistration{{
+						TenantID: tenant, ProviderID: "external-warehouse", OwnerModuleID: "warehouse.external", Kind: plugin.ProviderExternal,
+						Offers:    []contract.CapabilityOffer{{Name: "warehouse.lookup", Contract: contract.SchemaRef{ID: "warehouse.stock", Version: 1}}},
+						Factories: map[contract.CapabilityName]plugin.ProviderFactory{"warehouse.lookup": plugin.NewStaticFactory("warehouse.lookup", nil)},
+					}}, pluginSelections, revision)
+				}},
 			}
 			router := knet.NewSiteRouter([]*knet.LoadedSite{runtime})
 			coordinator := &packageExecutorCoordinator{replaceFailures: 1}
@@ -258,6 +284,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 			if uncertain.Error == nil {
 				t.Fatal("package runtime replacement failure was not reported as recoverable")
 			}
+			providerAvailable = false
 			if revision, err := configstore.CurrentConfigRevision(ctx, database, dialect); err != nil || revision != initialRevision+1 {
 				t.Fatalf("committed tenant config revision after runtime outage = %d, %v; want %d", revision, err, initialRevision+1)
 			}
@@ -295,6 +322,9 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 			if coordinator.replaces != 2 {
 				t.Fatalf("runtime replacements = %d, want failed attempt plus recovered attempt", coordinator.replaces)
 			}
+			if candidatePreflights != 1 {
+				t.Fatalf("candidate binding preflights = %d, want one before commit; committed recovery must not depend on current provider health", candidatePreflights)
+			}
 			if revision, err := configstore.CurrentConfigRevision(ctx, database, dialect); err != nil || revision != initialRevision+1 {
 				t.Fatalf("tenant config revision after recovery = %d, %v; want one committed revision %d", revision, err, initialRevision+1)
 			}
@@ -324,12 +354,16 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				t.Fatalf("recovered module snapshot = %+v; want active inventory module, digest, and Stock ownership", modules)
 			}
 			moduleStore := configstore.NewModuleStore(database, dialect)
+			if len(modules.ProviderSelections) != 1 || modules.ProviderSelections[0].ProviderID != "external-warehouse" {
+				t.Fatalf("package activation did not persist selected external provider: %+v", modules.ProviderSelections)
+			}
+			pinned := modules
 			start := make(chan struct{})
 			results := make(chan error, 2)
 			var writers sync.WaitGroup
 			for _, candidateDigest := range []string{"concurrent-digest-a", "concurrent-digest-b"} {
-				candidate := modules
-				candidate.Installations = append([]contract.ModuleInstallation(nil), modules.Installations...)
+				candidate := pinned
+				candidate.Installations = append([]contract.ModuleInstallation(nil), pinned.Installations...)
 				candidate.Installations[0].ArtifactDigest = candidateDigest
 				writers.Add(1)
 				go func(candidate contract.ModuleSnapshot) {
@@ -340,7 +374,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 						return
 					}
 					<-start
-					if _, commitErr := moduleStore.CommitActivation(tx, modules.Revision, candidate); commitErr != nil {
+					if _, commitErr := moduleStore.CommitActivation(ctx, tx, pinned.Revision, candidate); commitErr != nil {
 						_ = tx.Rollback()
 						results <- commitErr
 						return
@@ -361,8 +395,8 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				t.Fatalf("concurrent module snapshot writers committed %d times; want one", wins)
 			}
 			concurrent, err := moduleStore.Load(contract.TenantID(info.SiteID))
-			if err != nil || concurrent.Revision != 2 || (concurrent.Installations[0].ArtifactDigest != "concurrent-digest-a" && concurrent.Installations[0].ArtifactDigest != "concurrent-digest-b") {
-				t.Fatalf("module snapshot after concurrent activation = %+v, %v; want revision 2 and one winning digest", concurrent, err)
+			if err != nil || concurrent.Revision != pinned.Revision+1 || len(concurrent.ProviderSelections) != 1 || concurrent.ProviderSelections[0].ProviderID != "external-warehouse" || (concurrent.Installations[0].ArtifactDigest != "concurrent-digest-a" && concurrent.Installations[0].ArtifactDigest != "concurrent-digest-b") {
+				t.Fatalf("module snapshot after concurrent activation = %+v, %v; want revision %d, pinned provider, and one winning digest", concurrent, err, pinned.Revision+1)
 			}
 		})
 	}

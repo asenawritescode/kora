@@ -73,6 +73,55 @@ func (p BindingPlan) Resolve(key BindingKey) (ResolvedBinding, bool) {
 	return ResolvedBinding{}, false
 }
 
+// ProviderSelections returns the immutable provider choices represented by a
+// resolved plan in deterministic key order.
+func (p BindingPlan) ProviderSelections() ([]contract.ProviderSelection, error) {
+	byKey := make(map[contract.BindingKey]string, len(p.Bindings)+len(p.Queries))
+	add := func(key contract.BindingKey, providerID string) error {
+		if providerID == "" {
+			return fmt.Errorf("resolved provider selection has no provider identity")
+		}
+		if existing, ok := byKey[key]; ok && existing != providerID {
+			return fmt.Errorf("capability %q resolved to conflicting providers", key.CapabilityName)
+		}
+		byKey[key] = providerID
+		return nil
+	}
+	for _, binding := range p.Bindings {
+		key := contract.BindingKey{Scope: binding.Key.Scope, ConsumerModuleID: binding.Key.ConsumerModuleID, CapabilityName: binding.Key.CapabilityName}
+		if err := add(key, binding.ProviderID); err != nil {
+			return nil, err
+		}
+	}
+	for key, query := range p.Queries {
+		selectionKey := contract.BindingKey{Scope: key.Scope, ConsumerModuleID: key.OwnerModuleID, CapabilityName: query.Definition.Capability}
+		if err := add(selectionKey, query.ProviderID); err != nil {
+			return nil, err
+		}
+	}
+	selections := make([]contract.ProviderSelection, 0, len(byKey))
+	for key, providerID := range byKey {
+		selections = append(selections, contract.ProviderSelection{Key: key, ProviderID: providerID})
+	}
+	sort.Slice(selections, func(i, j int) bool {
+		a, b := selections[i].Key, selections[j].Key
+		if a.Scope.TenantID != b.Scope.TenantID {
+			return a.Scope.TenantID < b.Scope.TenantID
+		}
+		if a.Scope.Kind != b.Scope.Kind {
+			return a.Scope.Kind < b.Scope.Kind
+		}
+		if a.Scope.LegalEntityID != b.Scope.LegalEntityID {
+			return a.Scope.LegalEntityID < b.Scope.LegalEntityID
+		}
+		if a.ConsumerModuleID != b.ConsumerModuleID {
+			return a.ConsumerModuleID < b.ConsumerModuleID
+		}
+		return a.CapabilityName < b.CapabilityName
+	})
+	return selections, nil
+}
+
 type BindingDiagnostic struct {
 	Key  BindingKey
 	Code string
@@ -351,16 +400,87 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 	if scope.Validate() != nil {
 		return BindingPlan{}, fmt.Errorf("binding requires explicit tenant and scope")
 	}
+	if err := contract.ValidateModuleSet(modules, nil); err != nil {
+		return BindingPlan{}, fmt.Errorf("validate installed modules before binding: %w", err)
+	}
+	if err := contract.ValidateModuleExtensions(modules, nil); err != nil {
+		return BindingPlan{}, fmt.Errorf("validate installed module extensions before binding: %w", err)
+	}
 	plan := BindingPlan{Revision: revision, Queries: make(map[PublishedQueryKey]ResolvedPublishedQuery), QueryDefinitions: make(map[PublishedQueryKey]contract.PublishedQuery), Projections: make(map[PublishedProjectionKey]contract.ProjectionDefinition), ProjectionScopes: make(map[PublishedProjectionKey]contract.ResourceScopeKind)}
 	selected := map[BindingKey]string{}
+	declaredSelections := make(map[BindingKey]bool)
+	for _, module := range modules {
+		for _, requirement := range module.Requires {
+			declaredSelections[BindingKey{Scope: scope, ConsumerModuleID: module.ID, CapabilityName: requirement.Name}] = true
+		}
+		for _, query := range module.Queries {
+			declaredSelections[BindingKey{Scope: scope, ConsumerModuleID: module.ID, CapabilityName: query.Capability}] = true
+		}
+	}
 	for _, selection := range selections {
+		contractSelection := contract.ProviderSelection{Key: contract.BindingKey{Scope: selection.Key.Scope, ConsumerModuleID: selection.Key.ConsumerModuleID, CapabilityName: selection.Key.CapabilityName}, ProviderID: selection.ProviderID}
+		if err := contractSelection.Validate(); err != nil {
+			return plan, err
+		}
 		if selection.Key.Scope.TenantID != scope.TenantID {
 			return plan, fmt.Errorf("provider selection crosses tenant")
 		}
 		if selection.Key.Scope != scope {
 			continue
 		}
+		if !declaredSelections[selection.Key] {
+			return plan, fmt.Errorf("provider selection does not match an installed module capability")
+		}
+		if _, exists := selected[selection.Key]; exists {
+			return plan, fmt.Errorf("provider selection for module %q capability %q is duplicated", selection.Key.ConsumerModuleID, selection.Key.CapabilityName)
+		}
 		selected[selection.Key] = selection.ProviderID
+	}
+	providerKeys := make(map[string]bool, len(providers))
+	installedModules := make(map[contract.ModuleID]contract.ModuleDescriptor, len(modules))
+	for _, module := range modules {
+		installedModules[module.ID] = module
+	}
+	for _, provider := range providers {
+		if provider.TenantID != scope.TenantID {
+			continue
+		}
+		if _, err := contract.ParseTenantID(string(provider.TenantID)); err != nil {
+			return plan, fmt.Errorf("provider registration has an invalid tenant identity")
+		}
+		if provider.Scope.TenantID == "" {
+			if provider.Scope.Kind != "" || provider.Scope.LegalEntityID != "" {
+				return plan, fmt.Errorf("provider %q has an incomplete business scope", provider.ProviderID)
+			}
+		} else if provider.Scope.TenantID != provider.TenantID || provider.Scope.Validate() != nil {
+			return plan, fmt.Errorf("provider %q has an invalid business scope", provider.ProviderID)
+		}
+		if provider.ProviderID == "" || strings.TrimSpace(provider.ProviderID) != provider.ProviderID || len(provider.ProviderID) > 160 {
+			return plan, fmt.Errorf("provider registration has an invalid provider identity")
+		}
+		providerIdentity := contract.ModuleDescriptor{ID: provider.OwnerModuleID, Version: "1.0.0"}
+		if err := providerIdentity.Validate(nil); err != nil {
+			return plan, fmt.Errorf("provider %q has an invalid owner identity: %w", provider.ProviderID, err)
+		}
+		if provider.Kind != ProviderInternal && provider.Kind != ProviderExternal {
+			return plan, fmt.Errorf("provider %q has an unsupported provider kind", provider.ProviderID)
+		}
+		if provider.Kind == ProviderInternal {
+			owner, installed := installedModules[provider.OwnerModuleID]
+			if !installed {
+				return plan, fmt.Errorf("internal provider %q is not owned by an installed module", provider.ProviderID)
+			}
+			for _, offer := range provider.Offers {
+				if !moduleDeclaresOffer(owner, offer) {
+					return plan, fmt.Errorf("internal provider %q advertises a capability not declared by owner module %q", provider.ProviderID, owner.ID)
+				}
+			}
+		}
+		key := fmt.Sprintf("%s\x00%s\x00%s\x00%s", provider.TenantID, provider.Scope.Kind, provider.Scope.LegalEntityID, provider.ProviderID)
+		if providerKeys[key] {
+			return plan, fmt.Errorf("provider %q is registered more than once for the same scope and owner", provider.ProviderID)
+		}
+		providerKeys[key] = true
 	}
 	for _, module := range modules {
 		for _, query := range module.Queries {
@@ -382,13 +502,9 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 			plan.QueryDefinitions[key] = query
 			selectionKey := BindingKey{Scope: scope, ConsumerModuleID: module.ID, CapabilityName: query.Capability}
 			selectedProvider := selected[selectionKey]
-			if selectedProvider == "" {
-				plan.Warnings = append(plan.Warnings, BindingDiagnostic{Key: selectionKey, Code: "published_query_provider_selection_required"})
-				continue
-			}
 			var matches []ProviderRegistration
 			for _, provider := range providers {
-				if provider.TenantID != scope.TenantID || provider.OwnerModuleID != module.ID || provider.Queries[query.Name] == nil || provider.ProviderID == "" || provider.ProviderID != selectedProvider {
+				if provider.TenantID != scope.TenantID || provider.OwnerModuleID != module.ID || provider.Queries[query.Name] == nil || provider.ProviderID == "" || (selectedProvider != "" && provider.ProviderID != selectedProvider) {
 					continue
 				}
 				// A query executor is only eligible when it is also the selected
@@ -420,6 +536,10 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 				matches = append(matches, provider)
 			}
 			sort.Slice(matches, func(i, j int) bool { return matches[i].ProviderID < matches[j].ProviderID })
+			if selectedProvider == "" && len(matches) > 1 {
+				plan.Warnings = append(plan.Warnings, BindingDiagnostic{Key: selectionKey, Code: "published_query_provider_selection_required"})
+				continue
+			}
 			var chosen *ProviderRegistration
 			for i := range matches {
 				if chosen != nil {
@@ -443,7 +563,8 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 			plan.ProjectionScopes[projectionKey] = projection.ScopePolicy
 		}
 	}
-	sort.Slice(providers, func(i, j int) bool { return providers[i].ProviderID < providers[j].ProviderID })
+	orderedProviders := append([]ProviderRegistration(nil), providers...)
+	sort.Slice(orderedProviders, func(i, j int) bool { return orderedProviders[i].ProviderID < orderedProviders[j].ProviderID })
 	for _, module := range modules {
 		for _, requirement := range module.Requires {
 			key := BindingKey{Scope: scope, ConsumerModuleID: module.ID, CapabilityName: requirement.Name}
@@ -451,7 +572,7 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 				provider ProviderRegistration
 				offer    contract.CapabilityOffer
 			}
-			for _, provider := range providers {
+			for _, provider := range orderedProviders {
 				if provider.TenantID != scope.TenantID {
 					continue
 				}
@@ -531,4 +652,27 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 		return plan.Warnings[i].Key.ConsumerModuleID < plan.Warnings[j].Key.ConsumerModuleID
 	})
 	return plan, nil
+}
+
+func moduleDeclaresOffer(module contract.ModuleDescriptor, offer contract.CapabilityOffer) bool {
+	for _, declared := range module.Provides {
+		if declared.Name != offer.Name || declared.Contract != offer.Contract || len(declared.Operations) != len(offer.Operations) {
+			continue
+		}
+		declaredOps := make(map[string]contract.OperationSpec, len(declared.Operations))
+		for _, operation := range declared.Operations {
+			declaredOps[operation.Name] = operation
+		}
+		matches := true
+		for _, operation := range offer.Operations {
+			if expected, ok := declaredOps[operation.Name]; !ok || expected != operation {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }

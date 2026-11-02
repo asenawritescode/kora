@@ -63,6 +63,20 @@ func TestManagementCommandsRequireExpectedRevisionAndConstrainedState(t *testing
 	if err := ValidateApplyPackage(valid); err != nil {
 		t.Fatal("valid selected package components:", err)
 	}
+	valid.ProviderSelections = []ProviderSelection{{Key: BindingKey{Scope: BusinessScope{TenantID: valid.Tenant, Kind: ScopeKindTenant}, ConsumerModuleID: "sales.orders", CapabilityName: "billing.issue"}, ProviderID: "billing-external"}}
+	if err := ValidateApplyPackage(valid); err != nil {
+		t.Fatal("valid provider selection:", err)
+	}
+	valid.ProviderSelections[0].Key.Scope.TenantID = "tenant-2"
+	if err := ValidateApplyPackage(valid); err == nil {
+		t.Fatal("accepted cross-tenant provider selection")
+	}
+	valid.ProviderSelections[0].Key.Scope.TenantID = valid.Tenant
+	valid.ProviderSelections = append(valid.ProviderSelections, valid.ProviderSelections[0])
+	if err := ValidateApplyPackage(valid); err == nil {
+		t.Fatal("accepted duplicate provider selection")
+	}
+	valid.ProviderSelections = nil
 	valid.OptionalReleaseIDs = []string{"team-release-1.0.0", "team-release-1.0.0"}
 	if err := ValidateApplyPackage(valid); err == nil {
 		t.Fatal("accepted duplicate package component release IDs")

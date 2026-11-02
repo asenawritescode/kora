@@ -340,11 +340,12 @@ type ResourceOwnership struct {
 //
 //contract:wire:v2
 type ModuleSnapshot struct {
-	TenantID      TenantID             `json:"tenant_id"`
-	Revision      uint64               `json:"revision"`
-	Modules       []ModuleDescriptor   `json:"modules,omitempty"`
-	Installations []ModuleInstallation `json:"installations"`
-	Ownership     []ResourceOwnership  `json:"ownership"`
+	TenantID           TenantID             `json:"tenant_id"`
+	Revision           uint64               `json:"revision"`
+	Modules            []ModuleDescriptor   `json:"modules,omitempty"`
+	Installations      []ModuleInstallation `json:"installations"`
+	Ownership          []ResourceOwnership  `json:"ownership"`
+	ProviderSelections []ProviderSelection  `json:"provider_selections,omitempty"`
 }
 
 // ModuleStore is the persistence boundary used by activation. CommitActivation
@@ -352,6 +353,7 @@ type ModuleSnapshot struct {
 // activation transaction.
 type ModuleStore interface {
 	Load(tenant TenantID) (ModuleSnapshot, error)
+	CommitProviderSelections(ctx context.Context, tenant TenantID, expectedRevision uint64, selections []ProviderSelection) (ModuleSnapshot, error)
 }
 
 // ModuleDescriptor is the canonical package level business module contract.
@@ -428,10 +430,11 @@ type CompositionPlan struct {
 	PlanHash         string                  `json:"plan_hash"`
 }
 
+//contract:wire:v2
 type BindingKey struct {
-	Scope            BusinessScope `json:"scope"`
-	ConsumerModuleID ModuleID
-	CapabilityName   CapabilityName
+	Scope            BusinessScope  `json:"scope"`
+	ConsumerModuleID ModuleID       `json:"consumer_module_id"`
+	CapabilityName   CapabilityName `json:"capability_name"`
 }
 type ProviderRegistration struct {
 	TenantID      TenantID
@@ -441,9 +444,18 @@ type ProviderRegistration struct {
 	Kind          string
 	Offers        []CapabilityOffer
 }
+
+//contract:wire:v2
 type ProviderSelection struct {
-	Key        BindingKey
-	ProviderID string
+	Key        BindingKey `json:"key"`
+	ProviderID string     `json:"provider_id"`
+}
+
+func (selection ProviderSelection) Validate() error {
+	if selection.Key.Scope.Validate() != nil || !moduleIDPattern.MatchString(string(selection.Key.ConsumerModuleID)) || !validModuleName(string(selection.Key.CapabilityName)) || !validBusinessEntityID(selection.ProviderID) {
+		return fmt.Errorf("provider selection identity is invalid")
+	}
+	return nil
 }
 
 func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, scope BusinessScope, revision uint64) (CompositionPlan, error) {
@@ -464,11 +476,17 @@ func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistratio
 	}
 	selected := map[BindingKey]string{}
 	for _, selection := range selections {
+		if err := selection.Validate(); err != nil {
+			return CompositionPlan{}, err
+		}
 		if selection.Key.Scope.TenantID != scope.TenantID {
 			return CompositionPlan{}, fmt.Errorf("provider selection crosses tenant")
 		}
 		if selection.Key.Scope != scope {
 			continue
+		}
+		if _, exists := selected[selection.Key]; exists {
+			return CompositionPlan{}, fmt.Errorf("provider selection for module %q capability %q is duplicated", selection.Key.ConsumerModuleID, selection.Key.CapabilityName)
 		}
 		selected[selection.Key] = selection.ProviderID
 	}

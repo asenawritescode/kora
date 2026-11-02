@@ -175,6 +175,43 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		handle.Release()
 		return packageRecoveryRequired("stored package activation snapshot is invalid"), nil
 	}
+	services := runtime.Services
+	// Once config and module state are committed, recovery must reconcile the
+	// published runtime even if a provider is now unavailable. Provider
+	// availability is an activation gate only before durable activation.
+	if journal.Phase != configstore.ActivationCompleted && journal.Phase != configstore.ActivationActivated && len(target.Modules) > 0 {
+		if services.ResolveCandidateModuleBindings == nil {
+			releaseTenantWork()
+			handle.Release()
+			return failed(contract.CodeUnsupportedVersion, "tenant runtime cannot preflight module provider bindings"), nil
+		}
+		plan, planErr := services.ResolveCandidateModuleBindings(
+			contract.BusinessScope{TenantID: tenantID, Kind: contract.ScopeKindTenant},
+			target.Modules, command.ProviderSelections, moduleSnapshot.Revision+1,
+		)
+		if planErr != nil || len(plan.Blockers) > 0 {
+			releaseTenantWork()
+			handle.Release()
+			return failed(contract.CodeConflict, "package module provider bindings failed activation preflight"), nil
+		}
+		resolved, selectionErr := plan.ProviderSelections()
+		if selectionErr != nil {
+			releaseTenantWork()
+			handle.Release()
+			return failed(contract.CodeConflict, "package module provider selections are invalid"), nil
+		}
+		pinnedAndRequested, mergeErr := mergeProviderSelections(tenantID, moduleSnapshot.ProviderSelections, command.ProviderSelections)
+		if mergeErr == nil {
+			command.ProviderSelections, planErr = mergeProviderSelections(tenantID, pinnedAndRequested, resolved)
+		} else {
+			planErr = mergeErr
+		}
+		if planErr != nil {
+			releaseTenantWork()
+			handle.Release()
+			return failed(contract.CodeConflict, "package module provider selections conflict with pinned bindings"), nil
+		}
+	}
 	if err := configstore.RecordManagementActivationFence(ctx, runtime.DB, dialect, info.Name, string(operation.ID), claim.Fence, expectedRevision, command.Digest); err != nil {
 		releaseTenantWork()
 		handle.Release()
@@ -253,7 +290,8 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		RecoveryPlan: "replace-runtime-from-tenant-db", CreatedBy: string(operation.Caller),
 		VersionLabel: "Apply package " + command.ArtifactRef, Fence: claim.Fence,
 		ExpectedRevision: expectedRevision, ArtifactDigest: command.Digest, ModuleSnapshotRevision: moduleSnapshot.Revision,
-		ModuleTenantID: operation.Tenant,
+		ModuleTenantID:     operation.Tenant,
+		ProviderSelections: command.ProviderSelections,
 	})
 	if err != nil {
 		_ = tx.Rollback()

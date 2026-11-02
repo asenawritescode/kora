@@ -81,6 +81,13 @@
           "maxItems": 50,
           "type": "array"
         },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
         "tenant_id": {
           "type": "string"
         }
@@ -207,6 +214,26 @@
         "capability_name",
         "consumer_module_id",
         "provider_id"
+      ],
+      "type": "object"
+    },
+    "BindingKey": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "consumer_module_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        }
+      },
+      "required": [
+        "capability_name",
+        "consumer_module_id",
+        "scope"
       ],
       "type": "object"
     },
@@ -1921,6 +1948,12 @@
           },
           "type": "array"
         },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
         "revision": {
           "type": "integer"
         },
@@ -2399,6 +2432,22 @@
         "output_schema",
         "owner_module_id",
         "query_name"
+      ],
+      "type": "object"
+    },
+    "ProviderSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/BindingKey"
+        },
+        "provider_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "provider_id"
       ],
       "type": "object"
     },
@@ -3949,6 +3998,13 @@
           "maxItems": 50,
           "type": "array"
         },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
         "tenant_id": {
           "type": "string"
         }
@@ -4075,6 +4131,26 @@
         "capability_name",
         "consumer_module_id",
         "provider_id"
+      ],
+      "type": "object"
+    },
+    "BindingKey": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "consumer_module_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        }
+      },
+      "required": [
+        "capability_name",
+        "consumer_module_id",
+        "scope"
       ],
       "type": "object"
     },
@@ -5767,6 +5843,12 @@
           },
           "type": "array"
         },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
         "revision": {
           "type": "integer"
         },
@@ -6245,6 +6327,22 @@
         "output_schema",
         "owner_module_id",
         "query_name"
+      ],
+      "type": "object"
+    },
+    "ProviderSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/BindingKey"
+        },
+        "provider_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "provider_id"
       ],
       "type": "object"
     },

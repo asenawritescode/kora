@@ -1098,6 +1098,7 @@ type ManagementActivationCommit struct {
 	ArtifactDigest         string
 	ModuleTenantID         contract.TenantID
 	ModuleSnapshotRevision uint64
+	ProviderSelections     []contract.ProviderSelection
 }
 
 // CommitManagementActivation validates the current worker claim and atomically
@@ -1126,7 +1127,7 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 			return "", 0, err
 		}
 		tenantID := commit.ModuleTenantID
-		existing, err := loadModuleSnapshotTx(tx, dialect, tenantID)
+		existing, err := loadModuleSnapshotTx(ctx, tx, dialect, tenantID)
 		if err != nil {
 			return "", 0, err
 		}
@@ -1138,11 +1139,15 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 		if err != nil {
 			return "", 0, err
 		}
-		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Modules: allModules, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: ownership}
+		selections := existing.ProviderSelections
+		if commit.ProviderSelections != nil {
+			selections = commit.ProviderSelections
+		}
+		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Modules: allModules, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: ownership, ProviderSelections: append([]contract.ProviderSelection(nil), selections...)}
 		if err := validateModuleSnapshot(moduleSnapshot); err != nil {
 			return "", 0, err
 		}
-		if _, err := moduleStore.CommitActivationTx(tx, commit.ModuleSnapshotRevision, moduleSnapshot); err != nil {
+		if _, err := moduleStore.CommitActivationTx(ctx, tx, commit.ModuleSnapshotRevision, moduleSnapshot); err != nil {
 			return "", 0, err
 		}
 	}

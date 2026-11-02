@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/natsprovider"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/script"
 	"github.com/asenawritescode/kora/site"
 	"github.com/asenawritescode/kora/storage"
@@ -51,6 +53,7 @@ type Config struct {
 	// built-in business policy or transition mapping.
 	RequestAuthorizer                 RequestAuthorizerFactory
 	WorkflowApprovals                 map[string]process.WorkflowApproval
+	ModuleProviders                   func(site.DBSiteInfo, *sql.DB) ([]plugin.ProviderRegistration, []plugin.ProviderSelection, error)
 	SchedulerHandlerFactory           ScheduledJobHandlerFactory
 	SchedulerExecutionResolverFactory ScheduledJobExecutionResolverFactory
 	HTTPAllowlist                     []string
@@ -292,6 +295,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 			Workflow:            config.Workflow,
 			RequestAuthorizer:   config.RequestAuthorizer,
 			WorkflowApprovals:   config.WorkflowApprovals,
+			ModuleProviders:     config.ModuleProviders,
 			ResolveStorage:      config.ResolveStorage,
 			RegisterWorkerStart: resources.RegisterWorkerStart,
 		},

@@ -142,6 +142,10 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("resolve storage: %w", err)
 	}
 	services.Storage = backend
+	tenantID, err := contract.ParseTenantID(loaded.SiteID)
+	if err != nil {
+		return fmt.Errorf("parse tenant identity for module bindings: %w", err)
+	}
 	moduleStore := configstore.NewModuleStore(loaded.DB, dialect)
 	if moduleErr := moduleStore.EnsureSchema(); moduleErr != nil {
 		return fmt.Errorf("initialize module ownership store for tenant %s: %w", loaded.Name, moduleErr)
@@ -151,18 +155,34 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("load module ownership snapshot for tenant %s: %w", loaded.Name, moduleErr)
 	}
 	var providers []plugin.ProviderRegistration
-	var selections []plugin.ProviderSelection
+	var configuredSelections []plugin.ProviderSelection
 	if config.ModuleProviders != nil {
-		providers, selections, moduleErr = config.ModuleProviders(info, loaded.DB)
+		providers, configuredSelections, moduleErr = config.ModuleProviders(info, loaded.DB)
 		if moduleErr != nil {
 			return fmt.Errorf("load module providers for tenant %s: %w", loaded.Name, moduleErr)
 		}
+	}
+	selections, moduleErr := mergeProviderSelections(tenantID, moduleSnapshot.ProviderSelections, contractProviderSelections(configuredSelections))
+	if moduleErr != nil {
+		return fmt.Errorf("resolve persisted provider selections for tenant %s: %w", loaded.Name, moduleErr)
 	}
 	resolveModuleBindings := func(scope contract.BusinessScope) (plugin.BindingPlan, error) {
 		if scope.TenantID != contract.TenantID(loaded.SiteID) {
 			return plugin.BindingPlan{}, contract.NewError(contract.CodePermissionDenied, "module binding scope belongs to another tenant")
 		}
-		return plugin.ResolveModules(scope, moduleSnapshot.Modules, providers, selections, moduleSnapshot.Revision)
+		return plugin.ResolveModules(scope, moduleSnapshot.Modules, providers, pluginProviderSelections(selections), moduleSnapshot.Revision)
+	}
+	resolveCandidateModuleBindings := func(scope contract.BusinessScope, modules []contract.ModuleDescriptor, extra []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
+		if scope.TenantID != contract.TenantID(loaded.SiteID) {
+			return plugin.BindingPlan{}, contract.NewError(contract.CodePermissionDenied, "module binding scope belongs to another tenant")
+		}
+		baseSelections := filterProviderSelections(selections, scope)
+		candidateExtra := filterProviderSelections(extra, scope)
+		candidateSelections, err := mergeProviderSelections(tenantID, baseSelections, candidateExtra)
+		if err != nil {
+			return plugin.BindingPlan{}, err
+		}
+		return plugin.ResolveModules(scope, modules, providers, pluginProviderSelections(candidateSelections), revision)
 	}
 	tenantScope := contract.BusinessScope{TenantID: contract.TenantID(loaded.SiteID), Kind: contract.ScopeKindTenant}
 	bindingPlan, moduleErr := resolveModuleBindings(tenantScope)
@@ -172,8 +192,31 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if len(bindingPlan.Blockers) > 0 {
 		return fmt.Errorf("tenant %s has %d required module provider blockers", loaded.Name, len(bindingPlan.Blockers))
 	}
+	resolvedSelections, moduleErr := bindingPlan.ProviderSelections()
+	if moduleErr != nil {
+		return fmt.Errorf("validate resolved provider bindings for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	selections, moduleErr = mergeProviderSelections(tenantID, selections, resolvedSelections)
+	if moduleErr != nil {
+		return fmt.Errorf("persist resolved provider selections for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	persistedSelections := selections
+	if !sameProviderSelections(moduleSnapshot.ProviderSelections, persistedSelections) {
+		moduleSnapshot, moduleErr = moduleStore.CommitProviderSelections(config.ProcessContext, tenantID, moduleSnapshot.Revision, persistedSelections)
+		if moduleErr != nil {
+			return fmt.Errorf("persist provider bindings for tenant %s: %w", loaded.Name, moduleErr)
+		}
+		bindingPlan, moduleErr = resolveModuleBindings(tenantScope)
+		if moduleErr != nil {
+			return fmt.Errorf("resolve versioned module bindings for tenant %s: %w", loaded.Name, moduleErr)
+		}
+		if len(bindingPlan.Blockers) > 0 {
+			return fmt.Errorf("tenant %s has %d required module provider blockers", loaded.Name, len(bindingPlan.Blockers))
+		}
+	}
 	services.ModuleBindings = &bindingPlan
 	services.ResolveModuleBindings = resolveModuleBindings
+	services.ResolveCandidateModuleBindings = resolveCandidateModuleBindings
 	services.PublishedProjections = &analytics.PublishedProjectionStore{DB: loaded.DB, Dialect: dialect, Site: loaded.SiteID}
 	workAdmission, err := site.ConnectionAdmission(cfg)
 	if err != nil {
@@ -198,10 +241,6 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("compose request service: %w", err)
 	}
 	services.Requests = requestService
-	tenantID, err := contract.ParseTenantID(loaded.SiteID)
-	if err != nil {
-		return fmt.Errorf("parse tenant identity for approval coordinator: %w", err)
-	}
 	transactionOpener, err := process.NewTenantTransactionOpener(tenantID, loaded.DB, workAdmission)
 	if err != nil {
 		return fmt.Errorf("construct tenant approval transaction opener: %w", err)
@@ -474,6 +513,101 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("register workflow request recovery: %w", err)
 	}
 	return nil
+}
+
+func filterProviderSelections(selections []contract.ProviderSelection, scope contract.BusinessScope) []contract.ProviderSelection {
+	filtered := make([]contract.ProviderSelection, 0, len(selections))
+	for _, selection := range selections {
+		if selection.Key.Scope == scope {
+			filtered = append(filtered, selection)
+		}
+	}
+	return filtered
+}
+
+func contractProviderSelections(selections []plugin.ProviderSelection) []contract.ProviderSelection {
+	result := make([]contract.ProviderSelection, 0, len(selections))
+	for _, selection := range selections {
+		result = append(result, contract.ProviderSelection{
+			Key:        contract.BindingKey{Scope: selection.Key.Scope, ConsumerModuleID: selection.Key.ConsumerModuleID, CapabilityName: selection.Key.CapabilityName},
+			ProviderID: selection.ProviderID,
+		})
+	}
+	return result
+}
+
+func pluginProviderSelections(selections []contract.ProviderSelection) []plugin.ProviderSelection {
+	result := make([]plugin.ProviderSelection, 0, len(selections))
+	for _, selection := range selections {
+		result = append(result, plugin.ProviderSelection{
+			Key:        plugin.BindingKey{Scope: selection.Key.Scope, ConsumerModuleID: selection.Key.ConsumerModuleID, CapabilityName: selection.Key.CapabilityName},
+			ProviderID: selection.ProviderID,
+		})
+	}
+	return result
+}
+
+func mergeProviderSelections(tenant contract.TenantID, existing, incoming []contract.ProviderSelection) ([]contract.ProviderSelection, error) {
+	byKey := make(map[contract.BindingKey]string, len(existing)+len(incoming))
+	for _, selection := range existing {
+		if selection.Key.Scope.TenantID != tenant {
+			return nil, fmt.Errorf("persisted provider selection crosses tenant")
+		}
+		if err := selection.Validate(); err != nil {
+			return nil, err
+		}
+		byKey[selection.Key] = selection.ProviderID
+	}
+	seenIncoming := make(map[contract.BindingKey]bool, len(incoming))
+	for _, selection := range incoming {
+		if selection.Key.Scope.TenantID != tenant {
+			return nil, fmt.Errorf("configured provider selection crosses tenant")
+		}
+		if err := selection.Validate(); err != nil {
+			return nil, err
+		}
+		if seenIncoming[selection.Key] {
+			return nil, fmt.Errorf("configured provider selection is duplicated")
+		}
+		seenIncoming[selection.Key] = true
+		if provider, exists := byKey[selection.Key]; exists && provider != selection.ProviderID {
+			return nil, fmt.Errorf("configured provider selection conflicts with the pinned provider")
+		}
+		byKey[selection.Key] = selection.ProviderID
+	}
+	merged := make([]contract.ProviderSelection, 0, len(byKey))
+	for key, providerID := range byKey {
+		merged = append(merged, contract.ProviderSelection{Key: key, ProviderID: providerID})
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		a, b := merged[i].Key, merged[j].Key
+		if a.Scope.TenantID != b.Scope.TenantID {
+			return a.Scope.TenantID < b.Scope.TenantID
+		}
+		if a.Scope.Kind != b.Scope.Kind {
+			return a.Scope.Kind < b.Scope.Kind
+		}
+		if a.Scope.LegalEntityID != b.Scope.LegalEntityID {
+			return a.Scope.LegalEntityID < b.Scope.LegalEntityID
+		}
+		if a.ConsumerModuleID != b.ConsumerModuleID {
+			return a.ConsumerModuleID < b.ConsumerModuleID
+		}
+		return a.CapabilityName < b.CapabilityName
+	})
+	return merged, nil
+}
+
+func sameProviderSelections(a, b []contract.ProviderSelection) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // registerWebhookDelivery only starts webhook effects from the durable outbox.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,11 +15,13 @@ import (
 func TestResolveModulesRequiresExplicitSelectionAndEnforcesScope(t *testing.T) {
 	contractRef := contract.SchemaRef{ID: "billing.invoice", Version: 1}
 	consumer := contract.ModuleDescriptor{ID: "sales.order", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: "billing.issue", Contract: contractRef, Required: true}}}
+	providerModule := contract.ModuleDescriptor{ID: "billing.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{{Name: "billing.issue", Contract: contractRef}}}
 	provider := func(id string) ProviderRegistration {
 		return ProviderRegistration{TenantID: "tenant-a", ProviderID: id, OwnerModuleID: "billing.ar", Kind: ProviderInternal, Offers: []contract.CapabilityOffer{{Name: "billing.issue", Contract: contractRef}}, Factories: map[contract.CapabilityName]ProviderFactory{"billing.issue": NewStaticFactory("billing.issue", nil)}}
 	}
+	modules := []contract.ModuleDescriptor{consumer, providerModule}
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
-	plan, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer}, []ProviderRegistration{provider("p2"), provider("p1")}, nil, 7)
+	plan, err := ResolveModules(scope, modules, []ProviderRegistration{provider("p2"), provider("p1")}, nil, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +29,7 @@ func TestResolveModulesRequiresExplicitSelectionAndEnforcesScope(t *testing.T) {
 		t.Fatalf("unexpected plan: %#v", plan)
 	}
 	key := BindingKey{Scope: scope, ConsumerModuleID: consumer.ID, CapabilityName: "billing.issue"}
-	plan, err = ResolveModules(scope, []contract.ModuleDescriptor{consumer}, []ProviderRegistration{provider("p2"), provider("p1")}, []ProviderSelection{{Key: key, ProviderID: "p2"}}, 7)
+	plan, err = ResolveModules(scope, modules, []ProviderRegistration{provider("p2"), provider("p1")}, []ProviderSelection{{Key: key, ProviderID: "p2"}}, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,8 +37,93 @@ func TestResolveModulesRequiresExplicitSelectionAndEnforcesScope(t *testing.T) {
 		t.Fatalf("selection not pinned: %#v", plan)
 	}
 	key.Scope.TenantID = "tenant-b"
-	if _, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer}, []ProviderRegistration{provider("p1")}, []ProviderSelection{{Key: key, ProviderID: "p1"}}, 7); err == nil {
+	if _, err := ResolveModules(scope, modules, []ProviderRegistration{provider("p1")}, []ProviderSelection{{Key: key, ProviderID: "p1"}}, 7); err == nil {
 		t.Fatal("cross-tenant selection accepted")
+	}
+}
+
+func TestResolveModulesRejectsDuplicateAndUnmatchedProviderSelections(t *testing.T) {
+	contractRef := contract.SchemaRef{ID: "billing.invoice", Version: 1}
+	consumer := contract.ModuleDescriptor{ID: "sales.order", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: "billing.issue", Contract: contractRef, Required: true}}}
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	key := BindingKey{Scope: scope, ConsumerModuleID: consumer.ID, CapabilityName: "billing.issue"}
+	provider := ProviderRegistration{TenantID: scope.TenantID, ProviderID: "billing", OwnerModuleID: "billing.ar", Kind: ProviderExternal, Offers: []contract.CapabilityOffer{{Name: "billing.issue", Contract: contractRef}}, Factories: map[contract.CapabilityName]ProviderFactory{"billing.issue": NewStaticFactory("billing.issue", nil)}}
+	if _, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer}, []ProviderRegistration{provider}, []ProviderSelection{{Key: key, ProviderID: "billing"}, {Key: key, ProviderID: "billing"}}, 1); err == nil {
+		t.Fatal("duplicate provider selections were accepted")
+	}
+	if _, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer}, []ProviderRegistration{provider, provider}, []ProviderSelection{{Key: key, ProviderID: "billing"}}, 1); err == nil {
+		t.Fatal("duplicate provider registration was accepted")
+	}
+	unknown := key
+	unknown.CapabilityName = "billing.refund"
+	if _, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer}, []ProviderRegistration{provider}, []ProviderSelection{{Key: unknown, ProviderID: "billing"}}, 1); err == nil {
+		t.Fatal("provider selection for an undeclared capability was accepted")
+	}
+}
+
+func TestResolvedPlanExportsUniquePublishedQueryProviderSelection(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	inputSchema := contract.SchemaRef{ID: "ar.balance.input", Version: 1}
+	outputSchema := contract.SchemaRef{ID: "ar.balance.output", Version: 1}
+	operation := contract.OperationSpec{Name: "list", Effect: contract.EffectQuery, Input: inputSchema, Output: outputSchema}
+	query := contract.PublishedQuery{OwnerModuleID: "finance.ar", Name: "balances", Capability: "ar.balance", Operation: "list", InputSchema: inputSchema, OutputSchema: outputSchema, ScopePolicy: contract.ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}
+	module := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{{Name: "ar.balance", Contract: outputSchema, Operations: []contract.OperationSpec{operation}}}, Queries: []contract.PublishedQuery{query}}
+	provider := ProviderRegistration{TenantID: scope.TenantID, ProviderID: "ar-internal", OwnerModuleID: module.ID, Kind: ProviderInternal, Offers: module.Provides, Queries: map[string]PublishedQueryExecutor{query.Name: testPublishedQueryExecutor{}}, ValidateSchema: func(contract.SchemaRef, []byte) error { return nil }}
+	plan, err := ResolveModules(scope, []contract.ModuleDescriptor{module}, []ProviderRegistration{provider}, nil, 5)
+	if err != nil {
+		t.Fatal("resolve unique provider:", err)
+	}
+	selections, err := plan.ProviderSelections()
+	if err != nil || len(selections) != 1 || selections[0].ProviderID != "ar-internal" || selections[0].Key.CapabilityName != "ar.balance" {
+		t.Fatalf("resolved provider selections = %#v, %v", selections, err)
+	}
+}
+
+func TestResolveModulesCanShareProviderRegistrationsAcrossGenerations(t *testing.T) {
+	schema := contract.SchemaRef{ID: "billing.invoice", Version: 1}
+	consumer := contract.ModuleDescriptor{ID: "sales.order", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: "billing.issue", Contract: schema, Required: true}}}
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	provider := func(id string) ProviderRegistration {
+		return ProviderRegistration{TenantID: scope.TenantID, ProviderID: id, OwnerModuleID: "billing.external", Kind: ProviderExternal, Offers: []contract.CapabilityOffer{{Name: "billing.issue", Contract: schema}}, Factories: map[contract.CapabilityName]ProviderFactory{"billing.issue": NewStaticFactory("billing.issue", nil)}}
+	}
+	providers := []ProviderRegistration{provider("provider-b"), provider("provider-a")}
+	selection := ProviderSelection{Key: BindingKey{Scope: scope, ConsumerModuleID: consumer.ID, CapabilityName: "billing.issue"}, ProviderID: "provider-b"}
+	var workers sync.WaitGroup
+	for i := 0; i < 24; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			plan, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer}, providers, []ProviderSelection{selection}, 12)
+			if err != nil || len(plan.Bindings) != 1 || plan.Bindings[0].ProviderID != "provider-b" {
+				t.Errorf("resolve shared provider registrations = %#v, %v", plan, err)
+			}
+		}()
+	}
+	workers.Wait()
+	if providers[0].ProviderID != "provider-b" || providers[1].ProviderID != "provider-a" {
+		t.Fatalf("resolver mutated caller provider order: %#v", providers)
+	}
+}
+
+func TestProviderOutageBlocksOnlyBoundCapabilityAtExecution(t *testing.T) {
+	schema := contract.SchemaRef{ID: "billing.invoice", Version: 1}
+	offer := contract.CapabilityOffer{Name: "billing.issue", Contract: schema}
+	providerModule := contract.ModuleDescriptor{ID: "billing.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}}
+	consumer := contract.ModuleDescriptor{ID: "sales.order", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: offer.Name, Contract: schema, Required: true}}}
+	unrelated := contract.ModuleDescriptor{ID: "inventory.stock", Version: "1.0.0"}
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	selection := ProviderSelection{Key: BindingKey{Scope: scope, ConsumerModuleID: consumer.ID, CapabilityName: offer.Name}, ProviderID: "billing-internal"}
+	provider := ProviderRegistration{TenantID: scope.TenantID, ProviderID: selection.ProviderID, OwnerModuleID: providerModule.ID, Kind: ProviderInternal, Offers: []contract.CapabilityOffer{offer}, Factories: map[contract.CapabilityName]ProviderFactory{offer.Name: NewStaticFactory(offer.Name, errors.New("provider offline"))}}
+	plan, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer, providerModule, unrelated}, []ProviderRegistration{provider}, []ProviderSelection{selection}, 2)
+	if err != nil || len(plan.Blockers) != 0 {
+		t.Fatalf("provider outage should not prevent unrelated module activation: %#v, %v", plan, err)
+	}
+	bound, ok := plan.Resolve(selection.Key)
+	if !ok {
+		t.Fatal("consumer binding disappeared during provider outage")
+	}
+	if _, err := bound.Open(contract.OperationContext{Site: string(scope.TenantID), Scope: scope}); err == nil {
+		t.Fatal("provider outage did not block the bound capability operation")
 	}
 }
 
@@ -203,22 +291,23 @@ func TestPublishedQueryProviderOutageRetainsProjectionDefinitionForHistory(t *te
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
 	in, out := contract.SchemaRef{ID: "query.input", Version: 1}, contract.SchemaRef{ID: "query.output", Version: 1}
 	query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "balances", Capability: "sales.report", Operation: "list", InputSchema: in, OutputSchema: out, ScopePolicy: contract.ScopeEntityOwned, AllowedFields: []string{"amount", "id"}, PageLimit: 10}
-	module := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Provides: []contract.CapabilityOffer{{Name: query.Capability, Contract: out, Operations: []contract.OperationSpec{{Name: query.Operation, Input: in, Output: out, Effect: contract.EffectQuery}}}}, Queries: []contract.PublishedQuery{query}, Projections: []contract.ProjectionDefinition{{ID: "sales_balance", OwnerModuleID: "sales.orders", Sources: []contract.ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: query.Name, OutputSchema: out}}, ScopePolicy: contract.ScopeEntityOwned, FactKey: "id", AllowedFields: []string{"id", "amount"}, OutputSchema: out, RebuildStrategy: "consistent_snapshot"}}}
-	plan, err := ResolveModules(scope, []contract.ModuleDescriptor{module}, nil, nil, 1)
+	module := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Provides: []contract.CapabilityOffer{{Name: query.Capability, Contract: out, Operations: []contract.OperationSpec{{Name: query.Operation, Input: in, Output: out, Effect: contract.EffectQuery}}}}, Queries: []contract.PublishedQuery{query}}
+	projection := contract.ModuleDescriptor{ID: "sales.reporting", Version: "1.0.0", Projections: []contract.ProjectionDefinition{{ID: "sales_balance", OwnerModuleID: "sales.reporting", Sources: []contract.ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: query.Name, OutputSchema: out}}, ScopePolicy: contract.ScopeEntityOwned, FactKey: "id", AllowedFields: []string{"id", "amount"}, OutputSchema: out, RebuildStrategy: "consistent_snapshot"}}}
+	plan, err := ResolveModules(scope, []contract.ModuleDescriptor{module, projection}, nil, nil, 1)
 	if err != nil {
 		t.Fatal("provider outage prevented module plan resolution:", err)
 	}
 	if _, ok := plan.QueryDefinitions[PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}]; !ok {
 		t.Fatal("query definition was lost during provider outage")
 	}
-	key := PublishedProjectionKey{OwnerModuleID: module.ID, ID: "sales_balance"}
+	key := PublishedProjectionKey{OwnerModuleID: projection.ID, ID: "sales_balance"}
 	if _, ok := plan.Projections[key]; !ok || plan.ProjectionScopes[key] != contract.ScopeEntityOwned {
 		t.Fatal("retained projection contract or its legal-entity scope was lost during provider outage")
 	}
 	if len(plan.Warnings) == 0 || len(plan.Blockers) != 0 {
 		t.Fatalf("provider outage diagnostics = blockers %v warnings %v", plan.Blockers, plan.Warnings)
 	}
-	removedSource, err := ResolveModules(scope, []contract.ModuleDescriptor{{ID: module.ID, Version: module.Version, Projections: module.Projections}}, nil, nil, 2)
+	removedSource, err := ResolveModules(scope, []contract.ModuleDescriptor{projection}, nil, nil, 2)
 	if err != nil {
 		t.Fatal("source removal prevented historical projection plan resolution:", err)
 	}

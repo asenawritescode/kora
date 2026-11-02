@@ -25,11 +25,12 @@ import (
 // Services is the immutable service snapshot owned by a single tenant runtime.
 // Constructors and lifecycle ownership stay in Engine composition.
 type Services struct {
-	ModuleBindings        *plugin.BindingPlan
-	ResolveModuleBindings func(contract.BusinessScope) (plugin.BindingPlan, error)
-	PublishedProjections  *analytics.PublishedProjectionStore
-	WorkAdmission         *dbaccess.Admission
-	RealtimeAdmission     interface {
+	ModuleBindings                 *plugin.BindingPlan
+	ResolveModuleBindings          func(contract.BusinessScope) (plugin.BindingPlan, error)
+	ResolveCandidateModuleBindings func(contract.BusinessScope, []contract.ModuleDescriptor, []contract.ProviderSelection, uint64) (plugin.BindingPlan, error)
+	PublishedProjections           *analytics.PublishedProjectionStore
+	WorkAdmission                  *dbaccess.Admission
+	RealtimeAdmission              interface {
 		Acquire(context.Context) (func(), error)
 	}
 	UploadAdmission interface {

@@ -209,6 +209,10 @@ type ApplyPackage struct {
 	// that artifact delivery reproduces the exact composition Cloud approved.
 	//contract:maxItems=50
 	OptionalReleaseIDs []string `json:"optional_release_ids,omitempty"`
+	// ProviderSelections pins provider choices for capabilities needed by this
+	// activation. Choices are included in the durable command for recovery.
+	//contract:maxItems=256
+	ProviderSelections []ProviderSelection `json:"provider_selections,omitempty"`
 	//contract:minLength=64
 	//contract:maxLength=64
 	//contract:pattern=^[a-f0-9]{64}$
@@ -422,6 +426,19 @@ func ValidateApplyPackage(cmd ApplyPackage) error {
 	}
 	if len(cmd.OptionalReleaseIDs) > 50 {
 		return fmt.Errorf("package component release list exceeds the supported limit")
+	}
+	if len(cmd.ProviderSelections) > 256 {
+		return fmt.Errorf("provider selection list exceeds the supported limit")
+	}
+	seenBindings := make(map[BindingKey]bool, len(cmd.ProviderSelections))
+	for _, selection := range cmd.ProviderSelections {
+		if err := selection.Validate(); err != nil || selection.Key.Scope.TenantID != cmd.Tenant {
+			return fmt.Errorf("provider selection must identify a valid binding in this tenant")
+		}
+		if seenBindings[selection.Key] {
+			return fmt.Errorf("provider selections must have unique binding keys")
+		}
+		seenBindings[selection.Key] = true
 	}
 	seenComponents := make(map[string]struct{}, len(cmd.OptionalReleaseIDs))
 	for _, id := range cmd.OptionalReleaseIDs {

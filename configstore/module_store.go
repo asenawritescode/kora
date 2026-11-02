@@ -1,6 +1,7 @@
 package configstore
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -146,14 +147,17 @@ func (s *ModuleStore) Load(tenant contract.TenantID) (contract.ModuleSnapshot, e
 	return snapshot, nil
 }
 
-func (s *ModuleStore) CommitActivation(tx *sql.Tx, expectedRevision uint64, candidate contract.ModuleSnapshot) (uint64, error) {
+func (s *ModuleStore) CommitActivation(ctx context.Context, tx *sql.Tx, expectedRevision uint64, candidate contract.ModuleSnapshot) (uint64, error) {
+	if ctx == nil {
+		return 0, fmt.Errorf("module activation requires context")
+	}
 	if tx == nil || candidate.TenantID == "" {
 		return 0, fmt.Errorf("module activation requires transaction and tenant")
 	}
 	if err := validateModuleSnapshot(candidate); err != nil {
 		return 0, err
 	}
-	current, err := loadModuleSnapshotTx(tx, s.Dialect, candidate.TenantID)
+	current, err := loadModuleSnapshotTx(ctx, tx, s.Dialect, candidate.TenantID)
 	if err != nil {
 		return 0, err
 	}
@@ -166,10 +170,10 @@ func (s *ModuleStore) CommitActivation(tx *sql.Tx, expectedRevision uint64, cand
 		return 0, err
 	}
 	if expectedRevision == 0 {
-		_, err = tx.Exec(db.Rebind(s.Dialect, `INSERT INTO _kora_module_snapshot (tenant_id, revision, snapshot_json) VALUES (?, ?, ?)`), string(candidate.TenantID), candidate.Revision, string(payload))
+		_, err = tx.ExecContext(ctx, db.Rebind(s.Dialect, `INSERT INTO _kora_module_snapshot (tenant_id, revision, snapshot_json) VALUES (?, ?, ?)`), string(candidate.TenantID), candidate.Revision, string(payload))
 	} else {
 		var result sql.Result
-		result, err = tx.Exec(db.Rebind(s.Dialect, `UPDATE _kora_module_snapshot SET revision = ?, snapshot_json = ? WHERE tenant_id = ? AND revision = ?`), candidate.Revision, string(payload), string(candidate.TenantID), expectedRevision)
+		result, err = tx.ExecContext(ctx, db.Rebind(s.Dialect, `UPDATE _kora_module_snapshot SET revision = ?, snapshot_json = ? WHERE tenant_id = ? AND revision = ?`), candidate.Revision, string(payload), string(candidate.TenantID), expectedRevision)
 		if err == nil {
 			var affected int64
 			affected, err = result.RowsAffected()
@@ -184,14 +188,53 @@ func (s *ModuleStore) CommitActivation(tx *sql.Tx, expectedRevision uint64, cand
 	return candidate.Revision, nil
 }
 
-func (s *ModuleStore) CommitActivationTx(tx *sql.Tx, expectedRevision uint64, candidate contract.ModuleSnapshot) (uint64, error) {
-	return s.CommitActivation(tx, expectedRevision, candidate)
+func (s *ModuleStore) CommitActivationTx(ctx context.Context, tx *sql.Tx, expectedRevision uint64, candidate contract.ModuleSnapshot) (uint64, error) {
+	return s.CommitActivation(ctx, tx, expectedRevision, candidate)
 }
 
-func loadModuleSnapshotTx(tx *sql.Tx, dialect db.QueryDialect, tenant contract.TenantID) (contract.ModuleSnapshot, error) {
+// CommitProviderSelections persists explicit provider choices under the same
+// tenant snapshot compare-and-increment fence used for module activation.
+func (s *ModuleStore) CommitProviderSelections(ctx context.Context, tenant contract.TenantID, expectedRevision uint64, selections []contract.ProviderSelection) (contract.ModuleSnapshot, error) {
+	if s == nil || s.DB == nil || s.Dialect == nil {
+		return contract.ModuleSnapshot{}, fmt.Errorf("module store requires database and dialect")
+	}
+	if ctx == nil {
+		return contract.ModuleSnapshot{}, fmt.Errorf("provider binding update requires context")
+	}
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return contract.ModuleSnapshot{}, fmt.Errorf("provider binding update requires a valid tenant")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return contract.ModuleSnapshot{}, fmt.Errorf("begin provider binding update: %w", err)
+	}
+	defer tx.Rollback()
+	candidate, err := loadModuleSnapshotTx(ctx, tx, s.Dialect, tenant)
+	if err != nil {
+		return contract.ModuleSnapshot{}, err
+	}
+	if candidate.Revision != expectedRevision {
+		return contract.ModuleSnapshot{}, fmt.Errorf("module snapshot revision conflict: expected %d, actual %d", expectedRevision, candidate.Revision)
+	}
+	candidate.ProviderSelections = append([]contract.ProviderSelection(nil), selections...)
+	newRevision, err := s.CommitActivation(ctx, tx, expectedRevision, candidate)
+	if err != nil {
+		return contract.ModuleSnapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return contract.ModuleSnapshot{}, fmt.Errorf("commit provider binding update: %w", err)
+	}
+	candidate.Revision = newRevision
+	return candidate, nil
+}
+
+func loadModuleSnapshotTx(ctx context.Context, tx *sql.Tx, dialect db.QueryDialect, tenant contract.TenantID) (contract.ModuleSnapshot, error) {
+	if ctx == nil {
+		return contract.ModuleSnapshot{}, fmt.Errorf("module snapshot read requires context")
+	}
 	var revision uint64
 	var payload string
-	err := tx.QueryRow(db.Rebind(dialect, `SELECT revision, snapshot_json FROM _kora_module_snapshot WHERE tenant_id = ?`), string(tenant)).Scan(&revision, &payload)
+	err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT revision, snapshot_json FROM _kora_module_snapshot WHERE tenant_id = ?`), string(tenant)).Scan(&revision, &payload)
 	if err == sql.ErrNoRows {
 		return contract.ModuleSnapshot{TenantID: tenant}, nil
 	}
@@ -265,6 +308,32 @@ func validateModuleSnapshot(snapshot contract.ModuleSnapshot) error {
 	for resource, expectedOwner := range expectedOwnership {
 		if actualOwner, ok := owners[resource]; !ok || actualOwner != expectedOwner {
 			return fmt.Errorf("resource %q ownership index does not match module descriptor", resource)
+		}
+	}
+	moduleByID := make(map[contract.ModuleID]contract.ModuleDescriptor, len(snapshot.Modules))
+	for _, module := range snapshot.Modules {
+		moduleByID[module.ID] = module
+	}
+	seenSelections := make(map[contract.BindingKey]bool, len(snapshot.ProviderSelections))
+	for _, selection := range snapshot.ProviderSelections {
+		key := selection.Key
+		module, installed := moduleByID[key.ConsumerModuleID]
+		if !installed || key.Scope.TenantID != snapshot.TenantID || selection.Validate() != nil {
+			return fmt.Errorf("invalid persisted provider selection")
+		}
+		if seenSelections[key] {
+			return fmt.Errorf("duplicate persisted provider selection for module %q capability %q", key.ConsumerModuleID, key.CapabilityName)
+		}
+		seenSelections[key] = true
+		declared := false
+		for _, requirement := range module.Requires {
+			declared = declared || requirement.Name == key.CapabilityName
+		}
+		for _, query := range module.Queries {
+			declared = declared || query.Capability == key.CapabilityName
+		}
+		if !declared {
+			return fmt.Errorf("persisted provider selection does not match a declared module capability")
 		}
 	}
 	return nil

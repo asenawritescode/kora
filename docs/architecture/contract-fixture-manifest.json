@@ -41,15 +41,15 @@
     {
       "version": "v2",
       "schema": "kora/contract/schema/engine-v2.json",
-      "schema_sha256": "41330ae88f81564514b3e454b7c9feba6b19045d2314a84f0858651566a8db6a",
+      "schema_sha256": "710c8bd62d9fa551a03e39d3d48bef91922c993eeb6869213ce961b1d3f899cf",
       "typescript": "kora/contract/generated/engine-v2.ts",
-      "typescript_sha256": "aad2b22420f0785fb1d3e61febaa7bc958ffafddff3649bc588243b98e78fb84",
+      "typescript_sha256": "31195fce026f8b3eeef77a1ce223675fc4056bffbebbd78cd0e25c7c38e34936",
       "embedded_ui_copy": "kora/ui/src/generated/engine-v2.ts",
-      "embedded_ui_copy_sha256": "aad2b22420f0785fb1d3e61febaa7bc958ffafddff3649bc588243b98e78fb84",
+      "embedded_ui_copy_sha256": "31195fce026f8b3eeef77a1ce223675fc4056bffbebbd78cd0e25c7c38e34936",
       "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
-      "studio_copy_sha256": "aad2b22420f0785fb1d3e61febaa7bc958ffafddff3649bc588243b98e78fb84",
+      "studio_copy_sha256": "31195fce026f8b3eeef77a1ce223675fc4056bffbebbd78cd0e25c7c38e34936",
       "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
-      "sdk_copy_sha256": "aad2b22420f0785fb1d3e61febaa7bc958ffafddff3649bc588243b98e78fb84"
+      "sdk_copy_sha256": "31195fce026f8b3eeef77a1ce223675fc4056bffbebbd78cd0e25c7c38e34936"
     }
   ]
 }
