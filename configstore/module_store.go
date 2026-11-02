@@ -570,6 +570,23 @@ func (s *ModuleStore) AdmitCapabilityAttempt(ctx context.Context, expected contr
 		}
 	}
 	if err := s.admitCapabilityLeaseTx(ctx, tx, expected, now); err != nil {
+		if !expected.ExpiresAt.After(now.UTC()) {
+			scopeJSON, marshalErr := json.Marshal(expected.Scope)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			result, expireErr := tx.ExecContext(ctx, db.Rebind(s.Dialect, `UPDATE _kora_capability_lease SET state = 'expired' WHERE tenant_id = ? AND lease_id = ? AND scope_json = ? AND caller_module_id = ? AND provider_module_id = ? AND provider_id = ? AND operation_name = ? AND binding_revision = ? AND grant_epoch = ? AND state = 'active' AND expires_at = ? AND credential_ref = ?`), string(expected.TenantID), expected.ID, string(scopeJSON), string(expected.CallerModuleID), string(expected.ProviderModuleID), expected.ProviderID, expected.Operation, expected.BindingRevision, expected.GrantEpoch, expected.ExpiresAt.UTC().Format(capabilityLeaseTimeLayout), expected.CredentialRef)
+			if expireErr != nil {
+				return expireErr
+			}
+			if affected, affectedErr := result.RowsAffected(); affectedErr != nil {
+				return affectedErr
+			} else if affected == 1 {
+				if commitErr := tx.Commit(); commitErr != nil {
+					return commitErr
+				}
+			}
+		}
 		return err
 	}
 	return tx.Commit()

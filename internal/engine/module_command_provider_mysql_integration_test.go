@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -125,11 +126,26 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		t.Fatal("resolve module binding plan:", err)
 	}
 	moduleStore := configstore.NewModuleStore(database, dialect)
-	if err := moduleStore.EnsureCapabilityLeaseSchema(ctx); err != nil {
+	if err := moduleStore.EnsureSchema(); err != nil {
 		t.Fatal("ensure capability lease store:", err)
 	}
+	moduleSnapshot := contract.ModuleSnapshot{TenantID: tenant, Modules: []contract.ModuleDescriptor{caller, owner}, Installations: []contract.ModuleInstallation{
+		{TenantID: tenant, ModuleID: caller.ID, Version: caller.Version, ArtifactDigest: strings.Repeat("a", 64), State: string(contract.ModuleActive), Revision: 1},
+		{TenantID: tenant, ModuleID: owner.ID, Version: owner.Version, ArtifactDigest: strings.Repeat("b", 64), State: string(contract.ModuleActive), Revision: 1},
+	}}
+	activationTx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal("begin fixture module activation:", err)
+	}
+	if _, err := moduleStore.CommitActivation(ctx, activationTx, 0, moduleSnapshot); err != nil {
+		_ = activationTx.Rollback()
+		t.Fatal("persist fixture module ownership before testing protected command:", err)
+	}
+	if err := activationTx.Commit(); err != nil {
+		t.Fatal("commit fixture module ownership:", err)
+	}
 	plan.LeaseAdmission = moduleStore
-	lease := contract.CapabilityLease{ID: "lease-" + suffix[:16], TenantID: tenant, Scope: scope, CallerModuleID: caller.ID, ProviderID: plan.Bindings[0].ProviderID, Operation: operation.Name, BindingRevision: plan.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	lease := contract.CapabilityLease{ID: "lease-" + suffix[:16], TenantID: tenant, Scope: scope, CallerModuleID: caller.ID, ProviderModuleID: plan.Bindings[0].OwnerModuleID, ProviderID: plan.Bindings[0].ProviderID, Operation: operation.Name, BindingRevision: plan.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
 	if err := moduleStore.CreateCapabilityLease(ctx, lease); err != nil {
 		t.Fatal("create capability lease:", err)
 	}
