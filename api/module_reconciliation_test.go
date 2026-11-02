@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http/httptest"
 	"regexp"
@@ -67,6 +68,12 @@ type reconciliationLeaseAdmission struct{ calls int }
 func (a *reconciliationLeaseAdmission) AdmitCapabilityAttempt(context.Context, contract.CapabilityLease, time.Time) error {
 	a.calls++
 	return nil
+}
+
+type reconciliationLeaseReader struct{ lease contract.CapabilityLease }
+
+func (r reconciliationLeaseReader) LoadCapabilityLease(context.Context, contract.TenantID, string) (contract.CapabilityLease, bool, error) {
+	return r.lease, true, nil
 }
 
 func TestBusinessReconciliationSummaryIsAuthorizedAndScopeFiltered(t *testing.T) {
@@ -268,5 +275,62 @@ func TestBusinessCapabilityRepairerInvokesPinnedOwnerCommandWithStableIdempotenc
 	var received recon.BusinessObligation
 	if err := json.Unmarshal(handle.invocation.Payload, &received); err != nil || received != expected {
 		t.Fatalf("owner repair received payload %+v, err %v", received, err)
+	}
+}
+
+func TestBusinessReconciliationRepairRoutePersistsIntentInvokesOwnerAndAuditsCompletion(t *testing.T) {
+	scope, plan, registry, execution := reconciliationAPIFixture(t, json.RawMessage(`[]`), json.RawMessage(`[]`), true)
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	scopeJSON, _ := json.Marshal(scope)
+	finding := recon.BusinessFinding{ID: "bf_1", Key: "sale:1", Kind: recon.FindingMissingEffect, State: recon.BusinessFindingOpen, Expected: recon.BusinessObligation{Key: "sale:1", SourceRef: "sale:1", EntityID: "entity-a", Amount: "10.00", Currency: "KES"}}
+	findingJSON, _ := json.Marshal(finding)
+	expectLoad := func() {
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT owner_module_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-http-1").WillReturnRows(sqlmock.NewRows([]string{"owner_module_id", "rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("finance.reconciliation", "sales-ar", 1, string(scopeJSON), "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-http-1").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}).AddRow(string(findingJSON), "open", ""))
+	}
+	expectLoad() // route owner/rule/version validation
+	expectLoad() // service load before repair authorization and intent
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT state FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? AND finding_id = ?")).WithArgs("tenant-a", "run-http-1", "bf_1").WillReturnRows(sqlmock.NewRows([]string{"state"}).AddRow("open"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT idempotency_key, state FROM _kora_business_recon_repair WHERE tenant_id = ? AND run_id = ? AND finding_id = ?")).WithArgs("tenant-a", "run-http-1", "bf_1").WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_business_recon_repair (tenant_id, run_id, finding_id, idempotency_key, state, evidence, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")).WithArgs("tenant-a", "run-http-1", "bf_1", sqlmock.AnyArg(), "pending", "", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_business_recon_audit (tenant_id, run_id, finding_id, actor_id, action, reason, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)")).WithArgs("tenant-a", "run-http-1", "bf_1", "reader", "repair_requested", "owner command requested", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE _kora_business_recon_finding SET state = ? WHERE tenant_id = ? AND run_id = ? AND finding_id = ? AND state = ?")).WithArgs("investigating", "tenant-a", "run-http-1", "bf_1", "open").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE _kora_business_recon_finding SET state = ?, evidence = ? WHERE tenant_id = ? AND run_id = ? AND finding_id = ? AND state = ?")).WithArgs("resolved", "owner-execution-1", "tenant-a", "run-http-1", "bf_1", "investigating").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE _kora_business_recon_repair SET state = ?, evidence = ?, updated_at = ? WHERE tenant_id = ? AND run_id = ? AND finding_id = ? AND idempotency_key = ?")).WithArgs("completed", "owner-execution-1", sqlmock.AnyArg(), "tenant-a", "run-http-1", "bf_1", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_business_recon_audit (tenant_id, run_id, finding_id, actor_id, action, reason, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)")).WithArgs("tenant-a", "run-http-1", "bf_1", "reader", "repair_completed", "owner-execution-1", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	handle := &reconciliationCapabilityHandle{name: "ar.repair"}
+	for i := range plan.Bindings {
+		if plan.Bindings[i].Key.ConsumerModuleID == "finance.reconciliation" && plan.Bindings[i].Key.CapabilityName == "ar.repair" {
+			plan.Bindings[i].Factory = reconciliationCapabilityFactory{handle: handle}
+		}
+	}
+	lease := contract.CapabilityLease{ID: "repair-lease", TenantID: scope.TenantID, Scope: scope, CallerModuleID: "finance.reconciliation", ProviderModuleID: "accounts.receivable", ProviderID: "accounts.receivable-provider", Operation: "issue", BindingRevision: plan.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	admission := &reconciliationLeaseAdmission{}
+	plan.LeaseAdmission, plan.LeaseReader = admission, reconciliationLeaseReader{lease: lease}
+	service := &recon.BusinessReconciliationService{Store: &recon.BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}}
+	handler := NewHandler(registry, nil)
+	handler.RuntimeServices = NewSiteRuntimeServices()
+	handler.RuntimeServices.Replace("tenant-a", SiteRuntimeService{BusinessReconciliation: service, ResolveModuleBindings: func(contract.BusinessScope) (plugin.BindingPlan, error) { return plan, nil }})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "owner", Value: "finance.reconciliation"}, {Key: "rule", Value: "sales-ar"}, {Key: "run", Value: "run-http-1"}}
+	ctx.Request = httptest.NewRequest("POST", "/api/modules/reconciliation/runs/finance.reconciliation/sales-ar/run-http-1/repair", strings.NewReader(`{"finding_id":"bf_1"}`))
+	ctx.Set("site_name", "tenant-a")
+	ctx.Set("policy_execution", execution)
+	handler.HandleBusinessReconciliationRepair(ctx)
+	if recorder.Code != 200 || handle.calls != 1 || !handle.revoked || admission.calls != 1 || handle.invocation.Meta.IdempotencyKey == "" || handle.invocation.Operation.Name != "issue" {
+		t.Fatalf("repair route did not complete owner capability effect: status=%d calls=%d revoked=%t admissions=%d invocation=%+v body=%s", recorder.Code, handle.calls, handle.revoked, admission.calls, handle.invocation, recorder.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
