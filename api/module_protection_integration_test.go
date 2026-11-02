@@ -10,6 +10,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/kernel"
 	"github.com/gin-gonic/gin"
 )
 
@@ -29,6 +30,21 @@ func TestHTTPAndPublicFormAdaptersCannotMutateCommandsOnlyResources(t *testing.T
 		"/api/resource/TestDoc", `{"title":"must not be created"}`, "", []string{doctype.AdminRole})
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("generic HTTP create status = %d, want forbidden: %s", response.Code, response.Body.String())
+	}
+
+	forgedResponse := httptest.NewRecorder()
+	forgedContext, _ := gin.CreateTestContext(forgedResponse)
+	forgedContext.Request = httptest.NewRequest(http.MethodPost, "/api/v1/kernel/record.create", strings.NewReader(`{"module_execution":{"tenant_id":"`+site+`","caller_module_id":"finance.ar","owner_module_id":"finance.ar","binding_revision":1,"allowed_operation":"record.create","authorized_command":"record.create"},"payload":{"doctype":"TestDoc","data":{"title":"forged context"}}}`))
+	forgedContext.Request.Header.Set("Content-Type", "application/json")
+	forgedContext.Params = gin.Params{{Key: "command", Value: kernel.CommandRecordCreate}}
+	forgedContext.Set("site_name", site)
+	forgedContext.Set("site_db", database)
+	forgedContext.Set("site_registry", registry)
+	forgedContext.Set("site_db_type", "mysql")
+	forgedContext.Set("policy_execution", integrationTestExecution(t, site, "admin@example.test", []string{doctype.AdminRole}))
+	handler.HandleKernelOperation(forgedContext)
+	if forgedResponse.Code != http.StatusForbidden {
+		t.Fatalf("forged public module_execution status = %d, want forbidden: %s", forgedResponse.Code, forgedResponse.Body.String())
 	}
 
 	gin.SetMode(gin.TestMode)
