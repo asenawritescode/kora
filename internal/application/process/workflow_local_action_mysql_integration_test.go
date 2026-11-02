@@ -83,8 +83,9 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 	tenant := contract.TenantID("tenant-" + suffix)
 	doctypeName := "WorkflowInvoice" + suffix[:12]
 	dt := &doctype.DocType{Name: doctypeName, Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}, {Fieldname: "status", Fieldtype: "Data"}}}
+	moduleInvoice := &doctype.DocType{Name: "ModuleInvoice" + suffix[:8], ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands), BusinessScopePolicy: contract.ScopeTenantShared, Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}}}
 	registry := doctype.NewRegistry()
-	registry.LoadFull([]*doctype.DocType{dt}, []*doctype.Role{{Name: "Manager"}}, []*doctype.Permission{{Doctype: doctypeName, Role: "Manager", Read: true, Create: true, Write: true, Submit: true}})
+	registry.LoadFull([]*doctype.DocType{dt, moduleInvoice}, []*doctype.Role{{Name: "Manager"}}, []*doctype.Permission{{Doctype: doctypeName, Role: "Manager", Read: true, Create: true, Write: true, Submit: true}, {Doctype: moduleInvoice.Name, Role: "Manager", Read: true, Create: true, Write: true}})
 	var databaseName string
 	if err := database.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&databaseName); err != nil {
 		t.Fatal("read test database:", err)
@@ -93,9 +94,18 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 		t.Fatal("migrate workflow subject doctype:", err)
 	}
 	engine := kernel.New(dialect, outbox.NewSQLWriter(dialect))
+	moduleCommand, err := kernel.ParseCommandResource([]byte("name: issue\nnamespace: finance.invoice\nversion: 1\ninput:\n  record: " + moduleInvoice.Name + "\ntransaction:\n  - create:\n      record: " + moduleInvoice.Name + "\n      values:\n        title: $input.title\nemit:\n  - finance.invoice.issued\n"))
+	if err != nil {
+		t.Fatal("parse registered owner command:", err)
+	}
+	engine.Commands = kernel.NewCommandRegistry()
+	if err := engine.Commands.Register(moduleCommand); err != nil {
+		t.Fatal("register owner command:", err)
+	}
 	serviceGrant := policy.Grant{Resource: doctypeName, Operation: "create"}
+	moduleCommandGrant := policy.Grant{Resource: moduleInvoice.Name, Operation: "create"}
 	servicePrincipal := "workflow-service-" + suffix[:8]
-	execution, err := policy.NewVerifiedExecutionWithGrants(tenant, contract.ActorContext{PrincipalID: servicePrincipal, PrincipalType: contract.PrincipalService, Site: siteName, AuthenticatedAt: time.Now().UTC()}, []policy.Grant{serviceGrant})
+	execution, err := policy.NewVerifiedExecutionWithGrants(tenant, contract.ActorContext{PrincipalID: servicePrincipal, PrincipalType: contract.PrincipalService, Site: siteName, AuthenticatedAt: time.Now().UTC()}, []policy.Grant{serviceGrant, moduleCommandGrant})
 	if err != nil {
 		t.Fatal("verified workflow execution:", err)
 	}
@@ -121,6 +131,7 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 		t.Fatal("workflow execution store:", err)
 	}
 	key := workflow.ActionKey{Name: "invoice.create-follow-up", Version: 1}
+	moduleCommandKey := workflow.ActionKey{Name: "invoice.issue-through-owner-command", Version: 1}
 	inputSchema, outputSchema := contract.SchemaRef{ID: "workflow-input", Version: 1}, contract.SchemaRef{ID: "workflow-output", Version: 1}
 	builder := func(_ context.Context, action workflow.ActionContext, _ workflow.ActionInput) (kernel.Operation, error) {
 		payload, err := json.Marshal(kernel.RecordCreatePayload{Doctype: action.Subject.Kind, Data: json.RawMessage(`{"title":"follow-up:` + string(action.InstanceID) + `","status":"Draft"}`)})
@@ -131,9 +142,21 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 		// from the verified execution and not from builder-supplied values.
 		return kernel.Operation{Command: kernel.CommandRecordCreate, Payload: payload, Context: kernel.OperationContext{Site: "attacker", User: "attacker", IdempotencyKey: "attacker-key"}}, nil
 	}
+	moduleCommandBuilder := func(_ context.Context, action workflow.ActionContext, _ workflow.ActionInput) (kernel.Operation, error) {
+		payload, err := json.Marshal(map[string]any{"data": map[string]any{"title": "issued:" + string(action.InstanceID)}})
+		if err != nil {
+			return kernel.Operation{}, err
+		}
+		moduleExecution, err := contract.NewCommandModuleExecution(action.BusinessScope, "sales.orders", "finance.ar", 1, moduleCommand.FullName(), moduleCommand.FullName())
+		if err != nil {
+			return kernel.Operation{}, err
+		}
+		return kernel.Operation{Command: moduleCommand.FullName(), Payload: payload, Context: kernel.OperationContext{ModuleExecution: &moduleExecution}}, nil
+	}
 	registration := workflow.ActionRegistration{Key: key, Class: workflow.ActionLocal, InputSchema: inputSchema, OutputSchema: outputSchema, RequiredGrant: serviceGrant}
+	moduleCommandRegistration := workflow.ActionRegistration{Key: moduleCommandKey, Class: workflow.ActionLocal, InputSchema: inputSchema, OutputSchema: outputSchema, RequiredGrant: moduleCommandGrant}
 	makeExecutor := func(stepStore WorkflowLocalStepStore) *WorkflowLocalActionExecutor {
-		executor, err := NewWorkflowLocalActionExecutor(engine, registry, begin, stepStore, integrationWorkflowSchemas{}, []workflow.ActionRegistration{registration}, map[workflow.ActionKey]WorkflowOperationBuilder{key: builder})
+		executor, err := NewWorkflowLocalActionExecutor(engine, registry, begin, stepStore, integrationWorkflowSchemas{}, []workflow.ActionRegistration{registration, moduleCommandRegistration}, map[workflow.ActionKey]WorkflowOperationBuilder{key: builder, moduleCommandKey: moduleCommandBuilder})
 		if err != nil {
 			t.Fatal("construct workflow local executor:", err)
 		}
@@ -149,7 +172,7 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 	}
 	insertRunningInstance(instanceID)
 	claim := workflow.Claim{Tenant: tenant, BusinessScope: contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}, InstanceID: instanceID, StepID: "approve", Attempt: 1, Owner: "workflow-worker", Fence: 4, Revision: "1"}
-	actionContext := workflow.ActionContext{Execution: execution, RequiredGrant: serviceGrant, InstanceID: instanceID, StepID: "approve", ExecutionID: contract.NewOperationID(), Subject: contract.SubjectRef{Kind: doctypeName, ID: doc.Name, Revision: "1"}, IdempotencyKey: contract.IdempotencyKey("workflow-local-" + suffix[:12])}
+	actionContext := workflow.ActionContext{Execution: execution, BusinessScope: claim.BusinessScope, RequiredGrant: serviceGrant, InstanceID: instanceID, StepID: "approve", ExecutionID: contract.NewOperationID(), Subject: contract.SubjectRef{Kind: doctypeName, ID: doc.Name, Revision: "1"}, IdempotencyKey: contract.IdempotencyKey("workflow-local-" + suffix[:12])}
 	result, err := makeExecutor(store).ExecuteLocal(ctx, claim, actionContext, key, workflow.ActionInput{Schema: inputSchema, Data: json.RawMessage(`{}`)}, "done")
 	if err != nil {
 		t.Fatal("execute transaction-bound workflow action:", err)
@@ -185,6 +208,26 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 	}
 	if receiptCount != 1 || stepEventCount != 1 {
 		t.Fatalf("coordinated effects receipt=%d workflow_event=%d", receiptCount, stepEventCount)
+	}
+
+	moduleCommandInstance := contract.InstanceID(contract.NewID())
+	insertRunningInstance(moduleCommandInstance)
+	moduleCommandAction := actionContext
+	moduleCommandAction.InstanceID = moduleCommandInstance
+	moduleCommandAction.ExecutionID = contract.NewOperationID()
+	moduleCommandAction.IdempotencyKey = contract.IdempotencyKey("workflow-module-command-" + suffix[:12])
+	moduleCommandAction.RequiredGrant = moduleCommandGrant
+	moduleCommandClaim := claim
+	moduleCommandClaim.InstanceID = moduleCommandInstance
+	if _, err := makeExecutor(store).ExecuteLocal(ctx, moduleCommandClaim, moduleCommandAction, moduleCommandKey, workflow.ActionInput{Schema: inputSchema, Data: json.RawMessage(`{}`)}, "done"); err != nil {
+		t.Fatal("execute trusted module owner command through workflow:", err)
+	}
+	var issuedCount, issuedEventCount int
+	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(moduleInvoice.RawTableName())+" WHERE title=?", "issued:"+string(moduleCommandInstance)).Scan(&issuedCount); err != nil || issuedCount != 1 {
+		t.Fatalf("trusted workflow module command created %d invoices, err=%v", issuedCount, err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM _kora_outbox WHERE event_type='finance.invoice.issued'`).Scan(&issuedEventCount); err != nil || issuedEventCount != 1 {
+		t.Fatalf("trusted workflow module command emitted %d events, err=%v", issuedEventCount, err)
 	}
 
 	// A failure after both the domain command and workflow writes are staged

@@ -85,7 +85,11 @@ func (e *WorkflowLocalActionExecutor) ExecuteLocal(ctx context.Context, claim wo
 	if err != nil {
 		return workflow.ActionResult{}, &workflow.LocalActionFailure{Kind: workflow.LocalActionNotAppliedPermanent, Cause: err}
 	}
-	operation.Context = verifiedWorkflowOperationContext(action, operation.Context)
+	operationContext, contextErr := verifiedWorkflowOperationContext(action, operation.Context, operation.Command)
+	if contextErr != nil {
+		return workflow.ActionResult{}, &workflow.LocalActionFailure{Kind: workflow.LocalActionNotAppliedPermanent, Cause: contextErr}
+	}
+	operation.Context = operationContext
 	database, tx, release, err := e.begin(ctx, claim.Tenant)
 	if err != nil {
 		if release != nil {
@@ -151,7 +155,16 @@ func newLocalActionFailure(err error, fallback workflow.LocalActionFailureKind) 
 	return &workflow.LocalActionFailure{Kind: kind, Cause: err}
 }
 
-func verifiedWorkflowOperationContext(action workflow.ActionContext, requested kernel.OperationContext) kernel.OperationContext {
+func verifiedWorkflowOperationContext(action workflow.ActionContext, requested kernel.OperationContext, command string) (kernel.OperationContext, error) {
+	var moduleExecution *contract.ModuleExecution
+	if requested.ModuleExecution != nil {
+		candidate := requested.ModuleExecution
+		if !candidate.Verified() || candidate.BindingRevision == 0 || candidate.TenantID != action.Execution.Tenant() || candidate.Scope != action.BusinessScope || candidate.AuthorizedCommand != command || candidate.AllowedOperation != command {
+			return kernel.OperationContext{}, contract.NewError(contract.CodePermissionDenied, "workflow module execution does not match the trusted action")
+		}
+		copy := *candidate
+		moduleExecution = &copy
+	}
 	actor := action.Execution.Actor()
 	user := actor.SubjectUserID
 	if user == "" {
@@ -161,8 +174,8 @@ func verifiedWorkflowOperationContext(action workflow.ActionContext, requested k
 	if len(actor.Roles) > 0 {
 		primaryRole = actor.Roles[0]
 	}
-	return kernel.OperationContext{Site: actor.Site, TenantID: action.Execution.Tenant(), Execution: action.Execution, BusinessScope: action.BusinessScope, CausationDepth: action.CausationDepth, Actor: actor,
+	return kernel.OperationContext{ModuleExecution: moduleExecution, Site: actor.Site, TenantID: action.Execution.Tenant(), Execution: action.Execution, BusinessScope: action.BusinessScope, CausationDepth: action.CausationDepth, Actor: actor,
 		User: user, UserRole: primaryRole, Roles: append([]string(nil), actor.Roles...), Source: kernel.SourceWorker,
 		CorrelationID: requested.CorrelationID, CausationID: string(action.InstanceID), ExpectedVersion: requested.ExpectedVersion,
-		IdempotencyKey: string(action.IdempotencyKey)}
+		IdempotencyKey: string(action.IdempotencyKey)}, nil
 }
