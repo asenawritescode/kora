@@ -236,6 +236,30 @@
       ],
       "type": "object"
     },
+    "CapabilityAction": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "operation_name": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "capability_name",
+        "input_schema",
+        "operation_name",
+        "output_schema"
+      ],
+      "type": "object"
+    },
     "CapabilityOffer": {
       "additionalProperties": false,
       "properties": {
@@ -1688,6 +1712,50 @@
         "role",
         "submit",
         "write"
+      ],
+      "type": "object"
+    },
+    "PinnedDispatch": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "caller_module_id": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/$defs/CapabilityAction"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "scope_key": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "caller_module_id",
+        "execution_id",
+        "idempotency_key",
+        "input_hash",
+        "operation",
+        "provider_id",
+        "scope_key",
+        "tenant_id"
       ],
       "type": "object"
     },
@@ -3290,6 +3358,30 @@
       ],
       "type": "object"
     },
+    "CapabilityAction": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "operation_name": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "capability_name",
+        "input_schema",
+        "operation_name",
+        "output_schema"
+      ],
+      "type": "object"
+    },
     "CapabilityOffer": {
       "additionalProperties": false,
       "properties": {
@@ -4720,6 +4812,50 @@
         "role",
         "submit",
         "write"
+      ],
+      "type": "object"
+    },
+    "PinnedDispatch": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "caller_module_id": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/$defs/CapabilityAction"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "scope_key": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "caller_module_id",
+        "execution_id",
+        "idempotency_key",
+        "input_hash",
+        "operation",
+        "provider_id",
+        "scope_key",
+        "tenant_id"
       ],
       "type": "object"
     },

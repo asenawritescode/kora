@@ -293,3 +293,32 @@ func TestExternalActionValidatesBeforePersistingOrCalling(t *testing.T) {
 		t.Fatalf("invalid input crossed the effect boundary: started=%t called=%t", store.started, action.called)
 	}
 }
+
+func TestPinnedCapabilityDispatchIdentityIsStableAndHashesInput(t *testing.T) {
+	action := contract.CapabilityAction{CapabilityName: "billing.issue", OperationName: "IssueInvoice", InputSchema: contract.SchemaRef{ID: "invoice.issue.in", Version: 1}, OutputSchema: contract.SchemaRef{ID: "invoice.issue.out", Version: 1}}
+	first, err := NewPinnedDispatch("execution-a", "tenant-a", "entity-a", "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":12}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := NewPinnedDispatch("execution-a", "tenant-a", "entity-a", "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":12}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != retry {
+		t.Fatalf("retry identity changed: %#v %#v", first, retry)
+	}
+	changed, err := NewPinnedDispatch("execution-a", "tenant-a", "entity-a", "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":13}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.InputHash == changed.InputHash {
+		t.Fatal("changed request payload retained input hash")
+	}
+	rebound, err := NewPinnedDispatch("execution-a", "tenant-a", "entity-a", "sales.orders", 9, "billing-provider-b", action, "idem-a", json.RawMessage(`{"amount":12}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ProviderID == rebound.ProviderID || first.BindingRevision == rebound.BindingRevision {
+		t.Fatal("provider rebind not represented")
+	}
+}

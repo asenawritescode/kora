@@ -226,6 +226,39 @@ type BusinessEventDefinition struct {
 	OwnerModuleID ModuleID  `json:"owner_module_id"`
 }
 
+// CapabilityAction declares a schema-checked provider operation.
+//
+//contract:wire:v2
+type CapabilityAction struct {
+	CapabilityName CapabilityName `json:"capability_name"`
+	OperationName  string         `json:"operation_name"`
+	InputSchema    SchemaRef      `json:"input_schema"`
+	OutputSchema   SchemaRef      `json:"output_schema"`
+}
+
+// PinnedDispatch records provider and operation identity before an effect attempt.
+//
+//contract:wire:v2
+type PinnedDispatch struct {
+	ExecutionID     string           `json:"execution_id"`
+	TenantID        TenantID         `json:"tenant_id"`
+	ScopeKey        string           `json:"scope_key"`
+	CallerModuleID  ModuleID         `json:"caller_module_id"`
+	ProviderID      string           `json:"provider_id"`
+	BindingRevision uint64           `json:"binding_revision"`
+	Operation       CapabilityAction `json:"operation"`
+	IdempotencyKey  IdempotencyKey   `json:"idempotency_key"`
+	InputHash       string           `json:"input_hash"`
+}
+
+type ExternalOutcome string
+
+const (
+	ExternalApplied    ExternalOutcome = "applied"
+	ExternalNotApplied ExternalOutcome = "not_applied"
+	ExternalUnknown    ExternalOutcome = "unknown"
+)
+
 // ConsumerDefinition declares owner-controlled event subscriptions.
 //
 //contract:wire:v2

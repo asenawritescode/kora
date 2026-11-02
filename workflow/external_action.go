@@ -31,6 +31,31 @@ type ExternalActionExecutor struct {
 	schemas    PayloadSchemaRegistry
 }
 
+// PinnedCapabilityDispatcher ensures a durable external action keeps the
+// selected provider and capability binding across retries.
+type PinnedCapabilityDispatcher interface {
+	Dispatch(context.Context, contract.PinnedDispatch, ActionRegistration, json.RawMessage) (ActionResult, error)
+	Reconcile(context.Context, contract.PinnedDispatch) (contract.ExternalOutcome, ActionResult, error)
+}
+
+type CapabilityDispatchState struct {
+	Dispatch     contract.PinnedDispatch
+	Outcome      contract.ExternalOutcome
+	ReconciledAt time.Time
+	Evidence     string
+}
+
+func NewPinnedDispatch(executionID string, tenant contract.TenantID, scope string, caller contract.ModuleID, bindingRevision uint64, providerID string, action contract.CapabilityAction, idempotency contract.IdempotencyKey, input json.RawMessage) (contract.PinnedDispatch, error) {
+	if executionID == "" || tenant == "" || scope == "" || caller == "" || providerID == "" || action.OperationName == "" || idempotency == "" || !json.Valid(input) {
+		return contract.PinnedDispatch{}, fmt.Errorf("pinned capability dispatch identity is incomplete")
+	}
+	if action.InputSchema.ID == "" || action.InputSchema.Version == 0 || action.OutputSchema.ID == "" || action.OutputSchema.Version == 0 {
+		return contract.PinnedDispatch{}, fmt.Errorf("pinned capability schemas are required")
+	}
+	hash := sha256.Sum256(input)
+	return contract.PinnedDispatch{ExecutionID: executionID, TenantID: tenant, ScopeKey: scope, CallerModuleID: caller, ProviderID: providerID, BindingRevision: bindingRevision, Operation: action, IdempotencyKey: idempotency, InputHash: hex.EncodeToString(hash[:])}, nil
+}
+
 func NewExternalActionExecutor(store ExecutionStore, identities ExecutionIdentityProvider, schemas PayloadSchemaRegistry) (*ExternalActionExecutor, error) {
 	if store == nil || identities == nil || schemas == nil {
 		return nil, fmt.Errorf("external workflow action executor requires store, identity provider, and schemas")
