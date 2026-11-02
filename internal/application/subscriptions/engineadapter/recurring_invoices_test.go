@@ -1,10 +1,12 @@
 package engineadapter
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/internal/engine"
 	"github.com/asenawritescode/kora/kernel"
@@ -51,6 +53,27 @@ func TestScheduledJobHandlersAreOptInPerTenantPackage(t *testing.T) {
 	}
 }
 
+func TestScheduledJobHandlersWithBillingNeedsOnlySubscriptionOwnedTables(t *testing.T) {
+	registry := doctype.NewRegistry()
+	for _, name := range []string{"Subscription", "Plan", "Subscription Line"} {
+		registry.Register(&doctype.DocType{Name: name})
+	}
+	runtime := engine.TenantJobRuntime{Database: &sql.DB{}, Registry: registry, Kernel: &kernel.Kernel{}}
+	provider := billingProviderStub{}
+	if handlers := ScheduledJobHandlersWithBilling(runtime, provider); handlers[JobType] == nil {
+		t.Fatalf("external billing handler unexpectedly required local invoice tables: %#v", handlers)
+	}
+}
+
+type billingProviderStub struct{}
+
+func (billingProviderStub) CreateObligation(context.Context, contract.ScopeContext, BillingObligation) (BillingResult, error) {
+	return BillingResult{}, nil
+}
+func (billingProviderStub) ReconcileObligation(context.Context, contract.ScopeContext, string) (BillingResult, error) {
+	return BillingResult{}, nil
+}
+
 func TestConfiguredInvoiceDueDays(t *testing.T) {
 	for _, test := range []struct {
 		config map[string]any
@@ -70,5 +93,22 @@ func TestConfiguredInvoiceDueDays(t *testing.T) {
 		if !test.bad && (err != nil || got != test.want) {
 			t.Fatalf("configuredDueDays(%v) = %d, %v; want %d", test.config, got, err, test.want)
 		}
+	}
+}
+
+func TestBillingObligationValidatesProviderContractInputs(t *testing.T) {
+	valid := BillingObligation{Source: contract.BusinessRef{ProviderID: "subscriptions", ResourceType: "subscription", ID: "sub-1"}, PeriodStart: "2026-10-01", PeriodEnd: "2026-10-31", Customer: contract.BusinessRef{ProviderID: "parties", ResourceType: "party", ID: "party-1"}, Currency: "USD", Lines: []BillingLine{{Description: "Monthly service", Quantity: "1.00", UnitPrice: "12.50"}}, IdempotencyKey: "tenant-sub-period"}
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	bad := valid
+	bad.Lines = []BillingLine{{Description: "x", Quantity: "NaN", UnitPrice: "1"}}
+	if err := bad.Validate(); err == nil {
+		t.Fatal("non-decimal quantity accepted")
+	}
+	bad = valid
+	bad.PeriodEnd = "2026-09-30"
+	if err := bad.Validate(); err == nil {
+		t.Fatal("reversed period accepted")
 	}
 }

@@ -35,6 +35,63 @@ type recurringInvoiceGenerator struct {
 	tenantID       string
 	siteName       string
 	configRevision uint64
+	billing        BillingProvider
+}
+
+type BillingObligation struct {
+	Source         contract.BusinessRef
+	PeriodStart    string
+	PeriodEnd      string
+	Customer       contract.BusinessRef
+	Currency       string
+	Lines          []BillingLine
+	IdempotencyKey string
+}
+
+type BillingLine struct {
+	Description string
+	Quantity    string
+	UnitPrice   string
+}
+type BillingResult struct {
+	Obligation        contract.BusinessRef
+	State             string
+	ExternalReference string
+}
+type BillingProvider interface {
+	CreateObligation(context.Context, contract.ScopeContext, BillingObligation) (BillingResult, error)
+	ReconcileObligation(context.Context, contract.ScopeContext, string) (BillingResult, error)
+}
+
+func (o BillingObligation) Validate() error {
+	if o.Source.ID == "" || o.Source.ProviderID == "" || o.Source.ResourceType == "" || o.Customer.ID == "" || o.Customer.ProviderID == "" || o.Currency == "" || o.IdempotencyKey == "" || len(o.Lines) == 0 {
+		return fmt.Errorf("billing obligation identity, customer, currency, lines and idempotency key are required")
+	}
+	start, err := time.Parse("2006-01-02", o.PeriodStart)
+	if err != nil {
+		return fmt.Errorf("invalid billing period start")
+	}
+	end, err := time.Parse("2006-01-02", o.PeriodEnd)
+	if err != nil || end.Before(start) {
+		return fmt.Errorf("invalid billing period end")
+	}
+	if len(o.Lines) > 100 {
+		return fmt.Errorf("billing obligation has too many lines")
+	}
+	for _, line := range o.Lines {
+		quantity, err := strconv.ParseFloat(line.Quantity, 64)
+		if err != nil || math.IsNaN(quantity) || math.IsInf(quantity, 0) || quantity <= 0 {
+			return fmt.Errorf("billing quantity must be a positive decimal")
+		}
+		price, err := strconv.ParseFloat(line.UnitPrice, 64)
+		if err != nil || math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+			return fmt.Errorf("billing unit price must be a nonnegative decimal")
+		}
+		if line.Description == "" || len(line.Description) > 500 {
+			return fmt.Errorf("billing line description is invalid")
+		}
+	}
+	return nil
 }
 
 // ScheduledJobHandlers binds subscription invoice automation only when this
@@ -43,7 +100,7 @@ func ScheduledJobHandlers(runtime engine.TenantJobRuntime) map[scheduler.JobType
 	if runtime.Database == nil || runtime.Registry == nil || runtime.Kernel == nil {
 		return nil
 	}
-	for _, name := range []string{"Subscription", "Plan", "Subscription Line", "Billing Schedule", "Recurring Invoice"} {
+	for _, name := range []string{"Subscription", "Plan", "Subscription Line"} {
 		if runtime.Registry.Get(name) == nil {
 			return nil
 		}
@@ -62,6 +119,28 @@ func ScheduledJobHandlers(runtime engine.TenantJobRuntime) map[scheduler.JobType
 			return generator.GenerateDueInvoices(ctx, config)
 		},
 	}
+}
+
+func ScheduledJobHandlersWithBilling(runtime engine.TenantJobRuntime, provider BillingProvider) map[scheduler.JobType]scheduler.JobHandler {
+	if provider == nil {
+		return nil
+	}
+	if runtime.Database == nil || runtime.Registry == nil {
+		return nil
+	}
+	for _, name := range []string{"Subscription", "Plan", "Subscription Line"} {
+		if runtime.Registry.Get(name) == nil {
+			return nil
+		}
+	}
+	generator := &recurringInvoiceGenerator{database: runtime.Database, registry: runtime.Registry, dialect: runtime.Dialect, kernel: runtime.Kernel, tenantID: runtime.TenantID, siteName: runtime.SiteName, configRevision: runtime.ConfigRevision, billing: provider}
+	return map[scheduler.JobType]scheduler.JobHandler{JobType: func(ctx context.Context, job *scheduler.JobConfig) error {
+		var config map[string]any
+		if job != nil {
+			config = job.Config
+		}
+		return generator.GenerateDueInvoices(ctx, config)
+	}}
 }
 
 func (g *recurringInvoiceGenerator) GenerateDueInvoices(ctx context.Context, config map[string]any) error {
@@ -178,6 +257,42 @@ func (g *recurringInvoiceGenerator) generateForSubscription(ctx context.Context,
 		}
 		periodEnd := next.AddDate(0, 0, -1).Format("2006-01-02")
 		reference := subscription.Name + "-" + due.Format("20060102")
+		if g.billing != nil {
+			key := recurringInvoiceIdempotencyKey(subscription.Name, billingDate)
+			obligation := BillingObligation{Source: contract.BusinessRef{ProviderID: "kora.subscriptions", ResourceType: "subscription", ID: subscription.Name}, PeriodStart: billingDate, PeriodEnd: periodEnd, Customer: contract.BusinessRef{ProviderID: "kora.parties", ResourceType: "party", ID: subscription.GetString("customer")}, Currency: subscription.GetString("currency"), Lines: []BillingLine{{Description: "Subscription " + subscription.Name, Quantity: "1", UnitPrice: strconv.FormatFloat(amount, 'f', -1, 64)}}, IdempotencyKey: key}
+			if err := obligation.Validate(); err != nil {
+				return err
+			}
+			scope := contract.ScopeContext{TenantID: contract.TenantID(g.tenantID), ProviderID: "kora.subscriptions"}
+			result, err := g.billing.CreateObligation(ctx, scope, obligation)
+			if err != nil {
+				return fmt.Errorf("create billing obligation %s: %w", reference, err)
+			}
+			if result.State != "accepted" && result.State != "issued" {
+				return fmt.Errorf("billing obligation %s remains %s and requires reconciliation", reference, result.State)
+			}
+			advance, err := json.Marshal(map[string]any{"next_billing_date": next.Format("2006-01-02")})
+			if err != nil {
+				return err
+			}
+			update, err := json.Marshal(kernel.RecordUpdatePayload{Doctype: "Subscription", Name: subscription.Name, Data: advance})
+			if err != nil {
+				return err
+			}
+			operation := kernel.Operation{Command: kernel.CommandRecordUpdate, Payload: update, Context: kernel.OperationContext{Site: g.siteName, TenantID: execution.Tenant(), Execution: execution, Source: kernel.SourceWorker, User: "system", IdempotencyKey: key + "-schedule", ConfigRevision: g.configRevision}}
+			commandResult, commandErr := g.kernel.Execute(ctx, g.database, g.registry, operation)
+			if commandErr != nil {
+				return fmt.Errorf("advance subscription after accepted billing: %s", commandErr.Message)
+			}
+			if commandResult.Error != nil {
+				return fmt.Errorf("advance subscription after accepted billing: %s", commandResult.Error.Message)
+			}
+			subscription, err = tx.GetDoc(subscriptionType, name, "")
+			if err != nil {
+				return fmt.Errorf("reload advanced subscription: %w", err)
+			}
+			continue
+		}
 		scheduleData, err := json.Marshal(map[string]any{
 			"reference": reference, "subscription": subscription.Name,
 			"source_record": subscription.Name, "actor": "kora:recurring-invoice-scheduler",
