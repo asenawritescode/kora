@@ -36,8 +36,15 @@ func (s *moduleCommandFixtureSchemas) Validate(ref contract.SchemaRef, raw json.
 	if !json.Valid(raw) {
 		return errors.New("invalid JSON")
 	}
-	if ref == s.input && string(raw) != `{"data":{"title":"issued invoice"}}` {
-		return errors.New("input does not match registered contract")
+	if ref == s.input {
+		var payload struct {
+			Data struct {
+				Title string `json:"title"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &payload); err != nil || (payload.Data.Title != "issued invoice" && payload.Data.Title != "different invoice") {
+			return errors.New("input does not match registered contract")
+		}
 	}
 	if ref == s.output && s.rejectOutput {
 		return errors.New("injected output schema rejection")
@@ -130,7 +137,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		IdempotencyKey: "direct-output-schema-" + suffix[:12],
 	}}
 	invalidInputOperation := directOperation
-	invalidInputOperation.Payload = json.RawMessage(`{"data":{"title":"wrong input"}}`)
+	invalidInputOperation.Payload = json.RawMessage(`{"title":"wrong input"}`)
 	if _, commandErr := commandKernel.Execute(ctx, database, registry, invalidInputOperation); commandErr == nil || commandErr.Type != contract.CodeValidationFailed {
 		t.Fatalf("direct owner command accepted input schema mismatch: %v", commandErr)
 	}
@@ -176,6 +183,18 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	if auditOperationID != string(result.ExecutionID) {
 		t.Fatalf("capability execution ID %q differs from committed Kernel operation %q", result.ExecutionID, auditOperationID)
 	}
+	replayed, err := plan.InvokeCapability(ctx, execution, scope, caller.ID, offer.Name, operation.Name, meta, payload)
+	if err != nil || replayed.ExecutionID != result.ExecutionID {
+		t.Fatalf("capability idempotency replay = %+v, err=%v; want original execution %q", replayed, err, result.ExecutionID)
+	}
+	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
+	conflictingPayload := json.RawMessage(`{"data":{"title":"different invoice"}}`)
+	_, err = plan.InvokeCapability(ctx, execution, scope, caller.ID, offer.Name, operation.Name, meta, conflictingPayload)
+	var conflict *contract.Error
+	if !errors.As(err, &conflict) || conflict.Type != contract.CodeIdempotencyKeyReused {
+		t.Fatalf("capability key reuse with a different payload = %v, want idempotency key reused", err)
+	}
+	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
 }
 
 func assertModuleCommandCounts(t *testing.T, ctx context.Context, database *sql.DB, dialect kdb.Dialect, invoice *doctype.DocType, tenant contract.TenantID, wantRecords, wantEvents, wantAudits int) {
