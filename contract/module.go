@@ -259,6 +259,92 @@ const (
 	ExternalUnknown    ExternalOutcome = "unknown"
 )
 
+type ModuleLifecycleState string
+
+const (
+	ModuleInstalled ModuleLifecycleState = "installed"
+	ModuleActive    ModuleLifecycleState = "active"
+	ModuleDraining  ModuleLifecycleState = "draining"
+	ModuleDisabled  ModuleLifecycleState = "disabled"
+	ModuleRemoved   ModuleLifecycleState = "removed"
+)
+
+// PlanModuleChange is the optimistic input to lifecycle planning.
+//
+//contract:wire:v2
+type PlanModuleChange struct {
+	ModuleID         ModuleID             `json:"module_id"`
+	TargetState      ModuleLifecycleState `json:"target_state"`
+	TargetVersion    string               `json:"target_version,omitempty"`
+	ExpectedRevision uint64               `json:"expected_revision"`
+}
+
+// ModuleChangePlan carries bounded reasons why an operation cannot proceed.
+//
+//contract:wire:v2
+type ModuleChangePlan struct {
+	PlanHash           string          `json:"plan_hash"`
+	BaseRevision       uint64          `json:"base_revision"`
+	DependencyBlockers []ModuleBlocker `json:"dependency_blockers,omitempty"`
+	OpenWorkBlockers   []ModuleBlocker `json:"open_work_blockers,omitempty"`
+	BindingChanges     []string        `json:"binding_changes,omitempty"`
+}
+
+// ModuleBlocker is deliberately small and excludes business payloads.
+//
+//contract:wire:v2
+type ModuleBlocker struct {
+	Code     string   `json:"code"`
+	Count    uint32   `json:"count"`
+	Examples []string `json:"examples,omitempty"`
+}
+
+// ApplyModuleChange pins the reviewed plan to the expected snapshot revision.
+//
+//contract:wire:v2
+type ApplyModuleChange struct {
+	Meta             CommandMeta `json:"meta"`
+	ModuleID         ModuleID    `json:"module_id"`
+	PlanHash         string      `json:"plan_hash"`
+	ExpectedRevision uint64      `json:"expected_revision"`
+}
+
+type OpenWorkInspector interface {
+	InspectOpenWork(context.Context, TenantID, ModuleID, uint16) ([]ModuleBlocker, error)
+}
+
+func ValidateModuleLifecycleTransition(from, to ModuleLifecycleState) error {
+	switch from {
+	case ModuleInstalled:
+		if to == ModuleActive || to == ModuleDisabled {
+			return nil
+		}
+	case ModuleActive:
+		if to == ModuleDraining {
+			return nil
+		}
+	case ModuleDraining:
+		if to == ModuleDisabled {
+			return nil
+		}
+	case ModuleDisabled:
+		if to == ModuleActive || to == ModuleRemoved {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid module lifecycle transition %q -> %q", from, to)
+}
+
+func ValidateModuleChangePlan(plan ModuleChangePlan, expectedRevision uint64, openWork []ModuleBlocker) error {
+	if plan.PlanHash == "" || plan.BaseRevision != expectedRevision {
+		return fmt.Errorf("module change plan is stale or incomplete")
+	}
+	if len(plan.DependencyBlockers) > 0 || len(plan.OpenWorkBlockers) > 0 || len(openWork) > 0 {
+		return fmt.Errorf("module change is blocked by dependencies or open work")
+	}
+	return nil
+}
+
 // ConsumerDefinition declares owner-controlled event subscriptions.
 //
 //contract:wire:v2

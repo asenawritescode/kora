@@ -29,6 +29,30 @@
       ],
       "type": "object"
     },
+    "ApplyModuleChange": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "plan_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "meta",
+        "module_id",
+        "plan_hash"
+      ],
+      "type": "object"
+    },
     "ApplyPackage": {
       "additionalProperties": false,
       "properties": {
@@ -1374,6 +1398,62 @@
       ],
       "type": "object"
     },
+    "ModuleBlocker": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "examples": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "count"
+      ],
+      "type": "object"
+    },
+    "ModuleChangePlan": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "type": "integer"
+        },
+        "binding_changes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dependency_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "open_work_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "plan_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_revision",
+        "plan_hash"
+      ],
+      "type": "object"
+    },
     "ModuleDescriptor": {
       "additionalProperties": false,
       "properties": {
@@ -1756,6 +1836,29 @@
         "provider_id",
         "scope_key",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "PlanModuleChange": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "module_id",
+        "target_state"
       ],
       "type": "object"
     },
@@ -3151,6 +3254,30 @@
       ],
       "type": "object"
     },
+    "ApplyModuleChange": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "plan_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "meta",
+        "module_id",
+        "plan_hash"
+      ],
+      "type": "object"
+    },
     "ApplyPackage": {
       "additionalProperties": false,
       "properties": {
@@ -4474,6 +4601,62 @@
       ],
       "type": "object"
     },
+    "ModuleBlocker": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "examples": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "count"
+      ],
+      "type": "object"
+    },
+    "ModuleChangePlan": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "type": "integer"
+        },
+        "binding_changes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dependency_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "open_work_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "plan_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_revision",
+        "plan_hash"
+      ],
+      "type": "object"
+    },
     "ModuleDescriptor": {
       "additionalProperties": false,
       "properties": {
@@ -4856,6 +5039,29 @@
         "provider_id",
         "scope_key",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "PlanModuleChange": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "module_id",
+        "target_state"
       ],
       "type": "object"
     },

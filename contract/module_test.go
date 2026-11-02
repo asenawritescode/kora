@@ -86,3 +86,22 @@ func TestBusinessEventRequiresTrustedOwnerAndExactPayloadSchema(t *testing.T) {
 		t.Fatal("schema version mismatch accepted")
 	}
 }
+
+func TestModuleLifecycleDrainRequiresCurrentUnblockedPlan(t *testing.T) {
+	if err := ValidateModuleLifecycleTransition(ModuleActive, ModuleDraining); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateModuleLifecycleTransition(ModuleActive, ModuleRemoved); err == nil {
+		t.Fatal("active module skipped drain")
+	}
+	plan := ModuleChangePlan{PlanHash: "hash", BaseRevision: 7}
+	if err := ValidateModuleChangePlan(plan, 7, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateModuleChangePlan(plan, 8, nil); err == nil {
+		t.Fatal("stale plan accepted")
+	}
+	if err := ValidateModuleChangePlan(plan, 7, []ModuleBlocker{{Code: "workflow.unknown_outcome", Count: 1}}); err == nil {
+		t.Fatal("open work blocker ignored")
+	}
+}
