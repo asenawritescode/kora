@@ -108,11 +108,99 @@ type ModuleStore interface {
 //
 //contract:wire:v2
 type ModuleDescriptor struct {
-	ID        ModuleID                `json:"id"`
-	Version   string                  `json:"version"`
-	Resources []OwnedResource         `json:"resources,omitempty"`
-	Provides  []CapabilityOffer       `json:"provides,omitempty"`
-	Requires  []CapabilityRequirement `json:"requires,omitempty"`
+	ID              ModuleID                `json:"id"`
+	Version         string                  `json:"version"`
+	Resources       []OwnedResource         `json:"resources,omitempty"`
+	Provides        []CapabilityOffer       `json:"provides,omitempty"`
+	Requires        []CapabilityRequirement `json:"requires,omitempty"`
+	ExtensionPoints []ExtensionPoint        `json:"extension_points,omitempty"`
+	Extensions      []ExtensionRegistration `json:"extensions,omitempty"`
+}
+
+// ExtensionPoint is an owner declaration of a narrowly scoped extension surface.
+//
+//contract:wire:v2
+type ExtensionPoint struct {
+	OwnerModuleID  ModuleID    `json:"owner_module_id"`
+	ID             string      `json:"id"`
+	Version        uint32      `json:"version"`
+	Target         ResourceRef `json:"target"`
+	AllowedKinds   []string    `json:"allowed_kinds"`
+	InputSchema    SchemaRef   `json:"input_schema"`
+	OutputSchema   SchemaRef   `json:"output_schema"`
+	ExecutionPhase string      `json:"execution_phase"`
+	FailurePolicy  string      `json:"failure_policy"`
+}
+
+// ExtensionRegistration grants no resource mutation authority.
+//
+//contract:wire:v2
+type ExtensionRegistration struct {
+	ExtenderModuleID ModuleID         `json:"extender_module_id"`
+	PointID          string           `json:"point_id"`
+	PointVersion     uint32           `json:"point_version"`
+	ArtifactDigest   string           `json:"artifact_digest"`
+	HandlerRef       ResourceRef      `json:"handler_ref"`
+	Order            int32            `json:"order"`
+	AddedFields      []ExtensionField `json:"added_fields,omitempty"`
+}
+
+// ExtensionField must use an extender-owned namespaced key.
+//
+//contract:wire:v2
+type ExtensionField struct {
+	Key    string    `json:"key"`
+	Schema SchemaRef `json:"schema"`
+}
+
+func ValidateModuleExtensions(modules []ModuleDescriptor, registered func(SchemaRef) bool) error {
+	points := map[string]ExtensionPoint{}
+	ownerModules := map[ModuleID]ModuleDescriptor{}
+	for _, module := range modules {
+		ownerModules[module.ID] = module
+		for _, point := range module.ExtensionPoints {
+			if point.OwnerModuleID != module.ID || point.ID == "" || point.Version == 0 || point.Target.Name == "" || len(point.AllowedKinds) == 0 {
+				return fmt.Errorf("invalid extension point in module %q", module.ID)
+			}
+			key := string(module.ID) + "/" + point.ID
+			if _, ok := points[key]; ok {
+				return fmt.Errorf("duplicate extension point %q", key)
+			}
+			points[key] = point
+		}
+	}
+	orders := map[string]map[int32]bool{}
+	for _, module := range modules {
+		for _, extension := range module.Extensions {
+			key := extension.PointID
+			point, ok := points[key]
+			if !ok {
+				return fmt.Errorf("extension point %q is undeclared", key)
+			}
+			if extension.ExtenderModuleID != module.ID || extension.PointVersion != point.Version || extension.ArtifactDigest == "" {
+				return fmt.Errorf("extension %q has invalid owner or point version", key)
+			}
+			if orders[key] == nil {
+				orders[key] = map[int32]bool{}
+			}
+			if orders[key][extension.Order] {
+				return fmt.Errorf("extension point %q has ambiguous order %d", key, extension.Order)
+			}
+			orders[key][extension.Order] = true
+			for _, field := range extension.AddedFields {
+				if !strings.HasPrefix(field.Key, string(module.ID)+".") || field.Schema.ID == "" || field.Schema.Version == 0 {
+					return fmt.Errorf("extension field %q must be extender namespaced and versioned", field.Key)
+				}
+				if registered != nil && !registered(field.Schema) {
+					return fmt.Errorf("extension field %q schema is unregistered", field.Key)
+				}
+			}
+			if _, ok := ownerModules[point.OwnerModuleID]; !ok {
+				return fmt.Errorf("extension point owner is not installed")
+			}
+		}
+	}
+	return nil
 }
 
 func (m ModuleDescriptor) OwnerOf(ref ResourceRef) (OwnedResource, bool) {

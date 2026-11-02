@@ -105,3 +105,23 @@ func TestModuleLifecycleDrainRequiresCurrentUnblockedPlan(t *testing.T) {
 		t.Fatal("open work blocker ignored")
 	}
 }
+
+func TestOwnerControlledModuleExtensionsValidateScopeSchemaAndOrder(t *testing.T) {
+	owner := ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", ExtensionPoints: []ExtensionPoint{{OwnerModuleID: "finance.ar", ID: "invoice.validation", Version: 2, Target: ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1}, AllowedKinds: []string{"validation"}, InputSchema: SchemaRef{ID: "invoice", Version: 1}, OutputSchema: SchemaRef{ID: "validation", Version: 1}, ExecutionPhase: "before_commit", FailurePolicy: "reject"}}}
+	extender := ModuleDescriptor{ID: "tax.vat", Version: "1.0.0", Extensions: []ExtensionRegistration{{ExtenderModuleID: "tax.vat", PointID: "finance.ar/invoice.validation", PointVersion: 2, ArtifactDigest: "digest", HandlerRef: ResourceRef{Namespace: "tenant", Name: "tax.validate", Version: 1}, Order: 10, AddedFields: []ExtensionField{{Key: "tax.vat.code", Schema: SchemaRef{ID: "tax-code", Version: 1}}}}}}
+	if err := ValidateModuleExtensions([]ModuleDescriptor{owner, extender}, func(SchemaRef) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	bad := extender
+	bad.Extensions = append([]ExtensionRegistration(nil), extender.Extensions...)
+	bad.Extensions[0].PointID = "finance.ar/undeclared"
+	if err := ValidateModuleExtensions([]ModuleDescriptor{owner, bad}, nil); err == nil {
+		t.Fatal("undeclared extension point accepted")
+	}
+	bad = extender
+	bad.Extensions = append([]ExtensionRegistration(nil), extender.Extensions...)
+	bad.Extensions[0].AddedFields = []ExtensionField{{Key: "invoice.status", Schema: SchemaRef{ID: "tax-code", Version: 1}}}
+	if err := ValidateModuleExtensions([]ModuleDescriptor{owner, bad}, nil); err == nil {
+		t.Fatal("core field override accepted")
+	}
+}

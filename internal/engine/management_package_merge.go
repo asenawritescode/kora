@@ -67,6 +67,9 @@ func mergeModuleDescriptors(current, incoming []contract.ModuleDescriptor) ([]co
 	if err := contract.ValidateModuleSet(modules, nil); err != nil {
 		return nil, err
 	}
+	if err := contract.ValidateModuleExtensions(modules, nil); err != nil {
+		return nil, err
+	}
 	sort.Slice(modules, func(i, j int) bool { return modules[i].ID < modules[j].ID })
 	return modules, nil
 }

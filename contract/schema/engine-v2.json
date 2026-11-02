@@ -989,6 +989,107 @@
       ],
       "type": "object"
     },
+    "ExtensionField": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "key",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "ExtensionPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_kinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "execution_phase": {
+          "type": "string"
+        },
+        "failure_policy": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "allowed_kinds",
+        "execution_phase",
+        "failure_policy",
+        "id",
+        "input_schema",
+        "output_schema",
+        "owner_module_id",
+        "target",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ExtensionRegistration": {
+      "additionalProperties": false,
+      "properties": {
+        "added_fields": {
+          "items": {
+            "$ref": "#/$defs/ExtensionField"
+          },
+          "type": "array"
+        },
+        "artifact_digest": {
+          "type": "string"
+        },
+        "extender_module_id": {
+          "type": "string"
+        },
+        "handler_ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "point_id": {
+          "type": "string"
+        },
+        "point_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_digest",
+        "extender_module_id",
+        "handler_ref",
+        "order",
+        "point_id",
+        "point_version"
+      ],
+      "type": "object"
+    },
     "FieldCondition": {
       "additionalProperties": false,
       "properties": {
@@ -1544,6 +1645,18 @@
     "ModuleDescriptor": {
       "additionalProperties": false,
       "properties": {
+        "extension_points": {
+          "items": {
+            "$ref": "#/$defs/ExtensionPoint"
+          },
+          "type": "array"
+        },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/ExtensionRegistration"
+          },
+          "type": "array"
+        },
         "id": {
           "type": "string"
         },
@@ -4358,6 +4471,107 @@
       ],
       "type": "object"
     },
+    "ExtensionField": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "key",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "ExtensionPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_kinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "execution_phase": {
+          "type": "string"
+        },
+        "failure_policy": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "allowed_kinds",
+        "execution_phase",
+        "failure_policy",
+        "id",
+        "input_schema",
+        "output_schema",
+        "owner_module_id",
+        "target",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ExtensionRegistration": {
+      "additionalProperties": false,
+      "properties": {
+        "added_fields": {
+          "items": {
+            "$ref": "#/$defs/ExtensionField"
+          },
+          "type": "array"
+        },
+        "artifact_digest": {
+          "type": "string"
+        },
+        "extender_module_id": {
+          "type": "string"
+        },
+        "handler_ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "point_id": {
+          "type": "string"
+        },
+        "point_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_digest",
+        "extender_module_id",
+        "handler_ref",
+        "order",
+        "point_id",
+        "point_version"
+      ],
+      "type": "object"
+    },
     "FieldCondition": {
       "additionalProperties": false,
       "properties": {
@@ -4913,6 +5127,18 @@
     "ModuleDescriptor": {
       "additionalProperties": false,
       "properties": {
+        "extension_points": {
+          "items": {
+            "$ref": "#/$defs/ExtensionPoint"
+          },
+          "type": "array"
+        },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/ExtensionRegistration"
+          },
+          "type": "array"
+        },
         "id": {
           "type": "string"
         },
