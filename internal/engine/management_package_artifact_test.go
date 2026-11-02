@@ -47,7 +47,7 @@ func TestVerifiedManagementPackageChecksDigestBeforeReturningSnapshot(t *testing
 	files := []contract.PackFile{{Path: "doctypes/stock.yaml", Content: "name: Stock\nmodule: Inventory\nfields:\n  - fieldname: title\n    fieldtype: Data\n", ContentType: "doctype"}}
 	command := validManagementPackageCommand(t, manifest, files)
 	resolver := staticManagementPackageArtifact{artifact: ManagementPackageArtifact{Manifest: manifest, Files: files}, ref: command.ArtifactRef}
-	snapshot, scripts, err := verifiedManagementPackage(context.Background(), resolver, command)
+	snapshot, scripts, _, err := verifiedManagementPackage(context.Background(), resolver, command)
 	if err != nil {
 		t.Fatalf("verifiedManagementPackage() error = %v", err)
 	}
@@ -56,7 +56,7 @@ func TestVerifiedManagementPackageChecksDigestBeforeReturningSnapshot(t *testing
 	}
 
 	resolver.artifact.Files[0].Content += "# changed after review\n"
-	if snapshot, _, err := verifiedManagementPackage(context.Background(), resolver, command); err == nil || snapshot != nil {
+	if snapshot, _, _, err := verifiedManagementPackage(context.Background(), resolver, command); err == nil || snapshot != nil {
 		t.Fatalf("mutated artifact returned snapshot %#v, error %v", snapshot, err)
 	}
 }
@@ -69,7 +69,7 @@ func TestVerifiedManagementPackageRejectsUnboundedArtifacts(t *testing.T) {
 	}
 	command := contract.ApplyPackage{Meta: contract.CommandMeta{IdempotencyKey: "apply-key"}, Tenant: "tenant-1", ArtifactRef: "release:retail-1", Digest: strings.Repeat("a", 64), ExpectedConfigRevision: "4"}
 	resolver := staticManagementPackageArtifact{artifact: ManagementPackageArtifact{Manifest: manifest, Files: files}, ref: command.ArtifactRef}
-	if snapshot, _, err := verifiedManagementPackage(context.Background(), resolver, command); err == nil || snapshot != nil {
+	if snapshot, _, _, err := verifiedManagementPackage(context.Background(), resolver, command); err == nil || snapshot != nil {
 		t.Fatalf("oversized artifact returned snapshot %#v, error %v", snapshot, err)
 	}
 }
@@ -83,7 +83,7 @@ func TestVerifiedManagementPackageBindsScriptBodiesToSnapshot(t *testing.T) {
 	files := []contract.PackFile{{Path: "scripts/stock_check.js", Content: "return true;", ContentType: "script"}}
 	command := validManagementPackageCommand(t, manifest, files)
 	resolver := staticManagementPackageArtifact{artifact: ManagementPackageArtifact{Manifest: manifest, Files: files}, ref: command.ArtifactRef}
-	snapshot, scripts, err := verifiedManagementPackage(context.Background(), resolver, command)
+	snapshot, scripts, _, err := verifiedManagementPackage(context.Background(), resolver, command)
 	if err != nil {
 		t.Fatalf("verifiedManagementPackage() error = %v", err)
 	}

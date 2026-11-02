@@ -250,6 +250,9 @@ func loadModuleSnapshotTx(ctx context.Context, tx *sql.Tx, dialect db.QueryDiale
 }
 
 func validateModuleSnapshot(snapshot contract.ModuleSnapshot) error {
+	if err := contract.ValidateInstalledPackages(snapshot.Packages); err != nil {
+		return err
+	}
 	modules := make(map[contract.ModuleID]bool, len(snapshot.Installations))
 	for _, installation := range snapshot.Installations {
 		if installation.TenantID != snapshot.TenantID || installation.ModuleID == "" || installation.Version == "" || installation.ArtifactDigest == "" {

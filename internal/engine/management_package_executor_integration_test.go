@@ -171,7 +171,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 			// Simulate a process crash after the first non-transactional DDL
 			// statement. The executor below starts with only durable DB state; it
 			// must re-plan live schema and restore any remaining indexes/triggers.
-			incoming, _, err := verifiedManagementPackage(ctx, resolver, command)
+			incoming, _, _, err := verifiedManagementPackage(ctx, resolver, command)
 			if err != nil {
 				t.Fatal("verify package before simulating interruption:", err)
 			}

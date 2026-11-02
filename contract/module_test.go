@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -85,6 +86,47 @@ func TestDecodeMarketplacePackageManifestIsStrictAndValidatesModules(t *testing.
 	invalid := `{"schema_version":1,"package_id":"finance","release_id":"finance-1","version":"1.0.0","kind":"module","public":{"slug":"finance","name":"Finance","summary":"Finance"},"modules":[{"id":"INVALID","version":"2.0.0"}],"engine":{"min_version":"1.0.0"}}`
 	if _, err := DecodeMarketplacePackageManifest([]byte(invalid)); err == nil {
 		t.Fatal("invalid module identity accepted")
+	}
+}
+
+func TestManifestPackageReferencesRetainPinnedRequirementsAndConflicts(t *testing.T) {
+	valid := MarketplacePackageManifest{
+		SchemaVersion: 1, PackageID: "retail", ReleaseID: "retail-1.0.0", Version: "1.0.0", Kind: "template",
+		Requires:  []ManifestPackRef{{PackageID: "inventory", ReleaseID: "inventory-1.0.0"}},
+		Conflicts: []ManifestPackRef{{PackageID: "legacy-stock"}, {ReleaseID: "legacy-stock-1.0.0"}},
+	}
+	if err := ValidateManifestPackRefs(valid.Requires, valid.Conflicts); err != nil {
+		t.Fatalf("valid pinned package references: %v", err)
+	}
+	if err := ValidateManifestPackRefs([]ManifestPackRef{{PackageID: "inventory"}}, nil); err == nil {
+		t.Fatal("unversioned package requirement accepted")
+	}
+	if err := ValidateManifestPackRefs(nil, []ManifestPackRef{{}}); err == nil {
+		t.Fatal("empty package conflict accepted")
+	}
+	if err := ValidateManifestPackRefs(nil, []ManifestPackRef{{ReleaseID: "../escape"}}); err == nil {
+		t.Fatal("unsafe package conflict reference accepted")
+	}
+}
+
+func TestValidateInstalledPackagesChecksRequirementsConflictsAndPins(t *testing.T) {
+	base := InstalledPackage{PackageID: "base", ReleaseID: "base-2", Version: "2.0.0", Digest: "digest-base"}
+	consumer := InstalledPackage{PackageID: "sales", ReleaseID: "sales-1", Version: "1.0.0", Digest: "digest-sales", Requires: []ManifestPackRef{{PackageID: "base", ReleaseID: "base-2", Version: "2.0.0"}}}
+	if err := ValidateInstalledPackages([]InstalledPackage{consumer, base}); err != nil {
+		t.Fatalf("valid pinned dependency: %v", err)
+	}
+	if err := ValidateInstalledPackages([]InstalledPackage{consumer}); err == nil {
+		t.Fatal("missing required package accepted")
+	}
+	wrong := base
+	wrong.Version = "1.0.0"
+	if err := ValidateInstalledPackages([]InstalledPackage{consumer, wrong}); err == nil {
+		t.Fatal("version-mismatched dependency accepted")
+	}
+	conflicting := base
+	conflicting.Conflicts = []ManifestPackRef{{PackageID: "sales"}}
+	if err := ValidateInstalledPackages([]InstalledPackage{consumer, conflicting}); err == nil {
+		t.Fatal("declared package conflict accepted")
 	}
 }
 
@@ -223,5 +265,40 @@ func TestPlanCompositionResolvesTransitiveProvidersAndStableOrder(t *testing.T) 
 	cycleProviders := []ProviderRegistration{{TenantID: "tenant-a", ProviderID: "alpha-provider", OwnerModuleID: "alpha.one", Kind: "internal", Offers: []CapabilityOffer{{Name: "alpha", Contract: SchemaRef{ID: "a", Version: 1}}}}, {TenantID: "tenant-a", ProviderID: "beta-provider", OwnerModuleID: "beta.two", Kind: "internal", Offers: []CapabilityOffer{{Name: "beta", Contract: SchemaRef{ID: "b", Version: 1}}}}}
 	if _, err := PlanComposition(cycle, cycleProviders, nil, scope, 3); err == nil {
 		t.Fatal("multi-hop initialization cycle accepted")
+	}
+}
+
+func TestPlanCompositionRejectsMissingAndSelfInitializationRequirements(t *testing.T) {
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}
+	missing := ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Requires: []CapabilityRequirement{{Name: "billing.post", Contract: SchemaRef{ID: "journal", Version: 1}, Required: true}}}
+	if _, err := PlanComposition([]ModuleDescriptor{missing}, nil, nil, scope, 1); err == nil {
+		t.Fatal("missing mandatory capability accepted")
+	}
+	offer := CapabilityOffer{Name: "self.calculate", Contract: SchemaRef{ID: "calculation", Version: 1}}
+	self := ModuleDescriptor{ID: "finance.calc", Version: "1.0.0", Provides: []CapabilityOffer{offer}, Requires: []CapabilityRequirement{{Name: offer.Name, Contract: offer.Contract, Required: true}}}
+	provider := ProviderRegistration{TenantID: scope.TenantID, ProviderID: "calculator", OwnerModuleID: self.ID, Kind: "internal", Offers: []CapabilityOffer{offer}}
+	if _, err := PlanComposition([]ModuleDescriptor{self}, []ProviderRegistration{provider}, nil, scope, 1); err == nil {
+		t.Fatal("self dependency accepted")
+	}
+}
+
+func TestPlanCompositionBoundsConcreteCycleDiagnostics(t *testing.T) {
+	const size = 24
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}
+	modules := make([]ModuleDescriptor, 0, size)
+	providers := make([]ProviderRegistration, 0, size)
+	for i := 0; i < size; i++ {
+		id := ModuleID(fmt.Sprintf("module.%02d", i))
+		next := (i + 1) % size
+		capability := CapabilityName(fmt.Sprintf("capability.%02d", i))
+		nextCapability := CapabilityName(fmt.Sprintf("capability.%02d", next))
+		currentSchema := SchemaRef{ID: fmt.Sprintf("schema.%02d", i), Version: 1}
+		nextSchema := SchemaRef{ID: fmt.Sprintf("schema.%02d", next), Version: 1}
+		modules = append(modules, ModuleDescriptor{ID: id, Version: "1.0.0", Provides: []CapabilityOffer{{Name: capability, Contract: currentSchema}}, Requires: []CapabilityRequirement{{Name: nextCapability, Contract: nextSchema, Required: true}}})
+		providers = append(providers, ProviderRegistration{TenantID: scope.TenantID, ProviderID: string(id), OwnerModuleID: id, Kind: "internal", Offers: []CapabilityOffer{{Name: capability, Contract: currentSchema}}})
+	}
+	plan, err := PlanComposition(modules, providers, nil, scope, 2)
+	if err == nil || len(plan.CyclePaths) != 1 || len(plan.CyclePaths[0]) > 16 {
+		t.Fatalf("cycle diagnostic should be concrete and bounded: plan=%+v err=%v", plan, err)
 	}
 }

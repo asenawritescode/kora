@@ -549,6 +549,12 @@
           },
           "type": "array"
         },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/InstalledPackage"
+          },
+          "type": "array"
+        },
         "plan_hash": {
           "type": "string"
         }
@@ -1396,6 +1402,42 @@
       ],
       "type": "object"
     },
+    "InstalledPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "package_id",
+        "release_id",
+        "version"
+      ],
+      "type": "object"
+    },
     "ManagedChannelClientV2": {
       "additionalProperties": false,
       "properties": {
@@ -1948,6 +1990,12 @@
           },
           "type": "array"
         },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/InstalledPackage"
+          },
+          "type": "array"
+        },
         "provider_selections": {
           "items": {
             "$ref": "#/$defs/ProviderSelection"
@@ -2084,6 +2132,12 @@
     "PackManifest": {
       "additionalProperties": false,
       "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
         "exports": {
           "$ref": "#/$defs/ManifestExports"
         },
@@ -4466,6 +4520,12 @@
           },
           "type": "array"
         },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/InstalledPackage"
+          },
+          "type": "array"
+        },
         "plan_hash": {
           "type": "string"
         }
@@ -5291,6 +5351,42 @@
       ],
       "type": "object"
     },
+    "InstalledPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "package_id",
+        "release_id",
+        "version"
+      ],
+      "type": "object"
+    },
     "ManagedChannelClientV2": {
       "additionalProperties": false,
       "properties": {
@@ -5843,6 +5939,12 @@
           },
           "type": "array"
         },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/InstalledPackage"
+          },
+          "type": "array"
+        },
         "provider_selections": {
           "items": {
             "$ref": "#/$defs/ProviderSelection"
@@ -5979,6 +6081,12 @@
     "PackManifest": {
       "additionalProperties": false,
       "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
         "exports": {
           "$ref": "#/$defs/ManifestExports"
         },

@@ -83,6 +83,15 @@ func TestValidateModuleSnapshotRequiresSelectionsToMatchInstalledCapabilities(t 
 	}
 }
 
+func TestValidateModuleSnapshotRejectsInvalidInstalledPackageComposition(t *testing.T) {
+	snapshot := contract.ModuleSnapshot{TenantID: "tenant-a", Packages: []contract.InstalledPackage{
+		{PackageID: "sales", ReleaseID: "sales-1", Version: "1.0.0", Digest: "sales-digest", Requires: []contract.ManifestPackRef{{PackageID: "billing", ReleaseID: "billing-1"}}},
+	}}
+	if err := validateModuleSnapshot(snapshot); err == nil {
+		t.Fatal("module snapshot with missing package requirement accepted")
+	}
+}
+
 func TestModuleStoreSchemaUsesSupportedDialectTypes(t *testing.T) {
 	for _, name := range []string{"mysql", "postgres", "libsql"} {
 		statement := NewModuleStore(nil, db.Resolve(name)).SchemaStatement()

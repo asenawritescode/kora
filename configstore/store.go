@@ -1099,6 +1099,23 @@ type ManagementActivationCommit struct {
 	ModuleTenantID         contract.TenantID
 	ModuleSnapshotRevision uint64
 	ProviderSelections     []contract.ProviderSelection
+	PackageConstraints     []contract.InstalledPackage
+}
+
+func mergeInstalledPackages(existing, incoming []contract.InstalledPackage) []contract.InstalledPackage {
+	byRelease := make(map[string]contract.InstalledPackage, len(existing)+len(incoming))
+	for _, pkg := range existing {
+		byRelease[pkg.ReleaseID] = pkg
+	}
+	for _, pkg := range incoming {
+		byRelease[pkg.ReleaseID] = pkg
+	}
+	out := make([]contract.InstalledPackage, 0, len(byRelease))
+	for _, pkg := range byRelease {
+		out = append(out, pkg)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ReleaseID < out[j].ReleaseID })
+	return out
 }
 
 // CommitManagementActivation validates the current worker claim and atomically
@@ -1118,7 +1135,7 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 	if err := s.ActivateSnapshotAtConfigRevision(tx, snapshot, siteName, dialect, commit.ExpectedRevision); err != nil {
 		return "", 0, err
 	}
-	if len(snapshot.Modules) > 0 {
+	if len(snapshot.Modules) > 0 || len(commit.PackageConstraints) > 0 {
 		if _, err := contract.ParseTenantID(string(commit.ModuleTenantID)); err != nil {
 			return "", 0, fmt.Errorf("module snapshot tenant identity is invalid: %w", err)
 		}
@@ -1143,7 +1160,8 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 		if commit.ProviderSelections != nil {
 			selections = commit.ProviderSelections
 		}
-		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Modules: allModules, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: ownership, ProviderSelections: append([]contract.ProviderSelection(nil), selections...)}
+		packages := mergeInstalledPackages(existing.Packages, commit.PackageConstraints)
+		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Modules: allModules, Packages: packages, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: ownership, ProviderSelections: append([]contract.ProviderSelection(nil), selections...)}
 		if err := validateModuleSnapshot(moduleSnapshot); err != nil {
 			return "", 0, err
 		}

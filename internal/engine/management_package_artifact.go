@@ -34,60 +34,61 @@ func (e managementPackageResolutionError) Unwrap() error { return e.cause }
 
 // verifiedManagementPackage resolves, bounds, hashes, validates and parses the
 // release before any tenant database or runtime state is touched.
-func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageArtifactResolver, command contract.ApplyPackage) (*doctype.ConfigSnapshot, map[string]string, error) {
+func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageArtifactResolver, command contract.ApplyPackage) (*doctype.ConfigSnapshot, map[string]string, contract.MarketplacePackageManifest, error) {
 	if ctx == nil || resolver == nil {
-		return nil, nil, fmt.Errorf("package application requires context and an artifact resolver")
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package application requires context and an artifact resolver")
 	}
 	if err := contract.ValidateApplyPackage(command); err != nil {
-		return nil, nil, fmt.Errorf("invalid package application command: %w", err)
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("invalid package application command: %w", err)
 	}
 	artifact, err := resolver.ResolvePackage(ctx, command.ArtifactRef, string(command.Digest), command.OptionalReleaseIDs)
 	if err != nil {
-		return nil, nil, managementPackageResolutionError{cause: fmt.Errorf("resolve immutable package artifact: %w", err)}
+		return nil, nil, contract.MarketplacePackageManifest{}, managementPackageResolutionError{cause: fmt.Errorf("resolve immutable package artifact: %w", err)}
 	}
 	if len(artifact.Files) == 0 || len(artifact.Files) > maxManagementPackageFiles {
-		return nil, nil, fmt.Errorf("package artifact file count is outside the supported limit")
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package artifact file count is outside the supported limit")
 	}
 	total := 0
 	for _, file := range artifact.Files {
 		total += len(file.Path) + len(file.ContentType) + len(file.Content)
 		if total > maxManagementPackageSize {
-			return nil, nil, fmt.Errorf("package artifact exceeds the supported size limit")
+			return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package artifact exceeds the supported size limit")
 		}
 	}
 	canonical, err := contract.CanonicalManifestJSON(artifact.Manifest)
 	if err != nil {
-		return nil, nil, fmt.Errorf("canonicalize package manifest: %w", err)
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("canonicalize package manifest: %w", err)
 	}
 	digest, err := contract.PackDigest(canonical, artifact.Files)
 	if err != nil {
-		return nil, nil, fmt.Errorf("verify package artifact digest: %w", err)
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("verify package artifact digest: %w", err)
 	}
 	if digest != string(command.Digest) {
-		return nil, nil, fmt.Errorf("package artifact digest does not match the accepted operation")
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package artifact digest does not match the accepted operation")
 	}
 	manifest := contract.PackManifest{
 		SchemaVersion: artifact.Manifest.SchemaVersion,
 		Name:          artifact.Manifest.PackageID,
 		Version:       artifact.Manifest.Version,
 		Requires:      artifact.Manifest.Requires,
+		Conflicts:     artifact.Manifest.Conflicts,
 		Exports:       artifact.Manifest.Exports,
 		ScheduledJobs: artifact.Manifest.ScheduledJobs,
 		Modules:       artifact.Manifest.Modules,
 	}
 	if err := contract.ValidateModuleSet(manifest.Modules, nil); err != nil {
-		return nil, nil, fmt.Errorf("validate package modules: %w", err)
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("validate package modules: %w", err)
 	}
 	validation, err := site.ValidatePack(manifest, artifact.Files)
 	if err != nil {
-		return nil, nil, fmt.Errorf("validate package artifact: %w", err)
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("validate package artifact: %w", err)
 	}
 	if !validation.Valid {
-		return nil, nil, fmt.Errorf("package artifact failed Engine validation")
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package artifact failed Engine validation")
 	}
 	snapshot, scripts, err := site.ParseConfigPack(artifact.Manifest.PackageID, artifact.Files)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse package artifact: %w", err)
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("parse package artifact: %w", err)
 	}
 	snapshot.ScheduledJobs = append(snapshot.ScheduledJobs, artifact.Manifest.ScheduledJobs...)
 	snapshot.Modules = append(snapshot.Modules, artifact.Manifest.Modules...)
@@ -98,29 +99,29 @@ func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageAr
 	// persist an empty body.
 	for _, script := range snapshot.Scripts {
 		if script == nil {
-			return nil, nil, fmt.Errorf("package snapshot contains an empty script entry")
+			return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package snapshot contains an empty script entry")
 		}
 		source, ok := scripts[script.ScriptHash]
 		if !ok || source == "" {
-			return nil, nil, fmt.Errorf("package script %q has no verified source body", script.Name)
+			return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package script %q has no verified source body", script.Name)
 		}
 		script.Source = source
 	}
 	for _, module := range snapshot.Modules {
 		for _, owned := range module.Resources {
 			if owned.Ref.Version < 1 {
-				return nil, nil, fmt.Errorf("module %q resource %q has invalid version", module.ID, owned.Ref.String())
+				return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("module %q resource %q has invalid version", module.ID, owned.Ref.String())
 			}
 			found, err := bindOwnedPackageResource(snapshot, module.ID, owned)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, contract.MarketplacePackageManifest{}, err
 			}
 			if !found {
-				return nil, nil, fmt.Errorf("module %q owns missing package resource %q", module.ID, owned.Ref.String())
+				return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("module %q owns missing package resource %q", module.ID, owned.Ref.String())
 			}
 		}
 	}
-	return snapshot, scripts, nil
+	return snapshot, scripts, artifact.Manifest, nil
 }
 
 // bindOwnedPackageResource verifies that every declared package owner points

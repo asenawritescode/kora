@@ -42,7 +42,53 @@ func DecodeMarketplacePackageManifest(data []byte) (MarketplacePackageManifest, 
 			return MarketplacePackageManifest{}, err
 		}
 	}
+	if err := ValidateManifestPackRefs(manifest.Requires, manifest.Conflicts); err != nil {
+		return MarketplacePackageManifest{}, err
+	}
 	return manifest, nil
+}
+
+// ValidateManifestPackRefs validates pinned package requirements and declared
+// package/release conflicts before a composition can reach activation.
+func ValidateManifestPackRefs(requires, conflicts []ManifestPackRef) error {
+	if len(requires) > 128 || len(conflicts) > 128 {
+		return fmt.Errorf("package requirements or conflicts exceed the supported limit")
+	}
+	validRef := func(ref ManifestPackRef, requireTarget bool) bool {
+		valid := func(value string) bool {
+			if value == "" || len(value) > 160 || strings.TrimSpace(value) != value || strings.Contains(value, "..") || strings.ContainsAny(value, "/\\") {
+				return false
+			}
+			for _, r := range value {
+				if r < 0x21 || r > 0x7e {
+					return false
+				}
+			}
+			return true
+		}
+		if ref.PackageID != "" && !valid(ref.PackageID) || ref.ReleaseID != "" && !valid(ref.ReleaseID) || ref.Version != "" && !valid(ref.Version) {
+			return false
+		}
+		if requireTarget {
+			return ref.PackageID != "" && (ref.ReleaseID != "" || ref.Version != "")
+		}
+		return ref.PackageID != "" || ref.ReleaseID != ""
+	}
+	seen := map[ManifestPackRef]bool{}
+	for _, ref := range requires {
+		if !validRef(ref, true) || seen[ref] {
+			return fmt.Errorf("package requirement reference is invalid or duplicated")
+		}
+		seen[ref] = true
+	}
+	clear(seen)
+	for _, ref := range conflicts {
+		if !validRef(ref, false) || seen[ref] {
+			return fmt.Errorf("package conflict reference is invalid or duplicated")
+		}
+		seen[ref] = true
+	}
+	return nil
 }
 
 // ScheduledJobDefinition is an immutable tenant job supplied by a package.
@@ -205,6 +251,7 @@ type PackManifest struct {
 	Name          string                   `json:"name"`
 	Version       string                   `json:"version"`
 	Requires      []ManifestPackRef        `json:"requires,omitempty"`
+	Conflicts     []ManifestPackRef        `json:"conflicts,omitempty"`
 	Exports       ManifestExports          `json:"exports"`
 	ScheduledJobs []ScheduledJobDefinition `json:"scheduled_jobs,omitempty"`
 	Modules       []ModuleDescriptor       `json:"modules,omitempty"`

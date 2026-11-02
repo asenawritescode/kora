@@ -343,9 +343,24 @@ type ModuleSnapshot struct {
 	TenantID           TenantID             `json:"tenant_id"`
 	Revision           uint64               `json:"revision"`
 	Modules            []ModuleDescriptor   `json:"modules,omitempty"`
+	Packages           []InstalledPackage   `json:"packages,omitempty"`
 	Installations      []ModuleInstallation `json:"installations"`
 	Ownership          []ResourceOwnership  `json:"ownership"`
 	ProviderSelections []ProviderSelection  `json:"provider_selections,omitempty"`
+}
+
+// InstalledPackage preserves immutable package identity and composition
+// constraints already checked before package resources were activated.
+// It lives in the existing module snapshot rather than a second registry.
+//
+//contract:wire:v2
+type InstalledPackage struct {
+	PackageID string            `json:"package_id"`
+	ReleaseID string            `json:"release_id"`
+	Version   string            `json:"version"`
+	Digest    string            `json:"digest"`
+	Requires  []ManifestPackRef `json:"requires,omitempty"`
+	Conflicts []ManifestPackRef `json:"conflicts,omitempty"`
 }
 
 // ModuleStore is the persistence boundary used by activation. CommitActivation
@@ -422,12 +437,91 @@ type PackageDependency struct {
 //contract:wire:v2
 type CompositionPlan struct {
 	Modules          []ModuleDescriptor      `json:"modules"`
+	Packages         []InstalledPackage      `json:"packages,omitempty"`
 	Bindings         []BindingInspection     `json:"bindings"`
 	ActivationOrder  []ModuleID              `json:"activation_order"`
 	Conflicts        []string                `json:"conflicts,omitempty"`
 	CyclePaths       [][]ModuleID            `json:"cycle_paths,omitempty"`
 	DisabledOptional []CapabilityRequirement `json:"disabled_optional,omitempty"`
 	PlanHash         string                  `json:"plan_hash"`
+}
+
+// PlanInstalledComposition combines package dependency validation with the
+// existing capability graph planner and hashes the entire activation plan.
+func PlanInstalledComposition(packages []InstalledPackage, modules []ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, scope BusinessScope, revision uint64) (CompositionPlan, error) {
+	if err := ValidateInstalledPackages(packages); err != nil {
+		return CompositionPlan{}, err
+	}
+	plan, err := PlanComposition(modules, providers, selections, scope, revision)
+	if err != nil {
+		return plan, err
+	}
+	plan.Packages = append([]InstalledPackage(nil), packages...)
+	sort.Slice(plan.Packages, func(i, j int) bool { return plan.Packages[i].ReleaseID < plan.Packages[j].ReleaseID })
+	canonical, err := json.Marshal(struct {
+		Packages        []InstalledPackage
+		Modules         []ModuleDescriptor
+		Bindings        []BindingInspection
+		ActivationOrder []ModuleID
+		Revision        uint64
+	}{plan.Packages, plan.Modules, plan.Bindings, plan.ActivationOrder, revision})
+	if err != nil {
+		return CompositionPlan{}, err
+	}
+	hash := sha256.Sum256(canonical)
+	plan.PlanHash = hex.EncodeToString(hash[:])
+	return plan, nil
+}
+
+// ValidateInstalledPackages enforces immutable package requirements and
+// conflicts across the complete candidate installation set.
+func ValidateInstalledPackages(packages []InstalledPackage) error {
+	if len(packages) > 512 {
+		return fmt.Errorf("installed package set exceeds the supported limit")
+	}
+	byPackage := make(map[string][]InstalledPackage, len(packages))
+	byRelease := make(map[string]InstalledPackage, len(packages))
+	for _, pkg := range packages {
+		if err := ValidateManifestPackRefs(pkg.Requires, pkg.Conflicts); err != nil {
+			return fmt.Errorf("installed package %q has invalid constraints: %w", pkg.PackageID, err)
+		}
+		if pkg.PackageID == "" || pkg.ReleaseID == "" || pkg.Version == "" || pkg.Digest == "" {
+			return fmt.Errorf("installed package identity is incomplete")
+		}
+		if _, exists := byRelease[pkg.ReleaseID]; exists {
+			return fmt.Errorf("release %q is installed more than once", pkg.ReleaseID)
+		}
+		byRelease[pkg.ReleaseID] = pkg
+		byPackage[pkg.PackageID] = append(byPackage[pkg.PackageID], pkg)
+	}
+	for _, pkg := range packages {
+		for _, req := range pkg.Requires {
+			matched := false
+			for _, candidate := range byPackage[req.PackageID] {
+				if req.ReleaseID != "" && candidate.ReleaseID != req.ReleaseID || req.Version != "" && candidate.Version != req.Version {
+					continue
+				}
+				matched = true
+				break
+			}
+			if !matched {
+				return fmt.Errorf("installed package %q is missing required package %q", pkg.PackageID, req.PackageID)
+			}
+		}
+		for _, conflict := range pkg.Conflicts {
+			for _, candidate := range packages {
+				if pkg.ReleaseID == candidate.ReleaseID {
+					continue
+				}
+				packageMatch := conflict.PackageID != "" && conflict.PackageID == candidate.PackageID && (conflict.Version == "" || conflict.Version == candidate.Version)
+				releaseMatch := conflict.ReleaseID != "" && conflict.ReleaseID == candidate.ReleaseID
+				if packageMatch || releaseMatch {
+					return fmt.Errorf("installed package %q conflicts with %q", pkg.PackageID, candidate.PackageID)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 //contract:wire:v2
@@ -544,7 +638,9 @@ func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistratio
 	}
 	order, cycle := topologicalModuleOrder(ordered, edges)
 	if len(cycle) > 0 {
-		return CompositionPlan{}, fmt.Errorf("module initialization cycle: %s", moduleCycleText(cycle))
+		cycle = boundedModuleCycle(cycle, 16)
+		plan.CyclePaths = [][]ModuleID{cycle}
+		return plan, fmt.Errorf("module initialization cycle: %s", moduleCycleText(cycle))
 	}
 	plan.ActivationOrder = order
 	for _, req := range disabled {
@@ -570,6 +666,15 @@ func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistratio
 	hash := sha256.Sum256(canonical)
 	plan.PlanHash = hex.EncodeToString(hash[:])
 	return plan, nil
+}
+
+func boundedModuleCycle(cycle []ModuleID, limit int) []ModuleID {
+	if limit < 2 || len(cycle) <= limit {
+		return append([]ModuleID(nil), cycle...)
+	}
+	bounded := append([]ModuleID(nil), cycle[:limit-1]...)
+	bounded = append(bounded, ModuleID(fmt.Sprintf("…%d more", len(cycle)-(limit-1))))
+	return bounded
 }
 
 func topologicalModuleOrder(modules []ModuleDescriptor, dependencies map[ModuleID]map[ModuleID]bool) ([]ModuleID, []ModuleID) {
@@ -1215,6 +1320,9 @@ func validateModuleSchema(ref SchemaRef, registered func(SchemaRef) bool) error 
 
 // ValidateModuleSet rejects ambiguous ownership and returns deterministic errors.
 func ValidateModuleSet(modules []ModuleDescriptor, registered func(SchemaRef) bool) error {
+	if len(modules) > 256 {
+		return fmt.Errorf("module set exceeds the supported limit")
+	}
 	ids, owners := map[ModuleID]bool{}, map[string]ModuleID{}
 	queries := map[ModuleID]map[string]PublishedQuery{}
 	ordered := append([]ModuleDescriptor(nil), modules...)

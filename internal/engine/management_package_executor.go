@@ -69,7 +69,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		return failed(contract.CodeValidationFailed, "stored package configuration revision is invalid"), nil
 	}
 
-	incoming, _, err := verifiedManagementPackage(ctx, e.resolver, command)
+	incoming, _, artifactManifest, err := verifiedManagementPackage(ctx, e.resolver, command)
 	if err != nil {
 		var resolution managementPackageResolutionError
 		if errors.As(err, &resolution) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
@@ -77,6 +77,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		}
 		return failed(contract.CodeValidationFailed, "package artifact failed immutable digest or Engine validation"), nil
 	}
+	packageConstraint := contract.InstalledPackage{PackageID: artifactManifest.PackageID, ReleaseID: artifactManifest.ReleaseID, Version: artifactManifest.Version, Digest: string(command.Digest), Requires: artifactManifest.Requires, Conflicts: artifactManifest.Conflicts}
 
 	info, err := e.tenantInfo(ctx, string(operation.Tenant))
 	if err != nil {
@@ -131,6 +132,12 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		releaseTenantWork()
 		handle.Release()
 		return packageRecoveryRequired("module ownership snapshot read needs recovery"), nil
+	}
+	candidatePackages := append(append([]contract.InstalledPackage(nil), moduleSnapshot.Packages...), packageConstraint)
+	if err := contract.ValidateInstalledPackages(candidatePackages); err != nil {
+		releaseTenantWork()
+		handle.Release()
+		return failed(contract.CodeConflict, "package dependencies or conflicts do not match the installed tenant composition"), nil
 	}
 	currentRevision, err := configstore.CurrentConfigRevision(ctx, runtime.DB, dialect)
 	if err != nil {
@@ -193,6 +200,11 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 			releaseTenantWork()
 			handle.Release()
 			return failed(contract.CodeConflict, "package module provider bindings failed activation preflight"), nil
+		}
+		if err := contract.ValidateInstalledPackages(candidatePackages); err != nil {
+			releaseTenantWork()
+			handle.Release()
+			return failed(contract.CodeConflict, "candidate package set failed composition preflight"), nil
 		}
 		resolved, selectionErr := plan.ProviderSelections()
 		if selectionErr != nil {
@@ -292,6 +304,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		ExpectedRevision: expectedRevision, ArtifactDigest: command.Digest, ModuleSnapshotRevision: moduleSnapshot.Revision,
 		ModuleTenantID:     operation.Tenant,
 		ProviderSelections: command.ProviderSelections,
+		PackageConstraints: []contract.InstalledPackage{packageConstraint},
 	})
 	if err != nil {
 		_ = tx.Rollback()

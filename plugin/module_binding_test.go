@@ -61,6 +61,23 @@ func TestResolveModulesRejectsDuplicateAndUnmatchedProviderSelections(t *testing
 	}
 }
 
+func TestResolveModulesRejectsDeterministicInitializationCycle(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	capabilityA := contract.CapabilityOffer{Name: "billing.post", Contract: contract.SchemaRef{ID: "journal", Version: 1}}
+	capabilityB := contract.CapabilityOffer{Name: "inventory.reserve", Contract: contract.SchemaRef{ID: "reservation", Version: 1}}
+	accounting := contract.ModuleDescriptor{ID: "accounting.ledger", Version: "1.0.0", Provides: []contract.CapabilityOffer{capabilityA}, Requires: []contract.CapabilityRequirement{{Name: capabilityB.Name, Contract: capabilityB.Contract, Required: true}}}
+	inventory := contract.ModuleDescriptor{ID: "inventory.stock", Version: "1.0.0", Provides: []contract.CapabilityOffer{capabilityB}, Requires: []contract.CapabilityRequirement{{Name: capabilityA.Name, Contract: capabilityA.Contract, Required: true}}}
+	providers := []ProviderRegistration{
+		{TenantID: scope.TenantID, ProviderID: "accounting", OwnerModuleID: accounting.ID, Kind: ProviderInternal, Offers: []contract.CapabilityOffer{capabilityA}, Factories: map[contract.CapabilityName]ProviderFactory{capabilityA.Name: NewStaticFactory(capabilityA.Name, nil)}},
+		{TenantID: scope.TenantID, ProviderID: "inventory", OwnerModuleID: inventory.ID, Kind: ProviderInternal, Offers: []contract.CapabilityOffer{capabilityB}, Factories: map[contract.CapabilityName]ProviderFactory{capabilityB.Name: NewStaticFactory(capabilityB.Name, nil)}},
+	}
+	_, firstErr := ResolveModules(scope, []contract.ModuleDescriptor{accounting, inventory}, providers, nil, 3)
+	_, secondErr := ResolveModules(scope, []contract.ModuleDescriptor{inventory, accounting}, []ProviderRegistration{providers[1], providers[0]}, nil, 3)
+	if firstErr == nil || secondErr == nil || firstErr.Error() != secondErr.Error() {
+		t.Fatalf("initialization cycle diagnostics are not stable: %v / %v", firstErr, secondErr)
+	}
+}
+
 func TestResolvedPlanExportsUniquePublishedQueryProviderSelection(t *testing.T) {
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
 	inputSchema := contract.SchemaRef{ID: "ar.balance.input", Version: 1}

@@ -128,6 +128,8 @@ type BindingDiagnostic struct {
 }
 type BindingPlan struct {
 	Revision         uint64
+	Composition      contract.CompositionPlan
+	Packages         []contract.InstalledPackage
 	Bindings         []ResolvedBinding
 	Queries          map[PublishedQueryKey]ResolvedPublishedQuery
 	QueryDefinitions map[PublishedQueryKey]contract.PublishedQuery
@@ -135,6 +137,29 @@ type BindingPlan struct {
 	ProjectionScopes map[PublishedProjectionKey]contract.ResourceScopeKind
 	Blockers         []BindingDiagnostic
 	Warnings         []BindingDiagnostic
+}
+
+// ResolveInstalledModules uses the same provider resolver while including the
+// durable package dependency set in deterministic preflight and plan hashing.
+func ResolveInstalledModules(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, revision uint64) (BindingPlan, error) {
+	plan, err := ResolveModules(scope, modules, providers, selections, revision)
+	if err != nil {
+		return plan, err
+	}
+	providerRegistrations := make([]contract.ProviderRegistration, 0, len(providers))
+	for _, provider := range providers {
+		providerRegistrations = append(providerRegistrations, contract.ProviderRegistration{TenantID: provider.TenantID, Scope: provider.Scope, ProviderID: provider.ProviderID, OwnerModuleID: provider.OwnerModuleID, Kind: string(provider.Kind), Offers: append([]contract.CapabilityOffer(nil), provider.Offers...)})
+	}
+	selected := make([]contract.ProviderSelection, 0, len(selections))
+	for _, selection := range selections {
+		selected = append(selected, contract.ProviderSelection{Key: contract.BindingKey{Scope: selection.Key.Scope, ConsumerModuleID: selection.Key.ConsumerModuleID, CapabilityName: selection.Key.CapabilityName}, ProviderID: selection.ProviderID})
+	}
+	composition, err := contract.PlanInstalledComposition(packages, modules, providerRegistrations, selected, scope, revision)
+	if err != nil {
+		return plan, err
+	}
+	plan.Composition, plan.Packages = composition, composition.Packages
+	return plan, nil
 }
 
 type PublishedProjectionKey struct {
@@ -637,6 +662,27 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 			}
 			plan.Bindings = append(plan.Bindings, ResolvedBinding{Key: key, ProviderID: chosen.ProviderID, Contract: offer.Contract, Revision: revision, Factory: factory})
 		}
+	}
+	if len(plan.Blockers) == 0 {
+		compositionProviders := make([]contract.ProviderRegistration, 0, len(providers))
+		for _, provider := range providers {
+			compositionProviders = append(compositionProviders, contract.ProviderRegistration{
+				TenantID: provider.TenantID, Scope: provider.Scope, ProviderID: provider.ProviderID,
+				OwnerModuleID: provider.OwnerModuleID, Kind: string(provider.Kind), Offers: append([]contract.CapabilityOffer(nil), provider.Offers...),
+			})
+		}
+		compositionSelections := make([]contract.ProviderSelection, 0, len(selections))
+		for _, selection := range selections {
+			compositionSelections = append(compositionSelections, contract.ProviderSelection{
+				Key:        contract.BindingKey{Scope: selection.Key.Scope, ConsumerModuleID: selection.Key.ConsumerModuleID, CapabilityName: selection.Key.CapabilityName},
+				ProviderID: selection.ProviderID,
+			})
+		}
+		composition, err := contract.PlanComposition(modules, compositionProviders, compositionSelections, scope, revision)
+		if err != nil {
+			return plan, fmt.Errorf("plan module initialization dependencies: %w", err)
+		}
+		plan.Composition = composition
 	}
 	sort.Slice(plan.Bindings, func(i, j int) bool {
 		a, b := plan.Bindings[i].Key, plan.Bindings[j].Key

@@ -49,6 +49,9 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 	if strings.TrimSpace(manifest.Version) == "" {
 		add("version_required", "", "pack version is required")
 	}
+	if err := contract.ValidateManifestPackRefs(manifest.Requires, manifest.Conflicts); err != nil {
+		add("manifest_references_invalid", "", err.Error())
+	}
 	if len(files) == 0 {
 		add("files_required", "", "pack has no files")
 	}
