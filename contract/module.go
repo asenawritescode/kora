@@ -960,9 +960,9 @@ func (s HistoricalSnapshot) Validate() error {
 //
 //contract:wire:v2
 type BusinessEventDefinition struct {
-	Type          string    `json:"type"`
-	PayloadSchema SchemaRef `json:"payload_schema"`
-	OwnerModuleID ModuleID  `json:"owner_module_id"`
+	Type          string    `json:"type" yaml:"type"`
+	PayloadSchema SchemaRef `json:"payload_schema" yaml:"payload_schema"`
+	OwnerModuleID ModuleID  `json:"owner_module_id" yaml:"owner_module_id"`
 }
 
 // CapabilityAction declares a schema-checked provider operation.
@@ -1160,6 +1160,34 @@ type ConsumerDefinition struct {
 	AcceptedEventSchemas map[string]SchemaRef `json:"accepted_event_schemas"`
 }
 
+// ValidateConsumerDefinition binds every accepted payload schema to a known
+// event contract and an explicit consumer owner.
+func ValidateConsumerDefinition(consumer ConsumerDefinition, owner ModuleID, events map[string]BusinessEventDefinition) error {
+	if consumer.ConsumerID == "" || consumer.OwnerModuleID == "" || consumer.OwnerModuleID != owner || len(consumer.AcceptedEventSchemas) == 0 || len(consumer.AcceptedEventSchemas) > 100 {
+		return fmt.Errorf("consumer identity, owner, and bounded event subscriptions are required")
+	}
+	for eventType, schema := range consumer.AcceptedEventSchemas {
+		definition, ok := events[eventType]
+		if !ok || definition.Type != eventType || definition.PayloadSchema != schema || definition.OwnerModuleID == "" {
+			return fmt.Errorf("consumer subscription %q does not match a registered owned event schema", eventType)
+		}
+	}
+	return nil
+}
+
+// BusinessEventPayloadSchema reads the domain schema marker carried inside
+// Data; EventEnvelope.Version remains the transport contract version.
+func BusinessEventPayloadSchema(data json.RawMessage) (SchemaRef, error) {
+	var payload struct {
+		Schema SchemaRef       `json:"schema"`
+		Body   json.RawMessage `json:"payload"`
+	}
+	if !json.Valid(data) || json.Unmarshal(data, &payload) != nil || payload.Schema.ID == "" || payload.Schema.Version == 0 || len(payload.Body) == 0 || !json.Valid(payload.Body) {
+		return SchemaRef{}, fmt.Errorf("business event data must contain a versioned schema and valid payload")
+	}
+	return payload.Schema, nil
+}
+
 func ValidateBusinessEvent(definition BusinessEventDefinition, owner ModuleID, schema SchemaRef, eventType string) error {
 	if definition.OwnerModuleID == "" || definition.OwnerModuleID != owner {
 		return fmt.Errorf("business event owner does not match verified execution")
@@ -1175,7 +1203,10 @@ func ValidateBusinessEvent(definition BusinessEventDefinition, owner ModuleID, s
 
 func AppendBusinessEvent(ctx context.Context, writer interface {
 	Append(context.Context, *sql.Tx, EventEnvelope) error
-}, tx *sql.Tx, execution ModuleExecution, definition BusinessEventDefinition, payloadSchema SchemaRef, payload json.RawMessage, site, aggregateType, aggregateID, correlationID, causationID string) (string, error) {
+}, tx *sql.Tx, schemas interface {
+	Registered(SchemaRef) bool
+	Validate(SchemaRef, json.RawMessage) error
+}, execution ModuleExecution, definition BusinessEventDefinition, payloadSchema SchemaRef, payload json.RawMessage, site, aggregateType, aggregateID, correlationID, causationID string) (string, error) {
 	if !execution.Verified() || site != string(execution.TenantID) {
 		return "", fmt.Errorf("business event requires verified matching module execution")
 	}
@@ -1185,10 +1216,20 @@ func AppendBusinessEvent(ctx context.Context, writer interface {
 	if err := ValidateBusinessEvent(definition, execution.OwnerModuleID, payloadSchema, definition.Type); err != nil {
 		return "", err
 	}
-	if writer == nil || tx == nil || !json.Valid(payload) {
+	if writer == nil || tx == nil || schemas == nil || !schemas.Registered(payloadSchema) || !json.Valid(payload) {
 		return "", fmt.Errorf("business event writer, transaction, and valid payload are required")
 	}
-	event := EventEnvelope{ID: NewEventID(), Type: definition.Type, Version: CurrentVersion, Source: string(execution.OwnerModuleID), Site: site, BusinessScope: execution.Scope, AggregateType: aggregateType, AggregateID: aggregateID, OccurredAt: time.Now().UTC(), CorrelationID: correlationID, CausationID: causationID, Data: payload}
+	if err := schemas.Validate(payloadSchema, payload); err != nil {
+		return "", fmt.Errorf("business event payload failed its registered schema: %w", err)
+	}
+	data, err := json.Marshal(struct {
+		Schema  SchemaRef       `json:"schema"`
+		Payload json.RawMessage `json:"payload"`
+	}{Schema: payloadSchema, Payload: payload})
+	if err != nil {
+		return "", err
+	}
+	event := EventEnvelope{ID: NewEventID(), Type: definition.Type, Version: CurrentVersion, Source: string(execution.OwnerModuleID), Site: site, BusinessScope: execution.Scope, AggregateType: aggregateType, AggregateID: aggregateID, OccurredAt: time.Now().UTC(), CorrelationID: correlationID, CausationID: causationID, Data: data}
 	if err := writer.Append(ctx, tx, event); err != nil {
 		return "", err
 	}

@@ -18,21 +18,22 @@ import (
 //   - update steps resolve their target by name equality only;
 //   - preconditions are rejected because this runtime has no evaluator.
 type CommandResource struct {
-	Name          string                  `yaml:"name"                     json:"name"`
-	Namespace     string                  `yaml:"namespace"                json:"namespace,omitempty"`
-	Version       int                     `yaml:"version"                  json:"version"`
-	Permission    string                  `yaml:"permission"               json:"permission"` // permission-matrix operation, default "create"
-	Input         CommandInput            `yaml:"input"                    json:"input"`
-	ModuleOwnerID contract.ModuleID       `yaml:"module_owner_id,omitempty" json:"module_owner_id,omitempty"`
-	Capability    contract.CapabilityName `yaml:"capability,omitempty" json:"capability,omitempty"`
-	Operation     string                  `yaml:"operation,omitempty" json:"operation,omitempty"`
-	InputSchema   contract.SchemaRef      `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
-	OutputSchema  contract.SchemaRef      `yaml:"output_schema,omitempty" json:"output_schema,omitempty"`
-	CrossEntity   *CrossEntityCommand     `yaml:"cross_entity,omitempty"   json:"cross_entity,omitempty"`
-	Preconditions []string                `yaml:"preconditions"            json:"preconditions,omitempty"`
-	Steps         []CommandStep           `yaml:"transaction"              json:"transaction"`
-	Emits         []string                `yaml:"emit"                     json:"emit,omitempty"`
-	Labels        map[string]string       `yaml:"labels"                   json:"labels,omitempty"`
+	Name           string                             `yaml:"name"                     json:"name"`
+	Namespace      string                             `yaml:"namespace"                json:"namespace,omitempty"`
+	Version        int                                `yaml:"version"                  json:"version"`
+	Permission     string                             `yaml:"permission"               json:"permission"` // permission-matrix operation, default "create"
+	Input          CommandInput                       `yaml:"input"                    json:"input"`
+	ModuleOwnerID  contract.ModuleID                  `yaml:"module_owner_id,omitempty" json:"module_owner_id,omitempty"`
+	Capability     contract.CapabilityName            `yaml:"capability,omitempty" json:"capability,omitempty"`
+	Operation      string                             `yaml:"operation,omitempty" json:"operation,omitempty"`
+	InputSchema    contract.SchemaRef                 `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
+	OutputSchema   contract.SchemaRef                 `yaml:"output_schema,omitempty" json:"output_schema,omitempty"`
+	CrossEntity    *CrossEntityCommand                `yaml:"cross_entity,omitempty"   json:"cross_entity,omitempty"`
+	Preconditions  []string                           `yaml:"preconditions"            json:"preconditions,omitempty"`
+	Steps          []CommandStep                      `yaml:"transaction"              json:"transaction"`
+	Emits          []string                           `yaml:"emit"                     json:"emit,omitempty"`
+	BusinessEvents []contract.BusinessEventDefinition `yaml:"business_events" json:"business_events,omitempty"`
+	Labels         map[string]string                  `yaml:"labels"                   json:"labels,omitempty"`
 }
 
 // CrossEntityCommand registers a command that requires exact grants in both
@@ -120,6 +121,19 @@ func (c *CommandResource) validate() error {
 		if c.ModuleOwnerID == "" || c.Capability == "" || c.Operation == "" || c.InputSchema.ID == "" || c.InputSchema.Version == 0 || c.OutputSchema.ID == "" || c.OutputSchema.Version == 0 {
 			return fmt.Errorf("command %q: module capability metadata requires owner, capability, operation, and versioned input/output schemas", c.FullName())
 		}
+	}
+	if len(c.BusinessEvents) > 0 && c.ModuleOwnerID == "" {
+		return fmt.Errorf("command %q: authoritative business events require a module owner", c.FullName())
+	}
+	seenEvents := map[string]bool{}
+	for _, event := range c.BusinessEvents {
+		if err := contract.ValidateBusinessEvent(event, c.ModuleOwnerID, event.PayloadSchema, event.Type); err != nil {
+			return fmt.Errorf("command %q: invalid business event: %w", c.FullName(), err)
+		}
+		if seenEvents[event.Type] {
+			return fmt.Errorf("command %q: duplicate business event %q", c.FullName(), event.Type)
+		}
+		seenEvents[event.Type] = true
 	}
 	if c.CrossEntity != nil {
 		if c.CrossEntity.Resource == "" || c.CrossEntity.Operation == "" || !strings.HasPrefix(c.CrossEntity.TargetEntityField, "input.") || len(strings.TrimPrefix(c.CrossEntity.TargetEntityField, "input.")) == 0 {

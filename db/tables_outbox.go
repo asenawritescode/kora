@@ -45,6 +45,7 @@ func OutboxTablesMySQL() []string {
 			received_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 			PRIMARY KEY (consumer_name, event_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS _kora_outbox_delivery_failure (consumer_name VARCHAR(140) NOT NULL, event_id VARCHAR(255) NOT NULL, site VARCHAR(140) NOT NULL DEFAULT '', attempts INT NOT NULL DEFAULT 0, quarantined BOOLEAN NOT NULL DEFAULT FALSE, last_error VARCHAR(512) NOT NULL DEFAULT '', updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), PRIMARY KEY (consumer_name, event_id), INDEX idx_outbox_delivery_quarantine (site, quarantined, updated_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		`CREATE TABLE IF NOT EXISTS _kora_offline_snapshot (token VARCHAR(64) PRIMARY KEY, site VARCHAR(140) NOT NULL, actor VARCHAR(255) NOT NULL, generation BIGINT NOT NULL, boundary_sequence BIGINT NOT NULL, types_json TEXT NOT NULL, expires_at DATETIME(6) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		`CREATE TABLE IF NOT EXISTS _kora_offline_snapshot_row (token VARCHAR(64) NOT NULL, row_index BIGINT NOT NULL, doctype VARCHAR(140) NOT NULL, document JSON NOT NULL, PRIMARY KEY(token,row_index)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		`CREATE TABLE IF NOT EXISTS _kora_offline_cursor (token VARCHAR(64) PRIMARY KEY, site VARCHAR(140) NOT NULL, actor VARCHAR(255) NOT NULL, generation BIGINT NOT NULL, source_sequence BIGINT NOT NULL, types_json TEXT NOT NULL, expires_at DATETIME(6) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -94,6 +95,8 @@ func OutboxTablesLibSQL() []string {
 			received_at TEXT NOT NULL DEFAULT (datetime('now')),
 			PRIMARY KEY (consumer_name, event_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS _kora_outbox_delivery_failure (consumer_name TEXT NOT NULL, event_id TEXT NOT NULL, site TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, quarantined INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (consumer_name, event_id))`,
+		`CREATE INDEX IF NOT EXISTS idx_outbox_delivery_quarantine ON _kora_outbox_delivery_failure (site, quarantined, updated_at)`,
 		`CREATE TABLE IF NOT EXISTS _kora_offline_snapshot (token TEXT PRIMARY KEY, site TEXT NOT NULL, actor TEXT NOT NULL, generation INTEGER NOT NULL, boundary_sequence INTEGER NOT NULL, types_json TEXT NOT NULL, expires_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS _kora_offline_snapshot_row (token TEXT NOT NULL, row_index INTEGER NOT NULL, doctype TEXT NOT NULL, document TEXT NOT NULL, PRIMARY KEY(token,row_index))`,
 		`CREATE TABLE IF NOT EXISTS _kora_offline_cursor (token TEXT PRIMARY KEY, site TEXT NOT NULL, actor TEXT NOT NULL, generation INTEGER NOT NULL, source_sequence INTEGER NOT NULL, types_json TEXT NOT NULL, expires_at TEXT NOT NULL)`,
@@ -143,6 +146,8 @@ func OutboxTablesPostgres() []string {
 			"received_at" TIMESTAMP NOT NULL DEFAULT NOW(),
 			PRIMARY KEY ("consumer_name", "event_id")
 		)`,
+		`CREATE TABLE IF NOT EXISTS "_kora_outbox_delivery_failure" ("consumer_name" VARCHAR(140) NOT NULL, "event_id" VARCHAR(255) NOT NULL, "site" VARCHAR(140) NOT NULL DEFAULT '', "attempts" INTEGER NOT NULL DEFAULT 0, "quarantined" BOOLEAN NOT NULL DEFAULT FALSE, "last_error" VARCHAR(512) NOT NULL DEFAULT '', "updated_at" TIMESTAMP NOT NULL DEFAULT NOW(), PRIMARY KEY ("consumer_name", "event_id"))`,
+		`CREATE INDEX IF NOT EXISTS idx_outbox_delivery_quarantine ON "_kora_outbox_delivery_failure" ("site", "quarantined", "updated_at")`,
 		`CREATE TABLE IF NOT EXISTS "_kora_offline_snapshot" ("token" VARCHAR(64) PRIMARY KEY, "site" VARCHAR(140) NOT NULL, "actor" VARCHAR(255) NOT NULL, "generation" BIGINT NOT NULL, "boundary_sequence" BIGINT NOT NULL, "types_json" TEXT NOT NULL, "expires_at" TIMESTAMP NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS "_kora_offline_snapshot_row" ("token" VARCHAR(64) NOT NULL, "row_index" BIGINT NOT NULL, "doctype" VARCHAR(140) NOT NULL, "document" JSONB NOT NULL, PRIMARY KEY("token","row_index"))`,
 		`CREATE TABLE IF NOT EXISTS "_kora_offline_cursor" ("token" VARCHAR(64) PRIMARY KEY, "site" VARCHAR(140) NOT NULL, "actor" VARCHAR(255) NOT NULL, "generation" BIGINT NOT NULL, "source_sequence" BIGINT NOT NULL, "types_json" TEXT NOT NULL, "expires_at" TIMESTAMP NOT NULL)`,

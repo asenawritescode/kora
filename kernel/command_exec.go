@@ -455,6 +455,24 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			return nil, contract.NewError(contract.CodeInternal, "recording command event failed")
 		}
 	}
+	for _, eventDef := range cmd.BusinessEvents {
+		if k.Outbox == nil || k.CommandSchemas == nil {
+			return nil, contract.NewError(contract.CodeDependencyUnavailable, "business event outbox or schema registry is unavailable")
+		}
+		if !k.CommandSchemas.Registered(eventDef.PayloadSchema) {
+			return nil, contract.NewError(contract.CodeValidationFailed, "business event payload schema is not registered")
+		}
+		if err := k.CommandSchemas.Validate(eventDef.PayloadSchema, op.Payload); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, "business event payload failed its registered schema")
+		}
+		execution := op.Context.ModuleExecution
+		if execution == nil || !execution.Verified() || execution.OwnerModuleID != eventDef.OwnerModuleID {
+			return nil, contract.NewError(contract.CodePermissionDenied, "business event requires verified owner execution")
+		}
+		if _, err := contract.AppendBusinessEvent(ctx, k.Outbox, dbTx, k.CommandSchemas, *execution, eventDef, eventDef.PayloadSchema, op.Payload, op.Context.Site, lastRecord, lastName, op.Context.CorrelationID, opID); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, "recording owned business event failed: "+err.Error())
+		}
+	}
 
 	row := k.buildAuditRow(op, def, opID, lastRecord, lastName, contract.StatusCompleted, "")
 	row.Command = def.Name

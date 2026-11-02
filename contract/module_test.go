@@ -247,6 +247,24 @@ func TestBusinessEventRequiresTrustedOwnerAndExactPayloadSchema(t *testing.T) {
 	}
 }
 
+func TestConsumerDefinitionRequiresOwnerAndPublishedSchema(t *testing.T) {
+	schema := SchemaRef{ID: "finance.invoice-issued", Version: 2}
+	event := BusinessEventDefinition{Type: "finance.invoice.issued", PayloadSchema: schema, OwnerModuleID: "finance.ar"}
+	consumer := ConsumerDefinition{ConsumerID: "sales.invoice-copy", OwnerModuleID: "sales.orders", AcceptedEventSchemas: map[string]SchemaRef{event.Type: schema}}
+	if err := ValidateConsumerDefinition(consumer, "sales.orders", map[string]BusinessEventDefinition{event.Type: event}); err != nil {
+		t.Fatal(err)
+	}
+	consumer.OwnerModuleID = "finance.ar"
+	if err := ValidateConsumerDefinition(consumer, "sales.orders", map[string]BusinessEventDefinition{event.Type: event}); err == nil {
+		t.Fatal("foreign consumer owner accepted")
+	}
+	consumer.OwnerModuleID = "sales.orders"
+	consumer.AcceptedEventSchemas[event.Type] = SchemaRef{ID: schema.ID, Version: 1}
+	if err := ValidateConsumerDefinition(consumer, "sales.orders", map[string]BusinessEventDefinition{event.Type: event}); err == nil {
+		t.Fatal("consumer accepted an incompatible event payload schema")
+	}
+}
+
 func TestModuleLifecycleDrainRequiresCurrentUnblockedPlan(t *testing.T) {
 	if err := ValidateModuleLifecycleTransition(ModuleActive, ModuleDraining); err != nil {
 		t.Fatal(err)

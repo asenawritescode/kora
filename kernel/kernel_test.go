@@ -2143,8 +2143,12 @@ transaction:
       record: Invoice
       values:
         title: $input.title
-emit:
-  - finance.invoice.issued
+business_events:
+  - type: finance.invoice.issued
+    owner_module_id: finance.ar
+    payload_schema:
+      id: finance.invoice.issue.input
+      version: 1
 `))
 	if err != nil {
 		t.Fatal("parse owner command:", err)

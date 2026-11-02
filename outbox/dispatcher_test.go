@@ -59,7 +59,7 @@ func TestDispatcherReleasesDBCursorAndAdmissionBeforeExternalHandler(t *testing.
 		return nil
 	})
 	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).
-		WithArgs("external", 1).
+		WithArgs("external", "external", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}).AddRow(event.ID, string(payload), int64(17)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_outbox_receipt`).
 		WithArgs("external", event.ID).
@@ -105,7 +105,7 @@ func TestDispatcherCapsAggregateBufferedPayloadBytes(t *testing.T) {
 		return nil
 	})
 	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).
-		WithArgs("external", 10).WillReturnRows(rows)
+		WithArgs("external", "external", 10).WillReturnRows(rows)
 	for i := 0; i < 3; i++ {
 		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_outbox_receipt`).
 			WithArgs("external", events[i].ID).
@@ -194,7 +194,7 @@ func TestDispatcherPatternConsumerFiltersAtQueryAndDispatch(t *testing.T) {
 		t.Fatal("register pattern consumer:", err)
 	}
 	query, args, ok := dispatcher.consumerQuery(25)
-	if !ok || !strings.Contains(query, "o.event_type LIKE ? ESCAPE '!'") || !reflect.DeepEqual(args, []any{"kora.%.after!_insert", "kora.%.after!_save", "webhooks", 25}) {
+	if !ok || !strings.Contains(query, "o.event_type LIKE ? ESCAPE '!'") || !reflect.DeepEqual(args, []any{"kora.%.after!_insert", "kora.%.after!_save", "webhooks", "webhooks", 25}) {
 		t.Fatalf("consumer query = (%q, %#v, %t)", query, args, ok)
 	}
 	if !dispatcher.matchesWorkerEvent("webhooks", "kora.invoice.after_insert") || dispatcher.matchesWorkerEvent("webhooks", "command.completed") {
@@ -277,7 +277,7 @@ func TestDispatcherTransactionalWorkerCommitsReceiptWithEffect(t *testing.T) {
 	// First delivery reserves the receipt before running the local effect; both
 	// writes share one transaction and are committed together. Local completion
 	// leaves publication pending for the separate Publisher.
-	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).WithArgs("notifications", 1).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}).AddRow(event.ID, string(payload), int64(17)))
+	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).WithArgs("notifications", "notifications", 1).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}).AddRow(event.ID, string(payload), int64(17)))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT IGNORE INTO _kora_outbox_receipt`).WithArgs("notifications", event.ID, event.Site, int64(17), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`INSERT INTO local_effect`).WithArgs(event.ID).WillReturnResult(sqlmock.NewResult(1, 1))
@@ -288,7 +288,7 @@ func TestDispatcherTransactionalWorkerCommitsReceiptWithEffect(t *testing.T) {
 
 	// The committed receipt removes the event from local dispatch selection;
 	// the publication status is still owned by Publisher.
-	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).WithArgs("notifications", 1).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}))
+	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).WithArgs("notifications", "notifications", 1).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}))
 	if processed, err := dispatcher.Run(context.Background(), 1); err != nil || processed != 0 {
 		t.Fatalf("duplicate Run = (%d, %v)", processed, err)
 	}
@@ -322,7 +322,7 @@ func TestDispatcherDuplicateDeliveryAcrossRestart(t *testing.T) {
 
 	// First dispatcher instance processes the event and writes a receipt.
 	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).
-		WithArgs("analytics", 10).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}).AddRow(event.ID, string(payload), int64(0)))
+		WithArgs("analytics", "analytics", 10).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}).AddRow(event.ID, string(payload), int64(0)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_outbox_receipt`).
 		WithArgs("analytics", event.ID).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
@@ -331,7 +331,7 @@ func TestDispatcherDuplicateDeliveryAcrossRestart(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	// Restarted dispatcher excludes the event by its durable receipt.
 	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).
-		WithArgs("analytics", 10).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}))
+		WithArgs("analytics", "analytics", 10).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}))
 
 	var effects int32
 	run := func() int {
@@ -379,7 +379,7 @@ func TestDispatcherFilteredTransactionalWorkerSkipsIrrelevantReceipt(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).WithArgs("invoice.paid", "workflow-signals", 1).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}))
+	mock.ExpectQuery(`SELECT o.id,o.payload,o.source_sequence FROM _kora_outbox o WHERE .*ORDER BY o.created_at,o.id LIMIT \?`).WithArgs("invoice.paid", "workflow-signals", "workflow-signals", 1).WillReturnRows(sqlmock.NewRows([]string{"id", "payload", "source_sequence"}))
 	if processed, err := dispatcher.Run(context.Background(), 1); err != nil || processed != 0 {
 		t.Fatalf("Run = (%d, %v), want no event selected for irrelevant consumer", processed, err)
 	}

@@ -78,6 +78,7 @@ func TestMySQLTransactionalConsumerReceiptAndLocalEffect(t *testing.T) {
 		t.Fatalf("MySQL outbox backlog metrics = %+v, want one pending event older than a minute", backlog)
 	}
 	dispatcher := NewDispatcher(database, dialect)
+	dispatcher.FailureThreshold = 1
 	var calls int
 	if err := dispatcher.RegisterTransactional("local-test", func(ctx context.Context, tx *sql.Tx, got contract.EventEnvelope) error {
 		calls++
@@ -103,6 +104,13 @@ func TestMySQLTransactionalConsumerReceiptAndLocalEffect(t *testing.T) {
 	}
 	if receipts != 0 || effects != 0 {
 		t.Fatalf("failed handler left receipt/effect rows = (%d, %d), want (0, 0)", receipts, effects)
+	}
+	failed, err := dispatcher.InspectQuarantined(context.Background(), event.Site, 10)
+	if err != nil || len(failed) != 1 || failed[0].EventID != event.ID {
+		t.Fatalf("quarantined delivery inspection = (%+v, %v)", failed, err)
+	}
+	if err := dispatcher.ReplayQuarantined(context.Background(), event.Site, "local-test", event.ID, func(context.Context, string, string, string) error { return nil }); err != nil {
+		t.Fatal("authorized replay failed:", err)
 	}
 	if processed, err := dispatcher.Run(context.Background(), 1); err != nil || processed != 1 {
 		t.Fatalf("retry transaction Run = (%d, %v)", processed, err)

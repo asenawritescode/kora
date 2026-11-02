@@ -774,12 +774,14 @@ type Dispatcher struct {
 	WorkerPatterns       map[string][]string
 	TransactionalWorkers map[string]TransactionalWorker
 	TransactionalTypes   map[string]map[string]struct{}
+	TransactionalSchemas map[string]map[string]contract.SchemaRef
+	FailureThreshold     int
 	registrationErr      error
 }
 
 // NewDispatcher returns a Dispatcher with no workers registered.
 func NewDispatcher(database *sql.DB, dialect db.QueryDialect) *Dispatcher {
-	return &Dispatcher{DB: database, Dialect: dialect, Workers: make(map[string]Worker), WorkerTypes: make(map[string]map[string]struct{}), WorkerPatterns: make(map[string][]string), TransactionalWorkers: make(map[string]TransactionalWorker), TransactionalTypes: make(map[string]map[string]struct{})}
+	return &Dispatcher{DB: database, Dialect: dialect, Workers: make(map[string]Worker), WorkerTypes: make(map[string]map[string]struct{}), WorkerPatterns: make(map[string][]string), TransactionalWorkers: make(map[string]TransactionalWorker), TransactionalTypes: make(map[string]map[string]struct{}), TransactionalSchemas: make(map[string]map[string]contract.SchemaRef)}
 }
 
 // Register adds a named worker.
@@ -904,6 +906,30 @@ func (d *Dispatcher) RegisterTransactionalForTypes(name string, eventTypes []str
 		d.TransactionalTypes = make(map[string]map[string]struct{})
 	}
 	d.TransactionalTypes[name] = allowed
+	return nil
+}
+
+// RegisterTransactionalConsumer validates the owner's bounded subscription
+// against published event definitions and enforces payload schema identity at delivery.
+func (d *Dispatcher) RegisterTransactionalConsumer(definition contract.ConsumerDefinition, owner contract.ModuleID, events map[string]contract.BusinessEventDefinition, worker TransactionalWorker) error {
+	if err := contract.ValidateConsumerDefinition(definition, owner, events); err != nil {
+		return fmt.Errorf("outbox: invalid consumer definition: %w", err)
+	}
+	if definition.ConsumerID == "" {
+		return fmt.Errorf("outbox: consumer ID is required")
+	}
+	types := make([]string, 0, len(definition.AcceptedEventSchemas))
+	for eventType := range definition.AcceptedEventSchemas {
+		types = append(types, eventType)
+	}
+	sort.Strings(types)
+	if err := d.RegisterTransactionalForTypes(definition.ConsumerID, types, worker); err != nil {
+		return err
+	}
+	if d.TransactionalSchemas == nil {
+		d.TransactionalSchemas = make(map[string]map[string]contract.SchemaRef)
+	}
+	d.TransactionalSchemas[definition.ConsumerID] = definition.AcceptedEventSchemas
 	return nil
 }
 
@@ -1036,10 +1062,23 @@ func (d *Dispatcher) Run(ctx context.Context, limit int) (int, error) {
 				allOK = false
 				continue
 			}
-			err = d.runTransactional(ctx, name, id, event, worker)
+			if schemas, typed := d.TransactionalSchemas[name]; typed {
+				want, accepted := schemas[event.Type]
+				got, schemaErr := contract.BusinessEventPayloadSchema(event.Data)
+				if !accepted || schemaErr != nil || got != want {
+					err = fmt.Errorf("outbox: event %q payload schema is not accepted by consumer %q", event.Type, name)
+				} else {
+					err = d.runTransactional(ctx, name, id, event, worker)
+				}
+			} else {
+				err = d.runTransactional(ctx, name, id, event, worker)
+			}
 			release()
 			if err != nil {
 				allOK = false
+				if recordErr := d.recordDeliveryFailure(ctx, name, id, event.Site, err); recordErr != nil {
+					return processed, errors.Join(err, recordErr)
+				}
 			}
 		}
 
@@ -1048,6 +1087,87 @@ func (d *Dispatcher) Run(ctx context.Context, limit int) (int, error) {
 		}
 	}
 	return processed, nil
+}
+
+// recordDeliveryFailure keeps bounded diagnostics and quarantines poison local deliveries.
+func (d *Dispatcher) recordDeliveryFailure(ctx context.Context, consumer, eventID, site string, cause error) error {
+	threshold := d.FailureThreshold
+	if threshold <= 0 {
+		threshold = 8
+	}
+	message := cause.Error()
+	if len(message) > 512 {
+		message = message[:512]
+	}
+	query := `INSERT INTO _kora_outbox_delivery_failure (consumer_name,event_id,site,attempts,quarantined,last_error,updated_at) VALUES (?,?,?,1,?,?,?) `
+	if named, ok := d.Dialect.(interface{ DriverName() string }); ok && named.DriverName() == "mysql" {
+		query += `ON DUPLICATE KEY UPDATE attempts=attempts+1,quarantined=IF(attempts+1>=?,1,quarantined),last_error=VALUES(last_error),updated_at=VALUES(updated_at)`
+	} else {
+		query += `ON CONFLICT (consumer_name,event_id) DO UPDATE SET attempts=attempts+1,quarantined=CASE WHEN attempts+1>=? THEN 1 ELSE quarantined END,last_error=excluded.last_error,updated_at=excluded.updated_at`
+	}
+	_, err := d.DB.ExecContext(ctx, db.Rebind(d.Dialect, query), consumer, eventID, site, db.BoolParam(d.Dialect, threshold <= 1), message, time.Now().UTC(), threshold)
+	if err != nil {
+		return fmt.Errorf("outbox: record failed delivery: %w", err)
+	}
+	return nil
+}
+
+type DeliveryFailure struct {
+	Consumer    string
+	EventID     string
+	Site        string
+	Attempts    int
+	Quarantined bool
+	LastError   string
+}
+
+// InspectQuarantined returns bounded, redacted failure diagnostics for one tenant.
+func (d *Dispatcher) InspectQuarantined(ctx context.Context, site string, limit int) ([]DeliveryFailure, error) {
+	if d == nil || d.DB == nil || d.Dialect == nil || site == "" {
+		return nil, fmt.Errorf("outbox: dispatcher and site are required")
+	}
+	if limit < 1 || limit > 100 {
+		return nil, fmt.Errorf("outbox: inspection limit must be 1 to 100")
+	}
+	rows, err := d.DB.QueryContext(ctx, db.Rebind(d.Dialect, `SELECT consumer_name,event_id,site,attempts,quarantined,last_error FROM _kora_outbox_delivery_failure WHERE site=? AND quarantined=? ORDER BY updated_at,event_id LIMIT ?`), site, true, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeliveryFailure
+	for rows.Next() {
+		var f DeliveryFailure
+		var q bool
+		if err := rows.Scan(&f.Consumer, &f.EventID, &f.Site, &f.Attempts, &q, &f.LastError); err != nil {
+			return nil, err
+		}
+		f.Quarantined = q
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// ReplayQuarantined requires an authorization decision from the caller and removes only
+// the failure marker; the original event ID and payload remain unchanged.
+func (d *Dispatcher) ReplayQuarantined(ctx context.Context, site, consumer, eventID string, authorize func(context.Context, string, string, string) error) error {
+	if d == nil || d.DB == nil || d.Dialect == nil || site == "" || consumer == "" || eventID == "" || authorize == nil {
+		return fmt.Errorf("outbox: scoped replay authorization is required")
+	}
+	if err := authorize(ctx, site, consumer, eventID); err != nil {
+		return fmt.Errorf("outbox: replay denied: %w", err)
+	}
+	result, err := d.DB.ExecContext(ctx, db.Rebind(d.Dialect, `DELETE FROM _kora_outbox_delivery_failure WHERE site=? AND consumer_name=? AND event_id=? AND quarantined=?`), site, consumer, eventID, true)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("outbox: quarantined delivery not found")
+	}
+	return nil
 }
 
 func (d *Dispatcher) acquireWork(ctx context.Context) (func(), error) {
@@ -1112,7 +1232,7 @@ func (d *Dispatcher) consumerQuery(limit int) (string, []any, bool) {
 				patternClauses = append(patternClauses, `o.event_type LIKE ? ESCAPE '!'`)
 				args = append(args, pattern)
 			}
-			clauses = append(clauses, `(`+strings.Join(patternClauses, ` OR `)+`) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id)`)
+			clauses = append(clauses, `(`+strings.Join(patternClauses, ` OR `)+`) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.consumer_name=? AND f.event_id=o.id AND f.quarantined=TRUE)`)
 		} else if filter, filtered := d.WorkerTypes[name]; filtered {
 			eventTypes := make([]string, 0, len(filter))
 			for eventType := range filter {
@@ -1127,11 +1247,11 @@ func (d *Dispatcher) consumerQuery(limit int) (string, []any, bool) {
 				placeholders[i] = "?"
 				args = append(args, eventType)
 			}
-			clauses = append(clauses, ` (o.event_type IN (`+strings.Join(placeholders, ",")+`)) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id)`)
+			clauses = append(clauses, ` (o.event_type IN (`+strings.Join(placeholders, ",")+`)) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.consumer_name=? AND f.event_id=o.id AND f.quarantined=TRUE)`)
 		} else {
-			clauses = append(clauses, `NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id)`)
+			clauses = append(clauses, `NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.consumer_name=? AND f.event_id=o.id AND f.quarantined=TRUE)`)
 		}
-		args = append(args, name)
+		args = append(args, name, name)
 	}
 	transactionalNames := make([]string, 0, len(d.TransactionalWorkers))
 	for name := range d.TransactionalWorkers {
@@ -1154,11 +1274,11 @@ func (d *Dispatcher) consumerQuery(limit int) (string, []any, bool) {
 				placeholders[i] = "?"
 				args = append(args, eventType)
 			}
-			clauses = append(clauses, ` (o.event_type IN (`+strings.Join(placeholders, ",")+`)) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id)`)
+			clauses = append(clauses, ` (o.event_type IN (`+strings.Join(placeholders, ",")+`)) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.consumer_name=? AND f.event_id=o.id AND f.quarantined=TRUE)`)
 		} else {
-			clauses = append(clauses, `NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id)`)
+			clauses = append(clauses, `NOT EXISTS (SELECT 1 FROM _kora_outbox_receipt r WHERE r.consumer_name=? AND r.event_id=o.id) AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.consumer_name=? AND f.event_id=o.id AND f.quarantined=TRUE)`)
 		}
-		args = append(args, name)
+		args = append(args, name, name)
 	}
 	if len(clauses) == 0 {
 		return "", nil, false

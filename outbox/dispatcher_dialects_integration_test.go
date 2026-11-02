@@ -160,6 +160,7 @@ func runTransactionalReceiptScenario(t *testing.T, database *sql.DB, dialect db.
 		t.Fatalf("%s outbox backlog metrics = %+v, want one pending event older than a minute", label, backlog)
 	}
 	dispatcher := NewDispatcher(database, dialect)
+	dispatcher.FailureThreshold = 1
 	var calls int
 	consumerName := label + "-consumer"
 	if err := dispatcher.RegisterTransactional(consumerName, func(ctx context.Context, tx *sql.Tx, got contract.EventEnvelope) error {
@@ -186,6 +187,13 @@ func runTransactionalReceiptScenario(t *testing.T, database *sql.DB, dialect db.
 	}
 	if receipts != 0 || effects != 0 {
 		t.Fatalf("failed handler left receipt/effect rows (%d, %d), want (0, 0)", receipts, effects)
+	}
+	quarantined, err := dispatcher.InspectQuarantined(context.Background(), site, 10)
+	if err != nil || len(quarantined) != 1 || quarantined[0].EventID != event.ID || quarantined[0].Attempts != 1 {
+		t.Fatalf("quarantined delivery inspection = (%+v, %v)", quarantined, err)
+	}
+	if err := dispatcher.ReplayQuarantined(context.Background(), site, consumerName, event.ID, func(context.Context, string, string, string) error { return nil }); err != nil {
+		t.Fatal("authorized replay reset failed delivery:", err)
 	}
 	if processed, err := dispatcher.Run(context.Background(), 1); err != nil || processed != 1 {
 		t.Fatalf("retry local transaction = (%d, %v), want (1, nil)", processed, err)
