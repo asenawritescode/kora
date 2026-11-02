@@ -113,6 +113,14 @@ func ExecuteBusinessReconciliation(ctx context.Context, rule BusinessReconciliat
 	if !validBusinessQueryRef(rule.SourceQuery) || !validBusinessQueryRef(rule.TargetQuery) {
 		return BusinessReconciliationResult{}, cursors, BusinessRunWatermarks{}, fmt.Errorf("business reconciliation requires owner-published source and target queries")
 	}
+	// A cursor by itself is not sufficient to resume a comparison: earlier
+	// pages must also be present or a tail-only comparison could incorrectly
+	// produce a clean run. The run store currently persists cursors and
+	// watermarks, but not the bounded row set, so fail closed on continuation
+	// requests until that row set is available.
+	if cursors.Source != "" || cursors.Target != "" {
+		return BusinessReconciliationResult{Complete: false}, cursors, BusinessRunWatermarks{}, nil
+	}
 	sources, sourceCursor, sourceWatermark, sourceComplete, err := readBusinessPages[BusinessObligation](ctx, rule, rule.SourceQuery, cursors.Source, read)
 	if err != nil {
 		return BusinessReconciliationResult{Complete: false}, cursors, BusinessRunWatermarks{}, nil
@@ -190,12 +198,13 @@ func readBusinessPages[T BusinessObligation | BusinessEffect](ctx context.Contex
 type BusinessFindingKind string
 
 const (
-	FindingMissingEffect   BusinessFindingKind = "missing_effect"
-	FindingDuplicateEffect BusinessFindingKind = "duplicate_effect"
-	FindingAmountMismatch  BusinessFindingKind = "amount_mismatch"
-	FindingScopeMismatch   BusinessFindingKind = "scope_mismatch"
-	FindingUnknownOutcome  BusinessFindingKind = "unknown_outcome"
-	FindingPendingGrace    BusinessFindingKind = "pending_grace"
+	FindingMissingEffect     BusinessFindingKind = "missing_effect"
+	FindingDuplicateEffect   BusinessFindingKind = "duplicate_effect"
+	FindingAmountMismatch    BusinessFindingKind = "amount_mismatch"
+	FindingScopeMismatch     BusinessFindingKind = "scope_mismatch"
+	FindingUnknownOutcome    BusinessFindingKind = "unknown_outcome"
+	FindingPendingGrace      BusinessFindingKind = "pending_grace"
+	FindingLifecycleMismatch BusinessFindingKind = "lifecycle_mismatch"
 )
 
 type BusinessFinding struct {
@@ -320,6 +329,8 @@ func CompareBusinessObligations(input BusinessReconciliationInput) (BusinessReco
 				finding.Kind = FindingAmountMismatch
 			case effect.Lifecycle == "unknown":
 				finding.Kind = FindingUnknownOutcome
+			case source.Lifecycle != "" && effect.Lifecycle != source.Lifecycle:
+				finding.Kind = FindingLifecycleMismatch
 			default:
 				continue
 			}
@@ -374,7 +385,7 @@ func validBusinessFindingState(state BusinessFindingState) bool {
 
 func validBusinessFindingKind(kind BusinessFindingKind) bool {
 	switch kind {
-	case FindingMissingEffect, FindingDuplicateEffect, FindingAmountMismatch, FindingScopeMismatch, FindingUnknownOutcome, FindingPendingGrace:
+	case FindingMissingEffect, FindingDuplicateEffect, FindingAmountMismatch, FindingScopeMismatch, FindingUnknownOutcome, FindingPendingGrace, FindingLifecycleMismatch:
 		return true
 	default:
 		return false

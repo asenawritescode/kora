@@ -79,6 +79,17 @@ func TestCompareBusinessObligationsComparesExactDecimalValuesAndCurrency(t *test
 	}
 }
 
+func TestCompareBusinessObligationsDetectsLifecycleMismatch(t *testing.T) {
+	cutoff := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	input := BusinessReconciliationInput{Cutoff: cutoff, MaxRows: 10, SourceReady: true, TargetReady: true,
+		Sources: []BusinessObligation{{Key: "sale:1", EntityID: "entity-a", Amount: "12.50", Currency: "KES", Lifecycle: "posted", OccurredAt: cutoff.Add(-time.Hour)}},
+		Targets: []BusinessEffect{{Key: "sale:1", TargetRef: "invoice:1", EntityID: "entity-a", Amount: "12.50", Currency: "KES", Lifecycle: "draft", OccurredAt: cutoff.Add(-time.Minute)}}}
+	result, err := CompareBusinessObligations(input)
+	if err != nil || len(result.Findings) != 1 || result.Findings[0].Kind != FindingLifecycleMismatch {
+		t.Fatalf("lifecycle mismatch not found: %+v, %v", result, err)
+	}
+}
+
 func TestExecuteBusinessReconciliationPagesOwnerQueriesAndPinsWatermarks(t *testing.T) {
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
 	rule := BusinessReconciliationRule{OwnerModuleID: "sales.orders", ID: "sales-ar", Version: 2, Scope: scope,
@@ -128,6 +139,21 @@ func TestExecuteBusinessReconciliationUnavailableOwnerReturnsIncomplete(t *testi
 	result, _, _, err := ExecuteBusinessReconciliation(context.Background(), rule, time.Now().UTC(), BusinessRunCursor{}, read)
 	if err != nil || result.Complete || len(result.Findings) != 0 {
 		t.Fatalf("unavailable owner must make run incomplete: %+v, %v", result, err)
+	}
+}
+
+func TestExecuteBusinessReconciliationDoesNotResumeFromCursorWithoutEarlierPages(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	rule := BusinessReconciliationRule{OwnerModuleID: "sales.orders", ID: "sales-ar", Version: 1, Scope: scope,
+		SourceQuery: BusinessQueryRef{OwnerModuleID: "sales.orders", Name: "billable", Input: json.RawMessage(`{}`), PageLimit: 10},
+		TargetQuery: BusinessQueryRef{OwnerModuleID: "ar.receivables", Name: "invoices", Input: json.RawMessage(`{}`), PageLimit: 10}, MaxRows: 10}
+	reads := 0
+	result, next, _, err := ExecuteBusinessReconciliation(context.Background(), rule, time.Now().UTC(), BusinessRunCursor{Source: "source-page-2"}, func(context.Context, BusinessQueryRequest) (contract.QueryResult, error) {
+		reads++
+		return contract.QueryResult{Data: json.RawMessage(`[]`), AsOf: time.Now().UTC(), Freshness: contract.QueryFresh}, nil
+	})
+	if err != nil || result.Complete || reads != 0 || next.Source != "source-page-2" {
+		t.Fatalf("cursor without prior page evidence must remain incomplete: result=%+v next=%+v reads=%d err=%v", result, next, reads, err)
 	}
 }
 
