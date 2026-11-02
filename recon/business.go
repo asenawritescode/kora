@@ -51,7 +51,18 @@ type BusinessFinding struct {
 	TargetRefs []string
 	Expected   BusinessObligation
 	Actual     []BusinessEffect
+	State      BusinessFindingState
+	Evidence   string
 }
+
+type BusinessFindingState string
+
+const (
+	BusinessFindingOpen          BusinessFindingState = "open"
+	BusinessFindingInvestigating BusinessFindingState = "investigating"
+	BusinessFindingResolved      BusinessFindingState = "resolved"
+	BusinessFindingWaived        BusinessFindingState = "waived"
+)
 
 type BusinessReconciliationInput struct {
 	Cutoff      time.Time
@@ -130,6 +141,7 @@ func CompareBusinessObligations(input BusinessReconciliationInput) (BusinessReco
 			}
 		}
 		finding.ID = stableBusinessFindingID(finding.Kind, source.Key)
+		finding.State = BusinessFindingOpen
 		result.Findings = append(result.Findings, finding)
 	}
 	for key, effects := range byKey {
@@ -139,6 +151,7 @@ func CompareBusinessObligations(input BusinessReconciliationInput) (BusinessReco
 				finding.TargetRefs = append(finding.TargetRefs, effect.TargetRef)
 			}
 			finding.ID = stableBusinessFindingID(finding.Kind, key)
+			finding.State = BusinessFindingOpen
 			result.Findings = append(result.Findings, finding)
 		}
 	}
