@@ -134,6 +134,7 @@ type BindingPlan struct {
 	Revision         uint64
 	Composition      contract.CompositionPlan
 	Packages         []contract.InstalledPackage
+	Extensions       []contract.ResolvedModuleExtension
 	Bindings         []ResolvedBinding
 	Queries          map[PublishedQueryKey]ResolvedPublishedQuery
 	QueryDefinitions map[PublishedQueryKey]contract.PublishedQuery
@@ -439,10 +440,11 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 	if err := contract.ValidateModuleSet(modules, nil); err != nil {
 		return BindingPlan{}, fmt.Errorf("validate installed modules before binding: %w", err)
 	}
-	if err := contract.ValidateModuleExtensions(modules, nil); err != nil {
+	extensions, err := contract.OrderModuleExtensions(modules, nil)
+	if err != nil {
 		return BindingPlan{}, fmt.Errorf("validate installed module extensions before binding: %w", err)
 	}
-	plan := BindingPlan{Revision: revision, Queries: make(map[PublishedQueryKey]ResolvedPublishedQuery), QueryDefinitions: make(map[PublishedQueryKey]contract.PublishedQuery), Projections: make(map[PublishedProjectionKey]contract.ProjectionDefinition), ProjectionScopes: make(map[PublishedProjectionKey]contract.ResourceScopeKind)}
+	plan := BindingPlan{Revision: revision, Extensions: extensions, Queries: make(map[PublishedQueryKey]ResolvedPublishedQuery), QueryDefinitions: make(map[PublishedQueryKey]contract.PublishedQuery), Projections: make(map[PublishedProjectionKey]contract.ProjectionDefinition), ProjectionScopes: make(map[PublishedProjectionKey]contract.ResourceScopeKind)}
 	selected := map[BindingKey]string{}
 	declaredSelections := make(map[BindingKey]bool)
 	for _, module := range modules {

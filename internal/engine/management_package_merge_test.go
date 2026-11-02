@@ -165,6 +165,40 @@ func TestMergeManagementPackageSnapshotRequiresVersionChangeForModuleDefinitionU
 	}
 }
 
+func TestModuleOwnerUpdateRejectsIncompatibleActiveExtensionAndDisableRemovesIt(t *testing.T) {
+	target := contract.ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1}
+	handler := contract.ResourceRef{Namespace: "tenant", Name: "tax.validate", Version: 1}
+	owner := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: target, Access: contract.ModulePrivate, MutationMode: contract.MutationCommands, ScopeKind: contract.ScopeTenantShared}}, ExtensionPoints: []contract.ExtensionPoint{{
+		OwnerModuleID: "finance.ar", ID: "invoice.validation", Version: 1, Target: target, AllowedKinds: []string{string(contract.ExtensionValidation)},
+		InputSchema: contract.SchemaRef{ID: "invoice", Version: 1}, OutputSchema: contract.SchemaRef{ID: "validation", Version: 1}, ExecutionPhase: "before_commit", FailurePolicy: "reject",
+	}}}
+	extender := contract.ModuleDescriptor{ID: "tax.vat", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: handler, Access: contract.ModulePrivate, MutationMode: contract.MutationCommands, ScopeKind: contract.ScopeTenantShared}}, Extensions: []contract.ExtensionRegistration{{
+		ID: "vat-check", ExtenderModuleID: "tax.vat", PointID: "finance.ar/invoice.validation", PointVersion: 1, Kind: contract.ExtensionValidation,
+		ArtifactDigest: strings.Repeat("a", 64), HandlerRef: handler, Order: 10,
+	}}}
+	current := []contract.ModuleDescriptor{owner, extender}
+	if _, err := mergeModuleDescriptors(current, nil); err != nil {
+		t.Fatal("valid initial extension composition rejected:", err)
+	}
+	updatedOwner := owner
+	updatedOwner.Version = "1.1.0"
+	updatedOwner.ExtensionPoints = append([]contract.ExtensionPoint(nil), owner.ExtensionPoints...)
+	updatedOwner.ExtensionPoints[0].Version = 2
+	if err := contract.ValidateModuleSet([]contract.ModuleDescriptor{updatedOwner, extender}, nil); err == nil || !strings.Contains(err.Error(), "point version") {
+		t.Fatalf("owner update incompatible with active extension = %v, want extension compatibility rejection", err)
+	}
+	if _, err := mergeModuleDescriptors(current, []contract.ModuleDescriptor{updatedOwner}); err == nil {
+		t.Fatal("unplanned owner replacement with an active extension was accepted")
+	}
+	disabledExtender := extender
+	disabledExtender.Version = "1.1.0"
+	disabledExtender.Extensions = nil
+	ordered, err := contract.OrderModuleExtensions([]contract.ModuleDescriptor{owner, disabledExtender}, nil)
+	if err != nil || len(ordered) != 0 {
+		t.Fatalf("disabled extension remained active: %+v, err=%v", ordered, err)
+	}
+}
+
 func TestPackageOwnershipRecognizesNonDocTypeResources(t *testing.T) {
 	snapshot := &doctype.ConfigSnapshot{
 		Scripts:       []*doctype.ScriptSnapshot{{Name: "invoice.post"}},

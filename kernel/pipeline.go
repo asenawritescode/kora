@@ -164,6 +164,9 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 	if dt == nil {
 		return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", doctypeName))
 	}
+	if err := txMgr.LoadLifecycleHooksTx(ctx, dbTx, dt); err != nil {
+		return nil, contract.NewError(contract.CodeDependencyUnavailable, err.Error())
+	}
 
 	user := op.Context.User
 	if user == "" {
@@ -198,6 +201,12 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", item.Doctype))
 			}
 			keySet[item.Key] = struct{}{}
+		}
+		for _, item := range p.Records {
+			recordDT := reg.Get(item.Doctype)
+			if err := txMgr.LoadLifecycleHooksTx(ctx, dbTx, recordDT); err != nil {
+				return nil, contract.NewError(contract.CodeDependencyUnavailable, err.Error())
+			}
 		}
 		// Claim the idempotency key before allocating names or performing other
 		// transactional writes. Concurrent retries must contend on the unique

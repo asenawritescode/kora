@@ -46,17 +46,18 @@ const (
 
 // ExecuteRequest carries all context for a single script execution.
 type ExecuteRequest struct {
-	Script      string         // JavaScript source
-	ScriptType  Type           // doc_event, api_method, etc.
-	ScriptName  string         // from _kora_script.name
-	DocType     string         // doctype being operated on
-	Event       Event          // lifecycle hook point
-	Document    map[string]any // current document state
-	OldDocument map[string]any // previous document state (nil for inserts)
-	User        string         // authenticated user email
-	UserRoles   []string       // user's roles
-	Site        string         // site hostname
-	Timeout     time.Duration  // per-execution timeout
+	Script        string         // JavaScript source
+	ScriptType    Type           // doc_event, api_method, etc.
+	ScriptName    string         // from _kora_script.name
+	DocType       string         // doctype being operated on
+	Event         Event          // lifecycle hook point
+	Document      map[string]any // current document state
+	OldDocument   map[string]any // previous document state (nil for inserts)
+	User          string         // authenticated user email
+	UserRoles     []string       // user's roles
+	Site          string         // site hostname
+	Timeout       time.Duration  // per-execution timeout
+	Deterministic bool           // disables wall-clock and random JS sources
 
 	// Provider bridges the JS runtime to the Kigae engine.
 	// If nil, kora.getDoc/kora.saveDoc etc. return safe defaults.

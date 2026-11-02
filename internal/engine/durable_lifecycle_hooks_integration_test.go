@@ -14,6 +14,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/schema"
@@ -108,24 +109,54 @@ func TestDurableLifecycleHookWorkerCommitsAuthorizedLocalMutationAcrossDialects(
 			if err := store.EnsureAsyncHookInvocationSchema(ctx); err != nil {
 				t.Fatal("ensure lifecycle invocation table:", err)
 			}
+			const handlerName = "module-task-after-save"
+			if _, err := database.ExecContext(ctx, dbRebindForHook(dialect, `INSERT INTO _kora_script (name, site, script_type, doctype, event, priority, is_active, timeout_ms, script) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+				handlerName, siteName, string(script.TypeDocEvent), "Task", string(script.EventAfterSave), 10, true, 5000, "return true"); err != nil {
+				t.Fatal("insert module post-commit handler:", err)
+			}
 			source := contract.OperationID(contract.NewOperationID())
 			actor := contract.ActorContext{PrincipalID: "hook-user", SubjectUserID: "hook-user", PrincipalType: contract.PrincipalHuman,
 				Site: siteName, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now().UTC()}
+			grants := []policy.Grant{{Resource: "Task", Operation: "create"}}
+			execution, err := policy.NewVerifiedExecutionWithGrants(tenant, actor, grants)
+			if err != nil {
+				t.Fatal("create registered extension execution:", err)
+			}
+			target := contract.ResourceRef{Namespace: "tenant", Name: "Task", Version: 1}
+			handler := contract.ResourceRef{Namespace: "module", Name: handlerName, Version: 1}
+			ownerModule := contract.ModuleDescriptor{ID: "work.tasks", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: target}}, ExtensionPoints: []contract.ExtensionPoint{{
+				OwnerModuleID: "work.tasks", ID: "task.after-save", Version: 1, Target: target,
+				AllowedKinds: []string{string(contract.ExtensionPostCommit)}, InputSchema: contract.SchemaRef{ID: "task-event", Version: 1},
+				OutputSchema: contract.SchemaRef{ID: "task-result", Version: 1}, ExecutionPhase: "after_commit", FailurePolicy: "retry",
+			}}}
+			extenderModule := contract.ModuleDescriptor{ID: "audit.tasks", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: handler}}, Extensions: []contract.ExtensionRegistration{{
+				ID: "task-audit", ExtenderModuleID: "audit.tasks", PointID: "work.tasks/task.after-save", PointVersion: 1,
+				Kind: contract.ExtensionPostCommit, ArtifactDigest: strings.Repeat("d", 64), HandlerRef: handler,
+				Event: string(script.EventAfterSave), Order: 10,
+			}}}
+			modules := []contract.ModuleDescriptor{ownerModule, extenderModule}
+			extensions, err := contract.OrderModuleExtensions(modules, nil)
+			if err != nil {
+				t.Fatal("resolve post-commit extension:", err)
+			}
 			invocation := script.AsyncHookInvocation{
 				TenantID: tenant, Site: siteName, SourceOperation: source, ConfigRevision: 1, Sequence: 1,
 				Doctype: "Task", Event: script.EventAfterSave,
-				Record: script.ScriptRecord{Name: "task-after-save", Site: siteName, ScriptType: script.TypeDocEvent,
+				Record: script.ScriptRecord{Name: handlerName, Site: siteName, ScriptType: script.TypeDocEvent,
 					DocType: "Task", Event: script.EventAfterSave, IsActive: true, TimeoutMs: 5000, Script: "return true"},
-				Document: []byte(`{"name":"SOURCE-1","title":"source"}`), Actor: actor,
-				Grants: []policy.Grant{{Resource: "Task", Operation: "create"}},
+				Document: []byte(`{"doctype":"Task","name":"SOURCE-1","title":"source"}`), Actor: actor, Grants: grants,
 			}
 			sourceTx, err := database.BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal("begin invocation source transaction:", err)
 			}
-			if err := store.AppendAsyncHookTx(ctx, sourceTx, invocation); err != nil {
+			manager := &orm.TxManager{DB: database, Transaction: sourceTx, Context: ctx, ScriptStore: store,
+				SiteName: siteName, Execution: execution, AsyncHookInvocations: store, AsyncHookTenantID: tenant,
+				AsyncHookSourceOperation: source, AsyncHookConfigRevision: 1, ModuleDescriptors: modules, ModuleExtensions: extensions}
+			if err := manager.CaptureAsyncAfterHooksTx(ctx, sourceTx, dt, script.EventAfterSave,
+				&doctype.Document{DocType: "Task", Name: "SOURCE-1", Fields: map[string]any{"title": "source"}}, nil); err != nil {
 				_ = sourceTx.Rollback()
-				t.Fatal("append source invocation:", err)
+				t.Fatal("capture registered module post-commit extension:", err)
 			}
 			if err := sourceTx.Commit(); err != nil {
 				t.Fatal("commit source invocation:", err)

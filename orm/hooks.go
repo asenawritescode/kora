@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
@@ -16,6 +18,8 @@ import (
 // hookEnqueueFailed counts async after_* hooks that could not be handed to the
 // worker sink. Phase 1 requires async work to fail observably.
 var hookEnqueueFailed atomic.Int64
+
+const maxModuleValidationExtensionTime = 2 * time.Second
 
 // HookEnqueueFailedCount returns the number of async hooks that could not be
 // handed to the worker sink since process start.
@@ -113,7 +117,14 @@ func (tx *TxManager) RunHooksForValidate(dt *doctype.DocType, doc *doctype.Docum
 // transaction. When durable storage is configured, callers must invoke this
 // before committing their record mutation.
 func (tx *TxManager) CaptureAsyncAfterHooksTx(ctx context.Context, dbTx *sql.Tx, dt *doctype.DocType, event script.Event, doc, oldDoc *doctype.Document) error {
-	if tx == nil || tx.AsyncHookInvocations == nil {
+	if tx == nil {
+		return nil
+	}
+	extensions := tx.lifecycleExtensions(dt, event)
+	if tx.AsyncHookInvocations == nil {
+		if len(extensions) > 0 {
+			return fmt.Errorf("module post-commit extensions require durable lifecycle-hook storage")
+		}
 		return nil
 	}
 	if ctx == nil || dbTx == nil || dt == nil || doc == nil || tx.ScriptStore == nil || !tx.Execution.Valid() || tx.AsyncHookTenantID == "" || tx.AsyncHookSourceOperation == "" || tx.AsyncHookConfigRevision == 0 {
@@ -125,6 +136,10 @@ func (tx *TxManager) CaptureAsyncAfterHooksTx(ctx context.Context, dbTx *sql.Tx,
 	scripts, err := tx.activeHookScripts(dt.Name)
 	if err != nil {
 		return fmt.Errorf("load lifecycle scripts in source transaction: %w", err)
+	}
+	scripts, err = tx.selectLifecycleScripts(dt, event, scripts)
+	if err != nil {
+		return fmt.Errorf("resolve registered module post-commit hooks: %w", err)
 	}
 	current, err := json.Marshal(doc.ToMap())
 	if err != nil {
@@ -169,7 +184,14 @@ func (tx *TxManager) CaptureAsyncAfterHooksTx(ctx context.Context, dbTx *sql.Tx,
 // For before_* hooks, the modified document is returned (scripts can modify it).
 // For after_* hooks, errors are logged but not returned (best-effort).
 func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doctype.Document, oldDoc *doctype.Document) error {
+	extensions := tx.lifecycleExtensions(dt, event)
+	if len(extensions) > 0 && script.IsAfterEvent(event) && !tx.SuppressAsyncHookEvents {
+		return fmt.Errorf("module post-commit extension handlers must be captured in the source transaction")
+	}
 	if tx.ScriptRunner == nil || tx.ScriptStore == nil {
+		if len(extensions) > 0 && !(script.IsAfterEvent(event) && tx.SuppressAsyncHookEvents) {
+			return fmt.Errorf("module lifecycle extensions require the tenant script runtime")
+		}
 		if tx.ScriptRunner != nil || tx.ScriptStore != nil {
 			slog.Warn("runHooks: runner or store nil", "runner", tx.ScriptRunner != nil, "store", tx.ScriptStore != nil, "site", tx.SiteName, "doctype", dt.Name, "event", event)
 		}
@@ -179,6 +201,10 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 	scripts, err := tx.activeHookScripts(dt.Name)
 	if err != nil {
 		return fmt.Errorf("loading scripts: %w", err)
+	}
+	scripts, err = tx.selectLifecycleScripts(dt, event, scripts)
+	if err != nil {
+		return fmt.Errorf("resolve registered module lifecycle hooks: %w", err)
 	}
 	matching := make([]script.ScriptRecord, 0, len(scripts))
 	for _, record := range scripts {
@@ -241,6 +267,27 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 			continue
 		}
 
+		moduleExtension, isModuleExtension := tx.extensionForHandler(dt, event, rec.Name)
+		isValidationExtension := isModuleExtension && moduleExtension.Registration.Kind == contract.ExtensionValidation
+		if isValidationExtension {
+			if tx.ModuleExtensionSchemas == nil {
+				return fmt.Errorf("module validation extension %q has no schema registry", rec.Name)
+			}
+			input, marshalErr := json.Marshal(doc.ToMap())
+			if marshalErr != nil {
+				return fmt.Errorf("encode module validation extension input: %w", marshalErr)
+			}
+			if validateErr := tx.ModuleExtensionSchemas.Validate(moduleExtension.Point.InputSchema, input); validateErr != nil {
+				return fmt.Errorf("module validation extension %q input rejected: %w", rec.Name, validateErr)
+			}
+			if rec.TimeoutMs <= 0 || time.Duration(rec.TimeoutMs)*time.Millisecond > maxModuleValidationExtensionTime {
+				return fmt.Errorf("module validation extension %q timeout must be between 1ms and %s", rec.Name, maxModuleValidationExtensionTime)
+			}
+		}
+		provider := scopedHookProvider(tx, tx.ScriptProvider, dt.Name, event, rec.Name)
+		if isValidationExtension {
+			provider = nil // Validators receive no document, secret, HTTP, or mutation bridge.
+		}
 		req := script.ExecuteRequest{
 			Script:      rec.Script,
 			ScriptType:  rec.ScriptType,
@@ -252,7 +299,11 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 			User:        tx.CurrentUser,
 			UserRoles:   userRoles,
 			Site:        tx.SiteName,
-			Provider:    scopedHookProvider(tx, tx.ScriptProvider, dt.Name, event, rec.Name),
+			Provider:    provider,
+		}
+		if isValidationExtension {
+			req.Timeout = time.Duration(rec.TimeoutMs) * time.Millisecond
+			req.Deterministic = true
 		}
 
 		// Execute with panic recovery.
@@ -267,6 +318,15 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 			}()
 			result, execErr = tx.ScriptRunner.Execute(ctx, req)
 		}()
+		if isValidationExtension && execErr == nil {
+			if result == nil || result.Modified || result.Result == nil {
+				execErr = fmt.Errorf("module validation extension must return a schema-valid result without modifying the document")
+			} else if output, marshalErr := json.Marshal(result.Result); marshalErr != nil {
+				execErr = fmt.Errorf("encode module validation extension result: %w", marshalErr)
+			} else if validateErr := tx.ModuleExtensionSchemas.Validate(moduleExtension.Point.OutputSchema, output); validateErr != nil {
+				execErr = fmt.Errorf("module validation extension result rejected: %w", validateErr)
+			}
+		}
 
 		durationMs := 0
 		status := "success"
@@ -302,6 +362,105 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 		}
 	}
 	return nil
+}
+
+// LoadLifecycleHooksTx loads a command's lifecycle handlers from the command's
+// transaction snapshot. Kernel uses this before validation and mutation so
+// module extension handlers are present and their activation state cannot race
+// with the business write.
+func (tx *TxManager) LoadLifecycleHooksTx(ctx context.Context, dbTx *sql.Tx, dt *doctype.DocType) error {
+	if tx == nil || tx.ScriptStore == nil || dbTx == nil || dt == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	scripts, err := tx.ScriptStore.LoadActiveScriptsTx(ctx, dbTx, tx.SiteName, dt.Name, "")
+	if err != nil {
+		return fmt.Errorf("loading lifecycle scripts in command transaction: %w", err)
+	}
+	if tx.HookScriptsByDoctype == nil {
+		tx.HookScriptsByDoctype = make(map[string][]script.ScriptRecord)
+	}
+	tx.HookScriptsByDoctype[dt.Name] = scripts
+	return nil
+}
+
+func (tx *TxManager) lifecycleExtensions(dt *doctype.DocType, event script.Event) []contract.ResolvedModuleExtension {
+	if tx == nil || dt == nil {
+		return nil
+	}
+	var matching []contract.ResolvedModuleExtension
+	for _, extension := range tx.ModuleExtensions {
+		if extension.Point.Target.Name != dt.Name {
+			continue
+		}
+		registration := extension.Registration
+		switch registration.Kind {
+		case contract.ExtensionValidation:
+			if event == script.EventValidate {
+				matching = append(matching, extension)
+			}
+		case contract.ExtensionPostCommit:
+			if registration.Event == string(event) {
+				matching = append(matching, extension)
+			}
+		}
+	}
+	return matching
+}
+
+func (tx *TxManager) extensionForHandler(dt *doctype.DocType, event script.Event, name string) (contract.ResolvedModuleExtension, bool) {
+	for _, extension := range tx.lifecycleExtensions(dt, event) {
+		if extension.Registration.HandlerRef.Name == name {
+			return extension, true
+		}
+	}
+	return contract.ResolvedModuleExtension{}, false
+}
+
+// selectLifecycleScripts keeps module-owned hook resources inert unless the
+// current activation snapshot explicitly registers them at an owner point.
+// Registered extensions follow the precomputed owner order; ordinary scripts
+// keep the existing ScriptStore order ahead of extension handlers.
+func (tx *TxManager) selectLifecycleScripts(dt *doctype.DocType, event script.Event, records []script.ScriptRecord) ([]script.ScriptRecord, error) {
+	if tx == nil || dt == nil {
+		return nil, fmt.Errorf("module lifecycle hook selection requires a document type")
+	}
+	ownedNames := make(map[string]bool)
+	for _, module := range tx.ModuleDescriptors {
+		for _, resource := range module.Resources {
+			ownedNames[resource.Ref.Name] = true
+		}
+	}
+	active := make(map[string]script.ScriptRecord, len(records))
+	for _, record := range records {
+		if record.Event != event || record.DocType != "" && record.DocType != dt.Name {
+			continue
+		}
+		if _, duplicate := active[record.Name]; duplicate {
+			return nil, fmt.Errorf("module hook resource %q is ambiguous", record.Name)
+		}
+		active[record.Name] = record
+	}
+	var ordinary []script.ScriptRecord
+	for _, record := range records {
+		if record.Event != event || record.DocType != "" && record.DocType != dt.Name || ownedNames[record.Name] {
+			continue
+		}
+		ordinary = append(ordinary, record)
+	}
+	registered := tx.lifecycleExtensions(dt, event)
+	result := append([]script.ScriptRecord(nil), ordinary...)
+	for _, extension := range registered {
+		name := extension.Registration.HandlerRef.Name
+		record, ok := active[name]
+		if !ok || record.DocType != dt.Name || record.ScriptType != script.TypeDocEvent || !record.IsActive || record.Script == "" {
+			return nil, fmt.Errorf("registered module extension handler %q is missing or inactive", name)
+		}
+		result = append(result, record)
+	}
+	return result, nil
 }
 
 func (tx *TxManager) activeHookScripts(doctypeName string) ([]script.ScriptRecord, error) {

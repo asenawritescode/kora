@@ -3,6 +3,7 @@ package contract
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -285,22 +286,140 @@ func TestModuleLifecycleDrainRequiresCurrentUnblockedPlan(t *testing.T) {
 }
 
 func TestOwnerControlledModuleExtensionsValidateScopeSchemaAndOrder(t *testing.T) {
-	owner := ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", ExtensionPoints: []ExtensionPoint{{OwnerModuleID: "finance.ar", ID: "invoice.validation", Version: 2, Target: ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1}, AllowedKinds: []string{"validation"}, InputSchema: SchemaRef{ID: "invoice", Version: 1}, OutputSchema: SchemaRef{ID: "validation", Version: 1}, ExecutionPhase: "before_commit", FailurePolicy: "reject"}}}
-	extender := ModuleDescriptor{ID: "tax.vat", Version: "1.0.0", Extensions: []ExtensionRegistration{{ExtenderModuleID: "tax.vat", PointID: "finance.ar/invoice.validation", PointVersion: 2, ArtifactDigest: "digest", HandlerRef: ResourceRef{Namespace: "tenant", Name: "tax.validate", Version: 1}, Order: 10, AddedFields: []ExtensionField{{Key: "tax.vat.code", Schema: SchemaRef{ID: "tax-code", Version: 1}}}}}}
-	if err := ValidateModuleExtensions([]ModuleDescriptor{owner, extender}, func(SchemaRef) bool { return true }); err != nil {
-		t.Fatal(err)
+	invoice := ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1}
+	owner := ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Resources: []OwnedResource{{Ref: invoice, Access: ModulePrivate, MutationMode: MutationCommands, ScopeKind: ScopeTenantShared}}, ExtensionPoints: []ExtensionPoint{{OwnerModuleID: "finance.ar", ID: "invoice.validation", Version: 2, Target: invoice, AllowedKinds: []string{string(ExtensionValidation)}, ProtectedFields: []string{"status"}, InputSchema: SchemaRef{ID: "invoice", Version: 1}, OutputSchema: SchemaRef{ID: "validation", Version: 1}, ExecutionPhase: "before_commit", FailurePolicy: "reject"}}}
+	handlerA := ResourceRef{Namespace: "tenant", Name: "tax.validate", Version: 1}
+	handlerB := ResourceRef{Namespace: "tenant", Name: "tax.validate.discount", Version: 1}
+	extenderA := ModuleDescriptor{ID: "tax.vat", Version: "1.0.0", Resources: []OwnedResource{{Ref: handlerA, Access: ModulePrivate, MutationMode: MutationCommands, ScopeKind: ScopeTenantShared}}, Extensions: []ExtensionRegistration{{ID: "vat-check", ExtenderModuleID: "tax.vat", PointID: "finance.ar/invoice.validation", PointVersion: 2, Kind: ExtensionValidation, ArtifactDigest: strings.Repeat("a", 64), HandlerRef: handlerA, Order: 10}}}
+	extenderB := ModuleDescriptor{ID: "tax.discount", Version: "1.0.0", Resources: []OwnedResource{{Ref: handlerB, Access: ModulePrivate, MutationMode: MutationCommands, ScopeKind: ScopeTenantShared}}, Extensions: []ExtensionRegistration{{ID: "discount-check", ExtenderModuleID: "tax.discount", PointID: "finance.ar/invoice.validation", PointVersion: 2, Kind: ExtensionValidation, ArtifactDigest: strings.Repeat("b", 64), HandlerRef: handlerB, Order: 20, DependsOn: []string{"tax.vat/vat-check"}}}}
+	registered := func(ref SchemaRef) bool { return ref.ID != "missing" }
+	modules := []ModuleDescriptor{extenderB, owner, extenderA}
+	ordered, err := OrderModuleExtensions(modules, registered)
+	if err != nil {
+		t.Fatal("valid extension plan rejected:", err)
 	}
-	bad := extender
-	bad.Extensions = append([]ExtensionRegistration(nil), extender.Extensions...)
-	bad.Extensions[0].PointID = "finance.ar/undeclared"
-	if err := ValidateModuleExtensions([]ModuleDescriptor{owner, bad}, nil); err == nil {
-		t.Fatal("undeclared extension point accepted")
+	if len(ordered) != 2 || ordered[0].Registration.ID != "vat-check" || ordered[1].Registration.ID != "discount-check" {
+		t.Fatalf("extension order = %+v, want dependency-ordered registrations", ordered)
 	}
-	bad = extender
-	bad.Extensions = append([]ExtensionRegistration(nil), extender.Extensions...)
-	bad.Extensions[0].AddedFields = []ExtensionField{{Key: "invoice.status", Schema: SchemaRef{ID: "tax-code", Version: 1}}}
-	if err := ValidateModuleExtensions([]ModuleDescriptor{owner, bad}, nil); err == nil {
-		t.Fatal("core field override accepted")
+	orderedAgain, err := OrderModuleExtensions([]ModuleDescriptor{owner, extenderA, extenderB}, registered)
+	if err != nil || len(orderedAgain) != len(ordered) || orderedAgain[0].Registration.ID != ordered[0].Registration.ID || orderedAgain[1].Registration.ID != ordered[1].Registration.ID {
+		t.Fatalf("extension plan changed with input permutation: %+v, err=%v", orderedAgain, err)
+	}
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}
+	compositionA, err := PlanComposition(modules, nil, nil, scope, 7)
+	if err != nil {
+		t.Fatal("plan extension composition:", err)
+	}
+	compositionB, err := PlanComposition([]ModuleDescriptor{extenderA, owner, extenderB}, nil, nil, scope, 7)
+	if err != nil || compositionA.PlanHash != compositionB.PlanHash {
+		t.Fatalf("composition plan hash changed with module order: %q != %q, err=%v", compositionA.PlanHash, compositionB.PlanHash, err)
+	}
+	if err := ValidateModuleSet(modules, registered); err != nil {
+		t.Fatal("valid module composition rejected:", err)
+	}
+
+	assertRejected := func(name string, candidate []ModuleDescriptor) {
+		t.Helper()
+		if err := ValidateModuleSet(candidate, registered); err == nil {
+			t.Fatalf("%s accepted before activation", name)
+		}
+	}
+	bad := append([]ModuleDescriptor(nil), modules...)
+	bad[0].Extensions = append([]ExtensionRegistration(nil), extenderB.Extensions...)
+	bad[0].Extensions[0].PointID = "finance.ar/undeclared"
+	assertRejected("undeclared extension point", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[0].Extensions = append([]ExtensionRegistration(nil), extenderB.Extensions...)
+	bad[0].Extensions[0].PointVersion++
+	assertRejected("incompatible extension version", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[0].Extensions = append([]ExtensionRegistration(nil), extenderB.Extensions...)
+	bad[0].Extensions[0].Kind = ExtensionPostCommit
+	assertRejected("undeclared extension kind", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[0].Extensions = append([]ExtensionRegistration(nil), extenderB.Extensions...)
+	bad[0].Extensions[0].Event = "after_save"
+	assertRejected("validation extension with post-commit event", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[0].Extensions = append([]ExtensionRegistration(nil), extenderB.Extensions...)
+	bad[0].Extensions[0].HandlerRef = ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1}
+	assertRejected("handler owned by another module", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[1].ExtensionPoints = append([]ExtensionPoint(nil), owner.ExtensionPoints...)
+	bad[1].ExtensionPoints[0].Target = ResourceRef{Namespace: "tenant", Name: "Other", Version: 1}
+	assertRejected("target not owned by declaring module", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[0].Extensions = append([]ExtensionRegistration(nil), extenderB.Extensions...)
+	bad[0].Extensions[0].ArtifactDigest = "bad-digest"
+	assertRejected("invalid artifact digest", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[0].Extensions = append([]ExtensionRegistration(nil), extenderB.Extensions...)
+	bad[0].Extensions[0].Order = extenderA.Extensions[0].Order
+	assertRejected("ambiguous extension ordering", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[0].Extensions = append([]ExtensionRegistration(nil), extenderB.Extensions...)
+	bad[0].Extensions[0].DependsOn = []string{"unknown/extension"}
+	assertRejected("unknown extension dependency", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[0].Extensions = append([]ExtensionRegistration(nil), extenderB.Extensions...)
+	bad[0].Extensions[0].DependsOn = []string{"tax.vat/vat-check"}
+	bad[2].Extensions = append([]ExtensionRegistration(nil), extenderA.Extensions...)
+	bad[2].Extensions[0].DependsOn = []string{"tax.discount/discount-check"}
+	assertRejected("extension dependency cycle", bad)
+	bad = append([]ModuleDescriptor(nil), modules...)
+	bad[1].ExtensionPoints = append([]ExtensionPoint(nil), owner.ExtensionPoints...)
+	bad[1].ExtensionPoints[0].InputSchema.ID = "missing"
+	assertRejected("unregistered extension schema", bad)
+	if err := ValidateModuleSet(modules, func(SchemaRef) bool { return false }); err == nil {
+		t.Fatal("unregistered point schema was accepted")
+	}
+
+	withoutExtension := []ModuleDescriptor{owner, extenderA}
+	withoutExtension[1].Extensions = nil
+	disabled, err := OrderModuleExtensions(withoutExtension, registered)
+	if err != nil || len(disabled) != 0 {
+		t.Fatalf("disabled extension remained in runtime plan: %+v, err=%v", disabled, err)
+	}
+	updatedOwner := owner
+	updatedOwner.Version = "1.1.0"
+	updatedOwner.ExtensionPoints = append([]ExtensionPoint(nil), owner.ExtensionPoints...)
+	updatedOwner.ExtensionPoints[0].Version++
+	assertRejected("owner update incompatible with active extension", []ModuleDescriptor{updatedOwner, extenderA})
+}
+
+func TestOwnerModuleFieldExtensionsRequireNamespacedRegisteredFields(t *testing.T) {
+	target := ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1}
+	handler := ResourceRef{Namespace: "tenant", Name: "tax.fields", Version: 1}
+	owner := ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Resources: []OwnedResource{{Ref: target, Access: ModulePrivate, MutationMode: MutationCommands, ScopeKind: ScopeTenantShared}}, ExtensionPoints: []ExtensionPoint{{
+		OwnerModuleID: "finance.ar", ID: "invoice.fields", Version: 1, Target: target, AllowedKinds: []string{string(ExtensionFields)}, ProtectedFields: []string{"status", "tax.vat.status"},
+		InputSchema: SchemaRef{ID: "invoice-fields", Version: 1}, OutputSchema: SchemaRef{ID: "invoice-fields-result", Version: 1}, ExecutionPhase: "activation", FailurePolicy: "reject",
+	}}}
+	extension := ModuleDescriptor{ID: "tax.vat", Version: "1.0.0", Resources: []OwnedResource{{Ref: handler, Access: ModulePrivate, MutationMode: MutationCommands, ScopeKind: ScopeTenantShared}}, Extensions: []ExtensionRegistration{{
+		ID: "vat-fields", ExtenderModuleID: "tax.vat", PointID: "finance.ar/invoice.fields", PointVersion: 1, Kind: ExtensionFields,
+		ArtifactDigest: strings.Repeat("e", 64), HandlerRef: handler, Order: 1,
+		AddedFields: []ExtensionField{{Key: "tax.vat.registration_code", Schema: SchemaRef{ID: "registration-code", Version: 2}}},
+	}}}
+	modules := []ModuleDescriptor{owner, extension}
+	if err := ValidateModuleSet(modules, func(ref SchemaRef) bool { return ref.ID != "missing" }); err != nil {
+		t.Fatal("valid namespaced field extension rejected:", err)
+	}
+	bad := extension
+	bad.Extensions = append([]ExtensionRegistration(nil), extension.Extensions...)
+	bad.Extensions[0].AddedFields = []ExtensionField{{Key: "status", Schema: SchemaRef{ID: "registration-code", Version: 2}}}
+	if err := ValidateModuleSet([]ModuleDescriptor{owner, bad}, nil); err == nil {
+		t.Fatal("extension overrode an owner field")
+	}
+	bad = extension
+	bad.Extensions = append([]ExtensionRegistration(nil), extension.Extensions...)
+	bad.Extensions[0].AddedFields = []ExtensionField{{Key: "tax.vat.status", Schema: SchemaRef{ID: "registration-code", Version: 2}}}
+	if err := ValidateModuleSet([]ModuleDescriptor{owner, bad}, nil); err == nil {
+		t.Fatal("extension overrode an owner-reserved namespaced field")
+	}
+	bad = extension
+	bad.Extensions = append([]ExtensionRegistration(nil), extension.Extensions...)
+	bad.Extensions[0].AddedFields = []ExtensionField{{Key: "tax.vat.registration_code", Schema: SchemaRef{ID: "missing", Version: 1}}}
+	if err := ValidateModuleSet([]ModuleDescriptor{owner, bad}, func(ref SchemaRef) bool { return ref.ID != "missing" }); err == nil {
+		t.Fatal("unregistered field schema accepted")
 	}
 }
 

@@ -2,12 +2,15 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/auth"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/eventstream"
 	knet "github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/site"
@@ -15,12 +18,38 @@ import (
 	"github.com/asenawritescode/kora/webhook"
 )
 
+type tenantExtensionSchemas struct{ registered bool }
+
+func (s tenantExtensionSchemas) Registered(contract.SchemaRef) bool               { return s.registered }
+func (tenantExtensionSchemas) Validate(contract.SchemaRef, json.RawMessage) error { return nil }
+
 func TestNewTenantServiceInstallerRequiresConcreteDependencies(t *testing.T) {
 	if _, err := NewTenantServiceInstaller(TenantServiceConfig{}); err == nil {
 		t.Fatal("expected missing common configuration to be rejected")
 	}
 	if _, err := NewTenantServiceInstaller(TenantServiceConfig{Common: &site.CommonConfig{}}); err == nil {
 		t.Fatal("expected missing storage resolver to be rejected")
+	}
+}
+
+func TestTenantExtensionActivationRequiresRegisteredSchemas(t *testing.T) {
+	if err := validateModuleExtensionSchemas(nil, nil); err != nil {
+		t.Fatalf("module set without extensions requires a schema registry: %v", err)
+	}
+	target := contract.ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1}
+	handler := contract.ResourceRef{Namespace: "tenant", Name: "tax.validate", Version: 1}
+	modules := []contract.ModuleDescriptor{
+		{ID: "finance.ar", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: target}}, ExtensionPoints: []contract.ExtensionPoint{{OwnerModuleID: "finance.ar", ID: "invoice.validation", Version: 1, Target: target, AllowedKinds: []string{string(contract.ExtensionValidation)}, InputSchema: contract.SchemaRef{ID: "invoice", Version: 1}, OutputSchema: contract.SchemaRef{ID: "result", Version: 1}, ExecutionPhase: "before_commit", FailurePolicy: "reject"}}},
+		{ID: "tax.vat", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: handler}}, Extensions: []contract.ExtensionRegistration{{ID: "vat-check", ExtenderModuleID: "tax.vat", PointID: "finance.ar/invoice.validation", PointVersion: 1, Kind: contract.ExtensionValidation, ArtifactDigest: strings.Repeat("d", 64), HandlerRef: handler, Order: 1}}},
+	}
+	if err := validateModuleExtensionSchemas(modules, nil); err == nil {
+		t.Fatal("extension activation without a schema registry was accepted")
+	}
+	if err := validateModuleExtensionSchemas(modules, tenantExtensionSchemas{}); err == nil {
+		t.Fatal("extension activation with unregistered schemas was accepted")
+	}
+	if err := validateModuleExtensionSchemas(modules, tenantExtensionSchemas{registered: true}); err != nil {
+		t.Fatalf("registered extension schemas were rejected: %v", err)
 	}
 }
 

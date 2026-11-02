@@ -43,3 +43,16 @@ func TestRunnerBoundsWaitersAndCloseJoinsExecutions(t *testing.T) {
 		t.Fatalf("repeated Close: %v", err)
 	}
 }
+
+func TestDeterministicValidationRemovesClockAndRandomSources(t *testing.T) {
+	runner := NewEmbeddedRunner(EmbeddedConfig{PoolSize: 1, Timeout: time.Second})
+	defer runner.Close()
+	result, err := runner.Execute(context.Background(), ExecuteRequest{
+		Script:        `try { Date = function(){ return 1; }; Math.random = function(){ return 0.5; }; } catch (_) {} if (typeof Date !== "undefined") throw new Error("clock is available"); if (typeof Math.random !== "undefined") throw new Error("random is available"); return {result:{valid:true}};`,
+		Timeout:       250 * time.Millisecond,
+		Deterministic: true,
+	})
+	if err != nil || result == nil || result.Result == nil {
+		t.Fatalf("deterministic validation result = (%+v,%v)", result, err)
+	}
+}

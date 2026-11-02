@@ -444,32 +444,56 @@ type ModuleDescriptor struct {
 	Extensions      []ExtensionRegistration `json:"extensions,omitempty"`
 }
 
+// ExtensionKind is a behavior explicitly allowed by an owner-declared point.
+//
+//contract:enum:v2
+type ExtensionKind string
+
+const (
+	ExtensionFields     ExtensionKind = "fields"
+	ExtensionValidation ExtensionKind = "validation"
+	ExtensionPostCommit ExtensionKind = "post_commit"
+)
+
 // ExtensionPoint is an owner declaration of a narrowly scoped extension surface.
 //
 //contract:wire:v2
 type ExtensionPoint struct {
-	OwnerModuleID  ModuleID    `json:"owner_module_id"`
-	ID             string      `json:"id"`
-	Version        uint32      `json:"version"`
-	Target         ResourceRef `json:"target"`
-	AllowedKinds   []string    `json:"allowed_kinds"`
-	InputSchema    SchemaRef   `json:"input_schema"`
-	OutputSchema   SchemaRef   `json:"output_schema"`
-	ExecutionPhase string      `json:"execution_phase"`
-	FailurePolicy  string      `json:"failure_policy"`
+	OwnerModuleID   ModuleID    `json:"owner_module_id"`
+	ID              string      `json:"id"`
+	Version         uint32      `json:"version"`
+	Target          ResourceRef `json:"target"`
+	AllowedKinds    []string    `json:"allowed_kinds"`
+	ProtectedFields []string    `json:"protected_fields,omitempty"`
+	InputSchema     SchemaRef   `json:"input_schema"`
+	OutputSchema    SchemaRef   `json:"output_schema"`
+	ExecutionPhase  string      `json:"execution_phase"`
+	FailurePolicy   string      `json:"failure_policy"`
 }
 
 // ExtensionRegistration grants no resource mutation authority.
 //
 //contract:wire:v2
 type ExtensionRegistration struct {
+	ID               string           `json:"id"`
 	ExtenderModuleID ModuleID         `json:"extender_module_id"`
 	PointID          string           `json:"point_id"`
 	PointVersion     uint32           `json:"point_version"`
+	Kind             ExtensionKind    `json:"kind"`
 	ArtifactDigest   string           `json:"artifact_digest"`
 	HandlerRef       ResourceRef      `json:"handler_ref"`
+	Event            string           `json:"event,omitempty"`
 	Order            int32            `json:"order"`
+	DependsOn        []string         `json:"depends_on,omitempty"`
 	AddedFields      []ExtensionField `json:"added_fields,omitempty"`
+}
+
+// ResolvedModuleExtension is an activation-ordered extension registration.
+//
+//contract:wire:v2
+type ResolvedModuleExtension struct {
+	Point        ExtensionPoint        `json:"point"`
+	Registration ExtensionRegistration `json:"registration"`
 }
 
 // ExtensionField must use an extender-owned namespaced key.
@@ -494,14 +518,15 @@ type PackageDependency struct {
 //
 //contract:wire:v2
 type CompositionPlan struct {
-	Modules          []ModuleDescriptor      `json:"modules"`
-	Packages         []InstalledPackage      `json:"packages,omitempty"`
-	Bindings         []BindingInspection     `json:"bindings"`
-	ActivationOrder  []ModuleID              `json:"activation_order"`
-	Conflicts        []string                `json:"conflicts,omitempty"`
-	CyclePaths       [][]ModuleID            `json:"cycle_paths,omitempty"`
-	DisabledOptional []CapabilityRequirement `json:"disabled_optional,omitempty"`
-	PlanHash         string                  `json:"plan_hash"`
+	Modules          []ModuleDescriptor        `json:"modules"`
+	Packages         []InstalledPackage        `json:"packages,omitempty"`
+	Extensions       []ResolvedModuleExtension `json:"extensions,omitempty"`
+	Bindings         []BindingInspection       `json:"bindings"`
+	ActivationOrder  []ModuleID                `json:"activation_order"`
+	Conflicts        []string                  `json:"conflicts,omitempty"`
+	CyclePaths       [][]ModuleID              `json:"cycle_paths,omitempty"`
+	DisabledOptional []CapabilityRequirement   `json:"disabled_optional,omitempty"`
+	PlanHash         string                    `json:"plan_hash"`
 }
 
 // PlanInstalledComposition combines package dependency validation with the
@@ -519,10 +544,11 @@ func PlanInstalledComposition(packages []InstalledPackage, modules []ModuleDescr
 	canonical, err := json.Marshal(struct {
 		Packages        []InstalledPackage
 		Modules         []ModuleDescriptor
+		Extensions      []ResolvedModuleExtension
 		Bindings        []BindingInspection
 		ActivationOrder []ModuleID
 		Revision        uint64
-	}{plan.Packages, plan.Modules, plan.Bindings, plan.ActivationOrder, revision})
+	}{plan.Packages, plan.Modules, plan.Extensions, plan.Bindings, plan.ActivationOrder, revision})
 	if err != nil {
 		return CompositionPlan{}, err
 	}
@@ -616,10 +642,12 @@ func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistratio
 	}
 	ordered := append([]ModuleDescriptor(nil), modules...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	ordered = normalizeModuleExtensions(ordered)
 	if err := ValidateModuleSet(ordered, nil); err != nil {
 		return CompositionPlan{}, err
 	}
-	if err := ValidateModuleExtensions(ordered, nil); err != nil {
+	extensions, err := OrderModuleExtensions(ordered, nil)
+	if err != nil {
 		return CompositionPlan{}, err
 	}
 	moduleByID := map[ModuleID]ModuleDescriptor{}
@@ -642,7 +670,7 @@ func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistratio
 		}
 		selected[selection.Key] = selection.ProviderID
 	}
-	plan := CompositionPlan{Modules: ordered}
+	plan := CompositionPlan{Modules: ordered, Extensions: extensions}
 	edges := map[ModuleID]map[ModuleID]bool{}
 	disabled := map[string]CapabilityRequirement{}
 	for _, consumer := range ordered {
@@ -713,11 +741,12 @@ func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistratio
 		return a.CapabilityName < b.CapabilityName
 	})
 	canonical, err := json.Marshal(struct {
-		Modules  []ModuleDescriptor
-		Bindings []BindingInspection
-		Order    []ModuleID
-		Revision uint64
-	}{ordered, plan.Bindings, order, revision})
+		Modules    []ModuleDescriptor
+		Extensions []ResolvedModuleExtension
+		Bindings   []BindingInspection
+		Order      []ModuleID
+		Revision   uint64
+	}{ordered, extensions, plan.Bindings, order, revision})
 	if err != nil {
 		return CompositionPlan{}, err
 	}
@@ -792,53 +821,262 @@ func moduleCycleText(cycle []ModuleID) string {
 }
 
 func ValidateModuleExtensions(modules []ModuleDescriptor, registered func(SchemaRef) bool) error {
+	_, err := OrderModuleExtensions(modules, registered)
+	return err
+}
+
+type plannedModuleExtension struct {
+	point        ExtensionPoint
+	registration ExtensionRegistration
+	key          string
+}
+
+// OrderModuleExtensions validates declarations and returns a stable dependency
+// order shared by activation and runtime consumers.
+func OrderModuleExtensions(modules []ModuleDescriptor, registered func(SchemaRef) bool) ([]ResolvedModuleExtension, error) {
+	if len(modules) > 256 {
+		return nil, fmt.Errorf("module set exceeds the supported extension planning limit")
+	}
+	pointCount, registrationCount := 0, 0
+	for _, module := range modules {
+		if len(module.ExtensionPoints) > 128 || len(module.Extensions) > 256 {
+			return nil, fmt.Errorf("module %q exceeds the supported extension declaration limits", module.ID)
+		}
+		pointCount += len(module.ExtensionPoints)
+		registrationCount += len(module.Extensions)
+	}
+	if pointCount > 2048 || registrationCount > 4096 {
+		return nil, fmt.Errorf("module set exceeds the supported extension declaration limits")
+	}
+	modules = normalizeModuleExtensions(modules)
 	points := map[string]ExtensionPoint{}
 	ownerModules := map[ModuleID]ModuleDescriptor{}
 	for _, module := range modules {
 		ownerModules[module.ID] = module
 		for _, point := range module.ExtensionPoints {
-			if point.OwnerModuleID != module.ID || point.ID == "" || point.Version == 0 || point.Target.Name == "" || len(point.AllowedKinds) == 0 {
-				return fmt.Errorf("invalid extension point in module %q", module.ID)
+			if point.OwnerModuleID != module.ID || !validModuleName(point.ID) || point.Version == 0 || point.Target.Namespace == "" || point.Target.Name == "" || point.Target.Version < 1 || len(point.AllowedKinds) != 1 {
+				return nil, fmt.Errorf("invalid extension point in module %q", module.ID)
 			}
 			key := string(module.ID) + "/" + point.ID
 			if _, ok := points[key]; ok {
-				return fmt.Errorf("duplicate extension point %q", key)
+				return nil, fmt.Errorf("duplicate extension point %q", key)
+			}
+			target, ownsTarget := module.OwnerOf(point.Target)
+			if !ownsTarget || target.Ref != point.Target {
+				return nil, fmt.Errorf("extension point %q target is not owned by its declaring module", key)
+			}
+			if err := validateModuleSchema(point.InputSchema, registered); err != nil {
+				return nil, fmt.Errorf("extension point %q input: %w", key, err)
+			}
+			if err := validateModuleSchema(point.OutputSchema, registered); err != nil {
+				return nil, fmt.Errorf("extension point %q output: %w", key, err)
+			}
+			allowed := map[ExtensionKind]bool{}
+			for _, rawKind := range point.AllowedKinds {
+				kind := ExtensionKind(rawKind)
+				if !validExtensionKind(kind) || allowed[kind] {
+					return nil, fmt.Errorf("extension point %q has invalid or duplicate allowed kind %q", key, rawKind)
+				}
+				allowed[kind] = true
+			}
+			protected := map[string]bool{}
+			for _, field := range point.ProtectedFields {
+				if !validModuleName(field) || protected[field] {
+					return nil, fmt.Errorf("extension point %q has invalid or duplicate protected field %q", key, field)
+				}
+				protected[field] = true
 			}
 			points[key] = point
 		}
 	}
+	byID := map[string]plannedModuleExtension{}
+	byPoint := map[string][]plannedModuleExtension{}
 	orders := map[string]map[int32]bool{}
+	fields := map[string]bool{}
 	for _, module := range modules {
 		for _, extension := range module.Extensions {
+			if len(extension.AddedFields) > 128 || len(extension.DependsOn) > 256 {
+				return nil, fmt.Errorf("extension %s/%s exceeds field or dependency limits", module.ID, extension.ID)
+			}
 			key := extension.PointID
 			point, ok := points[key]
 			if !ok {
-				return fmt.Errorf("extension point %q is undeclared", key)
+				return nil, fmt.Errorf("extension point %q is undeclared", key)
 			}
-			if extension.ExtenderModuleID != module.ID || extension.PointVersion != point.Version || extension.ArtifactDigest == "" {
-				return fmt.Errorf("extension %q has invalid owner or point version", key)
+			if !validModuleName(extension.ID) || extension.ExtenderModuleID != module.ID || extension.PointVersion != point.Version || !validDigest(extension.ArtifactDigest) {
+				return nil, fmt.Errorf("extension %q has invalid identity, digest, owner or point version", key)
+			}
+			allowed := false
+			for _, rawKind := range point.AllowedKinds {
+				allowed = allowed || ExtensionKind(rawKind) == extension.Kind
+			}
+			if !allowed {
+				return nil, fmt.Errorf("extension %s/%s uses undeclared kind %q", module.ID, extension.ID, extension.Kind)
+			}
+			phase, failure := extensionPolicy(extension.Kind)
+			if phase == "" || point.ExecutionPhase != phase || point.FailurePolicy != failure {
+				return nil, fmt.Errorf("extension point %q has an invalid phase or failure policy for %q", key, extension.Kind)
+			}
+			if extension.Kind == ExtensionValidation && extension.Event != "" && extension.Event != "validate" || extension.Kind == ExtensionFields && extension.Event != "" || extension.Kind == ExtensionPostCommit && !validPostCommitExtensionEvent(extension.Event) {
+				return nil, fmt.Errorf("extension %s/%s has an invalid event for kind %q", module.ID, extension.ID, extension.Kind)
+			}
+			handler, handlerOwned := module.OwnerOf(extension.HandlerRef)
+			if !handlerOwned || handler.Ref != extension.HandlerRef {
+				return nil, fmt.Errorf("extension %s/%s handler is not owned by its extender", module.ID, extension.ID)
+			}
+			if extension.Kind != ExtensionFields && len(extension.AddedFields) != 0 {
+				return nil, fmt.Errorf("extension %s/%s adds fields for non-field extension kind", module.ID, extension.ID)
+			}
+			if extension.Kind == ExtensionFields && len(extension.AddedFields) == 0 {
+				return nil, fmt.Errorf("field extension %s/%s declares no fields", module.ID, extension.ID)
 			}
 			if orders[key] == nil {
 				orders[key] = map[int32]bool{}
 			}
 			if orders[key][extension.Order] {
-				return fmt.Errorf("extension point %q has ambiguous order %d", key, extension.Order)
+				return nil, fmt.Errorf("extension point %q has ambiguous order %d", key, extension.Order)
 			}
 			orders[key][extension.Order] = true
+			globalID := string(module.ID) + "/" + extension.ID
+			if _, exists := byID[globalID]; exists {
+				return nil, fmt.Errorf("duplicate extension identity %q", globalID)
+			}
+			item := plannedModuleExtension{point: point, registration: extension, key: globalID}
+			byID[globalID] = item
+			byPoint[key] = append(byPoint[key], item)
 			for _, field := range extension.AddedFields {
-				if !strings.HasPrefix(field.Key, string(module.ID)+".") || field.Schema.ID == "" || field.Schema.Version == 0 {
-					return fmt.Errorf("extension field %q must be extender namespaced and versioned", field.Key)
+				if !validModuleName(field.Key) || !strings.HasPrefix(field.Key, string(module.ID)+".") || field.Schema.ID == "" || field.Schema.Version == 0 {
+					return nil, fmt.Errorf("extension field %q must be extender namespaced and versioned", field.Key)
 				}
+				for _, protected := range point.ProtectedFields {
+					if field.Key == protected {
+						return nil, fmt.Errorf("extension field %q overrides an owner-protected field", field.Key)
+					}
+				}
+				fieldKey := key + "/" + field.Key
+				if fields[fieldKey] {
+					return nil, fmt.Errorf("extension field %q is declared more than once", field.Key)
+				}
+				fields[fieldKey] = true
 				if registered != nil && !registered(field.Schema) {
-					return fmt.Errorf("extension field %q schema is unregistered", field.Key)
+					return nil, fmt.Errorf("extension field %q schema is unregistered", field.Key)
 				}
 			}
 			if _, ok := ownerModules[point.OwnerModuleID]; !ok {
-				return fmt.Errorf("extension point owner is not installed")
+				return nil, fmt.Errorf("extension point owner is not installed")
 			}
 		}
 	}
-	return nil
+	pointKeys := make([]string, 0, len(byPoint))
+	for key := range byPoint {
+		pointKeys = append(pointKeys, key)
+	}
+	sort.Strings(pointKeys)
+	result := make([]ResolvedModuleExtension, 0, len(byID))
+	for _, pointKey := range pointKeys {
+		remaining := make(map[string]plannedModuleExtension, len(byPoint[pointKey]))
+		for _, item := range byPoint[pointKey] {
+			remaining[item.key] = item
+		}
+		for len(remaining) > 0 {
+			var ready []plannedModuleExtension
+			for _, item := range remaining {
+				blocked := false
+				for _, dependency := range item.registration.DependsOn {
+					dependencyItem, exists := byID[dependency]
+					if !exists || dependencyItem.registration.PointID != pointKey {
+						return nil, fmt.Errorf("extension %q has an unknown or cross-point dependency %q", item.key, dependency)
+					}
+					if _, pending := remaining[dependency]; pending {
+						blocked = true
+						break
+					}
+				}
+				if !blocked {
+					ready = append(ready, item)
+				}
+			}
+			if len(ready) == 0 {
+				return nil, fmt.Errorf("extension dependency cycle at point %q", pointKey)
+			}
+			sort.Slice(ready, func(i, j int) bool { return extensionLess(ready[i], ready[j]) })
+			for _, item := range ready {
+				result = append(result, ResolvedModuleExtension{Point: item.point, Registration: item.registration})
+				delete(remaining, item.key)
+			}
+		}
+	}
+	return result, nil
+}
+
+func normalizeModuleExtensions(modules []ModuleDescriptor) []ModuleDescriptor {
+	ordered := append([]ModuleDescriptor(nil), modules...)
+	for i := range ordered {
+		module := &ordered[i]
+		module.ExtensionPoints = append([]ExtensionPoint(nil), module.ExtensionPoints...)
+		for j := range module.ExtensionPoints {
+			point := &module.ExtensionPoints[j]
+			point.AllowedKinds = append([]string(nil), point.AllowedKinds...)
+			point.ProtectedFields = append([]string(nil), point.ProtectedFields...)
+			sort.Strings(point.AllowedKinds)
+			sort.Strings(point.ProtectedFields)
+		}
+		sort.Slice(module.ExtensionPoints, func(i, j int) bool { return module.ExtensionPoints[i].ID < module.ExtensionPoints[j].ID })
+		module.Extensions = append([]ExtensionRegistration(nil), module.Extensions...)
+		for j := range module.Extensions {
+			extension := &module.Extensions[j]
+			extension.DependsOn = append([]string(nil), extension.DependsOn...)
+			sort.Strings(extension.DependsOn)
+			extension.AddedFields = append([]ExtensionField(nil), extension.AddedFields...)
+			sort.Slice(extension.AddedFields, func(i, j int) bool { return extension.AddedFields[i].Key < extension.AddedFields[j].Key })
+		}
+		sort.Slice(module.Extensions, func(i, j int) bool { return module.Extensions[i].ID < module.Extensions[j].ID })
+	}
+	return ordered
+}
+
+func validExtensionKind(kind ExtensionKind) bool {
+	return kind == ExtensionFields || kind == ExtensionValidation || kind == ExtensionPostCommit
+}
+
+func extensionPolicy(kind ExtensionKind) (string, string) {
+	switch kind {
+	case ExtensionFields:
+		return "activation", "reject"
+	case ExtensionValidation:
+		return "before_commit", "reject"
+	case ExtensionPostCommit:
+		return "after_commit", "retry"
+	default:
+		return "", ""
+	}
+}
+
+func validPostCommitExtensionEvent(event string) bool {
+	switch event {
+	case "after_insert", "after_save", "after_delete", "after_submit", "after_cancel":
+		return true
+	default:
+		return false
+	}
+}
+
+func extensionLess(left, right plannedModuleExtension) bool {
+	if left.registration.Order != right.registration.Order {
+		return left.registration.Order < right.registration.Order
+	}
+	if left.registration.ExtenderModuleID != right.registration.ExtenderModuleID {
+		return left.registration.ExtenderModuleID < right.registration.ExtenderModuleID
+	}
+	return left.registration.ID < right.registration.ID
+}
+
+func validDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func (m ModuleDescriptor) OwnerOf(ref ResourceRef) (OwnedResource, bool) {
@@ -1521,5 +1759,5 @@ func ValidateModuleSet(modules []ModuleDescriptor, registered func(SchemaRef) bo
 			}
 		}
 	}
-	return nil
+	return ValidateModuleExtensions(ordered, registered)
 }

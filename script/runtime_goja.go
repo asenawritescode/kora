@@ -184,6 +184,13 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 		"doc":    req.Document,
 		"oldDoc": req.OldDocument,
 	})
+	if req.Deterministic {
+		_ = vm.Set("Date", goja.Undefined())
+		if mathValue := vm.Get("Math"); mathValue != nil && !goja.IsUndefined(mathValue) {
+			_ = mathValue.ToObject(vm).Set("random", goja.Undefined())
+		}
+		_, _ = vm.RunString("Object.defineProperty(globalThis, 'Date', {value: undefined, writable: false, configurable: false}); Object.freeze(Math)")
+	}
 
 	start := time.Now()
 

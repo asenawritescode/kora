@@ -543,6 +543,12 @@
           },
           "type": "array"
         },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/ResolvedModuleExtension"
+          },
+          "type": "array"
+        },
         "modules": {
           "items": {
             "$ref": "#/$defs/ModuleDescriptor"
@@ -1178,6 +1184,12 @@
         "owner_module_id": {
           "type": "string"
         },
+        "protected_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "target": {
           "$ref": "#/$defs/ResourceRef"
         },
@@ -1210,11 +1222,31 @@
         "artifact_digest": {
           "type": "string"
         },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "event": {
+          "type": "string"
+        },
         "extender_module_id": {
           "type": "string"
         },
         "handler_ref": {
           "$ref": "#/$defs/ResourceRef"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "fields",
+            "validation",
+            "post_commit"
+          ],
+          "type": "string"
         },
         "order": {
           "type": "integer"
@@ -1230,6 +1262,8 @@
         "artifact_digest",
         "extender_module_id",
         "handler_ref",
+        "id",
+        "kind",
         "order",
         "point_id",
         "point_version"
@@ -3121,6 +3155,22 @@
         "status",
         "title",
         "updated_at"
+      ],
+      "type": "object"
+    },
+    "ResolvedModuleExtension": {
+      "additionalProperties": false,
+      "properties": {
+        "point": {
+          "$ref": "#/$defs/ExtensionPoint"
+        },
+        "registration": {
+          "$ref": "#/$defs/ExtensionRegistration"
+        }
+      },
+      "required": [
+        "point",
+        "registration"
       ],
       "type": "object"
     },
@@ -4517,6 +4567,12 @@
           },
           "type": "array"
         },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/ResolvedModuleExtension"
+          },
+          "type": "array"
+        },
         "modules": {
           "items": {
             "$ref": "#/$defs/ModuleDescriptor"
@@ -5130,6 +5186,12 @@
         "owner_module_id": {
           "type": "string"
         },
+        "protected_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "target": {
           "$ref": "#/$defs/ResourceRef"
         },
@@ -5162,11 +5224,31 @@
         "artifact_digest": {
           "type": "string"
         },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "event": {
+          "type": "string"
+        },
         "extender_module_id": {
           "type": "string"
         },
         "handler_ref": {
           "$ref": "#/$defs/ResourceRef"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "fields",
+            "validation",
+            "post_commit"
+          ],
+          "type": "string"
         },
         "order": {
           "type": "integer"
@@ -5182,6 +5264,8 @@
         "artifact_digest",
         "extender_module_id",
         "handler_ref",
+        "id",
+        "kind",
         "order",
         "point_id",
         "point_version"
@@ -7076,6 +7160,22 @@
       ],
       "type": "object"
     },
+    "ResolvedModuleExtension": {
+      "additionalProperties": false,
+      "properties": {
+        "point": {
+          "$ref": "#/$defs/ExtensionPoint"
+        },
+        "registration": {
+          "$ref": "#/$defs/ExtensionRegistration"
+        }
+      },
+      "required": [
+        "point",
+        "registration"
+      ],
+      "type": "object"
+    },
     "ResourceOwnership": {
       "additionalProperties": false,
       "properties": {
@@ -7925,6 +8025,11 @@
     "BusinessScopeKind": [
       "tenant",
       "legal_entity"
+    ],
+    "ExtensionKind": [
+      "fields",
+      "validation",
+      "post_commit"
     ],
     "InboxView": [
       "needs_action",

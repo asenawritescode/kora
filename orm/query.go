@@ -143,6 +143,14 @@ type TxManager struct {
 	// operation-scoped TxManager created by the kernel. Providers must return a
 	// lightweight scoped copy; they may share immutable clients and transports.
 	ScriptProviderFactory func(*TxManager) script.KoraProvider
+	// ModuleDescriptors and ModuleExtensions are the current tenant activation
+	// snapshot. Module-owned hook scripts must be present in the ordered extension
+	// plan before they can run.
+	ModuleDescriptors      []contract.ModuleDescriptor
+	ModuleExtensions       []contract.ResolvedModuleExtension
+	ModuleExtensionSchemas interface {
+		Validate(contract.SchemaRef, json.RawMessage) error
+	}
 
 	// SiteName is the tenant identifier used in analytics events.
 	SiteName string

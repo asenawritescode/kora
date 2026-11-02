@@ -164,6 +164,17 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if moduleErr := contract.ValidateInstalledPackages(moduleSnapshot.Packages); moduleErr != nil {
 		return fmt.Errorf("validate installed package composition for tenant %s: %w", loaded.Name, moduleErr)
 	}
+	if moduleErr := validateModuleExtensionSchemas(moduleSnapshot.Modules, config.ModuleSchemas); moduleErr != nil {
+		return fmt.Errorf("validate module extension schemas for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	var registeredExtensionSchema func(contract.SchemaRef) bool
+	if config.ModuleSchemas != nil {
+		registeredExtensionSchema = config.ModuleSchemas.Registered
+	}
+	extensionPlan, moduleErr := contract.OrderModuleExtensions(moduleSnapshot.Modules, registeredExtensionSchema)
+	if moduleErr != nil {
+		return fmt.Errorf("resolve module extensions for tenant %s: %w", loaded.Name, moduleErr)
+	}
 	var providers []plugin.ProviderRegistration
 	var configuredSelections []plugin.ProviderSelection
 	if config.ModuleProviders != nil {
@@ -185,6 +196,9 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		if scope.TenantID != contract.TenantID(loaded.SiteID) {
 			return plugin.BindingPlan{}, contract.NewError(contract.CodePermissionDenied, "module binding scope belongs to another tenant")
 		}
+		if err := validateModuleExtensionSchemas(moduleSnapshot.Modules, config.ModuleSchemas); err != nil {
+			return plugin.BindingPlan{}, err
+		}
 		plan, err := plugin.ResolveInstalledModules(scope, moduleSnapshot.Packages, moduleSnapshot.Modules, providers, pluginProviderSelections(selections), moduleSnapshot.Revision)
 		if err != nil {
 			return plan, err
@@ -195,6 +209,9 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	resolveCandidateModuleBindings := func(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, extra []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
 		if scope.TenantID != contract.TenantID(loaded.SiteID) {
 			return plugin.BindingPlan{}, contract.NewError(contract.CodePermissionDenied, "module binding scope belongs to another tenant")
+		}
+		if err := validateModuleExtensionSchemas(modules, config.ModuleSchemas); err != nil {
+			return plugin.BindingPlan{}, err
 		}
 		baseSelections := filterProviderSelections(selections, scope)
 		candidateExtra := filterProviderSelections(extra, scope)
@@ -294,6 +311,8 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		DB: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Outbox: domainKernel.Outbox,
 		SiteName: loaded.Name, AsyncHookTenantID: tenantID,
 		AsyncHookConfigRevision: loaded.ConfigRevision,
+		ModuleDescriptors:       append([]contract.ModuleDescriptor(nil), moduleSnapshot.Modules...),
+		ModuleExtensions:        extensionPlan, ModuleExtensionSchemas: config.ModuleSchemas,
 	}
 	if config.ScriptRunner != nil {
 		domainTx.ScriptRunner = config.ScriptRunner
@@ -664,6 +683,20 @@ func sameProviderSelections(a, b []contract.ProviderSelection) bool {
 // KORA_OUTBOX=false is the documented opt-out for reports and event-driven
 // integrations; the old in-memory listener could lose accepted events when
 // its bounded fan-out queue filled or a tenant runtime was stopped.
+func validateModuleExtensionSchemas(modules []contract.ModuleDescriptor, schemas workflow.PayloadSchemaRegistry) error {
+	hasExtensions := false
+	for _, module := range modules {
+		hasExtensions = hasExtensions || len(module.ExtensionPoints) > 0 || len(module.Extensions) > 0
+	}
+	if !hasExtensions {
+		return nil
+	}
+	if schemas == nil {
+		return fmt.Errorf("module extension schemas require the tenant schema registry")
+	}
+	return contract.ValidateModuleExtensions(modules, schemas.Registered)
+}
+
 func registerWebhookDelivery(config TenantServiceConfig, loaded *knet.LoadedSite, worker *webhook.Worker, dialect kdb.Dialect, admission *dbaccess.Admission) error {
 	if !config.OutboxEnabled {
 		return nil

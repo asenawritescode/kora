@@ -5,12 +5,44 @@ package kernel_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/kernel"
+	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/script"
 )
+
+type rejectingModuleExtensionRunner struct{}
+
+func (rejectingModuleExtensionRunner) Execute(context.Context, script.ExecuteRequest) (*script.ExecuteResult, error) {
+	return &script.ExecuteResult{Result: map[string]any{"valid": false}}, nil
+}
+func (rejectingModuleExtensionRunner) Validate(string) error { return nil }
+func (rejectingModuleExtensionRunner) Close() error          { return nil }
+
+type moduleExtensionIntegrationSchemas struct{}
+
+func (moduleExtensionIntegrationSchemas) Registered(contract.SchemaRef) bool { return true }
+func (moduleExtensionIntegrationSchemas) Validate(ref contract.SchemaRef, raw json.RawMessage) error {
+	if ref.ID == "validation-result" {
+		var result struct {
+			Valid bool `json:"valid"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return err
+		}
+		if !result.Valid {
+			return errors.New("owner validation extension rejected document")
+		}
+	}
+	return nil
+}
 
 func TestExecuteInTxJoinsCallerTransactionAndReplaysReceipt(t *testing.T) {
 	site := newSite(t, "tx-bound")
@@ -107,5 +139,58 @@ func TestExecuteInTxJoinsCallerTransactionAndReplaysReceipt(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("outbox event count=%d, want one", count)
+	}
+}
+
+func TestOwnerValidationExtensionRejectionRollsBackKernelCommand(t *testing.T) {
+	site := newSite(t, "module-extension-rollback")
+	defer site.DB.Close()
+	for _, ddl := range kdb.ExtensibilityTablesMySQL()[:2] {
+		if _, err := site.DB.Exec(ddl); err != nil {
+			t.Fatal("create lifecycle tables:", err)
+		}
+	}
+	for _, ddl := range configstore.ConfigRevisionSchema(site.Dialect) {
+		if _, err := site.DB.Exec(ddl); err != nil {
+			t.Fatal("create config revision table:", err)
+		}
+	}
+	if err := configstore.SeedConfigRevision(context.Background(), site.DB, site.Dialect); err != nil {
+		t.Fatal("seed config revision:", err)
+	}
+	store := &script.Store{DB: site.DB, Dialect: site.Dialect}
+	handler := contract.ResourceRef{Namespace: "module", Name: "vat-validation", Version: 1}
+	if err := store.Insert(script.ScriptRecord{Name: handler.Name, Site: site.Name, ScriptType: script.TypeDocEvent,
+		DocType: "Task", Event: script.EventValidate, IsActive: true, TimeoutMs: 500, Script: "return {result: {valid: false}}"}); err != nil {
+		t.Fatal("insert extension handler:", err)
+	}
+	target := contract.ResourceRef{Namespace: "tenant", Name: "Task", Version: 1}
+	owner := contract.ModuleDescriptor{ID: "work.tasks", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: target}}, ExtensionPoints: []contract.ExtensionPoint{{
+		OwnerModuleID: "work.tasks", ID: "task.validation", Version: 1, Target: target,
+		AllowedKinds: []string{string(contract.ExtensionValidation)}, InputSchema: contract.SchemaRef{ID: "task-input", Version: 1},
+		OutputSchema: contract.SchemaRef{ID: "validation-result", Version: 1}, ExecutionPhase: "before_commit", FailurePolicy: "reject",
+	}}}
+	extender := contract.ModuleDescriptor{ID: "tax.vat", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: handler}}, Extensions: []contract.ExtensionRegistration{{
+		ID: "vat-check", ExtenderModuleID: "tax.vat", PointID: "work.tasks/task.validation", PointVersion: 1,
+		Kind: contract.ExtensionValidation, ArtifactDigest: strings.Repeat("a", 64), HandlerRef: handler, Order: 1,
+	}}}
+	modules := []contract.ModuleDescriptor{owner, extender}
+	plan, err := contract.OrderModuleExtensions(modules, moduleExtensionIntegrationSchemas{}.Registered)
+	if err != nil {
+		t.Fatal("plan validation extension:", err)
+	}
+	engine := newKernel(site)
+	engine.CommandSchemas = moduleExtensionIntegrationSchemas{}
+	engine.TxManager = &orm.TxManager{ScriptRunner: rejectingModuleExtensionRunner{}, ScriptStore: store,
+		ModuleDescriptors: modules, ModuleExtensions: plan, ModuleExtensionSchemas: moduleExtensionIntegrationSchemas{}}
+	result := exec(t, site, engine, createOp(map[string]any{"title": "must-not-commit"}, withUser("Administrator"), withRoles("Administrator")))
+	if result.Error == nil || result.Error.Type != contract.CodeValidationFailed {
+		t.Fatalf("extension rejection result = %+v, want validation failure", result.Error)
+	}
+	if count := site.count(t, "SELECT COUNT(*) FROM `tabTask` WHERE title = 'must-not-commit'"); count != 0 {
+		t.Fatalf("rejected extension left %d business rows", count)
+	}
+	if count := site.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE aggregate_type = 'Task'"); count != 0 {
+		t.Fatalf("rejected extension left %d outbox events", count)
 	}
 }
