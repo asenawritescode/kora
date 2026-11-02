@@ -299,6 +299,64 @@ type ModuleBlocker struct {
 	Examples []string `json:"examples,omitempty"`
 }
 
+// ModuleInspection is a redacted, tenant scoped runtime status projection.
+//
+//contract:wire:v2
+type ModuleInspection struct {
+	ConfigRevision         uint64                 `json:"config_revision"`
+	Installations          []ModuleInstallation   `json:"installations"`
+	ResourceOwners         []ResourceOwnership    `json:"resource_owners"`
+	Bindings               []BindingInspection    `json:"bindings"`
+	CapabilityAvailability []CapabilityInspection `json:"capability_availability"`
+	BlockingReasons        []ModuleBlocker        `json:"blocking_reasons"`
+	PendingWork            PendingWorkSummary     `json:"pending_work"`
+}
+
+// BindingInspection contains no credentials or provider configuration.
+//
+//contract:wire:v2
+type BindingInspection struct {
+	ConsumerModuleID ModuleID       `json:"consumer_module_id"`
+	CapabilityName   CapabilityName `json:"capability_name"`
+	ProviderID       string         `json:"provider_id"`
+	BindingRevision  uint64         `json:"binding_revision"`
+}
+
+// CapabilityInspection is a bounded availability diagnostic.
+//
+//contract:wire:v2
+type CapabilityInspection struct {
+	Name       CapabilityName `json:"name"`
+	State      string         `json:"state"`
+	ReasonCode string         `json:"reason_code,omitempty"`
+}
+
+// PendingWorkSummary provides counts only.
+//
+//contract:wire:v2
+type PendingWorkSummary struct {
+	WorkflowCount       uint32 `json:"workflow_count"`
+	DeliveryCount       uint32 `json:"delivery_count"`
+	UnknownOutcomeCount uint32 `json:"unknown_outcome_count"`
+	ScheduledCount      uint32 `json:"scheduled_count"`
+	OpenObligationCount uint32 `json:"open_obligation_count"`
+}
+
+// ExecutionInspection describes a pinned execution without exposing its payload.
+//
+//contract:wire:v2
+type ExecutionInspection struct {
+	ExecutionID         string           `json:"execution_id"`
+	CallerModuleID      ModuleID         `json:"caller_module_id"`
+	OwnerModuleID       ModuleID         `json:"owner_module_id"`
+	ProviderID          string           `json:"provider_id"`
+	BindingRevision     uint64           `json:"binding_revision"`
+	Contract            CapabilityAction `json:"contract"`
+	CorrelationID       string           `json:"correlation_id"`
+	DeliveryState       string           `json:"delivery_state"`
+	ReconciliationState string           `json:"reconciliation_state"`
+}
+
 // ApplyModuleChange pins the reviewed plan to the expected snapshot revision.
 //
 //contract:wire:v2

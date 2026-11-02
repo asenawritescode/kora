@@ -186,6 +186,30 @@
       ],
       "type": "object"
     },
+    "BindingInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "capability_name": {
+          "type": "string"
+        },
+        "consumer_module_id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "capability_name",
+        "consumer_module_id",
+        "provider_id"
+      ],
+      "type": "object"
+    },
     "BusinessEventDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -281,6 +305,25 @@
         "input_schema",
         "operation_name",
         "output_schema"
+      ],
+      "type": "object"
+    },
+    "CapabilityInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "state"
       ],
       "type": "object"
     },
@@ -902,6 +945,50 @@
       ],
       "type": "object"
     },
+    "ExecutionInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "caller_module_id": {
+          "type": "string"
+        },
+        "contract": {
+          "$ref": "#/$defs/CapabilityAction"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "delivery_state": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "reconciliation_state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "caller_module_id",
+        "contract",
+        "correlation_id",
+        "delivery_state",
+        "execution_id",
+        "owner_module_id",
+        "provider_id",
+        "reconciliation_state"
+      ],
+      "type": "object"
+    },
     "FieldCondition": {
       "additionalProperties": false,
       "properties": {
@@ -1488,6 +1575,57 @@
       ],
       "type": "object"
     },
+    "ModuleInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "items": {
+            "$ref": "#/$defs/BindingInspection"
+          },
+          "type": "array"
+        },
+        "blocking_reasons": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "capability_availability": {
+          "items": {
+            "$ref": "#/$defs/CapabilityInspection"
+          },
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "integer"
+        },
+        "installations": {
+          "items": {
+            "$ref": "#/$defs/ModuleInstallation"
+          },
+          "type": "array"
+        },
+        "pending_work": {
+          "$ref": "#/$defs/PendingWorkSummary"
+        },
+        "resource_owners": {
+          "items": {
+            "$ref": "#/$defs/ResourceOwnership"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bindings",
+        "blocking_reasons",
+        "capability_availability",
+        "config_revision",
+        "installations",
+        "pending_work",
+        "resource_owners"
+      ],
+      "type": "object"
+    },
     "ModuleInstallation": {
       "additionalProperties": false,
       "properties": {
@@ -1732,6 +1870,34 @@
       },
       "required": [
         "limit"
+      ],
+      "type": "object"
+    },
+    "PendingWorkSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_count": {
+          "type": "integer"
+        },
+        "open_obligation_count": {
+          "type": "integer"
+        },
+        "scheduled_count": {
+          "type": "integer"
+        },
+        "unknown_outcome_count": {
+          "type": "integer"
+        },
+        "workflow_count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "delivery_count",
+        "open_obligation_count",
+        "scheduled_count",
+        "unknown_outcome_count",
+        "workflow_count"
       ],
       "type": "object"
     },
@@ -3411,6 +3577,30 @@
       ],
       "type": "object"
     },
+    "BindingInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "capability_name": {
+          "type": "string"
+        },
+        "consumer_module_id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "capability_name",
+        "consumer_module_id",
+        "provider_id"
+      ],
+      "type": "object"
+    },
     "BusinessEventDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -3506,6 +3696,25 @@
         "input_schema",
         "operation_name",
         "output_schema"
+      ],
+      "type": "object"
+    },
+    "CapabilityInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "state"
       ],
       "type": "object"
     },
@@ -4105,6 +4314,50 @@
       ],
       "type": "object"
     },
+    "ExecutionInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "caller_module_id": {
+          "type": "string"
+        },
+        "contract": {
+          "$ref": "#/$defs/CapabilityAction"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "delivery_state": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "reconciliation_state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "caller_module_id",
+        "contract",
+        "correlation_id",
+        "delivery_state",
+        "execution_id",
+        "owner_module_id",
+        "provider_id",
+        "reconciliation_state"
+      ],
+      "type": "object"
+    },
     "FieldCondition": {
       "additionalProperties": false,
       "properties": {
@@ -4691,6 +4944,57 @@
       ],
       "type": "object"
     },
+    "ModuleInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "items": {
+            "$ref": "#/$defs/BindingInspection"
+          },
+          "type": "array"
+        },
+        "blocking_reasons": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "capability_availability": {
+          "items": {
+            "$ref": "#/$defs/CapabilityInspection"
+          },
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "integer"
+        },
+        "installations": {
+          "items": {
+            "$ref": "#/$defs/ModuleInstallation"
+          },
+          "type": "array"
+        },
+        "pending_work": {
+          "$ref": "#/$defs/PendingWorkSummary"
+        },
+        "resource_owners": {
+          "items": {
+            "$ref": "#/$defs/ResourceOwnership"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bindings",
+        "blocking_reasons",
+        "capability_availability",
+        "config_revision",
+        "installations",
+        "pending_work",
+        "resource_owners"
+      ],
+      "type": "object"
+    },
     "ModuleInstallation": {
       "additionalProperties": false,
       "properties": {
@@ -4935,6 +5239,34 @@
       },
       "required": [
         "limit"
+      ],
+      "type": "object"
+    },
+    "PendingWorkSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_count": {
+          "type": "integer"
+        },
+        "open_obligation_count": {
+          "type": "integer"
+        },
+        "scheduled_count": {
+          "type": "integer"
+        },
+        "unknown_outcome_count": {
+          "type": "integer"
+        },
+        "workflow_count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "delivery_count",
+        "open_obligation_count",
+        "scheduled_count",
+        "unknown_outcome_count",
+        "workflow_count"
       ],
       "type": "object"
     },
