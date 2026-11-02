@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
+	kdb "github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/plugin"
 )
 
@@ -54,10 +58,30 @@ func TestProgrammaticInvoiceSettlementAndJournalReconciliationAdapters(t *testin
 		t.Fatal("resolve fresh programmatic fixture domains:", err)
 	}
 	cutoff := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
-	// The fixture records a successful transport receipt for sale:1 while the
-	// AR owner's published query returns no invoice. The comparison reads only
-	// business owner queries, so the receipt cannot hide the missing effect.
-	deliveredReceipts := map[string]bool{"sale:1": true}
+	// Persist and read a real successful outbox consumer receipt for sale:1.
+	// The owner query still returns no invoice, demonstrating that transport
+	// delivery evidence cannot stand in for the missing business effect.
+	receiptDB, receiptMock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer receiptDB.Close()
+	consumer := outbox.Consumer{DB: receiptDB, Name: "accounts-receivable", Dialect: kdb.Resolve("mysql")}
+	receiptMock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_outbox_receipt (consumer_name, event_id, site, source_sequence, received_at)")).
+		WithArgs("accounts-receivable", "delivery-sale-1", string(scope.TenantID), nil, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	if err := consumer.RecordReceipt(context.Background(), "delivery-sale-1", string(scope.TenantID)); err != nil {
+		t.Fatal("record successful fixture delivery receipt:", err)
+	}
+	receiptMock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM _kora_outbox_receipt WHERE consumer_name = ? AND event_id = ?")).
+		WithArgs("accounts-receivable", "delivery-sale-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	delivered, err := consumer.HasSeen(context.Background(), "delivery-sale-1")
+	if err != nil || !delivered {
+		t.Fatalf("fixture delivery receipt is not visible: delivered=%t err=%v", delivered, err)
+	}
+	if err := receiptMock.ExpectationsWereMet(); err != nil {
+		t.Fatal("delivery receipt expectations:", err)
+	}
+	deliveredReceipts := map[string]bool{"sale:1": delivered}
 	rules := []struct {
 		name, sourceOwner, sourceQuery, targetOwner, targetQuery, key string
 		kind                                                          BusinessFindingKind
