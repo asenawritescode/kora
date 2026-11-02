@@ -2084,6 +2084,77 @@ func TestConfiguredCommandAuthzDenied(t *testing.T) {
 	}
 }
 
+func TestTrustedOwnerCommandValidatesBeforeBusinessEffects(t *testing.T) {
+	s := newSite(t, "site-a")
+	defer s.DB.Close()
+	invoice := &doctype.DocType{
+		Name: "Invoice", ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands),
+		BusinessScopePolicy: contract.ScopeTenantShared,
+		Fields:              []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}},
+	}
+	s.Registry.Register(invoice)
+	s.Registry.Permissions.SetPermission(&doctype.Permission{Doctype: invoice.Name, Role: doctype.AdminRole, Read: true, Create: true, Write: true, Delete: true})
+	if err := schema.MigrateSiteFromRegistry(s.DB, s.Name, s.Registry, s.Dialect); err != nil {
+		t.Fatal("migrate protected invoice resource:", err)
+	}
+
+	k := newKernel(s)
+	k.Commands = kernel.NewCommandRegistry()
+	command, err := kernel.ParseCommandResource([]byte(`
+name: issue
+namespace: finance.invoice
+version: 1
+input:
+  record: Invoice
+transaction:
+  - create:
+      record: Invoice
+      values:
+        title: $input.title
+emit:
+  - finance.invoice.issued
+`))
+	if err != nil {
+		t.Fatal("parse owner command:", err)
+	}
+	if err := k.Commands.Register(command); err != nil {
+		t.Fatal("register owner command:", err)
+	}
+	scope := contract.BusinessScope{TenantID: contract.TenantID(s.Name), Kind: contract.ScopeKindTenant}
+	moduleExecution, err := contract.NewCommandModuleExecution(scope, "finance.ar", "finance.ar", 1, command.FullName(), command.FullName())
+	if err != nil {
+		t.Fatal("mint internal owner command execution:", err)
+	}
+	context := opCtx(s.Name, doctype.AdminRole)
+	context.BusinessScope = scope
+	context.ModuleExecution = &moduleExecution
+
+	invalidPayload, _ := json.Marshal(map[string]any{"data": map[string]any{"title": ""}})
+	invalid := exec(t, s, k, kernel.Operation{Command: command.FullName(), Payload: invalidPayload, Context: context})
+	if invalid.Error == nil || invalid.Error.Type != contract.CodeValidationFailed {
+		t.Fatalf("owner command with invalid domain data = %+v, want validation failure", invalid.Error)
+	}
+	if count := s.count(t, `SELECT COUNT(*) FROM `+"`tabInvoice`"); count != 0 {
+		t.Fatalf("invalid owner command wrote %d invoices", count)
+	}
+	if count := s.count(t, `SELECT COUNT(*) FROM _kora_outbox WHERE event_type='finance.invoice.issued' AND site=?`, s.Name); count != 0 {
+		t.Fatalf("invalid owner command emitted %d success events", count)
+	}
+	if count := s.count(t, `SELECT COUNT(*) FROM _kora_operation_audit WHERE command_name=? AND status='completed'`, command.FullName()); count != 0 {
+		t.Fatalf("invalid owner command wrote %d success audit rows", count)
+	}
+
+	validPayload, _ := json.Marshal(map[string]any{"data": map[string]any{"title": "INV-1"}})
+	valid := exec(t, s, k, kernel.Operation{Command: command.FullName(), Payload: validPayload, Context: context})
+	mustComplete(t, valid)
+	if count := s.count(t, `SELECT COUNT(*) FROM `+"`tabInvoice`"+` WHERE title='INV-1'`); count != 1 {
+		t.Fatalf("trusted owner command persisted %d invoices, want one", count)
+	}
+	if count := s.count(t, `SELECT COUNT(*) FROM _kora_outbox WHERE event_type='finance.invoice.issued' AND site=?`, s.Name); count != 1 {
+		t.Fatalf("valid owner command emitted %d events, want one", count)
+	}
+}
+
 // TestConfiguredCommandIdempotentReplay proves defined commands honor
 // idempotency keys identically to built-in commands.
 func TestConfiguredCommandIdempotentReplay(t *testing.T) {
