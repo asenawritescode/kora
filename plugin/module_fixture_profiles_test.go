@@ -190,6 +190,19 @@ func TestProgrammaticFixtureProfilesUseDeclaredOwnerOperations(t *testing.T) {
 		if store.count != 2 || len(store.effects) != 2 {
 			t.Fatalf("Sales→AR effects=%d receipts=%d, want one per two billable sources", store.count, len(store.effects))
 		}
+		sources := map[string]bool{}
+		for _, raw := range store.effects {
+			var invoice struct {
+				SourceID string `json:"source_id"`
+			}
+			if err := json.Unmarshal(raw, &invoice); err != nil {
+				t.Fatal("decode fixture invoice:", err)
+			}
+			sources[invoice.SourceID] = true
+		}
+		if !sources["sale-101"] || !sources["sale-102"] {
+			t.Fatalf("invoice effects are not keyed to both billable sources: %+v", sources)
+		}
 	})
 
 	t.Run("Inventory to accounting preserves source amount currency and balanced intent", func(t *testing.T) {
@@ -200,13 +213,14 @@ func TestProgrammaticFixtureProfilesUseDeclaredOwnerOperations(t *testing.T) {
 			t.Fatal("post valuation journal:", err)
 		}
 		var journal struct {
-			SourceID string `json:"source_id"`
-			Amount   string `json:"amount"`
-			Currency string `json:"currency"`
-			EntityID string `json:"entity_id"`
-			Balanced bool   `json:"balanced"`
+			SourceID           string `json:"source_id"`
+			Amount             string `json:"amount"`
+			Currency           string `json:"currency"`
+			EntityID           string `json:"entity_id"`
+			Balanced           bool   `json:"balanced"`
+			SourceAcknowledged bool   `json:"source_acknowledged"`
 		}
-		if err := json.Unmarshal(result.Output, &journal); err != nil || journal.SourceID != "valuation-77" || journal.Amount != "125.40" || journal.Currency != "KES" || journal.EntityID != scope.LegalEntityID || !journal.Balanced {
+		if err := json.Unmarshal(result.Output, &journal); err != nil || journal.SourceID != "valuation-77" || journal.Amount != "125.40" || journal.Currency != "KES" || journal.EntityID != scope.LegalEntityID || !journal.Balanced || !journal.SourceAcknowledged {
 			t.Fatalf("fixture journal lost source invariants: %+v, %v", journal, err)
 		}
 	})
