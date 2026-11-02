@@ -20,6 +20,11 @@ import (
 // record at per-step least privilege — create steps need "create", update
 // steps need "write" on their target record (default-deny, spec §51/§108).
 func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn *CommandResource) *contract.Error {
+	if dyn != nil && dynamicCommandTouchesCommandOnly(reg, dyn) {
+		if !validDynamicModuleExecution(op.Context.ModuleExecution, op, reg, dyn) {
+			return contract.NewError(contract.CodePermissionDenied, "protected resources require their owning module command")
+		}
+	}
 	if mutationTouchesCommandOnly(reg, op) {
 		execution := op.Context.ModuleExecution
 		if execution == nil || execution.AuthorizedCommand == "" || execution.AuthorizedCommand == CommandRecordCreate || execution.AuthorizedCommand == CommandRecordUpdate || execution.AuthorizedCommand == CommandRecordMutateBundle || execution.AuthorizedCommand == CommandRecordDelete {
@@ -107,6 +112,39 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 		}
 	}
 	return nil
+}
+
+func dynamicCommandTouchesCommandOnly(reg *doctype.Registry, command *CommandResource) bool {
+	if reg == nil || command == nil {
+		return false
+	}
+	for _, name := range command.TouchedRecords() {
+		dt := reg.Get(name)
+		if dt != nil && dt.ModuleOwnershipMode == string(contract.MutationCommands) {
+			return true
+		}
+	}
+	return false
+}
+
+func validDynamicModuleExecution(execution *contract.ModuleExecution, op Operation, reg *doctype.Registry, command *CommandResource) bool {
+	if execution == nil || !execution.Verified() || execution.TenantID != op.Context.TenantID || execution.Scope != op.Context.BusinessScope || execution.AuthorizedCommand != op.Command || execution.AllowedOperation != op.Command || command == nil || command.FullName() != op.Command || reg == nil {
+		return false
+	}
+	protected := false
+	for _, name := range command.TouchedRecords() {
+		dt := reg.Get(name)
+		if dt == nil {
+			return false
+		}
+		if dt.ModuleOwnershipMode == string(contract.MutationCommands) {
+			protected = true
+			if dt.ModuleOwnerID == "" || execution.OwnerModuleID != contract.ModuleID(dt.ModuleOwnerID) {
+				return false
+			}
+		}
+	}
+	return protected
 }
 
 func validModuleExecution(execution *contract.ModuleExecution, op Operation, reg *doctype.Registry) bool {

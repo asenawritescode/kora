@@ -35,3 +35,35 @@ func TestGenericMutationCannotUseCommandOnlyModuleExecution(t *testing.T) {
 		t.Fatal("forged module execution was accepted")
 	}
 }
+
+func TestDynamicCommandCannotBypassCommandOnlyOwnership(t *testing.T) {
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Invoice", ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands)})
+	command := &CommandResource{Name: "issue", Namespace: "finance", Version: 1, Input: CommandInput{Record: "Invoice"}, Steps: []CommandStep{{Create: &StepCreate{Record: "Invoice"}}}}
+	op := Operation{Command: command.FullName(), Context: OperationContext{TenantID: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}}}
+	if !dynamicCommandTouchesCommandOnly(registry, command) {
+		t.Fatal("dynamic command's protected target was not detected")
+	}
+	if validDynamicModuleExecution(nil, op, registry, command) {
+		t.Fatal("missing module execution accepted")
+	}
+	forged := contract.ModuleExecution{TenantID: "tenant-a", CallerModuleID: "sales.orders", OwnerModuleID: "finance.ar", BindingRevision: 3, AllowedOperation: op.Command, AuthorizedCommand: op.Command, Scope: op.Context.BusinessScope}
+	op.Context.ModuleExecution = &forged
+	if validDynamicModuleExecution(&forged, op, registry, command) {
+		t.Fatal("forged module execution accepted")
+	}
+	wrongOwner, err := contract.NewCommandModuleExecution(op.Context.BusinessScope, "sales.orders", "sales.orders", 3, op.Command, op.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validDynamicModuleExecution(&wrongOwner, op, registry, command) {
+		t.Fatal("non-owner command execution accepted")
+	}
+	valid, err := contract.NewCommandModuleExecution(op.Context.BusinessScope, "sales.orders", "finance.ar", 3, op.Command, op.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validDynamicModuleExecution(&valid, op, registry, command) {
+		t.Fatal("valid owner command execution rejected")
+	}
+}
