@@ -221,7 +221,7 @@ func (s BusinessReconciliationService) Continue(ctx context.Context, actor, runI
 	if err != nil {
 		return BusinessRun{}, err
 	}
-	if previous.Complete || previous.RuleID != rule.ID || previous.Version != rule.Version || previous.Scope != rule.Scope {
+	if runID == previousRunID || previous.Complete || previous.OwnerModuleID != rule.OwnerModuleID || previous.RuleID != rule.ID || previous.Version != rule.Version || previous.Scope != rule.Scope {
 		return BusinessRun{}, fmt.Errorf("prior business reconciliation run cannot continue this rule and scope")
 	}
 	return s.runWithCursor(ctx, actor, runID, rule, previous.Cutoff, previous.Cursors, auth)
