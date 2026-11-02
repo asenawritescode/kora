@@ -447,7 +447,7 @@ func runServe() error {
 		UploadActiveBudgetBytes:   uploadActiveBudgetBytes,
 		AnalyticsQueueBudgetBytes: analyticsQueueBudgetBytes,
 		AnalyticsMaxSubscribers:   analyticsMaxSubscribers,
-		SchedulerHandlerFactory:   subscriptionjobs.ScheduledJobHandlers,
+		SchedulerHandlerFactory:   subscriptionjobs.ScheduledJobHandlersWithModuleBilling,
 		Listener: engine.HTTPServerConfig{
 			ListenAddress: fmt.Sprintf(":%d", port), TLS: listenerTLS,
 			ReadTimeout:  time.Duration(common.ReadTimeout) * time.Second,

@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
@@ -19,6 +21,7 @@ import (
 	"github.com/asenawritescode/kora/internal/engine"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/scheduler"
 )
@@ -26,6 +29,12 @@ import (
 const recurringInvoiceCatchUpLimit = 24
 
 const JobType scheduler.JobType = "subscription_invoice"
+
+const (
+	BillingCapabilityName     contract.CapabilityName = "billing.invoice"
+	BillingCreateOperation                            = "create_obligation@1"
+	BillingReconcileOperation                         = "reconcile_obligation@1"
+)
 
 type recurringInvoiceGenerator struct {
 	database       *sql.DB
@@ -39,42 +48,225 @@ type recurringInvoiceGenerator struct {
 }
 
 type BillingObligation struct {
-	Source         contract.BusinessRef
-	PeriodStart    string
-	PeriodEnd      string
-	Customer       contract.BusinessRef
-	Currency       string
-	Lines          []BillingLine
-	IdempotencyKey string
+	Source         contract.BusinessRef `json:"source"`
+	BillingPeriod  BillingPeriod        `json:"billingPeriod"`
+	Customer       contract.BusinessRef `json:"customer"`
+	Currency       string               `json:"currency"`
+	Lines          []BillingLine        `json:"lines"`
+	IdempotencyKey string               `json:"idempotencyKey"`
+}
+
+type BillingPeriod struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
 }
 
 type BillingLine struct {
-	Description string
-	Quantity    string
-	UnitPrice   string
+	Description string `json:"description"`
+	Quantity    string `json:"quantityDecimal"`
+	UnitPrice   string `json:"unitPriceDecimal"`
 }
 type BillingResult struct {
-	Obligation        contract.BusinessRef
-	State             string
-	ExternalReference string
+	Obligation        contract.BusinessRef `json:"obligation"`
+	State             string               `json:"state"`
+	ExternalReference string               `json:"externalReference,omitempty"`
 }
+
+const (
+	BillingStateAccepted = "accepted"
+	BillingStateIssued   = "issued"
+	BillingStatePending  = "pending"
+	BillingStateUnknown  = "unknown"
+	BillingStateNotFound = "not_found"
+)
+
 type BillingProvider interface {
-	CreateObligation(context.Context, contract.ScopeContext, BillingObligation) (BillingResult, error)
-	ReconcileObligation(context.Context, contract.ScopeContext, string) (BillingResult, error)
+	// CreateObligation must durably deduplicate by obligation.IdempotencyKey.
+	// Repeating the same key must return the same obligation identity and must
+	// never create a second business effect.
+	CreateObligation(context.Context, policy.Execution, contract.ScopeContext, BillingObligation) (BillingResult, error)
+	// ReconcileObligation may return not_found only when no effect for key can
+	// still commit. pending/unknown must remain unresolved until authoritative.
+	ReconcileObligation(context.Context, policy.Execution, contract.ScopeContext, string) (BillingResult, error)
+}
+
+// BillingOwnerCommands is the owner module's command boundary for internal
+// billing. The adapter carries no invoice tables or accounting rules; owner
+// commands must enforce durable uniqueness on the tenant-scoped idempotency
+// key and expose authoritative reconciliation for that key.
+type BillingOwnerCommands interface {
+	CreateObligation(context.Context, policy.Execution, contract.ScopeContext, BillingObligation) (BillingResult, error)
+	ReconcileObligation(context.Context, policy.Execution, contract.ScopeContext, string) (BillingResult, error)
+}
+
+type InternalBillingAdapter struct{ Commands BillingOwnerCommands }
+
+func (a InternalBillingAdapter) CreateObligation(ctx context.Context, execution policy.Execution, scope contract.ScopeContext, obligation BillingObligation) (BillingResult, error) {
+	if a.Commands == nil {
+		return BillingResult{}, fmt.Errorf("internal billing owner commands are unavailable")
+	}
+	if err := obligation.Validate(); err != nil {
+		return BillingResult{}, err
+	}
+	return a.Commands.CreateObligation(ctx, execution, scope, obligation)
+}
+
+func (a InternalBillingAdapter) ReconcileObligation(ctx context.Context, execution policy.Execution, scope contract.ScopeContext, key string) (BillingResult, error) {
+	if a.Commands == nil || key == "" || len(key) > 160 {
+		return BillingResult{}, fmt.Errorf("internal billing reconciliation identity is invalid")
+	}
+	return a.Commands.ReconcileObligation(ctx, execution, scope, key)
+}
+
+// CapabilityBillingAdapter invokes the provider selected in the tenant's
+// immutable module BindingPlan. Its durable leases fence each effect attempt.
+type CapabilityBillingAdapter struct {
+	Plan       plugin.BindingPlan
+	Caller     contract.ModuleID
+	Scope      contract.BusinessScope
+	LeaseStore plugin.CapabilityLeaseReader
+	Create     contract.CapabilityLease
+	Reconcile  contract.CapabilityLease
+}
+
+func NewCapabilityBillingAdapter(runtime engine.TenantJobRuntime) (*CapabilityBillingAdapter, error) {
+	if runtime.ModuleBindings == nil {
+		return nil, fmt.Errorf("billing.invoice module binding or durable lease owner is unavailable")
+	}
+	leaseStore, ok := runtime.ModuleBindings.LeaseAdmission.(plugin.CapabilityLeaseReader)
+	if !ok {
+		return nil, fmt.Errorf("billing.invoice durable lease lookup is unavailable")
+	}
+	tenant, err := contract.ParseTenantID(runtime.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("billing capability tenant identity: %w", err)
+	}
+	scope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
+	var subscriptionOwner contract.ModuleID
+	if runtime.Registry != nil {
+		if subscription := runtime.Registry.Get("Subscription"); subscription != nil {
+			subscriptionOwner = contract.ModuleID(subscription.ModuleOwnerID)
+		}
+	}
+	var selected *plugin.ResolvedBinding
+	for index := range runtime.ModuleBindings.Bindings {
+		binding := &runtime.ModuleBindings.Bindings[index]
+		if binding.Key.Scope != scope || binding.Key.CapabilityName != BillingCapabilityName {
+			continue
+		}
+		if subscriptionOwner != "" && binding.Key.ConsumerModuleID != subscriptionOwner {
+			continue
+		}
+		if selected != nil {
+			return nil, fmt.Errorf("billing.invoice has multiple consumer bindings for the tenant")
+		}
+		selected = binding
+	}
+	if selected == nil || selected.Revision != runtime.ModuleBindings.Revision || selected.OwnerModuleID == "" || selected.ProviderID == "" {
+		return nil, fmt.Errorf("selected billing.invoice binding is unavailable or unpinned")
+	}
+	if !hasCapabilityOperation(selected.Operations, BillingCreateOperation) || !hasCapabilityOperation(selected.Operations, BillingReconcileOperation) {
+		return nil, fmt.Errorf("billing.invoice provider must implement %s and %s", BillingCreateOperation, BillingReconcileOperation)
+	}
+	createLease, err := loadBillingCapabilityLease(context.Background(), leaseStore, scope, selected, BillingCreateOperation)
+	if err != nil {
+		return nil, err
+	}
+	reconcileLease, err := loadBillingCapabilityLease(context.Background(), leaseStore, scope, selected, BillingReconcileOperation)
+	if err != nil {
+		return nil, err
+	}
+	return &CapabilityBillingAdapter{Plan: *runtime.ModuleBindings, Caller: selected.Key.ConsumerModuleID, Scope: scope, LeaseStore: leaseStore, Create: createLease, Reconcile: reconcileLease}, nil
+}
+
+func hasCapabilityOperation(operations []contract.OperationSpec, name string) bool {
+	for _, operation := range operations {
+		if operation.Name == name && (operation.Effect == contract.EffectLocal || operation.Effect == contract.EffectExternal) {
+			return true
+		}
+	}
+	return false
+}
+
+// BillingCapabilityLeaseID returns the stable ID used to provision the
+// scheduler grant through the tenant's existing capability lease store.
+func BillingCapabilityLeaseID(scope contract.BusinessScope, binding plugin.ResolvedBinding, operation string) (string, error) {
+	if scope.Validate() != nil || binding.Key.Scope != scope || binding.Key.ConsumerModuleID == "" || binding.Key.CapabilityName != BillingCapabilityName || binding.ProviderID == "" || binding.OwnerModuleID == "" || binding.Revision == 0 || operation != BillingCreateOperation && operation != BillingReconcileOperation {
+		return "", fmt.Errorf("billing capability lease identity is invalid")
+	}
+	identity := string(scope.TenantID) + "\x00" + string(binding.Key.ConsumerModuleID) + "\x00" + binding.ProviderID + "\x00" + fmt.Sprint(binding.Revision) + "\x00" + operation
+	digest := sha256.Sum256([]byte(identity))
+	return "billing-scheduler-" + hex.EncodeToString(digest[:]), nil
+}
+
+func loadBillingCapabilityLease(ctx context.Context, store plugin.CapabilityLeaseReader, scope contract.BusinessScope, binding *plugin.ResolvedBinding, operation string) (contract.CapabilityLease, error) {
+	leaseID, err := BillingCapabilityLeaseID(scope, *binding, operation)
+	if err != nil {
+		return contract.CapabilityLease{}, err
+	}
+	lease, found, err := store.LoadCapabilityLease(ctx, scope.TenantID, leaseID)
+	if err != nil {
+		return contract.CapabilityLease{}, fmt.Errorf("load durable billing capability lease: %w", err)
+	}
+	if !found || lease.State != "active" || lease.Scope != scope || lease.CallerModuleID != binding.Key.ConsumerModuleID || lease.ProviderModuleID != binding.OwnerModuleID || lease.ProviderID != binding.ProviderID || lease.Operation != operation || lease.BindingRevision != binding.Revision {
+		return contract.CapabilityLease{}, contract.NewError(contract.CodePermissionDenied, "active durable billing capability grant is unavailable")
+	}
+	return lease, nil
+}
+
+func (a *CapabilityBillingAdapter) CreateObligation(ctx context.Context, execution policy.Execution, scope contract.ScopeContext, obligation BillingObligation) (BillingResult, error) {
+	if scope.Scope != a.Scope || scope.ProviderID == "" || scope.ProviderID != obligation.Source.ProviderID {
+		return BillingResult{}, fmt.Errorf("billing capability invocation scope does not match selected binding")
+	}
+	payload, err := json.Marshal(obligation)
+	if err != nil {
+		return BillingResult{}, err
+	}
+	return a.invoke(ctx, execution, a.Create, BillingCreateOperation, obligation.IdempotencyKey, payload)
+}
+
+func (a *CapabilityBillingAdapter) ReconcileObligation(ctx context.Context, execution policy.Execution, scope contract.ScopeContext, key string) (BillingResult, error) {
+	if scope.Scope != a.Scope || scope.ProviderID == "" || key == "" {
+		return BillingResult{}, fmt.Errorf("billing reconciliation scope or identity is invalid")
+	}
+	payload, err := json.Marshal(struct {
+		IdempotencyKey string `json:"idempotencyKey"`
+	}{IdempotencyKey: key})
+	if err != nil {
+		return BillingResult{}, err
+	}
+	digest := sha256.Sum256([]byte(key))
+	return a.invoke(ctx, execution, a.Reconcile, BillingReconcileOperation, "billing-reconcile-"+hex.EncodeToString(digest[:]), payload)
+}
+
+func (a *CapabilityBillingAdapter) invoke(ctx context.Context, execution policy.Execution, lease contract.CapabilityLease, operation, idempotencyKey string, payload []byte) (BillingResult, error) {
+	if a == nil || a.LeaseStore == nil {
+		return BillingResult{}, fmt.Errorf("billing capability durable lease admission is unavailable")
+	}
+	current, found, err := a.LeaseStore.LoadCapabilityLease(ctx, lease.TenantID, lease.ID)
+	if err != nil || !found || current != lease {
+		return BillingResult{}, contract.NewError(contract.CodePermissionDenied, "durable billing capability grant changed or is unavailable")
+	}
+	result, err := a.Plan.InvokeCapability(ctx, execution, lease, a.Scope, a.Caller, BillingCapabilityName, operation, contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey(idempotencyKey)}, payload)
+	if err != nil {
+		return BillingResult{}, err
+	}
+	var billingResult BillingResult
+	if err := json.Unmarshal(result.Output, &billingResult); err != nil {
+		return BillingResult{}, fmt.Errorf("decode billing capability result: %w", err)
+	}
+	return billingResult, nil
 }
 
 func (o BillingObligation) Validate() error {
-	if o.Source.ID == "" || o.Source.ProviderID == "" || o.Source.ResourceType == "" || o.Customer.ID == "" || o.Customer.ProviderID == "" || o.Currency == "" || o.IdempotencyKey == "" || len(o.Lines) == 0 {
+	if !validBillingReference(o.Source) || !validBillingReference(o.Customer) || o.Source.Scope != o.Customer.Scope || !validBillingCurrency(o.Currency) || o.IdempotencyKey == "" || len(o.IdempotencyKey) > 160 || len(o.Lines) == 0 {
 		return fmt.Errorf("billing obligation identity, customer, currency, lines and idempotency key are required")
 	}
-	if o.Source.Scope.Validate() != nil || o.Customer.Scope.Validate() != nil {
-		return fmt.Errorf("billing obligation references require verified business scope")
-	}
-	start, err := time.Parse("2006-01-02", o.PeriodStart)
+	start, err := time.Parse("2006-01-02", o.BillingPeriod.Start)
 	if err != nil {
 		return fmt.Errorf("invalid billing period start")
 	}
-	end, err := time.Parse("2006-01-02", o.PeriodEnd)
+	end, err := time.Parse("2006-01-02", o.BillingPeriod.End)
 	if err != nil || end.Before(start) {
 		return fmt.Errorf("invalid billing period end")
 	}
@@ -82,23 +274,123 @@ func (o BillingObligation) Validate() error {
 		return fmt.Errorf("billing obligation has too many lines")
 	}
 	for _, line := range o.Lines {
-		quantity, err := strconv.ParseFloat(line.Quantity, 64)
-		if err != nil || math.IsNaN(quantity) || math.IsInf(quantity, 0) || quantity <= 0 {
+		quantity, err := parseBillingDecimal(line.Quantity)
+		if err != nil || quantity.Sign() <= 0 {
 			return fmt.Errorf("billing quantity must be a positive decimal")
 		}
-		price, err := strconv.ParseFloat(line.UnitPrice, 64)
-		if err != nil || math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+		price, err := parseBillingDecimal(line.UnitPrice)
+		if err != nil || price.Sign() < 0 {
 			return fmt.Errorf("billing unit price must be a nonnegative decimal")
 		}
 		if line.Description == "" || len(line.Description) > 500 {
 			return fmt.Errorf("billing line description is invalid")
 		}
 	}
+	encoded, err := json.Marshal(o)
+	if err != nil || len(encoded) > 64<<10 {
+		return fmt.Errorf("billing obligation exceeds the bounded payload size")
+	}
 	return nil
 }
 
-// ScheduledJobHandlers binds subscription invoice automation only when this
-// tenant has the subscription pack and the application kernel available.
+func validBillingReference(reference contract.BusinessRef) bool {
+	return reference.Scope.Validate() == nil && reference.ProviderID != "" && len(reference.ProviderID) <= 160 &&
+		reference.ResourceType != "" && len(reference.ResourceType) <= 160 && reference.ID != "" && len(reference.ID) <= 200
+}
+
+func validBillingCurrency(currency string) bool {
+	if len(currency) != 3 {
+		return false
+	}
+	for _, character := range currency {
+		if character < 'A' || character > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+func parseBillingDecimal(value string) (*big.Rat, error) {
+	if value == "" || len(value) > 64 || strings.TrimSpace(value) != value {
+		return nil, fmt.Errorf("decimal string is empty, untrimmed, or too long")
+	}
+	index := 0
+	if value[0] == '-' {
+		index++
+	}
+	if index == len(value) {
+		return nil, fmt.Errorf("decimal has no digits")
+	}
+	seenPoint, seenDigit := false, false
+	for ; index < len(value); index++ {
+		character := value[index]
+		if character >= '0' && character <= '9' {
+			seenDigit = true
+			continue
+		}
+		if character == '.' && !seenPoint {
+			seenPoint = true
+			continue
+		}
+		return nil, fmt.Errorf("decimal must use plain base-10 notation")
+	}
+	if !seenDigit || value[len(value)-1] == '.' {
+		return nil, fmt.Errorf("decimal has an invalid fractional part")
+	}
+	parsed, ok := new(big.Rat).SetString(value)
+	if !ok {
+		return nil, fmt.Errorf("decimal could not be parsed")
+	}
+	return parsed, nil
+}
+
+func (g *recurringInvoiceGenerator) createOrRecoverBillingObligation(ctx context.Context, execution policy.Execution, scope contract.ScopeContext, obligation BillingObligation) (BillingResult, error) {
+	if g == nil || g.billing == nil {
+		return BillingResult{}, fmt.Errorf("billing.invoice capability is unavailable")
+	}
+	if err := obligation.Validate(); err != nil {
+		return BillingResult{}, err
+	}
+	if ctx == nil || scope.Scope.Validate() != nil || scope.Scope != obligation.Source.Scope || scope.ProviderID != obligation.Source.ProviderID {
+		return BillingResult{}, fmt.Errorf("billing capability invocation scope does not match the source obligation")
+	}
+	result, err := g.billing.ReconcileObligation(ctx, execution, scope, obligation.IdempotencyKey)
+	if err != nil {
+		return BillingResult{}, fmt.Errorf("reconcile billing obligation before retry: %w", err)
+	}
+	switch result.State {
+	case BillingStateAccepted, BillingStateIssued:
+		return validateBillingResult(result, obligation)
+	case BillingStateNotFound:
+		// Only a definitive not-found permits starting a new provider effect.
+	case BillingStatePending, BillingStateUnknown:
+		return result, fmt.Errorf("billing obligation %s remains %s and requires reconciliation", obligation.IdempotencyKey, result.State)
+	default:
+		return result, fmt.Errorf("billing reconciliation returned unsupported state %q", result.State)
+	}
+	result, err = g.billing.CreateObligation(ctx, execution, scope, obligation)
+	if err != nil {
+		return BillingResult{}, fmt.Errorf("create billing obligation: %w", err)
+	}
+	switch result.State {
+	case BillingStateAccepted, BillingStateIssued:
+		return validateBillingResult(result, obligation)
+	case BillingStatePending, BillingStateUnknown:
+		return result, fmt.Errorf("billing obligation %s remains %s and requires reconciliation", obligation.IdempotencyKey, result.State)
+	default:
+		return result, fmt.Errorf("billing provider returned unsupported state %q", result.State)
+	}
+}
+
+func validateBillingResult(result BillingResult, obligation BillingObligation) (BillingResult, error) {
+	if !validBillingReference(result.Obligation) || result.Obligation.Scope != obligation.Source.Scope || len(result.ExternalReference) > 256 {
+		return BillingResult{}, fmt.Errorf("billing provider returned an invalid or cross-scope obligation reference")
+	}
+	return result, nil
+}
+
+// ScheduledJobHandlers registers the job for the subscription package while
+// leaving billing capability availability to the application composition.
 func ScheduledJobHandlers(runtime engine.TenantJobRuntime) map[scheduler.JobType]scheduler.JobHandler {
 	if runtime.Database == nil || runtime.Registry == nil || runtime.Kernel == nil {
 		return nil
@@ -113,15 +405,13 @@ func ScheduledJobHandlers(runtime engine.TenantJobRuntime) map[scheduler.JobType
 		kernel: runtime.Kernel, tenantID: runtime.TenantID, siteName: runtime.SiteName,
 		configRevision: runtime.ConfigRevision,
 	}
-	return map[scheduler.JobType]scheduler.JobHandler{
-		JobType: func(ctx context.Context, job *scheduler.JobConfig) error {
-			var config map[string]any
-			if job != nil {
-				config = job.Config
-			}
-			return generator.GenerateDueInvoices(ctx, config)
-		},
-	}
+	return map[scheduler.JobType]scheduler.JobHandler{JobType: func(ctx context.Context, job *scheduler.JobConfig) error {
+		var config map[string]any
+		if job != nil {
+			config = job.Config
+		}
+		return generator.GenerateDueInvoices(ctx, config)
+	}}
 }
 
 func ScheduledJobHandlersWithBilling(runtime engine.TenantJobRuntime, provider BillingProvider) map[scheduler.JobType]scheduler.JobHandler {
@@ -146,9 +436,30 @@ func ScheduledJobHandlersWithBilling(runtime engine.TenantJobRuntime, provider B
 	}}
 }
 
+// ScheduledJobHandlersWithModuleBilling adapts the tenant's selected provider
+// binding into the subscription billing port for this scheduler generation.
+func ScheduledJobHandlersWithModuleBilling(runtime engine.TenantJobRuntime) map[scheduler.JobType]scheduler.JobHandler {
+	provider, err := NewCapabilityBillingAdapter(runtime)
+	if err == nil {
+		return ScheduledJobHandlersWithBilling(runtime, provider)
+	}
+	handlers := ScheduledJobHandlers(runtime)
+	if handlers[JobType] == nil {
+		return nil
+	}
+	handlers[JobType] = func(context.Context, *scheduler.JobConfig) error {
+		return fmt.Errorf("required billing.invoice capability is unavailable: %w", err)
+	}
+	return handlers
+}
+
 func (g *recurringInvoiceGenerator) GenerateDueInvoices(ctx context.Context, config map[string]any) error {
+	_ = config // billing due-date policy belongs to the selected billing provider.
 	if ctx == nil || g == nil || g.database == nil || g.registry == nil || g.kernel == nil {
 		return errors.New("recurring invoice generator is not fully configured")
+	}
+	if g.billing == nil {
+		return errors.New("required billing.invoice capability is unavailable")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -166,18 +477,11 @@ func (g *recurringInvoiceGenerator) GenerateDueInvoices(ctx context.Context, con
 		{Resource: "Subscription", Operation: "read"},
 		{Resource: "Plan", Operation: "read"},
 		{Resource: "Subscription Line", Operation: "read"},
-		{Resource: "Billing Schedule", Operation: "create"},
-		{Resource: "Recurring Invoice", Operation: "create"},
 		{Resource: "Subscription", Operation: "write"},
 	})
 	if err != nil {
 		return fmt.Errorf("build invoice worker identity: %w", err)
 	}
-	dueDays, err := configuredDueDays(config)
-	if err != nil {
-		return err
-	}
-	dueDateOffset := time.Duration(dueDays) * 24 * time.Hour
 	date := time.Now().UTC().Format("2006-01-02")
 	filters, _ := json.Marshal([][]any{{"status", "=", "Active"}, {"next_billing_date", "<=", date}})
 	subscriptionType := g.registry.Get("Subscription")
@@ -212,7 +516,7 @@ func (g *recurringInvoiceGenerator) GenerateDueInvoices(ctx context.Context, con
 				continue
 			}
 			cursor = listed.Name
-			if err := g.generateForSubscription(ctx, tx, execution, listed.Name, date, dueDateOffset); err != nil {
+			if err := g.generateForSubscription(ctx, tx, execution, listed.Name, date); err != nil {
 				// A later run retries this due period. The key is deterministic and
 				// the schedule reference is unique, so a committed retry is safe.
 				slog.Error("recurring invoice generation failed", "tenant", g.siteName, "subscription", listed.Name, "error", err)
@@ -225,7 +529,7 @@ func (g *recurringInvoiceGenerator) GenerateDueInvoices(ctx context.Context, con
 	}
 }
 
-func (g *recurringInvoiceGenerator) generateForSubscription(ctx context.Context, tx *orm.TxManager, execution policy.Execution, name, today string, dueDateOffset time.Duration) error {
+func (g *recurringInvoiceGenerator) generateForSubscription(ctx context.Context, tx *orm.TxManager, execution policy.Execution, name, today string) error {
 	subscriptionType := g.registry.Get("Subscription")
 	subscription, err := tx.GetDoc(subscriptionType, name, "")
 	if err != nil {
@@ -254,142 +558,68 @@ func (g *recurringInvoiceGenerator) generateForSubscription(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		subtotal, taxAmount, amount, err := g.subscriptionTotals(tx, subscription)
+		_, _, amount, err := g.subscriptionTotals(tx, subscription)
 		if err != nil {
 			return err
 		}
 		periodEnd := next.AddDate(0, 0, -1).Format("2006-01-02")
 		reference := subscription.Name + "-" + due.Format("20060102")
-		if g.billing != nil {
-			scope := tx.BusinessScope
-			if scope.TenantID == "" && scope.Kind == "" && scope.LegalEntityID == "" {
-				scope = contract.BusinessScope{TenantID: contract.TenantID(g.tenantID), Kind: contract.ScopeKindTenant}
-			}
-			key := recurringInvoiceIdempotencyKey(subscription.Name, billingDate)
-			obligation := BillingObligation{Source: contract.BusinessRef{ProviderID: "kora.subscriptions", ResourceType: "subscription", ID: subscription.Name, Scope: scope}, PeriodStart: billingDate, PeriodEnd: periodEnd, Customer: contract.BusinessRef{ProviderID: "kora.parties", ResourceType: "party", ID: subscription.GetString("customer"), Scope: scope}, Currency: subscription.GetString("currency"), Lines: []BillingLine{{Description: "Subscription " + subscription.Name, Quantity: "1", UnitPrice: strconv.FormatFloat(amount, 'f', -1, 64)}}, IdempotencyKey: key}
-			if err := obligation.Validate(); err != nil {
-				return err
-			}
-			scopeContext := contract.ScopeContext{Scope: scope, ProviderID: "kora.subscriptions"}
-			result, err := g.billing.CreateObligation(ctx, scopeContext, obligation)
-			if err != nil {
-				return fmt.Errorf("create billing obligation %s: %w", reference, err)
-			}
-			if result.State != "accepted" && result.State != "issued" {
-				return fmt.Errorf("billing obligation %s remains %s and requires reconciliation", reference, result.State)
-			}
-			advance, err := json.Marshal(map[string]any{"next_billing_date": next.Format("2006-01-02")})
-			if err != nil {
-				return err
-			}
-			update, err := json.Marshal(kernel.RecordUpdatePayload{Doctype: "Subscription", Name: subscription.Name, Data: advance})
-			if err != nil {
-				return err
-			}
-			operation := kernel.Operation{Command: kernel.CommandRecordUpdate, Payload: update, Context: kernel.OperationContext{Site: g.siteName, TenantID: execution.Tenant(), Execution: execution, Source: kernel.SourceWorker, User: "system", IdempotencyKey: key + "-schedule", ConfigRevision: g.configRevision}}
-			commandResult, commandErr := g.kernel.Execute(ctx, g.database, g.registry, operation)
-			if commandErr != nil {
-				return fmt.Errorf("advance subscription after accepted billing: %s", commandErr.Message)
-			}
-			if commandResult.Error != nil {
-				return fmt.Errorf("advance subscription after accepted billing: %s", commandResult.Error.Message)
-			}
-			subscription, err = tx.GetDoc(subscriptionType, name, "")
-			if err != nil {
-				return fmt.Errorf("reload advanced subscription: %w", err)
-			}
-			continue
+		scope := tx.BusinessScope
+		if scope.TenantID == "" && scope.Kind == "" && scope.LegalEntityID == "" {
+			scope = contract.BusinessScope{TenantID: contract.TenantID(g.tenantID), Kind: contract.ScopeKindTenant}
 		}
-		scheduleData, err := json.Marshal(map[string]any{
-			"reference": reference, "subscription": subscription.Name,
-			"source_record": subscription.Name, "actor": "kora:recurring-invoice-scheduler",
-			"billing_date": billingDate, "period_start": billingDate, "period_end": periodEnd,
-			"amount": amount, "currency": subscription.GetString("currency"), "status": "Invoiced",
-		})
+		key := recurringInvoiceIdempotencyKey(g.tenantID, subscription.Name, billingDate)
+		obligation := BillingObligation{Source: contract.BusinessRef{ProviderID: "kora.subscriptions", ResourceType: "subscription", ID: subscription.Name, Scope: scope}, BillingPeriod: BillingPeriod{Start: billingDate, End: periodEnd}, Customer: contract.BusinessRef{ProviderID: "kora.parties", ResourceType: "party", ID: subscription.GetString("customer"), Scope: scope}, Currency: subscription.GetString("currency"), Lines: []BillingLine{{Description: "Subscription " + subscription.Name, Quantity: "1", UnitPrice: strconv.FormatFloat(amount, 'f', -1, 64)}}, IdempotencyKey: key}
+		scopeContext := contract.ScopeContext{Scope: scope, ProviderID: "kora.subscriptions"}
+		_, err = g.createOrRecoverBillingObligation(ctx, execution, scopeContext, obligation)
+		if err != nil {
+			return fmt.Errorf("create billing obligation %s: %w", reference, err)
+		}
+		advance, err := json.Marshal(map[string]any{"next_billing_date": next.Format("2006-01-02")})
 		if err != nil {
 			return err
 		}
-		dueDate := due.Add(dueDateOffset).Format("2006-01-02")
-		invoiceData, err := json.Marshal(map[string]any{
-			"reference": reference, "source_record": subscription.Name,
-			"invoice_number": recurringInvoiceNumber(subscription.Name, due),
-			"subscription":   subscription.Name, "customer": subscription.GetString("customer"),
-			"billing_schedule": "$records.schedule.name", "issue_date": billingDate, "due_date": dueDate,
-			"subtotal": subtotal, "tax_amount": taxAmount, "total": amount, "amount_paid": 0, "balance": amount,
-			"currency": subscription.GetString("currency"), "status": "Draft",
-		})
+		update, err := json.Marshal(kernel.RecordUpdatePayload{Doctype: "Subscription", Name: subscription.Name, Data: advance})
 		if err != nil {
 			return err
 		}
-		advanceData, err := json.Marshal(map[string]any{"next_billing_date": next.Format("2006-01-02")})
-		if err != nil {
-			return err
+		operation := kernel.Operation{Command: kernel.CommandRecordUpdate, Payload: update, Context: kernel.OperationContext{Site: g.siteName, TenantID: execution.Tenant(), Execution: execution, Source: kernel.SourceWorker, User: "system", IdempotencyKey: key + "-schedule", ConfigRevision: g.configRevision}}
+		commandResult, commandErr := executeScheduleAdvance(ctx, g.kernel, g.database, g.registry, operation)
+		if commandErr != nil {
+			return fmt.Errorf("advance subscription after accepted billing: %s", commandErr.Message)
 		}
-		payload, err := json.Marshal(kernel.RecordMutationBundlePayload{
-			Doctype: "Billing Schedule",
-			Records: []kernel.RecordMutationBundleItem{
-				{Key: "schedule", Doctype: "Billing Schedule", Data: scheduleData},
-				{Key: "invoice", Doctype: "Recurring Invoice", Data: invoiceData},
-				{Key: "advance", Operation: "update", Doctype: "Subscription", Name: subscription.Name, ExpectedRevision: subscription.Revision, Data: advanceData},
-			},
-		})
-		if err != nil {
-			return err
+		if commandResult.Error != nil {
+			return fmt.Errorf("advance subscription after accepted billing: %s", commandResult.Error.Message)
 		}
-		key := recurringInvoiceIdempotencyKey(subscription.Name, billingDate)
-		operation := kernel.Operation{
-			Command: kernel.CommandRecordMutateBundle, Payload: payload,
-			Context: kernel.OperationContext{
-				Site: g.siteName, TenantID: execution.Tenant(), Execution: execution,
-				Source: kernel.SourceWorker, User: "system", IdempotencyKey: key,
-				ConfigRevision: g.configRevision,
-			},
-		}
-		result, kernelErr := g.kernel.Execute(ctx, g.database, g.registry, operation)
-		if kernelErr != nil {
-			return fmt.Errorf("create invoice for %s: %s", billingDate, kernelErr.Message)
-		}
-		if result.Error != nil {
-			return fmt.Errorf("create invoice for %s: %s", billingDate, result.Error.Message)
-		}
-		// Reload the revision and advance date committed by the bundle before
-		// processing another overdue period.
 		subscription, err = tx.GetDoc(subscriptionType, name, "")
 		if err != nil {
 			return fmt.Errorf("reload advanced subscription: %w", err)
 		}
+		continue
 	}
 	return nil
 }
 
-func configuredDueDays(config map[string]any) (int, error) {
-	if config == nil || config["due_days"] == nil {
-		return 0, nil // due on issue date unless explicitly configured otherwise
-	}
-	var days int
-	switch value := config["due_days"].(type) {
-	case int:
-		days = value
-	case int64:
-		days = int(value)
-	case float64:
-		if value != math.Trunc(value) {
-			return 0, errors.New("subscription_invoice config due_days must be a whole number")
+func executeScheduleAdvance(ctx context.Context, commandKernel *kernel.Kernel, database *sql.DB, registry *doctype.Registry, operation kernel.Operation) (contract.CommandResult, *contract.Error) {
+	const attempts = 4
+	var result contract.CommandResult
+	var commandErr *contract.Error
+	for attempt := 0; attempt < attempts; attempt++ {
+		result, commandErr = commandKernel.Execute(ctx, database, registry, operation)
+		retry := commandErr != nil && commandErr.Type == contract.CodeConflict || result.Error != nil && result.Error.Type == contract.CodeConflict
+		if !retry || attempt == attempts-1 {
+			return result, commandErr
 		}
-		days = int(value)
-	case string:
-		parsed, err := strconv.Atoi(value)
-		if err != nil {
-			return 0, errors.New("subscription_invoice config due_days must be an integer")
+		delay := time.Duration(attempt+1) * 10 * time.Millisecond
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return result, contract.NewError(contract.CodeDeadlineExceeded, ctx.Err().Error())
+		case <-timer.C:
 		}
-		days = parsed
-	default:
-		return 0, errors.New("subscription_invoice config due_days must be an integer")
 	}
-	if days < 0 || days > 365 {
-		return 0, errors.New("subscription_invoice config due_days must be between 0 and 365")
-	}
-	return days, nil
+	return result, commandErr
 }
 
 func (g *recurringInvoiceGenerator) subscriptionTotals(tx *orm.TxManager, subscription *doctype.Document) (subtotal, taxAmount, total float64, err error) {
@@ -431,12 +661,8 @@ func (g *recurringInvoiceGenerator) subscriptionTotals(tx *orm.TxManager, subscr
 	return subtotal, taxAmount, total, nil
 }
 
-func recurringInvoiceNumber(subscription string, billingDate time.Time) string {
-	return subscription + "-" + billingDate.Format("20060102")
-}
-
-func recurringInvoiceIdempotencyKey(subscription, billingDate string) string {
-	digest := sha256.Sum256([]byte(subscription + "\x00" + billingDate))
+func recurringInvoiceIdempotencyKey(tenant, subscription, billingDate string) string {
+	digest := sha256.Sum256([]byte(tenant + "\x00" + subscription + "\x00" + billingDate))
 	return "recurring-invoice-" + hex.EncodeToString(digest[:])
 }
 

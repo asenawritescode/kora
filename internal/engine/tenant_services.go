@@ -85,6 +85,7 @@ type TenantJobRuntime struct {
 	Registry       *doctype.Registry
 	Dialect        kdb.Dialect
 	Kernel         *kernel.Kernel
+	ModuleBindings *plugin.BindingPlan
 	TenantID       string
 	SiteName       string
 	ConfigRevision uint64
@@ -539,7 +540,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			}
 			jobs = append(jobs, &scheduler.JobConfig{Name: definition.Name, OwnerModuleID: definition.OwnerModuleID, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig, Scope: scope, RequiredResource: definition.RequiredResource, RequiredOperation: definition.RequiredOperation})
 		}
-		tenantScheduler, err := newTenantScheduler(loaded, dialect, jobs, domainKernel, config.SchedulerHandlerFactory, config.SchedulerExecutionResolverFactory, config.Mailer, services.Outbox, config.ScriptRunner, services.ScriptStore, services.WorkAdmission, worker)
+		tenantScheduler, err := newTenantScheduler(loaded, dialect, jobs, domainKernel, services.ModuleBindings, config.SchedulerHandlerFactory, config.SchedulerExecutionResolverFactory, config.Mailer, services.Outbox, config.ScriptRunner, services.ScriptStore, services.WorkAdmission, worker)
 		if err != nil {
 			return fmt.Errorf("construct scheduler for tenant %s: %w", loaded.Name, err)
 		}
@@ -719,7 +720,7 @@ func registerWebhookDelivery(config TenantServiceConfig, loaded *knet.LoadedSite
 	})
 }
 
-func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*scheduler.JobConfig, operationKernel *kernel.Kernel, handlerFactory ScheduledJobHandlerFactory, executionResolverFactory ScheduledJobExecutionResolverFactory, mailer *email.Sender, outboxWriter outbox.Writer, scriptRunner script.Runner, scriptStore *script.Store, workAdmission interface {
+func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*scheduler.JobConfig, operationKernel *kernel.Kernel, moduleBindings *plugin.BindingPlan, handlerFactory ScheduledJobHandlerFactory, executionResolverFactory ScheduledJobExecutionResolverFactory, mailer *email.Sender, outboxWriter outbox.Writer, scriptRunner script.Runner, scriptStore *script.Store, workAdmission interface {
 	Acquire(context.Context) (func(), error)
 }, webhookRetrier scheduler.WebhookRetrier) (*scheduler.Scheduler, error) {
 	if loaded == nil || loaded.DB == nil || loaded.Registry == nil {
@@ -750,13 +751,15 @@ func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*sc
 	if executionResolverFactory != nil {
 		worker.ResolveExecution = executionResolverFactory(TenantJobRuntime{
 			Database: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Kernel: operationKernel,
-			TenantID: loaded.SiteID, SiteName: loaded.Name, ConfigRevision: loaded.ConfigRevision,
+			ModuleBindings: moduleBindings,
+			TenantID:       loaded.SiteID, SiteName: loaded.Name, ConfigRevision: loaded.ConfigRevision,
 		})
 	}
 	if handlerFactory != nil {
 		handlers := handlerFactory(TenantJobRuntime{
 			Database: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Kernel: operationKernel,
-			TenantID: loaded.SiteID, SiteName: loaded.Name, ConfigRevision: loaded.ConfigRevision,
+			ModuleBindings: moduleBindings,
+			TenantID:       loaded.SiteID, SiteName: loaded.Name, ConfigRevision: loaded.ConfigRevision,
 		})
 		for jobType, handler := range handlers {
 			if err := worker.RegisterHandler(jobType, handler); err != nil {

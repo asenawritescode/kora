@@ -9,6 +9,7 @@ import (
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/net"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/scheduler"
 )
 
@@ -39,6 +40,7 @@ func TestTenantSchedulersBindToTheirOwnDatabaseAndRegistry(t *testing.T) {
 	t.Cleanup(func() { _ = dbB.Close() })
 	registryA := doctype.NewRegistry()
 	registryB := doctype.NewRegistry()
+	bindingsA, bindingsB := &plugin.BindingPlan{Revision: 1}, &plugin.BindingPlan{Revision: 2}
 	admissionA := &rejectingTenantWorkAdmission{}
 	admissionB := &rejectingTenantWorkAdmission{}
 	jobs := []*scheduler.JobConfig{
@@ -48,6 +50,12 @@ func TestTenantSchedulersBindToTheirOwnDatabaseAndRegistry(t *testing.T) {
 	handlerFactory := ScheduledJobHandlerFactory(func(runtime TenantJobRuntime) map[scheduler.JobType]scheduler.JobHandler {
 		if runtime.Database == nil || runtime.Registry == nil || runtime.SiteName == "" || runtime.TenantID == "" {
 			t.Fatal("handler factory did not receive tenant-bound runtime resources")
+		}
+		if runtime.TenantID == "tenant-a" && runtime.ModuleBindings != bindingsA {
+			t.Fatal("tenant A handler did not receive its own capability plan")
+		}
+		if runtime.TenantID == "tenant-b" && runtime.ModuleBindings != bindingsB {
+			t.Fatal("tenant B handler did not receive its own capability plan")
 		}
 		return map[scheduler.JobType]scheduler.JobHandler{
 			"application_task": func(context.Context, *scheduler.JobConfig) error { return nil },
@@ -59,11 +67,11 @@ func TestTenantSchedulersBindToTheirOwnDatabaseAndRegistry(t *testing.T) {
 		mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM information_schema\\.statistics").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	}
 
-	schedulerA, err := newTenantScheduler(&net.LoadedSite{Name: "tenant-a", SiteID: "tenant-a", DB: dbA, Registry: registryA}, &kdb.MySQLDialect{}, jobs, nil, handlerFactory, nil, nil, nil, nil, nil, admissionA, nil)
+	schedulerA, err := newTenantScheduler(&net.LoadedSite{Name: "tenant-a", SiteID: "tenant-a", DB: dbA, Registry: registryA}, &kdb.MySQLDialect{}, jobs, nil, bindingsA, handlerFactory, nil, nil, nil, nil, nil, admissionA, nil)
 	if err != nil {
 		t.Fatal("construct tenant A scheduler:", err)
 	}
-	schedulerB, err := newTenantScheduler(&net.LoadedSite{Name: "tenant-b", SiteID: "tenant-b", DB: dbB, Registry: registryB}, &kdb.MySQLDialect{}, jobs, nil, handlerFactory, nil, nil, nil, nil, nil, admissionB, nil)
+	schedulerB, err := newTenantScheduler(&net.LoadedSite{Name: "tenant-b", SiteID: "tenant-b", DB: dbB, Registry: registryB}, &kdb.MySQLDialect{}, jobs, nil, bindingsB, handlerFactory, nil, nil, nil, nil, nil, admissionB, nil)
 	if err != nil {
 		t.Fatal("construct tenant B scheduler:", err)
 	}
@@ -104,7 +112,11 @@ func TestTenantSchedulerSchemaEnsureRequiresAdmission(t *testing.T) {
 	defer database.Close()
 	capacityErr := errors.New("tenant work capacity exhausted")
 	admission := &rejectingTenantWorkAdmission{err: capacityErr}
-	_, err = newTenantScheduler(&net.LoadedSite{Name: "tenant-a", SiteID: "tenant-a", DB: database, Registry: doctype.NewRegistry()}, &kdb.MySQLDialect{}, []*scheduler.JobConfig{{Name: "hourly", Type: scheduler.JobWebhook, Schedule: "@every 1h"}}, nil, nil, nil, nil, nil, nil, nil, admission, nil)
+	_, err = newTenantScheduler(
+		&net.LoadedSite{Name: "tenant-a", SiteID: "tenant-a", DB: database, Registry: doctype.NewRegistry()},
+		&kdb.MySQLDialect{}, []*scheduler.JobConfig{{Name: "hourly", Type: scheduler.JobWebhook, Schedule: "@every 1h"}},
+		nil, nil, nil, nil, nil, nil, nil, nil, admission, nil,
+	)
 	if !errors.Is(err, capacityErr) {
 		t.Fatalf("scheduler construction error = %v, want admission rejection", err)
 	}

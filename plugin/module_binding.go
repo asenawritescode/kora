@@ -157,6 +157,13 @@ type CapabilityLeaseOwnerAdmission interface {
 	EnsureCapabilityLease(context.Context, contract.CapabilityLease) error
 }
 
+// CapabilityLeaseReader loads an existing durable grant without issuing or
+// widening authority. Scheduled and other recovered work use this to bind to
+// the grant that operators can revoke through the module store.
+type CapabilityLeaseReader interface {
+	LoadCapabilityLease(context.Context, contract.TenantID, string) (contract.CapabilityLease, bool, error)
+}
+
 // ResolveInstalledModules uses the same provider resolver while including the
 // durable package dependency set in deterministic preflight and plan hashing.
 func ResolveInstalledModules(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, revision uint64) (BindingPlan, error) {
