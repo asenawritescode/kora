@@ -319,12 +319,14 @@ func (p ProjectionCheckpoint) Validate() error {
 //
 //contract:wire:v2
 type ModuleInstallation struct {
-	TenantID       TenantID `json:"tenant_id"`
-	ModuleID       ModuleID `json:"module_id"`
-	Version        string   `json:"version"`
-	ArtifactDigest string   `json:"artifact_digest"`
-	State          string   `json:"state"`
-	Revision       uint64   `json:"revision"`
+	TenantID                 TenantID    `json:"tenant_id"`
+	ModuleID                 ModuleID    `json:"module_id"`
+	Version                  string      `json:"version"`
+	ArtifactDigest           string      `json:"artifact_digest"`
+	State                    string      `json:"state"`
+	Revision                 uint64      `json:"revision"`
+	StateChangedAt           time.Time   `json:"state_changed_at,omitempty"`
+	LastLifecycleOperationID OperationID `json:"last_lifecycle_operation_id,omitempty"`
 }
 
 // ResourceOwnership is durable ownership of a canonical resource identity.
@@ -356,6 +358,7 @@ type CapabilityLease struct {
 	TenantID         TenantID      `json:"tenant_id"`
 	Scope            BusinessScope `json:"scope"`
 	CallerModuleID   ModuleID      `json:"caller_module_id"`
+	ProviderModuleID ModuleID      `json:"provider_module_id,omitempty"`
 	ProviderID       string        `json:"provider_id"`
 	Operation        string        `json:"operation"`
 	BindingRevision  uint64        `json:"binding_revision"`
@@ -367,7 +370,7 @@ type CapabilityLease struct {
 }
 
 func (l CapabilityLease) Validate() error {
-	if l.ID == "" || l.TenantID == "" || l.Scope.Validate() != nil || l.Scope.TenantID != l.TenantID || l.CallerModuleID == "" || l.ProviderID == "" || l.Operation == "" || l.BindingRevision == 0 || l.GrantEpoch == 0 || l.ExpiresAt.IsZero() || l.State != "active" && l.State != "revoked" && l.State != "expired" {
+	if l.ID == "" || l.TenantID == "" || l.Scope.Validate() != nil || l.Scope.TenantID != l.TenantID || l.CallerModuleID == "" || l.ProviderModuleID == "" || l.ProviderID == "" || l.Operation == "" || l.BindingRevision == 0 || l.GrantEpoch == 0 || l.ExpiresAt.IsZero() || l.State != "active" && l.State != "revoked" && l.State != "expired" {
 		return fmt.Errorf("capability lease identity, scope, epoch, expiry, or state is invalid")
 	}
 	if len(l.CredentialRef) > 320 || strings.ContainsAny(l.CredentialRef, "\r\n\x00") {
@@ -1098,7 +1101,30 @@ type ModuleExecution struct {
 	AllowedOperation  string
 	AuthorizedCommand string
 	Scope             BusinessScope
+	workflowPin       *WorkflowCommandPin
 	seal              [32]byte
+}
+
+type WorkflowCommandPin struct {
+	InstanceID     InstanceID
+	StepID         StepID
+	IdempotencyKey IdempotencyKey
+}
+
+func (e ModuleExecution) WithWorkflowCommandPin(instance InstanceID, step StepID, key IdempotencyKey) (ModuleExecution, error) {
+	if !e.Verified() || instance == "" || step == "" || key == "" {
+		return ModuleExecution{}, fmt.Errorf("workflow command pin requires verified module identity and durable action identity")
+	}
+	e.workflowPin = &WorkflowCommandPin{InstanceID: instance, StepID: step, IdempotencyKey: key}
+	e.seal = e.identitySeal()
+	return e, nil
+}
+
+func (e ModuleExecution) WorkflowCommandPin() (WorkflowCommandPin, bool) {
+	if !e.Verified() || e.workflowPin == nil {
+		return WorkflowCommandPin{}, false
+	}
+	return *e.workflowPin, true
 }
 
 // BusinessRef is a stable provider-qualified identity, never a local row name.
@@ -1252,14 +1278,15 @@ type CapabilityAction struct {
 //
 //contract:wire:v2
 type PinnedDispatch struct {
-	ExecutionID     string           `json:"execution_id"`
-	Scope           BusinessScope    `json:"scope"`
-	CallerModuleID  ModuleID         `json:"caller_module_id"`
-	ProviderID      string           `json:"provider_id"`
-	BindingRevision uint64           `json:"binding_revision"`
-	Operation       CapabilityAction `json:"operation"`
-	IdempotencyKey  IdempotencyKey   `json:"idempotency_key"`
-	InputHash       string           `json:"input_hash"`
+	ExecutionID      string           `json:"execution_id"`
+	Scope            BusinessScope    `json:"scope"`
+	CallerModuleID   ModuleID         `json:"caller_module_id"`
+	ProviderModuleID ModuleID         `json:"provider_module_id,omitempty"`
+	ProviderID       string           `json:"provider_id"`
+	BindingRevision  uint64           `json:"binding_revision"`
+	Operation        CapabilityAction `json:"operation"`
+	IdempotencyKey   IdempotencyKey   `json:"idempotency_key"`
+	InputHash        string           `json:"input_hash"`
 }
 
 func (d PinnedDispatch) Validate() error {
@@ -1298,21 +1325,26 @@ const (
 //
 //contract:wire:v2
 type PlanModuleChange struct {
-	ModuleID         ModuleID             `json:"module_id"`
-	TargetState      ModuleLifecycleState `json:"target_state"`
-	TargetVersion    string               `json:"target_version,omitempty"`
-	ExpectedRevision uint64               `json:"expected_revision"`
+	ModuleID           ModuleID             `json:"module_id"`
+	TargetState        ModuleLifecycleState `json:"target_state"`
+	TargetVersion      string               `json:"target_version,omitempty"`
+	ProviderSelections []ProviderSelection  `json:"provider_selections,omitempty"`
+	ExpectedRevision   uint64               `json:"expected_revision"`
 }
 
 // ModuleChangePlan carries bounded reasons why an operation cannot proceed.
 //
 //contract:wire:v2
 type ModuleChangePlan struct {
-	PlanHash           string          `json:"plan_hash"`
-	BaseRevision       uint64          `json:"base_revision"`
-	DependencyBlockers []ModuleBlocker `json:"dependency_blockers,omitempty"`
-	OpenWorkBlockers   []ModuleBlocker `json:"open_work_blockers,omitempty"`
-	BindingChanges     []string        `json:"binding_changes,omitempty"`
+	ModuleID           ModuleID             `json:"module_id"`
+	TargetState        ModuleLifecycleState `json:"target_state"`
+	TargetVersion      string               `json:"target_version,omitempty"`
+	ProviderSelections []ProviderSelection  `json:"provider_selections,omitempty"`
+	PlanHash           string               `json:"plan_hash"`
+	BaseRevision       uint64               `json:"base_revision"`
+	DependencyBlockers []ModuleBlocker      `json:"dependency_blockers,omitempty"`
+	OpenWorkBlockers   []ModuleBlocker      `json:"open_work_blockers,omitempty"`
+	BindingChanges     []string             `json:"binding_changes,omitempty"`
 }
 
 // ModuleBlocker is deliberately small and excludes business payloads.
@@ -1386,20 +1418,52 @@ type ExecutionInspection struct {
 //
 //contract:wire:v2
 type ApplyModuleChange struct {
-	Meta             CommandMeta `json:"meta"`
-	ModuleID         ModuleID    `json:"module_id"`
-	PlanHash         string      `json:"plan_hash"`
-	ExpectedRevision uint64      `json:"expected_revision"`
+	Meta               CommandMeta          `json:"meta"`
+	ModuleID           ModuleID             `json:"module_id"`
+	TargetState        ModuleLifecycleState `json:"target_state"`
+	TargetVersion      string               `json:"target_version,omitempty"`
+	ProviderSelections []ProviderSelection  `json:"provider_selections,omitempty"`
+	PlanHash           string               `json:"plan_hash"`
+	ExpectedRevision   uint64               `json:"expected_revision"`
+}
+
+func ValidateApplyModuleChange(cmd ApplyModuleChange) error {
+	if _, err := ParseIdempotencyKey(string(cmd.Meta.IdempotencyKey)); err != nil || cmd.ModuleID == "" || len(cmd.PlanHash) != 64 || cmd.ExpectedRevision == 0 || cmd.ExpectedRevision > 1<<63-1 {
+		return fmt.Errorf("module lifecycle command identity, plan hash, or revision is invalid")
+	}
+	if cmd.TargetState != ModuleActive && cmd.TargetState != ModuleDraining && cmd.TargetState != ModuleDisabled && cmd.TargetState != ModuleRemoved {
+		return fmt.Errorf("module lifecycle target state is invalid")
+	}
+	if _, err := hex.DecodeString(cmd.PlanHash); err != nil {
+		return fmt.Errorf("module lifecycle plan hash is invalid")
+	}
+	if err := ValidatePlanModuleChange(PlanModuleChange{ModuleID: cmd.ModuleID, TargetState: cmd.TargetState, TargetVersion: cmd.TargetVersion, ProviderSelections: cmd.ProviderSelections, ExpectedRevision: cmd.ExpectedRevision}); err != nil {
+		return err
+	}
+	return nil
 }
 
 type OpenWorkInspector interface {
 	InspectOpenWork(context.Context, TenantID, ModuleID, uint16) ([]ModuleBlocker, error)
 }
 
+// OpenWorkDomainInspector declares which lifecycle work category it covers.
+// Registration is explicit so one adapter cannot accidentally stand in for
+// unrelated owner work such as obligations or event delivery.
+type OpenWorkDomainInspector interface {
+	OpenWorkDomain() string
+	OpenWorkInspector
+}
+
+type OpenWorkCoverageInspector interface {
+	OpenWorkDomains() []string
+	OpenWorkInspector
+}
+
 func ValidateModuleLifecycleTransition(from, to ModuleLifecycleState) error {
 	switch from {
 	case ModuleInstalled:
-		if to == ModuleActive || to == ModuleDisabled {
+		if to == ModuleActive {
 			return nil
 		}
 	case ModuleActive:
@@ -1416,6 +1480,26 @@ func ValidateModuleLifecycleTransition(from, to ModuleLifecycleState) error {
 		}
 	}
 	return fmt.Errorf("invalid module lifecycle transition %q -> %q", from, to)
+}
+
+func ValidatePlanModuleChange(request PlanModuleChange) error {
+	if request.ModuleID == "" || request.ExpectedRevision == 0 || request.ExpectedRevision > 1<<63-1 {
+		return fmt.Errorf("module plan identity and expected revision are required")
+	}
+	if request.TargetState != ModuleActive && request.TargetState != ModuleDraining && request.TargetState != ModuleDisabled && request.TargetState != ModuleRemoved {
+		return fmt.Errorf("module plan target state is invalid")
+	}
+	if len(request.TargetVersion) > 128 || strings.ContainsAny(request.TargetVersion, "\r\n\x00") {
+		return fmt.Errorf("module plan target version is invalid")
+	}
+	seen := map[BindingKey]bool{}
+	for _, selection := range request.ProviderSelections {
+		if selection.Validate() != nil || selection.Key.ConsumerModuleID != request.ModuleID || seen[selection.Key] {
+			return fmt.Errorf("provider cutover must contain unique selections for the target module")
+		}
+		seen[selection.Key] = true
+	}
+	return nil
 }
 
 func ValidateModuleChangePlan(plan ModuleChangePlan, expectedRevision uint64, openWork []ModuleBlocker) error {
@@ -1548,7 +1632,8 @@ func (e ModuleExecution) identitySeal() [32]byte {
 		AllowedOperation  string
 		AuthorizedCommand string
 		Scope             BusinessScope
-	}{e.TenantID, e.CallerModuleID, e.OwnerModuleID, e.BindingRevision, e.AllowedOperation, e.AuthorizedCommand, e.Scope})
+		WorkflowPin       *WorkflowCommandPin
+	}{e.TenantID, e.CallerModuleID, e.OwnerModuleID, e.BindingRevision, e.AllowedOperation, e.AuthorizedCommand, e.Scope, e.workflowPin})
 	return sha256.Sum256(identity)
 }
 

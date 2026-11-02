@@ -18,11 +18,12 @@ import (
 type CommandKind string
 
 const (
-	CommandProvisionTenant  CommandKind = "provision_tenant"
-	CommandApplyPackage     CommandKind = "apply_package"
-	CommandSetTenantState   CommandKind = "set_tenant_state"
-	CommandDeleteTenant     CommandKind = "delete_tenant"
-	CommandTenantInvitation CommandKind = "tenant_invitation"
+	CommandProvisionTenant   CommandKind = "provision_tenant"
+	CommandApplyPackage      CommandKind = "apply_package"
+	CommandSetTenantState    CommandKind = "set_tenant_state"
+	CommandDeleteTenant      CommandKind = "delete_tenant"
+	CommandTenantInvitation  CommandKind = "tenant_invitation"
+	CommandApplyModuleChange CommandKind = "apply_module_change"
 )
 
 type Operation struct {
@@ -194,6 +195,11 @@ func (s *Service) AcceptForTenant(ctx context.Context, caller contract.Principal
 			return Operation{}, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		key, kind = value.Meta.IdempotencyKey, CommandTenantInvitation
+	case contract.ApplyModuleChange:
+		if err := contract.ValidateApplyModuleChange(value); err != nil {
+			return Operation{}, contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+		key, kind = value.Meta.IdempotencyKey, CommandApplyModuleChange
 	default:
 		return Operation{}, contract.NewError(contract.CodeValidationFailed, "command is not valid for a tenant route")
 	}

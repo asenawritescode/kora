@@ -16,6 +16,102 @@ import (
 	"github.com/asenawritescode/kora/script"
 )
 
+// enforceModuleLifecycleAdmissionTx serializes module-owned command admission
+// with lifecycle transitions by touching the snapshot row inside the business
+// transaction. Historical reads do not pass through this write guard.
+func enforceModuleLifecycleAdmissionTx(ctx context.Context, tx *sql.Tx, dialect db.Dialect, op Operation, reg *doctype.Registry, dynamic *CommandResource) *contract.Error {
+	if tx == nil || reg == nil {
+		return nil
+	}
+	owners := map[contract.ModuleID]struct{}{}
+	for _, name := range operationTouchedRecords(op, dynamic) {
+		if dt := reg.Get(name); dt != nil && dt.ModuleOwnerID != "" {
+			owners[contract.ModuleID(dt.ModuleOwnerID)] = struct{}{}
+		}
+	}
+	if len(owners) == 0 {
+		return nil
+	}
+	if dialect == nil {
+		return contract.NewError(contract.CodeDependencyUnavailable, "module lifecycle state is unavailable")
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = ?`), string(op.Context.TenantID)); err != nil {
+		return contract.NewError(contract.CodeDependencyUnavailable, "module lifecycle admission could not be fenced")
+	}
+	var payload string
+	if err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = ?`), string(op.Context.TenantID)).Scan(&payload); err != nil {
+		return contract.NewError(contract.CodePermissionDenied, "owning module is not installed or available")
+	}
+	var snapshot contract.ModuleSnapshot
+	if json.Unmarshal([]byte(payload), &snapshot) != nil || snapshot.TenantID != op.Context.TenantID {
+		return contract.NewError(contract.CodeDependencyUnavailable, "module lifecycle snapshot is invalid")
+	}
+	for owner := range owners {
+		found := false
+		for _, installation := range snapshot.Installations {
+			if installation.ModuleID != owner {
+				continue
+			}
+			found = true
+			if installation.State != string(contract.ModuleActive) && (installation.State != string(contract.ModuleDraining) || !pinnedWorkflowAttemptPredatesDrain(ctx, tx, dialect, op, installation.StateChangedAt)) {
+				return contract.NewError(contract.CodePermissionDenied, "owning module is not accepting new commands")
+			}
+			break
+		}
+		if !found {
+			return contract.NewError(contract.CodePermissionDenied, "owning module is not installed")
+		}
+	}
+	return nil
+}
+
+func pinnedWorkflowAttemptPredatesDrain(ctx context.Context, tx *sql.Tx, dialect db.Dialect, op Operation, drainingAt time.Time) bool {
+	if drainingAt.IsZero() || op.Context.ModuleExecution == nil {
+		return false
+	}
+	pin, ok := op.Context.ModuleExecution.WorkflowCommandPin()
+	if !ok || pin.IdempotencyKey == "" || pin.InstanceID == "" || pin.StepID == "" {
+		return false
+	}
+	var started any
+	err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT MIN(started_at) FROM _kora_workflow_attempt WHERE tenant_id = ? AND instance_id = ? AND step_id = ? AND idempotency_key = ?`), string(op.Context.TenantID), string(pin.InstanceID), string(pin.StepID), string(pin.IdempotencyKey)).Scan(&started)
+	if err != nil || started == nil {
+		return false
+	}
+	var startedAt time.Time
+	switch value := started.(type) {
+	case time.Time:
+		startedAt = value
+	case string:
+		startedAt, err = time.Parse(time.RFC3339Nano, value)
+	case []byte:
+		startedAt, err = time.Parse(time.RFC3339Nano, string(value))
+	default:
+		return false
+	}
+	return err == nil && !startedAt.IsZero() && !startedAt.After(drainingAt)
+}
+
+func operationTouchedRecords(op Operation, dynamic *CommandResource) []string {
+	if dynamic != nil {
+		return dynamic.TouchedRecords()
+	}
+	if op.Command == CommandRecordMutateBundle {
+		var payload RecordMutationBundlePayload
+		if json.Unmarshal(op.Payload, &payload) == nil {
+			names := make([]string, 0, len(payload.Records))
+			for _, record := range payload.Records {
+				names = append(names, record.Doctype)
+			}
+			return names
+		}
+	}
+	if name := payloadDoctype(op.Payload); name != "" {
+		return []string{name}
+	}
+	return nil
+}
+
 // authorizeOp dispatches authorization: built-in commands authorize against
 // the payload's doctype; config-defined commands authorize EVERY touched
 // record at per-step least privilege — create steps need "create", update
@@ -248,6 +344,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			return nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
 		}
 		defer dbTx.Rollback()
+	}
+	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, k.dialect(), op, reg, cmd); admissionErr != nil {
+		return nil, admissionErr
 	}
 	priorMutationExecutor := txMgr.ScriptMutationExecutor
 	priorPostCommitHooks := txMgr.PostCommitHooks

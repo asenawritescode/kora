@@ -3,11 +3,13 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -84,5 +86,41 @@ func TestHTTPAndPublicFormCannotUseGenericMutationOnCommandOnlyResources(t *test
 	}
 	if rows != 0 || completedAudits != 0 || outboxEvents != 0 || receipts != 0 {
 		t.Fatalf("denied HTTP/public-form bypasses left rows=%d completed_audits=%d outbox=%d receipts=%d", rows, completedAudits, outboxEvents, receipts)
+	}
+}
+
+func TestHTTPGenericCRUDCannotWriteWhenOwningModuleIsDisabled(t *testing.T) {
+	handler, database, registry, site := newResourceIntegrationHandler(t)
+	protected := &doctype.DocType{Name: "LifecycleOwnedRecord", ModuleOwnerID: "finance.ar", Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}}}
+	registry.Register(protected)
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: protected.Name, Role: doctype.AdminRole, Read: true, Create: true, Write: true, Delete: true})
+	if err := schema.MigrateSiteFromRegistry(database, site, registry, kdb.Resolve("mysql")); err != nil {
+		t.Fatal("migrate lifecycle-owned resource:", err)
+	}
+	store := configstore.NewModuleStore(database, kdb.Resolve("mysql"))
+	if err := store.EnsureSchema(); err != nil {
+		t.Fatal("create module lifecycle snapshot table:", err)
+	}
+	snapshot := contract.ModuleSnapshot{TenantID: contract.TenantID(site), Revision: 1,
+		Modules:       []contract.ModuleDescriptor{{ID: "finance.ar", Version: "1.0.0"}},
+		Installations: []contract.ModuleInstallation{{TenantID: contract.TenantID(site), ModuleID: "finance.ar", Version: "1.0.0", ArtifactDigest: "fixture", State: string(contract.ModuleDisabled), Revision: 2}},
+	}
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal("encode lifecycle snapshot:", err)
+	}
+	if _, err := database.Exec(`INSERT INTO _kora_module_snapshot (tenant_id,revision,snapshot_json) VALUES (?,?,?)`, site, snapshot.Revision, string(payload)); err != nil {
+		t.Fatal("persist disabled module snapshot:", err)
+	}
+	response := serveResourceMutationBody(t, handler, database, registry, site, httpMethodPost, "/api/resource/"+protected.Name, `{"title":"must be rejected"}`, "", []string{doctype.AdminRole})
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("HTTP generic write against disabled module = %d, want forbidden: %s", response.Code, response.Body.String())
+	}
+	var rows int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM ` + kdb.Resolve("mysql").QuoteIdent(protected.RawTableName())).Scan(&rows); err != nil {
+		t.Fatal("count lifecycle-owned records:", err)
+	}
+	if rows != 0 {
+		t.Fatalf("disabled module HTTP write created %d records", rows)
 	}
 }

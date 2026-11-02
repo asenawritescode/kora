@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -28,6 +29,7 @@ import (
 // tenant-owned durable orchestration runtime. Catalog construction, SQL stores,
 // claim handling, and worker lifecycle remain owned by Engine.
 type WorkflowTenantConfig struct {
+	ModuleSnapshot   func(contract.TenantID) (contract.ModuleSnapshot, error)
 	Registrations    []workflow.ActionRegistration
 	LocalBuilders    map[workflow.ActionKey]process.WorkflowOperationBuilder
 	Schemas          workflow.PayloadSchemaRegistry
@@ -165,6 +167,9 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	instanceStore, err := workflowsql.NewInstanceStore(loaded.DB, dialect)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if loaded.RuntimeServices != nil {
+		loaded.RuntimeServices.WorkflowOpenWorkInspector = instanceStore
 	}
 	executionStore, err := workflowsql.NewExecutionStore(loaded.DB, dialect)
 	if err != nil {
@@ -317,6 +322,9 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct workflow definition service: %w", err)
 	}
+	definitionService.SetModuleSnapshotLookup(func(tenant contract.TenantID) (contract.ModuleSnapshot, error) {
+		return configstore.NewModuleStore(loaded.DB, dialect).Load(tenant)
+	})
 	instanceService, err := workflow.NewInstanceService(definitionStore, instanceStore, instanceAuthorizer, catalog, workflowSchemas, cfg.Waits, nil, nil)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct workflow instance service: %w", err)

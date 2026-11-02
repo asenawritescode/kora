@@ -1,12 +1,126 @@
 package kernel
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
+
+func TestModuleLifecycleAdmissionFencesOwnerCommands(t *testing.T) {
+	for _, state := range []string{"active", "draining", "disabled"} {
+		t.Run(state, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			mock.ExpectBegin()
+			tx, err := database.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			registry := doctype.NewRegistry()
+			registry.Register(&doctype.DocType{Name: "Invoice", ModuleOwnerID: "finance.ar"})
+			payload, _ := json.Marshal(RecordCreatePayload{Doctype: "Invoice", Data: json.RawMessage(`{}`)})
+			snapshot, _ := json.Marshal(contract.ModuleSnapshot{TenantID: "tenant-a", Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "finance.ar", State: state}}})
+			mock.ExpectExec("UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectQuery("SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"snapshot_json"}).AddRow(string(snapshot)))
+			op := Operation{Command: CommandRecordCreate, Payload: payload, Context: OperationContext{TenantID: "tenant-a", ModuleExecution: &contract.ModuleExecution{}}}
+			got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, kdb.Resolve("libsql"), op, registry, nil)
+			if state == "active" && got != nil {
+				t.Fatalf("active module rejected: %v", got)
+			}
+			if state != "active" && (got == nil || got.Type != contract.CodePermissionDenied) {
+				t.Fatalf("%s module admission error = %v", state, got)
+			}
+			_ = tx.Rollback()
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestModuleLifecycleAdmissionFencesGenericWritesWithoutModuleIdentity(t *testing.T) {
+	for _, test := range []struct {
+		state  string
+		denied bool
+	}{{"active", false}, {"draining", true}, {"disabled", true}, {"removed", true}} {
+		t.Run(test.state, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			mock.ExpectBegin()
+			tx, err := database.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			registry := doctype.NewRegistry()
+			registry.Register(&doctype.DocType{Name: "Invoice", ModuleOwnerID: "finance.ar"})
+			payload, _ := json.Marshal(RecordCreatePayload{Doctype: "Invoice", Data: json.RawMessage(`{}`)})
+			snapshot, _ := json.Marshal(contract.ModuleSnapshot{TenantID: "tenant-a", Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "finance.ar", State: test.state}}})
+			mock.ExpectExec("UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectQuery("SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"snapshot_json"}).AddRow(string(snapshot)))
+			op := Operation{Command: CommandRecordCreate, Payload: payload, Context: OperationContext{TenantID: "tenant-a"}}
+			got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, kdb.Resolve("libsql"), op, registry, nil)
+			if test.denied && (got == nil || got.Type != contract.CodePermissionDenied) {
+				t.Fatalf("generic %s write admission = %v, want permission denied", test.state, got)
+			}
+			if !test.denied && got != nil {
+				t.Fatalf("generic active-module write rejected: %v", got)
+			}
+			_ = tx.Rollback()
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestDrainingModuleAllowsOnlyPreDrainPinnedWorkflowCommand(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedAt := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	snapshot, _ := json.Marshal(contract.ModuleSnapshot{TenantID: "tenant-a", Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "finance.ar", State: string(contract.ModuleDraining), StateChangedAt: changedAt}}})
+	mock.ExpectExec("UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"snapshot_json"}).AddRow(string(snapshot)))
+	mock.ExpectQuery("SELECT MIN\\(started_at\\) FROM _kora_workflow_attempt").WithArgs("tenant-a", "instance-1", "issue", "workflow-key-1").WillReturnRows(sqlmock.NewRows([]string{"started_at"}).AddRow(changedAt.Add(-time.Minute).Format(time.RFC3339Nano)))
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Invoice", ModuleOwnerID: "finance.ar"})
+	module, err := contract.NewCommandModuleExecution(contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, "sales.orders", "finance.ar", 1, "finance.invoice.issue", "finance.invoice.issue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	module, err = module.WithWorkflowCommandPin("instance-1", "issue", "workflow-key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(RecordCreatePayload{Doctype: "Invoice", Data: json.RawMessage(`{}`)})
+	op := Operation{Command: CommandRecordCreate, Payload: payload, Context: OperationContext{TenantID: "tenant-a", ModuleExecution: &module}}
+	if got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, kdb.Resolve("libsql"), op, registry, nil); got != nil {
+		t.Fatalf("pre-drain pinned command rejected: %v", got)
+	}
+	_ = tx.Rollback()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestGenericMutationCannotUseCommandOnlyModuleExecution(t *testing.T) {
 	registry := doctype.NewRegistry()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +92,25 @@ func TestServiceAcceptUsesAuthenticatedCallerAndPersistsTypedCommand(t *testing.
 	}
 	if store.command.Caller != "cloud-service" || store.command.Tenant != command.Tenant || store.command.Kind != CommandProvisionTenant || store.command.Now != now || !jsonValid(store.command.Command) {
 		t.Fatalf("accepted command identity/payload was not preserved: %+v", store.command)
+	}
+}
+
+func TestServiceAcceptsTenantScopedModuleLifecycleCommand(t *testing.T) {
+	store := &acceptStore{operation: Operation{ID: "01K7OPERATION000000000000000000", Tenant: "tenant-1", State: contract.OperationRequested}}
+	service, err := NewService(store, fixedIDs{id: "01K7OPERATION000000000000000000"}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := contract.ApplyModuleChange{Meta: contract.CommandMeta{IdempotencyKey: "module-change-01"}, ModuleID: "billing.core", TargetState: contract.ModuleDraining, PlanHash: strings.Repeat("a", 64), ExpectedRevision: 3}
+	if _, err := service.AcceptForTenant(context.Background(), "cloud-service", "tenant-1", command); err != nil {
+		t.Fatal(err)
+	}
+	if store.command.Tenant != "tenant-1" || store.command.Kind != CommandApplyModuleChange {
+		t.Fatalf("accepted module lifecycle operation = %+v", store.command)
+	}
+	var stored contract.ApplyModuleChange
+	if err := json.Unmarshal(store.command.Command, &stored); err != nil || stored.ModuleID != command.ModuleID || stored.TargetState != command.TargetState {
+		t.Fatalf("stored module lifecycle command = %+v, %v", stored, err)
 	}
 }
 

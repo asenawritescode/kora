@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/scheduler"
 )
@@ -147,6 +148,11 @@ func (s *Store) RegisterDefinition(ctx context.Context, tenant string, job *sche
 	var existing string
 	err = tx.QueryRowContext(ctx, db.Rebind(s.dialect, query), tenant, job.Name).Scan(&existing)
 	if errors.Is(err, sql.ErrNoRows) {
+		if job.OwnerModuleID != "" {
+			if err := admitScheduledDefinitionModuleState(ctx, tx, s.dialect, contract.TenantID(tenant), job.OwnerModuleID); err != nil {
+				return err
+			}
+		}
 		insert := `INSERT INTO _kora_schedule_definition (tenant_id,job_name,definition_digest,schedule,job_json,next_run_at,updated_at) VALUES (?,?,?,?,?,?,?)`
 		switch s.dialect.DriverName() {
 		case "mysql":
@@ -163,6 +169,11 @@ func (s *Store) RegisterDefinition(ctx context.Context, tenant string, job *sche
 		return fmt.Errorf("read scheduled definition: %w", err)
 	}
 	if existing != digest {
+		if job.OwnerModuleID != "" {
+			if err := admitScheduledDefinitionModuleState(ctx, tx, s.dialect, contract.TenantID(tenant), job.OwnerModuleID); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, db.Rebind(s.dialect, `UPDATE _kora_schedule_definition SET definition_digest=?,schedule=?,job_json=?,next_run_at=?,updated_at=? WHERE tenant_id=? AND job_name=?`), digest, job.Schedule, string(body), stampFirst, stampNow, tenant, job.Name)
 	}
 	if err != nil {
@@ -174,6 +185,33 @@ func (s *Store) RegisterDefinition(ctx context.Context, tenant string, job *sche
 	return nil
 }
 
+func admitScheduledDefinitionModuleState(ctx context.Context, tx *sql.Tx, dialect db.Dialect, tenant contract.TenantID, owner contract.ModuleID) error {
+	if tx == nil || dialect == nil || tenant == "" || owner == "" {
+		return errors.New("scheduled module admission identity is incomplete")
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_module_snapshot SET revision=revision WHERE tenant_id=?`), string(tenant)); err != nil {
+		return fmt.Errorf("fence schedule definition against module lifecycle: %w", err)
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id=?`), string(tenant)).Scan(&raw); err != nil {
+		return fmt.Errorf("load scheduled module lifecycle state: %w", err)
+	}
+	var snapshot contract.ModuleSnapshot
+	if json.Unmarshal([]byte(raw), &snapshot) != nil || snapshot.TenantID != tenant {
+		return errors.New("scheduled module lifecycle snapshot is invalid")
+	}
+	for _, installation := range snapshot.Installations {
+		if installation.ModuleID != owner {
+			continue
+		}
+		if installation.State == string(contract.ModuleActive) {
+			return nil
+		}
+		return contract.NewError(contract.CodePermissionDenied, "owning module is not accepting new scheduled definitions")
+	}
+	return contract.NewError(contract.CodePermissionDenied, "owning scheduled module is not installed")
+}
+
 func (s *Store) ClaimDue(ctx context.Context, tenant, jobName, owner string, now time.Time, lease time.Duration) (*scheduler.ScheduleOccurrence, error) {
 	if tenant == "" || jobName == "" || owner == "" || lease <= 0 {
 		return nil, errors.New("invalid scheduled occurrence claim")
@@ -183,6 +221,44 @@ func (s *Store) ClaimDue(ctx context.Context, tenant, jobName, owner string, now
 		return nil, fmt.Errorf("begin scheduled occurrence claim: %w", err)
 	}
 	defer tx.Rollback()
+	var definitionJSON string
+	if err := tx.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT job_json FROM _kora_schedule_definition WHERE tenant_id=? AND job_name=?`), tenant, jobName).Scan(&definitionJSON); err != nil {
+		return nil, fmt.Errorf("load scheduled job owner for admission: %w", err)
+	}
+	var definition scheduler.JobConfig
+	if err := json.Unmarshal([]byte(definitionJSON), &definition); err != nil {
+		return nil, fmt.Errorf("decode scheduled job owner for admission: %w", err)
+	}
+	moduleDraining := false
+	var moduleDrainingSince time.Time
+	if definition.OwnerModuleID != "" {
+		if _, err := tx.ExecContext(ctx, db.Rebind(s.dialect, `UPDATE _kora_module_snapshot SET revision=revision WHERE tenant_id=?`), tenant); err != nil {
+			return nil, fmt.Errorf("fence scheduled job admission against module lifecycle: %w", err)
+		}
+		var moduleJSON string
+		if err := tx.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id=?`), tenant).Scan(&moduleJSON); err != nil {
+			return nil, fmt.Errorf("load module lifecycle state for scheduled job: %w", err)
+		}
+		var modules contract.ModuleSnapshot
+		if json.Unmarshal([]byte(moduleJSON), &modules) != nil || modules.TenantID != contract.TenantID(tenant) {
+			return nil, errors.New("invalid module lifecycle snapshot for scheduled job")
+		}
+		active := false
+		for _, installed := range modules.Installations {
+			if installed.ModuleID == definition.OwnerModuleID {
+				active = installed.State == string(contract.ModuleActive)
+				moduleDraining = installed.State == string(contract.ModuleDraining)
+				moduleDrainingSince = installed.StateChangedAt
+				break
+			}
+		}
+		if !active && !moduleDraining {
+			if err := tx.Commit(); err != nil {
+				return nil, fmt.Errorf("commit rejected scheduled admission: %w", err)
+			}
+			return nil, nil
+		}
+	}
 	if err := s.markExpiredRunningUnknown(ctx, tx, tenant, jobName); err != nil {
 		return nil, err
 	}
@@ -207,8 +283,14 @@ func (s *Store) ClaimDue(ctx context.Context, tenant, jobName, owner string, now
 		return nil, nil
 	}
 	occurrence, err := s.pendingOccurrence(ctx, tx, tenant, jobName)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) && !moduleDraining {
 		occurrence, err = s.materializeDue(ctx, tx, tenant, jobName, now)
+	}
+	if errors.Is(err, sql.ErrNoRows) && moduleDraining {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit empty draining schedule observation: %w", err)
+		}
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
@@ -216,6 +298,12 @@ func (s *Store) ClaimDue(ctx context.Context, tenant, jobName, owner string, now
 	if occurrence == nil {
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit empty schedule claim: %w", err)
+		}
+		return nil, nil
+	}
+	if moduleDraining && (moduleDrainingSince.IsZero() || occurrence.ScheduledAt.After(moduleDrainingSince)) {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit rejected post-drain scheduled occurrence: %w", err)
 		}
 		return nil, nil
 	}
@@ -240,6 +328,96 @@ func (s *Store) ClaimDue(ctx context.Context, tenant, jobName, owner string, now
 		return nil, fmt.Errorf("commit scheduled occurrence claim: %w", err)
 	}
 	return occurrence, nil
+}
+
+func (s *Store) InspectOpenWork(ctx context.Context, tenant contract.TenantID, module contract.ModuleID, limit uint16) ([]contract.ModuleBlocker, error) {
+	if ctx == nil || tenant == "" || module == "" {
+		return nil, errors.New("scheduled open-work inspection identity is required")
+	}
+	if limit == 0 || limit > 20 {
+		limit = 20
+	}
+	rows, err := s.database.QueryContext(ctx, db.Rebind(s.dialect, `SELECT job_name,job_json FROM _kora_schedule_definition WHERE tenant_id=? ORDER BY job_name LIMIT 257`), string(tenant))
+	if err != nil {
+		return nil, fmt.Errorf("list scheduled definitions for module inspection: %w", err)
+	}
+	type ownedJob struct{ name string }
+	owned := make([]ownedJob, 0)
+	definitionCount := 0
+	for rows.Next() {
+		definitionCount++
+		if definitionCount > 256 {
+			_ = rows.Close()
+			return nil, errors.New("scheduled definition inspection exceeds bounded limit")
+		}
+		var name, payload string
+		if err := rows.Scan(&name, &payload); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		var job scheduler.JobConfig
+		if err := json.Unmarshal([]byte(payload), &job); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("decode scheduled definition %q: %w", name, err)
+		}
+		if job.OwnerModuleID == module {
+			owned = append(owned, ownedJob{name: name})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	var total uint64
+	examples := make([]string, 0, limit)
+	for _, job := range owned {
+		var count uint64
+		if err := s.database.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT COUNT(*) FROM _kora_schedule_occurrence WHERE tenant_id=? AND job_name=? AND state IN ('pending','running','outcome_unknown')`), string(tenant), job.name).Scan(&count); err != nil {
+			return nil, fmt.Errorf("count open occurrences for scheduled job %q: %w", job.name, err)
+		}
+		if ^uint64(0)-total < count {
+			total = ^uint64(0)
+		} else {
+			total += count
+		}
+		remaining := int(limit) - len(examples)
+		if remaining <= 0 || count == 0 {
+			continue
+		}
+		if remaining > 5-len(examples) {
+			remaining = 5 - len(examples)
+		}
+		occurrences, err := s.database.QueryContext(ctx, db.Rebind(s.dialect, `SELECT scheduled_at FROM _kora_schedule_occurrence WHERE tenant_id=? AND job_name=? AND state IN ('pending','running','outcome_unknown') ORDER BY scheduled_at LIMIT ?`), string(tenant), job.name, remaining)
+		if err != nil {
+			return nil, fmt.Errorf("read bounded occurrence examples for %q: %w", job.name, err)
+		}
+		for occurrences.Next() {
+			var stamp string
+			if err := occurrences.Scan(&stamp); err != nil {
+				_ = occurrences.Close()
+				return nil, err
+			}
+			examples = append(examples, job.name+"@"+stamp)
+		}
+		if err := occurrences.Err(); err != nil {
+			_ = occurrences.Close()
+			return nil, err
+		}
+		if err := occurrences.Close(); err != nil {
+			return nil, err
+		}
+	}
+	if total == 0 {
+		return nil, nil
+	}
+	count := uint32(total)
+	if total > uint64(^uint32(0)) {
+		count = ^uint32(0)
+	}
+	return []contract.ModuleBlocker{{Code: "scheduled_execution_open", Count: count, Examples: examples}}, nil
 }
 
 func (s *Store) Renew(ctx context.Context, occurrence scheduler.ScheduleOccurrence, now time.Time, lease time.Duration) error {

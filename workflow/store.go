@@ -165,7 +165,7 @@ type PinnedCapabilityAttempt struct {
 }
 
 func (a PinnedCapabilityAttempt) Validate() error {
-	if a.Dispatch.Validate() != nil || a.Lease.Validate() != nil || a.Lease.State != "active" || a.Lease.TenantID != a.Dispatch.Scope.TenantID || a.Lease.Scope != a.Dispatch.Scope || a.Lease.CallerModuleID != a.Dispatch.CallerModuleID || a.Lease.ProviderID != a.Dispatch.ProviderID || a.Lease.BindingRevision != a.Dispatch.BindingRevision || a.Lease.Operation != a.Dispatch.Operation.OperationName {
+	if a.Dispatch.Validate() != nil || a.Lease.Validate() != nil || a.Lease.State != "active" || a.Lease.TenantID != a.Dispatch.Scope.TenantID || a.Lease.Scope != a.Dispatch.Scope || a.Lease.CallerModuleID != a.Dispatch.CallerModuleID || a.Lease.ProviderModuleID != a.Dispatch.ProviderModuleID || a.Lease.ProviderID != a.Dispatch.ProviderID || a.Lease.BindingRevision != a.Dispatch.BindingRevision || a.Lease.Operation != a.Dispatch.Operation.OperationName {
 		return fmt.Errorf("pinned capability attempt lease does not match its provider dispatch")
 	}
 	return nil

@@ -42,6 +42,10 @@ type CapabilityLeaseAdmission interface {
 	AdmitCapabilityAttempt(context.Context, contract.CapabilityLease, time.Time) error
 }
 
+type PinnedCapabilityRecoveryAdmission interface {
+	AdmitPinnedCapabilityRecovery(context.Context, contract.PinnedDispatch, contract.CapabilityLease, contract.TenantID, contract.InstanceID, contract.StepID, time.Time) error
+}
+
 type CapabilityLeaseManager interface {
 	CapabilityLeaseAdmission
 	EnsureCapabilityLease(context.Context, contract.CapabilityLease) error
@@ -132,7 +136,7 @@ func (d *HTTPSCapabilityDispatcher) Reconcile(ctx context.Context, pin contract.
 }
 
 func (d *HTTPSCapabilityDispatcher) ReconcilePinned(ctx context.Context, pin contract.PinnedDispatch, lease contract.CapabilityLease, registration ActionRegistration) (contract.ExternalOutcome, ActionResult, error) {
-	if d == nil || ctx == nil || pin.Validate() != nil || lease.Validate() != nil || d.ProviderID != pin.ProviderID || lease.ProviderID != pin.ProviderID || lease.Scope != pin.Scope || lease.CallerModuleID != pin.CallerModuleID || lease.BindingRevision != pin.BindingRevision || lease.Operation != pin.Operation.OperationName {
+	if d == nil || ctx == nil || pin.Validate() != nil || lease.Validate() != nil || d.ProviderID != pin.ProviderID || lease.ProviderID != pin.ProviderID || lease.ProviderModuleID != pin.ProviderModuleID || lease.Scope != pin.Scope || lease.CallerModuleID != pin.CallerModuleID || lease.BindingRevision != pin.BindingRevision || lease.Operation != pin.Operation.OperationName {
 		return contract.ExternalUnknown, ActionResult{}, contract.NewError(contract.CodePermissionDenied, "pinned reconciliation identity is invalid")
 	}
 	endpoint, err := url.Parse(d.StatusEndpoint)
@@ -205,14 +209,17 @@ func NewPinnedDispatch(executionID string, scope contract.BusinessScope, caller 
 	if executionID == "" || scope.Validate() != nil || caller == "" || providerID == "" || action.OperationName == "" || idempotency == "" || !json.Valid(input) {
 		return contract.PinnedDispatch{}, fmt.Errorf("pinned capability dispatch identity is incomplete")
 	}
-	if lease.Validate() != nil || lease.State != "active" || lease.TenantID != scope.TenantID || lease.Scope != scope || lease.CallerModuleID != caller || lease.ProviderID != providerID || lease.BindingRevision != bindingRevision || lease.Operation != action.OperationName {
+	if lease.Validate() != nil || lease.State != "active" || lease.TenantID != scope.TenantID || lease.Scope != scope || lease.CallerModuleID != caller || lease.ProviderID == "" || lease.BindingRevision != bindingRevision || lease.Operation != action.OperationName {
 		return contract.PinnedDispatch{}, fmt.Errorf("pinned capability lease does not match the provider binding")
 	}
 	if action.InputSchema.ID == "" || action.InputSchema.Version == 0 || action.OutputSchema.ID == "" || action.OutputSchema.Version == 0 {
 		return contract.PinnedDispatch{}, fmt.Errorf("pinned capability schemas are required")
 	}
 	hash := sha256.Sum256(input)
-	return contract.PinnedDispatch{ExecutionID: executionID, Scope: scope, CallerModuleID: caller, ProviderID: providerID, BindingRevision: bindingRevision, Operation: action, IdempotencyKey: idempotency, InputHash: hex.EncodeToString(hash[:])}, nil
+	if lease.ProviderID != providerID {
+		return contract.PinnedDispatch{}, fmt.Errorf("pinned capability lease provider does not match the workflow action")
+	}
+	return contract.PinnedDispatch{ExecutionID: executionID, Scope: scope, CallerModuleID: caller, ProviderModuleID: lease.ProviderModuleID, ProviderID: providerID, BindingRevision: bindingRevision, Operation: action, IdempotencyKey: idempotency, InputHash: hex.EncodeToString(hash[:])}, nil
 }
 
 func NewExternalActionExecutor(store ExecutionStore, identities ExecutionIdentityProvider, schemas PayloadSchemaRegistry, leases CapabilityLeaseAdmission) (*ExternalActionExecutor, error) {
@@ -316,9 +323,16 @@ func (e *ExternalActionExecutor) Execute(ctx context.Context, claim Claim, defin
 		if storedAttempt == nil || storedAttempt.Validate() != nil {
 			return StepCommit{}, contract.NewError(contract.CodeConflict, "persisted pinned capability lease is invalid")
 		}
-		if err := e.leases.AdmitCapabilityAttempt(ctx, storedAttempt.Lease, time.Now().UTC()); err != nil {
+		admitAt := time.Now().UTC()
+		var admissionErr error
+		if recoveryAdmission, ok := e.leases.(PinnedCapabilityRecoveryAdmission); ok && claim.Attempt > 1 && storedAttempt.Dispatch.ProviderModuleID != "" {
+			admissionErr = recoveryAdmission.AdmitPinnedCapabilityRecovery(ctx, storedAttempt.Dispatch, storedAttempt.Lease, claim.Tenant, claim.InstanceID, claim.StepID, admitAt)
+		} else {
+			admissionErr = e.leases.AdmitCapabilityAttempt(ctx, storedAttempt.Lease, admitAt)
+		}
+		if admissionErr != nil {
 			var denial *contract.Error
-			if errors.As(err, &denial) && denial.Type == contract.CodePermissionDenied {
+			if errors.As(admissionErr, &denial) && denial.Type == contract.CodePermissionDenied {
 				return externalLeaseDeniedCommit(claim, executionID, key)
 			}
 			// No provider request was started. Persist a safe retry transition;

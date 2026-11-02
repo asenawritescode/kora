@@ -31,6 +31,30 @@ func (a *dispatcherAdmissionProbe) Acquire(context.Context) (func(), error) {
 	}, nil
 }
 
+func TestInspectOpenWorkReportsOnlyOwnedUnpublishedEvents(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	owned, _ := json.Marshal(contract.EventEnvelope{ID: "evt-owned", Type: "invoice.issued", Version: 1, Source: "billing.ar", Site: "tenant-a"})
+	other, _ := json.Marshal(contract.EventEnvelope{ID: "evt-other", Type: "order.created", Version: 1, Source: "sales.orders", Site: "tenant-a"})
+	mock.ExpectQuery(`SELECT id,payload FROM _kora_outbox WHERE site=\? AND status IN \('pending','publishing','failed'\) ORDER BY created_at,id LIMIT 257`).
+		WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"id", "payload"}).AddRow("evt-owned", string(owned)).AddRow("evt-other", string(other)))
+	mock.ExpectQuery(`SELECT f.event_id,o.payload FROM _kora_outbox_delivery_failure f JOIN _kora_outbox o ON o.id=f.event_id AND o.site=f.site WHERE f.site=\? AND f.quarantined=\? ORDER BY f.updated_at,f.event_id LIMIT 257`).
+		WithArgs("tenant-a", true).WillReturnRows(sqlmock.NewRows([]string{"event_id", "payload"}).AddRow("evt-quarantined", string(owned)).AddRow("evt-other-quarantined", string(other)))
+	blockers, err := InspectOpenWork(context.Background(), database, kdb.Resolve("mysql"), "tenant-a", "billing.ar", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blockers) != 2 || blockers[0].Code != "event_delivery_open" || blockers[0].Count != 1 || !reflect.DeepEqual(blockers[0].Examples, []string{"evt-owned"}) || blockers[1].Code != "event_delivery_quarantined" || blockers[1].Count != 1 || !reflect.DeepEqual(blockers[1].Examples, []string{"evt-quarantined"}) {
+		t.Fatalf("unexpected blockers: %+v", blockers)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDispatcherReleasesDBCursorAndAdmissionBeforeExternalHandler(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {

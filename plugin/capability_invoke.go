@@ -71,6 +71,9 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 	if lease.Validate() != nil || lease.State != "active" || lease.TenantID != scope.TenantID || lease.Scope != scope || lease.CallerModuleID != caller || lease.ProviderID != binding.ProviderID || lease.Operation != operation || lease.BindingRevision != binding.Revision {
 		return CapabilityOperationResult{}, contract.NewError(contract.CodePermissionDenied, "capability lease does not match the resolved binding")
 	}
+	if lease.ProviderModuleID != binding.OwnerModuleID {
+		return CapabilityOperationResult{}, contract.NewError(contract.CodePermissionDenied, "capability lease provider owner does not match the resolved binding")
+	}
 	if err := binding.validateSchema(spec.Input, payload); err != nil {
 		return CapabilityOperationResult{}, fmt.Errorf("capability input failed its registered schema: %w", err)
 	}

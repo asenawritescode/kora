@@ -182,10 +182,16 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 		return nil, fmt.Errorf("configure management state executor: %w", err)
 	}
 	dispatcher := managementOperationDispatcher{state: executor}
+	moduleLifecycleExecutor, err := newManagementModuleLifecycleExecutor(tenants)
+	if err != nil {
+		return nil, fmt.Errorf("configure module lifecycle executor: %w", err)
+	}
+	dispatcher.moduleChange = moduleLifecycleExecutor
 	capabilities := map[api.ManagementCapability]bool{
 		api.ManagementStateCapability: true,
 		api.ManagementStateRecovery:   true,
 		api.ManagementOperationRead:   true,
+		api.ManagementModuleLifecycle: true,
 	}
 	if packageResolver != nil {
 		packageDirectory, ok := directory.(managementPackageDirectory)
@@ -253,7 +259,8 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 	return &managementOperationRuntime{
 		routes: api.ManagementOperationRoutes{
 			Service: service, Caller: principal, WorkerReady: true,
-			Capabilities: capabilities,
+			Capabilities:           capabilities,
+			ModuleLifecyclePlanner: moduleLifecycleExecutor,
 		},
 		worker: worker,
 		config: management.WorkerConfig{Owner: owner, Deployment: contract.DeploymentID(deploymentID), Concurrency: 2, Lease: 30 * time.Second, Poll: 250 * time.Millisecond},

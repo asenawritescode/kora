@@ -73,9 +73,9 @@ func TestBusinessRunStorePersistsRunAndFindingsAtomically(t *testing.T) {
 	}
 	defer database.Close()
 	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
-	run := BusinessRun{TenantID: "tenant-a", ID: "run-1", RuleID: "sales.invoice", Version: 1, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}, Cutoff: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), Complete: true, Findings: []BusinessFinding{{ID: "bf_1", Key: "sale:1", Kind: FindingMissingEffect}}}
+	run := BusinessRun{TenantID: "tenant-a", OwnerModuleID: "sales.orders", ID: "run-1", RuleID: "sales.invoice", Version: 1, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}, Cutoff: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), Complete: true, Findings: []BusinessFinding{{ID: "bf_1", Key: "sale:1", Kind: FindingMissingEffect}}}
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_business_recon_run (tenant_id, run_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")).WithArgs("tenant-a", "run-1", "sales.invoice", uint32(1), sqlmock.AnyArg(), run.Cutoff.Format(time.RFC3339Nano), int64(1), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_business_recon_run (tenant_id, run_id, owner_module_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")).WithArgs("tenant-a", "run-1", "sales.orders", "sales.invoice", uint32(1), sqlmock.AnyArg(), run.Cutoff.Format(time.RFC3339Nano), int64(1), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_business_recon_finding (tenant_id, run_id, finding_id, finding_json, state, evidence) VALUES (?, ?, ?, ?, ?, ?)")).WithArgs("tenant-a", "run-1", "bf_1", sqlmock.AnyArg(), "open", "").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	if err := store.Save(context.Background(), run); err != nil {
@@ -93,14 +93,34 @@ func TestBusinessRunStoreLoadsDurableCursorAndWatermarks(t *testing.T) {
 	}
 	defer database.Close()
 	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-2").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.invoice", 3, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 0, `{"source":"cursor-s"}`, `{"source_revision":"source-r","target_revision":"target-r"}`, "2026-11-02T00:00:00Z"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT owner_module_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-2").WillReturnRows(sqlmock.NewRows([]string{"owner_module_id", "rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.orders", "sales.invoice", 3, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 0, `{"source":"cursor-s"}`, `{"source_revision":"source-r","target_revision":"target-r"}`, "2026-11-02T00:00:00Z"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-2").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}))
 	run, err := store.Load(context.Background(), "tenant-a", "run-2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Cursors.Source != "cursor-s" || run.Watermarks.SourceRevision != "source-r" || run.Watermarks.TargetRevision != "target-r" || run.Complete {
+	if run.OwnerModuleID != "sales.orders" || run.Cursors.Source != "cursor-s" || run.Watermarks.SourceRevision != "source-r" || run.Watermarks.TargetRevision != "target-r" || run.Complete {
 		t.Fatalf("durable run progress = %+v", run)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBusinessRunStoreInspectOpenWorkIsOwnerScoped(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM _kora_business_recon_finding f JOIN _kora_business_recon_run r ON r.tenant_id=f.tenant_id AND r.run_id=f.run_id WHERE f.tenant_id=? AND r.owner_module_id=? AND f.state IN (?,?)`)).WithArgs("tenant-a", "sales.orders", string(BusinessFindingOpen), string(BusinessFindingInvestigating)).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT f.finding_id FROM _kora_business_recon_finding f JOIN _kora_business_recon_run r ON r.tenant_id=f.tenant_id AND r.run_id=f.run_id WHERE f.tenant_id=? AND r.owner_module_id=? AND f.state IN (?,?) ORDER BY f.finding_id LIMIT ?`)).WithArgs("tenant-a", "sales.orders", string(BusinessFindingOpen), string(BusinessFindingInvestigating), 2).WillReturnRows(sqlmock.NewRows([]string{"finding_id"}).AddRow("bf-a").AddRow("bf-b"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM _kora_business_recon_run WHERE tenant_id=? AND owner_module_id=? AND complete=?`)).WithArgs("tenant-a", "sales.orders", int64(0)).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT run_id FROM _kora_business_recon_run WHERE tenant_id=? AND owner_module_id=? AND complete=? ORDER BY created_at,run_id LIMIT ?`)).WithArgs("tenant-a", "sales.orders", int64(0), 2).WillReturnRows(sqlmock.NewRows([]string{"run_id"}).AddRow("run-incomplete"))
+	blockers, err := store.InspectOpenWork(context.Background(), "tenant-a", "sales.orders", 2)
+	if err != nil || len(blockers) != 2 || blockers[0].Code != "domain_obligation_open" || blockers[0].Count != 2 || len(blockers[0].Examples) != 2 || blockers[1].Code != "domain_reconciliation_incomplete" || blockers[1].Count != 1 {
+		t.Fatalf("owner-scoped obligation blockers = %+v, %v", blockers, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -114,7 +134,7 @@ func TestBusinessRunStoreRejectsForgedScopeAndFindingWithoutTransaction(t *testi
 	}
 	defer database.Close()
 	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
-	run := BusinessRun{TenantID: "tenant-a", ID: "run-1", RuleID: "sales.invoice", Version: 1, Scope: contract.BusinessScope{TenantID: "tenant-b", Kind: contract.ScopeKindTenant}, Cutoff: time.Now().UTC()}
+	run := BusinessRun{TenantID: "tenant-a", OwnerModuleID: "sales.orders", ID: "run-1", RuleID: "sales.invoice", Version: 1, Scope: contract.BusinessScope{TenantID: "tenant-b", Kind: contract.ScopeKindTenant}, Cutoff: time.Now().UTC()}
 	if err := store.Save(context.Background(), run); err == nil {
 		t.Fatal("cross-tenant business run accepted")
 	}
@@ -182,7 +202,7 @@ func TestBusinessRunStoreCompletedRepairRetryDoesNotCallOwnerAgain(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT owner_module_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"owner_module_id", "rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.orders", "sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}).AddRow(string(findingJSON), "resolved", "owner-evidence"))
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT state FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? AND finding_id = ?")).WithArgs("tenant-a", "run-1", "bf_repair").WillReturnRows(sqlmock.NewRows([]string{"state"}).AddRow("resolved"))
@@ -205,7 +225,7 @@ func TestBusinessRunWaiverRequiresAuthorizationAndAuditsAtomically(t *testing.T)
 	}
 	defer database.Close()
 	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT owner_module_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"owner_module_id", "rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.orders", "sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}))
 	if err := store.Waive(context.Background(), "tenant-a", "run-1", "bf_1", "operator-a", "source owner confirms non-applicability", allowBusinessWaiver{err: errors.New("denied")}); err == nil {
 		t.Fatal("unauthorized waiver accepted")
@@ -220,7 +240,7 @@ func TestBusinessRunWaiverRequiresAuthorizationAndAuditsAtomically(t *testing.T)
 	}
 	defer database2.Close()
 	store.DB = database2
-	mock2.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
+	mock2.ExpectQuery(regexp.QuoteMeta("SELECT owner_module_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"owner_module_id", "rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.orders", "sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
 	mock2.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}))
 	mock2.ExpectBegin()
 	mock2.ExpectQuery(regexp.QuoteMeta("SELECT state FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? AND finding_id = ?")).WithArgs("tenant-a", "run-1", "bf_1").WillReturnRows(sqlmock.NewRows([]string{"state"}).AddRow("open"))

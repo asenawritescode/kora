@@ -52,6 +52,146 @@ func (s *InstanceStore) StartInstance(ctx context.Context, input workflow.StartI
 	}
 }
 
+// InspectOpenWork reports bounded nonterminal workflow instances whose pinned
+// definition is owned by the module. The query uses existing definition and
+// instance stores and returns opaque IDs only.
+func (s *InstanceStore) InspectOpenWork(ctx context.Context, tenant contract.TenantID, module contract.ModuleID, limit uint16) ([]contract.ModuleBlocker, error) {
+	if s == nil || s.database == nil || s.dialect == nil || ctx == nil || tenant == "" || module == "" {
+		return nil, fmt.Errorf("workflow open-work inspection identity is required")
+	}
+	if limit == 0 || limit > 20 {
+		limit = 20
+	}
+	var count uint64
+	query := `SELECT COUNT(*) FROM _kora_workflow_instance i JOIN _kora_workflow_definition d ON d.tenant_id=i.tenant_id AND d.definition_id=i.definition_id AND d.version=i.definition_version WHERE i.tenant_id=? AND i.status NOT IN ('completed','cancelled','failed') AND JSON_UNQUOTE(JSON_EXTRACT(d.definition_json,'$.owner_module_id'))=?`
+	if s.dialect.DriverName() == "libsql" {
+		query = `SELECT COUNT(*) FROM _kora_workflow_instance i JOIN _kora_workflow_definition d ON d.tenant_id=i.tenant_id AND d.definition_id=i.definition_id AND d.version=i.definition_version WHERE i.tenant_id=? AND i.status NOT IN ('completed','cancelled','failed') AND json_extract(d.definition_json,'$.owner_module_id')=?`
+	} else if s.dialect.DriverName() == "postgres" {
+		query = `SELECT COUNT(*) FROM _kora_workflow_instance i JOIN _kora_workflow_definition d ON d.tenant_id=i.tenant_id AND d.definition_id=i.definition_id AND d.version=i.definition_version WHERE i.tenant_id=? AND i.status NOT IN ('completed','cancelled','failed') AND d.definition_json->>'owner_module_id'=?`
+	}
+	if err := s.database.QueryRowContext(ctx, db.Rebind(s.dialect, query), string(tenant), string(module)).Scan(&count); err != nil {
+		return nil, fmt.Errorf("count module-owned workflow instances: %w", err)
+	}
+	query = `SELECT i.id FROM _kora_workflow_instance i JOIN _kora_workflow_definition d ON d.tenant_id=i.tenant_id AND d.definition_id=i.definition_id AND d.version=i.definition_version WHERE i.tenant_id=? AND i.status NOT IN ('completed','cancelled','failed') AND JSON_UNQUOTE(JSON_EXTRACT(d.definition_json,'$.owner_module_id'))=? ORDER BY i.updated_at,i.id LIMIT ?`
+	if s.dialect.DriverName() == "libsql" {
+		query = `SELECT i.id FROM _kora_workflow_instance i JOIN _kora_workflow_definition d ON d.tenant_id=i.tenant_id AND d.definition_id=i.definition_id AND d.version=i.definition_version WHERE i.tenant_id=? AND i.status NOT IN ('completed','cancelled','failed') AND json_extract(d.definition_json,'$.owner_module_id')=? ORDER BY i.updated_at,i.id LIMIT ?`
+	}
+	if s.dialect.DriverName() == "postgres" {
+		query = `SELECT i.id FROM _kora_workflow_instance i JOIN _kora_workflow_definition d ON d.tenant_id=i.tenant_id AND d.definition_id=i.definition_id AND d.version=i.definition_version WHERE i.tenant_id=? AND i.status NOT IN ('completed','cancelled','failed') AND d.definition_json->>'owner_module_id'=? ORDER BY i.updated_at,i.id LIMIT ?`
+	}
+	examples := make([]string, 0, limit)
+	if count > 0 {
+		rows, err := s.database.QueryContext(ctx, db.Rebind(s.dialect, query), string(tenant), string(module), int(limit))
+		if err != nil {
+			return nil, fmt.Errorf("list module-owned workflow instances: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, err
+			}
+			examples = append(examples, id)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	pinnedOwnerExpr := `JSON_UNQUOTE(JSON_EXTRACT(pinned_dispatch_json,'$.dispatch.caller_module_id'))`
+	pinnedProviderOwnerExpr := `JSON_UNQUOTE(JSON_EXTRACT(pinned_dispatch_json,'$.dispatch.provider_module_id'))`
+	if s.dialect.DriverName() == "libsql" {
+		pinnedOwnerExpr = `json_extract(pinned_dispatch_json,'$.dispatch.caller_module_id')`
+		pinnedProviderOwnerExpr = `json_extract(pinned_dispatch_json,'$.dispatch.provider_module_id')`
+	}
+	if s.dialect.DriverName() == "postgres" {
+		pinnedOwnerExpr = `pinned_dispatch_json->'dispatch'->>'caller_module_id'`
+		pinnedProviderOwnerExpr = `pinned_dispatch_json->'dispatch'->>'provider_module_id'`
+	}
+	pinnedQuery := `SELECT COUNT(*) FROM _kora_workflow_attempt WHERE tenant_id=? AND status IN ('running','outcome_unknown') AND pinned_dispatch_json IS NOT NULL AND (` + pinnedOwnerExpr + `=? OR ` + pinnedProviderOwnerExpr + `=?)`
+	var pinnedCount uint64
+	if err := s.database.QueryRowContext(ctx, db.Rebind(s.dialect, pinnedQuery), string(tenant), string(module), string(module)).Scan(&pinnedCount); err != nil {
+		return nil, fmt.Errorf("count pinned module capability attempts: %w", err)
+	}
+	pinnedQuery = `SELECT execution_id FROM _kora_workflow_attempt WHERE tenant_id=? AND status IN ('running','outcome_unknown') AND pinned_dispatch_json IS NOT NULL AND (` + pinnedOwnerExpr + `=? OR ` + pinnedProviderOwnerExpr + `=?) ORDER BY started_at,execution_id LIMIT ?`
+	var pinnedExamples []string
+	if pinnedCount > 0 {
+		rows, err := s.database.QueryContext(ctx, db.Rebind(s.dialect, pinnedQuery), string(tenant), string(module), string(module), int(limit))
+		if err != nil {
+			return nil, fmt.Errorf("list pinned module capability attempts: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var executionID string
+			if err := rows.Scan(&executionID); err != nil {
+				return nil, err
+			}
+			pinnedExamples = append(pinnedExamples, executionID)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	blockers := make([]contract.ModuleBlocker, 0, 2)
+	if count > 0 {
+		blockers = append(blockers, contract.ModuleBlocker{Code: "workflow_instance_open", Count: clampModuleWorkCount(count), Examples: examples})
+	}
+	unknownQuery := `SELECT COUNT(*) FROM _kora_workflow_attempt a JOIN _kora_workflow_definition d ON d.tenant_id=a.tenant_id AND d.definition_id=(SELECT i.definition_id FROM _kora_workflow_instance i WHERE i.tenant_id=a.tenant_id AND i.id=a.instance_id) AND d.version=(SELECT i.definition_version FROM _kora_workflow_instance i WHERE i.tenant_id=a.tenant_id AND i.id=a.instance_id) WHERE a.tenant_id=? AND a.status='outcome_unknown' AND JSON_UNQUOTE(JSON_EXTRACT(d.definition_json,'$.owner_module_id'))=?`
+	if s.dialect.DriverName() == "libsql" {
+		unknownQuery = `SELECT COUNT(*) FROM _kora_workflow_attempt a JOIN _kora_workflow_instance i ON i.tenant_id=a.tenant_id AND i.id=a.instance_id JOIN _kora_workflow_definition d ON d.tenant_id=i.tenant_id AND d.definition_id=i.definition_id AND d.version=i.definition_version WHERE a.tenant_id=? AND a.status='outcome_unknown' AND json_extract(d.definition_json,'$.owner_module_id')=?`
+	}
+	if s.dialect.DriverName() == "postgres" {
+		unknownQuery = `SELECT COUNT(*) FROM _kora_workflow_attempt a JOIN _kora_workflow_instance i ON i.tenant_id=a.tenant_id AND i.id=a.instance_id JOIN _kora_workflow_definition d ON d.tenant_id=i.tenant_id AND d.definition_id=i.definition_id AND d.version=i.definition_version WHERE a.tenant_id=? AND a.status='outcome_unknown' AND d.definition_json->>'owner_module_id'=?`
+	}
+	var unknown uint64
+	if err := s.database.QueryRowContext(ctx, db.Rebind(s.dialect, unknownQuery), string(tenant), string(module)).Scan(&unknown); err != nil {
+		return nil, fmt.Errorf("count unknown module-owned workflow outcomes: %w", err)
+	}
+	if unknown > 0 {
+		blockers = append(blockers, contract.ModuleBlocker{Code: "external_outcome_unknown", Count: clampModuleWorkCount(unknown)})
+	}
+	if len(pinnedExamples) > 0 {
+		blockers = append(blockers, contract.ModuleBlocker{Code: "pinned_provider_work_open", Count: clampModuleWorkCount(pinnedCount), Examples: pinnedExamples})
+	}
+	return blockers, nil
+}
+
+func clampModuleWorkCount(value uint64) uint32 {
+	if value > uint64(^uint32(0)) {
+		return ^uint32(0)
+	}
+	return uint32(value)
+}
+
+func admitWorkflowModuleActive(ctx context.Context, tx *sql.Tx, dialect db.Dialect, tenant contract.TenantID, owner contract.ModuleID) error {
+	if owner == "" {
+		return nil
+	}
+	if tx == nil || dialect == nil || tenant == "" {
+		return fmt.Errorf("workflow module admission identity is incomplete")
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_module_snapshot SET revision=revision WHERE tenant_id=?`), string(tenant)); err != nil {
+		return fmt.Errorf("fence workflow write against module lifecycle: %w", err)
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id=?`), string(tenant)).Scan(&raw); err != nil {
+		return fmt.Errorf("load workflow module lifecycle state: %w", err)
+	}
+	var snapshot contract.ModuleSnapshot
+	if json.Unmarshal([]byte(raw), &snapshot) != nil || snapshot.TenantID != tenant {
+		return fmt.Errorf("workflow module lifecycle snapshot is invalid")
+	}
+	for _, installation := range snapshot.Installations {
+		if installation.ModuleID != owner {
+			continue
+		}
+		if installation.State == string(contract.ModuleActive) {
+			return nil
+		}
+		return contract.NewError(contract.CodePermissionDenied, "owning module is not accepting new workflow writes")
+	}
+	return contract.NewError(contract.CodePermissionDenied, "owning workflow module is not installed")
+}
+
 func (s *InstanceStore) startInstanceOnce(ctx context.Context, input workflow.StartInstanceInput) (contract.WorkflowInstance, error) {
 	if err := s.validateStart(ctx, input); err != nil {
 		return contract.WorkflowInstance{}, err
@@ -103,6 +243,9 @@ func (s *InstanceStore) startInstanceOnce(ctx context.Context, input workflow.St
 	}
 	if storedDefinitionDigest != input.DefinitionDigest {
 		return contract.WorkflowInstance{}, contract.NewError(contract.CodeConflict, "workflow definition changed from the published version")
+	}
+	if err := admitWorkflowModuleActive(ctx, tx, s.dialect, input.Tenant, input.Definition.OwnerModuleID); err != nil {
+		return contract.WorkflowInstance{}, err
 	}
 	stamp := "CURRENT_TIMESTAMP"
 	if s.dialect.DriverName() == "mysql" {

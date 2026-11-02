@@ -537,7 +537,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 				defaultScope := contract.BusinessScope{TenantID: contract.TenantID(loaded.SiteID), Kind: contract.ScopeKindTenant}
 				scope = &defaultScope
 			}
-			jobs = append(jobs, &scheduler.JobConfig{Name: definition.Name, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig, Scope: scope, RequiredResource: definition.RequiredResource, RequiredOperation: definition.RequiredOperation})
+			jobs = append(jobs, &scheduler.JobConfig{Name: definition.Name, OwnerModuleID: definition.OwnerModuleID, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig, Scope: scope, RequiredResource: definition.RequiredResource, RequiredOperation: definition.RequiredOperation})
 		}
 		tenantScheduler, err := newTenantScheduler(loaded, dialect, jobs, domainKernel, config.SchedulerHandlerFactory, config.SchedulerExecutionResolverFactory, config.Mailer, services.Outbox, config.ScriptRunner, services.ScriptStore, services.WorkAdmission, worker)
 		if err != nil {

@@ -184,7 +184,7 @@ func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T
 	}
 	leaseAdmission := &operationTestLeaseAdmission{}
 	plan.LeaseAdmission = leaseAdmission
-	lease := contract.CapabilityLease{ID: "lease-issue", TenantID: scope.TenantID, Scope: scope, CallerModuleID: consumer.ID, ProviderID: "ar-internal", Operation: "issue", BindingRevision: plan.Revision, GrantEpoch: 2, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	lease := contract.CapabilityLease{ID: "lease-issue", TenantID: scope.TenantID, Scope: scope, CallerModuleID: consumer.ID, ProviderModuleID: owner.ID, ProviderID: "ar-internal", Operation: "issue", BindingRevision: plan.Revision, GrantEpoch: 2, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
 	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{
 		PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", AuthenticatedAt: time.Now().UTC(),
 	})
@@ -237,7 +237,7 @@ func TestBindingPlanRejectsBadCapabilitySchemasBeforeAndAfterProviderCall(t *tes
 		t.Fatal("resolve external capability:", err)
 	}
 	plan.LeaseAdmission = &operationTestLeaseAdmission{}
-	lease := contract.CapabilityLease{ID: "lease-issue", TenantID: scope.TenantID, Scope: scope, CallerModuleID: consumer.ID, ProviderID: "ar-external", Operation: "issue", BindingRevision: plan.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	lease := contract.CapabilityLease{ID: "lease-issue", TenantID: scope.TenantID, Scope: scope, CallerModuleID: consumer.ID, ProviderModuleID: owner.ID, ProviderID: "ar-external", Operation: "issue", BindingRevision: plan.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
 	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", AuthenticatedAt: time.Now().UTC()})
 	if err != nil {
 		t.Fatal("verified actor execution:", err)

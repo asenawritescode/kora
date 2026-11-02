@@ -43,13 +43,26 @@
         },
         "plan_hash": {
           "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
         }
       },
       "required": [
         "expected_revision",
         "meta",
         "module_id",
-        "plan_hash"
+        "plan_hash",
+        "target_state"
       ],
       "type": "object"
     },
@@ -1566,6 +1579,7 @@
               "tenant.delete.reconcile",
               "tenant.invitation.deliver",
               "tenant.invitation.reconcile",
+              "tenant.module.lifecycle",
               "operation.read"
             ],
             "type": "string"
@@ -1846,6 +1860,9 @@
           },
           "type": "array"
         },
+        "module_id": {
+          "type": "string"
+        },
         "open_work_blockers": {
           "items": {
             "$ref": "#/$defs/ModuleBlocker"
@@ -1854,11 +1871,25 @@
         },
         "plan_hash": {
           "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
         }
       },
       "required": [
         "base_revision",
-        "plan_hash"
+        "module_id",
+        "plan_hash",
+        "target_state"
       ],
       "type": "object"
     },
@@ -1977,6 +2008,9 @@
         "artifact_digest": {
           "type": "string"
         },
+        "last_lifecycle_operation_id": {
+          "type": "string"
+        },
         "module_id": {
           "type": "string"
         },
@@ -1984,6 +2018,10 @@
           "type": "integer"
         },
         "state": {
+          "type": "string"
+        },
+        "state_changed_at": {
+          "format": "date-time",
           "type": "string"
         },
         "tenant_id": {
@@ -2381,6 +2419,9 @@
         "provider_id": {
           "type": "string"
         },
+        "provider_module_id": {
+          "type": "string"
+        },
         "scope": {
           "$ref": "#/$defs/BusinessScope"
         }
@@ -2405,6 +2446,12 @@
         },
         "module_id": {
           "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
         },
         "target_state": {
           "type": "string"
@@ -3377,6 +3424,9 @@
         "name": {
           "type": "string"
         },
+        "owner_module_id": {
+          "type": "string"
+        },
         "required_operation": {
           "type": "string"
         },
@@ -3908,6 +3958,9 @@
         "id": {
           "type": "string"
         },
+        "owner_module_id": {
+          "type": "string"
+        },
         "steps": {
           "items": {
             "$ref": "#/$defs/StepDefinition"
@@ -4067,13 +4120,26 @@
         },
         "plan_hash": {
           "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
         }
       },
       "required": [
         "expected_revision",
         "meta",
         "module_id",
-        "plan_hash"
+        "plan_hash",
+        "target_state"
       ],
       "type": "object"
     },
@@ -5568,6 +5634,7 @@
               "tenant.delete.reconcile",
               "tenant.invitation.deliver",
               "tenant.invitation.reconcile",
+              "tenant.module.lifecycle",
               "operation.read"
             ],
             "type": "string"
@@ -5848,6 +5915,9 @@
           },
           "type": "array"
         },
+        "module_id": {
+          "type": "string"
+        },
         "open_work_blockers": {
           "items": {
             "$ref": "#/$defs/ModuleBlocker"
@@ -5856,11 +5926,25 @@
         },
         "plan_hash": {
           "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
         }
       },
       "required": [
         "base_revision",
-        "plan_hash"
+        "module_id",
+        "plan_hash",
+        "target_state"
       ],
       "type": "object"
     },
@@ -5979,6 +6063,9 @@
         "artifact_digest": {
           "type": "string"
         },
+        "last_lifecycle_operation_id": {
+          "type": "string"
+        },
         "module_id": {
           "type": "string"
         },
@@ -5986,6 +6073,10 @@
           "type": "integer"
         },
         "state": {
+          "type": "string"
+        },
+        "state_changed_at": {
+          "format": "date-time",
           "type": "string"
         },
         "tenant_id": {
@@ -6383,6 +6474,9 @@
         "provider_id": {
           "type": "string"
         },
+        "provider_module_id": {
+          "type": "string"
+        },
         "scope": {
           "$ref": "#/$defs/BusinessScope"
         }
@@ -6407,6 +6501,12 @@
         },
         "module_id": {
           "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
         },
         "target_state": {
           "type": "string"
@@ -7359,6 +7459,9 @@
         "name": {
           "type": "string"
         },
+        "owner_module_id": {
+          "type": "string"
+        },
         "required_operation": {
           "type": "string"
         },
@@ -7890,6 +7993,9 @@
         "id": {
           "type": "string"
         },
+        "owner_module_id": {
+          "type": "string"
+        },
         "steps": {
           "items": {
             "$ref": "#/$defs/StepDefinition"
@@ -8062,6 +8168,7 @@
       "tenant.delete.reconcile",
       "tenant.invitation.deliver",
       "tenant.invitation.reconcile",
+      "tenant.module.lifecycle",
       "operation.read"
     ],
     "ModuleAccess": [

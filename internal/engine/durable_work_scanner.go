@@ -419,7 +419,7 @@ func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.Si
 						return false, fmt.Errorf("decode scheduled job %q config: %w", definition.Name, err)
 					}
 				}
-				job := &scheduler.JobConfig{Name: definition.Name, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig}
+				job := &scheduler.JobConfig{Name: definition.Name, OwnerModuleID: definition.OwnerModuleID, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig}
 				if err := jobStore.RegisterDefinition(ctx, info.SiteID, job, scheduler.JobDefinitionDigest(job), scheduler.NextRunAfter(job.Schedule, now), now); err != nil {
 					return false, err
 				}

@@ -191,6 +191,11 @@ func verifiedWorkflowOperationContext(action workflow.ActionContext, requested k
 			return kernel.OperationContext{}, contract.NewError(contract.CodePermissionDenied, "workflow module execution does not match the trusted action")
 		}
 		copy := *candidate
+		pinned, err := copy.WithWorkflowCommandPin(action.InstanceID, action.StepID, action.IdempotencyKey)
+		if err != nil {
+			return kernel.OperationContext{}, contract.NewError(contract.CodePermissionDenied, "workflow module command lacks a durable action pin")
+		}
+		copy = pinned
 		moduleExecution = &copy
 	}
 	actor := action.Execution.Actor()

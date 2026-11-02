@@ -49,7 +49,7 @@ func TestBusinessRunPersistenceAcrossDisposableDialects(t *testing.T) {
 			tenant := contract.TenantID(fmt.Sprintf("recon-test-%d", time.Now().UTC().UnixNano()))
 			runID := "run-" + string(tenant)
 			scope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
-			run := BusinessRun{TenantID: tenant, ID: runID, RuleID: "sales-ar", Version: 1, Scope: scope, Cutoff: time.Now().UTC(), Complete: false, Cursors: BusinessRunCursor{Source: "cursor-source"}, Watermarks: BusinessRunWatermarks{SourceRevision: "revision-source"}, Findings: []BusinessFinding{{ID: "bf_live", Key: "sale:1", Kind: FindingMissingEffect}}}
+			run := BusinessRun{TenantID: tenant, OwnerModuleID: "sales.orders", ID: runID, RuleID: "sales-ar", Version: 1, Scope: scope, Cutoff: time.Now().UTC(), Complete: false, Cursors: BusinessRunCursor{Source: "cursor-source"}, Watermarks: BusinessRunWatermarks{SourceRevision: "revision-source"}, Findings: []BusinessFinding{{ID: "bf_live", Key: "sale:1", Kind: FindingMissingEffect}}}
 			if err := store.Save(ctx, run); err != nil {
 				t.Fatal("save business run:", err)
 			}
@@ -60,11 +60,19 @@ func TestBusinessRunPersistenceAcrossDisposableDialects(t *testing.T) {
 			if loaded.Cursors.Source != run.Cursors.Source || loaded.Watermarks.SourceRevision != run.Watermarks.SourceRevision || len(loaded.Findings) != 1 || loaded.Findings[0].ID != "bf_live" {
 				t.Fatalf("loaded business evidence = %+v", loaded)
 			}
+			blockers, err := store.InspectOpenWork(ctx, tenant, "sales.orders", 5)
+			if err != nil || len(blockers) != 2 || blockers[0].Code != "domain_obligation_open" || blockers[0].Count != 1 || blockers[1].Code != "domain_reconciliation_incomplete" || blockers[1].Count != 1 {
+				t.Fatalf("owner-scoped lifecycle blockers = %+v, %v", blockers, err)
+			}
+			otherOwner, err := store.InspectOpenWork(ctx, tenant, "billing.ar", 5)
+			if err != nil || len(otherOwner) != 0 {
+				t.Fatalf("reconciliation findings leaked across module owners: %+v, %v", otherOwner, err)
+			}
 			if err := store.Waive(ctx, tenant, runID, "bf_live", "operator-a", "source owner confirms non-applicability", allowBusinessWaiver{}); err != nil {
 				t.Fatal("authorized audited waiver:", err)
 			}
 			repairFinding := BusinessFinding{ID: "bf_repair_live", Key: "sale:repair", Kind: FindingMissingEffect, Expected: BusinessObligation{Key: "sale:repair", SourceRef: "sale:repair", EntityID: "entity-a", Amount: "3.00", Currency: "KES"}}
-			repairRun := BusinessRun{TenantID: tenant, ID: runID + "-repair", RuleID: "sales-ar", Version: 1, Scope: scope, Cutoff: time.Now().UTC(), Complete: true, Findings: []BusinessFinding{repairFinding}}
+			repairRun := BusinessRun{TenantID: tenant, OwnerModuleID: "sales.orders", ID: runID + "-repair", RuleID: "sales-ar", Version: 1, Scope: scope, Cutoff: time.Now().UTC(), Complete: true, Findings: []BusinessFinding{repairFinding}}
 			if err := store.Save(ctx, repairRun); err != nil {
 				t.Fatal("save repair finding:", err)
 			}
@@ -91,7 +99,7 @@ func TestBusinessRunPersistenceAcrossDisposableDialects(t *testing.T) {
 				t.Fatalf("waived and repaired obligation summary count=%d err=%v", count, err)
 			}
 			uncertainFinding := BusinessFinding{ID: "bf_uncertain_live", Key: "sale:uncertain", Kind: FindingMissingEffect, Expected: BusinessObligation{Key: "sale:uncertain", SourceRef: "sale:uncertain", EntityID: "entity-a", Amount: "6.00", Currency: "KES"}}
-			uncertainRun := BusinessRun{TenantID: tenant, ID: runID + "-uncertain", RuleID: "sales-ar", Version: 1, Scope: scope, Cutoff: time.Now().UTC(), Complete: true, Findings: []BusinessFinding{uncertainFinding}}
+			uncertainRun := BusinessRun{TenantID: tenant, OwnerModuleID: "sales.orders", ID: runID + "-uncertain", RuleID: "sales-ar", Version: 1, Scope: scope, Cutoff: time.Now().UTC(), Complete: true, Findings: []BusinessFinding{uncertainFinding}}
 			if err := store.Save(ctx, uncertainRun); err != nil {
 				t.Fatal("save uncertain repair finding:", err)
 			}

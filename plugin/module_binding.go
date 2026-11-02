@@ -151,6 +151,12 @@ type CapabilityLeaseAdmission interface {
 	AdmitCapabilityAttempt(context.Context, contract.CapabilityLease, time.Time) error
 }
 
+// CapabilityLeaseOwnerAdmission persists the provider ownership resolved by
+// the immutable binding when issuing a lease.
+type CapabilityLeaseOwnerAdmission interface {
+	EnsureCapabilityLease(context.Context, contract.CapabilityLease) error
+}
+
 // ResolveInstalledModules uses the same provider resolver while including the
 // durable package dependency set in deterministic preflight and plan hashing.
 func ResolveInstalledModules(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, revision uint64) (BindingPlan, error) {

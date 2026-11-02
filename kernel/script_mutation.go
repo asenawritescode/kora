@@ -51,6 +51,9 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 	if authzErr := authorizeOp(txMgr.Registry, op, definition, nil); authzErr != nil {
 		return nil, authzErr
 	}
+	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, txMgr.Transaction, k.dialect(), op, txMgr.Registry, nil); admissionErr != nil {
+		return nil, admissionErr
+	}
 	doctypeName := payloadDoctype(op.Payload)
 	dt := txMgr.Registry.Get(doctypeName)
 	if dt == nil {

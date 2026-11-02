@@ -44,7 +44,7 @@ func TestCapabilityLeaseAdmissionSerializesWithRevocation(t *testing.T) {
 				lease := contract.CapabilityLease{
 					ID: "lease-race-" + contract.NewID(), TenantID: "tenant-lease-race",
 					Scope:          contract.BusinessScope{TenantID: "tenant-lease-race", Kind: contract.ScopeKindTenant},
-					CallerModuleID: "sales.orders", ProviderID: "billing.provider", Operation: "issue",
+					CallerModuleID: "sales.orders", ProviderModuleID: "finance.billing", ProviderID: "billing.provider", Operation: "issue",
 					BindingRevision: 3, GrantEpoch: 1, ExpiresAt: now.Add(time.Hour), State: "active",
 				}
 				if err := store.CreateCapabilityLease(context.Background(), lease); err != nil {

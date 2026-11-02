@@ -141,6 +141,9 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		}
 		defer dbTx.Rollback()
 	}
+	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, k.dialect(), op, reg, nil); admissionErr != nil {
+		return nil, admissionErr
+	}
 	priorMutationExecutor := txMgr.ScriptMutationExecutor
 	priorPostCommitHooks := txMgr.PostCommitHooks
 	priorTransaction := txMgr.Transaction

@@ -91,11 +91,18 @@ func managementOperationRouter(t *testing.T, service ManagementOperationService,
 	router := gin.New()
 	if err := handler.RegisterOperations(router, ManagementOperationRoutes{
 		Service: service, Caller: "cloud-control-plane", Capabilities: capabilities, WorkerReady: true,
-		InvitationReconciler: &invitationReconcilerStub{},
+		InvitationReconciler:   &invitationReconcilerStub{},
+		ModuleLifecyclePlanner: moduleLifecyclePlannerStub{},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	return router
+}
+
+type moduleLifecyclePlannerStub struct{}
+
+func (moduleLifecyclePlannerStub) Plan(_ context.Context, _ contract.TenantID, request contract.PlanModuleChange) (contract.ModuleChangePlan, error) {
+	return contract.ModuleChangePlan{ModuleID: request.ModuleID, TargetState: request.TargetState, BaseRevision: request.ExpectedRevision, PlanHash: strings.Repeat("a", 64)}, nil
 }
 
 func allManagementCapabilities() map[ManagementCapability]bool {
@@ -110,6 +117,7 @@ func allManagementCapabilities() map[ManagementCapability]bool {
 		ManagementDeleteRecovery:       true,
 		ManagementInvitationCapability: true,
 		ManagementInvitationRecovery:   true,
+		ManagementModuleLifecycle:      true,
 		ManagementOperationRead:        true,
 	}
 }
@@ -140,6 +148,25 @@ func TestManagementInvitationUsesRouteTenantAndVerifiedCaller(t *testing.T) {
 	}
 }
 
+func TestManagementModuleLifecyclePlanAndApplyAreTenantScoped(t *testing.T) {
+	operation := management.Operation{ID: "operation-module-1", Tenant: "tenant-a", Caller: "cloud-control-plane", State: contract.OperationRequested, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	service := &managementOperationServiceStub{accepted: operation}
+	router := managementOperationRouter(t, service, allManagementCapabilities())
+	planResponse := managementPost(router, "/api/management/v2/tenants/tenant-a/modules/plan", `{"module_id":"billing.core","target_state":"draining","expected_revision":3}`, "")
+	if planResponse.Code != http.StatusOK {
+		t.Fatalf("plan status=%d body=%s", planResponse.Code, planResponse.Body.String())
+	}
+	body := `{"meta":{"idempotency_key":"module-change-01"},"module_id":"billing.core","target_state":"draining","plan_hash":"` + strings.Repeat("a", 64) + `","expected_revision":3}`
+	response := managementPost(router, "/api/management/v2/tenants/tenant-a/modules/apply", body, "module-change-01")
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("apply status=%d body=%s", response.Code, response.Body.String())
+	}
+	command, ok := service.command.(contract.ApplyModuleChange)
+	if !ok || service.tenant != "tenant-a" || command.ModuleID != "billing.core" {
+		t.Fatalf("accepted lifecycle command/tenant = %#v / %q", service.command, service.tenant)
+	}
+}
+
 func TestManagementInvitationReconciliationVerifiesOutcomeBeforeRequeue(t *testing.T) {
 	operation := management.Operation{ID: "operation-invite-1", Tenant: "tenant-a", Caller: "cloud-control-plane", Kind: management.CommandTenantInvitation, State: contract.OperationRecoveryRequired, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	service := &managementOperationServiceStub{got: operation, invitationRecovery: management.Operation{ID: operation.ID, Tenant: operation.Tenant, State: contract.OperationRequested}}
@@ -151,7 +178,7 @@ func TestManagementInvitationReconciliationVerifiesOutcomeBeforeRequeue(t *testi
 	}
 	router := gin.New()
 	caps := allManagementCapabilities()
-	if err := handler.RegisterOperations(router, ManagementOperationRoutes{Service: service, Caller: "cloud-control-plane", Capabilities: caps, WorkerReady: true, InvitationReconciler: reconciler}); err != nil {
+	if err := handler.RegisterOperations(router, ManagementOperationRoutes{Service: service, Caller: "cloud-control-plane", Capabilities: caps, WorkerReady: true, InvitationReconciler: reconciler, ModuleLifecyclePlanner: moduleLifecyclePlannerStub{}}); err != nil {
 		t.Fatal(err)
 	}
 	body := `{"meta":{"idempotency_key":"reconcile-invite-01"},"outcome":"not_delivered","reason":"provider logs confirm the message was not accepted"}`

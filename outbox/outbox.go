@@ -784,6 +784,107 @@ func NewDispatcher(database *sql.DB, dialect db.QueryDialect) *Dispatcher {
 	return &Dispatcher{DB: database, Dialect: dialect, Workers: make(map[string]Worker), WorkerTypes: make(map[string]map[string]struct{}), WorkerPatterns: make(map[string][]string), TransactionalWorkers: make(map[string]TransactionalWorker), TransactionalTypes: make(map[string]map[string]struct{}), TransactionalSchemas: make(map[string]map[string]contract.SchemaRef)}
 }
 
+// InspectOpenWork reports owner-published events still awaiting durable external publication.
+func InspectOpenWork(ctx context.Context, database *sql.DB, dialect db.QueryDialect, tenant contract.TenantID, module contract.ModuleID, limit uint16) ([]contract.ModuleBlocker, error) {
+	if ctx == nil || database == nil || dialect == nil || tenant == "" || module == "" {
+		return nil, fmt.Errorf("outbox inspection identity is incomplete")
+	}
+	if limit == 0 || limit > 20 {
+		limit = 20
+	}
+	rows, err := database.QueryContext(ctx, db.Rebind(dialect, `SELECT id,payload FROM _kora_outbox WHERE site=? AND status IN ('pending','publishing','failed') ORDER BY created_at,id LIMIT 257`), string(tenant))
+	if err != nil {
+		return nil, fmt.Errorf("inspect pending outbox events: %w", err)
+	}
+	var count uint64
+	examples := make([]string, 0, limit)
+	seen := 0
+	for rows.Next() {
+		seen++
+		if seen > 256 {
+			_ = rows.Close()
+			return nil, fmt.Errorf("outbox inspection exceeds bounded limit")
+		}
+		var id, payload string
+		if err := rows.Scan(&id, &payload); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		var event contract.EventEnvelope
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("decode pending outbox event: %w", err)
+		}
+		if event.Source != string(module) {
+			continue
+		}
+		count++
+		if len(examples) < int(limit) {
+			examples = append(examples, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	blockers := make([]contract.ModuleBlocker, 0, 2)
+	if count > 0 {
+		blockers = append(blockers, contract.ModuleBlocker{Code: "event_delivery_open", Count: boundedBlockerCount(count), Examples: examples})
+	}
+	failures, err := database.QueryContext(ctx, db.Rebind(dialect, `SELECT f.event_id,o.payload FROM _kora_outbox_delivery_failure f JOIN _kora_outbox o ON o.id=f.event_id AND o.site=f.site WHERE f.site=? AND f.quarantined=? ORDER BY f.updated_at,f.event_id LIMIT 257`), string(tenant), true)
+	if err != nil {
+		return nil, fmt.Errorf("inspect quarantined outbox deliveries: %w", err)
+	}
+	var failureCount uint64
+	failureExamples := make([]string, 0, limit)
+	seen = 0
+	for failures.Next() {
+		seen++
+		if seen > 256 {
+			_ = failures.Close()
+			return nil, fmt.Errorf("outbox delivery inspection exceeds bounded limit")
+		}
+		var id, payload string
+		if err := failures.Scan(&id, &payload); err != nil {
+			_ = failures.Close()
+			return nil, err
+		}
+		var event contract.EventEnvelope
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			_ = failures.Close()
+			return nil, fmt.Errorf("decode quarantined outbox event: %w", err)
+		}
+		if event.Source != string(module) {
+			continue
+		}
+		failureCount++
+		if len(failureExamples) < int(limit) {
+			failureExamples = append(failureExamples, id)
+		}
+	}
+	if err := failures.Err(); err != nil {
+		_ = failures.Close()
+		return nil, err
+	}
+	if err := failures.Close(); err != nil {
+		return nil, err
+	}
+	if failureCount > 0 {
+		blockers = append(blockers, contract.ModuleBlocker{Code: "event_delivery_quarantined", Count: boundedBlockerCount(failureCount), Examples: failureExamples})
+	}
+	return blockers, nil
+}
+
+func boundedBlockerCount(count uint64) uint32 {
+	if count > uint64(^uint32(0)) {
+		return ^uint32(0)
+	}
+	return uint32(count)
+}
+
 // Register adds a named worker.
 func (d *Dispatcher) Register(name string, w Worker) {
 	if d == nil || name == "" || w == nil {
@@ -1101,11 +1202,11 @@ func (d *Dispatcher) recordDeliveryFailure(ctx context.Context, consumer, eventI
 	}
 	query := `INSERT INTO _kora_outbox_delivery_failure (consumer_name,event_id,site,attempts,quarantined,last_error,updated_at) VALUES (?,?,?,1,?,?,?) `
 	if named, ok := d.Dialect.(interface{ DriverName() string }); ok && named.DriverName() == "mysql" {
-		query += `ON DUPLICATE KEY UPDATE attempts=attempts+1,quarantined=IF(attempts+1>=?,1,quarantined),last_error=VALUES(last_error),updated_at=VALUES(updated_at)`
+		query += `ON DUPLICATE KEY UPDATE attempts=attempts+1,quarantined=IF(attempts+1>=?,TRUE,quarantined),last_error=VALUES(last_error),updated_at=VALUES(updated_at)`
 	} else {
-		query += `ON CONFLICT (consumer_name,event_id) DO UPDATE SET attempts=attempts+1,quarantined=CASE WHEN attempts+1>=? THEN 1 ELSE quarantined END,last_error=excluded.last_error,updated_at=excluded.updated_at`
+		query += `ON CONFLICT (consumer_name,event_id) DO UPDATE SET attempts=attempts+1,quarantined=CASE WHEN attempts+1>=? THEN TRUE ELSE quarantined END,last_error=excluded.last_error,updated_at=excluded.updated_at`
 	}
-	_, err := d.DB.ExecContext(ctx, db.Rebind(d.Dialect, query), consumer, eventID, site, db.BoolParam(d.Dialect, threshold <= 1), message, time.Now().UTC(), threshold)
+	_, err := d.DB.ExecContext(ctx, db.Rebind(d.Dialect, query), consumer, eventID, site, threshold <= 1, message, time.Now().UTC(), threshold)
 	if err != nil {
 		return fmt.Errorf("outbox: record failed delivery: %w", err)
 	}

@@ -31,6 +31,10 @@ type ManagementInvitationReconciler interface {
 	ReconcileInvitation(context.Context, management.Operation, contract.ReconcileTenantInvitationOperation) error
 }
 
+type ManagementModuleLifecyclePlanner interface {
+	Plan(context.Context, contract.TenantID, contract.PlanModuleChange) (contract.ModuleChangePlan, error)
+}
+
 type ManagementCapability = contract.ManagementCapability
 
 const (
@@ -44,17 +48,19 @@ const (
 	ManagementDeleteRecovery       = contract.ManagementCapabilityTenantDeleteRetry
 	ManagementInvitationCapability = contract.ManagementCapabilityTenantInvitation
 	ManagementInvitationRecovery   = contract.ManagementCapabilityTenantInvitationRetry
+	ManagementModuleLifecycle      = contract.ManagementCapabilityModuleLifecycle
 	ManagementOperationRead        = contract.ManagementCapabilityOperationRead
 )
 
 // ManagementOperationRoutes installs only the command routes whose durable
 // executor and verified service grants are present in Engine composition.
 type ManagementOperationRoutes struct {
-	Service              ManagementOperationService
-	Caller               contract.PrincipalID
-	Capabilities         map[ManagementCapability]bool
-	WorkerReady          bool
-	InvitationReconciler ManagementInvitationReconciler
+	Service                ManagementOperationService
+	Caller                 contract.PrincipalID
+	Capabilities           map[ManagementCapability]bool
+	WorkerReady            bool
+	InvitationReconciler   ManagementInvitationReconciler
+	ModuleLifecyclePlanner ManagementModuleLifecyclePlanner
 }
 
 func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config ManagementOperationRoutes) error {
@@ -76,9 +82,10 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 	deleteEnabled := config.Capabilities[ManagementDeleteCapability]
 	deleteRecoveryEnabled := config.Capabilities[ManagementDeleteRecovery]
 	invitationEnabled := config.Capabilities[ManagementInvitationCapability]
+	moduleLifecycleEnabled := config.Capabilities[ManagementModuleLifecycle]
 	invitationRecoveryEnabled := config.Capabilities[ManagementInvitationRecovery]
 	readEnabled := config.Capabilities[ManagementOperationRead]
-	if !stateEnabled && !stateRecoveryEnabled && !provisionEnabled && !provisionRecoveryEnabled && !packageEnabled && !packageRecoveryEnabled && !deleteEnabled && !deleteRecoveryEnabled && !invitationEnabled && !invitationRecoveryEnabled {
+	if !stateEnabled && !stateRecoveryEnabled && !provisionEnabled && !provisionRecoveryEnabled && !packageEnabled && !packageRecoveryEnabled && !deleteEnabled && !deleteRecoveryEnabled && !invitationEnabled && !invitationRecoveryEnabled && !moduleLifecycleEnabled {
 		return errors.New("management operation route requires at least one operation capability")
 	}
 	if !readEnabled {
@@ -98,6 +105,9 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 	}
 	if invitationRecoveryEnabled && (!invitationEnabled || config.InvitationReconciler == nil) {
 		return errors.New("tenant invitation reconciliation requires invitation delivery and a reconciler")
+	}
+	if moduleLifecycleEnabled && config.ModuleLifecyclePlanner == nil {
+		return errors.New("module lifecycle capability requires a planner")
 	}
 	group := router.Group("/api/management/v2")
 	group.Use(h.authenticate)
@@ -124,6 +134,7 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 		deleteRecoveryEnabled:     deleteRecoveryEnabled,
 		invitationRecoveryEnabled: invitationRecoveryEnabled,
 		invitationReconciler:      config.InvitationReconciler,
+		moduleLifecyclePlanner:    config.ModuleLifecyclePlanner,
 	}
 	if provisionEnabled {
 		group.POST("/tenants", operations.provision)
@@ -152,6 +163,10 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 	if invitationEnabled {
 		group.POST("/tenants/:id/invitation", operations.requestTenantInvitation)
 	}
+	if moduleLifecycleEnabled {
+		group.POST("/tenants/:id/modules/plan", operations.planModuleChange)
+		group.POST("/tenants/:id/modules/apply", operations.applyModuleChange)
+	}
 	if invitationRecoveryEnabled {
 		group.POST("/operations/:id/reconcile-tenant-invitation", operations.reconcileTenantInvitation)
 	}
@@ -167,6 +182,7 @@ type managementOperationHandler struct {
 	deleteRecoveryEnabled     bool
 	invitationRecoveryEnabled bool
 	invitationReconciler      ManagementInvitationReconciler
+	moduleLifecyclePlanner    ManagementModuleLifecyclePlanner
 }
 
 func (h *managementOperationHandler) provision(c *gin.Context) {
@@ -259,6 +275,44 @@ func (h *managementOperationHandler) requestTenantInvitation(c *gin.Context) {
 		return
 	}
 	writeManagedOperation(c, http.StatusAccepted, operation.View())
+}
+
+func (h *managementOperationHandler) applyModuleChange(c *gin.Context) {
+	tenant, ok := managementTenant(c)
+	if !ok {
+		return
+	}
+	var command contract.ApplyModuleChange
+	if !decodeManagementBody(c, &command) || !managementKeyMatches(c, command.Meta.IdempotencyKey) {
+		return
+	}
+	operation, err := h.service.AcceptForTenant(c.Request.Context(), h.caller, tenant, command)
+	if err != nil {
+		writeManagementOperationError(c, err)
+		return
+	}
+	writeManagedOperation(c, http.StatusAccepted, operation.View())
+}
+
+func (h *managementOperationHandler) planModuleChange(c *gin.Context) {
+	tenant, ok := managementTenant(c)
+	if !ok {
+		return
+	}
+	var request contract.PlanModuleChange
+	if !decodeManagementBody(c, &request) {
+		return
+	}
+	if err := contract.ValidatePlanModuleChange(request); err != nil {
+		writeManagementError(c, http.StatusBadRequest, contract.CodeValidationFailed, err.Error())
+		return
+	}
+	plan, err := h.moduleLifecyclePlanner.Plan(c.Request.Context(), tenant, request)
+	if err != nil {
+		writeManagementOperationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": plan})
 }
 
 func (h *managementOperationHandler) get(c *gin.Context) {

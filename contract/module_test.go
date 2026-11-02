@@ -267,8 +267,17 @@ func TestConsumerDefinitionRequiresOwnerAndPublishedSchema(t *testing.T) {
 }
 
 func TestModuleLifecycleDrainRequiresCurrentUnblockedPlan(t *testing.T) {
+	if err := ValidateModuleLifecycleTransition(ModuleInstalled, ModuleDisabled); err == nil {
+		t.Fatal("installed module skipped activation and drain")
+	}
+	if err := ValidateModuleLifecycleTransition(ModuleInstalled, ModuleActive); err != nil {
+		t.Fatalf("installed module could not activate: %v", err)
+	}
 	if err := ValidateModuleLifecycleTransition(ModuleActive, ModuleDraining); err != nil {
 		t.Fatal(err)
+	}
+	if err := ValidateModuleLifecycleTransition(ModuleDraining, ModuleDisabled); err != nil {
+		t.Fatalf("draining module could not disable: %v", err)
 	}
 	if err := ValidateModuleLifecycleTransition(ModuleActive, ModuleRemoved); err == nil {
 		t.Fatal("active module skipped drain")

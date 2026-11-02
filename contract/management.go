@@ -36,6 +36,7 @@ const (
 	ManagementCapabilityTenantDeleteRetry     ManagementCapability = "tenant.delete.reconcile"
 	ManagementCapabilityTenantInvitation      ManagementCapability = "tenant.invitation.deliver"
 	ManagementCapabilityTenantInvitationRetry ManagementCapability = "tenant.invitation.reconcile"
+	ManagementCapabilityModuleLifecycle ManagementCapability = "tenant.module.lifecycle"
 	ManagementCapabilityOperationRead         ManagementCapability = "operation.read"
 )
 
@@ -97,6 +98,7 @@ func ValidateManagementCapabilitiesV2(value ManagementCapabilitiesV2) error {
 		ManagementCapabilityTenantDelete: {}, ManagementCapabilityTenantDeleteRetry: {},
 		ManagementCapabilityTenantInvitation:      {},
 		ManagementCapabilityTenantInvitationRetry: {},
+		ManagementCapabilityModuleLifecycle: {},
 		ManagementCapabilityOperationRead:         {},
 	}
 	seen := make(map[ManagementCapability]struct{}, len(value.Capabilities))

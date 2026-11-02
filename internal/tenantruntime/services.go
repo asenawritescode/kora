@@ -40,25 +40,36 @@ type Services struct {
 	UploadAdmission interface {
 		Acquire(context.Context, uint64) (func(), error)
 	}
-	EventBus                        eventstream.Bus
-	Mailer                          *email.Sender
-	AnalyticsRelay                  *analytics.CloudRelay
-	AnalyticsRebuild                *analytics.RebuildRunner
-	Realtime                        *natsprovider.Provider
-	ScriptStore                     *script.Store
-	AsyncHookInvocations            script.AsyncHookInvocationStore
-	SecretStore                     *secret.Store
-	WebhookWorker                   *webhook.Worker
-	Outbox                          outbox.Writer
-	OutboxBacklog                   *outbox.BacklogMetrics
-	Storage                         storage.Backend
-	Requests                        *requests.Service
-	ApprovalApplier                 ApprovalApplier
-	WorkflowDefinitions             *workflow.Service
-	WorkflowInstances               *workflow.InstanceService
-	WorkflowStatusPolicies          workflow.StatusPolicyRepository
+	EventBus                  eventstream.Bus
+	Mailer                    *email.Sender
+	AnalyticsRelay            *analytics.CloudRelay
+	AnalyticsRebuild          *analytics.RebuildRunner
+	Realtime                  *natsprovider.Provider
+	ScriptStore               *script.Store
+	AsyncHookInvocations      script.AsyncHookInvocationStore
+	SecretStore               *secret.Store
+	WebhookWorker             *webhook.Worker
+	Outbox                    outbox.Writer
+	OutboxBacklog             *outbox.BacklogMetrics
+	Storage                   storage.Backend
+	Requests                  *requests.Service
+	ApprovalApplier           ApprovalApplier
+	WorkflowDefinitions       *workflow.Service
+	WorkflowInstances         *workflow.InstanceService
+	WorkflowStatusPolicies    workflow.StatusPolicyRepository
+	WorkflowOpenWorkInspector interface {
+		InspectOpenWork(context.Context, contract.TenantID, contract.ModuleID, uint16) ([]contract.ModuleBlocker, error)
+	}
+	ModuleOpenWorkInspectors        []ModuleOpenWorkInspector
 	WorkflowApprovalPoliciesByTable map[string][]string
 	Scheduler                       *scheduler.Scheduler
+}
+
+// ModuleOpenWorkInspector binds a module owner to its lifecycle inspection
+// implementation in the immutable tenant runtime service snapshot.
+type ModuleOpenWorkInspector struct {
+	ModuleID  contract.ModuleID
+	Inspector contract.OpenWorkInspector
 }
 
 // EnqueueCloudProductEvent submits best-effort telemetry to the tenant-owned
