@@ -2032,6 +2032,36 @@ func TestConfiguredCommandRollbackAtomicity(t *testing.T) {
 	}
 }
 
+func TestConfiguredCommandRejectsStaleVersionAtomically(t *testing.T) {
+	s := newSite(t, "site-a")
+	defer s.DB.Close()
+	k := newKernel(s)
+	k.Commands = kernel.NewCommandRegistry()
+	mustRegister(t, k, registerCmdYAML)
+
+	seed := exec(t, s, k, createOp(map[string]any{"title": "Supervisor", "serial": "SUP-STALE"}))
+	mustComplete(t, seed)
+	var supervisor string
+	if err := s.DB.QueryRow(`SELECT name FROM ` + "`tabTask`" + ` WHERE serial='SUP-STALE'`).Scan(&supervisor); err != nil {
+		t.Fatal("load supervisor record:", err)
+	}
+	payload, _ := json.Marshal(map[string]any{"data": map[string]any{
+		"title": "Must roll back", "serial": "STALE-1", "supervisor_ref": supervisor,
+	}})
+	ctx := opCtx(s.Name, "Administrator")
+	ctx.ExpectedVersion = "2000-01-01T00:00:00.000000Z"
+	result := exec(t, s, k, kernel.Operation{Command: "livestock.animal.register", Payload: payload, Context: ctx})
+	if result.Error == nil || result.Error.Type != contract.CodeConflict {
+		t.Fatalf("stale command update = %+v, want conflict", result.Error)
+	}
+	if count := s.count(t, `SELECT COUNT(*) FROM `+"`tabTask`"+` WHERE serial='STALE-1'`); count != 0 {
+		t.Fatalf("stale command retained its earlier create step: count=%d", count)
+	}
+	if count := s.count(t, `SELECT COUNT(*) FROM _kora_outbox WHERE event_type='animal.registered' AND site=?`, s.Name); count != 0 {
+		t.Fatalf("stale command emitted success event: count=%d", count)
+	}
+}
+
 // TestConfiguredCommandAuthzDenied proves authorization evaluates every
 // touched record through the same matrix — no adapter can slip past.
 func TestConfiguredCommandAuthzDenied(t *testing.T) {
@@ -2087,6 +2117,11 @@ transaction:
 	mustComplete(t, second)
 	if !second.Replayed {
 		t.Fatalf("defined command replay must be flagged")
+	}
+	changedPayload, _ := json.Marshal(map[string]any{"data": map[string]any{"title": "Different"}})
+	conflict := exec(t, s, k, kernel.Operation{Command: op.Command, Payload: changedPayload, Context: op.Context})
+	if conflict.Error == nil || conflict.Error.Type != contract.CodeIdempotencyKeyReused {
+		t.Fatalf("configured command key reuse with another payload = %+v, want IDEMPOTENCY_KEY_REUSED", conflict.Error)
 	}
 	if n := s.count(t, `SELECT COUNT(*) FROM `+"`tabTask`"+` WHERE title='Once'`); n != 1 {
 		t.Fatalf("replay duplicated the mutation")
