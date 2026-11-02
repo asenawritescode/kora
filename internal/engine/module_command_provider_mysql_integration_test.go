@@ -76,7 +76,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		t.Fatal("create fixture identity:", err)
 	}
 	tenant := contract.TenantID("tenant-" + suffix)
-	invoice := &doctype.DocType{Name: "ModuleInvoice" + suffix[:8], ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands), BusinessScopePolicy: contract.ScopeTenantShared, Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}}}
+	invoice := &doctype.DocType{Name: "ModuleInvoice" + suffix[:8], ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands), BusinessScopePolicy: contract.ScopeEntityOwned, BusinessScopeField: "legal_entity_id", Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}, {Fieldname: "legal_entity_id", Fieldtype: "Data", Reqd: true}}}
 	registry := doctype.NewRegistry()
 	registry.LoadFull([]*doctype.DocType{invoice}, []*doctype.Role{{Name: doctype.AdminRole}}, []*doctype.Permission{{Doctype: invoice.Name, Role: doctype.AdminRole, Read: true, Create: true}})
 	var databaseName string
@@ -110,12 +110,12 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	if len(providers) != 1 || providers[0].Kind != plugin.ProviderInternal {
 		t.Fatalf("internal providers = %+v, want one internal owner provider", providers)
 	}
-	scope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
+	scope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
 	plan, err := plugin.ResolveModules(scope, []contract.ModuleDescriptor{caller, owner}, providers, nil, 4)
 	if err != nil {
 		t.Fatal("resolve module binding plan:", err)
 	}
-	execution, err := policy.NewVerifiedExecutionWithGrants(tenant, contract.ActorContext{PrincipalID: "finance-operator", PrincipalType: contract.PrincipalHuman, Site: string(tenant), Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now().UTC()}, []policy.Grant{{Resource: invoice.Name, Operation: "create"}})
+	execution, err := policy.NewVerifiedExecutionWithGrants(tenant, contract.ActorContext{PrincipalID: "finance-operator", PrincipalType: contract.PrincipalHuman, Site: string(tenant), Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now().UTC()}, []policy.Grant{{Resource: invoice.Name, Operation: "create", Scope: scope}})
 	if err != nil {
 		t.Fatal("create verified actor execution:", err)
 	}
@@ -145,6 +145,15 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	}
 	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 0, 0, 0)
 	schemas.rejectOutput = false
+	otherScope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	otherPlan, err := plugin.ResolveModules(otherScope, []contract.ModuleDescriptor{caller, owner}, providers, nil, 4)
+	if err != nil {
+		t.Fatal("resolve other entity binding plan:", err)
+	}
+	if _, err := otherPlan.InvokeCapability(ctx, execution, otherScope, caller.ID, offer.Name, operation.Name, contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("other-entity-" + suffix[:12])}, payload); err == nil {
+		t.Fatal("entity-A actor grant authorized owner command in entity B")
+	}
+	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 0, 0, 0)
 	result, err := plan.InvokeCapability(ctx, execution, scope, caller.ID, offer.Name, operation.Name, meta, payload)
 	if err != nil {
 		t.Fatal("invoke local owner command:", err)
@@ -153,6 +162,13 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		t.Fatalf("local capability result = %+v", result)
 	}
 	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
+	var legalEntityID string
+	if err := database.QueryRowContext(ctx, "SELECT legal_entity_id FROM "+dialect.QuoteIdent(invoice.RawTableName())).Scan(&legalEntityID); err != nil {
+		t.Fatal("read owner command business scope:", err)
+	}
+	if legalEntityID != scope.LegalEntityID {
+		t.Fatalf("owner command row legal entity = %q, want actor scope %q", legalEntityID, scope.LegalEntityID)
+	}
 }
 
 func assertModuleCommandCounts(t *testing.T, ctx context.Context, database *sql.DB, dialect kdb.Dialect, invoice *doctype.DocType, tenant contract.TenantID, wantRecords, wantEvents, wantAudits int) {
