@@ -111,6 +111,51 @@ type ModuleDescriptor struct {
 	Requires  []CapabilityRequirement `json:"requires,omitempty"`
 }
 
+func (m ModuleDescriptor) OwnerOf(ref ResourceRef) (OwnedResource, bool) {
+	for _, resource := range m.Resources {
+		if resource.Ref.Namespace == ref.Namespace && resource.Ref.Name == ref.Name {
+			return resource, true
+		}
+	}
+	return OwnedResource{}, false
+}
+
+// ModuleExecution is trusted in-process provenance minted by module dispatch.
+// It must never be decoded from a user request.
+type ModuleExecution struct {
+	TenantID          TenantID
+	CallerModuleID    ModuleID
+	OwnerModuleID     ModuleID
+	BindingRevision   uint64
+	AllowedOperation  string
+	AuthorizedCommand string
+	ScopeKey          string
+	verified          bool
+}
+
+func NewModuleExecution(tenant TenantID, caller, owner ModuleID, revision uint64, operation, scope string) (ModuleExecution, error) {
+	if tenant == "" || caller == "" || owner == "" || operation == "" || scope == "" {
+		return ModuleExecution{}, fmt.Errorf("module execution identity is incomplete")
+	}
+	return ModuleExecution{TenantID: tenant, CallerModuleID: caller, OwnerModuleID: owner, BindingRevision: revision, AllowedOperation: operation, ScopeKey: scope, verified: true}, nil
+}
+
+func NewCommandModuleExecution(tenant TenantID, caller, owner ModuleID, revision uint64, command, operation, scope string) (ModuleExecution, error) {
+	e, err := NewModuleExecution(tenant, caller, owner, revision, operation, scope)
+	if err != nil {
+		return ModuleExecution{}, err
+	}
+	if strings.TrimSpace(command) == "" {
+		return ModuleExecution{}, fmt.Errorf("authorized domain command is required")
+	}
+	e.AuthorizedCommand = command
+	return e, nil
+}
+
+func (e ModuleExecution) Verified() bool {
+	return e.verified && e.TenantID != "" && e.CallerModuleID != "" && e.OwnerModuleID != "" && e.AllowedOperation != "" && e.ScopeKey != ""
+}
+
 var moduleIDPattern = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9-]+)+$`)
 var moduleSemverPattern = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 

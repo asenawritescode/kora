@@ -139,6 +139,7 @@ func LookupCommand(name string) (CommandDefinition, bool) {
 // OperationContext carries everything an adapter must resolve before invoking
 // the kernel. It is an explicit value, never smuggled through context.Context.
 type OperationContext struct {
+	ModuleExecution     *contract.ModuleExecution
 	Site                string                // authenticated tenant route, retained for audit and compatibility
 	TenantID            contract.TenantID     // stable tenant identity from routed runtime
 	Execution           policy.Execution      // verified identity; legacy internal callers are being migrated

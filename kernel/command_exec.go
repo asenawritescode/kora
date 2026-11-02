@@ -21,6 +21,15 @@ import (
 // record at per-step least privilege — create steps need "create", update
 // steps need "write" on their target record (default-deny, spec §51/§108).
 func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn *CommandResource) *contract.Error {
+	if mutationTouchesCommandOnly(reg, op) {
+		execution := op.Context.ModuleExecution
+		if execution == nil || execution.AuthorizedCommand == "" || execution.AuthorizedCommand == CommandRecordCreate || execution.AuthorizedCommand == CommandRecordUpdate || execution.AuthorizedCommand == CommandRecordMutateBundle || execution.AuthorizedCommand == CommandRecordDelete {
+			return contract.NewError(contract.CodePermissionDenied, "resource is owned by a protected module and requires its domain command")
+		}
+		if !validModuleExecution(execution, op, reg) {
+			return contract.NewError(contract.CodePermissionDenied, "module execution is not authorized for this domain command")
+		}
+	}
 	if op.Command == CommandPublicFormSubmit {
 		return authorizePublicForm(reg, op)
 	}
@@ -99,6 +108,48 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 		}
 	}
 	return nil
+}
+
+func validModuleExecution(execution *contract.ModuleExecution, op Operation, reg *doctype.Registry) bool {
+	if execution == nil || !execution.Verified() || execution.TenantID != op.Context.TenantID {
+		return false
+	}
+	if execution.AuthorizedCommand == "" || execution.AuthorizedCommand != op.Command || execution.AllowedOperation != op.Command {
+		return false
+	}
+	dt := reg.Get(payloadDoctype(op.Payload))
+	if dt == nil {
+		return false
+	}
+	return execution.OwnerModuleID == contract.ModuleID(dt.ModuleOwnerID)
+}
+
+func mutationTouchesCommandOnly(reg *doctype.Registry, op Operation) bool {
+	if reg == nil {
+		return false
+	}
+	check := func(name string) bool {
+		dt := reg.Get(name)
+		if dt == nil {
+			return false
+		}
+		return dt.ModuleOwnershipMode == string(contract.MutationCommands)
+	}
+	switch op.Command {
+	case CommandRecordCreate, CommandRecordUpdate, CommandRecordDelete, CommandWorkflowStatusTransition, CommandPublicFormSubmit:
+		return check(payloadDoctype(op.Payload))
+	case CommandRecordMutateBundle:
+		var payload RecordMutationBundlePayload
+		if json.Unmarshal(op.Payload, &payload) != nil {
+			return false
+		}
+		for _, record := range payload.Records {
+			if check(record.Doctype) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func authorizePublicForm(reg *doctype.Registry, op Operation) *contract.Error {

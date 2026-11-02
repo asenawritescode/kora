@@ -105,5 +105,27 @@ func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageAr
 		}
 		script.Source = source
 	}
+	for _, module := range snapshot.Modules {
+		for _, owned := range module.Resources {
+			if owned.Ref.Namespace != "tenant" {
+				return nil, nil, fmt.Errorf("module %q resource %q must use tenant resource namespace", module.ID, owned.Ref.String())
+			}
+			if owned.Ref.Version < 1 {
+				return nil, nil, fmt.Errorf("module %q resource %q has invalid version", module.ID, owned.Ref.String())
+			}
+			found := false
+			for _, dt := range snapshot.DocTypes {
+				if dt != nil && dt.Name == owned.Ref.Name {
+					found = true
+					dt.ModuleOwnerID = string(module.ID)
+					dt.ModuleOwnershipMode = string(owned.MutationMode)
+					break
+				}
+			}
+			if !found {
+				return nil, nil, fmt.Errorf("module %q owns missing package DocType %q", module.ID, owned.Ref.Name)
+			}
+		}
+	}
 	return snapshot, scripts, nil
 }
