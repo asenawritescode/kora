@@ -199,7 +199,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		}
 		plan, planErr := services.ResolveCandidateModuleBindings(
 			contract.BusinessScope{TenantID: tenantID, Kind: contract.ScopeKindTenant},
-			target.Modules, command.ProviderSelections, moduleSnapshot.Revision+1,
+			candidatePackages, target.Modules, command.ProviderSelections, moduleSnapshot.Revision+1,
 		)
 		if planErr != nil || len(plan.Blockers) > 0 {
 			releaseTenantWork()

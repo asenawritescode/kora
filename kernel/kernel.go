@@ -154,6 +154,7 @@ type OperationContext struct {
 	Source              Source                // adapter surface
 	CorrelationID       string
 	CausationID         string
+	CausationDepth      uint16
 	ExpectedVersion     string
 	// ExpectedConfigRevision fences internal operations that selected behavior
 	// from tenant configuration before entering the source transaction.

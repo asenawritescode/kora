@@ -85,26 +85,26 @@ func runWorkflowBusinessScopePersistence(t *testing.T, driver, dsn string) {
 		t.Fatal("publish workflow definition:", err)
 	}
 	scope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-ledger-a"}
-	started, err := instances.StartInstance(ctx, workflow.StartInstanceInput{Tenant: tenant, BusinessScope: scope, ID: instanceID, Definition: definition, DefinitionDigest: ref.Digest, Subject: contract.SubjectRef{Kind: "Invoice", ID: "INV-SCOPED", Revision: "1"}, Actor: "actor", IdempotencyKey: contract.IdempotencyKey("start-" + contract.NewID()), Site: site, Now: now})
+	started, err := instances.StartInstance(ctx, workflow.StartInstanceInput{Tenant: tenant, BusinessScope: scope, CausationDepth: 7, ID: instanceID, Definition: definition, DefinitionDigest: ref.Digest, Subject: contract.SubjectRef{Kind: "Invoice", ID: "INV-SCOPED", Revision: "1"}, Actor: "actor", IdempotencyKey: contract.IdempotencyKey("start-" + contract.NewID()), Site: site, Now: now})
 	if err != nil {
 		t.Fatal("start scoped workflow:", err)
 	}
-	if started.BusinessScope != scope {
-		t.Fatalf("started scope = %+v, want %+v", started.BusinessScope, scope)
+	if started.BusinessScope != scope || started.CausationDepth != 7 {
+		t.Fatalf("started business context = %+v at depth %d", started.BusinessScope, started.CausationDepth)
 	}
 	reloaded, err := instances.GetInstance(ctx, tenant, instanceID)
 	if err != nil {
 		t.Fatal("reload scoped workflow:", err)
 	}
-	if reloaded.BusinessScope != scope {
-		t.Fatalf("reloaded scope = %+v, want %+v", reloaded.BusinessScope, scope)
+	if reloaded.BusinessScope != scope || reloaded.CausationDepth != 7 {
+		t.Fatalf("reloaded business context = %+v at depth %d", reloaded.BusinessScope, reloaded.CausationDepth)
 	}
 	claims, err := executor.ClaimDue(ctx, tenant, "scope-test-worker", 1, 5*time.Second)
 	if err != nil {
 		t.Fatal("claim scoped workflow:", err)
 	}
-	if len(claims) != 1 || claims[0].InstanceID != instanceID || claims[0].BusinessScope != scope {
-		t.Fatalf("claimed workflow scope did not recover: %+v", claims)
+	if len(claims) != 1 || claims[0].InstanceID != instanceID || claims[0].BusinessScope != scope || claims[0].CausationDepth != 7 {
+		t.Fatalf("claimed workflow business context did not recover: %+v", claims)
 	}
 	var payload []byte
 	err = database.QueryRowContext(ctx, db.Rebind(dialect, `SELECT payload FROM _kora_outbox WHERE aggregate_id=? AND event_type='kora.workflow.started'`), string(instanceID)).Scan(&payload)
@@ -115,8 +115,8 @@ func runWorkflowBusinessScopePersistence(t *testing.T, driver, dsn string) {
 	if err := json.Unmarshal(payload, &event); err != nil {
 		t.Fatal("decode started workflow event:", err)
 	}
-	if event.BusinessScope != scope {
-		t.Fatalf("started event scope = %+v, want %+v", event.BusinessScope, scope)
+	if event.BusinessScope != scope || event.CausationDepth != 7 {
+		t.Fatalf("started event business context = %+v at depth %d", event.BusinessScope, event.CausationDepth)
 	}
 }
 

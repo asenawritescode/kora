@@ -31,6 +31,7 @@ type ActionResult struct {
 type ActionContext struct {
 	Execution      policy.Execution
 	BusinessScope  contract.BusinessScope
+	CausationDepth uint16
 	RequiredGrant  policy.Grant
 	InstanceID     contract.InstanceID
 	StepID         contract.StepID

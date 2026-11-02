@@ -240,7 +240,7 @@ func (h *DefinitionClaimHandler) handleAction(ctx context.Context, claim Claim, 
 		return contract.NewError(contract.CodePermissionDenied, "workflow service identity lacks the registered action grant")
 	}
 	identity, idem := stableExternalActionIdentity(claim.Tenant, claim.InstanceID, claim.StepID)
-	actionContext := ActionContext{Execution: execution, BusinessScope: instance.BusinessScope, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, ExecutionID: identity, Subject: instance.Subject, IdempotencyKey: idem}
+	actionContext := ActionContext{Execution: execution, BusinessScope: instance.BusinessScope, CausationDepth: instance.CausationDepth, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, ExecutionID: identity, Subject: instance.Subject, IdempotencyKey: idem}
 	input := ActionInput{Schema: registration.InputSchema, Data: append(json.RawMessage(nil), step.Action.Input...)}
 	if registration.Class == ActionLocal {
 		_, err := registration.Local.ExecuteLocal(ctx, claim, actionContext, registration.Key, input, step.Action.Next)

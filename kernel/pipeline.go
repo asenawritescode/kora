@@ -1141,7 +1141,7 @@ func (k *Kernel) appendRecordChangeEvent(ctx context.Context, tx *sql.Tx, op Ope
 		ID: contract.NewEventID(), Type: kind, Version: contract.CurrentVersion,
 		Source: "kora.kernel", Site: op.Context.Site, BusinessScope: op.Context.BusinessScope, AggregateType: dt.Name,
 		AggregateID: doc.Name, OccurredAt: time.Now().UTC(),
-		CorrelationID: op.Context.CorrelationID, CausationID: op.Context.CausationID, Actor: op.Context.Actor,
+		CorrelationID: op.Context.CorrelationID, CausationID: op.Context.CausationID, CausationDepth: op.Context.CausationDepth, Actor: op.Context.Actor,
 		Data: data,
 	}
 	if err := event.Validate(); err != nil {

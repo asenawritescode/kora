@@ -57,12 +57,13 @@ func (s *InstanceStore) startInstanceOnce(ctx context.Context, input workflow.St
 		return contract.WorkflowInstance{}, err
 	}
 	commandJSON, err := json.Marshal(struct {
-		DefinitionID  contract.DefinitionID  `json:"definition_id"`
-		Version       uint32                 `json:"version"`
-		Digest        string                 `json:"digest"`
-		Subject       contract.SubjectRef    `json:"subject"`
-		BusinessScope contract.BusinessScope `json:"business_scope"`
-	}{input.Definition.ID, input.Definition.Version, input.DefinitionDigest, input.Subject, input.BusinessScope})
+		DefinitionID   contract.DefinitionID  `json:"definition_id"`
+		Version        uint32                 `json:"version"`
+		Digest         string                 `json:"digest"`
+		Subject        contract.SubjectRef    `json:"subject"`
+		BusinessScope  contract.BusinessScope `json:"business_scope"`
+		CausationDepth uint16                 `json:"causation_depth"`
+	}{input.Definition.ID, input.Definition.Version, input.DefinitionDigest, input.Subject, input.BusinessScope, input.CausationDepth})
 	if err != nil {
 		return contract.WorkflowInstance{}, err
 	}
@@ -109,7 +110,7 @@ func (s *InstanceStore) startInstanceOnce(ctx context.Context, input workflow.St
 	}
 	var businessScopeJSON any
 	if input.BusinessScope.TenantID != "" {
-		businessScopeJSON, err = json.Marshal(input.BusinessScope)
+		businessScopeJSON, err = json.Marshal(persistedWorkflowBusinessContext{BusinessScope: input.BusinessScope, CausationDepth: input.CausationDepth})
 		if err != nil {
 			return contract.WorkflowInstance{}, fmt.Errorf("encode workflow business scope: %w", err)
 		}
@@ -134,7 +135,7 @@ func (s *InstanceStore) startInstanceOnce(ctx context.Context, input workflow.St
 	if err != nil {
 		return contract.WorkflowInstance{}, fmt.Errorf("encode workflow event data: %w", err)
 	}
-	event := contract.EventEnvelope{ID: contract.NewEventID(), Type: "kora.workflow.started", Version: 1, Source: "workflow", Site: input.Site, BusinessScope: input.BusinessScope, AggregateType: "workflow_instance", AggregateID: string(input.ID), OccurredAt: input.Now.UTC(), Data: eventData}
+	event := contract.EventEnvelope{ID: contract.NewEventID(), Type: "kora.workflow.started", Version: 1, Source: "workflow", Site: input.Site, BusinessScope: input.BusinessScope, CausationDepth: input.CausationDepth, AggregateType: "workflow_instance", AggregateID: string(input.ID), OccurredAt: input.Now.UTC(), Data: eventData}
 	if err := event.Validate(); err != nil {
 		return contract.WorkflowInstance{}, fmt.Errorf("validate workflow event: %w", err)
 	}
@@ -220,9 +221,11 @@ func getInstanceTx(ctx context.Context, q interface {
 		}
 	}
 	if businessScopeJSON.Valid {
-		if err := json.Unmarshal([]byte(businessScopeJSON.String), &value.BusinessScope); err != nil || value.BusinessScope.Validate() != nil || value.BusinessScope.TenantID != tenant {
+		storedContext, err := decodePersistedWorkflowBusinessContext(businessScopeJSON.String, tenant)
+		if err != nil {
 			return contract.WorkflowInstance{}, contract.NewError(contract.CodeConflict, "stored workflow business scope is invalid")
 		}
+		value.BusinessScope, value.CausationDepth = storedContext.BusinessScope, storedContext.CausationDepth
 	} else {
 		value.BusinessScope = contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
 	}
@@ -273,7 +276,7 @@ func validatePersistedInstance(instance contract.WorkflowInstance) error {
 	if _, err := contract.ParseDefinitionID(string(instance.DefinitionID)); err != nil {
 		return fmt.Errorf("stored workflow definition ID: %w", err)
 	}
-	if instance.DefinitionVersion == 0 || instance.Subject.Kind == "" || instance.Subject.ID == "" || instance.Subject.Revision == "" || instance.CurrentStep == "" || !validCommitStatus(instance.Status) || instance.CreatedAt.IsZero() || instance.UpdatedAt.IsZero() {
+	if instance.DefinitionVersion == 0 || instance.Subject.Kind == "" || instance.Subject.ID == "" || instance.Subject.Revision == "" || instance.CurrentStep == "" || instance.CausationDepth > contract.MaxEventCausationDepth || !validCommitStatus(instance.Status) || instance.CreatedAt.IsZero() || instance.UpdatedAt.IsZero() {
 		return fmt.Errorf("stored workflow instance is invalid")
 	}
 	return nil
@@ -285,6 +288,9 @@ func (s *InstanceStore) validateStart(ctx context.Context, input workflow.StartI
 	}
 	if ctx == nil {
 		return fmt.Errorf("workflow start requires context")
+	}
+	if input.CausationDepth > contract.MaxEventCausationDepth {
+		return contract.NewError(contract.CodeResourceExhausted, "workflow causation depth exceeds the dispatch bound")
 	}
 	if _, err := contract.ParseTenantID(string(input.Tenant)); err != nil {
 		return fmt.Errorf("workflow tenant: %w", err)
@@ -325,6 +331,19 @@ func (s *InstanceStore) validateStart(ctx context.Context, input workflow.StartI
 		}
 	}
 	return nil
+}
+
+type persistedWorkflowBusinessContext struct {
+	contract.BusinessScope
+	CausationDepth uint16 `json:"causation_depth,omitempty"`
+}
+
+func decodePersistedWorkflowBusinessContext(raw string, tenant contract.TenantID) (persistedWorkflowBusinessContext, error) {
+	var stored persistedWorkflowBusinessContext
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil || stored.BusinessScope.Validate() != nil || stored.BusinessScope.TenantID != tenant || stored.CausationDepth > contract.MaxEventCausationDepth {
+		return persistedWorkflowBusinessContext{}, fmt.Errorf("workflow business context is invalid")
+	}
+	return stored, nil
 }
 
 var _ = errors.Is

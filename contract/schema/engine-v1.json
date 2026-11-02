@@ -699,6 +699,9 @@
         "capability": {
           "$ref": "#/$defs/ResourceRef"
         },
+        "causation_depth": {
+          "type": "integer"
+        },
         "causation_id": {
           "type": "string"
         },
@@ -2810,6 +2813,9 @@
         },
         "capability": {
           "$ref": "#/$defs/ResourceRef"
+        },
+        "causation_depth": {
+          "type": "integer"
         },
         "causation_id": {
           "type": "string"

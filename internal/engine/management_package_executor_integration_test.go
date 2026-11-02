@@ -114,7 +114,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				Engine: contract.ManifestEngine{MinVersion: "1.0.0"},
 				Modules: []contract.ModuleDescriptor{{
 					ID: "inventory.stock", Version: "1.0.0",
-					Requires: []contract.CapabilityRequirement{{Name: "warehouse.lookup", Contract: contract.SchemaRef{ID: "warehouse.stock", Version: 1}, Required: false}},
+					Requires: []contract.CapabilityRequirement{{Name: "warehouse.lookup", Contract: contract.SchemaRef{ID: "warehouse.stock", Version: 1}, Required: true}},
 					Resources: []contract.OwnedResource{{
 						Ref:    contract.ResourceRef{Namespace: "tenant", Name: "Stock", Version: 1},
 						Access: contract.ModulePrivate, MutationMode: contract.MutationCRUD,
@@ -207,7 +207,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				SiteID: info.SiteID, Name: info.Name, Status: "active", DBType: test.driver,
 				DB: database, Registry: doctype.NewRegistry(), ConfigRevision: initialRevision,
 				Config: knet.SiteRouterConfig{Hostname: info.Name, Domains: []string{info.Name}},
-				RuntimeServices: &tenantruntime.Services{ResolveCandidateModuleBindings: func(scope contract.BusinessScope, modules []contract.ModuleDescriptor, selections []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
+				RuntimeServices: &tenantruntime.Services{ResolveCandidateModuleBindings: func(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, selections []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
 					candidatePreflights++
 					if !providerAvailable {
 						return plugin.BindingPlan{}, errors.New("external warehouse is offline")
@@ -216,7 +216,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 					for _, selection := range selections {
 						pluginSelections = append(pluginSelections, plugin.ProviderSelection{Key: plugin.BindingKey{Scope: selection.Key.Scope, ConsumerModuleID: selection.Key.ConsumerModuleID, CapabilityName: selection.Key.CapabilityName}, ProviderID: selection.ProviderID})
 					}
-					return plugin.ResolveModules(scope, modules, []plugin.ProviderRegistration{{
+					return plugin.ResolveInstalledModules(scope, packages, modules, []plugin.ProviderRegistration{{
 						TenantID: tenant, ProviderID: "external-warehouse", OwnerModuleID: "warehouse.external", Kind: plugin.ProviderExternal,
 						Offers:    []contract.CapabilityOffer{{Name: "warehouse.lookup", Contract: contract.SchemaRef{ID: "warehouse.stock", Version: 1}}},
 						Factories: map[contract.CapabilityName]plugin.ProviderFactory{"warehouse.lookup": plugin.NewStaticFactory("warehouse.lookup", nil)},
@@ -240,10 +240,6 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 			if err != nil {
 				t.Fatal("construct management operation service:", err)
 			}
-			accepted, err := service.Accept(ctx, "cloud-service", command)
-			if err != nil || accepted.ID != operationID || accepted.State != contract.OperationRequested {
-				t.Fatalf("accept package operation = %+v, %v", accepted, err)
-			}
 			worker, err := management.NewWorker(operationStore, executor, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			if err != nil {
 				t.Fatal("construct durable management worker:", err)
@@ -256,12 +252,12 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				}()
 				return stop, done
 			}
-			waitForState := func(want contract.OperationState) management.Operation {
+			waitForState := func(operationService *management.Service, id contract.OperationID, want contract.OperationState) management.Operation {
 				t.Helper()
 				ticker := time.NewTicker(10 * time.Millisecond)
 				defer ticker.Stop()
 				for {
-					operation, getErr := service.Get(ctx, "cloud-service", operationID)
+					operation, getErr := operationService.Get(ctx, "cloud-service", id)
 					if getErr != nil {
 						t.Fatalf("read package operation while waiting for %s: %v", want, getErr)
 					}
@@ -275,8 +271,41 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 					}
 				}
 			}
+			providerAvailable = false
+			failedCommand := command
+			failedCommand.Meta.IdempotencyKey = contract.IdempotencyKey("package-preflight-" + operationID[len(operationID)-8:])
+			preflightOperationID := contract.OperationID(contract.NewID())
+			preflightService, err := management.NewService(operationStore, packageExecutorIDs{id: string(preflightOperationID)}, time.Now)
+			if err != nil {
+				t.Fatal("construct failed-preflight operation service:", err)
+			}
+			preflightFailed, err := preflightService.Accept(ctx, "cloud-service", failedCommand)
+			if err != nil || preflightFailed.State != contract.OperationRequested {
+				t.Fatalf("accept package with unavailable mandatory provider = %+v, %v", preflightFailed, err)
+			}
 			stopWorker, workerDone := startWorker(worker)
-			uncertain := waitForState(contract.OperationRecoveryRequired)
+			failedOperation := waitForState(preflightService, preflightFailed.ID, contract.OperationFailed)
+			stopWorker()
+			if err := <-workerDone; err != nil {
+				t.Fatal("join failed-preflight management worker:", err)
+			}
+			if failedOperation.Error == nil || candidatePreflights != 1 || coordinator.replaces != 0 {
+				t.Fatalf("failed composition preflight did not stop before runtime replacement: operation=%+v preflights=%d replacements=%d", failedOperation, candidatePreflights, coordinator.replaces)
+			}
+			if revision, err := configstore.CurrentConfigRevision(ctx, database, dialect); err != nil || revision != initialRevision {
+				t.Fatalf("failed composition preflight changed config revision to %d: %v", revision, err)
+			}
+			preflightSnapshot, err := configstore.NewModuleStore(database, dialect).Load(tenant)
+			if err != nil || preflightSnapshot.Revision != 0 || len(preflightSnapshot.Packages) != 0 || len(preflightSnapshot.Modules) != 0 {
+				t.Fatalf("failed composition preflight changed installed modules: %+v, %v", preflightSnapshot, err)
+			}
+			providerAvailable = true
+			accepted, err := service.Accept(ctx, "cloud-service", command)
+			if err != nil || accepted.ID != operationID || accepted.State != contract.OperationRequested {
+				t.Fatalf("accept package operation = %+v, %v", accepted, err)
+			}
+			stopWorker, workerDone = startWorker(worker)
+			uncertain := waitForState(service, operationID, contract.OperationRecoveryRequired)
 			stopWorker()
 			if err := <-workerDone; err != nil {
 				t.Fatal("join first management worker:", err)
@@ -311,7 +340,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				t.Fatal("reopen durable management worker:", err)
 			}
 			stopWorker, workerDone = startWorker(worker)
-			succeeded := waitForState(contract.OperationSucceeded)
+			succeeded := waitForState(service, operationID, contract.OperationSucceeded)
 			stopWorker()
 			if err := <-workerDone; err != nil {
 				t.Fatal("join recovered management worker:", err)
@@ -322,8 +351,8 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 			if coordinator.replaces != 2 {
 				t.Fatalf("runtime replacements = %d, want failed attempt plus recovered attempt", coordinator.replaces)
 			}
-			if candidatePreflights != 1 {
-				t.Fatalf("candidate binding preflights = %d, want one before commit; committed recovery must not depend on current provider health", candidatePreflights)
+			if candidatePreflights != 2 {
+				t.Fatalf("candidate binding preflights = %d, want failed preflight plus one before commit; committed recovery must not depend on current provider health", candidatePreflights)
 			}
 			if revision, err := configstore.CurrentConfigRevision(ctx, database, dialect); err != nil || revision != initialRevision+1 {
 				t.Fatalf("tenant config revision after recovery = %d, %v; want one committed revision %d", revision, err, initialRevision+1)

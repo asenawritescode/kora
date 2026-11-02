@@ -195,6 +195,8 @@ func (c CommandEnvelope) Expired(now time.Time) bool {
 	return !c.Deadline.IsZero() && !now.Before(c.Deadline)
 }
 
+const MaxEventCausationDepth uint16 = 32
+
 // EventEnvelope is the versioned transport for a domain event (RFC §7/§8.3).
 //
 //contract:wire
@@ -206,20 +208,21 @@ type EventEnvelope struct {
 	// Sequence is assigned by the tenant outbox transaction and orders source
 	// events for rebuild cutoffs. It remains a decimal string to avoid JSON
 	// number precision loss in JavaScript consumers.
-	Sequence      Revision      `json:"sequence,omitempty"`
-	Source        string        `json:"source"`
-	Site          string        `json:"site"`
-	BusinessScope BusinessScope `json:"business_scope,omitempty"`
-	AggregateType string        `json:"aggregate_type,omitempty"`
-	AggregateID   string        `json:"aggregate_id,omitempty"`
-	OccurredAt    time.Time     `json:"occurred_at"`
-	CorrelationID string        `json:"correlation_id,omitempty"`
-	CausationID   string        `json:"causation_id,omitempty"`
-	Actor         ActorContext  `json:"actor,omitempty"`
-	Capability    ResourceRef   `json:"capability,omitempty"`
-	Skill         ResourceRef   `json:"skill,omitempty"`
-	ModelRevision string        `json:"model_revision,omitempty"`
-	ProvenanceIDs []string      `json:"provenance_ids,omitempty"`
+	Sequence       Revision      `json:"sequence,omitempty"`
+	Source         string        `json:"source"`
+	Site           string        `json:"site"`
+	BusinessScope  BusinessScope `json:"business_scope,omitempty"`
+	AggregateType  string        `json:"aggregate_type,omitempty"`
+	AggregateID    string        `json:"aggregate_id,omitempty"`
+	OccurredAt     time.Time     `json:"occurred_at"`
+	CorrelationID  string        `json:"correlation_id,omitempty"`
+	CausationID    string        `json:"causation_id,omitempty"`
+	CausationDepth uint16        `json:"causation_depth,omitempty"`
+	Actor          ActorContext  `json:"actor,omitempty"`
+	Capability     ResourceRef   `json:"capability,omitempty"`
+	Skill          ResourceRef   `json:"skill,omitempty"`
+	ModelRevision  string        `json:"model_revision,omitempty"`
+	ProvenanceIDs  []string      `json:"provenance_ids,omitempty"`
 	//contract:json
 	Data json.RawMessage `json:"data"`
 }
@@ -239,6 +242,8 @@ func (e EventEnvelope) Validate() error {
 		return NewError(CodeValidationFailed, "event site is required")
 	case e.OccurredAt.IsZero():
 		return NewError(CodeValidationFailed, "event occurred_at is required")
+	case e.CausationDepth > MaxEventCausationDepth:
+		return NewError(CodeResourceExhausted, "event causation depth exceeds the dispatch bound")
 	case len(e.Data) == 0 || string(e.Data) == "null":
 		return NewError(CodeValidationFailed, "event data is required")
 	}

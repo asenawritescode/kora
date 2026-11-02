@@ -59,7 +59,12 @@ func RunWorkflowTriggerDispatcher(ctx context.Context, dispatcher *outbox.Dispat
 		if err != nil && ctx.Err() == nil {
 			// Outbox delivery is retried by leaving the event unreceipted. Avoid
 			// logging record contents because they may contain user data.
-			slog.Warn("workflow trigger dispatch failed", "error_type", fmt.Sprintf("%T", err))
+			var domainErr *contract.Error
+			if errors.As(err, &domainErr) && domainErr.Type == contract.CodeResourceExhausted {
+				slog.Warn("workflow trigger dispatch stopped at its causal bound", "error_code", domainErr.Type)
+			} else {
+				slog.Warn("workflow trigger dispatch failed", "error_type", fmt.Sprintf("%T", err))
+			}
 		}
 		if processed > 0 {
 			continue

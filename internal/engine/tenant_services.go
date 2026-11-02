@@ -176,7 +176,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		}
 		return plugin.ResolveInstalledModules(scope, moduleSnapshot.Packages, moduleSnapshot.Modules, providers, pluginProviderSelections(selections), moduleSnapshot.Revision)
 	}
-	resolveCandidateModuleBindings := func(scope contract.BusinessScope, modules []contract.ModuleDescriptor, extra []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
+	resolveCandidateModuleBindings := func(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, extra []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
 		if scope.TenantID != contract.TenantID(loaded.SiteID) {
 			return plugin.BindingPlan{}, contract.NewError(contract.CodePermissionDenied, "module binding scope belongs to another tenant")
 		}
@@ -186,7 +186,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}
-		return plugin.ResolveInstalledModules(scope, moduleSnapshot.Packages, modules, providers, pluginProviderSelections(candidateSelections), revision)
+		return plugin.ResolveInstalledModules(scope, packages, modules, providers, pluginProviderSelections(candidateSelections), revision)
 	}
 	tenantScope := contract.BusinessScope{TenantID: contract.TenantID(loaded.SiteID), Kind: contract.ScopeKindTenant}
 	bindingPlan, moduleErr := resolveModuleBindings(tenantScope)

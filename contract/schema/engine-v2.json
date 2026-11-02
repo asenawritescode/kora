@@ -3908,6 +3908,9 @@
         "business_scope": {
           "$ref": "#/$defs/BusinessScope"
         },
+        "causation_depth": {
+          "type": "integer"
+        },
         "created_at": {
           "format": "date-time",
           "type": "string"
@@ -7836,6 +7839,9 @@
       "properties": {
         "business_scope": {
           "$ref": "#/$defs/BusinessScope"
+        },
+        "causation_depth": {
+          "type": "integer"
         },
         "created_at": {
           "format": "date-time",

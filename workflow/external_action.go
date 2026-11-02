@@ -115,7 +115,7 @@ func (e *ExternalActionExecutor) Execute(ctx context.Context, claim Claim, defin
 	if len(subject) > 0 {
 		subjectRef = subject[0]
 	}
-	actionContext := ActionContext{Execution: execution, BusinessScope: claim.BusinessScope, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, Subject: subjectRef, IdempotencyKey: key}
+	actionContext := ActionContext{Execution: execution, BusinessScope: claim.BusinessScope, CausationDepth: claim.CausationDepth, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, Subject: subjectRef, IdempotencyKey: key}
 	result, actionErr := callExternalAction(ctx, registration.External, actionContext, input)
 	if actionErr != nil {
 		var classified *ExternalActionFailure

@@ -356,12 +356,34 @@ func TestRecordTriggerStartsMatchingDefinitionIdempotentlyAndFiltersWatchedField
 	if instances.input.Subject != (contract.SubjectRef{Kind: "Invoice", ID: "INV-1", Revision: "4"}) || !strings.HasPrefix(string(instances.input.IdempotencyKey), "trigger_") {
 		t.Fatalf("trigger start was not bound to event subject/idempotency: %+v", instances.input)
 	}
+	if instances.input.CausationDepth != 1 {
+		t.Fatalf("root trigger causation depth = %d, want 1", instances.input.CausationDepth)
+	}
 	instances.called = false
 	event.ID = "evt-2"
 	event.Data = json.RawMessage(`{"table":"Invoice","record_id":"INV-1","revision":"5","changed_fields":["description"]}`)
 	started, err = service.StartFromRecordEvent(context.Background(), "tenant-1", "tenant-route", event)
 	if err != nil || len(started) != 0 || instances.called {
 		t.Fatalf("unwatched field triggered workflow: started=%+v called=%v err=%v", started, instances.called, err)
+	}
+}
+
+func TestRecordTriggerStopsAtCausationDispatchBound(t *testing.T) {
+	definition := validTestDefinition()
+	definition.Trigger = &contract.RecordTrigger{Kind: "record.updated", Table: "Invoice"}
+	ref := contract.DefinitionVersionRef{DefinitionID: definition.ID, Version: 1, Digest: "digest"}
+	defs := &testDefinitionRepository{stored: definition, storedRef: ref}
+	instances := &testInstanceRepository{}
+	service, err := NewInstanceService(defs, instances, &testInstanceAuthorizer{}, frozenTestCatalog(t), testSchemas{}, testWaits{}, time.Now, func() string { return contract.NewID() })
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := contract.EventEnvelope{ID: "evt-loop", Type: "record.updated", Source: "kora.kernel", Site: "tenant-route", CausationDepth: contract.MaxEventCausationDepth, Actor: contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-route"}, Data: json.RawMessage(`{"table":"Invoice","record_id":"INV-1","revision":"1"}`)}
+	if _, err := service.StartFromRecordEvent(context.Background(), "tenant-1", "tenant-route", event); err == nil || !strings.Contains(err.Error(), "causation bound") {
+		t.Fatalf("causal loop at dispatch bound was not rejected visibly: %v", err)
+	}
+	if instances.called {
+		t.Fatal("causation loop reached workflow persistence")
 	}
 }
 

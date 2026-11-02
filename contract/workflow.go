@@ -202,6 +202,7 @@ type WorkflowInstance struct {
 	DefinitionVersion uint32         `json:"definition_version"`
 	Subject           SubjectRef     `json:"subject"`
 	BusinessScope     BusinessScope  `json:"business_scope,omitempty"`
+	CausationDepth    uint16         `json:"causation_depth,omitempty"`
 	Status            InstanceStatus `json:"status"`
 	CurrentStep       StepID         `json:"current_step"`
 	NextWakeAt        *time.Time     `json:"next_wake_at,omitempty"`

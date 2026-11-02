@@ -61,6 +61,29 @@ func TestResolveModulesRejectsDuplicateAndUnmatchedProviderSelections(t *testing
 	}
 }
 
+func TestResolveInstalledModulesHashesDeterministicPackageComposition(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	modules := []contract.ModuleDescriptor{{ID: "sales.orders", Version: "1.0.0"}}
+	base := contract.InstalledPackage{PackageID: "base", ReleaseID: "base-1", Version: "1.0.0", Digest: "base-digest"}
+	consumer := contract.InstalledPackage{PackageID: "sales", ReleaseID: "sales-1", Version: "1.0.0", Digest: "sales-digest", Requires: []contract.ManifestPackRef{{PackageID: "base", ReleaseID: "base-1", Version: "1.0.0"}}}
+	first, err := ResolveInstalledModules(scope, []contract.InstalledPackage{consumer, base}, modules, nil, nil, 5)
+	if err != nil {
+		t.Fatal("resolve installed package composition:", err)
+	}
+	second, err := ResolveInstalledModules(scope, []contract.InstalledPackage{base, consumer}, modules, nil, nil, 5)
+	if err != nil || first.Composition.PlanHash != second.Composition.PlanHash {
+		t.Fatalf("package input order changed composition hash: %q / %q, %v", first.Composition.PlanHash, second.Composition.PlanHash, err)
+	}
+	if len(first.Packages) != 2 || first.Packages[0].ReleaseID != "base-1" {
+		t.Fatalf("resolved package constraints are not retained deterministically: %#v", first.Packages)
+	}
+	consumer.Digest = "changed-digest"
+	changed, err := ResolveInstalledModules(scope, []contract.InstalledPackage{base, consumer}, modules, nil, nil, 5)
+	if err != nil || changed.Composition.PlanHash == first.Composition.PlanHash {
+		t.Fatalf("composition hash did not bind immutable package digest: %q / %q, %v", first.Composition.PlanHash, changed.Composition.PlanHash, err)
+	}
+}
+
 func TestResolveModulesRejectsDeterministicInitializationCycle(t *testing.T) {
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
 	capabilityA := contract.CapabilityOffer{Name: "billing.post", Contract: contract.SchemaRef{ID: "journal", Version: 1}}

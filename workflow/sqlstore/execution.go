@@ -175,14 +175,17 @@ func (s *ExecutionStore) ClaimDue(ctx context.Context, tenant contract.TenantID,
 			continue
 		}
 		var businessScope contract.BusinessScope
+		var causationDepth uint16
 		if item.businessScopeJSON.Valid {
-			if err := json.Unmarshal([]byte(item.businessScopeJSON.String), &businessScope); err != nil || businessScope.Validate() != nil || businessScope.TenantID != tenant {
+			storedContext, err := decodePersistedWorkflowBusinessContext(item.businessScopeJSON.String, tenant)
+			if err != nil {
 				return nil, contract.NewError(contract.CodeConflict, "persisted workflow claim business scope is invalid")
 			}
+			businessScope, causationDepth = storedContext.BusinessScope, storedContext.CausationDepth
 		} else {
 			businessScope = contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
 		}
-		claims = append(claims, workflow.Claim{Tenant: tenant, BusinessScope: businessScope, InstanceID: contract.InstanceID(item.id), StepID: contract.StepID(item.step), Attempt: uint8(item.lastAttempt + 1), Owner: owner, Fence: workflow.Fence(item.fence + 1), LeaseUntil: time.Now().UTC().Add(lease), Revision: contract.Revision(fmt.Sprint(item.revision)), FirstAttemptAt: item.firstAttemptAt})
+		claims = append(claims, workflow.Claim{Tenant: tenant, BusinessScope: businessScope, CausationDepth: causationDepth, InstanceID: contract.InstanceID(item.id), StepID: contract.StepID(item.step), Attempt: uint8(item.lastAttempt + 1), Owner: owner, Fence: workflow.Fence(item.fence + 1), LeaseUntil: time.Now().UTC().Add(lease), Revision: contract.Revision(fmt.Sprint(item.revision)), FirstAttemptAt: item.firstAttemptAt})
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit workflow claims: %w", err)

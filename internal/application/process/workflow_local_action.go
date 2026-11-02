@@ -161,7 +161,7 @@ func verifiedWorkflowOperationContext(action workflow.ActionContext, requested k
 	if len(actor.Roles) > 0 {
 		primaryRole = actor.Roles[0]
 	}
-	return kernel.OperationContext{Site: actor.Site, TenantID: action.Execution.Tenant(), Execution: action.Execution, BusinessScope: action.BusinessScope, Actor: actor,
+	return kernel.OperationContext{Site: actor.Site, TenantID: action.Execution.Tenant(), Execution: action.Execution, BusinessScope: action.BusinessScope, CausationDepth: action.CausationDepth, Actor: actor,
 		User: user, UserRole: primaryRole, Roles: append([]string(nil), actor.Roles...), Source: kernel.SourceWorker,
 		CorrelationID: requested.CorrelationID, CausationID: string(action.InstanceID), ExpectedVersion: requested.ExpectedVersion,
 		IdempotencyKey: string(action.IdempotencyKey)}

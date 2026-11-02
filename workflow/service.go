@@ -441,6 +441,9 @@ func (s *InstanceService) StartFromRecordEvent(ctx context.Context, tenant contr
 	if event.Site != site || !event.Actor.Authenticated() || event.Actor.Site != site {
 		return nil, contract.NewError(contract.CodeUnauthenticated, "record trigger actor or tenant route is invalid")
 	}
+	if event.CausationDepth >= contract.MaxEventCausationDepth {
+		return nil, contract.NewError(contract.CodeResourceExhausted, "record-triggered workflow causation bound reached")
+	}
 	var data contract.RecordChangeEventData
 	if err := json.Unmarshal(event.Data, &data); err != nil || data.Table == "" || data.RecordID == "" || data.Revision == "" || event.AggregateType != data.Table || event.AggregateID != data.RecordID {
 		return nil, contract.NewError(contract.CodeValidationFailed, "record trigger event data is invalid")
@@ -490,7 +493,7 @@ func (s *InstanceService) StartFromRecordEvent(ctx context.Context, tenant contr
 			return nil, contract.NewError(contract.CodePermissionDenied, "record trigger business scope is invalid")
 		}
 		startedInstance, err := s.instances.StartInstance(ctx, StartInstanceInput{
-			Tenant: tenant, ID: instanceID, Definition: definition, DefinitionDigest: ref.Digest,
+			Tenant: tenant, ID: instanceID, CausationDepth: event.CausationDepth + 1, Definition: definition, DefinitionDigest: ref.Digest,
 			BusinessScope: businessScope, Subject: contract.SubjectRef{Kind: data.Table, ID: data.RecordID, Revision: contract.Revision(data.Revision)},
 			Actor: principal, IdempotencyKey: key, Site: site, Now: s.now().UTC(),
 		})
