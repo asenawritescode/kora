@@ -69,6 +69,11 @@ jobs:
           ./internal/dbaccess ./api ./analytics ./outbox ./site ./requests/sqlstore ./workflow/sqlstore
           ./notifications/sqlstore ./management/sqlstore -count=1 -timeout=15m
 
+      - name: Test programmatic module owner command fixture
+        env:
+          KORA_ENGINE_MODULE_COMMAND_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+        run: go test -tags=integration ./internal/engine -run TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction -count=1 -timeout=5m
+
       - name: Wait for disposable libSQL
         run: |
           for attempt in {1..45}; do
