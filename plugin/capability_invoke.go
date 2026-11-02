@@ -14,7 +14,14 @@ import (
 // come from the immutable BindingPlan, never from the caller payload.
 type CapabilityOperationHandle interface {
 	contract.CapabilityHandle
-	InvokeCapability(context.Context, CapabilityInvocation) (json.RawMessage, error)
+	InvokeCapability(context.Context, CapabilityInvocation) (CapabilityInvocationResult, error)
+}
+
+// CapabilityInvocationResult identifies the provider-side execution so
+// retries and reconciliation can refer to the effect that actually ran.
+type CapabilityInvocationResult struct {
+	ExecutionID contract.OperationID
+	Output      json.RawMessage
 }
 
 // CapabilityInvocation is assembled by BindingPlan after resolving a pinned
@@ -80,15 +87,19 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 	if err != nil {
 		return CapabilityOperationResult{}, err
 	}
-	output, err := invoker.InvokeCapability(ctx, CapabilityInvocation{Context: providerContext, Execution: execution, ModuleExecution: moduleExecution, Operation: *spec, Meta: meta, Payload: append(json.RawMessage(nil), payload...)})
+	providerResult, err := invoker.InvokeCapability(ctx, CapabilityInvocation{Context: providerContext, Execution: execution, ModuleExecution: moduleExecution, Operation: *spec, Meta: meta, Payload: append(json.RawMessage(nil), payload...)})
 	if err != nil {
 		return CapabilityOperationResult{}, err
 	}
+	if providerResult.ExecutionID == "" {
+		return CapabilityOperationResult{}, fmt.Errorf("capability provider returned no execution identity")
+	}
+	output := providerResult.Output
 	if len(output) == 0 || len(output) > 1<<20 || !json.Valid(output) {
 		return CapabilityOperationResult{}, fmt.Errorf("capability provider returned invalid output")
 	}
 	if err := binding.validateSchema(spec.Output, output); err != nil {
 		return CapabilityOperationResult{}, fmt.Errorf("capability output failed its registered schema: %w", err)
 	}
-	return CapabilityOperationResult{ExecutionID: contract.OperationID(contract.NewOperationID()), Status: "completed", OutputSchema: spec.Output, Output: append(json.RawMessage(nil), output...)}, nil
+	return CapabilityOperationResult{ExecutionID: providerResult.ExecutionID, Status: "completed", OutputSchema: spec.Output, Output: append(json.RawMessage(nil), output...)}, nil
 }

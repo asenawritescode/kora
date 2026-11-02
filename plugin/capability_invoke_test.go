@@ -20,24 +20,25 @@ func (f operationTestFactory) Open(context contract.OperationContext) (contract.
 }
 
 type operationTestHandle struct {
-	name       contract.CapabilityName
-	scope      contract.GrantScope
-	opened     int
-	calls      int
-	revoked    bool
-	invocation CapabilityInvocation
-	output     json.RawMessage
-	err        error
+	name        contract.CapabilityName
+	scope       contract.GrantScope
+	opened      int
+	calls       int
+	revoked     bool
+	invocation  CapabilityInvocation
+	executionID contract.OperationID
+	output      json.RawMessage
+	err         error
 }
 
 func (h *operationTestHandle) Name() contract.CapabilityName      { return h.name }
 func (h *operationTestHandle) Scope() contract.GrantScope         { return h.scope }
 func (h *operationTestHandle) Revoke()                            { h.revoked = true }
 func (h *operationTestHandle) Evidence() contract.CleanupEvidence { return contract.CleanupEvidence{} }
-func (h *operationTestHandle) InvokeCapability(_ context.Context, invocation CapabilityInvocation) (json.RawMessage, error) {
+func (h *operationTestHandle) InvokeCapability(_ context.Context, invocation CapabilityInvocation) (CapabilityInvocationResult, error) {
 	h.calls++
 	h.invocation = invocation
-	return append(json.RawMessage(nil), h.output...), h.err
+	return CapabilityInvocationResult{ExecutionID: h.executionID, Output: append(json.RawMessage(nil), h.output...)}, h.err
 }
 
 func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T) {
@@ -46,7 +47,7 @@ func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T
 	offer := contract.CapabilityOffer{Name: "billing.issue", Contract: output, Operations: []contract.OperationSpec{{Name: "issue", Input: input, Output: output, Effect: contract.EffectLocal}}}
 	owner := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}}
 	consumer := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: offer.Name, Contract: offer.Contract, Required: true}}}
-	handle := &operationTestHandle{name: offer.Name, scope: contract.GrantScopeOperation, output: json.RawMessage(`{"invoice_id":"INV-1"}`)}
+	handle := &operationTestHandle{name: offer.Name, scope: contract.GrantScopeOperation, executionID: "provider-execution-1", output: json.RawMessage(`{"invoice_id":"INV-1"}`)}
 	validate := func(schema contract.SchemaRef, data []byte) error {
 		if !json.Valid(data) {
 			return errors.New("invalid JSON")
@@ -79,7 +80,7 @@ func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T
 	if err != nil {
 		t.Fatal("invoke pinned capability:", err)
 	}
-	if result.Status != "completed" || result.ExecutionID == "" || result.OutputSchema != output || string(result.Output) != `{"invoice_id":"INV-1"}` {
+	if result.Status != "completed" || result.ExecutionID != "provider-execution-1" || result.OutputSchema != output || string(result.Output) != `{"invoice_id":"INV-1"}` {
 		t.Fatalf("capability result = %+v", result)
 	}
 	if handle.calls != 1 || !handle.revoked || handle.invocation.Operation != offer.Operations[0] || handle.invocation.Meta != meta || string(handle.invocation.Payload) != `{"order_id":"ORD-1"}` {
@@ -97,7 +98,7 @@ func TestBindingPlanRejectsBadCapabilitySchemasBeforeAndAfterProviderCall(t *tes
 	offer := contract.CapabilityOffer{Name: "billing.issue", Contract: output, Operations: []contract.OperationSpec{{Name: "issue", Input: input, Output: output, Effect: contract.EffectExternal}}}
 	owner := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}}
 	consumer := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: offer.Name, Contract: offer.Contract, Required: true}}}
-	handle := &operationTestHandle{name: offer.Name, output: json.RawMessage(`{"wrong":true}`)}
+	handle := &operationTestHandle{name: offer.Name, executionID: "provider-execution-2", output: json.RawMessage(`{"wrong":true}`)}
 	validate := func(schema contract.SchemaRef, data []byte) error {
 		want := `{"order_id":"ORD-1"}`
 		if schema == output {
@@ -129,5 +130,13 @@ func TestBindingPlanRejectsBadCapabilitySchemasBeforeAndAfterProviderCall(t *tes
 	}
 	if handle.calls != 1 || !handle.revoked {
 		t.Fatalf("bad output provider call/cleanup = calls:%d revoked:%t", handle.calls, handle.revoked)
+	}
+	handle.executionID = ""
+	handle.output = json.RawMessage(`{"invoice_id":"INV-1"}`)
+	if _, err := plan.InvokeCapability(context.Background(), execution, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`)); err == nil {
+		t.Fatal("provider result without an execution identity was accepted")
+	}
+	if handle.calls != 2 || !handle.revoked {
+		t.Fatalf("missing execution identity provider call/cleanup = calls:%d revoked:%t", handle.calls, handle.revoked)
 	}
 }

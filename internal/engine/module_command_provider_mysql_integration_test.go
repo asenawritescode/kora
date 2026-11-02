@@ -169,6 +169,13 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	if legalEntityID != scope.LegalEntityID {
 		t.Fatalf("owner command row legal entity = %q, want actor scope %q", legalEntityID, scope.LegalEntityID)
 	}
+	var auditOperationID string
+	if err := database.QueryRowContext(ctx, "SELECT operation_id FROM _kora_operation_audit WHERE site=? AND command_name=? AND status='completed'", string(tenant), command.FullName()).Scan(&auditOperationID); err != nil {
+		t.Fatal("read owner command execution identity:", err)
+	}
+	if auditOperationID != string(result.ExecutionID) {
+		t.Fatalf("capability execution ID %q differs from committed Kernel operation %q", result.ExecutionID, auditOperationID)
+	}
 }
 
 func assertModuleCommandCounts(t *testing.T, ctx context.Context, database *sql.DB, dialect kdb.Dialect, invoice *doctype.DocType, tenant contract.TenantID, wantRecords, wantEvents, wantAudits int) {

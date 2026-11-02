@@ -65,20 +65,20 @@ func (h *kernelCommandProviderHandle) Evidence() contract.CleanupEvidence {
 	return evidence
 }
 
-func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invocation plugin.CapabilityInvocation) (json.RawMessage, error) {
+func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invocation plugin.CapabilityInvocation) (plugin.CapabilityInvocationResult, error) {
 	if h == nil || h.factory == nil || h.revoked || ctx == nil || !invocation.Execution.Valid() || invocation.Execution.Tenant() != h.scope.TenantID || invocation.Context.Scope != h.scope || invocation.ModuleExecution.Scope != h.scope || !invocation.ModuleExecution.Verified() || invocation.ModuleExecution.CallerModuleID == "" || invocation.ModuleExecution.OwnerModuleID != h.factory.owner || invocation.ModuleExecution.BindingRevision == 0 || invocation.ModuleExecution.AllowedOperation != invocation.Operation.Name || invocation.Operation.Effect != contract.EffectLocal {
-		return nil, contract.NewError(contract.CodePermissionDenied, "internal capability invocation identity is invalid")
+		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodePermissionDenied, "internal capability invocation identity is invalid")
 	}
 	command, ok := h.factory.commands.LookupCapability(h.factory.capability, invocation.Operation.Name)
 	if !ok || command.ModuleOwnerID != h.factory.owner || command.Capability != h.factory.capability || command.Operation != invocation.Operation.Name || command.InputSchema != invocation.Operation.Input || command.OutputSchema != invocation.Operation.Output {
-		return nil, contract.NewError(contract.CodePermissionDenied, "local capability operation has no matching owner command contract")
+		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodePermissionDenied, "local capability operation has no matching owner command contract")
 	}
 	if err := h.factory.validateSchema(command.InputSchema, invocation.Payload); err != nil {
-		return nil, contract.NewError(contract.CodeValidationFailed, "owner command input failed its registered schema")
+		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeValidationFailed, "owner command input failed its registered schema")
 	}
 	moduleExecution, err := contract.NewCommandModuleExecution(h.scope, invocation.ModuleExecution.CallerModuleID, h.factory.owner, invocation.ModuleExecution.BindingRevision, command.FullName(), command.FullName())
 	if err != nil {
-		return nil, contract.NewError(contract.CodePermissionDenied, "owner command provenance could not be minted")
+		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodePermissionDenied, "owner command provenance could not be minted")
 	}
 	actor := invocation.Execution.Actor()
 	user := actor.SubjectUserID
@@ -96,7 +96,7 @@ func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invo
 	}}
 	tx, err := h.factory.database.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, contract.NewError(contract.CodeDependencyUnavailable, "begin local capability transaction failed")
+		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeDependencyUnavailable, "begin local capability transaction failed")
 	}
 	committed := false
 	defer func() {
@@ -106,17 +106,17 @@ func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invo
 	}()
 	result, afterCommit, commandErr := h.factory.engine.ExecuteInTx(ctx, h.factory.database, tx, h.factory.registry, operation)
 	if commandErr != nil {
-		return nil, commandErr
+		return plugin.CapabilityInvocationResult{}, commandErr
 	}
 	if err := h.factory.validateSchema(command.OutputSchema, result.Data); err != nil {
-		return nil, contract.NewError(contract.CodeValidationFailed, "owner command output failed its registered schema")
+		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeValidationFailed, "owner command output failed its registered schema")
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, contract.NewError(contract.CodeOutcomeUnknown, "local capability transaction commit outcome is unknown")
+		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeOutcomeUnknown, "local capability transaction commit outcome is unknown")
 	}
 	committed = true
 	if afterCommit != nil {
 		afterCommit()
 	}
-	return append(json.RawMessage(nil), result.Data...), nil
+	return plugin.CapabilityInvocationResult{ExecutionID: contract.OperationID(result.OperationID), Output: append(json.RawMessage(nil), result.Data...)}, nil
 }
