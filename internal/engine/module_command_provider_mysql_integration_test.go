@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -122,6 +124,15 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	if err != nil {
 		t.Fatal("resolve module binding plan:", err)
 	}
+	moduleStore := configstore.NewModuleStore(database, dialect)
+	if err := moduleStore.EnsureCapabilityLeaseSchema(ctx); err != nil {
+		t.Fatal("ensure capability lease store:", err)
+	}
+	plan.LeaseAdmission = moduleStore
+	lease := contract.CapabilityLease{ID: "lease-" + suffix[:16], TenantID: tenant, Scope: scope, CallerModuleID: caller.ID, ProviderID: plan.Bindings[0].ProviderID, Operation: operation.Name, BindingRevision: plan.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	if err := moduleStore.CreateCapabilityLease(ctx, lease); err != nil {
+		t.Fatal("create capability lease:", err)
+	}
 	execution, err := policy.NewVerifiedExecutionWithGrants(tenant, contract.ActorContext{PrincipalID: "finance-operator", PrincipalType: contract.PrincipalHuman, Site: string(tenant), Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now().UTC()}, []policy.Grant{{Resource: invoice.Name, Operation: "create", Scope: scope}})
 	if err != nil {
 		t.Fatal("create verified actor execution:", err)
@@ -147,7 +158,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 0, 0, 0)
 	meta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("issue-" + suffix[:12])}
 	payload := json.RawMessage(`{"data":{"title":"issued invoice"}}`)
-	if _, err := plan.InvokeCapability(ctx, execution, scope, caller.ID, offer.Name, operation.Name, meta, payload); err == nil {
+	if _, err := plan.InvokeCapability(ctx, execution, lease, scope, caller.ID, offer.Name, operation.Name, meta, payload); err == nil {
 		t.Fatal("output-schema rejection unexpectedly committed a local command")
 	}
 	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 0, 0, 0)
@@ -157,11 +168,18 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	if err != nil {
 		t.Fatal("resolve other entity binding plan:", err)
 	}
-	if _, err := otherPlan.InvokeCapability(ctx, execution, otherScope, caller.ID, offer.Name, operation.Name, contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("other-entity-" + suffix[:12])}, payload); err == nil {
+	otherPlan.LeaseAdmission = moduleStore
+	otherLease := lease
+	otherLease.ID = "lease-other-" + suffix[:12]
+	otherLease.Scope = otherScope
+	if err := moduleStore.CreateCapabilityLease(ctx, otherLease); err != nil {
+		t.Fatal("create other-entity capability lease:", err)
+	}
+	if _, err := otherPlan.InvokeCapability(ctx, execution, otherLease, otherScope, caller.ID, offer.Name, operation.Name, contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("other-entity-" + suffix[:12])}, payload); err == nil {
 		t.Fatal("entity-A actor grant authorized owner command in entity B")
 	}
 	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 0, 0, 0)
-	result, err := plan.InvokeCapability(ctx, execution, scope, caller.ID, offer.Name, operation.Name, meta, payload)
+	result, err := plan.InvokeCapability(ctx, execution, lease, scope, caller.ID, offer.Name, operation.Name, meta, payload)
 	if err != nil {
 		t.Fatal("invoke local owner command:", err)
 	}
@@ -183,18 +201,102 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	if auditOperationID != string(result.ExecutionID) {
 		t.Fatalf("capability execution ID %q differs from committed Kernel operation %q", result.ExecutionID, auditOperationID)
 	}
-	replayed, err := plan.InvokeCapability(ctx, execution, scope, caller.ID, offer.Name, operation.Name, meta, payload)
+	replayed, err := plan.InvokeCapability(ctx, execution, lease, scope, caller.ID, offer.Name, operation.Name, meta, payload)
 	if err != nil || replayed.ExecutionID != result.ExecutionID {
 		t.Fatalf("capability idempotency replay = %+v, err=%v; want original execution %q", replayed, err, result.ExecutionID)
 	}
 	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
 	conflictingPayload := json.RawMessage(`{"data":{"title":"different invoice"}}`)
-	_, err = plan.InvokeCapability(ctx, execution, scope, caller.ID, offer.Name, operation.Name, meta, conflictingPayload)
+	_, err = plan.InvokeCapability(ctx, execution, lease, scope, caller.ID, offer.Name, operation.Name, meta, conflictingPayload)
 	var conflict *contract.Error
 	if !errors.As(err, &conflict) || conflict.Type != contract.CodeIdempotencyKeyReused {
 		t.Fatalf("capability key reuse with a different payload = %v, want idempotency key reused", err)
 	}
 	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
+	if err := moduleStore.RevokeCapabilityLease(ctx, lease, "security-admin", "provider credential compromised", time.Now().UTC()); err != nil {
+		t.Fatal("revoke capability lease:", err)
+	}
+	revokedMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("revoked-" + suffix[:12])}
+	reloadedStore := configstore.NewModuleStore(database, dialect)
+	plan.LeaseAdmission = reloadedStore
+	_, err = plan.InvokeCapability(ctx, execution, lease, scope, caller.ID, offer.Name, operation.Name, revokedMeta, payload)
+	var denied *contract.Error
+	if !errors.As(err, &denied) || denied.Type != contract.CodePermissionDenied {
+		t.Fatalf("revoked capability invocation after store reload = %v, want permission denied", err)
+	}
+	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
+
+	raceLease := lease
+	raceLease.ID = "lease-race-" + suffix[:12]
+	raceLease.State = "active"
+	raceLease.GrantEpoch = 1
+	raceLease.ExpiresAt = time.Now().UTC().Add(time.Hour)
+	if err := reloadedStore.CreateCapabilityLease(ctx, raceLease); err != nil {
+		t.Fatal("create concurrent invocation lease:", err)
+	}
+	raceMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("race-invoke-" + suffix[:12])}
+	start := make(chan struct{})
+	var group sync.WaitGroup
+	group.Add(2)
+	var invokeErr, revokeErr error
+	go func() {
+		defer group.Done()
+		<-start
+		_, invokeErr = plan.InvokeCapability(ctx, execution, raceLease, scope, caller.ID, offer.Name, operation.Name, raceMeta, payload)
+	}()
+	go func() {
+		defer group.Done()
+		<-start
+		revokeErr = reloadedStore.RevokeCapabilityLease(ctx, raceLease, "security-admin", "concurrent invocation race", time.Now().UTC())
+	}()
+	close(start)
+	group.Wait()
+	if revokeErr != nil {
+		t.Fatalf("revoke concurrent invocation lease: %v", revokeErr)
+	}
+	if invokeErr != nil {
+		var invokeDenied *contract.Error
+		if !errors.As(invokeErr, &invokeDenied) || invokeDenied.Type != contract.CodePermissionDenied {
+			t.Fatalf("concurrent capability invocation = %v, want success or permission denied", invokeErr)
+		}
+	}
+	postRevokeMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("post-revoke-" + suffix[:12])}
+	_, err = plan.InvokeCapability(ctx, execution, raceLease, scope, caller.ID, offer.Name, operation.Name, postRevokeMeta, payload)
+	if !errors.As(err, &denied) || denied.Type != contract.CodePermissionDenied {
+		t.Fatalf("capability invocation after concurrent revoke committed = %v, want permission denied", err)
+	}
+	if invokeErr == nil {
+		assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 2, 2, 2)
+	} else {
+		assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
+	}
+
+	expiredLease := lease
+	expiredLease.ID = "lease-expired-" + suffix[:12]
+	expiredLease.State = "active"
+	expiredLease.GrantEpoch = 1
+	expiredLease.ExpiresAt = time.Now().UTC().Add(time.Hour)
+	if err := reloadedStore.CreateCapabilityLease(ctx, expiredLease); err != nil {
+		t.Fatal("create expired capability lease:", err)
+	}
+	expiredLease.ExpiresAt = time.Now().UTC().Add(-time.Second)
+	if _, err := database.ExecContext(ctx, kdb.Rebind(dialect, `UPDATE _kora_capability_lease SET expires_at=? WHERE tenant_id=? AND lease_id=?`), expiredLease.ExpiresAt.Format("2006-01-02T15:04:05.000000000Z"), string(expiredLease.TenantID), expiredLease.ID); err != nil {
+		t.Fatal("expire capability lease fixture:", err)
+	}
+	expiredMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("expired-" + suffix[:12])}
+	_, err = plan.InvokeCapability(ctx, execution, expiredLease, scope, caller.ID, offer.Name, operation.Name, expiredMeta, payload)
+	if !errors.As(err, &denied) || denied.Type != contract.CodePermissionDenied {
+		t.Fatalf("expired capability invocation = %v, want permission denied", err)
+	}
+	currentExpired, found, loadErr := reloadedStore.LoadCapabilityLease(ctx, expiredLease.TenantID, expiredLease.ID)
+	if loadErr != nil || !found || currentExpired.State != "expired" {
+		t.Fatalf("expired lease state = (%+v,%t,%v), want durable expired state", currentExpired, found, loadErr)
+	}
+	if invokeErr == nil {
+		assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 2, 2, 2)
+	} else {
+		assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
+	}
 }
 
 func assertModuleCommandCounts(t *testing.T, ctx context.Context, database *sql.DB, dialect kdb.Dialect, invoice *doctype.DocType, tenant contract.TenantID, wantRecords, wantEvents, wantAudits int) {

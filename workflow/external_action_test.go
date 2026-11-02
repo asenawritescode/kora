@@ -162,6 +162,32 @@ func TestHTTPSCapabilityDispatcherRedactsAuthenticationFailure(t *testing.T) {
 	}
 }
 
+func TestHTTPSCapabilityDispatcherReconcilesWithPersistedProviderIdentity(t *testing.T) {
+	var calls int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode reconciliation request: %v", err)
+		}
+		if request["execution_id"] != "execution-a" || request["provider_id"] != "billing.provider-a" || request["idempotency_key"] != "stable-key" || r.Header.Get("Authorization") != "Bearer provider-secret" {
+			t.Errorf("reconciliation did not use persisted provider identity and credential: request=%v", request)
+		}
+		_, _ = w.Write([]byte(`{"outcome":"applied","result":{"schema":{"id":"output","version":1},"data":{"ok":true}}}`))
+	}))
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	dispatcher := &HTTPSCapabilityDispatcher{ProviderID: "billing.provider-a", StatusEndpoint: server.URL, Client: client}
+	lease := contract.CapabilityLease{ID: "lease-a", TenantID: "tenant-a", Scope: externalClaim().BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", Operation: "issue", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().Add(-time.Minute), State: "revoked", CredentialRef: "billing-token@version-a"}
+	pin := contract.PinnedDispatch{ExecutionID: "execution-a", Scope: lease.Scope, CallerModuleID: lease.CallerModuleID, ProviderID: lease.ProviderID, BindingRevision: lease.BindingRevision, Operation: contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: contract.SchemaRef{ID: "input", Version: 1}, OutputSchema: contract.SchemaRef{ID: "output", Version: 1}}, IdempotencyKey: "stable-key", InputHash: strings.Repeat("a", 64)}
+	registration := ActionRegistration{ProviderID: lease.ProviderID, CredentialResolver: testCredentialResolver{value: "provider-secret"}}
+	outcome, result, err := dispatcher.ReconcilePinned(context.Background(), pin, lease, registration)
+	if err != nil || outcome != contract.ExternalApplied || result.Schema.ID != "output" || calls != 1 {
+		t.Fatalf("reconcile = (%s,%+v,%v), calls=%d", outcome, result, err, calls)
+	}
+}
+
 func (a responseLostExternalAction) Execute(ctx context.Context, action ActionContext, input ActionInput) (ActionResult, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, a.endpoint, bytes.NewReader(input.Data))
 	if err != nil {
