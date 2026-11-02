@@ -261,6 +261,7 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 			Service: service, Caller: principal, WorkerReady: true,
 			Capabilities:           capabilities,
 			ModuleLifecyclePlanner: moduleLifecycleExecutor,
+			ModuleInspector:        moduleLifecycleExecutor,
 		},
 		worker: worker,
 		config: management.WorkerConfig{Owner: owner, Deployment: contract.DeploymentID(deploymentID), Concurrency: 2, Lease: 30 * time.Second, Poll: 250 * time.Millisecond},

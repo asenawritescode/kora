@@ -205,6 +205,86 @@ func TestProviderOutageBlocksOnlyBoundCapabilityAtExecution(t *testing.T) {
 	}
 }
 
+func TestFreshModuleCompositionModeMatrix(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-mode-matrix", Kind: contract.ScopeKindTenant}
+	schema := contract.SchemaRef{ID: "fixture.billing.contract", Version: 1}
+	capability := contract.CapabilityName("billing.issue")
+	consumer := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: capability, Contract: schema, Required: true}}}
+	optionalConsumer := consumer
+	optionalConsumer.ID = "sales.optional"
+	optionalConsumer.Requires = []contract.CapabilityRequirement{{Name: capability, Contract: schema, Required: false}}
+	internalOwner := contract.ModuleDescriptor{ID: "finance.internal", Version: "1.0.0", Provides: []contract.CapabilityOffer{{Name: capability, Contract: schema}}}
+	externalOwner := contract.ModuleDescriptor{ID: "finance.external", Version: "1.0.0", Provides: []contract.CapabilityOffer{{Name: capability, Contract: schema}}}
+	provider := func(id string, owner contract.ModuleDescriptor, kind ProviderKind, factory ProviderFactory) ProviderRegistration {
+		factories := map[contract.CapabilityName]ProviderFactory{}
+		if factory != nil {
+			factories[capability] = factory
+		}
+		return ProviderRegistration{TenantID: scope.TenantID, ProviderID: id, OwnerModuleID: owner.ID, Kind: kind, Offers: owner.Provides, Factories: factories}
+	}
+	t.Run("absent optional capability", func(t *testing.T) {
+		plan, err := ResolveModules(scope, []contract.ModuleDescriptor{optionalConsumer}, nil, nil, 1)
+		if err != nil || len(plan.Blockers) != 0 || len(plan.Warnings) != 1 || plan.Warnings[0].Code != "provider_missing_or_contract_mismatch" {
+			t.Fatalf("optional capability absence = plan %+v, err %v", plan, err)
+		}
+	})
+	t.Run("absent mandatory capability", func(t *testing.T) {
+		plan, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer}, nil, nil, 1)
+		if err != nil || len(plan.Blockers) != 1 || plan.Blockers[0].Code != "provider_missing_or_contract_mismatch" {
+			t.Fatalf("mandatory capability absence = plan %+v, err %v", plan, err)
+		}
+	})
+	for _, mode := range []struct {
+		name  string
+		owner contract.ModuleDescriptor
+		kind  ProviderKind
+	}{
+		{name: "internal provider", owner: internalOwner, kind: ProviderInternal},
+		{name: "external provider", owner: externalOwner, kind: ProviderExternal},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			providerID := "fixture-" + string(mode.kind)
+			registered := provider(providerID, mode.owner, mode.kind, NewStaticFactory(capability, nil))
+			selection := ProviderSelection{Key: BindingKey{Scope: scope, ConsumerModuleID: consumer.ID, CapabilityName: capability}, ProviderID: providerID}
+			plan, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer, mode.owner}, []ProviderRegistration{registered}, []ProviderSelection{selection}, 2)
+			if err != nil || len(plan.Blockers) != 0 || len(plan.Bindings) != 1 || plan.Bindings[0].Kind != mode.kind || plan.Bindings[0].ProviderID != providerID {
+				t.Fatalf("%s composition = plan %+v, err %v", mode.name, plan, err)
+			}
+		})
+	}
+	t.Run("provider outage", func(t *testing.T) {
+		providerID := "fixture-outage"
+		registered := provider(providerID, internalOwner, ProviderInternal, NewStaticFactory(capability, errors.New("provider offline")))
+		selection := ProviderSelection{Key: BindingKey{Scope: scope, ConsumerModuleID: consumer.ID, CapabilityName: capability}, ProviderID: providerID}
+		plan, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer, internalOwner}, []ProviderRegistration{registered}, []ProviderSelection{selection}, 3)
+		if err != nil || len(plan.Blockers) != 0 {
+			t.Fatalf("outage blocked unrelated composition: plan %+v, err %v", plan, err)
+		}
+		binding, ok := plan.Resolve(selection.Key)
+		if !ok {
+			t.Fatal("outage removed the binding diagnostic")
+		}
+		if _, err := binding.Open(contract.OperationContext{Site: string(scope.TenantID), Scope: scope}); err == nil {
+			t.Fatal("provider outage allowed capability use")
+		}
+	})
+	t.Run("provider cutover", func(t *testing.T) {
+		providerA := provider("provider-a", internalOwner, ProviderInternal, NewStaticFactory(capability, nil))
+		providerB := provider("provider-b", externalOwner, ProviderExternal, NewStaticFactory(capability, nil))
+		selection := ProviderSelection{Key: BindingKey{Scope: scope, ConsumerModuleID: consumer.ID, CapabilityName: capability}, ProviderID: "provider-b"}
+		plan, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer, internalOwner, externalOwner}, []ProviderRegistration{providerA, providerB}, []ProviderSelection{selection}, 4)
+		if err != nil || len(plan.Blockers) != 0 || len(plan.Bindings) != 1 || plan.Bindings[0].ProviderID != "provider-b" {
+			t.Fatalf("provider cutover composition = plan %+v, err %v", plan, err)
+		}
+	})
+	t.Run("module removal", func(t *testing.T) {
+		plan, err := ResolveModules(scope, []contract.ModuleDescriptor{internalOwner}, []ProviderRegistration{provider("provider-a", internalOwner, ProviderInternal, NewStaticFactory(capability, nil))}, nil, 5)
+		if err != nil || len(plan.Blockers) != 0 || len(plan.Bindings) != 0 {
+			t.Fatalf("removed consumer module remained in the plan: %+v, err %v", plan, err)
+		}
+	})
+}
+
 type testPublishedQueryExecutor struct{ result contract.QueryResult }
 
 func (e testPublishedQueryExecutor) ExecutePublishedQuery(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, _ json.RawMessage, _ string, _ uint16) (contract.QueryResult, error) {

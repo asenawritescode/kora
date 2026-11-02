@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -35,6 +36,11 @@ type ManagementModuleLifecyclePlanner interface {
 	Plan(context.Context, contract.TenantID, contract.PlanModuleChange) (contract.ModuleChangePlan, error)
 }
 
+type ManagementModuleInspector interface {
+	InspectModules(context.Context, contract.TenantID) (contract.ModuleInspection, error)
+	InspectExecution(context.Context, contract.TenantID, string) (contract.ExecutionInspection, error)
+}
+
 type ManagementCapability = contract.ManagementCapability
 
 const (
@@ -61,6 +67,7 @@ type ManagementOperationRoutes struct {
 	WorkerReady            bool
 	InvitationReconciler   ManagementInvitationReconciler
 	ModuleLifecyclePlanner ManagementModuleLifecyclePlanner
+	ModuleInspector        ManagementModuleInspector
 }
 
 func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config ManagementOperationRoutes) error {
@@ -109,6 +116,9 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 	if moduleLifecycleEnabled && config.ModuleLifecyclePlanner == nil {
 		return errors.New("module lifecycle capability requires a planner")
 	}
+	if moduleLifecycleEnabled && config.ModuleInspector == nil {
+		return errors.New("module lifecycle capability requires a tenant module inspector")
+	}
 	group := router.Group("/api/management/v2")
 	group.Use(h.authenticate)
 	group.GET("/capabilities", func(c *gin.Context) {
@@ -135,6 +145,7 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 		invitationRecoveryEnabled: invitationRecoveryEnabled,
 		invitationReconciler:      config.InvitationReconciler,
 		moduleLifecyclePlanner:    config.ModuleLifecyclePlanner,
+		moduleInspector:           config.ModuleInspector,
 	}
 	if provisionEnabled {
 		group.POST("/tenants", operations.provision)
@@ -166,6 +177,8 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 	if moduleLifecycleEnabled {
 		group.POST("/tenants/:id/modules/plan", operations.planModuleChange)
 		group.POST("/tenants/:id/modules/apply", operations.applyModuleChange)
+		group.GET("/tenants/:id/modules/inspection", operations.inspectModules)
+		group.GET("/tenants/:id/executions/:execution", operations.inspectExecution)
 	}
 	if invitationRecoveryEnabled {
 		group.POST("/operations/:id/reconcile-tenant-invitation", operations.reconcileTenantInvitation)
@@ -183,6 +196,42 @@ type managementOperationHandler struct {
 	invitationRecoveryEnabled bool
 	invitationReconciler      ManagementInvitationReconciler
 	moduleLifecyclePlanner    ManagementModuleLifecyclePlanner
+	moduleInspector           ManagementModuleInspector
+}
+
+func (h *managementOperationHandler) inspectModules(c *gin.Context) {
+	tenant, ok := managementTenant(c)
+	if !ok {
+		return
+	}
+	inspection, err := h.moduleInspector.InspectModules(c.Request.Context(), tenant)
+	if err != nil {
+		writeManagementError(c, http.StatusServiceUnavailable, contract.CodeDependencyUnavailable, "tenant module inspection is unavailable")
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: inspection})
+}
+
+func (h *managementOperationHandler) inspectExecution(c *gin.Context) {
+	tenant, ok := managementTenant(c)
+	if !ok {
+		return
+	}
+	executionID, err := contract.ParseOperationID(strings.TrimSpace(c.Param("execution")))
+	if err != nil {
+		writeManagementError(c, http.StatusBadRequest, contract.CodeValidationFailed, "valid execution ID is required")
+		return
+	}
+	inspection, err := h.moduleInspector.InspectExecution(c.Request.Context(), tenant, string(executionID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeManagementError(c, http.StatusNotFound, contract.CodeNotFound, "tenant execution inspection is unavailable")
+		} else {
+			writeManagementError(c, http.StatusServiceUnavailable, contract.CodeDependencyUnavailable, "tenant execution inspection is unavailable")
+		}
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: inspection})
 }
 
 func (h *managementOperationHandler) provision(c *gin.Context) {

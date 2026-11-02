@@ -93,6 +93,7 @@ func managementOperationRouter(t *testing.T, service ManagementOperationService,
 		Service: service, Caller: "cloud-control-plane", Capabilities: capabilities, WorkerReady: true,
 		InvitationReconciler:   &invitationReconcilerStub{},
 		ModuleLifecyclePlanner: moduleLifecyclePlannerStub{},
+		ModuleInspector:        moduleLifecyclePlannerStub{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +104,14 @@ type moduleLifecyclePlannerStub struct{}
 
 func (moduleLifecyclePlannerStub) Plan(_ context.Context, _ contract.TenantID, request contract.PlanModuleChange) (contract.ModuleChangePlan, error) {
 	return contract.ModuleChangePlan{ModuleID: request.ModuleID, TargetState: request.TargetState, BaseRevision: request.ExpectedRevision, PlanHash: strings.Repeat("a", 64)}, nil
+}
+
+func (moduleLifecyclePlannerStub) InspectModules(context.Context, contract.TenantID) (contract.ModuleInspection, error) {
+	return contract.ModuleInspection{Installations: []contract.ModuleInstallation{}, ResourceOwners: []contract.ResourceOwnership{}, Bindings: []contract.BindingInspection{}, CapabilityAvailability: []contract.CapabilityInspection{}, BlockingReasons: []contract.ModuleBlocker{}}, nil
+}
+
+func (moduleLifecyclePlannerStub) InspectExecution(_ context.Context, _ contract.TenantID, executionID string) (contract.ExecutionInspection, error) {
+	return contract.ExecutionInspection{ExecutionID: executionID, CallerModuleID: "sales.orders", OwnerModuleID: "finance.ar", ProviderID: "ar-provider", BindingRevision: 3, DeliveryState: "succeeded", ReconciliationState: "not_required"}, nil
 }
 
 func allManagementCapabilities() map[ManagementCapability]bool {
@@ -178,7 +187,7 @@ func TestManagementInvitationReconciliationVerifiesOutcomeBeforeRequeue(t *testi
 	}
 	router := gin.New()
 	caps := allManagementCapabilities()
-	if err := handler.RegisterOperations(router, ManagementOperationRoutes{Service: service, Caller: "cloud-control-plane", Capabilities: caps, WorkerReady: true, InvitationReconciler: reconciler, ModuleLifecyclePlanner: moduleLifecyclePlannerStub{}}); err != nil {
+	if err := handler.RegisterOperations(router, ManagementOperationRoutes{Service: service, Caller: "cloud-control-plane", Capabilities: caps, WorkerReady: true, InvitationReconciler: reconciler, ModuleLifecyclePlanner: moduleLifecyclePlannerStub{}, ModuleInspector: moduleLifecyclePlannerStub{}}); err != nil {
 		t.Fatal(err)
 	}
 	body := `{"meta":{"idempotency_key":"reconcile-invite-01"},"outcome":"not_delivered","reason":"provider logs confirm the message was not accepted"}`
@@ -408,6 +417,31 @@ func TestManagementOperationRoutesAcceptDurableCommandsAndScopeTenant(t *testing
 	}
 	if service.tenant != "" {
 		t.Fatalf("mismatched route reached service with tenant %q", service.tenant)
+	}
+}
+
+func TestManagementModuleInspectionRoutesReturnRedactedTypedProjections(t *testing.T) {
+	router := managementOperationRouter(t, &managementOperationServiceStub{}, allManagementCapabilities())
+	request := httptest.NewRequest(http.MethodGet, "/api/management/v2/tenants/tenant-a/modules/inspection", nil)
+	request.Header.Set("Authorization", "Bearer separate-management-secret")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !contains(response.Body.String(), `"config_revision":0`) || !contains(response.Body.String(), `"installations":[]`) {
+		t.Fatalf("tenant module inspection response=%d %s", response.Code, response.Body.String())
+	}
+	for _, forbidden := range []string{"credential_ref", "secret", "password", "email", "payload"} {
+		if contains(response.Body.String(), forbidden) {
+			t.Fatalf("module inspection leaked %q: %s", forbidden, response.Body.String())
+		}
+	}
+
+	executionID := contract.NewID()
+	request = httptest.NewRequest(http.MethodGet, "/api/management/v2/tenants/tenant-a/executions/"+executionID, nil)
+	request.Header.Set("Authorization", "Bearer separate-management-secret")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !contains(response.Body.String(), `"caller_module_id":"sales.orders"`) || contains(response.Body.String(), `"payload"`) {
+		t.Fatalf("tenant execution inspection response=%d %s", response.Code, response.Body.String())
 	}
 }
 

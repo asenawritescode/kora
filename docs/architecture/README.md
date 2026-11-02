@@ -32,6 +32,8 @@ See [documentation changes](documentation-changes.md) for the documents consolid
 Track implementation evidence and release gates in the [implementation status ledger](implementation-status.md).
 The [G0 source inventory](g0-inventory.md), [registered route inventory](route-inventory.json), and [contract fixture manifest](contract-fixture-manifest.json) record the current consumer and persistence evidence. `make check-contracts` verifies Engine-local generation and UI drift; `make check-cross-repo-contracts` verifies fixture/SDK copies, registered routes, and the complete Go import graph across the sibling repositories.
 Inbound integration release procedures are in [provider callback authentication](provider-callbacks.md).
+The current module ownership, provider registration, command, event, workflow,
+and operator inspection paths are summarized in [module authoring](module-authoring.md).
 The current single-engine Compose example and backup/restore procedures are in [`deploy/selfhost`](../../deploy/selfhost/README.md).
 Run `make check-selfhost-backup` to verify the source-sequence manifest utility used by the backup and restore procedures.
 

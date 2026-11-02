@@ -39,6 +39,10 @@ func TestClientUsesTypedManagementRoutesAndServiceBearer(t *testing.T) {
 			data = contract.ManagedOperation{ID: operationID, Tenant: tenant, State: contract.OperationRequested}
 		case r.Method == http.MethodGet && r.URL.Path == "/proxy/api/management/v2/tenants/tenant-a":
 			data = contract.TenantDescriptorV2{Version: 2, SiteID: tenant, Status: contract.TenantActive, ConfigRevision: "1", DirectoryRevision: "2", Deployment: "deployment-a"}
+		case r.Method == http.MethodGet && r.URL.Path == "/proxy/api/management/v2/tenants/tenant-a/modules/inspection":
+			data = contract.ModuleInspection{ConfigRevision: 7, Installations: []contract.ModuleInstallation{}, ResourceOwners: []contract.ResourceOwnership{}, Bindings: []contract.BindingInspection{}, CapabilityAvailability: []contract.CapabilityInspection{}, BlockingReasons: []contract.ModuleBlocker{}}
+		case r.Method == http.MethodGet && r.URL.Path == "/proxy/api/management/v2/tenants/tenant-a/executions/"+string(operationID):
+			data = contract.ExecutionInspection{ExecutionID: string(operationID), CallerModuleID: "sales.orders", OwnerModuleID: "finance.ar", ProviderID: "ar-provider", BindingRevision: 3, Contract: contract.CapabilityAction{CapabilityName: "ar.issue", OperationName: "issue", InputSchema: contract.SchemaRef{ID: "ar.input", Version: 1}, OutputSchema: contract.SchemaRef{ID: "ar.output", Version: 1}}, CorrelationID: "instance/step", DeliveryState: "succeeded", ReconciliationState: "not_required"}
 		case r.Method == http.MethodGet && r.URL.Path == "/proxy/api/management/v2/tenants/resolve":
 			if r.URL.Query().Get("alias") != "tenant.example.test" {
 				t.Errorf("resolve alias query = %q", r.URL.Query().Get("alias"))
@@ -118,6 +122,16 @@ func TestClientUsesTypedManagementRoutesAndServiceBearer(t *testing.T) {
 	if descriptor, err := client.Inspect(ctx, tenant); err != nil || descriptor.SiteID != tenant {
 		t.Fatalf("Inspect = %+v, %v", descriptor, err)
 	}
+	moduleInspectionClient, ok := client.(ModuleInspectionClient)
+	if !ok {
+		t.Fatal("supported HTTP client does not implement ModuleInspectionClient")
+	}
+	if inspection, err := moduleInspectionClient.InspectModules(ctx, tenant); err != nil || inspection.ConfigRevision != 7 {
+		t.Fatalf("InspectModules = %+v, %v", inspection, err)
+	}
+	if inspection, err := moduleInspectionClient.InspectExecution(ctx, tenant, string(operationID)); err != nil || inspection.ExecutionID != string(operationID) || inspection.ProviderID != "ar-provider" {
+		t.Fatalf("InspectExecution = %+v, %v", inspection, err)
+	}
 	if descriptor, err := client.InspectAlias(ctx, " TENANT.EXAMPLE.TEST. "); err != nil || descriptor.SiteID != tenant {
 		t.Fatalf("InspectAlias = %+v, %v", descriptor, err)
 	}
@@ -170,7 +184,7 @@ func TestClientUsesTypedManagementRoutesAndServiceBearer(t *testing.T) {
 	if _, err := client.Operation(ctx, operationID); err != nil {
 		t.Fatal("Operation:", err)
 	}
-	if calls != 17 {
+	if calls != 19 {
 		t.Fatalf("HTTP calls = %d, want all management methods and capability discovery", calls)
 	}
 }

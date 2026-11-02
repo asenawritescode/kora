@@ -19,6 +19,21 @@ jobs:
         ports:
           - 3306:3306
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kora
+          POSTGRES_PASSWORD: kora123
+          POSTGRES_DB: kora_recon_test
+        ports:
+          - 5432:5432
+        options: --health-cmd="pg_isready -U kora -d kora_recon_test" --health-interval=5s --health-timeout=5s --health-retries=10
+      libsql:
+        image: ghcr.io/tursodatabase/libsql-server:latest
+        env:
+          SQLD_NODE: primary
+        ports:
+          - 8080:8080
 
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +53,9 @@ jobs:
       - name: Test
         run: go test ./... -v -count=1
 
+      - name: Verify domain import boundary gate
+        run: go test ./internal/application -run 'TestDomainPackagesDoNotImportOtherDomainInternals|TestDomainImportGateRejectsViolationFixture' -count=1
+
       - name: Test disposable MySQL integration packages
         env:
           KORA_TEST_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
@@ -45,10 +63,27 @@ jobs:
           KORA_OUTBOX_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_CONFIG_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_DBACCESS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
+          KORA_RECON_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
         run: >-
           go test -tags=integration -p 1
           ./internal/dbaccess ./api ./analytics ./outbox ./site ./requests/sqlstore ./workflow/sqlstore
           ./notifications/sqlstore ./management/sqlstore -count=1 -timeout=15m
+
+      - name: Wait for disposable libSQL
+        run: |
+          for attempt in {1..45}; do
+            if (echo > /dev/tcp/127.0.0.1/8080) >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          echo "libSQL did not open port 8080" >&2
+          exit 1
+
+      - name: Test reconciliation persistence on disposable SQL dialects
+        env:
+          KORA_RECON_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
+          KORA_RECON_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+          KORA_RECON_DISPOSABLE_LIBSQL_DSN: "http://127.0.0.1:8080"
+        run: go test -tags=integration ./recon -run TestBusinessRunPersistenceAcrossDisposableDialects -count=1 -timeout=5m
 
       - name: Check generated contracts
         run: go run ./cmd/contractgen -check

@@ -61,6 +61,13 @@ type DeploymentDirectoryClient interface {
 	ResolveDirectoryAlias(context.Context, string) (contract.SiteDirectoryEntryV2, error)
 }
 
+// ModuleInspectionClient exposes redacted tenant module and pinned-execution
+// projections without expanding the base Client contract for existing mocks.
+type ModuleInspectionClient interface {
+	InspectModules(context.Context, contract.TenantID) (contract.ModuleInspection, error)
+	InspectExecution(context.Context, contract.TenantID, string) (contract.ExecutionInspection, error)
+}
+
 // TokenSource supplies a scoped service credential for each request. It must
 // not return managed-channel tenant credentials.
 type TokenSource interface {
@@ -172,6 +179,33 @@ func (c *httpClient) InspectAlias(ctx context.Context, alias string) (contract.T
 				err = fmt.Errorf("management tenant response does not own requested alias")
 			}
 		}
+	}
+	return result, err
+}
+
+func (c *httpClient) InspectModules(ctx context.Context, tenant contract.TenantID) (contract.ModuleInspection, error) {
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return contract.ModuleInspection{}, fmt.Errorf("validate tenant ID: %w", err)
+	}
+	var result contract.ModuleInspection
+	endpoint := "/api/management/v2/tenants/" + url.PathEscape(string(tenant)) + "/modules/inspection"
+	err := c.do(ctx, http.MethodGet, endpoint, http.StatusOK, nil, &result)
+	return result, err
+}
+
+func (c *httpClient) InspectExecution(ctx context.Context, tenant contract.TenantID, executionID string) (contract.ExecutionInspection, error) {
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return contract.ExecutionInspection{}, fmt.Errorf("validate tenant ID: %w", err)
+	}
+	id, err := contract.ParseOperationID(executionID)
+	if err != nil {
+		return contract.ExecutionInspection{}, fmt.Errorf("validate execution ID: %w", err)
+	}
+	var result contract.ExecutionInspection
+	endpoint := "/api/management/v2/tenants/" + url.PathEscape(string(tenant)) + "/executions/" + url.PathEscape(string(id))
+	err = c.do(ctx, http.MethodGet, endpoint, http.StatusOK, nil, &result)
+	if err == nil && (result.ExecutionID != string(id) || result.CallerModuleID == "" || result.ProviderID == "") {
+		err = fmt.Errorf("management execution response identity is invalid")
 	}
 	return result, err
 }
