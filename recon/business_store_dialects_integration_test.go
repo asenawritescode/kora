@@ -49,7 +49,9 @@ func TestBusinessRunPersistenceAcrossDisposableDialects(t *testing.T) {
 			tenant := contract.TenantID(fmt.Sprintf("recon-test-%d", time.Now().UTC().UnixNano()))
 			runID := "run-" + string(tenant)
 			scope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
-			run := BusinessRun{TenantID: tenant, OwnerModuleID: "sales.orders", ID: runID, RuleID: "sales-ar", Version: 1, Scope: scope, Cutoff: time.Now().UTC(), Complete: false, Cursors: BusinessRunCursor{Source: "cursor-source"}, Watermarks: BusinessRunWatermarks{SourceRevision: "revision-source"}, Findings: []BusinessFinding{{ID: "bf_live", Key: "sale:1", Kind: FindingMissingEffect}}}
+			occurred := time.Now().UTC()
+			watermarks := BusinessRunWatermarks{SourceRevision: "revision-source", SourceSnapshot: "source-snapshot", SourceAsOf: occurred}
+			run := BusinessRun{TenantID: tenant, OwnerModuleID: "sales.orders", ID: runID, RuleID: "sales-ar", Version: 1, Scope: scope, Cutoff: occurred, Complete: false, Cursors: BusinessRunCursor{Source: "cursor-source", SourceRows: []BusinessObligation{{Key: "sale:prior", SourceRef: "sale:prior", EntityID: "entity-a", Amount: "10.00", Currency: "KES", OccurredAt: occurred}}, Watermarks: watermarks}, Watermarks: watermarks, Findings: []BusinessFinding{{ID: "bf_live", Key: "sale:1", Kind: FindingMissingEffect}}}
 			if err := store.Save(ctx, run); err != nil {
 				t.Fatal("save business run:", err)
 			}
@@ -57,7 +59,7 @@ func TestBusinessRunPersistenceAcrossDisposableDialects(t *testing.T) {
 			if err != nil {
 				t.Fatal("load business run:", err)
 			}
-			if loaded.Cursors.Source != run.Cursors.Source || loaded.Watermarks.SourceRevision != run.Watermarks.SourceRevision || len(loaded.Findings) != 1 || loaded.Findings[0].ID != "bf_live" {
+			if loaded.Cursors.Source != run.Cursors.Source || len(loaded.Cursors.SourceRows) != 1 || loaded.Cursors.SourceRows[0].Key != "sale:prior" || loaded.Cursors.Watermarks.SourceSnapshot != run.Cursors.Watermarks.SourceSnapshot || loaded.Watermarks.SourceRevision != run.Watermarks.SourceRevision || len(loaded.Findings) != 1 || loaded.Findings[0].ID != "bf_live" {
 				t.Fatalf("loaded business evidence = %+v", loaded)
 			}
 			blockers, err := store.InspectOpenWork(ctx, tenant, "sales.orders", 5)
