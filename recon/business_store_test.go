@@ -2,6 +2,7 @@ package recon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"testing"
@@ -18,6 +19,53 @@ func (a allowBusinessWaiver) CanWaiveBusinessFinding(context.Context, contract.T
 	return a.err
 }
 
+type allowBusinessRunRead struct{ err error }
+
+func (a allowBusinessRunRead) CanReadBusinessRun(context.Context, contract.TenantID, string, string) error {
+	return a.err
+}
+
+type allowBusinessFindingSummary struct{ err error }
+
+func (a allowBusinessFindingSummary) CanInspectBusinessFindings(context.Context, contract.TenantID, string) error {
+	return a.err
+}
+
+type allowBusinessRepair struct{ err error }
+
+func (a allowBusinessRepair) CanRepairBusinessFinding(context.Context, contract.TenantID, contract.BusinessScope, string) error {
+	return a.err
+}
+
+type countedBusinessRepairer struct{ calls int }
+
+func (r *countedBusinessRepairer) RepairBusinessObligation(context.Context, BusinessObligation, contract.IdempotencyKey) (string, error) {
+	r.calls++
+	return "owner-evidence", nil
+}
+
+type uncertainBusinessRepairer struct {
+	attempts    map[contract.IdempotencyKey]int
+	effects     map[contract.IdempotencyKey]bool
+	effectCount int
+}
+
+func (r *uncertainBusinessRepairer) RepairBusinessObligation(_ context.Context, _ BusinessObligation, key contract.IdempotencyKey) (string, error) {
+	if r.attempts == nil {
+		r.attempts = map[contract.IdempotencyKey]int{}
+		r.effects = map[contract.IdempotencyKey]bool{}
+	}
+	r.attempts[key]++
+	if !r.effects[key] {
+		r.effects[key] = true
+		r.effectCount++
+	}
+	if r.attempts[key] == 1 {
+		return "", errors.New("owner applied command but response was lost")
+	}
+	return "owner-confirmed-effect", nil
+}
+
 func TestBusinessRunStorePersistsRunAndFindingsAtomically(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -27,13 +75,32 @@ func TestBusinessRunStorePersistsRunAndFindingsAtomically(t *testing.T) {
 	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
 	run := BusinessRun{TenantID: "tenant-a", ID: "run-1", RuleID: "sales.invoice", Version: 1, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}, Cutoff: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), Complete: true, Findings: []BusinessFinding{{ID: "bf_1", Key: "sale:1", Kind: FindingMissingEffect}}}
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_business_recon_run (tenant_id, run_id, rule_id, rule_version, scope_json, cutoff_at, complete, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")).WithArgs("tenant-a", "run-1", "sales.invoice", uint32(1), sqlmock.AnyArg(), run.Cutoff.Format(time.RFC3339Nano), int64(1), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_business_recon_run (tenant_id, run_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")).WithArgs("tenant-a", "run-1", "sales.invoice", uint32(1), sqlmock.AnyArg(), run.Cutoff.Format(time.RFC3339Nano), int64(1), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_business_recon_finding (tenant_id, run_id, finding_id, finding_json, state, evidence) VALUES (?, ?, ?, ?, ?, ?)")).WithArgs("tenant-a", "run-1", "bf_1", sqlmock.AnyArg(), "open", "").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	if err := store.Save(context.Background(), run); err != nil {
 		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBusinessRunStoreLoadsDurableCursorAndWatermarks(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-2").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.invoice", 3, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 0, `{"source":"cursor-s"}`, `{"source_revision":"source-r","target_revision":"target-r"}`, "2026-11-02T00:00:00Z"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-2").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}))
+	run, err := store.Load(context.Background(), "tenant-a", "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Cursors.Source != "cursor-s" || run.Watermarks.SourceRevision != "source-r" || run.Watermarks.TargetRevision != "target-r" || run.Complete {
+		t.Fatalf("durable run progress = %+v", run)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -56,6 +123,81 @@ func TestBusinessRunStoreRejectsForgedScopeAndFindingWithoutTransaction(t *testi
 	}
 }
 
+func TestBusinessRunStoreAuthorizedReadDenialDoesNotQueryPersistence(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
+	if _, err := store.LoadAuthorized(context.Background(), "tenant-a", "run-1", "reader-a", allowBusinessRunRead{err: errors.New("denied")}); err == nil {
+		t.Fatal("unauthorized business run read accepted")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBusinessRunStoreCountsOnlyUnresolvedTenantBusinessFindings(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM _kora_business_recon_finding WHERE tenant_id = ? AND state IN (?, ?)")).WithArgs("tenant-a", "open", "investigating").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	count, err := store.CountUnresolvedFindings(context.Background(), "tenant-a")
+	if err != nil || count != 3 {
+		t.Fatalf("unresolved business finding count = %d, %v", count, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBusinessReconciliationServiceAuthorizesFindingSummary(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	service := BusinessReconciliationService{Store: &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}}
+	if _, err := service.CountUnresolvedFindings(context.Background(), "tenant-a", "reader-a", allowBusinessFindingSummary{err: errors.New("denied")}); err == nil {
+		t.Fatal("unauthorized finding summary accepted")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBusinessRunStoreCompletedRepairRetryDoesNotCallOwnerAgain(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
+	finding := BusinessFinding{ID: "bf_repair", Key: "sale:1", Kind: FindingMissingEffect, Expected: BusinessObligation{Key: "sale:1", SourceRef: "sale:1", EntityID: "entity-a", Amount: "4.00", Currency: "KES"}}
+	findingJSON, err := json.Marshal(finding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}).AddRow(string(findingJSON), "resolved", "owner-evidence"))
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT state FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? AND finding_id = ?")).WithArgs("tenant-a", "run-1", "bf_repair").WillReturnRows(sqlmock.NewRows([]string{"state"}).AddRow("resolved"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT idempotency_key, state FROM _kora_business_recon_repair WHERE tenant_id = ? AND run_id = ? AND finding_id = ?")).WithArgs("tenant-a", "run-1", "bf_repair").WillReturnRows(sqlmock.NewRows([]string{"idempotency_key", "state"}).AddRow(string(businessRepairIdempotencyKey("tenant-a", "run-1", "bf_repair")), "completed"))
+	mock.ExpectRollback()
+	owner := &countedBusinessRepairer{}
+	err = store.Repair(context.Background(), "tenant-a", "run-1", "bf_repair", "operator-a", allowBusinessRepair{}, owner)
+	if err != nil || owner.calls != 0 {
+		t.Fatalf("completed repair retry = err %v, owner calls %d", err, owner.calls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBusinessRunWaiverRequiresAuthorizationAndAuditsAtomically(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -63,7 +205,7 @@ func TestBusinessRunWaiverRequiresAuthorizationAndAuditsAtomically(t *testing.T)
 	}
 	defer database.Close()
 	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "created_at"}).AddRow("sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, "2026-11-02T00:00:00Z"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}))
 	if err := store.Waive(context.Background(), "tenant-a", "run-1", "bf_1", "operator-a", "source owner confirms non-applicability", allowBusinessWaiver{err: errors.New("denied")}); err == nil {
 		t.Fatal("unauthorized waiver accepted")
@@ -78,7 +220,7 @@ func TestBusinessRunWaiverRequiresAuthorizationAndAuditsAtomically(t *testing.T)
 	}
 	defer database2.Close()
 	store.DB = database2
-	mock2.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "created_at"}).AddRow("sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, "2026-11-02T00:00:00Z"))
+	mock2.ExpectQuery(regexp.QuoteMeta("SELECT rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.invoice", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 1, `{}`, `{}`, "2026-11-02T00:00:00Z"))
 	mock2.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-1").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}))
 	mock2.ExpectBegin()
 	mock2.ExpectQuery(regexp.QuoteMeta("SELECT state FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? AND finding_id = ?")).WithArgs("tenant-a", "run-1", "bf_1").WillReturnRows(sqlmock.NewRows([]string{"state"}).AddRow("open"))

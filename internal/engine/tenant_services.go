@@ -26,6 +26,7 @@ import (
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/plugin"
+	"github.com/asenawritescode/kora/recon"
 	"github.com/asenawritescode/kora/requests"
 	requestsql "github.com/asenawritescode/kora/requests/sqlstore"
 	"github.com/asenawritescode/kora/scheduler"
@@ -226,6 +227,26 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("resolve tenant work admission: %w", err)
 	}
 	services.WorkAdmission = workAdmission
+	businessRuns := &recon.BusinessRunStore{DB: loaded.DB, Dialect: dialect}
+	setupCtx, cancelSetup := context.WithTimeout(config.ProcessContext, 30*time.Second)
+	err = withTenantWorkAdmission(setupCtx, workAdmission, "ensure business reconciliation schema", func() error {
+		return businessRuns.EnsureSchema(setupCtx)
+	})
+	cancelSetup()
+	if err != nil {
+		return fmt.Errorf("prepare business reconciliation store for tenant %s: %w", loaded.Name, err)
+	}
+	services.BusinessReconciliation = &recon.BusinessReconciliationService{
+		Runs:  businessRuns,
+		Store: businessRuns,
+		ReadPage: func(ctx context.Context, request recon.BusinessQueryRequest) (contract.QueryResult, error) {
+			plan, err := resolveModuleBindings(request.Scope)
+			if err != nil {
+				return contract.QueryResult{}, err
+			}
+			return plan.ExecutePublishedQuery(ctx, request.Scope, request.OwnerModuleID, request.Name, request.Input, request.Cursor, request.Limit)
+		},
+	}
 	if config.ScriptRunner != nil {
 		services.ScriptStore = &script.Store{DB: loaded.DB, Dialect: dialect}
 		services.AsyncHookInvocations = services.ScriptStore

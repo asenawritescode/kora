@@ -17,20 +17,23 @@ import (
 // BusinessRun is the durable result of comparing one immutable rule version at
 // a cutoff. Tenant and entity scope are part of the persisted identity.
 type BusinessRun struct {
-	TenantID  contract.TenantID      `json:"tenant_id"`
-	ID        string                 `json:"id"`
-	RuleID    string                 `json:"rule_id"`
-	Version   uint32                 `json:"version"`
-	Scope     contract.BusinessScope `json:"scope"`
-	Cutoff    time.Time              `json:"cutoff"`
-	Complete  bool                   `json:"complete"`
-	Findings  []BusinessFinding      `json:"findings,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
+	TenantID   contract.TenantID      `json:"tenant_id"`
+	ID         string                 `json:"id"`
+	RuleID     string                 `json:"rule_id"`
+	Version    uint32                 `json:"version"`
+	Scope      contract.BusinessScope `json:"scope"`
+	Cutoff     time.Time              `json:"cutoff"`
+	Complete   bool                   `json:"complete"`
+	Cursors    BusinessRunCursor      `json:"cursors,omitempty"`
+	Watermarks BusinessRunWatermarks  `json:"watermarks,omitempty"`
+	Findings   []BusinessFinding      `json:"findings,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
 }
 
 // BusinessRunStore persists reconciliation evidence through the existing SQL
-// dialect abstraction. A run and its findings are replaced atomically so a
-// retry with the same run ID cannot leave a partial result.
+// dialect abstraction. Run IDs are immutable: retries use a new run ID and
+// finding identities remain stable across those runs. This preserves prior
+// evidence and audit state.
 type BusinessRunStore struct {
 	DB      *sql.DB
 	Dialect db.QueryDialect
@@ -44,8 +47,112 @@ type BusinessRepairAuthorizer interface {
 	CanRepairBusinessFinding(context.Context, contract.TenantID, contract.BusinessScope, string) error
 }
 
+type BusinessRunReader interface {
+	CanReadBusinessRun(context.Context, contract.TenantID, string, string) error
+}
+
+type BusinessRunAuthorizer interface {
+	CanRunBusinessReconciliation(context.Context, contract.TenantID, contract.BusinessScope, string) error
+}
+
+type BusinessFindingSummaryAuthorizer interface {
+	CanInspectBusinessFindings(context.Context, contract.TenantID, string) error
+}
+
 type BusinessOwnerRepairer interface {
 	RepairBusinessObligation(context.Context, BusinessObligation, contract.IdempotencyKey) (string, error)
+}
+
+type BusinessRunRepository interface {
+	Save(context.Context, BusinessRun) error
+}
+
+type BusinessReconciliationService struct {
+	Runs     BusinessRunRepository
+	Store    *BusinessRunStore
+	ReadPage BusinessQueryPageReader
+}
+
+func (s BusinessReconciliationService) GetRun(ctx context.Context, tenant contract.TenantID, runID, actor string, auth BusinessRunReader) (BusinessRun, error) {
+	if s.Store == nil {
+		return BusinessRun{}, fmt.Errorf("business reconciliation store is unavailable")
+	}
+	return s.Store.LoadAuthorized(ctx, tenant, runID, actor, auth)
+}
+
+func (s BusinessReconciliationService) WaiveFinding(ctx context.Context, tenant contract.TenantID, runID, findingID, actor, reason string, auth BusinessWaiverAuthorizer) error {
+	if s.Store == nil {
+		return fmt.Errorf("business reconciliation store is unavailable")
+	}
+	return s.Store.Waive(ctx, tenant, runID, findingID, actor, reason, auth)
+}
+
+func (s BusinessReconciliationService) RepairFinding(ctx context.Context, tenant contract.TenantID, runID, findingID, actor string, auth BusinessRepairAuthorizer, owner BusinessOwnerRepairer) error {
+	if s.Store == nil {
+		return fmt.Errorf("business reconciliation store is unavailable")
+	}
+	return s.Store.Repair(ctx, tenant, runID, findingID, actor, auth, owner)
+}
+
+func (s BusinessReconciliationService) CountUnresolvedFindings(ctx context.Context, tenant contract.TenantID, actor string, auth BusinessFindingSummaryAuthorizer) (uint32, error) {
+	if s.Store == nil || ctx == nil || actor == "" || auth == nil {
+		return 0, fmt.Errorf("business reconciliation store is unavailable")
+	}
+	if err := auth.CanInspectBusinessFindings(ctx, tenant, actor); err != nil {
+		return 0, fmt.Errorf("business finding summary denied: %w", err)
+	}
+	return s.Store.CountUnresolvedFindings(ctx, tenant)
+}
+
+func (s *BusinessRunStore) LoadAuthorized(ctx context.Context, tenant contract.TenantID, runID, actor string, auth BusinessRunReader) (BusinessRun, error) {
+	if ctx == nil || auth == nil || actor == "" {
+		return BusinessRun{}, fmt.Errorf("business reconciliation read requires context, actor, and authorizer")
+	}
+	if err := auth.CanReadBusinessRun(ctx, tenant, runID, actor); err != nil {
+		return BusinessRun{}, fmt.Errorf("business reconciliation read denied: %w", err)
+	}
+	return s.Load(ctx, tenant, runID)
+}
+
+// CountUnresolvedFindings returns a tenant-scoped count for operator summaries.
+// It includes open and investigating business findings, and never includes
+// delivery failures or any finding payload.
+func (s *BusinessRunStore) CountUnresolvedFindings(ctx context.Context, tenant contract.TenantID) (uint32, error) {
+	if ctx == nil || s == nil || s.DB == nil || s.Dialect == nil {
+		return 0, fmt.Errorf("business finding summary requires context and store")
+	}
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return 0, err
+	}
+	query := db.Rebind(s.Dialect, `SELECT COUNT(*) FROM _kora_business_recon_finding WHERE tenant_id = ? AND state IN (?, ?)`)
+	var count int64
+	if err := s.DB.QueryRowContext(ctx, query, string(tenant), string(BusinessFindingOpen), string(BusinessFindingInvestigating)).Scan(&count); err != nil {
+		return 0, err
+	}
+	if count < 0 || count > int64(^uint32(0)) {
+		return 0, fmt.Errorf("business finding count exceeds inspection bounds")
+	}
+	return uint32(count), nil
+}
+
+// Run executes owner-published queries and persists a bounded immutable run,
+// including its scope, cursors, watermarks, findings, and completeness state.
+func (s BusinessReconciliationService) Run(ctx context.Context, actor, runID string, rule BusinessReconciliationRule, cutoff time.Time, cursors BusinessRunCursor, auth BusinessRunAuthorizer) (BusinessRun, error) {
+	if s.Runs == nil || s.ReadPage == nil || runID == "" || len(runID) > 160 || actor == "" || ctx == nil || rule.Scope.Validate() != nil || auth == nil {
+		return BusinessRun{}, fmt.Errorf("business reconciliation service requires identity, repository, query reader, and authorizer")
+	}
+	if err := auth.CanRunBusinessReconciliation(ctx, rule.Scope.TenantID, rule.Scope, actor); err != nil {
+		return BusinessRun{}, fmt.Errorf("business reconciliation run denied: %w", err)
+	}
+	result, next, watermarks, err := ExecuteBusinessReconciliation(ctx, rule, cutoff, cursors, s.ReadPage)
+	if err != nil {
+		return BusinessRun{}, err
+	}
+	run := BusinessRun{TenantID: rule.Scope.TenantID, ID: runID, RuleID: rule.ID, Version: rule.Version, Scope: rule.Scope, Cutoff: cutoff, Complete: result.Complete, Cursors: next, Watermarks: watermarks, Findings: result.Findings, CreatedAt: time.Now().UTC()}
+	if err := s.Runs.Save(ctx, run); err != nil {
+		return BusinessRun{}, fmt.Errorf("persist business reconciliation run: %w", err)
+	}
+	return run, nil
 }
 
 func (s *BusinessRunStore) EnsureSchema(ctx context.Context) error {
@@ -60,7 +167,7 @@ func (s *BusinessRunStore) EnsureSchema(ctx context.Context) error {
 		runPayload, findingPayload = "LONGTEXT", "LONGTEXT"
 	}
 	queries := []string{
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS _kora_business_recon_run (tenant_id VARCHAR(140) NOT NULL, run_id VARCHAR(160) NOT NULL, rule_id VARCHAR(160) NOT NULL, rule_version INTEGER NOT NULL, scope_json %s NOT NULL, cutoff_at VARCHAR(40) NOT NULL, complete SMALLINT NOT NULL, created_at VARCHAR(40) NOT NULL, PRIMARY KEY (tenant_id, run_id))`, runPayload),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS _kora_business_recon_run (tenant_id VARCHAR(140) NOT NULL, run_id VARCHAR(160) NOT NULL, rule_id VARCHAR(160) NOT NULL, rule_version INTEGER NOT NULL, scope_json %s NOT NULL, cutoff_at VARCHAR(40) NOT NULL, complete SMALLINT NOT NULL, cursors_json %s NOT NULL, watermarks_json %s NOT NULL, created_at VARCHAR(40) NOT NULL, PRIMARY KEY (tenant_id, run_id))`, runPayload, runPayload, runPayload),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS _kora_business_recon_finding (tenant_id VARCHAR(140) NOT NULL, run_id VARCHAR(160) NOT NULL, finding_id VARCHAR(80) NOT NULL, finding_json %s NOT NULL, state VARCHAR(32) NOT NULL, evidence %s NOT NULL, PRIMARY KEY (tenant_id, run_id, finding_id))`, findingPayload, findingPayload),
 		`CREATE TABLE IF NOT EXISTS _kora_business_recon_audit (tenant_id VARCHAR(140) NOT NULL, run_id VARCHAR(160) NOT NULL, finding_id VARCHAR(80) NOT NULL, actor_id VARCHAR(160) NOT NULL, action VARCHAR(32) NOT NULL, reason VARCHAR(1000) NOT NULL, occurred_at VARCHAR(40) NOT NULL, PRIMARY KEY (tenant_id, run_id, finding_id, action))`,
 		`CREATE TABLE IF NOT EXISTS _kora_business_recon_repair (tenant_id VARCHAR(140) NOT NULL, run_id VARCHAR(160) NOT NULL, finding_id VARCHAR(80) NOT NULL, idempotency_key VARCHAR(100) NOT NULL, state VARCHAR(32) NOT NULL, evidence VARCHAR(1000) NOT NULL, updated_at VARCHAR(40) NOT NULL, PRIMARY KEY (tenant_id, run_id, finding_id))`,
@@ -116,6 +223,14 @@ func (s *BusinessRunStore) Repair(ctx context.Context, tenant contract.TenantID,
 		return rollback(err)
 	}
 	if state == string(BusinessFindingResolved) {
+		var completedKey, completedState string
+		err := tx.QueryRowContext(ctx, query(`SELECT idempotency_key, state FROM _kora_business_recon_repair WHERE tenant_id = ? AND run_id = ? AND finding_id = ?`), string(tenant), runID, findingID).Scan(&completedKey, &completedState)
+		if err == nil && completedKey == string(businessRepairIdempotencyKey(tenant, runID, findingID)) && completedState == "completed" {
+			return rollback(nil)
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return rollback(err)
+		}
 		return rollback(fmt.Errorf("business finding is already resolved"))
 	}
 	if state == string(BusinessFindingWaived) || state != string(BusinessFindingOpen) && state != string(BusinessFindingInvestigating) {
@@ -164,13 +279,29 @@ func (s *BusinessRunStore) Repair(ctx context.Context, tenant contract.TenantID,
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, query(`UPDATE _kora_business_recon_finding SET state = ?, evidence = ? WHERE tenant_id = ? AND run_id = ? AND finding_id = ? AND state = ?`), string(BusinessFindingResolved), evidence, string(tenant), runID, findingID, string(BusinessFindingInvestigating)); err != nil {
+	result, err := tx.ExecContext(ctx, query(`UPDATE _kora_business_recon_finding SET state = ?, evidence = ? WHERE tenant_id = ? AND run_id = ? AND finding_id = ? AND state = ?`), string(BusinessFindingResolved), evidence, string(tenant), runID, findingID, string(BusinessFindingInvestigating))
+	if err != nil {
 		_ = tx.Rollback()
 		return err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := tx.ExecContext(ctx, query(`UPDATE _kora_business_recon_repair SET state = ?, evidence = ?, updated_at = ? WHERE tenant_id = ? AND run_id = ? AND finding_id = ? AND idempotency_key = ?`), "completed", evidence, now, string(tenant), runID, findingID, string(idempotency)); err != nil {
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
 		_ = tx.Rollback()
+		if err == nil {
+			err = fmt.Errorf("business finding changed while owner repair was running")
+		}
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err = tx.ExecContext(ctx, query(`UPDATE _kora_business_recon_repair SET state = ?, evidence = ?, updated_at = ? WHERE tenant_id = ? AND run_id = ? AND finding_id = ? AND idempotency_key = ?`), "completed", evidence, now, string(tenant), runID, findingID, string(idempotency))
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		_ = tx.Rollback()
+		if err == nil {
+			err = fmt.Errorf("business repair intent changed before completion")
+		}
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, query(`INSERT INTO _kora_business_recon_audit (tenant_id, run_id, finding_id, actor_id, action, reason, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)`), string(tenant), runID, findingID, actor, "repair_completed", evidence, now); err != nil {
@@ -195,7 +326,7 @@ func (s *BusinessRunStore) Save(ctx context.Context, run BusinessRun) error {
 	if _, err := contract.ParseTenantID(string(run.TenantID)); err != nil {
 		return fmt.Errorf("business reconciliation tenant: %w", err)
 	}
-	if run.ID == "" || run.RuleID == "" || run.Version == 0 || run.Scope.Validate() != nil || run.Scope.TenantID != run.TenantID || run.Cutoff.IsZero() || len(run.Findings) > 10000 {
+	if run.ID == "" || len(run.ID) > 160 || run.RuleID == "" || len(run.RuleID) > 160 || run.Version == 0 || run.Scope.Validate() != nil || run.Scope.TenantID != run.TenantID || run.Cutoff.IsZero() || len(run.Findings) > 10000 || !validBusinessRunProgress(run.Cursors, run.Watermarks) {
 		return fmt.Errorf("business reconciliation run identity, scope, cutoff, or bounds are invalid")
 	}
 	if run.CreatedAt.IsZero() {
@@ -211,25 +342,30 @@ func (s *BusinessRunStore) Save(ctx context.Context, run BusinessRun) error {
 	}
 	rollback := func(cause error) error { _ = tx.Rollback(); return cause }
 	query := func(q string) string { return db.Rebind(s.Dialect, q) }
-	if _, err := tx.ExecContext(ctx, query(`DELETE FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ?`), string(run.TenantID), run.ID); err != nil {
-		return rollback(err)
-	}
-	if _, err := tx.ExecContext(ctx, query(`DELETE FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?`), string(run.TenantID), run.ID); err != nil {
-		return rollback(err)
-	}
 	complete := int64(0)
 	if run.Complete {
 		complete = 1
 	}
-	if _, err := tx.ExecContext(ctx, query(`INSERT INTO _kora_business_recon_run (tenant_id, run_id, rule_id, rule_version, scope_json, cutoff_at, complete, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`), string(run.TenantID), run.ID, run.RuleID, run.Version, string(scopeJSON), run.Cutoff.UTC().Format(time.RFC3339Nano), complete, run.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	cursorsJSON, err := json.Marshal(run.Cursors)
+	if err != nil {
+		return rollback(err)
+	}
+	watermarksJSON, err := json.Marshal(run.Watermarks)
+	if err != nil {
+		return rollback(err)
+	}
+	if _, err := tx.ExecContext(ctx, query(`INSERT INTO _kora_business_recon_run (tenant_id, run_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), string(run.TenantID), run.ID, run.RuleID, run.Version, string(scopeJSON), run.Cutoff.UTC().Format(time.RFC3339Nano), complete, string(cursorsJSON), string(watermarksJSON), run.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
 		return rollback(err)
 	}
 	for _, finding := range run.Findings {
-		if finding.ID == "" || finding.Key == "" {
+		if finding.ID == "" || len(finding.ID) > 80 || finding.Key == "" || len(finding.Evidence) > 4096 {
 			return rollback(fmt.Errorf("business reconciliation finding identity is incomplete"))
 		}
 		if finding.State == "" {
 			finding.State = BusinessFindingOpen
+		}
+		if !validBusinessFindingState(finding.State) || !validBusinessFindingKind(finding.Kind) {
+			return rollback(fmt.Errorf("business reconciliation finding state or kind is invalid"))
 		}
 		payload, err := json.Marshal(finding)
 		if err != nil {
@@ -257,15 +393,27 @@ func (s *BusinessRunStore) Load(ctx context.Context, tenant contract.TenantID, r
 	}
 	query := func(q string) string { return db.Rebind(s.Dialect, q) }
 	var run BusinessRun
-	var scopeJSON, cutoff, created string
+	var scopeJSON, cursorsJSON, watermarksJSON, cutoff, created string
 	var complete int64
-	err := s.DB.QueryRowContext(ctx, query(`SELECT rule_id, rule_version, scope_json, cutoff_at, complete, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?`), string(tenant), runID).Scan(&run.RuleID, &run.Version, &scopeJSON, &cutoff, &complete, &created)
+	err := s.DB.QueryRowContext(ctx, query(`SELECT rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?`), string(tenant), runID).Scan(&run.RuleID, &run.Version, &scopeJSON, &cutoff, &complete, &cursorsJSON, &watermarksJSON, &created)
 	if err != nil {
 		return BusinessRun{}, err
 	}
 	run.TenantID, run.ID, run.Complete = tenant, runID, complete != 0
 	if err := json.Unmarshal([]byte(scopeJSON), &run.Scope); err != nil {
 		return BusinessRun{}, err
+	}
+	if run.Scope.Validate() != nil || run.Scope.TenantID != tenant {
+		return BusinessRun{}, fmt.Errorf("stored business reconciliation scope does not match tenant")
+	}
+	if err := json.Unmarshal([]byte(cursorsJSON), &run.Cursors); err != nil {
+		return BusinessRun{}, fmt.Errorf("decode business reconciliation cursors: %w", err)
+	}
+	if err := json.Unmarshal([]byte(watermarksJSON), &run.Watermarks); err != nil {
+		return BusinessRun{}, fmt.Errorf("decode business reconciliation watermarks: %w", err)
+	}
+	if !validBusinessRunProgress(run.Cursors, run.Watermarks) {
+		return BusinessRun{}, fmt.Errorf("stored business reconciliation progress is invalid")
 	}
 	if run.Cutoff, err = time.Parse(time.RFC3339Nano, cutoff); err != nil {
 		return BusinessRun{}, err
@@ -288,6 +436,9 @@ func (s *BusinessRunStore) Load(ctx context.Context, tenant contract.TenantID, r
 			return BusinessRun{}, err
 		}
 		finding.State, finding.Evidence = BusinessFindingState(state), evidence
+		if finding.ID == "" || finding.Key == "" || len(finding.Evidence) > 4096 || !validBusinessFindingKind(finding.Kind) || !validBusinessFindingState(finding.State) {
+			return BusinessRun{}, fmt.Errorf("stored business reconciliation finding is invalid")
+		}
 		run.Findings = append(run.Findings, finding)
 	}
 	if err := rows.Err(); err != nil {

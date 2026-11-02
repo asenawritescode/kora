@@ -1,35 +1,190 @@
 package recon
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"math/big"
+	"regexp"
 	"sort"
 	"time"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 // BusinessObligation is supplied by the owning domain. Amounts are decimal
 // strings so reconciliation never introduces binary floating point rounding.
 type BusinessObligation struct {
-	Key        string
-	SourceRef  string
-	EntityID   string
-	Amount     string
-	Currency   string
-	OccurredAt time.Time
-	Lifecycle  string
+	Key        string    `json:"key"`
+	SourceRef  string    `json:"source_ref"`
+	EntityID   string    `json:"entity_id"`
+	Amount     string    `json:"amount"`
+	Currency   string    `json:"currency"`
+	OccurredAt time.Time `json:"occurred_at"`
+	Lifecycle  string    `json:"lifecycle,omitempty"`
 }
 
 // BusinessEffect is an owner-query result representing an actual downstream
 // business effect, independent of transport delivery receipts.
 type BusinessEffect struct {
-	Key        string
-	TargetRef  string
-	EntityID   string
-	Amount     string
-	Currency   string
-	OccurredAt time.Time
-	Lifecycle  string
+	Key        string    `json:"key"`
+	TargetRef  string    `json:"target_ref"`
+	EntityID   string    `json:"entity_id"`
+	Amount     string    `json:"amount"`
+	Currency   string    `json:"currency"`
+	OccurredAt time.Time `json:"occurred_at"`
+	Lifecycle  string    `json:"lifecycle,omitempty"`
+}
+
+// BusinessReconciliationRule binds a source and target to owner-published
+// queries. The query executor is supplied by the existing module binding plan,
+// so reconciliation never opens owner tables or introduces another registry.
+type BusinessReconciliationRule struct {
+	OwnerModuleID contract.ModuleID
+	ID            string
+	Version       uint32
+	Scope         contract.BusinessScope
+	SourceQuery   BusinessQueryRef
+	TargetQuery   BusinessQueryRef
+	GracePeriod   time.Duration
+	MaxRows       int
+}
+
+type BusinessQueryRef struct {
+	OwnerModuleID contract.ModuleID
+	Name          string
+	Input         json.RawMessage
+	PageLimit     uint16
+}
+
+type BusinessQueryRequest struct {
+	Scope         contract.BusinessScope
+	OwnerModuleID contract.ModuleID
+	Name          string
+	Input         json.RawMessage
+	Cursor        string
+	Limit         uint16
+}
+
+// BusinessQueryPageReader adapts the existing published-query executor. A
+// caller can implement this with BindingPlan.ExecutePublishedQuery.
+type BusinessQueryPageReader func(context.Context, BusinessQueryRequest) (contract.QueryResult, error)
+
+// PublishedBusinessQueryPlan is the existing module binding-plan query
+// surface. It is intentionally the only provider lookup used by this runner.
+type PublishedBusinessQueryPlan interface {
+	ExecutePublishedQuery(context.Context, contract.BusinessScope, contract.ModuleID, string, json.RawMessage, string, uint16) (contract.QueryResult, error)
+}
+
+func PublishedBusinessQueryReader(plan PublishedBusinessQueryPlan) BusinessQueryPageReader {
+	return func(ctx context.Context, request BusinessQueryRequest) (contract.QueryResult, error) {
+		if plan == nil {
+			return contract.QueryResult{}, fmt.Errorf("published module query plan is unavailable")
+		}
+		return plan.ExecutePublishedQuery(ctx, request.Scope, request.OwnerModuleID, request.Name, request.Input, request.Cursor, request.Limit)
+	}
+}
+
+type BusinessRunCursor struct {
+	Source string `json:"source,omitempty"`
+	Target string `json:"target,omitempty"`
+}
+
+type BusinessRunWatermarks struct {
+	SourceRevision string    `json:"source_revision,omitempty"`
+	TargetRevision string    `json:"target_revision,omitempty"`
+	SourceSnapshot string    `json:"source_snapshot,omitempty"`
+	TargetSnapshot string    `json:"target_snapshot,omitempty"`
+	SourceAsOf     time.Time `json:"source_as_of,omitempty"`
+	TargetAsOf     time.Time `json:"target_as_of,omitempty"`
+}
+
+var businessDecimalPattern = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$`)
+
+// ExecuteBusinessReconciliation reads only declared owner queries, with
+// bounded pagination and pinned per-query watermarks. Any unavailable,
+// incomplete, stale, or inconsistent page yields an incomplete run.
+func ExecuteBusinessReconciliation(ctx context.Context, rule BusinessReconciliationRule, cutoff time.Time, cursors BusinessRunCursor, read BusinessQueryPageReader) (BusinessReconciliationResult, BusinessRunCursor, BusinessRunWatermarks, error) {
+	if ctx == nil || read == nil || rule.ID == "" || rule.Version == 0 || rule.OwnerModuleID == "" || rule.Scope.Validate() != nil || rule.GracePeriod < 0 || rule.MaxRows < 1 || rule.MaxRows > 10000 || cutoff.IsZero() {
+		return BusinessReconciliationResult{}, cursors, BusinessRunWatermarks{}, fmt.Errorf("business reconciliation rule, scope, cutoff, or bounds are invalid")
+	}
+	if !validBusinessQueryRef(rule.SourceQuery) || !validBusinessQueryRef(rule.TargetQuery) {
+		return BusinessReconciliationResult{}, cursors, BusinessRunWatermarks{}, fmt.Errorf("business reconciliation requires owner-published source and target queries")
+	}
+	sources, sourceCursor, sourceWatermark, sourceComplete, err := readBusinessPages[BusinessObligation](ctx, rule, rule.SourceQuery, cursors.Source, read)
+	if err != nil {
+		return BusinessReconciliationResult{Complete: false}, cursors, BusinessRunWatermarks{}, nil
+	}
+	targets, targetCursor, targetWatermark, targetComplete, err := readBusinessPages[BusinessEffect](ctx, rule, rule.TargetQuery, cursors.Target, read)
+	if err != nil {
+		watermarks := BusinessRunWatermarks{SourceRevision: sourceWatermark.SourceRevision, SourceSnapshot: sourceWatermark.SnapshotToken, SourceAsOf: sourceWatermark.AsOf}
+		return BusinessReconciliationResult{Complete: false}, BusinessRunCursor{Source: sourceCursor, Target: cursors.Target}, watermarks, nil
+	}
+	watermarks := BusinessRunWatermarks{
+		SourceRevision: sourceWatermark.SourceRevision, SourceSnapshot: sourceWatermark.SnapshotToken, SourceAsOf: sourceWatermark.AsOf,
+		TargetRevision: targetWatermark.SourceRevision, TargetSnapshot: targetWatermark.SnapshotToken, TargetAsOf: targetWatermark.AsOf,
+	}
+	if !sourceComplete || !targetComplete {
+		return BusinessReconciliationResult{Complete: false}, BusinessRunCursor{Source: sourceCursor, Target: targetCursor}, watermarks, nil
+	}
+	result, err := CompareBusinessObligations(BusinessReconciliationInput{Cutoff: cutoff, GracePeriod: rule.GracePeriod, MaxRows: rule.MaxRows, Sources: sources, Targets: targets, SourceReady: true, TargetReady: true})
+	return result, BusinessRunCursor{Source: sourceCursor, Target: targetCursor}, watermarks, err
+}
+
+func validBusinessQueryRef(ref BusinessQueryRef) bool {
+	return ref.OwnerModuleID != "" && ref.Name != "" && ref.PageLimit > 0 && ref.PageLimit <= 1000 && len(ref.Input) > 0 && len(ref.Input) <= 65536 && json.Valid(ref.Input)
+}
+
+type businessPageWatermark struct {
+	SourceRevision string
+	SnapshotToken  string
+	AsOf           time.Time
+}
+
+func readBusinessPages[T BusinessObligation | BusinessEffect](ctx context.Context, rule BusinessReconciliationRule, ref BusinessQueryRef, cursor string, read BusinessQueryPageReader) ([]T, string, businessPageWatermark, bool, error) {
+	rows := make([]T, 0)
+	watermark := businessPageWatermark{}
+	seenCursors := map[string]bool{}
+	for len(rows) < rule.MaxRows {
+		limit := min(rule.MaxRows-len(rows), int(ref.PageLimit))
+		page, err := read(ctx, BusinessQueryRequest{Scope: rule.Scope, OwnerModuleID: ref.OwnerModuleID, Name: ref.Name, Input: append(json.RawMessage(nil), ref.Input...), Cursor: cursor, Limit: uint16(limit)})
+		if err != nil {
+			return nil, cursor, watermark, false, err
+		}
+		if len(page.Data) == 0 || page.AsOf.IsZero() || page.Freshness != contract.QueryFresh || page.NextCursor == cursor && page.NextCursor != "" {
+			return rows, cursor, watermark, false, nil
+		}
+		if watermark.AsOf.IsZero() {
+			watermark = businessPageWatermark{SourceRevision: page.SourceRevision, SnapshotToken: page.SnapshotToken, AsOf: page.AsOf}
+		} else if watermark.SourceRevision != page.SourceRevision || watermark.SnapshotToken != page.SnapshotToken || !watermark.AsOf.Equal(page.AsOf) {
+			return rows, cursor, watermark, false, nil
+		}
+		if page.NextCursor != "" && (page.SnapshotToken == "" || page.SourceRevision == "") {
+			return rows, cursor, watermark, false, nil
+		}
+		var pageRows []json.RawMessage
+		if err := json.Unmarshal(page.Data, &pageRows); err != nil || len(pageRows) > limit {
+			return nil, cursor, watermark, false, fmt.Errorf("business query returned invalid or unbounded rows")
+		}
+		for _, raw := range pageRows {
+			var row T
+			if err := json.Unmarshal(raw, &row); err != nil {
+				return nil, cursor, watermark, false, err
+			}
+			rows = append(rows, row)
+		}
+		cursor = page.NextCursor
+		if cursor == "" {
+			return rows, "", watermark, true, nil
+		}
+		if seenCursors[cursor] {
+			return rows, cursor, watermark, false, nil
+		}
+		seenCursors[cursor] = true
+	}
+	return rows, cursor, watermark, cursor == "", nil
 }
 
 type BusinessFindingKind string
@@ -95,6 +250,26 @@ func CompareBusinessObligations(input BusinessReconciliationInput) (BusinessReco
 	}
 	sources := append([]BusinessObligation(nil), input.Sources...)
 	targets := append([]BusinessEffect(nil), input.Targets...)
+	eligibleSources := sources[:0]
+	for _, source := range sources {
+		if source.OccurredAt.IsZero() {
+			return BusinessReconciliationResult{}, fmt.Errorf("business obligation %q has no occurrence time", source.Key)
+		}
+		if !source.OccurredAt.After(input.Cutoff) {
+			eligibleSources = append(eligibleSources, source)
+		}
+	}
+	sources = eligibleSources
+	eligibleTargets := targets[:0]
+	for _, target := range targets {
+		if target.OccurredAt.IsZero() {
+			return BusinessReconciliationResult{}, fmt.Errorf("business effect %q has no occurrence time", target.TargetRef)
+		}
+		if !target.OccurredAt.After(input.Cutoff) {
+			eligibleTargets = append(eligibleTargets, target)
+		}
+	}
+	targets = eligibleTargets
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Key < sources[j].Key })
 	sort.Slice(targets, func(i, j int) bool {
 		if targets[i].Key != targets[j].Key {
@@ -104,12 +279,21 @@ func CompareBusinessObligations(input BusinessReconciliationInput) (BusinessReco
 	})
 	byKey := make(map[string][]BusinessEffect, len(targets))
 	for _, effect := range targets {
+		if effect.Key == "" || effect.TargetRef == "" || effect.EntityID == "" || effect.Currency == "" || effect.Amount == "" {
+			return BusinessReconciliationResult{}, fmt.Errorf("business effect is missing stable key, target, entity, amount, or currency")
+		}
+		if _, ok := parseBusinessDecimal(effect.Amount); !ok {
+			return BusinessReconciliationResult{}, fmt.Errorf("business effect %q has an invalid decimal amount", effect.TargetRef)
+		}
 		byKey[effect.Key] = append(byKey[effect.Key], effect)
 	}
 	seen := map[string]bool{}
 	for _, source := range sources {
 		if source.Key == "" || source.EntityID == "" || source.Currency == "" || source.Amount == "" {
 			return BusinessReconciliationResult{}, fmt.Errorf("business obligation is missing stable key, entity, amount, or currency")
+		}
+		if _, ok := parseBusinessDecimal(source.Amount); !ok {
+			return BusinessReconciliationResult{}, fmt.Errorf("business obligation %q has an invalid decimal amount", source.Key)
 		}
 		if seen[source.Key] {
 			return BusinessReconciliationResult{}, fmt.Errorf("duplicate source obligation key %q", source.Key)
@@ -132,7 +316,7 @@ func CompareBusinessObligations(input BusinessReconciliationInput) (BusinessReco
 			switch {
 			case effect.EntityID != source.EntityID:
 				finding.Kind = FindingScopeMismatch
-			case effect.Amount != source.Amount || effect.Currency != source.Currency:
+			case !businessDecimalEqual(effect.Amount, source.Amount) || effect.Currency != source.Currency:
 				finding.Kind = FindingAmountMismatch
 			case effect.Lifecycle == "unknown":
 				finding.Kind = FindingUnknownOutcome
@@ -157,6 +341,44 @@ func CompareBusinessObligations(input BusinessReconciliationInput) (BusinessReco
 	}
 	sort.Slice(result.Findings, func(i, j int) bool { return result.Findings[i].ID < result.Findings[j].ID })
 	return result, nil
+}
+
+func businessDecimalEqual(a, b string) bool {
+	left, leftOK := parseBusinessDecimal(a)
+	right, rightOK := parseBusinessDecimal(b)
+	return leftOK && rightOK && left.Cmp(right) == 0
+}
+
+func parseBusinessDecimal(value string) (*big.Rat, bool) {
+	if len(value) > 64 || !businessDecimalPattern.MatchString(value) {
+		return nil, false
+	}
+	amount, ok := new(big.Rat).SetString(value)
+	return amount, ok
+}
+
+func validBusinessRunProgress(cursors BusinessRunCursor, watermarks BusinessRunWatermarks) bool {
+	return len(cursors.Source) <= 2048 && len(cursors.Target) <= 2048 &&
+		len(watermarks.SourceRevision) <= 256 && len(watermarks.TargetRevision) <= 256 &&
+		len(watermarks.SourceSnapshot) <= 2048 && len(watermarks.TargetSnapshot) <= 2048
+}
+
+func validBusinessFindingState(state BusinessFindingState) bool {
+	switch state {
+	case BusinessFindingOpen, BusinessFindingInvestigating, BusinessFindingResolved, BusinessFindingWaived:
+		return true
+	default:
+		return false
+	}
+}
+
+func validBusinessFindingKind(kind BusinessFindingKind) bool {
+	switch kind {
+	case FindingMissingEffect, FindingDuplicateEffect, FindingAmountMismatch, FindingScopeMismatch, FindingUnknownOutcome, FindingPendingGrace:
+		return true
+	default:
+		return false
+	}
 }
 
 func stableBusinessFindingID(kind BusinessFindingKind, key string) string {

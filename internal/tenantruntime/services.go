@@ -13,6 +13,7 @@ import (
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/recon"
 	"github.com/asenawritescode/kora/requests"
 	"github.com/asenawritescode/kora/scheduler"
 	"github.com/asenawritescode/kora/script"
@@ -29,6 +30,7 @@ type Services struct {
 	ResolveModuleBindings          func(contract.BusinessScope) (plugin.BindingPlan, error)
 	ResolveCandidateModuleBindings func(contract.BusinessScope, []contract.ModuleDescriptor, []contract.ProviderSelection, uint64) (plugin.BindingPlan, error)
 	PublishedProjections           *analytics.PublishedProjectionStore
+	BusinessReconciliation         *recon.BusinessReconciliationService
 	WorkAdmission                  *dbaccess.Admission
 	RealtimeAdmission              interface {
 		Acquire(context.Context) (func(), error)
