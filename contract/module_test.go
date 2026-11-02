@@ -130,6 +130,22 @@ func TestValidateInstalledPackagesChecksRequirementsConflictsAndPins(t *testing.
 	}
 }
 
+func TestValidateInstalledPackagesChecksTransitiveAndReleaseConflicts(t *testing.T) {
+	root := InstalledPackage{PackageID: "sales", ReleaseID: "sales-1", Version: "1.0.0", Digest: "sales-digest", Requires: []ManifestPackRef{{PackageID: "inventory", ReleaseID: "inventory-1", Version: "1.0.0"}}}
+	middle := InstalledPackage{PackageID: "inventory", ReleaseID: "inventory-1", Version: "1.0.0", Digest: "inventory-digest", Requires: []ManifestPackRef{{PackageID: "warehouse", ReleaseID: "warehouse-1", Version: "1.0.0"}}}
+	if err := ValidateInstalledPackages([]InstalledPackage{root, middle}); err == nil {
+		t.Fatal("missing transitive package requirement accepted")
+	}
+	warehouse := InstalledPackage{PackageID: "warehouse", ReleaseID: "warehouse-1", Version: "1.0.0", Digest: "warehouse-digest"}
+	if err := ValidateInstalledPackages([]InstalledPackage{root, middle, warehouse}); err != nil {
+		t.Fatalf("complete transitive package chain rejected: %v", err)
+	}
+	root.Conflicts = []ManifestPackRef{{ReleaseID: "warehouse-1"}}
+	if err := ValidateInstalledPackages([]InstalledPackage{root, middle, warehouse}); err == nil {
+		t.Fatal("conflict pinned to an installed release accepted")
+	}
+}
+
 type referenceResolverFixture struct {
 	result ResolvedBusinessRef
 	err    error
