@@ -27,6 +27,7 @@ type integrationMutationLifecycleRunner struct {
 	failAfterMutation bool
 	calls             int
 	mutationErr       error
+	targetDoctype     string
 }
 
 func (r *integrationMutationLifecycleRunner) Execute(_ context.Context, request script.ExecuteRequest) (*script.ExecuteResult, error) {
@@ -34,7 +35,11 @@ func (r *integrationMutationLifecycleRunner) Execute(_ context.Context, request 
 	if request.Provider == nil {
 		return nil, errors.New("provider is required for local mutation test")
 	}
-	if _, err := request.Provider.CreateDoc("Task", map[string]any{"title": "created-by-hook"}, "ignored-owner", "ignored-actor"); err != nil {
+	doctypeName := r.targetDoctype
+	if doctypeName == "" {
+		doctypeName = "Task"
+	}
+	if _, err := request.Provider.CreateDoc(doctypeName, map[string]any{"title": "created-by-hook"}, "ignored-owner", "ignored-actor"); err != nil {
 		r.mutationErr = err
 		return nil, err
 	}
@@ -91,9 +96,11 @@ func TestDurableLifecycleHookWorkerCommitsAuthorizedLocalMutationAcrossDialects(
 			siteName := string(tenant)
 			registry := doctype.NewRegistry()
 			dt := &doctype.DocType{Name: "Task", Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}}}
-			registry.LoadFull([]*doctype.DocType{dt}, []*doctype.Role{{Name: doctype.AdminRole}}, []*doctype.Permission{{
-				Doctype: dt.Name, Role: doctype.AdminRole, Read: true, Create: true, Write: true, Delete: true,
-			}})
+			protected := &doctype.DocType{Name: "ProtectedTask", ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands), BusinessScopePolicy: contract.ScopeTenantShared, Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}}}
+			registry.LoadFull([]*doctype.DocType{dt, protected}, []*doctype.Role{{Name: doctype.AdminRole}}, []*doctype.Permission{
+				{Doctype: dt.Name, Role: doctype.AdminRole, Read: true, Create: true, Write: true, Delete: true},
+				{Doctype: protected.Name, Role: doctype.AdminRole, Read: true, Create: true, Write: true, Delete: true},
+			})
 			if err := schema.MigrateSiteFromRegistry(database, "durable_hook_integration", registry, dialect); err != nil {
 				t.Fatal("migrate disposable Task doctype:", err)
 			}
@@ -170,6 +177,45 @@ func TestDurableLifecycleHookWorkerCommitsAuthorizedLocalMutationAcrossDialects(
 			}
 			if failing.calls != 1 || succeeding.calls != 1 {
 				t.Fatalf("runner calls after retry: failed=%d succeeded=%d; want one each", failing.calls, succeeding.calls)
+			}
+
+			// A nested script write carries the broad worker grant but no trusted
+			// owner-command provenance. The protected target must remain untouched.
+			protectedSource := contract.OperationID(contract.NewOperationID())
+			protectedInvocation := invocation
+			protectedInvocation.SourceOperation = protectedSource
+			protectedInvocation.Record.Name = "protected-task-after-save"
+			protectedTx, err := database.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal("begin protected invocation source transaction:", err)
+			}
+			if err := store.AppendAsyncHookTx(ctx, protectedTx, protectedInvocation); err != nil {
+				_ = protectedTx.Rollback()
+				t.Fatal("append protected nested-write invocation:", err)
+			}
+			if err := protectedTx.Commit(); err != nil {
+				t.Fatal("commit protected invocation:", err)
+			}
+			protectedRunner := &integrationMutationLifecycleRunner{targetDoctype: protected.Name}
+			worked, err = processOneDurableLifecycleHook(ctx, protectedRunner, store, database, registry, dialect, writer,
+				tenant, siteName, "worker-protected", nil, nil, nil)
+			if err != nil || !worked {
+				t.Fatalf("protected nested-write worker pass = (%t, %v), want handled script rejection", worked, err)
+			}
+			var protectedRows int
+			if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(protected.RawTableName())).Scan(&protectedRows); err != nil {
+				t.Fatal("count protected nested script records:", err)
+			}
+			if protectedRows != 0 {
+				t.Fatalf("nested script wrote %d commands-only records, want zero", protectedRows)
+			}
+			var protectedErr *contract.Error
+			if !errors.As(protectedRunner.mutationErr, &protectedErr) || protectedErr.Type != contract.CodePermissionDenied {
+				t.Fatalf("protected nested script mutation error = %v, want permission denied", protectedRunner.mutationErr)
+			}
+			assertDurableHookDatabaseCounts(t, ctx, database, dialect, dt, siteName, 1, 1)
+			if status := readDurableInvocationStatus(t, ctx, database, dialect, tenant, protectedSource); status != "pending" {
+				t.Fatalf("denied protected hook status = %q, want retryable pending", status)
 			}
 
 		})
