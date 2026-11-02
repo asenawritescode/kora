@@ -349,6 +349,29 @@ type ModuleSnapshot struct {
 	ProviderSelections []ProviderSelection  `json:"provider_selections,omitempty"`
 }
 
+// CapabilityLease is an internal durable, scope-bound grant for one provider
+// operation. It is persisted by the tenant module store, not exposed on a wire.
+type CapabilityLease struct {
+	ID               string        `json:"id"`
+	TenantID         TenantID      `json:"tenant_id"`
+	Scope            BusinessScope `json:"scope"`
+	CallerModuleID   ModuleID      `json:"caller_module_id"`
+	ProviderID       string        `json:"provider_id"`
+	Operation        string        `json:"operation"`
+	BindingRevision  uint64        `json:"binding_revision"`
+	GrantEpoch       uint64        `json:"grant_epoch"`
+	ExpiresAt        time.Time     `json:"expires_at"`
+	State            string        `json:"state"`
+	AdmittedAttempts uint64        `json:"admitted_attempts"`
+}
+
+func (l CapabilityLease) Validate() error {
+	if l.ID == "" || l.TenantID == "" || l.Scope.Validate() != nil || l.Scope.TenantID != l.TenantID || l.CallerModuleID == "" || l.ProviderID == "" || l.Operation == "" || l.BindingRevision == 0 || l.GrantEpoch == 0 || l.ExpiresAt.IsZero() || l.State != "active" && l.State != "revoked" && l.State != "expired" {
+		return fmt.Errorf("capability lease identity, scope, epoch, expiry, or state is invalid")
+	}
+	return nil
+}
+
 // InstalledPackage preserves immutable package identity and composition
 // constraints already checked before package resources were activated.
 // It lives in the existing module snapshot rather than a second registry.
@@ -802,7 +825,7 @@ type ModuleExecution struct {
 	AllowedOperation  string
 	AuthorizedCommand string
 	Scope             BusinessScope
-	verified          bool
+	seal              [32]byte
 }
 
 // BusinessRef is a stable provider-qualified identity, never a local row name.
@@ -1142,10 +1165,12 @@ func AppendBusinessEvent(ctx context.Context, writer interface {
 }
 
 func NewModuleExecution(scope BusinessScope, caller, owner ModuleID, revision uint64, operation string) (ModuleExecution, error) {
-	if scope.Validate() != nil || caller == "" || owner == "" || operation == "" {
+	if scope.Validate() != nil || caller == "" || owner == "" || revision == 0 || operation == "" {
 		return ModuleExecution{}, fmt.Errorf("module execution identity is incomplete")
 	}
-	return ModuleExecution{TenantID: scope.TenantID, CallerModuleID: caller, OwnerModuleID: owner, BindingRevision: revision, AllowedOperation: operation, Scope: scope, verified: true}, nil
+	e := ModuleExecution{TenantID: scope.TenantID, CallerModuleID: caller, OwnerModuleID: owner, BindingRevision: revision, AllowedOperation: operation, Scope: scope}
+	e.seal = e.identitySeal()
+	return e, nil
 }
 
 func NewCommandModuleExecution(scope BusinessScope, caller, owner ModuleID, revision uint64, command, operation string) (ModuleExecution, error) {
@@ -1157,11 +1182,25 @@ func NewCommandModuleExecution(scope BusinessScope, caller, owner ModuleID, revi
 		return ModuleExecution{}, fmt.Errorf("authorized domain command is required")
 	}
 	e.AuthorizedCommand = command
+	e.seal = e.identitySeal()
 	return e, nil
 }
 
 func (e ModuleExecution) Verified() bool {
-	return e.verified && e.TenantID == e.Scope.TenantID && e.Scope.Validate() == nil && e.CallerModuleID != "" && e.OwnerModuleID != "" && e.AllowedOperation != ""
+	return e.TenantID == e.Scope.TenantID && e.Scope.Validate() == nil && e.CallerModuleID != "" && e.OwnerModuleID != "" && e.BindingRevision != 0 && e.AllowedOperation != "" && e.seal != ([32]byte{}) && e.seal == e.identitySeal()
+}
+
+func (e ModuleExecution) identitySeal() [32]byte {
+	identity, _ := json.Marshal(struct {
+		TenantID          TenantID
+		CallerModuleID    ModuleID
+		OwnerModuleID     ModuleID
+		BindingRevision   uint64
+		AllowedOperation  string
+		AuthorizedCommand string
+		Scope             BusinessScope
+	}{e.TenantID, e.CallerModuleID, e.OwnerModuleID, e.BindingRevision, e.AllowedOperation, e.AuthorizedCommand, e.Scope})
+	return sha256.Sum256(identity)
 }
 
 var moduleIDPattern = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9-]+)+$`)

@@ -75,6 +75,38 @@ func TestPublishedQueriesAndProjectionSourcesAreValidated(t *testing.T) {
 	}
 }
 
+func TestModuleExecutionSealCoversEveryAuthorityField(t *testing.T) {
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	execution, err := NewCommandModuleExecution(scope, "sales.orders", "finance.ar", 7, "finance.invoice.issue", "finance.invoice.issue")
+	if err != nil {
+		t.Fatal("create module execution:", err)
+	}
+	if !execution.Verified() {
+		t.Fatal("new module execution is not verified")
+	}
+	mutations := map[string]func(*ModuleExecution){
+		"tenant":             func(e *ModuleExecution) { e.TenantID = "tenant-b" },
+		"caller":             func(e *ModuleExecution) { e.CallerModuleID = "attacker.module" },
+		"owner":              func(e *ModuleExecution) { e.OwnerModuleID = "attacker.module" },
+		"binding revision":   func(e *ModuleExecution) { e.BindingRevision++ },
+		"operation":          func(e *ModuleExecution) { e.AllowedOperation = "finance.invoice.cancel" },
+		"authorized command": func(e *ModuleExecution) { e.AuthorizedCommand = "finance.invoice.cancel" },
+		"scope":              func(e *ModuleExecution) { e.Scope.LegalEntityID = "entity-b" },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			changed := execution
+			mutate(&changed)
+			if changed.Verified() {
+				t.Fatal("mutated module execution retained verification")
+			}
+		})
+	}
+	if _, err := NewCommandModuleExecution(scope, "sales.orders", "finance.ar", 0, "finance.invoice.issue", "finance.invoice.issue"); err == nil {
+		t.Fatal("zero binding revision minted trusted module execution")
+	}
+}
+
 func TestDecodeMarketplacePackageManifestIsStrictAndValidatesModules(t *testing.T) {
 	valid := `{"schema_version":1,"package_id":"finance","release_id":"finance-1","version":"1.0.0","kind":"module","public":{"slug":"finance","name":"Finance","summary":"Finance"},"modules":[{"id":"finance.ar","version":"2.0.0","resources":[{"ref":{"namespace":"tenant","name":"invoice","version":1},"access":"private","mutation_mode":"commands_only","scope_kind":"tenant_shared"}]}],"engine":{"min_version":"1.0.0"}}`
 	if _, err := DecodeMarketplacePackageManifest([]byte(valid)); err != nil {
