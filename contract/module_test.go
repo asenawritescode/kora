@@ -125,3 +125,33 @@ func TestOwnerControlledModuleExtensionsValidateScopeSchemaAndOrder(t *testing.T
 		t.Fatal("core field override accepted")
 	}
 }
+
+func TestPlanCompositionResolvesTransitiveProvidersAndStableOrder(t *testing.T) {
+	capA := CapabilityOffer{Name: "accounting.post", Contract: SchemaRef{ID: "journal", Version: 1}}
+	capB := CapabilityOffer{Name: "inventory.reserve", Contract: SchemaRef{ID: "reservation", Version: 1}}
+	modules := []ModuleDescriptor{
+		{ID: "sales.order", Version: "1.0.0", Requires: []CapabilityRequirement{{Name: "inventory.reserve", Contract: capB.Contract, Required: true}}},
+		{ID: "inventory.stock", Version: "1.0.0", Provides: []CapabilityOffer{capB}, Requires: []CapabilityRequirement{{Name: "accounting.post", Contract: capA.Contract, Required: true}}},
+		{ID: "accounting.ledger", Version: "1.0.0", Provides: []CapabilityOffer{capA}},
+	}
+	providers := []ProviderRegistration{{TenantID: "tenant-a", ProviderID: "acct", OwnerModuleID: "accounting.ledger", Kind: "internal", Offers: []CapabilityOffer{capA}}, {TenantID: "tenant-a", ProviderID: "stock", OwnerModuleID: "inventory.stock", Kind: "internal", Offers: []CapabilityOffer{capB}}}
+	first, err := PlanComposition(modules, providers, nil, "tenant-a", "entity-a", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, j := 0, len(modules)-1; i < j; i, j = i+1, j-1 {
+		modules[i], modules[j] = modules[j], modules[i]
+	}
+	second, err := PlanComposition(modules, providers, nil, "tenant-a", "entity-a", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.PlanHash != second.PlanHash || len(first.ActivationOrder) != 3 || first.ActivationOrder[0] != "accounting.ledger" || first.ActivationOrder[2] != "sales.order" {
+		t.Fatalf("composition order/hash unstable: %#v %#v", first, second)
+	}
+	cycle := []ModuleDescriptor{{ID: "alpha.one", Version: "1.0.0", Requires: []CapabilityRequirement{{Name: "beta", Contract: SchemaRef{ID: "b", Version: 1}, Required: true}}}, {ID: "beta.two", Version: "1.0.0", Provides: []CapabilityOffer{{Name: "beta", Contract: SchemaRef{ID: "b", Version: 1}}, {Name: "alpha", Contract: SchemaRef{ID: "a", Version: 1}}}, Requires: []CapabilityRequirement{{Name: "alpha", Contract: SchemaRef{ID: "a", Version: 1}, Required: true}}}}
+	cycleProviders := []ProviderRegistration{{TenantID: "tenant-a", ProviderID: "alpha-provider", OwnerModuleID: "alpha.one", Kind: "internal", Offers: []CapabilityOffer{{Name: "alpha", Contract: SchemaRef{ID: "a", Version: 1}}}}, {TenantID: "tenant-a", ProviderID: "beta-provider", OwnerModuleID: "beta.two", Kind: "internal", Offers: []CapabilityOffer{{Name: "beta", Contract: SchemaRef{ID: "b", Version: 1}}}}}
+	if _, err := PlanComposition(cycle, cycleProviders, nil, "tenant-a", "entity-a", 3); err == nil {
+		t.Fatal("multi-hop initialization cycle accepted")
+	}
+}

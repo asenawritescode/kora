@@ -453,6 +453,60 @@
       ],
       "type": "object"
     },
+    "CompositionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bindings": {
+          "items": {
+            "$ref": "#/$defs/BindingInspection"
+          },
+          "type": "array"
+        },
+        "conflicts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cycle_paths": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "disabled_optional": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRequirement"
+          },
+          "type": "array"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
+        "plan_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "activation_order",
+        "bindings",
+        "modules",
+        "plan_hash"
+      ],
+      "type": "object"
+    },
     "ConditionSpec": {
       "additionalProperties": false,
       "properties": {
@@ -1966,6 +2020,28 @@
       "required": [
         "findings",
         "valid"
+      ],
+      "type": "object"
+    },
+    "PackageDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_id",
+        "required"
       ],
       "type": "object"
     },
@@ -3957,6 +4033,60 @@
       ],
       "type": "object"
     },
+    "CompositionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bindings": {
+          "items": {
+            "$ref": "#/$defs/BindingInspection"
+          },
+          "type": "array"
+        },
+        "conflicts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cycle_paths": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "disabled_optional": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRequirement"
+          },
+          "type": "array"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
+        "plan_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "activation_order",
+        "bindings",
+        "modules",
+        "plan_hash"
+      ],
+      "type": "object"
+    },
     "ConditionSpec": {
       "additionalProperties": false,
       "properties": {
@@ -5448,6 +5578,28 @@
       "required": [
         "findings",
         "valid"
+      ],
+      "type": "object"
+    },
+    "PackageDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_id",
+        "required"
       ],
       "type": "object"
     },

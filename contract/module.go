@@ -2,7 +2,9 @@ package contract
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -151,6 +153,199 @@ type ExtensionRegistration struct {
 type ExtensionField struct {
 	Key    string    `json:"key"`
 	Schema SchemaRef `json:"schema"`
+}
+
+// PackageDependency preserves immutable package requirements and conflicts.
+//
+//contract:wire:v2
+type PackageDependency struct {
+	PackageID string `json:"package_id"`
+	ReleaseID string `json:"release_id,omitempty"`
+	Version   string `json:"version,omitempty"`
+	Required  bool   `json:"required"`
+}
+
+// CompositionPlan is deterministic preflight output before configuration mutation.
+//
+//contract:wire:v2
+type CompositionPlan struct {
+	Modules          []ModuleDescriptor      `json:"modules"`
+	Bindings         []BindingInspection     `json:"bindings"`
+	ActivationOrder  []ModuleID              `json:"activation_order"`
+	Conflicts        []string                `json:"conflicts,omitempty"`
+	CyclePaths       [][]ModuleID            `json:"cycle_paths,omitempty"`
+	DisabledOptional []CapabilityRequirement `json:"disabled_optional,omitempty"`
+	PlanHash         string                  `json:"plan_hash"`
+}
+
+type BindingKey struct {
+	TenantID         TenantID
+	ScopeKey         string
+	ConsumerModuleID ModuleID
+	CapabilityName   CapabilityName
+}
+type ProviderRegistration struct {
+	TenantID      TenantID
+	ProviderID    string
+	OwnerModuleID ModuleID
+	Kind          string
+	Offers        []CapabilityOffer
+}
+type ProviderSelection struct {
+	Key        BindingKey
+	ProviderID string
+}
+
+func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, tenant TenantID, scope string, revision uint64) (CompositionPlan, error) {
+	ordered := append([]ModuleDescriptor(nil), modules...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	if err := ValidateModuleSet(ordered, nil); err != nil {
+		return CompositionPlan{}, err
+	}
+	if err := ValidateModuleExtensions(ordered, nil); err != nil {
+		return CompositionPlan{}, err
+	}
+	moduleByID := map[ModuleID]ModuleDescriptor{}
+	for _, module := range ordered {
+		moduleByID[module.ID] = module
+	}
+	selected := map[BindingKey]string{}
+	for _, selection := range selections {
+		if selection.Key.TenantID != tenant || selection.Key.ScopeKey != scope {
+			return CompositionPlan{}, fmt.Errorf("provider selection crosses scope")
+		}
+		selected[selection.Key] = selection.ProviderID
+	}
+	plan := CompositionPlan{Modules: ordered}
+	edges := map[ModuleID]map[ModuleID]bool{}
+	disabled := map[string]CapabilityRequirement{}
+	for _, consumer := range ordered {
+		for _, requirement := range consumer.Requires {
+			key := BindingKey{TenantID: tenant, ScopeKey: scope, ConsumerModuleID: consumer.ID, CapabilityName: requirement.Name}
+			providerID := selected[key]
+			var candidates []ProviderRegistration
+			for _, provider := range providers {
+				if provider.TenantID != tenant {
+					continue
+				}
+				if providerID != "" && provider.ProviderID != providerID {
+					continue
+				}
+				for _, offer := range provider.Offers {
+					if offer.Name == requirement.Name && offer.Contract == requirement.Contract {
+						candidates = append(candidates, provider)
+						break
+					}
+				}
+			}
+			sort.Slice(candidates, func(i, j int) bool { return candidates[i].ProviderID < candidates[j].ProviderID })
+			if len(candidates) == 0 {
+				if requirement.Required {
+					return CompositionPlan{}, fmt.Errorf("module %q requires missing capability %q", consumer.ID, requirement.Name)
+				}
+				disabled[string(consumer.ID)+"/"+string(requirement.Name)] = requirement
+				continue
+			}
+			if providerID == "" && len(candidates) > 1 {
+				return CompositionPlan{}, fmt.Errorf("capability %q requires explicit provider selection", requirement.Name)
+			}
+			provider := candidates[0]
+			if provider.OwnerModuleID == consumer.ID {
+				return CompositionPlan{}, fmt.Errorf("module %q has self dependency through %q", consumer.ID, requirement.Name)
+			}
+			if edges[consumer.ID] == nil {
+				edges[consumer.ID] = map[ModuleID]bool{}
+			}
+			if moduleByID[provider.OwnerModuleID].ID != "" {
+				edges[consumer.ID][provider.OwnerModuleID] = true
+			}
+			plan.Bindings = append(plan.Bindings, BindingInspection{ConsumerModuleID: consumer.ID, CapabilityName: requirement.Name, ProviderID: provider.ProviderID, BindingRevision: revision})
+		}
+	}
+	order, cycle := topologicalModuleOrder(ordered, edges)
+	if len(cycle) > 0 {
+		return CompositionPlan{}, fmt.Errorf("module initialization cycle: %s", moduleCycleText(cycle))
+	}
+	plan.ActivationOrder = order
+	for _, req := range disabled {
+		plan.DisabledOptional = append(plan.DisabledOptional, req)
+	}
+	sort.Slice(plan.DisabledOptional, func(i, j int) bool { return plan.DisabledOptional[i].Name < plan.DisabledOptional[j].Name })
+	sort.Slice(plan.Bindings, func(i, j int) bool {
+		a, b := plan.Bindings[i], plan.Bindings[j]
+		if a.ConsumerModuleID != b.ConsumerModuleID {
+			return a.ConsumerModuleID < b.ConsumerModuleID
+		}
+		return a.CapabilityName < b.CapabilityName
+	})
+	canonical, err := json.Marshal(struct {
+		Modules  []ModuleDescriptor
+		Bindings []BindingInspection
+		Order    []ModuleID
+		Revision uint64
+	}{ordered, plan.Bindings, order, revision})
+	if err != nil {
+		return CompositionPlan{}, err
+	}
+	hash := sha256.Sum256(canonical)
+	plan.PlanHash = hex.EncodeToString(hash[:])
+	return plan, nil
+}
+
+func topologicalModuleOrder(modules []ModuleDescriptor, dependencies map[ModuleID]map[ModuleID]bool) ([]ModuleID, []ModuleID) {
+	indegree := map[ModuleID]int{}
+	dependents := map[ModuleID][]ModuleID{}
+	for _, m := range modules {
+		indegree[m.ID] = 0
+	}
+	for consumer, deps := range dependencies {
+		for dep := range deps {
+			if _, ok := indegree[dep]; !ok {
+				continue
+			}
+			indegree[consumer]++
+			dependents[dep] = append(dependents[dep], consumer)
+		}
+	}
+	var queue []ModuleID
+	for id, n := range indegree {
+		if n == 0 {
+			queue = append(queue, id)
+		}
+	}
+	sort.Slice(queue, func(i, j int) bool { return queue[i] < queue[j] })
+	var order []ModuleID
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		order = append(order, id)
+		for _, consumer := range dependents[id] {
+			indegree[consumer]--
+			if indegree[consumer] == 0 {
+				queue = append(queue, consumer)
+				sort.Slice(queue, func(i, j int) bool { return queue[i] < queue[j] })
+			}
+		}
+	}
+	if len(order) == len(indegree) {
+		return order, nil
+	}
+	var cycle []ModuleID
+	for id, n := range indegree {
+		if n > 0 {
+			cycle = append(cycle, id)
+		}
+	}
+	sort.Slice(cycle, func(i, j int) bool { return cycle[i] < cycle[j] })
+	return nil, cycle
+}
+
+func moduleCycleText(cycle []ModuleID) string {
+	parts := make([]string, len(cycle))
+	for i, id := range cycle {
+		parts[i] = string(id)
+	}
+	return strings.Join(parts, " -> ")
 }
 
 func ValidateModuleExtensions(modules []ModuleDescriptor, registered func(SchemaRef) bool) error {
