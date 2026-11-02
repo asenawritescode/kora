@@ -63,6 +63,15 @@ func TestAuthorizePublishedQueryRequiresActorGrantAndExactScope(t *testing.T) {
 	if authErr := authorizePublishedQuery(ownerExecution.(policy.Execution), registry, query, scope); authErr == nil {
 		t.Fatal("owner-scoped role permission allowed a provider result without row-level filtering")
 	}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.query.totals", Role: "AssignedReader", Read: true, IfAssigned: []string{"assigned_to"}, Scope: scope})
+	assignedExecution := newAnalyticsAuthorizationContext(t, "tenant-a", "tenant-route", []string{"AssignedReader"}, nil)
+	assignedIdentity, ok := assignedExecution.Get("policy_execution")
+	if !ok {
+		t.Fatal("verified assigned execution was not installed")
+	}
+	if authErr := authorizePublishedQuery(assignedIdentity.(policy.Execution), registry, query, scope); authErr == nil {
+		t.Fatal("assignment-scoped role permission allowed a query without provider row filtering")
+	}
 }
 
 func TestPublishedQueryRouteDeniesUnverifiedIdentity(t *testing.T) {

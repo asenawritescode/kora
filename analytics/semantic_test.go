@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +76,19 @@ func TestPublishedProjectionModelUsesOnlyPublishedOutputFields(t *testing.T) {
 		[]SemanticDimension{{Name: "period", Field: "period", Type: "time"}},
 		[]SemanticMeasure{{Name: "amount_sum", Field: "amount", Aggregation: "sum"}}); err == nil {
 		t.Fatal("report model accepted a measure outside the published query field allowlist")
+	}
+}
+
+func TestPublishedProjectionSnapshotRejectsUndeclaredExportFields(t *testing.T) {
+	output := contract.SchemaRef{ID: "ar.balance.output", Version: 1}
+	definition := contract.ProjectionDefinition{ID: "ar_balance", OwnerModuleID: "finance.ar", ScopePolicy: contract.ScopeEntityOwned, FactKey: "id", AllowedFields: []string{"id", "amount"}, Sources: []contract.ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: "balances", OutputSchema: output}}, OutputSchema: output, RebuildStrategy: "consistent_snapshot"}
+	snapshot := PublishedProjectionSnapshot{Site: "tenant-a", Definition: definition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}, SourceID: "published_sources", SourceRevision: "r1", Cursor: `{"sales.orders/balances":"c1"}`, AsOf: time.Now().UTC(), Freshness: contract.QueryFresh, Data: json.RawMessage(`[{"id":"invoice-1","amount":12}]`)}
+	if err := snapshot.Validate(); err != nil {
+		t.Fatalf("valid projection snapshot rejected: %v", err)
+	}
+	snapshot.Data = json.RawMessage(`[{"id":"invoice-1","amount":12,"secret":"private"}]`)
+	if err := snapshot.Validate(); err == nil {
+		t.Fatal("projection snapshot with an undeclared export field was accepted")
 	}
 }
 
