@@ -232,6 +232,46 @@ func TestExtensionReadExecutorRejectsMutationBeforeAuthentication(t *testing.T) 
 	}
 }
 
+func TestMCPCommandsOnlyMutationCannotReachGenericExecutor(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("sqlmock.New:", err)
+	}
+	defer database.Close()
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{
+		Name: "Protected Task", ModuleOwnerID: "finance.ar",
+		ModuleOwnershipMode: string(contract.MutationCommands), BusinessScopePolicy: contract.ScopeTenantShared,
+		Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}},
+	})
+	executor, err := NewExtensionReadExecutor(database, kdb.Resolve("mysql"), registry, contract.TenantID("stable-tenant"), "tenant.example", "extension-token")
+	if err != nil {
+		t.Fatal("NewExtensionReadExecutor:", err)
+	}
+	server := NewWithExecutor(registry, "tenant.example", ModeExecutable, executor)
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+	serverSession, err := server.srv.Connect(context.Background(), serverTransport, nil)
+	if err != nil {
+		t.Fatal("connect MCP server:", err)
+	}
+	defer serverSession.Close()
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "1"}, nil)
+	clientSession, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatal("connect MCP client:", err)
+	}
+	defer clientSession.Close()
+	_, err = clientSession.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name: "protected_task_create", Arguments: map[string]any{"title": "must use the owner command"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("MCP generic create error = %v, want the protected mutation tool to be absent", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("MCP mutation reached authentication or database:", err)
+	}
+}
+
 func TestExtensionReadExecutorRejectsRevokedCredential(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
