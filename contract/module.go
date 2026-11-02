@@ -1,10 +1,12 @@
 package contract
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ModuleID identifies a durable business ownership boundary. It is independent
@@ -131,6 +133,86 @@ type ModuleExecution struct {
 	AuthorizedCommand string
 	ScopeKey          string
 	verified          bool
+}
+
+// BusinessRef is a stable provider-qualified identity, never a local row name.
+//
+//contract:wire:v2
+type BusinessRef struct {
+	ProviderID   string `json:"provider_id"`
+	ResourceType string `json:"resource_type"`
+	ID           string `json:"id"`
+}
+
+// ReferenceRule declares whether a field points to a local row or a published
+// provider-owned business identity.
+//
+//contract:wire:v2
+type ReferenceRule struct {
+	Kind           string         `json:"kind"`
+	CapabilityName CapabilityName `json:"capability_name,omitempty"`
+	ResourceType   string         `json:"resource_type"`
+}
+
+func (r ReferenceRule) Validate() error {
+	switch r.Kind {
+	case "local_owned":
+		if r.ResourceType == "" || r.CapabilityName != "" {
+			return fmt.Errorf("local-owned reference requires resource type and no capability")
+		}
+	case "published_business_ref":
+		if r.ResourceType == "" || r.CapabilityName == "" {
+			return fmt.Errorf("published reference requires resource type and capability")
+		}
+	default:
+		return fmt.Errorf("unknown reference rule kind %q", r.Kind)
+	}
+	return nil
+}
+
+type ScopeContext struct {
+	TenantID      TenantID
+	LegalEntityID string
+	ProviderID    string
+}
+type ResolvedBusinessRef struct {
+	Canonical BusinessRef
+	Revision  uint64
+	Display   string
+}
+type BusinessReferenceResolver interface {
+	Resolve(scope ScopeContext, ref BusinessRef) (ResolvedBusinessRef, error)
+}
+
+func ValidateBusinessReference(resolver BusinessReferenceResolver, scope ScopeContext, ref BusinessRef, expectedResourceType string) (ResolvedBusinessRef, error) {
+	if scope.TenantID == "" || ref.ProviderID == "" || ref.ResourceType == "" || ref.ID == "" {
+		return ResolvedBusinessRef{}, fmt.Errorf("business reference requires verified scope and provider-qualified identity")
+	}
+	if ref.ResourceType != expectedResourceType {
+		return ResolvedBusinessRef{}, fmt.Errorf("business reference resource type mismatch")
+	}
+	if resolver == nil {
+		return ResolvedBusinessRef{}, fmt.Errorf("business reference provider is unavailable")
+	}
+	resolved, err := resolver.Resolve(scope, ref)
+	if err != nil {
+		return ResolvedBusinessRef{}, err
+	}
+	if resolved.Canonical != ref {
+		return ResolvedBusinessRef{}, fmt.Errorf("business reference provider returned a different identity")
+	}
+	return resolved, nil
+}
+
+// HistoricalSnapshot retains approved provider fields captured at issuance.
+//
+//contract:wire:v2
+type HistoricalSnapshot struct {
+	Source     BusinessRef `json:"source"`
+	CapturedAt time.Time   `json:"captured_at"`
+	Schema     SchemaRef   `json:"schema"`
+	//contract:json
+	Data json.RawMessage `json:"data"`
 }
 
 func NewModuleExecution(tenant TenantID, caller, owner ModuleID, revision uint64, operation, scope string) (ModuleExecution, error) {

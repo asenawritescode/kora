@@ -162,6 +162,26 @@
       ],
       "type": "object"
     },
+    "BusinessRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provider_id",
+        "resource_type"
+      ],
+      "type": "object"
+    },
     "CancelRequest": {
       "additionalProperties": false,
       "properties": {
@@ -808,6 +828,31 @@
       "required": [
         "field",
         "operator"
+      ],
+      "type": "object"
+    },
+    "HistoricalSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "captured_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "source": {
+          "$ref": "#/$defs/BusinessRef"
+        }
+      },
+      "required": [
+        "captured_at",
+        "data",
+        "schema",
+        "source"
       ],
       "type": "object"
     },
@@ -1864,6 +1909,25 @@
       "required": [
         "kind",
         "table"
+      ],
+      "type": "object"
+    },
+    "ReferenceRule": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "resource_type"
       ],
       "type": "object"
     },
@@ -3109,6 +3173,26 @@
       ],
       "type": "object"
     },
+    "BusinessRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provider_id",
+        "resource_type"
+      ],
+      "type": "object"
+    },
     "CancelRequest": {
       "additionalProperties": false,
       "properties": {
@@ -3733,6 +3817,31 @@
       "required": [
         "field",
         "operator"
+      ],
+      "type": "object"
+    },
+    "HistoricalSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "captured_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "source": {
+          "$ref": "#/$defs/BusinessRef"
+        }
+      },
+      "required": [
+        "captured_at",
+        "data",
+        "schema",
+        "source"
       ],
       "type": "object"
     },
@@ -4789,6 +4898,25 @@
       "required": [
         "kind",
         "table"
+      ],
+      "type": "object"
+    },
+    "ReferenceRule": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "resource_type"
       ],
       "type": "object"
     },

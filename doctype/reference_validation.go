@@ -101,6 +101,17 @@ func ValidateSnapshotReferences(candidate *ConfigSnapshot, live *Registry) []Ref
 		}
 		for fi, field := range dt.Fields {
 			path := fmt.Sprintf("doctypes[%s].fields[%d]", dt.Name, fi)
+			if field.ReferenceRule != nil {
+				if err := field.ReferenceRule.Validate(); err != nil {
+					add("reference.rule_invalid", path+".reference_rule", "reference_rule", field.ReferenceRule.Kind, err.Error())
+				}
+				if field.ReferenceRule.Kind == "local_owned" && field.Fieldtype != "Link" {
+					add("reference.local_rule_requires_link", path+".reference_rule", "field", field.Fieldname, "local_owned reference rule requires a Link field")
+				}
+				if field.ReferenceRule.Kind == "published_business_ref" && field.Fieldtype == "Link" {
+					add("reference.published_rule_cannot_use_link", path+".reference_rule", "field", field.Fieldname, "published business references use a provider-qualified identity field")
+				}
+			}
 			switch strings.ToLower(strings.TrimSpace(field.Fieldtype)) {
 			case "link", "table":
 				target := checkDoc(path+".options", field.Options)
@@ -657,8 +668,138 @@ func validatePageActionInput(action PageAction, index int, contract PageActionCo
 	validateMappedFields(input["line_fields"], child, path+".line_fields", checkField, add)
 	validateTransactionTotals(input["totals"], target, child, path+".totals", checkField, add)
 	validateRelatedQuantityUpdates(input["related_quantity_updates"], child, path+".related_quantity_updates", checkDoc, checkField, add)
+	validateTransactionLineRecords(input["line_records"], child, path+".line_records", getDoc, checkField, add)
+	validateTransactionNumericUpdates(input["related_numeric_updates"], target, path+".related_numeric_updates", getDoc, checkField, add)
+	validateTransactionRelatedStatus(input["required_related_status"], target, path+".required_related_status", getDoc, checkField, add)
 	validateQuantityEffectInputs(action.Command, input, getDoc, add, path)
 	return findings
+}
+
+func validateTransactionRelatedStatus(raw any, parent *DocType, path string, getDoc func(string) *DocType, checkField func(string, *DocType, string), add func(string, string, string, string, string)) {
+	items, ok := raw.([]any)
+	if raw == nil {
+		return
+	}
+	if !ok {
+		add("reference.action_related_status_type", path, "related_status", "", "required_related_status must be an array")
+		return
+	}
+	for index, rawItem := range items {
+		item, ok := rawItem.(map[string]any)
+		itemPath := fmt.Sprintf("%s[%d]", path, index)
+		if !ok {
+			add("reference.action_related_status_item", itemPath, "related_status", "", "related status requirement must be an object")
+			continue
+		}
+		dt := getDoc(stringConfig(item, "doctype"))
+		if dt == nil {
+			add("reference.action_related_status_doctype", itemPath+".doctype", "doctype", stringConfig(item, "doctype"), "related status doctype must exist")
+		}
+		checkField(itemPath+".record_field", parent, stringConfig(item, "record_field"))
+		checkField(itemPath+".status_field", dt, stringConfig(item, "status_field"))
+		for _, key := range []string{"doctype", "record_field", "status_field", "equals"} {
+			if stringConfig(item, key) == "" {
+				add("reference.action_input_missing", itemPath+"."+key, "action_input", key, "related status requirement is missing a required value")
+			}
+		}
+	}
+}
+
+func validateTransactionLineRecords(raw any, line *DocType, path string, getDoc func(string) *DocType, checkField func(string, *DocType, string), add func(string, string, string, string, string)) {
+	items, ok := raw.([]any)
+	if raw == nil {
+		return
+	}
+	if !ok {
+		add("reference.action_line_records_type", path, "line_records", "", "line_records must be an array")
+		return
+	}
+	for index, rawItem := range items {
+		item, ok := rawItem.(map[string]any)
+		itemPath := fmt.Sprintf("%s[%d]", path, index)
+		if !ok {
+			add("reference.action_line_record_type", itemPath, "line_record", "", "line record must be an object")
+			continue
+		}
+		target := getDoc(stringConfig(item, "doctype"))
+		if target == nil {
+			add("reference.action_line_record_doctype", itemPath+".doctype", "doctype", stringConfig(item, "doctype"), "line record doctype is required and must exist")
+		}
+		fields, fieldsOK := item["fields"].(map[string]any)
+		if !fieldsOK || len(fields) == 0 {
+			add("reference.action_line_record_fields", itemPath+".fields", "field_map", "", "line record fields are required")
+		} else {
+			for name := range fields {
+				checkField(itemPath+".fields."+name, target, name)
+			}
+		}
+		quantity, exists := item["quantity"].(map[string]any)
+		if exists {
+			fieldName, sourceName := stringConfig(quantity, "field"), stringConfig(quantity, "source_field")
+			checkField(itemPath+".quantity.field", target, fieldName)
+			checkField(itemPath+".quantity.source_field", line, sourceName)
+			if target != nil {
+				if field := target.GetField(fieldName); field != nil && !isNumericFieldType(field.Fieldtype) {
+					add("reference.action_line_record_quantity_type", itemPath+".quantity.field", "field", target.Name+"."+fieldName, "line record quantity target must be numeric")
+				}
+			}
+			if line != nil {
+				if field := line.GetField(sourceName); field != nil && !isNumericFieldType(field.Fieldtype) {
+					add("reference.action_line_record_quantity_type", itemPath+".quantity.source_field", "field", line.Name+"."+sourceName, "line record quantity source must be numeric")
+				}
+			}
+			if sign, err := strconv.ParseFloat(fmt.Sprint(quantity["sign"]), 64); err == nil && sign != 1 && sign != -1 {
+				add("reference.action_line_record_sign", itemPath+".quantity.sign", "number", fmt.Sprint(quantity["sign"]), "line record quantity sign must be 1 or -1")
+			}
+			for _, key := range []string{"field", "source_field", "sign"} {
+				if quantity[key] == nil || quantity[key] == "" {
+					add("reference.action_input_missing", itemPath+".quantity."+key, "action_input", key, "line record quantity requires field, source_field, and sign")
+				}
+			}
+		}
+	}
+}
+
+func validateTransactionNumericUpdates(raw any, parent *DocType, path string, getDoc func(string) *DocType, checkField func(string, *DocType, string), add func(string, string, string, string, string)) {
+	items, ok := raw.([]any)
+	if raw == nil {
+		return
+	}
+	if !ok {
+		add("reference.action_numeric_updates_type", path, "numeric_updates", "", "related_numeric_updates must be an array")
+		return
+	}
+	for index, rawItem := range items {
+		item, ok := rawItem.(map[string]any)
+		itemPath := fmt.Sprintf("%s[%d]", path, index)
+		if !ok {
+			add("reference.action_numeric_update_type", itemPath, "numeric_update", "", "numeric update must be an object")
+			continue
+		}
+		target := getDoc(stringConfig(item, "doctype"))
+		if target == nil {
+			add("reference.action_numeric_update_doctype", itemPath+".doctype", "doctype", stringConfig(item, "doctype"), "numeric update doctype is required and must exist")
+		}
+		checkField(itemPath+".record_field", parent, stringConfig(item, "record_field"))
+		fieldName := stringConfig(item, "field")
+		checkField(itemPath+".field", target, fieldName)
+		if target != nil {
+			if field := target.GetField(fieldName); field != nil && !isNumericFieldType(field.Fieldtype) {
+				add("reference.action_numeric_update_field_type", itemPath+".field", "field", target.Name+"."+fieldName, "numeric updates require a numeric target field")
+			}
+		}
+		source := stringConfig(item, "source_field")
+		if source != "" {
+			checkField(itemPath+".source_field", parent, source)
+			if parent != nil {
+				if field := parent.GetField(source); field != nil && !isNumericFieldType(field.Fieldtype) {
+					add("reference.action_numeric_update_source_type", itemPath+".source_field", "field", parent.Name+"."+source, "numeric update source must be numeric")
+				}
+			}
+		} else if item["value"] == nil {
+			add("reference.action_numeric_update_source", itemPath, "numeric_update", "", "numeric update requires source_field or value")
+		}
+	}
 }
 
 func validateConfiguredFields(raw any, target *DocType, path string, checkField func(string, *DocType, string), add func(string, string, string, string, string)) {
