@@ -702,6 +702,35 @@ func TestCheckPermResolvesResourceAliasForScopedRole(t *testing.T) {
 	}
 }
 
+func TestCheckPermRequiresExactEntityGrantRegardlessOfTenantRole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Invoice", BusinessScopePolicy: contract.ScopeEntityOwned})
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Invoice", Role: "Administrator", Read: true, Create: true, Write: true})
+	actor := contract.ActorContext{PrincipalID: "admin", SubjectUserID: "admin", PrincipalType: contract.PrincipalHuman, Site: "tenant.test", Roles: []string{"Administrator"}, AuthenticatedAt: time.Now().UTC()}
+	scopeA := contract.BusinessScope{TenantID: "tenant-id", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	for _, tc := range []struct {
+		entity string
+		grants []policy.Grant
+		want   bool
+	}{{entity: "entity-a", want: false}, {entity: "entity-a", grants: []policy.Grant{{Resource: "Invoice", Operation: "read", Scope: scopeA}}, want: true}, {entity: "entity-b", grants: []policy.Grant{{Resource: "Invoice", Operation: "read", Scope: scopeA}}, want: false}} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/resource/Invoice", nil)
+		c.Request.Header.Set("X-Kora-Legal-Entity-ID", tc.entity)
+		execution, err := policy.NewVerifiedExecutionWithGrants("tenant-id", actor, tc.grants)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Set("site_name", "tenant.test")
+		c.Set("policy_execution", execution)
+		_, forbidden := checkPerm(c, registry, "Invoice", "read")
+		if gotAllowed := !forbidden; gotAllowed != tc.want {
+			t.Fatalf("entity %q allowed=%t, want %t; response=%s", tc.entity, gotAllowed, tc.want, w.Body.String())
+		}
+	}
+}
+
 func routerTestExecutionForUser(tenant, site, user string, roles []string) policy.Execution {
 	execution, err := policy.NewVerifiedExecution(contract.TenantID(tenant), contract.ActorContext{PrincipalID: user, SubjectUserID: user, PrincipalType: contract.PrincipalHuman, Site: site, Roles: roles, AuthenticatedAt: time.Now().UTC()})
 	if err != nil {

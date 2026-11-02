@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/scheduler"
 	_ "github.com/go-sql-driver/mysql"
@@ -55,7 +56,7 @@ func TestScheduledOccurrenceLeaseAndUncertainOutcomeAcrossDialects(t *testing.T)
 				_, _ = database.ExecContext(context.Background(), db.Rebind(tc.dialect, `DELETE FROM _kora_schedule_occurrence WHERE tenant_id=?`), tenant)
 				_, _ = database.ExecContext(context.Background(), db.Rebind(tc.dialect, `DELETE FROM _kora_schedule_definition WHERE tenant_id=?`), tenant)
 			}()
-			now := time.Now().UTC().Truncate(time.Microsecond)
+			now := time.Now().UTC().Truncate(time.Millisecond)
 			job := &scheduler.JobConfig{Name: "hourly", Type: scheduler.JobWebhook, Schedule: "0 * * * *", Config: map[string]any{"recipient": "test"}}
 			first := now.Add(-time.Minute)
 			if err := store.RegisterDefinition(ctx, tenant, job, scheduler.JobDefinitionDigest(job), first, now); err != nil {
@@ -63,6 +64,18 @@ func TestScheduledOccurrenceLeaseAndUncertainOutcomeAcrossDialects(t *testing.T)
 			}
 			if got, err := store.NextRunAt(ctx, tenant, job.Name); err != nil || !got.Equal(first) {
 				t.Fatalf("next run after registration = %s, %v; want %s", got, err, first)
+			}
+			entityScope := contract.BusinessScope{TenantID: contract.TenantID(tenant), Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+			entityJob := &scheduler.JobConfig{Name: "entity-reconcile", Type: "reconcile", Schedule: "0 * * * *", Scope: &entityScope, RequiredResource: "ledger.invoice", RequiredOperation: "write"}
+			if err := store.RegisterDefinition(ctx, tenant, entityJob, scheduler.JobDefinitionDigest(entityJob), first, now); err != nil {
+				t.Fatal("register entity-scoped schedule:", err)
+			}
+			entityClaim, err := store.ClaimDue(ctx, tenant, entityJob.Name, "worker-entity", now, time.Minute)
+			if err != nil || entityClaim == nil {
+				t.Fatalf("claim entity-scoped schedule: %+v, %v", entityClaim, err)
+			}
+			if entityClaim.Job.Scope == nil || *entityClaim.Job.Scope != entityScope || entityClaim.Job.RequiredResource != "ledger.invoice" || entityClaim.Job.RequiredOperation != "write" {
+				t.Fatalf("recovered entity schedule identity = %+v, want scope and exact grant preserved", entityClaim.Job)
 			}
 			claimed, err := store.ClaimDue(ctx, tenant, job.Name, "worker-a", now, time.Minute)
 			if err != nil {

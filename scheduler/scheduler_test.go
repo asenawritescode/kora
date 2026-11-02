@@ -9,10 +9,58 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 )
+
+func TestEntityScopedScheduledJobRequiresExactTrustedGrant(t *testing.T) {
+	scopeA := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	scopeB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	job := &JobConfig{Name: "entity-task", Type: "entity_task", Scope: &scopeA, RequiredResource: "sales.invoice", RequiredOperation: "write"}
+	called := false
+	s := New(nil, nil, nil, nil)
+	s.TenantID = "tenant-a"
+	if err := s.RegisterHandler("entity_task", func(_ context.Context, got *JobConfig) error {
+		called = true
+		if got.Scope == nil || *got.Scope != scopeA || !got.Execution.HasGrant(policy.Grant{Resource: "sales.invoice", Operation: "write", Scope: scopeA}) {
+			t.Fatalf("handler received wrong scoped execution: scope=%+v grants=%+v", got.Scope, got.Execution.Grants())
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.executeScheduledJob(context.Background(), job); err == nil || called {
+		t.Fatal("entity job ran without trusted grant resolver")
+	}
+	s.ResolveExecution = func(_ context.Context, got contract.BusinessScope) (policy.Execution, error) {
+		if got != scopeA {
+			t.Fatalf("resolver scope=%+v, want %+v", got, scopeA)
+		}
+		return policy.NewVerifiedExecutionWithGrants("tenant-a", contract.ActorContext{PrincipalID: "scheduler", PrincipalType: contract.PrincipalService, Site: "tenant-a", AuthenticatedAt: time.Now()}, []policy.Grant{{Resource: "sales.invoice", Operation: "write", Scope: scopeB}})
+	}
+	if err := s.executeScheduledJob(context.Background(), job); err == nil || called {
+		t.Fatal("entity job ran with grant for another legal entity")
+	}
+	s.ResolveExecution = func(context.Context, contract.BusinessScope) (policy.Execution, error) {
+		return policy.NewVerifiedExecutionWithGrants("tenant-a", contract.ActorContext{PrincipalID: "scheduler", PrincipalType: contract.PrincipalService, Site: "tenant-a", AuthenticatedAt: time.Now()}, []policy.Grant{{Resource: "sales.invoice", Operation: "write", Scope: scopeA}})
+	}
+	if err := s.executeScheduledJob(context.Background(), job); err != nil {
+		t.Fatal("entity job with exact grant:", err)
+	}
+	if !called {
+		t.Fatal("exactly authorized entity job did not run")
+	}
+	called = false
+	s.ResolveExecution = func(context.Context, contract.BusinessScope) (policy.Execution, error) {
+		return policy.NewVerifiedExecutionWithGrants("tenant-a", contract.ActorContext{PrincipalID: "scheduler", PrincipalType: contract.PrincipalService, Site: "tenant-a", AuthenticatedAt: time.Now()}, nil)
+	}
+	if err := s.executeScheduledJob(context.Background(), job); err == nil || called {
+		t.Fatal("revoked entity grant remained usable by resumed scheduled work")
+	}
+}
 
 func TestSchedulerJobUsesCancellationContextForDatabaseReads(t *testing.T) {
 	database, mock, err := sqlmock.New()

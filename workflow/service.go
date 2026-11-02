@@ -385,6 +385,18 @@ func (s *InstanceService) Start(ctx context.Context, exec policy.Execution, cmd 
 	if cmd.Subject.Kind == "" || cmd.Subject.ID == "" {
 		return contract.WorkflowInstance{}, contract.NewError(contract.CodeValidationFailed, "workflow subject is required")
 	}
+	scope := cmd.BusinessScope
+	if scope.Kind == "" && scope.TenantID == "" && scope.LegalEntityID == "" {
+		scope = contract.BusinessScope{TenantID: exec.Tenant(), Kind: contract.ScopeKindTenant}
+	}
+	if err := scope.Validate(); err != nil || scope.TenantID != exec.Tenant() {
+		return contract.WorkflowInstance{}, contract.NewError(contract.CodePermissionDenied, "workflow business scope is invalid")
+	}
+	if scope.Kind == contract.ScopeKindLegalEntity {
+		if _, ok := exec.GrantForScope(string(cmd.Subject.Kind), "read", scope); !ok {
+			return contract.WorkflowInstance{}, contract.NewError(contract.CodePermissionDenied, "workflow subject is not authorized in the requested legal entity")
+		}
+	}
 	if _, err := contract.ParseRevision(string(cmd.Subject.Revision)); err != nil {
 		return contract.WorkflowInstance{}, contract.NewError(contract.CodeValidationFailed, "workflow subject revision is invalid")
 	}
@@ -414,7 +426,7 @@ func (s *InstanceService) Start(ctx context.Context, exec policy.Execution, cmd 
 	if err != nil {
 		return contract.WorkflowInstance{}, contract.NewError(contract.CodeUnauthenticated, "workflow starter identity is invalid")
 	}
-	return s.instances.StartInstance(ctx, StartInstanceInput{Tenant: exec.Tenant(), ID: instanceID, Definition: definition, DefinitionDigest: ref.Digest, Subject: cmd.Subject, Actor: actor, IdempotencyKey: cmd.Meta.IdempotencyKey, Site: exec.Actor().Site, Now: s.now().UTC()})
+	return s.instances.StartInstance(ctx, StartInstanceInput{Tenant: exec.Tenant(), BusinessScope: scope, ID: instanceID, Definition: definition, DefinitionDigest: ref.Digest, Subject: cmd.Subject, Actor: actor, IdempotencyKey: cmd.Meta.IdempotencyKey, Site: exec.Actor().Site, Now: s.now().UTC()})
 }
 
 // StartFromRecordEvent starts each published record-triggered definition once.
@@ -470,10 +482,17 @@ func (s *InstanceService) StartFromRecordEvent(ctx context.Context, tenant contr
 		if err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "workflow instance identity is invalid")
 		}
+		businessScope := event.BusinessScope
+		if businessScope.Kind == "" && businessScope.TenantID == "" && businessScope.LegalEntityID == "" {
+			businessScope = contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
+		}
+		if businessScope.Validate() != nil || businessScope.TenantID != tenant {
+			return nil, contract.NewError(contract.CodePermissionDenied, "record trigger business scope is invalid")
+		}
 		startedInstance, err := s.instances.StartInstance(ctx, StartInstanceInput{
 			Tenant: tenant, ID: instanceID, Definition: definition, DefinitionDigest: ref.Digest,
-			Subject: contract.SubjectRef{Kind: data.Table, ID: data.RecordID, Revision: contract.Revision(data.Revision)},
-			Actor:   principal, IdempotencyKey: key, Site: site, Now: s.now().UTC(),
+			BusinessScope: businessScope, Subject: contract.SubjectRef{Kind: data.Table, ID: data.RecordID, Revision: contract.Revision(data.Revision)},
+			Actor: principal, IdempotencyKey: key, Site: site, Now: s.now().UTC(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("start record-triggered workflow %s: %w", definition.ID, err)

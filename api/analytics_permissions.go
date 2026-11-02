@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/asenawritescode/kora/analytics"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
@@ -15,7 +16,8 @@ import (
 
 func analyticsPermissionScope(c *gin.Context, registry *doctype.Registry) string {
 	roles := []string(nil)
-	if execution, valid := requestExecution(c); valid {
+	execution, valid := requestExecution(c)
+	if valid {
 		roles = append(roles, execution.Actor().Roles...)
 	}
 	sort.Strings(roles)
@@ -30,12 +32,21 @@ func analyticsPermissionScope(c *gin.Context, registry *doctype.Registry) string
 	if registry != nil && registry.Permissions != nil {
 		policyDigest = registry.Permissions.PolicyDigest()
 	}
+	var grants []policy.Grant
+	var executionTenant contract.TenantID
+	if valid {
+		grants = execution.Grants()
+		executionTenant = execution.Tenant()
+	}
 	payload, err := json.Marshal(struct {
-		Roles                []string             `json:"roles"`
-		PolicyDigest         string               `json:"policy_digest"`
-		ExtensionPermissions []doctype.Permission `json:"extension_permissions,omitempty"`
-		ChannelPermissions   []doctype.Permission `json:"channel_permissions,omitempty"`
-	}{roles, policyDigest, extensionPermissions, channelPermissions})
+		Roles                []string               `json:"roles"`
+		PolicyDigest         string                 `json:"policy_digest"`
+		ExtensionPermissions []doctype.Permission   `json:"extension_permissions,omitempty"`
+		ChannelPermissions   []doctype.Permission   `json:"channel_permissions,omitempty"`
+		Grants               []policy.Grant         `json:"grants,omitempty"`
+		Scope                contract.BusinessScope `json:"scope"`
+		Tenant               contract.TenantID      `json:"tenant"`
+	}{roles, policyDigest, extensionPermissions, channelPermissions, grants, businessScopeFromRequest(c, execution), executionTenant})
 	if err != nil {
 		return "unavailable"
 	}
@@ -117,6 +128,13 @@ func checkUnscopedAnalyticsRead(c *gin.Context, registry *doctype.Registry, doct
 	if doctypeName == "" {
 		return true
 	}
+	if dt := registry.Get(doctypeName); dt != nil && dt.BusinessScopePolicy == contract.ScopeEntityOwned {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{
+			"code":    "permission.entity_scope_unsupported",
+			"message": "Analytics queries cannot read entity-owned sources through an unscoped projection",
+		}})
+		return false
+	}
 	scope, denied := checkPerm(c, registry, doctypeName, "read")
 	if denied {
 		return false
@@ -133,6 +151,9 @@ func checkUnscopedAnalyticsRead(c *gin.Context, registry *doctype.Registry, doct
 
 func analyticsSourceReadable(c *gin.Context, registry *doctype.Registry, doctypeName string) bool {
 	if doctypeName == "" || registry == nil {
+		return false
+	}
+	if dt := registry.Get(doctypeName); dt != nil && dt.BusinessScopePolicy == contract.ScopeEntityOwned {
 		return false
 	}
 	execution, valid := requestExecution(c)

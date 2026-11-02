@@ -38,7 +38,13 @@ func (p *tenantWorkflowConditionScope) Scope(ctx context.Context, execution poli
 	if err != nil || execution.Tenant() != tenant || execution.Actor().Site != p.runtime.Name {
 		return nil, contract.NewError(contract.CodePermissionDenied, "workflow condition scope tenant binding is invalid")
 	}
-	grant, ok := execution.GrantFor(instance.Subject.Kind, "read")
+	var grant policy.Grant
+	var ok bool
+	if instance.BusinessScope.Kind == contract.ScopeKindLegalEntity {
+		grant, ok = execution.GrantForScope(instance.Subject.Kind, "read", instance.BusinessScope)
+	} else {
+		grant, ok = execution.GrantFor(instance.Subject.Kind, "read")
+	}
 	if !ok || grant.OwnerOnly {
 		return nil, contract.NewError(contract.CodePermissionDenied, "workflow condition requires an unscoped subject read grant")
 	}
@@ -52,7 +58,7 @@ func (p *tenantWorkflowConditionScope) Scope(ctx context.Context, execution poli
 	if dt == nil || dt.Name != instance.Subject.Kind {
 		return nil, contract.NewError(contract.CodeNotFound, "workflow condition subject type is unavailable")
 	}
-	tx := &orm.TxManager{DB: p.runtime.DB, Registry: p.runtime.Registry, Dialect: p.dialect, Context: ctx}
+	tx := &orm.TxManager{DB: p.runtime.DB, Registry: p.runtime.Registry, Dialect: p.dialect, Context: ctx, BusinessScope: instance.BusinessScope}
 	doc, err := tx.GetDoc(dt, instance.Subject.ID, "")
 	if err != nil {
 		if errors.Is(err, orm.ErrNotFound) {

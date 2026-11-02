@@ -183,7 +183,7 @@ func TestMySQLHumanWaitAtomicallyCreatesRequestAndFencedPause(t *testing.T) {
 	if err := insertRunningHumanWaitInstance(ctx, database, instanceID, "approve", "worker-a", 1, now); err != nil {
 		t.Fatal("insert successful wait instance:", err)
 	}
-	claim := workflow.Claim{Tenant: "tenant-a", InstanceID: instanceID, StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 1, Revision: "1"}
+	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: instanceID, StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 1, Revision: "1"}
 	due := now.Add(time.Hour)
 	cmd := contract.SubmitRequest{Meta: contract.CommandMeta{IdempotencyKey: "human-wait-success-key"}, Kind: contract.RequestTask,
 		Subject: &contract.SubjectRef{Kind: "workflow_instance", ID: string(instanceID), Revision: "1"},
@@ -250,7 +250,7 @@ func TestMySQLHumanWaitAtomicallyCreatesRequestAndFencedPause(t *testing.T) {
 	if err := insertRunningHumanWaitInstance(ctx, database, expiringInstanceID, "approve", "worker-expiry", 1, now); err != nil {
 		t.Fatal("insert expiring wait instance:", err)
 	}
-	expiringClaim := workflow.Claim{Tenant: "tenant-a", InstanceID: expiringInstanceID, StepID: "approve", Attempt: 1, Owner: "worker-expiry", Fence: 1, Revision: "1"}
+	expiringClaim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: expiringInstanceID, StepID: "approve", Attempt: 1, Owner: "worker-expiry", Fence: 1, Revision: "1"}
 	expiringDue := now.Add(time.Hour)
 	expiringCommand := contract.SubmitRequest{Meta: contract.CommandMeta{IdempotencyKey: "human-wait-expiry-key"}, Kind: contract.RequestTask,
 		Subject: &contract.SubjectRef{Kind: "workflow_instance", ID: string(expiringInstanceID), Revision: "1"},
@@ -338,7 +338,7 @@ func TestMySQLHumanWaitAtomicallyCreatesRequestAndFencedPause(t *testing.T) {
 	if reconciledAttemptStatus != "succeeded" {
 		t.Fatalf("reconciled action attempt status = %q, want succeeded", reconciledAttemptStatus)
 	}
-	staleChange := workflow.StepCommit{Claim: workflow.Claim{Tenant: "tenant-a", InstanceID: uncertainID, StepID: "approve", Attempt: 1, Owner: "lost-worker", Fence: 4, Revision: "7"}, ExecutionID: contract.NewID(), Attempt: 1, IdempotencyKey: "stale-action-key", Status: contract.InstanceReady, NextStep: "done"}
+	staleChange := workflow.StepCommit{Claim: workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: uncertainID, StepID: "approve", Attempt: 1, Owner: "lost-worker", Fence: 4, Revision: "7"}, ExecutionID: contract.NewID(), Attempt: 1, IdempotencyKey: "stale-action-key", Status: contract.InstanceReady, NextStep: "done"}
 	if err := workflowStore.CommitStep(ctx, staleChange); err == nil {
 		t.Fatal("pre-reconciliation worker committed after the operator transition")
 	}
@@ -357,7 +357,7 @@ func TestMySQLHumanWaitAtomicallyCreatesRequestAndFencedPause(t *testing.T) {
 	if err != nil {
 		t.Fatal("prepare rollback request:", err)
 	}
-	staleWaitChange := workflow.StepCommit{Claim: workflow.Claim{Tenant: "tenant-a", InstanceID: staleInstanceID, StepID: "approve", Attempt: 1, Owner: "stale-owner", Fence: 1, Revision: "1"},
+	staleWaitChange := workflow.StepCommit{Claim: workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: staleInstanceID, StepID: "approve", Attempt: 1, Owner: "stale-owner", Fence: 1, Revision: "1"},
 		ExecutionID: contract.NewID(), Attempt: 1, IdempotencyKey: "human-wait-attempt-rollback", Status: contract.InstanceWaiting, NextStep: "approve", NextWakeAt: &staleDue}
 	if _, err := workflowStore.CreateHumanWait(ctx, stalePrepared, staleWaitChange); err == nil {
 		t.Fatal("stale workflow claim committed human request")
@@ -432,7 +432,7 @@ func assertMySQLHumanWaitOutcomes(t *testing.T, ctx context.Context, database *s
 		if err != nil {
 			t.Fatalf("prepare %s workflow request: %v", tc.name, err)
 		}
-		claim := workflow.Claim{Tenant: "tenant-a", InstanceID: id, StepID: "approve", Attempt: 1, Owner: "outcome-worker-" + tc.name, Fence: 1, Revision: "1"}
+		claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: id, StepID: "approve", Attempt: 1, Owner: "outcome-worker-" + tc.name, Fence: 1, Revision: "1"}
 		change := workflow.StepCommit{Claim: claim, ExecutionID: contract.NewID(), Attempt: 1,
 			IdempotencyKey: contract.IdempotencyKey("human-outcome-attempt-" + tc.name), Status: contract.InstanceWaiting, NextStep: "approve", NextWakeAt: &due}
 		request, err := store.CreateHumanWait(ctx, prepared, change)

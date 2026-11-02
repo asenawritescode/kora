@@ -206,19 +206,20 @@ type EventEnvelope struct {
 	// Sequence is assigned by the tenant outbox transaction and orders source
 	// events for rebuild cutoffs. It remains a decimal string to avoid JSON
 	// number precision loss in JavaScript consumers.
-	Sequence      Revision     `json:"sequence,omitempty"`
-	Source        string       `json:"source"`
-	Site          string       `json:"site"`
-	AggregateType string       `json:"aggregate_type,omitempty"`
-	AggregateID   string       `json:"aggregate_id,omitempty"`
-	OccurredAt    time.Time    `json:"occurred_at"`
-	CorrelationID string       `json:"correlation_id,omitempty"`
-	CausationID   string       `json:"causation_id,omitempty"`
-	Actor         ActorContext `json:"actor,omitempty"`
-	Capability    ResourceRef  `json:"capability,omitempty"`
-	Skill         ResourceRef  `json:"skill,omitempty"`
-	ModelRevision string       `json:"model_revision,omitempty"`
-	ProvenanceIDs []string     `json:"provenance_ids,omitempty"`
+	Sequence      Revision      `json:"sequence,omitempty"`
+	Source        string        `json:"source"`
+	Site          string        `json:"site"`
+	BusinessScope BusinessScope `json:"business_scope,omitempty"`
+	AggregateType string        `json:"aggregate_type,omitempty"`
+	AggregateID   string        `json:"aggregate_id,omitempty"`
+	OccurredAt    time.Time     `json:"occurred_at"`
+	CorrelationID string        `json:"correlation_id,omitempty"`
+	CausationID   string        `json:"causation_id,omitempty"`
+	Actor         ActorContext  `json:"actor,omitempty"`
+	Capability    ResourceRef   `json:"capability,omitempty"`
+	Skill         ResourceRef   `json:"skill,omitempty"`
+	ModelRevision string        `json:"model_revision,omitempty"`
+	ProvenanceIDs []string      `json:"provenance_ids,omitempty"`
 	//contract:json
 	Data json.RawMessage `json:"data"`
 }
@@ -240,6 +241,11 @@ func (e EventEnvelope) Validate() error {
 		return NewError(CodeValidationFailed, "event occurred_at is required")
 	case len(e.Data) == 0 || string(e.Data) == "null":
 		return NewError(CodeValidationFailed, "event data is required")
+	}
+	if e.BusinessScope.TenantID != "" || e.BusinessScope.Kind != "" || e.BusinessScope.LegalEntityID != "" {
+		if err := e.BusinessScope.Validate(); err != nil {
+			return NewError(CodeValidationFailed, "event business scope is invalid")
+		}
 	}
 	if e.Sequence != "" {
 		if _, err := ParseRevision(string(e.Sequence)); err != nil {

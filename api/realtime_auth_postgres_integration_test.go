@@ -71,15 +71,15 @@ func TestPostgresRealtimeReplayAndNATSUseCurrentOwner(t *testing.T) {
 	}
 	if _, err := database.Exec(`CREATE TABLE _kora_outbox (
 		id TEXT PRIMARY KEY, event_type TEXT NOT NULL, site TEXT NOT NULL,
-		aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL
+		aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL, payload TEXT, created_at TIMESTAMP NOT NULL
 	)`); err != nil {
 		t.Fatal("create realtime replay fixture:", err)
 	}
 	if _, err := database.Exec(kdb.Rebind(dialect, "INSERT INTO "+dialect.QuoteIdent(dt.RawTableName())+" (name, owner, amount, secret) VALUES (?, ?, ?, ?)"), "INV-1", "alice@example.test", 25, "hidden"); err != nil {
 		t.Fatal("insert live invoice:", err)
 	}
-	if _, err := database.Exec(kdb.Rebind(dialect, `INSERT INTO _kora_outbox (id, event_type, site, aggregate_type, aggregate_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`), "evt-2", "kora.Invoice.after_update", "tenant-a", "Invoice", "INV-1", time.Now().UTC()); err != nil {
+	if _, err := database.Exec(kdb.Rebind(dialect, `INSERT INTO _kora_outbox (id, event_type, site, aggregate_type, aggregate_id, payload, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`), "evt-2", "kora.Invoice.after_update", "tenant-a", "Invoice", "INV-1", `{}`, time.Now().UTC()); err != nil {
 		t.Fatal("insert replay event:", err)
 	}
 

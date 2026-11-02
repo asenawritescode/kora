@@ -14,7 +14,16 @@ func (h *Handler) HandleChat(c *gin.Context) {
 	reg := h.siteRegistry(c)
 	siteNameRaw, _ := c.Get("site_name")
 	siteName, _ := siteNameRaw.(string)
-	tx := h.siteTx(c)
+	baseTx := h.siteTx(c)
+	if baseTx == nil {
+		writeError(c, http.StatusServiceUnavailable, "database.unavailable", "Tenant database is unavailable.", nil)
+		return
+	}
+	txCopy := *baseTx
+	tx := &txCopy
+	if execution, ok := requestExecution(c); ok {
+		tx.BusinessScope = businessScopeFromRequest(c, execution)
+	}
 
 	currentUser, verified := requestUserID(c)
 	if !verified {

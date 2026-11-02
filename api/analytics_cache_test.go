@@ -129,6 +129,7 @@ func TestAnalyticsQueryCacheKeyIncludesTenantConfigAndPermissionScope(t *testing
 		[]*doctype.Permission{{Role: "Reader", Doctype: "Invoice", Read: true}},
 	)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("GET", "/", nil)
 	ctx.Set("policy_execution", routerTestExecution([]string{"Reader"}, nil))
 	scope := analyticsPermissionScope(ctx, registry)
 	cache := newAnalyticsQueryCache(time.Minute, 4)
@@ -148,6 +149,13 @@ func TestAnalyticsQueryCacheKeyIncludesTenantConfigAndPermissionScope(t *testing
 	)
 	if base == cache.key("tenant-a", 4, analyticsPermissionScope(ctx, registry), request) {
 		t.Fatal("cache key omitted changed permission policy")
+	}
+	ctx.Request.Header.Set("X-Kora-Legal-Entity-ID", "entity-a")
+	entityA := cache.key("tenant-a", 4, analyticsPermissionScope(ctx, registry), request)
+	ctx.Request.Header.Set("X-Kora-Legal-Entity-ID", "entity-b")
+	entityB := cache.key("tenant-a", 4, analyticsPermissionScope(ctx, registry), request)
+	if entityA == base || entityA == entityB {
+		t.Fatal("cache key omitted legal entity scope")
 	}
 }
 

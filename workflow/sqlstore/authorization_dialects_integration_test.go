@@ -104,19 +104,19 @@ func authorizationDDL(driver, table string) []string {
 	switch driver {
 	case "mysql":
 		return []string{
-			`CREATE TABLE IF NOT EXISTS _kora_user (site VARCHAR(160) NOT NULL,name VARCHAR(160) NOT NULL,enabled BOOLEAN NOT NULL,roles VARCHAR(512) NOT NULL,PRIMARY KEY(site,name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+			`CREATE TABLE IF NOT EXISTS _kora_user (name VARCHAR(140) PRIMARY KEY,site VARCHAR(140) NOT NULL DEFAULT '',email VARCHAR(255) NOT NULL DEFAULT '',password_hash VARCHAR(255) NOT NULL DEFAULT '',full_name VARCHAR(255) NOT NULL DEFAULT '',enabled BOOLEAN NOT NULL DEFAULT TRUE,email_verified_at DATETIME(6),roles TEXT,creation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),modified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 			`CREATE TABLE IF NOT EXISTS _kora_workflow_history (tenant_id VARCHAR(160) NOT NULL,instance_id VARCHAR(36) NOT NULL,sequence BIGINT NOT NULL,step_id VARCHAR(64) NOT NULL,kind VARCHAR(48) NOT NULL,status VARCHAR(32) NOT NULL,actor_id VARCHAR(160),detail TEXT NOT NULL,created_at DATETIME(6) NOT NULL,PRIMARY KEY(tenant_id,instance_id,sequence)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 			"CREATE TABLE " + table + " (name VARCHAR(160) PRIMARY KEY,owner VARCHAR(160) NOT NULL,title TEXT,creation DATETIME(6),modified DATETIME(6),modified_by VARCHAR(160),doc_status INT NOT NULL,revision BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
 		}
 	case "postgres":
 		return []string{
-			`CREATE TABLE IF NOT EXISTS _kora_user (site TEXT NOT NULL,name TEXT NOT NULL,enabled BOOLEAN NOT NULL,roles TEXT NOT NULL,PRIMARY KEY(site,name))`,
+			`CREATE TABLE IF NOT EXISTS _kora_user (name VARCHAR(140) PRIMARY KEY,site VARCHAR(140) NOT NULL DEFAULT '',email VARCHAR(255) NOT NULL DEFAULT '',password_hash VARCHAR(255) NOT NULL DEFAULT '',full_name VARCHAR(255) NOT NULL DEFAULT '',enabled BOOLEAN NOT NULL DEFAULT TRUE,email_verified_at TIMESTAMPTZ,roles TEXT,creation TIMESTAMPTZ NOT NULL DEFAULT NOW(),modified TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
 			`CREATE TABLE IF NOT EXISTS _kora_workflow_history (tenant_id TEXT NOT NULL,instance_id TEXT NOT NULL,sequence BIGINT NOT NULL,step_id TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,actor_id TEXT,detail TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL,PRIMARY KEY(tenant_id,instance_id,sequence))`,
 			"CREATE TABLE " + table + " (name TEXT PRIMARY KEY,owner TEXT NOT NULL,title TEXT,creation TIMESTAMPTZ,modified TIMESTAMPTZ,modified_by TEXT,doc_status INT NOT NULL,revision BIGINT NOT NULL)",
 		}
 	default:
 		return []string{
-			`CREATE TABLE IF NOT EXISTS _kora_user (site TEXT NOT NULL,name TEXT NOT NULL,enabled INTEGER NOT NULL,roles TEXT NOT NULL,PRIMARY KEY(site,name))`,
+			`CREATE TABLE IF NOT EXISTS _kora_user (name VARCHAR(140) PRIMARY KEY,site VARCHAR(140) NOT NULL DEFAULT '',email VARCHAR(255) NOT NULL DEFAULT '',password_hash VARCHAR(255) NOT NULL DEFAULT '',full_name VARCHAR(255) NOT NULL DEFAULT '',enabled INTEGER NOT NULL DEFAULT 1,email_verified_at TEXT,roles TEXT,creation TEXT NOT NULL DEFAULT (datetime('now')),modified TEXT NOT NULL DEFAULT (datetime('now')))`,
 			`CREATE TABLE IF NOT EXISTS _kora_workflow_history (tenant_id TEXT NOT NULL,instance_id TEXT NOT NULL,sequence INTEGER NOT NULL,step_id TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,actor_id TEXT,detail TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(tenant_id,instance_id,sequence))`,
 			"CREATE TABLE " + table + " (name TEXT PRIMARY KEY,owner TEXT NOT NULL,title TEXT,creation TEXT,modified TEXT,modified_by TEXT,doc_status INTEGER NOT NULL,revision INTEGER NOT NULL)",
 		}

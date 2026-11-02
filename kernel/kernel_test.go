@@ -982,6 +982,46 @@ func TestRecordMutationBundleRejectsUnauthorizedRelatedRecord(t *testing.T) {
 	}
 }
 
+func TestEntityScopedKernelAndBundleRejectForgedCrossEntityRecords(t *testing.T) {
+	s := newSite(t, "site-entity-scope")
+	defer s.DB.Close()
+	dt := &doctype.DocType{
+		Name: "Invoice", Module: "Accounting", BusinessScopePolicy: contract.ScopeEntityOwned, BusinessScopeField: "legal_entity_id",
+		Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}, {Fieldname: "legal_entity_id", Fieldtype: "Data", Reqd: true}},
+	}
+	s.Registry.Register(dt)
+	if err := schema.MigrateSiteFromRegistry(s.DB, s.Name, s.Registry, s.Dialect); err != nil {
+		t.Fatal("migrate entity-owned invoice:", err)
+	}
+	scopeA := contract.BusinessScope{TenantID: contract.TenantID(s.Name), Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	actor := contract.ActorContext{PrincipalID: "scheduler", PrincipalType: contract.PrincipalService, Site: s.Name, AuthenticatedAt: time.Now().UTC()}
+	execution, err := policy.NewVerifiedExecutionWithGrants(contract.TenantID(s.Name), actor, []policy.Grant{{Resource: "Invoice", Operation: "create", Scope: scopeA}})
+	if err != nil {
+		t.Fatal("create scoped service execution:", err)
+	}
+	opContext := kernel.OperationContext{Site: s.Name, TenantID: contract.TenantID(s.Name), Actor: actor, Execution: execution, BusinessScope: scopeA, Source: kernel.SourceWorker}
+	forgedPayload, _ := json.Marshal(kernel.RecordCreatePayload{Doctype: "Invoice", Data: json.RawMessage(`{"title":"forged","legal_entity_id":"entity-b"}`)})
+	forged, _ := newKernel(s).Execute(context.Background(), s.DB, s.Registry, kernel.Operation{Command: kernel.CommandRecordCreate, Payload: forgedPayload, Context: opContext})
+	if forged.Error == nil {
+		t.Fatalf("forged entity insert = status %s error %+v, want fail-closed rejection", forged.Status, forged.Error)
+	}
+	first, _ := json.Marshal(map[string]any{"title": "would otherwise insert"})
+	second, _ := json.Marshal(map[string]any{"title": "cross entity", "legal_entity_id": "entity-b"})
+	bundle := kernel.RecordMutationBundlePayload{Doctype: "Invoice", Records: []kernel.RecordMutationBundleItem{{Key: "first", Doctype: "Invoice", Data: first}, {Key: "second", Doctype: "Invoice", Data: second}}}
+	bundlePayload, _ := json.Marshal(bundle)
+	bundleResult, _ := newKernel(s).Execute(context.Background(), s.DB, s.Registry, kernel.Operation{Command: kernel.CommandRecordMutateBundle, Payload: bundlePayload, Context: opContext})
+	if bundleResult.Error == nil {
+		t.Fatalf("cross-entity bundle = status %s error %+v, want atomic fail-closed rejection", bundleResult.Status, bundleResult.Error)
+	}
+	var count int
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM `tabInvoice`").Scan(&count); err != nil {
+		t.Fatal("count rejected invoice mutations:", err)
+	}
+	if count != 0 {
+		t.Fatalf("forged operations committed %d invoices, want none", count)
+	}
+}
+
 func TestRecordMutationBundleRollsBackEarlierWritesOnSQLFailure(t *testing.T) {
 	s := newSite(t, "site-bundle-rollback")
 	defer s.DB.Close()

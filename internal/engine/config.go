@@ -49,41 +49,42 @@ type Config struct {
 	// RequestAuthorizer and WorkflowApprovals are supplied by registered
 	// application-domain integrations; generic Engine composition has no
 	// built-in business policy or transition mapping.
-	RequestAuthorizer               RequestAuthorizerFactory
-	WorkflowApprovals               map[string]process.WorkflowApproval
-	SchedulerHandlerFactory         ScheduledJobHandlerFactory
-	HTTPAllowlist                   []string
-	CORSAllowedOrigins              []string
-	CloudRelay                      *analytics.CloudRelayConfig
-	Analytics                       *analytics.Config
-	OutboxEnabled                   bool
-	SystemGuard                     *auth.SystemGuard
-	PlatformDBUser                  string
-	PlatformDBPassword              string
-	AllowConsoleOnboarding          bool
-	ManagementToken                 string
-	ReloadToken                     string
-	ManagementCallerID              string
-	PublicAppBaseURL                string
-	CloudIdentityURL                string
-	CloudIdentityToken              string
-	DeploymentID                    string
-	ManagementDatabaseAllocationRef string
-	ManagementPackageResolver       ManagementPackageArtifactResolver
-	ManagementCheckpointVerifier    CheckpointVerifier
-	Listener                        HTTPServerConfig
-	OnReady                         func(EngineMetrics)
-	DirectoryLagMetricsEnabled      bool
-	AsyncHookQueueSize              int
-	AsyncHookMaxQueuedBytes         uint64
-	AsyncHookMaxEventBytes          uint64
-	ScriptBudget                    script.BudgetConfig
-	RealtimeMaxStreams              int
-	SessionCacheBudgetBytes         uint64
-	UploadMaxActive                 int
-	UploadActiveBudgetBytes         uint64
-	AnalyticsQueueBudgetBytes       uint64
-	AnalyticsMaxSubscribers         int
+	RequestAuthorizer                 RequestAuthorizerFactory
+	WorkflowApprovals                 map[string]process.WorkflowApproval
+	SchedulerHandlerFactory           ScheduledJobHandlerFactory
+	SchedulerExecutionResolverFactory ScheduledJobExecutionResolverFactory
+	HTTPAllowlist                     []string
+	CORSAllowedOrigins                []string
+	CloudRelay                        *analytics.CloudRelayConfig
+	Analytics                         *analytics.Config
+	OutboxEnabled                     bool
+	SystemGuard                       *auth.SystemGuard
+	PlatformDBUser                    string
+	PlatformDBPassword                string
+	AllowConsoleOnboarding            bool
+	ManagementToken                   string
+	ReloadToken                       string
+	ManagementCallerID                string
+	PublicAppBaseURL                  string
+	CloudIdentityURL                  string
+	CloudIdentityToken                string
+	DeploymentID                      string
+	ManagementDatabaseAllocationRef   string
+	ManagementPackageResolver         ManagementPackageArtifactResolver
+	ManagementCheckpointVerifier      CheckpointVerifier
+	Listener                          HTTPServerConfig
+	OnReady                           func(EngineMetrics)
+	DirectoryLagMetricsEnabled        bool
+	AsyncHookQueueSize                int
+	AsyncHookMaxQueuedBytes           uint64
+	AsyncHookMaxEventBytes            uint64
+	ScriptBudget                      script.BudgetConfig
+	RealtimeMaxStreams                int
+	SessionCacheBudgetBytes           uint64
+	UploadMaxActive                   int
+	UploadActiveBudgetBytes           uint64
+	AnalyticsQueueBudgetBytes         uint64
+	AnalyticsMaxSubscribers           int
 }
 
 // EngineMetrics is a low-cardinality startup snapshot provided to the host
@@ -283,7 +284,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 		Resources: resources,
 		Services: TenantServiceConfig{
 			ProcessContext: processCtx, Analytics: analyticsConfig, CloudRelay: relay, AnalyticsQueueAdmission: resources.AnalyticsQueueAdmission,
-			SchedulerHandlerFactory: config.SchedulerHandlerFactory, Mailer: mailer,
+			SchedulerHandlerFactory: config.SchedulerHandlerFactory, SchedulerExecutionResolverFactory: config.SchedulerExecutionResolverFactory, Mailer: mailer,
 			NATS: shared.NATSProvider, ScriptRunner: shared.ScriptRunner, HTTPAllowlist: config.HTTPAllowlist, RealtimeAdmission: resources.RealtimeStreams,
 			SessionCacheBudget:  resources.SessionCacheBudget,
 			UploadAdmission:     resources.UploadAdmission,

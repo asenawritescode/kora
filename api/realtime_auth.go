@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/policy"
@@ -12,7 +13,7 @@ import (
 
 // realtimeEventVisible applies the same DocType read and owner rules as resource
 // reads. Events without a document identity are denied except notifications.
-func (h *Handler) realtimeEventVisible(c *gin.Context, doctypeName, docName string, data map[string]any, op eventstream.EventOp) bool {
+func (h *Handler) realtimeEventVisible(c *gin.Context, doctypeName, docName string, data map[string]any, op eventstream.EventOp, eventScopes ...contract.BusinessScope) bool {
 	execution, ok := requestExecution(c)
 	if !ok {
 		return false
@@ -28,7 +29,20 @@ func (h *Handler) realtimeEventVisible(c *gin.Context, doctypeName, docName stri
 	if reg == nil || reg.Get(doctypeName) == nil || docName == "" {
 		return false
 	}
-	decision, err := policy.Decide(execution, reg, doctypeName, "read")
+	businessScope := businessScopeFromRequest(c, execution)
+	if len(eventScopes) > 0 {
+		if eventScopes[0].Validate() != nil && reg.Get(doctypeName).BusinessScopePolicy == contract.ScopeEntityOwned {
+			return false
+		}
+	}
+	if len(eventScopes) > 0 && eventScopes[0].Validate() == nil {
+		businessScope = eventScopes[0]
+		requestedScope := businessScopeFromRequest(c, execution)
+		if reg.Get(doctypeName).BusinessScopePolicy == contract.ScopeEntityOwned && requestedScope.Kind == contract.ScopeKindLegalEntity && requestedScope != businessScope {
+			return false
+		}
+	}
+	decision, err := policy.DecideForBusinessScope(execution, reg, doctypeName, "read", businessScope, reg.Get(doctypeName).BusinessScopePolicy == contract.ScopeEntityOwned)
 	if err != nil {
 		return false
 	}
@@ -41,7 +55,7 @@ func (h *Handler) realtimeEventVisible(c *gin.Context, doctypeName, docName stri
 		// Event data can describe an older owner (especially on delayed NATS
 		// delivery). Check the live record using the same owner-filtered read
 		// query as resource access instead of trusting the event snapshot.
-		scope := policy.RowScope{UserID: user, Owner: decision.OwnerOnly, AssignedFields: decision.AssignedFields}
+		scope := policy.RowScope{UserID: user, Owner: decision.OwnerOnly, AssignedFields: decision.AssignedFields, Business: businessScope}
 		if _, err := tx.GetDocWithScope(reg.Get(doctypeName), docName, scope); err != nil {
 			return false
 		}
@@ -102,7 +116,12 @@ func (h *Handler) authorizeRealtimeEnvelope(c *gin.Context, raw []byte) ([]byte,
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	if !h.realtimeEventVisible(c, doctypeName, docName, data, operation) {
+	var eventScope contract.BusinessScope
+	if encodedScope, exists := envelope["business_scope"]; exists {
+		encoded, _ := json.Marshal(encodedScope)
+		_ = json.Unmarshal(encoded, &eventScope)
+	}
+	if !h.realtimeEventVisible(c, doctypeName, docName, data, operation, eventScope) {
 		return nil, false
 	}
 	if operation == eventstream.EventNotification {

@@ -57,11 +57,12 @@ func (s *InstanceStore) startInstanceOnce(ctx context.Context, input workflow.St
 		return contract.WorkflowInstance{}, err
 	}
 	commandJSON, err := json.Marshal(struct {
-		DefinitionID contract.DefinitionID `json:"definition_id"`
-		Version      uint32                `json:"version"`
-		Digest       string                `json:"digest"`
-		Subject      contract.SubjectRef   `json:"subject"`
-	}{input.Definition.ID, input.Definition.Version, input.DefinitionDigest, input.Subject})
+		DefinitionID  contract.DefinitionID  `json:"definition_id"`
+		Version       uint32                 `json:"version"`
+		Digest        string                 `json:"digest"`
+		Subject       contract.SubjectRef    `json:"subject"`
+		BusinessScope contract.BusinessScope `json:"business_scope"`
+	}{input.Definition.ID, input.Definition.Version, input.DefinitionDigest, input.Subject, input.BusinessScope})
 	if err != nil {
 		return contract.WorkflowInstance{}, err
 	}
@@ -106,8 +107,15 @@ func (s *InstanceStore) startInstanceOnce(ctx context.Context, input workflow.St
 	if s.dialect.DriverName() == "mysql" {
 		stamp = "CURRENT_TIMESTAMP(6)"
 	}
-	insert := `INSERT INTO _kora_workflow_instance (id,tenant_id,definition_id,definition_version,subject_kind,subject_id,subject_revision,status,current_step,revision,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,` + stamp + `,` + stamp + `)`
-	if _, err := tx.ExecContext(ctx, db.Rebind(s.dialect, insert), string(input.ID), string(input.Tenant), string(input.Definition.ID), input.Definition.Version, input.Subject.Kind, input.Subject.ID, input.Subject.Revision, string(contract.InstanceReady), string(input.Definition.Entry)); err != nil {
+	var businessScopeJSON any
+	if input.BusinessScope.TenantID != "" {
+		businessScopeJSON, err = json.Marshal(input.BusinessScope)
+		if err != nil {
+			return contract.WorkflowInstance{}, fmt.Errorf("encode workflow business scope: %w", err)
+		}
+	}
+	insert := `INSERT INTO _kora_workflow_instance (id,tenant_id,definition_id,definition_version,subject_kind,subject_id,subject_revision,business_scope_json,status,current_step,revision,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,1,` + stamp + `,` + stamp + `)`
+	if _, err := tx.ExecContext(ctx, db.Rebind(s.dialect, insert), string(input.ID), string(input.Tenant), string(input.Definition.ID), input.Definition.Version, input.Subject.Kind, input.Subject.ID, input.Subject.Revision, businessScopeJSON, string(contract.InstanceReady), string(input.Definition.Entry)); err != nil {
 		return contract.WorkflowInstance{}, fmt.Errorf("insert workflow instance: %w", err)
 	}
 	_, err = tx.ExecContext(ctx, db.Rebind(s.dialect, `INSERT INTO _kora_workflow_history (tenant_id,instance_id,sequence,step_id,kind,status,actor_id,detail,created_at) VALUES (?,?,1,?,?,?,?,?,`+stamp+`)`), string(input.Tenant), string(input.ID), string(input.Definition.Entry), "started", string(contract.InstanceReady), string(input.Actor), "")
@@ -126,7 +134,7 @@ func (s *InstanceStore) startInstanceOnce(ctx context.Context, input workflow.St
 	if err != nil {
 		return contract.WorkflowInstance{}, fmt.Errorf("encode workflow event data: %w", err)
 	}
-	event := contract.EventEnvelope{ID: contract.NewEventID(), Type: "kora.workflow.started", Version: 1, Source: "workflow", Site: input.Site, AggregateType: "workflow_instance", AggregateID: string(input.ID), OccurredAt: input.Now.UTC(), Data: eventData}
+	event := contract.EventEnvelope{ID: contract.NewEventID(), Type: "kora.workflow.started", Version: 1, Source: "workflow", Site: input.Site, BusinessScope: input.BusinessScope, AggregateType: "workflow_instance", AggregateID: string(input.ID), OccurredAt: input.Now.UTC(), Data: eventData}
 	if err := event.Validate(); err != nil {
 		return contract.WorkflowInstance{}, fmt.Errorf("validate workflow event: %w", err)
 	}
@@ -187,10 +195,11 @@ func getInstanceTx(ctx context.Context, q interface {
 	var value contract.WorkflowInstance
 	var revision uint64
 	var createdRaw, updatedRaw any
+	var businessScopeJSON sql.NullString
 	var wakeRaw sql.NullTime
 	var wakeText sql.NullString
 	if dialect.DriverName() == "libsql" {
-		err := q.QueryRowContext(ctx, db.Rebind(dialect, `SELECT id,revision,definition_id,definition_version,subject_kind,subject_id,subject_revision,status,current_step,next_wake_at,created_at,updated_at FROM _kora_workflow_instance WHERE tenant_id = ? AND id = ?`), string(tenant), string(id)).Scan(&value.ID, &revision, &value.DefinitionID, &value.DefinitionVersion, &value.Subject.Kind, &value.Subject.ID, &value.Subject.Revision, &value.Status, &value.CurrentStep, &wakeText, &createdRaw, &updatedRaw)
+		err := q.QueryRowContext(ctx, db.Rebind(dialect, `SELECT id,revision,definition_id,definition_version,subject_kind,subject_id,subject_revision,business_scope_json,status,current_step,next_wake_at,created_at,updated_at FROM _kora_workflow_instance WHERE tenant_id = ? AND id = ?`), string(tenant), string(id)).Scan(&value.ID, &revision, &value.DefinitionID, &value.DefinitionVersion, &value.Subject.Kind, &value.Subject.ID, &value.Subject.Revision, &businessScopeJSON, &value.Status, &value.CurrentStep, &wakeText, &createdRaw, &updatedRaw)
 		if err != nil {
 			return contract.WorkflowInstance{}, err
 		}
@@ -202,13 +211,20 @@ func getInstanceTx(ctx context.Context, q interface {
 			value.NextWakeAt = &parsed
 		}
 	} else {
-		err := q.QueryRowContext(ctx, db.Rebind(dialect, `SELECT id,revision,definition_id,definition_version,subject_kind,subject_id,subject_revision,status,current_step,next_wake_at,created_at,updated_at FROM _kora_workflow_instance WHERE tenant_id = ? AND id = ?`), string(tenant), string(id)).Scan(&value.ID, &revision, &value.DefinitionID, &value.DefinitionVersion, &value.Subject.Kind, &value.Subject.ID, &value.Subject.Revision, &value.Status, &value.CurrentStep, &wakeRaw, &createdRaw, &updatedRaw)
+		err := q.QueryRowContext(ctx, db.Rebind(dialect, `SELECT id,revision,definition_id,definition_version,subject_kind,subject_id,subject_revision,business_scope_json,status,current_step,next_wake_at,created_at,updated_at FROM _kora_workflow_instance WHERE tenant_id = ? AND id = ?`), string(tenant), string(id)).Scan(&value.ID, &revision, &value.DefinitionID, &value.DefinitionVersion, &value.Subject.Kind, &value.Subject.ID, &value.Subject.Revision, &businessScopeJSON, &value.Status, &value.CurrentStep, &wakeRaw, &createdRaw, &updatedRaw)
 		if err != nil {
 			return contract.WorkflowInstance{}, err
 		}
 		if wakeRaw.Valid {
 			value.NextWakeAt = &wakeRaw.Time
 		}
+	}
+	if businessScopeJSON.Valid {
+		if err := json.Unmarshal([]byte(businessScopeJSON.String), &value.BusinessScope); err != nil || value.BusinessScope.Validate() != nil || value.BusinessScope.TenantID != tenant {
+			return contract.WorkflowInstance{}, contract.NewError(contract.CodeConflict, "stored workflow business scope is invalid")
+		}
+	} else {
+		value.BusinessScope = contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
 	}
 	created, err := parseDBTime(createdRaw)
 	if err != nil {
@@ -302,6 +318,11 @@ func (s *InstanceStore) validateStart(ctx context.Context, input workflow.StartI
 	}
 	if input.Site == "" || input.Now.IsZero() {
 		return fmt.Errorf("workflow start site and time are required")
+	}
+	if input.BusinessScope.TenantID != "" || input.BusinessScope.Kind != "" || input.BusinessScope.LegalEntityID != "" {
+		if err := input.BusinessScope.Validate(); err != nil || input.BusinessScope.TenantID != input.Tenant {
+			return fmt.Errorf("workflow business scope is invalid")
+		}
 	}
 	return nil
 }

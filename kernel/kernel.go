@@ -140,6 +140,7 @@ func LookupCommand(name string) (CommandDefinition, bool) {
 // the kernel. It is an explicit value, never smuggled through context.Context.
 type OperationContext struct {
 	ModuleExecution     *contract.ModuleExecution
+	BusinessScope       contract.BusinessScope
 	Site                string                // authenticated tenant route, retained for audit and compatibility
 	TenantID            contract.TenantID     // stable tenant identity from routed runtime
 	Execution           policy.Execution      // verified identity; legacy internal callers are being migrated
@@ -269,6 +270,7 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 		SiteName:         op.Context.Site,
 		CurrentUser:      op.Context.User,
 		Execution:        op.Context.Execution,
+		BusinessScope:    op.Context.BusinessScope,
 		CurrentUserRole:  op.Context.UserRole,
 		CurrentUserRoles: append([]string(nil), op.Context.Roles...),
 	}
@@ -280,6 +282,7 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 		txMgr.Outbox = k.Outbox
 		txMgr.SiteName = op.Context.Site
 		txMgr.CurrentUser = op.Context.User
+		txMgr.BusinessScope = op.Context.BusinessScope
 	}
 	if txMgr.WorkflowStatusPolicies == nil {
 		txMgr.WorkflowStatusPolicies = k.WorkflowStatusPolicies
@@ -396,7 +399,7 @@ func (k *Kernel) ExecuteInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 
 	txMgr := &orm.TxManager{DB: siteDB, Registry: reg, Dialect: k.Dialect, Outbox: k.Outbox,
 		SiteName: op.Context.Site, CurrentUser: op.Context.User, Context: ctx,
-		CurrentUserRole: op.Context.UserRole, CurrentUserRoles: append([]string(nil), op.Context.Roles...), Execution: op.Context.Execution}
+		CurrentUserRole: op.Context.UserRole, CurrentUserRoles: append([]string(nil), op.Context.Roles...), Execution: op.Context.Execution, BusinessScope: op.Context.BusinessScope}
 	if k.TxManager != nil {
 		*txMgr = *k.TxManager
 		txMgr.DB, txMgr.Registry, txMgr.Dialect, txMgr.Outbox = siteDB, reg, k.Dialect, k.Outbox
@@ -404,6 +407,7 @@ func (k *Kernel) ExecuteInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		txMgr.CurrentUserRole = op.Context.UserRole
 		txMgr.CurrentUserRoles = append([]string(nil), op.Context.Roles...)
 		txMgr.Execution = op.Context.Execution
+		txMgr.BusinessScope = op.Context.BusinessScope
 	}
 	baseAsyncConfigRevision := txMgr.AsyncHookConfigRevision
 	txMgr.SkipHookScripts = append([]string(nil), op.Context.SkipHookScripts...)
@@ -458,6 +462,11 @@ func normalizeVerifiedExecution(op *Operation) *contract.Error {
 		return contract.NewError(contract.CodePermissionDenied, "operation tenant route does not match verified actor")
 	}
 	op.Context.TenantID, op.Context.Site, op.Context.Actor = execution.Tenant(), actor.Site, actor
+	if op.Context.BusinessScope.Kind == "" && op.Context.BusinessScope.TenantID == "" && op.Context.BusinessScope.LegalEntityID == "" {
+		op.Context.BusinessScope = contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}
+	} else if err := op.Context.BusinessScope.Validate(); err != nil || op.Context.BusinessScope.TenantID != execution.Tenant() {
+		return contract.NewError(contract.CodePermissionDenied, "operation business scope does not match verified tenant")
+	}
 	op.Context.Roles = append([]string(nil), actor.Roles...)
 	op.Context.UserRole = ""
 	if len(actor.Roles) > 0 {

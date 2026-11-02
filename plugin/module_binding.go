@@ -15,13 +15,13 @@ const (
 )
 
 type BindingKey struct {
-	TenantID         contract.TenantID
-	ScopeKey         string
+	Scope            contract.BusinessScope
 	ConsumerModuleID contract.ModuleID
 	CapabilityName   contract.CapabilityName
 }
 type ProviderRegistration struct {
 	TenantID      contract.TenantID
+	Scope         contract.BusinessScope
 	ProviderID    string
 	OwnerModuleID contract.ModuleID
 	Kind          ProviderKind
@@ -44,8 +44,11 @@ func (b ResolvedBinding) Open(ctx contract.OperationContext) (contract.Capabilit
 	if b.Factory == nil {
 		return nil, fmt.Errorf("provider %q is unavailable", b.ProviderID)
 	}
-	if ctx.Site != string(b.Key.TenantID) {
+	if ctx.Site != string(b.Key.Scope.TenantID) {
 		return nil, fmt.Errorf("capability binding tenant does not match execution")
+	}
+	if ctx.Scope != b.Key.Scope || ctx.Scope.Validate() != nil {
+		return nil, fmt.Errorf("capability binding business scope does not match execution")
 	}
 	return b.Factory.Open(ctx)
 }
@@ -72,28 +75,37 @@ type BindingPlan struct {
 
 // ResolveModules produces a deterministic candidate plan. It does not open
 // providers; health is checked only for selected providers during generation assembly.
-func ResolveModules(tenant contract.TenantID, scope string, modules []contract.ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, revision uint64) (BindingPlan, error) {
-	if tenant == "" || scope == "" {
+func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, revision uint64) (BindingPlan, error) {
+	if scope.Validate() != nil {
 		return BindingPlan{}, fmt.Errorf("binding requires explicit tenant and scope")
 	}
 	plan := BindingPlan{Revision: revision}
 	selected := map[BindingKey]string{}
 	for _, selection := range selections {
-		if selection.Key.TenantID != tenant || selection.Key.ScopeKey != scope {
-			return plan, fmt.Errorf("provider selection crosses tenant or scope")
+		if selection.Key.Scope.TenantID != scope.TenantID {
+			return plan, fmt.Errorf("provider selection crosses tenant")
+		}
+		if selection.Key.Scope != scope {
+			continue
 		}
 		selected[selection.Key] = selection.ProviderID
 	}
 	sort.Slice(providers, func(i, j int) bool { return providers[i].ProviderID < providers[j].ProviderID })
 	for _, module := range modules {
 		for _, requirement := range module.Requires {
-			key := BindingKey{TenantID: tenant, ScopeKey: scope, ConsumerModuleID: module.ID, CapabilityName: requirement.Name}
+			key := BindingKey{Scope: scope, ConsumerModuleID: module.ID, CapabilityName: requirement.Name}
 			var matches []struct {
 				provider ProviderRegistration
 				offer    contract.CapabilityOffer
 			}
 			for _, provider := range providers {
-				if provider.TenantID != tenant {
+				if provider.TenantID != scope.TenantID {
+					continue
+				}
+				if provider.Scope.TenantID != "" && provider.Scope != scope {
+					continue
+				}
+				if provider.Scope.TenantID == "" && (provider.Scope.Kind != "" || provider.Scope.LegalEntityID != "") {
 					continue
 				}
 				if provider.ProviderID == "" || provider.OwnerModuleID == "" || (provider.Kind != ProviderInternal && provider.Kind != ProviderExternal) {

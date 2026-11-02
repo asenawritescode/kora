@@ -3,6 +3,8 @@ package doctype
 import (
 	"fmt"
 	"sync"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 // ComputedHookFunc is called to evaluate a script-based computed field.
@@ -197,4 +199,13 @@ func (r *Registry) RowScopeFor(userRoles []string, doctype, operation string) (b
 		return false, nil
 	}
 	return r.Permissions.RowScopeFor(userRoles, doctype, operation)
+}
+
+// CanUserInBusinessScope resolves only a permission row explicitly assigned
+// to one legal entity.
+func (r *Registry) CanUserInBusinessScope(userRoles []string, doctype, operation string, scope contract.BusinessScope) (bool, bool, []string) {
+	if r == nil || r.Permissions == nil {
+		return false, false, nil
+	}
+	return r.Permissions.CanUserInBusinessScope(userRoles, doctype, operation, scope)
 }

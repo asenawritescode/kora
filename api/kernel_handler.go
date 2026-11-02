@@ -191,6 +191,7 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 	opCtx := kernel.OperationContext{
 		Site:                   site,
 		TenantID:               execution.Tenant(),
+		BusinessScope:          businessScopeFromRequest(c, execution),
 		Execution:              execution,
 		User:                   user,
 		Roles:                  actor.Roles,

@@ -14,10 +14,12 @@ import (
 
 // CapabilityName identifies a grantable capability. Values are stable and used
 // as telemetry labels, so additions are fine but renames are not.
+//
 //contract:enum
 type CapabilityName string
 
 // GrantScope bounds the lifetime of an issued handle.
+//
 //contract:enum
 type GrantScope string
 
@@ -35,6 +37,7 @@ type OperationContext struct {
 	Actor    string
 	TraceID  string
 	Deadline time.Time
+	Scope    BusinessScope
 }
 
 // CleanupEvidence records the ownership and release of a handle.

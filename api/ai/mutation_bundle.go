@@ -279,7 +279,7 @@ func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, args map[
 		ctx = context.Background()
 	}
 	result, cerr := engine.Execute(ctx, tx.DB, reg, kernel.Operation{
-		Context: kernel.OperationContext{Site: site, TenantID: execution.Tenant(), Execution: execution, Actor: actor, User: user, UserRole: role, Roles: actor.Roles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
+		Context: kernel.OperationContext{Site: site, TenantID: execution.Tenant(), Execution: execution, BusinessScope: tx.BusinessScope, Actor: actor, User: user, UserRole: role, Roles: actor.Roles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
 		Command: kernel.CommandRecordMutateBundle, Payload: raw,
 	})
 	if cerr != nil {

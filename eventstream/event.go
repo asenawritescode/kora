@@ -2,7 +2,11 @@
 // contract shared by persistence, routing, and analytics adapters.
 package eventstream
 
-import "time"
+import (
+	"time"
+
+	"github.com/asenawritescode/kora/contract"
+)
 
 // EventOp describes the type of document change.
 type EventOp string
@@ -19,16 +23,17 @@ const (
 // ChangeEvent carries a document mutation or a recipient-scoped realtime
 // notification between the persistence and delivery layers.
 type ChangeEvent struct {
-	ID         string         `json:"id,omitempty"`
-	Sequence   string         `json:"sequence,omitempty"`
-	Site       string         `json:"site"`
-	Doctype    string         `json:"doctype"`
-	DocName    string         `json:"doc_name"`
-	Operation  EventOp        `json:"operation"`
-	Timestamp  time.Time      `json:"timestamp"`
-	ModifiedBy string         `json:"modified_by"`
-	Data       map[string]any `json:"data"`
-	OldData    map[string]any `json:"old_data,omitempty"`
+	ID            string                 `json:"id,omitempty"`
+	Sequence      string                 `json:"sequence,omitempty"`
+	Site          string                 `json:"site"`
+	BusinessScope contract.BusinessScope `json:"business_scope,omitempty"`
+	Doctype       string                 `json:"doctype"`
+	DocName       string                 `json:"doc_name"`
+	Operation     EventOp                `json:"operation"`
+	Timestamp     time.Time              `json:"timestamp"`
+	ModifiedBy    string                 `json:"modified_by"`
+	Data          map[string]any         `json:"data"`
+	OldData       map[string]any         `json:"old_data,omitempty"`
 }
 
 // Bus publishes and consumes durable change events for one site.

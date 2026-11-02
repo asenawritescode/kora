@@ -72,7 +72,7 @@ func (p *TenantServiceIdentityProvider) RequireActionGrants(ctx context.Context,
 		return contract.NewError(contract.CodePermissionDenied, "workflow execution identity tenant mismatch")
 	}
 	for _, grant := range grants {
-		if !grant.Valid() || !p.execution.Allows(grant.Resource, grant.Operation) {
+		if !p.execution.HasGrant(grant) {
 			return contract.NewError(contract.CodePermissionDenied, "workflow service identity lacks a registered action grant")
 		}
 	}

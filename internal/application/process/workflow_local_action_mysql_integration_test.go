@@ -148,7 +148,7 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 		}
 	}
 	insertRunningInstance(instanceID)
-	claim := workflow.Claim{Tenant: tenant, InstanceID: instanceID, StepID: "approve", Attempt: 1, Owner: "workflow-worker", Fence: 4, Revision: "1"}
+	claim := workflow.Claim{Tenant: tenant, BusinessScope: contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}, InstanceID: instanceID, StepID: "approve", Attempt: 1, Owner: "workflow-worker", Fence: 4, Revision: "1"}
 	actionContext := workflow.ActionContext{Execution: execution, RequiredGrant: serviceGrant, InstanceID: instanceID, StepID: "approve", ExecutionID: contract.NewOperationID(), Subject: contract.SubjectRef{Kind: doctypeName, ID: doc.Name, Revision: "1"}, IdempotencyKey: contract.IdempotencyKey("workflow-local-" + suffix[:12])}
 	result, err := makeExecutor(store).ExecuteLocal(ctx, claim, actionContext, key, workflow.ActionInput{Schema: inputSchema, Data: json.RawMessage(`{}`)}, "done")
 	if err != nil {

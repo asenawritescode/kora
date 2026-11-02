@@ -57,6 +57,14 @@ func (s *ExecutionStore) AcceptSignalInTx(ctx context.Context, tx *sql.Tx, signa
 	if err := signal.Event.Validate(); err != nil {
 		return 0, fmt.Errorf("workflow signal event: %w", err)
 	}
+	eventScope := signal.Event.BusinessScope
+	if eventScope.TenantID == "" && eventScope.Kind == "" && eventScope.LegalEntityID == "" {
+		eventScope = contract.BusinessScope{TenantID: signal.Tenant, Kind: contract.ScopeKindTenant}
+	}
+	if eventScope.Validate() != nil || eventScope.TenantID != signal.Tenant {
+		return 0, contract.NewError(contract.CodePermissionDenied, "workflow signal business scope is invalid")
+	}
+	signal.Event.BusinessScope = eventScope
 	if len(signal.Event.Data) > maxWorkflowSignalBytes {
 		return 0, contract.NewError(contract.CodeValidationFailed, "workflow signal payload exceeds 64 KiB")
 	}
@@ -275,6 +283,7 @@ func (s *ExecutionStore) pruneExpiredSignalsTx(ctx context.Context, tx *sql.Tx, 
 
 type signalPair struct {
 	eventID, eventType, envelope string
+	businessScopeJSON            sql.NullString
 	instanceID, stepID           string
 	field, expected, onEvent     string
 	revision                     int64
@@ -286,7 +295,7 @@ func (s *ExecutionStore) resumeEventSignalsTx(ctx context.Context, tx *sql.Tx, t
 	if limit == 0 || limit > maxWorkflowSignalBatch {
 		return 0, contract.NewError(contract.CodeValidationFailed, "workflow event recovery batch must be from 1 to 100")
 	}
-	query := `SELECT s.event_id,s.event_type,s.payload_json,i.id,i.current_step,sub.correlation_field,sub.correlation_value,sub.on_event,i.revision,i.definition_id,i.definition_version FROM _kora_workflow_signal s JOIN _kora_workflow_subscription sub ON sub.tenant_id=s.tenant_id AND sub.event_type=s.event_type JOIN _kora_workflow_instance i ON i.tenant_id=sub.tenant_id AND i.id=sub.instance_id AND i.current_step=sub.step_id AND i.status='waiting' LEFT JOIN _kora_workflow_signal_receipt r ON r.tenant_id=s.tenant_id AND r.event_id=s.event_id AND r.instance_id=i.id WHERE s.tenant_id=? AND r.event_id IS NULL`
+	query := `SELECT s.event_id,s.event_type,s.payload_json,i.business_scope_json,i.id,i.current_step,sub.correlation_field,sub.correlation_value,sub.on_event,i.revision,i.definition_id,i.definition_version FROM _kora_workflow_signal s JOIN _kora_workflow_subscription sub ON sub.tenant_id=s.tenant_id AND sub.event_type=s.event_type JOIN _kora_workflow_instance i ON i.tenant_id=sub.tenant_id AND i.id=sub.instance_id AND i.current_step=sub.step_id AND i.status='waiting' LEFT JOIN _kora_workflow_signal_receipt r ON r.tenant_id=s.tenant_id AND r.event_id=s.event_id AND r.instance_id=i.id WHERE s.tenant_id=? AND r.event_id IS NULL`
 	args := []any{string(tenant)}
 	if eventID != "" {
 		query += ` AND s.event_id=?`
@@ -310,7 +319,7 @@ func (s *ExecutionStore) resumeEventSignalsTx(ctx context.Context, tx *sql.Tx, t
 	pairs := make([]signalPair, 0, limit)
 	for rows.Next() {
 		var pair signalPair
-		if err := rows.Scan(&pair.eventID, &pair.eventType, &pair.envelope, &pair.instanceID, &pair.stepID, &pair.field, &pair.expected, &pair.onEvent, &pair.revision, &pair.definitionID, &pair.definitionVersion); err != nil {
+		if err := rows.Scan(&pair.eventID, &pair.eventType, &pair.envelope, &pair.businessScopeJSON, &pair.instanceID, &pair.stepID, &pair.field, &pair.expected, &pair.onEvent, &pair.revision, &pair.definitionID, &pair.definitionVersion); err != nil {
 			_ = rows.Close()
 			return 0, fmt.Errorf("scan pending workflow signal: %w", err)
 		}
@@ -363,6 +372,15 @@ func (s *ExecutionStore) applySignalPairTx(ctx context.Context, tx *sql.Tx, tena
 	var envelope contract.EventEnvelope
 	if err := json.Unmarshal([]byte(pair.envelope), &envelope); err != nil {
 		return false, fmt.Errorf("decode workflow signal envelope: %w", err)
+	}
+	instanceScope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
+	if pair.businessScopeJSON.Valid {
+		if err := json.Unmarshal([]byte(pair.businessScopeJSON.String), &instanceScope); err != nil || instanceScope.Validate() != nil || instanceScope.TenantID != tenant {
+			return false, contract.NewError(contract.CodeConflict, "persisted workflow wait business scope is invalid")
+		}
+	}
+	if envelope.BusinessScope.Validate() != nil || envelope.BusinessScope.TenantID != tenant || envelope.BusinessScope != instanceScope {
+		return false, nil
 	}
 	value, found, err := eventCorrelationValue(envelope.Data, pair.field)
 	if err != nil {

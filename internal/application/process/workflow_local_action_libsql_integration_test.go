@@ -107,7 +107,7 @@ func TestLibSQLWorkflowLocalActionCommitsDomainAndProgressAtomically(t *testing.
 		t.Fatal("construct local workflow action:", err)
 	}
 	instanceID := contract.InstanceID(contract.NewID())
-	claim := workflow.Claim{Tenant: tenant, InstanceID: instanceID, StepID: "approve", Attempt: 1, Owner: "workflow-worker", Fence: 2, Revision: "1"}
+	claim := workflow.Claim{Tenant: tenant, BusinessScope: contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}, InstanceID: instanceID, StepID: "approve", Attempt: 1, Owner: "workflow-worker", Fence: 2, Revision: "1"}
 	now := time.Now().UTC()
 	if _, err := database.ExecContext(ctx, db.Rebind(dialect, `INSERT INTO _kora_workflow_instance (id,tenant_id,definition_id,definition_version,subject_kind,subject_id,subject_revision,status,current_step,revision,lease_owner,lease_fence,lease_until,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?, ?, ?)`), string(instanceID), string(tenant), "invoice-flow", 1, doctypeName, document.Name, "1", string(contract.InstanceRunning), "approve", claim.Owner, uint64(claim.Fence), now.Add(2*time.Minute), now, now); err != nil {
 		t.Fatal("insert claimed workflow:", err)

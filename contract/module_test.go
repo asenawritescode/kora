@@ -1,9 +1,32 @@
 package contract
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestScheduledJobEntityScopeRequiresTypedScopeAndGrant(t *testing.T) {
+	base := ScheduledJobDefinition{Name: "entity-reconcile", Type: "reconcile", Schedule: "0 1 * * *"}
+	entityScope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	base.Scope = &entityScope
+	if err := ValidateScheduledJobDefinitions([]ScheduledJobDefinition{base}); err == nil {
+		t.Fatal("entity-scoped scheduled work accepted without explicit grant")
+	}
+	base.RequiredResource = "sales.invoice"
+	base.RequiredOperation = "write"
+	if err := ValidateScheduledJobDefinitions([]ScheduledJobDefinition{base}); err != nil {
+		t.Fatal("valid entity-scoped schedule rejected:", err)
+	}
+	invalidScope := entityScope
+	invalidScope.LegalEntityID = ""
+	base.Scope = &invalidScope
+	if err := ValidateScheduledJobDefinitions([]ScheduledJobDefinition{base}); err == nil {
+		t.Fatal("invalid entity scope accepted")
+	}
+}
 
 func TestValidateModuleSetRejectsDuplicateOwnersAndUnknownSchemas(t *testing.T) {
-	resource := OwnedResource{Ref: ResourceRef{Namespace: "tenant", Name: "invoice", Version: 1}, Access: ModulePrivate, MutationMode: MutationCommands}
+	resource := OwnedResource{Ref: ResourceRef{Namespace: "tenant", Name: "invoice", Version: 1}, Access: ModulePrivate, MutationMode: MutationCommands, ScopeKind: ScopeTenantShared}
 	base := ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Resources: []OwnedResource{resource}}
 	if err := ValidateModuleSet([]ModuleDescriptor{base}, nil); err != nil {
 		t.Fatal(err)
@@ -24,7 +47,7 @@ func TestValidateModuleSetRejectsDuplicateOwnersAndUnknownSchemas(t *testing.T) 
 }
 
 func TestDecodeMarketplacePackageManifestIsStrictAndValidatesModules(t *testing.T) {
-	valid := `{"schema_version":1,"package_id":"finance","release_id":"finance-1","version":"1.0.0","kind":"module","public":{"slug":"finance","name":"Finance","summary":"Finance"},"modules":[{"id":"finance.ar","version":"2.0.0","resources":[{"ref":{"namespace":"tenant","name":"invoice","version":1},"access":"private","mutation_mode":"commands_only"}]}],"engine":{"min_version":"1.0.0"}}`
+	valid := `{"schema_version":1,"package_id":"finance","release_id":"finance-1","version":"1.0.0","kind":"module","public":{"slug":"finance","name":"Finance","summary":"Finance"},"modules":[{"id":"finance.ar","version":"2.0.0","resources":[{"ref":{"namespace":"tenant","name":"invoice","version":1},"access":"private","mutation_mode":"commands_only","scope_kind":"tenant_shared"}]}],"engine":{"min_version":"1.0.0"}}`
 	if _, err := DecodeMarketplacePackageManifest([]byte(valid)); err != nil {
 		t.Fatal(err)
 	}
@@ -52,25 +75,43 @@ func (r *referenceResolverFixture) Resolve(scope ScopeContext, ref BusinessRef) 
 }
 
 func TestBusinessReferenceProviderQualificationAndScope(t *testing.T) {
-	ref := BusinessRef{ProviderID: "warehouse-a", ResourceType: "warehouse.location", ID: "same-id"}
+	entityScope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	ref := BusinessRef{ProviderID: "warehouse-a", ResourceType: "warehouse.location", ID: "same-id", Scope: entityScope}
 	resolver := &referenceResolverFixture{result: ResolvedBusinessRef{Canonical: ref, Revision: 4, Display: "Main"}}
-	resolved, err := ValidateBusinessReference(resolver, ScopeContext{TenantID: "tenant-a", LegalEntityID: "entity-a"}, ref, "warehouse.location")
+	resolved, err := ValidateBusinessReference(resolver, ScopeContext{Scope: entityScope}, ref, "warehouse.location")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Revision != 4 || resolver.scope.LegalEntityID != "entity-a" {
+	if resolved.Revision != 4 || resolver.scope.Scope != entityScope {
 		t.Fatalf("scope or revision lost: %#v %#v", resolved, resolver.scope)
+	}
+	otherEntityRef := ref
+	otherEntityRef.Scope.LegalEntityID = "entity-b"
+	if _, err := ValidateBusinessReference(resolver, ScopeContext{Scope: entityScope}, otherEntityRef, "warehouse.location"); err == nil {
+		t.Fatal("business reference from a different entity scope accepted")
 	}
 	other := ref
 	other.ProviderID = "warehouse-b"
 	if other == ref {
 		t.Fatal("provider did not participate in identity")
 	}
-	if _, err := ValidateBusinessReference(resolver, ScopeContext{TenantID: "tenant-a"}, ref, "account.customer"); err == nil {
+	if _, err := ValidateBusinessReference(resolver, ScopeContext{Scope: BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}}, ref, "account.customer"); err == nil {
 		t.Fatal("wrong resource type accepted")
 	}
-	if _, err := ValidateBusinessReference(nil, ScopeContext{TenantID: "tenant-a"}, ref, "warehouse.location"); err == nil {
+	if _, err := ValidateBusinessReference(nil, ScopeContext{Scope: BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}}, ref, "warehouse.location"); err == nil {
 		t.Fatal("unknown provider accepted")
+	}
+}
+
+func TestHistoricalSnapshotRetainsAndValidatesBusinessScope(t *testing.T) {
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	snapshot := HistoricalSnapshot{Source: BusinessRef{ProviderID: "warehouse-a", ResourceType: "warehouse.location", ID: "loc-1", Scope: scope}, BusinessScope: scope, CapturedAt: time.Now().UTC(), Schema: SchemaRef{ID: "warehouse-location", Version: 1}, Data: []byte(`{"label":"Main"}`)}
+	if err := snapshot.Validate(); err != nil {
+		t.Fatal("valid scoped snapshot rejected:", err)
+	}
+	snapshot.BusinessScope.LegalEntityID = "entity-b"
+	if err := snapshot.Validate(); err == nil {
+		t.Fatal("snapshot scope detached from provider reference accepted")
 	}
 }
 
@@ -135,14 +176,15 @@ func TestPlanCompositionResolvesTransitiveProvidersAndStableOrder(t *testing.T) 
 		{ID: "accounting.ledger", Version: "1.0.0", Provides: []CapabilityOffer{capA}},
 	}
 	providers := []ProviderRegistration{{TenantID: "tenant-a", ProviderID: "acct", OwnerModuleID: "accounting.ledger", Kind: "internal", Offers: []CapabilityOffer{capA}}, {TenantID: "tenant-a", ProviderID: "stock", OwnerModuleID: "inventory.stock", Kind: "internal", Offers: []CapabilityOffer{capB}}}
-	first, err := PlanComposition(modules, providers, nil, "tenant-a", "entity-a", 3)
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	first, err := PlanComposition(modules, providers, nil, scope, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i, j := 0, len(modules)-1; i < j; i, j = i+1, j-1 {
 		modules[i], modules[j] = modules[j], modules[i]
 	}
-	second, err := PlanComposition(modules, providers, nil, "tenant-a", "entity-a", 3)
+	second, err := PlanComposition(modules, providers, nil, scope, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +193,7 @@ func TestPlanCompositionResolvesTransitiveProvidersAndStableOrder(t *testing.T) 
 	}
 	cycle := []ModuleDescriptor{{ID: "alpha.one", Version: "1.0.0", Requires: []CapabilityRequirement{{Name: "beta", Contract: SchemaRef{ID: "b", Version: 1}, Required: true}}}, {ID: "beta.two", Version: "1.0.0", Provides: []CapabilityOffer{{Name: "beta", Contract: SchemaRef{ID: "b", Version: 1}}, {Name: "alpha", Contract: SchemaRef{ID: "a", Version: 1}}}, Requires: []CapabilityRequirement{{Name: "alpha", Contract: SchemaRef{ID: "a", Version: 1}, Required: true}}}}
 	cycleProviders := []ProviderRegistration{{TenantID: "tenant-a", ProviderID: "alpha-provider", OwnerModuleID: "alpha.one", Kind: "internal", Offers: []CapabilityOffer{{Name: "alpha", Contract: SchemaRef{ID: "a", Version: 1}}}}, {TenantID: "tenant-a", ProviderID: "beta-provider", OwnerModuleID: "beta.two", Kind: "internal", Offers: []CapabilityOffer{{Name: "beta", Contract: SchemaRef{ID: "b", Version: 1}}}}}
-	if _, err := PlanComposition(cycle, cycleProviders, nil, "tenant-a", "entity-a", 3); err == nil {
+	if _, err := PlanComposition(cycle, cycleProviders, nil, scope, 3); err == nil {
 		t.Fatal("multi-hop initialization cycle accepted")
 	}
 }

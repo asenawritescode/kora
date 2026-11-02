@@ -213,12 +213,12 @@ func (p *scriptProvider) authorizeRead(dt *doctype.DocType) (policy.RowScope, er
 	if actor.Site != p.site {
 		return policy.RowScope{}, contract.NewError(contract.CodePermissionDenied, "script provider tenant does not match verified execution")
 	}
-	decision, err := policy.Decide(p.tx.Execution, p.registry, dt.Name, "read")
+	decision, err := policy.DecideForBusinessScope(p.tx.Execution, p.registry, dt.Name, "read", p.tx.BusinessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned)
 	if err != nil {
 		return policy.RowScope{}, err
 	}
 	if !decision.OwnerOnly && len(decision.AssignedFields) == 0 {
-		return policy.RowScope{}, nil
+		return policy.RowScope{Business: p.tx.BusinessScope}, nil
 	}
 	owner := actor.SubjectUserID
 	if owner == "" {
@@ -227,7 +227,7 @@ func (p *scriptProvider) authorizeRead(dt *doctype.DocType) (policy.RowScope, er
 	if strings.TrimSpace(owner) == "" {
 		return policy.RowScope{}, contract.NewError(contract.CodePermissionDenied, "row-scoped script read requires an actor subject")
 	}
-	return policy.RowScope{UserID: owner, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...)}, nil
+	return policy.RowScope{UserID: owner, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...), Business: p.tx.BusinessScope}, nil
 }
 
 // SaveDoc updates an existing document.

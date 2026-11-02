@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ModuleID identifies a durable business ownership boundary. It is independent
@@ -40,9 +41,108 @@ const (
 
 //contract:wire:v2
 type OwnedResource struct {
-	Ref          ResourceRef  `json:"ref"`
-	Access       ModuleAccess `json:"access"`
-	MutationMode MutationMode `json:"mutation_mode"`
+	Ref          ResourceRef       `json:"ref"`
+	Access       ModuleAccess      `json:"access"`
+	MutationMode MutationMode      `json:"mutation_mode"`
+	ScopeKind    ResourceScopeKind `json:"scope_kind"`
+	ScopeField   string            `json:"scope_field,omitempty"`
+}
+
+// BusinessScope identifies a tenant or one verified legal entity.
+//
+//contract:wire:v2
+type BusinessScope struct {
+	TenantID      TenantID          `json:"tenant_id"`
+	Kind          BusinessScopeKind `json:"kind"`
+	LegalEntityID string            `json:"legal_entity_id,omitempty"`
+}
+
+// CrossEntityOperation is an explicit command envelope for an operation that
+// must act across two legal entities. Both scoped grants are checked before a
+// command handler is allowed to execute it.
+//
+//contract:wire:v2
+type CrossEntityOperation struct {
+	OperationID    string   `json:"operation_id"`
+	SourceEntityID string   `json:"source_entity_id"`
+	TargetEntityID string   `json:"target_entity_id"`
+	Resource       string   `json:"resource"`
+	Operation      string   `json:"operation"`
+	TenantID       TenantID `json:"tenant_id"`
+}
+
+func (o CrossEntityOperation) Validate() error {
+	if !validBusinessEntityID(o.SourceEntityID) || !validBusinessEntityID(o.TargetEntityID) || o.SourceEntityID == o.TargetEntityID || !moduleIDPattern.MatchString(o.OperationID) {
+		return fmt.Errorf("cross-entity operation requires distinct entities and a valid operation ID")
+	}
+	if _, err := ParseTenantID(string(o.TenantID)); err != nil || !validBusinessEntityID(o.Resource) || !validBusinessEntityID(o.Operation) {
+		return fmt.Errorf("cross-entity operation identity is invalid")
+	}
+	return nil
+}
+
+//contract:enum:v2
+type BusinessScopeKind string
+
+const (
+	ScopeKindTenant      BusinessScopeKind = "tenant"
+	ScopeKindLegalEntity BusinessScopeKind = "legal_entity"
+)
+
+//contract:enum:v2
+type ResourceScopeKind string
+
+const (
+	ScopeTenantShared ResourceScopeKind = "tenant_shared"
+	ScopeEntityOwned  ResourceScopeKind = "entity_owned"
+)
+
+func (s BusinessScope) Validate() error {
+	if _, err := ParseTenantID(string(s.TenantID)); err != nil {
+		return fmt.Errorf("business scope tenant is required")
+	}
+	switch s.Kind {
+	case ScopeKindTenant:
+		if s.LegalEntityID != "" {
+			return fmt.Errorf("tenant scope cannot carry legal entity")
+		}
+	case ScopeKindLegalEntity:
+		if !validBusinessEntityID(s.LegalEntityID) {
+			return fmt.Errorf("legal entity scope requires a valid entity ID")
+		}
+	default:
+		return fmt.Errorf("unknown business scope kind %q", s.Kind)
+	}
+	return nil
+}
+
+func validBusinessEntityID(id string) bool {
+	if id == "" || strings.TrimSpace(id) != id || len(id) > 160 {
+		return false
+	}
+	for _, r := range id {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func ValidateResourceBusinessScope(scope BusinessScope, resourcePolicy ResourceScopeKind) error {
+	if err := scope.Validate(); err != nil {
+		return err
+	}
+	switch resourcePolicy {
+	case ScopeTenantShared:
+		return nil
+	case ScopeEntityOwned:
+		if scope.Kind != ScopeKindLegalEntity {
+			return fmt.Errorf("entity-owned resource requires legal entity scope")
+		}
+		return nil
+	default:
+		return fmt.Errorf("resource scope policy is required")
+	}
 }
 
 //contract:wire:v2
@@ -179,13 +279,13 @@ type CompositionPlan struct {
 }
 
 type BindingKey struct {
-	TenantID         TenantID
-	ScopeKey         string
+	Scope            BusinessScope `json:"scope"`
 	ConsumerModuleID ModuleID
 	CapabilityName   CapabilityName
 }
 type ProviderRegistration struct {
 	TenantID      TenantID
+	Scope         BusinessScope
 	ProviderID    string
 	OwnerModuleID ModuleID
 	Kind          string
@@ -196,7 +296,10 @@ type ProviderSelection struct {
 	ProviderID string
 }
 
-func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, tenant TenantID, scope string, revision uint64) (CompositionPlan, error) {
+func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, scope BusinessScope, revision uint64) (CompositionPlan, error) {
+	if err := scope.Validate(); err != nil {
+		return CompositionPlan{}, err
+	}
 	ordered := append([]ModuleDescriptor(nil), modules...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
 	if err := ValidateModuleSet(ordered, nil); err != nil {
@@ -211,8 +314,11 @@ func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistratio
 	}
 	selected := map[BindingKey]string{}
 	for _, selection := range selections {
-		if selection.Key.TenantID != tenant || selection.Key.ScopeKey != scope {
-			return CompositionPlan{}, fmt.Errorf("provider selection crosses scope")
+		if selection.Key.Scope.TenantID != scope.TenantID {
+			return CompositionPlan{}, fmt.Errorf("provider selection crosses tenant")
+		}
+		if selection.Key.Scope != scope {
+			continue
 		}
 		selected[selection.Key] = selection.ProviderID
 	}
@@ -221,11 +327,17 @@ func PlanComposition(modules []ModuleDescriptor, providers []ProviderRegistratio
 	disabled := map[string]CapabilityRequirement{}
 	for _, consumer := range ordered {
 		for _, requirement := range consumer.Requires {
-			key := BindingKey{TenantID: tenant, ScopeKey: scope, ConsumerModuleID: consumer.ID, CapabilityName: requirement.Name}
+			key := BindingKey{Scope: scope, ConsumerModuleID: consumer.ID, CapabilityName: requirement.Name}
 			providerID := selected[key]
 			var candidates []ProviderRegistration
 			for _, provider := range providers {
-				if provider.TenantID != tenant {
+				if provider.TenantID != scope.TenantID {
+					continue
+				}
+				if provider.Scope.TenantID != "" && provider.Scope != scope {
+					continue
+				}
+				if provider.Scope.TenantID == "" && (provider.Scope.Kind != "" || provider.Scope.LegalEntityID != "") {
 					continue
 				}
 				if providerID != "" && provider.ProviderID != providerID {
@@ -416,7 +528,7 @@ type ModuleExecution struct {
 	BindingRevision   uint64
 	AllowedOperation  string
 	AuthorizedCommand string
-	ScopeKey          string
+	Scope             BusinessScope
 	verified          bool
 }
 
@@ -424,9 +536,10 @@ type ModuleExecution struct {
 //
 //contract:wire:v2
 type BusinessRef struct {
-	ProviderID   string `json:"provider_id"`
-	ResourceType string `json:"resource_type"`
-	ID           string `json:"id"`
+	ProviderID   string        `json:"provider_id"`
+	ResourceType string        `json:"resource_type"`
+	ID           string        `json:"id"`
+	Scope        BusinessScope `json:"scope"`
 }
 
 // ReferenceRule declares whether a field points to a local row or a published
@@ -456,9 +569,8 @@ func (r ReferenceRule) Validate() error {
 }
 
 type ScopeContext struct {
-	TenantID      TenantID
-	LegalEntityID string
-	ProviderID    string
+	Scope      BusinessScope
+	ProviderID string
 }
 type ResolvedBusinessRef struct {
 	Canonical BusinessRef
@@ -470,7 +582,7 @@ type BusinessReferenceResolver interface {
 }
 
 func ValidateBusinessReference(resolver BusinessReferenceResolver, scope ScopeContext, ref BusinessRef, expectedResourceType string) (ResolvedBusinessRef, error) {
-	if scope.TenantID == "" || ref.ProviderID == "" || ref.ResourceType == "" || ref.ID == "" {
+	if scope.Scope.Validate() != nil || ref.Scope.Validate() != nil || ref.Scope != scope.Scope || ref.ProviderID == "" || ref.ResourceType == "" || ref.ID == "" {
 		return ResolvedBusinessRef{}, fmt.Errorf("business reference requires verified scope and provider-qualified identity")
 	}
 	if ref.ResourceType != expectedResourceType {
@@ -493,11 +605,28 @@ func ValidateBusinessReference(resolver BusinessReferenceResolver, scope ScopeCo
 //
 //contract:wire:v2
 type HistoricalSnapshot struct {
-	Source     BusinessRef `json:"source"`
-	CapturedAt time.Time   `json:"captured_at"`
-	Schema     SchemaRef   `json:"schema"`
+	Source        BusinessRef   `json:"source"`
+	BusinessScope BusinessScope `json:"business_scope"`
+	CapturedAt    time.Time     `json:"captured_at"`
+	Schema        SchemaRef     `json:"schema"`
 	//contract:json
 	Data json.RawMessage `json:"data"`
+}
+
+func (s HistoricalSnapshot) Validate() error {
+	if err := s.BusinessScope.Validate(); err != nil {
+		return fmt.Errorf("historical snapshot business scope: %w", err)
+	}
+	if err := s.Source.Scope.Validate(); err != nil || s.Source.Scope != s.BusinessScope {
+		return fmt.Errorf("historical snapshot source scope does not match snapshot scope")
+	}
+	if s.Source.ProviderID == "" || s.Source.ResourceType == "" || s.Source.ID == "" {
+		return fmt.Errorf("historical snapshot source identity is required")
+	}
+	if s.Schema.ID == "" || s.Schema.Version == 0 || len(s.Data) == 0 || !json.Valid(s.Data) {
+		return fmt.Errorf("historical snapshot schema and JSON data are required")
+	}
+	return nil
 }
 
 // BusinessEventDefinition ties an authoritative business event to its owning module.
@@ -524,14 +653,23 @@ type CapabilityAction struct {
 //contract:wire:v2
 type PinnedDispatch struct {
 	ExecutionID     string           `json:"execution_id"`
-	TenantID        TenantID         `json:"tenant_id"`
-	ScopeKey        string           `json:"scope_key"`
+	Scope           BusinessScope    `json:"scope"`
 	CallerModuleID  ModuleID         `json:"caller_module_id"`
 	ProviderID      string           `json:"provider_id"`
 	BindingRevision uint64           `json:"binding_revision"`
 	Operation       CapabilityAction `json:"operation"`
 	IdempotencyKey  IdempotencyKey   `json:"idempotency_key"`
 	InputHash       string           `json:"input_hash"`
+}
+
+func (d PinnedDispatch) Validate() error {
+	if d.ExecutionID == "" || d.Scope.Validate() != nil || d.CallerModuleID == "" || d.ProviderID == "" || d.BindingRevision == 0 || d.Operation.OperationName == "" || d.IdempotencyKey == "" || d.InputHash == "" {
+		return fmt.Errorf("pinned dispatch identity is incomplete")
+	}
+	if d.Operation.CapabilityName == "" || d.Operation.InputSchema.ID == "" || d.Operation.InputSchema.Version == 0 || d.Operation.OutputSchema.ID == "" || d.Operation.OutputSchema.Version == 0 {
+		return fmt.Errorf("pinned dispatch operation contract is incomplete")
+	}
+	return nil
 }
 
 type ExternalOutcome string
@@ -723,22 +861,22 @@ func AppendBusinessEvent(ctx context.Context, writer interface {
 	if writer == nil || tx == nil || !json.Valid(payload) {
 		return "", fmt.Errorf("business event writer, transaction, and valid payload are required")
 	}
-	event := EventEnvelope{ID: NewEventID(), Type: definition.Type, Version: CurrentVersion, Source: string(execution.OwnerModuleID), Site: site, AggregateType: aggregateType, AggregateID: aggregateID, OccurredAt: time.Now().UTC(), CorrelationID: correlationID, CausationID: causationID, Data: payload}
+	event := EventEnvelope{ID: NewEventID(), Type: definition.Type, Version: CurrentVersion, Source: string(execution.OwnerModuleID), Site: site, BusinessScope: execution.Scope, AggregateType: aggregateType, AggregateID: aggregateID, OccurredAt: time.Now().UTC(), CorrelationID: correlationID, CausationID: causationID, Data: payload}
 	if err := writer.Append(ctx, tx, event); err != nil {
 		return "", err
 	}
 	return event.ID, nil
 }
 
-func NewModuleExecution(tenant TenantID, caller, owner ModuleID, revision uint64, operation, scope string) (ModuleExecution, error) {
-	if tenant == "" || caller == "" || owner == "" || operation == "" || scope == "" {
+func NewModuleExecution(scope BusinessScope, caller, owner ModuleID, revision uint64, operation string) (ModuleExecution, error) {
+	if scope.Validate() != nil || caller == "" || owner == "" || operation == "" {
 		return ModuleExecution{}, fmt.Errorf("module execution identity is incomplete")
 	}
-	return ModuleExecution{TenantID: tenant, CallerModuleID: caller, OwnerModuleID: owner, BindingRevision: revision, AllowedOperation: operation, ScopeKey: scope, verified: true}, nil
+	return ModuleExecution{TenantID: scope.TenantID, CallerModuleID: caller, OwnerModuleID: owner, BindingRevision: revision, AllowedOperation: operation, Scope: scope, verified: true}, nil
 }
 
-func NewCommandModuleExecution(tenant TenantID, caller, owner ModuleID, revision uint64, command, operation, scope string) (ModuleExecution, error) {
-	e, err := NewModuleExecution(tenant, caller, owner, revision, operation, scope)
+func NewCommandModuleExecution(scope BusinessScope, caller, owner ModuleID, revision uint64, command, operation string) (ModuleExecution, error) {
+	e, err := NewModuleExecution(scope, caller, owner, revision, operation)
 	if err != nil {
 		return ModuleExecution{}, err
 	}
@@ -750,7 +888,7 @@ func NewCommandModuleExecution(tenant TenantID, caller, owner ModuleID, revision
 }
 
 func (e ModuleExecution) Verified() bool {
-	return e.verified && e.TenantID != "" && e.CallerModuleID != "" && e.OwnerModuleID != "" && e.AllowedOperation != "" && e.ScopeKey != ""
+	return e.verified && e.TenantID == e.Scope.TenantID && e.Scope.Validate() == nil && e.CallerModuleID != "" && e.OwnerModuleID != "" && e.AllowedOperation != ""
 }
 
 var moduleIDPattern = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9-]+)+$`)
@@ -778,6 +916,12 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		}
 		if resource.MutationMode != MutationCRUD && resource.MutationMode != MutationCommands {
 			return fmt.Errorf("module %q resource %q has invalid mutation mode", m.ID, key)
+		}
+		if resource.ScopeKind != ScopeTenantShared && resource.ScopeKind != ScopeEntityOwned {
+			return fmt.Errorf("module %q resource %q requires an explicit business scope policy", m.ID, key)
+		}
+		if resource.ScopeKind == ScopeEntityOwned && !validScopeField(resource.ScopeField) {
+			return fmt.Errorf("module %q resource %q requires a valid entity scope field", m.ID, key)
 		}
 	}
 	capabilities := map[string]bool{}
@@ -817,6 +961,18 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		}
 	}
 	return nil
+}
+
+func validScopeField(field string) bool {
+	if field == "" || len(field) > 64 {
+		return false
+	}
+	for i, r := range field {
+		if !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func validateModuleSchema(ref SchemaRef, registered func(SchemaRef) bool) error {

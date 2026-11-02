@@ -45,15 +45,15 @@ type CapabilityDispatchState struct {
 	Evidence     string
 }
 
-func NewPinnedDispatch(executionID string, tenant contract.TenantID, scope string, caller contract.ModuleID, bindingRevision uint64, providerID string, action contract.CapabilityAction, idempotency contract.IdempotencyKey, input json.RawMessage) (contract.PinnedDispatch, error) {
-	if executionID == "" || tenant == "" || scope == "" || caller == "" || providerID == "" || action.OperationName == "" || idempotency == "" || !json.Valid(input) {
+func NewPinnedDispatch(executionID string, scope contract.BusinessScope, caller contract.ModuleID, bindingRevision uint64, providerID string, action contract.CapabilityAction, idempotency contract.IdempotencyKey, input json.RawMessage) (contract.PinnedDispatch, error) {
+	if executionID == "" || scope.Validate() != nil || caller == "" || providerID == "" || action.OperationName == "" || idempotency == "" || !json.Valid(input) {
 		return contract.PinnedDispatch{}, fmt.Errorf("pinned capability dispatch identity is incomplete")
 	}
 	if action.InputSchema.ID == "" || action.InputSchema.Version == 0 || action.OutputSchema.ID == "" || action.OutputSchema.Version == 0 {
 		return contract.PinnedDispatch{}, fmt.Errorf("pinned capability schemas are required")
 	}
 	hash := sha256.Sum256(input)
-	return contract.PinnedDispatch{ExecutionID: executionID, TenantID: tenant, ScopeKey: scope, CallerModuleID: caller, ProviderID: providerID, BindingRevision: bindingRevision, Operation: action, IdempotencyKey: idempotency, InputHash: hex.EncodeToString(hash[:])}, nil
+	return contract.PinnedDispatch{ExecutionID: executionID, Scope: scope, CallerModuleID: caller, ProviderID: providerID, BindingRevision: bindingRevision, Operation: action, IdempotencyKey: idempotency, InputHash: hex.EncodeToString(hash[:])}, nil
 }
 
 func NewExternalActionExecutor(store ExecutionStore, identities ExecutionIdentityProvider, schemas PayloadSchemaRegistry) (*ExternalActionExecutor, error) {
@@ -80,6 +80,9 @@ func (e *ExternalActionExecutor) Execute(ctx context.Context, claim Claim, defin
 	if claim.Attempt == 0 || claim.InstanceID == "" || claim.StepID == "" || step.ID != claim.StepID || step.Kind != contract.StepAction || step.Action == nil {
 		return StepCommit{}, contract.NewError(contract.CodeValidationFailed, "external action does not match the claimed workflow step")
 	}
+	if claim.BusinessScope.Validate() != nil || claim.BusinessScope.TenantID != claim.Tenant {
+		return StepCommit{}, contract.NewError(contract.CodeValidationFailed, "external action workflow business scope is invalid")
+	}
 	if definition.ID == "" || definition.Version == 0 {
 		return StepCommit{}, contract.NewError(contract.CodeValidationFailed, "external action requires its pinned workflow definition")
 	}
@@ -101,7 +104,7 @@ func (e *ExternalActionExecutor) Execute(ctx context.Context, claim Claim, defin
 	if !execution.Valid() || execution.Tenant() != claim.Tenant || execution.Actor().PrincipalType != contract.PrincipalService {
 		return StepCommit{}, contract.NewError(contract.CodeUnauthenticated, "workflow action requires a verified tenant service identity")
 	}
-	if !registration.RequiredGrant.Valid() || !execution.Allows(registration.RequiredGrant.Resource, registration.RequiredGrant.Operation) {
+	if !workflowGrantAllows(execution, registration.RequiredGrant, claim.BusinessScope) {
 		return StepCommit{}, contract.NewError(contract.CodePermissionDenied, "workflow service identity lacks the registered action grant")
 	}
 	executionID, key := stableExternalActionIdentity(claim.Tenant, claim.InstanceID, claim.StepID)
@@ -112,7 +115,7 @@ func (e *ExternalActionExecutor) Execute(ctx context.Context, claim Claim, defin
 	if len(subject) > 0 {
 		subjectRef = subject[0]
 	}
-	actionContext := ActionContext{Execution: execution, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, Subject: subjectRef, IdempotencyKey: key}
+	actionContext := ActionContext{Execution: execution, BusinessScope: claim.BusinessScope, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, Subject: subjectRef, IdempotencyKey: key}
 	result, actionErr := callExternalAction(ctx, registration.External, actionContext, input)
 	if actionErr != nil {
 		var classified *ExternalActionFailure

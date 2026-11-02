@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 func TestExecutionRequiresTenantBoundAuthenticatedActor(t *testing.T) {
@@ -75,6 +76,126 @@ func TestExecutionGrantForPreservesRestrictiveOwnerScope(t *testing.T) {
 	}
 	if _, ok := execution.GrantFor("Invoice", "write"); ok {
 		t.Fatal("GrantFor inherited grant across operations")
+	}
+}
+
+func TestEntityGrantIsExactAndTenantRoleDoesNotImplyEntityAccess(t *testing.T) {
+	actor := contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", Roles: []string{"Administrator"}}
+	scopeA := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	scopeB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	roles := testRolePolicy{"Administrator": {"Invoice:read": true, "Invoice:create": true, "Invoice:write": true}}
+	execution, err := NewVerifiedExecution("tenant-a", actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecideForBusinessScope(execution, roles, "Invoice", "read", scopeA, true); err == nil {
+		t.Fatal("tenant-wide role granted entity access without an entity grant")
+	}
+	execution, err = NewVerifiedExecutionWithGrants("tenant-a", actor, []Grant{{Resource: "Invoice", Operation: "read", Scope: scopeA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecideForBusinessScope(execution, roles, "Invoice", "read", scopeA, true); err != nil {
+		t.Fatalf("exact entity grant denied: %v", err)
+	}
+	if _, err := DecideForBusinessScope(execution, roles, "Invoice", "write", scopeA, true); err == nil {
+		t.Fatal("read grant authorized write")
+	}
+	if _, err := DecideForBusinessScope(execution, roles, "Invoice", "read", scopeB, true); err == nil {
+		t.Fatal("entity grant crossed to another entity")
+	}
+	crossTenant := contract.BusinessScope{TenantID: "tenant-b", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	if _, err := NewVerifiedExecutionWithGrants("tenant-a", actor, []Grant{{Resource: "Invoice", Operation: "read", Scope: crossTenant}}); err == nil {
+		t.Fatal("grant for another tenant's entity scope was accepted")
+	}
+}
+
+func TestScopedGrantCannotAuthorizeTenantScope(t *testing.T) {
+	actor := contract.ActorContext{PrincipalID: "service-1", PrincipalType: contract.PrincipalService, Site: "tenant-a"}
+	entity := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	execution, err := NewVerifiedExecutionWithGrants("tenant-a", actor, []Grant{{Resource: "Invoice", Operation: "read", Scope: entity}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.Allows("Invoice", "read") {
+		t.Fatal("entity grant authorized unscoped tenant operation")
+	}
+	if _, ok := execution.GrantFor("Invoice", "read"); ok {
+		t.Fatal("entity grant was returned as tenant grant")
+	}
+	if _, ok := execution.GrantForScope("Invoice", "read", entity); !ok {
+		t.Fatal("exact entity grant was not available")
+	}
+}
+
+func TestCrossEntityOperationRequiresBothExactEntityGrants(t *testing.T) {
+	actor := contract.ActorContext{PrincipalID: "service-1", PrincipalType: contract.PrincipalService, Site: "tenant-a"}
+	entityA := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	entityB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	operation := contract.CrossEntityOperation{OperationID: "intercompany.transfer", TenantID: "tenant-a", SourceEntityID: "entity-a", TargetEntityID: "entity-b", Resource: "Intercompany Transfer", Operation: "write"}
+	for _, grants := range [][]Grant{
+		{{Resource: operation.Resource, Operation: operation.Operation, Scope: entityA}},
+		{{Resource: operation.Resource, Operation: operation.Operation}},
+	} {
+		execution, err := NewVerifiedExecutionWithGrants("tenant-a", actor, grants)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if AuthorizeCrossEntityOperation(execution, operation) == nil {
+			t.Fatal("cross-entity command accepted without both scoped grants")
+		}
+	}
+	execution, err := NewVerifiedExecutionWithGrants("tenant-a", actor, []Grant{
+		{Resource: operation.Resource, Operation: operation.Operation, Scope: entityA},
+		{Resource: operation.Resource, Operation: operation.Operation, Scope: entityB},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AuthorizeCrossEntityOperation(execution, operation); err != nil {
+		t.Fatalf("dual-authorized operation denied: %v", err)
+	}
+	operation.TargetEntityID = "entity-a"
+	if AuthorizeCrossEntityOperation(execution, operation) == nil {
+		t.Fatal("same-entity cross-entity command accepted")
+	}
+	operation.TargetEntityID = "entity-b"
+	registry := doctype.NewRegistry()
+	registry.Permissions.LoadPermissionsFromDB([]*doctype.Role{{Name: "Source"}, {Name: "Target"}}, []*doctype.Permission{
+		{Role: "Source", Doctype: operation.Resource, Write: true, Scope: entityA},
+		{Role: "Target", Doctype: operation.Resource, Write: true, Scope: entityB},
+	})
+	roleExecution, err := NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", Roles: []string{"Source", "Target"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AuthorizeCrossEntityOperation(roleExecution, operation, registry); err != nil {
+		t.Fatalf("explicit dual-role operation denied: %v", err)
+	}
+	missingTarget, err := NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", Roles: []string{"Source"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if AuthorizeCrossEntityOperation(missingTarget, operation, registry) == nil {
+		t.Fatal("one entity role authorized both sides")
+	}
+}
+
+func TestEntityScopedRolePermissionIsNotTenantRoleInheritance(t *testing.T) {
+	registry := doctype.NewRegistry()
+	registry.Permissions.LoadPermissionsFromDB([]*doctype.Role{{Name: "Manager"}}, []*doctype.Permission{{Role: "Manager", Doctype: "Invoice", Read: true, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}}})
+	actor := contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", Roles: []string{"Manager"}}
+	execution, err := NewVerifiedExecution("tenant-a", actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopeA := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	scopeB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	if _, err := DecideForBusinessScope(execution, registry, "Invoice", "read", scopeA, true); err != nil {
+		t.Fatalf("explicit scoped role grant denied: %v", err)
+	}
+	if _, err := DecideForBusinessScope(execution, registry, "Invoice", "read", scopeB, true); err == nil {
+		t.Fatal("entity A role permission authorized entity B")
 	}
 }
 

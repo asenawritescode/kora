@@ -19,7 +19,8 @@ func TestGenericMutationCannotUseCommandOnlyModuleExecution(t *testing.T) {
 	if err := authorizeOp(registry, op, CommandDefinition{Name: CommandRecordCreate}, nil); err == nil {
 		t.Fatal("generic mutation authorized without trusted module execution")
 	}
-	execution, err := contract.NewCommandModuleExecution("tenant-a", "sales.orders", "finance.ar", 3, "finance.issue_invoice", "finance.issue_invoice", "entity-a")
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	execution, err := contract.NewCommandModuleExecution(scope, "sales.orders", "finance.ar", 3, "finance.issue_invoice", "finance.issue_invoice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +29,7 @@ func TestGenericMutationCannotUseCommandOnlyModuleExecution(t *testing.T) {
 		t.Fatal("domain command execution authorized generic record command")
 	}
 	// User-supplied struct values cannot set the private verification seal.
-	forged := contract.ModuleExecution{TenantID: "tenant-a", CallerModuleID: "sales.orders", OwnerModuleID: "finance.ar", BindingRevision: 3, AllowedOperation: CommandRecordCreate, ScopeKey: "entity-a"}
+	forged := contract.ModuleExecution{TenantID: "tenant-a", CallerModuleID: "sales.orders", OwnerModuleID: "finance.ar", BindingRevision: 3, AllowedOperation: CommandRecordCreate, Scope: scope}
 	op.Context.ModuleExecution = &forged
 	if validModuleExecution(op.Context.ModuleExecution, op, registry) {
 		t.Fatal("forged module execution was accepted")

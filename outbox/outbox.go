@@ -1226,6 +1226,7 @@ func ChangeEventToEnvelope(e eventstream.ChangeEvent) contract.EventEnvelope {
 		Version:       contract.CurrentVersion,
 		Source:        "kora.kernel",
 		Site:          e.Site,
+		BusinessScope: e.BusinessScope,
 		AggregateType: e.Doctype,
 		AggregateID:   e.DocName,
 		OccurredAt:    e.Timestamp,

@@ -84,11 +84,12 @@ func TestLibSQLWorkflowStartAndClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := instances.StartInstance(ctx, workflow.StartInstanceInput{Tenant: tenant, ID: instanceID, Definition: definition, DefinitionDigest: ref.Digest, Subject: contract.SubjectRef{Kind: "Invoice", ID: "INV-TEST", Revision: "1"}, Actor: "user-test", IdempotencyKey: contract.IdempotencyKey("start-" + contract.NewID()), Site: "tenant-route", Now: now})
+	businessScope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-accounts-receivable"}
+	started, err := instances.StartInstance(ctx, workflow.StartInstanceInput{Tenant: tenant, BusinessScope: businessScope, ID: instanceID, Definition: definition, DefinitionDigest: ref.Digest, Subject: contract.SubjectRef{Kind: "Invoice", ID: "INV-TEST", Revision: "1"}, Actor: "user-test", IdempotencyKey: contract.IdempotencyKey("start-" + contract.NewID()), Site: "tenant-route", Now: now})
 	if err != nil {
 		t.Fatal("start instance:", err)
 	}
-	if started.ID != instanceID || started.Status != contract.InstanceReady || started.CreatedAt.IsZero() {
+	if started.ID != instanceID || started.Status != contract.InstanceReady || started.CreatedAt.IsZero() || started.BusinessScope != businessScope {
 		t.Fatalf("unexpected LibSQL workflow instance: %+v", started)
 	}
 	executor, err := NewExecutionStore(database, dialect)
@@ -99,7 +100,7 @@ func TestLibSQLWorkflowStartAndClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal("claim due workflow:", err)
 	}
-	if len(claims) != 1 || claims[0].InstanceID != instanceID {
+	if len(claims) != 1 || claims[0].InstanceID != instanceID || claims[0].BusinessScope != businessScope {
 		t.Fatalf("LibSQL claims = %+v", claims)
 	}
 	if claims[0].Attempt != 1 {

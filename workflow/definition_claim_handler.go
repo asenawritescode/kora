@@ -35,6 +35,34 @@ type HumanWaitRuntime struct {
 	Now      func() time.Time
 }
 
+func workflowGrantAllows(execution policy.Execution, required policy.Grant, scope contract.BusinessScope) bool {
+	if !required.Valid() || scope.Validate() != nil || scope.TenantID != execution.Tenant() {
+		return false
+	}
+	if (required.Scope.TenantID != "" || required.Scope.Kind != "" || required.Scope.LegalEntityID != "") && required.Scope != scope {
+		return false
+	}
+	if scope.Kind == contract.ScopeKindTenant {
+		grant, ok := execution.GrantFor(required.Resource, required.Operation)
+		return ok && grant.OwnerOnly == required.OwnerOnly
+	}
+	grant, ok := execution.GrantForScope(required.Resource, required.Operation, scope)
+	return ok && grant.OwnerOnly == required.OwnerOnly
+}
+
+// WorkflowGrantAllows checks a trusted action registration against the exact
+// persisted workflow business scope.
+func WorkflowGrantAllows(execution policy.Execution, required policy.Grant, scope contract.BusinessScope) bool {
+	return workflowGrantAllows(execution, required, scope)
+}
+
+func workflowReadGrant(execution policy.Execution, resource string, scope contract.BusinessScope) (policy.Grant, bool) {
+	if scope.Kind == contract.ScopeKindTenant {
+		return execution.GrantFor(resource, "read")
+	}
+	return execution.GrantForScope(resource, "read", scope)
+}
+
 // DefinitionClaimHandler loads the instance's immutable pinned definition and
 // executes one action, condition, end, or transactionally-created human wait
 // step. Timed and event waits require a separate durable continuation worker.
@@ -88,6 +116,9 @@ func (h *DefinitionClaimHandler) HandleClaim(ctx context.Context, claim Claim) e
 	}
 	if instance.Status != contract.InstanceRunning || instance.CurrentStep != claim.StepID || instance.Revision != claim.Revision {
 		return contract.NewError(contract.CodeConflict, "claimed workflow instance no longer matches its step")
+	}
+	if instance.BusinessScope.Validate() != nil || instance.BusinessScope.TenantID != claim.Tenant || claim.BusinessScope != instance.BusinessScope {
+		return contract.NewError(contract.CodeConflict, "claimed workflow business scope no longer matches persisted instance")
 	}
 	definition, ref, err := h.definitions.GetDefinition(ctx, claim.Tenant, instance.DefinitionID, instance.DefinitionVersion)
 	if err != nil {
@@ -205,11 +236,11 @@ func (h *DefinitionClaimHandler) handleAction(ctx context.Context, claim Claim, 
 	if !execution.Valid() || execution.Tenant() != claim.Tenant || execution.Actor().PrincipalType != contract.PrincipalService {
 		return contract.NewError(contract.CodeUnauthenticated, "workflow action requires a verified tenant service identity")
 	}
-	if !execution.Allows(registration.RequiredGrant.Resource, registration.RequiredGrant.Operation) {
+	if !workflowGrantAllows(execution, registration.RequiredGrant, instance.BusinessScope) {
 		return contract.NewError(contract.CodePermissionDenied, "workflow service identity lacks the registered action grant")
 	}
 	identity, idem := stableExternalActionIdentity(claim.Tenant, claim.InstanceID, claim.StepID)
-	actionContext := ActionContext{Execution: execution, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, ExecutionID: identity, Subject: instance.Subject, IdempotencyKey: idem}
+	actionContext := ActionContext{Execution: execution, BusinessScope: instance.BusinessScope, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, ExecutionID: identity, Subject: instance.Subject, IdempotencyKey: idem}
 	input := ActionInput{Schema: registration.InputSchema, Data: append(json.RawMessage(nil), step.Action.Input...)}
 	if registration.Class == ActionLocal {
 		_, err := registration.Local.ExecuteLocal(ctx, claim, actionContext, registration.Key, input, step.Action.Next)
@@ -315,7 +346,7 @@ func (h *DefinitionClaimHandler) handleCondition(ctx context.Context, claim Clai
 	if !execution.Valid() || execution.Tenant() != claim.Tenant || execution.Actor().PrincipalType != contract.PrincipalService {
 		return h.failCondition(ctx, claim, "workflow condition identity is invalid")
 	}
-	readGrant, allowed := execution.GrantFor(string(instance.Subject.Kind), "read")
+	readGrant, allowed := workflowReadGrant(execution, string(instance.Subject.Kind), instance.BusinessScope)
 	if !allowed || readGrant.OwnerOnly {
 		// A workflow service has no authenticated human subject against which an
 		// owner-only grant can be evaluated. Do not treat the workflow starter or

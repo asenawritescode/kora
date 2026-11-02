@@ -57,15 +57,16 @@ type TenantServiceConfig struct {
 	UploadAdmission    interface {
 		Acquire(context.Context, uint64) (func(), error)
 	}
-	OutboxEnabled           bool
-	Workflow                *WorkflowTenantConfig
-	RequestAuthorizer       RequestAuthorizerFactory
-	WorkflowApprovals       map[string]process.WorkflowApproval
-	ModuleProviders         func(site.DBSiteInfo, *sql.DB) ([]plugin.ProviderRegistration, []plugin.ProviderSelection, error)
-	SchedulerHandlerFactory ScheduledJobHandlerFactory
-	Mailer                  *email.Sender
-	ResolveStorage          func(*site.SiteConfig) (storage.Backend, error)
-	RegisterWorkerStart     func(func() error) error
+	OutboxEnabled                     bool
+	Workflow                          *WorkflowTenantConfig
+	RequestAuthorizer                 RequestAuthorizerFactory
+	WorkflowApprovals                 map[string]process.WorkflowApproval
+	ModuleProviders                   func(site.DBSiteInfo, *sql.DB) ([]plugin.ProviderRegistration, []plugin.ProviderSelection, error)
+	SchedulerHandlerFactory           ScheduledJobHandlerFactory
+	SchedulerExecutionResolverFactory ScheduledJobExecutionResolverFactory
+	Mailer                            *email.Sender
+	ResolveStorage                    func(*site.SiteConfig) (storage.Backend, error)
+	RegisterWorkerStart               func(func() error) error
 }
 
 // RequestAuthorizerFactory lets an owning domain add governed request policies
@@ -88,6 +89,10 @@ type TenantJobRuntime struct {
 // ScheduledJobHandlerFactory creates application handlers for one tenant
 // generation. The application decides which configured types apply there.
 type ScheduledJobHandlerFactory func(TenantJobRuntime) map[scheduler.JobType]scheduler.JobHandler
+
+// ScheduledJobExecutionResolverFactory binds legal-entity scheduled work to
+// trusted service grants owned by the application domain.
+type ScheduledJobExecutionResolverFactory func(TenantJobRuntime) scheduler.ExecutionResolver
 
 // NewTenantServiceInstaller validates process dependencies once and returns a
 // tenant-generation installer used for startup activation and hot replacement.
@@ -149,7 +154,14 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return fmt.Errorf("load module providers for tenant %s: %w", loaded.Name, moduleErr)
 		}
 	}
-	bindingPlan, moduleErr := plugin.ResolveModules(contract.TenantID(loaded.SiteID), "tenant", moduleSnapshot.Modules, providers, selections, moduleSnapshot.Revision)
+	resolveModuleBindings := func(scope contract.BusinessScope) (plugin.BindingPlan, error) {
+		if scope.TenantID != contract.TenantID(loaded.SiteID) {
+			return plugin.BindingPlan{}, contract.NewError(contract.CodePermissionDenied, "module binding scope belongs to another tenant")
+		}
+		return plugin.ResolveModules(scope, moduleSnapshot.Modules, providers, selections, moduleSnapshot.Revision)
+	}
+	tenantScope := contract.BusinessScope{TenantID: contract.TenantID(loaded.SiteID), Kind: contract.ScopeKindTenant}
+	bindingPlan, moduleErr := resolveModuleBindings(tenantScope)
 	if moduleErr != nil {
 		return fmt.Errorf("resolve module providers for tenant %s: %w", loaded.Name, moduleErr)
 	}
@@ -157,6 +169,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("tenant %s has %d required module provider blockers", loaded.Name, len(bindingPlan.Blockers))
 	}
 	services.ModuleBindings = &bindingPlan
+	services.ResolveModuleBindings = resolveModuleBindings
 	workAdmission, err := site.ConnectionAdmission(cfg)
 	if err != nil {
 		return fmt.Errorf("resolve tenant work admission: %w", err)
@@ -406,9 +419,14 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 					return fmt.Errorf("decode scheduled job %q config: %w", definition.Name, err)
 				}
 			}
-			jobs = append(jobs, &scheduler.JobConfig{Name: definition.Name, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig})
+			scope := definition.Scope
+			if scope == nil {
+				defaultScope := contract.BusinessScope{TenantID: contract.TenantID(loaded.SiteID), Kind: contract.ScopeKindTenant}
+				scope = &defaultScope
+			}
+			jobs = append(jobs, &scheduler.JobConfig{Name: definition.Name, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig, Scope: scope, RequiredResource: definition.RequiredResource, RequiredOperation: definition.RequiredOperation})
 		}
-		tenantScheduler, err := newTenantScheduler(loaded, dialect, jobs, domainKernel, config.SchedulerHandlerFactory, config.Mailer, services.Outbox, config.ScriptRunner, services.ScriptStore, services.WorkAdmission, worker)
+		tenantScheduler, err := newTenantScheduler(loaded, dialect, jobs, domainKernel, config.SchedulerHandlerFactory, config.SchedulerExecutionResolverFactory, config.Mailer, services.Outbox, config.ScriptRunner, services.ScriptStore, services.WorkAdmission, worker)
 		if err != nil {
 			return fmt.Errorf("construct scheduler for tenant %s: %w", loaded.Name, err)
 		}
@@ -479,7 +497,7 @@ func registerWebhookDelivery(config TenantServiceConfig, loaded *knet.LoadedSite
 	})
 }
 
-func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*scheduler.JobConfig, operationKernel *kernel.Kernel, handlerFactory ScheduledJobHandlerFactory, mailer *email.Sender, outboxWriter outbox.Writer, scriptRunner script.Runner, scriptStore *script.Store, workAdmission interface {
+func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*scheduler.JobConfig, operationKernel *kernel.Kernel, handlerFactory ScheduledJobHandlerFactory, executionResolverFactory ScheduledJobExecutionResolverFactory, mailer *email.Sender, outboxWriter outbox.Writer, scriptRunner script.Runner, scriptStore *script.Store, workAdmission interface {
 	Acquire(context.Context) (func(), error)
 }, webhookRetrier scheduler.WebhookRetrier) (*scheduler.Scheduler, error) {
 	if loaded == nil || loaded.DB == nil || loaded.Registry == nil {
@@ -507,6 +525,12 @@ func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*sc
 	worker.WorkAdmission = workAdmission
 	worker.TenantID = loaded.SiteID
 	worker.WorkerID = contract.NewID()
+	if executionResolverFactory != nil {
+		worker.ResolveExecution = executionResolverFactory(TenantJobRuntime{
+			Database: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Kernel: operationKernel,
+			TenantID: loaded.SiteID, SiteName: loaded.Name, ConfigRevision: loaded.ConfigRevision,
+		})
+	}
 	if handlerFactory != nil {
 		handlers := handlerFactory(TenantJobRuntime{
 			Database: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Kernel: operationKernel,

@@ -97,7 +97,8 @@ func TestConfiguredInvoiceDueDays(t *testing.T) {
 }
 
 func TestBillingObligationValidatesProviderContractInputs(t *testing.T) {
-	valid := BillingObligation{Source: contract.BusinessRef{ProviderID: "subscriptions", ResourceType: "subscription", ID: "sub-1"}, PeriodStart: "2026-10-01", PeriodEnd: "2026-10-31", Customer: contract.BusinessRef{ProviderID: "parties", ResourceType: "party", ID: "party-1"}, Currency: "USD", Lines: []BillingLine{{Description: "Monthly service", Quantity: "1.00", UnitPrice: "12.50"}}, IdempotencyKey: "tenant-sub-period"}
+	tenantScope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	valid := BillingObligation{Source: contract.BusinessRef{ProviderID: "subscriptions", ResourceType: "subscription", ID: "sub-1", Scope: tenantScope}, PeriodStart: "2026-10-01", PeriodEnd: "2026-10-31", Customer: contract.BusinessRef{ProviderID: "parties", ResourceType: "party", ID: "party-1", Scope: tenantScope}, Currency: "USD", Lines: []BillingLine{{Description: "Monthly service", Quantity: "1.00", UnitPrice: "12.50"}}, IdempotencyKey: "tenant-sub-period"}
 	if err := valid.Validate(); err != nil {
 		t.Fatal(err)
 	}

@@ -26,12 +26,6 @@ func (s *humanWaitRecoveryTestStore) ExpireDue(ctx context.Context, tenant contr
 	}
 	s.batch.Store(uint32(batch))
 	s.expiries.Add(1)
-	if s.started != nil {
-		select {
-		case s.started <- struct{}{}:
-		default:
-		}
-	}
 	return 0, s.err
 }
 
@@ -41,6 +35,12 @@ func (s *humanWaitRecoveryTestStore) ResumeTerminalHumanWaits(ctx context.Contex
 	}
 	s.batch.Store(uint32(batch))
 	s.calls.Add(1)
+	if s.started != nil {
+		select {
+		case s.started <- struct{}{}:
+		default:
+		}
+	}
 	<-ctx.Done()
 	return 0, ctx.Err()
 }

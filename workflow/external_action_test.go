@@ -112,7 +112,7 @@ func newExternalDispatch(t *testing.T, action Action) (*ExternalActionExecutor, 
 }
 
 func externalClaim() Claim {
-	return Claim{Tenant: "tenant-a", InstanceID: "instance-1", StepID: "submit", Attempt: 1, Owner: "worker-1", Fence: 3, Revision: "7"}
+	return Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: "instance-1", StepID: "submit", Attempt: 1, Owner: "worker-1", Fence: 3, Revision: "7"}
 }
 
 func externalDefinitionAndStep() (contract.WorkflowDefinition, contract.StepDefinition) {
@@ -296,25 +296,26 @@ func TestExternalActionValidatesBeforePersistingOrCalling(t *testing.T) {
 
 func TestPinnedCapabilityDispatchIdentityIsStableAndHashesInput(t *testing.T) {
 	action := contract.CapabilityAction{CapabilityName: "billing.issue", OperationName: "IssueInvoice", InputSchema: contract.SchemaRef{ID: "invoice.issue.in", Version: 1}, OutputSchema: contract.SchemaRef{ID: "invoice.issue.out", Version: 1}}
-	first, err := NewPinnedDispatch("execution-a", "tenant-a", "entity-a", "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":12}`))
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	first, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":12}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry, err := NewPinnedDispatch("execution-a", "tenant-a", "entity-a", "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":12}`))
+	retry, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":12}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first != retry {
 		t.Fatalf("retry identity changed: %#v %#v", first, retry)
 	}
-	changed, err := NewPinnedDispatch("execution-a", "tenant-a", "entity-a", "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":13}`))
+	changed, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":13}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.InputHash == changed.InputHash {
 		t.Fatal("changed request payload retained input hash")
 	}
-	rebound, err := NewPinnedDispatch("execution-a", "tenant-a", "entity-a", "sales.orders", 9, "billing-provider-b", action, "idem-a", json.RawMessage(`{"amount":12}`))
+	rebound, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 9, "billing-provider-b", action, "idem-a", json.RawMessage(`{"amount":12}`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2365,7 +2365,11 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 		if !matchesRealtimeScope(scopes, "doctype:"+entry.aggregateType, entry.aggregateType) {
 			continue
 		}
-		if !h.realtimeEventVisible(c, entry.aggregateType, entry.aggregateID, nil, eventstream.EventOp(realtimeOperation(entry.eventType))) {
+		var envelope struct {
+			BusinessScope contract.BusinessScope `json:"business_scope"`
+		}
+		_ = json.Unmarshal(entry.payload, &envelope)
+		if !h.realtimeEventVisible(c, entry.aggregateType, entry.aggregateID, nil, eventstream.EventOp(realtimeOperation(entry.eventType)), envelope.BusinessScope) {
 			continue
 		}
 		if replayed >= replayLimit {

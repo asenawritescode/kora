@@ -56,7 +56,7 @@ func TestCommitStepRejectsStaleFenceAndRollsBack(t *testing.T) {
 	}
 	defer database.Close()
 	store, _ := NewExecutionStore(database, &db.MySQLDialect{})
-	claim := workflow.Claim{Tenant: "tenant-a", InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
+	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
 	change := workflow.StepCommit{Claim: claim, ExecutionID: "01K7EXECUTION000000000000000000", Attempt: 1, IdempotencyKey: "workflow-action-key-1", Status: contract.InstanceCompleted}
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(MAX(sequence),0)+1 FROM _kora_workflow_history WHERE tenant_id = ? AND instance_id = ?")).WithArgs("tenant-a", string(claim.InstanceID)).WillReturnRows(sqlmock.NewRows([]string{"sequence"}).AddRow(1))
@@ -77,7 +77,7 @@ func TestCommitStepInTxLeavesTransactionOwnershipToCaller(t *testing.T) {
 	}
 	defer database.Close()
 	store, _ := NewExecutionStore(database, &db.MySQLDialect{})
-	claim := workflow.Claim{Tenant: "tenant-a", InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
+	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
 	change := workflow.StepCommit{Claim: claim, ExecutionID: "01K7EXECUTION000000000000000000", Attempt: 1, IdempotencyKey: "workflow-action-key-1", Status: contract.InstanceCompleted}
 	mock.ExpectBegin()
 	tx, err := database.BeginTx(context.Background(), nil)
@@ -105,7 +105,7 @@ func TestCommitStepWritesAttemptProgressAndTimerAtomically(t *testing.T) {
 	}
 	defer database.Close()
 	store, _ := NewExecutionStore(database, &db.MySQLDialect{})
-	claim := workflow.Claim{Tenant: "tenant-a", InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
+	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
 	wake := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	change := workflow.StepCommit{Claim: claim, ExecutionID: "01K7EXECUTION000000000000000000", Attempt: 1, IdempotencyKey: "workflow-action-key-1", Status: contract.InstanceWaiting, NextStep: "wait", NextWakeAt: &wake, Result: workflow.ActionResult{Schema: contract.SchemaRef{ID: "output", Version: 1}, Data: []byte(`{"ok":true}`)}}
 	mock.ExpectBegin()
@@ -132,7 +132,7 @@ func TestCommitStepRejectsSkippedAttemptNumber(t *testing.T) {
 	}
 	defer database.Close()
 	store, _ := NewExecutionStore(database, &db.MySQLDialect{})
-	claim := workflow.Claim{Tenant: "tenant-a", InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 2, Owner: "worker-a", Fence: 3, Revision: "4"}
+	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 2, Owner: "worker-a", Fence: 3, Revision: "4"}
 	change := workflow.StepCommit{Claim: claim, ExecutionID: "01K7EXECUTION000000000000000000", Attempt: 2, IdempotencyKey: "workflow-action-key-1", Status: contract.InstanceCompleted}
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(MAX(sequence),0)+1 FROM _kora_workflow_history WHERE tenant_id = ? AND instance_id = ?")).WithArgs("tenant-a", string(claim.InstanceID)).WillReturnRows(sqlmock.NewRows([]string{"sequence"}).AddRow(2))
@@ -154,7 +154,7 @@ func TestExternalAttemptIsRecordedBeforeEffectAndFinalizedInStepTransaction(t *t
 	}
 	defer database.Close()
 	store, _ := NewExecutionStore(database, &db.MySQLDialect{})
-	claim := workflow.Claim{Tenant: "tenant-a", InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
+	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
 	executionID := "01K7EXECUTION000000000000000000"
 	key := contract.IdempotencyKey("workflow-action-key-1")
 	mock.ExpectBegin()
@@ -190,7 +190,7 @@ func TestRenewAndReleaseRequireCurrentLeaseFence(t *testing.T) {
 	}
 	defer database.Close()
 	store, _ := NewExecutionStore(database, &db.MySQLDialect{})
-	claim := workflow.Claim{Tenant: "tenant-a", InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
+	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE _kora_workflow_instance SET lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND), updated_at = CURRENT_TIMESTAMP(6) WHERE tenant_id = ? AND id = ? AND current_step = ? AND status = 'running' AND lease_owner = ? AND lease_fence = ? AND revision = ? AND lease_until > CURRENT_TIMESTAMP(6)")).WithArgs(int64(time.Second.Microseconds()), "tenant-a", string(claim.InstanceID), "approve", "worker-a", uint64(3), uint64(4)).WillReturnResult(sqlmock.NewResult(0, 0))
 	if _, err := store.Renew(context.Background(), claim, time.Second); err == nil {
 		t.Fatal("expired claim renewed")
@@ -211,7 +211,7 @@ func TestCommitStepRegistersEventWaitAndChecksDurableInbox(t *testing.T) {
 	}
 	defer database.Close()
 	store, _ := NewExecutionStore(database, &db.MySQLDialect{})
-	claim := workflow.Claim{Tenant: "tenant-a", InstanceID: "01K7INSTANCE00000000000000000", StepID: "wait", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
+	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: "01K7INSTANCE00000000000000000", StepID: "wait", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
 	wake := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	change := workflow.StepCommit{Claim: claim, ExecutionID: "01K7EXECUTION000000000000000000", Attempt: 1, IdempotencyKey: "workflow-wait-key-1", Status: contract.InstanceWaiting, NextStep: "wait", NextWakeAt: &wake, EventWait: &workflow.EventWaitSubscription{EventType: "invoice.paid", CorrelationField: "invoice_id", CorrelationValue: "INV-1", OnEvent: "paid"}}
 	mock.ExpectBegin()
@@ -223,7 +223,7 @@ func TestCommitStepRegistersEventWaitAndChecksDurableInbox(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM _kora_workflow_process_timer WHERE tenant_id = ? AND instance_id = ?")).WithArgs("tenant-a", string(claim.InstanceID)).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_workflow_process_timer (tenant_id, instance_id, step_id, generation, due_at) VALUES (?, ?, ?, ?, ?)")).WithArgs("tenant-a", string(claim.InstanceID), "wait", uint64(3), wake).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_workflow_subscription (tenant_id,instance_id,step_id,event_type,correlation_field,correlation_value,on_event) VALUES (?,?,?,?,?,?,?)")).WithArgs("tenant-a", string(claim.InstanceID), "wait", "invoice.paid", "invoice_id", "INV-1", "paid").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectQuery("SELECT s.event_id,s.event_type,s.payload_json,i.id,i.current_step,sub.correlation_field,sub.correlation_value,sub.on_event,i.revision,i.definition_id,i.definition_version .*i.id=\\? .*FOR UPDATE SKIP LOCKED").WithArgs("tenant-a", string(claim.InstanceID), int64(maxWorkflowSignalBatch)).WillReturnRows(sqlmock.NewRows([]string{"event_id", "event_type", "payload_json", "instance_id", "step_id", "field", "expected", "on_event", "revision", "definition_id", "definition_version"}))
+	mock.ExpectQuery("SELECT s.event_id,s.event_type,s.payload_json,i.business_scope_json,i.id,i.current_step,sub.correlation_field,sub.correlation_value,sub.on_event,i.revision,i.definition_id,i.definition_version .*i.id=\\? .*FOR UPDATE SKIP LOCKED").WithArgs("tenant-a", string(claim.InstanceID), int64(maxWorkflowSignalBatch)).WillReturnRows(sqlmock.NewRows([]string{"event_id", "event_type", "payload_json", "business_scope_json", "instance_id", "step_id", "field", "expected", "on_event", "revision", "definition_id", "definition_version"}))
 	mock.ExpectCommit()
 	if err := store.CommitStep(context.Background(), change); err != nil {
 		t.Fatal("CommitStep:", err)

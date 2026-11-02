@@ -6,26 +6,28 @@ import "github.com/asenawritescode/kora/contract"
 // DocType represents a data entity definition. It defines the fields,
 // constraints, relationships, and UI hints for a document type.
 type DocType struct {
-	Name                string                  `yaml:"name"          json:"name"`
-	ResourceName        string                  `yaml:"resource_name" json:"resource_name,omitempty"`
-	Module              string                  `yaml:"module"        json:"module"`
-	ModuleOwnerID       string                  `yaml:"module_owner_id,omitempty" json:"module_owner_id,omitempty"`
-	ModuleOwnershipMode string                  `yaml:"module_ownership_mode,omitempty" json:"module_ownership_mode,omitempty"`
-	ReferenceRule       *contract.ReferenceRule `yaml:"reference_rule,omitempty" json:"reference_rule,omitempty"`
-	IsSubmittable       bool                    `yaml:"is_submittable" json:"is_submittable"`
-	IsChildTable        bool                    `yaml:"is_child_table" json:"is_child_table"`
-	IsSingle            bool                    `yaml:"is_single"      json:"is_single"`
-	TrackChanges        bool                    `yaml:"track_changes"  json:"track_changes"`
-	AppendOnly          bool                    `yaml:"append_only"    json:"append_only,omitempty"`
-	TitleField          string                  `yaml:"title_field"    json:"title_field"`
-	SearchFields        string                  `yaml:"search_fields"  json:"search_fields"`
-	SortField           string                  `yaml:"sort_field"     json:"sort_field"`
-	SortOrder           string                  `yaml:"sort_order"     json:"sort_order"`
-	Description         string                  `yaml:"description"    json:"description"`
-	Fields              []Field                 `yaml:"fields"         json:"fields"`
-	DocConstraints      []DocConstraint         `yaml:"doc_constraints" json:"doc_constraints"`
-	PublicAccess        *PublicAccess           `yaml:"public_access" json:"public_access,omitempty"`
-	QuantityEffect      *QuantityEffect         `yaml:"quantity_effect" json:"quantity_effect,omitempty"`
+	Name                string                     `yaml:"name"          json:"name"`
+	ResourceName        string                     `yaml:"resource_name" json:"resource_name,omitempty"`
+	Module              string                     `yaml:"module"        json:"module"`
+	ModuleOwnerID       string                     `yaml:"module_owner_id,omitempty" json:"module_owner_id,omitempty"`
+	ModuleOwnershipMode string                     `yaml:"module_ownership_mode,omitempty" json:"module_ownership_mode,omitempty"`
+	BusinessScopePolicy contract.ResourceScopeKind `yaml:"business_scope_policy,omitempty" json:"business_scope_policy,omitempty"`
+	BusinessScopeField  string                     `yaml:"business_scope_field,omitempty" json:"business_scope_field,omitempty"`
+	ReferenceRule       *contract.ReferenceRule    `yaml:"reference_rule,omitempty" json:"reference_rule,omitempty"`
+	IsSubmittable       bool                       `yaml:"is_submittable" json:"is_submittable"`
+	IsChildTable        bool                       `yaml:"is_child_table" json:"is_child_table"`
+	IsSingle            bool                       `yaml:"is_single"      json:"is_single"`
+	TrackChanges        bool                       `yaml:"track_changes"  json:"track_changes"`
+	AppendOnly          bool                       `yaml:"append_only"    json:"append_only,omitempty"`
+	TitleField          string                     `yaml:"title_field"    json:"title_field"`
+	SearchFields        string                     `yaml:"search_fields"  json:"search_fields"`
+	SortField           string                     `yaml:"sort_field"     json:"sort_field"`
+	SortOrder           string                     `yaml:"sort_order"     json:"sort_order"`
+	Description         string                     `yaml:"description"    json:"description"`
+	Fields              []Field                    `yaml:"fields"         json:"fields"`
+	DocConstraints      []DocConstraint            `yaml:"doc_constraints" json:"doc_constraints"`
+	PublicAccess        *PublicAccess              `yaml:"public_access" json:"public_access,omitempty"`
+	QuantityEffect      *QuantityEffect            `yaml:"quantity_effect" json:"quantity_effect,omitempty"`
 
 	metadataReady      bool
 	dataFields         []Field

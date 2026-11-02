@@ -25,9 +25,10 @@ type Fence uint64
 // Claim is an optimistic, tenant-scoped lease. Stores must validate owner,
 // fence, revision, step, and DB-time lease validity on every mutation.
 type Claim struct {
-	Tenant     contract.TenantID
-	InstanceID contract.InstanceID
-	StepID     contract.StepID
+	Tenant        contract.TenantID
+	BusinessScope contract.BusinessScope
+	InstanceID    contract.InstanceID
+	StepID        contract.StepID
 	// Attempt is the next durable attempt number for this step execution,
 	// derived by the store from persisted attempts when the lease is claimed.
 	Attempt uint8
@@ -44,6 +45,7 @@ type Claim struct {
 
 type StartInstanceInput struct {
 	Tenant           contract.TenantID
+	BusinessScope    contract.BusinessScope
 	ID               contract.InstanceID
 	Definition       contract.WorkflowDefinition
 	DefinitionDigest string

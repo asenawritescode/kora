@@ -15,7 +15,7 @@ func ExecutionSchemaStatements(dialect db.Dialect) ([]string, error) {
 	switch dialect.DriverName() {
 	case "libsql":
 		return []string{
-			`CREATE TABLE IF NOT EXISTS _kora_workflow_instance (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, definition_id TEXT NOT NULL, definition_version INTEGER NOT NULL, subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL, subject_revision TEXT NOT NULL, status TEXT NOT NULL, current_step TEXT NOT NULL, revision INTEGER NOT NULL, next_wake_at TEXT, lease_owner TEXT, lease_fence INTEGER NOT NULL DEFAULT 0, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+			`CREATE TABLE IF NOT EXISTS _kora_workflow_instance (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, definition_id TEXT NOT NULL, definition_version INTEGER NOT NULL, subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL, subject_revision TEXT NOT NULL, business_scope_json TEXT, status TEXT NOT NULL, current_step TEXT NOT NULL, revision INTEGER NOT NULL, next_wake_at TEXT, lease_owner TEXT, lease_fence INTEGER NOT NULL DEFAULT 0, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 			`CREATE INDEX IF NOT EXISTS idx_kora_workflow_instance_due ON _kora_workflow_instance (tenant_id, status, next_wake_at, id)`,
 			`CREATE TABLE IF NOT EXISTS _kora_workflow_signal_capacity (lock_id INTEGER PRIMARY KEY)`,
 			`INSERT OR IGNORE INTO _kora_workflow_signal_capacity (lock_id) VALUES (1)`,
@@ -35,7 +35,7 @@ func ExecutionSchemaStatements(dialect db.Dialect) ([]string, error) {
 		}, nil
 	case "postgres":
 		return []string{
-			`CREATE TABLE IF NOT EXISTS _kora_workflow_instance (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, definition_id TEXT NOT NULL, definition_version BIGINT NOT NULL, subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL, subject_revision TEXT NOT NULL, status TEXT NOT NULL, current_step TEXT NOT NULL, revision BIGINT NOT NULL, next_wake_at TIMESTAMPTZ, lease_owner TEXT, lease_fence BIGINT NOT NULL DEFAULT 0, lease_until TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL)`,
+			`CREATE TABLE IF NOT EXISTS _kora_workflow_instance (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, definition_id TEXT NOT NULL, definition_version BIGINT NOT NULL, subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL, subject_revision TEXT NOT NULL, business_scope_json JSONB, status TEXT NOT NULL, current_step TEXT NOT NULL, revision BIGINT NOT NULL, next_wake_at TIMESTAMPTZ, lease_owner TEXT, lease_fence BIGINT NOT NULL DEFAULT 0, lease_until TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL)`,
 			`CREATE INDEX IF NOT EXISTS idx_kora_workflow_instance_due ON _kora_workflow_instance (tenant_id, status, next_wake_at, id)`,
 			`CREATE TABLE IF NOT EXISTS _kora_workflow_signal_capacity (lock_id INTEGER PRIMARY KEY)`,
 			`INSERT INTO _kora_workflow_signal_capacity (lock_id) VALUES (1) ON CONFLICT (lock_id) DO NOTHING`,
@@ -55,7 +55,7 @@ func ExecutionSchemaStatements(dialect db.Dialect) ([]string, error) {
 		}, nil
 	case "mysql":
 		return []string{
-			`CREATE TABLE IF NOT EXISTS _kora_workflow_instance (id VARCHAR(64) PRIMARY KEY, tenant_id VARCHAR(160) NOT NULL, definition_id VARCHAR(64) NOT NULL, definition_version BIGINT NOT NULL, subject_kind VARCHAR(140) NOT NULL, subject_id VARCHAR(160) NOT NULL, subject_revision VARCHAR(32) NOT NULL, status VARCHAR(32) NOT NULL, current_step VARCHAR(160) NOT NULL, revision BIGINT NOT NULL, next_wake_at DATETIME(6) NULL, lease_owner VARCHAR(160) NULL, lease_fence BIGINT NOT NULL DEFAULT 0, lease_until DATETIME(6) NULL, created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL, INDEX idx_kora_workflow_instance_due (tenant_id, status, next_wake_at, id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+			`CREATE TABLE IF NOT EXISTS _kora_workflow_instance (id VARCHAR(64) PRIMARY KEY, tenant_id VARCHAR(160) NOT NULL, definition_id VARCHAR(64) NOT NULL, definition_version BIGINT NOT NULL, subject_kind VARCHAR(140) NOT NULL, subject_id VARCHAR(160) NOT NULL, subject_revision VARCHAR(32) NOT NULL, business_scope_json JSON NULL, status VARCHAR(32) NOT NULL, current_step VARCHAR(160) NOT NULL, revision BIGINT NOT NULL, next_wake_at DATETIME(6) NULL, lease_owner VARCHAR(160) NULL, lease_fence BIGINT NOT NULL DEFAULT 0, lease_until DATETIME(6) NULL, created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL, INDEX idx_kora_workflow_instance_due (tenant_id, status, next_wake_at, id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 			`CREATE TABLE IF NOT EXISTS _kora_workflow_attempt (tenant_id VARCHAR(160) NOT NULL, instance_id VARCHAR(64) NOT NULL, step_id VARCHAR(160) NOT NULL, execution_id VARCHAR(64) NOT NULL, attempt INT NOT NULL, status VARCHAR(32) NOT NULL, idempotency_key VARCHAR(160) NOT NULL, result_json JSON NULL, failure TEXT NOT NULL, started_at DATETIME(6) NOT NULL, finished_at DATETIME(6) NOT NULL, PRIMARY KEY (instance_id, execution_id, attempt)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 			`CREATE TABLE IF NOT EXISTS _kora_workflow_signal_capacity (lock_id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 			`INSERT IGNORE INTO _kora_workflow_signal_capacity (lock_id) VALUES (1)`,

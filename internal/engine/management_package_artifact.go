@@ -119,6 +119,22 @@ func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageAr
 					found = true
 					dt.ModuleOwnerID = string(module.ID)
 					dt.ModuleOwnershipMode = string(owned.MutationMode)
+					dt.BusinessScopePolicy = owned.ScopeKind
+					dt.BusinessScopeField = owned.ScopeField
+					if owned.ScopeKind == contract.ScopeEntityOwned {
+						field := dt.GetField(owned.ScopeField)
+						if field == nil || field.Fieldtype != "Link" {
+							return nil, nil, fmt.Errorf("module %q resource %q entity scope field must be a Link field", module.ID, owned.Ref.String())
+						}
+					}
+					dt.BusinessScopePolicy = owned.ScopeKind
+					dt.BusinessScopeField = owned.ScopeField
+					if owned.ScopeKind == contract.ScopeEntityOwned {
+						field := dt.GetField(owned.ScopeField)
+						if field == nil || field.Fieldtype != "Link" {
+							return nil, nil, fmt.Errorf("module %q resource %q entity scope field must be a Link field", module.ID, owned.Ref.String())
+						}
+					}
 					break
 				}
 			}

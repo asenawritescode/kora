@@ -20,6 +20,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/email"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 )
 
@@ -38,11 +39,20 @@ type JobHandler func(context.Context, *JobConfig) error
 
 // JobConfig holds the parsed scheduler configuration.
 type JobConfig struct {
-	Name     string         `yaml:"name"     json:"name"`
-	Type     JobType        `yaml:"type"     json:"type"`
-	Schedule string         `yaml:"schedule" json:"schedule"` // Cron expression
-	Config   map[string]any `yaml:"config"   json:"config"`
+	Name              string                  `yaml:"name"     json:"name"`
+	Type              JobType                 `yaml:"type"     json:"type"`
+	Schedule          string                  `yaml:"schedule" json:"schedule"` // Cron expression
+	Config            map[string]any          `yaml:"config"   json:"config"`
+	Scope             *contract.BusinessScope `yaml:"scope,omitempty" json:"scope,omitempty"`
+	RequiredResource  string                  `yaml:"required_resource,omitempty" json:"required_resource,omitempty"`
+	RequiredOperation string                  `yaml:"required_operation,omitempty" json:"required_operation,omitempty"`
+	Execution         policy.Execution        `yaml:"-" json:"-"`
 }
+
+// ExecutionResolver returns a fresh, server-issued service execution for one
+// exact scheduled business scope. Entity-owned scheduled work fails closed if
+// the tenant runtime does not provide this resolver.
+type ExecutionResolver func(context.Context, contract.BusinessScope) (policy.Execution, error)
 
 // Scheduler manages and runs background jobs.
 type Scheduler struct {
@@ -59,6 +69,7 @@ type Scheduler struct {
 	} // optional tenant active-work admission
 	DurableStore       DurableScheduleStore
 	TenantID           string
+	ResolveExecution   ExecutionResolver
 	WorkerID           string
 	jobs               []*JobConfig
 	handlers           map[JobType]JobHandler
@@ -628,6 +639,42 @@ func (s *Scheduler) executeScheduledJob(ctx context.Context, job *JobConfig) err
 // retrier owns admission around each SQL phase itself, so its caller must not
 // hold a nested permit across the retry scan.
 func (s *Scheduler) executeScheduledWork(ctx context.Context, job *JobConfig) error {
+	if job == nil {
+		return errors.New("scheduled job is required")
+	}
+	var scope contract.BusinessScope
+	if job.Scope != nil {
+		scope = *job.Scope
+	}
+	if job.Scope == nil && s.TenantID != "" {
+		scope = contract.BusinessScope{TenantID: contract.TenantID(s.TenantID), Kind: contract.ScopeKindTenant}
+	}
+	if (scope.TenantID != "" || scope.Kind != "" || scope.LegalEntityID != "") && (scope.Validate() != nil || scope.TenantID != contract.TenantID(s.TenantID)) {
+		return contract.NewError(contract.CodePermissionDenied, "scheduled job business scope is invalid")
+	}
+	job = cloneJobConfig(job)
+	if scope.TenantID != "" || scope.Kind != "" || scope.LegalEntityID != "" {
+		job.Scope = &scope
+	}
+	if scope.Kind == contract.ScopeKindLegalEntity {
+		if s.ResolveExecution == nil {
+			return contract.NewError(contract.CodePermissionDenied, "entity-scoped scheduled work requires a trusted execution resolver")
+		}
+		execution, err := s.ResolveExecution(ctx, scope)
+		if err != nil {
+			return fmt.Errorf("resolve scheduled job execution: %w", err)
+		}
+		if !execution.Valid() || execution.Tenant() != scope.TenantID || execution.Actor().PrincipalType != contract.PrincipalService {
+			return contract.NewError(contract.CodePermissionDenied, "scheduled job execution is not a verified tenant service")
+		}
+		if job.RequiredResource == "" || job.RequiredOperation == "" {
+			return contract.NewError(contract.CodePermissionDenied, "entity-scoped scheduled job requires an explicit capability grant")
+		}
+		if grant, allowed := execution.GrantForScope(job.RequiredResource, job.RequiredOperation, scope); !allowed || grant.OwnerOnly {
+			return contract.NewError(contract.CodePermissionDenied, "scheduled job capability grant is missing or revoked")
+		}
+		job.Execution = execution
+	}
 	if job != nil && job.Type == JobWebhook {
 		if _, ok := s.WebhookWorker.(ContextWebhookRetrier); ok {
 			return s.executeJob(ctx, job)
@@ -642,6 +689,20 @@ func (s *Scheduler) executeScheduledWork(ctx context.Context, job *JobConfig) er
 	}
 	defer release()
 	return s.executeJob(ctx, job)
+}
+
+func cloneJobConfig(job *JobConfig) *JobConfig {
+	if job == nil {
+		return nil
+	}
+	copy := *job
+	if job.Config != nil {
+		copy.Config = make(map[string]any, len(job.Config))
+		for key, value := range job.Config {
+			copy.Config[key] = value
+		}
+	}
+	return &copy
 }
 
 func (s *Scheduler) executeJob(ctx context.Context, job *JobConfig) error {
@@ -735,6 +796,19 @@ func (s *Scheduler) runDoctypeAlert(ctx context.Context, job *JobConfig) error {
 	filtersJSON := buildFiltersJSON(job.Config["filters"])
 	tx := *s.TxManager
 	tx.Context = ctx
+	tx.BusinessScope = scheduledJobScope(job)
+	if dt.BusinessScopePolicy == contract.ScopeEntityOwned {
+		if !job.Execution.Valid() {
+			return contract.NewError(contract.CodePermissionDenied, "entity-scoped scheduled report requires verified service execution")
+		}
+		decision, denied := policy.DecideForBusinessScope(job.Execution, s.Registry, dt.Name, "read", tx.BusinessScope, true)
+		if denied != nil {
+			return denied
+		}
+		if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
+			return contract.NewError(contract.CodePermissionDenied, "scheduled report cannot apply a user-specific row grant")
+		}
+	}
 	docs, total, err := tx.GetList(dt, filtersJSON, "", 500, 0, "")
 	if err != nil {
 		return fmt.Errorf("querying doctype %s: %w", doctypeName, err)
@@ -786,6 +860,19 @@ func (s *Scheduler) runEmailReport(ctx context.Context, job *JobConfig) error {
 	filtersJSON := buildFiltersJSON(job.Config["filters"])
 	tx := *s.TxManager
 	tx.Context = ctx
+	tx.BusinessScope = scheduledJobScope(job)
+	if dt.BusinessScopePolicy == contract.ScopeEntityOwned {
+		if !job.Execution.Valid() {
+			return contract.NewError(contract.CodePermissionDenied, "entity-scoped scheduled report requires verified service execution")
+		}
+		decision, denied := policy.DecideForBusinessScope(job.Execution, s.Registry, dt.Name, "read", tx.BusinessScope, true)
+		if denied != nil {
+			return denied
+		}
+		if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
+			return contract.NewError(contract.CodePermissionDenied, "scheduled report cannot apply a user-specific row grant")
+		}
+	}
 	docs, total, err := tx.GetList(dt, filtersJSON, "", 500, 0, "")
 	if err != nil {
 		return fmt.Errorf("querying doctype %s: %w", doctypeName, err)
@@ -824,6 +911,13 @@ func (s *Scheduler) runEmailReport(ctx context.Context, job *JobConfig) error {
 	}
 
 	return s.Email.SendTemplateContext(ctx, recipients, subject, body.String(), nil)
+}
+
+func scheduledJobScope(job *JobConfig) contract.BusinessScope {
+	if job == nil || job.Scope == nil {
+		return contract.BusinessScope{}
+	}
+	return *job.Scope
 }
 
 // cronSchedule represents a parsed cron expression.

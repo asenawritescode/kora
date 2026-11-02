@@ -75,7 +75,7 @@ func (e *WorkflowLocalActionExecutor) ExecuteLocal(ctx context.Context, claim wo
 	if !ok || input.Schema != binding.input || action.RequiredGrant != binding.grant || !action.RequiredGrant.Valid() {
 		return workflow.ActionResult{}, &workflow.LocalActionFailure{Kind: workflow.LocalActionNotAppliedPermanent, Cause: contract.NewError(contract.CodeValidationFailed, "local workflow action is not registered for this schema")}
 	}
-	if !action.Execution.Allows(binding.grant.Resource, binding.grant.Operation) {
+	if !workflow.WorkflowGrantAllows(action.Execution, binding.grant, action.BusinessScope) {
 		return workflow.ActionResult{}, &workflow.LocalActionFailure{Kind: workflow.LocalActionNotAppliedPermanent, Cause: contract.NewError(contract.CodePermissionDenied, "workflow service identity lacks the registered action grant")}
 	}
 	if err := e.schemas.Validate(binding.input, input.Data); err != nil {
@@ -161,7 +161,7 @@ func verifiedWorkflowOperationContext(action workflow.ActionContext, requested k
 	if len(actor.Roles) > 0 {
 		primaryRole = actor.Roles[0]
 	}
-	return kernel.OperationContext{Site: actor.Site, TenantID: action.Execution.Tenant(), Execution: action.Execution, Actor: actor,
+	return kernel.OperationContext{Site: actor.Site, TenantID: action.Execution.Tenant(), Execution: action.Execution, BusinessScope: action.BusinessScope, Actor: actor,
 		User: user, UserRole: primaryRole, Roles: append([]string(nil), actor.Roles...), Source: kernel.SourceWorker,
 		CorrelationID: requested.CorrelationID, CausationID: string(action.InstanceID), ExpectedVersion: requested.ExpectedVersion,
 		IdempotencyKey: string(action.IdempotencyKey)}

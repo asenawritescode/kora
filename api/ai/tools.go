@@ -1199,11 +1199,11 @@ func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctyp
 	if permissionOperation == "" {
 		return "Permission denied: unsupported DocType operation"
 	}
-	decision, decisionErr := policy.Decide(execution, reg, dt.Name, permissionOperation)
+	decision, decisionErr := policy.DecideForBusinessScope(execution, reg, dt.Name, permissionOperation, tx.BusinessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned)
 	if decisionErr != nil {
 		return fmt.Sprintf("Permission denied: cannot %s on %s", permissionOperation, dt.Name)
 	}
-	rowScope := policy.RowScope{Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...)}
+	rowScope := policy.RowScope{Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...), Business: tx.BusinessScope}
 	if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
 		rowScope.UserID = actor.SubjectUserID
 		if rowScope.UserID == "" {
@@ -1414,7 +1414,7 @@ func executeAIRecordMutationWithExecution(tx *orm.TxManager, reg *doctype.Regist
 		ctx = context.Background()
 	}
 	result, cerr := engine.Execute(ctx, tx.DB, reg, kernel.Operation{
-		Context: kernel.OperationContext{Site: site, TenantID: execution.Tenant(), Execution: execution, Actor: actor, User: user, UserRole: role, Roles: actorRoles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
+		Context: kernel.OperationContext{Site: site, TenantID: execution.Tenant(), Execution: execution, BusinessScope: tx.BusinessScope, Actor: actor, User: user, UserRole: role, Roles: actorRoles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
 		Command: command, Payload: raw,
 	})
 	if cerr != nil {

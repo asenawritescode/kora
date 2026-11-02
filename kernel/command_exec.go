@@ -12,7 +12,6 @@ import (
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
-	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 )
 
@@ -68,7 +67,7 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if permission != "create" {
 				permission = "write"
 			}
-			if _, err := policy.Decide(op.Context.Execution, reg, dt.Name, permission); err != nil {
+			if _, err := decideOperationResource(op, reg, dt, permission); err != nil {
 				return err
 			}
 		}
@@ -91,7 +90,7 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if dt == nil {
 				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", step.Create.Record))
 			}
-			if _, err := policy.Decide(op.Context.Execution, reg, dt.Name, "create"); err != nil {
+			if _, err := decideOperationResource(op, reg, dt, "create"); err != nil {
 				return err
 			}
 		case step.Update != nil:
@@ -102,7 +101,7 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if dt.AppendOnly {
 				return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
 			}
-			if _, err := policy.Decide(op.Context.Execution, reg, dt.Name, "write"); err != nil {
+			if _, err := decideOperationResource(op, reg, dt, "write"); err != nil {
 				return err
 			}
 		}
@@ -111,7 +110,7 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 }
 
 func validModuleExecution(execution *contract.ModuleExecution, op Operation, reg *doctype.Registry) bool {
-	if execution == nil || !execution.Verified() || execution.TenantID != op.Context.TenantID {
+	if execution == nil || !execution.Verified() || execution.TenantID != op.Context.TenantID || execution.Scope != op.Context.BusinessScope {
 		return false
 	}
 	if execution.AuthorizedCommand == "" || execution.AuthorizedCommand != op.Command || execution.AllowedOperation != op.Command {
@@ -166,6 +165,9 @@ func authorizePublicForm(reg *doctype.Registry, op Operation) *contract.Error {
 	view := reg.Views.GetByRoute(payload.PublicRoute)
 	dt := reg.Get(payload.Doctype)
 	if view == nil || view.PublicAccess == nil || !view.PublicAccess.Enabled || !view.PublicAccess.AllowMutations || view.SourceDocType != payload.Doctype || dt == nil || dt.PublicAccess == nil || !dt.PublicAccess.Enabled {
+		return ErrPermission
+	}
+	if dt.BusinessScopePolicy == contract.ScopeEntityOwned {
 		return ErrPermission
 	}
 	return nil

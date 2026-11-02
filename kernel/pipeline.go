@@ -86,13 +86,20 @@ func authorize(reg *doctype.Registry, op Operation, def CommandDefinition) *cont
 			permission = "create"
 		}
 		if permission == "update" && bundle.Records[0].TransitionAction != "" {
-			if _, err := policy.Decide(op.Context.Execution, reg, doctypeName, "submit"); err != nil {
+			if _, err := decideOperationResource(op, reg, reg.Get(doctypeName), "submit"); err != nil {
 				return err
 			}
 		}
 	}
-	_, err := policy.Decide(op.Context.Execution, reg, doctypeName, permission)
+	_, err := decideOperationResource(op, reg, reg.Get(doctypeName), permission)
 	return err
+}
+
+func decideOperationResource(op Operation, reg *doctype.Registry, dt *doctype.DocType, operation string) (policy.Decision, *contract.Error) {
+	if dt == nil {
+		return policy.Decision{}, contract.NewError(contract.CodeNotFound, "resource not found")
+	}
+	return policy.DecideForBusinessScope(op.Context.Execution, reg, dt.Name, operation, op.Context.BusinessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned)
 }
 
 // payloadDoctype extracts the target doctype from either typed payload.
@@ -233,14 +240,14 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 			if operation != "create" {
 				permission = "write"
 			}
-			if _, permissionErr := policy.Decide(op.Context.Execution, reg, recordDT.Name, permission); permissionErr != nil {
+			if _, permissionErr := decideOperationResource(op, reg, recordDT, permission); permissionErr != nil {
 				return nil, permissionErr
 			}
 			if item.TransitionAction != "" {
 				if operation != "update" {
 					return nil, contract.NewError(contract.CodeValidationFailed, "transition actions require an update bundle item")
 				}
-				if _, permissionErr := policy.Decide(op.Context.Execution, reg, recordDT.Name, "submit"); permissionErr != nil {
+				if _, permissionErr := decideOperationResource(op, reg, recordDT, "submit"); permissionErr != nil {
 					return nil, permissionErr
 				}
 			}
@@ -315,6 +322,9 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 			}
 			if err := applyData(recordDT, doc, data, reg, operation == "update" && !op.Context.AllowReadOnlyFields); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+			}
+			if err := recordDT.BindBusinessScope(doc, op.Context.BusinessScope, operation == "create", oldDoc); err != nil {
+				return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
 			}
 			if item.TransitionAction != "" {
 				statusPolicy, unified, policyErr := k.workflowStatusPolicy(ctx, dbTx, op, recordDT.Name)
@@ -476,6 +486,9 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if err := applyData(dt, doc, p.Data, reg, false); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
+		if err := dt.BindBusinessScope(doc, op.Context.BusinessScope, true, nil); err != nil {
+			return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
+		}
 		setDefaultValues(dt, doc)
 		if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
@@ -554,6 +567,9 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		doc := cloneDoc(oldDoc)
 		if err := applyData(dt, doc, p.Data, reg, !op.Context.AllowReadOnlyFields); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+		if err := dt.BindBusinessScope(doc, op.Context.BusinessScope, false, oldDoc); err != nil {
+			return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
 		}
 		doc.IsNew = false
 		if err := txMgr.RunHooksForValidate(dt, doc, oldDoc); err != nil {
@@ -890,44 +906,21 @@ func resolveBundleValue(value any, priorNames map[string]string) (any, error) {
 }
 
 func setDefaultValues(dt *doctype.DocType, doc *doctype.Document) {
-	for _, field := range dt.DataFields() {
-		if field.Default == "" {
-			continue
-		}
-		if _, exists := doc.Fields[field.Fieldname]; !exists {
-			value := any(field.Default)
-			switch strings.ToLower(strings.TrimSpace(field.Default)) {
-			case "now":
-				switch field.Fieldtype {
-				case "Datetime":
-					value = time.Now().UTC()
-				case "Time":
-					value = time.Now().UTC().Format("15:04:05.000000")
-				}
-			case "today":
-				switch field.Fieldtype {
-				case "Date":
-					value = time.Now().UTC().Format("2006-01-02")
-				case "Datetime":
-					value = time.Now().UTC()
-				}
-			}
-			doc.Set(field.Fieldname, value)
-		}
-	}
+	doctype.ApplyDefaultValues(dt, doc)
 }
 
 func scopeForOperation(reg *doctype.Registry, op Operation, doctypeName, permission string) policy.RowScope {
-	decision, err := policy.Decide(op.Context.Execution, reg, doctypeName, permission)
-	if err != nil || (!decision.OwnerOnly && len(decision.AssignedFields) == 0) {
-		return policy.RowScope{}
+	dt := reg.Get(doctypeName)
+	decision, err := decideOperationResource(op, reg, dt, permission)
+	if err != nil {
+		return policy.RowScope{Business: op.Context.BusinessScope}
 	}
 	actor := op.Context.Execution.Actor()
 	userID := actor.SubjectUserID
 	if userID == "" {
 		userID = actor.PrincipalID
 	}
-	return policy.RowScope{UserID: userID, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...)}
+	return policy.RowScope{UserID: userID, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...), Business: op.Context.BusinessScope}
 }
 
 // cloneDoc copies a loaded document so mutation attempts never alias the
@@ -1146,7 +1139,7 @@ func (k *Kernel) appendRecordChangeEvent(ctx context.Context, tx *sql.Tx, op Ope
 	}
 	event := contract.EventEnvelope{
 		ID: contract.NewEventID(), Type: kind, Version: contract.CurrentVersion,
-		Source: "kora.kernel", Site: op.Context.Site, AggregateType: dt.Name,
+		Source: "kora.kernel", Site: op.Context.Site, BusinessScope: op.Context.BusinessScope, AggregateType: dt.Name,
 		AggregateID: doc.Name, OccurredAt: time.Now().UTC(),
 		CorrelationID: op.Context.CorrelationID, CausationID: op.Context.CausationID, Actor: op.Context.Actor,
 		Data: data,

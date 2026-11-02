@@ -67,6 +67,9 @@ func (o BillingObligation) Validate() error {
 	if o.Source.ID == "" || o.Source.ProviderID == "" || o.Source.ResourceType == "" || o.Customer.ID == "" || o.Customer.ProviderID == "" || o.Currency == "" || o.IdempotencyKey == "" || len(o.Lines) == 0 {
 		return fmt.Errorf("billing obligation identity, customer, currency, lines and idempotency key are required")
 	}
+	if o.Source.Scope.Validate() != nil || o.Customer.Scope.Validate() != nil {
+		return fmt.Errorf("billing obligation references require verified business scope")
+	}
 	start, err := time.Parse("2006-01-02", o.PeriodStart)
 	if err != nil {
 		return fmt.Errorf("invalid billing period start")
@@ -258,13 +261,17 @@ func (g *recurringInvoiceGenerator) generateForSubscription(ctx context.Context,
 		periodEnd := next.AddDate(0, 0, -1).Format("2006-01-02")
 		reference := subscription.Name + "-" + due.Format("20060102")
 		if g.billing != nil {
+			scope := tx.BusinessScope
+			if scope.TenantID == "" && scope.Kind == "" && scope.LegalEntityID == "" {
+				scope = contract.BusinessScope{TenantID: contract.TenantID(g.tenantID), Kind: contract.ScopeKindTenant}
+			}
 			key := recurringInvoiceIdempotencyKey(subscription.Name, billingDate)
-			obligation := BillingObligation{Source: contract.BusinessRef{ProviderID: "kora.subscriptions", ResourceType: "subscription", ID: subscription.Name}, PeriodStart: billingDate, PeriodEnd: periodEnd, Customer: contract.BusinessRef{ProviderID: "kora.parties", ResourceType: "party", ID: subscription.GetString("customer")}, Currency: subscription.GetString("currency"), Lines: []BillingLine{{Description: "Subscription " + subscription.Name, Quantity: "1", UnitPrice: strconv.FormatFloat(amount, 'f', -1, 64)}}, IdempotencyKey: key}
+			obligation := BillingObligation{Source: contract.BusinessRef{ProviderID: "kora.subscriptions", ResourceType: "subscription", ID: subscription.Name, Scope: scope}, PeriodStart: billingDate, PeriodEnd: periodEnd, Customer: contract.BusinessRef{ProviderID: "kora.parties", ResourceType: "party", ID: subscription.GetString("customer"), Scope: scope}, Currency: subscription.GetString("currency"), Lines: []BillingLine{{Description: "Subscription " + subscription.Name, Quantity: "1", UnitPrice: strconv.FormatFloat(amount, 'f', -1, 64)}}, IdempotencyKey: key}
 			if err := obligation.Validate(); err != nil {
 				return err
 			}
-			scope := contract.ScopeContext{TenantID: contract.TenantID(g.tenantID), ProviderID: "kora.subscriptions"}
-			result, err := g.billing.CreateObligation(ctx, scope, obligation)
+			scopeContext := contract.ScopeContext{Scope: scope, ProviderID: "kora.subscriptions"}
+			result, err := g.billing.CreateObligation(ctx, scopeContext, obligation)
 			if err != nil {
 				return fmt.Errorf("create billing obligation %s: %w", reference, err)
 			}

@@ -327,7 +327,7 @@ func delegatedExecution(tenantID contract.TenantID, siteName string, actor contr
 	for _, permission := range permissions {
 		for _, operation := range []string{"read", "create", "write", "delete", "submit", "cancel", "amend", "export", "import", "report"} {
 			if HasExtensionPermission([]doctype.Permission{permission}, permission.Doctype, operation) {
-				grants = append(grants, policy.Grant{Resource: permission.Doctype, Operation: operation, OwnerOnly: permission.IfOwner})
+				grants = append(grants, policy.Grant{Resource: permission.Doctype, Operation: operation, OwnerOnly: permission.IfOwner, Scope: permission.Scope})
 			}
 		}
 	}

@@ -49,6 +49,11 @@ type offlineBootstrapResponse = contract.OfflineBootstrapResponseV1
 type offlinePullRequest = contract.OfflinePullRequestV1
 type offlinePullResponse = contract.OfflinePullResponseV1
 
+type offlineTokenTypes struct {
+	Doctypes      []string               `json:"doctypes"`
+	BusinessScope contract.BusinessScope `json:"business_scope"`
+}
+
 func offlineProject(doctypeName string, data map[string]any) offlineDocument {
 	raw, _ := json.Marshal(data)
 	return offlineDocument{Doctype: doctypeName, Record: raw}
@@ -125,6 +130,7 @@ func (h *Handler) createOfflineSnapshot(c *gin.Context, site, actor string, data
 	registry := h.siteRegistry(c)
 	selected := make([]*doctype.DocType, 0, len(req.Doctypes))
 	scopes := make(map[string]any, len(req.Doctypes))
+	var businessScope contract.BusinessScope
 	seen := map[string]bool{}
 	for _, name := range req.Doctypes {
 		dt := registry.Get(name)
@@ -142,6 +148,7 @@ func (h *Handler) createOfflineSnapshot(c *gin.Context, site, actor string, data
 		seen[dt.Name] = true
 		selected = append(selected, dt)
 		scopes[dt.Name] = scope
+		businessScope = scope.Business
 	}
 	tx, err := database.BeginTx(c.Request.Context(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
@@ -195,7 +202,7 @@ func (h *Handler) createOfflineSnapshot(c *gin.Context, site, actor string, data
 		return
 	}
 	defer write.Rollback()
-	encodedTypes, _ := json.Marshal(names)
+	encodedTypes, _ := json.Marshal(offlineTokenTypes{Doctypes: names, BusinessScope: businessScope})
 	expires := time.Now().UTC().Add(offlineSnapshotLifetime)
 	_, err = write.ExecContext(c.Request.Context(), h.offlineSQL(c, "INSERT INTO _kora_offline_snapshot (token,site,actor,generation,boundary_sequence,types_json,expires_at) VALUES (?,?,?,?,?,?,?)"), token, site, actor, c.GetUint64("site_config_revision"), boundary, string(encodedTypes), expires)
 	if err != nil {
@@ -260,11 +267,21 @@ func (h *Handler) pageOfflineSnapshot(c *gin.Context, site, actor string, databa
 	if hasMore {
 		items = items[:offlineLimit(req.Limit)]
 	}
-	var types []string
-	_ = json.Unmarshal([]byte(typesJSON), &types)
+	var tokenTypes offlineTokenTypes
+	_ = json.Unmarshal([]byte(typesJSON), &tokenTypes)
+	types := tokenTypes.Doctypes
 	execution, _ := requestExecution(c)
+	if tokenTypes.BusinessScope.Validate() != nil || tokenTypes.BusinessScope != businessScopeFromRequest(c, execution) {
+		conflictError(c, "offline.rebootstrap_required", "Workspace scope changed. Download it again", nil)
+		return
+	}
 	for _, name := range types {
-		if _, permissionErr := policy.Decide(execution, h.siteRegistry(c), name, "read"); permissionErr != nil {
+		dt := h.siteRegistry(c).Get(name)
+		if dt == nil {
+			conflictError(c, "offline.rebootstrap_required", "Workspace permissions changed. Download it again", nil)
+			return
+		}
+		if _, permissionErr := policy.DecideForBusinessScope(execution, h.siteRegistry(c), name, "read", tokenTypes.BusinessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned); permissionErr != nil {
 			conflictError(c, "offline.rebootstrap_required", "Workspace permissions changed. Download it again", nil)
 			return
 		}
@@ -311,15 +328,25 @@ func (h *Handler) HandleOfflinePull(c *gin.Context) {
 		conflictError(c, "offline.rebootstrap_required", "Download the workspace again", nil)
 		return
 	}
-	var types []string
-	if err := json.Unmarshal([]byte(typesJSON), &types); err != nil {
+	var tokenTypes offlineTokenTypes
+	if err := json.Unmarshal([]byte(typesJSON), &tokenTypes); err != nil || tokenTypes.BusinessScope.Validate() != nil {
 		conflictError(c, "offline.rebootstrap_required", "Download the workspace again", nil)
 		return
 	}
+	types := tokenTypes.Doctypes
 	allowed := make(map[string]bool, len(types))
 	execution, _ := requestExecution(c)
+	if tokenTypes.BusinessScope != businessScopeFromRequest(c, execution) {
+		conflictError(c, "offline.rebootstrap_required", "Workspace scope changed. Download it again", nil)
+		return
+	}
 	for _, name := range types {
-		if _, permissionErr := policy.Decide(execution, h.siteRegistry(c), name, "read"); permissionErr != nil {
+		dt := h.siteRegistry(c).Get(name)
+		if dt == nil {
+			conflictError(c, "offline.rebootstrap_required", "Workspace permissions changed. Download it again", nil)
+			return
+		}
+		if _, permissionErr := policy.DecideForBusinessScope(execution, h.siteRegistry(c), name, "read", tokenTypes.BusinessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned); permissionErr != nil {
 			conflictError(c, "offline.rebootstrap_required", "Workspace permissions changed. Download it again", nil)
 			return
 		}
@@ -332,7 +359,7 @@ func (h *Handler) HandleOfflinePull(c *gin.Context) {
 		}
 	}
 	eventPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(eventTypes)), ",")
-	query := "SELECT source_sequence,aggregate_type,aggregate_id,event_type FROM _kora_outbox WHERE site = ? AND source_sequence > ? AND event_type IN (" + eventPlaceholders + ") ORDER BY source_sequence LIMIT ?"
+	query := "SELECT source_sequence,aggregate_type,aggregate_id,event_type,payload FROM _kora_outbox WHERE site = ? AND source_sequence > ? AND event_type IN (" + eventPlaceholders + ") ORDER BY source_sequence LIMIT ?"
 	args := make([]any, 0, len(eventTypes)+3)
 	args = append(args, site, sequence)
 	for _, eventType := range eventTypes {
@@ -347,15 +374,22 @@ func (h *Handler) HandleOfflinePull(c *gin.Context) {
 	type event struct {
 		seq                 int64
 		doctype, name, kind string
+		businessScope       contract.BusinessScope
 	}
 	events := make([]event, 0)
 	for rows.Next() {
 		var e event
-		if err := rows.Scan(&e.seq, &e.doctype, &e.name, &e.kind); err != nil {
+		var payload []byte
+		if err := rows.Scan(&e.seq, &e.doctype, &e.name, &e.kind, &payload); err != nil {
 			rows.Close()
 			internalError(c, "offline changes unavailable", err)
 			return
 		}
+		var envelope struct {
+			BusinessScope contract.BusinessScope `json:"business_scope"`
+		}
+		_ = json.Unmarshal(payload, &envelope)
+		e.businessScope = envelope.BusinessScope
 		events = append(events, e)
 	}
 	err = rows.Err()
@@ -376,17 +410,21 @@ func (h *Handler) HandleOfflinePull(c *gin.Context) {
 		if dt == nil || e.name == "" || !allowed[dt.Name] {
 			continue
 		}
+		if dt.BusinessScopePolicy == contract.ScopeEntityOwned && (e.businessScope.Validate() != nil || e.businessScope != tokenTypes.BusinessScope) {
+			continue
+		}
 		marker := offlineMarker{Doctype: dt.Name, Name: e.name}
 		if strings.HasSuffix(e.kind, ".after_delete") {
 			result.Tombstones = append(result.Tombstones, marker)
 			continue
 		}
-		decision, decisionErr := policy.Decide(execution, registry, dt.Name, "read")
+		businessScope := tokenTypes.BusinessScope
+		decision, decisionErr := policy.DecideForBusinessScope(execution, registry, dt.Name, "read", businessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned)
 		if decisionErr != nil {
 			conflictError(c, "offline.rebootstrap_required", "Workspace permissions changed. Download it again", nil)
 			return
 		}
-		scope := requestRowScope(c, decision)
+		scope := requestRowScope(c, decision, businessScope)
 		doc, err := h.siteTx(c).GetDocWithScope(dt, e.name, scope)
 		if errors.Is(err, orm.ErrNotFound) {
 			result.Tombstones = append(result.Tombstones, marker)

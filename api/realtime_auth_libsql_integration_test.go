@@ -48,7 +48,7 @@ func TestLibSQLRealtimeReplayAndNATSUseCurrentOwner(t *testing.T) {
 	}
 	if _, err := database.Exec(`CREATE TABLE IF NOT EXISTS _kora_outbox (
 		id TEXT PRIMARY KEY, event_type TEXT NOT NULL, site TEXT NOT NULL,
-		aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL, created_at DATETIME NOT NULL
+		aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL, payload TEXT, created_at DATETIME NOT NULL
 	)`); err != nil {
 		t.Fatal("create realtime replay fixture:", err)
 	}
@@ -56,8 +56,8 @@ func TestLibSQLRealtimeReplayAndNATSUseCurrentOwner(t *testing.T) {
 		t.Fatal("insert live invoice:", err)
 	}
 	eventID, cursor := "evt-"+suffix+"-2", "evt-"+suffix+"-1"
-	if _, err := database.Exec(kdb.Rebind(dialect, `INSERT INTO _kora_outbox (id, event_type, site, aggregate_type, aggregate_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`), eventID, "kora."+doctypeName+".after_update", siteName, doctypeName, "INV-1", time.Now().UTC()); err != nil {
+	if _, err := database.Exec(kdb.Rebind(dialect, `INSERT INTO _kora_outbox (id, event_type, site, aggregate_type, aggregate_id, payload, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`), eventID, "kora."+doctypeName+".after_update", siteName, doctypeName, "INV-1", `{}`, time.Now().UTC()); err != nil {
 		t.Fatal("insert replay event:", err)
 	}
 

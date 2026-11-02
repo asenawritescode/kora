@@ -50,9 +50,12 @@ func DecodeMarketplacePackageManifest(data []byte) (MarketplacePackageManifest, 
 //
 //contract:wire:v2
 type ScheduledJobDefinition struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Schedule string `json:"schedule"`
+	Name              string         `json:"name"`
+	Type              string         `json:"type"`
+	Schedule          string         `json:"schedule"`
+	Scope             *BusinessScope `json:"scope,omitempty"`
+	RequiredResource  string         `json:"required_resource,omitempty"`
+	RequiredOperation string         `json:"required_operation,omitempty"`
 	//contract:json
 	Config json.RawMessage `json:"config,omitempty"`
 }
@@ -77,6 +80,14 @@ func ValidateScheduledJobDefinitions(jobs []ScheduledJobDefinition) error {
 		names[name] = true
 		if err := ValidateCronSchedule(job.Schedule); err != nil {
 			return fmt.Errorf("scheduled job %q: %w", name, err)
+		}
+		if job.Scope != nil {
+			if err := job.Scope.Validate(); err != nil {
+				return fmt.Errorf("scheduled job %q scope: %w", name, err)
+			}
+			if job.Scope.Kind == ScopeKindLegalEntity && (job.RequiredResource == "" || job.RequiredOperation == "") {
+				return fmt.Errorf("scheduled job %q with legal-entity scope requires an explicit resource and operation grant", name)
+			}
 		}
 		if len(job.Config) == 0 {
 			continue

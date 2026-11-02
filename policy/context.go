@@ -27,12 +27,19 @@ type Grant struct {
 	Resource  string
 	Operation string
 	OwnerOnly bool
+	Scope     contract.BusinessScope
 }
 
 // Valid reports whether a grant names one exact resource and supported
 // operation. Grants intentionally have no wildcard or inheritance semantics.
 func (g Grant) Valid() bool {
-	return validResource(g.Resource) && validOperation(g.Operation)
+	if !validResource(g.Resource) || !validOperation(g.Operation) {
+		return false
+	}
+	if g.Scope.Kind == "" && g.Scope.TenantID == "" && g.Scope.LegalEntityID == "" {
+		return true
+	}
+	return g.Scope.Validate() == nil
 }
 
 // NewVerifiedExecution is for trusted authentication adapters after they have
@@ -59,7 +66,7 @@ func NewVerifiedExecutionWithGrants(tenant contract.TenantID, actor contract.Act
 	grantCopy := make([]Grant, 0, len(grants))
 	seen := make(map[Grant]struct{}, len(grants))
 	for _, grant := range grants {
-		if !grant.Valid() {
+		if !grant.Valid() || grant.Scope.TenantID != "" && grant.Scope.TenantID != parsedTenant {
 			return Execution{}, contract.NewError(contract.CodeValidationFailed, "execution grant is invalid")
 		}
 		if _, exists := seen[grant]; exists {
@@ -87,6 +94,20 @@ func (e Execution) Grants() []Grant {
 	return append([]Grant(nil), e.grants...)
 }
 
+// HasGrant reports whether the credential contains this exact grant,
+// including its business scope and owner restriction.
+func (e Execution) HasGrant(required Grant) bool {
+	if !e.Valid() || !required.Valid() {
+		return false
+	}
+	for _, grant := range e.grants {
+		if grant == required {
+			return true
+		}
+	}
+	return false
+}
+
 func (e Execution) Valid() bool {
 	return e.tenant != "" && e.actor.Authenticated() && e.actor.Site != ""
 }
@@ -98,7 +119,7 @@ func (e Execution) Allows(resource, operation string) bool {
 		return false
 	}
 	for _, grant := range e.grants {
-		if grant.Resource == resource && grant.Operation == operation {
+		if grant.Scope.Kind == "" && grant.Scope.TenantID == "" && grant.Scope.LegalEntityID == "" && grant.Resource == resource && grant.Operation == operation {
 			return true
 		}
 	}
@@ -114,7 +135,27 @@ func (e Execution) GrantFor(resource, operation string) (Grant, bool) {
 	var found Grant
 	allowed := false
 	for _, grant := range e.grants {
-		if grant.Resource != resource || grant.Operation != operation {
+		if grant.Scope.Kind != "" || grant.Scope.TenantID != "" || grant.Scope.LegalEntityID != "" || grant.Resource != resource || grant.Operation != operation {
+			continue
+		}
+		if !allowed || grant.OwnerOnly {
+			found = grant
+		}
+		allowed = true
+	}
+	return found, allowed
+}
+
+// GrantForScope returns only a grant issued for this exact legal-entity scope.
+// An unscoped tenant grant or tenant role never implies entity access.
+func (e Execution) GrantForScope(resource, operation string, scope contract.BusinessScope) (Grant, bool) {
+	if !e.Valid() || scope.Validate() != nil || scope.TenantID != e.Tenant() || resource == "" || !validOperation(operation) {
+		return Grant{}, false
+	}
+	var found Grant
+	allowed := false
+	for _, grant := range e.grants {
+		if grant.Resource != resource || grant.Operation != operation || grant.Scope != scope {
 			continue
 		}
 		if !allowed || grant.OwnerOnly {

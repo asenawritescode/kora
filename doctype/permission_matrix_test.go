@@ -4,7 +4,30 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/asenawritescode/kora/contract"
 )
+
+func TestPermissionMatrixEntityGrantRequiresExactBusinessScope(t *testing.T) {
+	matrix := NewPermissionMatrix()
+	scopeA := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	scopeB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	matrix.LoadPermissionsFromDB([]*Role{{Name: "Manager"}}, []*Permission{{Role: "Manager", Doctype: "Invoice", Read: true, Write: true, Scope: scopeA}})
+	tenantMatrix := NewPermissionMatrix()
+	tenantMatrix.LoadPermissionsFromDB([]*Role{{Name: "Manager"}}, []*Permission{{Role: "Manager", Doctype: "Invoice", Read: true}})
+	if allowed, _, _ := tenantMatrix.CanUserInBusinessScope([]string{"Manager"}, "Invoice", "read", scopeA); allowed {
+		t.Fatal("tenant-wide read permission implied entity access")
+	}
+	if allowed, _, _ := matrix.CanUserInBusinessScope([]string{"Manager"}, "Invoice", "read", scopeA); !allowed {
+		t.Fatal("exact entity permission was denied")
+	}
+	if allowed, _, _ := matrix.CanUserInBusinessScope([]string{"Manager"}, "Invoice", "write", scopeA); !allowed {
+		t.Fatal("exact entity permission was denied")
+	}
+	if allowed, _, _ := matrix.CanUserInBusinessScope([]string{"Manager"}, "Invoice", "write", scopeB); allowed {
+		t.Fatal("entity A permission authorized entity B")
+	}
+}
 
 func TestPermissionMatrixDigestIsStableAndTracksAtomicReplacement(t *testing.T) {
 	matrix := NewPermissionMatrix()

@@ -95,12 +95,39 @@ func newDefinitionHandler(t *testing.T, store *externalDispatchStore, definition
 	})
 }
 
+func TestWorkflowActionGrantIsBoundToClaimScopeAndCurrentIdentity(t *testing.T) {
+	scopeA := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	scopeB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	actor := contract.ActorContext{PrincipalID: "workflow-runtime", PrincipalType: contract.PrincipalService, Site: "tenant-a.example.test", AuthenticatedAt: time.Now().UTC()}
+	required := policy.Grant{Resource: "Invoice", Operation: "submit"}
+	current, err := policy.NewVerifiedExecutionWithGrants("tenant-a", actor, []policy.Grant{{Resource: "Invoice", Operation: "submit", Scope: scopeA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !workflowGrantAllows(current, required, scopeA) {
+		t.Fatal("exact entity grant was rejected")
+	}
+	if workflowGrantAllows(current, required, scopeB) {
+		t.Fatal("entity A grant authorized entity B workflow")
+	}
+	if workflowGrantAllows(current, required, contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}) {
+		t.Fatal("entity grant authorized tenant-scoped workflow")
+	}
+	revoked, err := policy.NewVerifiedExecutionWithGrants("tenant-a", actor, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workflowGrantAllows(revoked, required, scopeA) {
+		t.Fatal("resumed workflow continued after its scoped grant was revoked")
+	}
+}
+
 func newDefinitionHandlerWithGrants(t *testing.T, store *externalDispatchStore, definition contract.WorkflowDefinition, stepScope expression.Scope, grants []policy.Grant) (*DefinitionClaimHandler, ActionRegistration) {
 	t.Helper()
 	instances := claimHandlerInstances{instance: contract.WorkflowInstance{
 		ID: "instance-1", Revision: "7", DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		Subject: contract.SubjectRef{Kind: "Invoice", ID: "INV-1", Revision: "4"}, Status: contract.InstanceRunning,
-		CurrentStep: definition.Steps[0].ID,
+		BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CurrentStep: definition.Steps[0].ID,
 	}}
 	defs := claimHandlerDefinitions{definition: definition, ref: contract.DefinitionVersionRef{DefinitionID: definition.ID, Version: definition.Version, Digest: "digest-1"}}
 	identity, err := NewTenantServiceIdentityProvider("tenant-a", contract.ActorContext{
@@ -294,7 +321,7 @@ func TestDefinitionClaimHandlerDoesNotBlindlyRetryAmbiguousLocalCommit(t *testin
 	store := &externalDispatchStore{}
 	step := contract.StepDefinition{ID: "submit", Kind: contract.StepAction, Action: &contract.ActionSpec{Name: "invoice.local-submit", Version: 1, InputSchema: "input", Input: json.RawMessage(`{"ok":true}`), Next: "done"}}
 	definition := contract.WorkflowDefinition{ID: "invoice-flow", Version: 1, Entry: step.ID, Steps: []contract.StepDefinition{step}}
-	instance := contract.WorkflowInstance{ID: "instance-1", Revision: "7", DefinitionID: definition.ID, DefinitionVersion: 1, Status: contract.InstanceRunning, CurrentStep: step.ID}
+	instance := contract.WorkflowInstance{ID: "instance-1", Revision: "7", DefinitionID: definition.ID, DefinitionVersion: 1, BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, Status: contract.InstanceRunning, CurrentStep: step.ID}
 	instances := claimHandlerInstances{instance: instance}
 	definitions := claimHandlerDefinitions{definition: definition, ref: contract.DefinitionVersionRef{DefinitionID: definition.ID, Version: 1, Digest: "digest-1"}}
 	identity, err := NewTenantServiceIdentityProvider("tenant-a", contract.ActorContext{PrincipalID: "workflow-runtime", PrincipalType: contract.PrincipalService, Site: "tenant-a.example.test", AuthenticatedAt: time.Now().UTC()}, []policy.Grant{testActionGrant()})

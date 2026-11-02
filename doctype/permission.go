@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/asenawritescode/kora/contract"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,19 +29,20 @@ type Role struct {
 
 // Permission definition from permissions.yaml
 type Permission struct {
-	Doctype string `yaml:"doctype"   json:"doctype"`
-	Role    string `yaml:"role"      json:"role"`
-	Read    bool   `yaml:"read"      json:"read"`
-	Write   bool   `yaml:"write"     json:"write"`
-	Create  bool   `yaml:"create"    json:"create"`
-	Delete  bool   `yaml:"delete"    json:"delete"`
-	Submit  bool   `yaml:"submit"    json:"submit"`
-	Cancel  bool   `yaml:"cancel"    json:"cancel"`
-	Amend   bool   `yaml:"amend"     json:"amend"`
-	Export  bool   `yaml:"export"    json:"export"`
-	Import  bool   `yaml:"import"    json:"import"`
-	Report  bool   `yaml:"report"    json:"report"`
-	IfOwner bool   `yaml:"if_owner"  json:"if_owner"`
+	Doctype string                 `yaml:"doctype"   json:"doctype"`
+	Role    string                 `yaml:"role"      json:"role"`
+	Scope   contract.BusinessScope `yaml:"scope,omitempty" json:"scope,omitempty"`
+	Read    bool                   `yaml:"read"      json:"read"`
+	Write   bool                   `yaml:"write"     json:"write"`
+	Create  bool                   `yaml:"create"    json:"create"`
+	Delete  bool                   `yaml:"delete"    json:"delete"`
+	Submit  bool                   `yaml:"submit"    json:"submit"`
+	Cancel  bool                   `yaml:"cancel"    json:"cancel"`
+	Amend   bool                   `yaml:"amend"     json:"amend"`
+	Export  bool                   `yaml:"export"    json:"export"`
+	Import  bool                   `yaml:"import"    json:"import"`
+	Report  bool                   `yaml:"report"    json:"report"`
+	IfOwner bool                   `yaml:"if_owner"  json:"if_owner"`
 	// IfAssigned lists concrete fields whose value may match the verified
 	// actor identity to grant the same row access as creator ownership.
 	IfAssigned []string `yaml:"if_assigned,omitempty" json:"if_assigned,omitempty"`
@@ -303,6 +305,43 @@ func (pm *PermissionMatrix) RowScopeFor(userRoles []string, doctype, operation s
 	}
 	sort.Strings(result)
 	return owner, result
+}
+
+// CanUserInBusinessScope grants only when the permission row itself is bound
+// to the requested entity. Ordinary tenant-wide roles do not inherit access.
+func (pm *PermissionMatrix) CanUserInBusinessScope(userRoles []string, doctype, operation string, scope contract.BusinessScope) (bool, bool, []string) {
+	if pm == nil || scope.Validate() != nil || scope.Kind != contract.ScopeKindLegalEntity {
+		return false, false, nil
+	}
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	found, owner := false, false
+	fields := map[string]struct{}{}
+	for _, role := range userRoles {
+		permission := pm.permissions[role][doctype]
+		if permission == nil || permission.Scope != scope || !permissionAllows(permission, operation) {
+			continue
+		}
+		found = true
+		if !permission.IfOwner && len(permission.IfAssigned) == 0 {
+			return true, false, nil
+		}
+		owner = owner || permission.IfOwner
+		for _, field := range permission.IfAssigned {
+			if field = strings.TrimSpace(field); field != "" {
+				fields[field] = struct{}{}
+			}
+		}
+	}
+	if !found {
+		return false, false, nil
+	}
+	result := make([]string, 0, len(fields))
+	for field := range fields {
+		result = append(result, field)
+	}
+	sort.Strings(result)
+	return true, owner, result
 }
 
 func permissionAllows(p *Permission, operation string) bool {

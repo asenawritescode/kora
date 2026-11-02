@@ -69,7 +69,7 @@ func (p *scopedWorkflowIdentity) RequireActionGrants(ctx context.Context, tenant
 
 func hasWorkflowGrant(grants []policy.Grant, required policy.Grant) bool {
 	for _, grant := range grants {
-		if grant.Resource == required.Resource && grant.Operation == required.Operation && grant.OwnerOnly == required.OwnerOnly {
+		if grant == required {
 			return true
 		}
 	}

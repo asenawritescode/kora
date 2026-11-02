@@ -1792,6 +1792,10 @@ func (h *Handler) HandleViewData(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "resource.doctype_not_found", "Doctype not found", map[string]any{"name": doctypeName})
 		return
 	}
+	rowScope, forbidden := checkPerm(c, reg, dt.Name, "read")
+	if forbidden {
+		return
+	}
 
 	// Get count via ORM.
 	statusFilter := ""
@@ -1801,7 +1805,7 @@ func (h *Handler) HandleViewData(c *gin.Context) {
 		}
 	}
 
-	_, total, err := h.siteTx(c).GetList(dt, statusFilter, "", 1, 0, "")
+	_, total, err := h.siteTx(c).GetListWithScope(dt, statusFilter, "", 1, 0, rowScope, nil, "")
 	if err != nil {
 		c.JSON(http.StatusOK, Response{Data: map[string]any{
 			"count": 0,

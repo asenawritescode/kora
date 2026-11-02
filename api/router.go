@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/asenawritescode/kora/auth"
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/eventstream"
@@ -411,10 +412,20 @@ func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation st
 		c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{"message": "verified execution is required"}})
 		return policy.RowScope{}, true
 	}
+	dt := registry.Get(docType)
+	businessScope := contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}
+	if entityID := strings.TrimSpace(c.GetHeader("X-Kora-Legal-Entity-ID")); entityID != "" {
+		businessScope.Kind = contract.ScopeKindLegalEntity
+		businessScope.LegalEntityID = entityID
+	}
+	if err := businessScope.Validate(); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "invalid legal entity scope"}})
+		return policy.RowScope{}, true
+	}
 
 	authType := c.GetString("auth_type")
 	if authType == "extension" || authType == "channel_session" {
-		decision, decideErr := policy.Decide(execution, registry, docType, operation)
+		decision, decideErr := policy.DecideForBusinessScope(execution, registry, docType, operation, businessScope, dt != nil && dt.BusinessScopePolicy == contract.ScopeEntityOwned)
 		if decideErr != nil {
 			c.JSON(http.StatusForbidden, ErrorResponse{
 				Error: map[string]string{
@@ -423,9 +434,9 @@ func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation st
 			})
 			return policy.RowScope{}, true
 		}
-		return requestRowScope(c, decision), false
+		return requestRowScope(c, decision, businessScope), false
 	}
-	decision, decideErr := policy.Decide(execution, registry, docType, operation)
+	decision, decideErr := policy.DecideForBusinessScope(execution, registry, docType, operation, businessScope, dt != nil && dt.BusinessScopePolicy == contract.ScopeEntityOwned)
 	if decideErr != nil {
 		c.JSON(http.StatusForbidden, ErrorResponse{
 			Error: map[string]string{
@@ -434,15 +445,26 @@ func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation st
 		})
 		return policy.RowScope{}, true
 	}
-	return requestRowScope(c, decision), false
+	return requestRowScope(c, decision, businessScope), false
 }
 
-func requestRowScope(c *gin.Context, decision policy.Decision) policy.RowScope {
+func requestRowScope(c *gin.Context, decision policy.Decision, business contract.BusinessScope) policy.RowScope {
 	if !decision.OwnerOnly && len(decision.AssignedFields) == 0 {
-		return policy.RowScope{}
+		return policy.RowScope{Business: business}
 	}
 	user, _ := requestUserID(c)
-	return policy.RowScope{UserID: user, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...)}
+	return policy.RowScope{UserID: user, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...), Business: business}
+}
+
+func businessScopeFromRequest(c *gin.Context, execution policy.Execution) contract.BusinessScope {
+	scope := contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}
+	if c != nil {
+		if entityID := strings.TrimSpace(c.GetHeader("X-Kora-Legal-Entity-ID")); entityID != "" {
+			scope.Kind = contract.ScopeKindLegalEntity
+			scope.LegalEntityID = entityID
+		}
+	}
+	return scope
 }
 
 // HandleList handles GET /api/resource/{doctype}

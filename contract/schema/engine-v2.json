@@ -241,12 +241,39 @@
         },
         "resource_type": {
           "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
         }
       },
       "required": [
         "id",
         "provider_id",
-        "resource_type"
+        "resource_type",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "BusinessScope": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "tenant",
+            "legal_entity"
+          ],
+          "type": "string"
+        },
+        "legal_entity_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "tenant_id"
       ],
       "type": "object"
     },
@@ -924,6 +951,38 @@
       ],
       "type": "object"
     },
+    "CrossEntityOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "source_entity_id": {
+          "type": "string"
+        },
+        "target_entity_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "operation_id",
+        "resource",
+        "source_entity_id",
+        "target_entity_id",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
     "DefinitionVersionRef": {
       "additionalProperties": false,
       "properties": {
@@ -1167,6 +1226,9 @@
     "HistoricalSnapshot": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "captured_at": {
           "format": "date-time",
           "type": "string"
@@ -1182,6 +1244,7 @@
         }
       },
       "required": [
+        "business_scope",
         "captured_at",
         "data",
         "schema",
@@ -1909,12 +1972,23 @@
         },
         "ref": {
           "$ref": "#/$defs/ResourceRef"
+        },
+        "scope_field": {
+          "type": "string"
+        },
+        "scope_kind": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
         }
       },
       "required": [
         "access",
         "mutation_mode",
-        "ref"
+        "ref",
+        "scope_kind"
       ],
       "type": "object"
     },
@@ -2174,11 +2248,8 @@
         "provider_id": {
           "type": "string"
         },
-        "scope_key": {
-          "type": "string"
-        },
-        "tenant_id": {
-          "type": "string"
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
         }
       },
       "required": [
@@ -2189,8 +2260,7 @@
         "input_hash",
         "operation",
         "provider_id",
-        "scope_key",
-        "tenant_id"
+        "scope"
       ],
       "type": "object"
     },
@@ -2952,8 +3022,18 @@
         "name": {
           "type": "string"
         },
+        "required_operation": {
+          "type": "string"
+        },
+        "required_resource": {
+          "type": "string"
+        },
         "schedule": {
           "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope",
+          "x-optional-pointer": true
         },
         "type": {
           "type": "string"
@@ -3062,6 +3142,9 @@
     "StartWorkflow": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "definition_id": {
           "type": "string"
         },
@@ -3517,6 +3600,9 @@
     "WorkflowInstance": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "created_at": {
           "format": "date-time",
           "type": "string"
@@ -3821,12 +3907,39 @@
         },
         "resource_type": {
           "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
         }
       },
       "required": [
         "id",
         "provider_id",
-        "resource_type"
+        "resource_type",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "BusinessScope": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "tenant",
+            "legal_entity"
+          ],
+          "type": "string"
+        },
+        "legal_entity_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "tenant_id"
       ],
       "type": "object"
     },
@@ -4504,6 +4617,38 @@
       ],
       "type": "object"
     },
+    "CrossEntityOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "source_entity_id": {
+          "type": "string"
+        },
+        "target_entity_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "operation_id",
+        "resource",
+        "source_entity_id",
+        "target_entity_id",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
     "DefinitionVersionRef": {
       "additionalProperties": false,
       "properties": {
@@ -4725,6 +4870,9 @@
     "HistoricalSnapshot": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "captured_at": {
           "format": "date-time",
           "type": "string"
@@ -4740,6 +4888,7 @@
         }
       },
       "required": [
+        "business_scope",
         "captured_at",
         "data",
         "schema",
@@ -5467,12 +5616,23 @@
         },
         "ref": {
           "$ref": "#/$defs/ResourceRef"
+        },
+        "scope_field": {
+          "type": "string"
+        },
+        "scope_kind": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
         }
       },
       "required": [
         "access",
         "mutation_mode",
-        "ref"
+        "ref",
+        "scope_kind"
       ],
       "type": "object"
     },
@@ -5732,11 +5892,8 @@
         "provider_id": {
           "type": "string"
         },
-        "scope_key": {
-          "type": "string"
-        },
-        "tenant_id": {
-          "type": "string"
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
         }
       },
       "required": [
@@ -5747,8 +5904,7 @@
         "input_hash",
         "operation",
         "provider_id",
-        "scope_key",
-        "tenant_id"
+        "scope"
       ],
       "type": "object"
     },
@@ -6490,8 +6646,18 @@
         "name": {
           "type": "string"
         },
+        "required_operation": {
+          "type": "string"
+        },
+        "required_resource": {
+          "type": "string"
+        },
         "schedule": {
           "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope",
+          "x-optional-pointer": true
         },
         "type": {
           "type": "string"
@@ -6600,6 +6766,9 @@
     "StartWorkflow": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "definition_id": {
           "type": "string"
         },
@@ -7055,6 +7224,9 @@
     "WorkflowInstance": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "created_at": {
           "format": "date-time",
           "type": "string"
@@ -7133,6 +7305,10 @@
       "responded",
       "superseded",
       "cancelled"
+    ],
+    "BusinessScopeKind": [
+      "tenant",
+      "legal_entity"
     ],
     "InboxView": [
       "needs_action",
@@ -7223,6 +7399,10 @@
       "cancelled",
       "expired",
       "stale"
+    ],
+    "ResourceScopeKind": [
+      "tenant_shared",
+      "entity_owned"
     ],
     "ResponseKind": [
       "approve",

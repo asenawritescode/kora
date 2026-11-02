@@ -187,10 +187,11 @@ type ValidationResult struct {
 
 //contract:wire:v2
 type StartWorkflow struct {
-	Meta              CommandMeta  `json:"meta"`
-	DefinitionID      DefinitionID `json:"definition_id"`
-	DefinitionVersion uint32       `json:"definition_version"`
-	Subject           SubjectRef   `json:"subject"`
+	Meta              CommandMeta   `json:"meta"`
+	DefinitionID      DefinitionID  `json:"definition_id"`
+	DefinitionVersion uint32        `json:"definition_version"`
+	Subject           SubjectRef    `json:"subject"`
+	BusinessScope     BusinessScope `json:"business_scope,omitempty"`
 }
 
 //contract:wire:v2
@@ -200,6 +201,7 @@ type WorkflowInstance struct {
 	DefinitionID      DefinitionID   `json:"definition_id"`
 	DefinitionVersion uint32         `json:"definition_version"`
 	Subject           SubjectRef     `json:"subject"`
+	BusinessScope     BusinessScope  `json:"business_scope,omitempty"`
 	Status            InstanceStatus `json:"status"`
 	CurrentStep       StepID         `json:"current_step"`
 	NextWakeAt        *time.Time     `json:"next_wake_at,omitempty"`

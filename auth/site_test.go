@@ -79,6 +79,20 @@ func TestAuthenticateExtension_LoadsPermissions(t *testing.T) {
 	}
 }
 
+func TestDelegatedExecutionRetainsLegalEntityGrantScope(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	execution, err := delegatedExecution("tenant-a", "tenant-a.example.test", contract.ActorContext{PrincipalID: "extension:books", PrincipalType: contract.PrincipalService}, []doctype.Permission{{Doctype: "Invoice", Read: true, Scope: scope}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.Allows("Invoice", "read") {
+		t.Fatal("entity-scoped credential grant became tenant-wide")
+	}
+	if _, ok := execution.GrantForScope("Invoice", "read", scope); !ok {
+		t.Fatal("entity-scoped credential grant was lost")
+	}
+}
+
 func TestAuthenticateExtensionExecutionUsesDialectAndExactOwnerGrant(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

@@ -104,12 +104,12 @@ func (s *ExecutionStore) ClaimDue(ctx context.Context, tenant contract.TenantID,
 		return nil, fmt.Errorf("begin workflow claim: %w", err)
 	}
 	defer tx.Rollback()
-	query := `SELECT i.id, i.current_step, i.revision, i.lease_fence, COALESCE((SELECT MAX(a.attempt) FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step),0), (SELECT a.status FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1), (SELECT a.execution_id FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1) FROM _kora_workflow_instance i WHERE i.tenant_id = ? AND i.status IN ('ready','retrying','running') AND (i.next_wake_at IS NULL OR i.next_wake_at <= CURRENT_TIMESTAMP) AND (i.lease_until IS NULL OR i.lease_until <= CURRENT_TIMESTAMP) ORDER BY COALESCE(i.next_wake_at, i.created_at), i.id LIMIT ?`
+	query := `SELECT i.id, i.current_step, i.revision, i.lease_fence, COALESCE((SELECT MAX(a.attempt) FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step),0), (SELECT a.status FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1), (SELECT a.execution_id FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1), i.business_scope_json FROM _kora_workflow_instance i WHERE i.tenant_id = ? AND i.status IN ('ready','retrying','running') AND (i.next_wake_at IS NULL OR i.next_wake_at <= CURRENT_TIMESTAMP) AND (i.lease_until IS NULL OR i.lease_until <= CURRENT_TIMESTAMP) ORDER BY COALESCE(i.next_wake_at, i.created_at), i.id LIMIT ?`
 	if s.dialect.DriverName() == "mysql" {
-		query = `SELECT i.id, i.current_step, i.revision, i.lease_fence, COALESCE((SELECT MAX(a.attempt) FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step),0), (SELECT a.status FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1), (SELECT a.execution_id FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1) FROM _kora_workflow_instance i WHERE i.tenant_id = ? AND i.status IN ('ready','retrying','running') AND (i.next_wake_at IS NULL OR i.next_wake_at <= CURRENT_TIMESTAMP(6)) AND (i.lease_until IS NULL OR i.lease_until <= CURRENT_TIMESTAMP(6)) ORDER BY COALESCE(i.next_wake_at, i.created_at), i.id LIMIT ? FOR UPDATE SKIP LOCKED`
+		query = `SELECT i.id, i.current_step, i.revision, i.lease_fence, COALESCE((SELECT MAX(a.attempt) FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step),0), (SELECT a.status FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1), (SELECT a.execution_id FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1), i.business_scope_json FROM _kora_workflow_instance i WHERE i.tenant_id = ? AND i.status IN ('ready','retrying','running') AND (i.next_wake_at IS NULL OR i.next_wake_at <= CURRENT_TIMESTAMP(6)) AND (i.lease_until IS NULL OR i.lease_until <= CURRENT_TIMESTAMP(6)) ORDER BY COALESCE(i.next_wake_at, i.created_at), i.id LIMIT ? FOR UPDATE SKIP LOCKED`
 	}
 	if s.dialect.DriverName() == "postgres" {
-		query = `SELECT i.id, i.current_step, i.revision, i.lease_fence, COALESCE((SELECT MAX(a.attempt) FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step),0), (SELECT a.status FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1), (SELECT a.execution_id FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1) FROM _kora_workflow_instance i WHERE i.tenant_id = ? AND i.status IN ('ready','retrying','running') AND (i.next_wake_at IS NULL OR i.next_wake_at <= CURRENT_TIMESTAMP) AND (i.lease_until IS NULL OR i.lease_until <= CURRENT_TIMESTAMP) ORDER BY COALESCE(i.next_wake_at, i.created_at), i.id LIMIT ? FOR UPDATE SKIP LOCKED`
+		query = `SELECT i.id, i.current_step, i.revision, i.lease_fence, COALESCE((SELECT MAX(a.attempt) FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step),0), (SELECT a.status FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1), (SELECT a.execution_id FROM _kora_workflow_attempt a WHERE a.tenant_id = i.tenant_id AND a.instance_id = i.id AND a.step_id = i.current_step ORDER BY a.attempt DESC LIMIT 1), i.business_scope_json FROM _kora_workflow_instance i WHERE i.tenant_id = ? AND i.status IN ('ready','retrying','running') AND (i.next_wake_at IS NULL OR i.next_wake_at <= CURRENT_TIMESTAMP) AND (i.lease_until IS NULL OR i.lease_until <= CURRENT_TIMESTAMP) ORDER BY COALESCE(i.next_wake_at, i.created_at), i.id LIMIT ? FOR UPDATE SKIP LOCKED`
 	}
 	rows, err := tx.QueryContext(ctx, db.Rebind(s.dialect, query), string(tenant), limit)
 	if err != nil {
@@ -120,11 +120,12 @@ func (s *ExecutionStore) ClaimDue(ctx context.Context, tenant contract.TenantID,
 		lastStatus, lastExecutionID  sql.NullString
 		revision, fence, lastAttempt uint64
 		firstAttemptAt               time.Time
+		businessScopeJSON            sql.NullString
 	}
 	dueRows := make([]due, 0, limit)
 	for rows.Next() {
 		var item due
-		if err := rows.Scan(&item.id, &item.step, &item.revision, &item.fence, &item.lastAttempt, &item.lastStatus, &item.lastExecutionID); err != nil {
+		if err := rows.Scan(&item.id, &item.step, &item.revision, &item.fence, &item.lastAttempt, &item.lastStatus, &item.lastExecutionID, &item.businessScopeJSON); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("scan due workflow: %w", err)
 		}
@@ -173,7 +174,15 @@ func (s *ExecutionStore) ClaimDue(ctx context.Context, tenant contract.TenantID,
 		if changed != 1 {
 			continue
 		}
-		claims = append(claims, workflow.Claim{Tenant: tenant, InstanceID: contract.InstanceID(item.id), StepID: contract.StepID(item.step), Attempt: uint8(item.lastAttempt + 1), Owner: owner, Fence: workflow.Fence(item.fence + 1), LeaseUntil: time.Now().UTC().Add(lease), Revision: contract.Revision(fmt.Sprint(item.revision)), FirstAttemptAt: item.firstAttemptAt})
+		var businessScope contract.BusinessScope
+		if item.businessScopeJSON.Valid {
+			if err := json.Unmarshal([]byte(item.businessScopeJSON.String), &businessScope); err != nil || businessScope.Validate() != nil || businessScope.TenantID != tenant {
+				return nil, contract.NewError(contract.CodeConflict, "persisted workflow claim business scope is invalid")
+			}
+		} else {
+			businessScope = contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
+		}
+		claims = append(claims, workflow.Claim{Tenant: tenant, BusinessScope: businessScope, InstanceID: contract.InstanceID(item.id), StepID: contract.StepID(item.step), Attempt: uint8(item.lastAttempt + 1), Owner: owner, Fence: workflow.Fence(item.fence + 1), LeaseUntil: time.Now().UTC().Add(lease), Revision: contract.Revision(fmt.Sprint(item.revision)), FirstAttemptAt: item.firstAttemptAt})
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit workflow claims: %w", err)
@@ -578,6 +587,9 @@ func (s *ExecutionStore) validateClaim(claim workflow.Claim, lease time.Duration
 	}
 	if _, err := contract.ParseTenantID(string(claim.Tenant)); err != nil {
 		return fmt.Errorf("workflow tenant: %w", err)
+	}
+	if claim.BusinessScope.Validate() != nil || claim.BusinessScope.TenantID != claim.Tenant {
+		return contract.NewError(contract.CodeValidationFailed, "workflow claim business scope is invalid")
 	}
 	if _, err := contract.ParseInstanceID(string(claim.InstanceID)); err != nil {
 		return fmt.Errorf("workflow instance: %w", err)

@@ -106,7 +106,8 @@ func DerivePrefix(name string) string {
 
 // TxManager provides transactional operations on documents.
 type TxManager struct {
-	DB *sql.DB
+	DB            *sql.DB
+	BusinessScope contract.BusinessScope
 	// Transaction binds reads performed during a kernel operation to its owner
 	// transaction. The kernel sets and clears this only for the operation scope.
 	Transaction *sql.Tx
@@ -207,14 +208,15 @@ func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op eventstream.EventOp, dt *docty
 		ctx = context.Background()
 	}
 	change := eventstream.ChangeEvent{
-		Site:       tx.SiteName,
-		Doctype:    dt.Name,
-		DocName:    docName,
-		Operation:  op,
-		Timestamp:  time.Now(),
-		ModifiedBy: modifiedBy,
-		Data:       data,
-		OldData:    oldData,
+		Site:          tx.SiteName,
+		BusinessScope: tx.BusinessScope,
+		Doctype:       dt.Name,
+		DocName:       docName,
+		Operation:     op,
+		Timestamp:     time.Now(),
+		ModifiedBy:    modifiedBy,
+		Data:          data,
+		OldData:       oldData,
 	}
 	return tx.Outbox.Append(ctx, dbTx, outbox.ChangeEventToEnvelope(change))
 }
@@ -239,6 +241,12 @@ func (tx *TxManager) CompleteInsert(dt *doctype.DocType, doc *doctype.Document) 
 // transaction. It never begins or commits a transaction; the kernel owns the
 // business write together with its receipt, audit row, and outbox events.
 func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document, owner, modifiedBy string) error {
+	if err := dt.BindBusinessScope(doc, tx.BusinessScope, true, nil); err != nil {
+		return fmt.Errorf("validating business scope: %w", err)
+	}
+	if err := tx.validateEntityReferences(dbTx, dt, doc); err != nil {
+		return err
+	}
 	nextNum := 1
 	if doc.Name == "" {
 		prefix := derivePrefix(dt.Name)
@@ -405,6 +413,13 @@ func (tx *TxManager) populateLinkedFields(ex db.Queryer, dt *doctype.DocType, do
 			where += " OR " + targetDT.TitleField + " = ?"
 			args = append(args, linkValue)
 		}
+		if targetDT.BusinessScopePolicy == contract.ScopeEntityOwned {
+			if contract.ValidateResourceBusinessScope(tx.BusinessScope, targetDT.BusinessScopePolicy) != nil || targetDT.BusinessScopeField == "" {
+				return fmt.Errorf("entity-owned linked resource %s requires verified entity scope", targetDT.Name)
+			}
+			where = "(" + where + ") AND " + tx.Dialect.QuoteIdent(targetDT.BusinessScopeField) + " = ?"
+			args = append(args, tx.BusinessScope.LegalEntityID)
+		}
 		targetMeta := targetDT.GetField(targetField)
 		if targetMeta == nil {
 			continue
@@ -495,6 +510,12 @@ func (tx *TxManager) SaveInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Do
 // SaveInTxWithScope applies optimistic revision matching and the actor's
 // current owner-or-assignee predicate in the same write statement.
 func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document, modifiedBy string, scope policy.RowScope, oldDoc *doctype.Document) error {
+	if err := dt.BindBusinessScope(doc, scope.Business, false, oldDoc); err != nil {
+		return fmt.Errorf("validating business scope: %w", err)
+	}
+	if err := tx.validateEntityReferences(dbTx, dt, doc); err != nil {
+		return err
+	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	doc.Set("modified", now)
 	dataFields := dt.NonTableDataFields()
@@ -534,7 +555,7 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 	if scopeErr != nil {
 		return scopeErr
 	}
-	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" {
+	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" && dt.BusinessScopePolicy != contract.ScopeEntityOwned {
 		where += " AND owner = ?"
 		values = append(values, scope.UserID)
 	} else if scopedWhere != "" {
@@ -660,6 +681,45 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 	return nil
 }
 
+func (tx *TxManager) validateEntityReferences(queryer db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
+	if tx == nil || tx.Registry == nil || dt == nil || doc == nil {
+		return nil
+	}
+	for _, field := range dt.Fields {
+		if field.Fieldtype != "Link" || field.Fieldname == dt.BusinessScopeField {
+			continue
+		}
+		value := strings.TrimSpace(fmt.Sprint(doc.Get(field.Fieldname)))
+		if value == "" || value == "<nil>" {
+			continue
+		}
+		target := tx.Registry.Get(field.Options)
+		if target == nil || target.BusinessScopePolicy != contract.ScopeEntityOwned {
+			continue
+		}
+		if contract.ValidateResourceBusinessScope(tx.BusinessScope, contract.ScopeEntityOwned) != nil || target.BusinessScopeField == "" {
+			return fmt.Errorf("reference to entity-owned resource %s requires verified entity scope", target.Name)
+		}
+		where := "name = ?"
+		args := []any{value}
+		if target.TitleField != "" && target.GetField(target.TitleField) != nil {
+			where = "(" + where + " OR " + tx.Dialect.QuoteIdent(target.TitleField) + " = ?)"
+			args = append(args, value)
+		}
+		where += " AND " + tx.Dialect.QuoteIdent(target.BusinessScopeField) + " = ?"
+		args = append(args, tx.BusinessScope.LegalEntityID)
+		var count int
+		query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tx.tableName(target), where)
+		if err := queryer.QueryRow(db.Rebind(tx.Dialect, query), args...).Scan(&count); err != nil {
+			return fmt.Errorf("validating entity-owned reference %s.%s: %w", dt.Name, field.Fieldname, err)
+		}
+		if count == 0 {
+			return fmt.Errorf("reference %s.%s does not resolve within the verified legal entity", dt.Name, field.Fieldname)
+		}
+	}
+	return nil
+}
+
 // GetDoc loads a single document by name, including child table expansion.
 // If owner is non-empty, only returns the document if owned by that user.
 func (tx *TxManager) GetDoc(dt *doctype.DocType, name string, owner string) (*doctype.Document, error) {
@@ -685,7 +745,7 @@ func (tx *TxManager) GetDocWithScope(dt *doctype.DocType, name string, scope pol
 
 	where := "name = ?"
 	args := []any{name}
-	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" {
+	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" && dt.BusinessScopePolicy != contract.ScopeEntityOwned {
 		where += " AND owner = ?"
 		args = append(args, scope.UserID)
 		scope.Owner = false
@@ -755,17 +815,31 @@ func (tx *TxManager) GetDocWithScope(dt *doctype.DocType, name string, scope pol
 }
 
 func (tx *TxManager) rowScopePredicate(dt *doctype.DocType, scope policy.RowScope) (string, []any, error) {
+	var entityClause string
+	var entityArgs []any
+	if scope.Business.TenantID != "" || scope.Business.Kind != "" || scope.Business.LegalEntityID != "" {
+		if err := scope.Business.Validate(); err != nil {
+			return "", nil, fmt.Errorf("invalid business scope: %w", err)
+		}
+	}
+	if dt.BusinessScopePolicy == contract.ScopeEntityOwned {
+		if contract.ValidateResourceBusinessScope(scope.Business, dt.BusinessScopePolicy) != nil || dt.BusinessScopeField == "" || dt.GetField(dt.BusinessScopeField) == nil {
+			return "", nil, fmt.Errorf("entity-owned resource %s requires explicit legal entity scope", dt.Name)
+		}
+		entityClause = tx.Dialect.QuoteIdent(dt.BusinessScopeField) + " = ?"
+		entityArgs = append(entityArgs, scope.Business.LegalEntityID)
+	}
 	if scope.UserID == "" {
 		if scope.Owner || len(scope.AssignedFields) > 0 {
 			return "", nil, fmt.Errorf("row scope requires an actor identity")
 		}
-		return "", nil, nil
+		return entityClause, entityArgs, nil
 	}
-	var clauses []string
-	var args []any
+	var actorClauses []string
+	var actorArgs []any
 	if scope.Owner {
-		clauses = append(clauses, "owner = ?")
-		args = append(args, scope.UserID)
+		actorClauses = append(actorClauses, "owner = ?")
+		actorArgs = append(actorArgs, scope.UserID)
 	}
 	seen := map[string]bool{}
 	for _, fieldName := range scope.AssignedFields {
@@ -778,13 +852,17 @@ func (tx *TxManager) rowScopePredicate(dt *doctype.DocType, scope policy.RowScop
 		if field == nil || field.Fieldtype != "User" {
 			return "", nil, fmt.Errorf("assignment scope field %q on %s must be a User field", fieldName, dt.Name)
 		}
-		clauses = append(clauses, tx.Dialect.QuoteIdent(fieldName)+" = ?")
-		args = append(args, scope.UserID)
+		actorClauses = append(actorClauses, tx.Dialect.QuoteIdent(fieldName)+" = ?")
+		actorArgs = append(actorArgs, scope.UserID)
 	}
-	if len(clauses) == 0 {
-		return "", nil, nil
+	if len(actorClauses) == 0 {
+		return entityClause, entityArgs, nil
 	}
-	return strings.Join(clauses, " OR "), args, nil
+	actorClause := strings.Join(actorClauses, " OR ")
+	if entityClause == "" {
+		return actorClause, actorArgs, nil
+	}
+	return entityClause + " AND (" + actorClause + ")", append(entityArgs, actorArgs...), nil
 }
 
 // GetList returns a paginated list of documents with optional filtering.
@@ -822,7 +900,7 @@ func (tx *TxManager) GetListWithScope(dt *doctype.DocType, filters string, order
 	if scopeErr != nil {
 		return nil, 0, scopeErr
 	}
-	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" {
+	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" && dt.BusinessScopePolicy != contract.ScopeEntityOwned {
 		where += " AND owner = ?"
 		whereArgs = append(whereArgs, scope.UserID)
 	} else if scopedWhere != "" {
@@ -1021,7 +1099,7 @@ func (tx *TxManager) DeleteInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, name
 	if scopeErr != nil {
 		return scopeErr
 	}
-	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" {
+	if scope.Owner && len(scope.AssignedFields) == 0 && scope.UserID != "" && dt.BusinessScopePolicy != contract.ScopeEntityOwned {
 		where += " AND owner = ?"
 		args = append(args, scope.UserID)
 	} else if scopedWhere != "" {
