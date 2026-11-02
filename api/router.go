@@ -960,6 +960,7 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 		resource.DELETE("/:doctype/:name", handler.HandleDelete)
 	}
 	apiGroup.POST("/modules/:module/queries/:query", handler.HandlePublishedModuleQuery)
+	apiGroup.GET("/modules/reconciliation/findings", handler.HandleBusinessReconciliationSummary)
 	apiGroup.GET("/modules/:module/projections/:projection", handler.HandlePublishedModuleProjection)
 	apiGroup.POST("/modules/:module/projections/:projection/rebuild", handler.HandleRebuildPublishedModuleProjection)
 

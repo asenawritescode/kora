@@ -81,6 +81,9 @@ func TestBusinessRunPersistenceAcrossDisposableDialects(t *testing.T) {
 			if count, err := store.CountUnresolvedFindings(ctx, tenant); err != nil || count != 1 {
 				t.Fatalf("unresolved obligation summary count=%d err=%v", count, err)
 			}
+			if count, err := store.CountUnresolvedFindingsInScope(ctx, scope); err != nil || count != 1 {
+				t.Fatalf("entity-scoped unresolved obligation summary count=%d err=%v", count, err)
+			}
 			owner := &countedBusinessRepairer{}
 			if err := store.Repair(ctx, tenant, repairRun.ID, repairFinding.ID, "operator-a", allowBusinessRepair{}, owner); err != nil {
 				t.Fatal("owner-command repair:", err)
@@ -99,6 +102,9 @@ func TestBusinessRunPersistenceAcrossDisposableDialects(t *testing.T) {
 			}
 			if count, err := restarted.CountUnresolvedFindings(ctx, tenant); err != nil || count != 0 {
 				t.Fatalf("waived and repaired obligation summary count=%d err=%v", count, err)
+			}
+			if count, err := restarted.CountUnresolvedFindingsInScope(ctx, scope); err != nil || count != 0 {
+				t.Fatalf("entity-scoped waived and repaired summary count=%d err=%v", count, err)
 			}
 			uncertainFinding := BusinessFinding{ID: "bf_uncertain_live", Key: "sale:uncertain", Kind: FindingMissingEffect, Expected: BusinessObligation{Key: "sale:uncertain", SourceRef: "sale:uncertain", EntityID: "entity-a", Amount: "6.00", Currency: "KES"}}
 			uncertainRun := BusinessRun{TenantID: tenant, OwnerModuleID: "sales.orders", ID: runID + "-uncertain", RuleID: "sales-ar", Version: 1, Scope: scope, Cutoff: time.Now().UTC(), Complete: true, Findings: []BusinessFinding{uncertainFinding}}

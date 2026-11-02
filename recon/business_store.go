@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -57,8 +58,10 @@ type BusinessRunAuthorizer interface {
 }
 
 type BusinessFindingSummaryAuthorizer interface {
-	CanInspectBusinessFindings(context.Context, contract.TenantID, string) error
+	CanInspectBusinessFindings(context.Context, contract.BusinessScope, string) error
 }
+
+var ErrBusinessFindingSummaryDenied = errors.New("business finding summary authorization denied")
 
 type BusinessOwnerRepairer interface {
 	RepairBusinessObligation(context.Context, BusinessObligation, contract.IdempotencyKey) (string, error)
@@ -95,14 +98,14 @@ func (s BusinessReconciliationService) RepairFinding(ctx context.Context, tenant
 	return s.Store.Repair(ctx, tenant, runID, findingID, actor, auth, owner)
 }
 
-func (s BusinessReconciliationService) CountUnresolvedFindings(ctx context.Context, tenant contract.TenantID, actor string, auth BusinessFindingSummaryAuthorizer) (uint32, error) {
+func (s BusinessReconciliationService) CountUnresolvedFindings(ctx context.Context, scope contract.BusinessScope, actor string, auth BusinessFindingSummaryAuthorizer) (uint32, error) {
 	if s.Store == nil || ctx == nil || actor == "" || auth == nil {
 		return 0, fmt.Errorf("business reconciliation store is unavailable")
 	}
-	if err := auth.CanInspectBusinessFindings(ctx, tenant, actor); err != nil {
-		return 0, fmt.Errorf("business finding summary denied: %w", err)
+	if err := auth.CanInspectBusinessFindings(ctx, scope, actor); err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrBusinessFindingSummaryDenied, err)
 	}
-	return s.Store.CountUnresolvedFindings(ctx, tenant)
+	return s.Store.CountUnresolvedFindingsInScope(ctx, scope)
 }
 
 func (s *BusinessRunStore) LoadAuthorized(ctx context.Context, tenant contract.TenantID, runID, actor string, auth BusinessRunReader) (BusinessRun, error) {
@@ -128,6 +131,27 @@ func (s *BusinessRunStore) CountUnresolvedFindings(ctx context.Context, tenant c
 	query := db.Rebind(s.Dialect, `SELECT COUNT(*) FROM _kora_business_recon_finding WHERE tenant_id = ? AND state IN (?, ?)`)
 	var count int64
 	if err := s.DB.QueryRowContext(ctx, query, string(tenant), string(BusinessFindingOpen), string(BusinessFindingInvestigating)).Scan(&count); err != nil {
+		return 0, err
+	}
+	if count < 0 || count > int64(^uint32(0)) {
+		return 0, fmt.Errorf("business finding count exceeds inspection bounds")
+	}
+	return uint32(count), nil
+}
+
+// CountUnresolvedFindingsInScope keeps operator summaries inside the exact
+// tenant or legal-entity scope that was authorized for the request.
+func (s *BusinessRunStore) CountUnresolvedFindingsInScope(ctx context.Context, scope contract.BusinessScope) (uint32, error) {
+	if ctx == nil || s == nil || s.DB == nil || s.Dialect == nil || scope.Validate() != nil {
+		return 0, fmt.Errorf("business finding summary requires context, store, and valid scope")
+	}
+	scopeJSON, err := json.Marshal(scope)
+	if err != nil {
+		return 0, err
+	}
+	query := db.Rebind(s.Dialect, `SELECT COUNT(*) FROM _kora_business_recon_finding f JOIN _kora_business_recon_run r ON r.tenant_id=f.tenant_id AND r.run_id=f.run_id WHERE f.tenant_id = ? AND r.scope_json = ? AND f.state IN (?, ?)`)
+	var count int64
+	if err := s.DB.QueryRowContext(ctx, query, string(scope.TenantID), string(scopeJSON), string(BusinessFindingOpen), string(BusinessFindingInvestigating)).Scan(&count); err != nil {
 		return 0, err
 	}
 	if count < 0 || count > int64(^uint32(0)) {

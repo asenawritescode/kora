@@ -27,7 +27,7 @@ func (a allowBusinessRunRead) CanReadBusinessRun(context.Context, contract.Tenan
 
 type allowBusinessFindingSummary struct{ err error }
 
-func (a allowBusinessFindingSummary) CanInspectBusinessFindings(context.Context, contract.TenantID, string) error {
+func (a allowBusinessFindingSummary) CanInspectBusinessFindings(context.Context, contract.BusinessScope, string) error {
 	return a.err
 }
 
@@ -175,6 +175,25 @@ func TestBusinessRunStoreCountsOnlyUnresolvedTenantBusinessFindings(t *testing.T
 	}
 }
 
+func TestBusinessRunStoreCountsFindingsInsideExactBusinessScope(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	scopeJSON, _ := json.Marshal(scope)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM _kora_business_recon_finding f JOIN _kora_business_recon_run r ON r.tenant_id=f.tenant_id AND r.run_id=f.run_id WHERE f.tenant_id = ? AND r.scope_json = ? AND f.state IN (?, ?)")).WithArgs("tenant-a", string(scopeJSON), "open", "investigating").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	count, err := store.CountUnresolvedFindingsInScope(context.Background(), scope)
+	if err != nil || count != 2 {
+		t.Fatalf("scope-filtered unresolved business finding count=%d err=%v", count, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBusinessReconciliationServiceAuthorizesFindingSummary(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -182,7 +201,8 @@ func TestBusinessReconciliationServiceAuthorizesFindingSummary(t *testing.T) {
 	}
 	defer database.Close()
 	service := BusinessReconciliationService{Store: &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}}
-	if _, err := service.CountUnresolvedFindings(context.Background(), "tenant-a", "reader-a", allowBusinessFindingSummary{err: errors.New("denied")}); err == nil {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	if _, err := service.CountUnresolvedFindings(context.Background(), scope, "reader-a", allowBusinessFindingSummary{err: errors.New("denied")}); err == nil {
 		t.Fatal("unauthorized finding summary accepted")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
