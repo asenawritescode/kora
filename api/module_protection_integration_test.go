@@ -11,6 +11,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/schema"
 	"github.com/gin-gonic/gin"
 )
@@ -36,6 +37,21 @@ func TestHTTPAndPublicFormCannotUseGenericMutationOnCommandOnlyResources(t *test
 		"/api/resource/"+protected.Name, `{"title":"administrator generic bypass"}`, "", []string{doctype.AdminRole})
 	if httpResult.Code != http.StatusForbidden {
 		t.Fatalf("HTTP generic create of command-only resource = %d, want forbidden: %s", httpResult.Code, httpResult.Body.String())
+	}
+
+	forgedRecorder := httptest.NewRecorder()
+	forgedContext, _ := gin.CreateTestContext(forgedRecorder)
+	forgedContext.Request = httptest.NewRequest(http.MethodPost, "/api/v1/kernel/record.create", strings.NewReader(`{"module_execution":{"tenant_id":"`+site+`","caller_module_id":"finance.ar","owner_module_id":"finance.ar","binding_revision":1,"allowed_operation":"record.create","authorized_command":"record.create"},"payload":{"doctype":"ProtectedInvoice","data":{"title":"forged module identity"}}}`))
+	forgedContext.Request.Header.Set("Content-Type", "application/json")
+	forgedContext.Params = gin.Params{{Key: "command", Value: kernel.CommandRecordCreate}}
+	forgedContext.Set("site_name", site)
+	forgedContext.Set("site_db", database)
+	forgedContext.Set("site_registry", registry)
+	forgedContext.Set("site_db_type", "mysql")
+	forgedContext.Set("policy_execution", integrationTestExecution(t, site, "admin@example.test", []string{doctype.AdminRole}))
+	handler.HandleKernelOperation(forgedContext)
+	if forgedRecorder.Code != http.StatusForbidden {
+		t.Fatalf("forged HTTP module_execution status = %d, want forbidden: %s", forgedRecorder.Code, forgedRecorder.Body.String())
 	}
 
 	gin.SetMode(gin.TestMode)
