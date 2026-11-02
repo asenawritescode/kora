@@ -152,6 +152,7 @@ func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *
 		if execution, valid := requestExecution(c); valid {
 			qe.BusinessScope = businessScopeFromRequest(c, execution)
 		}
+		applyProjectionActorScopes(c, qe)
 		result, err := qe.ResolveSemanticQuery(catalog, request, siteRegistry)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "analytics.invalid_query", err.Error(), nil)
@@ -217,6 +218,7 @@ func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *
 		if execution, valid := requestExecution(c); valid {
 			qe.BusinessScope = businessScopeFromRequest(c, execution)
 		}
+		applyProjectionActorScopes(c, qe)
 		result, err := qe.ResolveSemanticQuery(catalog, request, siteRegistry)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "analytics.invalid_query", err.Error(), nil)
@@ -431,6 +433,17 @@ func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *
 
 		c.JSON(http.StatusOK, Response{Data: insights})
 	})
+}
+
+func applyProjectionActorScopes(c *gin.Context, qe *analytics.QueryEngine) {
+	if c == nil || qe == nil {
+		return
+	}
+	if value, ok := c.Get("analytics_projection_actor_scopes"); ok {
+		if scopes, ok := value.(map[string]analytics.ProjectionActorScope); ok {
+			qe.ProjectionActorScopes = scopes
+		}
+	}
 }
 
 const analyticsQueryRequestBodyLimit = 64 << 10

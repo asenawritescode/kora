@@ -58,6 +58,28 @@ func TestModuleOwnedResourcesNeverEnterGenericAnalyticsCatalog(t *testing.T) {
 	}
 }
 
+func TestPublishedProjectionAnalyticsPropagatesActorRowScope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := doctype.NewRegistry()
+	scope := contract.BusinessScope{TenantID: "stable-tenant", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	model := analytics.SemanticModel{Name: "ar_balance", ProjectionOwner: "finance.ar", ProjectionID: "ar_balance", PublishedQuery: "sales.orders/balances", ProjectionScopePolicy: contract.ScopeEntityOwned, AllowedFields: []string{"assigned_to", "id", "amount"}, Dimensions: []analytics.SemanticDimension{{Name: "assigned_to", Field: "assigned_to", Type: "category"}}}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.finance.ar.projection.ar_balance", Role: "Reader", Read: true, IfAssigned: []string{"assigned_to"}, Scope: scope})
+	ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", []string{"Reader"}, nil)
+	ctx.Request.Header.Set("X-Kora-Legal-Entity-ID", "entity-a")
+	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: model.Name, Measures: []string{"count"}}}}
+	if !checkRelatedModelPermissions(ctx, registry, []analytics.SemanticModel{model}, request) {
+		t.Fatalf("assigned actor query permission was denied: status=%d", ctx.Writer.Status())
+	}
+	value, ok := ctx.Get("analytics_projection_actor_scopes")
+	scopes, cast := value.(map[string]analytics.ProjectionActorScope)
+	if !ok || !cast || scopes[model.Name].SubjectID != "analytics-reader" || len(scopes[model.Name].AssignedFields) != 1 || scopes[model.Name].AssignedFields[0] != "assigned_to" {
+		t.Fatalf("projection actor scope = %#v", value)
+	}
+	if !analyticsModelSourcesReadable(ctx, registry, model) {
+		t.Fatal("authorized row-scoped projection was omitted from analytics catalog")
+	}
+}
+
 func TestRelatedAnalyticsQueryAcceptsExactVerifiedSourceGrant(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	registry := doctype.NewRegistry()

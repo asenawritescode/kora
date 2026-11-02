@@ -2518,6 +2518,9 @@
         "output_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
+        "owner_field": {
+          "type": "string"
+        },
         "owner_module_id": {
           "type": "string"
         },
@@ -6637,6 +6640,9 @@
         },
         "output_schema": {
           "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_field": {
+          "type": "string"
         },
         "owner_module_id": {
           "type": "string"

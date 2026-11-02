@@ -78,6 +78,7 @@ func BuildPublishedProjectionModel(name, label string, definition contract.Proje
 		return SemanticModel{}, err
 	}
 	model.AllowedFields = append([]string(nil), definition.AllowedFields...)
+	model.ProjectionOwnerField = definition.OwnerField
 	sort.Strings(model.AllowedFields)
 	if err := model.Validate(); err != nil {
 		return SemanticModel{}, err
@@ -219,6 +220,7 @@ type SemanticModel struct {
 	Relation              *SemanticRelation          `json:"relation,omitempty" yaml:"relation,omitempty"`
 	ProjectionOwner       string                     `json:"projection_owner,omitempty" yaml:"projection_owner,omitempty"`
 	ProjectionID          string                     `json:"projection_id,omitempty" yaml:"projection_id,omitempty"`
+	ProjectionOwnerField  string                     `json:"projection_owner_field,omitempty" yaml:"projection_owner_field,omitempty"`
 	PublishedQuery        string                     `json:"published_query,omitempty" yaml:"published_query,omitempty"`
 	ProjectionScopePolicy contract.ResourceScopeKind `json:"projection_scope_policy,omitempty" yaml:"projection_scope_policy,omitempty"`
 	AllowedFields         []string                   `json:"allowed_fields,omitempty" yaml:"allowed_fields,omitempty"`
@@ -391,6 +393,9 @@ func (m *SemanticModel) Validate() error {
 				return fmt.Errorf("duplicate published field %q", field)
 			}
 			allowed[field] = true
+		}
+		if m.ProjectionOwnerField != "" && !allowed[m.ProjectionOwnerField] {
+			return fmt.Errorf("projection owner field is outside the published field contract")
 		}
 		for _, dimension := range m.Dimensions {
 			if !allowed[dimension.Field] {

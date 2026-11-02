@@ -47,7 +47,7 @@ func TestPublishedProjectionAnalyticsUsesScopedSnapshotAndReportsFreshness(t *te
 	defer database.Close()
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
 	asOf := time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
-	data := json.RawMessage(`[{"id":"invoice-1","period":"2026-10-01","amount":12},{"id":"invoice-2","period":"2026-10-01","amount":8},{"id":"invoice-3","period":"2026-11-01","amount":5}]`)
+	data := json.RawMessage(`[{"id":"invoice-1","period":"2026-10-01","amount":12,"assigned_to":"alice"},{"id":"invoice-2","period":"2026-10-01","amount":8,"assigned_to":"bob"},{"id":"invoice-3","period":"2026-11-01","amount":5,"assigned_to":"alice"}]`)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT source_revision, as_of, freshness, data FROM _kora_analytics_module_projection WHERE site = ? AND projection_id = ? AND owner_module_id = ? AND scope_kind = ? AND legal_entity_id = ? AND source_id = 'published_sources' ORDER BY generation DESC LIMIT 1")).
 		WithArgs("tenant-a", "ar_balance", "finance.ar", "legal_entity", "entity-a").
 		WillReturnRows(sqlmock.NewRows([]string{"source_revision", "as_of", "freshness", "data"}).AddRow("revision-1", asOf, "stale", string(data)))
@@ -57,9 +57,9 @@ func TestPublishedProjectionAnalyticsUsesScopedSnapshotAndReportsFreshness(t *te
 	if err != nil {
 		t.Fatal("build published model:", err)
 	}
-	model.AllowedFields = []string{"amount", "id", "period"}
+	model.AllowedFields = []string{"amount", "id", "period", "assigned_to"}
 	catalog := &SemanticCatalog{Models: []SemanticModel{model}}
-	engine := &QueryEngine{DB: database, SiteName: "tenant-a", Dialect: kdb.Resolve("mysql"), BusinessScope: scope}
+	engine := &QueryEngine{DB: database, SiteName: "tenant-a", Dialect: kdb.Resolve("mysql"), BusinessScope: scope, ProjectionActorScopes: map[string]ProjectionActorScope{model.Name: {SubjectID: "alice", AssignedFields: []string{"assigned_to"}}}}
 	response, err := engine.ResolveSemanticQuery(catalog, AnalyticsQueryRequest{
 		Queries: []ModelQuery{{Model: model.Name, Dimensions: []string{"period"}, Measures: []string{"amount_sum", "count"}}},
 		Time:    QueryTime{From: "2026-10-01", To: "2026-10-31", Granularity: "month"}, Limit: 10,
@@ -70,7 +70,7 @@ func TestPublishedProjectionAnalyticsUsesScopedSnapshotAndReportsFreshness(t *te
 	if response.DataSource != "published_projection" || len(response.Queries) != 1 || response.Queries[0].Freshness != contract.QueryStale || response.Queries[0].AsOf == nil || !response.Queries[0].AsOf.Equal(asOf) {
 		t.Fatalf("projection response metadata = %#v", response)
 	}
-	if len(response.Queries[0].Rows) != 1 || response.Queries[0].Rows[0]["period"] != "2026-10-01" || response.Queries[0].Rows[0]["amount_sum"] != float64(20) || response.Queries[0].Rows[0]["count"] != 2 {
+	if len(response.Queries[0].Rows) != 1 || response.Queries[0].Rows[0]["period"] != "2026-10-01" || response.Queries[0].Rows[0]["amount_sum"] != float64(12) || response.Queries[0].Rows[0]["count"] != 1 {
 		t.Fatalf("projection aggregate rows = %#v", response.Queries[0].Rows)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

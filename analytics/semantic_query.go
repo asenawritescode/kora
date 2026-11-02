@@ -20,6 +20,16 @@ type SemanticQueryResponse struct {
 	DataSource  string                `json:"data_source"`
 }
 
+// ProjectionActorScope is derived from verified API authorization. Assignment
+// and owner predicates are applied before report filters, aggregation, and row
+// limits so analytics cannot widen actor visibility.
+type ProjectionActorScope struct {
+	SubjectID      string
+	OwnerOnly      bool
+	OwnerField     string
+	AssignedFields []string
+}
+
 type SemanticQueryResult struct {
 	Model          string                  `json:"model"`
 	Columns        []string                `json:"columns"`
@@ -121,6 +131,30 @@ func (qe *QueryEngine) resolvePublishedProjection(model SemanticModel, query Mod
 				return nil, fmt.Errorf("published projection %q contains an undeclared field", model.Name)
 			}
 		}
+	}
+	if actorScope, scoped := qe.ProjectionActorScopes[model.Name]; scoped {
+		if strings.TrimSpace(actorScope.SubjectID) == "" || actorScope.OwnerOnly && (actorScope.OwnerField == "" || actorScope.OwnerField != model.ProjectionOwnerField) || !actorScope.OwnerOnly && len(actorScope.AssignedFields) == 0 {
+			return nil, fmt.Errorf("published projection %q actor scope is invalid", model.Name)
+		}
+		visible := make([]map[string]any, 0, len(rows))
+		for _, row := range rows {
+			matched := false
+			if actorScope.OwnerOnly && strings.TrimSpace(fmt.Sprint(row[actorScope.OwnerField])) == actorScope.SubjectID {
+				matched = true
+			}
+			for _, field := range actorScope.AssignedFields {
+				if !allowed[field] {
+					return nil, fmt.Errorf("published projection %q assignment field is not published", model.Name)
+				}
+				if strings.TrimSpace(fmt.Sprint(row[field])) == actorScope.SubjectID {
+					matched = true
+				}
+			}
+			if matched {
+				visible = append(visible, row)
+			}
+		}
+		rows = visible
 	}
 	filtered := make([]map[string]any, 0, len(rows))
 	timeField := semanticDimensionField(model, model.TimeDimension)

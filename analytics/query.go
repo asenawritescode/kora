@@ -20,11 +20,12 @@ type cacheEntry struct {
 
 // QueryEngine resolves metric queries against the rollup tables.
 type QueryEngine struct {
-	DB            *sql.DB
-	SiteName      string
-	Dialect       kdb.Dialect
-	BusinessScope contract.BusinessScope
-	cache         sync.Map // key string → *cacheEntry
+	DB                    *sql.DB
+	SiteName              string
+	Dialect               kdb.Dialect
+	BusinessScope         contract.BusinessScope
+	ProjectionActorScopes map[string]ProjectionActorScope
+	cache                 sync.Map // key string → *cacheEntry
 }
 
 // CachedResolve returns a cached result if available and not expired.

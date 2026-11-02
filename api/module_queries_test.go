@@ -25,7 +25,7 @@ func (e historicalPublishedQueryExecutor) ExecutePublishedQuery(context.Context,
 func TestAuthorizePublishedQueryRequiresActorGrantAndExactScope(t *testing.T) {
 	registry := doctype.NewRegistry()
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
-	query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "totals", ScopePolicy: contract.ScopeEntityOwned}
+	query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "totals", ScopePolicy: contract.ScopeEntityOwned, AllowedFields: []string{"assigned_to"}}
 	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "reader", PrincipalType: contract.PrincipalHuman, Site: "tenant-route", Roles: []string{"Reader"}})
 	if err != nil {
 		t.Fatal(err)
@@ -158,5 +158,24 @@ func TestPublishedProjectionAuthorizationRequiresExactScopeAndNoRowScope(t *test
 	}
 	if authorizePublishedProjection(roleExecution, registry, definition, scope, contract.ScopeEntityOwned, "read") {
 		t.Fatal("owner-scoped permission authorized aggregate projection access")
+	}
+}
+
+func TestPublishedProjectionActorScopeFiltersRawRows(t *testing.T) {
+	registry := doctype.NewRegistry()
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	definition := contract.ProjectionDefinition{ID: "ar_balance", OwnerModuleID: "finance.ar", Sources: []contract.ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: "balances", OutputSchema: contract.SchemaRef{ID: "ar.output", Version: 1}}}, ScopePolicy: contract.ScopeEntityOwned, FactKey: "id", AllowedFields: []string{"assigned_to", "id", "amount"}, OutputSchema: contract.SchemaRef{ID: "ar.output", Version: 1}, RebuildStrategy: "consistent_snapshot"}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.finance.ar.projection.ar_balance", Role: "Reader", Read: true, IfAssigned: []string{"assigned_to"}, Scope: scope})
+	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "alice", SubjectUserID: "alice", PrincipalType: contract.PrincipalHuman, Site: "tenant-route", Roles: []string{"Reader"}, AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal("verified actor:", err)
+	}
+	actorScope, authErr := authorizePublishedProjectionActorScope(execution, registry, definition, scope, contract.ScopeEntityOwned, "read")
+	if authErr != nil || actorScope == nil || len(actorScope.AssignedFields) != 1 || actorScope.AssignedFields[0] != "assigned_to" {
+		t.Fatalf("authorized projection actor scope = %#v, %v", actorScope, authErr)
+	}
+	data, err := filterPublishedProjectionRows(json.RawMessage(`[{"id":"mine","assigned_to":"alice","amount":12},{"id":"theirs","assigned_to":"bob","amount":99}]`), *actorScope)
+	if err != nil || string(data) != `[{"amount":12,"assigned_to":"alice","id":"mine"}]` {
+		t.Fatalf("filtered projection rows = %s, error=%v", data, err)
 	}
 }

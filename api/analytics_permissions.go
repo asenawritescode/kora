@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
@@ -112,6 +113,7 @@ func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, mo
 		queried[query.Model] = true
 	}
 	checked := make(map[string]bool)
+	projectionActorScopes := make(map[string]analytics.ProjectionActorScope)
 	for _, model := range models {
 		if !queried[model.Name] {
 			continue
@@ -122,13 +124,25 @@ func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, mo
 			}
 			resource := "module." + model.ProjectionOwner + ".projection." + model.ProjectionID
 			scope, denied := checkPerm(c, registry, resource, "read")
-			if denied || scope.Owner || len(scope.AssignedFields) > 0 {
-				if !denied {
-					c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{
-						"code": "permission.row_scope_unsupported", "message": "Analytics projections require an explicit scoped grant",
-					}})
-				}
+			if denied {
 				return false
+			}
+			if scope.Owner || len(scope.AssignedFields) > 0 {
+				if strings.TrimSpace(scope.UserID) == "" || scope.Owner && model.ProjectionOwnerField == "" {
+					c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{"code": "permission.row_scope_unsupported", "message": "Projection actor scope is missing its subject or owner field"}})
+					return false
+				}
+				allowed := make(map[string]bool, len(model.AllowedFields))
+				for _, field := range model.AllowedFields {
+					allowed[field] = true
+				}
+				for _, field := range scope.AssignedFields {
+					if !allowed[field] {
+						c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{"code": "permission.row_scope_unsupported", "message": "Projection assignment field is outside the published field contract"}})
+						return false
+					}
+				}
+				projectionActorScopes[model.Name] = analytics.ProjectionActorScope{SubjectID: scope.UserID, OwnerOnly: scope.Owner, OwnerField: model.ProjectionOwnerField, AssignedFields: append([]string(nil), scope.AssignedFields...)}
 			}
 			continue
 		}
@@ -151,6 +165,7 @@ func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, mo
 			}
 		}
 	}
+	c.Set("analytics_projection_actor_scopes", projectionActorScopes)
 	return true
 }
 
@@ -197,7 +212,19 @@ func analyticsModelSourcesReadable(c *gin.Context, registry *doctype.Registry, m
 		}
 		resource := "module." + model.ProjectionOwner + ".projection." + model.ProjectionID
 		scope, denied := checkPerm(c, registry, resource, "read")
-		return !denied && !scope.Owner && len(scope.AssignedFields) == 0
+		if denied || scope.Owner && model.ProjectionOwnerField == "" {
+			return false
+		}
+		allowed := make(map[string]bool, len(model.AllowedFields))
+		for _, field := range model.AllowedFields {
+			allowed[field] = true
+		}
+		for _, field := range scope.AssignedFields {
+			if !allowed[field] {
+				return false
+			}
+		}
+		return true
 	}
 	sources := []string{model.SourceDoctype}
 	if model.Relation != nil {

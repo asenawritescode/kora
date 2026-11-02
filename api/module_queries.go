@@ -95,6 +95,18 @@ func authorizePublishedQueryActorScope(execution policy.Execution, roles policy.
 	if decision.OwnerOnly && query.OwnerField == "" {
 		return nil, contract.NewError(contract.CodePermissionDenied, "published query does not declare an owner field for this grant")
 	}
+	allowed := make(map[string]bool, len(query.AllowedFields))
+	for _, field := range query.AllowedFields {
+		allowed[field] = true
+	}
+	if decision.OwnerOnly && !allowed[query.OwnerField] {
+		return nil, contract.NewError(contract.CodePermissionDenied, "published query owner field is outside its field contract")
+	}
+	for _, field := range decision.AssignedFields {
+		if !allowed[field] {
+			return nil, contract.NewError(contract.CodePermissionDenied, "published query assignment field is outside its field contract")
+		}
+	}
 	if !decision.OwnerOnly && len(decision.AssignedFields) == 0 {
 		return nil, nil
 	}

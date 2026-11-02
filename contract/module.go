@@ -255,6 +255,7 @@ type ProjectionDefinition struct {
 	Sources       []ProjectionSource `json:"sources"`
 	ScopePolicy   ResourceScopeKind  `json:"scope_policy"`
 	FactKey       string             `json:"fact_key"`
+	OwnerField    string             `json:"owner_field,omitempty"`
 	AllowedFields []string           `json:"allowed_fields"`
 	OutputSchema  SchemaRef          `json:"output_schema"`
 	// consistent_snapshot requires every source to return the same non-empty
@@ -279,6 +280,9 @@ func (p ProjectionDefinition) Validate() error {
 	}
 	if !factKeyAllowed {
 		return fmt.Errorf("projection %q fact key is not published", p.ID)
+	}
+	if p.OwnerField != "" && (!validModuleName(p.OwnerField) || !allowed[p.OwnerField]) {
+		return fmt.Errorf("projection %q owner field is not published", p.ID)
 	}
 	seen := make(map[ProjectionSource]bool, len(p.Sources))
 	for _, source := range p.Sources {
