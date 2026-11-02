@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/asenawritescode/kora/contract"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,15 +19,25 @@ import (
 //     once the rule evaluator contract lands (PLUGIN-007); unknown rules
 //     fail definition registration.
 type CommandResource struct {
-	Name          string            `yaml:"name"                     json:"name"`
-	Namespace     string            `yaml:"namespace"                json:"namespace,omitempty"`
-	Version       int               `yaml:"version"                  json:"version"`
-	Permission    string            `yaml:"permission"               json:"permission"` // permission-matrix operation, default "create"
-	Input         CommandInput      `yaml:"input"                    json:"input"`
-	Preconditions []string          `yaml:"preconditions"            json:"preconditions,omitempty"`
-	Steps         []CommandStep     `yaml:"transaction"              json:"transaction"`
-	Emits         []string          `yaml:"emit"                     json:"emit,omitempty"`
-	Labels        map[string]string `yaml:"labels"                   json:"labels,omitempty"`
+	Name          string              `yaml:"name"                     json:"name"`
+	Namespace     string              `yaml:"namespace"                json:"namespace,omitempty"`
+	Version       int                 `yaml:"version"                  json:"version"`
+	Permission    string              `yaml:"permission"               json:"permission"` // permission-matrix operation, default "create"
+	Input         CommandInput        `yaml:"input"                    json:"input"`
+	CrossEntity   *CrossEntityCommand `yaml:"cross_entity,omitempty"   json:"cross_entity,omitempty"`
+	Preconditions []string            `yaml:"preconditions"            json:"preconditions,omitempty"`
+	Steps         []CommandStep       `yaml:"transaction"              json:"transaction"`
+	Emits         []string            `yaml:"emit"                     json:"emit,omitempty"`
+	Labels        map[string]string   `yaml:"labels"                   json:"labels,omitempty"`
+}
+
+// CrossEntityCommand registers a command that requires exact grants in both
+// the invoking entity and a target entity named in its typed input. The
+// invoking entity always comes from verified server context.
+type CrossEntityCommand struct {
+	Resource          string `yaml:"resource"            json:"resource"`
+	Operation         string `yaml:"operation"           json:"operation"`
+	TargetEntityField string `yaml:"target_entity_field" json:"target_entity_field"`
 }
 
 // CommandInput types the payload. The slice form binds one record kind;
@@ -43,14 +54,16 @@ type CommandStep struct {
 }
 
 type StepCreate struct {
-	Record string            `yaml:"record" json:"record"`
-	Values map[string]string `yaml:"values" json:"values"`
+	Record string            `yaml:"record"        json:"record"`
+	Scope  string            `yaml:"business_scope" json:"business_scope,omitempty"`
+	Values map[string]string `yaml:"values"         json:"values"`
 }
 
 type StepUpdate struct {
-	Record string            `yaml:"record" json:"record"`
-	Name   string            `yaml:"name"   json:"name"` // "$input.field" reference
-	Values map[string]string `yaml:"values" json:"values"`
+	Record string            `yaml:"record"        json:"record"`
+	Name   string            `yaml:"name"          json:"name"` // "$input.field" reference
+	Scope  string            `yaml:"business_scope" json:"business_scope,omitempty"`
+	Values map[string]string `yaml:"values"         json:"values"`
 }
 
 // ParseCommandResource parses one command definition from YAML bytes with
@@ -96,7 +109,38 @@ func (c *CommandResource) validate() error {
 	if c.Input.Record == "" {
 		return fmt.Errorf("command %q: input.record required in this slice", c.Name)
 	}
+	if c.CrossEntity != nil {
+		if c.CrossEntity.Resource == "" || c.CrossEntity.Operation == "" || !strings.HasPrefix(c.CrossEntity.TargetEntityField, "input.") || len(strings.TrimPrefix(c.CrossEntity.TargetEntityField, "input.")) == 0 {
+			return fmt.Errorf("command %q: cross_entity requires resource, operation, and target_entity_field under input", c.Name)
+		}
+		probe := contract.CrossEntityOperation{OperationID: c.FullName(), TenantID: "tenant-a", SourceEntityID: "source", TargetEntityID: "target", Resource: c.CrossEntity.Resource, Operation: c.CrossEntity.Operation}
+		if err := probe.Validate(); err != nil {
+			return fmt.Errorf("command %q: cross_entity registration is invalid: %w", c.Name, err)
+		}
+		for i, step := range c.Steps {
+			scope := commandStepScope(step)
+			if scope != "source" && scope != "target" {
+				return fmt.Errorf("command %q: cross-entity step %d requires business_scope source or target", c.Name, i)
+			}
+		}
+	} else {
+		for i, step := range c.Steps {
+			if scope := commandStepScope(step); scope != "" {
+				return fmt.Errorf("command %q: step %d business_scope requires cross_entity registration", c.Name, i)
+			}
+		}
+	}
 	return nil
+}
+
+func commandStepScope(step CommandStep) string {
+	if step.Create != nil {
+		return step.Create.Scope
+	}
+	if step.Update != nil {
+		return step.Update.Scope
+	}
+	return ""
 }
 
 // TouchedRecords returns the distinct record kinds the command mutates, in

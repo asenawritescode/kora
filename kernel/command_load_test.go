@@ -75,3 +75,40 @@ func TestCommandRegistryDuplicateRejected(t *testing.T) {
 		t.Fatalf("duplicate registration must be rejected")
 	}
 }
+
+func TestCrossEntityCommandRequiresExplicitStepScopes(t *testing.T) {
+	definition := `
+name: transfer.apply
+namespace: finance
+version: 1
+input:
+  record: Transfer
+cross_entity:
+  resource: Intercompany Transfer
+  operation: write
+  target_entity_field: input.target_entity_id
+transaction:
+  - create:
+      record: Transfer
+      business_scope: source
+      values:
+        title: $input.title
+  - create:
+      record: Transfer
+      business_scope: target
+      values:
+        title: $input.title
+`
+	parsed, err := kernel.ParseCommandResource([]byte(definition))
+	if err != nil || parsed.CrossEntity == nil {
+		t.Fatalf("valid registered cross-entity command rejected: command=%+v err=%v", parsed, err)
+	}
+	unsafe := strings.Replace(definition, "      business_scope: target\n", "", 1)
+	if _, err := kernel.ParseCommandResource([]byte(unsafe)); err == nil {
+		t.Fatal("cross-entity command with an implicit step scope was registered")
+	}
+	undeclared := strings.Replace(definition, "cross_entity:\n  resource: Intercompany Transfer\n  operation: write\n  target_entity_field: input.target_entity_id\n", "", 1)
+	if _, err := kernel.ParseCommandResource([]byte(undeclared)); err == nil {
+		t.Fatal("step scope was accepted without a registered cross-entity operation")
+	}
+}

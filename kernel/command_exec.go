@@ -12,6 +12,7 @@ import (
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 )
 
@@ -20,6 +21,14 @@ import (
 // record at per-step least privilege — create steps need "create", update
 // steps need "write" on their target record (default-deny, spec §51/§108).
 func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn *CommandResource) *contract.Error {
+	if dyn != nil && dyn.CrossEntity != nil {
+		if op.Context.crossEntityOperation == nil {
+			return contract.NewError(contract.CodePermissionDenied, "cross-entity command requires verified source and target scopes")
+		}
+		if authErr := policy.AuthorizeCrossEntityOperation(op.Context.Execution, *op.Context.crossEntityOperation, reg); authErr != nil {
+			return authErr
+		}
+	}
 	if dyn != nil && dynamicCommandTouchesCommandOnly(reg, dyn) {
 		if !validDynamicModuleExecution(op.Context.ModuleExecution, op, reg, dyn) {
 			return contract.NewError(contract.CodePermissionDenied, "protected resources require their owning module command")
@@ -89,13 +98,17 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 		return ErrPermission
 	}
 	for _, step := range dyn.Steps {
+		stepOp, scopeErr := operationForCommandStep(op, dyn, step)
+		if scopeErr != nil {
+			return scopeErr
+		}
 		switch {
 		case step.Create != nil:
 			dt := reg.Get(step.Create.Record)
 			if dt == nil {
 				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", step.Create.Record))
 			}
-			if _, err := decideOperationResource(op, reg, dt, "create"); err != nil {
+			if _, err := decideOperationResource(stepOp, reg, dt, "create"); err != nil {
 				return err
 			}
 		case step.Update != nil:
@@ -106,7 +119,7 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if dt.AppendOnly {
 				return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
 			}
-			if _, err := decideOperationResource(op, reg, dt, "write"); err != nil {
+			if _, err := decideOperationResource(stepOp, reg, dt, "write"); err != nil {
 				return err
 			}
 		}
@@ -240,6 +253,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 	priorPostCommitHooks := txMgr.PostCommitHooks
 	priorTransaction := txMgr.Transaction
 	priorUser, priorRole, priorRoles, priorContext := txMgr.CurrentUser, txMgr.CurrentUserRole, txMgr.CurrentUserRoles, txMgr.Context
+	priorBusinessScope := txMgr.BusinessScope
 	priorSkipHooks := txMgr.SkipHookScripts
 	txMgr.PostCommitHooks = nil
 	txMgr.Transaction = dbTx
@@ -256,6 +270,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		txMgr.PostCommitHooks = priorPostCommitHooks
 		txMgr.Transaction = priorTransaction
 		txMgr.CurrentUser, txMgr.CurrentUserRole, txMgr.CurrentUserRoles, txMgr.Context = priorUser, priorRole, priorRoles, priorContext
+		txMgr.BusinessScope = priorBusinessScope
 		txMgr.SkipHookScripts = priorSkipHooks
 	}()
 
@@ -272,8 +287,17 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 
 	outcomes := make([]stepOutcome, 0, len(cmd.Steps))
 	lastRecord, lastName := "", ""
+	lastBusinessScope := op.Context.BusinessScope
 
 	for i, step := range cmd.Steps {
+		stepOp, scopeErr := operationForCommandStep(op, cmd, step)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+		if cmd.CrossEntity != nil {
+			txMgr.BusinessScope = stepOp.Context.BusinessScope
+		}
+		lastBusinessScope = stepOp.Context.BusinessScope
 		switch {
 		case step.Create != nil:
 			dt := reg.Get(step.Create.Record)
@@ -287,6 +311,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 				}
 				doc.Set(field, v)
+			}
+			if err := dt.BindBusinessScope(doc, txMgr.BusinessScope, true, nil); err != nil {
+				return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
 			}
 			setDefaultValues(dt, doc)
 			if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
@@ -335,7 +362,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			if rerr != nil || targetName == "" {
 				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 			}
-			scope := scopeForOperation(reg, op, dt.Name, "write")
+			scope := scopeForOperation(reg, stepOp, dt.Name, "write")
 			oldDoc, err := txMgr.GetDocWithScope(dt, targetName, scope)
 			if err != nil {
 				if err == sql.ErrNoRows || strings.Contains(err.Error(), orm.ErrNotFound.Error()) {
@@ -398,6 +425,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			Type:          evtType,
 			Source:        "kora.kernel",
 			Site:          op.Context.Site,
+			BusinessScope: lastBusinessScope,
 			AggregateType: lastRecord,
 			AggregateID:   lastName,
 			CorrelationID: op.Context.CorrelationID,

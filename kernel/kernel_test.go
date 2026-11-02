@@ -1022,6 +1022,104 @@ func TestEntityScopedKernelAndBundleRejectForgedCrossEntityRecords(t *testing.T)
 	}
 }
 
+func TestRegisteredCrossEntityCommandCommitsOnlyWithBothEntityGrants(t *testing.T) {
+	s := newSite(t, "site-cross-entity-command")
+	defer s.DB.Close()
+	k := newKernel(s)
+	dt := &doctype.DocType{
+		Name: "Transfer", Module: "Finance",
+		Fields:              []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}, {Fieldname: "legal_entity_id", Fieldtype: "Data", Reqd: true}},
+		BusinessScopePolicy: contract.ScopeEntityOwned, BusinessScopeField: "legal_entity_id",
+	}
+	s.Registry.Register(dt)
+	if err := schema.MigrateSiteFromRegistry(s.DB, s.Name, s.Registry, s.Dialect); err != nil {
+		t.Fatal("migrate entity-owned transfer:", err)
+	}
+	k.Commands = kernel.NewCommandRegistry()
+	command := `
+name: transfer.apply
+namespace: finance
+version: 1
+input:
+  record: Transfer
+cross_entity:
+  resource: Intercompany Transfer
+  operation: write
+  target_entity_field: input.target_entity_id
+transaction:
+  - create:
+      record: Transfer
+      business_scope: source
+      values:
+        title: $input.source_title
+  - create:
+      record: Transfer
+      business_scope: target
+      values:
+        title: $input.target_title
+`
+	if _, err := kernel.ParseCommandResource([]byte(command)); err != nil {
+		t.Fatal("parse cross-entity command:", err)
+	}
+	mustRegister(t, k, command)
+	source := contract.BusinessScope{TenantID: contract.TenantID(s.Name), Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	target := contract.BusinessScope{TenantID: contract.TenantID(s.Name), Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	actor := contract.ActorContext{PrincipalID: "operator", PrincipalType: contract.PrincipalHuman, Site: s.Name, AuthenticatedAt: time.Now().UTC()}
+	baseGrants := []policy.Grant{
+		{Resource: "Intercompany Transfer", Operation: "write", Scope: source},
+		{Resource: "Intercompany Transfer", Operation: "write", Scope: target},
+		{Resource: "Transfer", Operation: "create", Scope: source},
+		{Resource: "Transfer", Operation: "create", Scope: target},
+	}
+	makeOperation := func(grants []policy.Grant) kernel.Operation {
+		execution, err := policy.NewVerifiedExecutionWithGrants(contract.TenantID(s.Name), actor, grants)
+		if err != nil {
+			t.Fatal("create verified execution:", err)
+		}
+		payload, _ := json.Marshal(map[string]any{"data": map[string]any{
+			"source_entity_id": "entity-c", "target_entity_id": "entity-b", "source_title": "source side", "target_title": "target side",
+		}})
+		return kernel.Operation{Command: "finance.transfer.apply", Payload: payload, Context: kernel.OperationContext{
+			Site: s.Name, TenantID: contract.TenantID(s.Name), Actor: actor, Execution: execution, BusinessScope: source,
+		}}
+	}
+	denied, denialErr := k.Execute(context.Background(), s.DB, s.Registry, makeOperation(baseGrants[:3]))
+	if denialErr == nil || denialErr.Type != contract.CodePermissionDenied {
+		t.Fatalf("operation without target record grant = result %+v, err %v; want permission denied", denied, denialErr)
+	}
+	var count int
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM `tabTransfer`").Scan(&count); err != nil {
+		t.Fatal("count denied transfer records:", err)
+	}
+	if count != 0 {
+		t.Fatalf("denied cross-entity command committed %d records", count)
+	}
+
+	result, err := k.Execute(context.Background(), s.DB, s.Registry, makeOperation(baseGrants))
+	if err != nil || result.Error != nil || result.Status != contract.StatusCompleted {
+		t.Fatalf("dual-authorized registered command = result %+v, err type=%v message=%q", result, err.Type, err.Message)
+	}
+	rows, queryErr := s.DB.Query("SELECT legal_entity_id, title FROM `tabTransfer` ORDER BY legal_entity_id")
+	if queryErr != nil {
+		t.Fatal("load cross-entity command effects:", queryErr)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var entityID, title string
+		if err := rows.Scan(&entityID, &title); err != nil {
+			t.Fatal("scan cross-entity command effect:", err)
+		}
+		got = append(got, entityID+":"+title)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal("iterate cross-entity command effects:", err)
+	}
+	if len(got) != 2 || got[0] != "entity-a:source side" || got[1] != "entity-b:target side" {
+		t.Fatalf("cross-entity command effects = %#v; want one correctly scoped record per entity", got)
+	}
+}
+
 func TestRecordMutationBundleRollsBackEarlierWritesOnSQLFailure(t *testing.T) {
 	s := newSite(t, "site-bundle-rollback")
 	defer s.DB.Close()

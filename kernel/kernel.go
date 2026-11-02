@@ -163,6 +163,10 @@ type OperationContext struct {
 	// it is distinct from the caller's expected-revision precondition.
 	ConfigRevision uint64
 	IdempotencyKey string
+	// Cross-entity operation state is derived from a registered command and
+	// verified source scope inside Kernel.Execute; adapters cannot populate it.
+	crossEntityOperation *contract.CrossEntityOperation
+	crossEntityTarget    contract.BusinessScope
 }
 
 // Operation is a fully specified invocation handed to Kernel.Execute.
@@ -243,6 +247,9 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 		} else {
 			return k.rejected(opID, op, contract.NewError(contract.CodeValidationFailed, "unknown command "+op.Command))
 		}
+	}
+	if err := prepareCrossEntityCommand(&op, dyn); err != nil {
+		return k.rejected(opID, op, err)
 	}
 
 	// Authorization parity gate: identical evaluation regardless of source.
@@ -384,6 +391,9 @@ func (k *Kernel) ExecuteInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		} else {
 			return contract.CommandResult{}, nil, contract.NewError(contract.CodeValidationFailed, "unknown command "+op.Command)
 		}
+	}
+	if err := prepareCrossEntityCommand(&op, dyn); err != nil {
+		return contract.CommandResult{}, nil, err
 	}
 	if authzErr := authorizeOp(reg, op, def, dyn); authzErr != nil {
 		return contract.CommandResult{}, nil, authzErr
