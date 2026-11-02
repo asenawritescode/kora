@@ -36,6 +36,37 @@ func TestGenericMutationCannotUseCommandOnlyModuleExecution(t *testing.T) {
 	}
 }
 
+func TestCommandOnlyResourcesRejectGenericMutationSources(t *testing.T) {
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Invoice", ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands)})
+
+	tests := []struct {
+		name    string
+		command string
+		payload string
+		source  Source
+	}{
+		{name: "http create", command: CommandRecordCreate, payload: `{"doctype":"Invoice","data":{}}`, source: SourceHTTP},
+		{name: "ai update", command: CommandRecordUpdate, payload: `{"doctype":"Invoice","name":"INV-1","data":{}}`, source: SourceAI},
+		{name: "mcp delete", command: CommandRecordDelete, payload: `{"doctype":"Invoice","name":"INV-1"}`, source: SourceMCP},
+		{name: "workflow transition", command: CommandWorkflowStatusTransition, payload: `{"doctype":"Invoice","name":"INV-1","action":"approve"}`, source: SourceWorker},
+		{name: "public form", command: CommandPublicFormSubmit, payload: `{"doctype":"Invoice","public_route":"apply","data":{}}`, source: SourceHTTP},
+		{name: "bundle with protected child", command: CommandRecordMutateBundle, payload: `{"doctype":"Task","records":[{"key":"task","doctype":"Task","data":{}},{"key":"invoice","doctype":"Invoice","data":{}}]}`, source: SourceAI},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			op := Operation{
+				Command: test.command,
+				Payload: json.RawMessage(test.payload),
+				Context: OperationContext{TenantID: "tenant-a", Source: test.source, Roles: []string{doctype.AdminRole}, UserRole: doctype.AdminRole},
+			}
+			if err := authorizeOp(registry, op, CommandDefinition{Name: test.command}, nil); err == nil || err.Type != contract.CodePermissionDenied {
+				t.Fatalf("broad actor role authorized generic command against commands-only resource: got %v", err)
+			}
+		})
+	}
+}
+
 func TestDynamicCommandCannotBypassCommandOnlyOwnership(t *testing.T) {
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Invoice", ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands)})

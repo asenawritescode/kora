@@ -86,6 +86,9 @@ func (c *CommandResource) validate() error {
 	if c.Name == "" {
 		return fmt.Errorf("command definition: missing name")
 	}
+	if len(c.Preconditions) != 0 {
+		return fmt.Errorf("command %q: preconditions are not supported by this runtime", c.FullName())
+	}
 	if strings.Count(c.Name, ".") == 0 && c.Namespace == "" {
 		return fmt.Errorf("command %q: namespaced name or namespace required", c.Name)
 	}

@@ -62,6 +62,26 @@ func TestLoadCommandDirFailsClosedOnInvalid(t *testing.T) {
 	}
 }
 
+func TestParseCommandResourceRejectsUnimplementedPreconditions(t *testing.T) {
+	definition := `
+name: issue_invoice
+namespace: finance
+version: 1
+input:
+  record: Invoice
+preconditions:
+  - invoice_is_draft
+transaction:
+  - create:
+      record: Invoice
+      values:
+        amount: $input.amount
+`
+	if _, err := kernel.ParseCommandResource([]byte(definition)); err == nil || !strings.Contains(err.Error(), "preconditions are not supported") {
+		t.Fatalf("unimplemented precondition must fail command registration, got %v", err)
+	}
+}
+
 func TestCommandRegistryDuplicateRejected(t *testing.T) {
 	r := kernel.NewCommandRegistry()
 	def, err := kernel.ParseCommandResource([]byte("name: x.create\nnamespace: n\nversion: 1\ninput:\n  record: T\ntransaction:\n  - create:\n      record: T\n      values:\n        a: b\n"))
