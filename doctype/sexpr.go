@@ -38,9 +38,29 @@ func ToSExpr(snapshot *ConfigSnapshot) string {
 	writeReportsSection(&b, snapshot.Reports)
 	writeScriptsSection(&b, snapshot.Scripts)
 	writeScheduledJobsSection(&b, snapshot.ScheduledJobs)
+	writeModuleDescriptorsSection(&b, snapshot.Modules)
 
 	b.WriteString(")")
 	return b.String()
+}
+
+func writeModuleDescriptorsSection(b *strings.Builder, modules []contract.ModuleDescriptor) {
+	if len(modules) == 0 {
+		return
+	}
+	ordered := append([]contract.ModuleDescriptor(nil), modules...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	b.WriteString("\n  (modules")
+	for _, module := range ordered {
+		encoded, err := json.Marshal(module)
+		if err != nil {
+			continue // descriptors are validated before activation serialization
+		}
+		b.WriteString("\n    (module-json ")
+		b.WriteString(quoteSExprString(string(encoded)))
+		b.WriteString(")")
+	}
+	b.WriteString(")")
 }
 
 // ---------------------------------------------------------------------------
@@ -1053,6 +1073,12 @@ func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 					return nil, err
 				}
 				snapshot.ScheduledJobs = jobs
+			case "modules":
+				modules, err := parseModuleDescriptors(child.Children[1:])
+				if err != nil {
+					return nil, err
+				}
+				snapshot.Modules = modules
 			case "views":
 				views, err := parseViews(child.Children[1:])
 				if err != nil {
@@ -1089,6 +1115,21 @@ func parseScheduledJobs(nodes []*sNode) ([]contract.ScheduledJobDefinition, erro
 		jobs = append(jobs, job)
 	}
 	return jobs, nil
+}
+
+func parseModuleDescriptors(nodes []*sNode) ([]contract.ModuleDescriptor, error) {
+	modules := make([]contract.ModuleDescriptor, 0, len(nodes))
+	for _, node := range nodes {
+		if !node.IsList || len(node.Children) != 2 || nodeStr(node.Children[0]) != "module-json" {
+			return nil, fmt.Errorf("invalid module descriptor form")
+		}
+		var module contract.ModuleDescriptor
+		if err := json.Unmarshal([]byte(nodeStr(node.Children[1])), &module); err != nil {
+			return nil, fmt.Errorf("invalid module descriptor JSON: %w", err)
+		}
+		modules = append(modules, module)
+	}
+	return modules, nil
 }
 
 // ---------------------------------------------------------------------------

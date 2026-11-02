@@ -18,7 +18,8 @@ func TestModuleStoreActivationIsAtomicAndRevisionFenced(t *testing.T) {
 	}
 	defer database.Close()
 	store := NewModuleStore(database, db.Resolve("libsql"))
-	candidate := contract.ModuleSnapshot{TenantID: "tenant-a", Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "finance.ar", Version: "1.0.0", ArtifactDigest: "digest"}}, Ownership: []contract.ResourceOwnership{{TenantID: "tenant-a", Resource: contract.ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1}, OwnerModuleID: "finance.ar"}}}
+	resource := contract.OwnedResource{Ref: contract.ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1}, Access: contract.ModulePrivate, MutationMode: contract.MutationCommands, ScopeKind: contract.ScopeTenantShared}
+	candidate := contract.ModuleSnapshot{TenantID: "tenant-a", Modules: []contract.ModuleDescriptor{{ID: "finance.ar", Version: "1.0.0", Resources: []contract.OwnedResource{resource}}}, Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "finance.ar", Version: "1.0.0", ArtifactDigest: "digest"}}, Ownership: []contract.ResourceOwnership{{TenantID: "tenant-a", Resource: resource.Ref, OwnerModuleID: "finance.ar"}}}
 	query := regexp.QuoteMeta(`SELECT revision, snapshot_json FROM _kora_module_snapshot WHERE tenant_id = ?`)
 	mock.ExpectBegin()
 	tx, err := database.Begin()

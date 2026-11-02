@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -108,6 +109,14 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				SchemaVersion: 1, PackageID: "inventory", ReleaseID: "inventory-1", Version: "1.0.0", Kind: "module",
 				Public: contract.ManifestPublic{Slug: "inventory", Name: "Inventory", Summary: "Inventory"},
 				Engine: contract.ManifestEngine{MinVersion: "1.0.0"},
+				Modules: []contract.ModuleDescriptor{{
+					ID: "inventory.stock", Version: "1.0.0",
+					Resources: []contract.OwnedResource{{
+						Ref:    contract.ResourceRef{Namespace: "tenant", Name: "Stock", Version: 1},
+						Access: contract.ModulePrivate, MutationMode: contract.MutationCRUD,
+						ScopeKind: contract.ScopeTenantShared,
+					}},
+				}},
 			}
 			files := []contract.PackFile{{Path: "doctypes/Stock.yaml", ContentType: "doctype", Content: "name: Stock\nmodule: Inventory\nfields:\n  - fieldname: title\n    fieldtype: Data\n    search_index: true\n"}}
 			canonical, err := contract.CanonicalManifestJSON(manifest)
@@ -306,6 +315,54 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = ?`, "tabStock_modified_on_update").Scan(&triggerCount); err != nil || triggerCount != 1 {
 					t.Fatalf("recovered LibSQL modified trigger count = %d, %v; want 1", triggerCount, err)
 				}
+			}
+			modules, err := configstore.NewModuleStore(database, dialect).Load(contract.TenantID(info.SiteID))
+			if err != nil {
+				t.Fatal("reload durable module ownership snapshot after activation recovery:", err)
+			}
+			if modules.Revision != 1 || len(modules.Modules) != 1 || modules.Modules[0].ID != "inventory.stock" || len(modules.Installations) != 1 || modules.Installations[0].ArtifactDigest != digest || len(modules.Ownership) != 1 || modules.Ownership[0].OwnerModuleID != "inventory.stock" || modules.Ownership[0].Resource.Name != "Stock" {
+				t.Fatalf("recovered module snapshot = %+v; want active inventory module, digest, and Stock ownership", modules)
+			}
+			moduleStore := configstore.NewModuleStore(database, dialect)
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			var writers sync.WaitGroup
+			for _, candidateDigest := range []string{"concurrent-digest-a", "concurrent-digest-b"} {
+				candidate := modules
+				candidate.Installations = append([]contract.ModuleInstallation(nil), modules.Installations...)
+				candidate.Installations[0].ArtifactDigest = candidateDigest
+				writers.Add(1)
+				go func(candidate contract.ModuleSnapshot) {
+					defer writers.Done()
+					tx, beginErr := database.BeginTx(ctx, nil)
+					if beginErr != nil {
+						results <- beginErr
+						return
+					}
+					<-start
+					if _, commitErr := moduleStore.CommitActivation(tx, modules.Revision, candidate); commitErr != nil {
+						_ = tx.Rollback()
+						results <- commitErr
+						return
+					}
+					results <- tx.Commit()
+				}(candidate)
+			}
+			close(start)
+			writers.Wait()
+			close(results)
+			wins := 0
+			for result := range results {
+				if result == nil {
+					wins++
+				}
+			}
+			if wins != 1 {
+				t.Fatalf("concurrent module snapshot writers committed %d times; want one", wins)
+			}
+			concurrent, err := moduleStore.Load(contract.TenantID(info.SiteID))
+			if err != nil || concurrent.Revision != 2 || (concurrent.Installations[0].ArtifactDigest != "concurrent-digest-a" && concurrent.Installations[0].ArtifactDigest != "concurrent-digest-b") {
+				t.Fatalf("module snapshot after concurrent activation = %+v, %v; want revision 2 and one winning digest", concurrent, err)
 			}
 		})
 	}

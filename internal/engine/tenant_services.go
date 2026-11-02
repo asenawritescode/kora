@@ -142,7 +142,11 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("resolve storage: %w", err)
 	}
 	services.Storage = backend
-	moduleSnapshot, moduleErr := configstore.NewModuleStore(loaded.DB, dialect).Load(contract.TenantID(loaded.SiteID))
+	moduleStore := configstore.NewModuleStore(loaded.DB, dialect)
+	if moduleErr := moduleStore.EnsureSchema(); moduleErr != nil {
+		return fmt.Errorf("initialize module ownership store for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	moduleSnapshot, moduleErr := moduleStore.Load(contract.TenantID(loaded.SiteID))
 	if moduleErr != nil {
 		return fmt.Errorf("load module ownership snapshot for tenant %s: %w", loaded.Name, moduleErr)
 	}

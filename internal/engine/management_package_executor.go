@@ -125,12 +125,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		handle.Release()
 		return packageRecoveryRequired("module ownership store initialization needs recovery"), nil
 	}
-	tenantID, tenantIDErr := contract.ParseTenantID(info.Name)
-	if tenantIDErr != nil {
-		releaseTenantWork()
-		handle.Release()
-		return failed(contract.CodeValidationFailed, "tenant identity is invalid for module activation"), nil
-	}
+	tenantID := contract.TenantID(operation.Tenant)
 	moduleSnapshot, moduleLoadErr := moduleStore.Load(tenantID)
 	if moduleLoadErr != nil {
 		releaseTenantWork()
@@ -258,6 +253,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		RecoveryPlan: "replace-runtime-from-tenant-db", CreatedBy: string(operation.Caller),
 		VersionLabel: "Apply package " + command.ArtifactRef, Fence: claim.Fence,
 		ExpectedRevision: expectedRevision, ArtifactDigest: command.Digest, ModuleSnapshotRevision: moduleSnapshot.Revision,
+		ModuleTenantID: operation.Tenant,
 	})
 	if err != nil {
 		_ = tx.Rollback()

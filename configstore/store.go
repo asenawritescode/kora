@@ -1096,6 +1096,7 @@ type ManagementActivationCommit struct {
 	Fence                  uint64
 	ExpectedRevision       uint64
 	ArtifactDigest         string
+	ModuleTenantID         contract.TenantID
 	ModuleSnapshotRevision uint64
 }
 
@@ -1117,14 +1118,14 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 		return "", 0, err
 	}
 	if len(snapshot.Modules) > 0 {
+		if _, err := contract.ParseTenantID(string(commit.ModuleTenantID)); err != nil {
+			return "", 0, fmt.Errorf("module snapshot tenant identity is invalid: %w", err)
+		}
 		moduleStore := NewModuleStore(s.DB, dialect)
 		if err := moduleStore.EnsureTxSchema(tx); err != nil {
 			return "", 0, err
 		}
-		tenantID, err := contract.ParseTenantID(siteName)
-		if err != nil {
-			return "", 0, fmt.Errorf("parse module snapshot tenant: %w", err)
-		}
+		tenantID := commit.ModuleTenantID
 		existing, err := loadModuleSnapshotTx(tx, dialect, tenantID)
 		if err != nil {
 			return "", 0, err
@@ -1133,7 +1134,11 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 			return "", 0, fmt.Errorf("module snapshot revision conflict: expected %d, actual %d", commit.ModuleSnapshotRevision, existing.Revision)
 		}
 		allModules := mergeInstalledDescriptors(existing.Modules, snapshot.Modules)
-		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Modules: allModules, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: replaceModuleOwnership(existing.Ownership, tenantID, snapshot.Modules)}
+		ownership, err := replaceModuleOwnership(existing.Ownership, tenantID, snapshot.Modules)
+		if err != nil {
+			return "", 0, err
+		}
+		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Modules: allModules, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: ownership}
 		if err := validateModuleSnapshot(moduleSnapshot); err != nil {
 			return "", 0, err
 		}

@@ -17,6 +17,9 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (
 	if current == nil || incoming == nil {
 		return nil, fmt.Errorf("package activation requires current and incoming config snapshots")
 	}
+	if err := validateOwnedResourceReplacements(current, incoming); err != nil {
+		return nil, err
+	}
 	merged := *current
 	merged.DocTypes = mergeSnapshotItems(current.DocTypes, incoming.DocTypes, func(v *doctype.DocType) string { return v.Name })
 	merged.Roles = mergeSnapshotItems(current.Roles, incoming.Roles, func(v *doctype.Role) string { return v.Name })
@@ -38,6 +41,120 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (
 	return &merged, nil
 }
 
+func validateOwnedResourceReplacements(current, incoming *doctype.ConfigSnapshot) error {
+	owners := make(map[string]contract.ModuleID)
+	for _, module := range current.Modules {
+		for _, resource := range module.Resources {
+			owners[resource.Ref.Namespace+"\x00"+resource.Ref.Name] = module.ID
+		}
+	}
+	incomingOwners := make(map[string]contract.ModuleID)
+	for _, module := range incoming.Modules {
+		for _, resource := range module.Resources {
+			incomingOwners[resource.Ref.Namespace+"\x00"+resource.Ref.Name] = module.ID
+		}
+	}
+	for key, owner := range owners {
+		namespace, name, _ := strings.Cut(key, "\x00")
+		if !packageContainsResource(incoming, namespace, name) {
+			continue
+		}
+		if replacementOwner := incomingOwners[key]; replacementOwner != owner {
+			return fmt.Errorf("package resource %s/%s is owned by module %q and cannot be replaced without that module's update", namespace, name, owner)
+		}
+	}
+	return nil
+}
+
+func packageContainsResource(snapshot *doctype.ConfigSnapshot, namespace, name string) bool {
+	switch namespace {
+	case "tenant":
+		for _, value := range snapshot.DocTypes {
+			if value != nil && value.Name == name {
+				return true
+			}
+		}
+	case "role":
+		for _, value := range snapshot.Roles {
+			if value != nil && value.Name == name {
+				return true
+			}
+		}
+	case "permission":
+		for _, value := range snapshot.Permissions {
+			if value != nil && value.Doctype+"/"+value.Role == name {
+				return true
+			}
+		}
+	case "workflow":
+		for _, value := range snapshot.WorkflowDefinitions {
+			if string(value.ID) == name {
+				return true
+			}
+		}
+	case "view":
+		for _, value := range snapshot.Views {
+			if value != nil && value.Name == name {
+				return true
+			}
+		}
+	case "metric":
+		for _, value := range snapshot.AnalyticsMetrics {
+			if value != nil && value.Name == name {
+				return true
+			}
+		}
+	case "script":
+		for _, value := range snapshot.Scripts {
+			if value != nil && value.Name == name {
+				return true
+			}
+		}
+	case "job":
+		for _, value := range snapshot.ScheduledJobs {
+			if value.Name == name {
+				return true
+			}
+		}
+	case "query":
+		for _, module := range snapshot.Modules {
+			for _, value := range module.Queries {
+				if value.Name == name {
+					return true
+				}
+			}
+		}
+	case "projection":
+		for _, module := range snapshot.Modules {
+			for _, value := range module.Projections {
+				if value.ID == name {
+					return true
+				}
+			}
+		}
+	case "command":
+		for _, module := range snapshot.Modules {
+			for _, offer := range module.Provides {
+				for _, operation := range offer.Operations {
+					if string(offer.Name)+"."+operation.Name == name {
+						return true
+					}
+				}
+			}
+		}
+	case "report":
+		for _, value := range snapshot.Reports {
+			var report struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(value, &report) == nil && report.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func mergeModuleDescriptors(current, incoming []contract.ModuleDescriptor) ([]contract.ModuleDescriptor, error) {
 	byID := make(map[contract.ModuleID]contract.ModuleDescriptor, len(current)+len(incoming))
 	owners := make(map[string]contract.ModuleID)
@@ -48,8 +165,15 @@ func mergeModuleDescriptors(current, incoming []contract.ModuleDescriptor) ([]co
 		}
 	}
 	for _, module := range incoming {
-		if existing, ok := byID[module.ID]; ok && existing.Version != module.Version {
-			return nil, fmt.Errorf("module %q update requires explicit authorized replacement", module.ID)
+		if existing, ok := byID[module.ID]; ok {
+			if existing.Version != module.Version {
+				return nil, fmt.Errorf("module %q update requires explicit authorized replacement", module.ID)
+			}
+			previous, _ := json.Marshal(existing)
+			next, _ := json.Marshal(module)
+			if string(previous) != string(next) {
+				return nil, fmt.Errorf("module %q content cannot change without an authorized version update", module.ID)
+			}
 		}
 		for _, resource := range module.Resources {
 			key := resource.Ref.Namespace + "\x00" + resource.Ref.Name

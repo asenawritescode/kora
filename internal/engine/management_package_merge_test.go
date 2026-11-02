@@ -107,3 +107,56 @@ func TestMergeManagementPackageSnapshotRejectsViewRouteCollision(t *testing.T) {
 		t.Fatal("accepted a package route that collides with a different tenant view")
 	}
 }
+
+func TestMergeManagementPackageSnapshotRejectsUnownedReplacementOfOwnedResource(t *testing.T) {
+	owned := contract.ModuleDescriptor{
+		ID: "finance.ar", Version: "1.0.0",
+		Resources: []contract.OwnedResource{{
+			Ref:    contract.ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1},
+			Access: contract.ModulePrivate, MutationMode: contract.MutationCommands,
+			ScopeKind: contract.ScopeTenantShared,
+		}},
+	}
+	_, err := mergeManagementPackageSnapshot(
+		&doctype.ConfigSnapshot{Modules: []contract.ModuleDescriptor{owned}, DocTypes: []*doctype.DocType{{Name: "Invoice", ModuleOwnerID: "finance.ar"}}},
+		&doctype.ConfigSnapshot{DocTypes: []*doctype.DocType{{Name: "Invoice", Module: "Other package"}}},
+	)
+	if err == nil || !strings.Contains(err.Error(), `owned by module "finance.ar"`) {
+		t.Fatalf("unowned package replacement error = %v; want owner conflict", err)
+	}
+}
+
+func TestMergeManagementPackageSnapshotRequiresVersionChangeForModuleDefinitionUpdate(t *testing.T) {
+	current := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0"}
+	changed := contract.ModuleDescriptor{
+		ID: "finance.ar", Version: "1.0.0",
+		Resources: []contract.OwnedResource{{
+			Ref:    contract.ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1},
+			Access: contract.ModulePrivate, MutationMode: contract.MutationCommands,
+			ScopeKind: contract.ScopeTenantShared,
+		}},
+	}
+	_, err := mergeManagementPackageSnapshot(
+		&doctype.ConfigSnapshot{Modules: []contract.ModuleDescriptor{current}},
+		&doctype.ConfigSnapshot{Modules: []contract.ModuleDescriptor{changed}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "cannot change without an authorized version update") {
+		t.Fatalf("same-version module update error = %v; want immutable version rejection", err)
+	}
+}
+
+func TestPackageOwnershipRecognizesNonDocTypeResources(t *testing.T) {
+	snapshot := &doctype.ConfigSnapshot{
+		Scripts:       []*doctype.ScriptSnapshot{{Name: "invoice.post"}},
+		ScheduledJobs: []contract.ScheduledJobDefinition{{Name: "invoice.due"}},
+	}
+	for _, resource := range []contract.OwnedResource{
+		{Ref: contract.ResourceRef{Namespace: "script", Name: "invoice.post", Version: 1}},
+		{Ref: contract.ResourceRef{Namespace: "job", Name: "invoice.due", Version: 1}},
+	} {
+		found, err := bindOwnedPackageResource(snapshot, "finance.ar", resource)
+		if err != nil || !found {
+			t.Fatalf("bind %s: found=%t err=%v", resource.Ref, found, err)
+		}
+	}
+}

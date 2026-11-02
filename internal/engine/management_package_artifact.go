@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/asenawritescode/kora/contract"
@@ -107,41 +108,135 @@ func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageAr
 	}
 	for _, module := range snapshot.Modules {
 		for _, owned := range module.Resources {
-			if owned.Ref.Namespace != "tenant" {
-				return nil, nil, fmt.Errorf("module %q resource %q must use tenant resource namespace", module.ID, owned.Ref.String())
-			}
 			if owned.Ref.Version < 1 {
 				return nil, nil, fmt.Errorf("module %q resource %q has invalid version", module.ID, owned.Ref.String())
 			}
-			found := false
-			for _, dt := range snapshot.DocTypes {
-				if dt != nil && dt.Name == owned.Ref.Name {
-					found = true
-					dt.ModuleOwnerID = string(module.ID)
-					dt.ModuleOwnershipMode = string(owned.MutationMode)
-					dt.BusinessScopePolicy = owned.ScopeKind
-					dt.BusinessScopeField = owned.ScopeField
-					if owned.ScopeKind == contract.ScopeEntityOwned {
-						field := dt.GetField(owned.ScopeField)
-						if field == nil || field.Fieldtype != "Link" {
-							return nil, nil, fmt.Errorf("module %q resource %q entity scope field must be a Link field", module.ID, owned.Ref.String())
-						}
-					}
-					dt.BusinessScopePolicy = owned.ScopeKind
-					dt.BusinessScopeField = owned.ScopeField
-					if owned.ScopeKind == contract.ScopeEntityOwned {
-						field := dt.GetField(owned.ScopeField)
-						if field == nil || field.Fieldtype != "Link" {
-							return nil, nil, fmt.Errorf("module %q resource %q entity scope field must be a Link field", module.ID, owned.Ref.String())
-						}
-					}
-					break
-				}
+			found, err := bindOwnedPackageResource(snapshot, module.ID, owned)
+			if err != nil {
+				return nil, nil, err
 			}
 			if !found {
-				return nil, nil, fmt.Errorf("module %q owns missing package DocType %q", module.ID, owned.Ref.Name)
+				return nil, nil, fmt.Errorf("module %q owns missing package resource %q", module.ID, owned.Ref.String())
 			}
 		}
 	}
 	return snapshot, scripts, nil
+}
+
+// bindOwnedPackageResource verifies that every declared package owner points
+// at a resource in the immutable artifact. The namespace is the resource kind;
+// the resource name is its canonical identity within that kind.
+func bindOwnedPackageResource(snapshot *doctype.ConfigSnapshot, owner contract.ModuleID, resource contract.OwnedResource) (bool, error) {
+	if snapshot == nil {
+		return false, fmt.Errorf("module %q resource %q has no package snapshot", owner, resource.Ref.String())
+	}
+	setDocTypeOwner := func(dt *doctype.DocType) error {
+		dt.ModuleOwnerID = string(owner)
+		dt.ModuleAccess = resource.Access
+		dt.ModuleOwnershipMode = string(resource.MutationMode)
+		dt.BusinessScopePolicy = resource.ScopeKind
+		dt.BusinessScopeField = resource.ScopeField
+		if resource.ScopeKind == contract.ScopeEntityOwned {
+			field := dt.GetField(resource.ScopeField)
+			if field == nil || field.Fieldtype != "Link" {
+				return fmt.Errorf("module %q resource %q entity scope field must be a Link field", owner, resource.Ref.String())
+			}
+		}
+		return nil
+	}
+	switch resource.Ref.Namespace {
+	case "tenant":
+		for _, dt := range snapshot.DocTypes {
+			if dt != nil && dt.Name == resource.Ref.Name {
+				return true, setDocTypeOwner(dt)
+			}
+		}
+	case "role":
+		for _, value := range snapshot.Roles {
+			if value != nil && value.Name == resource.Ref.Name {
+				return true, nil
+			}
+		}
+	case "permission":
+		for _, value := range snapshot.Permissions {
+			if value != nil && value.Doctype+"/"+value.Role == resource.Ref.Name {
+				return true, nil
+			}
+		}
+	case "workflow":
+		for _, value := range snapshot.WorkflowDefinitions {
+			if string(value.ID) == resource.Ref.Name {
+				return true, nil
+			}
+		}
+	case "view":
+		for _, value := range snapshot.Views {
+			if value != nil && value.Name == resource.Ref.Name {
+				return true, nil
+			}
+		}
+	case "metric":
+		for _, value := range snapshot.AnalyticsMetrics {
+			if value != nil && value.Name == resource.Ref.Name {
+				return true, nil
+			}
+		}
+	case "script":
+		for _, value := range snapshot.Scripts {
+			if value != nil && value.Name == resource.Ref.Name {
+				return true, nil
+			}
+		}
+	case "job":
+		for _, value := range snapshot.ScheduledJobs {
+			if value.Name == resource.Ref.Name {
+				return true, nil
+			}
+		}
+	case "query":
+		for _, module := range snapshot.Modules {
+			if module.ID != owner {
+				continue
+			}
+			for _, value := range module.Queries {
+				if value.Name == resource.Ref.Name {
+					return true, nil
+				}
+			}
+		}
+	case "projection":
+		for _, module := range snapshot.Modules {
+			if module.ID != owner {
+				continue
+			}
+			for _, value := range module.Projections {
+				if value.ID == resource.Ref.Name {
+					return true, nil
+				}
+			}
+		}
+	case "command":
+		for _, module := range snapshot.Modules {
+			if module.ID != owner {
+				continue
+			}
+			for _, offer := range module.Provides {
+				for _, operation := range offer.Operations {
+					if string(offer.Name)+"."+operation.Name == resource.Ref.Name {
+						return true, nil
+					}
+				}
+			}
+		}
+	case "report":
+		for _, value := range snapshot.Reports {
+			var report struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(value, &report) == nil && report.Name == resource.Ref.Name {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

@@ -148,6 +148,28 @@ func TestToSExpr_RoundTripsScheduledJobDefinitions(t *testing.T) {
 	}
 }
 
+func TestToSExpr_RoundTripsModuleDescriptors(t *testing.T) {
+	snapshot := &ConfigSnapshot{Modules: []contract.ModuleDescriptor{{
+		ID: "finance.ar", Version: "1.2.3",
+		Resources: []contract.OwnedResource{{
+			Ref:    contract.ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1},
+			Access: contract.ModulePrivate, MutationMode: contract.MutationCommands,
+			ScopeKind: contract.ScopeEntityOwned, ScopeField: "legal_entity",
+		}},
+	}}}
+	encoded := ToSExpr(snapshot)
+	parsed, err := FromSExpr(encoded)
+	if err != nil {
+		t.Fatalf("parse module descriptor snapshot: %v", err)
+	}
+	if len(parsed.Modules) != 1 || parsed.Modules[0].ID != "finance.ar" || parsed.Modules[0].Resources[0].Ref.Name != "Invoice" || parsed.Modules[0].Resources[0].ScopeField != "legal_entity" {
+		t.Fatalf("module ownership metadata was not preserved: %#v", parsed.Modules)
+	}
+	if got := ToSExpr(parsed); got != encoded {
+		t.Fatalf("module snapshot did not serialize canonically:\nfirst: %s\nsecond: %s", encoded, got)
+	}
+}
+
 func TestToSExpr_Empty(t *testing.T) {
 	snapshot := &ConfigSnapshot{}
 	sexpr := ToSExpr(snapshot)

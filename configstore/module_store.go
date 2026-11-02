@@ -42,7 +42,7 @@ func mergeInstalledDescriptors(existing, incoming []contract.ModuleDescriptor) [
 	return out
 }
 
-func replaceModuleOwnership(existing []contract.ResourceOwnership, tenant contract.TenantID, modules []contract.ModuleDescriptor) []contract.ResourceOwnership {
+func replaceModuleOwnership(existing []contract.ResourceOwnership, tenant contract.TenantID, modules []contract.ModuleDescriptor) ([]contract.ResourceOwnership, error) {
 	byResource := make(map[string]contract.ResourceOwnership, len(existing))
 	moduleIDs := make(map[contract.ModuleID]bool, len(modules))
 	for _, module := range modules {
@@ -57,7 +57,7 @@ func replaceModuleOwnership(existing []contract.ResourceOwnership, tenant contra
 		for _, resource := range module.Resources {
 			key := resource.Ref.Namespace + "\x00" + resource.Ref.Name
 			if prior, exists := byResource[key]; exists && prior.OwnerModuleID != module.ID {
-				continue // activation validation reports the conflicting owner before persistence
+				return nil, fmt.Errorf("resource %q is already owned by module %q", resource.Ref.String(), prior.OwnerModuleID)
 			}
 			owner := contract.ResourceOwnership{TenantID: tenant, Resource: resource.Ref, OwnerModuleID: module.ID}
 			byResource[key] = owner
@@ -74,7 +74,7 @@ func replaceModuleOwnership(existing []contract.ResourceOwnership, tenant contra
 		}
 		return a.Resource.Name < b.Resource.Name
 	})
-	return out
+	return out, nil
 }
 
 // ModuleStore persists the authoritative module ownership snapshot in the
@@ -121,7 +121,7 @@ func (s *ModuleStore) EnsureTxSchema(tx *sql.Tx) error {
 }
 
 func (s *ModuleStore) Load(tenant contract.TenantID) (contract.ModuleSnapshot, error) {
-	if tenant == "" {
+	if s == nil || s.DB == nil || s.Dialect == nil || tenant == "" {
 		return contract.ModuleSnapshot{}, fmt.Errorf("module snapshot tenant is required")
 	}
 	var revision uint64
@@ -139,6 +139,9 @@ func (s *ModuleStore) Load(tenant contract.TenantID) (contract.ModuleSnapshot, e
 	}
 	if snapshot.TenantID != tenant || snapshot.Revision != revision {
 		return contract.ModuleSnapshot{}, fmt.Errorf("module snapshot identity or revision mismatch")
+	}
+	if err := validateModuleSnapshot(snapshot); err != nil {
+		return contract.ModuleSnapshot{}, fmt.Errorf("validate module snapshot: %w", err)
 	}
 	return snapshot, nil
 }
@@ -221,9 +224,25 @@ func validateModuleSnapshot(snapshot contract.ModuleSnapshot) error {
 	for _, installation := range snapshot.Installations {
 		installed[installation.ModuleID] = true
 	}
+	expectedOwnership := make(map[string]contract.ModuleID)
 	for _, module := range snapshot.Modules {
-		if !installed[module.ID] {
+		installation, ok := func() (contract.ModuleInstallation, bool) {
+			for _, value := range snapshot.Installations {
+				if value.ModuleID == module.ID {
+					return value, true
+				}
+			}
+			return contract.ModuleInstallation{}, false
+		}()
+		if !installed[module.ID] || !ok || installation.Version != module.Version {
 			return fmt.Errorf("module descriptor %q has no installation", module.ID)
+		}
+		for _, resource := range module.Resources {
+			key := resource.Ref.Namespace + "/" + resource.Ref.Name
+			if previous, exists := expectedOwnership[key]; exists && previous != module.ID {
+				return fmt.Errorf("resource %q has duplicate module owners %q and %q", key, previous, module.ID)
+			}
+			expectedOwnership[key] = module.ID
 		}
 	}
 	owners := map[string]contract.ModuleID{}
@@ -239,6 +258,14 @@ func validateModuleSnapshot(snapshot contract.ModuleSnapshot) error {
 			return fmt.Errorf("resource %q has duplicate owners %q and %q", key, previous, owner.OwnerModuleID)
 		}
 		owners[key] = owner.OwnerModuleID
+	}
+	if len(owners) != len(expectedOwnership) {
+		return fmt.Errorf("module ownership index does not match module descriptors")
+	}
+	for resource, expectedOwner := range expectedOwnership {
+		if actualOwner, ok := owners[resource]; !ok || actualOwner != expectedOwner {
+			return fmt.Errorf("resource %q ownership index does not match module descriptor", resource)
+		}
 	}
 	return nil
 }
