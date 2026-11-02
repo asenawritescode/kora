@@ -142,18 +142,55 @@ func TestExecuteBusinessReconciliationUnavailableOwnerReturnsIncomplete(t *testi
 	}
 }
 
-func TestExecuteBusinessReconciliationDoesNotResumeFromCursorWithoutEarlierPages(t *testing.T) {
+func TestExecuteBusinessReconciliationResumesWithPersistedEarlierPages(t *testing.T) {
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
 	rule := BusinessReconciliationRule{OwnerModuleID: "sales.orders", ID: "sales-ar", Version: 1, Scope: scope,
 		SourceQuery: BusinessQueryRef{OwnerModuleID: "sales.orders", Name: "billable", Input: json.RawMessage(`{}`), PageLimit: 10},
 		TargetQuery: BusinessQueryRef{OwnerModuleID: "ar.receivables", Name: "invoices", Input: json.RawMessage(`{}`), PageLimit: 10}, MaxRows: 10}
+	cutoff := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	prior := BusinessObligation{Key: "sale:1", SourceRef: "sale:1", EntityID: "entity-a", Amount: "10.00", Currency: "KES", OccurredAt: cutoff.Add(-time.Hour)}
+	marks := BusinessRunWatermarks{SourceRevision: "rev-1", SourceSnapshot: "snap-1", SourceAsOf: cutoff}
 	reads := 0
-	result, next, _, err := ExecuteBusinessReconciliation(context.Background(), rule, time.Now().UTC(), BusinessRunCursor{Source: "source-page-2"}, func(context.Context, BusinessQueryRequest) (contract.QueryResult, error) {
+	result, next, _, err := ExecuteBusinessReconciliation(context.Background(), rule, cutoff, BusinessRunCursor{Source: "source-page-2", SourceRows: []BusinessObligation{prior}, Watermarks: marks}, func(_ context.Context, request BusinessQueryRequest) (contract.QueryResult, error) {
 		reads++
-		return contract.QueryResult{Data: json.RawMessage(`[]`), AsOf: time.Now().UTC(), Freshness: contract.QueryFresh}, nil
+		data := `[]`
+		if request.Name == "billable" {
+			data = `[{"key":"sale:2","source_ref":"sale:2","entity_id":"entity-a","amount":"4.00","currency":"KES","occurred_at":"2026-11-02T10:00:00Z"}]`
+		}
+		return contract.QueryResult{Data: json.RawMessage(data), SnapshotToken: "snap-1", SourceRevision: "rev-1", AsOf: cutoff, Freshness: contract.QueryFresh}, nil
 	})
-	if err != nil || result.Complete || reads != 0 || next.Source != "source-page-2" {
-		t.Fatalf("cursor without prior page evidence must remain incomplete: result=%+v next=%+v reads=%d err=%v", result, next, reads, err)
+	if err != nil || !result.Complete || reads != 2 || len(result.Findings) != 2 || next.Source != "" || len(next.SourceRows) != 2 {
+		t.Fatalf("resumed comparison lost earlier-page evidence: result=%+v next=%+v reads=%d err=%v", result, next, reads, err)
+	}
+}
+
+func TestExecuteBusinessReconciliationDoesNotRereadCompletedSideOnResume(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	rule := BusinessReconciliationRule{OwnerModuleID: "sales.orders", ID: "sales-ar", Version: 1, Scope: scope,
+		SourceQuery: BusinessQueryRef{OwnerModuleID: "sales.orders", Name: "billable", Input: json.RawMessage(`{}`), PageLimit: 10},
+		TargetQuery: BusinessQueryRef{OwnerModuleID: "ar.receivables", Name: "invoices", Input: json.RawMessage(`{}`), PageLimit: 10}, MaxRows: 1}
+	cutoff := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	var sourceCalls, targetCalls int
+	read := func(_ context.Context, request BusinessQueryRequest) (contract.QueryResult, error) {
+		data, next := `[]`, ""
+		if request.Name == "billable" {
+			sourceCalls++
+			data = `[{"key":"sale:1","source_ref":"sale:1","entity_id":"entity-a","amount":"10.00","currency":"KES","occurred_at":"2026-11-02T10:00:00Z"}]`
+		} else {
+			targetCalls++
+			if request.Cursor == "" {
+				data, next = `[{"key":"sale:1","target_ref":"invoice:1","entity_id":"entity-a","amount":"10.00","currency":"KES","occurred_at":"2026-11-02T10:30:00Z"}]`, "target-page-2"
+			}
+		}
+		return contract.QueryResult{Data: json.RawMessage(data), NextCursor: next, SnapshotToken: "snap-1", SourceRevision: "rev-1", AsOf: cutoff, Freshness: contract.QueryFresh}, nil
+	}
+	_, cursor, _, err := ExecuteBusinessReconciliation(context.Background(), rule, cutoff, BusinessRunCursor{}, read)
+	if err != nil || cursor.SourceComplete != true || cursor.TargetComplete || cursor.Target != "target-page-2" {
+		t.Fatalf("first bounded pass did not persist side completion: cursor=%+v err=%v", cursor, err)
+	}
+	result, _, _, err := ExecuteBusinessReconciliation(context.Background(), rule, cutoff, cursor, read)
+	if err != nil || !result.Complete || len(result.Findings) != 0 || sourceCalls != 1 || targetCalls != 2 {
+		t.Fatalf("resume reread completed source or lost target progress: result=%+v sourceCalls=%d targetCalls=%d err=%v", result, sourceCalls, targetCalls, err)
 	}
 }
 

@@ -88,8 +88,13 @@ func PublishedBusinessQueryReader(plan PublishedBusinessQueryPlan) BusinessQuery
 }
 
 type BusinessRunCursor struct {
-	Source string `json:"source,omitempty"`
-	Target string `json:"target,omitempty"`
+	Source         string                `json:"source,omitempty"`
+	Target         string                `json:"target,omitempty"`
+	SourceRows     []BusinessObligation  `json:"source_rows,omitempty"`
+	TargetRows     []BusinessEffect      `json:"target_rows,omitempty"`
+	Watermarks     BusinessRunWatermarks `json:"watermarks,omitempty"`
+	SourceComplete bool                  `json:"source_complete,omitempty"`
+	TargetComplete bool                  `json:"target_complete,omitempty"`
 }
 
 type BusinessRunWatermarks struct {
@@ -113,32 +118,44 @@ func ExecuteBusinessReconciliation(ctx context.Context, rule BusinessReconciliat
 	if !validBusinessQueryRef(rule.SourceQuery) || !validBusinessQueryRef(rule.TargetQuery) {
 		return BusinessReconciliationResult{}, cursors, BusinessRunWatermarks{}, fmt.Errorf("business reconciliation requires owner-published source and target queries")
 	}
-	// A cursor by itself is not sufficient to resume a comparison: earlier
-	// pages must also be present or a tail-only comparison could incorrectly
-	// produce a clean run. The run store currently persists cursors and
-	// watermarks, but not the bounded row set, so fail closed on continuation
-	// requests until that row set is available.
-	if cursors.Source != "" || cursors.Target != "" {
-		return BusinessReconciliationResult{Complete: false}, cursors, BusinessRunWatermarks{}, nil
+	if len(cursors.SourceRows) > 10000 || len(cursors.TargetRows) > 10000 {
+		return BusinessReconciliationResult{}, cursors, BusinessRunWatermarks{}, fmt.Errorf("business reconciliation continuation exceeds accumulated row bound")
 	}
-	sources, sourceCursor, sourceWatermark, sourceComplete, err := readBusinessPages[BusinessObligation](ctx, rule, rule.SourceQuery, cursors.Source, read)
+	if cursors.Source != "" && (len(cursors.SourceRows) == 0 || cursors.Watermarks.SourceSnapshot == "" || cursors.Watermarks.SourceRevision == "") ||
+		cursors.Target != "" && (len(cursors.TargetRows) == 0 || cursors.Watermarks.TargetSnapshot == "" || cursors.Watermarks.TargetRevision == "") {
+		return BusinessReconciliationResult{Complete: false}, cursors, cursors.Watermarks, nil
+	}
+	sourceWatermark := businessPageWatermark{SourceRevision: cursors.Watermarks.SourceRevision, SnapshotToken: cursors.Watermarks.SourceSnapshot, AsOf: cursors.Watermarks.SourceAsOf}
+	targetWatermark := businessPageWatermark{SourceRevision: cursors.Watermarks.TargetRevision, SnapshotToken: cursors.Watermarks.TargetSnapshot, AsOf: cursors.Watermarks.TargetAsOf}
+	sources, sourceCursor, sourceComplete := cursors.SourceRows, cursors.Source, cursors.SourceComplete
+	var err error
+	if !sourceComplete {
+		sources, sourceCursor, sourceWatermark, sourceComplete, err = readBusinessPages(ctx, rule, rule.SourceQuery, sourceCursor, sources, sourceWatermark, read)
+	}
 	if err != nil {
-		return BusinessReconciliationResult{Complete: false}, cursors, BusinessRunWatermarks{}, nil
+		return BusinessReconciliationResult{Complete: false}, businessCursor(sources, cursors.TargetRows, sourceCursor, cursors.Target, sourceWatermark, targetWatermark, false, cursors.TargetComplete), businessRunWatermarks(sourceWatermark, targetWatermark), nil
 	}
-	targets, targetCursor, targetWatermark, targetComplete, err := readBusinessPages[BusinessEffect](ctx, rule, rule.TargetQuery, cursors.Target, read)
+	targets, targetCursor, targetComplete := cursors.TargetRows, cursors.Target, cursors.TargetComplete
+	if !targetComplete {
+		targets, targetCursor, targetWatermark, targetComplete, err = readBusinessPages(ctx, rule, rule.TargetQuery, targetCursor, targets, targetWatermark, read)
+	}
 	if err != nil {
-		watermarks := BusinessRunWatermarks{SourceRevision: sourceWatermark.SourceRevision, SourceSnapshot: sourceWatermark.SnapshotToken, SourceAsOf: sourceWatermark.AsOf}
-		return BusinessReconciliationResult{Complete: false}, BusinessRunCursor{Source: sourceCursor, Target: cursors.Target}, watermarks, nil
+		return BusinessReconciliationResult{Complete: false}, businessCursor(sources, targets, sourceCursor, targetCursor, sourceWatermark, targetWatermark, sourceComplete, false), businessRunWatermarks(sourceWatermark, targetWatermark), nil
 	}
-	watermarks := BusinessRunWatermarks{
-		SourceRevision: sourceWatermark.SourceRevision, SourceSnapshot: sourceWatermark.SnapshotToken, SourceAsOf: sourceWatermark.AsOf,
-		TargetRevision: targetWatermark.SourceRevision, TargetSnapshot: targetWatermark.SnapshotToken, TargetAsOf: targetWatermark.AsOf,
-	}
+	watermarks := businessRunWatermarks(sourceWatermark, targetWatermark)
 	if !sourceComplete || !targetComplete {
-		return BusinessReconciliationResult{Complete: false}, BusinessRunCursor{Source: sourceCursor, Target: targetCursor}, watermarks, nil
+		return BusinessReconciliationResult{Complete: false}, businessCursor(sources, targets, sourceCursor, targetCursor, sourceWatermark, targetWatermark, sourceComplete, targetComplete), watermarks, nil
 	}
-	result, err := CompareBusinessObligations(BusinessReconciliationInput{Cutoff: cutoff, GracePeriod: rule.GracePeriod, MaxRows: rule.MaxRows, Sources: sources, Targets: targets, SourceReady: true, TargetReady: true})
-	return result, BusinessRunCursor{Source: sourceCursor, Target: targetCursor}, watermarks, err
+	result, err := CompareBusinessObligations(BusinessReconciliationInput{Cutoff: cutoff, GracePeriod: rule.GracePeriod, MaxRows: 10000, Sources: sources, Targets: targets, SourceReady: true, TargetReady: true})
+	return result, businessCursor(sources, targets, sourceCursor, targetCursor, sourceWatermark, targetWatermark, sourceComplete, targetComplete), watermarks, err
+}
+
+func businessRunWatermarks(source, target businessPageWatermark) BusinessRunWatermarks {
+	return BusinessRunWatermarks{SourceRevision: source.SourceRevision, SourceSnapshot: source.SnapshotToken, SourceAsOf: source.AsOf, TargetRevision: target.SourceRevision, TargetSnapshot: target.SnapshotToken, TargetAsOf: target.AsOf}
+}
+
+func businessCursor(sources []BusinessObligation, targets []BusinessEffect, source, target string, sourceMark, targetMark businessPageWatermark, sourceComplete, targetComplete bool) BusinessRunCursor {
+	return BusinessRunCursor{Source: source, Target: target, SourceRows: sources, TargetRows: targets, Watermarks: businessRunWatermarks(sourceMark, targetMark), SourceComplete: sourceComplete, TargetComplete: targetComplete}
 }
 
 func validBusinessQueryRef(ref BusinessQueryRef) bool {
@@ -151,15 +168,15 @@ type businessPageWatermark struct {
 	AsOf           time.Time
 }
 
-func readBusinessPages[T BusinessObligation | BusinessEffect](ctx context.Context, rule BusinessReconciliationRule, ref BusinessQueryRef, cursor string, read BusinessQueryPageReader) ([]T, string, businessPageWatermark, bool, error) {
-	rows := make([]T, 0)
-	watermark := businessPageWatermark{}
+func readBusinessPages[T BusinessObligation | BusinessEffect](ctx context.Context, rule BusinessReconciliationRule, ref BusinessQueryRef, cursor string, prior []T, watermark businessPageWatermark, read BusinessQueryPageReader) ([]T, string, businessPageWatermark, bool, error) {
+	rows := append([]T(nil), prior...)
+	added := 0
 	seenCursors := map[string]bool{}
-	for len(rows) < rule.MaxRows {
-		limit := min(rule.MaxRows-len(rows), int(ref.PageLimit))
+	for added < rule.MaxRows && len(rows) < 10000 {
+		limit := min(rule.MaxRows-added, 10000-len(rows), int(ref.PageLimit))
 		page, err := read(ctx, BusinessQueryRequest{Scope: rule.Scope, OwnerModuleID: ref.OwnerModuleID, Name: ref.Name, Input: append(json.RawMessage(nil), ref.Input...), Cursor: cursor, Limit: uint16(limit)})
 		if err != nil {
-			return nil, cursor, watermark, false, err
+			return rows, cursor, watermark, false, err
 		}
 		if len(page.Data) == 0 || page.AsOf.IsZero() || page.Freshness != contract.QueryFresh || page.NextCursor == cursor && page.NextCursor != "" {
 			return rows, cursor, watermark, false, nil
@@ -174,14 +191,18 @@ func readBusinessPages[T BusinessObligation | BusinessEffect](ctx context.Contex
 		}
 		var pageRows []json.RawMessage
 		if err := json.Unmarshal(page.Data, &pageRows); err != nil || len(pageRows) > limit {
-			return nil, cursor, watermark, false, fmt.Errorf("business query returned invalid or unbounded rows")
+			return rows, cursor, watermark, false, fmt.Errorf("business query returned invalid or unbounded rows")
 		}
 		for _, raw := range pageRows {
 			var row T
 			if err := json.Unmarshal(raw, &row); err != nil {
-				return nil, cursor, watermark, false, err
+				return rows, cursor, watermark, false, err
 			}
 			rows = append(rows, row)
+			added++
+		}
+		if len(pageRows) == 0 && page.NextCursor != "" {
+			return rows, cursor, watermark, false, nil
 		}
 		cursor = page.NextCursor
 		if cursor == "" {
@@ -369,9 +390,15 @@ func parseBusinessDecimal(value string) (*big.Rat, bool) {
 }
 
 func validBusinessRunProgress(cursors BusinessRunCursor, watermarks BusinessRunWatermarks) bool {
-	return len(cursors.Source) <= 2048 && len(cursors.Target) <= 2048 &&
+	if len(cursors.SourceRows) > 10000 || len(cursors.TargetRows) > 10000 {
+		return false
+	}
+	payload, err := json.Marshal(cursors)
+	return err == nil && len(payload) <= 16<<20 && len(cursors.Source) <= 2048 && len(cursors.Target) <= 2048 &&
 		len(watermarks.SourceRevision) <= 256 && len(watermarks.TargetRevision) <= 256 &&
-		len(watermarks.SourceSnapshot) <= 2048 && len(watermarks.TargetSnapshot) <= 2048
+		len(watermarks.SourceSnapshot) <= 2048 && len(watermarks.TargetSnapshot) <= 2048 &&
+		len(cursors.Watermarks.SourceRevision) <= 256 && len(cursors.Watermarks.TargetRevision) <= 256 &&
+		len(cursors.Watermarks.SourceSnapshot) <= 2048 && len(cursors.Watermarks.TargetSnapshot) <= 2048
 }
 
 func validBusinessFindingState(state BusinessFindingState) bool {
