@@ -9,6 +9,7 @@ import (
 	"github.com/asenawritescode/kora/email"
 	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/internal/dbaccess"
+	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/natsprovider"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/plugin"
@@ -26,6 +27,7 @@ import (
 // Services is the immutable service snapshot owned by a single tenant runtime.
 // Constructors and lifecycle ownership stay in Engine composition.
 type Services struct {
+	CommandSchemas                 kernel.CommandSchemaRegistry
 	ModuleBindings                 *plugin.BindingPlan
 	ResolveModuleBindings          func(contract.BusinessScope) (plugin.BindingPlan, error)
 	ResolveCandidateModuleBindings func(contract.BusinessScope, []contract.InstalledPackage, []contract.ModuleDescriptor, []contract.ProviderSelection, uint64) (plugin.BindingPlan, error)

@@ -44,11 +44,15 @@ type ProviderSelection struct {
 	ProviderID string
 }
 type ResolvedBinding struct {
-	Key        BindingKey
-	ProviderID string
-	Contract   contract.SchemaRef
-	Revision   uint64
-	Factory    ProviderFactory
+	Key            BindingKey
+	ProviderID     string
+	OwnerModuleID  contract.ModuleID
+	Kind           ProviderKind
+	Contract       contract.SchemaRef
+	Operations     []contract.OperationSpec
+	Revision       uint64
+	Factory        ProviderFactory
+	validateSchema func(contract.SchemaRef, []byte) error
 }
 
 func (b ResolvedBinding) Open(ctx contract.OperationContext) (contract.CapabilityHandle, error) {
@@ -660,7 +664,7 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 				}
 				continue
 			}
-			plan.Bindings = append(plan.Bindings, ResolvedBinding{Key: key, ProviderID: chosen.ProviderID, Contract: offer.Contract, Revision: revision, Factory: factory})
+			plan.Bindings = append(plan.Bindings, ResolvedBinding{Key: key, ProviderID: chosen.ProviderID, OwnerModuleID: chosen.OwnerModuleID, Kind: chosen.Kind, Contract: offer.Contract, Operations: append([]contract.OperationSpec(nil), offer.Operations...), Revision: revision, Factory: factory, validateSchema: chosen.ValidateSchema})
 		}
 	}
 	if len(plan.Blockers) == 0 {

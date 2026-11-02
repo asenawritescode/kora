@@ -82,6 +82,49 @@ transaction:
 	}
 }
 
+func TestCommandResourceCapabilityMetadataMustBeCompleteAndUnique(t *testing.T) {
+	base := `name: issue
+namespace: finance.invoice
+version: 1
+input:
+  record: Invoice
+module_owner_id: finance.ar
+capability: billing.invoice
+operation: issue
+input_schema:
+  id: billing.issue.input
+  version: 1
+output_schema:
+  id: billing.issue.output
+  version: 1
+transaction:
+  - create:
+      record: Invoice
+      values:
+        title: $input.title
+`
+	command, err := kernel.ParseCommandResource([]byte(base))
+	if err != nil {
+		t.Fatal("valid capability command rejected:", err)
+	}
+	registry := kernel.NewCommandRegistry()
+	if err := registry.Register(command); err != nil {
+		t.Fatal("register capability command:", err)
+	}
+	if got, ok := registry.LookupCapability("billing.invoice", "issue"); !ok || got.FullName() != command.FullName() {
+		t.Fatalf("capability lookup = (%v,%t), want %q", got, ok, command.FullName())
+	}
+	partial := strings.Replace(base, "output_schema:\n  id: billing.issue.output\n  version: 1\n", "", 1)
+	if _, err := kernel.ParseCommandResource([]byte(partial)); err == nil {
+		t.Fatal("incomplete capability command schema metadata accepted")
+	}
+	duplicate := *command
+	duplicate.Name = "issue_again"
+	if err := registry.Register(&duplicate); err == nil {
+		t.Fatal("duplicate capability operation registered to another owner command")
+	}
+}
+
 func TestCommandRegistryDuplicateRejected(t *testing.T) {
 	r := kernel.NewCommandRegistry()
 	def, err := kernel.ParseCommandResource([]byte("name: x.create\nnamespace: n\nversion: 1\ninput:\n  record: T\ntransaction:\n  - create:\n      record: T\n      values:\n        a: b\n"))

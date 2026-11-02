@@ -204,6 +204,11 @@ type Kernel struct {
 	// only built-in commands are available. Definitions are generation-scoped:
 	// swap the registry atomically on activation.
 	Commands *CommandRegistry
+
+	// CommandSchemas is the existing versioned schema registry used by
+	// module-owned commands. The same validator is applied for provider and
+	// direct command entry paths before transactional effects can commit.
+	CommandSchemas CommandSchemaRegistry
 }
 
 // New returns a Kernel. Outbox may be nil only in tests that do not assert

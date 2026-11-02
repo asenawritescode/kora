@@ -71,7 +71,7 @@ func TestCommandOnlyResourcesRejectGenericMutationSources(t *testing.T) {
 func TestDynamicCommandCannotBypassCommandOnlyOwnership(t *testing.T) {
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Invoice", ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands)})
-	command := &CommandResource{Name: "issue", Namespace: "finance", Version: 1, Input: CommandInput{Record: "Invoice"}, Steps: []CommandStep{{Create: &StepCreate{Record: "Invoice"}}}}
+	command := &CommandResource{Name: "issue", Namespace: "finance", Version: 1, Input: CommandInput{Record: "Invoice"}, ModuleOwnerID: "finance.ar", Capability: "billing.issue", Operation: "issue", InputSchema: contract.SchemaRef{ID: "invoice.issue.input", Version: 1}, OutputSchema: contract.SchemaRef{ID: "invoice.issue.output", Version: 1}, Steps: []CommandStep{{Create: &StepCreate{Record: "Invoice"}}}}
 	op := Operation{Command: command.FullName(), Context: OperationContext{TenantID: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}}}
 	if !dynamicCommandTouchesCommandOnly(registry, command) {
 		t.Fatal("dynamic command's protected target was not detected")

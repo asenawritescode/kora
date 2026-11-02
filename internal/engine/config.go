@@ -21,6 +21,7 @@ import (
 	"github.com/asenawritescode/kora/script"
 	"github.com/asenawritescode/kora/site"
 	"github.com/asenawritescode/kora/storage"
+	"github.com/asenawritescode/kora/workflow"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -53,6 +54,7 @@ type Config struct {
 	// built-in business policy or transition mapping.
 	RequestAuthorizer                 RequestAuthorizerFactory
 	WorkflowApprovals                 map[string]process.WorkflowApproval
+	ModuleSchemas                     workflow.PayloadSchemaRegistry
 	ModuleProviders                   func(site.DBSiteInfo, *sql.DB) ([]plugin.ProviderRegistration, []plugin.ProviderSelection, error)
 	SchedulerHandlerFactory           ScheduledJobHandlerFactory
 	SchedulerExecutionResolverFactory ScheduledJobExecutionResolverFactory
@@ -295,6 +297,8 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 			Workflow:            config.Workflow,
 			RequestAuthorizer:   config.RequestAuthorizer,
 			WorkflowApprovals:   config.WorkflowApprovals,
+			KernelCommands:      config.KernelCommands,
+			ModuleSchemas:       config.ModuleSchemas,
 			ModuleProviders:     config.ModuleProviders,
 			ResolveStorage:      config.ResolveStorage,
 			RegisterWorkerStart: resources.RegisterWorkerStart,

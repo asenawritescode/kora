@@ -2106,6 +2106,15 @@ namespace: finance.invoice
 version: 1
 input:
   record: Invoice
+module_owner_id: finance.ar
+capability: finance.invoice.issue
+operation: issue
+input_schema:
+  id: finance.invoice.issue.input
+  version: 1
+output_schema:
+  id: finance.invoice.issue.output
+  version: 1
 transaction:
   - create:
       record: Invoice

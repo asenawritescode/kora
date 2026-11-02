@@ -214,6 +214,7 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 	k := kernel.New(h.siteDialect(c), h.siteOutboxWriter(c))
 	k.TxManager = txManager
 	k.Commands = h.KernelCommands
+	k.CommandSchemas = h.runtimeService(c, site).CommandSchemas
 	result, cerr := k.Execute(c.Request.Context(), sqlDB, reg, kernel.Operation{
 		Context:  opCtx,
 		Command:  commandName,

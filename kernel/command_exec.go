@@ -141,7 +141,7 @@ func dynamicCommandTouchesCommandOnly(reg *doctype.Registry, command *CommandRes
 }
 
 func validDynamicModuleExecution(execution *contract.ModuleExecution, op Operation, reg *doctype.Registry, command *CommandResource) bool {
-	if execution == nil || !execution.Verified() || execution.TenantID != op.Context.TenantID || execution.Scope != op.Context.BusinessScope || execution.AuthorizedCommand != op.Command || execution.AllowedOperation != op.Command || command == nil || command.FullName() != op.Command || reg == nil {
+	if execution == nil || !execution.Verified() || execution.TenantID != op.Context.TenantID || execution.Scope != op.Context.BusinessScope || execution.AuthorizedCommand != op.Command || execution.AllowedOperation != op.Command || command == nil || command.FullName() != op.Command || command.ModuleOwnerID == "" || command.Capability == "" || command.Operation == "" || command.InputSchema.ID == "" || command.InputSchema.Version == 0 || command.OutputSchema.ID == "" || command.OutputSchema.Version == 0 || reg == nil {
 		return false
 	}
 	protected := false
@@ -152,7 +152,7 @@ func validDynamicModuleExecution(execution *contract.ModuleExecution, op Operati
 		}
 		if dt.ModuleOwnershipMode == string(contract.MutationCommands) {
 			protected = true
-			if dt.ModuleOwnerID == "" || execution.OwnerModuleID != contract.ModuleID(dt.ModuleOwnerID) {
+			if dt.ModuleOwnerID == "" || execution.OwnerModuleID != contract.ModuleID(dt.ModuleOwnerID) || command.ModuleOwnerID != execution.OwnerModuleID {
 				return false
 			}
 		}
@@ -277,6 +277,14 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 	input, cerr := decodeInput(op.Payload)
 	if cerr != nil {
 		return nil, cerr
+	}
+	if cmd.ModuleOwnerID != "" {
+		if k.CommandSchemas == nil || !k.CommandSchemas.Registered(cmd.InputSchema) || !k.CommandSchemas.Registered(cmd.OutputSchema) {
+			return nil, contract.NewError(contract.CodeValidationFailed, "owner command input or output schema is not registered")
+		}
+		if err := k.CommandSchemas.Validate(cmd.InputSchema, op.Payload); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, "owner command input failed its registered schema")
+		}
 	}
 
 	user := op.Context.User
@@ -417,6 +425,13 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		}
 	}
 
+	raw, _ := json.Marshal(map[string]any{"command": def.Name, "steps": outcomes})
+	if cmd.ModuleOwnerID != "" {
+		if err := k.CommandSchemas.Validate(cmd.OutputSchema, raw); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, "owner command output failed its registered schema")
+		}
+	}
+
 	// Emit declared events through the outbox INSIDE the transaction so a
 	// committed command's events are guaranteed durable (spec §19, §41).
 	eventData, _ := json.Marshal(map[string]any{"command": def.Name, "steps": outcomes})
@@ -447,7 +462,6 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		return nil, contract.NewError(contract.CodeInternal, "audit write failed")
 	}
 
-	raw, _ := json.Marshal(map[string]any{"command": def.Name, "steps": outcomes})
 	if op.Context.IdempotencyKey != "" && def.IdempotentByKey {
 		if cerr := k.storeReceiptResult(dbTx, op, contract.CommandResult{
 			OperationID: opID, CorrelationID: op.Context.CorrelationID,

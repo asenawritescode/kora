@@ -36,6 +36,7 @@ import (
 	"github.com/asenawritescode/kora/site"
 	"github.com/asenawritescode/kora/storage"
 	"github.com/asenawritescode/kora/webhook"
+	"github.com/asenawritescode/kora/workflow"
 )
 
 // TenantServiceConfig is the concrete dependency set for constructing services
@@ -62,6 +63,8 @@ type TenantServiceConfig struct {
 	Workflow                          *WorkflowTenantConfig
 	RequestAuthorizer                 RequestAuthorizerFactory
 	WorkflowApprovals                 map[string]process.WorkflowApproval
+	KernelCommands                    *kernel.CommandRegistry
+	ModuleSchemas                     workflow.PayloadSchemaRegistry
 	ModuleProviders                   func(site.DBSiteInfo, *sql.DB) ([]plugin.ProviderRegistration, []plugin.ProviderSelection, error)
 	SchedulerHandlerFactory           ScheduledJobHandlerFactory
 	SchedulerExecutionResolverFactory ScheduledJobExecutionResolverFactory
@@ -133,11 +136,14 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	}
 	services := loaded.RuntimeServiceSnapshot()
 	services.Mailer = config.Mailer
+	services.CommandSchemas = config.ModuleSchemas
 	// Publish the in-progress bundle to the still-unpublished runtime so its
 	// single Close path can roll back any worker started by this installer.
 	loaded.RuntimeServices = &services
 	cfg := site.ReconstructSiteConfigFromDBInfo(info, config.Common)
 	dialect := kdb.Resolve(cfg.DBType)
+	domainKernel := kernel.New(dialect, outbox.NewSQLWriter(dialect))
+	domainKernel.CommandSchemas = config.ModuleSchemas
 	backend, err := resolveTenantStorage(services.Storage, config.ResolveStorage, cfg)
 	if err != nil {
 		return fmt.Errorf("resolve storage: %w", err)
@@ -166,6 +172,11 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return fmt.Errorf("load module providers for tenant %s: %w", loaded.Name, moduleErr)
 		}
 	}
+	internalProviders, moduleErr := registeredKernelCommandProviders(tenantID, loaded.DB, loaded.Registry, moduleSnapshot.Modules, config.KernelCommands, domainKernel, config.ModuleSchemas, providers)
+	if moduleErr != nil {
+		return fmt.Errorf("register internal module command providers for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	providers = append(providers, internalProviders...)
 	selections, moduleErr := mergeProviderSelections(tenantID, moduleSnapshot.ProviderSelections, contractProviderSelections(configuredSelections))
 	if moduleErr != nil {
 		return fmt.Errorf("resolve persisted provider selections for tenant %s: %w", loaded.Name, moduleErr)
@@ -269,7 +280,6 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if err != nil {
 		return fmt.Errorf("construct tenant approval transaction opener: %w", err)
 	}
-	domainKernel := kernel.New(dialect, outbox.NewSQLWriter(dialect))
 	domainTx := &orm.TxManager{
 		DB: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Outbox: domainKernel.Outbox,
 		SiteName: loaded.Name, AsyncHookTenantID: tenantID,

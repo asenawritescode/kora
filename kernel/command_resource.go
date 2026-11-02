@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -15,20 +16,23 @@ import (
 //
 // Slice limitations (documented, not silent):
 //   - update steps resolve their target by name equality only;
-//   - preconditions are validated as declared rule references and enforced
-//     once the rule evaluator contract lands (PLUGIN-007); unknown rules
-//     fail definition registration.
+//   - preconditions are rejected because this runtime has no evaluator.
 type CommandResource struct {
-	Name          string              `yaml:"name"                     json:"name"`
-	Namespace     string              `yaml:"namespace"                json:"namespace,omitempty"`
-	Version       int                 `yaml:"version"                  json:"version"`
-	Permission    string              `yaml:"permission"               json:"permission"` // permission-matrix operation, default "create"
-	Input         CommandInput        `yaml:"input"                    json:"input"`
-	CrossEntity   *CrossEntityCommand `yaml:"cross_entity,omitempty"   json:"cross_entity,omitempty"`
-	Preconditions []string            `yaml:"preconditions"            json:"preconditions,omitempty"`
-	Steps         []CommandStep       `yaml:"transaction"              json:"transaction"`
-	Emits         []string            `yaml:"emit"                     json:"emit,omitempty"`
-	Labels        map[string]string   `yaml:"labels"                   json:"labels,omitempty"`
+	Name          string                  `yaml:"name"                     json:"name"`
+	Namespace     string                  `yaml:"namespace"                json:"namespace,omitempty"`
+	Version       int                     `yaml:"version"                  json:"version"`
+	Permission    string                  `yaml:"permission"               json:"permission"` // permission-matrix operation, default "create"
+	Input         CommandInput            `yaml:"input"                    json:"input"`
+	ModuleOwnerID contract.ModuleID       `yaml:"module_owner_id,omitempty" json:"module_owner_id,omitempty"`
+	Capability    contract.CapabilityName `yaml:"capability,omitempty" json:"capability,omitempty"`
+	Operation     string                  `yaml:"operation,omitempty" json:"operation,omitempty"`
+	InputSchema   contract.SchemaRef      `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
+	OutputSchema  contract.SchemaRef      `yaml:"output_schema,omitempty" json:"output_schema,omitempty"`
+	CrossEntity   *CrossEntityCommand     `yaml:"cross_entity,omitempty"   json:"cross_entity,omitempty"`
+	Preconditions []string                `yaml:"preconditions"            json:"preconditions,omitempty"`
+	Steps         []CommandStep           `yaml:"transaction"              json:"transaction"`
+	Emits         []string                `yaml:"emit"                     json:"emit,omitempty"`
+	Labels        map[string]string       `yaml:"labels"                   json:"labels,omitempty"`
 }
 
 // CrossEntityCommand registers a command that requires exact grants in both
@@ -112,6 +116,11 @@ func (c *CommandResource) validate() error {
 	if c.Input.Record == "" {
 		return fmt.Errorf("command %q: input.record required in this slice", c.Name)
 	}
+	if c.ModuleOwnerID != "" || c.Capability != "" || c.Operation != "" || c.InputSchema.ID != "" || c.InputSchema.Version != 0 || c.OutputSchema.ID != "" || c.OutputSchema.Version != 0 {
+		if c.ModuleOwnerID == "" || c.Capability == "" || c.Operation == "" || c.InputSchema.ID == "" || c.InputSchema.Version == 0 || c.OutputSchema.ID == "" || c.OutputSchema.Version == 0 {
+			return fmt.Errorf("command %q: module capability metadata requires owner, capability, operation, and versioned input/output schemas", c.FullName())
+		}
+	}
 	if c.CrossEntity != nil {
 		if c.CrossEntity.Resource == "" || c.CrossEntity.Operation == "" || !strings.HasPrefix(c.CrossEntity.TargetEntityField, "input.") || len(strings.TrimPrefix(c.CrossEntity.TargetEntityField, "input.")) == 0 {
 			return fmt.Errorf("command %q: cross_entity requires resource, operation, and target_entity_field under input", c.Name)
@@ -185,6 +194,13 @@ type CommandRegistry struct {
 	defs map[string]*CommandResource
 }
 
+// CommandSchemaRegistry is the existing versioned payload-schema contract
+// injected into the kernel for module-owned commands.
+type CommandSchemaRegistry interface {
+	Registered(contract.SchemaRef) bool
+	Validate(contract.SchemaRef, json.RawMessage) error
+}
+
 // NewCommandRegistry returns an empty registry.
 func NewCommandRegistry() *CommandRegistry {
 	return &CommandRegistry{defs: map[string]*CommandResource{}}
@@ -200,6 +216,13 @@ func (r *CommandRegistry) Register(def *CommandResource) error {
 	if _, exists := r.defs[key]; exists {
 		return fmt.Errorf("command registry: duplicate command %q", key)
 	}
+	if def.Capability != "" {
+		for _, registered := range r.defs {
+			if registered.Capability == def.Capability && registered.Operation == def.Operation {
+				return fmt.Errorf("command registry: capability %q operation %q is already assigned to command %q", def.Capability, def.Operation, registered.FullName())
+			}
+		}
+	}
 	if r.defs == nil {
 		r.defs = map[string]*CommandResource{}
 	}
@@ -214,6 +237,20 @@ func (r *CommandRegistry) Lookup(name string) (*CommandResource, bool) {
 	}
 	d, ok := r.defs[name]
 	return d, ok
+}
+
+// LookupCapability resolves the unique owner command attached to a declared
+// capability operation. Definitions remain owned by CommandRegistry.
+func (r *CommandRegistry) LookupCapability(capability contract.CapabilityName, operation string) (*CommandResource, bool) {
+	if r == nil || capability == "" || operation == "" {
+		return nil, false
+	}
+	for _, definition := range r.defs {
+		if definition.Capability == capability && definition.Operation == operation {
+			return definition, true
+		}
+	}
+	return nil, false
 }
 
 // List returns all registered definitions sorted by name for stable
