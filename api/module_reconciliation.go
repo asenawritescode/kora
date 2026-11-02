@@ -208,6 +208,10 @@ func (h *Handler) HandleBusinessReconciliationRepair(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "reconciliation.repair_unavailable", "Owner repair capability is unavailable", nil)
 		return
 	}
+	if err := validateBusinessRunRegistration(c.Request.Context(), services.BusinessReconciliation, scope, runID, registration); err != nil {
+		writeError(c, http.StatusNotFound, "reconciliation.run_unavailable", "Business reconciliation run is not available", nil)
+		return
+	}
 	lease, found, err := plan.LeaseReader.LoadCapabilityLease(c.Request.Context(), scope.TenantID, registration.RepairLeaseID)
 	if err != nil || !found {
 		writeError(c, http.StatusServiceUnavailable, "reconciliation.repair_unavailable", "Owner repair capability is unavailable", nil)
@@ -268,6 +272,10 @@ func handleBusinessReconciliationFindingDecision(c *gin.Context, h *Handler, act
 			writeError(c, http.StatusForbidden, "permission.denied", "Business reconciliation run is not available", nil)
 			return
 		}
+		if !businessRunMatchesRegistration(run, scope, registration) {
+			writeError(c, http.StatusNotFound, "reconciliation.run_unavailable", "Business reconciliation run is not available", nil)
+			return
+		}
 		c.JSON(http.StatusOK, Response{Data: run})
 		return
 	}
@@ -276,11 +284,33 @@ func handleBusinessReconciliationFindingDecision(c *gin.Context, h *Handler, act
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "A finding ID and waiver reason are required", nil)
 		return
 	}
+	if err := validateBusinessRunRegistration(c.Request.Context(), services.BusinessReconciliation, scope, runID, registration); err != nil {
+		writeError(c, http.StatusNotFound, "reconciliation.run_unavailable", "Business reconciliation run is not available", nil)
+		return
+	}
 	if err := services.BusinessReconciliation.WaiveFinding(c.Request.Context(), scope.TenantID, runID, request.FindingID, actor, request.Reason, authorizer); err != nil {
 		writeError(c, http.StatusForbidden, "permission.denied", "Business finding waiver was not accepted", nil)
 		return
 	}
 	c.JSON(http.StatusOK, Response{Data: gin.H{"waived": true}})
+}
+
+func validateBusinessRunRegistration(ctx context.Context, service *recon.BusinessReconciliationService, scope contract.BusinessScope, runID string, registration plugin.BusinessReconciliationRule) error {
+	if service == nil || service.Store == nil {
+		return errors.New("business reconciliation store is unavailable")
+	}
+	run, err := service.Store.Load(ctx, scope.TenantID, runID)
+	if err != nil {
+		return err
+	}
+	if !businessRunMatchesRegistration(run, scope, registration) {
+		return errors.New("business reconciliation run does not match registered owner rule")
+	}
+	return nil
+}
+
+func businessRunMatchesRegistration(run recon.BusinessRun, scope contract.BusinessScope, registration plugin.BusinessReconciliationRule) bool {
+	return run.TenantID == scope.TenantID && run.Scope == scope && run.OwnerModuleID == registration.OwnerModuleID && run.RuleID == registration.ID && run.Version == registration.Version
 }
 
 type businessFindingSummaryAuthorization struct {
