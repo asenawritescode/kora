@@ -229,7 +229,19 @@ func analyticsModelReadable(reg *doctype.Registry, execution policy.Execution, m
 			scope = scopes[0]
 		}
 		decision, err := policy.DecideForBusinessScope(execution, reg, "module."+model.ProjectionOwner+".projection."+model.ProjectionID, "read", scope, model.ProjectionScopePolicy == contract.ScopeEntityOwned)
-		return err == nil && !decision.OwnerOnly && len(decision.AssignedFields) == 0
+		if err != nil || decision.OwnerOnly && model.ProjectionOwnerField == "" {
+			return false
+		}
+		allowed := make(map[string]bool, len(model.AllowedFields))
+		for _, field := range model.AllowedFields {
+			allowed[field] = true
+		}
+		for _, field := range decision.AssignedFields {
+			if !allowed[field] {
+				return false
+			}
+		}
+		return true
 	}
 	sources := []string{model.SourceDoctype}
 	if model.Relation != nil {
@@ -331,10 +343,11 @@ func executeAnalyticsQuery(reg *doctype.Registry, tx *orm.TxManager, siteName st
 	if err := request.Validate(catalog); err != nil {
 		return fmt.Sprintf("I could not run that report: %v. Use the analytics catalog to choose valid models, measures, and dimensions.", err)
 	}
-	if err := checkRelatedAnalyticsPermissions(reg, reports, request, execution, tx.BusinessScope); err != nil {
+	actorScopes, err := authorizeRelatedAnalytics(reg, reports, request, execution, tx.BusinessScope)
+	if err != nil {
 		return err.Error()
 	}
-	result, err := (&analytics.QueryEngine{DB: tx.DB, SiteName: siteName, Dialect: tx.Dialect, BusinessScope: tx.BusinessScope}).ResolveSemanticQuery(catalog, request, reg)
+	result, err := (&analytics.QueryEngine{DB: tx.DB, SiteName: siteName, Dialect: tx.Dialect, BusinessScope: tx.BusinessScope, ProjectionActorScopes: actorScopes}).ResolveSemanticQuery(catalog, request, reg)
 	if err != nil {
 		return fmt.Sprintf("Analytics query failed: %v", err)
 	}
@@ -399,12 +412,17 @@ func executeAnalyticsReport(reg *doctype.Registry, tx *orm.TxManager, siteName s
 }
 
 func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.AnalyticsQueryRequest, execution policy.Execution, scopes ...contract.BusinessScope) error {
+	_, err := authorizeRelatedAnalytics(reg, reports, request, execution, scopes...)
+	return err
+}
+
+func authorizeRelatedAnalytics(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.AnalyticsQueryRequest, execution policy.Execution, scopes ...contract.BusinessScope) (map[string]analytics.ProjectionActorScope, error) {
 	if reg == nil || reg.Permissions == nil || !execution.Valid() {
-		return fmt.Errorf("verified execution is required to query related report records")
+		return nil, fmt.Errorf("verified execution is required to query related report records")
 	}
 	catalog, err := buildAnalyticsCatalog(reg, reports)
 	if err != nil {
-		return fmt.Errorf("analytics catalog is unavailable: %w", err)
+		return nil, fmt.Errorf("analytics catalog is unavailable: %w", err)
 	}
 	queriedModels := make(map[string]bool, len(request.Queries))
 	for _, query := range request.Queries {
@@ -412,14 +430,36 @@ func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics
 	}
 	checked := make(map[string]bool)
 	matched := make(map[string]bool, len(queriedModels))
+	actorScopes := make(map[string]analytics.ProjectionActorScope)
+	scope := contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
 	for _, model := range catalog.Models {
 		if !queriedModels[model.Name] {
 			continue
 		}
 		if !analyticsModelReadable(reg, execution, model, scopes...) {
-			return fmt.Errorf("The analytics model %q is unavailable for this actor.", model.Name)
+			return nil, fmt.Errorf("The analytics model %q is unavailable for this actor.", model.Name)
 		}
 		matched[model.Name] = true
+		if model.ProjectionOwner != "" {
+			decision, err := policy.DecideForBusinessScope(execution, reg, "module."+model.ProjectionOwner+".projection."+model.ProjectionID, "read", scope, model.ProjectionScopePolicy == contract.ScopeEntityOwned)
+			if err != nil {
+				return nil, fmt.Errorf("The analytics model %q is unavailable for this actor.", model.Name)
+			}
+			if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
+				subject := strings.TrimSpace(execution.Actor().SubjectUserID)
+				if subject == "" {
+					subject = strings.TrimSpace(execution.Actor().PrincipalID)
+				}
+				if subject == "" {
+					return nil, fmt.Errorf("The analytics model %q has no verified row-scope subject.", model.Name)
+				}
+				actorScopes[model.Name] = analytics.ProjectionActorScope{SubjectID: subject, OwnerOnly: decision.OwnerOnly, OwnerField: model.ProjectionOwnerField, AssignedFields: append([]string(nil), decision.AssignedFields...)}
+			}
+			continue
+		}
 		doctypes := []string{model.SourceDoctype}
 		if model.Relation != nil {
 			doctypes = append(doctypes, model.Relation.ParentDoctype, model.Relation.ChildDoctype)
@@ -436,19 +476,19 @@ func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics
 			checked[name] = true
 			decision, err := policy.Decide(execution, reg, name, "read")
 			if err != nil {
-				return fmt.Errorf("You do not have permission to read %s records for this report.", name)
+				return nil, fmt.Errorf("You do not have permission to read %s records for this report.", name)
 			}
 			if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
-				return fmt.Errorf("This report requires unscoped read access to its source records.")
+				return nil, fmt.Errorf("This report requires unscoped read access to its source records.")
 			}
 		}
 	}
 	for modelName := range queriedModels {
 		if !matched[modelName] {
-			return fmt.Errorf("The analytics model %q is unavailable.", modelName)
+			return nil, fmt.Errorf("The analytics model %q is unavailable.", modelName)
 		}
 	}
-	return nil
+	return actorScopes, nil
 }
 
 // executeAnalyticsInsights runs an analytics query against rollup tables.

@@ -167,6 +167,18 @@ func TestAnalyticsModelsExcludeHiddenPasswordAndOwnerScopedFields(t *testing.T) 
 	}
 }
 
+func TestAnalyticsQueryCarriesProjectionActorScope(t *testing.T) {
+	registry := doctype.NewRegistry()
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.finance.ar.projection.ar_balance", Role: "Reader", Read: true, IfAssigned: []string{"assigned_to"}, Scope: scope})
+	definition := analytics.ReportDefinition{Name: "ar_report", Label: "AR report", Models: []analytics.SemanticModel{{Name: "ar_balance", ProjectionOwner: "finance.ar", ProjectionID: "ar_balance", ProjectionOwnerField: "owner_id", PublishedQuery: "sales.orders/balances", ProjectionScopePolicy: contract.ScopeEntityOwned, AllowedFields: []string{"assigned_to", "owner_id", "amount"}, Measures: []analytics.SemanticMeasure{{Name: "count", Aggregation: "count"}}}}, Queries: []analytics.ReportQuery{{ID: "balance", Model: "ar_balance", Measures: []string{"count"}}}}
+	execution := analyticsTestExecution(t, "tenant-a", []string{"Reader"}, nil)
+	scopes, err := authorizeRelatedAnalytics(registry, []analytics.ReportDefinition{definition}, analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "ar_balance", Measures: []string{"count"}}}}, execution, scope)
+	if err != nil || scopes["ar_balance"].SubjectID != "analytics-test" || len(scopes["ar_balance"].AssignedFields) != 1 || scopes["ar_balance"].AssignedFields[0] != "assigned_to" {
+		t.Fatalf("analytics actor scopes = %#v, error=%v", scopes, err)
+	}
+}
+
 func analyticsTestExecution(t *testing.T, tenant string, roles []string, grants []policy.Grant) policy.Execution {
 	t.Helper()
 	execution, err := policy.NewVerifiedExecutionWithGrants(contract.TenantID(tenant), contract.ActorContext{
