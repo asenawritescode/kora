@@ -93,13 +93,13 @@ func TestBusinessRunStoreLoadsDurableCursorAndWatermarks(t *testing.T) {
 	}
 	defer database.Close()
 	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT owner_module_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-2").WillReturnRows(sqlmock.NewRows([]string{"owner_module_id", "rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.orders", "sales.invoice", 3, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 0, `{"source":"cursor-s"}`, `{"source_revision":"source-r","target_revision":"target-r"}`, "2026-11-02T00:00:00Z"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT owner_module_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-2").WillReturnRows(sqlmock.NewRows([]string{"owner_module_id", "rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.orders", "sales.invoice", 3, `{"tenant_id":"tenant-a","kind":"tenant"}`, "2026-11-02T00:00:00Z", 0, `{"source":"cursor-s","source_rows":[{"key":"sale:1","source_ref":"sale:1","entity_id":"entity-a","amount":"5.00","currency":"KES","occurred_at":"2026-11-02T00:00:00Z"}],"source_complete":true,"watermarks":{"source_revision":"source-r","source_snapshot":"source-snap"}}`, `{"source_revision":"source-r","target_revision":"target-r"}`, "2026-11-02T00:00:00Z"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-2").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}))
 	run, err := store.Load(context.Background(), "tenant-a", "run-2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.OwnerModuleID != "sales.orders" || run.Cursors.Source != "cursor-s" || run.Watermarks.SourceRevision != "source-r" || run.Watermarks.TargetRevision != "target-r" || run.Complete {
+	if run.OwnerModuleID != "sales.orders" || run.Cursors.Source != "cursor-s" || len(run.Cursors.SourceRows) != 1 || !run.Cursors.SourceComplete || run.Cursors.Watermarks.SourceSnapshot != "source-snap" || run.Watermarks.SourceRevision != "source-r" || run.Watermarks.TargetRevision != "target-r" || run.Complete {
 		t.Fatalf("durable run progress = %+v", run)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

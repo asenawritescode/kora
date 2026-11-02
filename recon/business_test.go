@@ -3,10 +3,13 @@ package recon
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/db"
 )
 
 func TestCompareBusinessObligationsFindingsAreStableAndScoped(t *testing.T) {
@@ -242,7 +245,7 @@ func TestBusinessReconciliationServicePersistsUnavailableRunAsIncomplete(t *test
 		}
 		return contract.QueryResult{Data: json.RawMessage(`[]`), SnapshotToken: "source-snapshot", SourceRevision: "source-revision", AsOf: time.Now().UTC(), Freshness: contract.QueryFresh}, nil
 	}}
-	run, err := service.Run(context.Background(), "operator-a", "run-unavailable", rule, time.Now().UTC(), BusinessRunCursor{}, businessRunAuthorizer{})
+	run, err := service.Run(context.Background(), "operator-a", "run-unavailable", rule, time.Now().UTC(), businessRunAuthorizer{})
 	if err != nil || run.Complete || repository.run.ID != "run-unavailable" || repository.run.Complete || repository.run.Watermarks.SourceRevision != "source-revision" {
 		t.Fatalf("persist incomplete run: returned=%+v stored=%+v err=%v", run, repository.run, err)
 	}
@@ -259,10 +262,44 @@ func TestBusinessReconciliationServiceAuthorizesBeforeOwnerQuery(t *testing.T) {
 		reads++
 		return contract.QueryResult{}, nil
 	}}
-	if _, err := service.Run(context.Background(), "operator-a", "run-denied", rule, time.Now().UTC(), BusinessRunCursor{}, businessRunAuthorizer{err: context.Canceled}); err == nil {
+	if _, err := service.Run(context.Background(), "operator-a", "run-denied", rule, time.Now().UTC(), businessRunAuthorizer{err: context.Canceled}); err == nil {
 		t.Fatal("unauthorized reconciliation run accepted")
 	}
 	if reads != 0 || repository.run.ID != "" {
 		t.Fatalf("authorization denial reached owner query or persisted a run: reads=%d run=%+v", reads, repository.run)
+	}
+}
+
+func TestBusinessReconciliationContinueLoadsAuthorizedPersistedCursor(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	cutoff := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	prior := BusinessObligation{Key: "sale:1", SourceRef: "sale:1", EntityID: "entity-a", Amount: "10.00", Currency: "KES", OccurredAt: cutoff.Add(-time.Hour)}
+	priorRows, _ := json.Marshal([]BusinessObligation{prior})
+	cursors := `{"source":"source-page-2","source_rows":` + string(priorRows) + `,"watermarks":{"source_revision":"rev-1","source_snapshot":"snap-1","source_as_of":"2026-11-02T12:00:00Z"}}`
+	store := &BusinessRunStore{DB: database, Dialect: &db.MySQLDialect{}}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT owner_module_id, rule_id, rule_version, scope_json, cutoff_at, complete, cursors_json, watermarks_json, created_at FROM _kora_business_recon_run WHERE tenant_id = ? AND run_id = ?")).WithArgs("tenant-a", "run-prior").WillReturnRows(sqlmock.NewRows([]string{"owner_module_id", "rule_id", "rule_version", "scope_json", "cutoff_at", "complete", "cursors_json", "watermarks_json", "created_at"}).AddRow("sales.orders", "sales-ar", 1, `{"tenant_id":"tenant-a","kind":"tenant"}`, cutoff.Format(time.RFC3339Nano), 0, cursors, `{"source_revision":"rev-1","source_snapshot":"snap-1","source_as_of":"2026-11-02T12:00:00Z"}`, cutoff.Format(time.RFC3339Nano)))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT finding_json, state, evidence FROM _kora_business_recon_finding WHERE tenant_id = ? AND run_id = ? ORDER BY finding_id LIMIT 10000")).WithArgs("tenant-a", "run-prior").WillReturnRows(sqlmock.NewRows([]string{"finding_json", "state", "evidence"}))
+	repository := &capturedBusinessRunRepository{}
+	service := BusinessReconciliationService{Runs: repository, Store: store, ReadPage: func(_ context.Context, request BusinessQueryRequest) (contract.QueryResult, error) {
+		data := `[]`
+		if request.Name == "billable" {
+			data = `[{"key":"sale:2","source_ref":"sale:2","entity_id":"entity-a","amount":"4.00","currency":"KES","occurred_at":"2026-11-02T10:00:00Z"}]`
+		}
+		return contract.QueryResult{Data: json.RawMessage(data), SnapshotToken: "snap-1", SourceRevision: "rev-1", AsOf: cutoff, Freshness: contract.QueryFresh}, nil
+	}}
+	rule := BusinessReconciliationRule{OwnerModuleID: "sales.orders", ID: "sales-ar", Version: 1, Scope: scope, MaxRows: 10,
+		SourceQuery: BusinessQueryRef{OwnerModuleID: "sales.orders", Name: "billable", Input: json.RawMessage(`{}`), PageLimit: 10},
+		TargetQuery: BusinessQueryRef{OwnerModuleID: "ar.receivables", Name: "invoices", Input: json.RawMessage(`{}`), PageLimit: 10}}
+	run, err := service.Continue(context.Background(), "operator-a", "run-next", "run-prior", rule, businessRunAuthorizer{}, allowBusinessRunRead{})
+	if err != nil || !run.Complete || len(run.Findings) != 2 || len(repository.run.Findings) != 2 {
+		t.Fatalf("authorized durable continuation lost earlier page: returned=%+v stored=%+v err=%v", run, repository.run, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

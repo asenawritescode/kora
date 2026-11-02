@@ -205,9 +205,31 @@ func (s *BusinessRunStore) InspectOpenWork(ctx context.Context, tenant contract.
 	return blockers, nil
 }
 
-// Run executes owner-published queries and persists a bounded immutable run,
-// including its scope, cursors, watermarks, findings, and completeness state.
-func (s BusinessReconciliationService) Run(ctx context.Context, actor, runID string, rule BusinessReconciliationRule, cutoff time.Time, cursors BusinessRunCursor, auth BusinessRunAuthorizer) (BusinessRun, error) {
+// Run begins a new bounded reconciliation and persists an immutable run.
+func (s BusinessReconciliationService) Run(ctx context.Context, actor, runID string, rule BusinessReconciliationRule, cutoff time.Time, auth BusinessRunAuthorizer) (BusinessRun, error) {
+	return s.runWithCursor(ctx, actor, runID, rule, cutoff, BusinessRunCursor{}, auth)
+}
+
+// Continue loads continuation evidence from an authorized durable run. The
+// caller supplies only its ID; row buffers and cursors are never accepted from
+// untrusted request data.
+func (s BusinessReconciliationService) Continue(ctx context.Context, actor, runID, previousRunID string, rule BusinessReconciliationRule, auth BusinessRunAuthorizer, readAuth BusinessRunReader) (BusinessRun, error) {
+	if s.Store == nil || previousRunID == "" {
+		return BusinessRun{}, fmt.Errorf("business reconciliation continuation requires a prior run")
+	}
+	previous, err := s.Store.LoadAuthorized(ctx, rule.Scope.TenantID, previousRunID, actor, readAuth)
+	if err != nil {
+		return BusinessRun{}, err
+	}
+	if previous.Complete || previous.RuleID != rule.ID || previous.Version != rule.Version || previous.Scope != rule.Scope {
+		return BusinessRun{}, fmt.Errorf("prior business reconciliation run cannot continue this rule and scope")
+	}
+	return s.runWithCursor(ctx, actor, runID, rule, previous.Cutoff, previous.Cursors, auth)
+}
+
+// runWithCursor executes only with cursor evidence constructed internally or
+// loaded from the authorized durable run store.
+func (s BusinessReconciliationService) runWithCursor(ctx context.Context, actor, runID string, rule BusinessReconciliationRule, cutoff time.Time, cursors BusinessRunCursor, auth BusinessRunAuthorizer) (BusinessRun, error) {
 	if s.Runs == nil || s.ReadPage == nil || runID == "" || len(runID) > 160 || actor == "" || ctx == nil || rule.Scope.Validate() != nil || auth == nil {
 		return BusinessRun{}, fmt.Errorf("business reconciliation service requires identity, repository, query reader, and authorizer")
 	}
