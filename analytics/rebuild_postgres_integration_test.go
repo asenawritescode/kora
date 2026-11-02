@@ -70,7 +70,7 @@ func TestPostgresRebuildCutoffSerializesWithFlush(t *testing.T) {
 		t.Fatal("bootstrap analytics schema:", err)
 	}
 	projectionDefinition := contract.ProjectionDefinition{ID: "task_snapshot", OwnerModuleID: "analytics.task", ScopePolicy: contract.ScopeTenantShared, FactKey: "id", AllowedFields: []string{"id"}, Sources: []contract.ProjectionSource{{OwnerModuleID: "task.domain", QueryName: "tasks", OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}}}, OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}, RebuildStrategy: "consistent_snapshot"}
-	projection := PublishedProjectionSnapshot{Site: "tenant-a", Definition: projectionDefinition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, SourceID: "published_sources", SourceRevision: "task-r1", Cursor: "complete", AsOf: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: []byte(`[{"id":"task-1"}]`)}
+	projection := PublishedProjectionSnapshot{Site: "tenant-a", Definition: projectionDefinition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, SourceID: "published_sources", SourceRevision: "task-r1", Cursor: `{"task.domain/tasks":"cursor-1"}`, AsOf: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: []byte(`[{"id":"task-1"}]`)}
 	if err := SavePublishedProjection(context.Background(), database, dialect, projection); err != nil {
 		t.Fatal("save PostgreSQL projection snapshot:", err)
 	}
@@ -78,7 +78,7 @@ func TestPostgresRebuildCutoffSerializesWithFlush(t *testing.T) {
 		t.Fatal("mark PostgreSQL projection stale:", err)
 	}
 	loadedProjection, err := LoadPublishedProjection(context.Background(), database, dialect, "tenant-a", projectionDefinition, projection.Scope, "published_sources")
-	if err != nil || string(loadedProjection.Data) != string(projection.Data) || loadedProjection.Freshness != contract.QueryStale {
+	if err != nil || string(loadedProjection.Data) != string(projection.Data) || loadedProjection.Cursor != projection.Cursor || loadedProjection.Freshness != contract.QueryStale {
 		t.Fatalf("PostgreSQL retained projection = %#v, error=%v", loadedProjection, err)
 	}
 	for _, query := range []string{

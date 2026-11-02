@@ -89,7 +89,7 @@ func TestMySQLBackfillFailurePreservesPreviouslyCommittedRollups(t *testing.T) {
 	}
 	projectionDefinition := contract.ProjectionDefinition{ID: "task_snapshot", OwnerModuleID: "analytics.task", ScopePolicy: contract.ScopeTenantShared, FactKey: "id", AllowedFields: []string{"id"}, Sources: []contract.ProjectionSource{{OwnerModuleID: "task.domain", QueryName: "tasks", OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}}}, OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}, RebuildStrategy: "consistent_snapshot"}
 	projectionStore := PublishedProjectionStore{DB: database, Dialect: db.Resolve("mysql"), Site: "tenant-a"}
-	projection := PublishedProjectionSnapshot{Definition: projectionDefinition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, SourceID: "published_sources", SourceRevision: "task-r1", Cursor: "complete", AsOf: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: []byte(`[{"id":"task-1"}]`)}
+	projection := PublishedProjectionSnapshot{Definition: projectionDefinition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, SourceID: "published_sources", SourceRevision: "task-r1", Cursor: `{"task.domain/tasks":"cursor-1"}`, AsOf: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: []byte(`[{"id":"task-1"}]`)}
 	if err := projectionStore.Save(context.Background(), projection); err != nil {
 		t.Fatal("save MySQL projection snapshot:", err)
 	}
@@ -97,7 +97,7 @@ func TestMySQLBackfillFailurePreservesPreviouslyCommittedRollups(t *testing.T) {
 		t.Fatal("mark MySQL projection stale:", err)
 	}
 	loaded, err := projectionStore.Load(context.Background(), projectionDefinition, projection.Scope, "published_sources")
-	if err != nil || string(loaded.Data) != string(projection.Data) || loaded.Freshness != contract.QueryStale {
+	if err != nil || string(loaded.Data) != string(projection.Data) || loaded.Cursor != projection.Cursor || loaded.Freshness != contract.QueryStale {
 		t.Fatalf("MySQL retained projection = %#v, error=%v", loaded, err)
 	}
 
