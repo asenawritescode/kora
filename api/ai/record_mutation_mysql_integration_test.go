@@ -330,14 +330,19 @@ func TestAIRecordMutationUsesExactVerifiedGrantAndPrincipal(t *testing.T) {
 	database, dialect := newAIKernelMySQLDatabase(t, dsn)
 	site := "ai-exact-grant-" + fmt.Sprintf("%x", time.Now().UnixNano())
 	dt := &doctype.DocType{Name: "AI Grant Task", Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}}}
+	protected := &doctype.DocType{Name: "AI Protected Task", ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands), BusinessScopePolicy: contract.ScopeTenantShared, Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}}}
 	registry := doctype.NewRegistry()
 	registry.Register(dt)
-	for _, statement := range dialect.CreateTable(dt) {
-		if _, err := database.Exec(statement); err != nil {
-			t.Fatalf("create exact-grant DocType table: %v", err)
+	registry.Register(protected)
+	for _, resource := range []*doctype.DocType{dt, protected} {
+		for _, statement := range dialect.CreateTable(resource) {
+			if _, err := database.Exec(statement); err != nil {
+				t.Fatalf("create exact-grant DocType table: %v", err)
+			}
 		}
 	}
 	defer func() {
+		_, _ = database.Exec("DROP TABLE " + dialect.QuoteIdent(protected.RawTableName()))
 		_, _ = database.Exec("DROP TABLE " + dialect.QuoteIdent(dt.RawTableName()))
 		_, _ = database.Exec(kdb.Rebind(dialect, "DELETE FROM _kora_naming_series WHERE doctype = ?"), dt.Name)
 		for _, table := range []string{"_kora_operation_audit", "_kora_idempotency_receipt", "_kora_outbox"} {
@@ -346,7 +351,7 @@ func TestAIRecordMutationUsesExactVerifiedGrantAndPrincipal(t *testing.T) {
 	}()
 	execution, err := policy.NewVerifiedExecutionWithGrants(contract.TenantID(site), contract.ActorContext{
 		PrincipalID: "service:ai-writer", PrincipalType: contract.PrincipalService, Site: site,
-	}, []policy.Grant{{Resource: dt.Name, Operation: "create"}})
+	}, []policy.Grant{{Resource: dt.Name, Operation: "create"}, {Resource: protected.Name, Operation: "create"}})
 	if err != nil {
 		t.Fatal("create verified exact-grant execution:", err)
 	}
@@ -370,7 +375,17 @@ func TestAIRecordMutationUsesExactVerifiedGrantAndPrincipal(t *testing.T) {
 	if owner != "service:ai-writer" {
 		t.Fatalf("AI adapter used caller owner %q, want verified principal owner", owner)
 	}
-	for table, want := range map[string]int{"_kora_operation_audit": 1, "_kora_idempotency_receipt": 1, "_kora_outbox": 1} {
+	if _, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, protected.Name, "", map[string]any{"title": "must use the owner command"}, "service:ai-writer", nil, "ai-protected-generic-create", false, execution); err == nil {
+		t.Fatal("AI generic record adapter mutated a commands-only module resource")
+	}
+	var protectedCount int
+	if err := database.QueryRow("SELECT COUNT(*) FROM " + dialect.QuoteIdent(protected.RawTableName())).Scan(&protectedCount); err != nil {
+		t.Fatal("count protected AI records:", err)
+	}
+	if protectedCount != 0 {
+		t.Fatalf("AI generic mutation wrote %d commands-only records, want zero", protectedCount)
+	}
+	for table, want := range map[string]int{"_kora_operation_audit": 2, "_kora_idempotency_receipt": 1, "_kora_outbox": 2} {
 		var count int
 		if err := database.QueryRow("SELECT COUNT(*) FROM "+dialect.QuoteIdent(table)+" WHERE site = ?", site).Scan(&count); err != nil {
 			t.Fatalf("count %s rows: %v", table, err)
