@@ -436,6 +436,48 @@ func TestHandleListRequiresVerifiedExecution(t *testing.T) {
 	}
 }
 
+func TestGenericHTTPReadsDenyModuleOwnedRecordsBeforeStorage(t *testing.T) {
+	handler, registry, mock, database := setupTestHandler(t)
+	defer database.Close()
+	docType := registry.Get("TestDoc")
+	docType.ModuleOwnerID = "finance.ar"
+	docType.ModuleAccess = contract.ModulePrivate
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "TestDoc", Role: "Administrator", Read: true})
+
+	for _, method := range []string{"list", "get", "history"} {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		target := "/api/resource/TestDoc"
+		switch method {
+		case "get":
+			target += "/INV-1"
+		case "history":
+			target += "/INV-1/history"
+		}
+		ctx.Request = httptest.NewRequest(http.MethodGet, target, nil)
+		ctx.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
+		if method != "list" {
+			ctx.Params = append(ctx.Params, gin.Param{Key: "name", Value: "INV-1"})
+		}
+		injectDB(ctx, database, registry)
+		injectContext(ctx)
+		switch method {
+		case "list":
+			handler.HandleList(ctx)
+		case "get":
+			handler.HandleGet(ctx)
+		case "history":
+			handler.HandleRecordHistory(ctx)
+		}
+		if recorder.Code != http.StatusForbidden {
+			t.Errorf("generic %s of module-owned record status=%d, want forbidden: %s", method, recorder.Code, recorder.Body.String())
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("denied generic module reads reached storage: %v", err)
+	}
+}
+
 func TestHandleListUsesRoutedTenantPermissions(t *testing.T) {
 	handler, _, mock, sqlDB := setupTestHandler(t)
 	siteRegistry := doctype.NewRegistry()

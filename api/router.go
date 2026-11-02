@@ -417,6 +417,12 @@ func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation st
 		return policy.RowScope{}, true
 	}
 	dt := registry.Get(docType)
+	if operation == "read" && dt != nil && dt.ModuleOwnerID != "" {
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{
+			"message": "module-owned records are available only through their published query contract",
+		}})
+		return policy.RowScope{}, true
+	}
 	businessScope := contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}
 	if entityID := strings.TrimSpace(c.GetHeader("X-Kora-Legal-Entity-ID")); entityID != "" {
 		businessScope.Kind = contract.ScopeKindLegalEntity
@@ -1028,6 +1034,7 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 	agents := apiGroup.Group("/system/agents")
 	agents.GET("/:id", handler.HandleAgentManifest)
 	agents.PUT("/:id", handler.HandleAgentManifest)
+	agents.GET("", handler.HandleAgentManifests)
 	agents.GET("/:id/effective-permissions", handler.HandleAgentEffectivePermissions)
 	agents.GET("/:id/runs", handler.HandleAgentRuns)
 	agents.POST("/:id/runs", handler.HandleAgentRuns)
