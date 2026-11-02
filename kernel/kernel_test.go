@@ -2084,6 +2084,29 @@ func TestConfiguredCommandAuthzDenied(t *testing.T) {
 	}
 }
 
+type trustedOwnerCommandSchemas struct {
+	input, output contract.SchemaRef
+	rejectInput   bool
+	rejectOutput  bool
+}
+
+func (s *trustedOwnerCommandSchemas) Registered(ref contract.SchemaRef) bool {
+	return ref == s.input || ref == s.output
+}
+
+func (s *trustedOwnerCommandSchemas) Validate(ref contract.SchemaRef, raw json.RawMessage) error {
+	if !json.Valid(raw) {
+		return fmt.Errorf("invalid JSON")
+	}
+	if ref == s.input && s.rejectInput {
+		return fmt.Errorf("injected input rejection")
+	}
+	if ref == s.output && s.rejectOutput {
+		return fmt.Errorf("injected output rejection")
+	}
+	return nil
+}
+
 func TestTrustedOwnerCommandValidatesBeforeBusinessEffects(t *testing.T) {
 	s := newSite(t, "site-a")
 	defer s.DB.Close()
@@ -2129,6 +2152,8 @@ emit:
 	if err := k.Commands.Register(command); err != nil {
 		t.Fatal("register owner command:", err)
 	}
+	schemas := &trustedOwnerCommandSchemas{input: command.InputSchema, output: command.OutputSchema}
+	k.CommandSchemas = schemas
 	scope := contract.BusinessScope{TenantID: contract.TenantID(s.Name), Kind: contract.ScopeKindTenant}
 	moduleExecution, err := contract.NewCommandModuleExecution(scope, "finance.ar", "finance.ar", 1, command.FullName(), command.FullName())
 	if err != nil {
@@ -2153,7 +2178,58 @@ emit:
 		t.Fatalf("invalid owner command wrote %d success audit rows", count)
 	}
 
+	bundlePayload := kernel.RecordMutationBundlePayload{Doctype: "Task", Records: []kernel.RecordMutationBundleItem{
+		{Key: "task", Doctype: "Task", Data: json.RawMessage(`{"title":"must roll back before protected invoice"}`)},
+		{Key: "invoice", Doctype: invoice.Name, Data: json.RawMessage(`{"title":"generic bundle bypass"}`)},
+	}}
+	bundle := bundleOp(bundlePayload, withRoles(doctype.AdminRole), withKey("protected-module-bundle"))
+	beforeTasks := s.taskCount(t)
+	beforeInvoices := s.count(t, `SELECT COUNT(*) FROM `+"`tabInvoice`")
+	beforeEvents := s.count(t, `SELECT COUNT(*) FROM _kora_outbox WHERE site=?`, s.Name)
+	beforeCompleted := s.count(t, `SELECT COUNT(*) FROM _kora_operation_audit WHERE site=? AND command_name=? AND status='completed'`, s.Name, kernel.CommandRecordMutateBundle)
+	beforeReceipts := s.count(t, `SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site=? AND command_name=?`, s.Name, kernel.CommandRecordMutateBundle)
+	deniedBundle := exec(t, s, k, bundle)
+	if deniedBundle.Error == nil || deniedBundle.Error.Type != contract.CodePermissionDenied {
+		t.Fatalf("generic bundle touching an owner resource = %+v, want permission denied", deniedBundle.Error)
+	}
+	if got := s.taskCount(t); got != beforeTasks {
+		t.Fatalf("denied protected-resource bundle changed task rows from %d to %d", beforeTasks, got)
+	}
+	if got := s.count(t, `SELECT COUNT(*) FROM `+"`tabInvoice`"); got != beforeInvoices {
+		t.Fatalf("denied protected-resource bundle changed invoice rows from %d to %d", beforeInvoices, got)
+	}
+	if got := s.count(t, `SELECT COUNT(*) FROM _kora_outbox WHERE site=?`, s.Name); got != beforeEvents {
+		t.Fatalf("denied protected-resource bundle changed outbox rows from %d to %d", beforeEvents, got)
+	}
+	if got := s.count(t, `SELECT COUNT(*) FROM _kora_operation_audit WHERE site=? AND command_name=? AND status='completed'`, s.Name, kernel.CommandRecordMutateBundle); got != beforeCompleted {
+		t.Fatalf("denied protected-resource bundle wrote %d success audits", got-beforeCompleted)
+	}
+	if got := s.count(t, `SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site=? AND command_name=?`, s.Name, kernel.CommandRecordMutateBundle); got != beforeReceipts {
+		t.Fatalf("denied protected-resource bundle wrote %d idempotency receipts", got-beforeReceipts)
+	}
+
 	validPayload, _ := json.Marshal(map[string]any{"data": map[string]any{"title": "INV-1"}})
+	schemas.rejectInput = true
+	invalidSchema := exec(t, s, k, kernel.Operation{Command: command.FullName(), Payload: validPayload, Context: context})
+	if invalidSchema.Error == nil || invalidSchema.Error.Type != contract.CodeValidationFailed {
+		t.Fatalf("owner command with input schema mismatch = %+v, want validation failure", invalidSchema.Error)
+	}
+	if count := s.count(t, `SELECT COUNT(*) FROM `+"`tabInvoice`"); count != 0 {
+		t.Fatalf("input schema rejection wrote %d invoices", count)
+	}
+	schemas.rejectInput = false
+	schemas.rejectOutput = true
+	invalidOutput := exec(t, s, k, kernel.Operation{Command: command.FullName(), Payload: validPayload, Context: context})
+	if invalidOutput.Error == nil || invalidOutput.Error.Type != contract.CodeValidationFailed {
+		t.Fatalf("owner command with output schema mismatch = %+v, want validation failure", invalidOutput.Error)
+	}
+	if count := s.count(t, `SELECT COUNT(*) FROM `+"`tabInvoice`"); count != 0 {
+		t.Fatalf("output schema rejection left %d invoices", count)
+	}
+	if count := s.count(t, `SELECT COUNT(*) FROM _kora_outbox WHERE event_type='finance.invoice.issued' AND site=?`, s.Name); count != 0 {
+		t.Fatalf("output schema rejection emitted %d success events", count)
+	}
+	schemas.rejectOutput = false
 	valid := exec(t, s, k, kernel.Operation{Command: command.FullName(), Payload: validPayload, Context: context})
 	mustComplete(t, valid)
 	if count := s.count(t, `SELECT COUNT(*) FROM `+"`tabInvoice`"+` WHERE title='INV-1'`); count != 1 {

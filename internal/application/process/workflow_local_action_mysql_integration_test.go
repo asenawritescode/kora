@@ -94,7 +94,8 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 		t.Fatal("migrate workflow subject doctype:", err)
 	}
 	engine := kernel.New(dialect, outbox.NewSQLWriter(dialect))
-	moduleCommand, err := kernel.ParseCommandResource([]byte("name: issue\nnamespace: finance.invoice\nversion: 1\ninput:\n  record: " + moduleInvoice.Name + "\ntransaction:\n  - create:\n      record: " + moduleInvoice.Name + "\n      values:\n        title: $input.title\nemit:\n  - finance.invoice.issued\n"))
+	engine.CommandSchemas = integrationWorkflowSchemas{}
+	moduleCommand, err := kernel.ParseCommandResource([]byte("name: issue\nnamespace: finance.invoice\nversion: 1\ninput:\n  record: " + moduleInvoice.Name + "\nmodule_owner_id: finance.ar\ncapability: finance.invoice.issue\noperation: issue\ninput_schema:\n  id: finance.invoice.issue.input\n  version: 1\noutput_schema:\n  id: finance.invoice.issue.output\n  version: 1\ntransaction:\n  - create:\n      record: " + moduleInvoice.Name + "\n      values:\n        title: $input.title\nemit:\n  - finance.invoice.issued\n"))
 	if err != nil {
 		t.Fatal("parse registered owner command:", err)
 	}
