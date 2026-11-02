@@ -162,6 +162,26 @@
       ],
       "type": "object"
     },
+    "BusinessEventDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "type": "string"
+        },
+        "payload_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "payload_schema",
+        "type"
+      ],
+      "type": "object"
+    },
     "BusinessRef": {
       "additionalProperties": false,
       "properties": {
@@ -710,6 +730,29 @@
         "site",
         "status",
         "version"
+      ],
+      "type": "object"
+    },
+    "ConsumerDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_event_schemas": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SchemaRef"
+          },
+          "type": "object"
+        },
+        "consumer_id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted_event_schemas",
+        "consumer_id",
+        "owner_module_id"
       ],
       "type": "object"
     },
@@ -3173,6 +3216,26 @@
       ],
       "type": "object"
     },
+    "BusinessEventDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "type": "string"
+        },
+        "payload_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "payload_schema",
+        "type"
+      ],
+      "type": "object"
+    },
     "BusinessRef": {
       "additionalProperties": false,
       "properties": {
@@ -3721,6 +3784,29 @@
         "site",
         "status",
         "version"
+      ],
+      "type": "object"
+    },
+    "ConsumerDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_event_schemas": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SchemaRef"
+          },
+          "type": "object"
+        },
+        "consumer_id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted_event_schemas",
+        "consumer_id",
+        "owner_module_id"
       ],
       "type": "object"
     },

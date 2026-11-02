@@ -1,6 +1,8 @@
 package contract
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -213,6 +215,59 @@ type HistoricalSnapshot struct {
 	Schema     SchemaRef   `json:"schema"`
 	//contract:json
 	Data json.RawMessage `json:"data"`
+}
+
+// BusinessEventDefinition ties an authoritative business event to its owning module.
+//
+//contract:wire:v2
+type BusinessEventDefinition struct {
+	Type          string    `json:"type"`
+	PayloadSchema SchemaRef `json:"payload_schema"`
+	OwnerModuleID ModuleID  `json:"owner_module_id"`
+}
+
+// ConsumerDefinition declares owner-controlled event subscriptions.
+//
+//contract:wire:v2
+type ConsumerDefinition struct {
+	ConsumerID           string               `json:"consumer_id"`
+	OwnerModuleID        ModuleID             `json:"owner_module_id"`
+	AcceptedEventSchemas map[string]SchemaRef `json:"accepted_event_schemas"`
+}
+
+func ValidateBusinessEvent(definition BusinessEventDefinition, owner ModuleID, schema SchemaRef, eventType string) error {
+	if definition.OwnerModuleID == "" || definition.OwnerModuleID != owner {
+		return fmt.Errorf("business event owner does not match verified execution")
+	}
+	if definition.Type != eventType || definition.PayloadSchema != schema {
+		return fmt.Errorf("business event type or payload schema mismatch")
+	}
+	if definition.Type == "" || definition.PayloadSchema.ID == "" || definition.PayloadSchema.Version == 0 {
+		return fmt.Errorf("business event contract is incomplete")
+	}
+	return nil
+}
+
+func AppendBusinessEvent(ctx context.Context, writer interface {
+	Append(context.Context, *sql.Tx, EventEnvelope) error
+}, tx *sql.Tx, execution ModuleExecution, definition BusinessEventDefinition, payloadSchema SchemaRef, payload json.RawMessage, site, aggregateType, aggregateID, correlationID, causationID string) (string, error) {
+	if !execution.Verified() || site != string(execution.TenantID) {
+		return "", fmt.Errorf("business event requires verified matching module execution")
+	}
+	if execution.OwnerModuleID != definition.OwnerModuleID {
+		return "", fmt.Errorf("business event can only be published by its owning module")
+	}
+	if err := ValidateBusinessEvent(definition, execution.OwnerModuleID, payloadSchema, definition.Type); err != nil {
+		return "", err
+	}
+	if writer == nil || tx == nil || !json.Valid(payload) {
+		return "", fmt.Errorf("business event writer, transaction, and valid payload are required")
+	}
+	event := EventEnvelope{ID: NewEventID(), Type: definition.Type, Version: CurrentVersion, Source: string(execution.OwnerModuleID), Site: site, AggregateType: aggregateType, AggregateID: aggregateID, OccurredAt: time.Now().UTC(), CorrelationID: correlationID, CausationID: causationID, Data: payload}
+	if err := writer.Append(ctx, tx, event); err != nil {
+		return "", err
+	}
+	return event.ID, nil
 }
 
 func NewModuleExecution(tenant TenantID, caller, owner ModuleID, revision uint64, operation, scope string) (ModuleExecution, error) {

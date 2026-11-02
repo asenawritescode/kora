@@ -73,3 +73,16 @@ func TestBusinessReferenceProviderQualificationAndScope(t *testing.T) {
 		t.Fatal("unknown provider accepted")
 	}
 }
+
+func TestBusinessEventRequiresTrustedOwnerAndExactPayloadSchema(t *testing.T) {
+	def := BusinessEventDefinition{Type: "finance.invoice.issued", PayloadSchema: SchemaRef{ID: "finance.invoice-issued", Version: 1}, OwnerModuleID: "finance.ar"}
+	if err := ValidateBusinessEvent(def, "finance.ar", def.PayloadSchema, def.Type); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateBusinessEvent(def, "sales.orders", def.PayloadSchema, def.Type); err == nil {
+		t.Fatal("non-owner published authoritative event")
+	}
+	if err := ValidateBusinessEvent(def, "finance.ar", SchemaRef{ID: "finance.invoice-issued", Version: 2}, def.Type); err == nil {
+		t.Fatal("schema version mismatch accepted")
+	}
+}
