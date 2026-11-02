@@ -689,6 +689,33 @@ func (s *InstanceService) Reconcile(ctx context.Context, exec policy.Execution, 
 	if _, err := contract.ParseStepID(string(step.Action.Next)); err != nil {
 		return contract.WorkflowInstance{}, contract.NewError(contract.CodeConflict, "pinned action destination is invalid")
 	}
+	registration, resolveErr := s.catalog.Resolve(ActionKey{Name: step.Action.Name, Version: step.Action.Version})
+	if resolveErr != nil {
+		return contract.WorkflowInstance{}, contract.NewError(contract.CodeDependencyUnavailable, "pinned workflow action is unavailable for reconciliation")
+	}
+	if registration.PinnedDispatcher != nil {
+		pinnedRepository, ok := s.instances.(PinnedDispatchRepository)
+		if !ok {
+			return contract.WorkflowInstance{}, contract.NewError(contract.CodeInternal, "workflow repository cannot load the persisted provider pin")
+		}
+		dispatch, loadErr := pinnedRepository.LoadPinnedDispatch(ctx, exec.Tenant(), id, cmd.StepID)
+		if loadErr != nil {
+			return contract.WorkflowInstance{}, loadErr
+		}
+		outcome, _, reconcileErr := registration.PinnedDispatcher.Reconcile(ctx, dispatch)
+		if reconcileErr != nil {
+			return contract.WorkflowInstance{}, fmt.Errorf("reconcile pinned workflow provider outcome: %w", reconcileErr)
+		}
+		if outcome == contract.ExternalApplied && cmd.Outcome != contract.ReconcileSucceeded {
+			return contract.WorkflowInstance{}, contract.NewError(contract.CodeConflict, "provider confirms the pinned effect was applied")
+		}
+		if outcome == contract.ExternalNotApplied && cmd.Outcome == contract.ReconcileSucceeded {
+			return contract.WorkflowInstance{}, contract.NewError(contract.CodeConflict, "provider confirms the pinned effect was not applied")
+		}
+		if outcome != contract.ExternalApplied && outcome != contract.ExternalNotApplied && outcome != contract.ExternalUnknown {
+			return contract.WorkflowInstance{}, contract.NewError(contract.CodeValidationFailed, "provider reconciliation returned an invalid outcome")
+		}
+	}
 	status, nextStep := contract.InstanceReady, cmd.StepID
 	switch cmd.Outcome {
 	case contract.ReconcileSucceeded:

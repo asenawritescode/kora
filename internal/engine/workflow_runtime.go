@@ -241,7 +241,7 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 				return nil, nil, nil, fmt.Errorf("local workflow adapters must be assembled through registered domain-operation builders")
 			}
 			localRegistrations = append(localRegistrations, registration)
-		} else if registration.Class != workflow.ActionExternal || registration.External == nil || registration.Local != nil {
+		} else if registration.Class != workflow.ActionExternal || (registration.External == nil && registration.PinnedDispatcher == nil) || (registration.PinnedDispatcher != nil && registration.External != nil) || registration.Local != nil {
 			return nil, nil, nil, fmt.Errorf("external workflow registration has an invalid adapter")
 		}
 	}

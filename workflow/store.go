@@ -145,9 +145,15 @@ type SignalStore interface {
 type ExecutionStore interface {
 	ClaimDue(context.Context, contract.TenantID, string, uint16, time.Duration) ([]Claim, error)
 	Renew(context.Context, Claim, time.Duration) (Claim, error)
-	BeginExternalAttempt(context.Context, Claim, string, contract.IdempotencyKey) error
+	BeginExternalAttempt(context.Context, Claim, string, contract.IdempotencyKey, *contract.PinnedDispatch) (*contract.PinnedDispatch, error)
 	CommitStep(context.Context, StepCommit) error
 	Release(context.Context, Claim) error
+}
+
+// PinnedDispatchRepository loads the durable provider identity for an
+// uncertain action so reconciliation always addresses the provider that was called.
+type PinnedDispatchRepository interface {
+	LoadPinnedDispatch(context.Context, contract.TenantID, contract.InstanceID, contract.StepID) (contract.PinnedDispatch, error)
 }
 
 // HumanWaitRecoveryStore is the durable terminal-request recovery boundary.

@@ -35,22 +35,25 @@ var _ workflow.ExecutionStore = (*ExecutionStore)(nil)
 // BeginExternalAttempt records ownership and retry identity before a provider
 // call. If the process dies after the effect starts, recovery can distinguish
 // that uncertain outcome from an attempt that was never sent.
-func (s *ExecutionStore) BeginExternalAttempt(ctx context.Context, claim workflow.Claim, executionID string, key contract.IdempotencyKey) error {
+func (s *ExecutionStore) BeginExternalAttempt(ctx context.Context, claim workflow.Claim, executionID string, key contract.IdempotencyKey, requested *contract.PinnedDispatch) (*contract.PinnedDispatch, error) {
 	if ctx == nil {
-		return fmt.Errorf("begin workflow external attempt requires context")
+		return nil, fmt.Errorf("begin workflow external attempt requires context")
 	}
 	if err := s.validateClaim(claim, 0); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := contract.ParseOperationID(executionID); err != nil {
-		return fmt.Errorf("workflow execution identity: %w", err)
+		return nil, fmt.Errorf("workflow execution identity: %w", err)
 	}
 	if _, err := contract.ParseIdempotencyKey(string(key)); err != nil {
-		return fmt.Errorf("workflow action idempotency key: %w", err)
+		return nil, fmt.Errorf("workflow action idempotency key: %w", err)
+	}
+	if requested != nil && (requested.Validate() != nil || requested.ExecutionID != executionID || requested.Scope != claim.BusinessScope || requested.IdempotencyKey != key) {
+		return nil, contract.NewError(contract.CodeValidationFailed, "pinned dispatch does not match the claimed workflow identity")
 	}
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin external workflow attempt transaction: %w", err)
+		return nil, fmt.Errorf("begin external workflow attempt transaction: %w", err)
 	}
 	defer tx.Rollback()
 	now := "CURRENT_TIMESTAMP"
@@ -64,35 +67,65 @@ func (s *ExecutionStore) BeginExternalAttempt(ctx context.Context, claim workflo
 	var instanceID string
 	if err := tx.QueryRowContext(ctx, db.Rebind(s.dialect, query), string(claim.Tenant), string(claim.InstanceID), string(claim.StepID), claim.Owner, uint64(claim.Fence), mustRevision(claim.Revision)).Scan(&instanceID); err != nil {
 		if err == sql.ErrNoRows {
-			return contract.NewError(contract.CodeConflict, "workflow claim is stale or expired")
+			return nil, contract.NewError(contract.CodeConflict, "workflow claim is stale or expired")
 		}
-		return fmt.Errorf("validate external workflow claim: %w", err)
+		return nil, fmt.Errorf("validate external workflow claim: %w", err)
 	}
 	var previousAttempt uint64
 	var previousKey, previousExecution, previousStatus string
-	previousErr := tx.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT attempt,idempotency_key,execution_id,status FROM _kora_workflow_attempt WHERE tenant_id = ? AND instance_id = ? AND step_id = ? ORDER BY attempt DESC LIMIT 1`), string(claim.Tenant), string(claim.InstanceID), string(claim.StepID)).Scan(&previousAttempt, &previousKey, &previousExecution, &previousStatus)
+	var previousDispatchJSON sql.NullString
+	previousErr := tx.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT attempt,idempotency_key,execution_id,status,pinned_dispatch_json FROM _kora_workflow_attempt WHERE tenant_id = ? AND instance_id = ? AND step_id = ? ORDER BY attempt DESC LIMIT 1`), string(claim.Tenant), string(claim.InstanceID), string(claim.StepID)).Scan(&previousAttempt, &previousKey, &previousExecution, &previousStatus, &previousDispatchJSON)
 	if previousErr != nil && previousErr != sql.ErrNoRows {
-		return fmt.Errorf("load previous external workflow attempt: %w", previousErr)
+		return nil, fmt.Errorf("load previous external workflow attempt: %w", previousErr)
 	}
 	if uint64(claim.Attempt) != previousAttempt+1 {
-		return contract.NewError(contract.CodeConflict, "external workflow attempt is not the next durable attempt")
+		return nil, contract.NewError(contract.CodeConflict, "external workflow attempt is not the next durable attempt")
 	}
+	selected := requested
 	if previousErr == nil {
 		if previousStatus != "failed" {
-			return contract.NewError(contract.CodeConflict, "previous external workflow outcome is unresolved")
+			return nil, contract.NewError(contract.CodeConflict, "previous external workflow outcome is unresolved")
 		}
 		if previousKey != string(key) || previousExecution != executionID {
-			return contract.NewError(contract.CodeConflict, "workflow action idempotency or execution identity changed across attempts")
+			return nil, contract.NewError(contract.CodeConflict, "workflow action idempotency or execution identity changed across attempts")
+		}
+		if previousDispatchJSON.Valid {
+			var prior contract.PinnedDispatch
+			if err := json.Unmarshal([]byte(previousDispatchJSON.String), &prior); err != nil || prior.Validate() != nil {
+				return nil, contract.NewError(contract.CodeConflict, "persisted pinned capability dispatch is invalid")
+			}
+			if requested == nil || !samePinnedOperation(prior, *requested) {
+				return nil, contract.NewError(contract.CodeConflict, "pinned capability operation or input changed across attempts")
+			}
+			selected = &prior
+		} else if requested != nil {
+			return nil, contract.NewError(contract.CodeConflict, "previous attempt has no pinned capability identity")
 		}
 	}
-	_, err = tx.ExecContext(ctx, db.Rebind(s.dialect, `INSERT INTO _kora_workflow_attempt (tenant_id,instance_id,step_id,execution_id,attempt,status,idempotency_key,result_json,failure,started_at,finished_at) VALUES (?,?,?,?,?,'running',?,NULL,'',`+now+`,`+now+`)`), string(claim.Tenant), string(claim.InstanceID), string(claim.StepID), executionID, claim.Attempt, string(key))
+	var pinnedJSON any
+	if selected != nil {
+		encoded, marshalErr := json.Marshal(selected)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		pinnedJSON = string(encoded)
+	}
+	_, err = tx.ExecContext(ctx, db.Rebind(s.dialect, `INSERT INTO _kora_workflow_attempt (tenant_id,instance_id,step_id,execution_id,attempt,status,idempotency_key,pinned_dispatch_json,result_json,failure,started_at,finished_at) VALUES (?,?,?,?,?,'running',?,?,NULL,'',`+now+`,`+now+`)`), string(claim.Tenant), string(claim.InstanceID), string(claim.StepID), executionID, claim.Attempt, string(key), pinnedJSON)
 	if err != nil {
-		return fmt.Errorf("persist external workflow attempt start: %w", err)
+		return nil, fmt.Errorf("persist external workflow attempt start: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit external workflow attempt start: %w", err)
+		return nil, fmt.Errorf("commit external workflow attempt start: %w", err)
 	}
-	return nil
+	if selected == nil {
+		return nil, nil
+	}
+	copy := *selected
+	return &copy, nil
+}
+
+func samePinnedOperation(a, b contract.PinnedDispatch) bool {
+	return a.ExecutionID == b.ExecutionID && a.Scope == b.Scope && a.CallerModuleID == b.CallerModuleID && a.Operation == b.Operation && a.IdempotencyKey == b.IdempotencyKey && a.InputHash == b.InputHash
 }
 
 func (s *ExecutionStore) ClaimDue(ctx context.Context, tenant contract.TenantID, owner string, limit uint16, lease time.Duration) ([]workflow.Claim, error) {

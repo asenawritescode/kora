@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -184,8 +185,15 @@ func TestMySQLExpiredWorkflowClaimCannotCommitProgress(t *testing.T) {
 		t.Fatalf("abandoned workflow initial claim = %#v, %v", claimed, err)
 	}
 	executionID := "01K7EXECUTION000000000000000001"
-	if err := store.BeginExternalAttempt(ctx, claimed[0], executionID, "stable-external-key-01"); err != nil {
+	key := contract.IdempotencyKey("stable-external-key-01")
+	pinned := contract.PinnedDispatch{ExecutionID: executionID, Scope: claimed[0].BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", BindingRevision: 6, Operation: contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: contract.SchemaRef{ID: "billing.input", Version: 1}, OutputSchema: contract.SchemaRef{ID: "billing.output", Version: 1}}, IdempotencyKey: key, InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	stored, err := store.BeginExternalAttempt(ctx, claimed[0], executionID, key, &pinned)
+	if err != nil || stored == nil || stored.ProviderID != "billing.provider-a" {
 		t.Fatal("persist external action start:", err)
+	}
+	var pinnedJSON string
+	if err := database.QueryRowContext(ctx, `SELECT pinned_dispatch_json FROM _kora_workflow_attempt WHERE tenant_id=? AND instance_id=? AND step_id=?`, "tenant-a", string(abandonedID), string(claimed[0].StepID)).Scan(&pinnedJSON); err != nil || !strings.Contains(pinnedJSON, "billing.provider-a") {
+		t.Fatalf("persisted provider pin = %q, %v", pinnedJSON, err)
 	}
 	if _, err := database.ExecContext(ctx, `UPDATE _kora_workflow_instance SET lease_until = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE id = ?`, string(abandonedID)); err != nil {
 		t.Fatal("expire external action lease:", err)

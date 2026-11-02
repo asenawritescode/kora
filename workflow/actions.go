@@ -38,6 +38,7 @@ type ActionContext struct {
 	ExecutionID    string
 	Subject        contract.SubjectRef
 	IdempotencyKey contract.IdempotencyKey
+	PinnedDispatch *contract.PinnedDispatch
 }
 
 type Action interface {
@@ -125,13 +126,18 @@ func (e *LocalActionFailure) Unwrap() error {
 }
 
 type ActionRegistration struct {
-	Key           ActionKey
-	Class         ActionClass
-	InputSchema   contract.SchemaRef
-	OutputSchema  contract.SchemaRef
-	RequiredGrant policy.Grant
-	External      Action
-	Local         LocalActionExecutor
+	Key              ActionKey
+	Class            ActionClass
+	InputSchema      contract.SchemaRef
+	OutputSchema     contract.SchemaRef
+	RequiredGrant    policy.Grant
+	External         Action
+	Local            LocalActionExecutor
+	Capability       *contract.CapabilityAction
+	ProviderID       string
+	BindingRevision  uint64
+	CallerModuleID   contract.ModuleID
+	PinnedDispatcher PinnedCapabilityDispatcher
 }
 
 // Catalog is mutable only during assembly. Freeze is required before lookup
@@ -154,7 +160,11 @@ func (c *Catalog) Register(reg ActionRegistration) error {
 	if !reg.RequiredGrant.Valid() {
 		return fmt.Errorf("action %s@%d requires one exact valid service grant", reg.Key.Name, reg.Key.Version)
 	}
-	if (reg.Class == ActionExternal && (reg.External == nil || reg.Local != nil)) || (reg.Class == ActionLocal && (reg.Local == nil || reg.External != nil)) || (reg.Class != ActionExternal && reg.Class != ActionLocal) {
+	pinned := reg.Capability != nil || reg.ProviderID != "" || reg.BindingRevision != 0 || reg.CallerModuleID != "" || reg.PinnedDispatcher != nil
+	if pinned && (reg.Class != ActionExternal || reg.Capability == nil || reg.ProviderID == "" || reg.BindingRevision == 0 || reg.CallerModuleID == "" || reg.PinnedDispatcher == nil || reg.External != nil || reg.Local != nil || reg.Capability.CapabilityName == "" || reg.Capability.OperationName == "" || reg.Capability.InputSchema != reg.InputSchema || reg.Capability.OutputSchema != reg.OutputSchema) {
+		return fmt.Errorf("pinned capability registration requires provider, revision, caller, operation schemas, and pinned dispatcher")
+	}
+	if (reg.Class == ActionExternal && ((!pinned && reg.External == nil) || (pinned && reg.External != nil) || reg.Local != nil)) || (reg.Class == ActionLocal && (reg.Local == nil || reg.External != nil || pinned)) || (reg.Class != ActionExternal && reg.Class != ActionLocal) {
 		return fmt.Errorf("action adapter does not match declared class")
 	}
 	c.mu.Lock()

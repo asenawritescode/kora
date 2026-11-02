@@ -190,6 +190,38 @@ func (s *InstanceStore) GetInstance(ctx context.Context, tenant contract.TenantI
 	return getInstanceTx(ctx, s.database, s.dialect, tenant, id)
 }
 
+func (s *InstanceStore) LoadPinnedDispatch(ctx context.Context, tenant contract.TenantID, instance contract.InstanceID, step contract.StepID) (contract.PinnedDispatch, error) {
+	if s == nil || s.database == nil || s.dialect == nil || ctx == nil {
+		return contract.PinnedDispatch{}, fmt.Errorf("workflow pinned dispatch repository is not configured")
+	}
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return contract.PinnedDispatch{}, err
+	}
+	if _, err := contract.ParseInstanceID(string(instance)); err != nil {
+		return contract.PinnedDispatch{}, err
+	}
+	if _, err := contract.ParseStepID(string(step)); err != nil {
+		return contract.PinnedDispatch{}, err
+	}
+	var raw sql.NullString
+	var executionID, idempotencyKey string
+	err := s.database.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT pinned_dispatch_json,execution_id,idempotency_key FROM _kora_workflow_attempt WHERE tenant_id=? AND instance_id=? AND step_id=? ORDER BY attempt DESC LIMIT 1`), string(tenant), string(instance), string(step)).Scan(&raw, &executionID, &idempotencyKey)
+	if err != nil {
+		return contract.PinnedDispatch{}, fmt.Errorf("load pinned workflow provider identity: %w", err)
+	}
+	if !raw.Valid {
+		return contract.PinnedDispatch{}, contract.NewError(contract.CodeNotFound, "workflow step has no pinned provider dispatch")
+	}
+	var dispatch contract.PinnedDispatch
+	if err := json.Unmarshal([]byte(raw.String), &dispatch); err != nil || dispatch.Validate() != nil || dispatch.ExecutionID != executionID || string(dispatch.IdempotencyKey) != idempotencyKey {
+		return contract.PinnedDispatch{}, contract.NewError(contract.CodeConflict, "persisted pinned provider dispatch is invalid")
+	}
+	if dispatch.Scope.TenantID != tenant {
+		return contract.PinnedDispatch{}, contract.NewError(contract.CodePermissionDenied, "pinned provider dispatch belongs to another tenant")
+	}
+	return dispatch, nil
+}
+
 func getInstanceTx(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, dialect db.Dialect, tenant contract.TenantID, id contract.InstanceID) (contract.WorkflowInstance, error) {

@@ -192,7 +192,7 @@ func TestLibSQLWorkflowStartAndClaim(t *testing.T) {
 	}
 	executionID := contract.NewOperationID()
 	key := contract.IdempotencyKey("external-" + contract.NewID())
-	if err := executor.BeginExternalAttempt(ctx, abandonedClaim[0], executionID, key); err != nil {
+	if _, err := executor.BeginExternalAttempt(ctx, abandonedClaim[0], executionID, key, nil); err != nil {
 		t.Fatal("persist LibSQL external attempt:", err)
 	}
 	if _, err := database.ExecContext(ctx, `UPDATE _kora_workflow_instance SET lease_until=datetime('now','-1 second') WHERE tenant_id=? AND id=?`, string(tenant), string(abandonedID)); err != nil {

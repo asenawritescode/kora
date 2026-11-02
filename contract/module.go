@@ -996,6 +996,10 @@ func (d PinnedDispatch) Validate() error {
 	if d.Operation.CapabilityName == "" || d.Operation.InputSchema.ID == "" || d.Operation.InputSchema.Version == 0 || d.Operation.OutputSchema.ID == "" || d.Operation.OutputSchema.Version == 0 {
 		return fmt.Errorf("pinned dispatch operation contract is incomplete")
 	}
+	decoded, err := hex.DecodeString(d.InputHash)
+	if err != nil || len(decoded) != sha256.Size || hex.EncodeToString(decoded) != d.InputHash {
+		return fmt.Errorf("pinned dispatch input hash must be canonical SHA-256 hex")
+	}
 	return nil
 }
 

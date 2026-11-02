@@ -93,6 +93,18 @@ type testInstanceRepository struct {
 	reconciled ReconcileCommit
 }
 
+type testPinnedInstanceRepository struct {
+	*testInstanceRepository
+	dispatch contract.PinnedDispatch
+}
+
+func (r *testPinnedInstanceRepository) LoadPinnedDispatch(_ context.Context, tenant contract.TenantID, _ contract.InstanceID, _ contract.StepID) (contract.PinnedDispatch, error) {
+	if r.dispatch.Scope.TenantID != tenant {
+		return contract.PinnedDispatch{}, contract.NewError(contract.CodePermissionDenied, "test tenant mismatch")
+	}
+	return r.dispatch, nil
+}
+
 func (r *testInstanceRepository) StartInstance(_ context.Context, input StartInstanceInput) (contract.WorkflowInstance, error) {
 	r.called, r.input = true, input
 	r.instance = contract.WorkflowInstance{ID: input.ID, Revision: "1", DefinitionID: input.Definition.ID, DefinitionVersion: input.Definition.Version, Subject: input.Subject, Status: contract.InstanceReady, CurrentStep: input.Definition.Entry, CreatedAt: input.Now, UpdatedAt: input.Now}
@@ -439,5 +451,46 @@ func TestInstanceServiceReconcileNotAppliedReusesUncertainStepAndAbandonFails(t 
 		if instances.reconciled.Status != test.status || instances.reconciled.NextStep != test.next {
 			t.Fatalf("outcome %s transition = %s/%s, want %s/%s", test.outcome, instances.reconciled.Status, instances.reconciled.NextStep, test.status, test.next)
 		}
+	}
+}
+
+func TestPinnedProviderReconciliationUsesStoredProviderAndRejectsConflictingOperatorOutcome(t *testing.T) {
+	definition := validTestDefinition()
+	defs := &testDefinitionRepository{stored: definition, storedRef: contract.DefinitionVersionRef{DefinitionID: definition.ID, Version: definition.Version, Digest: "digest"}}
+	base := &testInstanceRepository{instance: contract.WorkflowInstance{ID: "01K7INSTANCE00000000000000000", Revision: "7", DefinitionID: definition.ID, DefinitionVersion: 1, Status: contract.InstanceUncertain, CurrentStep: "approve"}}
+	call := &pinnedDispatchCapture{outcome: contract.ExternalApplied}
+	catalog := NewCatalog()
+	grant := testActionGrant()
+	in := contract.SchemaRef{ID: "input", Version: 1}
+	out := contract.SchemaRef{ID: "output", Version: 1}
+	registration := ActionRegistration{Key: ActionKey{Name: "invoice.approve", Version: 1}, Class: ActionExternal, InputSchema: in, OutputSchema: out, RequiredGrant: grant, Capability: &contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: in, OutputSchema: out}, ProviderID: "billing.provider-new", BindingRevision: 9, CallerModuleID: "sales.orders", PinnedDispatcher: call}
+	if err := catalog.Register(registration); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Freeze(); err != nil {
+		t.Fatal(err)
+	}
+	pinned := contract.PinnedDispatch{ExecutionID: "01K7EXECUTION000000000000000000", Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "billing.provider-old", BindingRevision: 8, Operation: *registration.Capability, IdempotencyKey: "stable-key-01", InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	instances := &testPinnedInstanceRepository{testInstanceRepository: base, dispatch: pinned}
+	authz := &testInstanceAuthorizer{reconcile: true}
+	service, err := NewInstanceService(defs, instances, authz, catalog, testSchemas{}, testWaits{}, time.Now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "operator-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := contract.ReconcileWorkflow{Meta: contract.CommandMeta{IdempotencyKey: "reconcile-provider", ExpectedRevision: "7"}, StepID: "approve", Outcome: contract.ReconcileNotApplied, EvidenceRef: "case:OPS-43", Reason: "Check provider result"}
+	if _, err := service.Reconcile(context.Background(), exec, base.instance.ID, cmd); err == nil || base.called {
+		t.Fatal("operator decision contradicted known applied provider outcome")
+	}
+	cmd.Meta.IdempotencyKey = "reconcile-provider-applied"
+	cmd.Outcome = contract.ReconcileSucceeded
+	if _, err := service.Reconcile(context.Background(), exec, base.instance.ID, cmd); err != nil {
+		t.Fatal("reconcile applied provider outcome:", err)
+	}
+	if len(call.dispatches) != 2 || call.dispatches[0].ProviderID != "billing.provider-old" || call.dispatches[1].ProviderID != "billing.provider-old" {
+		t.Fatalf("reconciler did not use persisted provider pin: %+v", call.dispatches)
 	}
 }

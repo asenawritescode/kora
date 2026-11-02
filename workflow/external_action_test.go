@@ -19,6 +19,7 @@ type externalDispatchStore struct {
 	claim   Claim
 	key     contract.IdempotencyKey
 	ident   string
+	pinned  *contract.PinnedDispatch
 	commit  *StepCommit
 }
 
@@ -28,9 +29,18 @@ func (s *externalDispatchStore) ClaimDue(context.Context, contract.TenantID, str
 func (s *externalDispatchStore) Renew(context.Context, Claim, time.Duration) (Claim, error) {
 	return Claim{}, nil
 }
-func (s *externalDispatchStore) BeginExternalAttempt(_ context.Context, claim Claim, id string, key contract.IdempotencyKey) error {
+func (s *externalDispatchStore) BeginExternalAttempt(_ context.Context, claim Claim, id string, key contract.IdempotencyKey, requested *contract.PinnedDispatch) (*contract.PinnedDispatch, error) {
 	s.started, s.claim, s.ident, s.key = true, claim, id, key
-	return nil
+	if requested != nil {
+		copy := *requested
+		if s.pinned != nil {
+			copy = *s.pinned
+		} else {
+			s.pinned = &copy
+		}
+		return &copy, nil
+	}
+	return nil, nil
 }
 func (s *externalDispatchStore) CommitStep(_ context.Context, change StepCommit) error {
 	s.commit = &change
@@ -64,6 +74,20 @@ type orderedExternalAction struct {
 type responseLostExternalAction struct {
 	client   *http.Client
 	endpoint string
+}
+
+type pinnedDispatchCapture struct {
+	dispatches []contract.PinnedDispatch
+	outcome    contract.ExternalOutcome
+}
+
+func (p *pinnedDispatchCapture) Dispatch(_ context.Context, dispatch contract.PinnedDispatch, _ ActionRegistration, _ json.RawMessage) (ActionResult, error) {
+	p.dispatches = append(p.dispatches, dispatch)
+	return ActionResult{Schema: contract.SchemaRef{ID: "output", Version: 1}, Data: json.RawMessage(`{"ok":true}`)}, nil
+}
+func (p *pinnedDispatchCapture) Reconcile(_ context.Context, dispatch contract.PinnedDispatch) (contract.ExternalOutcome, ActionResult, error) {
+	p.dispatches = append(p.dispatches, dispatch)
+	return p.outcome, ActionResult{}, nil
 }
 
 func (a responseLostExternalAction) Execute(ctx context.Context, action ActionContext, input ActionInput) (ActionResult, error) {
@@ -144,6 +168,36 @@ func TestExternalActionPersistsAttemptBeforeEffectAndUsesStableIdentity(t *testi
 	}
 	if len(change.Events) != 1 || change.Events[0].Type != "kora.workflow.advanced" {
 		t.Fatalf("successful action event = %+v", change.Events)
+	}
+}
+
+func TestPinnedCapabilityRetryUsesPersistedProviderAfterRebind(t *testing.T) {
+	executor, store, registration := newExternalDispatch(t, nil)
+	dispatcher := &pinnedDispatchCapture{}
+	registration.External = nil
+	registration.Capability = &contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "create_obligation", InputSchema: registration.InputSchema, OutputSchema: registration.OutputSchema}
+	registration.ProviderID = "billing.provider-a"
+	registration.BindingRevision = 8
+	registration.CallerModuleID = "sales.orders"
+	registration.PinnedDispatcher = dispatcher
+	definition, step := externalDefinitionAndStep()
+	first, err := executor.Execute(context.Background(), externalClaim(), definition, step, registration)
+	if err != nil || first.Status != contract.InstanceReady {
+		t.Fatalf("first pinned execution = (%+v,%v)", first, err)
+	}
+	registration.ProviderID = "billing.provider-b"
+	registration.BindingRevision = 9
+	claim := externalClaim()
+	claim.Attempt = 2
+	second, err := executor.Execute(context.Background(), claim, definition, step, registration)
+	if err != nil || second.Status != contract.InstanceReady {
+		t.Fatalf("rebound retry = (%+v,%v)", second, err)
+	}
+	if len(dispatcher.dispatches) != 2 || dispatcher.dispatches[0].ProviderID != "billing.provider-a" || dispatcher.dispatches[1].ProviderID != "billing.provider-a" || dispatcher.dispatches[1].BindingRevision != 8 {
+		t.Fatalf("retry silently rerouted pinned dispatch: %+v", dispatcher.dispatches)
+	}
+	if store.pinned == nil || store.pinned.ProviderID != "billing.provider-a" {
+		t.Fatalf("durable dispatch pin = %+v", store.pinned)
 	}
 }
 

@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"regexp"
 	"testing"
 	"time"
@@ -159,10 +160,10 @@ func TestExternalAttemptIsRecordedBeforeEffectAndFinalizedInStepTransaction(t *t
 	key := contract.IdempotencyKey("workflow-action-key-1")
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM _kora_workflow_instance WHERE tenant_id = ? AND id = ? AND current_step = ? AND status = 'running' AND lease_owner = ? AND lease_fence = ? AND revision = ? AND lease_until > CURRENT_TIMESTAMP(6) FOR UPDATE")).WithArgs("tenant-a", string(claim.InstanceID), "approve", "worker-a", uint64(3), uint64(4)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(string(claim.InstanceID)))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT attempt,idempotency_key,execution_id,status FROM _kora_workflow_attempt WHERE tenant_id = ? AND instance_id = ? AND step_id = ? ORDER BY attempt DESC LIMIT 1")).WithArgs("tenant-a", string(claim.InstanceID), "approve").WillReturnError(sql.ErrNoRows)
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_workflow_attempt (tenant_id,instance_id,step_id,execution_id,attempt,status,idempotency_key,result_json,failure,started_at,finished_at) VALUES (?,?,?,?,?,'running',?,NULL,'',CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6))")).WithArgs("tenant-a", string(claim.InstanceID), "approve", executionID, uint8(1), string(key)).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT attempt,idempotency_key,execution_id,status,pinned_dispatch_json FROM _kora_workflow_attempt WHERE tenant_id = ? AND instance_id = ? AND step_id = ? ORDER BY attempt DESC LIMIT 1")).WithArgs("tenant-a", string(claim.InstanceID), "approve").WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_workflow_attempt (tenant_id,instance_id,step_id,execution_id,attempt,status,idempotency_key,pinned_dispatch_json,result_json,failure,started_at,finished_at) VALUES (?,?,?,?,?,'running',?,?,NULL,'',CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6))")).WithArgs("tenant-a", string(claim.InstanceID), "approve", executionID, uint8(1), string(key), nil).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	if err := store.BeginExternalAttempt(context.Background(), claim, executionID, key); err != nil {
+	if _, err := store.BeginExternalAttempt(context.Background(), claim, executionID, key, nil); err != nil {
 		t.Fatal("begin external attempt:", err)
 	}
 
@@ -177,6 +178,47 @@ func TestExternalAttemptIsRecordedBeforeEffectAndFinalizedInStepTransaction(t *t
 	mock.ExpectCommit()
 	if err := store.CommitStep(context.Background(), change); err != nil {
 		t.Fatal("finalize external attempt:", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExternalAttemptRetainsPinnedProviderAcrossBindingRevision(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store, _ := NewExecutionStore(database, &db.MySQLDialect{})
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: scope, InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
+	executionID := "01K7EXECUTION000000000000000000"
+	key := contract.IdempotencyKey("workflow-action-key-1")
+	first := contract.PinnedDispatch{ExecutionID: executionID, Scope: scope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", BindingRevision: 8, Operation: contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "create_obligation", InputSchema: contract.SchemaRef{ID: "input", Version: 1}, OutputSchema: contract.SchemaRef{ID: "output", Version: 1}}, IdempotencyKey: key, InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	firstJSON, _ := json.Marshal(first)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM _kora_workflow_instance WHERE tenant_id = ? AND id = ? AND current_step = ? AND status = 'running' AND lease_owner = ? AND lease_fence = ? AND revision = ? AND lease_until > CURRENT_TIMESTAMP(6) FOR UPDATE")).WithArgs("tenant-a", string(claim.InstanceID), "approve", "worker-a", uint64(3), uint64(4)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(string(claim.InstanceID)))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT attempt,idempotency_key,execution_id,status,pinned_dispatch_json FROM _kora_workflow_attempt WHERE tenant_id = ? AND instance_id = ? AND step_id = ? ORDER BY attempt DESC LIMIT 1")).WithArgs("tenant-a", string(claim.InstanceID), "approve").WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_workflow_attempt (tenant_id,instance_id,step_id,execution_id,attempt,status,idempotency_key,pinned_dispatch_json,result_json,failure,started_at,finished_at) VALUES (?,?,?,?,?,'running',?,?,NULL,'',CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6))")).WithArgs("tenant-a", string(claim.InstanceID), "approve", executionID, uint8(1), string(key), string(firstJSON)).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	stored, err := store.BeginExternalAttempt(context.Background(), claim, executionID, key, &first)
+	if err != nil || stored == nil || stored.ProviderID != "billing.provider-a" {
+		t.Fatalf("initial pinned attempt = (%+v,%v)", stored, err)
+	}
+
+	claim.Attempt = 2
+	rebound := first
+	rebound.ProviderID = "billing.provider-b"
+	rebound.BindingRevision = 9
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM _kora_workflow_instance WHERE tenant_id = ? AND id = ? AND current_step = ? AND status = 'running' AND lease_owner = ? AND lease_fence = ? AND revision = ? AND lease_until > CURRENT_TIMESTAMP(6) FOR UPDATE")).WithArgs("tenant-a", string(claim.InstanceID), "approve", "worker-a", uint64(3), uint64(4)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(string(claim.InstanceID)))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT attempt,idempotency_key,execution_id,status,pinned_dispatch_json FROM _kora_workflow_attempt WHERE tenant_id = ? AND instance_id = ? AND step_id = ? ORDER BY attempt DESC LIMIT 1")).WithArgs("tenant-a", string(claim.InstanceID), "approve").WillReturnRows(sqlmock.NewRows([]string{"attempt", "idempotency_key", "execution_id", "status", "pinned_dispatch_json"}).AddRow(1, string(key), executionID, "failed", string(firstJSON)))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_workflow_attempt (tenant_id,instance_id,step_id,execution_id,attempt,status,idempotency_key,pinned_dispatch_json,result_json,failure,started_at,finished_at) VALUES (?,?,?,?,?,'running',?,?,NULL,'',CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6))")).WithArgs("tenant-a", string(claim.InstanceID), "approve", executionID, uint8(2), string(key), string(firstJSON)).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	stored, err = store.BeginExternalAttempt(context.Background(), claim, executionID, key, &rebound)
+	if err != nil || stored == nil || stored.ProviderID != "billing.provider-a" || stored.BindingRevision != 8 {
+		t.Fatalf("retry pin after rebind = (%+v,%v)", stored, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -87,7 +87,8 @@ func (e *ExternalActionExecutor) Execute(ctx context.Context, claim Claim, defin
 		return StepCommit{}, contract.NewError(contract.CodeValidationFailed, "external action requires its pinned workflow definition")
 	}
 	action := step.Action
-	if registration.Class != ActionExternal || registration.External == nil || registration.Local != nil || registration.Key != (ActionKey{Name: action.Name, Version: action.Version}) {
+	pinned := registration.PinnedDispatcher != nil
+	if registration.Class != ActionExternal || (!pinned && registration.External == nil) || (pinned && (registration.External != nil || registration.Capability == nil)) || registration.Local != nil || registration.Key != (ActionKey{Name: action.Name, Version: action.Version}) {
 		return StepCommit{}, contract.NewError(contract.CodeValidationFailed, "registered external action does not match the pinned step")
 	}
 	if action.InputSchema != registration.InputSchema.ID || !e.schemas.Registered(registration.InputSchema) || !e.schemas.Registered(registration.OutputSchema) {
@@ -108,15 +109,33 @@ func (e *ExternalActionExecutor) Execute(ctx context.Context, claim Claim, defin
 		return StepCommit{}, contract.NewError(contract.CodePermissionDenied, "workflow service identity lacks the registered action grant")
 	}
 	executionID, key := stableExternalActionIdentity(claim.Tenant, claim.InstanceID, claim.StepID)
-	if err := e.store.BeginExternalAttempt(ctx, claim, executionID, key); err != nil {
+	var requested *contract.PinnedDispatch
+	if registration.Capability != nil {
+		p, err := NewPinnedDispatch(executionID, claim.BusinessScope, registration.CallerModuleID, registration.BindingRevision, registration.ProviderID, *registration.Capability, key, input.Data)
+		if err != nil {
+			return StepCommit{}, contract.NewError(contract.CodeValidationFailed, "pinned capability dispatch is invalid")
+		}
+		requested = &p
+	}
+	stored, err := e.store.BeginExternalAttempt(ctx, claim, executionID, key, requested)
+	if err != nil {
 		return StepCommit{}, fmt.Errorf("persist workflow external attempt: %w", err)
 	}
 	var subjectRef contract.SubjectRef
 	if len(subject) > 0 {
 		subjectRef = subject[0]
 	}
-	actionContext := ActionContext{Execution: execution, BusinessScope: claim.BusinessScope, CausationDepth: claim.CausationDepth, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, Subject: subjectRef, IdempotencyKey: key}
-	result, actionErr := callExternalAction(ctx, registration.External, actionContext, input)
+	actionContext := ActionContext{Execution: execution, BusinessScope: claim.BusinessScope, CausationDepth: claim.CausationDepth, RequiredGrant: registration.RequiredGrant, InstanceID: claim.InstanceID, StepID: claim.StepID, Subject: subjectRef, IdempotencyKey: key, PinnedDispatch: stored}
+	var result ActionResult
+	var actionErr error
+	if pinned {
+		if stored == nil {
+			return StepCommit{}, contract.NewError(contract.CodeInternal, "pinned dispatch was not durably stored")
+		}
+		result, actionErr = registration.PinnedDispatcher.Dispatch(ctx, *stored, registration, input.Data)
+	} else {
+		result, actionErr = callExternalAction(ctx, registration.External, actionContext, input)
+	}
 	if actionErr != nil {
 		var classified *ExternalActionFailure
 		if errors.As(actionErr, &classified) {
