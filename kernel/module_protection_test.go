@@ -49,6 +49,7 @@ func TestCommandOnlyResourcesRejectGenericMutationSources(t *testing.T) {
 		{name: "http create", command: CommandRecordCreate, payload: `{"doctype":"Invoice","data":{}}`, source: SourceHTTP},
 		{name: "ai update", command: CommandRecordUpdate, payload: `{"doctype":"Invoice","name":"INV-1","data":{}}`, source: SourceAI},
 		{name: "mcp delete", command: CommandRecordDelete, payload: `{"doctype":"Invoice","name":"INV-1"}`, source: SourceMCP},
+		{name: "scheduled worker generic create", command: CommandRecordCreate, payload: `{"doctype":"Invoice","data":{}}`, source: SourceWorker},
 		{name: "workflow transition", command: CommandWorkflowStatusTransition, payload: `{"doctype":"Invoice","name":"INV-1","action":"approve"}`, source: SourceWorker},
 		{name: "public form", command: CommandPublicFormSubmit, payload: `{"doctype":"Invoice","public_route":"apply","data":{}}`, source: SourceHTTP},
 		{name: "bundle with protected child", command: CommandRecordMutateBundle, payload: `{"doctype":"Task","records":[{"key":"task","doctype":"Task","data":{}},{"key":"invoice","doctype":"Invoice","data":{}}]}`, source: SourceAI},
