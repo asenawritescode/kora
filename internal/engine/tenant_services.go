@@ -170,6 +170,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	}
 	services.ModuleBindings = &bindingPlan
 	services.ResolveModuleBindings = resolveModuleBindings
+	services.PublishedProjections = &analytics.PublishedProjectionStore{DB: loaded.DB, Dialect: dialect, Site: loaded.SiteID}
 	workAdmission, err := site.ConnectionAdmission(cfg)
 	if err != nil {
 		return fmt.Errorf("resolve tenant work admission: %w", err)

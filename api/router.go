@@ -949,6 +949,9 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 		resource.PUT("/:doctype/:name", handler.HandleUpdate)
 		resource.DELETE("/:doctype/:name", handler.HandleDelete)
 	}
+	apiGroup.POST("/modules/:module/queries/:query", handler.HandlePublishedModuleQuery)
+	apiGroup.GET("/modules/:module/projections/:projection", handler.HandlePublishedModuleProjection)
+	apiGroup.POST("/modules/:module/projections/:projection/rebuild", handler.HandleRebuildPublishedModuleProjection)
 
 	// Operation kernel: canonical command path shared by every adapter
 	// (first vertical slice — record.create, record.update) plus the

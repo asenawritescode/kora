@@ -28,6 +28,23 @@ func TestExecutionRequiresTenantBoundAuthenticatedActor(t *testing.T) {
 	}
 }
 
+func TestPrivateModuleResourcesDenyGenericReads(t *testing.T) {
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Private Invoice", ModuleOwnerID: "finance.ar", ModuleAccess: contract.ModulePrivate})
+	execution, err := NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "reader", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", Roles: []string{"Administrator"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"read", "report", "export"} {
+		if _, authErr := Decide(execution, registry, "Private Invoice", operation); authErr == nil {
+			t.Errorf("private resource %s bypassed generic %s authorization", "Private Invoice", operation)
+		}
+		if _, authErr := DecideForBusinessScope(execution, registry, "Private Invoice", operation, contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}, true); authErr == nil {
+			t.Errorf("private resource %s bypassed scoped %s authorization", "Private Invoice", operation)
+		}
+	}
+}
+
 func TestExecutionCannotBeConstructedFromJSON(t *testing.T) {
 	var exec Execution
 	if err := json.Unmarshal([]byte(`{"tenant":"tenant-a","actor":{"principal_id":"user-1","principal_type":"human","site":"tenant-a"}}`), &exec); err != nil {

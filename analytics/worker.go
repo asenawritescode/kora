@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
@@ -101,10 +102,11 @@ func (w *Worker) acquireMaintenance(ctx context.Context) (func(), error) {
 }
 
 type deltaKey struct {
-	Doctype   string
-	Metric    string
-	Dimension string
-	Date      string // "2006-01-02" format
+	BusinessScope contract.BusinessScope
+	Doctype       string
+	Metric        string
+	Dimension     string
+	Date          string // "2006-01-02" format
 }
 
 type eventContribution struct {
@@ -119,8 +121,8 @@ type pendingEventSequence struct {
 	conflict bool
 }
 
-func (c *eventContribution) addDelta(doctype, metric, dimension, date string, delta float64) {
-	key := deltaKey{Doctype: doctype, Metric: metric, Dimension: dimension, Date: date}
+func (c *eventContribution) addDelta(scope contract.BusinessScope, doctype, metric, dimension, date string, delta float64) {
+	key := deltaKey{BusinessScope: scope, Doctype: doctype, Metric: metric, Dimension: dimension, Date: date}
 	if c.deltas == nil {
 		c.deltas = make(map[deltaKey]float64)
 	}
@@ -129,22 +131,24 @@ func (c *eventContribution) addDelta(doctype, metric, dimension, date string, de
 
 // workflowCloseOp closes the previous workflow transition (sets exited_at + duration).
 type workflowCloseOp struct {
-	Site     string
-	Doctype  string
-	DocName  string
-	OldState string
-	Now      time.Time
+	Site          string
+	BusinessScope contract.BusinessScope
+	Doctype       string
+	DocName       string
+	OldState      string
+	Now           time.Time
 }
 
 // workflowOpenOp inserts a new workflow transition row.
 type workflowOpenOp struct {
-	Site       string
-	Doctype    string
-	DocName    string
-	FromState  string
-	ToState    string
-	Now        time.Time
-	ModifiedBy string
+	Site          string
+	BusinessScope contract.BusinessScope
+	Doctype       string
+	DocName       string
+	FromState     string
+	ToState       string
+	Now           time.Time
+	ModifiedBy    string
 }
 
 // NewWorker creates an analytics worker for a single site.
@@ -372,6 +376,13 @@ func (w *Worker) process(event ChangeEvent) {
 	if event.Operation != EventInsert && event.Operation != EventUpdate && event.Operation != EventDelete && event.Operation != EventSubmit && event.Operation != EventCancel {
 		return
 	}
+	if event.BusinessScope.TenantID == "" {
+		tenant := contract.TenantID(event.Site)
+		if w.siteName != "" {
+			tenant = contract.TenantID(w.siteName)
+		}
+		event.BusinessScope = contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
+	}
 	dt := w.registry.Get(event.Doctype)
 	if dt == nil {
 		// Only log first occurrence per doctype to avoid flooding in hot path.
@@ -389,7 +400,7 @@ func (w *Worker) process(event ChangeEvent) {
 		date := eventDate(event, m.TimeField)
 		switch m.Type {
 		case MetricCount:
-			contribution.addDelta(event.Doctype, m.Name, "", date, 1)
+			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, "", date, 1)
 
 		case MetricCountByField:
 			if m.Field == "" {
@@ -397,20 +408,20 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 			val := event.Data[m.Field]
 			dim := m.Field + "=" + anyToString(val)
-			contribution.addDelta(event.Doctype, m.Name, dim, date, 1)
+			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, dim, date, 1)
 
 			// On update: decrement old dimension if the field changed.
 			if event.Operation == EventUpdate && event.OldData != nil {
 				oldVal := event.OldData[m.Field]
 				if anyToString(oldVal) != anyToString(val) {
 					oldDim := m.Field + "=" + anyToString(oldVal)
-					contribution.addDelta(event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
+					contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
 				}
 			}
 
 		case MetricCountByTime:
 			if event.Operation == EventInsert {
-				contribution.addDelta(event.Doctype, m.Name, "", event.Timestamp.Format("2006-01-02"), 1)
+				contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, "", event.Timestamp.Format("2006-01-02"), 1)
 			}
 
 		case MetricSum:
@@ -427,7 +438,7 @@ func (w *Worker) process(event ChangeEvent) {
 			if event.Operation == EventDelete {
 				netDelta = -newVal
 			}
-			contribution.addDelta(event.Doctype, m.Name, "", date, netDelta)
+			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, "", date, netDelta)
 
 		case MetricSumByField:
 			if m.Field == "" || m.GroupByField == "" {
@@ -442,22 +453,22 @@ func (w *Worker) process(event ChangeEvent) {
 			if event.Operation == EventDelete {
 				netDelta = -newVal
 			}
-			contribution.addDelta(event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.Data[m.GroupByField]), date, netDelta)
+			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.Data[m.GroupByField]), date, netDelta)
 			if event.Operation == EventUpdate && event.OldData != nil && anyToString(event.OldData[m.GroupByField]) != anyToString(event.Data[m.GroupByField]) {
-				contribution.addDelta(event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.OldData[m.GroupByField]), eventOldDate(event, m.TimeField), -oldVal)
+				contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.OldData[m.GroupByField]), eventOldDate(event, m.TimeField), -oldVal)
 			}
 
 		case MetricStateDistribution:
 			// Track document counts by workflow state.
 			newState := anyToString(event.Data["doc_status"])
 			newDim := "state=" + newState
-			contribution.addDelta(event.Doctype, m.Name, newDim, date, 1)
+			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, newDim, date, 1)
 
 			if event.Operation == EventUpdate && event.OldData != nil {
 				oldState := anyToString(event.OldData["doc_status"])
 				if oldState != newState {
 					oldDim := "state=" + oldState
-					contribution.addDelta(event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
+					contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, oldDim, eventOldDate(event, m.TimeField), -1)
 
 					// Accumulate workflow transition for batch flush.
 					contribution.addWorkflowTransition(event, oldState, newState)
@@ -470,15 +481,15 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 			val := event.Data[m.LinkField]
 			dim := m.LinkField + "=" + anyToString(val)
-			contribution.addDelta(event.Doctype, m.Name, dim, date, 1)
+			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, dim, date, 1)
 		}
 	}
 	w.recordContribution(event.ID, contribution)
 }
 
 func (c *eventContribution) addWorkflowTransition(event ChangeEvent, oldState, newState string) {
-	c.closes = append(c.closes, workflowCloseOp{Site: event.Site, Doctype: event.Doctype, DocName: event.DocName, OldState: oldState, Now: event.Timestamp})
-	c.opens = append(c.opens, workflowOpenOp{Site: event.Site, Doctype: event.Doctype, DocName: event.DocName, FromState: oldState, ToState: newState, Now: event.Timestamp, ModifiedBy: event.ModifiedBy})
+	c.closes = append(c.closes, workflowCloseOp{Site: event.Site, BusinessScope: event.BusinessScope, Doctype: event.Doctype, DocName: event.DocName, OldState: oldState, Now: event.Timestamp})
+	c.opens = append(c.opens, workflowOpenOp{Site: event.Site, BusinessScope: event.BusinessScope, Doctype: event.Doctype, DocName: event.DocName, FromState: oldState, ToState: newState, Now: event.Timestamp, ModifiedBy: event.ModifiedBy})
 }
 
 func (w *Worker) recordContribution(id string, contribution eventContribution) {
@@ -501,6 +512,9 @@ func (w *Worker) recordContribution(id string, contribution eventContribution) {
 
 // getMetrics returns all metrics for a doctype, resolving auto-generated ones on first call.
 func (w *Worker) getMetrics(dt *doctype.DocType) []*Metric {
+	if dt == nil || dt.ModuleOwnerID != "" {
+		return nil
+	}
 	w.metricsMu.RLock()
 	cached, ok := w.metrics[dt.Name]
 	w.metricsMu.RUnlock()
@@ -525,7 +539,11 @@ func (w *Worker) getMetrics(dt *doctype.DocType) []*Metric {
 func (w *Worker) addDelta(doctype, metric, dimension, date string, delta float64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	key := deltaKey{Doctype: doctype, Metric: metric, Dimension: dimension, Date: date}
+	tenant := contract.TenantID(w.siteName)
+	if tenant == "" {
+		tenant = "tenant"
+	}
+	key := deltaKey{BusinessScope: contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}, Doctype: doctype, Metric: metric, Dimension: dimension, Date: date}
 	w.deltas[key] += delta
 	if w.manualDeltas == nil {
 		w.manualDeltas = make(map[deltaKey]float64)
@@ -835,7 +853,7 @@ func insertEventReceiptTx(ctx context.Context, tx *sql.Tx, dialect db.QueryDiale
 // SQLite has a default SQLITE_MAX_VARIABLE_NUMBER of 999. With 6 columns per
 // row, 150 rows = 900 placeholders, safely under the limit. MySQL handles
 // much larger batches, but capping at 150 keeps both dialects happy.
-const maxBatchRows = 150
+const maxBatchRows = 100
 
 func incrementUpsert(dialect db.QueryDialect, tableName string, conflictCols, incrementCols []string) string {
 	if qualified, ok := dialect.(db.TableQualifiedIncrementDialect); ok {
@@ -846,9 +864,9 @@ func incrementUpsert(dialect db.QueryDialect, tableName string, conflictCols, in
 
 // flushDeltasTx writes daily rollup deltas in multi-row UPSERT chunks within tx.
 func (w *Worker) flushDeltasTx(tx *sql.Tx, deltas map[deltaKey]float64) error {
-	const rowCols = 6
+	const rowCols = 8
 	upsertSuffix := incrementUpsert(w.dialect, "_kora_analytics_daily",
-		[]string{"site", "doctype", "metric", "dimension", "date"},
+		[]string{"site", "doctype", "metric", "dimension", "date", "scope_kind", "legal_entity_id"},
 		[]string{"value"},
 	)
 
@@ -874,10 +892,10 @@ func (w *Worker) flushDeltasTx(tx *sql.Tx, deltas map[deltaKey]float64) error {
 
 		args := make([]any, 0, n*rowCols)
 		for _, e := range chunk {
-			args = append(args, w.siteName, e.key.Doctype, e.key.Metric, e.key.Dimension, e.key.Date, e.delta)
+			args = append(args, w.siteName, e.key.Doctype, e.key.Metric, e.key.Dimension, e.key.Date, string(e.key.BusinessScope.Kind), e.key.BusinessScope.LegalEntityID, e.delta)
 		}
 
-		query := "INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value) VALUES " +
+		query := "INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, scope_kind, legal_entity_id, value) VALUES " +
 			placeholders + " " + upsertSuffix
 
 		if _, err := tx.Exec(db.Rebind(w.dialect, query), args...); err != nil {
@@ -988,16 +1006,16 @@ func (w *Worker) rollupMonthly(ctx context.Context) {
 	monthEndDate := monthEnd.Format("2006-01-02")
 
 	upsert := incrementUpsert(w.dialect, "_kora_analytics_monthly",
-		[]string{"site", "doctype", "metric", "dimension", "month"},
+		[]string{"site", "doctype", "metric", "dimension", "month", "scope_kind", "legal_entity_id"},
 		[]string{"value"},
 	)
 
 	query := db.Rebind(w.dialect, fmt.Sprintf(
-		`INSERT INTO _kora_analytics_monthly (site, doctype, metric, dimension, month, value)
-		 SELECT site, doctype, metric, dimension, ? AS month, SUM(value)
+		`INSERT INTO _kora_analytics_monthly (site, doctype, metric, dimension, month, scope_kind, legal_entity_id, value)
+		 SELECT site, doctype, metric, dimension, ? AS month, scope_kind, legal_entity_id, SUM(value)
 		 FROM _kora_analytics_daily
 		 WHERE site = ? AND date >= ? AND date < ?
-		 GROUP BY site, doctype, metric, dimension
+		 GROUP BY site, doctype, metric, dimension, scope_kind, legal_entity_id
 		 %s`, upsert))
 
 	result, err := w.db.ExecContext(ctx, query, monthStartDate, w.siteName, monthStartDate, monthEndDate)

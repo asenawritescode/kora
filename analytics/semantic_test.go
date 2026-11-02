@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -22,6 +23,59 @@ func testCatalog() *SemanticCatalog {
 			{Name: "order_count", Aggregation: "count", Format: "number"},
 		},
 	}}}
+}
+
+func TestBuildSemanticCatalogDoesNotPublishModuleOwnedResources(t *testing.T) {
+	catalog := BuildSemanticCatalog([]*doctype.DocType{
+		{Name: "Public Record", Fields: []doctype.Field{{Fieldname: "amount", Fieldtype: "Currency"}}},
+		{Name: "Private Ledger", ModuleOwnerID: "finance.ledger", ModuleAccess: "private", Fields: []doctype.Field{{Fieldname: "amount", Fieldtype: "Currency"}}},
+		{Name: "Published Balance", ModuleOwnerID: "finance.ledger", ModuleAccess: "published", Fields: []doctype.Field{{Fieldname: "amount", Fieldtype: "Currency"}}},
+	})
+	if len(catalog.Models) != 1 || catalog.Models[0].SourceDoctype != "Public Record" {
+		t.Fatalf("module-owned resources leaked into automatic analytics catalog: %#v", catalog.Models)
+	}
+}
+
+func TestPublishedSemanticModelHasNoDirectTableSource(t *testing.T) {
+	model, err := BuildPublishedSemanticModel("ar_balance", "AR balance", "finance.ar", "finance_ar_balance", "balances", contract.ScopeEntityOwned, []SemanticDimension{{Name: "period", Field: "period", Type: "time"}}, []SemanticMeasure{{Name: "open_amount", Field: "open_amount", Aggregation: "sum"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.ProjectionID = "finance_ar_balance"
+	if err := model.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if model.SourceDoctype != "" || model.Relation != nil {
+		t.Fatalf("published semantic model has direct table source: %#v", model)
+	}
+	model.AllowedFields = []string{"period"}
+	if err := model.Validate(); err == nil {
+		t.Fatal("projection measure outside the declared output contract was accepted")
+	}
+}
+
+func TestPublishedProjectionModelUsesOnlyPublishedOutputFields(t *testing.T) {
+	output := contract.SchemaRef{ID: "ar.balance.output", Version: 1}
+	definition := contract.ProjectionDefinition{ID: "ar_balance", OwnerModuleID: "finance.ar", ScopePolicy: contract.ScopeEntityOwned, FactKey: "id", AllowedFields: []string{"id", "period", "amount"}, Sources: []contract.ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: "balances", OutputSchema: output}}, OutputSchema: output, RebuildStrategy: "consistent_snapshot"}
+	model, err := BuildPublishedProjectionModel("ar_balance", "AR balance", definition,
+		[]SemanticDimension{{Name: "period", Field: "period", Type: "time", SupportedGranularities: []string{"day", "month"}}},
+		[]SemanticMeasure{{Name: "amount_sum", Field: "amount", Aggregation: "sum"}})
+	if err != nil {
+		t.Fatal("build published projection model:", err)
+	}
+	hasFactKey := false
+	for _, field := range model.AllowedFields {
+		hasFactKey = hasFactKey || field == "id"
+	}
+	if model.SourceDoctype != "" || model.Relation != nil || !hasFactKey {
+		t.Fatalf("projection model exposed direct source or dropped dedupe key: %#v", model)
+	}
+	definition.AllowedFields = []string{"id", "period"}
+	if _, err := BuildPublishedProjectionModel("ar_balance", "AR balance", definition,
+		[]SemanticDimension{{Name: "period", Field: "period", Type: "time"}},
+		[]SemanticMeasure{{Name: "amount_sum", Field: "amount", Aggregation: "sum"}}); err == nil {
+		t.Fatal("report model accepted a measure outside the published query field allowlist")
+	}
 }
 
 func TestSemanticCatalogValidatesModelAndRollupReferences(t *testing.T) {

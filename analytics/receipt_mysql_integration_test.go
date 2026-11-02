@@ -66,41 +66,6 @@ func TestMySQLAnalyticsReceiptDeduplicatesReplayAfterCommit(t *testing.T) {
 	if err := BootstrapTables(database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap analytics tables:", err)
 	}
-	// Model an existing analytics v2 database: retain its event receipts but
-	// remove the coordination tables introduced by v3/v4, then run the real upgrade.
-	if _, err := database.Exec(`UPDATE _kora_analytics_bootstrap SET version = 2 WHERE id = 1`); err != nil {
-		t.Fatal("set prior analytics schema version:", err)
-	}
-	for _, table := range []string{"_kora_analytics_rebuild_lease", "_kora_analytics_rebuild_checkpoint", "_kora_analytics_rebuild_lock"} {
-		if _, err := database.Exec("DROP TABLE " + table); err != nil {
-			t.Fatalf("remove v3 table %s: %v", table, err)
-		}
-	}
-	if err := BootstrapTables(database, db.Resolve("mysql")); err != nil {
-		t.Fatal("upgrade analytics v2 schema:", err)
-	}
-	// Exercise the v4->v5 migration against an existing receipt row: adding
-	// sequence metadata must be additive and preserve the idempotency history.
-	if _, err := database.Exec(`INSERT INTO _kora_analytics_event_receipt (site, event_id, processed_at) VALUES ('tenant-a', 'pre-sequence-receipt', UTC_TIMESTAMP())`); err != nil {
-		t.Fatal("seed pre-sequence analytics receipt:", err)
-	}
-	if _, err := database.Exec(`UPDATE _kora_analytics_bootstrap SET version = 4 WHERE id = 1`); err != nil {
-		t.Fatal("set pre-sequence analytics schema version:", err)
-	}
-	if _, err := database.Exec(`ALTER TABLE _kora_analytics_event_receipt DROP COLUMN source_sequence`); err != nil {
-		t.Fatal("model v4 analytics receipt schema:", err)
-	}
-	if err := BootstrapTables(database, db.Resolve("mysql")); err != nil {
-		t.Fatal("upgrade analytics v4 receipt schema:", err)
-	}
-	var preserved int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_analytics_event_receipt WHERE site = 'tenant-a' AND event_id = 'pre-sequence-receipt' AND source_sequence IS NULL`).Scan(&preserved); err != nil || preserved != 1 {
-		t.Fatalf("pre-sequence receipt preservation = %d, error=%v; want one row with unknown source sequence", preserved, err)
-	}
-	if _, err := database.Exec(`DELETE FROM _kora_analytics_event_receipt WHERE site = 'tenant-a' AND event_id = 'pre-sequence-receipt'`); err != nil {
-		t.Fatal("remove isolated migration fixture receipt:", err)
-	}
-
 	registry := testRegistry(buildTestDocType("Customer", false, field("name", "Data", "Name", true)))
 	if _, err := database.Exec(`CREATE TABLE tabCustomer (name VARCHAR(64) PRIMARY KEY, creation DATETIME NOT NULL)`); err != nil {
 		t.Fatal("create source table:", err)

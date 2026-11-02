@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/analytics"
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
@@ -160,12 +161,12 @@ func buildAnalyticsCatalog(reg *doctype.Registry, reports []analytics.ReportDefi
 	return catalog, nil
 }
 
-func analyticsCatalogJSON(reg *doctype.Registry, reports []analytics.ReportDefinition, execution policy.Execution) string {
+func analyticsCatalogJSON(reg *doctype.Registry, reports []analytics.ReportDefinition, execution policy.Execution, scopes ...contract.BusinessScope) string {
 	catalog, err := buildAnalyticsCatalog(reg, reports)
 	if err != nil {
 		return fmt.Sprintf("Analytics catalog is temporarily unavailable: %v", err)
 	}
-	catalog = filterAnalyticsCatalog(reg, execution, catalog)
+	catalog = filterAnalyticsCatalog(reg, execution, catalog, scopes...)
 	data, err := json.Marshal(map[string]any{
 		"meaning": "Models are business entities. Measures are numeric facts that can be counted or totaled. Dimensions are ways to group those facts. Related report models read governed live records; other models use Kigae's analytics rollups.",
 		"catalog": catalog,
@@ -177,10 +178,10 @@ func analyticsCatalogJSON(reg *doctype.Registry, reports []analytics.ReportDefin
 }
 
 func executeAnalyticsCatalog(reg *doctype.Registry, tx *orm.TxManager, siteName string, execution policy.Execution) string {
-	return analyticsCatalogJSON(reg, loadAnalyticsReports(tx, siteName), execution)
+	return analyticsCatalogJSON(reg, loadAnalyticsReports(tx, siteName), execution, tx.BusinessScope)
 }
 
-func filterAnalyticsCatalog(reg *doctype.Registry, execution policy.Execution, catalog *analytics.SemanticCatalog) *analytics.SemanticCatalog {
+func filterAnalyticsCatalog(reg *doctype.Registry, execution policy.Execution, catalog *analytics.SemanticCatalog, scopes ...contract.BusinessScope) *analytics.SemanticCatalog {
 	filtered := &analytics.SemanticCatalog{Models: []analytics.SemanticModel{}, Reports: []analytics.ReportDefinition{}}
 	if catalog == nil {
 		return filtered
@@ -188,7 +189,7 @@ func filterAnalyticsCatalog(reg *doctype.Registry, execution policy.Execution, c
 	models := make(map[string]analytics.SemanticModel, len(catalog.Models))
 	for _, model := range catalog.Models {
 		models[model.Name] = model
-		if analyticsModelReadable(reg, execution, model) {
+		if analyticsModelReadable(reg, execution, model, scopes...) {
 			filtered.Models = append(filtered.Models, model)
 		}
 	}
@@ -203,7 +204,7 @@ func filterAnalyticsCatalog(reg *doctype.Registry, execution policy.Execution, c
 		visible := true
 		for modelName := range queried {
 			model, exists := models[modelName]
-			if !exists || !analyticsModelReadable(reg, execution, model) {
+			if !exists || !analyticsModelReadable(reg, execution, model, scopes...) {
 				visible = false
 				break
 			}
@@ -215,9 +216,20 @@ func filterAnalyticsCatalog(reg *doctype.Registry, execution policy.Execution, c
 	return filtered
 }
 
-func analyticsModelReadable(reg *doctype.Registry, execution policy.Execution, model analytics.SemanticModel) bool {
+func analyticsModelReadable(reg *doctype.Registry, execution policy.Execution, model analytics.SemanticModel, scopes ...contract.BusinessScope) bool {
 	if reg == nil || !execution.Valid() {
 		return false
+	}
+	if model.ProjectionOwner != "" {
+		if model.ProjectionID == "" || model.PublishedQuery == "" || len(model.AllowedFields) == 0 {
+			return false
+		}
+		scope := contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}
+		if len(scopes) > 0 {
+			scope = scopes[0]
+		}
+		decision, err := policy.DecideForBusinessScope(execution, reg, "module."+model.ProjectionOwner+".projection."+model.ProjectionID, "read", scope, model.ProjectionScopePolicy == contract.ScopeEntityOwned)
+		return err == nil && !decision.OwnerOnly && len(decision.AssignedFields) == 0
 	}
 	sources := []string{model.SourceDoctype}
 	if model.Relation != nil {
@@ -319,10 +331,10 @@ func executeAnalyticsQuery(reg *doctype.Registry, tx *orm.TxManager, siteName st
 	if err := request.Validate(catalog); err != nil {
 		return fmt.Sprintf("I could not run that report: %v. Use the analytics catalog to choose valid models, measures, and dimensions.", err)
 	}
-	if err := checkRelatedAnalyticsPermissions(reg, reports, request, execution); err != nil {
+	if err := checkRelatedAnalyticsPermissions(reg, reports, request, execution, tx.BusinessScope); err != nil {
 		return err.Error()
 	}
-	result, err := (&analytics.QueryEngine{DB: tx.DB, SiteName: siteName, Dialect: tx.Dialect}).ResolveSemanticQuery(catalog, request, reg)
+	result, err := (&analytics.QueryEngine{DB: tx.DB, SiteName: siteName, Dialect: tx.Dialect, BusinessScope: tx.BusinessScope}).ResolveSemanticQuery(catalog, request, reg)
 	if err != nil {
 		return fmt.Sprintf("Analytics query failed: %v", err)
 	}
@@ -362,7 +374,7 @@ func executeAnalyticsReports(reg *doctype.Registry, tx *orm.TxManager, siteName 
 	if err != nil {
 		return "Approved analytics reports are temporarily unavailable."
 	}
-	filtered := filterAnalyticsCatalog(reg, execution, catalog)
+	filtered := filterAnalyticsCatalog(reg, execution, catalog, tx.BusinessScope)
 	data, _ := json.Marshal(map[string]any{
 		"meaning": "These are approved report definitions. Each report describes governed queries and intended visuals; it is not arbitrary SQL.",
 		"reports": filtered.Reports,
@@ -386,7 +398,7 @@ func executeAnalyticsReport(reg *doctype.Registry, tx *orm.TxManager, siteName s
 	return executeAnalyticsQuery(reg, tx, siteName, queryArgs, execution)
 }
 
-func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.AnalyticsQueryRequest, execution policy.Execution) error {
+func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.AnalyticsQueryRequest, execution policy.Execution, scopes ...contract.BusinessScope) error {
 	if reg == nil || reg.Permissions == nil || !execution.Valid() {
 		return fmt.Errorf("verified execution is required to query related report records")
 	}
@@ -404,7 +416,7 @@ func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics
 		if !queriedModels[model.Name] {
 			continue
 		}
-		if !analyticsModelReadable(reg, execution, model) {
+		if !analyticsModelReadable(reg, execution, model, scopes...) {
 			return fmt.Errorf("The analytics model %q is unavailable for this actor.", model.Name)
 		}
 		matched[model.Name] = true

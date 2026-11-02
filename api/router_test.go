@@ -476,6 +476,19 @@ func TestHandlePublicList_RequiresExplicitPublicAccess(t *testing.T) {
 	}
 }
 
+func TestHandlePublicListRejectsModuleOwnedResourceEvenWhenExplicitlyPublic(t *testing.T) {
+	handler, registry, _, _ := setupTestHandler(t)
+	registry.Register(&doctype.DocType{Name: "ModuleRecord", ModuleOwnerID: "billing.ar", ModuleAccess: contract.ModulePublished, PublicAccess: &doctype.PublicAccess{Enabled: true, List: true, Read: true, Fields: []string{"title"}}})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/public/resource/ModuleRecord", nil)
+	c.Params = gin.Params{{Key: "doctype", Value: "ModuleRecord"}}
+	handler.HandlePublicList(c)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("public route exposed module resource: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandlePublicList_AllowlistedFieldsAndServerFilters(t *testing.T) {
 	handler, reg, mock, sqlDB := setupTestHandler(t)
 	reg.Register(&doctype.DocType{

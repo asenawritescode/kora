@@ -59,6 +59,27 @@ func TestBuildToolCatalogAllowsWhatsAppWithGuards(t *testing.T) {
 	}
 }
 
+func TestPrivateModuleRecordsAreNotExposedThroughAITools(t *testing.T) {
+	reg := doctype.NewRegistry()
+	reg.Register(&doctype.DocType{Name: "Private Invoice", ModuleOwnerID: "billing.ar", ModuleAccess: contract.ModulePrivate, Fields: []doctype.Field{{Fieldname: "amount", Fieldtype: "Currency"}}})
+	catalog := BuildToolCatalog(reg)
+	for _, descriptor := range catalog.Tools {
+		if descriptor.Doctype == "Private Invoice" {
+			t.Fatalf("private module record was exposed as an AI tool: %#v", descriptor)
+		}
+	}
+	database, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create SQL mock:", err)
+	}
+	defer database.Close()
+	tx := &orm.TxManager{DB: database, Dialect: db.Resolve("mysql"), Context: context.Background()}
+	got := executeSingleToolWithRolesAndCallIDAndExecution(tx, reg, "private_invoice_get", map[string]any{"name": "INV-1"}, "owner", "tenant-a", "run", "step", "call", nil, testAIExecution(t, "tenant-a", "owner", []string{"Administrator"}))
+	if !strings.Contains(got, "published query contract") {
+		t.Fatalf("private module record bypass was not denied: %q", got)
+	}
+}
+
 func TestMutationBundleToolRequiresConfirmationAndRevisionedUpdates(t *testing.T) {
 	reg := doctype.NewRegistry()
 	reg.Register(&doctype.DocType{Name: "Lead", Fields: []doctype.Field{

@@ -50,26 +50,6 @@ func TestLibSQLRebuildLeaseFencesExpiredOwner(t *testing.T) {
 	if err := BootstrapTables(database, dialect); err != nil {
 		t.Fatal("bootstrap LibSQL analytics schema:", err)
 	}
-	var existingJobs, existingLeases int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_analytics_rebuild_job`).Scan(&existingJobs); err != nil {
-		t.Fatal("inspect disposable LibSQL rebuild jobs:", err)
-	}
-	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_analytics_rebuild_lease`).Scan(&existingLeases); err != nil {
-		t.Fatal("inspect disposable LibSQL rebuild leases:", err)
-	}
-	if existingJobs == 0 && existingLeases == 0 {
-		// On an empty disposable database, exercise the v3→v4 additive lease
-		// bootstrap before creating this test's job. Never drop a populated table.
-		if _, err := database.Exec(`UPDATE _kora_analytics_bootstrap SET version = 3 WHERE id = 1`); err != nil {
-			t.Fatal("set LibSQL pre-lease schema version:", err)
-		}
-		if _, err := database.Exec(`DROP TABLE _kora_analytics_rebuild_lease`); err != nil {
-			t.Fatal("remove empty LibSQL v4 lease table:", err)
-		}
-		if err := BootstrapTables(database, dialect); err != nil {
-			t.Fatal("upgrade LibSQL analytics v3 schema:", err)
-		}
-	}
 	suffix := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 	site := "tenant-lease-" + suffix
 	job := &RebuildJob{

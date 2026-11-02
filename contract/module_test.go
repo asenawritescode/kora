@@ -46,6 +46,34 @@ func TestValidateModuleSetRejectsDuplicateOwnersAndUnknownSchemas(t *testing.T) 
 	}
 }
 
+func TestPublishedQueriesAndProjectionSourcesAreValidated(t *testing.T) {
+	schemaIn, schemaOut := SchemaRef{ID: "query.input", Version: 1}, SchemaRef{ID: "query.output", Version: 1}
+	query := PublishedQuery{OwnerModuleID: "sales.orders", Name: "totals", Capability: "sales.reporting", Operation: "list", InputSchema: schemaIn, OutputSchema: schemaOut, ScopePolicy: ScopeEntityOwned, AllowedFields: []string{"amount"}, PageLimit: 25}
+	module := ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Provides: []CapabilityOffer{{Name: query.Capability, Contract: schemaOut, Operations: []OperationSpec{{Name: "list", Input: schemaIn, Output: schemaOut, Effect: EffectQuery}}}}, Queries: []PublishedQuery{query}, Projections: []ProjectionDefinition{{ID: "sales_totals", OwnerModuleID: "sales.orders", Sources: []ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: "totals", OutputSchema: schemaOut}}, ScopePolicy: ScopeEntityOwned, FactKey: "amount", AllowedFields: []string{"amount"}, OutputSchema: schemaOut, RebuildStrategy: "consistent_snapshot"}}}
+	registered := func(SchemaRef) bool { return true }
+	if err := ValidateModuleSet([]ModuleDescriptor{module}, registered); err != nil {
+		t.Fatal("valid published query rejected:", err)
+	}
+	bad := module
+	bad.Queries = append([]PublishedQuery(nil), module.Queries...)
+	bad.Queries[0].AllowedFields = []string{"amount", "amount"}
+	if err := ValidateModuleSet([]ModuleDescriptor{bad}, registered); err == nil {
+		t.Fatal("duplicate allowed fields accepted")
+	}
+	bad = module
+	bad.Projections = append([]ProjectionDefinition(nil), module.Projections...)
+	bad.Projections[0].Sources = []ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: "totals", OutputSchema: schemaIn}}
+	if err := ValidateModuleSet([]ModuleDescriptor{bad}, registered); err == nil {
+		t.Fatal("projection source with an incompatible published query accepted")
+	}
+	bad = module
+	bad.Projections = append([]ProjectionDefinition(nil), module.Projections...)
+	bad.Projections[0].AllowedFields = []string{"amount", "private_note"}
+	if err := ValidateModuleSet([]ModuleDescriptor{bad}, registered); err == nil {
+		t.Fatal("projection exposed a field its source query does not publish")
+	}
+}
+
 func TestDecodeMarketplacePackageManifestIsStrictAndValidatesModules(t *testing.T) {
 	valid := `{"schema_version":1,"package_id":"finance","release_id":"finance-1","version":"1.0.0","kind":"module","public":{"slug":"finance","name":"Finance","summary":"Finance"},"modules":[{"id":"finance.ar","version":"2.0.0","resources":[{"ref":{"namespace":"tenant","name":"invoice","version":1},"access":"private","mutation_mode":"commands_only","scope_kind":"tenant_shared"}]}],"engine":{"min_version":"1.0.0"}}`
 	if _, err := DecodeMarketplacePackageManifest([]byte(valid)); err != nil {

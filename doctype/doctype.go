@@ -10,6 +10,7 @@ type DocType struct {
 	ResourceName        string                     `yaml:"resource_name" json:"resource_name,omitempty"`
 	Module              string                     `yaml:"module"        json:"module"`
 	ModuleOwnerID       string                     `yaml:"module_owner_id,omitempty" json:"module_owner_id,omitempty"`
+	ModuleAccess        contract.ModuleAccess      `yaml:"module_access,omitempty" json:"module_access,omitempty"`
 	ModuleOwnershipMode string                     `yaml:"module_ownership_mode,omitempty" json:"module_ownership_mode,omitempty"`
 	BusinessScopePolicy contract.ResourceScopeKind `yaml:"business_scope_policy,omitempty" json:"business_scope_policy,omitempty"`
 	BusinessScopeField  string                     `yaml:"business_scope_field,omitempty" json:"business_scope_field,omitempty"`

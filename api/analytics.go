@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/asenawritescode/kora/analytics"
+	"github.com/asenawritescode/kora/contract"
 	db "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/natsprovider"
@@ -148,6 +149,9 @@ func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
 		}
+		if execution, valid := requestExecution(c); valid {
+			qe.BusinessScope = businessScopeFromRequest(c, execution)
+		}
 		result, err := qe.ResolveSemanticQuery(catalog, request, siteRegistry)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "analytics.invalid_query", err.Error(), nil)
@@ -193,22 +197,34 @@ func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *
 		if tenantID == "" {
 			tenantID = c.GetString("site_name")
 		}
-		cacheKey := queryCache.key(tenantID, c.GetUint64("site_config_revision"), analyticsPermissionScope(c, siteRegistry), request)
-		if cached, ok := queryCache.get(cacheKey); ok {
-			c.JSON(http.StatusOK, Response{Data: cached})
-			return
+		queryScope := contract.BusinessScope{TenantID: contract.TenantID(tenantID), Kind: contract.ScopeKindTenant}
+		if execution, valid := requestExecution(c); valid {
+			queryScope = businessScopeFromRequest(c, execution)
+		}
+		cacheKey := queryCache.key(tenantID, c.GetUint64("site_config_revision"), analyticsPermissionScope(c, siteRegistry)+"\x00"+string(queryScope.Kind)+"\x00"+queryScope.LegalEntityID, request)
+		cacheable := !analyticsRequestUsesPublishedProjection(catalog, request)
+		if cacheable {
+			if cached, ok := queryCache.get(cacheKey); ok {
+				c.JSON(http.StatusOK, Response{Data: cached})
+				return
+			}
 		}
 		qe := getQueryEngine(c, siteDB, dialect)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
 		}
+		if execution, valid := requestExecution(c); valid {
+			qe.BusinessScope = businessScopeFromRequest(c, execution)
+		}
 		result, err := qe.ResolveSemanticQuery(catalog, request, siteRegistry)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "analytics.invalid_query", err.Error(), nil)
 			return
 		}
-		queryCache.put(cacheKey, result)
+		if cacheable {
+			queryCache.put(cacheKey, result)
+		}
 		c.JSON(http.StatusOK, Response{Data: result})
 	})
 
@@ -373,7 +389,7 @@ func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *
 			writeError(c, http.StatusNotFound, "analytics.metric_not_found", "Metric not found", nil)
 			return
 		}
-		if !checkUnscopedAnalyticsRead(c, analyticsRegistry(c, registry), metric.DocType) {
+		if !checkAnalyticsRead(c, analyticsRegistry(c, registry), metric.DocType) {
 			return
 		}
 
@@ -393,7 +409,7 @@ func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *
 			writeError(c, http.StatusNotFound, "doctype.not_found", "DocType not found", nil)
 			return
 		}
-		if !checkUnscopedAnalyticsRead(c, siteRegistry, doctypeName) {
+		if !checkAnalyticsRead(c, siteRegistry, doctypeName) {
 			return
 		}
 		qe := getQueryEngine(c, siteDB, dialect)

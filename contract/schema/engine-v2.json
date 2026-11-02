@@ -1777,9 +1777,21 @@
         "id": {
           "type": "string"
         },
+        "projections": {
+          "items": {
+            "$ref": "#/$defs/ProjectionDefinition"
+          },
+          "type": "array"
+        },
         "provides": {
           "items": {
             "$ref": "#/$defs/CapabilityOffer"
+          },
+          "type": "array"
+        },
+        "queries": {
+          "items": {
+            "$ref": "#/$defs/PublishedQuery"
           },
           "type": "array"
         },
@@ -2287,6 +2299,109 @@
       ],
       "type": "object"
     },
+    "ProjectionCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "entity_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "projection_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "entity_scope",
+        "projection_id",
+        "source_id",
+        "tenant_id",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "ProjectionDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fact_key": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "rebuild_strategy": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/ProjectionSource"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "fact_key",
+        "id",
+        "output_schema",
+        "owner_module_id",
+        "rebuild_strategy",
+        "scope_policy",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "ProjectionSource": {
+      "additionalProperties": false,
+      "properties": {
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "query_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "output_schema",
+        "owner_module_id",
+        "query_name"
+      ],
+      "type": "object"
+    },
     "ProvisionTenant": {
       "additionalProperties": false,
       "properties": {
@@ -2345,6 +2460,93 @@
         "meta",
         "primary_alias",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "PublishedQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "page_limit": {
+          "type": "integer"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "capability",
+        "input_schema",
+        "name",
+        "operation",
+        "output_schema",
+        "owner_module_id",
+        "page_limit",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "QueryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "incomplete"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "data",
+        "freshness"
       ],
       "type": "object"
     },
@@ -5421,9 +5623,21 @@
         "id": {
           "type": "string"
         },
+        "projections": {
+          "items": {
+            "$ref": "#/$defs/ProjectionDefinition"
+          },
+          "type": "array"
+        },
         "provides": {
           "items": {
             "$ref": "#/$defs/CapabilityOffer"
+          },
+          "type": "array"
+        },
+        "queries": {
+          "items": {
+            "$ref": "#/$defs/PublishedQuery"
           },
           "type": "array"
         },
@@ -5931,6 +6145,109 @@
       ],
       "type": "object"
     },
+    "ProjectionCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "entity_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "projection_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "entity_scope",
+        "projection_id",
+        "source_id",
+        "tenant_id",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "ProjectionDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fact_key": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "rebuild_strategy": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/ProjectionSource"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "fact_key",
+        "id",
+        "output_schema",
+        "owner_module_id",
+        "rebuild_strategy",
+        "scope_policy",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "ProjectionSource": {
+      "additionalProperties": false,
+      "properties": {
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "query_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "output_schema",
+        "owner_module_id",
+        "query_name"
+      ],
+      "type": "object"
+    },
     "ProvisionTenant": {
       "additionalProperties": false,
       "properties": {
@@ -5989,6 +6306,93 @@
         "meta",
         "primary_alias",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "PublishedQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "page_limit": {
+          "type": "integer"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "capability",
+        "input_schema",
+        "name",
+        "operation",
+        "output_schema",
+        "owner_module_id",
+        "page_limit",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "QueryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "incomplete"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "data",
+        "freshness"
       ],
       "type": "object"
     },
@@ -7362,6 +7766,12 @@
       "succeeded",
       "failed",
       "recovery_required"
+    ],
+    "QueryFreshness": [
+      "fresh",
+      "stale",
+      "unknown",
+      "incomplete"
     ],
     "ReconciliationOutcome": [
       "confirmed_succeeded",

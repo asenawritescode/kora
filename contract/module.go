@@ -167,6 +167,154 @@ type CapabilityRequirement struct {
 	Required bool           `json:"required"`
 }
 
+// PublishedQuery is an owner-controlled, read-only capability surface. The
+// operation must be declared by the owner module with EffectQuery; consumers
+// never receive direct access to the provider's tables.
+//
+//contract:wire:v2
+type PublishedQuery struct {
+	OwnerModuleID ModuleID          `json:"owner_module_id"`
+	Name          string            `json:"name"`
+	Capability    CapabilityName    `json:"capability"`
+	Operation     string            `json:"operation"`
+	InputSchema   SchemaRef         `json:"input_schema"`
+	OutputSchema  SchemaRef         `json:"output_schema"`
+	ScopePolicy   ResourceScopeKind `json:"scope_policy"`
+	AllowedFields []string          `json:"allowed_fields"`
+	PageLimit     uint16            `json:"page_limit"`
+}
+
+// QueryFreshness describes whether a published query result is current.
+//
+//contract:enum:v2
+type QueryFreshness string
+
+const (
+	QueryFresh      QueryFreshness = "fresh"
+	QueryStale      QueryFreshness = "stale"
+	QueryUnknown    QueryFreshness = "unknown"
+	QueryIncomplete QueryFreshness = "incomplete"
+)
+
+// QueryResult is a bounded, schema-validated result from a published query.
+//
+//contract:wire:v2
+type QueryResult struct {
+	//contract:json
+	Data       json.RawMessage `json:"data"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+	// SnapshotToken pins every page in a paginated query to one immutable source snapshot.
+	SnapshotToken  string         `json:"snapshot_token,omitempty"`
+	SourceRevision string         `json:"source_revision,omitempty"`
+	AsOf           time.Time      `json:"as_of"`
+	Freshness      QueryFreshness `json:"freshness"`
+}
+
+// ProjectionSource pins one projection input to a published query contract.
+//
+//contract:wire:v2
+type ProjectionSource struct {
+	OwnerModuleID ModuleID  `json:"owner_module_id"`
+	QueryName     string    `json:"query_name"`
+	OutputSchema  SchemaRef `json:"output_schema"`
+}
+
+// ProjectionDefinition declares a rebuildable, owner-controlled projection.
+//
+//contract:wire:v2
+type ProjectionDefinition struct {
+	ID            string             `json:"id"`
+	OwnerModuleID ModuleID           `json:"owner_module_id"`
+	Sources       []ProjectionSource `json:"sources"`
+	ScopePolicy   ResourceScopeKind  `json:"scope_policy"`
+	FactKey       string             `json:"fact_key"`
+	AllowedFields []string           `json:"allowed_fields"`
+	OutputSchema  SchemaRef          `json:"output_schema"`
+	// consistent_snapshot requires every source to return the same non-empty
+	// global snapshot token and as-of instant. Each paginated cursor must stay
+	// pinned to that immutable snapshot; providers unable to prove that complete
+	// cross-source boundary are unavailable for rebuild.
+	RebuildStrategy string `json:"rebuild_strategy"`
+}
+
+func (p ProjectionDefinition) Validate() error {
+	if p.ID == "" || p.OwnerModuleID == "" || !moduleIDPattern.MatchString(string(p.OwnerModuleID)) || len(p.Sources) == 0 || len(p.Sources) > 32 || p.RebuildStrategy != "consistent_snapshot" || p.ScopePolicy != ScopeTenantShared && p.ScopePolicy != ScopeEntityOwned || !validModuleName(p.FactKey) || len(p.AllowedFields) == 0 || len(p.AllowedFields) > 128 || p.OutputSchema.ID == "" || p.OutputSchema.Version == 0 {
+		return fmt.Errorf("projection definition requires an owner, bounded sources, output schema, and supported rebuild strategy")
+	}
+	allowed := make(map[string]bool, len(p.AllowedFields))
+	factKeyAllowed := false
+	for _, field := range p.AllowedFields {
+		if !validModuleName(field) || allowed[field] {
+			return fmt.Errorf("projection %q has an invalid or duplicate allowed field", p.ID)
+		}
+		allowed[field] = true
+		factKeyAllowed = factKeyAllowed || field == p.FactKey
+	}
+	if !factKeyAllowed {
+		return fmt.Errorf("projection %q fact key is not published", p.ID)
+	}
+	seen := make(map[ProjectionSource]bool, len(p.Sources))
+	for _, source := range p.Sources {
+		if source.OwnerModuleID == "" || !moduleIDPattern.MatchString(string(source.OwnerModuleID)) || !validModuleName(source.QueryName) || source.OutputSchema.ID == "" || source.OutputSchema.Version == 0 || source.OutputSchema != p.OutputSchema || seen[source] {
+			return fmt.Errorf("projection %q has an invalid or duplicate source", p.ID)
+		}
+		seen[source] = true
+	}
+	return nil
+}
+
+// ProjectionCheckpoint resumes projection replay from one source and scope.
+//
+//contract:wire:v2
+type ProjectionCheckpoint struct {
+	ProjectionID string        `json:"projection_id"`
+	TenantID     TenantID      `json:"tenant_id"`
+	EntityScope  BusinessScope `json:"entity_scope"`
+	SourceID     string        `json:"source_id"`
+	Cursor       string        `json:"cursor"`
+	UpdatedAt    time.Time     `json:"updated_at"`
+}
+
+func (q QueryResult) Validate(query PublishedQuery, limit uint16, scope BusinessScope) error {
+	if scope.Validate() != nil || ValidateResourceBusinessScope(scope, query.ScopePolicy) != nil {
+		return fmt.Errorf("published query result scope is invalid")
+	}
+	if limit == 0 || limit > query.PageLimit || len(q.Data) == 0 || !json.Valid(q.Data) || q.AsOf.IsZero() {
+		return fmt.Errorf("published query result is incomplete or exceeds its page contract")
+	}
+	switch q.Freshness {
+	case QueryFresh, QueryStale, QueryUnknown, QueryIncomplete:
+	default:
+		return fmt.Errorf("published query result has invalid freshness")
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(q.Data, &rows); err != nil || len(rows) > int(limit) {
+		return fmt.Errorf("published query result data must be a bounded row array")
+	}
+	allowed := make(map[string]bool, len(query.AllowedFields))
+	for _, field := range query.AllowedFields {
+		allowed[field] = true
+	}
+	for _, row := range rows {
+		for field, value := range row {
+			if !allowed[field] || !json.Valid(value) {
+				return fmt.Errorf("published query result contains an undeclared field")
+			}
+		}
+	}
+	if len(q.NextCursor) > 2048 || len(q.SnapshotToken) > 2048 || len(q.SourceRevision) > 256 {
+		return fmt.Errorf("published query result cursor or source revision is too large")
+	}
+	return nil
+}
+
+func (p ProjectionCheckpoint) Validate() error {
+	if p.ProjectionID == "" || p.SourceID == "" || p.Cursor == "" || p.UpdatedAt.IsZero() || p.EntityScope.Validate() != nil || p.TenantID != p.EntityScope.TenantID {
+		return fmt.Errorf("projection checkpoint identity is invalid")
+	}
+	return nil
+}
+
 // ModuleInstallation is the persisted lifecycle identity for one tenant module.
 //
 //contract:wire:v2
@@ -213,6 +361,8 @@ type ModuleDescriptor struct {
 	ID              ModuleID                `json:"id"`
 	Version         string                  `json:"version"`
 	Resources       []OwnedResource         `json:"resources,omitempty"`
+	Queries         []PublishedQuery        `json:"queries,omitempty"`
+	Projections     []ProjectionDefinition  `json:"projections,omitempty"`
 	Provides        []CapabilityOffer       `json:"provides,omitempty"`
 	Requires        []CapabilityRequirement `json:"requires,omitempty"`
 	ExtensionPoints []ExtensionPoint        `json:"extension_points,omitempty"`
@@ -924,6 +1074,62 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 			return fmt.Errorf("module %q resource %q requires a valid entity scope field", m.ID, key)
 		}
 	}
+	queryNames := map[string]bool{}
+	queryOperations := make(map[string]OperationSpec)
+	for _, offer := range m.Provides {
+		for _, operation := range offer.Operations {
+			queryOperations[string(offer.Name)+"/"+operation.Name] = operation
+		}
+	}
+	for _, query := range m.Queries {
+		if query.OwnerModuleID != m.ID || !moduleIDPattern.MatchString(string(query.OwnerModuleID)) || !validModuleName(query.Name) || len("module.")+len(query.OwnerModuleID)+len(".query.")+len(query.Name) > 160 || queryNames[query.Name] || query.Capability == "" || !validModuleName(query.Operation) {
+			return fmt.Errorf("module %q has invalid or duplicate published query", m.ID)
+		}
+		queryNames[query.Name] = true
+		if query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned {
+			return fmt.Errorf("module %q query %q requires an explicit scope policy", m.ID, query.Name)
+		}
+		if query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 {
+			return fmt.Errorf("module %q query %q requires allowed fields and a page limit from 1 to 1000", m.ID, query.Name)
+		}
+		fields := map[string]bool{}
+		for _, field := range query.AllowedFields {
+			if !validModuleName(field) || fields[field] {
+				return fmt.Errorf("module %q query %q has an invalid or duplicate allowed field", m.ID, query.Name)
+			}
+			fields[field] = true
+		}
+		operation, ok := queryOperations[string(query.Capability)+"/"+query.Operation]
+		if !ok || operation.Effect != EffectQuery || operation.Input != query.InputSchema || operation.Output != query.OutputSchema {
+			return fmt.Errorf("module %q query %q must match a declared query capability operation", m.ID, query.Name)
+		}
+		if err := validateModuleSchema(query.InputSchema, registeredSchema); err != nil {
+			return err
+		}
+		if err := validateModuleSchema(query.OutputSchema, registeredSchema); err != nil {
+			return err
+		}
+	}
+	projectionIDs := map[string]bool{}
+	for _, projection := range m.Projections {
+		if projection.Validate() != nil || projection.OwnerModuleID != m.ID || len("module.")+len(projection.OwnerModuleID)+len(".projection.")+len(projection.ID) > 160 || projectionIDs[projection.ID] {
+			return fmt.Errorf("module %q has an invalid projection definition", m.ID)
+		}
+		projectionIDs[projection.ID] = true
+		if err := validateModuleSchema(projection.OutputSchema, registeredSchema); err != nil {
+			return err
+		}
+		for _, source := range projection.Sources {
+			if !moduleIDPattern.MatchString(string(source.OwnerModuleID)) || !validModuleName(source.QueryName) {
+				return fmt.Errorf("module %q projection %q references an invalid published query", m.ID, projection.ID)
+			}
+			if source.OwnerModuleID == m.ID {
+				if !queryNames[source.QueryName] {
+					return fmt.Errorf("module %q projection %q references unpublished query %s/%s", m.ID, projection.ID, source.OwnerModuleID, source.QueryName)
+				}
+			}
+		}
+	}
 	capabilities := map[string]bool{}
 	for _, offer := range m.Provides {
 		if offer.Name == "" || capabilities[string(offer.Name)] {
@@ -975,6 +1181,10 @@ func validScopeField(field string) bool {
 	return true
 }
 
+var moduleNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
+
+func validModuleName(name string) bool { return moduleNamePattern.MatchString(name) }
+
 func validateModuleSchema(ref SchemaRef, registered func(SchemaRef) bool) error {
 	if strings.TrimSpace(ref.ID) == "" || ref.Version == 0 {
 		return fmt.Errorf("schema id and version are required")
@@ -988,6 +1198,7 @@ func validateModuleSchema(ref SchemaRef, registered func(SchemaRef) bool) error 
 // ValidateModuleSet rejects ambiguous ownership and returns deterministic errors.
 func ValidateModuleSet(modules []ModuleDescriptor, registered func(SchemaRef) bool) error {
 	ids, owners := map[ModuleID]bool{}, map[string]ModuleID{}
+	queries := map[ModuleID]map[string]PublishedQuery{}
 	ordered := append([]ModuleDescriptor(nil), modules...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
 	for _, module := range ordered {
@@ -998,12 +1209,40 @@ func ValidateModuleSet(modules []ModuleDescriptor, registered func(SchemaRef) bo
 		if err := module.Validate(registered); err != nil {
 			return err
 		}
+		queries[module.ID] = make(map[string]PublishedQuery, len(module.Queries))
+		for _, query := range module.Queries {
+			queries[module.ID][query.Name] = query
+		}
 		for _, resource := range module.Resources {
 			key := fmt.Sprintf("%s/%s", resource.Ref.Namespace, resource.Ref.Name)
 			if owner, ok := owners[key]; ok {
 				return fmt.Errorf("resource %q has duplicate owners %q and %q", key, owner, module.ID)
 			}
 			owners[key] = module.ID
+		}
+	}
+	for _, module := range ordered {
+		for _, projection := range module.Projections {
+			for _, source := range projection.Sources {
+				query, ok := queries[source.OwnerModuleID][source.QueryName]
+				if ok {
+					factKeyPublished := false
+					for _, field := range query.AllowedFields {
+						factKeyPublished = factKeyPublished || field == projection.FactKey
+					}
+					allowedFieldsPublished := true
+					for _, field := range projection.AllowedFields {
+						found := false
+						for _, sourceField := range query.AllowedFields {
+							found = found || field == sourceField
+						}
+						allowedFieldsPublished = allowedFieldsPublished && found
+					}
+					if query.OutputSchema != source.OutputSchema || query.ScopePolicy != projection.ScopePolicy || !factKeyPublished || !allowedFieldsPublished {
+						return fmt.Errorf("module %q projection %q source %s/%s has an incompatible output or fact-key contract", module.ID, projection.ID, source.OwnerModuleID, source.QueryName)
+					}
+				}
+			}
 		}
 	}
 	return nil

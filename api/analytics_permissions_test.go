@@ -46,6 +46,18 @@ func TestRelatedAnalyticsQueryRequiresSourceRead(t *testing.T) {
 	}
 }
 
+func TestModuleOwnedResourcesNeverEnterGenericAnalyticsCatalog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Private Invoice", ModuleOwnerID: "billing.ar", ModuleAccess: contract.ModulePrivate})
+	registry.Permissions.AddRole(&doctype.Role{Name: "Administrator"})
+	catalog := analytics.BuildSemanticCatalog([]*doctype.DocType{registry.Get("Private Invoice")})
+	ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", []string{"Administrator"}, nil)
+	if filtered := filterReadableAnalyticsCatalog(ctx, registry, catalog); len(filtered.Models) != 0 {
+		t.Fatalf("module-owned resource leaked through analytics catalog: %#v", filtered.Models)
+	}
+}
+
 func TestRelatedAnalyticsQueryAcceptsExactVerifiedSourceGrant(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	registry := doctype.NewRegistry()
@@ -56,6 +68,26 @@ func TestRelatedAnalyticsQueryAcceptsExactVerifiedSourceGrant(t *testing.T) {
 	ctx.Set("auth_type", "extension")
 	if !checkRelatedModelPermissions(ctx, registry, models, request) {
 		t.Fatal("exact service read grant was denied")
+	}
+}
+
+func TestEntityOwnedAnalyticsRequiresExactEntityGrant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Invoice", BusinessScopePolicy: contract.ScopeEntityOwned, BusinessScopeField: "legal_entity_id"})
+	models := []analytics.SemanticModel{{Name: "invoices", SourceDoctype: "Invoice"}}
+	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "invoices"}}}
+	scope := contract.BusinessScope{TenantID: "stable-tenant", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Invoice", Role: "Reader", Read: true, Scope: scope})
+	ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", []string{"Reader"}, nil)
+	ctx.Request.Header.Set("X-Kora-Legal-Entity-ID", "entity-b")
+	if checkRelatedModelPermissions(ctx, registry, models, request) {
+		t.Fatal("entity grant authorized analytics for a different legal entity")
+	}
+	ctx = newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", []string{"Reader"}, nil)
+	ctx.Request.Header.Set("X-Kora-Legal-Entity-ID", "entity-a")
+	if !checkRelatedModelPermissions(ctx, registry, models, request) {
+		t.Fatal("exact entity analytics grant was denied")
 	}
 }
 

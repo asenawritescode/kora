@@ -27,6 +27,9 @@ type RowScope struct {
 // Entity operations require a narrow grant bound to that exact tenant/entity;
 // tenant roles and unscoped service grants do not carry over.
 func DecideForBusinessScope(execution Execution, roles RolePolicy, resource, operation string, scope contract.BusinessScope, entityOwned bool) (Decision, *contract.Error) {
+	if private, ok := roles.(interface{ IsPrivateModuleResource(string) bool }); ok && private.IsPrivateModuleResource(resource) && isReadOperation(operation) {
+		return Decision{}, contract.NewError(contract.CodePermissionDenied, "private module resources require an owner-controlled query surface")
+	}
 	if !entityOwned {
 		return Decide(execution, roles, resource, operation)
 	}
@@ -98,6 +101,9 @@ type BusinessScopedRolePolicy interface {
 // Decide evaluates one resource operation from verified identity and the
 // current tenant role policy. Caller-populated actor fields are never inputs.
 func Decide(execution Execution, roles RolePolicy, resource, operation string) (Decision, *contract.Error) {
+	if private, ok := roles.(interface{ IsPrivateModuleResource(string) bool }); ok && private.IsPrivateModuleResource(resource) && isReadOperation(operation) {
+		return Decision{}, contract.NewError(contract.CodePermissionDenied, "private module resources require an owner-controlled query surface")
+	}
 	if !execution.Valid() {
 		return Decision{}, contract.NewError(contract.CodeUnauthenticated, "verified execution identity is required")
 	}
@@ -117,4 +123,13 @@ func Decide(execution Execution, roles RolePolicy, resource, operation string) (
 		decision.OwnerOnly, decision.AssignedFields = scoped.RowScopeFor(actor.Roles, resource, operation)
 	}
 	return decision, nil
+}
+
+func isReadOperation(operation string) bool {
+	switch operation {
+	case "read", "report", "export":
+		return true
+	default:
+		return false
+	}
 }

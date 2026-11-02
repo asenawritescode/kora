@@ -209,6 +209,9 @@ func (p *scriptProvider) authorizeRead(dt *doctype.DocType) (policy.RowScope, er
 	if p == nil || p.tx == nil || p.registry == nil || dt == nil || !p.tx.Execution.Valid() {
 		return policy.RowScope{}, contract.NewError(contract.CodeUnauthenticated, "script record read requires verified execution identity")
 	}
+	if dt.ModuleOwnerID != "" {
+		return policy.RowScope{}, contract.NewError(contract.CodePermissionDenied, "module-owned records are available only through owner-published queries")
+	}
 	actor := p.tx.Execution.Actor()
 	if actor.Site != p.site {
 		return policy.RowScope{}, contract.NewError(contract.CodePermissionDenied, "script provider tenant does not match verified execution")

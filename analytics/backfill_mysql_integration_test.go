@@ -3,6 +3,7 @@
 package analytics
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/go-sql-driver/mysql"
@@ -84,6 +86,19 @@ func TestMySQLBackfillFailurePreservesPreviouslyCommittedRollups(t *testing.T) {
 		if _, err := database.Exec(query); err != nil {
 			t.Fatal("seed analytics rebuild fixture:", err)
 		}
+	}
+	projectionDefinition := contract.ProjectionDefinition{ID: "task_snapshot", OwnerModuleID: "analytics.task", ScopePolicy: contract.ScopeTenantShared, FactKey: "id", AllowedFields: []string{"id"}, Sources: []contract.ProjectionSource{{OwnerModuleID: "task.domain", QueryName: "tasks", OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}}}, OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}, RebuildStrategy: "consistent_snapshot"}
+	projectionStore := PublishedProjectionStore{DB: database, Dialect: db.Resolve("mysql"), Site: "tenant-a"}
+	projection := PublishedProjectionSnapshot{Definition: projectionDefinition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, SourceID: "published_sources", SourceRevision: "task-r1", Cursor: "complete", AsOf: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: []byte(`[{"id":"task-1"}]`)}
+	if err := projectionStore.Save(context.Background(), projection); err != nil {
+		t.Fatal("save MySQL projection snapshot:", err)
+	}
+	if err := projectionStore.MarkStale(context.Background(), projectionDefinition, projection.Scope, "published_sources"); err != nil {
+		t.Fatal("mark MySQL projection stale:", err)
+	}
+	loaded, err := projectionStore.Load(context.Background(), projectionDefinition, projection.Scope, "published_sources")
+	if err != nil || string(loaded.Data) != string(projection.Data) || loaded.Freshness != contract.QueryStale {
+		t.Fatalf("MySQL retained projection = %#v, error=%v", loaded, err)
 	}
 
 	registry := doctype.NewRegistry()

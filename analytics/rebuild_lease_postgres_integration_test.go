@@ -64,15 +64,6 @@ func TestPostgresRebuildLeaseFencesExpiredOwner(t *testing.T) {
 	if err := BootstrapTables(database, dialect); err != nil {
 		t.Fatal("bootstrap analytics schema:", err)
 	}
-	if _, err := database.Exec(`UPDATE _kora_analytics_bootstrap SET version = 3 WHERE id = 1`); err != nil {
-		t.Fatal("set pre-lease analytics version:", err)
-	}
-	if _, err := database.Exec(`DROP TABLE _kora_analytics_rebuild_lease`); err != nil {
-		t.Fatal("remove v4 rebuild lease table:", err)
-	}
-	if err := BootstrapTables(database, dialect); err != nil {
-		t.Fatal("upgrade analytics v3 schema:", err)
-	}
 	job := &RebuildJob{ID: "lease-job", Site: "tenant-a", Status: "queued", StartedAt: time.Now().UTC(), From: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 	if err := CreateRebuildJob(database, dialect, job); err != nil {
 		t.Fatal("create analytics rebuild job:", err)

@@ -178,7 +178,7 @@ func buildFunctions(reg *doctype.Registry) []map[string]any {
 func BuildToolCatalog(reg *doctype.Registry) ToolCatalog {
 	var catalog []ToolDescriptor
 	for _, dt := range reg.All() {
-		if dt.IsChildTable {
+		if dt.IsChildTable || dt.ModuleOwnerID != "" {
 			continue
 		}
 		catalog = append(catalog, buildDoctypeToolDescriptors(dt)...)
@@ -1194,6 +1194,9 @@ func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctyp
 	}
 	if dt == nil {
 		return fmt.Sprintf("DocType %q not found", doctypeName)
+	}
+	if dt.ModuleOwnerID != "" {
+		return "Permission denied: module records are available only through their published query contract"
 	}
 	permissionOperation := map[string]string{"find": "read", "list": "read", "get": "read", "create": "create", "update": "write"}[operation]
 	if permissionOperation == "" {

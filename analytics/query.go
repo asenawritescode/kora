@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 )
 
@@ -19,10 +20,11 @@ type cacheEntry struct {
 
 // QueryEngine resolves metric queries against the rollup tables.
 type QueryEngine struct {
-	DB       *sql.DB
-	SiteName string
-	Dialect  kdb.Dialect
-	cache    sync.Map // key string → *cacheEntry
+	DB            *sql.DB
+	SiteName      string
+	Dialect       kdb.Dialect
+	BusinessScope contract.BusinessScope
+	cache         sync.Map // key string → *cacheEntry
 }
 
 // CachedResolve returns a cached result if available and not expired.
@@ -296,8 +298,12 @@ func (qe *QueryEngine) queryAggregate(table, dateCol string, metric *Metric, fro
 		orderClause = "bucket ASC"
 	}
 
-	where := []string{"site = ?", "doctype = ?", "metric = ?", dateCol + " >= ?", dateCol + " <= ?"}
-	args := []any{qe.SiteName, metric.DocType, metric.Name, fromStr, toStr}
+	scope := qe.BusinessScope
+	if scope.TenantID == "" {
+		scope = contract.BusinessScope{TenantID: contract.TenantID(qe.SiteName), Kind: contract.ScopeKindTenant}
+	}
+	where := []string{"site = ?", "scope_kind = ?", "legal_entity_id = ?", "doctype = ?", "metric = ?", dateCol + " >= ?", dateCol + " <= ?"}
+	args := []any{qe.SiteName, string(scope.Kind), scope.LegalEntityID, metric.DocType, metric.Name, fromStr, toStr}
 	if len(req.Filters) > 0 {
 		column := "dimension"
 		prefix := req.Dimension + "="
@@ -398,16 +404,20 @@ func (qe *QueryEngine) queryAvg(table, dateCol string, metric *Metric, from, to 
 
 	// For avg metrics, we need sum(value) / count of non-zero days.
 	// Since rollup values are accumulated deltas, the sum is the total over the period.
+	scope := qe.BusinessScope
+	if scope.TenantID == "" {
+		scope = contract.BusinessScope{TenantID: contract.TenantID(qe.SiteName), Kind: contract.ScopeKindTenant}
+	}
 	query := fmt.Sprintf(
 		`SELECT SUM(value) AS total, COUNT(*) AS days
 		 FROM %s
-		 WHERE site = ? AND doctype = ? AND metric = ?
+		 WHERE site = ? AND scope_kind = ? AND legal_entity_id = ? AND doctype = ? AND metric = ?
 		   AND %s >= ? AND %s <= ?`,
 		table, dateCol, dateCol,
 	)
 
 	var total, days float64
-	if err := qe.DB.QueryRow(kdb.Rebind(qe.Dialect, query), qe.SiteName, metric.DocType, metric.Name, fromStr, toStr).Scan(&total, &days); err != nil {
+	if err := qe.DB.QueryRow(kdb.Rebind(qe.Dialect, query), qe.SiteName, string(scope.Kind), scope.LegalEntityID, metric.DocType, metric.Name, fromStr, toStr).Scan(&total, &days); err != nil {
 		return nil, err
 	}
 

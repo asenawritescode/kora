@@ -27,6 +27,7 @@ import (
 type Services struct {
 	ModuleBindings        *plugin.BindingPlan
 	ResolveModuleBindings func(contract.BusinessScope) (plugin.BindingPlan, error)
+	PublishedProjections  *analytics.PublishedProjectionStore
 	WorkAdmission         *dbaccess.Admission
 	RealtimeAdmission     interface {
 		Acquire(context.Context) (func(), error)

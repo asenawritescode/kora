@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
+	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
 
@@ -43,22 +45,47 @@ func TestLibSQLRebuildCutoffAndLaterEvents(t *testing.T) {
 	if err := BootstrapTables(database, dialect); err != nil {
 		t.Fatal("bootstrap analytics schema:", err)
 	}
-	preSequenceReceipt := "pre-sequence-" + time.Now().UTC().Format("20060102150405.000000000")
-	if _, err := database.Exec(`INSERT INTO _kora_analytics_event_receipt (site, event_id, processed_at) VALUES (?, ?, CURRENT_TIMESTAMP)`, "tenant-a", preSequenceReceipt); err != nil {
-		t.Fatal("seed pre-sequence LibSQL analytics receipt:", err)
+	projectionDefinition := contract.ProjectionDefinition{
+		ID: "ar_balance", OwnerModuleID: "finance.ar", ScopePolicy: contract.ScopeEntityOwned, FactKey: "period", AllowedFields: []string{"period", "amount"},
+		Sources:      []contract.ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: "balances", OutputSchema: contract.SchemaRef{ID: "balance.output", Version: 2}}},
+		OutputSchema: contract.SchemaRef{ID: "balance.output", Version: 2}, RebuildStrategy: "consistent_snapshot",
 	}
-	if _, err := database.Exec(`UPDATE _kora_analytics_bootstrap SET version = 4 WHERE id = 1`); err != nil {
-		t.Fatal("set pre-sequence LibSQL analytics schema version:", err)
+	projectionScope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	projectionStore := PublishedProjectionStore{DB: database, Dialect: dialect, Site: "tenant-a"}
+	projectionData := []byte(`[{"period":"2026-10","amount":21}]`)
+	projectionSnapshot := PublishedProjectionSnapshot{Definition: projectionDefinition, Scope: projectionScope, SourceID: "published_sources", SourceRevision: "source-r1", Cursor: "complete", AsOf: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: projectionData}
+	if err := projectionStore.Save(context.Background(), projectionSnapshot); err != nil {
+		t.Fatal("save complete LibSQL projection:", err)
 	}
-	if _, err := database.Exec(`ALTER TABLE _kora_analytics_event_receipt DROP COLUMN source_sequence`); err != nil {
-		t.Fatal("model v4 LibSQL analytics receipt schema:", err)
+	loadedProjection, err := projectionStore.Load(context.Background(), projectionDefinition, projectionScope, "published_sources")
+	if err != nil || string(loadedProjection.Data) != string(projectionData) || loadedProjection.Freshness != contract.QueryFresh {
+		t.Fatalf("load LibSQL projection = %#v, error=%v", loadedProjection, err)
 	}
-	if err := BootstrapTables(database, dialect); err != nil {
-		t.Fatal("upgrade LibSQL analytics v4 receipt schema:", err)
+	if err := projectionStore.MarkStale(context.Background(), projectionDefinition, projectionScope, "published_sources"); err != nil {
+		t.Fatal("mark retained LibSQL projection stale:", err)
 	}
-	var preserved int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_analytics_event_receipt WHERE site = ? AND event_id = ? AND source_sequence IS NULL`, "tenant-a", preSequenceReceipt).Scan(&preserved); err != nil || preserved != 1 {
-		t.Fatalf("pre-sequence LibSQL receipt preservation = %d, error=%v; want one row with unknown source sequence", preserved, err)
+	staleProjection, err := projectionStore.Load(context.Background(), projectionDefinition, projectionScope, "published_sources")
+	if err != nil || string(staleProjection.Data) != string(projectionData) || staleProjection.Freshness != contract.QueryStale {
+		t.Fatalf("stale LibSQL projection = %#v, error=%v", staleProjection, err)
+	}
+	secondProjection := projectionSnapshot
+	secondProjection.SourceRevision = "source-r2"
+	secondProjection.Data = []byte(`[{"period":"2026-10","amount":24}]`)
+	if err := projectionStore.Save(context.Background(), secondProjection); err != nil {
+		t.Fatal("save second LibSQL projection revision:", err)
+	}
+	latestProjection, err := projectionStore.Load(context.Background(), projectionDefinition, projectionScope, "published_sources")
+	if err != nil || latestProjection.SourceRevision != "source-r2" || latestProjection.Freshness != contract.QueryFresh {
+		t.Fatalf("latest LibSQL projection = %#v, error=%v", latestProjection, err)
+	}
+	var projectionHistory int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM _kora_analytics_module_projection WHERE site = ? AND projection_id = ?`, "tenant-a", projectionDefinition.ID).Scan(&projectionHistory); err != nil || projectionHistory != 2 {
+		t.Fatalf("LibSQL projection history count = %d, error=%v", projectionHistory, err)
+	}
+	wrongScope := projectionScope
+	wrongScope.LegalEntityID = "entity-b"
+	if _, err := projectionStore.Load(context.Background(), projectionDefinition, wrongScope, "published_sources"); err == nil {
+		t.Fatal("LibSQL projection snapshot crossed legal-entity scope")
 	}
 	if _, err := database.Exec(`CREATE TABLE _kora_event_sequence (site TEXT PRIMARY KEY, last_sequence INTEGER NOT NULL)`); err != nil {
 		t.Fatal("create source sequence table:", err)
@@ -126,9 +153,9 @@ func TestLibSQLRebuildCutoffAndLaterEvents(t *testing.T) {
 		_ = rebuildTx.Rollback()
 		t.Fatal("lock LibSQL rebuild state:", err)
 	}
-	if _, err := rebuildTx.Exec(`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-		VALUES ('tenant-a', 'Customer', 'customer_count', '', '2026-10-14', 2)
-		ON CONFLICT (site, doctype, metric, dimension, date) DO UPDATE SET value = excluded.value`); err != nil {
+	if _, err := rebuildTx.Exec(`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, scope_kind, legal_entity_id, value)
+		VALUES ('tenant-a', 'Customer', 'customer_count', '', '2026-10-14', 'tenant', '', 2)
+		ON CONFLICT (site, doctype, metric, dimension, date, scope_kind, legal_entity_id) DO UPDATE SET value = excluded.value`); err != nil {
 		_ = rebuildTx.Rollback()
 		t.Fatal("stage LibSQL rebuild rollup:", err)
 	}

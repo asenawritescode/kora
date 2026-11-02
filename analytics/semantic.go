@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -26,9 +28,61 @@ func BuildSemanticCatalog(docTypes []*doctype.DocType) *SemanticCatalog {
 		if dt == nil || dt.IsChildTable || dt.IsSingle {
 			continue
 		}
+		// Module-owned records are never automatically published to the
+		// analytics surface. Owners must expose an explicit published query or
+		// projection before another module can report on them.
+		if dt.ModuleOwnerID != "" {
+			continue
+		}
 		catalog.Models = append(catalog.Models, BuildSemanticModel(dt))
 	}
 	return catalog
+}
+
+// BuildPublishedSemanticModel creates a reporting model solely from an owner's
+// declared query output fields. It has no DocType/table source, so analytics
+// execution cannot fall through to private record storage.
+func BuildPublishedSemanticModel(name, label, owner, projection, query string, scopePolicy contract.ResourceScopeKind, fields []SemanticDimension, measures []SemanticMeasure) (SemanticModel, error) {
+	model := SemanticModel{Name: name, Label: label, ProjectionOwner: owner, ProjectionID: projection, PublishedQuery: query, ProjectionScopePolicy: scopePolicy, Dimensions: append([]SemanticDimension(nil), fields...), Measures: append([]SemanticMeasure(nil), measures...)}
+	allowed := make(map[string]bool, len(fields)+len(measures))
+	for _, dimension := range fields {
+		allowed[dimension.Field] = true
+		if dimension.Type == "time" && model.TimeDimension == "" {
+			model.TimeDimension = dimension.Name
+		}
+	}
+	for _, measure := range measures {
+		if measure.Field != "" {
+			allowed[measure.Field] = true
+		}
+	}
+	for field := range allowed {
+		model.AllowedFields = append(model.AllowedFields, field)
+	}
+	sort.Strings(model.AllowedFields)
+	if err := model.Validate(); err != nil {
+		return SemanticModel{}, err
+	}
+	return model, nil
+}
+
+// BuildPublishedProjectionModel creates an analytics model backed only by a
+// module projection. Its owner-controlled field allowlist is retained with the
+// projection, so historical reports remain readable if an input source goes away.
+func BuildPublishedProjectionModel(name, label string, definition contract.ProjectionDefinition, dimensions []SemanticDimension, measures []SemanticMeasure) (SemanticModel, error) {
+	if err := definition.Validate(); err != nil {
+		return SemanticModel{}, fmt.Errorf("published projection definition is invalid")
+	}
+	model, err := BuildPublishedSemanticModel(name, label, string(definition.OwnerModuleID), definition.ID, "projection:"+definition.ID, definition.ScopePolicy, dimensions, measures)
+	if err != nil {
+		return SemanticModel{}, err
+	}
+	model.AllowedFields = append([]string(nil), definition.AllowedFields...)
+	sort.Strings(model.AllowedFields)
+	if err := model.Validate(); err != nil {
+		return SemanticModel{}, err
+	}
+	return model, nil
 }
 
 // AddReportModels adds explicitly configured business models to a catalog.
@@ -154,15 +208,20 @@ func GenerateDefaultReports(catalog *SemanticCatalog) []ReportDefinition {
 
 // SemanticModel is an analytics-friendly projection of one or more sources.
 type SemanticModel struct {
-	Name          string              `json:"name" yaml:"name"`
-	Label         string              `json:"label" yaml:"label"`
-	Description   string              `json:"description,omitempty" yaml:"description,omitempty"`
-	SourceDoctype string              `json:"source_doctype,omitempty" yaml:"source_doctype,omitempty"`
-	TimeDimension string              `json:"time_dimension,omitempty" yaml:"time_dimension,omitempty"`
-	Dimensions    []SemanticDimension `json:"dimensions,omitempty" yaml:"dimensions,omitempty"`
-	Measures      []SemanticMeasure   `json:"measures,omitempty" yaml:"measures,omitempty"`
-	Rollups       []RollupDefinition  `json:"rollups,omitempty" yaml:"rollups,omitempty"`
-	Relation      *SemanticRelation   `json:"relation,omitempty" yaml:"relation,omitempty"`
+	Name                  string                     `json:"name" yaml:"name"`
+	Label                 string                     `json:"label" yaml:"label"`
+	Description           string                     `json:"description,omitempty" yaml:"description,omitempty"`
+	SourceDoctype         string                     `json:"source_doctype,omitempty" yaml:"source_doctype,omitempty"`
+	TimeDimension         string                     `json:"time_dimension,omitempty" yaml:"time_dimension,omitempty"`
+	Dimensions            []SemanticDimension        `json:"dimensions,omitempty" yaml:"dimensions,omitempty"`
+	Measures              []SemanticMeasure          `json:"measures,omitempty" yaml:"measures,omitempty"`
+	Rollups               []RollupDefinition         `json:"rollups,omitempty" yaml:"rollups,omitempty"`
+	Relation              *SemanticRelation          `json:"relation,omitempty" yaml:"relation,omitempty"`
+	ProjectionOwner       string                     `json:"projection_owner,omitempty" yaml:"projection_owner,omitempty"`
+	ProjectionID          string                     `json:"projection_id,omitempty" yaml:"projection_id,omitempty"`
+	PublishedQuery        string                     `json:"published_query,omitempty" yaml:"published_query,omitempty"`
+	ProjectionScopePolicy contract.ResourceScopeKind `json:"projection_scope_policy,omitempty" yaml:"projection_scope_policy,omitempty"`
+	AllowedFields         []string                   `json:"allowed_fields,omitempty" yaml:"allowed_fields,omitempty"`
 }
 
 // SemanticRelation describes a business-level parent/child source. Child
@@ -319,7 +378,31 @@ func (m *SemanticModel) Validate() error {
 	if err := validateIdentifier("name", m.Name); err != nil {
 		return err
 	}
-	if m.SourceDoctype == "" && len(m.Measures) == 0 {
+	if m.ProjectionOwner != "" {
+		if m.SourceDoctype != "" || m.Relation != nil || m.ProjectionID == "" || m.PublishedQuery == "" || len(m.AllowedFields) == 0 || m.ProjectionScopePolicy != contract.ScopeTenantShared && m.ProjectionScopePolicy != contract.ScopeEntityOwned {
+			return fmt.Errorf("published projection model %q requires an owner, projection, query, and field contract without table sources", m.Name)
+		}
+		allowed := map[string]bool{}
+		for _, field := range m.AllowedFields {
+			if err := validateIdentifier("published field", field); err != nil {
+				return err
+			}
+			if allowed[field] {
+				return fmt.Errorf("duplicate published field %q", field)
+			}
+			allowed[field] = true
+		}
+		for _, dimension := range m.Dimensions {
+			if !allowed[dimension.Field] {
+				return fmt.Errorf("dimension %q is outside the published query field contract", dimension.Name)
+			}
+		}
+		for _, measure := range m.Measures {
+			if measure.Field != "" && !allowed[measure.Field] {
+				return fmt.Errorf("measure %q is outside the published query field contract", measure.Name)
+			}
+		}
+	} else if m.SourceDoctype == "" && len(m.Measures) == 0 {
 		return fmt.Errorf("source_doctype or measures are required")
 	}
 	if m.TimeDimension != "" && !hasDimensionField(m.Dimensions, m.TimeDimension) {

@@ -1,10 +1,13 @@
 package analytics
 
 import (
+	"encoding/json"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 )
 
@@ -14,8 +17,8 @@ func TestSemanticRollupQueryAppliesFiltersBeforeBoundedLimit(t *testing.T) {
 		t.Fatal("sqlmock:", err)
 	}
 	defer database.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT dimension, SUM(value) AS value FROM _kora_analytics_daily WHERE site = ? AND doctype = ? AND metric = ? AND date >= ? AND date <= ? AND `dimension` = ? GROUP BY dimension ORDER BY value DESC LIMIT ?")).
-		WithArgs("tenant-a", "Cake Order", "cake_orders_count_by_flavour", "2026-01-01", "2026-01-31", "flavour=vanilla", 1).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT dimension, SUM(value) AS value FROM _kora_analytics_daily WHERE site = ? AND scope_kind = ? AND legal_entity_id = ? AND doctype = ? AND metric = ? AND date >= ? AND date <= ? AND `dimension` = ? GROUP BY dimension ORDER BY value DESC LIMIT ?")).
+		WithArgs("tenant-a", "tenant", "", "Cake Order", "cake_orders_count_by_flavour", "2026-01-01", "2026-01-31", "flavour=vanilla", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"dimension", "value"}).AddRow("flavour=vanilla", 3.0))
 	engine := &QueryEngine{DB: database, SiteName: "tenant-a", Dialect: kdb.Resolve("mysql")}
 	result, err := engine.Resolve(&Metric{
@@ -33,6 +36,45 @@ func TestSemanticRollupQueryAppliesFiltersBeforeBoundedLimit(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal("SQL expectations:", err)
+	}
+}
+
+func TestPublishedProjectionAnalyticsUsesScopedSnapshotAndReportsFreshness(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("sqlmock:", err)
+	}
+	defer database.Close()
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	asOf := time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
+	data := json.RawMessage(`[{"id":"invoice-1","period":"2026-10-01","amount":12},{"id":"invoice-2","period":"2026-10-01","amount":8},{"id":"invoice-3","period":"2026-11-01","amount":5}]`)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT source_revision, as_of, freshness, data FROM _kora_analytics_module_projection WHERE site = ? AND projection_id = ? AND owner_module_id = ? AND scope_kind = ? AND legal_entity_id = ? AND source_id = 'published_sources' ORDER BY generation DESC LIMIT 1")).
+		WithArgs("tenant-a", "ar_balance", "finance.ar", "legal_entity", "entity-a").
+		WillReturnRows(sqlmock.NewRows([]string{"source_revision", "as_of", "freshness", "data"}).AddRow("revision-1", asOf, "stale", string(data)))
+	model, err := BuildPublishedSemanticModel("ar_balance", "AR balance", "finance.ar", "ar_balance", "sales.orders/balances", contract.ScopeEntityOwned,
+		[]SemanticDimension{{Name: "period", Field: "period", Type: "time", SupportedGranularities: []string{"day", "month"}}},
+		[]SemanticMeasure{{Name: "amount_sum", Field: "amount", Aggregation: "sum"}, {Name: "count", Aggregation: "count"}})
+	if err != nil {
+		t.Fatal("build published model:", err)
+	}
+	model.AllowedFields = []string{"amount", "id", "period"}
+	catalog := &SemanticCatalog{Models: []SemanticModel{model}}
+	engine := &QueryEngine{DB: database, SiteName: "tenant-a", Dialect: kdb.Resolve("mysql"), BusinessScope: scope}
+	response, err := engine.ResolveSemanticQuery(catalog, AnalyticsQueryRequest{
+		Queries: []ModelQuery{{Model: model.Name, Dimensions: []string{"period"}, Measures: []string{"amount_sum", "count"}}},
+		Time:    QueryTime{From: "2026-10-01", To: "2026-10-31", Granularity: "month"}, Limit: 10,
+	})
+	if err != nil {
+		t.Fatal("query published projection:", err)
+	}
+	if response.DataSource != "published_projection" || len(response.Queries) != 1 || response.Queries[0].Freshness != contract.QueryStale || response.Queries[0].AsOf == nil || !response.Queries[0].AsOf.Equal(asOf) {
+		t.Fatalf("projection response metadata = %#v", response)
+	}
+	if len(response.Queries[0].Rows) != 1 || response.Queries[0].Rows[0]["period"] != "2026-10-01" || response.Queries[0].Rows[0]["amount_sum"] != float64(20) || response.Queries[0].Rows[0]["count"] != 2 {
+		t.Fatalf("projection aggregate rows = %#v", response.Queries[0].Rows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("unexpected projection query:", err)
 	}
 }
 
@@ -82,8 +124,8 @@ func TestSemanticRollupInFilterRunsBeforeLimit(t *testing.T) {
 		t.Fatal("sqlmock:", err)
 	}
 	defer database.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT dimension, SUM(value) AS value FROM _kora_analytics_daily WHERE site = ? AND doctype = ? AND metric = ? AND date >= ? AND date <= ? AND `dimension` IN (?,?) GROUP BY dimension ORDER BY value DESC LIMIT ?")).
-		WithArgs("tenant-a", "Deal", "deal_total_amount_sum_by_pipeline_stage", "2026-01-01", "2026-01-31", "pipeline_stage=Lead", "pipeline_stage=Qualified", 10).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT dimension, SUM(value) AS value FROM _kora_analytics_daily WHERE site = ? AND scope_kind = ? AND legal_entity_id = ? AND doctype = ? AND metric = ? AND date >= ? AND date <= ? AND `dimension` IN (?,?) GROUP BY dimension ORDER BY value DESC LIMIT ?")).
+		WithArgs("tenant-a", "tenant", "", "Deal", "deal_total_amount_sum_by_pipeline_stage", "2026-01-01", "2026-01-31", "pipeline_stage=Lead", "pipeline_stage=Qualified", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"dimension", "value"}).
 			AddRow("pipeline_stage=Lead", 1200.0).
 			AddRow("pipeline_stage=Qualified", 800.0))

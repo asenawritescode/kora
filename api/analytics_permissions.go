@@ -54,6 +54,20 @@ func analyticsPermissionScope(c *gin.Context, registry *doctype.Registry) string
 	return hex.EncodeToString(digest[:])
 }
 
+func analyticsRequestUsesPublishedProjection(catalog *analytics.SemanticCatalog, request analytics.AnalyticsQueryRequest) bool {
+	if catalog == nil {
+		return false
+	}
+	for _, query := range request.Queries {
+		for _, model := range catalog.Models {
+			if model.Name == query.Model && model.ProjectionOwner != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func checkRelatedReportPermissions(c *gin.Context, registry *doctype.Registry, report *analytics.ReportDefinition, catalog *analytics.SemanticCatalog) bool {
 	if report == nil || catalog == nil {
 		return false
@@ -102,6 +116,22 @@ func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, mo
 		if !queried[model.Name] {
 			continue
 		}
+		if model.ProjectionOwner != "" {
+			if model.ProjectionID == "" || model.PublishedQuery == "" || len(model.AllowedFields) == 0 {
+				return false
+			}
+			resource := "module." + model.ProjectionOwner + ".projection." + model.ProjectionID
+			scope, denied := checkPerm(c, registry, resource, "read")
+			if denied || scope.Owner || len(scope.AssignedFields) > 0 {
+				if !denied {
+					c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{
+						"code": "permission.row_scope_unsupported", "message": "Analytics projections require an explicit scoped grant",
+					}})
+				}
+				return false
+			}
+			continue
+		}
 		doctypes := []string{model.SourceDoctype}
 		if model.Relation != nil {
 			doctypes = append(doctypes, model.Relation.ParentDoctype, model.Relation.ChildDoctype)
@@ -116,7 +146,7 @@ func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, mo
 				continue
 			}
 			checked[name] = true
-			if !checkUnscopedAnalyticsRead(c, registry, name) {
+			if !checkAnalyticsRead(c, registry, name) {
 				return false
 			}
 		}
@@ -124,16 +154,9 @@ func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, mo
 	return true
 }
 
-func checkUnscopedAnalyticsRead(c *gin.Context, registry *doctype.Registry, doctypeName string) bool {
+func checkAnalyticsRead(c *gin.Context, registry *doctype.Registry, doctypeName string) bool {
 	if doctypeName == "" {
 		return true
-	}
-	if dt := registry.Get(doctypeName); dt != nil && dt.BusinessScopePolicy == contract.ScopeEntityOwned {
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{
-			"code":    "permission.entity_scope_unsupported",
-			"message": "Analytics queries cannot read entity-owned sources through an unscoped projection",
-		}})
-		return false
 	}
 	scope, denied := checkPerm(c, registry, doctypeName, "read")
 	if denied {
@@ -153,15 +176,8 @@ func analyticsSourceReadable(c *gin.Context, registry *doctype.Registry, doctype
 	if doctypeName == "" || registry == nil {
 		return false
 	}
-	if dt := registry.Get(doctypeName); dt != nil && dt.BusinessScopePolicy == contract.ScopeEntityOwned {
-		return false
-	}
-	execution, valid := requestExecution(c)
-	if !valid {
-		return false
-	}
-	decision, err := policy.Decide(execution, registry, doctypeName, "read")
-	return err == nil && !decision.OwnerOnly && len(decision.AssignedFields) == 0
+	scope, denied := checkPerm(c, registry, doctypeName, "read")
+	return !denied && !scope.Owner && len(scope.AssignedFields) == 0
 }
 
 func filterReadableAnalyticsMetrics(c *gin.Context, registry *doctype.Registry, metrics []*analytics.Metric) []*analytics.Metric {
@@ -175,6 +191,14 @@ func filterReadableAnalyticsMetrics(c *gin.Context, registry *doctype.Registry, 
 }
 
 func analyticsModelSourcesReadable(c *gin.Context, registry *doctype.Registry, model analytics.SemanticModel) bool {
+	if model.ProjectionOwner != "" {
+		if model.ProjectionID == "" || model.PublishedQuery == "" || len(model.AllowedFields) == 0 || model.ProjectionScopePolicy != contract.ScopeTenantShared && model.ProjectionScopePolicy != contract.ScopeEntityOwned {
+			return false
+		}
+		resource := "module." + model.ProjectionOwner + ".projection." + model.ProjectionID
+		scope, denied := checkPerm(c, registry, resource, "read")
+		return !denied && !scope.Owner && len(scope.AssignedFields) == 0
+	}
 	sources := []string{model.SourceDoctype}
 	if model.Relation != nil {
 		sources = append(sources, model.Relation.ParentDoctype, model.Relation.ChildDoctype)

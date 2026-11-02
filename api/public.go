@@ -77,7 +77,7 @@ func (h *Handler) HandlePublicGet(c *gin.Context) {
 func (h *Handler) publicDocType(c *gin.Context, list bool) (*doctype.DocType, bool) {
 	doctypeName := c.Param("doctype")
 	dt := h.siteRegistry(c).Get(doctypeName)
-	if dt == nil || dt.PublicAccess == nil || !dt.PublicAccess.Enabled {
+	if dt == nil || dt.ModuleOwnerID != "" || dt.PublicAccess == nil || !dt.PublicAccess.Enabled {
 		writeError(c, http.StatusNotFound, "resource.doctype_not_found", "Document type not found", nil)
 		return nil, false
 	}

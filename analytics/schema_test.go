@@ -105,6 +105,11 @@ func TestAnalyticsDDLUsesDialectCompatibleTypesAndIndexes(t *testing.T) {
 			if !strings.Contains(joined, "source_sequence BIGINT NULL") {
 				t.Error("analytics receipts do not preserve the optional source sequence")
 			}
+			for _, token := range []string{"scope_kind VARCHAR(32)", "legal_entity_id VARCHAR(140)", "_kora_analytics_module_projection", "snapshot_key CHAR(64)", "source_cursor VARCHAR(2048)"} {
+				if !strings.Contains(joined, token) {
+					t.Errorf("fresh analytics schema is missing %q", token)
+				}
+			}
 			for _, table := range []string{"_kora_analytics_rebuild_lock", "_kora_analytics_rebuild_checkpoint", "_kora_analytics_rebuild_lease"} {
 				if !strings.Contains(joined, table) {
 					t.Errorf("DDL is missing rebuild coordination table %s", table)
@@ -114,7 +119,7 @@ func TestAnalyticsDDLUsesDialectCompatibleTypesAndIndexes(t *testing.T) {
 	}
 }
 
-func TestBootstrapUpgradesExistingAnalyticsSchemaToReceipts(t *testing.T) {
+func TestBootstrapRejectsOlderAnalyticsSchemaWithoutMigratingIt(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -122,89 +127,11 @@ func TestBootstrapUpgradesExistingAnalyticsSchemaToReceipts(t *testing.T) {
 	defer database.Close()
 	mock.ExpectExec(regexp.QuoteMeta("CREATE TABLE IF NOT EXISTS _kora_analytics_bootstrap (\n\t\tid INTEGER PRIMARY KEY,\n\t\tversion INTEGER NOT NULL\n\t)")).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT version FROM _kora_analytics_bootstrap WHERE id = 1`)).
-		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
-	for _, statement := range rollupTableDDL(db.Resolve("mysql")) {
-		mock.ExpectExec(regexp.QuoteMeta(statement)).WillReturnResult(sqlmock.NewResult(0, 0))
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '_kora_analytics_event_receipt' AND COLUMN_NAME = 'source_sequence'`)).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_analytics_bootstrap SET version = 5 WHERE id = 1`)).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := BootstrapTables(database, db.Resolve("mysql")); err != nil {
-		t.Fatalf("upgrade analytics schema: %v", err)
+		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(6))
+	if err := BootstrapTables(database, db.Resolve("mysql")); err == nil || !strings.Contains(err.Error(), "create a fresh tenant database") {
+		t.Fatalf("older schema error = %v, want fresh-database guidance", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestBootstrapVersionFourAddsReceiptSourceSequence(t *testing.T) {
-	database, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	mock.ExpectExec(regexp.QuoteMeta("CREATE TABLE IF NOT EXISTS _kora_analytics_bootstrap (\n\t\tid INTEGER PRIMARY KEY,\n\t\tversion INTEGER NOT NULL\n\t)")).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT version FROM _kora_analytics_bootstrap WHERE id = 1`)).
-		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(4))
-	for _, statement := range rollupTableDDL(db.Resolve("mysql")) {
-		mock.ExpectExec(regexp.QuoteMeta(statement)).WillReturnResult(sqlmock.NewResult(0, 0))
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '_kora_analytics_event_receipt' AND COLUMN_NAME = 'source_sequence'`)).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectExec(regexp.QuoteMeta("ALTER TABLE `_kora_analytics_event_receipt` ADD COLUMN `source_sequence` BIGINT NULL")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_analytics_bootstrap SET version = 5 WHERE id = 1`)).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := BootstrapTables(database, db.Resolve("mysql")); err != nil {
-		t.Fatalf("upgrade analytics schema from version four: %v", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestAnalyticsReceiptSequenceMigrationAddsMissingColumnForEachDialect(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		dialect db.Dialect
-		probe   string
-		alter   string
-	}{
-		{
-			name: "mysql", dialect: db.Resolve("mysql"),
-			probe: `SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '_kora_analytics_event_receipt' AND COLUMN_NAME = 'source_sequence'`,
-			alter: "ALTER TABLE `_kora_analytics_event_receipt` ADD COLUMN `source_sequence` BIGINT NULL",
-		},
-		{
-			name: "postgres", dialect: db.Resolve("postgres"),
-			probe: `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '_kora_analytics_event_receipt' AND column_name = 'source_sequence'`,
-			alter: `ALTER TABLE "_kora_analytics_event_receipt" ADD COLUMN "source_sequence" BIGINT NULL`,
-		},
-		{
-			name: "libsql", dialect: db.Resolve("libsql"),
-			probe: `PRAGMA table_info('_kora_analytics_event_receipt')`,
-			alter: `ALTER TABLE "_kora_analytics_event_receipt" ADD COLUMN "source_sequence" BIGINT NULL`,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			database, mock, err := sqlmock.New()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer database.Close()
-			if tc.name == "libsql" {
-				mock.ExpectQuery(regexp.QuoteMeta(tc.probe)).WillReturnRows(sqlmock.NewRows([]string{"cid", "name", "type", "notnull", "dflt_value", "pk"}).AddRow(0, "site", "TEXT", 1, nil, 0))
-			} else {
-				mock.ExpectQuery(regexp.QuoteMeta(tc.probe)).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-			}
-			mock.ExpectExec(regexp.QuoteMeta(tc.alter)).WillReturnResult(sqlmock.NewResult(0, 0))
-			if err := ensureReceiptSequenceColumn(context.Background(), database, tc.dialect); err != nil {
-				t.Fatalf("ensure receipt sequence: %v", err)
-			}
-			if err := mock.ExpectationsWereMet(); err != nil {
-				t.Fatal(err)
-			}
-		})
 	}
 }

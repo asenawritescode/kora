@@ -10,7 +10,7 @@ import (
 )
 
 // Increment this when rollupTableDDL gains or changes analytics schema DDL.
-const analyticsBootstrapVersion = 5
+const analyticsBootstrapVersion = 7
 
 // BootstrapTables creates the analytics rollup tables in the operational DB.
 // Idempotent — uses IF NOT EXISTS. Called once per site at startup.
@@ -18,8 +18,8 @@ func BootstrapTables(database *sql.DB, dialect db.SchemaDialect) error {
 	return BootstrapTablesContext(context.Background(), database, dialect)
 }
 
-// BootstrapTablesContext creates or upgrades the analytics schema using the
-// caller's cancellation and deadline. Engine startup passes its tenant work
+// BootstrapTablesContext creates the analytics schema using the caller's
+// cancellation and deadline. Engine startup passes its tenant work
 // admission context here so schema work participates in the same bounded
 // database-work budget as requests and workers.
 func BootstrapTablesContext(ctx context.Context, database *sql.DB, dialect db.SchemaDialect) error {
@@ -32,10 +32,8 @@ func BootstrapTablesContext(ctx context.Context, database *sql.DB, dialect db.Sc
 	if database == nil || dialect == nil {
 		return errors.New("analytics bootstrap requires database and dialect")
 	}
-	// Rollup DDL is immutable between bootstrap versions. Persist completion per
-	// physical database so normal Engine starts don't issue repeated CREATE TABLE
-	// statements for every registered site. The marker is written only after
-	// all analytics tables have been created successfully.
+	// Analytics storage uses one fresh schema. Older layouts are intentionally
+	// rejected: the module architecture does not migrate preexisting records.
 	if _, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _kora_analytics_bootstrap (
 		id INTEGER PRIMARY KEY,
 		version INTEGER NOT NULL
@@ -51,6 +49,9 @@ func BootstrapTablesContext(ctx context.Context, database *sql.DB, dialect db.Sc
 		if currentVersion == analyticsBootstrapVersion {
 			return nil
 		}
+		if currentVersion != 0 {
+			return fmt.Errorf("analytics schema version %d is incompatible with required version %d; create a fresh tenant database", currentVersion, analyticsBootstrapVersion)
+		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("reading analytics bootstrap marker: %w", err)
 	}
@@ -59,9 +60,6 @@ func BootstrapTablesContext(ctx context.Context, database *sql.DB, dialect db.Sc
 		if _, err := database.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("analytics bootstrap: %w", err)
 		}
-	}
-	if err := ensureReceiptSequenceColumn(ctx, database, dialect); err != nil {
-		return fmt.Errorf("analytics receipt source-sequence migration: %w", err)
 	}
 	result, err := database.ExecContext(ctx, fmt.Sprintf(`UPDATE _kora_analytics_bootstrap SET version = %d WHERE id = 1`, analyticsBootstrapVersion))
 	if err != nil {
@@ -79,65 +77,6 @@ func BootstrapTablesContext(ctx context.Context, database *sql.DB, dialect db.Sc
 	return nil
 }
 
-func ensureReceiptSequenceColumn(ctx context.Context, database *sql.DB, dialect db.SchemaDialect) error {
-	if ctx == nil || database == nil || dialect == nil {
-		return errors.New("analytics receipt sequence migration requires context, database, and dialect")
-	}
-	columnExists := func() (bool, error) {
-		driver := ""
-		if named, ok := dialect.(interface{ DriverName() string }); ok {
-			driver = named.DriverName()
-		}
-		switch driver {
-		case "mysql":
-			var count int
-			err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '_kora_analytics_event_receipt' AND COLUMN_NAME = 'source_sequence'`).Scan(&count)
-			return count > 0, err
-		case "postgres":
-			var count int
-			err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '_kora_analytics_event_receipt' AND column_name = 'source_sequence'`).Scan(&count)
-			return count > 0, err
-		case "libsql":
-			rows, err := database.QueryContext(ctx, `PRAGMA table_info('_kora_analytics_event_receipt')`)
-			if err != nil {
-				return false, err
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var cid int
-				var name, columnType string
-				var notNull, primaryKey int
-				var defaultValue any
-				if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-					return false, err
-				}
-				if name == "source_sequence" {
-					return true, nil
-				}
-			}
-			return false, rows.Err()
-		default:
-			return false, fmt.Errorf("unsupported SQL dialect %q", driver)
-		}
-	}
-	exists, err := columnExists()
-	if err != nil || exists {
-		return err
-	}
-	alter := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s BIGINT NULL", dialect.QuoteIdent("_kora_analytics_event_receipt"), dialect.QuoteIdent("source_sequence"))
-	if _, err := database.ExecContext(ctx, alter); err != nil {
-		// Multiple Engine replicas can bootstrap the same tenant concurrently.
-		// Accept the losing ALTER only when a fresh schema check proves that the
-		// winner added the requested column.
-		exists, checkErr := columnExists()
-		if checkErr == nil && exists {
-			return nil
-		}
-		return errors.Join(err, checkErr)
-	}
-	return nil
-}
-
 func rollupTableDDL(dialect db.SchemaDialect) []string {
 	quote := func(name string) string { return dialect.QuoteIdent(name) }
 	driver := "mysql"
@@ -145,11 +84,13 @@ func rollupTableDDL(dialect db.SchemaDialect) []string {
 		driver = d.DriverName()
 	}
 	identity, timestampType, doubleType := "BIGINT AUTO_INCREMENT PRIMARY KEY", "DATETIME", "DOUBLE"
+	projectionDataType := "LONGTEXT"
 	indexClause := func(name, columns string) string { return fmt.Sprintf(", INDEX %s (%s)", name, columns) }
 	var indexStatements []string
 	switch driver {
 	case "postgres":
 		identity, timestampType, doubleType = "BIGSERIAL PRIMARY KEY", "TIMESTAMP", "DOUBLE PRECISION"
+		projectionDataType = "TEXT"
 		indexClause = func(name, columns string) string {
 			table := analyticsIndexTable(name)
 			indexStatements = append(indexStatements, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s)", quote(name), quote(table), columns))
@@ -157,6 +98,7 @@ func rollupTableDDL(dialect db.SchemaDialect) []string {
 		}
 	case "libsql":
 		identity, timestampType, doubleType = "INTEGER PRIMARY KEY AUTOINCREMENT", "DATETIME", "REAL"
+		projectionDataType = "TEXT"
 		indexClause = func(name, columns string) string {
 			table := analyticsIndexTable(name)
 			indexStatements = append(indexStatements, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s)", quote(name), quote(table), columns))
@@ -171,10 +113,12 @@ func rollupTableDDL(dialect db.SchemaDialect) []string {
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 			site VARCHAR(140) NOT NULL,
 			doctype VARCHAR(140) NOT NULL DEFAULT '',
+			scope_kind VARCHAR(32) NOT NULL DEFAULT 'tenant',
+			legal_entity_id VARCHAR(140) NOT NULL DEFAULT '',
 			from_date VARCHAR(10) NOT NULL,
 			last_source_sequence BIGINT NOT NULL DEFAULT 0,
 			updated_at %s NOT NULL,
-			PRIMARY KEY (site, doctype, from_date)
+			PRIMARY KEY (site, doctype, from_date, scope_kind, legal_entity_id)
 		)`, quote("_kora_analytics_rebuild_checkpoint"), timestampType),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 			site VARCHAR(140) NOT NULL,
@@ -193,6 +137,24 @@ func rollupTableDDL(dialect db.SchemaDialect) []string {
 			processed_at %s NOT NULL,
 			PRIMARY KEY (site, event_id)
 		)`, quote("_kora_analytics_event_receipt"), timestampType),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+			snapshot_key CHAR(64) NOT NULL PRIMARY KEY,
+			generation BIGINT NOT NULL,
+			site VARCHAR(140) NOT NULL,
+			projection_id VARCHAR(140) NOT NULL,
+			owner_module_id VARCHAR(140) NOT NULL,
+			scope_kind VARCHAR(32) NOT NULL,
+			legal_entity_id VARCHAR(140) NOT NULL DEFAULT '',
+			source_id VARCHAR(280) NOT NULL,
+			source_revision VARCHAR(256) NOT NULL,
+			source_cursor VARCHAR(2048) NOT NULL DEFAULT '',
+			output_schema_id VARCHAR(140) NOT NULL,
+			output_schema_version INTEGER NOT NULL,
+			as_of %s NOT NULL,
+			freshness VARCHAR(16) NOT NULL,
+			data %s NOT NULL,
+			updated_at %s NOT NULL
+		)`, quote("_kora_analytics_module_projection"), timestampType, projectionDataType, timestampType),
 
 		// Daily aggregated metrics.
 		// One row per (site, doctype, metric, dimension, date).
@@ -201,11 +163,13 @@ func rollupTableDDL(dialect db.SchemaDialect) []string {
 			site VARCHAR(140) NOT NULL,
 			doctype VARCHAR(140) NOT NULL,
 			metric VARCHAR(140) NOT NULL,
-			dimension VARCHAR(255) NOT NULL DEFAULT '',
+			dimension VARCHAR(160) NOT NULL DEFAULT '',
 			date DATE NOT NULL,
+			scope_kind VARCHAR(32) NOT NULL DEFAULT 'tenant',
+			legal_entity_id VARCHAR(140) NOT NULL DEFAULT '',
 			value %s NOT NULL DEFAULT 0,
-			PRIMARY KEY (site, doctype, metric, dimension, date)
-		)`, quote("_kora_analytics_daily"), doubleType),
+			PRIMARY KEY (site, doctype, metric, dimension, date, scope_kind, legal_entity_id)%s
+		)`, quote("_kora_analytics_daily"), doubleType, indexClause("idx_analytics_daily_scope", "site, scope_kind, legal_entity_id, doctype")),
 
 		// Monthly aggregated metrics.
 		// Derived from daily data by the monthly rollup job (runs at midnight).
@@ -213,11 +177,13 @@ func rollupTableDDL(dialect db.SchemaDialect) []string {
 			site VARCHAR(140) NOT NULL,
 			doctype VARCHAR(140) NOT NULL,
 			metric VARCHAR(140) NOT NULL,
-			dimension VARCHAR(255) NOT NULL DEFAULT '',
+			dimension VARCHAR(160) NOT NULL DEFAULT '',
 			month DATE NOT NULL,
+			scope_kind VARCHAR(32) NOT NULL DEFAULT 'tenant',
+			legal_entity_id VARCHAR(140) NOT NULL DEFAULT '',
 			value %s NOT NULL DEFAULT 0,
-			PRIMARY KEY (site, doctype, metric, dimension, month)
-		)`, quote("_kora_analytics_monthly"), doubleType),
+			PRIMARY KEY (site, doctype, metric, dimension, month, scope_kind, legal_entity_id)%s
+		)`, quote("_kora_analytics_monthly"), doubleType, indexClause("idx_analytics_monthly_scope", "site, scope_kind, legal_entity_id, doctype")),
 
 		// Workflow state transitions.
 		// Tracks every state change for funnel + duration metrics.
@@ -288,5 +254,7 @@ func analyticsIndexTable(name string) string {
 		"idx_analytics_events_site_doctype_time":   "_kora_analytics_events",
 		"idx_analytics_rebuild_site_status":        "_kora_analytics_rebuild_job",
 		"idx_analytics_rebuild_lease_expiry":       "_kora_analytics_rebuild_lease",
+		"idx_analytics_daily_scope":                "_kora_analytics_daily",
+		"idx_analytics_monthly_scope":              "_kora_analytics_monthly",
 	}[name]
 }

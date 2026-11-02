@@ -1,9 +1,16 @@
 package plugin
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 
+	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
 )
 
@@ -14,19 +21,23 @@ const (
 	ProviderExternal ProviderKind = "external"
 )
 
+const maxPublishedProjectionRows = 100000
+
 type BindingKey struct {
 	Scope            contract.BusinessScope
 	ConsumerModuleID contract.ModuleID
 	CapabilityName   contract.CapabilityName
 }
 type ProviderRegistration struct {
-	TenantID      contract.TenantID
-	Scope         contract.BusinessScope
-	ProviderID    string
-	OwnerModuleID contract.ModuleID
-	Kind          ProviderKind
-	Offers        []contract.CapabilityOffer
-	Factories     map[contract.CapabilityName]ProviderFactory
+	TenantID       contract.TenantID
+	Scope          contract.BusinessScope
+	ProviderID     string
+	OwnerModuleID  contract.ModuleID
+	Kind           ProviderKind
+	Offers         []contract.CapabilityOffer
+	Factories      map[contract.CapabilityName]ProviderFactory
+	Queries        map[string]PublishedQueryExecutor
+	ValidateSchema func(contract.SchemaRef, []byte) error
 }
 type ProviderSelection struct {
 	Key        BindingKey
@@ -67,10 +78,271 @@ type BindingDiagnostic struct {
 	Code string
 }
 type BindingPlan struct {
-	Revision uint64
-	Bindings []ResolvedBinding
-	Blockers []BindingDiagnostic
-	Warnings []BindingDiagnostic
+	Revision         uint64
+	Bindings         []ResolvedBinding
+	Queries          map[PublishedQueryKey]ResolvedPublishedQuery
+	QueryDefinitions map[PublishedQueryKey]contract.PublishedQuery
+	Projections      map[PublishedProjectionKey]contract.ProjectionDefinition
+	ProjectionScopes map[PublishedProjectionKey]contract.ResourceScopeKind
+	Blockers         []BindingDiagnostic
+	Warnings         []BindingDiagnostic
+}
+
+type PublishedProjectionKey struct {
+	OwnerModuleID contract.ModuleID
+	ID            string
+}
+
+type PublishedProjectionStore interface {
+	Save(context.Context, analytics.PublishedProjectionSnapshot) error
+	MarkStale(context.Context, contract.ProjectionDefinition, contract.BusinessScope, string) error
+}
+
+type PublishedQueryKey struct {
+	Scope         contract.BusinessScope
+	OwnerModuleID contract.ModuleID
+	Name          string
+}
+
+type PublishedQueryExecutor interface {
+	ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, uint16) (contract.QueryResult, error)
+}
+
+type ResolvedPublishedQuery struct {
+	Definition contract.PublishedQuery
+	ProviderID string
+	Revision   uint64
+	executor   PublishedQueryExecutor
+	validate   func(contract.SchemaRef, []byte) error
+}
+
+func (p BindingPlan) ExecutePublishedQuery(ctx context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+	key := PublishedQueryKey{Scope: scope, OwnerModuleID: owner, Name: name}
+	resolved, ok := p.Queries[key]
+	if !ok || resolved.executor == nil || resolved.validate == nil {
+		return contract.QueryResult{}, fmt.Errorf("published query provider is unavailable")
+	}
+	query := resolved.Definition
+	if scope.Validate() != nil || contract.ValidateResourceBusinessScope(scope, query.ScopePolicy) != nil || len(input) == 0 || len(input) > 65536 || !json.Valid(input) {
+		return contract.QueryResult{}, fmt.Errorf("published query request is invalid")
+	}
+	if limit == 0 {
+		limit = query.PageLimit
+	}
+	if limit > query.PageLimit || len(cursor) > 2048 {
+		return contract.QueryResult{}, fmt.Errorf("published query page is outside its registered bounds")
+	}
+	if err := resolved.validate(query.InputSchema, input); err != nil {
+		return contract.QueryResult{}, fmt.Errorf("published query input failed schema validation: %w", err)
+	}
+	execution, err := contract.NewModuleExecution(scope, owner, owner, resolved.Revision, query.Operation)
+	if err != nil {
+		return contract.QueryResult{}, err
+	}
+	result, err := resolved.executor.ExecutePublishedQuery(ctx, execution, query, append(json.RawMessage(nil), input...), cursor, limit)
+	if err != nil {
+		return contract.QueryResult{}, err
+	}
+	if len(result.Data) > 1<<20 {
+		return contract.QueryResult{}, fmt.Errorf("published query result exceeds the response size limit")
+	}
+	if err := resolved.validate(query.OutputSchema, result.Data); err != nil {
+		return contract.QueryResult{}, fmt.Errorf("published query output failed schema validation: %w", err)
+	}
+	if err := result.Validate(query, limit, scope); err != nil {
+		return contract.QueryResult{}, err
+	}
+	return result, nil
+}
+
+// RebuildPublishedProjection reads every source under pinned provider
+// revisions, verifies each paged result, then atomically publishes one
+// complete snapshot through the existing analytics rebuild store.
+func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store PublishedProjectionStore, scope contract.BusinessScope, owner contract.ModuleID, projectionID string, inputs map[string]json.RawMessage) error {
+	key := PublishedProjectionKey{OwnerModuleID: owner, ID: projectionID}
+	definition, ok := p.Projections[key]
+	if ctx == nil || !ok || store == nil || scope.Validate() != nil {
+		return fmt.Errorf("published projection is unavailable")
+	}
+	if err := definition.Validate(); err != nil {
+		return err
+	}
+	if contract.ValidateResourceBusinessScope(scope, definition.ScopePolicy) != nil {
+		return fmt.Errorf("published projection scope is invalid")
+	}
+	encodedInputs, err := json.Marshal(inputs)
+	if err != nil || len(encodedInputs) > 65536 {
+		return fmt.Errorf("published projection inputs exceed their request bound")
+	}
+	validInputs := make(map[string]bool, len(definition.Sources))
+	for _, source := range definition.Sources {
+		validInputs[string(source.OwnerModuleID)+"/"+source.QueryName] = true
+	}
+	for sourceID := range inputs {
+		if !validInputs[sourceID] {
+			return fmt.Errorf("published projection input references an undeclared source")
+		}
+	}
+	allRows := make([]json.RawMessage, 0)
+	factKeys := make(map[string]bool)
+	projectionFields := make(map[string]bool, len(definition.AllowedFields))
+	for _, field := range definition.AllowedFields {
+		projectionFields[field] = true
+	}
+	var sourceRevisions []string
+	var projectionAsOf time.Time
+	var projectionSnapshotToken string
+	for _, source := range definition.Sources {
+		queryKey := PublishedQueryKey{Scope: scope, OwnerModuleID: source.OwnerModuleID, Name: source.QueryName}
+		resolved, exists := p.Queries[queryKey]
+		factKeyPublished := false
+		allProjectionFieldsPublished := true
+		if exists {
+			for _, field := range resolved.Definition.AllowedFields {
+				factKeyPublished = factKeyPublished || field == definition.FactKey
+			}
+			for field := range projectionFields {
+				published := false
+				for _, sourceField := range resolved.Definition.AllowedFields {
+					published = published || sourceField == field
+				}
+				allProjectionFieldsPublished = allProjectionFieldsPublished && published
+			}
+		}
+		if !exists || resolved.Definition.OutputSchema != source.OutputSchema || resolved.Definition.ScopePolicy != definition.ScopePolicy || !factKeyPublished || !allProjectionFieldsPublished {
+			return p.markProjectionStale(ctx, store, definition, scope)
+		}
+		sourceID := string(source.OwnerModuleID) + "/" + source.QueryName
+		input := inputs[sourceID]
+		if len(input) == 0 {
+			input = json.RawMessage(`{}`)
+		}
+		cursor := ""
+		seenCursors := make(map[string]bool)
+		var sourceRevision string
+		var sourceAsOf time.Time
+		var sourceSnapshotToken string
+		var done bool
+		for page := 0; page < 1000 && !done; page++ {
+			limit := resolved.Definition.PageLimit
+			result, err := p.ExecutePublishedQuery(ctx, scope, source.OwnerModuleID, source.QueryName, input, cursor, limit)
+			if err != nil || result.Freshness != contract.QueryFresh || result.SourceRevision == "" {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			if sourceRevision == "" {
+				sourceRevision, sourceAsOf = result.SourceRevision, result.AsOf
+				if result.SnapshotToken == "" {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+			} else if sourceRevision != result.SourceRevision || !sourceAsOf.Equal(result.AsOf) || result.SnapshotToken == "" {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			if page > 0 && result.SnapshotToken != sourceSnapshotToken {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			if page == 0 {
+				sourceSnapshotToken = result.SnapshotToken
+				if projectionSnapshotToken == "" {
+					projectionSnapshotToken = sourceSnapshotToken
+				} else if sourceSnapshotToken != projectionSnapshotToken {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+			}
+			var rows []json.RawMessage
+			if err := json.Unmarshal(result.Data, &rows); err != nil {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			for _, row := range rows {
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(row, &fields); err != nil || fields[definition.FactKey] == nil {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+				var factValue any
+				decoder := json.NewDecoder(strings.NewReader(string(fields[definition.FactKey])))
+				decoder.UseNumber()
+				if err := decoder.Decode(&factValue); err != nil {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+				var factKey string
+				switch value := factValue.(type) {
+				case string:
+					factKey = value
+				case json.Number:
+					factKey = value.String()
+				default:
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+				if strings.TrimSpace(factKey) == "" {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+				if factKeys[factKey] {
+					continue
+				}
+				factKeys[factKey] = true
+				projectionRow := make(map[string]json.RawMessage, len(projectionFields))
+				for field := range projectionFields {
+					if value, present := fields[field]; present {
+						projectionRow[field] = value
+					}
+				}
+				canonicalRow, err := json.Marshal(projectionRow)
+				if err != nil {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+				allRows = append(allRows, canonicalRow)
+				if len(allRows) > maxPublishedProjectionRows {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+			}
+			encoded, err := json.Marshal(allRows)
+			if err != nil || len(encoded) > 16<<20 {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			if result.NextCursor == "" {
+				done = true
+				continue
+			}
+			if seenCursors[result.NextCursor] || result.NextCursor == cursor {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			seenCursors[result.NextCursor] = true
+			cursor = result.NextCursor
+		}
+		if !done {
+			return p.markProjectionStale(ctx, store, definition, scope)
+		}
+		sourceRevisions = append(sourceRevisions, sourceID+"="+sourceRevision)
+		if projectionAsOf.IsZero() {
+			projectionAsOf = sourceAsOf
+		} else if !sourceAsOf.Equal(projectionAsOf) {
+			return p.markProjectionStale(ctx, store, definition, scope)
+		}
+	}
+	data, err := json.Marshal(allRows)
+	if err != nil {
+		return p.markProjectionStale(ctx, store, definition, scope)
+	}
+	revisionBytes := sha256.Sum256([]byte(strings.Join(sourceRevisions, "\n")))
+	if err := store.Save(ctx, analytics.PublishedProjectionSnapshot{
+		Definition: definition, Scope: scope, SourceID: "published_sources",
+		SourceRevision: hex.EncodeToString(revisionBytes[:]), Cursor: "complete", AsOf: projectionAsOf,
+		Freshness: contract.QueryFresh, Data: data,
+	}); err != nil {
+		return p.markProjectionStale(ctx, store, definition, scope)
+	}
+	return nil
+}
+
+func (p BindingPlan) markProjectionStale(ctx context.Context, store PublishedProjectionStore, definition contract.ProjectionDefinition, scope contract.BusinessScope) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := store.MarkStale(markCtx, definition, scope, "published_sources"); err != nil {
+		return fmt.Errorf("published projection rebuild failed and stale state could not be recorded: %w", err)
+	}
+	return fmt.Errorf("published projection rebuild failed; retained snapshot is marked stale")
 }
 
 // ResolveModules produces a deterministic candidate plan. It does not open
@@ -79,7 +351,7 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 	if scope.Validate() != nil {
 		return BindingPlan{}, fmt.Errorf("binding requires explicit tenant and scope")
 	}
-	plan := BindingPlan{Revision: revision}
+	plan := BindingPlan{Revision: revision, Queries: make(map[PublishedQueryKey]ResolvedPublishedQuery), QueryDefinitions: make(map[PublishedQueryKey]contract.PublishedQuery), Projections: make(map[PublishedProjectionKey]contract.ProjectionDefinition), ProjectionScopes: make(map[PublishedProjectionKey]contract.ResourceScopeKind)}
 	selected := map[BindingKey]string{}
 	for _, selection := range selections {
 		if selection.Key.Scope.TenantID != scope.TenantID {
@@ -89,6 +361,87 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 			continue
 		}
 		selected[selection.Key] = selection.ProviderID
+	}
+	for _, module := range modules {
+		for _, query := range module.Queries {
+			declared := false
+			for _, offer := range module.Provides {
+				if offer.Name != query.Capability {
+					continue
+				}
+				for _, operation := range offer.Operations {
+					if operation.Name == query.Operation && operation.Effect == contract.EffectQuery && operation.Input == query.InputSchema && operation.Output == query.OutputSchema {
+						declared = true
+					}
+				}
+			}
+			if query.OwnerModuleID != module.ID || !declared {
+				return plan, fmt.Errorf("published query %s/%s does not match its owner's query capability contract", module.ID, query.Name)
+			}
+			key := PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}
+			plan.QueryDefinitions[key] = query
+			selectionKey := BindingKey{Scope: scope, ConsumerModuleID: module.ID, CapabilityName: query.Capability}
+			selectedProvider := selected[selectionKey]
+			if selectedProvider == "" {
+				plan.Warnings = append(plan.Warnings, BindingDiagnostic{Key: selectionKey, Code: "published_query_provider_selection_required"})
+				continue
+			}
+			var matches []ProviderRegistration
+			for _, provider := range providers {
+				if provider.TenantID != scope.TenantID || provider.OwnerModuleID != module.ID || provider.Queries[query.Name] == nil || provider.ProviderID == "" || provider.ProviderID != selectedProvider {
+					continue
+				}
+				// A query executor is only eligible when it is also the selected
+				// provider for the declared query capability and advertises the
+				// exact operation contract. Query maps alone are not authority.
+				offersQuery := false
+				for _, offer := range provider.Offers {
+					if offer.Name != query.Capability {
+						continue
+					}
+					for _, operation := range offer.Operations {
+						if operation.Name == query.Operation && operation.Effect == contract.EffectQuery && operation.Input == query.InputSchema && operation.Output == query.OutputSchema {
+							offersQuery = true
+						}
+					}
+				}
+				if !offersQuery {
+					continue
+				}
+				if provider.Kind != ProviderInternal && provider.Kind != ProviderExternal {
+					continue
+				}
+				if provider.Scope.TenantID != "" && provider.Scope != scope {
+					continue
+				}
+				if provider.Scope.TenantID == "" && (provider.Scope.Kind != "" || provider.Scope.LegalEntityID != "") {
+					continue
+				}
+				matches = append(matches, provider)
+			}
+			sort.Slice(matches, func(i, j int) bool { return matches[i].ProviderID < matches[j].ProviderID })
+			var chosen *ProviderRegistration
+			for i := range matches {
+				if chosen != nil {
+					return plan, fmt.Errorf("published query %s/%s has multiple providers; select one explicitly", module.ID, query.Name)
+				}
+				chosen = &matches[i]
+			}
+			if chosen == nil {
+				plan.Warnings = append(plan.Warnings, BindingDiagnostic{Key: selectionKey, Code: "published_query_provider_unavailable"})
+				continue
+			}
+			if chosen.ValidateSchema == nil {
+				plan.Warnings = append(plan.Warnings, BindingDiagnostic{Key: selectionKey, Code: "published_query_schema_validator_unavailable"})
+				continue
+			}
+			plan.Queries[key] = ResolvedPublishedQuery{Definition: query, ProviderID: chosen.ProviderID, Revision: revision, executor: chosen.Queries[query.Name], validate: chosen.ValidateSchema}
+		}
+		for _, projection := range module.Projections {
+			projectionKey := PublishedProjectionKey{OwnerModuleID: module.ID, ID: projection.ID}
+			plan.Projections[projectionKey] = projection
+			plan.ProjectionScopes[projectionKey] = projection.ScopePolicy
+		}
 	}
 	sort.Slice(providers, func(i, j int) bool { return providers[i].ProviderID < providers[j].ProviderID })
 	for _, module := range modules {
