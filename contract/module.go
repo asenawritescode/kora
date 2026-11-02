@@ -181,6 +181,7 @@ type PublishedQuery struct {
 	OutputSchema  SchemaRef         `json:"output_schema"`
 	ScopePolicy   ResourceScopeKind `json:"scope_policy"`
 	AllowedFields []string          `json:"allowed_fields"`
+	OwnerField    string            `json:"owner_field,omitempty"`
 	PageLimit     uint16            `json:"page_limit"`
 }
 
@@ -1762,6 +1763,9 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 				return fmt.Errorf("module %q query %q has an invalid or duplicate allowed field", m.ID, query.Name)
 			}
 			fields[field] = true
+		}
+		if query.OwnerField != "" && (!validModuleName(query.OwnerField) || !fields[query.OwnerField]) {
+			return fmt.Errorf("module %q query %q owner field must be declared in its published fields", m.ID, query.Name)
 		}
 		operation, ok := queryOperations[string(query.Capability)+"/"+query.Operation]
 		if !ok || operation.Effect != EffectQuery || operation.Input != query.InputSchema || operation.Output != query.OutputSchema {

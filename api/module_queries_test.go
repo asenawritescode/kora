@@ -69,8 +69,9 @@ func TestAuthorizePublishedQueryRequiresActorGrantAndExactScope(t *testing.T) {
 	if !ok {
 		t.Fatal("verified assigned execution was not installed")
 	}
-	if authErr := authorizePublishedQuery(assignedIdentity.(policy.Execution), registry, query, scope); authErr == nil {
-		t.Fatal("assignment-scoped role permission allowed a query without provider row filtering")
+	actorScope, authErr := authorizePublishedQueryActorScope(assignedIdentity.(policy.Execution), registry, query, scope)
+	if authErr != nil || actorScope == nil || actorScope.SubjectID == "" || len(actorScope.AssignedFields) != 1 || actorScope.AssignedFields[0] != "assigned_to" {
+		t.Fatalf("assignment-scoped role did not produce trusted provider scope: scope=%#v err=%v", actorScope, authErr)
 	}
 }
 

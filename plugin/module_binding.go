@@ -207,6 +207,22 @@ type PublishedQueryExecutor interface {
 	ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, uint16) (contract.QueryResult, error)
 }
 
+// PublishedQueryActorScope is derived only from verified policy execution.
+// Providers must apply assignment filters before pagination, not after it.
+type PublishedQueryActorScope struct {
+	BusinessScope  contract.BusinessScope
+	SubjectID      string
+	OwnerOnly      bool
+	OwnerField     string
+	AssignedFields []string
+}
+
+// ScopedPublishedQueryExecutor implements actor row filtering in the source
+// query so limits and cursors describe only rows visible to that actor.
+type ScopedPublishedQueryExecutor interface {
+	ExecutePublishedQueryForActor(context.Context, contract.ModuleExecution, contract.PublishedQuery, PublishedQueryActorScope, json.RawMessage, string, uint16) (contract.QueryResult, error)
+}
+
 // PublishedQueryReplayExecutor replays owner changes after an immutable query
 // snapshot. The first page fixes ThroughCursor; all following pages must use
 // that same high-water mark so the persisted projection cursor is gapless.
@@ -224,6 +240,17 @@ type ResolvedPublishedQuery struct {
 }
 
 func (p BindingPlan) ExecutePublishedQuery(ctx context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+	return p.executePublishedQuery(ctx, scope, owner, name, nil, input, cursor, limit)
+}
+
+func (p BindingPlan) ExecutePublishedQueryForActor(ctx context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, actorScope PublishedQueryActorScope, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+	if actorScope.BusinessScope != scope || strings.TrimSpace(actorScope.SubjectID) == "" || len(actorScope.AssignedFields) == 0 && (!actorScope.OwnerOnly || actorScope.OwnerField == "") {
+		return contract.QueryResult{}, fmt.Errorf("published query actor scope is invalid")
+	}
+	return p.executePublishedQuery(ctx, scope, owner, name, &actorScope, input, cursor, limit)
+}
+
+func (p BindingPlan) executePublishedQuery(ctx context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, actorScope *PublishedQueryActorScope, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
 	key := PublishedQueryKey{Scope: scope, OwnerModuleID: owner, Name: name}
 	resolved, ok := p.Queries[key]
 	if !ok || resolved.executor == nil || resolved.validate == nil {
@@ -242,11 +269,34 @@ func (p BindingPlan) ExecutePublishedQuery(ctx context.Context, scope contract.B
 	if err := resolved.validate(query.InputSchema, input); err != nil {
 		return contract.QueryResult{}, fmt.Errorf("published query input failed schema validation: %w", err)
 	}
+	if actorScope != nil {
+		allowed := make(map[string]bool, len(query.AllowedFields))
+		for _, field := range query.AllowedFields {
+			allowed[field] = true
+		}
+		for _, field := range actorScope.AssignedFields {
+			if !allowed[field] {
+				return contract.QueryResult{}, fmt.Errorf("published query assignment field %q is not published", field)
+			}
+		}
+		if actorScope.OwnerOnly && (!allowed[actorScope.OwnerField] || query.OwnerField != actorScope.OwnerField) {
+			return contract.QueryResult{}, fmt.Errorf("published query owner field is not declared")
+		}
+	}
 	execution, err := contract.NewModuleExecution(scope, owner, owner, resolved.Revision, query.Operation)
 	if err != nil {
 		return contract.QueryResult{}, err
 	}
-	result, err := resolved.executor.ExecutePublishedQuery(ctx, execution, query, append(json.RawMessage(nil), input...), cursor, limit)
+	var result contract.QueryResult
+	if actorScope == nil {
+		result, err = resolved.executor.ExecutePublishedQuery(ctx, execution, query, append(json.RawMessage(nil), input...), cursor, limit)
+	} else {
+		executor, ok := resolved.executor.(ScopedPublishedQueryExecutor)
+		if !ok {
+			return contract.QueryResult{}, fmt.Errorf("published query provider does not support actor row scopes")
+		}
+		result, err = executor.ExecutePublishedQueryForActor(ctx, execution, query, *actorScope, append(json.RawMessage(nil), input...), cursor, limit)
+	}
 	if err != nil {
 		return contract.QueryResult{}, err
 	}
@@ -258,6 +308,31 @@ func (p BindingPlan) ExecutePublishedQuery(ctx context.Context, scope contract.B
 	}
 	if err := result.Validate(query, limit, scope); err != nil {
 		return contract.QueryResult{}, err
+	}
+	if actorScope != nil {
+		var rows []map[string]json.RawMessage
+		if err := json.Unmarshal(result.Data, &rows); err != nil {
+			return contract.QueryResult{}, fmt.Errorf("scoped published query returned invalid rows")
+		}
+		for _, row := range rows {
+			matched := false
+			if actorScope.OwnerOnly {
+				var subject string
+				if err := json.Unmarshal(row[actorScope.OwnerField], &subject); err == nil && subject == actorScope.SubjectID {
+					matched = true
+				}
+			}
+			for _, field := range actorScope.AssignedFields {
+				var subject string
+				if err := json.Unmarshal(row[field], &subject); err == nil && subject == actorScope.SubjectID {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return contract.QueryResult{}, fmt.Errorf("published query provider returned a row outside actor assignment scope")
+			}
+		}
 	}
 	return result, nil
 }

@@ -174,6 +174,93 @@ func (e testPublishedQueryExecutor) ExecutePublishedQuery(_ context.Context, _ c
 	return e.result, nil
 }
 
+type actorScopedTestQueryExecutor struct {
+	result contract.QueryResult
+	ignore bool
+}
+
+func (e actorScopedTestQueryExecutor) ExecutePublishedQuery(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+	return e.result, nil
+}
+
+func (e actorScopedTestQueryExecutor) ExecutePublishedQueryForActor(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, actor PublishedQueryActorScope, _ json.RawMessage, _ string, limit uint16) (contract.QueryResult, error) {
+	if e.ignore {
+		return e.result, nil
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(e.result.Data, &rows); err != nil {
+		return contract.QueryResult{}, err
+	}
+	visible := make([]map[string]json.RawMessage, 0, len(rows))
+	for _, row := range rows {
+		if actor.OwnerOnly {
+			var subject string
+			if json.Unmarshal(row[actor.OwnerField], &subject) == nil && subject == actor.SubjectID {
+				visible = append(visible, row)
+				continue
+			}
+		}
+		for _, field := range actor.AssignedFields {
+			var subject string
+			if json.Unmarshal(row[field], &subject) == nil && subject == actor.SubjectID {
+				visible = append(visible, row)
+				break
+			}
+		}
+	}
+	if len(visible) > int(limit) {
+		visible = visible[:limit]
+	}
+	data, err := json.Marshal(visible)
+	e.result.Data = data
+	return e.result, err
+}
+
+func TestPublishedQueryAppliesActorAssignmentBeforePageLimit(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	in, out := contract.SchemaRef{ID: "task.input", Version: 1}, contract.SchemaRef{ID: "task.output", Version: 1}
+	query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "assigned", Capability: "sales.tasks", Operation: "list", InputSchema: in, OutputSchema: out, ScopePolicy: contract.ScopeEntityOwned, AllowedFields: []string{"assigned_to", "id", "owner_id"}, PageLimit: 1}
+	operation := contract.OperationSpec{Name: query.Operation, Input: in, Output: out, Effect: contract.EffectQuery}
+	module := contract.ModuleDescriptor{ID: query.OwnerModuleID, Version: "1.0.0", Provides: []contract.CapabilityOffer{{Name: query.Capability, Contract: out, Operations: []contract.OperationSpec{operation}}}, Queries: []contract.PublishedQuery{query}}
+	result := contract.QueryResult{Data: json.RawMessage(`[{"id":"other","assigned_to":"bob","owner_id":"bob"},{"id":"mine","assigned_to":"alice","owner_id":"alice"}]`), SnapshotToken: "snapshot-1", SourceRevision: "r1", AsOf: time.Now().UTC(), Freshness: contract.QueryFresh}
+	provider := ProviderRegistration{TenantID: scope.TenantID, ProviderID: "sales-provider", OwnerModuleID: module.ID, Kind: ProviderInternal, Offers: module.Provides, Queries: map[string]PublishedQueryExecutor{query.Name: actorScopedTestQueryExecutor{result: result}}, ValidateSchema: func(_ contract.SchemaRef, data []byte) error {
+		if !json.Valid(data) {
+			return errors.New("invalid json")
+		}
+		return nil
+	}}
+	selection := ProviderSelection{Key: BindingKey{Scope: scope, ConsumerModuleID: module.ID, CapabilityName: query.Capability}, ProviderID: provider.ProviderID}
+	plan, err := ResolveModules(scope, []contract.ModuleDescriptor{module}, []ProviderRegistration{provider}, []ProviderSelection{selection}, 1)
+	if err != nil {
+		t.Fatal("resolve scoped query:", err)
+	}
+	actor := PublishedQueryActorScope{BusinessScope: scope, SubjectID: "alice", AssignedFields: []string{"assigned_to"}}
+	got, err := plan.ExecutePublishedQueryForActor(context.Background(), scope, module.ID, query.Name, actor, json.RawMessage(`{}`), "", 1)
+	if err != nil || string(got.Data) != `[{"assigned_to":"alice","id":"mine","owner_id":"alice"}]` {
+		t.Fatalf("actor-scoped page = %s, error=%v", got.Data, err)
+	}
+	query.OwnerField = "owner_id"
+	module.Queries[0] = query
+	provider.Queries[query.Name] = actorScopedTestQueryExecutor{result: result}
+	plan, err = ResolveModules(scope, []contract.ModuleDescriptor{module}, []ProviderRegistration{provider}, []ProviderSelection{selection}, 2)
+	if err != nil {
+		t.Fatal("resolve owner-scoped query:", err)
+	}
+	ownerScope := PublishedQueryActorScope{BusinessScope: scope, SubjectID: "alice", OwnerOnly: true, OwnerField: query.OwnerField}
+	got, err = plan.ExecutePublishedQueryForActor(context.Background(), scope, module.ID, query.Name, ownerScope, json.RawMessage(`{}`), "", 1)
+	if err != nil || string(got.Data) != `[{"assigned_to":"alice","id":"mine","owner_id":"alice"}]` {
+		t.Fatalf("owner-scoped page = %s, error=%v", got.Data, err)
+	}
+	provider.Queries[query.Name] = actorScopedTestQueryExecutor{result: result, ignore: true}
+	plan, err = ResolveModules(scope, []contract.ModuleDescriptor{module}, []ProviderRegistration{provider}, []ProviderSelection{selection}, 3)
+	if err != nil {
+		t.Fatal("resolve misbehaving scoped query:", err)
+	}
+	if _, err := plan.ExecutePublishedQueryForActor(context.Background(), scope, module.ID, query.Name, actor, json.RawMessage(`{}`), "", 1); err == nil {
+		t.Fatal("provider returned a row outside the verified actor assignment")
+	}
+}
+
 type testProjectionStore struct {
 	snapshot analytics.PublishedProjectionSnapshot
 	saved    bool

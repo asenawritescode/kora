@@ -49,7 +49,8 @@ func (h *Handler) HandlePublishedModuleQuery(c *gin.Context) {
 		return
 	}
 	query := &queryValue
-	if authErr := authorizePublishedQuery(execution, h.siteRegistry(c), *query, scope); authErr != nil {
+	actorScope, authErr := authorizePublishedQueryActorScope(execution, h.siteRegistry(c), *query, scope)
+	if authErr != nil {
 		writeError(c, http.StatusForbidden, "permission.denied", "Published query access is not granted", nil)
 		return
 	}
@@ -64,7 +65,12 @@ func (h *Handler) HandlePublishedModuleQuery(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid published query request", nil)
 		return
 	}
-	result, err := plan.ExecutePublishedQuery(c.Request.Context(), scope, moduleID, queryName, request.Input, request.Cursor, request.Limit)
+	var result contract.QueryResult
+	if actorScope == nil {
+		result, err = plan.ExecutePublishedQuery(c.Request.Context(), scope, moduleID, queryName, request.Input, request.Cursor, request.Limit)
+	} else {
+		result, err = plan.ExecutePublishedQueryForActor(c.Request.Context(), scope, moduleID, queryName, *actorScope, request.Input, request.Cursor, request.Limit)
+	}
 	if err != nil {
 		writeError(c, http.StatusServiceUnavailable, "module.query_failed", "Published query could not be completed", nil)
 		return
@@ -73,20 +79,32 @@ func (h *Handler) HandlePublishedModuleQuery(c *gin.Context) {
 }
 
 func authorizePublishedQuery(execution policy.Execution, roles policy.RolePolicy, query contract.PublishedQuery, scope contract.BusinessScope) *contract.Error {
+	_, authErr := authorizePublishedQueryActorScope(execution, roles, query, scope)
+	return authErr
+}
+
+func authorizePublishedQueryActorScope(execution policy.Execution, roles policy.RolePolicy, query contract.PublishedQuery, scope contract.BusinessScope) (*plugin.PublishedQueryActorScope, *contract.Error) {
 	if !execution.Valid() || query.OwnerModuleID == "" || query.Name == "" || contract.ValidateResourceBusinessScope(scope, query.ScopePolicy) != nil {
-		return contract.NewError(contract.CodePermissionDenied, "published query scope is invalid")
+		return nil, contract.NewError(contract.CodePermissionDenied, "published query scope is invalid")
 	}
 	resource := "module." + string(query.OwnerModuleID) + ".query." + query.Name
 	decision, authErr := policy.DecideForBusinessScope(execution, roles, resource, "read", scope, query.ScopePolicy == contract.ScopeEntityOwned)
 	if authErr != nil {
-		return authErr
+		return nil, authErr
 	}
-	// Published query providers must apply row scopes themselves. The generic
-	// result validator cannot safely retrofit owner or assignment filters after
-	// aggregation, so those grants fail closed until the query contract carries
-	// an explicit row-scope binding.
-	if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
-		return contract.NewError(contract.CodePermissionDenied, "published query requires an unscoped actor grant")
+	if decision.OwnerOnly && query.OwnerField == "" {
+		return nil, contract.NewError(contract.CodePermissionDenied, "published query does not declare an owner field for this grant")
 	}
-	return nil
+	if !decision.OwnerOnly && len(decision.AssignedFields) == 0 {
+		return nil, nil
+	}
+	actor := execution.Actor()
+	subject := strings.TrimSpace(actor.SubjectUserID)
+	if subject == "" {
+		subject = strings.TrimSpace(actor.PrincipalID)
+	}
+	if subject == "" {
+		return nil, contract.NewError(contract.CodePermissionDenied, "published query assignment scope requires a verified actor subject")
+	}
+	return &plugin.PublishedQueryActorScope{BusinessScope: scope, SubjectID: subject, OwnerOnly: decision.OwnerOnly, OwnerField: query.OwnerField, AssignedFields: append([]string(nil), decision.AssignedFields...)}, nil
 }
