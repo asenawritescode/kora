@@ -196,6 +196,49 @@
       ],
       "type": "object"
     },
+    "CapabilityOffer": {
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OperationSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "contract",
+        "name",
+        "operations"
+      ],
+      "type": "object"
+    },
+    "CapabilityRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "contract",
+        "name",
+        "required"
+      ],
+      "type": "object"
+    },
     "ChannelSessionIssueRequestV2": {
       "additionalProperties": false,
       "properties": {
@@ -1174,6 +1217,12 @@
         "kind": {
           "type": "string"
         },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
         "package_id": {
           "type": "string"
         },
@@ -1210,6 +1259,97 @@
         "release_id",
         "schema_version",
         "version"
+      ],
+      "type": "object"
+    },
+    "ModuleDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provides": {
+          "items": {
+            "$ref": "#/$defs/CapabilityOffer"
+          },
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRequirement"
+          },
+          "type": "array"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/OwnedResource"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "OperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "effect": {
+          "enum": [
+            "query",
+            "local_command",
+            "external_command"
+          ],
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "effect",
+        "input",
+        "name",
+        "output"
+      ],
+      "type": "object"
+    },
+    "OwnedResource": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "enum": [
+            "private",
+            "published"
+          ],
+          "type": "string"
+        },
+        "mutation_mode": {
+          "enum": [
+            "crud",
+            "commands_only"
+          ],
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        }
+      },
+      "required": [
+        "access",
+        "mutation_mode",
+        "ref"
       ],
       "type": "object"
     },
@@ -1262,6 +1402,12 @@
       "properties": {
         "exports": {
           "$ref": "#/$defs/ManifestExports"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
         },
         "name": {
           "type": "string"
@@ -1899,6 +2045,26 @@
         "status",
         "title",
         "updated_at"
+      ],
+      "type": "object"
+    },
+    "ResourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "namespace",
+        "version"
       ],
       "type": "object"
     },
@@ -2889,6 +3055,49 @@
       ],
       "type": "object"
     },
+    "CapabilityOffer": {
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OperationSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "contract",
+        "name",
+        "operations"
+      ],
+      "type": "object"
+    },
+    "CapabilityRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "contract",
+        "name",
+        "required"
+      ],
+      "type": "object"
+    },
     "ChannelSessionIssueRequestV2": {
       "additionalProperties": false,
       "properties": {
@@ -3845,6 +4054,12 @@
         "kind": {
           "type": "string"
         },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
         "package_id": {
           "type": "string"
         },
@@ -3881,6 +4096,97 @@
         "release_id",
         "schema_version",
         "version"
+      ],
+      "type": "object"
+    },
+    "ModuleDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provides": {
+          "items": {
+            "$ref": "#/$defs/CapabilityOffer"
+          },
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRequirement"
+          },
+          "type": "array"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/OwnedResource"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "OperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "effect": {
+          "enum": [
+            "query",
+            "local_command",
+            "external_command"
+          ],
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "effect",
+        "input",
+        "name",
+        "output"
+      ],
+      "type": "object"
+    },
+    "OwnedResource": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "enum": [
+            "private",
+            "published"
+          ],
+          "type": "string"
+        },
+        "mutation_mode": {
+          "enum": [
+            "crud",
+            "commands_only"
+          ],
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        }
+      },
+      "required": [
+        "access",
+        "mutation_mode",
+        "ref"
       ],
       "type": "object"
     },
@@ -3933,6 +4239,12 @@
       "properties": {
         "exports": {
           "$ref": "#/$defs/ManifestExports"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
         },
         "name": {
           "type": "string"
@@ -5412,6 +5724,19 @@
       "tenant.invitation.deliver",
       "tenant.invitation.reconcile",
       "operation.read"
+    ],
+    "ModuleAccess": [
+      "private",
+      "published"
+    ],
+    "MutationMode": [
+      "crud",
+      "commands_only"
+    ],
+    "OperationEffect": [
+      "query",
+      "local_command",
+      "external_command"
     ],
     "OperationState": [
       "requested",

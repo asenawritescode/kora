@@ -21,8 +21,28 @@ type MarketplacePackageManifest struct {
 	Exports       ManifestExports          `json:"exports,omitempty"`
 	Conflicts     []ManifestPackRef        `json:"conflicts,omitempty"`
 	Composition   []ManifestComponent      `json:"composition,omitempty"`
+	Modules       []ModuleDescriptor       `json:"modules,omitempty"`
 	ScheduledJobs []ScheduledJobDefinition `json:"scheduled_jobs,omitempty"`
 	Engine        ManifestEngine           `json:"engine"`
+}
+
+// DecodeMarketplacePackageManifest strictly decodes the immutable package contract.
+func DecodeMarketplacePackageManifest(data []byte) (MarketplacePackageManifest, error) {
+	var manifest MarketplacePackageManifest
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&manifest); err != nil {
+		return MarketplacePackageManifest{}, fmt.Errorf("decode package manifest: %w", err)
+	}
+	if decoder.More() {
+		return MarketplacePackageManifest{}, fmt.Errorf("decode package manifest: trailing JSON value")
+	}
+	if len(manifest.Modules) > 0 {
+		if err := ValidateModuleSet(manifest.Modules, nil); err != nil {
+			return MarketplacePackageManifest{}, err
+		}
+	}
+	return manifest, nil
 }
 
 // ScheduledJobDefinition is an immutable tenant job supplied by a package.
@@ -176,6 +196,7 @@ type PackManifest struct {
 	Requires      []ManifestPackRef        `json:"requires,omitempty"`
 	Exports       ManifestExports          `json:"exports"`
 	ScheduledJobs []ScheduledJobDefinition `json:"scheduled_jobs,omitempty"`
+	Modules       []ModuleDescriptor       `json:"modules,omitempty"`
 }
 
 //contract:wire:v2
