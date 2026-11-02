@@ -53,12 +53,12 @@ func TestLibSQLRebuildCutoffAndLaterEvents(t *testing.T) {
 	projectionScope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
 	projectionStore := PublishedProjectionStore{DB: database, Dialect: dialect, Site: "tenant-a"}
 	projectionData := []byte(`[{"period":"2026-10","amount":21}]`)
-	projectionSnapshot := PublishedProjectionSnapshot{Definition: projectionDefinition, Scope: projectionScope, SourceID: "published_sources", SourceRevision: "source-r1", Cursor: "complete", AsOf: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: projectionData}
+	projectionSnapshot := PublishedProjectionSnapshot{Definition: projectionDefinition, Scope: projectionScope, SourceID: "published_sources", SourceRevision: "source-r1", Cursor: `{"sales.orders/balances":"log-8"}`, AsOf: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: projectionData}
 	if err := projectionStore.Save(context.Background(), projectionSnapshot); err != nil {
 		t.Fatal("save complete LibSQL projection:", err)
 	}
 	loadedProjection, err := projectionStore.Load(context.Background(), projectionDefinition, projectionScope, "published_sources")
-	if err != nil || string(loadedProjection.Data) != string(projectionData) || loadedProjection.Freshness != contract.QueryFresh {
+	if err != nil || string(loadedProjection.Data) != string(projectionData) || loadedProjection.Cursor != projectionSnapshot.Cursor || loadedProjection.Freshness != contract.QueryFresh {
 		t.Fatalf("load LibSQL projection = %#v, error=%v", loadedProjection, err)
 	}
 	if err := projectionStore.MarkStale(context.Background(), projectionDefinition, projectionScope, "published_sources"); err != nil {

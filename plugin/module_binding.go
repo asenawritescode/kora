@@ -207,11 +207,19 @@ type PublishedQueryExecutor interface {
 	ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, uint16) (contract.QueryResult, error)
 }
 
+// PublishedQueryReplayExecutor replays owner changes after an immutable query
+// snapshot. The first page fixes ThroughCursor; all following pages must use
+// that same high-water mark so the persisted projection cursor is gapless.
+type PublishedQueryReplayExecutor interface {
+	ReplayPublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, string, string, uint16) (contract.QueryReplayPage, error)
+}
+
 type ResolvedPublishedQuery struct {
 	Definition contract.PublishedQuery
 	ProviderID string
 	Revision   uint64
 	executor   PublishedQueryExecutor
+	replay     PublishedQueryReplayExecutor
 	validate   func(contract.SchemaRef, []byte) error
 }
 
@@ -289,6 +297,7 @@ func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store Publi
 		projectionFields[field] = true
 	}
 	var sourceRevisions []string
+	replayCursors := make(map[string]string, len(definition.Sources))
 	var projectionAsOf time.Time
 	var projectionSnapshotToken string
 	for _, source := range definition.Sources {
@@ -308,7 +317,7 @@ func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store Publi
 				allProjectionFieldsPublished = allProjectionFieldsPublished && published
 			}
 		}
-		if !exists || resolved.Definition.OutputSchema != source.OutputSchema || resolved.Definition.ScopePolicy != definition.ScopePolicy || !factKeyPublished || !allProjectionFieldsPublished {
+		if !exists || resolved.replay == nil || resolved.Definition.OutputSchema != source.OutputSchema || resolved.Definition.ScopePolicy != definition.ScopePolicy || !factKeyPublished || !allProjectionFieldsPublished {
 			return p.markProjectionStale(ctx, store, definition, scope)
 		}
 		sourceID := string(source.OwnerModuleID) + "/" + source.QueryName
@@ -321,6 +330,7 @@ func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store Publi
 		var sourceRevision string
 		var sourceAsOf time.Time
 		var sourceSnapshotToken string
+		var sourceSnapshotCursor string
 		var done bool
 		for page := 0; page < 1000 && !done; page++ {
 			limit := resolved.Definition.PageLimit
@@ -330,10 +340,11 @@ func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store Publi
 			}
 			if sourceRevision == "" {
 				sourceRevision, sourceAsOf = result.SourceRevision, result.AsOf
-				if result.SnapshotToken == "" {
+				sourceSnapshotCursor = result.SourceCursor
+				if result.SnapshotToken == "" || sourceSnapshotCursor == "" {
 					return p.markProjectionStale(ctx, store, definition, scope)
 				}
-			} else if sourceRevision != result.SourceRevision || !sourceAsOf.Equal(result.AsOf) || result.SnapshotToken == "" {
+			} else if sourceRevision != result.SourceRevision || !sourceAsOf.Equal(result.AsOf) || result.SnapshotToken == "" || result.SourceCursor != sourceSnapshotCursor {
 				return p.markProjectionStale(ctx, store, definition, scope)
 			}
 			if page > 0 && result.SnapshotToken != sourceSnapshotToken {
@@ -410,10 +421,92 @@ func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store Publi
 		if !done {
 			return p.markProjectionStale(ctx, store, definition, scope)
 		}
-		sourceRevisions = append(sourceRevisions, sourceID+"="+sourceRevision)
+		// Replay every committed source change after the pinned snapshot through a
+		// stable high-water cursor before publishing the projection.
+		replayCursor := ""
+		var throughCursor string
+		var sourceReplayAsOf time.Time
+		seenReplayCursors := map[string]bool{}
+		for page := 0; page < 1000; page++ {
+			execution, err := contract.NewModuleExecution(scope, source.OwnerModuleID, source.OwnerModuleID, resolved.Revision, resolved.Definition.Operation)
+			if err != nil {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			replay, err := resolved.replay.ReplayPublishedQuery(ctx, execution, resolved.Definition, input, sourceSnapshotCursor, throughCursor, replayCursor, resolved.Definition.PageLimit)
+			if err != nil || replay.Validate(resolved.Definition, resolved.Definition.PageLimit) != nil {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			if sourceReplayAsOf.IsZero() {
+				sourceReplayAsOf = replay.AsOf
+			} else if !sourceReplayAsOf.Equal(replay.AsOf) {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			if throughCursor == "" {
+				throughCursor = replay.ThroughCursor
+			} else if throughCursor != replay.ThroughCursor {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			for _, change := range replay.Changes {
+				if !change.Deleted && resolved.validate(resolved.Definition.OutputSchema, change.Data) != nil {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+				index := -1
+				for i, row := range allRows {
+					key, keyErr := projectionFactKey(row, definition.FactKey)
+					if keyErr != nil {
+						return p.markProjectionStale(ctx, store, definition, scope)
+					}
+					if key == change.FactKey {
+						index = i
+						break
+					}
+				}
+				if change.Deleted {
+					if index >= 0 {
+						allRows = append(allRows[:index], allRows[index+1:]...)
+					}
+					continue
+				}
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(change.Data, &fields); err != nil || fields[definition.FactKey] == nil {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+				projected := make(map[string]json.RawMessage, len(projectionFields))
+				for field := range projectionFields {
+					if value, ok := fields[field]; ok {
+						projected[field] = value
+					}
+				}
+				encoded, err := json.Marshal(projected)
+				if err != nil {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+				if index >= 0 {
+					allRows[index] = encoded
+				} else {
+					allRows = append(allRows, encoded)
+				}
+				if len(allRows) > maxPublishedProjectionRows {
+					return p.markProjectionStale(ctx, store, definition, scope)
+				}
+			}
+			if replay.NextCursor == "" {
+				break
+			}
+			if replay.NextCursor == replayCursor || seenReplayCursors[replay.NextCursor] {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+			seenReplayCursors[replay.NextCursor] = true
+			replayCursor = replay.NextCursor
+			if page == 999 {
+				return p.markProjectionStale(ctx, store, definition, scope)
+			}
+		}
+		replayCursors[sourceID] = throughCursor
+		sourceRevisions = append(sourceRevisions, sourceID+"="+sourceRevision+"@"+throughCursor)
 		if projectionAsOf.IsZero() {
-			projectionAsOf = sourceAsOf
-		} else if !sourceAsOf.Equal(projectionAsOf) {
+			projectionAsOf = sourceReplayAsOf
+		} else if !sourceReplayAsOf.Equal(projectionAsOf) {
 			return p.markProjectionStale(ctx, store, definition, scope)
 		}
 	}
@@ -422,14 +515,39 @@ func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store Publi
 		return p.markProjectionStale(ctx, store, definition, scope)
 	}
 	revisionBytes := sha256.Sum256([]byte(strings.Join(sourceRevisions, "\n")))
+	checkpoint, err := json.Marshal(replayCursors)
+	if err != nil || len(checkpoint) > 2048 {
+		return p.markProjectionStale(ctx, store, definition, scope)
+	}
 	if err := store.Save(ctx, analytics.PublishedProjectionSnapshot{
 		Definition: definition, Scope: scope, SourceID: "published_sources",
-		SourceRevision: hex.EncodeToString(revisionBytes[:]), Cursor: "complete", AsOf: projectionAsOf,
+		SourceRevision: hex.EncodeToString(revisionBytes[:]), Cursor: string(checkpoint), AsOf: projectionAsOf,
 		Freshness: contract.QueryFresh, Data: data,
 	}); err != nil {
 		return p.markProjectionStale(ctx, store, definition, scope)
 	}
 	return nil
+}
+
+func projectionFactKey(row json.RawMessage, field string) (string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(row, &fields); err != nil || fields[field] == nil {
+		return "", fmt.Errorf("projection row is missing fact key %q", field)
+	}
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(fields[field])))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return "", err
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed, nil
+	case json.Number:
+		return typed.String(), nil
+	default:
+		return "", fmt.Errorf("projection fact key %q must be a string or number", field)
+	}
 }
 
 func (p BindingPlan) markProjectionStale(ctx context.Context, store PublishedProjectionStore, definition contract.ProjectionDefinition, scope contract.BusinessScope) error {
@@ -606,7 +724,11 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 				plan.Warnings = append(plan.Warnings, BindingDiagnostic{Key: selectionKey, Code: "published_query_schema_validator_unavailable"})
 				continue
 			}
-			plan.Queries[key] = ResolvedPublishedQuery{Definition: query, ProviderID: chosen.ProviderID, Revision: revision, executor: chosen.Queries[query.Name], validate: chosen.ValidateSchema}
+			executor := chosen.Queries[query.Name]
+			plan.Queries[key] = ResolvedPublishedQuery{Definition: query, ProviderID: chosen.ProviderID, Revision: revision, executor: executor, replay: func() PublishedQueryReplayExecutor {
+				replay, _ := executor.(PublishedQueryReplayExecutor)
+				return replay
+			}(), validate: chosen.ValidateSchema}
 		}
 		for _, projection := range module.Projections {
 			projectionKey := PublishedProjectionKey{OwnerModuleID: module.ID, ID: projection.ID}

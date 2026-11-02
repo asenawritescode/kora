@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -246,8 +247,11 @@ func TestPublishedProjectionRebuildPinsSourceRevisionAndPreservesOnOutage(t *tes
 	asOf := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 	concurrentSourceRevision := "source-r7"
 	pageExecutor := projectionPageExecutor{pages: map[string]contract.QueryResult{
-		"":     {Data: json.RawMessage(`[{"amount":12,"id":"fact-1","internal_note":"hidden"}]`), NextCursor: "next", SnapshotToken: "snapshot-r7", SourceRevision: "source-r7", AsOf: asOf, Freshness: contract.QueryFresh},
-		"next": {Data: json.RawMessage(`[{"amount":99,"id":"fact-1","internal_note":"hidden"},{"amount":9,"id":"fact-2","internal_note":"hidden"}]`), SnapshotToken: "snapshot-r7", SourceRevision: "source-r7", AsOf: asOf, Freshness: contract.QueryFresh},
+		"":     {Data: json.RawMessage(`[{"amount":12,"id":"fact-1","internal_note":"hidden"}]`), NextCursor: "next", SnapshotToken: "snapshot-r7", SourceCursor: "log-7", SourceRevision: "source-r7", AsOf: asOf, Freshness: contract.QueryFresh},
+		"next": {Data: json.RawMessage(`[{"amount":99,"id":"fact-1","internal_note":"hidden"},{"amount":9,"id":"fact-2","internal_note":"hidden"}]`), SnapshotToken: "snapshot-r7", SourceCursor: "log-7", SourceRevision: "source-r7", AsOf: asOf, Freshness: contract.QueryFresh},
+	}, replay: map[string]contract.QueryReplayPage{
+		"":            {Changes: []contract.QueryReplayChange{{FactKey: "fact-1", Deleted: true}, {FactKey: "fact-3", Data: json.RawMessage(`{"id":"fact-3","amount":4}`)}}, NextCursor: "replay-next", ThroughCursor: "log-8", SourceRevision: "source-r8", AsOf: asOf.Add(time.Minute), Freshness: contract.QueryFresh},
+		"replay-next": {Changes: []contract.QueryReplayChange{{FactKey: "fact-3", Data: json.RawMessage(`{"id":"fact-3","amount":6}`)}}, ThroughCursor: "log-8", SourceRevision: "source-r8", AsOf: asOf.Add(time.Minute), Freshness: contract.QueryFresh},
 	}, afterFirstPage: func() { concurrentSourceRevision = "source-r8" }}
 	provider := ProviderRegistration{TenantID: scope.TenantID, ProviderID: "sales-internal", OwnerModuleID: source.ID, Kind: ProviderInternal, Offers: source.Provides, Queries: map[string]PublishedQueryExecutor{query.Name: pageExecutor}, ValidateSchema: func(_ contract.SchemaRef, data []byte) error {
 		if !json.Valid(data) {
@@ -264,8 +268,17 @@ func TestPublishedProjectionRebuildPinsSourceRevisionAndPreservesOnOutage(t *tes
 	if err := plan.RebuildPublishedProjection(context.Background(), store, scope, owner.ID, projection.ID, nil); err != nil {
 		t.Fatal("rebuild projection:", err)
 	}
-	if !store.saved || store.stale || string(store.snapshot.Data) != `[{"amount":12,"id":"fact-1"},{"amount":9,"id":"fact-2"}]` || store.snapshot.SourceRevision == "source-r7" || store.snapshot.AsOf != asOf || concurrentSourceRevision != "source-r8" {
+	if !store.saved || store.stale || string(store.snapshot.Data) != `[{"amount":9,"id":"fact-2"},{"amount":6,"id":"fact-3"}]` || store.snapshot.SourceRevision == "source-r7" || !store.snapshot.AsOf.Equal(asOf.Add(time.Minute)) || !strings.Contains(store.snapshot.Cursor, "log-8") || concurrentSourceRevision != "source-r8" {
 		t.Fatalf("stored projection snapshot = %#v, saved=%v stale=%v", store.snapshot, store.saved, store.stale)
+	}
+	provider.Queries[query.Name] = testPublishedQueryExecutor{contract.QueryResult{Data: json.RawMessage(`[]`), SnapshotToken: "snapshot-r8", SourceCursor: "log-8", SourceRevision: "source-r8", AsOf: asOf, Freshness: contract.QueryFresh}}
+	plan, err = ResolveModules(scope, []contract.ModuleDescriptor{source, owner}, []ProviderRegistration{provider}, []ProviderSelection{selection}, 10)
+	if err != nil {
+		t.Fatal("resolve provider without replay:", err)
+	}
+	store.saved, store.stale = false, false
+	if err := plan.RebuildPublishedProjection(context.Background(), store, scope, owner.ID, projection.ID, nil); err == nil || store.saved || !store.stale {
+		t.Fatalf("provider without replay support was not failed closed: err=%v saved=%v stale=%v", err, store.saved, store.stale)
 	}
 	provider.Queries[query.Name] = projectionPageExecutor{pages: map[string]contract.QueryResult{
 		"":     {Data: json.RawMessage(`[{"amount":13,"id":"fact-3"}]`), NextCursor: "next", SnapshotToken: "snapshot-r8", SourceRevision: "source-r8", AsOf: asOf, Freshness: contract.QueryFresh},
@@ -358,7 +371,16 @@ func TestPublishedQueryProviderOutageRetainsProjectionDefinitionForHistory(t *te
 
 type projectionPageExecutor struct {
 	pages          map[string]contract.QueryResult
+	replay         map[string]contract.QueryReplayPage
 	afterFirstPage func()
+}
+
+func (e projectionPageExecutor) ReplayPublishedQuery(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, _ json.RawMessage, _ string, _ string, cursor string, _ uint16) (contract.QueryReplayPage, error) {
+	page, ok := e.replay[cursor]
+	if !ok {
+		return contract.QueryReplayPage{}, errors.New("replay cursor unavailable")
+	}
+	return page, nil
 }
 
 func (e projectionPageExecutor) ExecutePublishedQuery(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, _ json.RawMessage, cursor string, _ uint16) (contract.QueryResult, error) {

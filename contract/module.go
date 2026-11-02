@@ -204,10 +204,36 @@ type QueryResult struct {
 	Data       json.RawMessage `json:"data"`
 	NextCursor string          `json:"next_cursor,omitempty"`
 	// SnapshotToken pins every page in a paginated query to one immutable source snapshot.
-	SnapshotToken  string         `json:"snapshot_token,omitempty"`
+	SnapshotToken string `json:"snapshot_token,omitempty"`
+	// SourceCursor is the owner's durable change-log position at SnapshotToken.
+	// Projection rebuilds replay changes after this position before publishing.
+	SourceCursor   string         `json:"source_cursor,omitempty"`
 	SourceRevision string         `json:"source_revision,omitempty"`
 	AsOf           time.Time      `json:"as_of"`
 	Freshness      QueryFreshness `json:"freshness"`
+}
+
+// QueryReplayPage is one bounded page of owner-published changes after a
+// snapshot cursor. ThroughCursor pins all pages to one replay high-water mark.
+// A change with Deleted=true removes the FactKey; otherwise Data is a full
+// replacement row conforming to the query output schema.
+//
+//contract:wire:v2
+type QueryReplayPage struct {
+	Changes        []QueryReplayChange `json:"changes"`
+	NextCursor     string              `json:"next_cursor,omitempty"`
+	ThroughCursor  string              `json:"through_cursor"`
+	SourceRevision string              `json:"source_revision"`
+	AsOf           time.Time           `json:"as_of"`
+	Freshness      QueryFreshness      `json:"freshness"`
+}
+
+//contract:wire:v2
+type QueryReplayChange struct {
+	FactKey string `json:"fact_key"`
+	Deleted bool   `json:"deleted,omitempty"`
+	//contract:json
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // ProjectionSource pins one projection input to a published query contract.
@@ -302,8 +328,50 @@ func (q QueryResult) Validate(query PublishedQuery, limit uint16, scope Business
 			}
 		}
 	}
-	if len(q.NextCursor) > 2048 || len(q.SnapshotToken) > 2048 || len(q.SourceRevision) > 256 {
+	if len(q.NextCursor) > 2048 || len(q.SnapshotToken) > 2048 || len(q.SourceCursor) > 2048 || len(q.SourceRevision) > 256 {
 		return fmt.Errorf("published query result cursor or source revision is too large")
+	}
+	return nil
+}
+
+func (p QueryReplayPage) Validate(query PublishedQuery, limit uint16) error {
+	if limit == 0 || limit > query.PageLimit || len(p.Changes) > int(limit) || p.ThroughCursor == "" || p.AsOf.IsZero() || p.SourceRevision == "" {
+		return fmt.Errorf("published query replay page is incomplete or exceeds its page contract")
+	}
+	switch p.Freshness {
+	case QueryFresh:
+	default:
+		return fmt.Errorf("published query replay page is not fresh")
+	}
+	allowed := make(map[string]bool, len(query.AllowedFields))
+	for _, field := range query.AllowedFields {
+		allowed[field] = true
+	}
+	for _, change := range p.Changes {
+		if strings.TrimSpace(change.FactKey) == "" || len(change.FactKey) > 256 {
+			return fmt.Errorf("published query replay change has an invalid fact key")
+		}
+		if change.Deleted {
+			if len(change.Data) != 0 {
+				return fmt.Errorf("deleted replay change must not contain row data")
+			}
+			continue
+		}
+		if len(change.Data) == 0 || !json.Valid(change.Data) {
+			return fmt.Errorf("published query replay change has invalid row data")
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(change.Data, &fields); err != nil || len(fields) == 0 {
+			return fmt.Errorf("published query replay change must contain a row object")
+		}
+		for field, value := range fields {
+			if !allowed[field] || !json.Valid(value) {
+				return fmt.Errorf("published query replay change contains an undeclared field")
+			}
+		}
+	}
+	if len(p.NextCursor) > 2048 || len(p.ThroughCursor) > 2048 || len(p.SourceRevision) > 256 {
+		return fmt.Errorf("published query replay cursor or revision is too large")
 	}
 	return nil
 }

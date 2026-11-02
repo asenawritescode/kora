@@ -65,6 +65,21 @@ func (s PublishedProjectionSnapshot) Validate() error {
 	if err := json.Unmarshal(s.Data, &rows); err != nil {
 		return fmt.Errorf("published projection snapshot must be a JSON row array")
 	}
+	allowed := make(map[string]bool, len(s.Definition.AllowedFields))
+	for _, field := range s.Definition.AllowedFields {
+		allowed[field] = true
+	}
+	for _, row := range rows {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(row, &fields); err != nil || fields[s.Definition.FactKey] == nil {
+			return fmt.Errorf("published projection snapshot contains a malformed row")
+		}
+		for field, value := range fields {
+			if !allowed[field] || !json.Valid(value) {
+				return fmt.Errorf("published projection snapshot contains an undeclared field")
+			}
+		}
+	}
 	if s.Definition.OutputSchema.ID == "" || s.Definition.OutputSchema.Version == 0 {
 		return fmt.Errorf("published projection output schema is required")
 	}

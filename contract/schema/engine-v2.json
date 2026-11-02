@@ -2698,6 +2698,65 @@
       ],
       "type": "object"
     },
+    "QueryReplayChange": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "x-open-json-value": true
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "fact_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_key"
+      ],
+      "type": "object"
+    },
+    "QueryReplayPage": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/QueryReplayChange"
+          },
+          "type": "array"
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "incomplete"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "changes",
+        "freshness",
+        "source_revision",
+        "through_cursor"
+      ],
+      "type": "object"
+    },
     "QueryResult": {
       "additionalProperties": false,
       "properties": {
@@ -2721,6 +2780,9 @@
           "type": "string"
         },
         "snapshot_token": {
+          "type": "string"
+        },
+        "source_cursor": {
           "type": "string"
         },
         "source_revision": {
@@ -6753,6 +6815,65 @@
       ],
       "type": "object"
     },
+    "QueryReplayChange": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "x-open-json-value": true
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "fact_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_key"
+      ],
+      "type": "object"
+    },
+    "QueryReplayPage": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/QueryReplayChange"
+          },
+          "type": "array"
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "incomplete"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "changes",
+        "freshness",
+        "source_revision",
+        "through_cursor"
+      ],
+      "type": "object"
+    },
     "QueryResult": {
       "additionalProperties": false,
       "properties": {
@@ -6776,6 +6897,9 @@
           "type": "string"
         },
         "snapshot_token": {
+          "type": "string"
+        },
+        "source_cursor": {
           "type": "string"
         },
         "source_revision": {
