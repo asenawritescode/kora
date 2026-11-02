@@ -133,15 +133,19 @@ func TestExecuteBusinessReconciliationUnavailableOwnerReturnsIncomplete(t *testi
 	rule := BusinessReconciliationRule{OwnerModuleID: "sales.orders", ID: "sales-ar", Version: 1, Scope: scope,
 		SourceQuery: BusinessQueryRef{OwnerModuleID: "sales.orders", Name: "billable", Input: json.RawMessage(`{}`), PageLimit: 10},
 		TargetQuery: BusinessQueryRef{OwnerModuleID: "ar.receivables", Name: "invoices", Input: json.RawMessage(`{}`), PageLimit: 10}, MaxRows: 10}
-	read := func(_ context.Context, request BusinessQueryRequest) (contract.QueryResult, error) {
-		if request.Name == "invoices" {
-			return contract.QueryResult{}, context.DeadlineExceeded
-		}
-		return contract.QueryResult{Data: json.RawMessage(`[]`), SnapshotToken: "s", SourceRevision: "r", AsOf: time.Now().UTC(), Freshness: contract.QueryFresh}, nil
-	}
-	result, _, _, err := ExecuteBusinessReconciliation(context.Background(), rule, time.Now().UTC(), BusinessRunCursor{}, read)
-	if err != nil || result.Complete || len(result.Findings) != 0 {
-		t.Fatalf("unavailable owner must make run incomplete: %+v, %v", result, err)
+	for _, unavailable := range []string{"billable", "invoices"} {
+		t.Run(unavailable, func(t *testing.T) {
+			read := func(_ context.Context, request BusinessQueryRequest) (contract.QueryResult, error) {
+				if request.Name == unavailable {
+					return contract.QueryResult{}, context.DeadlineExceeded
+				}
+				return contract.QueryResult{Data: json.RawMessage(`[]`), SnapshotToken: "s", SourceRevision: "r", AsOf: time.Now().UTC(), Freshness: contract.QueryFresh}, nil
+			}
+			result, _, _, err := ExecuteBusinessReconciliation(context.Background(), rule, time.Now().UTC(), BusinessRunCursor{}, read)
+			if err != nil || result.Complete || len(result.Findings) != 0 {
+				t.Fatalf("unavailable %s owner must make run incomplete: %+v, %v", unavailable, result, err)
+			}
+		})
 	}
 }
 
