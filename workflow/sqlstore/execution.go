@@ -36,6 +36,18 @@ var _ workflow.ExecutionStore = (*ExecutionStore)(nil)
 // call. If the process dies after the effect starts, recovery can distinguish
 // that uncertain outcome from an attempt that was never sent.
 func (s *ExecutionStore) BeginExternalAttempt(ctx context.Context, claim workflow.Claim, executionID string, key contract.IdempotencyKey, requested *contract.PinnedDispatch) (*contract.PinnedDispatch, error) {
+	if requested != nil {
+		return nil, contract.NewError(contract.CodeValidationFailed, "pinned capability attempts require a durable lease")
+	}
+	_, err := s.beginExternalAttempt(ctx, claim, executionID, key, nil, nil)
+	return nil, err
+}
+
+func (s *ExecutionStore) BeginPinnedExternalAttempt(ctx context.Context, claim workflow.Claim, executionID string, key contract.IdempotencyKey, requested contract.PinnedDispatch, lease contract.CapabilityLease) (*workflow.PinnedCapabilityAttempt, error) {
+	return s.beginExternalAttempt(ctx, claim, executionID, key, &requested, &lease)
+}
+
+func (s *ExecutionStore) beginExternalAttempt(ctx context.Context, claim workflow.Claim, executionID string, key contract.IdempotencyKey, requested *contract.PinnedDispatch, requestedLease *contract.CapabilityLease) (*workflow.PinnedCapabilityAttempt, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("begin workflow external attempt requires context")
 	}
@@ -48,8 +60,14 @@ func (s *ExecutionStore) BeginExternalAttempt(ctx context.Context, claim workflo
 	if _, err := contract.ParseIdempotencyKey(string(key)); err != nil {
 		return nil, fmt.Errorf("workflow action idempotency key: %w", err)
 	}
-	if requested != nil && (requested.Validate() != nil || requested.ExecutionID != executionID || requested.Scope != claim.BusinessScope || requested.IdempotencyKey != key) {
+	if (requested == nil) != (requestedLease == nil) {
 		return nil, contract.NewError(contract.CodeValidationFailed, "pinned dispatch does not match the claimed workflow identity")
+	}
+	if requested != nil {
+		candidate := workflow.PinnedCapabilityAttempt{Dispatch: *requested, Lease: *requestedLease}
+		if requested.Validate() != nil || requested.ExecutionID != executionID || requested.Scope != claim.BusinessScope || requested.IdempotencyKey != key || candidate.Validate() != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, "pinned dispatch does not match the claimed workflow identity")
+		}
 	}
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
@@ -81,7 +99,10 @@ func (s *ExecutionStore) BeginExternalAttempt(ctx context.Context, claim workflo
 	if uint64(claim.Attempt) != previousAttempt+1 {
 		return nil, contract.NewError(contract.CodeConflict, "external workflow attempt is not the next durable attempt")
 	}
-	selected := requested
+	var selected *workflow.PinnedCapabilityAttempt
+	if requested != nil {
+		selected = &workflow.PinnedCapabilityAttempt{Dispatch: *requested, Lease: *requestedLease}
+	}
 	if previousErr == nil {
 		if previousStatus != "failed" {
 			return nil, contract.NewError(contract.CodeConflict, "previous external workflow outcome is unresolved")
@@ -90,11 +111,11 @@ func (s *ExecutionStore) BeginExternalAttempt(ctx context.Context, claim workflo
 			return nil, contract.NewError(contract.CodeConflict, "workflow action idempotency or execution identity changed across attempts")
 		}
 		if previousDispatchJSON.Valid {
-			var prior contract.PinnedDispatch
+			var prior workflow.PinnedCapabilityAttempt
 			if err := json.Unmarshal([]byte(previousDispatchJSON.String), &prior); err != nil || prior.Validate() != nil {
 				return nil, contract.NewError(contract.CodeConflict, "persisted pinned capability dispatch is invalid")
 			}
-			if requested == nil || !samePinnedOperation(prior, *requested) {
+			if requested == nil || !samePinnedOperation(prior.Dispatch, *requested) {
 				return nil, contract.NewError(contract.CodeConflict, "pinned capability operation or input changed across attempts")
 			}
 			selected = &prior
@@ -104,6 +125,9 @@ func (s *ExecutionStore) BeginExternalAttempt(ctx context.Context, claim workflo
 	}
 	var pinnedJSON any
 	if selected != nil {
+		if err := selected.Validate(); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, "pinned capability lease does not match its provider dispatch")
+		}
 		encoded, marshalErr := json.Marshal(selected)
 		if marshalErr != nil {
 			return nil, marshalErr

@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
@@ -150,10 +151,36 @@ type ExecutionStore interface {
 	Release(context.Context, Claim) error
 }
 
+// PinnedCapabilityAttemptStore atomically persists the provider pin and its
+// private durable lease for each pinned workflow attempt.
+type PinnedCapabilityAttemptStore interface {
+	BeginPinnedExternalAttempt(context.Context, Claim, string, contract.IdempotencyKey, contract.PinnedDispatch, contract.CapabilityLease) (*PinnedCapabilityAttempt, error)
+}
+
+// PinnedCapabilityAttempt keeps internal revocation data beside the persisted
+// provider pin without adding lease metadata to the public PinnedDispatch type.
+type PinnedCapabilityAttempt struct {
+	Dispatch contract.PinnedDispatch
+	Lease    contract.CapabilityLease
+}
+
+func (a PinnedCapabilityAttempt) Validate() error {
+	if a.Dispatch.Validate() != nil || a.Lease.Validate() != nil || a.Lease.State != "active" || a.Lease.TenantID != a.Dispatch.Scope.TenantID || a.Lease.Scope != a.Dispatch.Scope || a.Lease.CallerModuleID != a.Dispatch.CallerModuleID || a.Lease.ProviderID != a.Dispatch.ProviderID || a.Lease.BindingRevision != a.Dispatch.BindingRevision || a.Lease.Operation != a.Dispatch.Operation.OperationName {
+		return fmt.Errorf("pinned capability attempt lease does not match its provider dispatch")
+	}
+	return nil
+}
+
 // PinnedDispatchRepository loads the durable provider identity for an
 // uncertain action so reconciliation always addresses the provider that was called.
 type PinnedDispatchRepository interface {
-	LoadPinnedDispatch(context.Context, contract.TenantID, contract.InstanceID, contract.StepID) (contract.PinnedDispatch, error)
+	LoadPinnedCapabilityAttempt(context.Context, contract.TenantID, contract.InstanceID, contract.StepID) (PinnedCapabilityAttempt, error)
+}
+
+// PinnedCapabilityReconciler receives the durable lease so it can resolve the
+// original credential reference after restart or provider cutover.
+type PinnedCapabilityReconciler interface {
+	ReconcilePinned(context.Context, contract.PinnedDispatch, contract.CapabilityLease, ActionRegistration) (contract.ExternalOutcome, ActionResult, error)
 }
 
 // HumanWaitRecoveryStore is the durable terminal-request recovery boundary.

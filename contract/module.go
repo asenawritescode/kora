@@ -363,11 +363,46 @@ type CapabilityLease struct {
 	ExpiresAt        time.Time     `json:"expires_at"`
 	State            string        `json:"state"`
 	AdmittedAttempts uint64        `json:"admitted_attempts"`
+	CredentialRef    string        `json:"credential_ref,omitempty"`
 }
 
 func (l CapabilityLease) Validate() error {
 	if l.ID == "" || l.TenantID == "" || l.Scope.Validate() != nil || l.Scope.TenantID != l.TenantID || l.CallerModuleID == "" || l.ProviderID == "" || l.Operation == "" || l.BindingRevision == 0 || l.GrantEpoch == 0 || l.ExpiresAt.IsZero() || l.State != "active" && l.State != "revoked" && l.State != "expired" {
 		return fmt.Errorf("capability lease identity, scope, epoch, expiry, or state is invalid")
+	}
+	if len(l.CredentialRef) > 320 || strings.ContainsAny(l.CredentialRef, "\r\n\x00") {
+		return fmt.Errorf("capability credential reference is invalid")
+	}
+	return nil
+}
+
+// CapabilitySelector identifies one caller/provider operation within a
+// business scope. It intentionally has no wildcard fields.
+type CapabilitySelector struct {
+	CallerModuleID ModuleID
+	ProviderID     string
+	Operation      string
+}
+
+func (s CapabilitySelector) Validate() error {
+	if s.CallerModuleID == "" || s.ProviderID == "" || s.Operation == "" {
+		return fmt.Errorf("capability selector requires caller, provider, and operation")
+	}
+	return nil
+}
+
+// RevokeCapability is a revision-fenced security decision for one exact
+// capability selector in one tenant or legal-entity scope.
+type RevokeCapability struct {
+	Scope            BusinessScope
+	Selector         CapabilitySelector
+	ExpectedRevision uint64
+	Reason           string
+}
+
+func (r RevokeCapability) Validate() error {
+	if r.Scope.Validate() != nil || r.Selector.Validate() != nil || r.ExpectedRevision == 0 || strings.TrimSpace(r.Reason) == "" || len(r.Reason) > 1000 {
+		return fmt.Errorf("capability revocation scope, selector, revision, or reason is invalid")
 	}
 	return nil
 }

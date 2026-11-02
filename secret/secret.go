@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	kdb "github.com/asenawritescode/kora/db"
@@ -22,6 +23,36 @@ import (
 type Store struct {
 	DB      *sql.DB
 	Dialect kdb.Dialect
+}
+
+// Reference identifies a secret by stable key and the version current when it
+// was read. It never contains secret material.
+type Reference struct {
+	Key     string
+	Version string
+}
+
+func (r Reference) String() string {
+	if r.Key == "" || len(r.Version) != sha256.Size*2 {
+		return ""
+	}
+	return r.Key + "@" + r.Version
+}
+
+func ParseReference(value string) (Reference, error) {
+	index := strings.LastIndexByte(value, '@')
+	if index <= 0 || index == len(value)-1 {
+		return Reference{}, fmt.Errorf("secret reference is invalid")
+	}
+	ref := Reference{Key: value[:index], Version: value[index+1:]}
+	if len(ref.Key) > 140 || len(ref.Version) != sha256.Size*2 {
+		return Reference{}, fmt.Errorf("secret reference is invalid")
+	}
+	decoded, err := hex.DecodeString(ref.Version)
+	if err != nil || len(decoded) != sha256.Size || hex.EncodeToString(decoded) != ref.Version {
+		return Reference{}, fmt.Errorf("secret reference is invalid")
+	}
+	return ref, nil
 }
 
 // NewStore creates a new secret store.
@@ -109,6 +140,45 @@ func (s *Store) Get(site, key string) (string, error) {
 		return "", fmt.Errorf("decrypting: %w", err)
 	}
 	return string(plain), nil
+}
+
+// ResolveReference returns the current secret only when its encrypted-value
+// version matches the caller's reference. Set rotates a key and Delete disables it.
+func (s *Store) ResolveReference(site string, ref Reference) (string, error) {
+	if s == nil || s.DB == nil || ref.Key == "" || ref.Version == "" {
+		return "", fmt.Errorf("secret reference is invalid")
+	}
+	var encrypted []byte
+	err := s.DB.QueryRow(s.query("SELECT encrypted_value FROM _kora_secret WHERE site = ? AND key_name = ?"), site, ref.Key).Scan(&encrypted)
+	if err != nil {
+		return "", fmt.Errorf("secret reference is unavailable")
+	}
+	if secretVersion(encrypted) != ref.Version {
+		return "", fmt.Errorf("secret reference is stale or disabled")
+	}
+	plain, err := decrypt(encrypted, deriveKey([]byte(site)))
+	if err != nil {
+		return "", fmt.Errorf("secret reference could not be resolved")
+	}
+	return string(plain), nil
+}
+
+// Reference returns an opaque versioned pointer suitable for durable provider
+// configuration. The secret value is never returned by this method.
+func (s *Store) Reference(site, key string) (Reference, error) {
+	if s == nil || s.DB == nil || site == "" || key == "" {
+		return Reference{}, fmt.Errorf("secret reference identity is invalid")
+	}
+	var encrypted []byte
+	if err := s.DB.QueryRow(s.query("SELECT encrypted_value FROM _kora_secret WHERE site = ? AND key_name = ?"), site, key).Scan(&encrypted); err != nil {
+		return Reference{}, fmt.Errorf("secret reference is unavailable")
+	}
+	return Reference{Key: key, Version: secretVersion(encrypted)}, nil
+}
+
+func secretVersion(encrypted []byte) string {
+	digest := sha256.Sum256(encrypted)
+	return hex.EncodeToString(digest[:])
 }
 
 // Delete removes a secret.
@@ -235,6 +305,3 @@ func (s *Store) ReEncrypt(site, oldPassword, newPassword string) error {
 	}
 	return nil
 }
-
-// No-op import to keep hex happy.
-var _ = hex.EncodeToString

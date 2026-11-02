@@ -698,11 +698,20 @@ func (s *InstanceService) Reconcile(ctx context.Context, exec policy.Execution, 
 		if !ok {
 			return contract.WorkflowInstance{}, contract.NewError(contract.CodeInternal, "workflow repository cannot load the persisted provider pin")
 		}
-		dispatch, loadErr := pinnedRepository.LoadPinnedDispatch(ctx, exec.Tenant(), id, cmd.StepID)
+		attempt, loadErr := pinnedRepository.LoadPinnedCapabilityAttempt(ctx, exec.Tenant(), id, cmd.StepID)
 		if loadErr != nil {
 			return contract.WorkflowInstance{}, loadErr
 		}
-		outcome, _, reconcileErr := registration.PinnedDispatcher.Reconcile(ctx, dispatch)
+		// Reconciliation is a separately authorized status/evidence operation,
+		// not a new business effect attempt. It must remain available after a
+		// grant is revoked; normal execution retries still pass the durable gate.
+		var outcome contract.ExternalOutcome
+		var reconcileErr error
+		if reconciler, ok := registration.PinnedDispatcher.(PinnedCapabilityReconciler); ok {
+			outcome, _, reconcileErr = reconciler.ReconcilePinned(ctx, attempt.Dispatch, attempt.Lease, registration)
+		} else {
+			outcome, _, reconcileErr = registration.PinnedDispatcher.Reconcile(ctx, attempt.Dispatch)
+		}
 		if reconcileErr != nil {
 			return contract.WorkflowInstance{}, fmt.Errorf("reconcile pinned workflow provider outcome: %w", reconcileErr)
 		}

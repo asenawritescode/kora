@@ -96,13 +96,25 @@ type testInstanceRepository struct {
 type testPinnedInstanceRepository struct {
 	*testInstanceRepository
 	dispatch contract.PinnedDispatch
+	lease    contract.CapabilityLease
 }
 
-func (r *testPinnedInstanceRepository) LoadPinnedDispatch(_ context.Context, tenant contract.TenantID, _ contract.InstanceID, _ contract.StepID) (contract.PinnedDispatch, error) {
+type pinnedLeaseReconciler struct {
+	pinnedDispatchCapture
+	leases []contract.CapabilityLease
+}
+
+func (p *pinnedLeaseReconciler) ReconcilePinned(_ context.Context, dispatch contract.PinnedDispatch, lease contract.CapabilityLease, _ ActionRegistration) (contract.ExternalOutcome, ActionResult, error) {
+	p.dispatches = append(p.dispatches, dispatch)
+	p.leases = append(p.leases, lease)
+	return p.outcome, ActionResult{}, nil
+}
+
+func (r *testPinnedInstanceRepository) LoadPinnedCapabilityAttempt(_ context.Context, tenant contract.TenantID, _ contract.InstanceID, _ contract.StepID) (PinnedCapabilityAttempt, error) {
 	if r.dispatch.Scope.TenantID != tenant {
-		return contract.PinnedDispatch{}, contract.NewError(contract.CodePermissionDenied, "test tenant mismatch")
+		return PinnedCapabilityAttempt{}, contract.NewError(contract.CodePermissionDenied, "test tenant mismatch")
 	}
-	return r.dispatch, nil
+	return PinnedCapabilityAttempt{Dispatch: r.dispatch, Lease: r.lease}, nil
 }
 
 func (r *testInstanceRepository) StartInstance(_ context.Context, input StartInstanceInput) (contract.WorkflowInstance, error) {
@@ -458,20 +470,23 @@ func TestPinnedProviderReconciliationUsesStoredProviderAndRejectsConflictingOper
 	definition := validTestDefinition()
 	defs := &testDefinitionRepository{stored: definition, storedRef: contract.DefinitionVersionRef{DefinitionID: definition.ID, Version: definition.Version, Digest: "digest"}}
 	base := &testInstanceRepository{instance: contract.WorkflowInstance{ID: "01K7INSTANCE00000000000000000", Revision: "7", DefinitionID: definition.ID, DefinitionVersion: 1, Status: contract.InstanceUncertain, CurrentStep: "approve"}}
-	call := &pinnedDispatchCapture{outcome: contract.ExternalApplied}
+	call := &pinnedLeaseReconciler{pinnedDispatchCapture: pinnedDispatchCapture{outcome: contract.ExternalApplied}}
 	catalog := NewCatalog()
 	grant := testActionGrant()
 	in := contract.SchemaRef{ID: "input", Version: 1}
 	out := contract.SchemaRef{ID: "output", Version: 1}
-	registration := ActionRegistration{Key: ActionKey{Name: "invoice.approve", Version: 1}, Class: ActionExternal, InputSchema: in, OutputSchema: out, RequiredGrant: grant, Capability: &contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: in, OutputSchema: out}, ProviderID: "billing.provider-new", BindingRevision: 9, CallerModuleID: "sales.orders", PinnedDispatcher: call}
+	leaseScope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	registration := ActionRegistration{Key: ActionKey{Name: "invoice.approve", Version: 1}, Class: ActionExternal, InputSchema: in, OutputSchema: out, RequiredGrant: grant, Capability: &contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: in, OutputSchema: out}, ProviderID: "billing.provider-new", BindingRevision: 9, CallerModuleID: "sales.orders", PinnedDispatcher: call,
+		CapabilityLease: &contract.CapabilityLease{ID: "lease-new", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-new", Operation: "issue", BindingRevision: 9, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}}
 	if err := catalog.Register(registration); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalog.Freeze(); err != nil {
 		t.Fatal(err)
 	}
-	pinned := contract.PinnedDispatch{ExecutionID: "01K7EXECUTION000000000000000000", Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "billing.provider-old", BindingRevision: 8, Operation: *registration.Capability, IdempotencyKey: "stable-key-01", InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
-	instances := &testPinnedInstanceRepository{testInstanceRepository: base, dispatch: pinned}
+	pinned := contract.PinnedDispatch{ExecutionID: "01K7EXECUTION000000000000000000", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-old", BindingRevision: 8, Operation: *registration.Capability, IdempotencyKey: "stable-key-01", InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	oldLease := contract.CapabilityLease{ID: "lease-old", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-old", Operation: "issue", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active", CredentialRef: "old-credential@v1"}
+	instances := &testPinnedInstanceRepository{testInstanceRepository: base, dispatch: pinned, lease: oldLease}
 	authz := &testInstanceAuthorizer{reconcile: true}
 	service, err := NewInstanceService(defs, instances, authz, catalog, testSchemas{}, testWaits{}, time.Now, nil)
 	if err != nil {
@@ -492,5 +507,8 @@ func TestPinnedProviderReconciliationUsesStoredProviderAndRejectsConflictingOper
 	}
 	if len(call.dispatches) != 2 || call.dispatches[0].ProviderID != "billing.provider-old" || call.dispatches[1].ProviderID != "billing.provider-old" {
 		t.Fatalf("reconciler did not use persisted provider pin: %+v", call.dispatches)
+	}
+	if len(call.leases) != 2 || call.leases[1].CredentialRef != "old-credential@v1" {
+		t.Fatalf("reconciliation did not use its persisted lease reference: %+v", call.leases)
 	}
 }

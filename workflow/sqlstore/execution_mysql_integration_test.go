@@ -66,6 +66,10 @@ func TestMySQLExpiredWorkflowClaimCannotCommitProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	instanceStore, err := NewInstanceStore(database, dialect)
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	instanceID := contract.InstanceID("01K7INSTANCE00000000000000000")
 	_, err = database.ExecContext(ctx, `INSERT INTO _kora_workflow_instance (id,tenant_id,definition_id,definition_version,subject_kind,subject_id,subject_revision,status,current_step,revision,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, string(instanceID), "tenant-a", "purchase", 1, "Invoice", "INV-1", "1", "ready", "approve", 1, now, now)
@@ -187,9 +191,14 @@ func TestMySQLExpiredWorkflowClaimCannotCommitProgress(t *testing.T) {
 	executionID := "01K7EXECUTION000000000000000001"
 	key := contract.IdempotencyKey("stable-external-key-01")
 	pinned := contract.PinnedDispatch{ExecutionID: executionID, Scope: claimed[0].BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", BindingRevision: 6, Operation: contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: contract.SchemaRef{ID: "billing.input", Version: 1}, OutputSchema: contract.SchemaRef{ID: "billing.output", Version: 1}}, IdempotencyKey: key, InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
-	stored, err := store.BeginExternalAttempt(ctx, claimed[0], executionID, key, &pinned)
-	if err != nil || stored == nil || stored.ProviderID != "billing.provider-a" {
+	capabilityLease := contract.CapabilityLease{ID: "lease-a", TenantID: "tenant-a", Scope: claimed[0].BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", Operation: "issue", BindingRevision: 6, GrantEpoch: 3, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active", CredentialRef: "billing-token@fixture-version"}
+	stored, err := store.BeginPinnedExternalAttempt(ctx, claimed[0], executionID, key, pinned, capabilityLease)
+	if err != nil || stored == nil || stored.Dispatch.ProviderID != "billing.provider-a" {
 		t.Fatal("persist external action start:", err)
+	}
+	reloaded, err := instanceStore.LoadPinnedCapabilityAttempt(ctx, "tenant-a", abandonedID, claimed[0].StepID)
+	if err != nil || reloaded.Lease.CredentialRef != capabilityLease.CredentialRef || reloaded.Lease.GrantEpoch != capabilityLease.GrantEpoch || reloaded.Dispatch.ProviderID != pinned.ProviderID {
+		t.Fatalf("reloaded durable provider grant = (%+v,%v)", reloaded, err)
 	}
 	var pinnedJSON string
 	if err := database.QueryRowContext(ctx, `SELECT pinned_dispatch_json FROM _kora_workflow_attempt WHERE tenant_id=? AND instance_id=? AND step_id=?`, "tenant-a", string(abandonedID), string(claimed[0].StepID)).Scan(&pinnedJSON); err != nil || !strings.Contains(pinnedJSON, "billing.provider-a") {

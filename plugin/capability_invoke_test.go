@@ -31,6 +31,16 @@ type operationTestHandle struct {
 	err         error
 }
 
+type operationTestLeaseAdmission struct {
+	count int
+	err   error
+}
+
+func (a *operationTestLeaseAdmission) AdmitCapabilityAttempt(context.Context, contract.CapabilityLease, time.Time) error {
+	a.count++
+	return a.err
+}
+
 type referenceTestHandle struct {
 	name    contract.CapabilityName
 	scope   contract.BusinessScope
@@ -172,6 +182,9 @@ func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T
 	if err != nil {
 		t.Fatal("resolve capability binding:", err)
 	}
+	leaseAdmission := &operationTestLeaseAdmission{}
+	plan.LeaseAdmission = leaseAdmission
+	lease := contract.CapabilityLease{ID: "lease-issue", TenantID: scope.TenantID, Scope: scope, CallerModuleID: consumer.ID, ProviderID: "ar-internal", Operation: "issue", BindingRevision: plan.Revision, GrantEpoch: 2, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
 	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{
 		PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", AuthenticatedAt: time.Now().UTC(),
 	})
@@ -179,7 +192,7 @@ func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T
 		t.Fatal("verified actor execution:", err)
 	}
 	meta := contract.CommandMeta{IdempotencyKey: "issue-ord-1"}
-	result, err := plan.InvokeCapability(context.Background(), execution, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`))
+	result, err := plan.InvokeCapability(context.Background(), execution, lease, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`))
 	if err != nil {
 		t.Fatal("invoke pinned capability:", err)
 	}
@@ -188,6 +201,9 @@ func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T
 	}
 	if handle.calls != 1 || !handle.revoked || handle.invocation.Operation != offer.Operations[0] || handle.invocation.Meta != meta || string(handle.invocation.Payload) != `{"order_id":"ORD-1"}` {
 		t.Fatalf("provider invocation or cleanup = calls:%d revoked:%t invocation:%+v", handle.calls, handle.revoked, handle.invocation)
+	}
+	if leaseAdmission.count != 1 {
+		t.Fatalf("capability effect admissions=%d, want one", leaseAdmission.count)
 	}
 	moduleExecution := handle.invocation.ModuleExecution
 	if !moduleExecution.Verified() || moduleExecution.TenantID != scope.TenantID || moduleExecution.CallerModuleID != consumer.ID || moduleExecution.OwnerModuleID != owner.ID || moduleExecution.BindingRevision != plan.Revision || moduleExecution.AllowedOperation != "issue" {
@@ -220,18 +236,20 @@ func TestBindingPlanRejectsBadCapabilitySchemasBeforeAndAfterProviderCall(t *tes
 	if err != nil {
 		t.Fatal("resolve external capability:", err)
 	}
+	plan.LeaseAdmission = &operationTestLeaseAdmission{}
+	lease := contract.CapabilityLease{ID: "lease-issue", TenantID: scope.TenantID, Scope: scope, CallerModuleID: consumer.ID, ProviderID: "ar-external", Operation: "issue", BindingRevision: plan.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
 	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", AuthenticatedAt: time.Now().UTC()})
 	if err != nil {
 		t.Fatal("verified actor execution:", err)
 	}
 	meta := contract.CommandMeta{IdempotencyKey: "issue-ord-2"}
-	if _, err := plan.InvokeCapability(context.Background(), execution, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"bad":"input"}`)); err == nil {
+	if _, err := plan.InvokeCapability(context.Background(), execution, lease, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"bad":"input"}`)); err == nil {
 		t.Fatal("input schema mismatch reached provider")
 	}
 	if handle.opened != 0 || handle.calls != 0 {
 		t.Fatalf("invalid input opened provider: opens=%d calls=%d", handle.opened, handle.calls)
 	}
-	if _, err := plan.InvokeCapability(context.Background(), execution, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`)); err == nil {
+	if _, err := plan.InvokeCapability(context.Background(), execution, lease, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`)); err == nil {
 		t.Fatal("output schema mismatch was accepted")
 	}
 	if handle.calls != 1 || !handle.revoked {
@@ -239,7 +257,7 @@ func TestBindingPlanRejectsBadCapabilitySchemasBeforeAndAfterProviderCall(t *tes
 	}
 	handle.executionID = ""
 	handle.output = json.RawMessage(`{"invoice_id":"INV-1"}`)
-	if _, err := plan.InvokeCapability(context.Background(), execution, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`)); err == nil {
+	if _, err := plan.InvokeCapability(context.Background(), execution, lease, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`)); err == nil {
 		t.Fatal("provider result without an execution identity was accepted")
 	}
 	if handle.calls != 2 || !handle.revoked {

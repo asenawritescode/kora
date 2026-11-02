@@ -28,10 +28,11 @@ import (
 // tenant-owned durable orchestration runtime. Catalog construction, SQL stores,
 // claim handling, and worker lifecycle remain owned by Engine.
 type WorkflowTenantConfig struct {
-	Registrations []workflow.ActionRegistration
-	LocalBuilders map[workflow.ActionKey]process.WorkflowOperationBuilder
-	Schemas       workflow.PayloadSchemaRegistry
-	Waits         workflow.WaitFieldRegistry
+	Registrations    []workflow.ActionRegistration
+	LocalBuilders    map[workflow.ActionKey]process.WorkflowOperationBuilder
+	Schemas          workflow.PayloadSchemaRegistry
+	CapabilityLeases workflow.CapabilityLeaseManager
+	Waits            workflow.WaitFieldRegistry
 	// ServiceGrants are exact trusted policy grants for non-action workflow
 	// operations, such as one registered human-request policy or a condition
 	// subject read. Action grants are derived from ActionRegistration instead.
@@ -234,6 +235,26 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("verify workflow service action grants: %w", err)
 	}
+	for _, registration := range registrations {
+		lease := registration.CapabilityLease
+		if registration.Class == workflow.ActionLocal {
+			lease = registration.LocalCapabilityLease
+		}
+		if registration.PinnedDispatcher == nil && lease == nil {
+			continue
+		}
+		if cfg.CapabilityLeases == nil || lease == nil {
+			return nil, nil, nil, fmt.Errorf("pinned workflow capability %s@%d has no durable lease manager", registration.Key.Name, registration.Key.Version)
+		}
+		leaseCtx, cancelLease := context.WithTimeout(ctx, 5*time.Second)
+		err := withTenantWorkAdmission(leaseCtx, admission, "ensure pinned workflow capability lease", func() error {
+			return cfg.CapabilityLeases.EnsureCapabilityLease(leaseCtx, *lease)
+		})
+		cancelLease()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("ensure workflow capability lease for %s@%d: %w", registration.Key.Name, registration.Key.Version, err)
+		}
+	}
 	localRegistrations := make([]workflow.ActionRegistration, 0, len(registrations))
 	for _, registration := range registrations {
 		if registration.Class == workflow.ActionLocal {
@@ -251,7 +272,11 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	}
 	var localExecutor workflow.LocalActionExecutor
 	if len(localRegistrations) > 0 {
-		localExecutor, err = process.NewWorkflowLocalActionExecutor(domainKernel, loaded.Registry, transaction, executionStore, workflowSchemas, localRegistrations, localBuilders)
+		var localLeaseAdmission process.WorkflowCapabilityLeaseAdmission
+		if admission, ok := cfg.CapabilityLeases.(process.WorkflowCapabilityLeaseAdmission); ok {
+			localLeaseAdmission = admission
+		}
+		localExecutor, err = process.NewWorkflowLocalActionExecutor(domainKernel, loaded.Registry, transaction, executionStore, workflowSchemas, localRegistrations, localBuilders, localLeaseAdmission)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("construct workflow local domain executor: %w", err)
 		}
@@ -309,7 +334,7 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 		return nil, nil, nil, fmt.Errorf("tenant workflow authorized condition scope is unavailable")
 	}
 	human := workflow.HumanWaitRuntime{Requests: requestsService, Store: executionStore}
-	claimHandler, err := workflow.NewDefinitionClaimHandler(executionStore, instanceStore, definitionStore, catalog, workflowSchemas, identity, conditionScope, cfg.Evaluator, human)
+	claimHandler, err := workflow.NewDefinitionClaimHandler(executionStore, instanceStore, definitionStore, catalog, workflowSchemas, identity, conditionScope, cfg.Evaluator, cfg.CapabilityLeases, human)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct tenant workflow claim handler: %w", err)
 	}

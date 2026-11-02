@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
@@ -36,6 +37,155 @@ func TestModuleStoreActivationIsAtomicAndRevisionFenced(t *testing.T) {
 	mock.ExpectRollback()
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCapabilityLeaseAdmissionAndRevocationAreEpochFenced(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewModuleStore(database, &db.MySQLDialect{})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	lease := contract.CapabilityLease{ID: "lease-1", TenantID: "tenant-a", Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}, CallerModuleID: "sales.orders", ProviderID: "finance.billing", Operation: "invoice.issue", BindingRevision: 4, GrantEpoch: 3, ExpiresAt: now.Add(time.Hour), State: "active"}
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO _kora_capability_lease (tenant_id, lease_id, scope_json, caller_module_id, provider_id, operation_name, binding_revision, grant_epoch, expires_at, state, admitted_attempts, credential_ref, revoked_by, revocation_reason, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)).WithArgs("tenant-a", "lease-1", sqlmock.AnyArg(), "sales.orders", "finance.billing", "invoice.issue", uint64(4), uint64(3), lease.ExpiresAt.Format(capabilityLeaseTimeLayout), "active", uint64(0), "", "", "", "").WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.CreateCapabilityLease(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_capability_lease SET admitted_attempts = admitted_attempts + 1 WHERE tenant_id = ? AND lease_id = ? AND scope_json = ? AND caller_module_id = ? AND provider_id = ? AND operation_name = ? AND binding_revision = ? AND grant_epoch = ? AND state = 'active' AND expires_at > ? AND credential_ref = ?`)).WithArgs("tenant-a", "lease-1", sqlmock.AnyArg(), "sales.orders", "finance.billing", "invoice.issue", uint64(4), uint64(3), now.Format(capabilityLeaseTimeLayout), "").WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.AdmitCapabilityAttempt(context.Background(), lease, now); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_capability_lease SET grant_epoch = grant_epoch + 1, state = 'revoked', revoked_by = ?, revocation_reason = ?, revoked_at = ? WHERE tenant_id = ? AND lease_id = ? AND scope_json = ? AND caller_module_id = ? AND provider_id = ? AND operation_name = ? AND binding_revision = ? AND grant_epoch = ? AND state = 'active'`)).WithArgs("security-admin", "credential compromised", now.Format(capabilityLeaseTimeLayout), "tenant-a", "lease-1", sqlmock.AnyArg(), "sales.orders", "finance.billing", "invoice.issue", uint64(4), uint64(3)).WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.RevokeCapabilityLease(context.Background(), lease, "security-admin", "credential compromised", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRevokeCapabilitiesIsScopeAndRevisionFenced(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewModuleStore(database, &db.MySQLDialect{})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	request := contract.RevokeCapability{Scope: scope, Selector: contract.CapabilitySelector{CallerModuleID: "sales.orders", ProviderID: "billing.provider", Operation: "issue"}, ExpectedRevision: 4, Reason: "provider credential compromised"}
+	scopeJSON, _ := json.Marshal(scope)
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_capability_lease SET grant_epoch = grant_epoch + 1, state = 'revoked', revoked_by = ?, revocation_reason = ?, revoked_at = ? WHERE tenant_id = ? AND scope_json = ? AND caller_module_id = ? AND provider_id = ? AND operation_name = ? AND binding_revision = ? AND state = 'active'`)).WithArgs("security-admin", request.Reason, now.Format(capabilityLeaseTimeLayout), "tenant-a", string(scopeJSON), "sales.orders", "billing.provider", "issue", uint64(4)).WillReturnResult(sqlmock.NewResult(0, 2))
+	count, err := store.RevokeCapabilities(context.Background(), request, "security-admin", now)
+	if err != nil || count != 2 {
+		t.Fatalf("scope revocation = %d, %v; want two active matching leases", count, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCapabilityLeaseSchemaUsesTransactionalMySQLTable(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewModuleStore(database, &db.MySQLDialect{})
+	mock.ExpectExec(regexp.QuoteMeta(`CREATE TABLE IF NOT EXISTS _kora_capability_lease (tenant_id VARCHAR(140) NOT NULL, lease_id VARCHAR(160) NOT NULL, scope_json TEXT NOT NULL, caller_module_id VARCHAR(160) NOT NULL, provider_id VARCHAR(160) NOT NULL, operation_name VARCHAR(160) NOT NULL, binding_revision BIGINT NOT NULL, grant_epoch BIGINT NOT NULL, expires_at VARCHAR(40) NOT NULL, state VARCHAR(16) NOT NULL, admitted_attempts BIGINT NOT NULL, credential_ref VARCHAR(320) NOT NULL, revoked_by VARCHAR(160) NOT NULL, revocation_reason VARCHAR(1000) NOT NULL, revoked_at VARCHAR(40) NOT NULL, PRIMARY KEY (tenant_id, lease_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)).WillReturnResult(sqlmock.NewResult(0, 0))
+	if err := store.EnsureCapabilityLeaseSchema(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCapabilityLeaseValidationRejectsStaleOrExpiredGrant(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewModuleStore(database, &db.LibSQLDialect{})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	lease := contract.CapabilityLease{ID: "lease-2", TenantID: "tenant-a", Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "billing", Operation: "issue", BindingRevision: 8, GrantEpoch: 2, ExpiresAt: now.Add(time.Hour), State: "active"}
+	query := regexp.QuoteMeta(`SELECT scope_json, caller_module_id, provider_id, operation_name, binding_revision, grant_epoch, expires_at, state, credential_ref FROM _kora_capability_lease WHERE tenant_id = ? AND lease_id = ?`)
+	scopeJSON, _ := json.Marshal(lease.Scope)
+	mock.ExpectQuery(query).WithArgs("tenant-a", "lease-2").WillReturnRows(sqlmock.NewRows([]string{"scope_json", "caller_module_id", "provider_id", "operation_name", "binding_revision", "grant_epoch", "expires_at", "state", "credential_ref"}).AddRow(string(scopeJSON), "sales.orders", "billing", "issue", uint64(8), uint64(2), lease.ExpiresAt.Format(capabilityLeaseTimeLayout), "active", ""))
+	if err := store.ValidateCapabilityLease(context.Background(), lease, now); err != nil {
+		t.Fatalf("valid durable lease rejected: %v", err)
+	}
+	lease.GrantEpoch++
+	mock.ExpectQuery(query).WithArgs("tenant-a", "lease-2").WillReturnRows(sqlmock.NewRows([]string{"scope_json", "caller_module_id", "provider_id", "operation_name", "binding_revision", "grant_epoch", "expires_at", "state", "credential_ref"}).AddRow(string(scopeJSON), "sales.orders", "billing", "issue", uint64(8), uint64(2), lease.ExpiresAt.Format(capabilityLeaseTimeLayout), "active", ""))
+	if err := store.ValidateCapabilityLease(context.Background(), lease, now); err == nil {
+		t.Fatal("stale grant epoch accepted")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureCapabilityLeasePreservesRevokedGrantForRecovery(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewModuleStore(database, &db.LibSQLDialect{})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	lease := contract.CapabilityLease{ID: "lease-3", TenantID: "tenant-a", Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "billing", Operation: "issue", BindingRevision: 2, GrantEpoch: 4, ExpiresAt: now.Add(time.Hour), State: "active"}
+	query := regexp.QuoteMeta(`SELECT scope_json, caller_module_id, provider_id, operation_name, binding_revision, grant_epoch, expires_at, state, admitted_attempts, credential_ref FROM _kora_capability_lease WHERE tenant_id = ? AND lease_id = ?`)
+	scopeJSON, _ := json.Marshal(lease.Scope)
+	mock.ExpectQuery(query).WithArgs("tenant-a", "lease-3").WillReturnRows(sqlmock.NewRows([]string{"scope_json", "caller_module_id", "provider_id", "operation_name", "binding_revision", "grant_epoch", "expires_at", "state", "admitted_attempts", "credential_ref"}).AddRow(string(scopeJSON), "sales.orders", "billing", "issue", uint64(2), uint64(5), lease.ExpiresAt.Format(capabilityLeaseTimeLayout), "revoked", uint64(7), ""))
+	if err := store.EnsureCapabilityLease(context.Background(), lease); err != nil {
+		t.Fatalf("revoked lease should not prevent reconciliation runtime startup: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCapabilityLeaseAdmissionPersistsExpiry(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewModuleStore(database, &db.LibSQLDialect{})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	lease := contract.CapabilityLease{ID: "lease-expired", TenantID: "tenant-a", Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "billing", Operation: "issue", BindingRevision: 2, GrantEpoch: 1, ExpiresAt: now.Add(-time.Second), State: "active"}
+	scopeJSON, _ := json.Marshal(lease.Scope)
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_capability_lease SET admitted_attempts = admitted_attempts + 1 WHERE tenant_id = ? AND lease_id = ? AND scope_json = ? AND caller_module_id = ? AND provider_id = ? AND operation_name = ? AND binding_revision = ? AND grant_epoch = ? AND state = 'active' AND expires_at > ? AND credential_ref = ?`)).WithArgs("tenant-a", "lease-expired", string(scopeJSON), "sales.orders", "billing", "issue", uint64(2), uint64(1), now.Format(capabilityLeaseTimeLayout), "").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_capability_lease SET state = 'expired' WHERE tenant_id = ? AND lease_id = ? AND scope_json = ? AND caller_module_id = ? AND provider_id = ? AND operation_name = ? AND binding_revision = ? AND grant_epoch = ? AND state = 'active' AND expires_at <= ? AND credential_ref = ?`)).WithArgs("tenant-a", "lease-expired", string(scopeJSON), "sales.orders", "billing", "issue", uint64(2), uint64(1), now.Format(capabilityLeaseTimeLayout), "").WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.AdmitCapabilityAttempt(context.Background(), lease, now); err == nil {
+		t.Fatal("expired capability lease admitted")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCapabilityLeaseRejectsInvalidScopeAndStaleRevocation(t *testing.T) {
+	invalid := contract.CapabilityLease{ID: "lease-1", TenantID: "tenant-a", Scope: contract.BusinessScope{TenantID: "tenant-b", Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "billing", Operation: "issue", BindingRevision: 1, GrantEpoch: 1, ExpiresAt: time.Now().Add(time.Hour), State: "active"}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("cross-tenant capability lease accepted")
+	}
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewModuleStore(database, &db.MySQLDialect{})
+	stale := contract.CapabilityLease{ID: "lease-1", TenantID: "tenant-a", Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "billing", Operation: "issue", BindingRevision: 1, GrantEpoch: 2, ExpiresAt: time.Now().Add(time.Hour), State: "active"}
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_capability_lease SET grant_epoch = grant_epoch + 1, state = 'revoked', revoked_by = ?, revocation_reason = ?, revoked_at = ? WHERE tenant_id = ? AND lease_id = ? AND scope_json = ? AND caller_module_id = ? AND provider_id = ? AND operation_name = ? AND binding_revision = ? AND grant_epoch = ? AND state = 'active'`)).WithArgs("admin", "revoke", sqlmock.AnyArg(), "tenant-a", "lease-1", sqlmock.AnyArg(), "sales.orders", "billing", "issue", uint64(1), uint64(2)).WillReturnResult(sqlmock.NewResult(0, 0))
+	if err := store.RevokeCapabilityLease(context.Background(), stale, "admin", "revoke", time.Now().UTC()); err == nil {
+		t.Fatal("stale revocation accepted")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

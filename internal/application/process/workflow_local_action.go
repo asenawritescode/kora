@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
@@ -21,7 +22,12 @@ type WorkflowOperationBuilder func(context.Context, workflow.ActionContext, work
 type workflowLocalActionBinding struct {
 	input, output contract.SchemaRef
 	grant         policy.Grant
+	lease         *contract.CapabilityLease
 	build         WorkflowOperationBuilder
+}
+
+type WorkflowCapabilityLeaseAdmission interface {
+	AdmitCapabilityAttemptInTx(context.Context, *sql.Tx, contract.CapabilityLease, time.Time) error
 }
 
 // WorkflowLocalStepStore is implemented by the durable workflow SQL store.
@@ -41,9 +47,10 @@ type WorkflowLocalActionExecutor struct {
 	store    WorkflowLocalStepStore
 	schemas  workflow.PayloadSchemaRegistry
 	bindings map[workflow.ActionKey]workflowLocalActionBinding
+	leases   WorkflowCapabilityLeaseAdmission
 }
 
-func NewWorkflowLocalActionExecutor(engine *kernel.Kernel, registry *doctype.Registry, begin TenantTransaction, store WorkflowLocalStepStore, schemas workflow.PayloadSchemaRegistry, registrations []workflow.ActionRegistration, builders map[workflow.ActionKey]WorkflowOperationBuilder) (*WorkflowLocalActionExecutor, error) {
+func NewWorkflowLocalActionExecutor(engine *kernel.Kernel, registry *doctype.Registry, begin TenantTransaction, store WorkflowLocalStepStore, schemas workflow.PayloadSchemaRegistry, registrations []workflow.ActionRegistration, builders map[workflow.ActionKey]WorkflowOperationBuilder, leaseAdmission ...WorkflowCapabilityLeaseAdmission) (*WorkflowLocalActionExecutor, error) {
 	if engine == nil || registry == nil || begin == nil || store == nil || schemas == nil {
 		return nil, fmt.Errorf("workflow local action executor dependencies are required")
 	}
@@ -59,12 +66,21 @@ func NewWorkflowLocalActionExecutor(engine *kernel.Kernel, registry *doctype.Reg
 		if !registration.RequiredGrant.Valid() {
 			return nil, fmt.Errorf("workflow local action %s@%d lacks a valid required grant", registration.Key.Name, registration.Key.Version)
 		}
-		bindings[registration.Key] = workflowLocalActionBinding{input: registration.InputSchema, output: registration.OutputSchema, grant: registration.RequiredGrant, build: builder}
+		bindings[registration.Key] = workflowLocalActionBinding{input: registration.InputSchema, output: registration.OutputSchema, grant: registration.RequiredGrant, lease: registration.LocalCapabilityLease, build: builder}
 	}
 	if len(bindings) != len(builders) {
 		return nil, fmt.Errorf("workflow local action builder set does not match registered actions")
 	}
-	return &WorkflowLocalActionExecutor{engine: engine, registry: registry, begin: begin, store: store, schemas: schemas, bindings: bindings}, nil
+	var leases WorkflowCapabilityLeaseAdmission
+	if len(leaseAdmission) > 0 {
+		leases = leaseAdmission[0]
+	}
+	for _, binding := range bindings {
+		if binding.lease != nil && leases == nil {
+			return nil, fmt.Errorf("local module workflow action requires transactional capability lease admission")
+		}
+	}
+	return &WorkflowLocalActionExecutor{engine: engine, registry: registry, begin: begin, store: store, schemas: schemas, bindings: bindings, leases: leases}, nil
 }
 
 func (e *WorkflowLocalActionExecutor) ExecuteLocal(ctx context.Context, claim workflow.Claim, action workflow.ActionContext, key workflow.ActionKey, input workflow.ActionInput, next contract.StepID) (workflow.ActionResult, error) {
@@ -90,6 +106,13 @@ func (e *WorkflowLocalActionExecutor) ExecuteLocal(ctx context.Context, claim wo
 		return workflow.ActionResult{}, &workflow.LocalActionFailure{Kind: workflow.LocalActionNotAppliedPermanent, Cause: contextErr}
 	}
 	operation.Context = operationContext
+	if binding.lease != nil {
+		moduleExecution := operation.Context.ModuleExecution
+		lease := binding.lease
+		if moduleExecution == nil || !moduleExecution.Verified() || moduleExecution.Scope != lease.Scope || moduleExecution.TenantID != lease.TenantID || moduleExecution.CallerModuleID != lease.CallerModuleID || moduleExecution.BindingRevision != lease.BindingRevision || moduleExecution.AllowedOperation != lease.Operation {
+			return workflow.ActionResult{}, &workflow.LocalActionFailure{Kind: workflow.LocalActionNotAppliedPermanent, Cause: contract.NewError(contract.CodePermissionDenied, "local workflow capability lease does not match the trusted module command")}
+		}
+	}
 	database, tx, release, err := e.begin(ctx, claim.Tenant)
 	if err != nil {
 		if release != nil {
@@ -114,6 +137,11 @@ func (e *WorkflowLocalActionExecutor) ExecuteLocal(ctx context.Context, claim wo
 	}()
 	if err := e.store.ValidateClaimInTx(ctx, tx, claim); err != nil {
 		return workflow.ActionResult{}, newLocalActionFailure(err, workflow.LocalActionNotAppliedRetryable)
+	}
+	if binding.lease != nil {
+		if err := e.leases.AdmitCapabilityAttemptInTx(ctx, tx, *binding.lease, time.Now().UTC()); err != nil {
+			return workflow.ActionResult{}, newLocalActionFailure(err, workflow.LocalActionNotAppliedPermanent)
+		}
 	}
 	commandResult, afterCommit, commandErr := e.engine.ExecuteInTx(ctx, database, tx, e.registry, operation)
 	if commandErr != nil {

@@ -2,6 +2,7 @@ package secret
 
 import (
 	"bytes"
+	"database/sql"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -150,6 +151,51 @@ func TestEncryptDecrypt_EmptyPlaintext(t *testing.T) {
 				t.Errorf("decrypted length = %d, want 0", len(decrypted))
 			}
 		})
+	}
+}
+
+func TestVersionedReferenceResolvesUntilRotationOrDisable(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create SQL mock:", err)
+	}
+	defer database.Close()
+	store := NewStore(database, kdb.Resolve("postgres"))
+	firstCiphertext, err := encrypt([]byte("first-credential"), deriveKey([]byte("site-a")))
+	if err != nil {
+		t.Fatal("encrypt first credential:", err)
+	}
+	secondCiphertext, err := encrypt([]byte("second-credential"), deriveKey([]byte("site-a")))
+	if err != nil {
+		t.Fatal("encrypt rotated credential:", err)
+	}
+	mock.ExpectQuery(`SELECT encrypted_value FROM _kora_secret WHERE site = \$1 AND key_name = \$2`).WithArgs("site-a", "billing-token").
+		WillReturnRows(sqlmock.NewRows([]string{"encrypted_value"}).AddRow(firstCiphertext))
+	ref, err := store.Reference("site-a", "billing-token")
+	if err != nil || ref.Key != "billing-token" || ref.Version != secretVersion(firstCiphertext) {
+		t.Fatalf("reference = %+v, %v", ref, err)
+	}
+	parsed, err := ParseReference(ref.String())
+	if err != nil || parsed != ref {
+		t.Fatalf("serialize/parse secret reference = %+v, %v", parsed, err)
+	}
+	mock.ExpectQuery(`SELECT encrypted_value FROM _kora_secret WHERE site = \$1 AND key_name = \$2`).WithArgs("site-a", "billing-token").
+		WillReturnRows(sqlmock.NewRows([]string{"encrypted_value"}).AddRow(firstCiphertext))
+	if value, err := store.ResolveReference("site-a", ref); err != nil || value != "first-credential" {
+		t.Fatalf("resolve current reference = %q, %v", value, err)
+	}
+	mock.ExpectQuery(`SELECT encrypted_value FROM _kora_secret WHERE site = \$1 AND key_name = \$2`).WithArgs("site-a", "billing-token").
+		WillReturnRows(sqlmock.NewRows([]string{"encrypted_value"}).AddRow(secondCiphertext))
+	if value, err := store.ResolveReference("site-a", ref); err == nil || value != "" {
+		t.Fatalf("stale reference resolved after rotation: %q, %v", value, err)
+	}
+	mock.ExpectQuery(`SELECT encrypted_value FROM _kora_secret WHERE site = \$1 AND key_name = \$2`).WithArgs("site-a", "billing-token").
+		WillReturnError(sql.ErrNoRows)
+	if value, err := store.ResolveReference("site-a", ref); err == nil || value != "" {
+		t.Fatalf("disabled reference resolved after deletion: %q, %v", value, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("secret reference expectations:", err)
 	}
 }
 

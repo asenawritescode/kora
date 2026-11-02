@@ -185,7 +185,12 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		if scope.TenantID != contract.TenantID(loaded.SiteID) {
 			return plugin.BindingPlan{}, contract.NewError(contract.CodePermissionDenied, "module binding scope belongs to another tenant")
 		}
-		return plugin.ResolveInstalledModules(scope, moduleSnapshot.Packages, moduleSnapshot.Modules, providers, pluginProviderSelections(selections), moduleSnapshot.Revision)
+		plan, err := plugin.ResolveInstalledModules(scope, moduleSnapshot.Packages, moduleSnapshot.Modules, providers, pluginProviderSelections(selections), moduleSnapshot.Revision)
+		if err != nil {
+			return plan, err
+		}
+		plan.LeaseAdmission = moduleStore
+		return plan, nil
 	}
 	resolveCandidateModuleBindings := func(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, extra []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
 		if scope.TenantID != contract.TenantID(loaded.SiteID) {
@@ -197,7 +202,12 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}
-		return plugin.ResolveInstalledModules(scope, packages, modules, providers, pluginProviderSelections(candidateSelections), revision)
+		plan, err := plugin.ResolveInstalledModules(scope, packages, modules, providers, pluginProviderSelections(candidateSelections), revision)
+		if err != nil {
+			return plan, err
+		}
+		plan.LeaseAdmission = moduleStore
+		return plan, nil
 	}
 	tenantScope := contract.BusinessScope{TenantID: contract.TenantID(loaded.SiteID), Kind: contract.ScopeKindTenant}
 	bindingPlan, moduleErr := resolveModuleBindings(tenantScope)
@@ -371,6 +381,12 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		workflowConfigCopy := *workflowConfig
 		workflowConfigCopy.Mailer = config.Mailer
 		workflowConfigCopy.EventBus = services.EventBus
+		workflowConfigCopy.CapabilityLeases = moduleStore
+		for i := range workflowConfigCopy.Registrations {
+			if lease := workflowConfigCopy.Registrations[i].CapabilityLease; lease != nil && lease.CredentialRef != "" {
+				workflowConfigCopy.Registrations[i].CredentialResolver = secret.CredentialResolver{Store: services.SecretStore, Site: loaded.Name}
+			}
+		}
 		workflowRuntimeConfig = &workflowConfigCopy
 	}
 	workflowWorker, definitionService, instanceService, err := configureTenantWorkflow(config.ProcessContext, workflowRuntimeConfig, loaded, dialect, requestService, workAdmission, domainKernel)

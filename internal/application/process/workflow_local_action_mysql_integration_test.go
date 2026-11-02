@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -131,6 +132,10 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 	if err != nil {
 		t.Fatal("workflow execution store:", err)
 	}
+	moduleStore := configstore.NewModuleStore(database, dialect)
+	if err := moduleStore.EnsureSchema(); err != nil {
+		t.Fatal("ensure capability lease schema:", err)
+	}
 	key := workflow.ActionKey{Name: "invoice.create-follow-up", Version: 1}
 	moduleCommandKey := workflow.ActionKey{Name: "invoice.issue-through-owner-command", Version: 1}
 	inputSchema, outputSchema := contract.SchemaRef{ID: "workflow-input", Version: 1}, contract.SchemaRef{ID: "workflow-output", Version: 1}
@@ -155,9 +160,13 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 		return kernel.Operation{Command: moduleCommand.FullName(), Payload: payload, Context: kernel.OperationContext{ModuleExecution: &moduleExecution}}, nil
 	}
 	registration := workflow.ActionRegistration{Key: key, Class: workflow.ActionLocal, InputSchema: inputSchema, OutputSchema: outputSchema, RequiredGrant: serviceGrant}
-	moduleCommandRegistration := workflow.ActionRegistration{Key: moduleCommandKey, Class: workflow.ActionLocal, InputSchema: inputSchema, OutputSchema: outputSchema, RequiredGrant: moduleCommandGrant}
+	moduleLease := contract.CapabilityLease{ID: "workflow-module-lease-" + suffix[:12], TenantID: tenant, Scope: contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "engine.internal.finance.ar", Operation: moduleCommand.FullName(), BindingRevision: 1, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	if err := moduleStore.CreateCapabilityLease(ctx, moduleLease); err != nil {
+		t.Fatal("create workflow module capability lease:", err)
+	}
+	moduleCommandRegistration := workflow.ActionRegistration{Key: moduleCommandKey, Class: workflow.ActionLocal, InputSchema: inputSchema, OutputSchema: outputSchema, RequiredGrant: moduleCommandGrant, LocalCapabilityLease: &moduleLease}
 	makeExecutor := func(stepStore WorkflowLocalStepStore) *WorkflowLocalActionExecutor {
-		executor, err := NewWorkflowLocalActionExecutor(engine, registry, begin, stepStore, integrationWorkflowSchemas{}, []workflow.ActionRegistration{registration, moduleCommandRegistration}, map[workflow.ActionKey]WorkflowOperationBuilder{key: builder, moduleCommandKey: moduleCommandBuilder})
+		executor, err := NewWorkflowLocalActionExecutor(engine, registry, begin, stepStore, integrationWorkflowSchemas{}, []workflow.ActionRegistration{registration, moduleCommandRegistration}, map[workflow.ActionKey]WorkflowOperationBuilder{key: builder, moduleCommandKey: moduleCommandBuilder}, moduleStore)
 		if err != nil {
 			t.Fatal("construct workflow local executor:", err)
 		}
@@ -222,6 +231,20 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 	moduleCommandClaim.InstanceID = moduleCommandInstance
 	if _, err := makeExecutor(store).ExecuteLocal(ctx, moduleCommandClaim, moduleCommandAction, moduleCommandKey, workflow.ActionInput{Schema: inputSchema, Data: json.RawMessage(`{}`)}, "done"); err != nil {
 		t.Fatal("execute trusted module owner command through workflow:", err)
+	}
+	if err := moduleStore.RevokeCapabilityLease(ctx, moduleLease, "security-admin", "test workflow revocation", time.Now().UTC()); err != nil {
+		t.Fatal("revoke workflow module capability:", err)
+	}
+	deniedInstance := contract.InstanceID(contract.NewID())
+	insertRunningInstance(deniedInstance)
+	deniedClaim := moduleCommandClaim
+	deniedClaim.InstanceID = deniedInstance
+	deniedAction := moduleCommandAction
+	deniedAction.InstanceID = deniedInstance
+	deniedAction.ExecutionID = contract.NewOperationID()
+	deniedAction.IdempotencyKey = contract.IdempotencyKey("workflow-module-revoked-" + suffix[:12])
+	if _, err := makeExecutor(store).ExecuteLocal(ctx, deniedClaim, deniedAction, moduleCommandKey, workflow.ActionInput{Schema: inputSchema, Data: json.RawMessage(`{}`)}, "done"); err == nil {
+		t.Fatal("revoked workflow module capability executed")
 	}
 	var issuedCount, issuedEventCount int
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(moduleInvoice.RawTableName())+" WHERE title=?", "issued:"+string(moduleCommandInstance)).Scan(&issuedCount); err != nil || issuedCount != 1 {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ type externalDispatchStore struct {
 	claim   Claim
 	key     contract.IdempotencyKey
 	ident   string
-	pinned  *contract.PinnedDispatch
+	pinned  *PinnedCapabilityAttempt
 	commit  *StepCommit
 }
 
@@ -32,15 +33,19 @@ func (s *externalDispatchStore) Renew(context.Context, Claim, time.Duration) (Cl
 func (s *externalDispatchStore) BeginExternalAttempt(_ context.Context, claim Claim, id string, key contract.IdempotencyKey, requested *contract.PinnedDispatch) (*contract.PinnedDispatch, error) {
 	s.started, s.claim, s.ident, s.key = true, claim, id, key
 	if requested != nil {
-		copy := *requested
-		if s.pinned != nil {
-			copy = *s.pinned
-		} else {
-			s.pinned = &copy
-		}
-		return &copy, nil
+		return nil, errors.New("test store requires a durable lease for pinned capabilities")
 	}
 	return nil, nil
+}
+func (s *externalDispatchStore) BeginPinnedExternalAttempt(_ context.Context, claim Claim, id string, key contract.IdempotencyKey, requested contract.PinnedDispatch, lease contract.CapabilityLease) (*PinnedCapabilityAttempt, error) {
+	s.started, s.claim, s.ident, s.key = true, claim, id, key
+	leaseAttempt := PinnedCapabilityAttempt{Dispatch: requested, Lease: lease}
+	if s.pinned != nil {
+		leaseAttempt = *s.pinned
+	} else {
+		s.pinned = &leaseAttempt
+	}
+	return &leaseAttempt, nil
 }
 func (s *externalDispatchStore) CommitStep(_ context.Context, change StepCommit) error {
 	s.commit = &change
@@ -79,15 +84,82 @@ type responseLostExternalAction struct {
 type pinnedDispatchCapture struct {
 	dispatches []contract.PinnedDispatch
 	outcome    contract.ExternalOutcome
+	err        error
 }
 
-func (p *pinnedDispatchCapture) Dispatch(_ context.Context, dispatch contract.PinnedDispatch, _ ActionRegistration, _ json.RawMessage) (ActionResult, error) {
+type testCapabilityLeaseAdmission struct {
+	leases []contract.CapabilityLease
+	err    error
+}
+
+func (g *testCapabilityLeaseAdmission) AdmitCapabilityAttempt(_ context.Context, lease contract.CapabilityLease, _ time.Time) error {
+	g.leases = append(g.leases, lease)
+	return g.err
+}
+
+func (p *pinnedDispatchCapture) Dispatch(_ context.Context, dispatch contract.PinnedDispatch, _ contract.CapabilityLease, _ ActionRegistration, _ json.RawMessage) (ActionResult, error) {
 	p.dispatches = append(p.dispatches, dispatch)
-	return ActionResult{Schema: contract.SchemaRef{ID: "output", Version: 1}, Data: json.RawMessage(`{"ok":true}`)}, nil
+	return ActionResult{Schema: contract.SchemaRef{ID: "output", Version: 1}, Data: json.RawMessage(`{"ok":true}`)}, p.err
 }
 func (p *pinnedDispatchCapture) Reconcile(_ context.Context, dispatch contract.PinnedDispatch) (contract.ExternalOutcome, ActionResult, error) {
 	p.dispatches = append(p.dispatches, dispatch)
 	return p.outcome, ActionResult{}, nil
+}
+
+type testCredentialResolver struct {
+	value string
+	err   error
+}
+
+func (r testCredentialResolver) ResolveCredential(context.Context, string) (string, error) {
+	return r.value, r.err
+}
+
+func TestHTTPSCapabilityDispatcherUsesPinnedIdentityAndSecretReference(t *testing.T) {
+	var calls int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("Authorization") != "Bearer provider-secret" || r.Header.Get("Idempotency-Key") != "stable-key" || r.Header.Get("X-Kora-Provider") != "billing.provider-a" || r.Header.Get("X-Kora-Operation") != "issue" {
+			t.Errorf("provider request headers missing pinned identity or credential")
+		}
+		_, _ = w.Write([]byte(`{"schema":{"id":"output","version":1},"data":{"ok":true}}`))
+	}))
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	dispatcher := &HTTPSCapabilityDispatcher{ProviderID: "billing.provider-a", Endpoint: server.URL, Client: client}
+	lease := contract.CapabilityLease{ID: "lease-a", TenantID: "tenant-a", Scope: externalClaim().BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", Operation: "issue", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().Add(time.Hour), State: "active", CredentialRef: "billing-token@version-a"}
+	registration := ActionRegistration{ProviderID: "billing.provider-a", CredentialResolver: testCredentialResolver{value: "provider-secret"}}
+	input := json.RawMessage(`{"ok":true}`)
+	pin := contract.PinnedDispatch{ExecutionID: "execution-a", Scope: lease.Scope, CallerModuleID: lease.CallerModuleID, ProviderID: lease.ProviderID, BindingRevision: lease.BindingRevision, Operation: contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: contract.SchemaRef{ID: "input", Version: 1}, OutputSchema: contract.SchemaRef{ID: "output", Version: 1}}, IdempotencyKey: "stable-key", InputHash: sha256Hex(input)}
+	result, err := dispatcher.Dispatch(context.Background(), pin, lease, registration, input)
+	if err != nil || result.Schema.ID != "output" || calls != 1 {
+		t.Fatalf("dispatch result=%+v err=%v calls=%d", result, err, calls)
+	}
+	registration.CredentialResolver = testCredentialResolver{err: errors.New("stale secret reference")}
+	if _, err := dispatcher.Dispatch(context.Background(), pin, lease, registration, input); err == nil || calls != 1 {
+		t.Fatalf("stale credential reference reached provider: err=%v calls=%d", err, calls)
+	}
+}
+
+func TestHTTPSCapabilityDispatcherRedactsAuthenticationFailure(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("token echoed provider-secret"))
+	}))
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	dispatcher := &HTTPSCapabilityDispatcher{ProviderID: "billing.provider-a", Endpoint: server.URL, Client: client}
+	lease := contract.CapabilityLease{ID: "lease-a", TenantID: "tenant-a", Scope: externalClaim().BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", Operation: "issue", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().Add(time.Hour), State: "active", CredentialRef: "billing-token@version-a"}
+	registration := ActionRegistration{ProviderID: "billing.provider-a", CredentialResolver: testCredentialResolver{value: "provider-secret"}}
+	input := json.RawMessage(`{"ok":true}`)
+	pin := contract.PinnedDispatch{ExecutionID: "execution-a", Scope: lease.Scope, CallerModuleID: lease.CallerModuleID, ProviderID: lease.ProviderID, BindingRevision: lease.BindingRevision, Operation: contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: contract.SchemaRef{ID: "input", Version: 1}, OutputSchema: contract.SchemaRef{ID: "output", Version: 1}}, IdempotencyKey: "stable-key", InputHash: sha256Hex(input)}
+	_, err := dispatcher.Dispatch(context.Background(), pin, lease, registration, input)
+	var failure *ExternalActionFailure
+	if !errors.As(err, &failure) || failure.Kind != ExternalNotAppliedPermanent || strings.Contains(err.Error(), "provider-secret") || strings.Contains(err.Error(), "token echoed") {
+		t.Fatalf("authentication error was not typed/redacted: %v", err)
+	}
 }
 
 func (a responseLostExternalAction) Execute(ctx context.Context, action ActionContext, input ActionInput) (ActionResult, error) {
@@ -124,7 +196,7 @@ func newExternalDispatch(t *testing.T, action Action) (*ExternalActionExecutor, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor, err := NewExternalActionExecutor(store, identity, externalDispatchSchemas{})
+	executor, err := NewExternalActionExecutor(store, identity, externalDispatchSchemas{}, &testCapabilityLeaseAdmission{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +251,7 @@ func TestPinnedCapabilityRetryUsesPersistedProviderAfterRebind(t *testing.T) {
 	registration.ProviderID = "billing.provider-a"
 	registration.BindingRevision = 8
 	registration.CallerModuleID = "sales.orders"
+	registration.CapabilityLease = &contract.CapabilityLease{ID: "lease-provider-a", TenantID: "tenant-a", Scope: externalClaim().BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", Operation: "create_obligation", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
 	registration.PinnedDispatcher = dispatcher
 	definition, step := externalDefinitionAndStep()
 	first, err := executor.Execute(context.Background(), externalClaim(), definition, step, registration)
@@ -187,6 +260,7 @@ func TestPinnedCapabilityRetryUsesPersistedProviderAfterRebind(t *testing.T) {
 	}
 	registration.ProviderID = "billing.provider-b"
 	registration.BindingRevision = 9
+	registration.CapabilityLease = &contract.CapabilityLease{ID: "lease-provider-b", TenantID: "tenant-a", Scope: externalClaim().BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-b", Operation: "create_obligation", BindingRevision: 9, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
 	claim := externalClaim()
 	claim.Attempt = 2
 	second, err := executor.Execute(context.Background(), claim, definition, step, registration)
@@ -196,8 +270,53 @@ func TestPinnedCapabilityRetryUsesPersistedProviderAfterRebind(t *testing.T) {
 	if len(dispatcher.dispatches) != 2 || dispatcher.dispatches[0].ProviderID != "billing.provider-a" || dispatcher.dispatches[1].ProviderID != "billing.provider-a" || dispatcher.dispatches[1].BindingRevision != 8 {
 		t.Fatalf("retry silently rerouted pinned dispatch: %+v", dispatcher.dispatches)
 	}
-	if store.pinned == nil || store.pinned.ProviderID != "billing.provider-a" {
+	if store.pinned == nil || store.pinned.Dispatch.ProviderID != "billing.provider-a" {
 		t.Fatalf("durable dispatch pin = %+v", store.pinned)
+	}
+	gate := executor.leases.(*testCapabilityLeaseAdmission)
+	if len(gate.leases) != 2 || gate.leases[0].ProviderID != "billing.provider-a" || gate.leases[1].ProviderID != "billing.provider-a" || gate.leases[1].ID != "lease-provider-a" {
+		t.Fatalf("retry lease authorization followed new binding instead of stored pin: %+v", gate.leases)
+	}
+}
+
+func TestPinnedCapabilityLeaseDenialPreventsProviderAttempt(t *testing.T) {
+	executor, store, registration := newExternalDispatch(t, nil)
+	dispatcher := &pinnedDispatchCapture{}
+	registration.External = nil
+	registration.Capability = &contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "create_obligation", InputSchema: registration.InputSchema, OutputSchema: registration.OutputSchema}
+	registration.ProviderID = "billing.provider-a"
+	registration.BindingRevision = 8
+	registration.CallerModuleID = "sales.orders"
+	registration.CapabilityLease = &contract.CapabilityLease{ID: "lease-provider-a", TenantID: "tenant-a", Scope: externalClaim().BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", Operation: "create_obligation", BindingRevision: 8, GrantEpoch: 3, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	registration.PinnedDispatcher = dispatcher
+	executor.leases.(*testCapabilityLeaseAdmission).err = contract.NewError(contract.CodePermissionDenied, "revoked")
+	definition, step := externalDefinitionAndStep()
+	change, err := executor.Execute(context.Background(), externalClaim(), definition, step, registration)
+	if err != nil {
+		t.Fatal("prepare denied lease retry transition:", err)
+	}
+	if change.Status != contract.InstanceFailed || !store.started || len(dispatcher.dispatches) != 0 {
+		t.Fatalf("revoked capability was sent to provider: change=%+v started=%t dispatches=%d", change, store.started, len(dispatcher.dispatches))
+	}
+}
+
+func TestPinnedProviderAuthenticationFailureIsExplicitAndRedacted(t *testing.T) {
+	executor, _, registration := newExternalDispatch(t, nil)
+	dispatcher := &pinnedDispatchCapture{err: &ExternalActionFailure{Kind: ExternalNotAppliedPermanent, Cause: errors.New("401 bearer credential-secret")}}
+	registration.External = nil
+	registration.Capability = &contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "create_obligation", InputSchema: registration.InputSchema, OutputSchema: registration.OutputSchema}
+	registration.ProviderID = "billing.provider-a"
+	registration.BindingRevision = 8
+	registration.CallerModuleID = "sales.orders"
+	registration.CapabilityLease = &contract.CapabilityLease{ID: "lease-provider-a", TenantID: "tenant-a", Scope: externalClaim().BusinessScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-a", Operation: "create_obligation", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	registration.PinnedDispatcher = dispatcher
+	definition, step := externalDefinitionAndStep()
+	change, err := executor.Execute(context.Background(), externalClaim(), definition, step, registration)
+	if err != nil {
+		t.Fatal("prepare provider authentication failure transition:", err)
+	}
+	if change.Status != contract.InstanceFailed || strings.Contains(change.Failure, "credential-secret") || change.Failure == "" {
+		t.Fatalf("provider authentication failure was not explicitly and safely recorded: %+v", change)
 	}
 }
 
@@ -211,7 +330,7 @@ func TestExternalActionRejectsMissingRegisteredGrantBeforeAttempt(t *testing.T) 
 	if err != nil {
 		t.Fatal("construct identity:", err)
 	}
-	executor, err := NewExternalActionExecutor(store, identity, externalDispatchSchemas{})
+	executor, err := NewExternalActionExecutor(store, identity, externalDispatchSchemas{}, nil)
 	if err != nil {
 		t.Fatal("construct executor:", err)
 	}
@@ -351,25 +470,27 @@ func TestExternalActionValidatesBeforePersistingOrCalling(t *testing.T) {
 func TestPinnedCapabilityDispatchIdentityIsStableAndHashesInput(t *testing.T) {
 	action := contract.CapabilityAction{CapabilityName: "billing.issue", OperationName: "IssueInvoice", InputSchema: contract.SchemaRef{ID: "invoice.issue.in", Version: 1}, OutputSchema: contract.SchemaRef{ID: "invoice.issue.out", Version: 1}}
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
-	first, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":12}`))
+	lease := contract.CapabilityLease{ID: "lease-a", TenantID: scope.TenantID, Scope: scope, CallerModuleID: "sales.orders", ProviderID: "billing-provider-a", Operation: action.OperationName, BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	first, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 8, "billing-provider-a", lease, action, "idem-a", json.RawMessage(`{"amount":12}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":12}`))
+	retry, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 8, "billing-provider-a", lease, action, "idem-a", json.RawMessage(`{"amount":12}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first != retry {
 		t.Fatalf("retry identity changed: %#v %#v", first, retry)
 	}
-	changed, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 8, "billing-provider-a", action, "idem-a", json.RawMessage(`{"amount":13}`))
+	changed, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 8, "billing-provider-a", lease, action, "idem-a", json.RawMessage(`{"amount":13}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.InputHash == changed.InputHash {
 		t.Fatal("changed request payload retained input hash")
 	}
-	rebound, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 9, "billing-provider-b", action, "idem-a", json.RawMessage(`{"amount":12}`))
+	reboundLease := contract.CapabilityLease{ID: "lease-b", TenantID: scope.TenantID, Scope: scope, CallerModuleID: "sales.orders", ProviderID: "billing-provider-b", Operation: action.OperationName, BindingRevision: 9, GrantEpoch: 1, ExpiresAt: lease.ExpiresAt, State: "active"}
+	rebound, err := NewPinnedDispatch("execution-a", scope, "sales.orders", 9, "billing-provider-b", reboundLease, action, "idem-a", json.RawMessage(`{"amount":12}`))
 	if err != nil {
 		t.Fatal(err)
 	}

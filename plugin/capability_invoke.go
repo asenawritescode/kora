@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/policy"
@@ -48,8 +49,8 @@ type CapabilityOperationResult struct {
 // InvokeCapability dispatches an operation through the provider selected in
 // this plan. Provider identity, scope, contract, schema and binding revision
 // are pinned before the handle is opened.
-func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, caller contract.ModuleID, capability contract.CapabilityName, operation string, meta contract.CommandMeta, payload json.RawMessage) (CapabilityOperationResult, error) {
-	if ctx == nil || !execution.Valid() || scope.Validate() != nil || execution.Tenant() != scope.TenantID || caller == "" || capability == "" || operation == "" || meta.IdempotencyKey == "" || len(payload) == 0 || len(payload) > 1<<20 || !json.Valid(payload) {
+func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Execution, lease contract.CapabilityLease, scope contract.BusinessScope, caller contract.ModuleID, capability contract.CapabilityName, operation string, meta contract.CommandMeta, payload json.RawMessage) (CapabilityOperationResult, error) {
+	if ctx == nil || !execution.Valid() || scope.Validate() != nil || execution.Tenant() != scope.TenantID || caller == "" || capability == "" || operation == "" || meta.IdempotencyKey == "" || len(payload) == 0 || len(payload) > 1<<20 || !json.Valid(payload) || p.LeaseAdmission == nil {
 		return CapabilityOperationResult{}, fmt.Errorf("capability invocation identity or payload is invalid")
 	}
 	key := BindingKey{Scope: scope, ConsumerModuleID: caller, CapabilityName: capability}
@@ -66,6 +67,9 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 	}
 	if spec == nil || (spec.Effect != contract.EffectLocal && spec.Effect != contract.EffectExternal) {
 		return CapabilityOperationResult{}, fmt.Errorf("capability operation is not a declared command")
+	}
+	if lease.Validate() != nil || lease.State != "active" || lease.TenantID != scope.TenantID || lease.Scope != scope || lease.CallerModuleID != caller || lease.ProviderID != binding.ProviderID || lease.Operation != operation || lease.BindingRevision != binding.Revision {
+		return CapabilityOperationResult{}, contract.NewError(contract.CodePermissionDenied, "capability lease does not match the resolved binding")
 	}
 	if err := binding.validateSchema(spec.Input, payload); err != nil {
 		return CapabilityOperationResult{}, fmt.Errorf("capability input failed its registered schema: %w", err)
@@ -96,6 +100,9 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 		_, err := p.ResolveBusinessReference(ctx, execution, scope, module, rule, ref)
 		return err
 	})
+	if err := p.LeaseAdmission.AdmitCapabilityAttempt(ctx, lease, time.Now().UTC()); err != nil {
+		return CapabilityOperationResult{}, err
+	}
 	providerResult, err := invoker.InvokeCapability(ctx, CapabilityInvocation{Context: providerContext, Execution: execution, ModuleExecution: moduleExecution, Operation: *spec, Meta: meta, Payload: append(json.RawMessage(nil), payload...), BusinessReferenceValidator: referenceValidator})
 	if err != nil {
 		return CapabilityOperationResult{}, err

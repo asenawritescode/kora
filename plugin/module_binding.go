@@ -141,6 +141,13 @@ type BindingPlan struct {
 	ProjectionScopes map[PublishedProjectionKey]contract.ResourceScopeKind
 	Blockers         []BindingDiagnostic
 	Warnings         []BindingDiagnostic
+	LeaseAdmission   CapabilityLeaseAdmission
+}
+
+// CapabilityLeaseAdmission is the tenant module store's durable pre-effect
+// gate. Implementations serialize admission against security revocation.
+type CapabilityLeaseAdmission interface {
+	AdmitCapabilityAttempt(context.Context, contract.CapabilityLease, time.Time) error
 }
 
 // ResolveInstalledModules uses the same provider resolver while including the
