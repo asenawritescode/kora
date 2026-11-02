@@ -72,6 +72,10 @@ func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageAr
 		Requires:      artifact.Manifest.Requires,
 		Exports:       artifact.Manifest.Exports,
 		ScheduledJobs: artifact.Manifest.ScheduledJobs,
+		Modules:       artifact.Manifest.Modules,
+	}
+	if err := contract.ValidateModuleSet(manifest.Modules, nil); err != nil {
+		return nil, nil, fmt.Errorf("validate package modules: %w", err)
 	}
 	validation, err := site.ValidatePack(manifest, artifact.Files)
 	if err != nil {
@@ -85,6 +89,7 @@ func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageAr
 		return nil, nil, fmt.Errorf("parse package artifact: %w", err)
 	}
 	snapshot.ScheduledJobs = append(snapshot.ScheduledJobs, artifact.Manifest.ScheduledJobs...)
+	snapshot.Modules = append(snapshot.Modules, artifact.Manifest.Modules...)
 	// Config activation persists scripts from ScriptSnapshot.Source. ParseConfigPack
 	// returns the verified bodies separately to preserve its import API, so bind
 	// each body to its hash here before the snapshot is journaled. Without this,

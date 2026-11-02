@@ -119,6 +119,24 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		return packageRecoveryRequired("tenant database admission wait needs recovery"), nil
 	}
 	store := configstore.NewStore(runtime.DB, dialect)
+	moduleStore := configstore.NewModuleStore(runtime.DB, dialect)
+	if err := moduleStore.EnsureSchema(); err != nil {
+		releaseTenantWork()
+		handle.Release()
+		return packageRecoveryRequired("module ownership store initialization needs recovery"), nil
+	}
+	tenantID, tenantIDErr := contract.ParseTenantID(info.Name)
+	if tenantIDErr != nil {
+		releaseTenantWork()
+		handle.Release()
+		return failed(contract.CodeValidationFailed, "tenant identity is invalid for module activation"), nil
+	}
+	moduleSnapshot, moduleLoadErr := moduleStore.Load(tenantID)
+	if moduleLoadErr != nil {
+		releaseTenantWork()
+		handle.Release()
+		return packageRecoveryRequired("module ownership snapshot read needs recovery"), nil
+	}
 	currentRevision, err := configstore.CurrentConfigRevision(ctx, runtime.DB, dialect)
 	if err != nil {
 		releaseTenantWork()
@@ -239,7 +257,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		OperationID: string(operation.ID), JournalKind: "management_package", FromPhase: configstore.ActivationValidated,
 		RecoveryPlan: "replace-runtime-from-tenant-db", CreatedBy: string(operation.Caller),
 		VersionLabel: "Apply package " + command.ArtifactRef, Fence: claim.Fence,
-		ExpectedRevision: expectedRevision, ArtifactDigest: command.Digest,
+		ExpectedRevision: expectedRevision, ArtifactDigest: command.Digest, ModuleSnapshotRevision: moduleSnapshot.Revision,
 	})
 	if err != nil {
 		_ = tx.Rollback()

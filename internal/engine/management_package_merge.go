@@ -27,10 +27,48 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (
 	merged.Scripts = mergeSnapshotItems(current.Scripts, incoming.Scripts, func(v *doctype.ScriptSnapshot) string { return v.Name })
 	merged.Reports = append([]json.RawMessage(nil), current.Reports...)
 	merged.ScheduledJobs = mergeScheduledJobs(current.ScheduledJobs, incoming.ScheduledJobs)
+	modules, err := mergeModuleDescriptors(current.Modules, incoming.Modules)
+	if err != nil {
+		return nil, err
+	}
+	merged.Modules = modules
 	if err := validateMergedViewRoutes(merged.Views); err != nil {
 		return nil, err
 	}
 	return &merged, nil
+}
+
+func mergeModuleDescriptors(current, incoming []contract.ModuleDescriptor) ([]contract.ModuleDescriptor, error) {
+	byID := make(map[contract.ModuleID]contract.ModuleDescriptor, len(current)+len(incoming))
+	owners := make(map[string]contract.ModuleID)
+	for _, module := range current {
+		byID[module.ID] = module
+		for _, resource := range module.Resources {
+			owners[resource.Ref.Namespace+"\x00"+resource.Ref.Name] = module.ID
+		}
+	}
+	for _, module := range incoming {
+		if existing, ok := byID[module.ID]; ok && existing.Version != module.Version {
+			return nil, fmt.Errorf("module %q update requires explicit authorized replacement", module.ID)
+		}
+		for _, resource := range module.Resources {
+			key := resource.Ref.Namespace + "\x00" + resource.Ref.Name
+			if owner, ok := owners[key]; ok && owner != module.ID {
+				return nil, fmt.Errorf("resource %q is already owned by module %q", resource.Ref.String(), owner)
+			}
+			owners[key] = module.ID
+		}
+		byID[module.ID] = module
+	}
+	modules := make([]contract.ModuleDescriptor, 0, len(byID))
+	for _, module := range byID {
+		modules = append(modules, module)
+	}
+	if err := contract.ValidateModuleSet(modules, nil); err != nil {
+		return nil, err
+	}
+	sort.Slice(modules, func(i, j int) bool { return modules[i].ID < modules[j].ID })
+	return modules, nil
 }
 
 func mergeWorkflowDefinitions(current, incoming []contract.WorkflowDefinition) []contract.WorkflowDefinition {

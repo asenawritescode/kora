@@ -54,6 +54,7 @@ type ConfigSnapshot struct {
 	Reports             []json.RawMessage                 `json:"reports,omitempty"`
 	Scripts             []*ScriptSnapshot                 `json:"scripts,omitempty"`
 	ScheduledJobs       []contract.ScheduledJobDefinition `json:"scheduled_jobs,omitempty"`
+	Modules             []contract.ModuleDescriptor       `json:"modules,omitempty"`
 	MinKoraVersion      string                            `json:"min_kora_version,omitempty"`
 }
 

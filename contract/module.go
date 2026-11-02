@@ -61,6 +61,44 @@ type CapabilityRequirement struct {
 	Required bool           `json:"required"`
 }
 
+// ModuleInstallation is the persisted lifecycle identity for one tenant module.
+//
+//contract:wire:v2
+type ModuleInstallation struct {
+	TenantID       TenantID `json:"tenant_id"`
+	ModuleID       ModuleID `json:"module_id"`
+	Version        string   `json:"version"`
+	ArtifactDigest string   `json:"artifact_digest"`
+	State          string   `json:"state"`
+	Revision       uint64   `json:"revision"`
+}
+
+// ResourceOwnership is durable ownership of a canonical resource identity.
+//
+//contract:wire:v2
+type ResourceOwnership struct {
+	TenantID      TenantID    `json:"tenant_id"`
+	Resource      ResourceRef `json:"resource"`
+	OwnerModuleID ModuleID    `json:"owner_module_id"`
+}
+
+// ModuleSnapshot is a complete candidate/published ownership state.
+//
+//contract:wire:v2
+type ModuleSnapshot struct {
+	TenantID      TenantID             `json:"tenant_id"`
+	Revision      uint64               `json:"revision"`
+	Installations []ModuleInstallation `json:"installations"`
+	Ownership     []ResourceOwnership  `json:"ownership"`
+}
+
+// ModuleStore is the persistence boundary used by activation. CommitActivation
+// must atomically compare and increment the snapshot revision with the caller's
+// activation transaction.
+type ModuleStore interface {
+	Load(tenant TenantID) (ModuleSnapshot, error)
+}
+
 // ModuleDescriptor is the canonical package level business module contract.
 //
 //contract:wire:v2

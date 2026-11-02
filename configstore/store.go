@@ -1084,15 +1084,16 @@ func (s *Store) ActivateSnapshotAtManagementClaimWithJournal(ctx context.Context
 // become visible atomically. DDL planning/application is intentionally a
 // preceding journaled phase because MySQL DDL may commit statement by statement.
 type ManagementActivationCommit struct {
-	OperationID      string
-	JournalKind      string
-	FromPhase        string
-	RecoveryPlan     string
-	CreatedBy        string
-	VersionLabel     string
-	Fence            uint64
-	ExpectedRevision uint64
-	ArtifactDigest   string
+	OperationID            string
+	JournalKind            string
+	FromPhase              string
+	RecoveryPlan           string
+	CreatedBy              string
+	VersionLabel           string
+	Fence                  uint64
+	ExpectedRevision       uint64
+	ArtifactDigest         string
+	ModuleSnapshotRevision uint64
 }
 
 // CommitManagementActivation validates the current worker claim and atomically
@@ -1111,6 +1112,30 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 	}
 	if err := s.ActivateSnapshotAtConfigRevision(tx, snapshot, siteName, dialect, commit.ExpectedRevision); err != nil {
 		return "", 0, err
+	}
+	if len(snapshot.Modules) > 0 {
+		moduleStore := NewModuleStore(s.DB, dialect)
+		if err := moduleStore.EnsureTxSchema(tx); err != nil {
+			return "", 0, err
+		}
+		tenantID, err := contract.ParseTenantID(siteName)
+		if err != nil {
+			return "", 0, fmt.Errorf("parse module snapshot tenant: %w", err)
+		}
+		existing, err := loadModuleSnapshotTx(tx, dialect, tenantID)
+		if err != nil {
+			return "", 0, err
+		}
+		if existing.Revision != commit.ModuleSnapshotRevision {
+			return "", 0, fmt.Errorf("module snapshot revision conflict: expected %d, actual %d", commit.ModuleSnapshotRevision, existing.Revision)
+		}
+		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: replaceModuleOwnership(existing.Ownership, tenantID, snapshot.Modules)}
+		if err := validateModuleSnapshot(moduleSnapshot); err != nil {
+			return "", 0, err
+		}
+		if _, err := moduleStore.CommitActivationTx(tx, commit.ModuleSnapshotRevision, moduleSnapshot); err != nil {
+			return "", 0, err
+		}
 	}
 	versionID, version, err := s.CreateConfigVersionTx(tx, siteName, commit.CreatedBy, commit.VersionLabel, "Active", snapshot, "")
 	if err != nil {
