@@ -1417,7 +1417,7 @@ func executeAIRecordMutationWithExecution(tx *orm.TxManager, reg *doctype.Regist
 		ctx = context.Background()
 	}
 	result, cerr := engine.Execute(ctx, tx.DB, reg, kernel.Operation{
-		Context: kernel.OperationContext{Site: site, TenantID: execution.Tenant(), Execution: execution, BusinessScope: tx.BusinessScope, Actor: actor, User: user, UserRole: role, Roles: actorRoles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
+		Context: kernel.OperationContext{Site: site, TenantID: execution.Tenant(), Execution: execution, BusinessScope: tx.BusinessScope, BusinessReferenceValidator: tx.BusinessReferenceValidator, Actor: actor, User: user, UserRole: role, Roles: actorRoles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
 		Command: command, Payload: raw,
 	})
 	if cerr != nil {

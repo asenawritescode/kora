@@ -381,6 +381,7 @@ func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string
 		result, cerr := k.Execute(ctx, p.tx.DB, p.registry, kernel.Operation{
 			Context: kernel.OperationContext{
 				Site: p.site, TenantID: execution.Tenant(), Execution: execution, Actor: actor, User: user, Owner: owner,
+				BusinessScope: p.tx.BusinessScope, BusinessReferenceValidator: p.tx.BusinessReferenceValidator,
 				UserRole: userRole, Roles: roles,
 				SkipHookScripts:     append([]string(nil), p.activeHooks...),
 				AllowReadOnlyFields: true, Source: kernel.SourceIntegration,

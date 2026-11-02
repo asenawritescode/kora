@@ -1,11 +1,14 @@
 package doctype
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 // ValidationError represents a single constraint violation.
@@ -62,6 +65,18 @@ func ValidateDocument(dt *DocType, doc *Document, registry *Registry, oldDoc *Do
 // constraints. Linked rules remain declarative and are never executed as
 // scripts.
 func ValidateDocumentWithResolver(dt *DocType, doc *Document, registry *Registry, oldDoc *Document, resolver LinkedDocumentResolver) ValidationErrors {
+	return ValidateDocumentWithReferenceResolver(dt, doc, registry, oldDoc, resolver, nil)
+}
+
+// ValidateDocumentWithReferenceResolver validates provider-qualified fields
+// through the trusted resolver pinned by the caller's runtime generation.
+func ValidateDocumentWithReferenceResolver(dt *DocType, doc *Document, registry *Registry, oldDoc *Document, resolver LinkedDocumentResolver, referenceResolver contract.BusinessReferenceValidator) ValidationErrors {
+	return ValidateDocumentWithResolvers(dt, doc, registry, oldDoc, resolver, referenceResolver, nil)
+}
+
+// ValidateDocumentWithResolvers validates local links, provider references and
+// captured snapshots through the caller's existing persistence/runtime services.
+func ValidateDocumentWithResolvers(dt *DocType, doc *Document, registry *Registry, oldDoc *Document, resolver LinkedDocumentResolver, referenceResolver contract.BusinessReferenceValidator, snapshotValidator contract.HistoricalSnapshotValidator) ValidationErrors {
 	var errors ValidationErrors
 
 	// Evaluate predicate-based document constraints.
@@ -142,6 +157,42 @@ func ValidateDocumentWithResolver(dt *DocType, doc *Document, registry *Registry
 		// Skip further validation if value is empty and not required.
 		if isNilOrEmpty(val) {
 			continue
+		}
+		if field.ReferenceRule != nil && field.ReferenceRule.Kind == "published_business_ref" && (oldDoc == nil || !reflect.DeepEqual(oldDoc.Get(field.Fieldname), val)) {
+			if referenceResolver == nil {
+				errors = append(errors, &ValidationError{Type: "ReferenceError", Message: "published business reference cannot be verified", Field: field.Fieldname, DocType: dt.Name})
+			} else {
+				valueToResolve := val
+				if field.HistoricalSnapshotSchema != nil {
+					var snapshot contract.HistoricalSnapshot
+					encoded, encodeErr := json.Marshal(val)
+					if encodeErr != nil || json.Unmarshal(encoded, &snapshot) != nil {
+						errors = append(errors, &ValidationError{Type: "ReferenceError", Message: "historical snapshot source is invalid", Field: field.Fieldname, DocType: dt.Name})
+						valueToResolve = nil
+					} else {
+						valueToResolve = snapshot.Source
+					}
+				}
+				raw, err := json.Marshal(valueToResolve)
+				if err != nil {
+					errors = append(errors, &ValidationError{Type: "ReferenceError", Message: "published business reference is invalid", Field: field.Fieldname, DocType: dt.Name})
+				} else if valueToResolve != nil {
+					if err := referenceResolver(contract.ModuleID(dt.ModuleOwnerID), *field.ReferenceRule, raw); err != nil {
+						errors = append(errors, &ValidationError{Type: "ReferenceError", Message: err.Error(), Field: field.Fieldname, DocType: dt.Name})
+					}
+				}
+			}
+		}
+		if field.HistoricalSnapshotSchema != nil && (oldDoc == nil || !reflect.DeepEqual(oldDoc.Get(field.Fieldname), val)) {
+			raw, err := json.Marshal(val)
+			var snapshot contract.HistoricalSnapshot
+			if err != nil || json.Unmarshal(raw, &snapshot) != nil || snapshot.Validate() != nil || snapshot.Schema != *field.HistoricalSnapshotSchema {
+				errors = append(errors, &ValidationError{Type: "SnapshotError", Message: "historical business snapshot is invalid or uses a different schema", Field: field.Fieldname, DocType: dt.Name})
+			} else if snapshotValidator == nil {
+				errors = append(errors, &ValidationError{Type: "SnapshotError", Message: "historical business snapshot schema is unavailable", Field: field.Fieldname, DocType: dt.Name})
+			} else if err := snapshotValidator(*field.HistoricalSnapshotSchema, snapshot); err != nil {
+				errors = append(errors, &ValidationError{Type: "SnapshotError", Message: err.Error(), Field: field.Fieldname, DocType: dt.Name})
+			}
 		}
 
 		// Run constraint validations.

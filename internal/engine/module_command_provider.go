@@ -47,6 +47,13 @@ func (f *kernelCommandProviderFactory) Open(ctx contract.OperationContext) (cont
 	return &kernelCommandProviderHandle{factory: f, scope: ctx.Scope, opened: time.Now().UTC()}, nil
 }
 
+func (f *kernelCommandProviderFactory) OpenReferenceResolver(ctx context.Context, operation contract.OperationContext) (contract.BusinessReferenceProviderHandle, error) {
+	if ctx == nil || operation.Scope.TenantID != f.tenant || operation.Scope.Validate() != nil || operation.Site != string(f.tenant) {
+		return nil, fmt.Errorf("kernel command reference provider scope does not match its tenant")
+	}
+	return &kernelCommandProviderHandle{factory: f, scope: operation.Scope, opened: time.Now().UTC()}, nil
+}
+
 type kernelCommandProviderHandle struct {
 	factory *kernelCommandProviderFactory
 	scope   contract.BusinessScope
@@ -63,6 +70,61 @@ func (h *kernelCommandProviderHandle) Evidence() contract.CleanupEvidence {
 		evidence.ReleasedAt = time.Now().UTC()
 	}
 	return evidence
+}
+
+// Resolve maps the provider's stable public resource identity to its owned
+// local row under the exact selected tenant or legal-entity scope. Resource
+// names and identity fields are module metadata; no companion DocType is
+// installed for the consumer.
+func (h *kernelCommandProviderHandle) Resolve(ctx context.Context, scope contract.ScopeContext, ref contract.BusinessRef) (contract.ResolvedBusinessRef, error) {
+	if ctx == nil || h == nil || h.factory == nil || h.revoked || scope.Scope != h.scope || scope.ProviderID == "" || ref.Scope != h.scope || ref.ProviderID != scope.ProviderID {
+		return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodePermissionDenied, "internal business reference scope is invalid")
+	}
+	var target *doctype.DocType
+	for _, candidate := range h.factory.registry.All() {
+		if candidate != nil && candidate.BusinessResourceType == ref.ResourceType && candidate.ModuleOwnerID == string(h.factory.owner) && candidate.ModuleAccess == contract.ModulePublished && candidate.BusinessIdentityField != "" {
+			if target != nil {
+				return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodeConflict, "published resource identity is ambiguous")
+			}
+			target = candidate
+		}
+	}
+	if target == nil || target.GetField(target.BusinessIdentityField) == nil || !target.GetField(target.BusinessIdentityField).Unique || contract.ValidateResourceBusinessScope(h.scope, target.BusinessScopePolicy) != nil {
+		return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodeNotFound, "published business reference resource is unavailable")
+	}
+	dialect := h.factory.engine.Dialect
+	query := "SELECT name FROM " + dialect.QuoteIdent(target.RawTableName()) + " WHERE " + dialect.QuoteIdent(target.BusinessIdentityField) + "=?"
+	args := []any{ref.ID}
+	if target.BusinessScopePolicy == contract.ScopeEntityOwned {
+		if target.BusinessScopeField == "" || target.GetField(target.BusinessScopeField) == nil {
+			return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodePermissionDenied, "published resource has no entity scope field")
+		}
+		query += " AND " + dialect.QuoteIdent(target.BusinessScopeField) + "=?"
+		args = append(args, h.scope.LegalEntityID)
+	}
+	rows, err := h.factory.database.QueryContext(ctx, query, args...)
+	if err != nil {
+		return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodeDependencyUnavailable, "published reference lookup failed")
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var rowName string
+		if err := rows.Scan(&rowName); err != nil {
+			return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodeDependencyUnavailable, "published reference lookup failed")
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodeDependencyUnavailable, "published reference lookup failed")
+	}
+	if count == 0 {
+		return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodeNotFound, "published business reference was not found in this scope")
+	}
+	if count > 1 {
+		return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodeConflict, "published business identity is not unique")
+	}
+	return contract.ResolvedBusinessRef{Canonical: ref}, nil
 }
 
 func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invocation plugin.CapabilityInvocation) (plugin.CapabilityInvocationResult, error) {
@@ -90,7 +152,7 @@ func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invo
 		primaryRole = actor.Roles[0]
 	}
 	operation := kernel.Operation{Command: command.FullName(), Payload: append(json.RawMessage(nil), invocation.Payload...), Context: kernel.OperationContext{
-		ModuleExecution: &moduleExecution, BusinessScope: h.scope, Site: actor.Site, TenantID: invocation.Execution.Tenant(),
+		ModuleExecution: &moduleExecution, BusinessScope: h.scope, BusinessReferenceValidator: invocation.BusinessReferenceValidator, Site: actor.Site, TenantID: invocation.Execution.Tenant(),
 		Execution: invocation.Execution, Actor: actor, User: user, Owner: user, UserRole: primaryRole, Roles: append([]string(nil), actor.Roles...),
 		Source: kernel.SourceWorker, ExpectedVersion: string(invocation.Meta.ExpectedRevision), IdempotencyKey: string(invocation.Meta.IdempotencyKey),
 	}}

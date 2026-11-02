@@ -327,7 +327,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 			}
-			if verrs := validateOperationDocument(txMgr, dt, doc, reg, nil); verrs.HasErrors() {
+			if verrs := validateOperationDocumentWithResolvers(txMgr, dt, doc, reg, nil, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
 				return nil, validationContractError(verrs)
 			}
 			if err := txMgr.PrepareInsert(dt, doc); err != nil {
@@ -397,7 +397,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 				doc.Set(field, v)
 			}
 			doc.IsNew = false
-			if verrs := validateOperationDocument(txMgr, dt, doc, reg, oldDoc); verrs.HasErrors() {
+			if verrs := validateOperationDocumentWithResolvers(txMgr, dt, doc, reg, oldDoc, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
 				return nil, validationContractError(verrs)
 			}
 			if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {

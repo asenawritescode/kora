@@ -28,7 +28,8 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 	actorType := contract.PrincipalType(request.PrincipalType)
 	op := Operation{
 		Context: OperationContext{
-			Site: request.Site, TenantID: txMgr.Execution.Tenant(), Execution: txMgr.Execution, Actor: contract.ActorContext{
+			Site: request.Site, TenantID: txMgr.Execution.Tenant(), Execution: txMgr.Execution, BusinessScope: txMgr.BusinessScope,
+			BusinessReferenceValidator: txMgr.BusinessReferenceValidator, HistoricalSnapshotValidator: txMgr.HistoricalSnapshotValidator, Actor: contract.ActorContext{
 				PrincipalID: request.PrincipalID, PrincipalType: actorType,
 				SubjectUserID: request.SubjectUserID, Site: request.Site, Roles: append([]string(nil), request.Roles...),
 			},
@@ -86,7 +87,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if validation := validateOperationDocument(txMgr, dt, doc, txMgr.Registry, nil); validation.HasErrors() {
+		if validation := validateOperationDocumentWithResolvers(txMgr, dt, doc, txMgr.Registry, nil, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); validation.HasErrors() {
 			return nil, validationContractError(validation)
 		}
 		if err := txMgr.PrepareInsert(dt, doc); err != nil {
@@ -143,7 +144,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := txMgr.RunHooksForValidate(dt, doc, oldDoc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if validation := validateOperationDocument(txMgr, dt, doc, txMgr.Registry, oldDoc); validation.HasErrors() {
+		if validation := validateOperationDocumentWithResolvers(txMgr, dt, doc, txMgr.Registry, oldDoc, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); validation.HasErrors() {
 			return nil, validationContractError(validation)
 		}
 		if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {

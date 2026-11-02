@@ -204,17 +204,19 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 		IdempotencyKey:         req.IdempotencyKey,
 		AllowReadOnlyFields:    allowReadOnlyFields,
 	}
+	services := h.runtimeService(c, site)
 	if len(actor.Roles) > 0 {
 		opCtx.UserRole = actor.Roles[0]
 	}
 	opCtx.Actor = actor
 
 	txManager := h.siteTx(c)
+	opCtx.BusinessReferenceValidator = txManager.BusinessReferenceValidator
 	txManager.CurrentUserRole = opCtx.UserRole
 	k := kernel.New(h.siteDialect(c), h.siteOutboxWriter(c))
 	k.TxManager = txManager
 	k.Commands = h.KernelCommands
-	k.CommandSchemas = h.runtimeService(c, site).CommandSchemas
+	k.CommandSchemas = services.CommandSchemas
 	result, cerr := k.Execute(c.Request.Context(), sqlDB, reg, kernel.Operation{
 		Context:  opCtx,
 		Command:  commandName,

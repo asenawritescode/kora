@@ -28,12 +28,13 @@ type CapabilityInvocationResult struct {
 // provider and operation contract. Implementations must treat Execution as
 // the actor authority and ModuleExecution as the bounded module provenance.
 type CapabilityInvocation struct {
-	Context         contract.OperationContext
-	Execution       policy.Execution
-	ModuleExecution contract.ModuleExecution
-	Operation       contract.OperationSpec
-	Meta            contract.CommandMeta
-	Payload         json.RawMessage
+	Context                    contract.OperationContext
+	Execution                  policy.Execution
+	ModuleExecution            contract.ModuleExecution
+	Operation                  contract.OperationSpec
+	Meta                       contract.CommandMeta
+	Payload                    json.RawMessage
+	BusinessReferenceValidator contract.BusinessReferenceValidator
 }
 
 // CapabilityOperationResult is the schema-bound result of one provider call.
@@ -87,7 +88,15 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 	if err != nil {
 		return CapabilityOperationResult{}, err
 	}
-	providerResult, err := invoker.InvokeCapability(ctx, CapabilityInvocation{Context: providerContext, Execution: execution, ModuleExecution: moduleExecution, Operation: *spec, Meta: meta, Payload: append(json.RawMessage(nil), payload...)})
+	referenceValidator := contract.BusinessReferenceValidator(func(module contract.ModuleID, rule contract.ReferenceRule, raw json.RawMessage) error {
+		var ref contract.BusinessRef
+		if err := json.Unmarshal(raw, &ref); err != nil {
+			return fmt.Errorf("business reference must be a provider-qualified object")
+		}
+		_, err := p.ResolveBusinessReference(ctx, execution, scope, module, rule, ref)
+		return err
+	})
+	providerResult, err := invoker.InvokeCapability(ctx, CapabilityInvocation{Context: providerContext, Execution: execution, ModuleExecution: moduleExecution, Operation: *spec, Meta: meta, Payload: append(json.RawMessage(nil), payload...), BusinessReferenceValidator: referenceValidator})
 	if err != nil {
 		return CapabilityOperationResult{}, err
 	}
@@ -102,4 +111,36 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 		return CapabilityOperationResult{}, fmt.Errorf("capability output failed its registered schema: %w", err)
 	}
 	return CapabilityOperationResult{ExecutionID: providerResult.ExecutionID, Status: "completed", OutputSchema: spec.Output, Output: append(json.RawMessage(nil), output...)}, nil
+}
+
+// ResolveBusinessReference opens only the provider already selected for the
+// consumer capability in this immutable plan. It does not search alternate
+// providers when resolution fails.
+func (p BindingPlan) ResolveBusinessReference(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, consumer contract.ModuleID, rule contract.ReferenceRule, ref contract.BusinessRef) (contract.ResolvedBusinessRef, error) {
+	if ctx == nil || !execution.Valid() || execution.Tenant() != scope.TenantID || scope.Validate() != nil || consumer == "" || rule.Validate() != nil || rule.Kind != "published_business_ref" || rule.ResourceType != ref.ResourceType {
+		return contract.ResolvedBusinessRef{}, fmt.Errorf("business reference rule or verified execution is invalid")
+	}
+	binding, ok := p.Resolve(BindingKey{Scope: scope, ConsumerModuleID: consumer, CapabilityName: rule.CapabilityName})
+	if !ok || binding.Factory == nil || binding.Revision == 0 || binding.Revision != p.Revision {
+		return contract.ResolvedBusinessRef{}, fmt.Errorf("business reference provider is unavailable or unpinned")
+	}
+	if ref.ProviderID != binding.ProviderID {
+		return contract.ResolvedBusinessRef{}, fmt.Errorf("business reference provider does not match selected binding")
+	}
+	factory, ok := binding.Factory.(interface {
+		OpenReferenceResolver(context.Context, contract.OperationContext) (contract.BusinessReferenceProviderHandle, error)
+	})
+	if !ok {
+		return contract.ResolvedBusinessRef{}, fmt.Errorf("selected provider does not support business reference resolution")
+	}
+	actor := execution.Actor()
+	handle, err := factory.OpenReferenceResolver(ctx, contract.OperationContext{Site: string(scope.TenantID), Actor: actor.PrincipalID, Scope: scope})
+	if err != nil {
+		return contract.ResolvedBusinessRef{}, fmt.Errorf("open selected reference provider: %w", err)
+	}
+	if handle == nil {
+		return contract.ResolvedBusinessRef{}, fmt.Errorf("selected reference provider returned no resolver")
+	}
+	defer handle.Revoke()
+	return contract.ValidateBusinessReference(ctx, handle, contract.ScopeContext{Scope: scope, ProviderID: binding.ProviderID}, ref, rule.ResourceType)
 }

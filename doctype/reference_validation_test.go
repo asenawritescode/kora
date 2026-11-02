@@ -2,12 +2,121 @@ package doctype
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"testing"
+	"time"
+
+	"github.com/asenawritescode/kora/contract"
 )
+
+func TestPublishedBusinessReferenceUsesTrustedValidatorAndFailsClosed(t *testing.T) {
+	dt := &DocType{Name: "Sales Order", ModuleOwnerID: "sales.orders", Fields: []Field{{Fieldname: "warehouse_location", Fieldtype: "JSON", ReferenceRule: &contract.ReferenceRule{Kind: "published_business_ref", CapabilityName: "warehouse.lookup", ResourceType: "warehouse.location"}}}}
+	doc := NewDocument(dt.Name)
+	doc.Set("warehouse_location", map[string]any{"provider_id": "warehouse-a", "resource_type": "warehouse.location", "id": "loc-1", "scope": map[string]any{"tenant_id": "tenant-a", "kind": "tenant"}})
+	if errs := ValidateDocumentWithResolver(dt, doc, nil, nil, nil); !errs.HasErrors() {
+		t.Fatal("published reference without a selected provider resolver was accepted")
+	}
+	called := false
+	validator := contract.BusinessReferenceValidator(func(owner contract.ModuleID, rule contract.ReferenceRule, raw json.RawMessage) error {
+		called = true
+		if owner != "sales.orders" || rule.CapabilityName != "warehouse.lookup" {
+			t.Fatalf("reference lost owner or capability: %q %#v", owner, rule)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil || got["provider_id"] != "warehouse-a" {
+			t.Fatalf("reference identity not preserved: %s, %v", raw, err)
+		}
+		return nil
+	})
+	if errs := ValidateDocumentWithReferenceResolver(dt, doc, nil, nil, nil, validator); errs.HasErrors() || !called {
+		t.Fatalf("valid published reference rejected: called=%v errors=%v", called, errs)
+	}
+	called = false
+	old := NewDocument(dt.Name)
+	old.Set("warehouse_location", doc.Get("warehouse_location"))
+	changed := NewDocument(dt.Name)
+	changed.Set("warehouse_location", doc.Get("warehouse_location"))
+	outage := contract.BusinessReferenceValidator(func(contract.ModuleID, contract.ReferenceRule, json.RawMessage) error {
+		called = true
+		return fmt.Errorf("provider offline")
+	})
+	if errs := ValidateDocumentWithReferenceResolver(dt, changed, nil, old, nil, outage); errs.HasErrors() || called {
+		t.Fatalf("unrelated update revalidated retained reference during outage: called=%v errors=%v", called, errs)
+	}
+}
+
+func TestPublishedBusinessReferenceDoesNotRequireLocalCompanionDoctype(t *testing.T) {
+	consumer := &DocType{Name: "Sales Order", ModuleOwnerID: "sales.orders", Fields: []Field{{Fieldname: "warehouse_location", Fieldtype: "JSON", ReferenceRule: &contract.ReferenceRule{Kind: "published_business_ref", CapabilityName: "warehouse.lookup", ResourceType: "warehouse.location"}}}}
+	findings := ValidateSnapshotReferences(&ConfigSnapshot{DocTypes: []*DocType{consumer}}, NewRegistry())
+	for _, finding := range findings {
+		if finding.Code == "reference.doctype_missing" || finding.Code == "reference.published_rule_cannot_use_link" {
+			t.Fatalf("external identity incorrectly requires a local companion DocType: %#v", findings)
+		}
+	}
+}
+
+func TestPublishedBusinessIdentityRequiresOwnerDeclaredUniqueField(t *testing.T) {
+	valid := &DocType{Name: "Warehouse Location", BusinessResourceType: "warehouse.location", BusinessIdentityField: "external_code", ModuleOwnerID: "warehouse.module", ModuleAccess: contract.ModulePublished, Fields: []Field{{Fieldname: "external_code", Fieldtype: "Data", Unique: true}}}
+	if findings := ValidateSnapshotReferences(&ConfigSnapshot{DocTypes: []*DocType{valid}}, NewRegistry()); len(findings) != 0 {
+		t.Fatalf("valid published identity metadata rejected: %#v", findings)
+	}
+	invalid := *valid
+	invalid.Fields = []Field{{Fieldname: "external_code", Fieldtype: "Data"}}
+	findings := ValidateSnapshotReferences(&ConfigSnapshot{DocTypes: []*DocType{&invalid}}, NewRegistry())
+	for _, finding := range findings {
+		if finding.Code == "reference.business_identity_invalid" {
+			return
+		}
+	}
+	t.Fatalf("non-unique published identity field accepted: %#v", findings)
+}
+
+func TestHistoricalSnapshotRequiresDeclaredSchemaAndValidatesWithoutProvider(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	schema := contract.SchemaRef{ID: "warehouse-location.snapshot", Version: 2}
+	snapshot := contract.HistoricalSnapshot{Source: contract.BusinessRef{ProviderID: "warehouse-old", ResourceType: "warehouse.location", ID: "EXT-1", Scope: scope}, BusinessScope: scope, CapturedAt: time.Now().UTC(), Schema: schema, Data: json.RawMessage(`{"label":"Issued location"}`)}
+	raw, _ := json.Marshal(snapshot)
+	dt := &DocType{Name: "Issued Invoice", ModuleOwnerID: "sales.orders", Fields: []Field{{Fieldname: "warehouse_snapshot", Fieldtype: "JSON", ReferenceRule: &contract.ReferenceRule{Kind: "published_business_ref", CapabilityName: "warehouse.lookup", ResourceType: "warehouse.location"}, HistoricalSnapshotSchema: &schema}}}
+	doc := NewDocument(dt.Name)
+	doc.Set("warehouse_snapshot", json.RawMessage(raw))
+	if errs := ValidateDocumentWithResolvers(dt, doc, nil, nil, nil, nil, nil); !errs.HasErrors() {
+		t.Fatal("snapshot accepted without its captured schema validator")
+	}
+	called := false
+	referenceValidator := contract.BusinessReferenceValidator(func(owner contract.ModuleID, rule contract.ReferenceRule, raw json.RawMessage) error {
+		var ref contract.BusinessRef
+		if err := json.Unmarshal(raw, &ref); err != nil || owner != "sales.orders" || ref.ProviderID != "warehouse-old" || rule.ResourceType != ref.ResourceType {
+			return fmt.Errorf("snapshot source was not checked through its declared provider")
+		}
+		return nil
+	})
+	validator := contract.HistoricalSnapshotValidator(func(expected contract.SchemaRef, got contract.HistoricalSnapshot) error {
+		called = true
+		if expected != schema || got.Source.ProviderID != "warehouse-old" {
+			t.Fatalf("snapshot validator received wrong schema or identity: %#v %#v", expected, got.Source)
+		}
+		return contract.ValidateHistoricalSnapshot(got, func(gotSchema contract.SchemaRef, data json.RawMessage) error {
+			if gotSchema != schema || !json.Valid(data) {
+				return fmt.Errorf("captured payload failed schema")
+			}
+			return nil
+		})
+	})
+	if errs := ValidateDocumentWithResolvers(dt, doc, nil, nil, nil, referenceValidator, validator); errs.HasErrors() || !called {
+		t.Fatalf("valid captured snapshot rejected without provider: called=%v errors=%v", called, errs)
+	}
+	wrong := snapshot
+	wrong.Schema.Version++
+	wrongRaw, _ := json.Marshal(wrong)
+	doc.Set("warehouse_snapshot", json.RawMessage(wrongRaw))
+	if errs := ValidateDocumentWithResolvers(dt, doc, nil, nil, nil, referenceValidator, validator); !errs.HasErrors() {
+		t.Fatal("snapshot with undeclared captured schema accepted")
+	}
+}
 
 func TestPageComponentContractsMatchRenderedComponentRegistry(t *testing.T) {
 	source, err := os.ReadFile(filepath.Join("..", "ui", "src", "components", "views", "registry.tsx"))

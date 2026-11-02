@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 // ReferenceFinding describes a configuration reference that cannot be safely
@@ -99,8 +101,17 @@ func ValidateSnapshotReferences(candidate *ConfigSnapshot, live *Registry) []Ref
 		if dt == nil {
 			continue
 		}
+		if dt.BusinessIdentityField != "" || dt.BusinessResourceType != "" {
+			identity := dt.GetField(dt.BusinessIdentityField)
+			if dt.BusinessResourceType == "" || dt.BusinessIdentityField == "" || identity == nil || !identity.Unique || dt.ModuleOwnerID == "" || dt.ModuleAccess != contract.ModulePublished {
+				add("reference.business_identity_invalid", "doctypes["+dt.Name+"].business_identity_field", "field", dt.BusinessIdentityField, "business identity requires a published owner resource type and a registered unique field")
+			}
+		}
 		for fi, field := range dt.Fields {
 			path := fmt.Sprintf("doctypes[%s].fields[%d]", dt.Name, fi)
+			if field.HistoricalSnapshotSchema != nil && (field.Fieldtype != "JSON" || field.HistoricalSnapshotSchema.ID == "" || field.HistoricalSnapshotSchema.Version == 0 || field.ReferenceRule == nil || field.ReferenceRule.Kind != "published_business_ref") {
+				add("reference.snapshot_schema_invalid", path+".historical_snapshot_schema", "schema", field.HistoricalSnapshotSchema.ID, "historical snapshots require a JSON field, versioned schema, and published source reference rule")
+			}
 			if field.ReferenceRule != nil {
 				if err := field.ReferenceRule.Validate(); err != nil {
 					add("reference.rule_invalid", path+".reference_rule", "reference_rule", field.ReferenceRule.Kind, err.Error())

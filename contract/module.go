@@ -874,11 +874,27 @@ type ResolvedBusinessRef struct {
 	Display   string
 }
 type BusinessReferenceResolver interface {
-	Resolve(scope ScopeContext, ref BusinessRef) (ResolvedBusinessRef, error)
+	Resolve(context.Context, ScopeContext, BusinessRef) (ResolvedBusinessRef, error)
 }
 
-func ValidateBusinessReference(resolver BusinessReferenceResolver, scope ScopeContext, ref BusinessRef, expectedResourceType string) (ResolvedBusinessRef, error) {
-	if scope.Scope.Validate() != nil || ref.Scope.Validate() != nil || ref.Scope != scope.Scope || ref.ProviderID == "" || ref.ResourceType == "" || ref.ID == "" {
+// BusinessReferenceProviderHandle is a granted capability handle that also
+// resolves provider-owned business identities in the handle's exact scope.
+type BusinessReferenceProviderHandle interface {
+	CapabilityHandle
+	BusinessReferenceResolver
+}
+
+// BusinessReferenceValidator is injected from a verified runtime binding plan
+// into the shared document validation path. It is deliberately not serializable
+// and cannot be supplied through an API payload.
+type BusinessReferenceValidator func(ModuleID, ReferenceRule, json.RawMessage) error
+
+// HistoricalSnapshotValidator checks a retained snapshot against its declared
+// field schema and verified transaction scope without consulting its provider.
+type HistoricalSnapshotValidator func(SchemaRef, HistoricalSnapshot) error
+
+func ValidateBusinessReference(ctx context.Context, resolver BusinessReferenceResolver, scope ScopeContext, ref BusinessRef, expectedResourceType string) (ResolvedBusinessRef, error) {
+	if ctx == nil || scope.Scope.Validate() != nil || ref.Scope.Validate() != nil || ref.Scope != scope.Scope || ref.ProviderID == "" || scope.ProviderID == "" || ref.ProviderID != scope.ProviderID || ref.ResourceType == "" || ref.ID == "" {
 		return ResolvedBusinessRef{}, fmt.Errorf("business reference requires verified scope and provider-qualified identity")
 	}
 	if ref.ResourceType != expectedResourceType {
@@ -887,7 +903,7 @@ func ValidateBusinessReference(resolver BusinessReferenceResolver, scope ScopeCo
 	if resolver == nil {
 		return ResolvedBusinessRef{}, fmt.Errorf("business reference provider is unavailable")
 	}
-	resolved, err := resolver.Resolve(scope, ref)
+	resolved, err := resolver.Resolve(ctx, scope, ref)
 	if err != nil {
 		return ResolvedBusinessRef{}, err
 	}
@@ -907,6 +923,21 @@ type HistoricalSnapshot struct {
 	Schema        SchemaRef     `json:"schema"`
 	//contract:json
 	Data json.RawMessage `json:"data"`
+}
+
+// ValidateHistoricalSnapshot checks the captured payload against its stored
+// schema without resolving the source provider.
+func ValidateHistoricalSnapshot(snapshot HistoricalSnapshot, validate func(SchemaRef, json.RawMessage) error) error {
+	if err := snapshot.Validate(); err != nil {
+		return err
+	}
+	if validate == nil {
+		return fmt.Errorf("historical snapshot schema validator is unavailable")
+	}
+	if err := validate(snapshot.Schema, append(json.RawMessage(nil), snapshot.Data...)); err != nil {
+		return fmt.Errorf("historical snapshot data failed captured schema: %w", err)
+	}
+	return nil
 }
 
 func (s HistoricalSnapshot) Validate() error {

@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -184,7 +185,7 @@ type referenceResolverFixture struct {
 	scope  ScopeContext
 }
 
-func (r *referenceResolverFixture) Resolve(scope ScopeContext, ref BusinessRef) (ResolvedBusinessRef, error) {
+func (r *referenceResolverFixture) Resolve(_ context.Context, scope ScopeContext, ref BusinessRef) (ResolvedBusinessRef, error) {
 	r.scope = scope
 	if r.err != nil {
 		return ResolvedBusinessRef{}, r.err
@@ -196,7 +197,7 @@ func TestBusinessReferenceProviderQualificationAndScope(t *testing.T) {
 	entityScope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindLegalEntity, LegalEntityID: "entity-a"}
 	ref := BusinessRef{ProviderID: "warehouse-a", ResourceType: "warehouse.location", ID: "same-id", Scope: entityScope}
 	resolver := &referenceResolverFixture{result: ResolvedBusinessRef{Canonical: ref, Revision: 4, Display: "Main"}}
-	resolved, err := ValidateBusinessReference(resolver, ScopeContext{Scope: entityScope}, ref, "warehouse.location")
+	resolved, err := ValidateBusinessReference(context.Background(), resolver, ScopeContext{Scope: entityScope, ProviderID: "warehouse-a"}, ref, "warehouse.location")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +206,7 @@ func TestBusinessReferenceProviderQualificationAndScope(t *testing.T) {
 	}
 	otherEntityRef := ref
 	otherEntityRef.Scope.LegalEntityID = "entity-b"
-	if _, err := ValidateBusinessReference(resolver, ScopeContext{Scope: entityScope}, otherEntityRef, "warehouse.location"); err == nil {
+	if _, err := ValidateBusinessReference(context.Background(), resolver, ScopeContext{Scope: entityScope, ProviderID: "warehouse-a"}, otherEntityRef, "warehouse.location"); err == nil {
 		t.Fatal("business reference from a different entity scope accepted")
 	}
 	other := ref
@@ -213,10 +214,10 @@ func TestBusinessReferenceProviderQualificationAndScope(t *testing.T) {
 	if other == ref {
 		t.Fatal("provider did not participate in identity")
 	}
-	if _, err := ValidateBusinessReference(resolver, ScopeContext{Scope: BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}}, ref, "account.customer"); err == nil {
+	if _, err := ValidateBusinessReference(context.Background(), resolver, ScopeContext{Scope: BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}, ProviderID: "warehouse-a"}, ref, "account.customer"); err == nil {
 		t.Fatal("wrong resource type accepted")
 	}
-	if _, err := ValidateBusinessReference(nil, ScopeContext{Scope: BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}}, ref, "warehouse.location"); err == nil {
+	if _, err := ValidateBusinessReference(context.Background(), nil, ScopeContext{Scope: BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}, ProviderID: "warehouse-a"}, ref, "warehouse.location"); err == nil {
 		t.Fatal("unknown provider accepted")
 	}
 }

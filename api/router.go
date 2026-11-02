@@ -224,6 +224,10 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 				tm := &orm.TxManager{DB: sqlDB, Registry: r, Dialect: h.siteDialect(c)}
 				tm.Context = c.Request.Context()
 				if verified {
+					tm.BusinessScope = businessScopeFromRequest(c, execution)
+					if siteNameStr, ok := siteName.(string); ok {
+						tm.BusinessReferenceValidator = newBusinessReferenceValidator(c.Request.Context(), h.runtimeService(c, siteNameStr), execution, tm.BusinessScope)
+					}
 					// Durable after-hooks must be captured with the verified tenant
 					// identity and the exact configuration revision pinned by the
 					// site router for this request.

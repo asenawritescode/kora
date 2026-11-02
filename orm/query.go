@@ -106,8 +106,10 @@ func DerivePrefix(name string) string {
 
 // TxManager provides transactional operations on documents.
 type TxManager struct {
-	DB            *sql.DB
-	BusinessScope contract.BusinessScope
+	DB                          *sql.DB
+	BusinessScope               contract.BusinessScope
+	BusinessReferenceValidator  contract.BusinessReferenceValidator
+	HistoricalSnapshotValidator contract.HistoricalSnapshotValidator
 	// Transaction binds reads performed during a kernel operation to its owner
 	// transaction. The kernel sets and clears this only for the operation scope.
 	Transaction *sql.Tx

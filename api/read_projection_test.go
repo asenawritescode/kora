@@ -1,8 +1,11 @@
 package api
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -57,5 +60,30 @@ func TestResourceReadProjectionsOmitHiddenAndPasswordFields(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHistoricalBusinessSnapshotProjectsWithoutProviderResolution(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	snapshot := contract.HistoricalSnapshot{Source: contract.BusinessRef{ProviderID: "warehouse-old", ResourceType: "warehouse.location", ID: "same-id", Scope: scope}, BusinessScope: scope, CapturedAt: time.Now().UTC(), Schema: contract.SchemaRef{ID: "warehouse.location", Version: 1}, Data: json.RawMessage(`{"label":"Issued location"}`)}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dt := &doctype.DocType{Name: "Issued Invoice", Fields: []doctype.Field{{Fieldname: "warehouse_snapshot", Fieldtype: "JSON"}}}
+	doc := doctype.NewDocument(dt.Name)
+	doc.Name = "INV-1"
+	doc.Set("warehouse_snapshot", json.RawMessage(raw))
+	projected := docToMap(doc, dt, nil, nil)
+	var got contract.HistoricalSnapshot
+	encoded, err := json.Marshal(projected["warehouse_snapshot"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := got.Validate(); err != nil || got.Source.ProviderID != "warehouse-old" || string(got.Data) != `{"label":"Issued location"}` {
+		t.Fatalf("retained historical snapshot was not readable: %#v, %v", got, err)
 	}
 }

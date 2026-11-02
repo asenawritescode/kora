@@ -139,23 +139,25 @@ func LookupCommand(name string) (CommandDefinition, bool) {
 // OperationContext carries everything an adapter must resolve before invoking
 // the kernel. It is an explicit value, never smuggled through context.Context.
 type OperationContext struct {
-	ModuleExecution     *contract.ModuleExecution
-	BusinessScope       contract.BusinessScope
-	Site                string                // authenticated tenant route, retained for audit and compatibility
-	TenantID            contract.TenantID     // stable tenant identity from routed runtime
-	Execution           policy.Execution      // verified identity; legacy internal callers are being migrated
-	Actor               contract.ActorContext // authenticated principal
-	User                string                // owner-attribution user ("" → "system")
-	Owner               string                // internal owner override; adapters must not populate this from user data
-	UserRole            string                // primary role used by workflow policy
-	Roles               []string              // roles used for permission-matrix lookup
-	SkipHookScripts     []string              // trusted internal stack prevents recursive execution of active lifecycle scripts
-	AllowReadOnlyFields bool                  // trusted internal writers may update UI-read-only fields
-	Source              Source                // adapter surface
-	CorrelationID       string
-	CausationID         string
-	CausationDepth      uint16
-	ExpectedVersion     string
+	ModuleExecution             *contract.ModuleExecution
+	BusinessScope               contract.BusinessScope
+	BusinessReferenceValidator  contract.BusinessReferenceValidator
+	HistoricalSnapshotValidator contract.HistoricalSnapshotValidator
+	Site                        string                // authenticated tenant route, retained for audit and compatibility
+	TenantID                    contract.TenantID     // stable tenant identity from routed runtime
+	Execution                   policy.Execution      // verified identity; legacy internal callers are being migrated
+	Actor                       contract.ActorContext // authenticated principal
+	User                        string                // owner-attribution user ("" → "system")
+	Owner                       string                // internal owner override; adapters must not populate this from user data
+	UserRole                    string                // primary role used by workflow policy
+	Roles                       []string              // roles used for permission-matrix lookup
+	SkipHookScripts             []string              // trusted internal stack prevents recursive execution of active lifecycle scripts
+	AllowReadOnlyFields         bool                  // trusted internal writers may update UI-read-only fields
+	Source                      Source                // adapter surface
+	CorrelationID               string
+	CausationID                 string
+	CausationDepth              uint16
+	ExpectedVersion             string
 	// ExpectedConfigRevision fences internal operations that selected behavior
 	// from tenant configuration before entering the source transaction.
 	ExpectedConfigRevision uint64

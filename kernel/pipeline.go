@@ -124,6 +124,9 @@ func captureLifecycleHooks(ctx context.Context, txMgr *orm.TxManager, tx *sql.Tx
 // transaction (the mutation itself writes its outbox rows via orm InTx
 // variants). Any failure rolls back everything; a commit implies all of it.
 func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, def CommandDefinition, opID string, afterCommit *func()) (*ResultData, *contract.Error) {
+	if op.Context.HistoricalSnapshotValidator == nil {
+		op.Context.HistoricalSnapshotValidator = newHistoricalSnapshotValidator(op.Context.BusinessScope, k.CommandSchemas)
+	}
 	ownsTransaction := dbTx == nil
 	auditFailure := func(code contract.Code) {
 		if ownsTransaction {
@@ -141,6 +144,9 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 	priorMutationExecutor := txMgr.ScriptMutationExecutor
 	priorPostCommitHooks := txMgr.PostCommitHooks
 	priorTransaction := txMgr.Transaction
+	priorReferenceValidator, priorSnapshotValidator := txMgr.BusinessReferenceValidator, txMgr.HistoricalSnapshotValidator
+	txMgr.BusinessReferenceValidator = op.Context.BusinessReferenceValidator
+	txMgr.HistoricalSnapshotValidator = op.Context.HistoricalSnapshotValidator
 	txMgr.Transaction = dbTx
 	txMgr.PostCommitHooks = nil
 	txMgr.ScriptMutationExecutor = script.MutationExecutorFunc(func(nestedCtx context.Context, request script.MutationRequest) (json.RawMessage, error) {
@@ -150,6 +156,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		txMgr.ScriptMutationExecutor = priorMutationExecutor
 		txMgr.PostCommitHooks = priorPostCommitHooks
 		txMgr.Transaction = priorTransaction
+		txMgr.BusinessReferenceValidator, txMgr.HistoricalSnapshotValidator = priorReferenceValidator, priorSnapshotValidator
 	}()
 
 	doctypeName := payloadDoctype(op.Payload)
@@ -398,7 +405,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 				}
 			}
-			if verrs := validateOperationDocumentWithResolver(recordDT, doc, reg, oldDoc, resolver); verrs.HasErrors() {
+			if verrs := doctype.ValidateDocumentWithResolvers(recordDT, doc, reg, oldDoc, resolver, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
 				return nil, validationContractError(verrs)
 			}
 			if oldDoc == nil {
@@ -496,7 +503,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if err := k.initializeWorkflowStateOnCreate(ctx, dbTx, op, dt, doc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if verrs := validateOperationDocument(txMgr, dt, doc, reg, nil); verrs.HasErrors() {
+		if verrs := validateOperationDocumentWithResolvers(txMgr, dt, doc, reg, nil, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
 			return nil, validationContractError(verrs)
 		}
 		if err := txMgr.PrepareInsert(dt, doc); err != nil {
@@ -578,7 +585,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if err := k.rejectWorkflowStateChange(ctx, dbTx, op, dt, reg, oldDoc, doc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if verrs := validateOperationDocument(txMgr, dt, doc, reg, oldDoc); verrs.HasErrors() {
+		if verrs := validateOperationDocumentWithResolvers(txMgr, dt, doc, reg, oldDoc, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
 			return nil, validationContractError(verrs)
 		}
 		if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {
@@ -819,11 +826,14 @@ func validateOperationDocument(txMgr *orm.TxManager, dt *doctype.DocType, doc *d
 	resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
 		return txMgr.GetDoc(target, name, "")
 	}
-	return validateOperationDocumentWithResolver(dt, doc, reg, oldDoc, resolver)
+	return doctype.ValidateDocumentWithReferenceResolver(dt, doc, reg, oldDoc, resolver, nil)
 }
 
-func validateOperationDocumentWithResolver(dt *doctype.DocType, doc *doctype.Document, reg *doctype.Registry, oldDoc *doctype.Document, resolver doctype.LinkedDocumentResolver) doctype.ValidationErrors {
-	return doctype.ValidateDocumentWithResolver(dt, doc, reg, oldDoc, resolver)
+func validateOperationDocumentWithResolvers(txMgr *orm.TxManager, dt *doctype.DocType, doc *doctype.Document, reg *doctype.Registry, oldDoc *doctype.Document, referenceResolver contract.BusinessReferenceValidator, snapshotValidator contract.HistoricalSnapshotValidator) doctype.ValidationErrors {
+	resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
+		return txMgr.GetDoc(target, name, "")
+	}
+	return doctype.ValidateDocumentWithResolvers(dt, doc, reg, oldDoc, resolver, referenceResolver, snapshotValidator)
 }
 
 func resolveCreateBundleData(raw json.RawMessage, priorNames map[string]string) (json.RawMessage, error) {

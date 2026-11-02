@@ -31,6 +31,109 @@ type operationTestHandle struct {
 	err         error
 }
 
+type referenceTestHandle struct {
+	name    contract.CapabilityName
+	scope   contract.BusinessScope
+	opened  int
+	result  contract.ResolvedBusinessRef
+	err     error
+	revoked bool
+}
+
+func (h *referenceTestHandle) Name() contract.CapabilityName      { return h.name }
+func (h *referenceTestHandle) Scope() contract.GrantScope         { return contract.GrantScopeOperation }
+func (h *referenceTestHandle) Revoke()                            { h.revoked = true }
+func (h *referenceTestHandle) Evidence() contract.CleanupEvidence { return contract.CleanupEvidence{} }
+func (h *referenceTestHandle) Resolve(_ context.Context, scope contract.ScopeContext, ref contract.BusinessRef) (contract.ResolvedBusinessRef, error) {
+	if scope.Scope != h.scope {
+		return contract.ResolvedBusinessRef{}, errors.New("scope mismatch")
+	}
+	if h.err != nil {
+		return contract.ResolvedBusinessRef{}, h.err
+	}
+	return h.result, nil
+}
+
+type referenceTestFactory struct {
+	name   contract.CapabilityName
+	handle *referenceTestHandle
+}
+
+func (f referenceTestFactory) Capability() contract.CapabilityName { return f.name }
+func (f referenceTestFactory) Open(contract.OperationContext) (contract.CapabilityHandle, error) {
+	return f.handle, nil
+}
+func (f referenceTestFactory) OpenReferenceResolver(context.Context, contract.OperationContext) (contract.BusinessReferenceProviderHandle, error) {
+	f.handle.opened++
+	return f.handle, nil
+}
+
+func TestBindingPlanResolvesReferencesOnlyThroughSelectedScopedProvider(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	capability := contract.CapabilityName("warehouse.lookup")
+	contractRef := contract.SchemaRef{ID: "warehouse.contract", Version: 1}
+	offer := contract.CapabilityOffer{Name: capability, Contract: contractRef}
+	consumer := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: capability, Contract: contractRef, Required: true}}}
+	ownerA := contract.ModuleDescriptor{ID: "warehouse.one", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}}
+	ownerB := contract.ModuleDescriptor{ID: "warehouse.two", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}}
+	ref := contract.BusinessRef{ProviderID: "warehouse-a", ResourceType: "warehouse.location", ID: "same-id", Scope: scope}
+	handleA := &referenceTestHandle{name: capability, scope: scope, result: contract.ResolvedBusinessRef{Canonical: ref, Revision: 1, Display: "A"}}
+	refB := ref
+	refB.ProviderID = "warehouse-b"
+	handleB := &referenceTestHandle{name: capability, scope: scope, result: contract.ResolvedBusinessRef{Canonical: refB, Revision: 9, Display: "B"}}
+	providers := []ProviderRegistration{
+		{TenantID: scope.TenantID, ProviderID: "warehouse-a", OwnerModuleID: ownerA.ID, Kind: ProviderExternal, Offers: []contract.CapabilityOffer{offer}, Factories: map[contract.CapabilityName]ProviderFactory{capability: referenceTestFactory{capability, handleA}}},
+		{TenantID: scope.TenantID, ProviderID: "warehouse-b", OwnerModuleID: ownerB.ID, Kind: ProviderExternal, Offers: []contract.CapabilityOffer{offer}, Factories: map[contract.CapabilityName]ProviderFactory{capability: referenceTestFactory{capability, handleB}}},
+	}
+	modules := []contract.ModuleDescriptor{consumer, ownerA, ownerB}
+	selection := ProviderSelection{Key: BindingKey{Scope: scope, ConsumerModuleID: consumer.ID, CapabilityName: capability}, ProviderID: "warehouse-a"}
+	plan, err := ResolveModules(scope, modules, providers, []ProviderSelection{selection}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := contract.ReferenceRule{Kind: "published_business_ref", CapabilityName: capability, ResourceType: "warehouse.location"}
+	resolved, err := plan.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, ref)
+	if err != nil || resolved.Display != "A" || !handleA.revoked {
+		t.Fatalf("selected provider resolution = %#v, %v, revoked=%v", resolved, err, handleA.revoked)
+	}
+	if _, err := plan.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, refB); err == nil {
+		t.Fatal("reference from an unselected provider was accepted")
+	}
+	providerBSelection := ProviderSelection{Key: selection.Key, ProviderID: "warehouse-b"}
+	rebound, err := ResolveModules(scope, modules, providers, []ProviderSelection{providerBSelection}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedB, err := rebound.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, refB)
+	if err != nil || resolvedB.Display != "B" {
+		t.Fatalf("replacement provider did not resolve its own same-id identity: %#v, %v", resolvedB, err)
+	}
+	if _, err := rebound.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, ref); err == nil {
+		t.Fatal("provider replacement silently reinterpreted historical provider-A identity")
+	}
+	wrongType := ref
+	wrongType.ResourceType = "account.customer"
+	if _, err := plan.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, wrongType); err == nil {
+		t.Fatal("wrong resource type was accepted")
+	}
+	otherScope := scope
+	otherScope.LegalEntityID = "entity-b"
+	if _, err := plan.ResolveBusinessReference(context.Background(), execution, otherScope, consumer.ID, rule, ref); err == nil {
+		t.Fatal("cross-scope reference was accepted")
+	}
+	handleA.err = errors.New("provider offline")
+	if _, err := plan.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, ref); err == nil {
+		t.Fatal("selected provider outage was accepted")
+	}
+	if handleB.opened != 1 {
+		t.Fatalf("outage silently rerouted to another provider; provider B opens=%d", handleB.opened)
+	}
+}
+
 func (h *operationTestHandle) Name() contract.CapabilityName      { return h.name }
 func (h *operationTestHandle) Scope() contract.GrantScope         { return h.scope }
 func (h *operationTestHandle) Revoke()                            { h.revoked = true }
@@ -89,6 +192,9 @@ func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T
 	moduleExecution := handle.invocation.ModuleExecution
 	if !moduleExecution.Verified() || moduleExecution.TenantID != scope.TenantID || moduleExecution.CallerModuleID != consumer.ID || moduleExecution.OwnerModuleID != owner.ID || moduleExecution.BindingRevision != plan.Revision || moduleExecution.AllowedOperation != "issue" {
 		t.Fatalf("provider received unpinned module provenance: %+v", moduleExecution)
+	}
+	if handle.invocation.BusinessReferenceValidator == nil {
+		t.Fatal("provider operation did not receive the plan-scoped reference validator")
 	}
 }
 
