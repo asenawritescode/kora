@@ -505,7 +505,7 @@ func TestApplicationCatalogValidatesAndBoundsSchemaDocuments(t *testing.T) {
 	out := SchemaRef{ID: "sales.output", Version: 1}
 	catalog := ApplicationCatalog{Revision: 1, BusinessScope: scope,
 		Modules:              []ApplicationCatalogModule{{ID: "sales.orders", Version: "1.0.0", State: string(ModuleActive)}},
-		PublishedQueries:     []ApplicationCatalogQuery{{OwnerModuleID: "sales.orders", Name: "list", Route: "/api/v1/modules/sales.orders/queries/list", InputSchema: in, OutputSchema: out, ScopePolicy: ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}},
+		PublishedQueries:     []ApplicationCatalogQuery{{OwnerModuleID: "sales.orders", Name: "list", Capability: "sales.read", Route: "/api/v1/modules/sales.orders/queries/list", InputSchema: in, OutputSchema: out, ScopePolicy: ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}},
 		PublishedProjections: []ApplicationCatalogProjection{},
 		Schemas:              []ModuleSchemaDocument{{Ref: in, Schema: []byte(`{"type":"object"}`)}, {Ref: out, Schema: []byte(`{"type":"array","items":{"type":"object"}}`)}},
 		AllowedEntityChoices: []BusinessScope{}, Blockers: []ModuleBlocker{}}

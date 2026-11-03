@@ -195,9 +195,35 @@ type PublishedQuery struct {
 	OwnerField    string              `json:"owner_field,omitempty"`
 	PageLimit     uint16              `json:"page_limit"`
 	Presentation  SurfacePresentation `json:"presentation"`
+	// ReferenceLookup declares how an authorized query row supplies a provider-qualified value.
+	// It is descriptive only: Engine still validates the BusinessRef on writes.
+	ReferenceLookup *PublishedReferenceLookup `json:"reference_lookup,omitempty"`
 	// OfflineEligible permits this published query to back an actor-scoped offline feed.
 	// Providers must still support pinned snapshots and actor-scoped replay.
 	OfflineEligible bool `json:"offline_eligible,omitempty"`
+}
+
+// PublishedReferenceLookup binds a query result field to a stable business identity.
+//
+//contract:wire:v2
+type PublishedReferenceLookup struct {
+	ResourceType string `json:"resource_type"`
+	ValueField   string `json:"value_field"`
+	LabelField   string `json:"label_field"`
+}
+
+func (r PublishedReferenceLookup) Validate(allowedFields []string) error {
+	if r.ResourceType == "" || len(r.ResourceType) > 160 || !validModuleName(r.ValueField) || !validModuleName(r.LabelField) || r.ValueField == r.LabelField {
+		return fmt.Errorf("published reference lookup identity is invalid")
+	}
+	allowed := make(map[string]bool, len(allowedFields))
+	for _, field := range allowedFields {
+		allowed[field] = true
+	}
+	if !allowed[r.ValueField] || !allowed[r.LabelField] {
+		return fmt.Errorf("published reference lookup fields must be included in allowed fields")
+	}
+	return nil
 }
 
 // QueryFreshness describes whether a published query result is current.
@@ -378,16 +404,18 @@ type ApplicationCatalogModule struct {
 
 //contract:wire:v2
 type ApplicationCatalogQuery struct {
-	OwnerModuleID   ModuleID            `json:"owner_module_id"`
-	Name            string              `json:"name"`
-	Route           string              `json:"route"`
-	InputSchema     SchemaRef           `json:"input_schema"`
-	OutputSchema    SchemaRef           `json:"output_schema"`
-	ScopePolicy     ResourceScopeKind   `json:"scope_policy"`
-	AllowedFields   []string            `json:"allowed_fields"`
-	PageLimit       uint16              `json:"page_limit"`
-	Presentation    SurfacePresentation `json:"presentation"`
-	OfflineEligible bool                `json:"offline_eligible,omitempty"`
+	OwnerModuleID   ModuleID                  `json:"owner_module_id"`
+	Name            string                    `json:"name"`
+	Capability      CapabilityName            `json:"capability"`
+	Route           string                    `json:"route"`
+	InputSchema     SchemaRef                 `json:"input_schema"`
+	OutputSchema    SchemaRef                 `json:"output_schema"`
+	ScopePolicy     ResourceScopeKind         `json:"scope_policy"`
+	AllowedFields   []string                  `json:"allowed_fields"`
+	PageLimit       uint16                    `json:"page_limit"`
+	Presentation    SurfacePresentation       `json:"presentation"`
+	OfflineEligible bool                      `json:"offline_eligible,omitempty"`
+	ReferenceLookup *PublishedReferenceLookup `json:"reference_lookup,omitempty"`
 }
 
 // ApplicationCatalogProjection identifies an owner-published, actor-authorized
@@ -497,7 +525,7 @@ func (c ApplicationCatalog) Validate() error {
 	queries := map[string]bool{}
 	for _, query := range c.PublishedQueries {
 		key := string(query.OwnerModuleID) + "/" + query.Name
-		if !modules[query.OwnerModuleID] || !validModuleName(query.Name) || query.Route != "/api/v1/modules/"+string(query.OwnerModuleID)+"/queries/"+query.Name || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 || queries[key] || validateSurfacePresentation(query.Presentation) != nil {
+		if !modules[query.OwnerModuleID] || !validModuleName(query.Name) || query.Capability == "" || query.Route != "/api/v1/modules/"+string(query.OwnerModuleID)+"/queries/"+query.Name || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 || queries[key] || validateSurfacePresentation(query.Presentation) != nil || query.ReferenceLookup != nil && query.ReferenceLookup.Validate(query.AllowedFields) != nil {
 			return fmt.Errorf("application catalog has an invalid or duplicate published query")
 		}
 		queries[key] = true
@@ -2239,6 +2267,11 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 	for _, query := range m.Queries {
 		if err := validateSurfacePresentation(query.Presentation); err != nil {
 			return fmt.Errorf("module %q query %q presentation: %w", m.ID, query.Name, err)
+		}
+		if query.ReferenceLookup != nil {
+			if err := query.ReferenceLookup.Validate(query.AllowedFields); err != nil {
+				return fmt.Errorf("module %q query %q reference lookup: %w", m.ID, query.Name, err)
+			}
 		}
 	}
 	required := map[string]bool{}
