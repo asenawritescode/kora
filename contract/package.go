@@ -257,6 +257,13 @@ type PackManifest struct {
 	Modules       []ModuleDescriptor       `json:"modules,omitempty"`
 }
 
+// MarketplacePackManifest projects the canonical marketplace declaration into
+// the Engine package validation contract. Keep this as the sole projection so
+// validation and activation cannot drift as PackManifest evolves.
+func MarketplacePackManifest(m MarketplacePackageManifest) PackManifest {
+	return PackManifest{SchemaVersion: m.SchemaVersion, Name: m.PackageID, Version: m.Version, Requires: m.Requires, Conflicts: m.Conflicts, Exports: m.Exports, ScheduledJobs: m.ScheduledJobs, Modules: m.Modules}
+}
+
 //contract:wire:v2
 type PackFile struct {
 	Path string `json:"path"`
