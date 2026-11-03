@@ -127,3 +127,28 @@ func TestTenantSchedulerSchemaEnsureRequiresAdmission(t *testing.T) {
 		t.Fatalf("scheduler schema DDL reached database without admission: %v", err)
 	}
 }
+
+func TestTenantSchedulerSchemaIsPreparedWithoutConfiguredJobs(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create tenant database:", err)
+	}
+	defer database.Close()
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS _kora_schedule_definition").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS _kora_schedule_occurrence").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM information_schema\\.statistics").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	worker, err := newTenantScheduler(
+		&net.LoadedSite{Name: "tenant-a", SiteID: "tenant-a", DB: database, Registry: doctype.NewRegistry()},
+		&kdb.MySQLDialect{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	if err != nil {
+		t.Fatal("prepare scheduler schema without jobs:", err)
+	}
+	if worker != nil {
+		t.Fatal("scheduler worker was created without configured jobs")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("scheduler schema was not prepared for module inspection:", err)
+	}
+}
