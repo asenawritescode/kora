@@ -133,7 +133,7 @@ func publishImportedWorkflows(ctx context.Context, database *sql.DB, dialect sql
 	}
 	statusInput := contract.SchemaRef{ID: "kora.record.update_status", Version: 1}
 	statusOutput := contract.SchemaRef{ID: "kora.record.update_status.result", Version: 1}
-	if err := catalog.Register(flow.ActionRegistration{Key: flow.ActionKey{Name: "record.update_status", Version: 1}, Class: flow.ActionLocal, InputSchema: statusInput, OutputSchema: statusOutput, RequiredGrant: policy.Grant{Resource: "workflow.status", Operation: "submit"}}); err != nil {
+	if err := catalog.Register(flow.ActionRegistration{Key: flow.ActionKey{Name: "record.update_status", Version: 1}, Class: flow.ActionLocal, InputSchema: statusInput, OutputSchema: statusOutput, RequiredGrant: policy.Grant{Resource: "workflow.status", Operation: "submit"}, Local: importedRecordStatusAction{}}); err != nil {
 		return err
 	}
 	if err := catalog.Freeze(); err != nil {
@@ -184,6 +184,12 @@ func configImportOperationID(siteName string, snapshot []byte) string {
 type importedNotificationAction struct{}
 
 func (importedNotificationAction) Execute(context.Context, flow.ActionContext, flow.ActionInput) (flow.ActionResult, error) {
+	return flow.ActionResult{}, fmt.Errorf("import validation action cannot execute")
+}
+
+type importedRecordStatusAction struct{}
+
+func (importedRecordStatusAction) ExecuteLocal(context.Context, flow.Claim, flow.ActionContext, flow.ActionKey, flow.ActionInput, contract.StepID) (flow.ActionResult, error) {
 	return flow.ActionResult{}, fmt.Errorf("import validation action cannot execute")
 }
 
