@@ -198,6 +198,8 @@ type PublishedQuery struct {
 	// OfflineEligible permits this published query to back an actor-scoped offline feed.
 	// Providers must still support pinned snapshots and actor-scoped replay.
 	OfflineEligible bool `json:"offline_eligible,omitempty"`
+	// OfflineFactKey names the stable scalar identity in offline snapshot rows.
+	OfflineFactKey string `json:"offline_fact_key,omitempty"`
 }
 
 // QueryFreshness describes whether a published query result is current.
@@ -388,6 +390,7 @@ type ApplicationCatalogQuery struct {
 	PageLimit       uint16              `json:"page_limit"`
 	Presentation    SurfacePresentation `json:"presentation"`
 	OfflineEligible bool                `json:"offline_eligible,omitempty"`
+	OfflineFactKey  string              `json:"offline_fact_key,omitempty"`
 }
 
 // ApplicationCatalogProjection identifies an owner-published, actor-authorized
@@ -501,6 +504,20 @@ func (c ApplicationCatalog) Validate() error {
 			return fmt.Errorf("application catalog has an invalid or duplicate published query")
 		}
 		queries[key] = true
+		if query.OfflineEligible {
+			if !validModuleName(query.OfflineFactKey) {
+				return fmt.Errorf("application catalog offline query has no stable fact-key field")
+			}
+			found := false
+			for _, field := range query.AllowedFields {
+				found = found || field == query.OfflineFactKey
+			}
+			if !found {
+				return fmt.Errorf("application catalog offline query fact key is not published")
+			}
+		} else if query.OfflineFactKey != "" {
+			return fmt.Errorf("application catalog online-only query declares an offline fact key")
+		}
 		if err := useSchema(query.InputSchema); err != nil {
 			return err
 		}
@@ -678,6 +695,11 @@ func (q QueryResult) Validate(query PublishedQuery, limit uint16, scope Business
 				return fmt.Errorf("published query result contains an undeclared field")
 			}
 		}
+		if query.OfflineEligible {
+			if _, err := stableOfflineFactKey(row, query.OfflineFactKey); err != nil {
+				return fmt.Errorf("published query result has invalid offline row identity")
+			}
+		}
 	}
 	if len(q.NextCursor) > 2048 || len(q.SnapshotToken) > 2048 || len(q.SourceCursor) > 2048 || len(q.SourceRevision) > 256 {
 		return fmt.Errorf("published query result cursor or source revision is too large")
@@ -720,11 +742,40 @@ func (p QueryReplayPage) Validate(query PublishedQuery, limit uint16) error {
 				return fmt.Errorf("published query replay change contains an undeclared field")
 			}
 		}
+		if query.OfflineEligible {
+			rowKey, err := stableOfflineFactKey(fields, query.OfflineFactKey)
+			if err != nil || rowKey != change.FactKey {
+				return fmt.Errorf("published query replay row does not match its stable fact key")
+			}
+		}
 	}
 	if len(p.NextCursor) > 2048 || len(p.ThroughCursor) > 2048 || len(p.SourceRevision) > 256 {
 		return fmt.Errorf("published query replay cursor or revision is too large")
 	}
 	return nil
+}
+
+func stableOfflineFactKey(fields map[string]json.RawMessage, field string) (string, error) {
+	if !validModuleName(field) || len(fields[field]) == 0 {
+		return "", fmt.Errorf("offline fact key field is absent")
+	}
+	var value string
+	if err := json.Unmarshal(fields[field], &value); err == nil && strings.TrimSpace(value) != "" && len(value) <= 256 {
+		return value, nil
+	}
+	var number json.Number
+	decoder := json.NewDecoder(strings.NewReader(string(fields[field])))
+	decoder.UseNumber()
+	if err := decoder.Decode(&number); err == nil && number.String() != "" && len(number.String()) <= 256 {
+		return number.String(), nil
+	}
+	return "", fmt.Errorf("offline fact key must be a bounded non-empty string or number")
+}
+
+// OfflineQueryFactKey returns the canonical scalar identity declared by an
+// offline-eligible query. It is shared by snapshot and replay validators.
+func OfflineQueryFactKey(fields map[string]json.RawMessage, field string) (string, error) {
+	return stableOfflineFactKey(fields, field)
 }
 
 func (p ProjectionCheckpoint) Validate() error {
@@ -2141,12 +2192,22 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		if query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 {
 			return fmt.Errorf("module %q query %q requires allowed fields and a page limit from 1 to 1000", m.ID, query.Name)
 		}
+		if query.OfflineEligible {
+			if !validModuleName(query.OfflineFactKey) {
+				return fmt.Errorf("module %q offline query %q requires a stable fact-key field", m.ID, query.Name)
+			}
+		} else if query.OfflineFactKey != "" {
+			return fmt.Errorf("module %q online-only query %q cannot declare an offline fact key", m.ID, query.Name)
+		}
 		fields := map[string]bool{}
 		for _, field := range query.AllowedFields {
 			if !validModuleName(field) || fields[field] {
 				return fmt.Errorf("module %q query %q has an invalid or duplicate allowed field", m.ID, query.Name)
 			}
 			fields[field] = true
+		}
+		if query.OfflineEligible && !fields[query.OfflineFactKey] {
+			return fmt.Errorf("module %q offline query %q fact-key field must be published", m.ID, query.Name)
 		}
 		if query.OwnerField != "" && (!validModuleName(query.OwnerField) || !fields[query.OwnerField]) {
 			return fmt.Errorf("module %q query %q owner field must be declared in its published fields", m.ID, query.Name)

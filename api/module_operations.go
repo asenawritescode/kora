@@ -180,7 +180,7 @@ func (h *Handler) HandleOfflineBootstrapV2(c *gin.Context) {
 	if subject == "" {
 		subject = actor.PrincipalID
 	}
-	c.JSON(http.StatusOK, Response{Data: contract.OfflineSnapshotPage{Source: request.Source, InputHash: inputHash, BusinessScope: request.BusinessScope, SubjectID: subject, SchemaRevision: query.OutputSchema, CatalogRevision: snapshot.Revision, SnapshotToken: result.SnapshotToken, PageCursor: request.PageCursor, NextPageCursor: result.NextCursor, ReplayPosition: result.SourceCursor, Rows: result.Data, Complete: result.NextCursor == ""}})
+	c.JSON(http.StatusOK, Response{Data: contract.OfflineSnapshotPage{Source: request.Source, FactKeyField: query.OfflineFactKey, InputHash: inputHash, BusinessScope: request.BusinessScope, SubjectID: subject, SchemaRevision: query.OutputSchema, CatalogRevision: snapshot.Revision, SnapshotToken: result.SnapshotToken, PageCursor: request.PageCursor, NextPageCursor: result.NextCursor, ReplayPosition: result.SourceCursor, Rows: result.Data, Complete: result.NextCursor == ""}})
 }
 
 func (h *Handler) HandleOfflinePullV2(c *gin.Context) {

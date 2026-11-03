@@ -233,6 +233,9 @@
         "offline_eligible": {
           "type": "boolean"
         },
+        "offline_fact_key": {
+          "type": "string"
+        },
         "output_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
@@ -2726,6 +2729,9 @@
         "complete": {
           "type": "boolean"
         },
+        "fact_key_field": {
+          "type": "string"
+        },
         "input_hash": {
           "type": "string"
         },
@@ -2758,6 +2764,7 @@
         "business_scope",
         "catalog_revision",
         "complete",
+        "fact_key_field",
         "input_hash",
         "replay_position",
         "rows",
@@ -3639,6 +3646,9 @@
         },
         "offline_eligible": {
           "type": "boolean"
+        },
+        "offline_fact_key": {
+          "type": "string"
         },
         "operation": {
           "type": "string"
@@ -5395,6 +5405,9 @@
         },
         "offline_eligible": {
           "type": "boolean"
+        },
+        "offline_fact_key": {
+          "type": "string"
         },
         "output_schema": {
           "$ref": "#/$defs/SchemaRef"
@@ -7867,6 +7880,9 @@
         "complete": {
           "type": "boolean"
         },
+        "fact_key_field": {
+          "type": "string"
+        },
         "input_hash": {
           "type": "string"
         },
@@ -7899,6 +7915,7 @@
         "business_scope",
         "catalog_revision",
         "complete",
+        "fact_key_field",
         "input_hash",
         "replay_position",
         "rows",
@@ -8780,6 +8797,9 @@
         },
         "offline_eligible": {
           "type": "boolean"
+        },
+        "offline_fact_key": {
+          "type": "string"
         },
         "operation": {
           "type": "string"

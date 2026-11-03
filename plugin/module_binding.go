@@ -330,6 +330,21 @@ func (p BindingPlan) ReplayPublishedQueryForActor(ctx context.Context, scope con
 	if err := page.Validate(query, limit); err != nil {
 		return contract.QueryReplayPage{}, err
 	}
+	if query.OfflineEligible {
+		for _, change := range page.Changes {
+			if change.Deleted {
+				continue
+			}
+			var row map[string]json.RawMessage
+			if err := json.Unmarshal(change.Data, &row); err != nil {
+				return contract.QueryReplayPage{}, fmt.Errorf("scoped replay returned an invalid row")
+			}
+			key, err := contract.OfflineQueryFactKey(row, query.OfflineFactKey)
+			if err != nil || key != change.FactKey {
+				return contract.QueryReplayPage{}, fmt.Errorf("scoped replay row does not match its fact key")
+			}
+		}
+	}
 	for _, change := range page.Changes {
 		if change.Deleted {
 			continue
