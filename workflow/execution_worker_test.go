@@ -50,8 +50,8 @@ func (s *workerTestStore) Renew(context.Context, Claim, time.Duration) (Claim, e
 	}
 	return Claim{}, nil
 }
-func (*workerTestStore) BeginExternalAttempt(context.Context, Claim, string, contract.IdempotencyKey) error {
-	return nil
+func (*workerTestStore) BeginExternalAttempt(_ context.Context, _ Claim, executionID string, key contract.IdempotencyKey, dispatch *contract.PinnedDispatch) (*contract.PinnedDispatch, error) {
+	return dispatch, nil
 }
 func (*workerTestStore) CommitStep(context.Context, StepCommit) error { return nil }
 func (s *workerTestStore) Release(context.Context, Claim) error {

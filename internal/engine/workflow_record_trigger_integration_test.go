@@ -213,7 +213,7 @@ func TestGridHTTPRecordCreateStartsWorkflowAndDeliversEmail(t *testing.T) {
 		t.Fatal("create workflow service identity:", err)
 	}
 	claimHandler, err := workflow.NewDefinitionClaimHandler(executionStore, instanceStore, definitionStore, catalog, workflowSchemas,
-		identity, recordTriggerIntegrationScope{}, expression.NewTreeEvaluator(), workflow.HumanWaitRuntime{})
+		identity, recordTriggerIntegrationScope{}, expression.NewTreeEvaluator(), nil, workflow.HumanWaitRuntime{})
 	if err != nil {
 		t.Fatal("construct workflow execution handler:", err)
 	}

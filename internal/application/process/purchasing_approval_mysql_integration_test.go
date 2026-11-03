@@ -556,7 +556,7 @@ func runProductionPurchaseApprovalWorkflowWait(t *testing.T, ctx context.Context
 	if err != nil {
 		t.Fatal("construct workflow service identity provider:", err)
 	}
-	handler, err := processworkflow.NewDefinitionClaimHandler(executions, instances, definitions, catalog, schemas, identity, restartWorkflowScopes{}, expression.NewTreeEvaluator(), processworkflow.HumanWaitRuntime{Requests: requestService, Store: executions, Now: time.Now})
+	handler, err := processworkflow.NewDefinitionClaimHandler(executions, instances, definitions, catalog, schemas, identity, restartWorkflowScopes{}, expression.NewTreeEvaluator(), nil, processworkflow.HumanWaitRuntime{Requests: requestService, Store: executions, Now: time.Now})
 	if err != nil {
 		t.Fatal("construct production-policy human wait handler:", err)
 	}
@@ -643,7 +643,7 @@ func runProductionPurchaseApprovalWorkflowWait(t *testing.T, ctx context.Context
 	if err != nil {
 		t.Fatal("rebuild authorized workflow instance service:", err)
 	}
-	recoveredHandler, err := processworkflow.NewDefinitionClaimHandler(recoveredExecutions, recoveredInstances, recoveredDefinitions, catalog, schemas, identity, restartWorkflowScopes{}, expression.NewTreeEvaluator(), processworkflow.HumanWaitRuntime{Requests: requestService, Store: recoveredExecutions, Now: time.Now})
+	recoveredHandler, err := processworkflow.NewDefinitionClaimHandler(recoveredExecutions, recoveredInstances, recoveredDefinitions, catalog, schemas, identity, restartWorkflowScopes{}, expression.NewTreeEvaluator(), nil, processworkflow.HumanWaitRuntime{Requests: requestService, Store: recoveredExecutions, Now: time.Now})
 	if err != nil {
 		t.Fatal("rebuild workflow claim handler after decision:", err)
 	}
