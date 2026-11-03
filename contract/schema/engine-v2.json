@@ -135,6 +135,10 @@
         "capability": {
           "type": "string"
         },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
@@ -224,6 +228,9 @@
           },
           "type": "array"
         },
+        "capability": {
+          "type": "string"
+        },
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
@@ -245,6 +252,10 @@
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
         },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
         "route": {
           "type": "string"
         },
@@ -258,6 +269,7 @@
       },
       "required": [
         "allowed_fields",
+        "capability",
         "input_schema",
         "name",
         "output_schema",
@@ -798,6 +810,93 @@
       ],
       "type": "object"
     },
+    "CheckoutInputBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "cart_items": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "customer_phone": {
+          "type": "string"
+        },
+        "customer_ref": {
+          "type": "string"
+        },
+        "payment_method": {
+          "type": "string"
+        },
+        "register_ref": {
+          "type": "string"
+        },
+        "requested_total": {
+          "type": "string"
+        },
+        "shift_ref": {
+          "type": "string"
+        },
+        "till_session_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cart_items",
+        "currency",
+        "payment_method",
+        "requested_total"
+      ],
+      "type": "object"
+    },
+    "CheckoutOperationContract": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/CheckoutInputBinding"
+        },
+        "outcomes": {
+          "items": {
+            "$ref": "#/$defs/CheckoutOutcomeBinding"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "outcomes"
+      ],
+      "type": "object"
+    },
+    "CheckoutOutcomeBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "payment_initiated",
+            "payment_settled",
+            "invoice_issued",
+            "fulfillment_completed"
+          ],
+          "type": "string"
+        },
+        "reference_field": {
+          "type": "string"
+        },
+        "status_field": {
+          "type": "string"
+        },
+        "success_value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "status_field",
+        "success_value"
+      ],
+      "type": "object"
+    },
     "CommandMeta": {
       "additionalProperties": false,
       "properties": {
@@ -927,6 +1026,13 @@
         "proposal_id": {
           "type": "string"
         },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
+          "type": "array"
+        },
         "roles": {
           "items": {
             "x-open-json-value": true
@@ -981,10 +1087,23 @@
           },
           "type": "array"
         },
+        "module_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
         "ordered_doctypes": {
           "items": {
             "type": "string"
           },
+          "type": "array"
+        },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
           "type": "array"
         },
         "valid": {
@@ -1086,6 +1205,13 @@
         },
         "proposal_id": {
           "type": "string"
+        },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
+          "type": "array"
         },
         "roles": {
           "items": {
@@ -1223,6 +1349,221 @@
         "status",
         "version",
         "version_id"
+      ],
+      "type": "object"
+    },
+    "ConfigurationSurfaceBinding": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "operation_ref"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "kind": {
+              "const": "query",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 160,
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "name",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "operation_ref"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "input_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "projection",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 160,
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "name",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "kind": {
+              "const": "operation",
+              "type": "string"
+            },
+            "operation_ref": {
+              "maxLength": 386,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "operation_ref",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "query",
+            "projection",
+            "operation"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "operation_ref": {
+          "maxLength": 386,
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}$",
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+          "type": "string"
+        },
+        "view_name": {
+          "maxLength": 160,
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "kind",
+        "output_schema",
+        "owner_module_id",
+        "view_name"
       ],
       "type": "object"
     },
@@ -3589,6 +3930,10 @@
         "capability": {
           "type": "string"
         },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
         "name": {
           "type": "string"
         },
@@ -3658,6 +4003,10 @@
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
         },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
         "scope_policy": {
           "enum": [
             "tenant_shared",
@@ -3698,6 +4047,30 @@
       },
       "required": [
         "input"
+      ],
+      "type": "object"
+    },
+    "PublishedReferenceLookup": {
+      "additionalProperties": false,
+      "properties": {
+        "label_field": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "search_field": {
+          "type": "string"
+        },
+        "value_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label_field",
+        "resource_type",
+        "search_field",
+        "value_field"
       ],
       "type": "object"
     },
@@ -5298,6 +5671,10 @@
         "capability": {
           "type": "string"
         },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
@@ -5387,6 +5764,9 @@
           },
           "type": "array"
         },
+        "capability": {
+          "type": "string"
+        },
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
@@ -5408,6 +5788,10 @@
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
         },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
         "route": {
           "type": "string"
         },
@@ -5421,6 +5805,7 @@
       },
       "required": [
         "allowed_fields",
+        "capability",
         "input_schema",
         "name",
         "output_schema",
@@ -5961,6 +6346,93 @@
       ],
       "type": "object"
     },
+    "CheckoutInputBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "cart_items": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "customer_phone": {
+          "type": "string"
+        },
+        "customer_ref": {
+          "type": "string"
+        },
+        "payment_method": {
+          "type": "string"
+        },
+        "register_ref": {
+          "type": "string"
+        },
+        "requested_total": {
+          "type": "string"
+        },
+        "shift_ref": {
+          "type": "string"
+        },
+        "till_session_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cart_items",
+        "currency",
+        "payment_method",
+        "requested_total"
+      ],
+      "type": "object"
+    },
+    "CheckoutOperationContract": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/CheckoutInputBinding"
+        },
+        "outcomes": {
+          "items": {
+            "$ref": "#/$defs/CheckoutOutcomeBinding"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "outcomes"
+      ],
+      "type": "object"
+    },
+    "CheckoutOutcomeBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "payment_initiated",
+            "payment_settled",
+            "invoice_issued",
+            "fulfillment_completed"
+          ],
+          "type": "string"
+        },
+        "reference_field": {
+          "type": "string"
+        },
+        "status_field": {
+          "type": "string"
+        },
+        "success_value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "status_field",
+        "success_value"
+      ],
+      "type": "object"
+    },
     "CommandMeta": {
       "additionalProperties": false,
       "properties": {
@@ -6090,6 +6562,13 @@
         "proposal_id": {
           "type": "string"
         },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
+          "type": "array"
+        },
         "roles": {
           "items": {
             "x-open-json-value": true
@@ -6144,10 +6623,23 @@
           },
           "type": "array"
         },
+        "module_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
         "ordered_doctypes": {
           "items": {
             "type": "string"
           },
+          "type": "array"
+        },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
           "type": "array"
         },
         "valid": {
@@ -6249,6 +6741,13 @@
         },
         "proposal_id": {
           "type": "string"
+        },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
+          "type": "array"
         },
         "roles": {
           "items": {
@@ -6386,6 +6885,218 @@
         "status",
         "version",
         "version_id"
+      ],
+      "type": "object"
+    },
+    "ConfigurationSurfaceBinding": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "operation_ref"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "kind": {
+              "const": "query",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 160,
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "name",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "operation_ref"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "input_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "projection",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 160,
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "name",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "kind": {
+              "const": "operation",
+              "type": "string"
+            },
+            "operation_ref": {
+              "maxLength": 386,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "operation_ref",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "query",
+            "projection",
+            "operation"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+          "type": "string"
+        },
+        "view_name": {
+          "maxLength": 160,
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "kind",
+        "output_schema",
+        "owner_module_id",
+        "view_name"
       ],
       "type": "object"
     },
@@ -8730,6 +9441,10 @@
         "capability": {
           "type": "string"
         },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
         "name": {
           "type": "string"
         },
@@ -8799,6 +9514,10 @@
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
         },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
         "scope_policy": {
           "enum": [
             "tenant_shared",
@@ -8839,6 +9558,30 @@
       },
       "required": [
         "input"
+      ],
+      "type": "object"
+    },
+    "PublishedReferenceLookup": {
+      "additionalProperties": false,
+      "properties": {
+        "label_field": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "search_field": {
+          "type": "string"
+        },
+        "value_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label_field",
+        "resource_type",
+        "search_field",
+        "value_field"
       ],
       "type": "object"
     },
@@ -10303,6 +11046,17 @@
     "BusinessScopeKind": [
       "tenant",
       "legal_entity"
+    ],
+    "CheckoutOutcomeKind": [
+      "payment_initiated",
+      "payment_settled",
+      "invoice_issued",
+      "fulfillment_completed"
+    ],
+    "ConfigurationSurfaceKind": [
+      "query",
+      "projection",
+      "operation"
     ],
     "ExtensionKind": [
       "fields",

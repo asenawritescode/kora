@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -184,17 +185,26 @@ func TestApplicationCatalogFiltersSurfacesByActorGrant(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	scope := contract.BusinessScope{TenantID: "catalog-tenant", Kind: contract.ScopeKindTenant}
 	in, out := contract.SchemaRef{ID: "catalog.input", Version: 1}, contract.SchemaRef{ID: "catalog.output", Version: 1}
+	checkoutIn, checkoutOut := contract.SchemaRef{ID: "checkout.input", Version: 1}, contract.SchemaRef{ID: "checkout.output", Version: 1}
 	query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "list", Capability: "sales.orders", Operation: "list", InputSchema: in, OutputSchema: out, ScopePolicy: contract.ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}
+	query.ReferenceLookup = &contract.PublishedReferenceLookup{ResourceType: "sales.order", SearchField: "search", ValueField: "business_ref", LabelField: "number"}
+	query.AllowedFields = []string{"id", "business_ref", "number"}
 	projection := contract.ProjectionDefinition{ID: "history", OwnerModuleID: "sales.orders", Sources: []contract.ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: "list", OutputSchema: out}}, ScopePolicy: contract.ScopeTenantShared, FactKey: "id", AllowedFields: []string{"id"}, OutputSchema: out, RebuildStrategy: "consistent_snapshot"}
-	module := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Schemas: []contract.ModuleSchemaDocument{{Ref: in, Schema: json.RawMessage(`{"type":"object"}`)}, {Ref: out, Schema: json.RawMessage(`{"type":"array"}`)}}, Queries: []contract.PublishedQuery{query}, Projections: []contract.ProjectionDefinition{projection}, Provides: []contract.CapabilityOffer{{Name: query.Capability, Contract: out, Operations: []contract.OperationSpec{{Name: "list", Input: in, Output: out, Effect: contract.EffectQuery}}}}}
+	checkoutContract := &contract.CheckoutOperationContract{Input: contract.CheckoutInputBinding{CartItems: "lines", RequestedTotal: "amount", Currency: "currency", PaymentMethod: "method"}, Outcomes: []contract.CheckoutOutcomeBinding{{Kind: contract.CheckoutPaymentSettled, StatusField: "payment_status", SuccessValue: "Settled"}, {Kind: contract.CheckoutInvoiceIssued, StatusField: "invoice_status", SuccessValue: "Issued", ReferenceField: "invoice_ref"}}}
+	refSchema := `{"type":"object","properties":{"provider_id":{"type":"string"},"resource_type":{"type":"string"},"id":{"type":"string"},"scope":{"type":"object"}},"required":["provider_id","resource_type","id","scope"]}`
+	checkoutInputSchema := json.RawMessage(`{"type":"object","properties":{"lines":{"type":"array"},"amount":{"type":"string"},"currency":{"type":"string"},"method":{"type":"string"}}}`)
+	checkoutOutputSchema := json.RawMessage(`{"type":"object","properties":{"payment_status":{"type":"string","enum":["Settled","Pending"]},"invoice_status":{"type":"string","enum":["Issued","Pending"]},"invoice_ref":` + refSchema + `}}`)
+	checkoutOperation := contract.PublishedOperation{Name: "checkout", Capability: "sales.checkout", Operation: "submit", ScopePolicy: contract.ScopeTenantShared, AllowedCallers: []contract.ModuleID{"sales.orders"}, Checkout: checkoutContract}
+	module := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Schemas: []contract.ModuleSchemaDocument{{Ref: in, Schema: json.RawMessage(`{"type":"object"}`)}, {Ref: out, Schema: json.RawMessage(`{"type":"array"}`)}, {Ref: checkoutIn, Schema: checkoutInputSchema}, {Ref: checkoutOut, Schema: checkoutOutputSchema}}, Queries: []contract.PublishedQuery{query}, PublishedOperations: []contract.PublishedOperation{checkoutOperation}, Projections: []contract.ProjectionDefinition{projection}, Provides: []contract.CapabilityOffer{{Name: query.Capability, Contract: out, Operations: []contract.OperationSpec{{Name: "list", Input: in, Output: out, Effect: contract.EffectQuery}}}, {Name: checkoutOperation.Capability, Contract: checkoutOut, Operations: []contract.OperationSpec{{Name: checkoutOperation.Operation, Input: checkoutIn, Output: checkoutOut, Effect: contract.EffectExternal}}}}}
 	snapshot := contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 7, Modules: []contract.ModuleDescriptor{module}, Installations: []contract.ModuleInstallation{{TenantID: scope.TenantID, ModuleID: module.ID, Version: module.Version, State: string(contract.ModuleActive)}}}
-	plan, err := plugin.ResolveModules(scope, []contract.ModuleDescriptor{module}, []plugin.ProviderRegistration{{TenantID: scope.TenantID, ProviderID: "sales.internal", OwnerModuleID: module.ID, Kind: plugin.ProviderInternal, Offers: module.Provides, Queries: map[string]plugin.PublishedQueryExecutor{"list": historicalPublishedQueryExecutor{}}}}, nil, snapshot.Revision)
+	plan, err := plugin.ResolveModules(scope, []contract.ModuleDescriptor{module}, []plugin.ProviderRegistration{{TenantID: scope.TenantID, ProviderID: "sales.internal", OwnerModuleID: module.ID, Kind: plugin.ProviderInternal, Offers: module.Provides, Factories: map[contract.CapabilityName]plugin.ProviderFactory{checkoutOperation.Capability: plugin.NewStaticFactory(checkoutOperation.Capability, nil)}, Queries: map[string]plugin.PublishedQueryExecutor{"list": historicalPublishedQueryExecutor{}}}}, nil, snapshot.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
 	registry := doctype.NewRegistry()
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.query.list", Role: "Reader", Read: true})
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.projection.history", Role: "Reader", Read: true})
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.operation.checkout", Role: "Reader", Write: true})
 	execution, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "reader", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), Roles: []string{"Reader"}, AuthenticatedAt: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +233,7 @@ func TestApplicationCatalogFiltersSurfacesByActorGrant(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Data.PublishedQueries) != 1 || response.Data.PublishedQueries[0].Route != "/api/v1/modules/sales.orders/queries/list" || len(response.Data.PublishedProjections) != 1 || response.Data.PublishedProjections[0].Route != "/api/v1/modules/sales.orders/projections/history" || response.Data.Revision != 7 || len(response.Data.Schemas) != 2 {
+	if len(response.Data.PublishedQueries) != 1 || response.Data.PublishedQueries[0].Route != "/api/v1/modules/sales.orders/queries/list" || response.Data.PublishedQueries[0].Capability != query.Capability || response.Data.PublishedQueries[0].ReferenceLookup == nil || *response.Data.PublishedQueries[0].ReferenceLookup != *query.ReferenceLookup || len(response.Data.PublishedProjections) != 1 || response.Data.PublishedProjections[0].Route != "/api/v1/modules/sales.orders/projections/history" || response.Data.Revision != 7 || len(response.Data.Schemas) != 4 || len(response.Data.PublishedOperations) != 1 || response.Data.PublishedOperations[0].Checkout == nil || !reflect.DeepEqual(response.Data.PublishedOperations[0].Checkout, checkoutContract) {
 		t.Fatalf("unexpected actor catalog: %+v", response.Data)
 	}
 }

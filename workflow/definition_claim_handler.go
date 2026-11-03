@@ -79,7 +79,7 @@ type DefinitionClaimHandler struct {
 	human       HumanWaitRuntime
 }
 
-func NewDefinitionClaimHandler(store ExecutionStore, instances InstanceRepository, definitions DefinitionRepository, catalog *Catalog, schemas PayloadSchemaRegistry, identities ExecutionIdentityProvider, conditions ConditionScopeProvider, evaluator expression.Evaluator, humanWait ...HumanWaitRuntime) (*DefinitionClaimHandler, error) {
+func NewDefinitionClaimHandler(store ExecutionStore, instances InstanceRepository, definitions DefinitionRepository, catalog *Catalog, schemas PayloadSchemaRegistry, identities ExecutionIdentityProvider, conditions ConditionScopeProvider, evaluator expression.Evaluator, leases CapabilityLeaseAdmission, humanWait ...HumanWaitRuntime) (*DefinitionClaimHandler, error) {
 	if store == nil || instances == nil || definitions == nil || catalog == nil || !catalog.Frozen() || schemas == nil || identities == nil || conditions == nil || evaluator == nil {
 		return nil, fmt.Errorf("workflow definition claim handler dependencies are incomplete")
 	}
@@ -99,7 +99,7 @@ func NewDefinitionClaimHandler(store ExecutionStore, instances InstanceRepositor
 	if err := catalog.ValidateSchemas(schemas); err != nil {
 		return nil, err
 	}
-	external, err := NewExternalActionExecutor(store, identities, schemas)
+	external, err := NewExternalActionExecutor(store, identities, schemas, leases)
 	if err != nil {
 		return nil, err
 	}

@@ -31,12 +31,19 @@ type DefinitionAuthorizer interface {
 }
 
 type Service struct {
-	repository DefinitionRepository
-	authorizer DefinitionAuthorizer
-	catalog    *Catalog
-	schemas    PayloadSchemaRegistry
-	waits      WaitFieldRegistry
-	now        func() time.Time
+	repository     DefinitionRepository
+	authorizer     DefinitionAuthorizer
+	catalog        *Catalog
+	schemas        PayloadSchemaRegistry
+	waits          WaitFieldRegistry
+	now            func() time.Time
+	moduleSnapshot func(contract.TenantID) (contract.ModuleSnapshot, error)
+}
+
+func (s *Service) SetModuleSnapshotLookup(lookup func(contract.TenantID) (contract.ModuleSnapshot, error)) {
+	if s != nil {
+		s.moduleSnapshot = lookup
+	}
 }
 
 func NewService(repository DefinitionRepository, authorizer DefinitionAuthorizer, catalog *Catalog, schemas PayloadSchemaRegistry, waits WaitFieldRegistry, now func() time.Time) (*Service, error) {

@@ -1260,6 +1260,13 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		})
 		return
 	}
+	if len(snapshot.PublishedBindings) > 0 {
+		_, blockers, bindingErrors := validateConfigurationPublishedBindings(h, c, snapshot.PublishedBindings, snapshot.Views)
+		if len(blockers) > 0 || len(bindingErrors) > 0 {
+			writeError(c, http.StatusConflict, "configuration.published_bindings_stale", "Published module bindings changed or are unavailable; prepare a new configuration draft", map[string]any{"blockers": blockers, "errors": bindingErrors})
+			return
+		}
+	}
 	if rejectInvalidSnapshotReferences(c, snapshot, reg) {
 		return
 	}
@@ -2325,7 +2332,7 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 		return nil
 	}
 	siteDB := h.siteTx(c).DB
-	query := db.Rebind(h.siteDialect(c), `SELECT id, event_type, site, aggregate_type, aggregate_id, created_at
+	query := db.Rebind(h.siteDialect(c), `SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at
 		FROM _kora_outbox WHERE site = ? AND id > ? ORDER BY id LIMIT 501`)
 	rows, err := siteDB.QueryContext(c.Request.Context(), query, c.GetString("site_name"), after)
 	if err != nil {
@@ -2333,13 +2340,14 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 	}
 	type replayEntry struct {
 		id, eventType, site, aggregateType, aggregateID string
+		payload                                         []byte
 		occurredAt                                      time.Time
 	}
 	entries := make([]replayEntry, 0, 501)
 	for rows.Next() {
 		var entry replayEntry
 		var occurredAt any
-		if err := rows.Scan(&entry.id, &entry.eventType, &entry.site, &entry.aggregateType, &entry.aggregateID, &occurredAt); err != nil {
+		if err := rows.Scan(&entry.id, &entry.eventType, &entry.site, &entry.aggregateType, &entry.aggregateID, &entry.payload, &occurredAt); err != nil {
 			_ = rows.Close()
 			return err
 		}

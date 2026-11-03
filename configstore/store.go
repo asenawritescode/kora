@@ -873,6 +873,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 	var minKoraVersion string
 	var scheduledJobs []contract.ScheduledJobDefinition
 	var modules []contract.ModuleDescriptor
+	var publishedBindings []contract.ConfigurationSurfaceBinding
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("loading active config snapshot metadata: %w", err)
 	}
@@ -885,18 +886,20 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 		minKoraVersion = activeSnapshot.MinKoraVersion
 		scheduledJobs = append([]contract.ScheduledJobDefinition(nil), activeSnapshot.ScheduledJobs...)
 		modules = append([]contract.ModuleDescriptor(nil), activeSnapshot.Modules...)
+		publishedBindings = append([]contract.ConfigurationSurfaceBinding(nil), activeSnapshot.PublishedBindings...)
 	}
 	return &doctype.ConfigSnapshot{
-		DocTypes:         doctypes,
-		Roles:            roles,
-		Permissions:      permissions,
-		Views:            views,
-		AnalyticsMetrics: analyticsMetrics,
-		Scripts:          scripts,
-		Reports:          reports,
-		MinKoraVersion:   minKoraVersion,
-		ScheduledJobs:    scheduledJobs,
-		Modules:          modules,
+		DocTypes:          doctypes,
+		Roles:             roles,
+		Permissions:       permissions,
+		Views:             views,
+		AnalyticsMetrics:  analyticsMetrics,
+		Scripts:           scripts,
+		Reports:           reports,
+		MinKoraVersion:    minKoraVersion,
+		ScheduledJobs:     scheduledJobs,
+		Modules:           modules,
+		PublishedBindings: publishedBindings,
 	}, nil
 }
 
