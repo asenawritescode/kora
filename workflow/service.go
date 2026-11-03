@@ -31,12 +31,19 @@ type DefinitionAuthorizer interface {
 }
 
 type Service struct {
-	repository DefinitionRepository
-	authorizer DefinitionAuthorizer
-	catalog    *Catalog
-	schemas    PayloadSchemaRegistry
-	waits      WaitFieldRegistry
-	now        func() time.Time
+	repository     DefinitionRepository
+	authorizer     DefinitionAuthorizer
+	catalog        *Catalog
+	schemas        PayloadSchemaRegistry
+	waits          WaitFieldRegistry
+	now            func() time.Time
+	moduleSnapshot func(contract.TenantID) (contract.ModuleSnapshot, error)
+}
+
+func (s *Service) SetModuleSnapshotLookup(lookup func(contract.TenantID) (contract.ModuleSnapshot, error)) {
+	if s != nil {
+		s.moduleSnapshot = lookup
+	}
 }
 
 func NewService(repository DefinitionRepository, authorizer DefinitionAuthorizer, catalog *Catalog, schemas PayloadSchemaRegistry, waits WaitFieldRegistry, now func() time.Time) (*Service, error) {
@@ -186,6 +193,30 @@ func (s *Service) PreviewHistory(ctx context.Context, exec policy.Execution, lim
 func (s *Service) Publish(ctx context.Context, exec policy.Execution, definition contract.WorkflowDefinition, key contract.IdempotencyKey) (contract.DefinitionVersionRef, error) {
 	if _, err := contract.ParseIdempotencyKey(string(key)); err != nil {
 		return contract.DefinitionVersionRef{}, contract.NewError(contract.CodeValidationFailed, "valid idempotency key is required")
+	}
+	if definition.OwnerModuleID != "" {
+		if s.moduleSnapshot == nil {
+			return contract.DefinitionVersionRef{}, contract.NewError(contract.CodeDependencyUnavailable, "module ownership snapshot is unavailable")
+		}
+		snapshot, err := s.moduleSnapshot(exec.Tenant())
+		if err != nil {
+			return contract.DefinitionVersionRef{}, err
+		}
+		moduleFound, resourceFound := false, false
+		for _, module := range snapshot.Modules {
+			if module.ID != definition.OwnerModuleID {
+				continue
+			}
+			moduleFound = true
+			for _, resource := range module.Resources {
+				if (resource.Ref.Namespace == "workflow" || resource.Ref.Namespace == "workflows") && resource.Ref.Name == string(definition.ID) {
+					resourceFound = true
+				}
+			}
+		}
+		if !moduleFound || !resourceFound {
+			return contract.DefinitionVersionRef{}, contract.NewError(contract.CodePermissionDenied, "workflow owner is not declared in the module snapshot")
+		}
 	}
 	result, err := s.Validate(ctx, exec, definition)
 	if err != nil {

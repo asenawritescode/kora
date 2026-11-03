@@ -168,10 +168,10 @@ func TestReplayRealtimeReadsSiteScopedOutboxAfterCursor(t *testing.T) {
 	setRealtimeTestExecution(c, []string{"Reader"}, false)
 
 	occurredAt := time.Date(2026, 9, 12, 8, 0, 0, 0, time.UTC)
-	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
 		WithArgs("tenant-a", "evt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "created_at"}).
-			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", occurredAt))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "payload", "created_at"}).
+			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", []byte(`{}`), occurredAt))
 
 	var messages []map[string]any
 	err = h.replayRealtime(c, "evt-1", []string{"doctype:customer"}, func(payload []byte) error {
@@ -324,10 +324,10 @@ func TestReplayRealtimeRequiresCurrentReadAuthorization(t *testing.T) {
 	c.Set("site_name", "tenant-a")
 	c.Set("user_roles", []string{"Reader"})
 	setRealtimeTestExecution(c, []string{"Reader"}, false)
-	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
 		WithArgs("tenant-a", "evt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "created_at"}).
-			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", time.Now().UTC()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "payload", "created_at"}).
+			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", []byte(`{}`), time.Now().UTC()))
 
 	var delivered int
 	err = h.replayRealtime(c, "evt-1", nil, func(payload []byte) error {
@@ -373,10 +373,10 @@ func TestReplayRealtimeAcceptsExactVerifiedReadGrant(t *testing.T) {
 	c.Set("user", "forged-user")
 	c.Set("user_roles", []string{doctype.AdminRole})
 	c.Set("policy_execution", execution)
-	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
 		WithArgs("tenant-a", "evt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "created_at"}).
-			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", time.Now().UTC()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "payload", "created_at"}).
+			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", []byte(`{}`), time.Now().UTC()))
 	var delivered int
 	if err := handler.replayRealtime(c, "evt-1", nil, func(payload []byte) error {
 		var message map[string]any
@@ -419,10 +419,10 @@ func TestReplayRealtimeDoesNotDeliverAfterReadRoleRevocation(t *testing.T) {
 	// includes the role that granted read access when the stream was opened.
 	c.Set("user_roles", []string{"RevokedReader"})
 	setRealtimeTestExecution(c, []string{"RevokedReader"}, false)
-	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
 		WithArgs("tenant-a", "evt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "created_at"}).
-			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", time.Now().UTC()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "payload", "created_at"}).
+			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", []byte(`{}`), time.Now().UTC()))
 
 	var delivered int
 	err = h.replayRealtime(c, "evt-1", nil, func(payload []byte) error {

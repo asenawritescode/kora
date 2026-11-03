@@ -2325,7 +2325,7 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 		return nil
 	}
 	siteDB := h.siteTx(c).DB
-	query := db.Rebind(h.siteDialect(c), `SELECT id, event_type, site, aggregate_type, aggregate_id, created_at
+	query := db.Rebind(h.siteDialect(c), `SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at
 		FROM _kora_outbox WHERE site = ? AND id > ? ORDER BY id LIMIT 501`)
 	rows, err := siteDB.QueryContext(c.Request.Context(), query, c.GetString("site_name"), after)
 	if err != nil {
@@ -2333,13 +2333,14 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 	}
 	type replayEntry struct {
 		id, eventType, site, aggregateType, aggregateID string
+		payload                                         []byte
 		occurredAt                                      time.Time
 	}
 	entries := make([]replayEntry, 0, 501)
 	for rows.Next() {
 		var entry replayEntry
 		var occurredAt any
-		if err := rows.Scan(&entry.id, &entry.eventType, &entry.site, &entry.aggregateType, &entry.aggregateID, &occurredAt); err != nil {
+		if err := rows.Scan(&entry.id, &entry.eventType, &entry.site, &entry.aggregateType, &entry.aggregateID, &entry.payload, &occurredAt); err != nil {
 			_ = rows.Close()
 			return err
 		}
