@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/site"
 )
 
@@ -91,9 +90,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	// Import YAML config.
 	slog.Info("importing config", "path", setupConfigPath)
-	if err := runSetupConfigImport(cmd.Context(), result.Config, func() error {
-		return site.ImportConfigForTenant(result.DB, result.Registry, result.Config.DBName, siteName, result.SiteID, setupConfigPath, kdb.Resolve(result.Config.DBType))
-	}); err != nil {
+	if err := runConfigImportForSiteContext(cmd.Context(), siteName, setupConfigPath, result.Config, result.SiteID); err != nil {
 		return fmt.Errorf("importing config: %w", err)
 	}
 
@@ -108,18 +105,6 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	fmt.Println("└─────────────────────────────────────────────────────┘")
 
 	return nil
-}
-
-func runSetupConfigImport(ctx context.Context, config *site.SiteConfig, importConfig func() error) error {
-	if ctx == nil || config == nil || importConfig == nil {
-		return fmt.Errorf("setup config import requires context, tenant configuration, and operation")
-	}
-	release, err := acquireSiteCLIWork(ctx, config, true)
-	if err != nil {
-		return err
-	}
-	defer release()
-	return importConfig()
 }
 
 func runSetupSiteCreation(ctx context.Context, tenantConfig *site.SiteConfig, platformDriver, platformDSN string, createSite func() (*site.CreateSiteResult, error)) (*site.CreateSiteResult, error) {

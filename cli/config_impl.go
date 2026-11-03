@@ -2,11 +2,8 @@ package cli
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -187,6 +184,20 @@ func runConfigImportContext(ctx context.Context, siteName, path, dbName string) 
 	// Load site config.
 	common_cfg := site.CommonConfigFromEnv()
 	siteCfg := resolveConfigImportSiteConfigContext(ctx, siteName, dbName, common_cfg)
+	tenantID := siteName
+	if info, ok := lookupRegisteredSiteContext(ctx, siteName, common_cfg); ok && info.SiteID != "" {
+		tenantID = info.SiteID
+	}
+	return runConfigImportForSiteContext(ctx, siteName, path, siteCfg, tenantID)
+}
+
+func runConfigImportForSiteContext(ctx context.Context, siteName, path string, siteCfg *site.SiteConfig, tenantID string) (returnErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if siteName == "" || path == "" || siteCfg == nil || tenantID == "" {
+		return fmt.Errorf("config import requires site, path, tenant configuration, and tenant ID")
+	}
 	fmt.Printf("Import target: site=%s database=%s\n", siteName, siteCfg.DBName)
 
 	// Connect to database.
@@ -268,152 +279,22 @@ func runConfigImportContext(ctx context.Context, siteName, path, dbName string) 
 	if len(reports) > 0 {
 		fmt.Printf("Found %d reports\n", len(reports))
 	}
-
-	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, Views: views, Reports: reports, MinKoraVersion: Version}
-	snapshotBytes, err := json.Marshal(snapshot)
+	workflowDefinitions, err := site.ParseWorkflowDefinitionsDirectory(path + "/workflows")
 	if err != nil {
-		return fmt.Errorf("encoding config import snapshot: %w", err)
+		return fmt.Errorf("parsing Engine v2 workflow definitions: %w", err)
 	}
+	if len(workflowDefinitions) > 0 {
+		fmt.Printf("Found %d workflow definitions\n", len(workflowDefinitions))
+	}
+
+	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, WorkflowDefinitions: workflowDefinitions, Views: views, Reports: reports, MinKoraVersion: Version}
 	dialect := kdb.Resolve(siteCfg.DBType)
-	store := configstore.NewStore(db, dialect)
-	liveDocTypes, err := store.LoadAll(siteName)
-	if err != nil {
-		return fmt.Errorf("loading existing DocTypes for reference validation: %w", err)
-	}
-	liveRegistry := doctype.NewRegistry()
-	liveRegistry.LoadFull(liveDocTypes, nil, nil)
-	if findings := doctype.ValidateSnapshotReferences(snapshot, liveRegistry); len(findings) > 0 {
-		return fmt.Errorf("configuration has unresolved references: %s at %s", findings[0].Code, findings[0].Path)
-	}
-	operationID := configImportOperationID(siteName, snapshotBytes)
-	operation, err := configstore.EnsureActivationOperation(db, dialect, siteName, operationID, "import", snapshot)
-	if err != nil {
-		return fmt.Errorf("recording config import operation: %w", err)
-	}
-	if operation.Phase == configstore.ActivationActivated {
-		return fmt.Errorf("config import operation %s has an invalid activated phase", operationID)
-	}
-	if operation.Phase != configstore.ActivationCompleted && operation.Phase != configstore.ActivationValidated {
-		if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "import", configstore.ActivationApplying, operation.DDLPlan, "resume-from-live-schema", ""); err != nil {
-			return fmt.Errorf("starting config import operation: %w", err)
-		}
-		operation.Phase = configstore.ActivationApplying
-	}
-	journalPhase := operation.Phase
-	defer func() {
-		if returnErr == nil || journalPhase == configstore.ActivationCompleted {
-			return
-		}
-		if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "import", journalPhase, operation.DDLPlan, operation.RecoveryPlan, returnErr.Error()); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("recording config import failure: %w", err))
-		}
-	}()
-
 	registry := doctype.NewRegistry()
-	registry.LoadFull(doctypes, roles, permissions)
-	versionID := strings.TrimSpace(operation.RecoveryPlan)
-	if operation.Phase != configstore.ActivationValidated && operation.Phase != configstore.ActivationCompleted {
-		// Save to database. These idempotent upserts may be interrupted; retries
-		// reuse the immutable journal snapshot and repeat them before version commit.
-		for _, dt := range doctypes {
-			if err := store.SaveDocType(dt, siteName); err != nil {
-				return fmt.Errorf("saving %s: %w", dt.Name, err)
-			}
-			fmt.Printf("  ✓ %s (%d fields)\n", dt.Name, len(dt.Fields))
-		}
-
-		// Save roles and permissions as one authorization snapshot.
-		authTx, err := db.BeginTx(context.Background(), nil)
-		if err != nil {
-			return fmt.Errorf("begin authorization config import: %w", err)
-		}
-		defer authTx.Rollback()
-		if err := store.SaveRolesTx(authTx, roles, siteName); err != nil {
-			return fmt.Errorf("saving roles: %w", err)
-		}
-		if err := store.SavePermissionsTx(authTx, permissions, siteName); err != nil {
-			return fmt.Errorf("saving permissions: %w", err)
-		}
-		if err := configstore.BumpAuthorizationRevisionTx(authTx, kdb.Resolve(siteCfg.DBType), true, false); err != nil {
-			return fmt.Errorf("advancing policy revision: %w", err)
-		}
-		if err := authTx.Commit(); err != nil {
-			return fmt.Errorf("committing authorization config import: %w", err)
-		}
-
-		// Save views from the dedicated views directory only. Root-level YAML files
-		// are reserved for doctypes, roles, and permissions.
-		if len(views) > 0 {
-			if err := store.SaveViews(views, siteName); err != nil {
-				return fmt.Errorf("saving views: %w", err)
-			}
-			for _, v := range views {
-				fmt.Printf("  ✓ %s (view)\n", v.Name)
-			}
-		}
-
-		// Version history and the journal phase commit together so a lost CLI
-		// response cannot create duplicate versions on retry.
-		versionTx, err := db.BeginTx(context.Background(), nil)
-		if err != nil {
-			return fmt.Errorf("beginning config import version transaction: %w", err)
-		}
-		defer versionTx.Rollback()
-		var versionNum int
-		versionID, versionNum, err = store.CreateConfigVersionTx(versionTx, siteName, "system", "Config import from "+path, "Active", snapshot, "")
-		if err != nil {
-			return fmt.Errorf("creating config version: %w", err)
-		}
-		if err := configstore.UpdateActivationOperationPhaseTx(versionTx, dialect, siteName, operationID, "import", configstore.ActivationApplying, configstore.ActivationValidated, versionID); err != nil {
-			return err
-		}
-		if err := versionTx.Commit(); err != nil {
-			return fmt.Errorf("committing config import version: %w", err)
-		}
-		journalPhase = configstore.ActivationValidated
-		operation.RecoveryPlan = versionID
-		fmt.Printf("  ✓ Config version %d (%s) created\n", versionNum, versionID)
-	} else if versionID == "" {
-		return fmt.Errorf("config import operation %s is missing its committed version reference", operationID)
+	if err := site.ImportConfigFromSnapshotContext(ctx, db, registry, siteCfg.DBName, siteName, tenantID, "Config import from "+path, snapshot, dialect, nil); err != nil {
+		return fmt.Errorf("activating imported config: %w", err)
 	}
-
-	// Run migration.
-	if err := schema.MigrateSiteFromRegistry(db, siteCfg.DBName, registry, kdb.Resolve(siteCfg.DBType)); err != nil {
-		return fmt.Errorf("migrating: %w", err)
-	}
-	if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "import", configstore.ActivationCompleted, operation.DDLPlan, versionID, ""); err != nil {
-		return fmt.Errorf("finalizing config import operation: %w", err)
-	}
-	journalPhase = configstore.ActivationCompleted
-	// Print changelog summary.
-	var changelogStr string
-	if err := db.QueryRow("SELECT COALESCE(changelog, '') FROM _kora_config_version WHERE id = ?", versionID).Scan(&changelogStr); err != nil {
-		return fmt.Errorf("reading imported config changelog: %w", err)
-	}
-	if changelogStr != "" {
-		var diff doctype.ConfigDiff
-		if json.Unmarshal([]byte(changelogStr), &diff) == nil {
-			if diff.IsBreaking {
-				fmt.Printf("  ⚠️  Warning: %d breaking changes detected!\n", len(diff.BreakingChanges()))
-				for _, c := range diff.BreakingChanges() {
-					fmt.Printf("     - %s\n", c.Message)
-				}
-			}
-			fmt.Printf("  ✓ %s\n", diff.Summary())
-		}
-	}
-
 	fmt.Println("Config imported successfully.")
 	return nil
-}
-
-func configImportOperationID(siteName string, snapshot []byte) string {
-	input := make([]byte, 0, len(siteName)+1+len(snapshot))
-	input = append(input, siteName...)
-	input = append(input, 0)
-	input = append(input, snapshot...)
-	digest := sha256.Sum256(input)
-	return hex.EncodeToString(digest[:18])
 }
 
 func resolveConfigImportSiteConfig(siteName, dbName string, commonCfg *site.CommonConfig) *site.SiteConfig {

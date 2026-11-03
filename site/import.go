@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,7 +46,7 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 	}
 
 	// Load unified Engine v2 definitions from the pack's workflows directory.
-	workflowDefinitions, err := parseWorkflowDefinitionDirectory(filepath.Join(configPath, "workflows"))
+	workflowDefinitions, err := ParseWorkflowDefinitionsDirectory(filepath.Join(configPath, "workflows"))
 	if err != nil {
 		return fmt.Errorf("parsing Engine v2 workflow definitions: %w", err)
 	}
@@ -78,7 +79,7 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 	}, dialect, nil)
 }
 
-func parseWorkflowDefinitionDirectory(directory string) ([]contract.WorkflowDefinition, error) {
+func ParseWorkflowDefinitionsDirectory(directory string) ([]contract.WorkflowDefinition, error) {
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -115,7 +116,15 @@ func ImportConfigFromSnapshot(db *sql.DB, registry *doctype.Registry, dbName, si
 	return ImportConfigFromSnapshotForTenant(db, registry, dbName, siteName, siteName, label, snapshot, dialect, scriptBodyByHash)
 }
 
-func publishImportedWorkflows(database *sql.DB, dialect sqlDialect.Dialect, tenant contract.TenantID, definitions []contract.WorkflowDefinition, registry *doctype.Registry) error {
+func PublishImportedWorkflowDefinitions(ctx context.Context, database *sql.DB, dialect sqlDialect.Dialect, tenantID string, definitions []contract.WorkflowDefinition, registry *doctype.Registry) error {
+	tenant, err := contract.ParseTenantID(tenantID)
+	if err != nil {
+		return fmt.Errorf("invalid tenant ID: %w", err)
+	}
+	return publishImportedWorkflows(ctx, database, dialect, tenant, definitions, registry)
+}
+
+func publishImportedWorkflows(ctx context.Context, database *sql.DB, dialect sqlDialect.Dialect, tenant contract.TenantID, definitions []contract.WorkflowDefinition, registry *doctype.Registry) error {
 	catalog := flow.NewCatalog()
 	input := contract.SchemaRef{ID: "kora.notification.send", Version: 1}
 	output := contract.SchemaRef{ID: "kora.notification.send.result", Version: 1}
@@ -150,7 +159,9 @@ func publishImportedWorkflows(database *sql.DB, dialect sqlDialect.Dialect, tena
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := store.Ensure(ctx); err != nil {
 		return err
 	}
@@ -159,6 +170,15 @@ func publishImportedWorkflows(database *sql.DB, dialect sqlDialect.Dialect, tena
 		return err
 	}
 	return store.PublishImportedBatch(ctx, tenant, actor, definitions, time.Now().UTC())
+}
+
+func configImportOperationID(siteName string, snapshot []byte) string {
+	input := make([]byte, 0, len(siteName)+1+len(snapshot))
+	input = append(input, siteName...)
+	input = append(input, 0)
+	input = append(input, snapshot...)
+	digest := sha256.Sum256(input)
+	return hex.EncodeToString(digest[:18])
 }
 
 type importedNotificationAction struct{}
@@ -267,77 +287,122 @@ func (s importedWorkflowSchemas) RecordFieldOptions(table, field string) (string
 }
 
 func ImportConfigFromSnapshotForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteName, tenantID, label string, snapshot *doctype.ConfigSnapshot, dialect sqlDialect.Dialect, scriptBodyByHash map[string]string) error {
+	return ImportConfigFromSnapshotContext(context.Background(), db, registry, dbName, siteName, tenantID, label, snapshot, dialect, scriptBodyByHash)
+}
+
+// ImportConfigFromSnapshotContext activates a complete config snapshot through
+// the same journaled, revision-fenced transaction used by CLI setup/import.
+func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, registry *doctype.Registry, dbName, siteName, tenantID, label string, snapshot *doctype.ConfigSnapshot, dialect sqlDialect.Dialect, scriptBodyByHash map[string]string) (returnErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if database == nil || registry == nil || dialect == nil || dbName == "" || siteName == "" || label == "" {
+		return fmt.Errorf("config activation requires database, registry, dialect, database name, site, and label")
+	}
 	if snapshot == nil {
 		return fmt.Errorf("snapshot is required")
-	}
-	if findings := doctype.ValidateSnapshotReferences(snapshot, registry); len(findings) > 0 {
-		return fmt.Errorf("configuration references are invalid: %s at %s targets %q", findings[0].Code, findings[0].Path, findings[0].Target)
 	}
 	tenant, err := contract.ParseTenantID(tenantID)
 	if err != nil {
 		return fmt.Errorf("invalid workflow tenant ID: %w", err)
 	}
 	workflowDefinitions := append([]contract.WorkflowDefinition(nil), snapshot.WorkflowDefinitions...)
-
-	// Step 1: Save to database.
-	store := configstore.NewStore(db, dialect)
-	for _, dt := range snapshot.DocTypes {
-		if err := store.SaveDocType(dt, siteName); err != nil {
-			return fmt.Errorf("saving doctype %s: %w", dt.Name, err)
+	store := configstore.NewStore(database, dialect)
+	liveDocTypes, err := store.LoadAll(siteName)
+	if err != nil {
+		return fmt.Errorf("loading existing doctypes for reference validation: %w", err)
+	}
+	liveRegistry := doctype.NewRegistry()
+	if registry != nil {
+		liveRegistry.LoadFull(registry.All(), nil, nil)
+		if registry.Views != nil {
+			liveRegistry.Views.LoadFromDB(registry.Views.All())
 		}
 	}
-	// Roles and permissions form one authorization snapshot. Publish both with
-	// the epoch bump in one transaction so requests cannot observe a mixed state.
-	authTx, err := db.BeginTx(context.Background(), nil)
+	liveRegistry.LoadFull(liveDocTypes, nil, nil)
+	if findings := doctype.ValidateSnapshotReferences(snapshot, liveRegistry); len(findings) > 0 {
+		return fmt.Errorf("configuration references are invalid: %s at %s targets %q", findings[0].Code, findings[0].Path, findings[0].Target)
+	}
+	snapshotCopy := *snapshot
+	snapshotCopy.WorkflowDefinitions = workflowDefinitions
+	snapshotBytes, err := json.Marshal(&snapshotCopy)
 	if err != nil {
-		return fmt.Errorf("begin authorization config import: %w", err)
+		return fmt.Errorf("encoding config activation snapshot: %w", err)
 	}
-	defer authTx.Rollback()
-	if err := store.SaveRolesTx(authTx, snapshot.Roles, siteName); err != nil {
-		return fmt.Errorf("saving roles: %w", err)
-	}
-	if err := store.SavePermissionsTx(authTx, snapshot.Permissions, siteName); err != nil {
-		return fmt.Errorf("saving permissions: %w", err)
-	}
-	if err := configstore.BumpAuthorizationRevisionTx(authTx, dialect, true, false); err != nil {
-		return fmt.Errorf("advancing policy revision: %w", err)
-	}
-	if err := authTx.Commit(); err != nil {
-		return fmt.Errorf("committing authorization config import: %w", err)
-	}
-	if err := store.SaveViews(snapshot.Views, siteName); err != nil {
-		return fmt.Errorf("saving views: %w", err)
-	}
-	if err := store.SaveAnalyticsMetrics(snapshot.AnalyticsMetrics, siteName); err != nil {
-		return fmt.Errorf("saving analytics metrics: %w", err)
-	}
-	if err := store.SaveScripts(snapshot.Scripts, scriptBodyByHash, siteName); err != nil {
-		return fmt.Errorf("saving scripts: %w", err)
-	}
-
-	// Step 2: Build registry with full config.
-	registry.LoadFull(snapshot.DocTypes, snapshot.Roles, snapshot.Permissions)
-	snapshot.WorkflowDefinitions = nil
-
-	// Step 3: Create config version BEFORE migration.
-	versionID, _, err := store.CreateConfigVersion(siteName, "system", label, "Active", snapshot)
+	expectedRevision, err := configstore.CurrentConfigRevision(ctx, database, dialect)
 	if err != nil {
-		return fmt.Errorf("creating config version: %w", err)
+		return fmt.Errorf("reading config revision for activation preflight: %w", err)
+	}
+	operationID := configImportOperationID(siteName, snapshotBytes)
+	operation, err := configstore.EnsureActivationOperation(database, dialect, siteName, operationID, "import", &snapshotCopy)
+	if err != nil {
+		return fmt.Errorf("recording config activation operation: %w", err)
+	}
+	if operation.Phase == configstore.ActivationActivated {
+		return fmt.Errorf("config activation operation %s has an invalid activated phase", operationID)
+	}
+	if operation.Phase != configstore.ActivationCompleted && operation.Phase != configstore.ActivationValidated {
+		if err := configstore.UpdateActivationOperation(database, dialect, siteName, operationID, "import", configstore.ActivationApplying, operation.DDLPlan, "resume-from-live-schema", ""); err != nil {
+			return fmt.Errorf("starting config activation operation: %w", err)
+		}
+		operation.Phase = configstore.ActivationApplying
+	}
+	journalPhase := operation.Phase
+	defer func() {
+		if returnErr == nil || journalPhase == configstore.ActivationCompleted {
+			return
+		}
+		if err := configstore.UpdateActivationOperation(database, dialect, siteName, operationID, "import", journalPhase, operation.DDLPlan, operation.RecoveryPlan, returnErr.Error()); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("recording config activation failure: %w", err))
+		}
+	}()
+
+	versionID := strings.TrimSpace(operation.RecoveryPlan)
+	if operation.Phase != configstore.ActivationValidated && operation.Phase != configstore.ActivationCompleted {
+		tx, err := database.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin config activation transaction: %w", err)
+		}
+		defer tx.Rollback()
+		if err := store.ActivateSnapshotAtConfigRevision(tx, &snapshotCopy, siteName, dialect, expectedRevision); err != nil {
+			return fmt.Errorf("activating config snapshot at expected revision %d: %w", expectedRevision, err)
+		}
+		var version int
+		versionID, version, err = store.CreateConfigVersionTx(tx, siteName, "system", label, "Active", &snapshotCopy, "")
+		if err != nil {
+			return fmt.Errorf("creating config version: %w", err)
+		}
+		if err := configstore.UpdateActivationOperationPhaseTx(tx, dialect, siteName, operationID, "import", configstore.ActivationApplying, configstore.ActivationValidated, versionID); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("committing config activation: %w", err)
+		}
+		journalPhase = configstore.ActivationValidated
+		operation.RecoveryPlan = versionID
+		fmt.Printf("  ✓ Config version %d (%s) created\n", version, versionID)
+	} else if versionID == "" {
+		return fmt.Errorf("config activation operation %s is missing its committed version reference", operationID)
 	}
 
-	// Step 4: Run schema migration.
-	if err := schema.MigrateSiteFromRegistry(db, dbName, registry, dialect); err != nil {
+	registry.LoadFull(snapshotCopy.DocTypes, snapshotCopy.Roles, snapshotCopy.Permissions)
+	registry.Views.LoadFromDB(snapshotCopy.Views)
+	if err := schema.MigrateSiteFromRegistry(database, dbName, registry, dialect); err != nil {
 		return fmt.Errorf("migrating schema: %w", err)
 	}
 	if len(workflowDefinitions) > 0 {
-		if err := publishImportedWorkflows(db, dialect, tenant, workflowDefinitions, registry); err != nil {
+		if err := publishImportedWorkflows(ctx, database, dialect, tenant, workflowDefinitions, registry); err != nil {
 			return fmt.Errorf("publishing Engine v2 workflows: %w", err)
 		}
 	}
+	if err := configstore.UpdateActivationOperation(database, dialect, siteName, operationID, "import", configstore.ActivationCompleted, operation.DDLPlan, versionID, ""); err != nil {
+		return fmt.Errorf("finalizing config activation operation: %w", err)
+	}
+	journalPhase = configstore.ActivationCompleted
 
 	// Print changelog summary.
 	var changelogStr string
-	if err := db.QueryRow(sqlDialect.Rebind(dialect, "SELECT COALESCE(changelog, '') FROM _kora_config_version WHERE id = ?"), versionID).Scan(&changelogStr); err != nil {
+	if err := database.QueryRowContext(ctx, sqlDialect.Rebind(dialect, "SELECT COALESCE(changelog, '') FROM _kora_config_version WHERE id = ?"), versionID).Scan(&changelogStr); err != nil {
 		fmt.Printf("Warning: config was imported, but its changelog summary could not be read: %v\n", err)
 		return nil
 	}
