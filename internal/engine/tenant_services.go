@@ -539,8 +539,9 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("load active scheduled job definitions for tenant %s: %w", loaded.Name, err)
 	}
+	jobs := make([]*scheduler.JobConfig, 0)
 	if activeConfig != nil && len(activeConfig.ScheduledJobs) > 0 {
-		jobs := make([]*scheduler.JobConfig, 0, len(activeConfig.ScheduledJobs))
+		jobs = make([]*scheduler.JobConfig, 0, len(activeConfig.ScheduledJobs))
 		for _, definition := range activeConfig.ScheduledJobs {
 			var jobConfig map[string]any
 			if len(definition.Config) > 0 {
@@ -555,10 +556,12 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			}
 			jobs = append(jobs, &scheduler.JobConfig{Name: definition.Name, OwnerModuleID: definition.OwnerModuleID, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig, Scope: scope, RequiredResource: definition.RequiredResource, RequiredOperation: definition.RequiredOperation})
 		}
-		tenantScheduler, err := newTenantScheduler(loaded, dialect, jobs, domainKernel, services.ModuleBindings, config.SchedulerHandlerFactory, config.SchedulerExecutionResolverFactory, config.Mailer, services.Outbox, config.ScriptRunner, services.ScriptStore, services.WorkAdmission, worker)
-		if err != nil {
-			return fmt.Errorf("construct scheduler for tenant %s: %w", loaded.Name, err)
-		}
+	}
+	tenantScheduler, err := newTenantScheduler(loaded, dialect, jobs, domainKernel, services.ModuleBindings, config.SchedulerHandlerFactory, config.SchedulerExecutionResolverFactory, config.Mailer, services.Outbox, config.ScriptRunner, services.ScriptStore, services.WorkAdmission, worker)
+	if err != nil {
+		return fmt.Errorf("construct scheduler for tenant %s: %w", loaded.Name, err)
+	}
+	if tenantScheduler != nil {
 		services.Scheduler = tenantScheduler
 		if err := registerTenantWorkerStart(config, func() error {
 			if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
@@ -744,6 +747,18 @@ func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*sc
 	if loaded.SiteID == "" {
 		return nil, errors.New("tenant scheduler requires stable tenant ID")
 	}
+	store, err := schedulersql.New(loaded.DB, dialect)
+	if err != nil {
+		return nil, err
+	}
+	ensureCtx, cancelEnsure := context.WithTimeout(context.Background(), 30*time.Second)
+	err = withTenantWorkAdmission(ensureCtx, workAdmission, "ensure durable scheduler schema", func() error {
+		return store.Ensure(ensureCtx)
+	})
+	cancelEnsure()
+	if err != nil {
+		return nil, fmt.Errorf("prepare durable scheduler store: %w", err)
+	}
 	if len(jobs) == 0 {
 		return nil, nil
 	}
@@ -795,18 +810,6 @@ func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*sc
 	}
 	if len(activeJobs) == 0 {
 		return nil, nil
-	}
-	store, err := schedulersql.New(loaded.DB, dialect)
-	if err != nil {
-		return nil, err
-	}
-	ensureCtx, cancelEnsure := context.WithTimeout(context.Background(), 30*time.Second)
-	err = withTenantWorkAdmission(ensureCtx, workAdmission, "ensure durable scheduler schema", func() error {
-		return store.Ensure(ensureCtx)
-	})
-	cancelEnsure()
-	if err != nil {
-		return nil, fmt.Errorf("prepare durable scheduler store: %w", err)
 	}
 	worker.DurableStore = store
 	for _, job := range activeJobs {
