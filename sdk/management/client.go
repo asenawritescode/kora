@@ -4,6 +4,7 @@ package management
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
+	"reflect"
 	"strings"
 	"time"
 
@@ -33,37 +35,13 @@ type Client interface {
 	ReconcileTenantDeleteOperation(context.Context, contract.OperationID, contract.ReconcileTenantDeleteOperation) (contract.ManagedOperation, error)
 	Delete(context.Context, contract.TenantID, contract.DeleteTenant) (contract.ManagedOperation, error)
 	Operation(context.Context, contract.OperationID) (contract.ManagedOperation, error)
-}
-
-// CapabilitiesClient is an optional discovery extension implemented by the
-// supported HTTP client. Keeping it separate preserves source compatibility
-// for existing Client implementations while letting callers fail closed
-// before they persist work for an unavailable Engine operation.
-type CapabilitiesClient interface {
 	Capabilities(context.Context) (contract.ManagementCapabilitiesV2, error)
-}
-
-// TenantInvitationClient is an optional extension for durable bootstrap
-// invitation delivery. It remains separate to preserve older Client mocks.
-type TenantInvitationClient interface {
 	InviteTenantAdministrator(context.Context, contract.TenantID, contract.RequestTenantInvitation) (contract.ManagedOperation, error)
-}
-
-type TenantInvitationRecoveryClient interface {
 	ReconcileTenantInvitationOperation(context.Context, contract.OperationID, contract.ReconcileTenantInvitationOperation) (contract.ManagedOperation, error)
-}
-
-// DeploymentDirectoryClient is the read-only directory lookup used by
-// deployment ingress. It is an optional extension so older management client
-// implementations remain source compatible during consumer rollout.
-type DeploymentDirectoryClient interface {
 	ResolveDirectoryEntry(context.Context, contract.TenantID) (contract.SiteDirectoryEntryV2, error)
 	ResolveDirectoryAlias(context.Context, string) (contract.SiteDirectoryEntryV2, error)
-}
-
-// ModuleInspectionClient exposes redacted tenant module and pinned-execution
-// projections without expanding the base Client contract for existing mocks.
-type ModuleInspectionClient interface {
+	PlanModuleChange(context.Context, contract.TenantID, contract.PlanModuleChange) (contract.ModuleChangePlan, error)
+	ApplyModuleChange(context.Context, contract.TenantID, contract.ApplyModuleChange) (contract.ManagedOperation, error)
 	InspectModules(context.Context, contract.TenantID) (contract.ModuleInspection, error)
 	InspectExecution(context.Context, contract.TenantID, string) (contract.ExecutionInspection, error)
 }
@@ -206,6 +184,49 @@ func (c *httpClient) InspectExecution(ctx context.Context, tenant contract.Tenan
 	err = c.do(ctx, http.MethodGet, endpoint, http.StatusOK, nil, &result)
 	if err == nil && (result.ExecutionID != string(id) || result.CallerModuleID == "" || result.ProviderID == "") {
 		err = fmt.Errorf("management execution response identity is invalid")
+	}
+	return result, err
+}
+
+// PlanModuleChange returns the Engine's current lifecycle plan, including any
+// dependency or open-work blockers. The caller must present those blockers
+// and apply only the exact returned plan hash and base revision.
+func (c *httpClient) PlanModuleChange(ctx context.Context, tenant contract.TenantID, request contract.PlanModuleChange) (contract.ModuleChangePlan, error) {
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return contract.ModuleChangePlan{}, fmt.Errorf("validate tenant ID: %w", err)
+	}
+	if err := contract.ValidatePlanModuleChange(request); err != nil {
+		return contract.ModuleChangePlan{}, fmt.Errorf("validate module plan request: %w", err)
+	}
+	var result contract.ModuleChangePlan
+	endpoint := "/api/management/v2/tenants/" + url.PathEscape(string(tenant)) + "/modules/plan"
+	err := c.do(ctx, http.MethodPost, endpoint, http.StatusOK, request, &result)
+	if err == nil && (result.ModuleID != request.ModuleID || result.TargetState != request.TargetState || result.TargetVersion != request.TargetVersion || !reflect.DeepEqual(result.ProviderSelections, request.ProviderSelections) || result.BaseRevision != request.ExpectedRevision || len(result.PlanHash) != 64) {
+		err = fmt.Errorf("management module plan response identity is invalid")
+	}
+	if err == nil {
+		if digest, decodeErr := hex.DecodeString(result.PlanHash); decodeErr != nil || len(digest) != 32 || strings.ToLower(result.PlanHash) != result.PlanHash {
+			err = fmt.Errorf("management module plan hash is invalid")
+		}
+	}
+	return result, err
+}
+
+// ApplyModuleChange submits the reviewed Engine plan. It never replans or
+// silently substitutes a newer revision; callers poll the returned operation
+// through Operation after acceptance.
+func (c *httpClient) ApplyModuleChange(ctx context.Context, tenant contract.TenantID, command contract.ApplyModuleChange) (contract.ManagedOperation, error) {
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return contract.ManagedOperation{}, fmt.Errorf("validate tenant ID: %w", err)
+	}
+	if err := contract.ValidateApplyModuleChange(command); err != nil {
+		return contract.ManagedOperation{}, fmt.Errorf("validate module apply command: %w", err)
+	}
+	var result contract.ManagedOperation
+	endpoint := "/api/management/v2/tenants/" + url.PathEscape(string(tenant)) + "/modules/apply"
+	err := c.do(ctx, http.MethodPost, endpoint, http.StatusAccepted, command, &result)
+	if err == nil && result.Tenant != tenant {
+		err = fmt.Errorf("management operation tenant does not match module apply request")
 	}
 	return result, err
 }
@@ -455,17 +476,28 @@ func (c *httpClient) do(ctx context.Context, method, endpoint string, expected i
 	if response.StatusCode != expected {
 		return decodeRemoteError(response.StatusCode, data)
 	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
+		Meta json.RawMessage `json:"meta,omitempty"`
 	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
+	if err := decoder.Decode(&envelope); err != nil {
 		return fmt.Errorf("decode management response envelope: %w", err)
 	}
 	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
 		return fmt.Errorf("management response omitted data")
 	}
-	if err := json.Unmarshal(envelope.Data, output); err != nil {
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("decode management response envelope: trailing data")
+	}
+	dataDecoder := json.NewDecoder(bytes.NewReader(envelope.Data))
+	dataDecoder.DisallowUnknownFields()
+	if err := dataDecoder.Decode(output); err != nil {
 		return fmt.Errorf("decode management response data: %w", err)
+	}
+	if err := dataDecoder.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("decode management response data: trailing data")
 	}
 	if operation, ok := output.(*contract.ManagedOperation); ok {
 		if err := contract.ValidateManagedOperation(*operation); err != nil {
@@ -509,5 +541,3 @@ func decodeRemoteError(status int, data []byte) error {
 }
 
 var _ Client = (*httpClient)(nil)
-var _ TenantInvitationClient = (*httpClient)(nil)
-var _ TenantInvitationRecoveryClient = (*httpClient)(nil)
