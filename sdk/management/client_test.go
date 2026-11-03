@@ -41,6 +41,18 @@ func TestClientUsesTypedManagementRoutesAndServiceBearer(t *testing.T) {
 			data = contract.TenantDescriptorV2{Version: 2, SiteID: tenant, Status: contract.TenantActive, ConfigRevision: "1", DirectoryRevision: "2", Deployment: "deployment-a"}
 		case r.Method == http.MethodGet && r.URL.Path == "/proxy/api/management/v2/tenants/tenant-a/modules/inspection":
 			data = contract.ModuleInspection{ConfigRevision: 7, Installations: []contract.ModuleInstallation{}, ResourceOwners: []contract.ResourceOwnership{}, Bindings: []contract.BindingInspection{}, CapabilityAvailability: []contract.CapabilityInspection{}, BlockingReasons: []contract.ModuleBlocker{}}
+		case r.Method == http.MethodPost && r.URL.Path == "/proxy/api/management/v2/tenants/tenant-a/modules/plan":
+			var request contract.PlanModuleChange
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.ExpectedRevision != 7 {
+				t.Errorf("module plan request=%+v error=%v", request, err)
+			}
+			data = contract.ModuleChangePlan{ModuleID: request.ModuleID, TargetState: request.TargetState, BaseRevision: request.ExpectedRevision, PlanHash: strings.Repeat("a", 64), DependencyBlockers: []contract.ModuleBlocker{}, OpenWorkBlockers: []contract.ModuleBlocker{}}
+		case r.Method == http.MethodPost && r.URL.Path == "/proxy/api/management/v2/tenants/tenant-a/modules/apply":
+			var request contract.ApplyModuleChange
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.PlanHash != strings.Repeat("a", 64) || request.ExpectedRevision != 7 {
+				t.Errorf("module apply request=%+v error=%v", request, err)
+			}
+			data = contract.ManagedOperation{ID: operationID, Tenant: tenant, State: contract.OperationRequested}
 		case r.Method == http.MethodGet && r.URL.Path == "/proxy/api/management/v2/tenants/tenant-a/executions/"+string(operationID):
 			data = contract.ExecutionInspection{ExecutionID: string(operationID), CallerModuleID: "sales.orders", OwnerModuleID: "finance.ar", ProviderID: "ar-provider", BindingRevision: 3, Contract: contract.CapabilityAction{CapabilityName: "ar.issue", OperationName: "issue", InputSchema: contract.SchemaRef{ID: "ar.input", Version: 1}, OutputSchema: contract.SchemaRef{ID: "ar.output", Version: 1}}, CorrelationID: "instance/step", DeliveryState: "succeeded", ReconciliationState: "not_required"}
 		case r.Method == http.MethodGet && r.URL.Path == "/proxy/api/management/v2/tenants/resolve":
@@ -91,7 +103,7 @@ func TestClientUsesTypedManagementRoutesAndServiceBearer(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodPost && r.URL.Path != "/proxy/api/management/v2/packages/validate" {
+		if r.Method == http.MethodPost && r.URL.Path != "/proxy/api/management/v2/packages/validate" && r.URL.Path != "/proxy/api/management/v2/tenants/tenant-a/modules/plan" {
 			w.WriteHeader(http.StatusAccepted)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
@@ -102,11 +114,7 @@ func TestClientUsesTypedManagementRoutesAndServiceBearer(t *testing.T) {
 		t.Fatal("NewClient:", err)
 	}
 	ctx := context.Background()
-	discovery, ok := client.(CapabilitiesClient)
-	if !ok {
-		t.Fatal("supported HTTP client does not implement CapabilitiesClient")
-	}
-	capabilities, err := discovery.Capabilities(ctx)
+	capabilities, err := client.Capabilities(ctx)
 	if err != nil || capabilities.Version != 2 || len(capabilities.Capabilities) != 3 {
 		t.Fatalf("Capabilities() = %+v, %v", capabilities, err)
 	}
@@ -122,45 +130,36 @@ func TestClientUsesTypedManagementRoutesAndServiceBearer(t *testing.T) {
 	if descriptor, err := client.Inspect(ctx, tenant); err != nil || descriptor.SiteID != tenant {
 		t.Fatalf("Inspect = %+v, %v", descriptor, err)
 	}
-	moduleInspectionClient, ok := client.(ModuleInspectionClient)
-	if !ok {
-		t.Fatal("supported HTTP client does not implement ModuleInspectionClient")
-	}
-	if inspection, err := moduleInspectionClient.InspectModules(ctx, tenant); err != nil || inspection.ConfigRevision != 7 {
+	if inspection, err := client.InspectModules(ctx, tenant); err != nil || inspection.ConfigRevision != 7 {
 		t.Fatalf("InspectModules = %+v, %v", inspection, err)
 	}
-	if inspection, err := moduleInspectionClient.InspectExecution(ctx, tenant, string(operationID)); err != nil || inspection.ExecutionID != string(operationID) || inspection.ProviderID != "ar-provider" {
+	if inspection, err := client.InspectExecution(ctx, tenant, string(operationID)); err != nil || inspection.ExecutionID != string(operationID) || inspection.ProviderID != "ar-provider" {
 		t.Fatalf("InspectExecution = %+v, %v", inspection, err)
 	}
 	if descriptor, err := client.InspectAlias(ctx, " TENANT.EXAMPLE.TEST. "); err != nil || descriptor.SiteID != tenant {
 		t.Fatalf("InspectAlias = %+v, %v", descriptor, err)
 	}
-	directoryClient, ok := client.(DeploymentDirectoryClient)
-	if !ok {
-		t.Fatal("supported HTTP client does not implement DeploymentDirectoryClient")
-	}
-	if entry, err := directoryClient.ResolveDirectoryEntry(ctx, tenant); err != nil || entry.DeploymentID != "deployment-b" || entry.DirectoryRevision != "19" {
+	if entry, err := client.ResolveDirectoryEntry(ctx, tenant); err != nil || entry.DeploymentID != "deployment-b" || entry.DirectoryRevision != "19" {
 		t.Fatalf("ResolveDirectoryEntry = %+v, %v", entry, err)
 	}
-	if entry, err := directoryClient.ResolveDirectoryAlias(ctx, " TENANT.EXAMPLE.TEST. "); err != nil || entry.SiteID != tenant {
+	if entry, err := client.ResolveDirectoryAlias(ctx, " TENANT.EXAMPLE.TEST. "); err != nil || entry.SiteID != tenant {
 		t.Fatalf("ResolveDirectoryAlias = %+v, %v", entry, err)
 	}
 	apply := contract.ApplyPackage{Meta: meta, Tenant: tenant, ArtifactRef: "artifact:pack-a", Digest: strings.Repeat("a", 64), ExpectedConfigRevision: "1"}
 	if _, err := client.ApplyPackage(ctx, apply); err != nil {
 		t.Fatal("ApplyPackage:", err)
 	}
-	invitations, ok := client.(TenantInvitationClient)
-	if !ok {
-		t.Fatal("supported HTTP client does not implement TenantInvitationClient")
+	modulePlan, err := client.PlanModuleChange(ctx, tenant, contract.PlanModuleChange{ModuleID: "sales.orders", TargetState: contract.ModuleDraining, ExpectedRevision: 7})
+	if err != nil || modulePlan.PlanHash != strings.Repeat("a", 64) || modulePlan.BaseRevision != 7 {
+		t.Fatalf("PlanModuleChange = %+v, %v", modulePlan, err)
 	}
-	if _, err := invitations.InviteTenantAdministrator(ctx, tenant, contract.RequestTenantInvitation{Meta: meta, Email: "admin@tenant.example.test"}); err != nil {
+	if _, err := client.ApplyModuleChange(ctx, tenant, contract.ApplyModuleChange{Meta: meta, ModuleID: "sales.orders", TargetState: contract.ModuleDraining, PlanHash: modulePlan.PlanHash, ExpectedRevision: modulePlan.BaseRevision}); err != nil {
+		t.Fatal("ApplyModuleChange:", err)
+	}
+	if _, err := client.InviteTenantAdministrator(ctx, tenant, contract.RequestTenantInvitation{Meta: meta, Email: "admin@tenant.example.test"}); err != nil {
 		t.Fatal("InviteTenantAdministrator:", err)
 	}
-	recovery, ok := client.(TenantInvitationRecoveryClient)
-	if !ok {
-		t.Fatal("supported HTTP client does not implement TenantInvitationRecoveryClient")
-	}
-	if _, err := recovery.ReconcileTenantInvitationOperation(ctx, operationID, contract.ReconcileTenantInvitationOperation{Meta: meta, Outcome: contract.InvitationNotDelivered, Reason: "provider logs confirm the message was not accepted"}); err != nil {
+	if _, err := client.ReconcileTenantInvitationOperation(ctx, operationID, contract.ReconcileTenantInvitationOperation{Meta: meta, Outcome: contract.InvitationNotDelivered, Reason: "provider logs confirm the message was not accepted"}); err != nil {
 		t.Fatal("ReconcileTenantInvitationOperation:", err)
 	}
 	if _, err := client.SetState(ctx, tenant, contract.SetTenantState{Meta: meta, State: contract.TenantSuspended, ExpectedConfigRevision: "1", Reason: "operator request"}); err != nil {
@@ -184,7 +183,7 @@ func TestClientUsesTypedManagementRoutesAndServiceBearer(t *testing.T) {
 	if _, err := client.Operation(ctx, operationID); err != nil {
 		t.Fatal("Operation:", err)
 	}
-	if calls != 19 {
+	if calls != 21 {
 		t.Fatalf("HTTP calls = %d, want all management methods and capability discovery", calls)
 	}
 }

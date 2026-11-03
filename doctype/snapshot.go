@@ -45,21 +45,24 @@ type ScriptSnapshot struct {
 // ConfigSnapshot is the complete configuration state stored in _kora_config_version.config.
 // It replaces the doctypes-only JSON array with a versioned snapshot of every config entity.
 type ConfigSnapshot struct {
-	DocTypes            []*DocType                        `json:"doctypes"`
-	Roles               []*Role                           `json:"roles"`
-	Permissions         []*Permission                     `json:"permissions"`
-	WorkflowDefinitions []contract.WorkflowDefinition     `json:"workflow_definitions,omitempty"`
-	Views               []*View                           `json:"views,omitempty"`
-	AnalyticsMetrics    []*AnalyticsMetricConfig          `json:"analytics_metrics,omitempty"`
-	Reports             []json.RawMessage                 `json:"reports,omitempty"`
-	Scripts             []*ScriptSnapshot                 `json:"scripts,omitempty"`
-	ScheduledJobs       []contract.ScheduledJobDefinition `json:"scheduled_jobs,omitempty"`
-	Modules             []contract.ModuleDescriptor       `json:"modules,omitempty"`
-	MinKoraVersion      string                            `json:"min_kora_version,omitempty"`
+	DocTypes            []*DocType                             `json:"doctypes"`
+	Roles               []*Role                                `json:"roles"`
+	Permissions         []*Permission                          `json:"permissions"`
+	WorkflowDefinitions []contract.WorkflowDefinition          `json:"workflow_definitions,omitempty"`
+	Views               []*View                                `json:"views,omitempty"`
+	AnalyticsMetrics    []*AnalyticsMetricConfig               `json:"analytics_metrics,omitempty"`
+	Reports             []json.RawMessage                      `json:"reports,omitempty"`
+	Scripts             []*ScriptSnapshot                      `json:"scripts,omitempty"`
+	ScheduledJobs       []contract.ScheduledJobDefinition      `json:"scheduled_jobs,omitempty"`
+	Modules             []contract.ModuleDescriptor            `json:"modules,omitempty"`
+	PublishedBindings   []contract.ConfigurationSurfaceBinding `json:"published_bindings,omitempty"`
+	MinKoraVersion      string                                 `json:"min_kora_version,omitempty"`
 }
 
 // ModuleDescriptors returns a defensive copy of installed module contracts.
-func (s ConfigSnapshot) ModuleDescriptors() []contract.ModuleDescriptor { return append([]contract.ModuleDescriptor(nil), s.Modules...) }
+func (s ConfigSnapshot) ModuleDescriptors() []contract.ModuleDescriptor {
+	return append([]contract.ModuleDescriptor(nil), s.Modules...)
+}
 
 // ParseSnapshot parses a config snapshot from stored JSON, handling both:
 //   - Old format: [...] (JSON array of doctypes only)

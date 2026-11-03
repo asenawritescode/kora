@@ -18,23 +18,24 @@ import (
 // configuration-draft wire contract. The complete package is composed into
 // one draft; callers must not create each DocType independently.
 type DraftConfigurationRequest struct {
-	ProposalID           string                            `json:"proposal_id"`
-	DraftConfigVersionID string                            `json:"draft_config_version_id,omitempty"`
-	ConversationID       string                            `json:"conversation_id,omitempty"`
-	InterviewSnapshot    map[string]any                    `json:"interview_snapshot,omitempty"`
-	PrimaryWorkflow      string                            `json:"primary_workflow,omitempty"`
-	StructuredInput      map[string]any                    `json:"structured_input,omitempty"`
-	OpenQuestions        []string                          `json:"open_questions,omitempty"`
-	ChannelOrigin        string                            `json:"channel_origin,omitempty"`
-	BaseConfigVersionID  string                            `json:"base_config_version_id,omitempty"`
-	CreatedBy            string                            `json:"created_by,omitempty"` // legacy input; attribution uses verified execution
-	DocTypes             []*doctype.DocType                `json:"doctypes"`
-	Roles                []*doctype.Role                   `json:"roles,omitempty"`
-	Permissions          []*DraftPermission                `json:"permissions,omitempty"`
-	Views                []*doctype.View                   `json:"views,omitempty"`
-	Scripts              []*ScriptCandidate                `json:"scripts,omitempty"`
-	ScheduledJobs        []contract.ScheduledJobDefinition `json:"scheduled_jobs,omitempty"`
-	WorkflowDefinitions  []contract.WorkflowDefinition     `json:"workflow_definitions,omitempty"`
+	ProposalID           string                                 `json:"proposal_id"`
+	DraftConfigVersionID string                                 `json:"draft_config_version_id,omitempty"`
+	ConversationID       string                                 `json:"conversation_id,omitempty"`
+	InterviewSnapshot    map[string]any                         `json:"interview_snapshot,omitempty"`
+	PrimaryWorkflow      string                                 `json:"primary_workflow,omitempty"`
+	StructuredInput      map[string]any                         `json:"structured_input,omitempty"`
+	OpenQuestions        []string                               `json:"open_questions,omitempty"`
+	ChannelOrigin        string                                 `json:"channel_origin,omitempty"`
+	BaseConfigVersionID  string                                 `json:"base_config_version_id,omitempty"`
+	CreatedBy            string                                 `json:"created_by,omitempty"` // legacy input; attribution uses verified execution
+	DocTypes             []*doctype.DocType                     `json:"doctypes"`
+	Roles                []*doctype.Role                        `json:"roles,omitempty"`
+	Permissions          []*DraftPermission                     `json:"permissions,omitempty"`
+	Views                []*doctype.View                        `json:"views,omitempty"`
+	Scripts              []*ScriptCandidate                     `json:"scripts,omitempty"`
+	ScheduledJobs        []contract.ScheduledJobDefinition      `json:"scheduled_jobs,omitempty"`
+	WorkflowDefinitions  []contract.WorkflowDefinition          `json:"workflow_definitions,omitempty"`
+	PublishedBindings    []contract.ConfigurationSurfaceBinding `json:"published_bindings,omitempty"`
 }
 
 // DraftPermission includes the legacy public flag so the Engine can reject an
@@ -111,6 +112,11 @@ func (h *Handler) HandleConfigurationDraft(c *gin.Context) {
 		badRequestError(c, "proposal.invalid_configuration", strings.Join(messages, "; "), nil)
 		return
 	}
+	_, moduleBlockers, moduleErrors := validateConfigurationPublishedBindings(h, c, req.PublishedBindings, req.Views)
+	if len(moduleErrors) > 0 || len(moduleBlockers) > 0 {
+		badRequestError(c, "proposal.invalid_published_bindings", "Published module bindings are stale or unavailable", map[string]any{"blockers": moduleBlockers, "errors": moduleErrors})
+		return
+	}
 
 	store := configstore.NewStore(h.siteTx(c).DB, h.siteDialect(c))
 	snapshot, baseVersionID, err := store.LoadDraftHeadSnapshot(c.GetString("site_name"))
@@ -129,6 +135,7 @@ func (h *Handler) HandleConfigurationDraft(c *gin.Context) {
 	if req.BaseConfigVersionID != "" {
 		baseVersionID = req.BaseConfigVersionID
 	}
+	snapshot.PublishedBindings = append([]contract.ConfigurationSurfaceBinding(nil), req.PublishedBindings...)
 	for _, dt := range ordered {
 		doctype.UpsertSnapshotDocType(snapshot, dt)
 	}
