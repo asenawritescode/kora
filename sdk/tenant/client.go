@@ -217,6 +217,161 @@ func (c *ScopedClient) LookupExecution(ctx context.Context, catalog contract.App
 	return result, err
 }
 
+// StartWorkflow starts one durable workflow intent under this client's scope.
+// A timeout does not authorize callers to mint a new idempotency key.
+func (c *ScopedClient) StartWorkflow(ctx context.Context, command contract.StartWorkflow) (contract.WorkflowInstance, error) {
+	var result contract.WorkflowInstance
+	if command.BusinessScope.TenantID == "" {
+		command.BusinessScope = c.scope
+	}
+	if command.BusinessScope != c.scope || command.Meta.IdempotencyKey == "" || command.DefinitionID == "" || command.DefinitionVersion == 0 || command.Subject.Kind == "" || command.Subject.ID == "" || command.Subject.Revision == "" {
+		return result, fmt.Errorf("workflow start identity or scope is invalid")
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/v2/workflow-instances", command, http.StatusCreated, &result); err == nil {
+		err = validateWorkflowInstance(result, c.scope)
+		return result, err
+	} else {
+		return result, err
+	}
+}
+
+func (c *ScopedClient) Workflow(ctx context.Context, instanceID contract.InstanceID) (contract.WorkflowInstance, error) {
+	var result contract.WorkflowInstance
+	if _, err := contract.ParseInstanceID(string(instanceID)); err != nil {
+		return result, fmt.Errorf("validate workflow instance ID: %w", err)
+	}
+	err := c.do(ctx, http.MethodGet, "/api/v2/workflow-instances/"+url.PathEscape(string(instanceID)), nil, http.StatusOK, &result)
+	if err == nil {
+		err = validateWorkflowInstance(result, c.scope)
+	}
+	return result, err
+}
+
+func (c *ScopedClient) WorkflowInstances(ctx context.Context) ([]contract.WorkflowInstance, error) {
+	var result []contract.WorkflowInstance
+	err := c.do(ctx, http.MethodGet, "/api/v2/workflow-instances", nil, http.StatusOK, &result)
+	if err == nil {
+		if len(result) > 50 {
+			return nil, fmt.Errorf("workflow instance list exceeds 50 items")
+		}
+		for _, instance := range result {
+			if validateWorkflowInstance(instance, c.scope) != nil {
+				return nil, fmt.Errorf("workflow instance list contains invalid scope or identity")
+			}
+		}
+	}
+	return result, err
+}
+
+func (c *ScopedClient) WorkflowHistory(ctx context.Context, instanceID contract.InstanceID) ([]contract.WorkflowHistoryEntry, error) {
+	var result []contract.WorkflowHistoryEntry
+	if _, err := contract.ParseInstanceID(string(instanceID)); err != nil {
+		return nil, fmt.Errorf("validate workflow instance ID: %w", err)
+	}
+	err := c.do(ctx, http.MethodGet, "/api/v2/workflow-instances/"+url.PathEscape(string(instanceID))+"/history", nil, http.StatusOK, &result)
+	if err == nil {
+		if len(result) > 100 {
+			return nil, fmt.Errorf("workflow history exceeds 100 entries")
+		}
+		for _, entry := range result {
+			if entry.Sequence == 0 || entry.Kind == "" || entry.Status == "" || entry.StepID == "" || entry.CreatedAt.IsZero() || len(entry.Detail) > 8192 {
+				return nil, fmt.Errorf("workflow history contains an invalid entry")
+			}
+		}
+	}
+	return result, err
+}
+
+func (c *ScopedClient) CancelWorkflow(ctx context.Context, instanceID contract.InstanceID, command contract.CancelWorkflow) (contract.WorkflowInstance, error) {
+	var result contract.WorkflowInstance
+	if _, err := contract.ParseInstanceID(string(instanceID)); err != nil {
+		return result, fmt.Errorf("validate workflow instance ID: %w", err)
+	}
+	if command.Meta.IdempotencyKey == "" || strings.TrimSpace(command.Reason) == "" || len(command.Reason) > 8192 {
+		return result, fmt.Errorf("workflow cancellation identity or reason is invalid")
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v2/workflow-instances/"+url.PathEscape(string(instanceID))+"/cancel", command, http.StatusOK, &result)
+	if err == nil {
+		err = validateWorkflowInstance(result, c.scope)
+	}
+	return result, err
+}
+
+func (c *ScopedClient) ReconcileWorkflow(ctx context.Context, instanceID contract.InstanceID, command contract.ReconcileWorkflow) (contract.WorkflowInstance, error) {
+	var result contract.WorkflowInstance
+	if _, err := contract.ParseInstanceID(string(instanceID)); err != nil {
+		return result, fmt.Errorf("validate workflow instance ID: %w", err)
+	}
+	if command.Meta.IdempotencyKey == "" || command.StepID == "" || command.Reason == "" || len(command.Reason) > 8192 || len(command.EvidenceRef) > 512 || (command.Outcome != contract.ReconcileSucceeded && command.Outcome != contract.ReconcileNotApplied && command.Outcome != contract.ReconcileAbandon) {
+		return result, fmt.Errorf("workflow reconciliation identity or evidence is invalid")
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v2/workflow-instances/"+url.PathEscape(string(instanceID))+"/reconcile", command, http.StatusOK, &result)
+	if err == nil {
+		err = validateWorkflowInstance(result, c.scope)
+	}
+	return result, err
+}
+
+func (c *ScopedClient) BusinessReconciliationSummary(ctx context.Context) (contract.BusinessReconciliationSummary, error) {
+	var result contract.BusinessReconciliationSummary
+	err := c.do(ctx, http.MethodGet, "/api/v1/modules/reconciliation/findings", nil, http.StatusOK, &result)
+	if err == nil && result.Scope != c.scope {
+		err = fmt.Errorf("business reconciliation summary scope does not match scoped client")
+	}
+	return result, err
+}
+
+func (c *ScopedClient) RunBusinessReconciliation(ctx context.Context, request contract.BusinessReconciliationRunRequest) (contract.BusinessRun, error) {
+	var result contract.BusinessRun
+	if err := request.Validate(); err != nil {
+		return result, err
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v1/modules/reconciliation/runs", request, http.StatusOK, &result)
+	if err == nil && (result.Scope != c.scope || result.OwnerModuleID != request.OwnerModuleID || result.RuleID != request.RuleID || result.ID != request.RunID) {
+		err = fmt.Errorf("business reconciliation run identity does not match request")
+	}
+	return result, err
+}
+
+func (c *ScopedClient) BusinessReconciliationRun(ctx context.Context, owner contract.ModuleID, ruleID, runID string) (contract.BusinessRun, error) {
+	var result contract.BusinessRun
+	if owner == "" || ruleID == "" || runID == "" {
+		return result, fmt.Errorf("business reconciliation run identity is required")
+	}
+	route := "/api/v1/modules/reconciliation/runs/" + url.PathEscape(string(owner)) + "/" + url.PathEscape(ruleID) + "/" + url.PathEscape(runID)
+	err := c.do(ctx, http.MethodGet, route, nil, http.StatusOK, &result)
+	if err == nil && (result.Scope != c.scope || result.OwnerModuleID != owner || result.RuleID != ruleID || result.ID != runID) {
+		err = fmt.Errorf("business reconciliation run identity does not match request")
+	}
+	return result, err
+}
+
+func (c *ScopedClient) WaiveBusinessFinding(ctx context.Context, owner contract.ModuleID, ruleID, runID string, request contract.BusinessFindingDecision) (contract.BusinessFindingActionResult, error) {
+	var result contract.BusinessFindingActionResult
+	if err := request.Validate(true); err != nil {
+		return result, err
+	}
+	route := "/api/v1/modules/reconciliation/runs/" + url.PathEscape(string(owner)) + "/" + url.PathEscape(ruleID) + "/" + url.PathEscape(runID) + "/waive"
+	err := c.do(ctx, http.MethodPost, route, request, http.StatusOK, &result)
+	if err == nil && (result.FindingID != request.FindingID || result.Action != contract.BusinessFindingActionWaived) {
+		err = fmt.Errorf("business finding waiver response identity is invalid")
+	}
+	return result, err
+}
+
+func (c *ScopedClient) RepairBusinessFinding(ctx context.Context, owner contract.ModuleID, ruleID, runID string, request contract.BusinessFindingDecision) (contract.BusinessFindingActionResult, error) {
+	var result contract.BusinessFindingActionResult
+	if err := request.Validate(false); err != nil {
+		return result, err
+	}
+	route := "/api/v1/modules/reconciliation/runs/" + url.PathEscape(string(owner)) + "/" + url.PathEscape(ruleID) + "/" + url.PathEscape(runID) + "/repair"
+	err := c.do(ctx, http.MethodPost, route, request, http.StatusOK, &result)
+	if err == nil && (result.FindingID != request.FindingID || result.Action != contract.BusinessFindingActionRepaired) {
+		err = fmt.Errorf("business finding repair response identity is invalid")
+	}
+	return result, err
+}
+
 func (c *ScopedClient) validateCatalog(catalog contract.ApplicationCatalog) error {
 	if err := catalog.Validate(); err != nil {
 		return fmt.Errorf("validate actor catalog: %w", err)
@@ -350,6 +505,24 @@ func validateReceipt(receipt contract.OperationReceipt, scope contract.BusinessS
 	}
 	if receipt.BusinessScope != scope || operationRef != "" && receipt.OperationRef != operationRef {
 		return fmt.Errorf("operation receipt identity does not match requested scope and operation")
+	}
+	return nil
+}
+
+func validateWorkflowInstance(instance contract.WorkflowInstance, scope contract.BusinessScope) error {
+	if _, err := contract.ParseInstanceID(string(instance.ID)); err != nil {
+		return fmt.Errorf("workflow instance ID is invalid")
+	}
+	if instance.DefinitionID == "" || instance.DefinitionVersion == 0 || instance.Subject.ID == "" || instance.Subject.Kind == "" || instance.Revision == "" || instance.CreatedAt.IsZero() || instance.UpdatedAt.IsZero() {
+		return fmt.Errorf("workflow instance identity is incomplete")
+	}
+	if instance.BusinessScope.TenantID != "" && instance.BusinessScope != scope {
+		return fmt.Errorf("workflow instance scope does not match scoped client")
+	}
+	switch instance.Status {
+	case contract.InstanceReady, contract.InstanceRunning, contract.InstanceWaiting, contract.InstanceRetrying, contract.InstanceCompleted, contract.InstanceCancelled, contract.InstanceFailed, contract.InstanceUncertain:
+	default:
+		return fmt.Errorf("workflow instance status is invalid")
 	}
 	return nil
 }

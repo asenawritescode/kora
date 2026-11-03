@@ -156,6 +156,152 @@ func TestTenantRemoteErrorsRetainHTTPStatusAndEngineCode(t *testing.T) {
 	}
 }
 
+func TestScopedWorkflowMethodsUseCanonicalContractsAndStableKeys(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	instance := contract.WorkflowInstance{ID: "workflow-1", Revision: "4", DefinitionID: "sales.approval", DefinitionVersion: 2, Subject: contract.SubjectRef{Kind: "sales.order", ID: "order-1", Revision: "3"}, BusinessScope: scope, Status: contract.InstanceWaiting, CurrentStep: "approval", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	var cancelKey, reconcileKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Kora-Legal-Entity-ID") != scope.LegalEntityID {
+			t.Errorf("scope header = %q", r.Header.Get("X-Kora-Legal-Entity-ID"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		var data any
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/s/demo/api/v2/workflow-instances":
+			var command contract.StartWorkflow
+			if err := json.NewDecoder(r.Body).Decode(&command); err != nil || command.Meta.IdempotencyKey != "start-1" || command.BusinessScope != scope {
+				t.Errorf("start command=%+v err=%v", command, err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			data = instance
+		case r.Method == http.MethodGet && r.URL.Path == "/s/demo/api/v2/workflow-instances/workflow-1":
+			data = instance
+		case r.Method == http.MethodGet && r.URL.Path == "/s/demo/api/v2/workflow-instances":
+			data = []contract.WorkflowInstance{instance}
+		case r.Method == http.MethodGet && r.URL.Path == "/s/demo/api/v2/workflow-instances/workflow-1/history":
+			data = []contract.WorkflowHistoryEntry{{Sequence: 1, StepID: "approval", Kind: "step.started", Status: "waiting", CreatedAt: time.Now().UTC()}}
+		case r.Method == http.MethodPost && r.URL.Path == "/s/demo/api/v2/workflow-instances/workflow-1/cancel":
+			var command contract.CancelWorkflow
+			if err := json.NewDecoder(r.Body).Decode(&command); err != nil {
+				t.Error(err)
+			}
+			cancelKey = string(command.Meta.IdempotencyKey)
+			instance.Status = contract.InstanceCancelled
+			data = instance
+		case r.Method == http.MethodPost && r.URL.Path == "/s/demo/api/v2/workflow-instances/workflow-1/reconcile":
+			var command contract.ReconcileWorkflow
+			if err := json.NewDecoder(r.Body).Decode(&command); err != nil {
+				t.Error(err)
+			}
+			reconcileKey = string(command.Meta.IdempotencyKey)
+			data = instance
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+	client, err := NewClient(Config{BaseURL: server.URL, SiteName: "demo", Tokens: TokenSourceFunc(func(context.Context) (string, error) { return "actor", nil })})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := client.WithScope(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := scoped.StartWorkflow(context.Background(), contract.StartWorkflow{Meta: contract.CommandMeta{IdempotencyKey: "start-1"}, DefinitionID: "sales.approval", DefinitionVersion: 2, Subject: instance.Subject})
+	if err != nil || started.ID != instance.ID {
+		t.Fatalf("StartWorkflow=%+v err=%v", started, err)
+	}
+	if _, err := scoped.Workflow(context.Background(), instance.ID); err != nil {
+		t.Fatal("Workflow:", err)
+	}
+	if list, err := scoped.WorkflowInstances(context.Background()); err != nil || len(list) != 1 {
+		t.Fatalf("WorkflowInstances=%+v err=%v", list, err)
+	}
+	if history, err := scoped.WorkflowHistory(context.Background(), instance.ID); err != nil || len(history) != 1 {
+		t.Fatalf("WorkflowHistory=%+v err=%v", history, err)
+	}
+	if _, err := scoped.CancelWorkflow(context.Background(), instance.ID, contract.CancelWorkflow{Meta: contract.CommandMeta{IdempotencyKey: "cancel-1"}, Reason: "operator request"}); err != nil {
+		t.Fatal("CancelWorkflow:", err)
+	}
+	if _, err := scoped.ReconcileWorkflow(context.Background(), instance.ID, contract.ReconcileWorkflow{Meta: contract.CommandMeta{IdempotencyKey: "reconcile-1"}, StepID: "approval", Outcome: contract.ReconcileAbandon, EvidenceRef: "audit:case-1", Reason: "provider evidence unavailable"}); err != nil {
+		t.Fatal("ReconcileWorkflow:", err)
+	}
+	if cancelKey != "cancel-1" || reconcileKey != "reconcile-1" {
+		t.Fatalf("stable command keys cancel=%q reconcile=%q", cancelKey, reconcileKey)
+	}
+}
+
+func TestScopedReconciliationMethodsPreserveCanonicalReportsAndActions(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	var runRequest contract.BusinessReconciliationRunRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Kora-Legal-Entity-ID") != "entity-a" {
+			t.Errorf("scope header = %q", r.Header.Get("X-Kora-Legal-Entity-ID"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		var data any
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/s/demo/api/v1/modules/reconciliation/findings":
+			data = contract.BusinessReconciliationSummary{Scope: scope, UnresolvedBusinessFindings: 2}
+		case r.Method == http.MethodPost && r.URL.Path == "/s/demo/api/v1/modules/reconciliation/runs":
+			if err := json.NewDecoder(r.Body).Decode(&runRequest); err != nil {
+				t.Error(err)
+			}
+			data = contract.BusinessRun{TenantID: scope.TenantID, OwnerModuleID: "finance.reconciliation", ID: runRequest.RunID, RuleID: runRequest.RuleID, Version: 3, Scope: scope, Complete: false, Cursors: contract.BusinessRunCursor{Source: "source-cursor"}, Watermarks: contract.BusinessRunWatermarks{SourceSnapshot: "snapshot-1"}, Findings: []contract.BusinessFinding{{ID: "finding-1", Kind: contract.FindingUnknownOutcome, Key: "invoice-1", State: contract.BusinessFindingOpen}}, CreatedAt: time.Now().UTC()}
+		case r.Method == http.MethodGet && r.URL.Path == "/s/demo/api/v1/modules/reconciliation/runs/finance.reconciliation/invoices/run-1":
+			data = contract.BusinessRun{TenantID: scope.TenantID, OwnerModuleID: "finance.reconciliation", ID: "run-1", RuleID: "invoices", Version: 3, Scope: scope, Complete: true, Findings: []contract.BusinessFinding{}, CreatedAt: time.Now().UTC()}
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/waive"):
+			var request contract.BusinessFindingDecision
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+			}
+			data = contract.BusinessFindingActionResult{FindingID: request.FindingID, Action: contract.BusinessFindingActionWaived}
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/repair"):
+			var request contract.BusinessFindingDecision
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+			}
+			data = contract.BusinessFindingActionResult{FindingID: request.FindingID, Action: contract.BusinessFindingActionRepaired}
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+	client, err := NewClient(Config{BaseURL: server.URL, SiteName: "demo", Tokens: TokenSourceFunc(func(context.Context) (string, error) { return "actor", nil })})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := client.WithScope(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := scoped.BusinessReconciliationSummary(context.Background())
+	if err != nil || summary.UnresolvedBusinessFindings != 2 {
+		t.Fatalf("summary=%+v err=%v", summary, err)
+	}
+	run, err := scoped.RunBusinessReconciliation(context.Background(), contract.BusinessReconciliationRunRequest{OwnerModuleID: "finance.reconciliation", RuleID: "invoices", RunID: "run-1"})
+	if err != nil || run.Complete || run.Cursors.Source != "source-cursor" || run.Watermarks.SourceSnapshot != "snapshot-1" || len(run.Findings) != 1 {
+		t.Fatalf("run=%+v err=%v", run, err)
+	}
+	if runRequest.RunID != "run-1" {
+		t.Fatalf("run request=%+v", runRequest)
+	}
+	if _, err := scoped.BusinessReconciliationRun(context.Background(), "finance.reconciliation", "invoices", "run-1"); err != nil {
+		t.Fatal("read report:", err)
+	}
+	if result, err := scoped.WaiveBusinessFinding(context.Background(), "finance.reconciliation", "invoices", "run-1", contract.BusinessFindingDecision{FindingID: "finding-1", Reason: "evidence reviewed"}); err != nil || result.Action != contract.BusinessFindingActionWaived {
+		t.Fatalf("waiver=%+v err=%v", result, err)
+	}
+	if result, err := scoped.RepairBusinessFinding(context.Background(), "finance.reconciliation", "invoices", "run-1", contract.BusinessFindingDecision{FindingID: "finding-1"}); err != nil || result.Action != contract.BusinessFindingActionRepaired {
+		t.Fatalf("repair=%+v err=%v", result, err)
+	}
+}
+
 func TestScopedClientKeepsConcurrentEntityScopesIsolated(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		entity := r.Header.Get("X-Kora-Legal-Entity-ID")
