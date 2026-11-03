@@ -39,12 +39,18 @@ def sha256(data: bytes) -> str:
 
 
 def source_revision(engine: Path = ENGINE) -> tuple[str, str]:
+    contract_inputs = [
+        ":(glob)contract/**/*.go",
+        ":(glob)cmd/contractgen/**/*.go",
+        "contract/generated/engine-v2.ts",
+        "contract/schema/engine-v2.json",
+    ]
     revision = subprocess.run(
-        ["git", "log", "-1", "--format=%H", "--", ":(glob)contract/**/*.go", ":(glob)cmd/contractgen/**/*.go"], cwd=engine, check=True,
+        ["git", "log", "-1", "--format=%H", "--", *contract_inputs], cwd=engine, check=True,
         capture_output=True, text=True,
     ).stdout.strip()
     dirty = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all", "--", ":(glob)contract/**/*.go", ":(glob)cmd/contractgen/**/*.go"], cwd=engine, check=True,
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", *contract_inputs], cwd=engine, check=True,
         capture_output=True, text=True,
     ).stdout
     return revision, "uncommitted" if dirty else "clean"
