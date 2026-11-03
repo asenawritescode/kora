@@ -101,6 +101,10 @@ func RegisterApplicationRoutes(config ApplicationRouteConfig) (*auth.SessionMana
 	requestGroup.POST("/modules/operations/:operation/execute", catalogHandler.HandleExecutePublishedOperation)
 	requestGroup.POST("/module-executions/lookup", catalogHandler.HandleLookupPublishedOperation)
 	requestGroup.GET("/module-executions/:execution", catalogHandler.HandleGetPublishedOperationReceipt)
+	requestGroup.GET("/offline/capabilities", catalogHandler.HandleOfflineCapabilitiesV2)
+	requestGroup.POST("/offline/intents", catalogHandler.HandleOfflineIntentsV2)
+	requestGroup.POST("/offline/bootstrap", catalogHandler.HandleOfflineBootstrapV2)
+	requestGroup.POST("/offline/pull", catalogHandler.HandleOfflinePullV2)
 	api.RegisterPublicRoutesOnGroupWithRuntimeServices(publicV1Group, config.Registry, config.Transactions, nil, nil)
 	api.RegisterPublicRoutesOnGroupWithRuntimeServices(publicLegacyGroup, config.Registry, config.Transactions, nil, nil)
 

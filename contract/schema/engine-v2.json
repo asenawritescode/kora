@@ -131,6 +131,9 @@
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
+        "offline_eligible": {
+          "type": "boolean"
+        },
         "operation": {
           "type": "string"
         },
@@ -180,6 +183,9 @@
         },
         "name": {
           "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
         },
         "output_schema": {
           "$ref": "#/$defs/SchemaRef"
@@ -2381,6 +2387,351 @@
       ],
       "type": "object"
     },
+    "OfflineBootstrapRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "limit",
+        "source"
+      ],
+      "type": "object"
+    },
+    "OfflineCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "max_batch_size": {
+          "type": "integer"
+        },
+        "max_page_size": {
+          "type": "integer"
+        },
+        "protocol_version": {
+          "type": "integer"
+        },
+        "snapshot_lifetime_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "catalog_revision",
+        "max_batch_size",
+        "max_page_size",
+        "protocol_version",
+        "snapshot_lifetime_seconds"
+      ],
+      "type": "object"
+    },
+    "OfflineChange": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "x-open-json-value": true
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "fact_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deleted",
+        "fact_key"
+      ],
+      "type": "object"
+    },
+    "OfflineIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "expected_revision": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "input": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "local_operation_id": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "idempotency_key",
+        "input",
+        "input_schema",
+        "local_operation_id",
+        "operation_ref"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "local_operation_id": {
+          "type": "string"
+        },
+        "receipt": {
+          "$ref": "#/$defs/OperationReceipt"
+        }
+      },
+      "required": [
+        "local_operation_id",
+        "receipt"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "intents": {
+          "items": {
+            "$ref": "#/$defs/OfflineIntent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "intents"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentsResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "receipts": {
+          "items": {
+            "$ref": "#/$defs/OfflineIntentReceipt"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "receipts"
+      ],
+      "type": "object"
+    },
+    "OfflinePullRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "input_hash",
+        "limit",
+        "replay_position",
+        "snapshot_token",
+        "source"
+      ],
+      "type": "object"
+    },
+    "OfflinePullResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/OfflineChange"
+          },
+          "type": "array"
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "next_page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "schema_revision": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "subject_id": {
+          "type": "string"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "changes",
+        "has_more",
+        "input_hash",
+        "replay_position",
+        "schema_revision",
+        "snapshot_token",
+        "source",
+        "subject_id",
+        "through_cursor"
+      ],
+      "type": "object"
+    },
+    "OfflineSnapshotPage": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "next_page_cursor": {
+          "type": "string"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "rows": {
+          "x-open-json-value": true
+        },
+        "schema_revision": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "subject_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "complete",
+        "input_hash",
+        "replay_position",
+        "rows",
+        "schema_revision",
+        "snapshot_token",
+        "source",
+        "subject_id"
+      ],
+      "type": "object"
+    },
+    "OfflineSourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "query_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "owner_module_id",
+        "query_name"
+      ],
+      "type": "object"
+    },
     "OperationReceipt": {
       "additionalProperties": false,
       "oneOf": [
@@ -3110,6 +3461,9 @@
         "name": {
           "type": "string"
         },
+        "offline_eligible": {
+          "type": "boolean"
+        },
         "operation": {
           "type": "string"
         },
@@ -3151,6 +3505,9 @@
         },
         "name": {
           "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
         },
         "operation": {
           "type": "string"
@@ -4806,6 +5163,9 @@
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
+        "offline_eligible": {
+          "type": "boolean"
+        },
         "operation": {
           "type": "string"
         },
@@ -4855,6 +5215,9 @@
         },
         "name": {
           "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
         },
         "output_schema": {
           "$ref": "#/$defs/SchemaRef"
@@ -7034,6 +7397,351 @@
       ],
       "type": "object"
     },
+    "OfflineBootstrapRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "limit",
+        "source"
+      ],
+      "type": "object"
+    },
+    "OfflineCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "max_batch_size": {
+          "type": "integer"
+        },
+        "max_page_size": {
+          "type": "integer"
+        },
+        "protocol_version": {
+          "type": "integer"
+        },
+        "snapshot_lifetime_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "catalog_revision",
+        "max_batch_size",
+        "max_page_size",
+        "protocol_version",
+        "snapshot_lifetime_seconds"
+      ],
+      "type": "object"
+    },
+    "OfflineChange": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "x-open-json-value": true
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "fact_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deleted",
+        "fact_key"
+      ],
+      "type": "object"
+    },
+    "OfflineIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "expected_revision": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "input": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "local_operation_id": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "idempotency_key",
+        "input",
+        "input_schema",
+        "local_operation_id",
+        "operation_ref"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "local_operation_id": {
+          "type": "string"
+        },
+        "receipt": {
+          "$ref": "#/$defs/OperationReceipt"
+        }
+      },
+      "required": [
+        "local_operation_id",
+        "receipt"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "intents": {
+          "items": {
+            "$ref": "#/$defs/OfflineIntent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "intents"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentsResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "receipts": {
+          "items": {
+            "$ref": "#/$defs/OfflineIntentReceipt"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "receipts"
+      ],
+      "type": "object"
+    },
+    "OfflinePullRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "input_hash",
+        "limit",
+        "replay_position",
+        "snapshot_token",
+        "source"
+      ],
+      "type": "object"
+    },
+    "OfflinePullResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/OfflineChange"
+          },
+          "type": "array"
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "next_page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "schema_revision": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "subject_id": {
+          "type": "string"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "changes",
+        "has_more",
+        "input_hash",
+        "replay_position",
+        "schema_revision",
+        "snapshot_token",
+        "source",
+        "subject_id",
+        "through_cursor"
+      ],
+      "type": "object"
+    },
+    "OfflineSnapshotPage": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "next_page_cursor": {
+          "type": "string"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "rows": {
+          "x-open-json-value": true
+        },
+        "schema_revision": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "subject_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "complete",
+        "input_hash",
+        "replay_position",
+        "rows",
+        "schema_revision",
+        "snapshot_token",
+        "source",
+        "subject_id"
+      ],
+      "type": "object"
+    },
+    "OfflineSourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "query_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "owner_module_id",
+        "query_name"
+      ],
+      "type": "object"
+    },
     "OperationReceipt": {
       "additionalProperties": false,
       "oneOf": [
@@ -7763,6 +8471,9 @@
         "name": {
           "type": "string"
         },
+        "offline_eligible": {
+          "type": "boolean"
+        },
         "operation": {
           "type": "string"
         },
@@ -7804,6 +8515,9 @@
         },
         "name": {
           "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
         },
         "operation": {
           "type": "string"

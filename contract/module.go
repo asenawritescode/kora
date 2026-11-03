@@ -195,6 +195,9 @@ type PublishedQuery struct {
 	OwnerField    string              `json:"owner_field,omitempty"`
 	PageLimit     uint16              `json:"page_limit"`
 	Presentation  SurfacePresentation `json:"presentation"`
+	// OfflineEligible permits this published query to back an actor-scoped offline feed.
+	// Providers must still support pinned snapshots and actor-scoped replay.
+	OfflineEligible bool `json:"offline_eligible,omitempty"`
 }
 
 // QueryFreshness describes whether a published query result is current.
@@ -374,15 +377,16 @@ type ApplicationCatalogModule struct {
 
 //contract:wire:v2
 type ApplicationCatalogQuery struct {
-	OwnerModuleID ModuleID            `json:"owner_module_id"`
-	Name          string              `json:"name"`
-	Route         string              `json:"route"`
-	InputSchema   SchemaRef           `json:"input_schema"`
-	OutputSchema  SchemaRef           `json:"output_schema"`
-	ScopePolicy   ResourceScopeKind   `json:"scope_policy"`
-	AllowedFields []string            `json:"allowed_fields"`
-	PageLimit     uint16              `json:"page_limit"`
-	Presentation  SurfacePresentation `json:"presentation"`
+	OwnerModuleID   ModuleID            `json:"owner_module_id"`
+	Name            string              `json:"name"`
+	Route           string              `json:"route"`
+	InputSchema     SchemaRef           `json:"input_schema"`
+	OutputSchema    SchemaRef           `json:"output_schema"`
+	ScopePolicy     ResourceScopeKind   `json:"scope_policy"`
+	AllowedFields   []string            `json:"allowed_fields"`
+	PageLimit       uint16              `json:"page_limit"`
+	Presentation    SurfacePresentation `json:"presentation"`
+	OfflineEligible bool                `json:"offline_eligible,omitempty"`
 }
 
 //contract:enum:v2
@@ -397,15 +401,16 @@ const (
 
 //contract:wire:v2
 type ApplicationCatalogOperation struct {
-	OperationRef  string                `json:"operation_ref"`
-	OwnerModuleID ModuleID              `json:"owner_module_id"`
-	Capability    CapabilityName        `json:"capability"`
-	Operation     string                `json:"operation"`
-	InputSchema   SchemaRef             `json:"input_schema"`
-	OutputSchema  SchemaRef             `json:"output_schema"`
-	Availability  OperationAvailability `json:"availability"`
-	Permissions   []string              `json:"permissions"`
-	Presentation  SurfacePresentation   `json:"presentation"`
+	OperationRef    string                `json:"operation_ref"`
+	OwnerModuleID   ModuleID              `json:"owner_module_id"`
+	Capability      CapabilityName        `json:"capability"`
+	Operation       string                `json:"operation"`
+	InputSchema     SchemaRef             `json:"input_schema"`
+	OutputSchema    SchemaRef             `json:"output_schema"`
+	Availability    OperationAvailability `json:"availability"`
+	Permissions     []string              `json:"permissions"`
+	Presentation    SurfacePresentation   `json:"presentation"`
+	OfflineEligible bool                  `json:"offline_eligible,omitempty"`
 }
 
 //contract:wire:v2
@@ -850,6 +855,8 @@ type PublishedOperation struct {
 	ScopePolicy    ResourceScopeKind   `json:"scope_policy"`
 	AllowedCallers []ModuleID          `json:"allowed_callers"`
 	Presentation   SurfacePresentation `json:"presentation"`
+	// OfflineEligible permits clients to queue this business intent for server replay.
+	OfflineEligible bool `json:"offline_eligible,omitempty"`
 }
 
 // ExtensionKind is a behavior explicitly allowed by an owner-declared point.

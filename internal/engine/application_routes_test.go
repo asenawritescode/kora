@@ -151,6 +151,10 @@ func TestRegisterApplicationRoutesKeepsAuthAndVersionedAPIPaths(t *testing.T) {
 		http.MethodPost + " /api/v2/modules/operations/:operation/execute": false,
 		http.MethodPost + " /api/v2/module-executions/lookup":              false,
 		http.MethodGet + " /api/v2/module-executions/:execution":           false,
+		http.MethodGet + " /api/v2/offline/capabilities":                   false,
+		http.MethodPost + " /api/v2/offline/intents":                       false,
+		http.MethodPost + " /api/v2/offline/bootstrap":                     false,
+		http.MethodPost + " /api/v2/offline/pull":                          false,
 	}
 	for _, route := range router.Routes() {
 		key := route.Method + " " + route.Path

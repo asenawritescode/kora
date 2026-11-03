@@ -973,13 +973,6 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 	// config-defined command registry (KERNEL-008).
 	apiGroup.POST("/kernel/:command", handler.HandleKernelOperation)
 	apiGroup.GET("/kernel/_registry", handler.HandleKernelRegistry)
-	if apiGroup.BasePath() == "/api/v1" {
-		apiGroup.GET("/offline/capabilities", handler.HandleOfflineCapabilities)
-		apiGroup.POST("/offline/push", handler.HandleOfflinePush)
-		apiGroup.POST("/offline/bootstrap", handler.HandleOfflineBootstrap)
-		apiGroup.POST("/offline/pull", handler.HandleOfflinePull)
-	}
-
 	// OpenAPI docs.
 	apiGroup.GET("/openapi.json", handler.HandleOpenAPI)
 	apiGroup.GET("/swagger-ui", handler.HandleSwaggerUI)

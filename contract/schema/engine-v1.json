@@ -989,73 +989,6 @@
       ],
       "type": "object"
     },
-    "OfflineBootstrapRequestV1": {
-      "additionalProperties": false,
-      "properties": {
-        "doctypes": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "limit": {
-          "type": "integer"
-        },
-        "page_token": {
-          "type": "string"
-        },
-        "snapshot_token": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "doctypes",
-        "limit",
-        "page_token",
-        "snapshot_token"
-      ],
-      "type": "object"
-    },
-    "OfflineBootstrapResponseV1": {
-      "additionalProperties": false,
-      "properties": {
-        "complete": {
-          "type": "boolean"
-        },
-        "doctypes": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "generation": {
-          "type": "integer"
-        },
-        "next_page_token": {
-          "type": "string"
-        },
-        "pull_cursor": {
-          "type": "string"
-        },
-        "records": {
-          "items": {
-            "$ref": "#/$defs/OfflineDocumentV1"
-          },
-          "type": "array"
-        },
-        "snapshot_token": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "complete",
-        "doctypes",
-        "generation",
-        "records",
-        "snapshot_token"
-      ],
-      "type": "object"
-    },
     "OfflineConflict": {
       "additionalProperties": false,
       "properties": {
@@ -1124,22 +1057,6 @@
         "resolution_mode",
         "server_version",
         "site"
-      ],
-      "type": "object"
-    },
-    "OfflineDocumentV1": {
-      "additionalProperties": false,
-      "properties": {
-        "doctype": {
-          "type": "string"
-        },
-        "record": {
-          "x-open-json-value": true
-        }
-      },
-      "required": [
-        "doctype",
-        "record"
       ],
       "type": "object"
     },
@@ -1232,56 +1149,6 @@
         "cursor",
         "next_cursor",
         "operations"
-      ],
-      "type": "object"
-    },
-    "OfflinePullRequestV1": {
-      "additionalProperties": false,
-      "properties": {
-        "cursor": {
-          "type": "string"
-        },
-        "limit": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "cursor",
-        "limit"
-      ],
-      "type": "object"
-    },
-    "OfflinePullResponseV1": {
-      "additionalProperties": false,
-      "properties": {
-        "changes": {
-          "items": {
-            "$ref": "#/$defs/OfflineDocumentV1"
-          },
-          "type": "array"
-        },
-        "generation": {
-          "type": "integer"
-        },
-        "has_more": {
-          "type": "boolean"
-        },
-        "next_cursor": {
-          "type": "string"
-        },
-        "tombstones": {
-          "items": {
-            "$ref": "#/$defs/OfflineTombstoneV1"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "changes",
-        "generation",
-        "has_more",
-        "next_cursor",
-        "tombstones"
       ],
       "type": "object"
     },
@@ -1406,22 +1273,6 @@
         "retain_until",
         "schema_version",
         "site"
-      ],
-      "type": "object"
-    },
-    "OfflineTombstoneV1": {
-      "additionalProperties": false,
-      "properties": {
-        "doctype": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "doctype",
-        "name"
       ],
       "type": "object"
     },
@@ -3080,73 +2931,6 @@
       ],
       "type": "object"
     },
-    "OfflineBootstrapRequestV1": {
-      "additionalProperties": false,
-      "properties": {
-        "doctypes": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "limit": {
-          "type": "integer"
-        },
-        "page_token": {
-          "type": "string"
-        },
-        "snapshot_token": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "doctypes",
-        "limit",
-        "page_token",
-        "snapshot_token"
-      ],
-      "type": "object"
-    },
-    "OfflineBootstrapResponseV1": {
-      "additionalProperties": false,
-      "properties": {
-        "complete": {
-          "type": "boolean"
-        },
-        "doctypes": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "generation": {
-          "type": "integer"
-        },
-        "next_page_token": {
-          "type": "string"
-        },
-        "pull_cursor": {
-          "type": "string"
-        },
-        "records": {
-          "items": {
-            "$ref": "#/$defs/OfflineDocumentV1"
-          },
-          "type": "array"
-        },
-        "snapshot_token": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "complete",
-        "doctypes",
-        "generation",
-        "records",
-        "snapshot_token"
-      ],
-      "type": "object"
-    },
     "OfflineConflict": {
       "additionalProperties": false,
       "properties": {
@@ -3215,22 +2999,6 @@
         "resolution_mode",
         "server_version",
         "site"
-      ],
-      "type": "object"
-    },
-    "OfflineDocumentV1": {
-      "additionalProperties": false,
-      "properties": {
-        "doctype": {
-          "type": "string"
-        },
-        "record": {
-          "x-open-json-value": true
-        }
-      },
-      "required": [
-        "doctype",
-        "record"
       ],
       "type": "object"
     },
@@ -3323,56 +3091,6 @@
         "cursor",
         "next_cursor",
         "operations"
-      ],
-      "type": "object"
-    },
-    "OfflinePullRequestV1": {
-      "additionalProperties": false,
-      "properties": {
-        "cursor": {
-          "type": "string"
-        },
-        "limit": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "cursor",
-        "limit"
-      ],
-      "type": "object"
-    },
-    "OfflinePullResponseV1": {
-      "additionalProperties": false,
-      "properties": {
-        "changes": {
-          "items": {
-            "$ref": "#/$defs/OfflineDocumentV1"
-          },
-          "type": "array"
-        },
-        "generation": {
-          "type": "integer"
-        },
-        "has_more": {
-          "type": "boolean"
-        },
-        "next_cursor": {
-          "type": "string"
-        },
-        "tombstones": {
-          "items": {
-            "$ref": "#/$defs/OfflineTombstoneV1"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "changes",
-        "generation",
-        "has_more",
-        "next_cursor",
-        "tombstones"
       ],
       "type": "object"
     },
@@ -3497,22 +3215,6 @@
         "retain_until",
         "schema_version",
         "site"
-      ],
-      "type": "object"
-    },
-    "OfflineTombstoneV1": {
-      "additionalProperties": false,
-      "properties": {
-        "doctype": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "doctype",
-        "name"
       ],
       "type": "object"
     },
