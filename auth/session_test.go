@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/email"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -795,5 +796,46 @@ func TestCloudOwnedInteractiveSignInRoutesAreRetired(t *testing.T) {
 		if response.Code != http.StatusNotFound {
 			t.Errorf("%s status = %d, want %d", path, response.Code, http.StatusNotFound)
 		}
+	}
+}
+
+type testMagicLinkMailer struct{}
+
+func (testMagicLinkMailer) SendContext(context.Context, *email.Message) error { return nil }
+
+func TestMagicLinkRoutesRequireConfiguredDelivery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("sqlmock:", err)
+	}
+	defer db.Close()
+	sm := NewSessionManager(db)
+	defer sm.Close()
+	const publicURL = "https://app.kora.test"
+
+	for _, tc := range []struct {
+		name       string
+		mailer     MagicLinkMailer
+		wantStatus int
+	}{
+		{name: "delivery unavailable", wantStatus: http.StatusNotFound},
+		{name: "delivery configured", mailer: testMagicLinkMailer{}, wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			if err := RegisterAuthRoutesWithPublicAppBaseURL(router, sm, db, tc.mailer, publicURL); err != nil {
+				t.Fatal("register routes:", err)
+			}
+			for _, path := range []string{"/api/auth/magic-link/request", "/api/auth/magic-link/verify"} {
+				request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+				request.Header.Set("Authorization", "Bearer native-api-client")
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, request)
+				if response.Code != tc.wantStatus {
+					t.Errorf("%s status = %d, want %d; body=%s", path, response.Code, tc.wantStatus, response.Body.String())
+				}
+			}
+		})
 	}
 }

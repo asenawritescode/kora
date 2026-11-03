@@ -1292,70 +1292,75 @@ func registerAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB, mail
 				},
 			})
 		})
-
-		auth.POST("/magic-link/request", CSRFMiddleware(), func(c *gin.Context) {
-			var request struct {
-				Email string `json:"email"`
-			}
-			if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Email) == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "auth.invalid_request", "message": "A valid email is required."}})
-				return
-			}
-			site := c.GetString("site_name")
-			emailAddr := strings.TrimSpace(request.Email)
-			if !allowMagicLinkRequest(site, emailAddr, c.ClientIP(), time.Now()) {
-				c.JSON(http.StatusAccepted, gin.H{"data": gin.H{"message": "If that account can sign in, a link will arrive by email."}})
-				return
-			}
-			targetDB := db
-			if value, ok := c.Get("site_db"); ok {
-				if siteDB, valid := value.(*sql.DB); valid && siteDB != nil {
-					targetDB = siteDB
-				}
-			}
-			if targetDB == nil || site == "" {
-				c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "site.not_found", "message": "Site not found."}})
-				return
-			}
-			manager := sessionManagerForRequest(c, targetDB)
-			user, err := manager.FindUserByEmailContext(c.Request.Context(), site, emailAddr)
-			if err == nil {
-				if _, err := issueOneTimeLinkWithPublicAppBaseURL(c, targetDB, site, user, mailer, publicAppBaseURL); err != nil {
-					slog.Error("issuing sign-in link", "site", site, "error", err)
-				}
-			}
-			c.JSON(http.StatusAccepted, gin.H{"data": gin.H{"message": "If that account can sign in, a link will arrive by email."}})
-		})
-
-		auth.POST("/magic-link/verify", CSRFMiddleware(), func(c *gin.Context) {
-			var request struct {
-				Token string `json:"token"`
-			}
-			if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Token) == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "auth.invalid_request", "message": "A sign-in token is required."}})
-				return
-			}
-			site := c.GetString("site_name")
-			targetDB := db
-			if value, ok := c.Get("site_db"); ok {
-				if siteDB, valid := value.(*sql.DB); valid && siteDB != nil {
-					targetDB = siteDB
-				}
-			}
-			if targetDB == nil || site == "" {
-				c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "site.not_found", "message": "Site not found."}})
-				return
-			}
-			manager := sessionManagerForRequest(c, targetDB)
-			user, sid, expiresAt, err := manager.consumeMagicLink(c.Request.Context(), site, strings.TrimSpace(request.Token))
-			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": gin.H{"code": "auth.magic_link_invalid", "message": "This sign-in link is invalid, expired, or already used."}})
-				return
-			}
-			SetSecureCookie(c, "kora_sid", sid, int(SessionLifetime.Seconds()), "/", true)
-			c.JSON(http.StatusOK, gin.H{"data": gin.H{"user": user, "expires_at": expiresAt.UTC().Format(time.RFC3339)}})
-		})
 	}
+	if mailer != nil && strings.TrimSpace(publicAppBaseURL) != "" {
+		registerMagicLinkRoutes(auth, db, mailer, publicAppBaseURL)
+	}
+}
+
+func registerMagicLinkRoutes(auth *gin.RouterGroup, db *sql.DB, mailer MagicLinkMailer, publicAppBaseURL string) {
+	auth.POST("/magic-link/request", CSRFMiddleware(), func(c *gin.Context) {
+		var request struct {
+			Email string `json:"email"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Email) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "auth.invalid_request", "message": "A valid email is required."}})
+			return
+		}
+		site := c.GetString("site_name")
+		emailAddr := strings.TrimSpace(request.Email)
+		if !allowMagicLinkRequest(site, emailAddr, c.ClientIP(), time.Now()) {
+			c.JSON(http.StatusAccepted, gin.H{"data": gin.H{"message": "If that account can sign in, a link will arrive by email."}})
+			return
+		}
+		targetDB := db
+		if value, ok := c.Get("site_db"); ok {
+			if siteDB, valid := value.(*sql.DB); valid && siteDB != nil {
+				targetDB = siteDB
+			}
+		}
+		if targetDB == nil || site == "" {
+			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "site.not_found", "message": "Site not found."}})
+			return
+		}
+		manager := sessionManagerForRequest(c, targetDB)
+		user, err := manager.FindUserByEmailContext(c.Request.Context(), site, emailAddr)
+		if err == nil {
+			if _, err := issueOneTimeLinkWithPublicAppBaseURL(c, targetDB, site, user, mailer, publicAppBaseURL); err != nil {
+				slog.Error("issuing sign-in link", "site", site, "error", err)
+			}
+		}
+		c.JSON(http.StatusAccepted, gin.H{"data": gin.H{"message": "If that account can sign in, a link will arrive by email."}})
+	})
+
+	auth.POST("/magic-link/verify", CSRFMiddleware(), func(c *gin.Context) {
+		var request struct {
+			Token string `json:"token"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Token) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "auth.invalid_request", "message": "A sign-in token is required."}})
+			return
+		}
+		site := c.GetString("site_name")
+		targetDB := db
+		if value, ok := c.Get("site_db"); ok {
+			if siteDB, valid := value.(*sql.DB); valid && siteDB != nil {
+				targetDB = siteDB
+			}
+		}
+		if targetDB == nil || site == "" {
+			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "site.not_found", "message": "Site not found."}})
+			return
+		}
+		manager := sessionManagerForRequest(c, targetDB)
+		user, sid, expiresAt, err := manager.consumeMagicLink(c.Request.Context(), site, strings.TrimSpace(request.Token))
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": gin.H{"code": "auth.magic_link_invalid", "message": "This sign-in link is invalid, expired, or already used."}})
+			return
+		}
+		SetSecureCookie(c, "kora_sid", sid, int(SessionLifetime.Seconds()), "/", true)
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"user": user, "expires_at": expiresAt.UTC().Format(time.RFC3339)}})
+	})
 }
 
 // parseTime parses a datetime string from the database (MySQL DATETIME or SQLite TEXT).
