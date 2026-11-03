@@ -8,9 +8,82 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/gin-gonic/gin"
 )
+
+func TestValidateConfigurationPublishedBindingsRequiresCurrentActiveOwnerSurface(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	schema := contract.SchemaRef{ID: "sales.orders.summary", Version: 1}
+	snapshot := contract.ModuleSnapshot{
+		TenantID: "tenant-a", Revision: 7,
+		Modules:       []contract.ModuleDescriptor{{ID: "sales.orders", Version: "1.0.0"}},
+		Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "sales.orders", Version: "1.0.0", State: string(contract.ModuleActive)}},
+	}
+	services := NewSiteRuntimeServices()
+	services.Replace("tenant-a", SiteRuntimeService{
+		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return snapshot, nil },
+		ResolveModuleBindings: func(got contract.BusinessScope) (plugin.BindingPlan, error) {
+			if got != scope {
+				t.Fatalf("resolved scope = %#v, want %#v", got, scope)
+			}
+			return plugin.BindingPlan{Revision: 7, Projections: map[plugin.PublishedProjectionKey]contract.ProjectionDefinition{
+				{OwnerModuleID: "sales.orders", ID: "orders.summary"}: {ID: "orders.summary", OwnerModuleID: "sales.orders", ScopePolicy: contract.ScopeTenantShared, OutputSchema: schema},
+			}}, nil
+		},
+	})
+	h := &Handler{RuntimeServices: services}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("site_name", "tenant-a")
+	binding := contract.ConfigurationSurfaceBinding{Kind: contract.ConfigurationProjection, ViewName: "Invoice Board", CatalogRevision: 7, BusinessScope: scope, OwnerModuleID: "sales.orders", Name: "orders.summary", OutputSchema: schema}
+	views := []*doctype.View{{Name: "Invoice Board"}}
+	canonical, blockers, issues := validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding}, views)
+	if len(canonical) != 1 || len(blockers) != 0 || len(issues) != 0 {
+		t.Fatalf("active published surface validation = canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding}, nil)
+	if len(canonical) != 0 || len(blockers) != 0 || len(issues) != 1 || !strings.Contains(issues[0], "missing generated view") {
+		t.Fatalf("binding without its generated view was accepted: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+
+	stale := binding
+	stale.CatalogRevision--
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{stale}, views)
+	if len(canonical) != 0 || len(blockers) != 0 || len(issues) != 1 {
+		t.Fatalf("stale published surface was not rejected: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+
+	snapshot.Installations[0].State = string(contract.ModuleDraining)
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding}, views)
+	if len(canonical) != 0 || len(blockers) != 1 || len(issues) != 0 {
+		t.Fatalf("draining published surface was not blocked: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+}
+
+func TestCheckoutViewMustBindItsOwnerPublishedCheckoutOperation(t *testing.T) {
+	schema := contract.SchemaRef{ID: "sales.checkout", Version: 1}
+	checkout := &contract.CheckoutOperationContract{Input: contract.CheckoutInputBinding{CartItems: "items", RequestedTotal: "total", Currency: "currency", PaymentMethod: "method"}, Outcomes: []contract.CheckoutOutcomeBinding{{Kind: contract.CheckoutInvoiceIssued, StatusField: "invoice_status", SuccessValue: "issued"}}}
+	operation := contract.PublishedOperation{Capability: "sales.checkout", Operation: "submit", Checkout: checkout}
+	module := contract.ModuleDescriptor{ID: "sales.orders", PublishedOperations: []contract.PublishedOperation{operation}}
+	view := &doctype.View{Name: "Register", PageManifest: &doctype.PageManifest{APIVersion: "ui.kora.dev/v1", Kind: "Page", Metadata: doctype.PageManifestMetadata{Name: "Register", Version: "1", Package: "sales", Status: "active"}, Spec: doctype.PageManifestSpec{Layout: doctype.PageManifestLayout{Children: []doctype.PageComponent{{ID: "pay", Component: "payment_panel", Props: map[string]any{"bindings": map[string]any{"checkout_operation_ref": "sales.orders~sales.checkout~submit"}}}}}}}}
+	binding := contract.ConfigurationSurfaceBinding{Kind: contract.ConfigurationOperation, ViewName: "Register", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CatalogRevision: 4, OwnerModuleID: "sales.orders", OperationRef: "sales.orders~sales.checkout~submit", InputSchema: &schema, OutputSchema: schema}
+	modules := map[contract.ModuleID]contract.ModuleDescriptor{module.ID: module}
+	views := []*doctype.View{view}
+
+	if issues := validateCheckoutViewBindings(views, []contract.ConfigurationSurfaceBinding{binding}, modules); len(issues) != 0 {
+		t.Fatalf("valid exact checkout binding rejected: %v", issues)
+	}
+	if issues := validateCheckoutViewBindings(views, nil, modules); len(issues) != 1 || !strings.Contains(issues[0], "current owner-published checkout operation") {
+		t.Fatalf("unregistered checkout view binding accepted: %v", issues)
+	}
+	view.PageManifest.Spec.Layout.Children[0].Props["bindings"].(map[string]any)["checkout_operation_ref"] = "sales.orders~sales.checkout~other"
+	if issues := validateCheckoutViewBindings(views, []contract.ConfigurationSurfaceBinding{binding}, modules); len(issues) != 1 {
+		t.Fatalf("mismatched view operation ref accepted: %v", issues)
+	}
+}
 
 func TestConfigurationCheckRejectsOversizedBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -98,7 +171,7 @@ func TestConfigurationCheckDecodesLegacyDoctypeViewAlias(t *testing.T) {
 
 func TestDecodeDraftConfigurationUsesSharedWireEnvelope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	body := `{"proposal_id":"proposal-1","conversation_id":"conversation-2","base_config_version_id":"config-3","created_by":"untrusted-legacy-actor","doctypes":[{"name":"Task"}],"roles":[{"name":"Manager"}],"permissions":[{"doctype":"Task","role":"Manager","read":true,"public":true}],"views":[{"name":"Tasks","doctype":"Task","route":"/tasks"}],"scripts":[{"name":"task_api","script_type":"api_method","source":"return true;"}],"scheduled_jobs":[{"name":"invoice-generation","type":"subscription_invoice","schedule":"0 0 * * *","config":{"due_days":14}}]}`
+	body := `{"proposal_id":"proposal-1","conversation_id":"conversation-2","base_config_version_id":"config-3","created_by":"untrusted-legacy-actor","doctypes":[{"name":"Task"}],"roles":[{"name":"Manager"}],"permissions":[{"doctype":"Task","role":"Manager","read":true,"public":true}],"views":[{"name":"Tasks","doctype":"Task","route":"/tasks"}],"scripts":[{"name":"task_api","script_type":"api_method","source":"return true;"}],"scheduled_jobs":[{"name":"invoice-generation","type":"subscription_invoice","schedule":"0 0 * * *","config":{"due_days":14}}],"published_bindings":[{"kind":"projection","catalog_revision":7,"business_scope":{"tenant_id":"tenant-a","kind":"tenant"},"owner_module_id":"sales","name":"sales.orders","output_schema":{"id":"sales.orders.v1","version":1}}]}`
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/system/config/drafts", strings.NewReader(body))
@@ -121,6 +194,9 @@ func TestDecodeDraftConfigurationUsesSharedWireEnvelope(t *testing.T) {
 	}
 	if len(req.ScheduledJobs) != 1 || req.ScheduledJobs[0].Name != "invoice-generation" || req.ScheduledJobs[0].Type != "subscription_invoice" {
 		t.Fatalf("scheduled jobs = %#v", req.ScheduledJobs)
+	}
+	if len(req.PublishedBindings) != 1 || req.PublishedBindings[0].CatalogRevision != 7 || req.PublishedBindings[0].OwnerModuleID != "sales" {
+		t.Fatalf("published bindings = %#v", req.PublishedBindings)
 	}
 }
 

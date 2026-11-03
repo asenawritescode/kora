@@ -52,7 +52,52 @@ operation, err := client.ApplyPackage(ctx, contract.ApplyPackage{
 ```
 
 The client targets `/api/management/v2`; it does not make these capabilities
-available until the Engine exposes their authenticated, durable handlers.
+available until the Engine exposes their authenticated, durable handlers. The
+single `management.Client` interface includes capabilities, durable invitation
+delivery/reconciliation, directory resolution, module inspection and lifecycle
+planning/apply. A submitted lifecycle change returns a managed operation; poll
+that operation with `Operation` instead of submitting apply again.
+
+### Tenant business client
+
+Business credentials use a separate client and cannot be supplied through the
+management client. Scope is immutable per scoped client. The Engine filters the
+catalog for the authenticated actor and rechecks permission on each request.
+
+```go
+import (
+    "context"
+    "encoding/json"
+
+    "github.com/asenawritescode/kora/contract"
+    "github.com/asenawritescode/kora/sdk/tenant"
+)
+
+client, err := tenant.NewClient(tenant.Config{
+    BaseURL: "https://engine.example.test",
+    SiteName: "acme",
+    Tokens: tenant.TokenSourceFunc(func(context.Context) (string, error) {
+        return extensionCredential, nil
+    }),
+})
+if err != nil { return err }
+scoped, err := client.WithScope(contract.BusinessScope{
+    TenantID: tenantID, Kind: contract.ScopeKindLegalEntity, LegalEntityID: entityID,
+})
+if err != nil { return err }
+catalog, err := scoped.Catalog(ctx)
+if err != nil { return err }
+query, err := scoped.PublishedQuery(ctx, catalog, "sales.orders", "open_orders", contract.PublishedQueryRequest{
+    Input: json.RawMessage(`{}`), Limit: 50,
+})
+```
+
+`QueryResult` preserves cursor, snapshot, source revision, `as_of` and freshness.
+`ExecutePublishedOperation` uses the catalog's operation reference and schema;
+after an uncertain transport outcome, `LookupExecution` recovers the original
+receipt with the same idempotency key without redispatching it. `outcome_unknown`
+remains a distinct receipt status. The client never chooses a provider or sends
+management credentials to business routes.
 
 ### DocProvider — CRUD on Kigae documents
 

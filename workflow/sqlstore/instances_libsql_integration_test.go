@@ -330,7 +330,7 @@ func verifyExternalHTTPReconciliation(ctx context.Context, t *testing.T, databas
 	registration := workflow.ActionRegistration{Key: actionKey, Class: workflow.ActionExternal, InputSchema: inputSchema, OutputSchema: outputSchema, RequiredGrant: grant, External: action}
 	definition := contract.WorkflowDefinition{ID: definitionID, Version: 1}
 	step := contract.StepDefinition{ID: stepID, Kind: contract.StepAction, Action: &contract.ActionSpec{Name: actionKey.Name, Version: actionKey.Version, InputSchema: inputSchema.ID, Input: json.RawMessage(`{"order":"INV-HTTP"}`), Next: "done"}}
-	actionExecutor, err := workflow.NewExternalActionExecutor(store, identity, libSQLWorkflowSchemas{})
+	actionExecutor, err := workflow.NewExternalActionExecutor(store, identity, libSQLWorkflowSchemas{}, nil)
 	if err != nil {
 		t.Fatal("construct external workflow executor:", err)
 	}

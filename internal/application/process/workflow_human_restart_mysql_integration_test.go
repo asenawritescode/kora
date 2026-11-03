@@ -254,7 +254,7 @@ func TestRolelessWorkflowServiceCannotSynthesizeTransitionRoleAfterWorkerRestart
 		if err != nil {
 			t.Fatal("construct workflow execution identity:", err)
 		}
-		handler, err := workflow.NewDefinitionClaimHandler(store, instanceStoreFor(database, dialect, t), definitionsFor(database, dialect, t), catalog, integrationWorkflowSchemas{}, identity, restartWorkflowScopes{}, expression.NewTreeEvaluator(), workflow.HumanWaitRuntime{Requests: requestService, Store: store, Now: func() time.Time { return time.Now().UTC() }})
+		handler, err := workflow.NewDefinitionClaimHandler(store, instanceStoreFor(database, dialect, t), definitionsFor(database, dialect, t), catalog, integrationWorkflowSchemas{}, identity, restartWorkflowScopes{}, expression.NewTreeEvaluator(), nil, workflow.HumanWaitRuntime{Requests: requestService, Store: store, Now: func() time.Time { return time.Now().UTC() }})
 		if err != nil {
 			t.Fatal("construct definition claim handler:", err)
 		}

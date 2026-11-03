@@ -1,6 +1,10 @@
 package contract
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // ConfigurationVersionSummaryV2 identifies a stored tenant configuration.
 // It is intended for authenticated management clients that need to anchor a
@@ -63,6 +67,92 @@ type ConfigurationCandidateV2 struct {
 	// V2 workflow definitions use the same strict decoder as package imports.
 	//contract:json
 	WorkflowDefinitions []json.RawMessage `json:"workflow_definitions,omitempty"`
+	//contract:maxItems=512
+	PublishedBindings []ConfigurationSurfaceBinding `json:"published_bindings,omitempty"`
+}
+
+// ConfigurationSurfaceKind identifies an owner-published surface referenced
+// by a generated page or view.
+//
+//contract:enum:v2
+type ConfigurationSurfaceKind string
+
+const (
+	ConfigurationQuery      ConfigurationSurfaceKind = "query"
+	ConfigurationProjection ConfigurationSurfaceKind = "projection"
+	ConfigurationOperation  ConfigurationSurfaceKind = "operation"
+)
+
+// ConfigurationSurfaceBinding pins generated UI to one exact registered
+// module surface. It is descriptive configuration, never an authorization
+// grant. Execution must still authorize the current actor and business scope.
+//
+//contract:wire:v2
+type ConfigurationSurfaceBinding struct {
+	Kind ConfigurationSurfaceKind `json:"kind"`
+	// ViewName binds this published surface to the exact generated view that
+	// consumes it. It is configuration metadata, never an execution grant.
+	//contract:maxLength=160
+	ViewName        string        `json:"view_name"`
+	CatalogRevision uint64        `json:"catalog_revision"`
+	BusinessScope   BusinessScope `json:"business_scope"`
+	//contract:maxLength=128
+	//contract:pattern=^[a-z][a-z0-9_.-]{0,127}$
+	OwnerModuleID ModuleID `json:"owner_module_id"`
+	//contract:maxLength=160
+	Name         string     `json:"name,omitempty"`
+	OperationRef string     `json:"operation_ref,omitempty"`
+	InputSchema  *SchemaRef `json:"input_schema,omitempty"`
+	OutputSchema SchemaRef  `json:"output_schema"`
+}
+
+func (b ConfigurationSurfaceBinding) Validate() error {
+	if strings.TrimSpace(b.ViewName) == "" || len(b.ViewName) > 160 || strings.TrimSpace(b.ViewName) != b.ViewName || b.CatalogRevision == 0 || b.BusinessScope.Validate() != nil || !moduleIDPattern.MatchString(string(b.OwnerModuleID)) || b.OutputSchema.ID == "" || b.OutputSchema.Version == 0 {
+		return fmt.Errorf("published surface binding view, identity, scope, revision, and output schema are required")
+	}
+	if b.InputSchema != nil && (b.InputSchema.ID == "" || b.InputSchema.Version == 0) {
+		return fmt.Errorf("published surface binding input schema is invalid")
+	}
+	switch b.Kind {
+	case ConfigurationQuery:
+		if !validConfigurationSurfaceName(b.Name) || b.OperationRef != "" || b.InputSchema == nil {
+			return fmt.Errorf("query binding requires one name and input/output schemas")
+		}
+	case ConfigurationProjection:
+		if !validConfigurationSurfaceName(b.Name) || b.OperationRef != "" || b.InputSchema != nil {
+			return fmt.Errorf("projection binding requires one name and output schema")
+		}
+	case ConfigurationOperation:
+		parts := strings.Split(b.OperationRef, "~")
+		if b.Name != "" || b.InputSchema == nil || len(parts) != 3 || parts[0] != string(b.OwnerModuleID) || !validModuleName(parts[1]) || !validModuleName(parts[2]) || PublishedOperationRef(b.OwnerModuleID, CapabilityName(parts[1]), parts[2]) != b.OperationRef {
+			return fmt.Errorf("operation binding requires its canonical operation reference and schemas")
+		}
+	default:
+		return fmt.Errorf("published surface binding kind is invalid")
+	}
+	return nil
+}
+
+func validConfigurationSurfaceName(value string) bool {
+	return value != "" && len(value) <= 160 && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "~/\\")
+}
+
+func ValidateConfigurationSurfaceBindings(bindings []ConfigurationSurfaceBinding) error {
+	if len(bindings) > 512 {
+		return fmt.Errorf("published surface binding count exceeds its limit")
+	}
+	seen := make(map[string]bool, len(bindings))
+	for _, binding := range bindings {
+		if err := binding.Validate(); err != nil {
+			return err
+		}
+		key := binding.ViewName + "/" + string(binding.BusinessScope.TenantID) + "/" + string(binding.BusinessScope.Kind) + "/" + binding.BusinessScope.LegalEntityID + "/" + string(binding.Kind) + "/" + string(binding.OwnerModuleID) + "/" + binding.Name + "/" + binding.OperationRef
+		if seen[key] {
+			return fmt.Errorf("published surface binding is duplicated")
+		}
+		seen[key] = true
+	}
+	return nil
 }
 
 //contract:wire:v2
@@ -92,6 +182,9 @@ type ConfigurationCheckV2 struct {
 	Warnings          []string                `json:"warnings,omitempty"`
 	Conflicts         []ConfigurationConflict `json:"conflicts,omitempty"`
 	Impact            []ConfigurationImpact   `json:"impact,omitempty"`
+	//contract:maxItems=512
+	PublishedBindings []ConfigurationSurfaceBinding `json:"published_bindings,omitempty"`
+	ModuleBlockers    []ModuleBlocker               `json:"module_blockers,omitempty"`
 }
 
 // ConfigurationDraftV2 is Cloud's request to compose an inactive Engine
@@ -121,6 +214,8 @@ type ConfigurationDraftV2 struct {
 	ScheduledJobs []ScheduledJobDefinition `json:"scheduled_jobs,omitempty"`
 	//contract:json
 	WorkflowDefinitions []json.RawMessage `json:"workflow_definitions,omitempty"`
+	//contract:maxItems=512
+	PublishedBindings []ConfigurationSurfaceBinding `json:"published_bindings,omitempty"`
 }
 
 // ConfigurationDraftResultV2 identifies the one inactive version composed

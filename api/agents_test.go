@@ -76,3 +76,25 @@ func TestAgentPermissionPolicyRejectsUnknownResources(t *testing.T) {
 		t.Fatalf("unknown permission status = %d, body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestAgentManifestCollectionEndpointReturnsStableList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHandler(nil, nil)
+	r := gin.New()
+	r.PUT("/agents/:id", h.HandleAgentManifest)
+	r.GET("/agents", h.HandleAgentManifests)
+	for _, manifest := range []struct{ id, name string }{{"zulu", "Zulu"}, {"alpha", "Alpha"}} {
+		body := `{"name":"` + manifest.name + `","granted_capabilities":[]}`
+		request := httptest.NewRequest(http.MethodPut, "/agents/"+manifest.id, bytes.NewBufferString(body))
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("save manifest status = %d body=%s", response.Code, response.Body.String())
+		}
+	}
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/agents", nil))
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"id":"alpha"`)) || bytes.Index(response.Body.Bytes(), []byte(`"id":"alpha"`)) > bytes.Index(response.Body.Bytes(), []byte(`"id":"zulu"`)) {
+		t.Fatalf("manifest collection response = %d body=%s", response.Code, response.Body.String())
+	}
+}

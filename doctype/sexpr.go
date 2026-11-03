@@ -39,9 +39,31 @@ func ToSExpr(snapshot *ConfigSnapshot) string {
 	writeScriptsSection(&b, snapshot.Scripts)
 	writeScheduledJobsSection(&b, snapshot.ScheduledJobs)
 	writeModuleDescriptorsSection(&b, snapshot.Modules)
+	writePublishedBindingsSection(&b, snapshot.PublishedBindings)
 
 	b.WriteString(")")
 	return b.String()
+}
+
+func writePublishedBindingsSection(b *strings.Builder, bindings []contract.ConfigurationSurfaceBinding) {
+	ordered := append([]contract.ConfigurationSurfaceBinding(nil), bindings...)
+	sort.Slice(ordered, func(i, j int) bool {
+		a, z := ordered[i], ordered[j]
+		ak := a.ViewName + "/" + string(a.BusinessScope.TenantID) + "/" + string(a.BusinessScope.Kind) + "/" + a.BusinessScope.LegalEntityID + "/" + string(a.Kind) + "/" + string(a.OwnerModuleID) + "/" + a.Name + "/" + a.OperationRef
+		zk := z.ViewName + "/" + string(z.BusinessScope.TenantID) + "/" + string(z.BusinessScope.Kind) + "/" + z.BusinessScope.LegalEntityID + "/" + string(z.Kind) + "/" + string(z.OwnerModuleID) + "/" + z.Name + "/" + z.OperationRef
+		return ak < zk
+	})
+	b.WriteString("\n  (published-bindings")
+	for _, binding := range ordered {
+		encoded, err := json.Marshal(binding)
+		if err != nil {
+			continue
+		}
+		b.WriteString("\n    (binding-json ")
+		b.WriteString(quoteSExprString(string(encoded)))
+		b.WriteString(")")
+	}
+	b.WriteString(")")
 }
 
 func writeModuleDescriptorsSection(b *strings.Builder, modules []contract.ModuleDescriptor) {
@@ -1079,6 +1101,12 @@ func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 					return nil, err
 				}
 				snapshot.Modules = modules
+			case "published-bindings":
+				bindings, err := parsePublishedBindings(child.Children[1:])
+				if err != nil {
+					return nil, err
+				}
+				snapshot.PublishedBindings = bindings
 			case "views":
 				views, err := parseViews(child.Children[1:])
 				if err != nil {
@@ -1130,6 +1158,24 @@ func parseModuleDescriptors(nodes []*sNode) ([]contract.ModuleDescriptor, error)
 		modules = append(modules, module)
 	}
 	return modules, nil
+}
+
+func parsePublishedBindings(nodes []*sNode) ([]contract.ConfigurationSurfaceBinding, error) {
+	bindings := make([]contract.ConfigurationSurfaceBinding, 0, len(nodes))
+	for _, node := range nodes {
+		if !node.IsList || len(node.Children) != 2 || nodeStr(node.Children[0]) != "binding-json" {
+			return nil, fmt.Errorf("invalid published surface binding form")
+		}
+		var binding contract.ConfigurationSurfaceBinding
+		if err := json.Unmarshal([]byte(nodeStr(node.Children[1])), &binding); err != nil {
+			return nil, fmt.Errorf("invalid published surface binding JSON: %w", err)
+		}
+		bindings = append(bindings, binding)
+	}
+	if err := contract.ValidateConfigurationSurfaceBindings(bindings); err != nil {
+		return nil, fmt.Errorf("invalid published surface bindings: %w", err)
+	}
+	return bindings, nil
 }
 
 // ---------------------------------------------------------------------------

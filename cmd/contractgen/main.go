@@ -166,6 +166,38 @@ func addV2SemanticRules(data []byte) ([]byte, error) {
 			revision["pattern"] = "^(0|[1-9][0-9]*)$"
 		}
 	}
+	binding, ok := defs["ConfigurationSurfaceBinding"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("v2 schema is missing ConfigurationSurfaceBinding")
+	}
+	bindingProperties, _ := binding["properties"].(map[string]any)
+	bindingObject := func(kind string, required, forbidden []string) map[string]any {
+		properties := map[string]any{"kind": map[string]any{"const": kind, "type": "string"}}
+		for _, field := range required {
+			properties[field] = bindingProperties[field]
+		}
+		requiredFields := append([]string{"kind"}, required...)
+		var excluded map[string]any
+		if len(forbidden) > 0 {
+			excluded = forbidAny(forbidden...)
+		}
+		return object(properties, requiredFields, excluded)
+	}
+	binding["oneOf"] = []any{
+		bindingObject("query", []string{"catalog_revision", "business_scope", "owner_module_id", "name", "input_schema", "output_schema"}, []string{"operation_ref"}),
+		bindingObject("projection", []string{"catalog_revision", "business_scope", "owner_module_id", "name", "output_schema"}, []string{"operation_ref", "input_schema"}),
+		bindingObject("operation", []string{"catalog_revision", "business_scope", "owner_module_id", "operation_ref", "input_schema", "output_schema"}, []string{"name"}),
+	}
+	if rootBinding, ok := rootProperties["ConfigurationSurfaceBinding"].(map[string]any); ok {
+		rootBinding["oneOf"] = binding["oneOf"]
+	}
+	if revision, ok := bindingProperties["catalog_revision"].(map[string]any); ok {
+		revision["minimum"] = 1
+	}
+	if operationRef, ok := bindingProperties["operation_ref"].(map[string]any); ok {
+		operationRef["pattern"] = "^[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}$"
+		operationRef["maxLength"] = 386
+	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return nil, err

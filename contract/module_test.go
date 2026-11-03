@@ -505,13 +505,29 @@ func TestApplicationCatalogValidatesAndBoundsSchemaDocuments(t *testing.T) {
 	out := SchemaRef{ID: "sales.output", Version: 1}
 	catalog := ApplicationCatalog{Revision: 1, BusinessScope: scope,
 		Modules:              []ApplicationCatalogModule{{ID: "sales.orders", Version: "1.0.0", State: string(ModuleActive)}},
-		PublishedQueries:     []ApplicationCatalogQuery{{OwnerModuleID: "sales.orders", Name: "list", Route: "/api/v1/modules/sales.orders/queries/list", InputSchema: in, OutputSchema: out, ScopePolicy: ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}},
+		PublishedQueries:     []ApplicationCatalogQuery{{OwnerModuleID: "sales.orders", Name: "list", Capability: "sales.read", Route: "/api/v1/modules/sales.orders/queries/list", InputSchema: in, OutputSchema: out, ScopePolicy: ScopeTenantShared, AllowedFields: []string{"id", "reference", "name"}, PageLimit: 10}},
 		PublishedProjections: []ApplicationCatalogProjection{},
 		Schemas:              []ModuleSchemaDocument{{Ref: in, Schema: []byte(`{"type":"object"}`)}, {Ref: out, Schema: []byte(`{"type":"array","items":{"type":"object"}}`)}},
 		AllowedEntityChoices: []BusinessScope{}, Blockers: []ModuleBlocker{}}
 	if err := catalog.Validate(); err != nil {
 		t.Fatalf("valid catalog rejected: %v", err)
 	}
+	lookup := PublishedReferenceLookup{ResourceType: "warehouse.location", SearchField: "search", ValueField: "reference", LabelField: "name"}
+	if err := lookup.Validate([]string{"reference", "name"}); err != nil {
+		t.Fatalf("valid reference lookup rejected: %v", err)
+	}
+	if err := lookup.Validate([]string{"reference"}); err == nil {
+		t.Fatal("lookup label outside published fields accepted")
+	}
+	catalog.PublishedQueries[0].ReferenceLookup = &lookup
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("valid typed lookup catalog rejected: %v", err)
+	}
+	catalog.PublishedQueries[0].ReferenceLookup = &PublishedReferenceLookup{ResourceType: "warehouse.location", ValueField: "private_id", LabelField: "name"}
+	if err := catalog.Validate(); err == nil {
+		t.Fatal("lookup over unpublished field accepted")
+	}
+	catalog.PublishedQueries[0].ReferenceLookup = nil
 	catalog.Schemas[0].Schema = []byte(`{"$ref":"https://example.com/schema.json"}`)
 	if err := catalog.Validate(); err == nil {
 		t.Fatal("remote schema reference accepted")
@@ -575,6 +591,48 @@ func TestPublishedOperationsRequireExplicitCallerAllowlist(t *testing.T) {
 	module.PublishedOperations[0].AllowedCallers = []ModuleID{"sales.orders", "sales.orders"}
 	if err := module.Validate(nil); err == nil {
 		t.Fatal("duplicate trusted caller accepted")
+	}
+}
+
+func TestCheckoutOperationContractBindsExactInputsAndSeparateOutcomes(t *testing.T) {
+	refSchema := `{"type":"object","properties":{"provider_id":{"type":"string"},"resource_type":{"type":"string"},"id":{"type":"string"},"scope":{"type":"object"}},"required":["provider_id","resource_type","id","scope"]}`
+	input := json.RawMessage(`{"type":"object","properties":{"lines":{"type":"array"},"amount":{"type":"string"},"currency":{"type":"string"},"method":{"type":"string"},"customer":` + refSchema + `,"phone":{"type":"string"}}}`)
+	output := json.RawMessage(`{"type":"object","properties":{"payment":{"type":"string","enum":["Pending","Settled"]},"invoice_status":{"type":"string","enum":["Issued","Rejected"]},"invoice_ref":` + refSchema + `,"fulfillment":{"type":"string","enum":["Complete","Pending"]}}}`)
+	checkout := CheckoutOperationContract{
+		Input: CheckoutInputBinding{CartItems: "lines", RequestedTotal: "amount", Currency: "currency", PaymentMethod: "method", CustomerRef: "customer", CustomerPhone: "phone"},
+		Outcomes: []CheckoutOutcomeBinding{
+			{Kind: CheckoutPaymentInitiated, StatusField: "payment", SuccessValue: "Pending"},
+			{Kind: CheckoutInvoiceIssued, StatusField: "invoice_status", SuccessValue: "Issued", ReferenceField: "invoice_ref"},
+			{Kind: CheckoutFulfillmentEnded, StatusField: "fulfillment", SuccessValue: "Complete"},
+		},
+	}
+	if err := checkout.Validate(input, output); err != nil {
+		t.Fatalf("valid owner-declared checkout contract rejected: %v", err)
+	}
+	badInput := json.RawMessage(`{"type":"object","properties":{"lines":{"type":"array"},"amount":{"type":"number"},"currency":{"type":"string"},"method":{"type":"string"}}}`)
+	if err := checkout.Validate(badInput, output); err == nil {
+		t.Fatal("floating-point requested total accepted for checkout wire input")
+	}
+	checkout.Outcomes[1].ReferenceField = ""
+	if err := checkout.Validate(input, output); err == nil {
+		t.Fatal("invoice-issued outcome without a provider-qualified reference accepted")
+	}
+}
+
+func TestModuleDescriptorPublishesCheckoutContractOnlyWithItsSchemas(t *testing.T) {
+	inRef := SchemaRef{ID: "sales.checkout.input", Version: 1}
+	outRef := SchemaRef{ID: "sales.checkout.output", Version: 1}
+	in := json.RawMessage(`{"type":"object","properties":{"lines":{"type":"array"},"amount":{"type":"string"},"currency":{"type":"string"},"method":{"type":"string"}}}`)
+	refSchema := json.RawMessage(`{"type":"object","properties":{"provider_id":{"type":"string"},"resource_type":{"type":"string"},"id":{"type":"string"},"scope":{"type":"object"}},"required":["provider_id","resource_type","id","scope"]}`)
+	out := json.RawMessage(`{"type":"object","properties":{"payment":{"type":"string","enum":["Settled","Pending"]},"invoice_status":{"type":"string","enum":["Issued","Pending"]},"invoice_ref":` + string(refSchema) + `}}`)
+	checkout := &CheckoutOperationContract{Input: CheckoutInputBinding{CartItems: "lines", RequestedTotal: "amount", Currency: "currency", PaymentMethod: "method"}, Outcomes: []CheckoutOutcomeBinding{{Kind: CheckoutPaymentSettled, StatusField: "payment", SuccessValue: "Settled"}, {Kind: CheckoutInvoiceIssued, StatusField: "invoice_status", SuccessValue: "Issued", ReferenceField: "invoice_ref"}}}
+	module := ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Schemas: []ModuleSchemaDocument{{Ref: inRef, Schema: in}, {Ref: outRef, Schema: out}}, Provides: []CapabilityOffer{{Name: "sales.checkout", Contract: outRef, Operations: []OperationSpec{{Name: "submit", Input: inRef, Output: outRef, Effect: EffectExternal}}}}, PublishedOperations: []PublishedOperation{{Name: "checkout", Capability: "sales.checkout", Operation: "submit", ScopePolicy: ScopeEntityOwned, AllowedCallers: []ModuleID{"sales.orders"}, Checkout: checkout}}}
+	if err := module.Validate(nil); err != nil {
+		t.Fatalf("module checkout contract rejected: %v", err)
+	}
+	module.Schemas = module.Schemas[:1]
+	if err := module.Validate(nil); err == nil {
+		t.Fatal("checkout metadata accepted without its published outcome schema")
 	}
 }
 
