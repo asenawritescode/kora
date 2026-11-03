@@ -351,6 +351,51 @@ func TestReplayRealtimeRequiresCurrentReadAuthorization(t *testing.T) {
 	}
 }
 
+func TestReplayRealtimeRejectsOutboxEventFromDifferentLegalEntity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer mockDB.Close()
+
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Customer", BusinessScopePolicy: contract.ScopeEntityOwned})
+	registry.Permissions.AddRole(&doctype.Role{Name: "Reader"})
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Customer", Role: "Reader", Read: true})
+	h := NewHandler(registry, &orm.TxManager{DB: mockDB, Dialect: db.Resolve("mysql")})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/system/realtime?after=evt-1", nil)
+	c.Request.Header.Set("X-Kora-Legal-Entity-ID", "entity-b")
+	c.Set("site_name", "tenant-a")
+	c.Set("user", "reader@example.test")
+	c.Set("user_roles", []string{"Reader"})
+	setRealtimeTestExecution(c, []string{"Reader"}, false)
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
+		WithArgs("tenant-a", "evt-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "payload", "created_at"}).
+			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", []byte(`{"business_scope":{"tenant_id":"tenant-a","kind":"legal_entity","legal_entity_id":"entity-a"}}`), time.Now().UTC()))
+	var delivered int
+	if err := h.replayRealtime(c, "evt-1", nil, func(payload []byte) error {
+		var message map[string]any
+		if err := json.Unmarshal(payload, &message); err != nil {
+			return err
+		}
+		if message["type"] == "change" {
+			delivered++
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("replayRealtime: %v", err)
+	}
+	if delivered != 0 {
+		t.Fatalf("replayed %d changes across legal entity scope", delivered)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReplayRealtimeAcceptsExactVerifiedReadGrant(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	database, mock, err := sqlmock.New()
