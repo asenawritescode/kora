@@ -4,12 +4,13 @@
 import hashlib
 import json
 import argparse
+import os
 from pathlib import Path
 import sys
 
 
 ENGINE = Path(__file__).resolve().parents[1]
-PROJECTS = ENGINE.parent
+PROJECTS = Path(os.environ.get("KORA_PROJECTS_ROOT", ENGINE.parent)).resolve()
 REPOS = {
     "kora": ENGINE,
     "kora-cloud": PROJECTS / "kora-cloud",
