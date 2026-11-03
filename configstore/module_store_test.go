@@ -409,6 +409,7 @@ func TestCapabilityLeaseSchemaUsesTransactionalMySQLTable(t *testing.T) {
 	defer database.Close()
 	store := NewModuleStore(database, &db.MySQLDialect{})
 	mock.ExpectExec(regexp.QuoteMeta(`CREATE TABLE IF NOT EXISTS _kora_capability_lease (tenant_id VARCHAR(140) NOT NULL, lease_id VARCHAR(160) NOT NULL, scope_json TEXT NOT NULL, caller_module_id VARCHAR(160) NOT NULL, provider_module_id VARCHAR(160) NOT NULL, provider_id VARCHAR(160) NOT NULL, operation_name VARCHAR(160) NOT NULL, binding_revision BIGINT NOT NULL, grant_epoch BIGINT NOT NULL, expires_at VARCHAR(40) NOT NULL, state VARCHAR(16) NOT NULL, admitted_attempts BIGINT NOT NULL, credential_ref VARCHAR(320) NOT NULL, revoked_by VARCHAR(160) NOT NULL, revocation_reason VARCHAR(1000) NOT NULL, revoked_at VARCHAR(40) NOT NULL, PRIMARY KEY (tenant_id, lease_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`CREATE TABLE IF NOT EXISTS _kora_published_operation_receipt (tenant_id VARCHAR(140) NOT NULL, execution_id VARCHAR(160) NOT NULL, actor_type VARCHAR(40) NOT NULL, actor_id VARCHAR(160) NOT NULL, intent_hash VARCHAR(64) NOT NULL, input_hash VARCHAR(64) NOT NULL, state VARCHAR(32) NOT NULL, dispatch_state VARCHAR(24) NOT NULL, operation_ref VARCHAR(256) NOT NULL, scope_json TEXT NOT NULL, dispatch_json TEXT NOT NULL, lease_json TEXT NOT NULL, receipt_json TEXT NOT NULL, PRIMARY KEY (tenant_id, execution_id), UNIQUE (tenant_id, actor_type, actor_id, intent_hash)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)).WillReturnResult(sqlmock.NewResult(0, 0))
 	if err := store.EnsureCapabilityLeaseSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -569,3 +570,44 @@ func TestModuleStoreSchemaUsesSupportedDialectTypes(t *testing.T) {
 }
 
 var _ *sql.DB
+
+func TestPublishedOperationReceiptLookupBindsActorAndExactScope(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewModuleStore(database, &db.MySQLDialect{})
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	actor := contract.ActorContext{PrincipalID: "alice", PrincipalType: contract.PrincipalHuman, Site: "tenant-a"}
+	receipt := contract.OperationReceipt{ExecutionID: "execution-a", OperationRef: "finance.billing~billing.invoice~issue", BusinessScope: scope, Status: contract.ReceiptRunning, Revision: "7"}
+	scopeJSON, _ := json.Marshal(scope)
+	receiptJSON, _ := json.Marshal(receipt)
+	input := []byte(`{"amount":3}`)
+	inputHash := PublishedOperationInputHash(input)
+	intentHash := strings.Repeat("a", 64)
+	inputSchema, outputSchema := contract.SchemaRef{ID: "billing.input", Version: 1}, contract.SchemaRef{ID: "billing.output", Version: 1}
+	lease := contract.CapabilityLease{ID: "lease-a", TenantID: scope.TenantID, Scope: scope, CallerModuleID: "sales.orders", ProviderModuleID: "finance.billing", ProviderID: "billing-provider", Operation: "issue", BindingRevision: 4, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	dispatch := contract.PinnedDispatch{ExecutionID: string(receipt.ExecutionID), Scope: scope, CallerModuleID: lease.CallerModuleID, ProviderModuleID: lease.ProviderModuleID, ProviderID: lease.ProviderID, BindingRevision: lease.BindingRevision, Operation: contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: inputSchema, OutputSchema: outputSchema}, IdempotencyKey: contract.IdempotencyKey("published:" + intentHash), InputHash: inputHash}
+	dispatchJSON, _ := json.Marshal(&dispatch)
+	leaseJSON, _ := json.Marshal(&lease)
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO _kora_published_operation_receipt (tenant_id,execution_id,actor_type,actor_id,intent_hash,input_hash,state,dispatch_state,operation_ref,scope_json,dispatch_json,lease_json,receipt_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)).WithArgs("tenant-a", "execution-a", "human", "alice", intentHash, inputHash, "running", "claimed", receipt.OperationRef, string(scopeJSON), string(dispatchJSON), string(leaseJSON), string(receiptJSON)).WillReturnResult(sqlmock.NewResult(1, 1))
+	attempt, created, err := store.BeginPublishedOperationAttempt(context.Background(), actor, PublishedOperationAttempt{Receipt: receipt, IntentHash: intentHash, InputHash: inputHash, Dispatch: &dispatch, Lease: &lease})
+	if err != nil || !created || attempt.Receipt.ExecutionID != receipt.ExecutionID {
+		t.Fatalf("begin operation attempt=(%+v,%v,%v)", attempt, created, err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT execution_id,operation_ref,scope_json,input_hash,state,dispatch_state,dispatch_json,lease_json,receipt_json FROM _kora_published_operation_receipt WHERE tenant_id=? AND intent_hash=? AND actor_type=? AND actor_id=?`)).WithArgs("tenant-a", intentHash, "human", "alice").WillReturnRows(sqlmock.NewRows([]string{"execution_id", "operation_ref", "scope_json", "input_hash", "state", "dispatch_state", "dispatch_json", "lease_json", "receipt_json"}).AddRow("execution-a", receipt.OperationRef, string(scopeJSON), inputHash, "running", "claimed", string(dispatchJSON), string(leaseJSON), string(receiptJSON)))
+	loaded, found, err := store.LoadPublishedOperationAttempt(context.Background(), scope.TenantID, intentHash, actor, scope)
+	if err != nil || !found || loaded.Receipt.OperationRef != receipt.OperationRef || loaded.InputHash != inputHash {
+		t.Fatalf("intent lookup=(%+v,%v,%v)", loaded, found, err)
+	}
+	other := scope
+	other.LegalEntityID = "entity-b"
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT execution_id,operation_ref,scope_json,input_hash,state,dispatch_state,dispatch_json,lease_json,receipt_json FROM _kora_published_operation_receipt WHERE tenant_id=? AND intent_hash=? AND actor_type=? AND actor_id=?`)).WithArgs("tenant-a", intentHash, "human", "alice").WillReturnRows(sqlmock.NewRows([]string{"execution_id", "operation_ref", "scope_json", "input_hash", "state", "dispatch_state", "dispatch_json", "lease_json", "receipt_json"}).AddRow("execution-a", receipt.OperationRef, string(scopeJSON), inputHash, "running", "claimed", string(dispatchJSON), string(leaseJSON), string(receiptJSON)))
+	if _, found, err := store.LoadPublishedOperationAttempt(context.Background(), scope.TenantID, intentHash, actor, other); err == nil || found {
+		t.Fatalf("cross-entity receipt lookup=(found %v, err %v)", found, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

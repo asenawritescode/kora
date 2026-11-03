@@ -450,3 +450,30 @@ func TestRolePermissionAuthorizesResourceAlias(t *testing.T) {
 		t.Fatalf("Sales Rep create permission denied for resource alias: %v", got)
 	}
 }
+
+func TestLookupReceiptByIntentRecoversWithoutPayloadDispatch(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	execution, err := policy.NewVerifiedExecution("stable-tenant", contract.ActorContext{PrincipalID: "alice", PrincipalType: contract.PrincipalHuman, Site: "tenant-route"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := contract.CommandResult{OperationID: "operation-prior", CorrelationID: "correlation-prior", Status: contract.StatusCompleted, Data: json.RawMessage(`{"issued":true}`)}
+	encoded, err := json.Marshal(prior)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{Command: "sales.invoice.issue", Context: OperationContext{Site: "tenant-route", TenantID: "stable-tenant", Actor: execution.Actor(), User: "alice", Execution: execution, IdempotencyKey: "scope-op-key"}}
+	query := regexp.QuoteMeta("SELECT operation_id, command_name, actor_user, result_hash, status, result_json FROM _kora_idempotency_receipt WHERE idempotency_key = ? LIMIT 2")
+	mock.ExpectQuery(query).WithArgs(scopedReceiptKey(op)).WillReturnRows(sqlmock.NewRows([]string{"operation_id", "command_name", "actor_user", "result_hash", "status", "result_json"}).AddRow(prior.OperationID, op.Command, "alice", resultHash(prior), receiptCompleted, string(encoded)))
+	result, found, commandErr := New(db.Resolve("mysql"), nil).LookupReceiptByIntent(context.Background(), database, execution, "alice", op.Command, "scope-op-key")
+	if commandErr != nil || !found || !result.Replayed || result.OperationID != prior.OperationID || string(result.Data) != string(prior.Data) {
+		t.Fatalf("intent receipt = (%#v,%v,%v)", result, found, commandErr)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

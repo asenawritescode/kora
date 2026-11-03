@@ -267,6 +267,22 @@ func (r *CommandRegistry) LookupCapability(capability contract.CapabilityName, o
 	return nil, false
 }
 
+// OwnerCommands returns registered owner-authored domain commands. Public
+// transport adapters use it to ensure those commands only enter Kernel via
+// their published capability binding, never by a guessed command name.
+func (r *CommandRegistry) OwnerCommands() []*CommandResource {
+	if r == nil {
+		return nil
+	}
+	var out []*CommandResource
+	for _, definition := range r.defs {
+		if definition.ModuleOwnerID != "" {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
 // List returns all registered definitions sorted by name for stable
 // introspection output.
 func (r *CommandRegistry) List() []*CommandResource {

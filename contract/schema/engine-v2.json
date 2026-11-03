@@ -2959,6 +2959,12 @@
     "PublishedOperation": {
       "additionalProperties": false,
       "properties": {
+        "allowed_callers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "capability": {
           "type": "string"
         },
@@ -2980,6 +2986,7 @@
         }
       },
       "required": [
+        "allowed_callers",
         "capability",
         "name",
         "operation",
@@ -7445,6 +7452,12 @@
     "PublishedOperation": {
       "additionalProperties": false,
       "properties": {
+        "allowed_callers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "capability": {
           "type": "string"
         },
@@ -7466,6 +7479,7 @@
         }
       },
       "required": [
+        "allowed_callers",
         "capability",
         "name",
         "operation",

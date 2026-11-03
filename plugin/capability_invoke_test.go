@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,15 +21,20 @@ func (f operationTestFactory) Open(context contract.OperationContext) (contract.
 }
 
 type operationTestHandle struct {
-	name        contract.CapabilityName
-	scope       contract.GrantScope
-	opened      int
-	calls       int
-	revoked     bool
-	invocation  CapabilityInvocation
-	executionID contract.OperationID
-	output      json.RawMessage
-	err         error
+	name             contract.CapabilityName
+	scope            contract.GrantScope
+	opened           int
+	calls            int
+	revoked          bool
+	invocation       CapabilityInvocation
+	executionID      contract.OperationID
+	output           json.RawMessage
+	err              error
+	reconcileOutcome contract.ExternalOutcome
+	reconcileResult  CapabilityInvocationResult
+	reconcileError   error
+	reconcileCalls   int
+	reconcilePin     contract.PinnedDispatch
 }
 
 type operationTestLeaseAdmission struct {
@@ -154,6 +160,12 @@ func (h *operationTestHandle) InvokeCapability(_ context.Context, invocation Cap
 	return CapabilityInvocationResult{ExecutionID: h.executionID, Output: append(json.RawMessage(nil), h.output...)}, h.err
 }
 
+func (h *operationTestHandle) ReconcileCapability(_ context.Context, pin contract.PinnedDispatch, _ contract.CapabilityLease) (contract.ExternalOutcome, CapabilityInvocationResult, error) {
+	h.reconcileCalls++
+	h.reconcilePin = pin
+	return h.reconcileOutcome, h.reconcileResult, h.reconcileError
+}
+
 func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T) {
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
 	input, output := contract.SchemaRef{ID: "invoice.issue.input", Version: 1}, contract.SchemaRef{ID: "invoice.issue.output", Version: 2}
@@ -262,5 +274,37 @@ func TestBindingPlanRejectsBadCapabilitySchemasBeforeAndAfterProviderCall(t *tes
 	}
 	if handle.calls != 2 || !handle.revoked {
 		t.Fatalf("missing execution identity provider call/cleanup = calls:%d revoked:%t", handle.calls, handle.revoked)
+	}
+}
+
+func TestBindingPlanReconcilesOnlyThePersistedProviderPin(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	input, output := contract.SchemaRef{ID: "input", Version: 1}, contract.SchemaRef{ID: "output", Version: 1}
+	offer := contract.CapabilityOffer{Name: "billing.issue", Contract: output, Operations: []contract.OperationSpec{{Name: "issue", Input: input, Output: output, Effect: contract.EffectExternal}}}
+	owner := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}}
+	consumer := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: offer.Name, Contract: offer.Contract, Required: true}}}
+	handle := &operationTestHandle{name: offer.Name, reconcileOutcome: contract.ExternalApplied, reconcileResult: CapabilityInvocationResult{ExecutionID: "provider-execution-3", Output: json.RawMessage(`{"invoice_id":"INV-1"}`)}}
+	provider := ProviderRegistration{TenantID: scope.TenantID, ProviderID: "ar-external", OwnerModuleID: owner.ID, Kind: ProviderExternal, Offers: []contract.CapabilityOffer{offer}, Factories: map[contract.CapabilityName]ProviderFactory{offer.Name: operationTestFactory{handle}}, ValidateSchema: func(_ contract.SchemaRef, raw []byte) error {
+		if !json.Valid(raw) {
+			return errors.New("invalid JSON")
+		}
+		return nil
+	}}
+	plan, err := ResolveModules(scope, []contract.ModuleDescriptor{consumer, owner}, []ProviderRegistration{provider}, nil, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := contract.CapabilityLease{ID: "lease-reconcile", TenantID: scope.TenantID, Scope: scope, CallerModuleID: consumer.ID, ProviderModuleID: owner.ID, ProviderID: provider.ProviderID, Operation: "issue", BindingRevision: plan.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	pin := contract.PinnedDispatch{ExecutionID: "operation-execution-1", Scope: scope, CallerModuleID: consumer.ID, ProviderModuleID: owner.ID, ProviderID: provider.ProviderID, BindingRevision: plan.Revision, Operation: contract.CapabilityAction{CapabilityName: offer.Name, OperationName: "issue", InputSchema: input, OutputSchema: output}, IdempotencyKey: "published-intent-key", InputHash: strings.Repeat("a", 64)}
+	execution, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, result, err := plan.ReconcileCapability(context.Background(), execution, pin, lease)
+	if err != nil || outcome != contract.ExternalApplied || result.OutputSchema != output || string(result.Output) != `{"invoice_id":"INV-1"}` {
+		t.Fatalf("reconcile result=(%s,%+v,%v)", outcome, result, err)
+	}
+	if handle.reconcileCalls != 1 || handle.calls != 0 || handle.reconcilePin != pin || !handle.revoked {
+		t.Fatalf("reconciliation called effect or lost pin: reconcile=%d invoke=%d pin=%+v revoked=%v", handle.reconcileCalls, handle.calls, handle.reconcilePin, handle.revoked)
 	}
 }

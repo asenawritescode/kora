@@ -526,13 +526,27 @@ func TestPublishedOperationWireValidationRequiresBoundedIntentAndCompletedOutput
 		t.Fatal("invalid JSON input accepted")
 	}
 	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}
-	receipt := OperationReceipt{ExecutionID: "exec-1", OperationRef: "sales.orders/issue", BusinessScope: scope, Status: ReceiptCompleted, OutputSchema: &SchemaRef{ID: "sales.output", Version: 1}, Output: []byte(`{"ok":true}`), Revision: "r1"}
+	receipt := OperationReceipt{ExecutionID: "exec-1", OperationRef: "sales~orders~issue", BusinessScope: scope, Status: ReceiptCompleted, OutputSchema: &SchemaRef{ID: "sales.output", Version: 1}, Output: []byte(`{"ok":true}`), Revision: "1"}
 	if err := receipt.Validate(); err != nil {
 		t.Fatalf("valid completed receipt rejected: %v", err)
 	}
 	receipt.Output = nil
 	if err := receipt.Validate(); err == nil {
 		t.Fatal("completed receipt without output accepted")
+	}
+	for _, status := range []OperationReceiptStatus{ReceiptRejected, ReceiptConflict, ReceiptFailed, ReceiptOutcomeUnknown} {
+		terminal := OperationReceipt{ExecutionID: "exec-2", OperationRef: "sales~orders~issue", BusinessScope: scope, Status: status, Revision: "1"}
+		if err := terminal.Validate(); err == nil {
+			t.Fatalf("%s receipt without typed error accepted", status)
+		}
+		terminal.Error = NewError(CodeConflict, "operation requires recovery")
+		if err := terminal.Validate(); err != nil {
+			t.Fatalf("%s receipt with typed error rejected: %v", status, err)
+		}
+	}
+	accepted := OperationReceipt{ExecutionID: "exec-3", OperationRef: "sales~orders~issue", BusinessScope: scope, Status: ReceiptAccepted, Revision: "1"}
+	if err := accepted.Validate(); err != nil {
+		t.Fatalf("accepted receipt without output rejected: %v", err)
 	}
 }
 
@@ -542,5 +556,22 @@ func TestPublishedOperationLookupValidationRejectsBlankKeys(t *testing.T) {
 	}
 	if err := (LookupPublishedOperation{OperationRef: "sales.orders/issue"}).Validate(); err == nil {
 		t.Fatal("lookup without idempotency key accepted")
+	}
+}
+
+func TestPublishedOperationsRequireExplicitCallerAllowlist(t *testing.T) {
+	input := SchemaRef{ID: "billing.issue.input", Version: 1}
+	output := SchemaRef{ID: "billing.issue.output", Version: 1}
+	module := ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []CapabilityOffer{{Name: "billing.invoice", Contract: output, Operations: []OperationSpec{{Name: "issue", Input: input, Output: output, Effect: EffectLocal}}}}, PublishedOperations: []PublishedOperation{{Name: "issue", Capability: "billing.invoice", Operation: "issue", ScopePolicy: ScopeTenantShared, AllowedCallers: []ModuleID{"sales.orders"}}}}
+	if err := module.Validate(nil); err != nil {
+		t.Fatalf("valid caller allowlist rejected: %v", err)
+	}
+	module.PublishedOperations[0].AllowedCallers = nil
+	if err := module.Validate(nil); err == nil {
+		t.Fatal("published operation without trusted caller allowlist accepted")
+	}
+	module.PublishedOperations[0].AllowedCallers = []ModuleID{"sales.orders", "sales.orders"}
+	if err := module.Validate(nil); err == nil {
+		t.Fatal("duplicate trusted caller accepted")
 	}
 }

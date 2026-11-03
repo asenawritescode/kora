@@ -9,6 +9,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/policy"
 )
 
 // Receipt status values for _kora_idempotency_receipt.
@@ -23,6 +24,55 @@ var errConcurrentIdempotencyClaim = contract.NewError(contract.CodeConflict, "co
 // direct human executions whose persisted actor_user still identifies them.
 func (k *Kernel) lookupReceipt(ctx context.Context, siteDB *sql.DB, op Operation) (contract.CommandResult, bool, *contract.Error) {
 	return k.lookupReceiptFrom(ctx, siteDB, op)
+}
+
+// LookupReceiptByIntent recovers a completed receipt without dispatching the
+// command. The caller must derive idempotencyKey from its full public intent
+// (including scope and operation reference) before calling this method.
+func (k *Kernel) LookupReceiptByIntent(ctx context.Context, siteDB *sql.DB, execution policy.Execution, actorUser, command, idempotencyKey string) (contract.CommandResult, bool, *contract.Error) {
+	if ctx == nil || siteDB == nil || !execution.Valid() || actorUser == "" || command == "" || idempotencyKey == "" {
+		return contract.CommandResult{}, false, contract.NewError(contract.CodeValidationFailed, "receipt lookup identity is invalid")
+	}
+	actor := execution.Actor()
+	op := Operation{Command: command, Context: OperationContext{Site: actor.Site, TenantID: execution.Tenant(), Actor: actor, User: actorUser, Execution: execution, IdempotencyKey: idempotencyKey}}
+	key := scopedReceiptKey(op)
+	if key == "" {
+		return contract.CommandResult{}, false, contract.NewError(contract.CodeUnauthenticated, "receipt lookup requires verified execution identity")
+	}
+	rows, err := siteDB.QueryContext(ctx, db.Rebind(k.dialect(), `SELECT operation_id, command_name, actor_user, result_hash, status, result_json FROM _kora_idempotency_receipt WHERE idempotency_key = ? LIMIT 2`), key)
+	if err != nil {
+		return contract.CommandResult{}, false, contract.NewError(contract.CodeDependencyUnavailable, "idempotency lookup failed")
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return contract.CommandResult{}, false, contract.NewError(contract.CodeDependencyUnavailable, "idempotency lookup failed")
+		}
+		return contract.CommandResult{}, false, nil
+	}
+	var operationID, storedCommand, storedActor, storedHash, status string
+	var resultJSON sql.NullString
+	if err := rows.Scan(&operationID, &storedCommand, &storedActor, &storedHash, &status, &resultJSON); err != nil {
+		return contract.CommandResult{}, false, contract.NewError(contract.CodeDependencyUnavailable, "idempotency lookup failed")
+	}
+	if rows.Next() {
+		return contract.CommandResult{}, true, contract.NewError(contract.CodeConflict, "multiple receipts exist for this intent")
+	}
+	if err := rows.Err(); err != nil {
+		return contract.CommandResult{}, false, contract.NewError(contract.CodeDependencyUnavailable, "idempotency lookup failed")
+	}
+	if storedCommand != command || storedActor != actorUser {
+		return contract.CommandResult{}, true, contract.NewError(contract.CodePermissionDenied, "receipt intent identity does not match")
+	}
+	if status != receiptCompleted || !resultJSON.Valid || resultJSON.String == "" {
+		return contract.CommandResult{}, true, contract.NewError(contract.CodeOutcomeUnknown, "original operation outcome is not yet recoverable")
+	}
+	var result contract.CommandResult
+	if err := json.Unmarshal([]byte(resultJSON.String), &result); err != nil || storedHash != resultHash(result) {
+		return contract.CommandResult{}, true, contract.NewError(contract.CodeInternal, "stored idempotency result failed integrity check")
+	}
+	result.OperationID, result.Replayed = operationID, true
+	return result, true, nil
 }
 
 type receiptQueryer interface {

@@ -31,6 +31,63 @@ type moduleCommandFixtureSchemas struct {
 	rejectOutput  bool
 }
 
+type publishedOperationExternalFactory struct {
+	capability contract.CapabilityName
+	handle     *publishedOperationExternalHandle
+}
+
+func (f publishedOperationExternalFactory) Capability() contract.CapabilityName { return f.capability }
+func (f publishedOperationExternalFactory) Open(contract.OperationContext) (contract.CapabilityHandle, error) {
+	return f.handle, nil
+}
+
+type publishedOperationExternalHandle struct {
+	mu              sync.Mutex
+	capability      contract.CapabilityName
+	calls           int
+	reconciliations int
+	lastInvocation  plugin.CapabilityInvocation
+	revoked         bool
+	started         chan struct{}
+	release         chan struct{}
+}
+
+func (h *publishedOperationExternalHandle) Name() contract.CapabilityName { return h.capability }
+func (h *publishedOperationExternalHandle) Scope() contract.GrantScope {
+	return contract.GrantScopeOperation
+}
+func (h *publishedOperationExternalHandle) Revoke() { h.revoked = true }
+func (h *publishedOperationExternalHandle) Evidence() contract.CleanupEvidence {
+	return contract.CleanupEvidence{}
+}
+func (h *publishedOperationExternalHandle) InvokeCapability(_ context.Context, invocation plugin.CapabilityInvocation) (plugin.CapabilityInvocationResult, error) {
+	h.mu.Lock()
+	h.calls++
+	h.lastInvocation = invocation
+	started, release := h.started, h.release
+	h.mu.Unlock()
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
+	if release != nil {
+		<-release
+	}
+	return plugin.CapabilityInvocationResult{ExecutionID: "external-provider-execution", Output: json.RawMessage(`{"settled":true}`)}, errors.New("provider response was lost")
+}
+func (h *publishedOperationExternalHandle) ReconcileCapability(_ context.Context, pin contract.PinnedDispatch, _ contract.CapabilityLease) (contract.ExternalOutcome, plugin.CapabilityInvocationResult, error) {
+	h.mu.Lock()
+	h.reconciliations++
+	lastInvocation := h.lastInvocation
+	h.mu.Unlock()
+	if pin.IdempotencyKey != lastInvocation.Meta.IdempotencyKey || pin.InputHash != configstore.PublishedOperationInputHash(lastInvocation.Payload) {
+		return contract.ExternalUnknown, plugin.CapabilityInvocationResult{}, errors.New("reconciliation did not use the original intent")
+	}
+	return contract.ExternalApplied, plugin.CapabilityInvocationResult{ExecutionID: "external-provider-execution", Output: json.RawMessage(`{"settled":true}`)}, nil
+}
+
 func (s *moduleCommandFixtureSchemas) Registered(ref contract.SchemaRef) bool {
 	return ref == s.input || ref == s.output
 }
@@ -88,7 +145,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	tenant := contract.TenantID("tenant-" + suffix)
 	invoice := &doctype.DocType{Name: "ModuleInvoice" + suffix[:8], ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands), BusinessScopePolicy: contract.ScopeEntityOwned, BusinessScopeField: "legal_entity_id", Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}, {Fieldname: "legal_entity_id", Fieldtype: "Data", Reqd: true}}}
 	registry := doctype.NewRegistry()
-	registry.LoadFull([]*doctype.DocType{invoice}, []*doctype.Role{{Name: doctype.AdminRole}}, []*doctype.Permission{{Doctype: invoice.Name, Role: doctype.AdminRole, Read: true, Create: true}})
+	registry.LoadFull([]*doctype.DocType{invoice}, []*doctype.Role{{Name: doctype.AdminRole}}, []*doctype.Permission{{Doctype: invoice.Name, Role: doctype.AdminRole, Read: true, Create: true}, {Doctype: "module.finance.ar.operation.issue", Role: doctype.AdminRole, Write: true}})
 	var databaseName string
 	if err := database.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&databaseName); err != nil {
 		t.Fatal("read disposable database name:", err)
@@ -111,7 +168,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	commandKernel.CommandSchemas = schemas
 	operation := contract.OperationSpec{Name: "issue", Input: inputSchema, Output: outputSchema, Effect: contract.EffectLocal}
 	offer := contract.CapabilityOffer{Name: "billing.invoice", Contract: outputSchema, Operations: []contract.OperationSpec{operation}}
-	owner := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}}
+	owner := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}, PublishedOperations: []contract.PublishedOperation{{Name: "issue", Capability: offer.Name, Operation: operation.Name, ScopePolicy: contract.ScopeEntityOwned, AllowedCallers: []contract.ModuleID{"sales.orders"}}}}
 	caller := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: offer.Name, Contract: offer.Contract, Required: true}}}
 	providers, err := registeredKernelCommandProviders(tenant, database, registry, []contract.ModuleDescriptor{caller, owner}, commands, commandKernel, schemas, nil)
 	if err != nil {
@@ -121,6 +178,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		t.Fatalf("internal providers = %+v, want one internal owner provider", providers)
 	}
 	scope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.finance.ar.operation.issue", Role: doctype.AdminRole, Write: true, Scope: scope})
 	plan, err := plugin.ResolveModules(scope, []contract.ModuleDescriptor{caller, owner}, providers, nil, 4)
 	if err != nil {
 		t.Fatal("resolve module binding plan:", err)
@@ -312,6 +370,160 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 2, 2, 2)
 	} else {
 		assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
+	}
+	publicMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("public-" + suffix[:12])}
+	resolvePublicPlan := func(requested contract.BusinessScope) (plugin.BindingPlan, error) {
+		resolved, resolveErr := plugin.ResolveModules(requested, []contract.ModuleDescriptor{caller, owner}, providers, nil, 4)
+		resolved.LeaseAdmission = reloadedStore
+		return resolved, resolveErr
+	}
+	staleMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("public-stale-" + suffix[:12]), ExpectedRevision: "0"}
+	_, staleErr := executePublishedOperation(ctx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, execution, scope, owner.ID, owner.PublishedOperations[0], inputSchema, staleMeta, payload)
+	var staleContractErr *contract.Error
+	if !errors.As(staleErr, &staleContractErr) || staleContractErr.Type != contract.CodeStaleSubject {
+		t.Fatalf("public operation with stale catalog revision = %v, want typed stale revision conflict", staleErr)
+	}
+	publicReceipt, publicErr := executePublishedOperation(ctx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, execution, scope, owner.ID, owner.PublishedOperations[0], inputSchema, publicMeta, payload)
+	if publicErr != nil || publicReceipt.Status != contract.ReceiptCompleted {
+		t.Fatalf("public registered operation = (%+v,%v)", publicReceipt, publicErr)
+	}
+	publicReplay, publicErr := executePublishedOperation(ctx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, execution, scope, owner.ID, owner.PublishedOperations[0], inputSchema, publicMeta, payload)
+	if publicErr != nil || publicReplay.ExecutionID != publicReceipt.ExecutionID {
+		t.Fatalf("public registered operation retry = (%+v,%v), want original %s", publicReplay, publicErr, publicReceipt.ExecutionID)
+	}
+	publicLookup, foundPublic, lookupErr := lookupPublishedOperation(ctx, reloadedStore, commandKernel, commands, resolvePublicPlan, execution, scope, owner.ID, owner.PublishedOperations[0], publicMeta.IdempotencyKey)
+	if lookupErr != nil || !foundPublic || publicLookup.ExecutionID != publicReceipt.ExecutionID {
+		t.Fatalf("public operation lookup = (%+v,%v,%v), want original %s", publicLookup, foundPublic, lookupErr, publicReceipt.ExecutionID)
+	}
+	byID, foundPublic, lookupErr := reloadedStore.LoadPublishedOperationReceipt(ctx, tenant, publicReceipt.ExecutionID, execution.Actor(), scope)
+	if lookupErr != nil || !foundPublic || byID.OperationRef != publicReceipt.OperationRef {
+		t.Fatalf("public receipt by execution ID = (%+v,%v,%v)", byID, foundPublic, lookupErr)
+	}
+	otherActor, err := policy.NewVerifiedExecutionWithGrants(tenant, contract.ActorContext{PrincipalID: "other-operator", PrincipalType: contract.PrincipalHuman, Site: string(tenant), Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now().UTC()}, []policy.Grant{{Resource: "module.finance.ar.operation.issue", Operation: "write", Scope: scope}})
+	if err != nil {
+		t.Fatal("create second public operation reader:", err)
+	}
+	if _, otherFound, otherErr := reloadedStore.LoadPublishedOperationReceipt(ctx, tenant, publicReceipt.ExecutionID, otherActor.Actor(), scope); otherErr != nil || otherFound {
+		t.Fatalf("other actor receipt lookup = (found %v, err %v), want hidden", otherFound, otherErr)
+	}
+	wrongScope := scope
+	wrongScope.LegalEntityID = "entity-other"
+	if _, scopeFound, scopeErr := reloadedStore.LoadPublishedOperationReceipt(ctx, tenant, publicReceipt.ExecutionID, execution.Actor(), wrongScope); scopeErr == nil || scopeFound {
+		t.Fatalf("cross-entity receipt lookup = (found %v, err %v), want denied", scopeFound, scopeErr)
+	}
+	publicIntentKey, intentErr := contract.PublishedOperationIntentKey(scope, publicReceipt.OperationRef, publicMeta.IdempotencyKey)
+	if intentErr != nil {
+		t.Fatal("derive public operation intent key:", intentErr)
+	}
+	publicAttempt, foundPublic, lookupErr := reloadedStore.LoadPublishedOperationAttempt(ctx, tenant, strings.TrimPrefix(string(publicIntentKey), "published:"), execution.Actor(), scope)
+	if lookupErr != nil || !foundPublic || publicAttempt.Lease == nil {
+		t.Fatalf("load public operation lease = (%+v,%v,%v)", publicAttempt, foundPublic, lookupErr)
+	}
+	if err := reloadedStore.RevokeCapabilityLease(ctx, *publicAttempt.Lease, "security-admin", "public operation grant revoked", time.Now().UTC()); err != nil {
+		t.Fatal("revoke public operation lease:", err)
+	}
+	newMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("after-revoke-" + suffix[:12])}
+	_, revokeErr = executePublishedOperation(ctx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, execution, scope, owner.ID, owner.PublishedOperations[0], inputSchema, newMeta, payload)
+	var revokeContractErr *contract.Error
+	if !errors.As(revokeErr, &revokeContractErr) || revokeContractErr.Type != contract.CodePermissionDenied {
+		t.Fatalf("new public operation after grant revocation = %v, want permission denied", revokeErr)
+	}
+
+	// A provider response can be lost after its business effect. The public
+	// intent and pin survive that response loss; retry reconciles the original
+	// provider and does not dispatch a second effect.
+	externalScope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-external"}
+	externalInput := contract.SchemaRef{ID: "billing.external.input", Version: 1}
+	externalOutput := contract.SchemaRef{ID: "billing.external.output", Version: 1}
+	externalCapability := contract.CapabilityName("billing.external")
+	externalOperation := contract.OperationSpec{Name: "settle", Input: externalInput, Output: externalOutput, Effect: contract.EffectExternal}
+	externalOffer := contract.CapabilityOffer{Name: externalCapability, Contract: externalOutput, Operations: []contract.OperationSpec{externalOperation}}
+	externalOwner := contract.ModuleDescriptor{ID: "finance.external", Version: "1.0.0", Provides: []contract.CapabilityOffer{externalOffer}, PublishedOperations: []contract.PublishedOperation{{Name: "settle", Capability: externalCapability, Operation: "settle", ScopePolicy: contract.ScopeEntityOwned, AllowedCallers: []contract.ModuleID{"sales.external"}}}}
+	externalCaller := contract.ModuleDescriptor{ID: "sales.external", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: externalCapability, Contract: externalOutput, Required: true}}}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.finance.external.operation.settle", Role: doctype.AdminRole, Write: true, Scope: externalScope})
+	currentSnapshot, err := reloadedStore.Load(tenant)
+	if err != nil {
+		t.Fatal("load current module snapshot for external fixture:", err)
+	}
+	currentSnapshot.Modules = append(currentSnapshot.Modules, externalCaller, externalOwner)
+	currentSnapshot.Installations = append(currentSnapshot.Installations,
+		contract.ModuleInstallation{TenantID: tenant, ModuleID: externalCaller.ID, Version: externalCaller.Version, ArtifactDigest: strings.Repeat("c", 64), State: string(contract.ModuleActive), Revision: 1},
+		contract.ModuleInstallation{TenantID: tenant, ModuleID: externalOwner.ID, Version: externalOwner.Version, ArtifactDigest: strings.Repeat("d", 64), State: string(contract.ModuleActive), Revision: 1},
+	)
+	externalTx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal("begin external fixture module activation:", err)
+	}
+	if _, err := reloadedStore.CommitActivation(ctx, externalTx, currentSnapshot.Revision, currentSnapshot); err != nil {
+		_ = externalTx.Rollback()
+		t.Fatal("persist external fixture module ownership:", err)
+	}
+	if err := externalTx.Commit(); err != nil {
+		t.Fatal("commit external fixture module ownership:", err)
+	}
+	externalHandle := &publishedOperationExternalHandle{capability: externalCapability}
+	externalProvider := plugin.ProviderRegistration{TenantID: tenant, ProviderID: "billing-external-provider", OwnerModuleID: externalOwner.ID, Kind: plugin.ProviderExternal, Offers: []contract.CapabilityOffer{externalOffer}, Factories: map[contract.CapabilityName]plugin.ProviderFactory{externalCapability: publishedOperationExternalFactory{capability: externalCapability, handle: externalHandle}}, ValidateSchema: func(_ contract.SchemaRef, raw []byte) error {
+		if !json.Valid(raw) {
+			return errors.New("invalid JSON")
+		}
+		return nil
+	}}
+	externalResolver := func(requested contract.BusinessScope) (plugin.BindingPlan, error) {
+		plan, resolveErr := plugin.ResolveModules(requested, []contract.ModuleDescriptor{externalCaller, externalOwner}, []plugin.ProviderRegistration{externalProvider}, nil, currentSnapshot.Revision)
+		plan.LeaseAdmission = reloadedStore
+		return plan, resolveErr
+	}
+	externalExecution, err := policy.NewVerifiedExecutionWithGrants(tenant, execution.Actor(), []policy.Grant{{Resource: "module.finance.external.operation.settle", Operation: "write", Scope: externalScope}})
+	if err != nil {
+		t.Fatal("create external operation actor:", err)
+	}
+	externalMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("external-settle-" + suffix[:12])}
+	externalInputJSON := json.RawMessage(`{"invoice_id":"INV-EXT-1"}`)
+	unknown, err := executePublishedOperation(ctx, reloadedStore, externalResolver, commandKernel, commands, registry, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalInput, externalMeta, externalInputJSON)
+	if err != nil || unknown.Status != contract.ReceiptOutcomeUnknown || externalHandle.calls != 1 {
+		t.Fatalf("lost external response = (%+v,%v), provider calls=%d", unknown, err, externalHandle.calls)
+	}
+	recovered, err := executePublishedOperation(ctx, reloadedStore, externalResolver, commandKernel, commands, registry, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalInput, externalMeta, externalInputJSON)
+	if err != nil || recovered.Status != contract.ReceiptCompleted || recovered.ExecutionID != unknown.ExecutionID || externalHandle.calls != 1 || externalHandle.reconciliations != 1 {
+		t.Fatalf("external retry recovery = (%+v,%v), calls=%d reconciliations=%d", recovered, err, externalHandle.calls, externalHandle.reconciliations)
+	}
+	recoveredByKey, found, err := lookupPublishedOperation(ctx, reloadedStore, commandKernel, commands, externalResolver, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalMeta.IdempotencyKey)
+	if err != nil || !found || recoveredByKey.Status != contract.ReceiptCompleted || recoveredByKey.ExecutionID != unknown.ExecutionID {
+		t.Fatalf("external recovery lookup=(%+v,%v,%v)", recoveredByKey, found, err)
+	}
+
+	// Two concurrent requests for a fresh external intent must not both
+	// dispatch. The duplicate observes the durable running receipt while the
+	// sole claimant is inside the provider call.
+	externalHandle.started, externalHandle.release = make(chan struct{}, 1), make(chan struct{})
+	concurrentMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("external-race-" + suffix[:12])}
+	firstResult := make(chan contract.OperationReceipt, 1)
+	firstErr := make(chan error, 1)
+	go func() {
+		receipt, callErr := executePublishedOperation(ctx, reloadedStore, externalResolver, commandKernel, commands, registry, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalInput, concurrentMeta, externalInputJSON)
+		firstResult <- receipt
+		firstErr <- callErr
+	}()
+	select {
+	case <-externalHandle.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first external intent did not reach provider")
+	}
+	duplicate, duplicateErr := executePublishedOperation(ctx, reloadedStore, externalResolver, commandKernel, commands, registry, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalInput, concurrentMeta, externalInputJSON)
+	if duplicateErr != nil || duplicate.Status != contract.ReceiptRunning {
+		t.Fatalf("concurrent duplicate = (%+v,%v), want running receipt", duplicate, duplicateErr)
+	}
+	close(externalHandle.release)
+	firstReceipt := <-firstResult
+	if callErr := <-firstErr; callErr != nil || firstReceipt.Status != contract.ReceiptOutcomeUnknown {
+		t.Fatalf("first external claimant = (%+v,%v), want outcome_unknown", firstReceipt, callErr)
+	}
+	externalHandle.mu.Lock()
+	concurrentCalls := externalHandle.calls
+	externalHandle.started, externalHandle.release = nil, nil
+	externalHandle.mu.Unlock()
+	if concurrentCalls != 2 { // one completed intent above plus this one claimant
+		t.Fatalf("external provider dispatches=%d, want 2 total", concurrentCalls)
 	}
 }
 

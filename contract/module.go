@@ -259,6 +259,11 @@ func (r ExecutePublishedOperation) Validate() error {
 	if r.Meta.IdempotencyKey == "" || len(r.Meta.IdempotencyKey) > 256 || r.InputSchema.ID == "" || r.InputSchema.Version == 0 || len(r.Input) == 0 || len(r.Input) > 1<<20 || !json.Valid(r.Input) {
 		return fmt.Errorf("published operation request identity or input is invalid")
 	}
+	if r.Meta.ExpectedRevision != "" {
+		if _, err := ParseRevision(string(r.Meta.ExpectedRevision)); err != nil {
+			return fmt.Errorf("published operation expected revision is invalid")
+		}
+	}
 	return nil
 }
 
@@ -294,8 +299,11 @@ type OperationReceipt struct {
 }
 
 func (r OperationReceipt) Validate() error {
-	if r.ExecutionID == "" || r.OperationRef == "" || len(r.OperationRef) > 256 || r.BusinessScope.Validate() != nil || r.Revision == "" || len(r.Revision) > 128 {
+	if r.ExecutionID == "" || r.OperationRef == "" || len(r.OperationRef) > 256 || r.BusinessScope.Validate() != nil || len(r.Revision) > 128 {
 		return fmt.Errorf("operation receipt identity or scope is invalid")
+	}
+	if _, err := ParseRevision(r.Revision); err != nil {
+		return fmt.Errorf("operation receipt revision is invalid")
 	}
 	switch r.Status {
 	case ReceiptAccepted, ReceiptRunning, ReceiptCompleted, ReceiptRejected, ReceiptConflict, ReceiptFailed, ReceiptOutcomeUnknown:
@@ -308,6 +316,12 @@ func (r OperationReceipt) Validate() error {
 		}
 	} else if len(r.Output) > 0 || r.OutputSchema != nil {
 		return fmt.Errorf("non-completed operation receipt cannot contain output")
+	}
+	if (r.Status == ReceiptRejected || r.Status == ReceiptConflict || r.Status == ReceiptFailed || r.Status == ReceiptOutcomeUnknown) && (r.Error == nil || r.Error.Type == "" || r.Error.Message == "") {
+		return fmt.Errorf("terminal non-completed operation receipt requires a typed error")
+	}
+	if (r.Status == ReceiptAccepted || r.Status == ReceiptRunning) && r.Error != nil {
+		return fmt.Errorf("accepted or running operation receipt cannot contain an error")
 	}
 	if len(r.Output) > 1<<20 || r.CorrelationID != "" && len(r.CorrelationID) > 160 {
 		return fmt.Errorf("operation receipt exceeds bounds")
@@ -383,7 +397,22 @@ type SurfacePresentation struct {
 }
 
 func PublishedOperationRef(owner ModuleID, capability CapabilityName, operation string) string {
-	return string(owner) + "/" + string(capability) + "/" + operation
+	return string(owner) + "~" + string(capability) + "~" + operation
+}
+
+// PublishedOperationIntentKey derives the internal kernel retry key from the
+// complete public operation intent. The raw caller key is never persisted as
+// the kernel key or included in logs/URLs.
+func PublishedOperationIntentKey(scope BusinessScope, operationRef string, key IdempotencyKey) (IdempotencyKey, error) {
+	if scope.Validate() != nil || operationRef == "" || len(operationRef) > 256 || key == "" || len(key) > 256 {
+		return "", fmt.Errorf("published operation intent identity is invalid")
+	}
+	identity, err := json.Marshal([]string{string(scope.TenantID), string(scope.Kind), scope.LegalEntityID, operationRef, string(key)})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(identity)
+	return IdempotencyKey("published:" + hex.EncodeToString(digest[:])), nil
 }
 
 func validateSurfacePresentation(p SurfacePresentation) error {
@@ -794,11 +823,12 @@ type ModuleDescriptor struct {
 //
 //contract:wire:v2
 type PublishedOperation struct {
-	Name         string              `json:"name"`
-	Capability   CapabilityName      `json:"capability"`
-	Operation    string              `json:"operation"`
-	ScopePolicy  ResourceScopeKind   `json:"scope_policy"`
-	Presentation SurfacePresentation `json:"presentation"`
+	Name           string              `json:"name"`
+	Capability     CapabilityName      `json:"capability"`
+	Operation      string              `json:"operation"`
+	ScopePolicy    ResourceScopeKind   `json:"scope_policy"`
+	AllowedCallers []ModuleID          `json:"allowed_callers"`
+	Presentation   SurfacePresentation `json:"presentation"`
 }
 
 // ExtensionKind is a behavior explicitly allowed by an owner-declared point.
@@ -2088,6 +2118,16 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		}
 		if published.ScopePolicy != ScopeTenantShared && published.ScopePolicy != ScopeEntityOwned {
 			return fmt.Errorf("module %q operation %q requires an explicit scope policy", m.ID, published.Name)
+		}
+		if len(published.AllowedCallers) == 0 || len(published.AllowedCallers) > 64 {
+			return fmt.Errorf("module %q operation %q requires 1 to 64 registered caller modules", m.ID, published.Name)
+		}
+		callers := map[ModuleID]bool{}
+		for _, caller := range published.AllowedCallers {
+			if !moduleIDPattern.MatchString(string(caller)) || callers[caller] {
+				return fmt.Errorf("module %q operation %q has an invalid or duplicate caller module", m.ID, published.Name)
+			}
+			callers[caller] = true
 		}
 		if len("module.")+len(m.ID)+len(".operation.")+len(published.Name) > 160 {
 			return fmt.Errorf("module %q operation %q has an oversized permission resource", m.ID, published.Name)

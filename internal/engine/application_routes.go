@@ -98,6 +98,9 @@ func RegisterApplicationRoutes(config ApplicationRouteConfig) (*auth.SessionMana
 	api.RegisterWorkflowRoutes(requestGroup, nil)
 	catalogHandler := api.NewHandler(config.Registry, config.Transactions)
 	requestGroup.GET("/modules/catalog", catalogHandler.HandleApplicationCatalog)
+	requestGroup.POST("/modules/operations/:operation/execute", catalogHandler.HandleExecutePublishedOperation)
+	requestGroup.POST("/module-executions/lookup", catalogHandler.HandleLookupPublishedOperation)
+	requestGroup.GET("/module-executions/:execution", catalogHandler.HandleGetPublishedOperationReceipt)
 	api.RegisterPublicRoutesOnGroupWithRuntimeServices(publicV1Group, config.Registry, config.Transactions, nil, nil)
 	api.RegisterPublicRoutesOnGroupWithRuntimeServices(publicLegacyGroup, config.Registry, config.Transactions, nil, nil)
 

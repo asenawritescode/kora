@@ -129,6 +129,13 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 		return contract.CommandResult{}, contract.NewError(contract.CodeDependencyUnavailable, "site database unavailable")
 	}
 	reg := h.siteRegistry(c)
+	if h.KernelCommands != nil {
+		for _, ownerCommand := range h.KernelCommands.OwnerCommands() {
+			if ownerCommand.FullName() == commandName {
+				return contract.CommandResult{}, contract.NewError(contract.CodePermissionDenied, "owner module commands must be invoked through their published capability")
+			}
+		}
+	}
 	if req.IdempotencyKey == "" {
 		req.IdempotencyKey = c.GetHeader("Idempotency-Key")
 	}

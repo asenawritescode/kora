@@ -444,7 +444,10 @@ func (s *ModuleStore) EnsureCapabilityLeaseSchema(ctx context.Context) error {
 		query += ` ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 	}
 	_, err := s.DB.ExecContext(ctx, query)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.EnsurePublishedOperationReceiptSchema(ctx)
 }
 
 // CreateCapabilityLease persists an active grant. Lease IDs are unique within

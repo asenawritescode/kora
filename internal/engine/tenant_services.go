@@ -26,6 +26,7 @@ import (
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/plugin"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/recon"
 	"github.com/asenawritescode/kora/requests"
 	requestsql "github.com/asenawritescode/kora/requests/sqlstore"
@@ -264,6 +265,15 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	services.ResolveCandidateModuleBindings = resolveCandidateModuleBindings
 	services.LoadModuleSnapshot = func() (contract.ModuleSnapshot, error) {
 		return moduleStore.Load(tenantID)
+	}
+	services.ExecutePublishedOperation = func(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, owner contract.ModuleID, published contract.PublishedOperation, inputSchema contract.SchemaRef, meta contract.CommandMeta, input []byte) (contract.OperationReceipt, error) {
+		return executePublishedOperation(ctx, moduleStore, resolveModuleBindings, domainKernel, config.KernelCommands, loaded.Registry, execution, scope, owner, published, inputSchema, meta, input)
+	}
+	services.LookupPublishedOperation = func(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, owner contract.ModuleID, published contract.PublishedOperation, key contract.IdempotencyKey) (contract.OperationReceipt, bool, error) {
+		return lookupPublishedOperation(ctx, moduleStore, domainKernel, config.KernelCommands, resolveModuleBindings, execution, scope, owner, published, key)
+	}
+	services.LookupPublishedOperationByID = func(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, id contract.OperationID) (contract.OperationReceipt, bool, error) {
+		return moduleStore.LoadPublishedOperationReceipt(ctx, scope.TenantID, id, execution.Actor(), scope)
 	}
 	services.PublishedProjections = &analytics.PublishedProjectionStore{DB: loaded.DB, Dialect: dialect, Site: loaded.SiteID}
 	workAdmission, err := site.ConnectionAdmission(cfg)

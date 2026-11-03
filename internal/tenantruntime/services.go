@@ -32,6 +32,9 @@ type Services struct {
 	ResolveModuleBindings          func(contract.BusinessScope) (plugin.BindingPlan, error)
 	ResolveCandidateModuleBindings func(contract.BusinessScope, []contract.InstalledPackage, []contract.ModuleDescriptor, []contract.ProviderSelection, uint64) (plugin.BindingPlan, error)
 	LoadModuleSnapshot             func() (contract.ModuleSnapshot, error)
+	ExecutePublishedOperation      func(context.Context, policy.Execution, contract.BusinessScope, contract.ModuleID, contract.PublishedOperation, contract.SchemaRef, contract.CommandMeta, []byte) (contract.OperationReceipt, error)
+	LookupPublishedOperation       func(context.Context, policy.Execution, contract.BusinessScope, contract.ModuleID, contract.PublishedOperation, contract.IdempotencyKey) (contract.OperationReceipt, bool, error)
+	LookupPublishedOperationByID   func(context.Context, policy.Execution, contract.BusinessScope, contract.OperationID) (contract.OperationReceipt, bool, error)
 	PublishedProjections           *analytics.PublishedProjectionStore
 	BusinessReconciliation         *recon.BusinessReconciliationService
 	WorkAdmission                  *dbaccess.Admission

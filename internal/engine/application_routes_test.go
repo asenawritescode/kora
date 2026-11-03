@@ -144,10 +144,13 @@ func TestRegisterApplicationRoutesKeepsAuthAndVersionedAPIPaths(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		http.MethodGet + " /api/v1/openapi.json":    false,
-		http.MethodGet + " /api/openapi.json":       false,
-		http.MethodGet + " /api/v2/requests":        false,
-		http.MethodGet + " /api/v2/modules/catalog": false,
+		http.MethodGet + " /api/v1/openapi.json":                           false,
+		http.MethodGet + " /api/openapi.json":                              false,
+		http.MethodGet + " /api/v2/requests":                               false,
+		http.MethodGet + " /api/v2/modules/catalog":                        false,
+		http.MethodPost + " /api/v2/modules/operations/:operation/execute": false,
+		http.MethodPost + " /api/v2/module-executions/lookup":              false,
+		http.MethodGet + " /api/v2/module-executions/:execution":           false,
 	}
 	for _, route := range router.Routes() {
 		key := route.Method + " " + route.Path
