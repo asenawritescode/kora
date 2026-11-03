@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -103,6 +104,17 @@ func (s *AgentStore) GetManifest(id string) (AgentManifest, bool) {
 	defer s.mu.RUnlock()
 	m, ok := s.manifests[id]
 	return m, ok
+}
+
+func (s *AgentStore) Manifests() []AgentManifest {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	manifests := make([]AgentManifest, 0, len(s.manifests))
+	for _, manifest := range s.manifests {
+		manifests = append(manifests, manifest)
+	}
+	sort.Slice(manifests, func(i, j int) bool { return manifests[i].ID < manifests[j].ID })
+	return manifests
 }
 func (s *AgentStore) RecordRun(r AgentRun) (AgentRun, error) {
 	if r.ID == "" || r.AgentID == "" || (r.Capability == "" && (r.Doctype == "" || r.Operation == "")) {

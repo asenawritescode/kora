@@ -89,9 +89,13 @@ const (
 //
 //contract:wire:v2
 type ConfigurationSurfaceBinding struct {
-	Kind            ConfigurationSurfaceKind `json:"kind"`
-	CatalogRevision uint64                   `json:"catalog_revision"`
-	BusinessScope   BusinessScope            `json:"business_scope"`
+	Kind ConfigurationSurfaceKind `json:"kind"`
+	// ViewName binds this published surface to the exact generated view that
+	// consumes it. It is configuration metadata, never an execution grant.
+	//contract:maxLength=160
+	ViewName        string        `json:"view_name"`
+	CatalogRevision uint64        `json:"catalog_revision"`
+	BusinessScope   BusinessScope `json:"business_scope"`
 	//contract:maxLength=128
 	//contract:pattern=^[a-z][a-z0-9_.-]{0,127}$
 	OwnerModuleID ModuleID `json:"owner_module_id"`
@@ -103,8 +107,8 @@ type ConfigurationSurfaceBinding struct {
 }
 
 func (b ConfigurationSurfaceBinding) Validate() error {
-	if b.CatalogRevision == 0 || b.BusinessScope.Validate() != nil || !moduleIDPattern.MatchString(string(b.OwnerModuleID)) || b.OutputSchema.ID == "" || b.OutputSchema.Version == 0 {
-		return fmt.Errorf("published surface binding identity, scope, revision, and output schema are required")
+	if strings.TrimSpace(b.ViewName) == "" || len(b.ViewName) > 160 || strings.TrimSpace(b.ViewName) != b.ViewName || b.CatalogRevision == 0 || b.BusinessScope.Validate() != nil || !moduleIDPattern.MatchString(string(b.OwnerModuleID)) || b.OutputSchema.ID == "" || b.OutputSchema.Version == 0 {
+		return fmt.Errorf("published surface binding view, identity, scope, revision, and output schema are required")
 	}
 	if b.InputSchema != nil && (b.InputSchema.ID == "" || b.InputSchema.Version == 0) {
 		return fmt.Errorf("published surface binding input schema is invalid")
@@ -142,7 +146,7 @@ func ValidateConfigurationSurfaceBindings(bindings []ConfigurationSurfaceBinding
 		if err := binding.Validate(); err != nil {
 			return err
 		}
-		key := string(binding.BusinessScope.TenantID) + "/" + string(binding.BusinessScope.Kind) + "/" + binding.BusinessScope.LegalEntityID + "/" + string(binding.Kind) + "/" + string(binding.OwnerModuleID) + "/" + binding.Name + "/" + binding.OperationRef
+		key := binding.ViewName + "/" + string(binding.BusinessScope.TenantID) + "/" + string(binding.BusinessScope.Kind) + "/" + binding.BusinessScope.LegalEntityID + "/" + string(binding.Kind) + "/" + string(binding.OwnerModuleID) + "/" + binding.Name + "/" + binding.OperationRef
 		if seen[key] {
 			return fmt.Errorf("published surface binding is duplicated")
 		}

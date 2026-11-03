@@ -49,8 +49,8 @@ func writePublishedBindingsSection(b *strings.Builder, bindings []contract.Confi
 	ordered := append([]contract.ConfigurationSurfaceBinding(nil), bindings...)
 	sort.Slice(ordered, func(i, j int) bool {
 		a, z := ordered[i], ordered[j]
-		ak := string(a.BusinessScope.TenantID) + "/" + string(a.BusinessScope.Kind) + "/" + a.BusinessScope.LegalEntityID + "/" + string(a.Kind) + "/" + string(a.OwnerModuleID) + "/" + a.Name + "/" + a.OperationRef
-		zk := string(z.BusinessScope.TenantID) + "/" + string(z.BusinessScope.Kind) + "/" + z.BusinessScope.LegalEntityID + "/" + string(z.Kind) + "/" + string(z.OwnerModuleID) + "/" + z.Name + "/" + z.OperationRef
+		ak := a.ViewName + "/" + string(a.BusinessScope.TenantID) + "/" + string(a.BusinessScope.Kind) + "/" + a.BusinessScope.LegalEntityID + "/" + string(a.Kind) + "/" + string(a.OwnerModuleID) + "/" + a.Name + "/" + a.OperationRef
+		zk := z.ViewName + "/" + string(z.BusinessScope.TenantID) + "/" + string(z.BusinessScope.Kind) + "/" + z.BusinessScope.LegalEntityID + "/" + string(z.Kind) + "/" + string(z.OwnerModuleID) + "/" + z.Name + "/" + z.OperationRef
 		return ak < zk
 	})
 	b.WriteString("\n  (published-bindings")

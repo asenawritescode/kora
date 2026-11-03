@@ -30,31 +30,58 @@ func TestValidateConfigurationPublishedBindingsRequiresCurrentActiveOwnerSurface
 			if got != scope {
 				t.Fatalf("resolved scope = %#v, want %#v", got, scope)
 			}
-			return plugin.BindingPlan{Projections: map[plugin.PublishedProjectionKey]contract.ProjectionDefinition{
-				{OwnerModuleID: "sales.orders", ID: "orders.summary"}: {ID: "orders.summary", OwnerModuleID: "sales.orders", OutputSchema: schema},
+			return plugin.BindingPlan{Revision: 7, Projections: map[plugin.PublishedProjectionKey]contract.ProjectionDefinition{
+				{OwnerModuleID: "sales.orders", ID: "orders.summary"}: {ID: "orders.summary", OwnerModuleID: "sales.orders", ScopePolicy: contract.ScopeTenantShared, OutputSchema: schema},
 			}}, nil
 		},
 	})
 	h := &Handler{RuntimeServices: services}
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Set("site_name", "tenant-a")
-	binding := contract.ConfigurationSurfaceBinding{Kind: contract.ConfigurationProjection, CatalogRevision: 7, BusinessScope: scope, OwnerModuleID: "sales.orders", Name: "orders.summary", OutputSchema: schema}
-	canonical, blockers, issues := validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding})
+	binding := contract.ConfigurationSurfaceBinding{Kind: contract.ConfigurationProjection, ViewName: "Invoice Board", CatalogRevision: 7, BusinessScope: scope, OwnerModuleID: "sales.orders", Name: "orders.summary", OutputSchema: schema}
+	views := []*doctype.View{{Name: "Invoice Board"}}
+	canonical, blockers, issues := validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding}, views)
 	if len(canonical) != 1 || len(blockers) != 0 || len(issues) != 0 {
 		t.Fatalf("active published surface validation = canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding}, nil)
+	if len(canonical) != 0 || len(blockers) != 0 || len(issues) != 1 || !strings.Contains(issues[0], "missing generated view") {
+		t.Fatalf("binding without its generated view was accepted: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
 	}
 
 	stale := binding
 	stale.CatalogRevision--
-	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{stale})
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{stale}, views)
 	if len(canonical) != 0 || len(blockers) != 0 || len(issues) != 1 {
 		t.Fatalf("stale published surface was not rejected: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
 	}
 
 	snapshot.Installations[0].State = string(contract.ModuleDraining)
-	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding})
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding}, views)
 	if len(canonical) != 0 || len(blockers) != 1 || len(issues) != 0 {
 		t.Fatalf("draining published surface was not blocked: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+}
+
+func TestCheckoutViewMustBindItsOwnerPublishedCheckoutOperation(t *testing.T) {
+	schema := contract.SchemaRef{ID: "sales.checkout", Version: 1}
+	checkout := &contract.CheckoutOperationContract{Input: contract.CheckoutInputBinding{CartItems: "items", RequestedTotal: "total", Currency: "currency", PaymentMethod: "method"}, Outcomes: []contract.CheckoutOutcomeBinding{{Kind: contract.CheckoutInvoiceIssued, StatusField: "invoice_status", SuccessValue: "issued"}}}
+	operation := contract.PublishedOperation{Capability: "sales.checkout", Operation: "submit", Checkout: checkout}
+	module := contract.ModuleDescriptor{ID: "sales.orders", PublishedOperations: []contract.PublishedOperation{operation}}
+	view := &doctype.View{Name: "Register", PageManifest: &doctype.PageManifest{APIVersion: "ui.kora.dev/v1", Kind: "Page", Metadata: doctype.PageManifestMetadata{Name: "Register", Version: "1", Package: "sales", Status: "active"}, Spec: doctype.PageManifestSpec{Layout: doctype.PageManifestLayout{Children: []doctype.PageComponent{{ID: "pay", Component: "payment_panel", Props: map[string]any{"bindings": map[string]any{"checkout_operation_ref": "sales.orders~sales.checkout~submit"}}}}}}}}
+	binding := contract.ConfigurationSurfaceBinding{Kind: contract.ConfigurationOperation, ViewName: "Register", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CatalogRevision: 4, OwnerModuleID: "sales.orders", OperationRef: "sales.orders~sales.checkout~submit", InputSchema: &schema, OutputSchema: schema}
+	modules := map[contract.ModuleID]contract.ModuleDescriptor{module.ID: module}
+	views := []*doctype.View{view}
+
+	if issues := validateCheckoutViewBindings(views, []contract.ConfigurationSurfaceBinding{binding}, modules); len(issues) != 0 {
+		t.Fatalf("valid exact checkout binding rejected: %v", issues)
+	}
+	if issues := validateCheckoutViewBindings(views, nil, modules); len(issues) != 1 || !strings.Contains(issues[0], "current owner-published checkout operation") {
+		t.Fatalf("unregistered checkout view binding accepted: %v", issues)
+	}
+	view.PageManifest.Spec.Layout.Children[0].Props["bindings"].(map[string]any)["checkout_operation_ref"] = "sales.orders~sales.checkout~other"
+	if issues := validateCheckoutViewBindings(views, []contract.ConfigurationSurfaceBinding{binding}, modules); len(issues) != 1 {
+		t.Fatalf("mismatched view operation ref accepted: %v", issues)
 	}
 }
 

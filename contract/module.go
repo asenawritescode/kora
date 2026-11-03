@@ -195,9 +195,39 @@ type PublishedQuery struct {
 	OwnerField    string              `json:"owner_field,omitempty"`
 	PageLimit     uint16              `json:"page_limit"`
 	Presentation  SurfacePresentation `json:"presentation"`
+	// ReferenceLookup declares how an authorized query row supplies a provider-qualified value.
+	// It is descriptive only: Engine still validates the BusinessRef on writes.
+	ReferenceLookup *PublishedReferenceLookup `json:"reference_lookup,omitempty"`
 	// OfflineEligible permits this published query to back an actor-scoped offline feed.
 	// Providers must still support pinned snapshots and actor-scoped replay.
 	OfflineEligible bool `json:"offline_eligible,omitempty"`
+}
+
+// PublishedReferenceLookup binds a query result field to a stable business identity.
+// SearchField names the query input property used for text search. ValueField
+// must return a BusinessRef in the active catalog scope; Engine validates it
+// again when a consumer persists that reference.
+//
+//contract:wire:v2
+type PublishedReferenceLookup struct {
+	ResourceType string `json:"resource_type"`
+	SearchField  string `json:"search_field"`
+	ValueField   string `json:"value_field"`
+	LabelField   string `json:"label_field"`
+}
+
+func (r PublishedReferenceLookup) Validate(allowedFields []string) error {
+	if r.ResourceType == "" || len(r.ResourceType) > 160 || !validModuleName(r.SearchField) || !validModuleName(r.ValueField) || !validModuleName(r.LabelField) || r.ValueField == r.LabelField {
+		return fmt.Errorf("published reference lookup identity is invalid")
+	}
+	allowed := make(map[string]bool, len(allowedFields))
+	for _, field := range allowedFields {
+		allowed[field] = true
+	}
+	if !allowed[r.ValueField] || !allowed[r.LabelField] {
+		return fmt.Errorf("published reference lookup fields must be included in allowed fields")
+	}
+	return nil
 }
 
 // QueryFreshness describes whether a published query result is current.
@@ -378,16 +408,18 @@ type ApplicationCatalogModule struct {
 
 //contract:wire:v2
 type ApplicationCatalogQuery struct {
-	OwnerModuleID   ModuleID            `json:"owner_module_id"`
-	Name            string              `json:"name"`
-	Route           string              `json:"route"`
-	InputSchema     SchemaRef           `json:"input_schema"`
-	OutputSchema    SchemaRef           `json:"output_schema"`
-	ScopePolicy     ResourceScopeKind   `json:"scope_policy"`
-	AllowedFields   []string            `json:"allowed_fields"`
-	PageLimit       uint16              `json:"page_limit"`
-	Presentation    SurfacePresentation `json:"presentation"`
-	OfflineEligible bool                `json:"offline_eligible,omitempty"`
+	OwnerModuleID   ModuleID                  `json:"owner_module_id"`
+	Name            string                    `json:"name"`
+	Capability      CapabilityName            `json:"capability"`
+	Route           string                    `json:"route"`
+	InputSchema     SchemaRef                 `json:"input_schema"`
+	OutputSchema    SchemaRef                 `json:"output_schema"`
+	ScopePolicy     ResourceScopeKind         `json:"scope_policy"`
+	AllowedFields   []string                  `json:"allowed_fields"`
+	PageLimit       uint16                    `json:"page_limit"`
+	Presentation    SurfacePresentation       `json:"presentation"`
+	OfflineEligible bool                      `json:"offline_eligible,omitempty"`
+	ReferenceLookup *PublishedReferenceLookup `json:"reference_lookup,omitempty"`
 }
 
 // ApplicationCatalogProjection identifies an owner-published, actor-authorized
@@ -415,16 +447,62 @@ const (
 
 //contract:wire:v2
 type ApplicationCatalogOperation struct {
-	OperationRef    string                `json:"operation_ref"`
-	OwnerModuleID   ModuleID              `json:"owner_module_id"`
-	Capability      CapabilityName        `json:"capability"`
-	Operation       string                `json:"operation"`
-	InputSchema     SchemaRef             `json:"input_schema"`
-	OutputSchema    SchemaRef             `json:"output_schema"`
-	Availability    OperationAvailability `json:"availability"`
-	Permissions     []string              `json:"permissions"`
-	Presentation    SurfacePresentation   `json:"presentation"`
-	OfflineEligible bool                  `json:"offline_eligible,omitempty"`
+	OperationRef    string                     `json:"operation_ref"`
+	OwnerModuleID   ModuleID                   `json:"owner_module_id"`
+	Capability      CapabilityName             `json:"capability"`
+	Operation       string                     `json:"operation"`
+	InputSchema     SchemaRef                  `json:"input_schema"`
+	OutputSchema    SchemaRef                  `json:"output_schema"`
+	Availability    OperationAvailability      `json:"availability"`
+	Permissions     []string                   `json:"permissions"`
+	Presentation    SurfacePresentation        `json:"presentation"`
+	Checkout        *CheckoutOperationContract `json:"checkout,omitempty"`
+	OfflineEligible bool                       `json:"offline_eligible,omitempty"`
+}
+
+// CheckoutOperationContract declares how a checkout client maps its exact
+// cart/context values into an owner's input schema and which business facts
+// the operation output confirms. OperationReceipt.completed alone never
+// implies payment, invoice, or fulfillment completion.
+//
+//contract:wire:v2
+type CheckoutOperationContract struct {
+	Input    CheckoutInputBinding     `json:"input"`
+	Outcomes []CheckoutOutcomeBinding `json:"outcomes"`
+}
+
+//contract:wire:v2
+type CheckoutInputBinding struct {
+	CartItems      string `json:"cart_items"`
+	RequestedTotal string `json:"requested_total"`
+	Currency       string `json:"currency"`
+	PaymentMethod  string `json:"payment_method"`
+	CustomerRef    string `json:"customer_ref,omitempty"`
+	RegisterRef    string `json:"register_ref,omitempty"`
+	ShiftRef       string `json:"shift_ref,omitempty"`
+	TillSessionRef string `json:"till_session_ref,omitempty"`
+	CustomerPhone  string `json:"customer_phone,omitempty"`
+}
+
+//contract:enum:v2
+type CheckoutOutcomeKind string
+
+const (
+	CheckoutPaymentInitiated CheckoutOutcomeKind = "payment_initiated"
+	CheckoutPaymentSettled   CheckoutOutcomeKind = "payment_settled"
+	CheckoutInvoiceIssued    CheckoutOutcomeKind = "invoice_issued"
+	CheckoutFulfillmentEnded CheckoutOutcomeKind = "fulfillment_completed"
+)
+
+// CheckoutOutcomeBinding points to the output fact that confirms one
+// independently reported checkout outcome.
+//
+//contract:wire:v2
+type CheckoutOutcomeBinding struct {
+	Kind           CheckoutOutcomeKind `json:"kind"`
+	StatusField    string              `json:"status_field"`
+	SuccessValue   string              `json:"success_value"`
+	ReferenceField string              `json:"reference_field,omitempty"`
 }
 
 //contract:wire:v2
@@ -468,6 +546,155 @@ func validateSurfacePresentation(p SurfacePresentation) error {
 	return nil
 }
 
+func (c CheckoutOperationContract) Validate(inputSchema, outputSchema json.RawMessage) error {
+	inputProperties, err := checkoutSchemaProperties(inputSchema)
+	if err != nil {
+		return fmt.Errorf("input schema: %w", err)
+	}
+	outputProperties, err := checkoutSchemaProperties(outputSchema)
+	if err != nil {
+		return fmt.Errorf("output schema: %w", err)
+	}
+	inputFields := []struct {
+		name     string
+		field    string
+		wantType string
+		required bool
+	}{
+		{"cart_items", c.Input.CartItems, "array", true},
+		{"requested_total", c.Input.RequestedTotal, "string", true},
+		{"currency", c.Input.Currency, "string", true},
+		{"payment_method", c.Input.PaymentMethod, "string", true},
+		{"customer_ref", c.Input.CustomerRef, "business_ref", false},
+		{"register_ref", c.Input.RegisterRef, "business_ref", false},
+		{"shift_ref", c.Input.ShiftRef, "business_ref", false},
+		{"till_session_ref", c.Input.TillSessionRef, "business_ref", false},
+		{"customer_phone", c.Input.CustomerPhone, "string", false},
+	}
+	usedInputFields := map[string]bool{}
+	for _, binding := range inputFields {
+		if binding.field == "" {
+			if binding.required {
+				return fmt.Errorf("%s input field mapping is required", binding.name)
+			}
+			continue
+		}
+		if !validModuleName(binding.field) || usedInputFields[binding.field] {
+			return fmt.Errorf("input field mappings must be valid and unique")
+		}
+		usedInputFields[binding.field] = true
+		var fieldErr error
+		if binding.wantType == "business_ref" {
+			fieldErr = checkoutRequireBusinessRefField(inputProperties, binding.field)
+		} else {
+			fieldErr = checkoutRequireSchemaField(inputProperties, binding.field, binding.wantType)
+		}
+		if fieldErr != nil {
+			return fmt.Errorf("%s: %w", binding.name, fieldErr)
+		}
+	}
+	if len(c.Outcomes) == 0 || len(c.Outcomes) > 4 {
+		return fmt.Errorf("one to four checkout outcomes are required")
+	}
+	allowedOutcomes := map[CheckoutOutcomeKind]bool{CheckoutPaymentInitiated: true, CheckoutPaymentSettled: true, CheckoutInvoiceIssued: true, CheckoutFulfillmentEnded: true}
+	seenOutcomes := map[CheckoutOutcomeKind]bool{}
+	seenStatusFields := map[string]bool{}
+	for _, outcome := range c.Outcomes {
+		if !allowedOutcomes[outcome.Kind] || seenOutcomes[outcome.Kind] || !validModuleName(outcome.StatusField) || seenStatusFields[outcome.StatusField] || outcome.SuccessValue == "" || len(outcome.SuccessValue) > 120 || strings.ContainsAny(outcome.SuccessValue, "\r\n\x00") {
+			return fmt.Errorf("checkout outcome identity is invalid or duplicated")
+		}
+		seenOutcomes[outcome.Kind] = true
+		seenStatusFields[outcome.StatusField] = true
+		if err := checkoutRequireSchemaField(outputProperties, outcome.StatusField, "string"); err != nil {
+			return fmt.Errorf("checkout outcome status: %w", err)
+		}
+		property := outputProperties[outcome.StatusField]
+		var enum struct {
+			Enum []string `json:"enum"`
+		}
+		if json.Unmarshal(property, &enum) != nil || len(enum.Enum) == 0 {
+			return fmt.Errorf("checkout outcome status field must declare an enum")
+		}
+		foundSuccess := false
+		for _, value := range enum.Enum {
+			if value == outcome.SuccessValue {
+				foundSuccess = true
+				break
+			}
+		}
+		if !foundSuccess {
+			return fmt.Errorf("checkout outcome success value is absent from the output enum")
+		}
+		if outcome.ReferenceField != "" {
+			if !validModuleName(outcome.ReferenceField) {
+				return fmt.Errorf("checkout outcome reference field is invalid")
+			}
+			if err := checkoutRequireBusinessRefField(outputProperties, outcome.ReferenceField); err != nil {
+				return fmt.Errorf("checkout outcome reference: %w", err)
+			}
+		}
+		if outcome.Kind == CheckoutInvoiceIssued && outcome.ReferenceField == "" {
+			return fmt.Errorf("invoice-issued outcome requires a provider-qualified reference field")
+		}
+	}
+	return nil
+}
+
+func checkoutSchemaProperties(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	var schema struct {
+		Type       string                     `json:"type"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if json.Unmarshal(raw, &schema) != nil || schema.Type != "object" || len(schema.Properties) == 0 {
+		return nil, fmt.Errorf("must be an object schema with declared properties")
+	}
+	return schema.Properties, nil
+}
+
+func checkoutRequireSchemaField(properties map[string]json.RawMessage, field, wantType string) error {
+	raw, ok := properties[field]
+	if !ok {
+		return fmt.Errorf("field %q is not declared by its schema", field)
+	}
+	var property struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &property) != nil || property.Type != wantType {
+		return fmt.Errorf("field %q must have schema type %q", field, wantType)
+	}
+	return nil
+}
+
+func checkoutRequireBusinessRefField(properties map[string]json.RawMessage, field string) error {
+	raw, ok := properties[field]
+	if !ok {
+		return fmt.Errorf("field %q is not declared by its schema", field)
+	}
+	var ref struct {
+		Type       string                     `json:"type"`
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+	}
+	if json.Unmarshal(raw, &ref) != nil || ref.Type != "object" || len(ref.Properties) == 0 {
+		return fmt.Errorf("field %q must declare a BusinessRef object schema", field)
+	}
+	for _, name := range []string{"provider_id", "resource_type", "id", "scope"} {
+		if _, ok := ref.Properties[name]; !ok || !containsContractString(ref.Required, name) {
+			return fmt.Errorf("field %q BusinessRef must require %s", field, name)
+		}
+	}
+	return nil
+}
+
+func containsContractString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (c ApplicationCatalog) Validate() error {
 	if c.Revision == 0 || c.BusinessScope.Validate() != nil || len(c.Modules) > 500 || len(c.PublishedQueries) > 2000 || len(c.PublishedProjections) > 2000 || len(c.PublishedOperations) > 2000 || len(c.Schemas) > 4000 || len(c.AllowedEntityChoices) > 1000 || len(c.AvailableScopes) > 1001 || len(c.Blockers) > 100 {
 		return fmt.Errorf("application catalog identity or collection bounds are invalid")
@@ -480,11 +707,13 @@ func (c ApplicationCatalog) Validate() error {
 		modules[module.ID] = true
 	}
 	schemas := make(map[SchemaRef]bool, len(c.Schemas))
+	schemaDocuments := make(map[SchemaRef]ModuleSchemaDocument, len(c.Schemas))
 	for _, schema := range c.Schemas {
 		if schema.Ref.ID == "" || schema.Ref.Version == 0 || len(schema.Schema) == 0 || len(schema.Schema) > 65536 || !json.Valid(schema.Schema) || validateLocalSchemaReferences(schema.Schema) != nil || schemas[schema.Ref] {
 			return fmt.Errorf("application catalog has an invalid or duplicate schema")
 		}
 		schemas[schema.Ref] = false
+		schemaDocuments[schema.Ref] = schema
 	}
 	useSchema := func(ref SchemaRef) error {
 		_, ok := schemas[ref]
@@ -497,7 +726,7 @@ func (c ApplicationCatalog) Validate() error {
 	queries := map[string]bool{}
 	for _, query := range c.PublishedQueries {
 		key := string(query.OwnerModuleID) + "/" + query.Name
-		if !modules[query.OwnerModuleID] || !validModuleName(query.Name) || query.Route != "/api/v1/modules/"+string(query.OwnerModuleID)+"/queries/"+query.Name || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 || queries[key] || validateSurfacePresentation(query.Presentation) != nil {
+		if !modules[query.OwnerModuleID] || !validModuleName(query.Name) || query.Capability == "" || query.Route != "/api/v1/modules/"+string(query.OwnerModuleID)+"/queries/"+query.Name || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 || queries[key] || validateSurfacePresentation(query.Presentation) != nil || query.ReferenceLookup != nil && query.ReferenceLookup.Validate(query.AllowedFields) != nil {
 			return fmt.Errorf("application catalog has an invalid or duplicate published query")
 		}
 		queries[key] = true
@@ -531,6 +760,13 @@ func (c ApplicationCatalog) Validate() error {
 		}
 		if err := useSchema(operation.OutputSchema); err != nil {
 			return err
+		}
+		if operation.Checkout != nil {
+			inputSchema, inputOK := schemaDocuments[operation.InputSchema]
+			outputSchema, outputOK := schemaDocuments[operation.OutputSchema]
+			if !inputOK || !outputOK || operation.Checkout.Validate(inputSchema.Schema, outputSchema.Schema) != nil {
+				return fmt.Errorf("application catalog has an invalid checkout operation contract")
+			}
 		}
 	}
 	for ref, used := range schemas {
@@ -874,12 +1110,13 @@ type ModuleDescriptor struct {
 //
 //contract:wire:v2
 type PublishedOperation struct {
-	Name           string              `json:"name"`
-	Capability     CapabilityName      `json:"capability"`
-	Operation      string              `json:"operation"`
-	ScopePolicy    ResourceScopeKind   `json:"scope_policy"`
-	AllowedCallers []ModuleID          `json:"allowed_callers"`
-	Presentation   SurfacePresentation `json:"presentation"`
+	Name           string                     `json:"name"`
+	Capability     CapabilityName             `json:"capability"`
+	Operation      string                     `json:"operation"`
+	ScopePolicy    ResourceScopeKind          `json:"scope_policy"`
+	AllowedCallers []ModuleID                 `json:"allowed_callers"`
+	Presentation   SurfacePresentation        `json:"presentation"`
+	Checkout       *CheckoutOperationContract `json:"checkout,omitempty"`
 	// OfflineEligible permits clients to queue this business intent for server replay.
 	OfflineEligible bool `json:"offline_eligible,omitempty"`
 }
@@ -2085,6 +2322,7 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		return fmt.Errorf("module %q requires a semver version", m.ID)
 	}
 	moduleSchemas := make(map[SchemaRef]bool, len(m.Schemas))
+	moduleSchemaDocs := make(map[SchemaRef]ModuleSchemaDocument, len(m.Schemas))
 	for _, schema := range m.Schemas {
 		if schema.Ref.ID == "" || schema.Ref.Version == 0 || len(schema.Schema) == 0 || len(schema.Schema) > 65536 || !json.Valid(schema.Schema) {
 			return fmt.Errorf("module %q contains an invalid or oversized JSON Schema document", m.ID)
@@ -2096,6 +2334,7 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 			return fmt.Errorf("module %q schema %s@%d: %w", m.ID, schema.Ref.ID, schema.Ref.Version, err)
 		}
 		moduleSchemas[schema.Ref] = true
+		moduleSchemaDocs[schema.Ref] = schema
 	}
 	moduleSchemaRegistered := func(ref SchemaRef) bool {
 		return registeredSchema == nil || moduleSchemas[ref] || registeredSchema(ref)
@@ -2188,6 +2427,16 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		if err := validateSurfacePresentation(published.Presentation); err != nil {
 			return fmt.Errorf("module %q operation %q presentation: %w", m.ID, published.Name, err)
 		}
+		if published.Checkout != nil {
+			inputDoc, inputOK := moduleSchemaDocs[op.Input]
+			outputDoc, outputOK := moduleSchemaDocs[op.Output]
+			if !inputOK || !outputOK {
+				return fmt.Errorf("module %q operation %q checkout contract requires published input and output schemas", m.ID, published.Name)
+			}
+			if err := published.Checkout.Validate(inputDoc.Schema, outputDoc.Schema); err != nil {
+				return fmt.Errorf("module %q operation %q checkout contract: %w", m.ID, published.Name, err)
+			}
+		}
 		publishedOperationNames[published.Name] = true
 	}
 	projectionIDs := map[string]bool{}
@@ -2239,6 +2488,11 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 	for _, query := range m.Queries {
 		if err := validateSurfacePresentation(query.Presentation); err != nil {
 			return fmt.Errorf("module %q query %q presentation: %w", m.ID, query.Name, err)
+		}
+		if query.ReferenceLookup != nil {
+			if err := query.ReferenceLookup.Validate(query.AllowedFields); err != nil {
+				return fmt.Errorf("module %q query %q reference lookup: %w", m.ID, query.Name, err)
+			}
 		}
 	}
 	required := map[string]bool{}
