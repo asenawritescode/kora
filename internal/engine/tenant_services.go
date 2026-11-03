@@ -190,6 +190,11 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("register internal module command providers for tenant %s: %w", loaded.Name, moduleErr)
 	}
 	providers = append(providers, internalProviders...)
+	publishedQueryProviders, moduleErr := registeredSQLPublishedQueryProviders(config.ProcessContext, tenantID, loaded.DB, dialect, moduleSnapshot.Modules, config.ModuleSchemas, providers)
+	if moduleErr != nil {
+		return fmt.Errorf("register durable published query providers for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	providers = append(providers, publishedQueryProviders...)
 	selections, moduleErr := mergeProviderSelections(tenantID, moduleSnapshot.ProviderSelections, contractProviderSelections(configuredSelections))
 	if moduleErr != nil {
 		return fmt.Errorf("resolve persisted provider selections for tenant %s: %w", loaded.Name, moduleErr)

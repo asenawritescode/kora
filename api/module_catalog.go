@@ -104,7 +104,8 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 	for owner, module := range modules {
 		moduleVisible := false
 		for _, query := range module.Queries {
-			if query.OwnerModuleID != owner || !catalogQueryAllowed(execution, h.siteRegistry(c), query, scope) {
+			actorScope, queryAuthErr := authorizePublishedQueryActorScope(execution, h.siteRegistry(c), query, scope)
+			if query.OwnerModuleID != owner || queryAuthErr != nil {
 				continue
 			}
 			if query.ScopePolicy == contract.ScopeEntityOwned && scope.Kind != contract.ScopeKindLegalEntity {
@@ -113,7 +114,7 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 			if _, exists := plan.QueryDefinitions[plugin.PublishedQueryKey{Scope: scope, OwnerModuleID: owner, Name: query.Name}]; !exists {
 				continue
 			}
-			catalog.PublishedQueries = append(catalog.PublishedQueries, contract.ApplicationCatalogQuery{OwnerModuleID: owner, Name: query.Name, Capability: query.Capability, Route: "/api/v1/modules/" + string(owner) + "/queries/" + query.Name, InputSchema: query.InputSchema, OutputSchema: query.OutputSchema, ScopePolicy: query.ScopePolicy, AllowedFields: append([]string(nil), query.AllowedFields...), PageLimit: query.PageLimit, Presentation: query.Presentation, OfflineEligible: plan.CanReplayPublishedQueryOffline(scope, owner, query.Name), OfflineFactKey: query.OfflineFactKey, ReferenceLookup: query.ReferenceLookup})
+			catalog.PublishedQueries = append(catalog.PublishedQueries, contract.ApplicationCatalogQuery{OwnerModuleID: owner, Name: query.Name, Capability: query.Capability, Route: "/api/v1/modules/" + string(owner) + "/queries/" + query.Name, InputSchema: query.InputSchema, OutputSchema: query.OutputSchema, ScopePolicy: query.ScopePolicy, AllowedFields: append([]string(nil), query.AllowedFields...), PageLimit: query.PageLimit, Presentation: query.Presentation, OfflineEligible: plan.CanReplayPublishedQueryOfflineForActor(scope, owner, query.Name, actorScope), OfflineFactKey: query.OfflineFactKey, ReferenceLookup: query.ReferenceLookup})
 			moduleVisible = true
 			usedSchemas[query.InputSchema], usedSchemas[query.OutputSchema] = true, true
 		}
