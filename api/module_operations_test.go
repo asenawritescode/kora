@@ -189,3 +189,45 @@ func TestLookupPublishedOperationDoesNotReturnReceiptFromAnotherEntity(t *testin
 		t.Fatalf("cross-entity receipt status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestGetPublishedOperationReceiptUsesActorAndBusinessScope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	scope := contract.BusinessScope{TenantID: "receipt-tenant", Kind: contract.ScopeKindTenant}
+	inputSchema, outputSchema := contract.SchemaRef{ID: "sales.issue.input", Version: 1}, contract.SchemaRef{ID: "sales.issue.output", Version: 1}
+	published := contract.PublishedOperation{Name: "issue", Capability: "sales.invoice", Operation: "issue", ScopePolicy: contract.ScopeTenantShared, AllowedCallers: []contract.ModuleID{"sales.checkout"}}
+	owner := contract.ModuleDescriptor{ID: "sales.invoices", Version: "1.0.0", PublishedOperations: []contract.PublishedOperation{published}, Provides: []contract.CapabilityOffer{{Name: published.Capability, Contract: outputSchema, Operations: []contract.OperationSpec{{Name: published.Operation, Input: inputSchema, Output: outputSchema, Effect: contract.EffectLocal}}}}}
+	snapshot := contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 12, Modules: []contract.ModuleDescriptor{owner}}
+	registry := doctype.NewRegistry()
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.invoices.operation.issue", Role: "Operator", Write: true})
+	execution, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "operator", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), Roles: []string{"Operator"}, AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := contract.OperationID(contract.NewOperationID())
+	operationRef := contract.PublishedOperationRef(owner.ID, published.Capability, published.Operation)
+	receipt := contract.OperationReceipt{ExecutionID: id, OperationRef: operationRef, BusinessScope: scope, Status: contract.ReceiptCompleted, OutputSchema: &outputSchema, Output: json.RawMessage(`{"issued":true}`), Revision: "12"}
+	services := NewSiteRuntimeServices()
+	lookupCalls := 0
+	services.Replace(string(scope.TenantID), SiteRuntimeService{
+		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return snapshot, nil },
+		LookupPublishedOperationByID: func(_ context.Context, got policy.Execution, gotScope contract.BusinessScope, gotID contract.OperationID) (contract.OperationReceipt, bool, error) {
+			lookupCalls++
+			if got.Actor().PrincipalID != execution.Actor().PrincipalID || gotScope != scope || gotID != id {
+				t.Fatalf("receipt lookup identity changed: actor=%s scope=%+v id=%s", got.Actor().PrincipalID, gotScope, gotID)
+			}
+			return receipt, true, nil
+		},
+	})
+	handler := NewHandler(registry, nil)
+	handler.RuntimeServices = services
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("GET", "/api/v2/module-executions/"+string(id), nil)
+	ctx.Params = gin.Params{{Key: "execution", Value: string(id)}}
+	ctx.Set("site_name", string(scope.TenantID))
+	ctx.Set("policy_execution", execution)
+	handler.HandleGetPublishedOperationReceipt(ctx)
+	if recorder.Code != http.StatusOK || lookupCalls != 1 || !strings.Contains(recorder.Body.String(), string(id)) {
+		t.Fatalf("receipt status=%d lookup_calls=%d body=%s", recorder.Code, lookupCalls, recorder.Body.String())
+	}
+}
