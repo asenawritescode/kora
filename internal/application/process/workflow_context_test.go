@@ -40,7 +40,7 @@ func TestVerifiedWorkflowOperationContextPropagatesOnlyGrantedModuleExecution(t 
 		t.Fatal(err)
 	}
 	grant := policy.Grant{Resource: "Invoice", Operation: "create", Scope: scope}
-	action := workflow.ActionContext{Execution: execution, BusinessScope: scope, RequiredGrant: grant, InstanceID: "01K7INSTANCE00000000000000000"}
+	action := workflow.ActionContext{Execution: execution, BusinessScope: scope, RequiredGrant: grant, InstanceID: "01K7INSTANCE00000000000000000", StepID: "issue", IdempotencyKey: "workflow-intent-1"}
 	requested := kernel.OperationContext{ModuleExecution: &moduleExecution, BusinessScope: scope}
 	actual, err := verifiedWorkflowOperationContext(action, requested, command)
 	if err != nil {

@@ -208,13 +208,13 @@ func TestSubscriptionPackScriptsCopyTermsPrepareInvoicesAndAllocatePayments(t *t
 
 	newSubscription := execute("Subscription/before_insert", "Subscription", script.EventBeforeInsert,
 		map[string]any{"plan": "plan-a", "override_plan_terms": false}, nil)
-	if newSubscription["unit_price"] != 12.5 || newSubscription["currency"] != "USD" || newSubscription["billing_interval"] != "Quarterly" || newSubscription["interval_count"] != 3 {
+	if newSubscription["unit_price"] != 12.5 || newSubscription["currency"] != "USD" || newSubscription["billing_interval"] != "Quarterly" || newSubscription["interval_count"] != int64(3) {
 		t.Fatalf("plan terms were not copied: %#v", newSubscription)
 	}
 
 	newInvoice := execute("Recurring Invoice/before_insert", "Recurring Invoice", script.EventBeforeInsert,
 		map[string]any{"subscription": "sub-a", "status": "Draft"}, nil)
-	if newInvoice["customer"] != "customer-a" || newInvoice["currency"] != "USD" || newInvoice["subtotal"] != 30.0 || newInvoice["tax_amount"] != 4.8 || newInvoice["total"] != 34.8 || newInvoice["balance"] != 34.8 {
+	if newInvoice["customer"] != "customer-a" || newInvoice["currency"] != "USD" || newInvoice["subtotal"] != int64(30) || newInvoice["tax_amount"] != 4.8 || newInvoice["total"] != 34.8 || newInvoice["balance"] != 34.8 {
 		t.Fatalf("invoice was not prepared from subscription terms and lines: %#v", newInvoice)
 	}
 
@@ -223,7 +223,7 @@ func TestSubscriptionPackScriptsCopyTermsPrepareInvoicesAndAllocatePayments(t *t
 	if newPayment["subscription"] != "sub-a" || newPayment["customer"] != "customer-a" || len(provider.saved) != 1 {
 		t.Fatalf("payment was not linked/applied: payment=%#v saves=%#v", newPayment, provider.saved)
 	}
-	if provider.saved[0].doctype != "Recurring Invoice" || provider.saved[0].doc["amount_paid"] != 10.0 || provider.saved[0].doc["status"] != "Partially Paid" {
+	if provider.saved[0].doctype != "Recurring Invoice" || provider.saved[0].doc["amount_paid"] != int64(10) || provider.saved[0].doc["status"] != "Partially Paid" {
 		t.Fatalf("payment allocation = %#v", provider.saved[0])
 	}
 }
