@@ -148,3 +148,44 @@ func TestLookupPublishedOperationDeniesUnauthorizedActorBeforeReceiptRead(t *tes
 		t.Fatalf("unauthorized lookup status=%d lookup_calls=%d body=%s", recorder.Code, lookupCalls, recorder.Body.String())
 	}
 }
+
+func TestLookupPublishedOperationDoesNotReturnReceiptFromAnotherEntity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requestedScope := contract.BusinessScope{TenantID: "entity-lookup-tenant", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	otherScope := contract.BusinessScope{TenantID: requestedScope.TenantID, Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	inputSchema, outputSchema := contract.SchemaRef{ID: "sales.issue.input", Version: 1}, contract.SchemaRef{ID: "sales.issue.output", Version: 1}
+	published := contract.PublishedOperation{Name: "issue", Capability: "sales.invoice", Operation: "issue", ScopePolicy: contract.ScopeEntityOwned, AllowedCallers: []contract.ModuleID{"sales.checkout"}}
+	owner := contract.ModuleDescriptor{ID: "sales.invoices", Version: "1.0.0", PublishedOperations: []contract.PublishedOperation{published}, Provides: []contract.CapabilityOffer{{Name: published.Capability, Contract: outputSchema, Operations: []contract.OperationSpec{{Name: published.Operation, Input: inputSchema, Output: outputSchema, Effect: contract.EffectLocal}}}}}
+	snapshot := contract.ModuleSnapshot{TenantID: requestedScope.TenantID, Revision: 12, Modules: []contract.ModuleDescriptor{owner}}
+	registry := doctype.NewRegistry()
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.invoices.operation.issue", Role: "Operator", Write: true, Scope: requestedScope})
+	execution, err := policy.NewVerifiedExecution(requestedScope.TenantID, contract.ActorContext{PrincipalID: "operator", PrincipalType: contract.PrincipalHuman, Site: string(requestedScope.TenantID), Roles: []string{"Operator"}, AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationRef := contract.PublishedOperationRef(owner.ID, published.Capability, published.Operation)
+	receipt := contract.OperationReceipt{ExecutionID: "execute-entity-b", OperationRef: operationRef, BusinessScope: otherScope, Status: contract.ReceiptCompleted, OutputSchema: &outputSchema, Output: json.RawMessage(`{"entity":"entity-b","secret":"private"}`), Revision: "12"}
+	services := NewSiteRuntimeServices()
+	services.Replace(string(requestedScope.TenantID), SiteRuntimeService{
+		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return snapshot, nil },
+		LookupPublishedOperation: func(context.Context, policy.Execution, contract.BusinessScope, contract.ModuleID, contract.PublishedOperation, contract.IdempotencyKey) (contract.OperationReceipt, bool, error) {
+			return receipt, true, nil
+		},
+	})
+	handler := NewHandler(registry, nil)
+	handler.RuntimeServices = services
+	body, err := json.Marshal(contract.LookupPublishedOperation{OperationRef: operationRef, IdempotencyKey: "entity-a-intent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/api/v2/module-executions/lookup", strings.NewReader(string(body)))
+	ctx.Request.Header.Set("X-Kora-Legal-Entity-ID", requestedScope.LegalEntityID)
+	ctx.Set("site_name", string(requestedScope.TenantID))
+	ctx.Set("policy_execution", execution)
+	handler.HandleLookupPublishedOperation(ctx)
+	if recorder.Code != http.StatusInternalServerError || strings.Contains(recorder.Body.String(), "entity-b") || strings.Contains(recorder.Body.String(), "private") {
+		t.Fatalf("cross-entity receipt status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
