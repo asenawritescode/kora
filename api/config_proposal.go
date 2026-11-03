@@ -112,7 +112,7 @@ func (h *Handler) HandleConfigurationDraft(c *gin.Context) {
 		badRequestError(c, "proposal.invalid_configuration", strings.Join(messages, "; "), nil)
 		return
 	}
-	_, moduleBlockers, moduleErrors := validateConfigurationPublishedBindings(h, c, req.PublishedBindings)
+	_, moduleBlockers, moduleErrors := validateConfigurationPublishedBindings(h, c, req.PublishedBindings, req.Views)
 	if len(moduleErrors) > 0 || len(moduleBlockers) > 0 {
 		badRequestError(c, "proposal.invalid_published_bindings", "Published module bindings are stale or unavailable", map[string]any{"blockers": moduleBlockers, "errors": moduleErrors})
 		return

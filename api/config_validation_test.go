@@ -30,29 +30,34 @@ func TestValidateConfigurationPublishedBindingsRequiresCurrentActiveOwnerSurface
 			if got != scope {
 				t.Fatalf("resolved scope = %#v, want %#v", got, scope)
 			}
-			return plugin.BindingPlan{Projections: map[plugin.PublishedProjectionKey]contract.ProjectionDefinition{
-				{OwnerModuleID: "sales.orders", ID: "orders.summary"}: {ID: "orders.summary", OwnerModuleID: "sales.orders", OutputSchema: schema},
+			return plugin.BindingPlan{Revision: 7, Projections: map[plugin.PublishedProjectionKey]contract.ProjectionDefinition{
+				{OwnerModuleID: "sales.orders", ID: "orders.summary"}: {ID: "orders.summary", OwnerModuleID: "sales.orders", ScopePolicy: contract.ScopeTenantShared, OutputSchema: schema},
 			}}, nil
 		},
 	})
 	h := &Handler{RuntimeServices: services}
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Set("site_name", "tenant-a")
-	binding := contract.ConfigurationSurfaceBinding{Kind: contract.ConfigurationProjection, CatalogRevision: 7, BusinessScope: scope, OwnerModuleID: "sales.orders", Name: "orders.summary", OutputSchema: schema}
-	canonical, blockers, issues := validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding})
+	binding := contract.ConfigurationSurfaceBinding{Kind: contract.ConfigurationProjection, ViewName: "Invoice Board", CatalogRevision: 7, BusinessScope: scope, OwnerModuleID: "sales.orders", Name: "orders.summary", OutputSchema: schema}
+	views := []*doctype.View{{Name: "Invoice Board"}}
+	canonical, blockers, issues := validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding}, views)
 	if len(canonical) != 1 || len(blockers) != 0 || len(issues) != 0 {
 		t.Fatalf("active published surface validation = canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding}, nil)
+	if len(canonical) != 0 || len(blockers) != 0 || len(issues) != 1 || !strings.Contains(issues[0], "missing generated view") {
+		t.Fatalf("binding without its generated view was accepted: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
 	}
 
 	stale := binding
 	stale.CatalogRevision--
-	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{stale})
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{stale}, views)
 	if len(canonical) != 0 || len(blockers) != 0 || len(issues) != 1 {
 		t.Fatalf("stale published surface was not rejected: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
 	}
 
 	snapshot.Installations[0].State = string(contract.ModuleDraining)
-	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding})
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding}, views)
 	if len(canonical) != 0 || len(blockers) != 1 || len(issues) != 0 {
 		t.Fatalf("draining published surface was not blocked: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
 	}

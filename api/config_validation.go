@@ -69,7 +69,7 @@ func handleConfigurationCheck(c *gin.Context, h *Handler, includeImpact bool) {
 		c.JSON(http.StatusOK, Response{Data: result})
 		return
 	}
-	bindings, moduleBlockers, moduleErrors := validateConfigurationPublishedBindings(h, c, req.PublishedBindings)
+	bindings, moduleBlockers, moduleErrors := validateConfigurationPublishedBindings(h, c, req.PublishedBindings, req.Views)
 	result.PublishedBindings = bindings
 	result.ModuleBlockers = moduleBlockers
 	result.Errors = append(result.Errors, moduleErrors...)
@@ -144,12 +144,23 @@ func handleConfigurationCheck(c *gin.Context, h *Handler, includeImpact bool) {
 // validateConfigurationPublishedBindings confirms that generated references
 // still match registered owner surfaces and the current provider plan. It does
 // not grant actor access; every execution endpoint reauthorizes independently.
-func validateConfigurationPublishedBindings(h *Handler, c *gin.Context, bindings []contract.ConfigurationSurfaceBinding) ([]contract.ConfigurationSurfaceBinding, []contract.ModuleBlocker, []string) {
+func validateConfigurationPublishedBindings(h *Handler, c *gin.Context, bindings []contract.ConfigurationSurfaceBinding, views []*doctype.View) ([]contract.ConfigurationSurfaceBinding, []contract.ModuleBlocker, []string) {
 	if len(bindings) == 0 {
 		return nil, nil, nil
 	}
 	if err := contract.ValidateConfigurationSurfaceBindings(bindings); err != nil {
 		return nil, nil, []string{err.Error()}
+	}
+	viewNames := make(map[string]bool, len(views))
+	for _, view := range views {
+		if view != nil {
+			viewNames[normalizeDocTypeName(view.Name)] = true
+		}
+	}
+	for _, binding := range bindings {
+		if !viewNames[normalizeDocTypeName(binding.ViewName)] {
+			return nil, nil, []string{fmt.Sprintf("published surface binding references missing generated view %q", binding.ViewName)}
+		}
 	}
 	services := h.runtimeService(c, c.GetString("site_name"))
 	if services.LoadModuleSnapshot == nil || services.ResolveModuleBindings == nil {

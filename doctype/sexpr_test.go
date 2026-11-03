@@ -172,7 +172,7 @@ func TestToSExpr_RoundTripsModuleDescriptors(t *testing.T) {
 
 func TestToSExpr_RoundTripsPublishedSurfaceBindings(t *testing.T) {
 	snapshot := &ConfigSnapshot{PublishedBindings: []contract.ConfigurationSurfaceBinding{{
-		Kind: contract.ConfigurationOperation, CatalogRevision: 9,
+		Kind: contract.ConfigurationOperation, ViewName: "Invoice Detail", CatalogRevision: 9,
 		BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"},
 		OwnerModuleID: "sales.orders", OperationRef: contract.PublishedOperationRef("sales.orders", "sales.invoice", "issue"),
 		InputSchema: &contract.SchemaRef{ID: "sales.invoice.issue.input", Version: 2}, OutputSchema: contract.SchemaRef{ID: "sales.invoice.issue.output", Version: 1},
