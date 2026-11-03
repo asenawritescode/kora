@@ -11,6 +11,7 @@ import (
 	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/schema"
 	flow "github.com/asenawritescode/kora/workflow"
 	"github.com/gin-gonic/gin"
@@ -67,6 +68,13 @@ func handleConfigurationCheck(c *gin.Context, h *Handler, includeImpact bool) {
 		result.Errors = append(result.Errors, "at least one DocType is required")
 		c.JSON(http.StatusOK, Response{Data: result})
 		return
+	}
+	bindings, moduleBlockers, moduleErrors := validateConfigurationPublishedBindings(h, c, req.PublishedBindings)
+	result.PublishedBindings = bindings
+	result.ModuleBlockers = moduleBlockers
+	result.Errors = append(result.Errors, moduleErrors...)
+	if len(moduleBlockers) > 0 || len(moduleErrors) > 0 {
+		result.Valid = false
 	}
 	ordered, err := orderDraftDocTypes(req.DocTypes)
 	if err != nil {
@@ -133,6 +141,113 @@ func handleConfigurationCheck(c *gin.Context, h *Handler, includeImpact bool) {
 	c.JSON(http.StatusOK, Response{Data: result})
 }
 
+// validateConfigurationPublishedBindings confirms that generated references
+// still match registered owner surfaces and the current provider plan. It does
+// not grant actor access; every execution endpoint reauthorizes independently.
+func validateConfigurationPublishedBindings(h *Handler, c *gin.Context, bindings []contract.ConfigurationSurfaceBinding) ([]contract.ConfigurationSurfaceBinding, []contract.ModuleBlocker, []string) {
+	if len(bindings) == 0 {
+		return nil, nil, nil
+	}
+	if err := contract.ValidateConfigurationSurfaceBindings(bindings); err != nil {
+		return nil, nil, []string{err.Error()}
+	}
+	services := h.runtimeService(c, c.GetString("site_name"))
+	if services.LoadModuleSnapshot == nil || services.ResolveModuleBindings == nil {
+		return nil, []contract.ModuleBlocker{{Code: "module.runtime_unavailable", Count: 1}}, nil
+	}
+	snapshot, err := services.LoadModuleSnapshot()
+	if err != nil || snapshot.TenantID == "" || snapshot.Revision == 0 {
+		return nil, []contract.ModuleBlocker{{Code: "module.snapshot_unavailable", Count: 1}}, nil
+	}
+	installed := make(map[contract.ModuleID]contract.ModuleInstallation, len(snapshot.Installations))
+	for _, installation := range snapshot.Installations {
+		if installation.TenantID == snapshot.TenantID && installation.State != string(contract.ModuleRemoved) {
+			installed[installation.ModuleID] = installation
+		}
+	}
+	modules := make(map[contract.ModuleID]contract.ModuleDescriptor, len(snapshot.Modules))
+	for _, module := range snapshot.Modules {
+		modules[module.ID] = module
+	}
+	canonical := make([]contract.ConfigurationSurfaceBinding, 0, len(bindings))
+	blockers := make([]contract.ModuleBlocker, 0)
+	issues := make([]string, 0)
+	for _, binding := range bindings {
+		if binding.BusinessScope.TenantID != snapshot.TenantID {
+			issues = append(issues, "published surface binding belongs to another tenant")
+			continue
+		}
+		if binding.CatalogRevision != snapshot.Revision {
+			issues = append(issues, "published surface binding references a stale module catalog revision")
+			continue
+		}
+		module, exists := modules[binding.OwnerModuleID]
+		installation, isInstalled := installed[binding.OwnerModuleID]
+		if !exists || !isInstalled {
+			blockers = append(blockers, contract.ModuleBlocker{Code: "module.binding_owner_unavailable", Count: 1})
+			continue
+		}
+		plan, resolveErr := services.ResolveModuleBindings(binding.BusinessScope)
+		if resolveErr != nil {
+			blockers = append(blockers, contract.ModuleBlocker{Code: "module.binding_plan_unavailable", Count: 1})
+			continue
+		}
+		if plan.Revision != snapshot.Revision {
+			issues = append(issues, "published surface binding changed while validating the module catalog")
+			continue
+		}
+		matched := false
+		switch binding.Kind {
+		case contract.ConfigurationQuery:
+			key := plugin.PublishedQueryKey{Scope: binding.BusinessScope, OwnerModuleID: binding.OwnerModuleID, Name: binding.Name}
+			definition, declared := plan.QueryDefinitions[key]
+			resolved, available := plan.Queries[key]
+			matched = declared && available && resolved.ProviderID != "" && definition.InputSchema == *binding.InputSchema && definition.OutputSchema == binding.OutputSchema && contract.ValidateResourceBusinessScope(binding.BusinessScope, definition.ScopePolicy) == nil
+		case contract.ConfigurationProjection:
+			key := plugin.PublishedProjectionKey{OwnerModuleID: binding.OwnerModuleID, ID: binding.Name}
+			definition, declared := plan.Projections[key]
+			matched = declared && definition.OutputSchema == binding.OutputSchema && contract.ValidateResourceBusinessScope(binding.BusinessScope, definition.ScopePolicy) == nil
+		case contract.ConfigurationOperation:
+			for _, published := range module.PublishedOperations {
+				if contract.PublishedOperationRef(binding.OwnerModuleID, published.Capability, published.Operation) != binding.OperationRef {
+					continue
+				}
+				if contract.ValidateResourceBusinessScope(binding.BusinessScope, published.ScopePolicy) != nil {
+					continue
+				}
+				for _, offer := range module.Provides {
+					if offer.Name != published.Capability {
+						continue
+					}
+					for _, operation := range offer.Operations {
+						if operation.Name != published.Operation || operation.Input != *binding.InputSchema || operation.Output != binding.OutputSchema {
+							continue
+						}
+						for _, resolved := range plan.Bindings {
+							if resolved.OwnerModuleID != binding.OwnerModuleID || resolved.Key.CapabilityName != published.Capability || resolved.ProviderID == "" {
+								continue
+							}
+							for _, resolvedOperation := range resolved.Operations {
+								matched = matched || resolvedOperation.Name == published.Operation && resolvedOperation.Input == *binding.InputSchema && resolvedOperation.Output == binding.OutputSchema
+							}
+						}
+					}
+				}
+			}
+		}
+		if !matched {
+			blockers = append(blockers, contract.ModuleBlocker{Code: "module.published_surface_unavailable", Count: 1})
+			continue
+		}
+		if installation.State != string(contract.ModuleActive) {
+			blockers = append(blockers, contract.ModuleBlocker{Code: "module.published_surface_not_active", Count: 1})
+			continue
+		}
+		canonical = append(canonical, binding)
+	}
+	return canonical, blockers, issues
+}
+
 func decodeDraftConfigurationRequest(c *gin.Context) (DraftConfigurationRequest, bool) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, configurationCheckBodyLimit)
 	body, err := io.ReadAll(c.Request.Body)
@@ -155,8 +270,9 @@ func decodeDraftConfigurationRequest(c *gin.Context) (DraftConfigurationRequest,
 	req := DraftConfigurationRequest{
 		ProposalID: wire.ProposalID, DraftConfigVersionID: wire.DraftConfigVersionID,
 		ConversationID: wire.ConversationID, BaseConfigVersionID: wire.BaseConfigVersionID,
-		CreatedBy:     wire.CreatedBy,
-		ScheduledJobs: wire.ScheduledJobs,
+		CreatedBy:         wire.CreatedBy,
+		ScheduledJobs:     wire.ScheduledJobs,
+		PublishedBindings: append([]contract.ConfigurationSurfaceBinding(nil), wire.PublishedBindings...),
 	}
 	for i, raw := range wire.WorkflowDefinitions {
 		definition, err := flow.DecodeWorkflowDefinition(raw)

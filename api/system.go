@@ -1260,6 +1260,13 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		})
 		return
 	}
+	if len(snapshot.PublishedBindings) > 0 {
+		_, blockers, bindingErrors := validateConfigurationPublishedBindings(h, c, snapshot.PublishedBindings)
+		if len(blockers) > 0 || len(bindingErrors) > 0 {
+			writeError(c, http.StatusConflict, "configuration.published_bindings_stale", "Published module bindings changed or are unavailable; prepare a new configuration draft", map[string]any{"blockers": blockers, "errors": bindingErrors})
+			return
+		}
+	}
 	if rejectInvalidSnapshotReferences(c, snapshot, reg) {
 		return
 	}

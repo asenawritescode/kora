@@ -170,6 +170,26 @@ func TestToSExpr_RoundTripsModuleDescriptors(t *testing.T) {
 	}
 }
 
+func TestToSExpr_RoundTripsPublishedSurfaceBindings(t *testing.T) {
+	snapshot := &ConfigSnapshot{PublishedBindings: []contract.ConfigurationSurfaceBinding{{
+		Kind: contract.ConfigurationOperation, CatalogRevision: 9,
+		BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"},
+		OwnerModuleID: "sales.orders", OperationRef: contract.PublishedOperationRef("sales.orders", "sales.invoice", "issue"),
+		InputSchema: &contract.SchemaRef{ID: "sales.invoice.issue.input", Version: 2}, OutputSchema: contract.SchemaRef{ID: "sales.invoice.issue.output", Version: 1},
+	}}}
+	encoded := ToSExpr(snapshot)
+	parsed, err := FromSExpr(encoded)
+	if err != nil {
+		t.Fatalf("parse published surface bindings: %v", err)
+	}
+	if len(parsed.PublishedBindings) != 1 || parsed.PublishedBindings[0].OperationRef != snapshot.PublishedBindings[0].OperationRef || parsed.PublishedBindings[0].BusinessScope != snapshot.PublishedBindings[0].BusinessScope {
+		t.Fatalf("published surface bindings were not preserved: %#v", parsed.PublishedBindings)
+	}
+	if got := ToSExpr(parsed); got != encoded {
+		t.Fatalf("published surface bindings did not serialize canonically:\nfirst: %s\nsecond: %s", encoded, got)
+	}
+}
+
 func TestToSExpr_Empty(t *testing.T) {
 	snapshot := &ConfigSnapshot{}
 	sexpr := ToSExpr(snapshot)

@@ -8,9 +8,55 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/gin-gonic/gin"
 )
+
+func TestValidateConfigurationPublishedBindingsRequiresCurrentActiveOwnerSurface(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	schema := contract.SchemaRef{ID: "sales.orders.summary", Version: 1}
+	snapshot := contract.ModuleSnapshot{
+		TenantID: "tenant-a", Revision: 7,
+		Modules:       []contract.ModuleDescriptor{{ID: "sales.orders", Version: "1.0.0"}},
+		Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "sales.orders", Version: "1.0.0", State: string(contract.ModuleActive)}},
+	}
+	services := NewSiteRuntimeServices()
+	services.Replace("tenant-a", SiteRuntimeService{
+		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return snapshot, nil },
+		ResolveModuleBindings: func(got contract.BusinessScope) (plugin.BindingPlan, error) {
+			if got != scope {
+				t.Fatalf("resolved scope = %#v, want %#v", got, scope)
+			}
+			return plugin.BindingPlan{Projections: map[plugin.PublishedProjectionKey]contract.ProjectionDefinition{
+				{OwnerModuleID: "sales.orders", ID: "orders.summary"}: {ID: "orders.summary", OwnerModuleID: "sales.orders", OutputSchema: schema},
+			}}, nil
+		},
+	})
+	h := &Handler{RuntimeServices: services}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("site_name", "tenant-a")
+	binding := contract.ConfigurationSurfaceBinding{Kind: contract.ConfigurationProjection, CatalogRevision: 7, BusinessScope: scope, OwnerModuleID: "sales.orders", Name: "orders.summary", OutputSchema: schema}
+	canonical, blockers, issues := validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding})
+	if len(canonical) != 1 || len(blockers) != 0 || len(issues) != 0 {
+		t.Fatalf("active published surface validation = canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+
+	stale := binding
+	stale.CatalogRevision--
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{stale})
+	if len(canonical) != 0 || len(blockers) != 0 || len(issues) != 1 {
+		t.Fatalf("stale published surface was not rejected: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+
+	snapshot.Installations[0].State = string(contract.ModuleDraining)
+	canonical, blockers, issues = validateConfigurationPublishedBindings(h, ctx, []contract.ConfigurationSurfaceBinding{binding})
+	if len(canonical) != 0 || len(blockers) != 1 || len(issues) != 0 {
+		t.Fatalf("draining published surface was not blocked: canonical %#v blockers %#v issues %#v", canonical, blockers, issues)
+	}
+}
 
 func TestConfigurationCheckRejectsOversizedBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -98,7 +144,7 @@ func TestConfigurationCheckDecodesLegacyDoctypeViewAlias(t *testing.T) {
 
 func TestDecodeDraftConfigurationUsesSharedWireEnvelope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	body := `{"proposal_id":"proposal-1","conversation_id":"conversation-2","base_config_version_id":"config-3","created_by":"untrusted-legacy-actor","doctypes":[{"name":"Task"}],"roles":[{"name":"Manager"}],"permissions":[{"doctype":"Task","role":"Manager","read":true,"public":true}],"views":[{"name":"Tasks","doctype":"Task","route":"/tasks"}],"scripts":[{"name":"task_api","script_type":"api_method","source":"return true;"}],"scheduled_jobs":[{"name":"invoice-generation","type":"subscription_invoice","schedule":"0 0 * * *","config":{"due_days":14}}]}`
+	body := `{"proposal_id":"proposal-1","conversation_id":"conversation-2","base_config_version_id":"config-3","created_by":"untrusted-legacy-actor","doctypes":[{"name":"Task"}],"roles":[{"name":"Manager"}],"permissions":[{"doctype":"Task","role":"Manager","read":true,"public":true}],"views":[{"name":"Tasks","doctype":"Task","route":"/tasks"}],"scripts":[{"name":"task_api","script_type":"api_method","source":"return true;"}],"scheduled_jobs":[{"name":"invoice-generation","type":"subscription_invoice","schedule":"0 0 * * *","config":{"due_days":14}}],"published_bindings":[{"kind":"projection","catalog_revision":7,"business_scope":{"tenant_id":"tenant-a","kind":"tenant"},"owner_module_id":"sales","name":"sales.orders","output_schema":{"id":"sales.orders.v1","version":1}}]}`
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/system/config/drafts", strings.NewReader(body))
@@ -121,6 +167,9 @@ func TestDecodeDraftConfigurationUsesSharedWireEnvelope(t *testing.T) {
 	}
 	if len(req.ScheduledJobs) != 1 || req.ScheduledJobs[0].Name != "invoice-generation" || req.ScheduledJobs[0].Type != "subscription_invoice" {
 		t.Fatalf("scheduled jobs = %#v", req.ScheduledJobs)
+	}
+	if len(req.PublishedBindings) != 1 || req.PublishedBindings[0].CatalogRevision != 7 || req.PublishedBindings[0].OwnerModuleID != "sales" {
+		t.Fatalf("published bindings = %#v", req.PublishedBindings)
 	}
 }
 
