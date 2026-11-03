@@ -231,3 +231,51 @@ func TestGetPublishedOperationReceiptUsesActorAndBusinessScope(t *testing.T) {
 		t.Fatalf("receipt status=%d lookup_calls=%d body=%s", recorder.Code, lookupCalls, recorder.Body.String())
 	}
 }
+
+func TestExecutePublishedOperationRejectsForgedSchemaAndProviderBeforeDispatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	scope := contract.BusinessScope{TenantID: "execute-validation-tenant", Kind: contract.ScopeKindTenant}
+	inputSchema, outputSchema := contract.SchemaRef{ID: "sales.issue.input", Version: 1}, contract.SchemaRef{ID: "sales.issue.output", Version: 1}
+	published := contract.PublishedOperation{Name: "issue", Capability: "sales.invoice", Operation: "issue", ScopePolicy: contract.ScopeTenantShared, AllowedCallers: []contract.ModuleID{"sales.checkout"}}
+	owner := contract.ModuleDescriptor{ID: "sales.invoices", Version: "1.0.0", PublishedOperations: []contract.PublishedOperation{published}, Provides: []contract.CapabilityOffer{{Name: published.Capability, Contract: outputSchema, Operations: []contract.OperationSpec{{Name: published.Operation, Input: inputSchema, Output: outputSchema, Effect: contract.EffectLocal}}}}}
+	snapshot := contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 12, Modules: []contract.ModuleDescriptor{owner}}
+	registry := doctype.NewRegistry()
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.invoices.operation.issue", Role: "Operator", Write: true})
+	execution, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "operator", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), Roles: []string{"Operator"}, AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := NewSiteRuntimeServices()
+	executeCalls := 0
+	services.Replace(string(scope.TenantID), SiteRuntimeService{
+		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return snapshot, nil },
+		ExecutePublishedOperation: func(context.Context, policy.Execution, contract.BusinessScope, contract.ModuleID, contract.PublishedOperation, contract.SchemaRef, contract.CommandMeta, []byte) (contract.OperationReceipt, error) {
+			executeCalls++
+			return contract.OperationReceipt{}, nil
+		},
+	})
+	handler := NewHandler(registry, nil)
+	handler.RuntimeServices = services
+	operationRef := contract.PublishedOperationRef(owner.ID, published.Capability, published.Operation)
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "forged schema", body: `{"meta":{"idempotency_key":"intent-1"},"input_schema":{"id":"attacker.schema","version":1},"input":{"invoice_id":"INV-1"}}`},
+		{name: "forged provider", body: `{"meta":{"idempotency_key":"intent-1"},"input_schema":{"id":"sales.issue.input","version":1},"provider_id":"attacker-provider","input":{"invoice_id":"INV-1"}}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest("POST", "/api/v2/modules/operations/"+operationRef+"/execute", strings.NewReader(testCase.body))
+			ctx.Params = gin.Params{{Key: "operation", Value: operationRef}}
+			ctx.Set("site_name", string(scope.TenantID))
+			ctx.Set("policy_execution", execution)
+			handler.HandleExecutePublishedOperation(ctx)
+			if recorder.Code != http.StatusBadRequest || executeCalls != 0 {
+				t.Fatalf("execute status=%d calls=%d body=%s", recorder.Code, executeCalls, recorder.Body.String())
+			}
+		})
+	}
+}
