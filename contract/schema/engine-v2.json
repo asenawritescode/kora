@@ -224,6 +224,9 @@
           },
           "type": "array"
         },
+        "capability": {
+          "type": "string"
+        },
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
@@ -245,6 +248,10 @@
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
         },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
         "route": {
           "type": "string"
         },
@@ -258,6 +265,7 @@
       },
       "required": [
         "allowed_fields",
+        "capability",
         "input_schema",
         "name",
         "output_schema",
@@ -3895,6 +3903,10 @@
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
         },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
         "scope_policy": {
           "enum": [
             "tenant_shared",
@@ -3935,6 +3947,30 @@
       },
       "required": [
         "input"
+      ],
+      "type": "object"
+    },
+    "PublishedReferenceLookup": {
+      "additionalProperties": false,
+      "properties": {
+        "label_field": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "search_field": {
+          "type": "string"
+        },
+        "value_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label_field",
+        "resource_type",
+        "search_field",
+        "value_field"
       ],
       "type": "object"
     },
@@ -5624,6 +5660,9 @@
           },
           "type": "array"
         },
+        "capability": {
+          "type": "string"
+        },
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
@@ -5645,6 +5684,10 @@
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
         },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
         "route": {
           "type": "string"
         },
@@ -5658,6 +5701,7 @@
       },
       "required": [
         "allowed_fields",
+        "capability",
         "input_schema",
         "name",
         "output_schema",
@@ -9270,6 +9314,10 @@
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
         },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
         "scope_policy": {
           "enum": [
             "tenant_shared",
@@ -9310,6 +9358,30 @@
       },
       "required": [
         "input"
+      ],
+      "type": "object"
+    },
+    "PublishedReferenceLookup": {
+      "additionalProperties": false,
+      "properties": {
+        "label_field": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "search_field": {
+          "type": "string"
+        },
+        "value_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label_field",
+        "resource_type",
+        "search_field",
+        "value_field"
       ],
       "type": "object"
     },

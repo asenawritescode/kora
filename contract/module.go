@@ -208,12 +208,13 @@ type PublishedQuery struct {
 //contract:wire:v2
 type PublishedReferenceLookup struct {
 	ResourceType string `json:"resource_type"`
+	SearchField  string `json:"search_field"`
 	ValueField   string `json:"value_field"`
 	LabelField   string `json:"label_field"`
 }
 
 func (r PublishedReferenceLookup) Validate(allowedFields []string) error {
-	if r.ResourceType == "" || len(r.ResourceType) > 160 || !validModuleName(r.ValueField) || !validModuleName(r.LabelField) || r.ValueField == r.LabelField {
+	if r.ResourceType == "" || len(r.ResourceType) > 160 || !validModuleName(r.SearchField) || !validModuleName(r.ValueField) || !validModuleName(r.LabelField) || r.ValueField == r.LabelField {
 		return fmt.Errorf("published reference lookup identity is invalid")
 	}
 	allowed := make(map[string]bool, len(allowedFields))

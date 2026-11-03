@@ -185,6 +185,8 @@ func TestApplicationCatalogFiltersSurfacesByActorGrant(t *testing.T) {
 	scope := contract.BusinessScope{TenantID: "catalog-tenant", Kind: contract.ScopeKindTenant}
 	in, out := contract.SchemaRef{ID: "catalog.input", Version: 1}, contract.SchemaRef{ID: "catalog.output", Version: 1}
 	query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "list", Capability: "sales.orders", Operation: "list", InputSchema: in, OutputSchema: out, ScopePolicy: contract.ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}
+	query.ReferenceLookup = &contract.PublishedReferenceLookup{ResourceType: "sales.order", SearchField: "search", ValueField: "business_ref", LabelField: "number"}
+	query.AllowedFields = []string{"id", "business_ref", "number"}
 	projection := contract.ProjectionDefinition{ID: "history", OwnerModuleID: "sales.orders", Sources: []contract.ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: "list", OutputSchema: out}}, ScopePolicy: contract.ScopeTenantShared, FactKey: "id", AllowedFields: []string{"id"}, OutputSchema: out, RebuildStrategy: "consistent_snapshot"}
 	module := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Schemas: []contract.ModuleSchemaDocument{{Ref: in, Schema: json.RawMessage(`{"type":"object"}`)}, {Ref: out, Schema: json.RawMessage(`{"type":"array"}`)}}, Queries: []contract.PublishedQuery{query}, Projections: []contract.ProjectionDefinition{projection}, Provides: []contract.CapabilityOffer{{Name: query.Capability, Contract: out, Operations: []contract.OperationSpec{{Name: "list", Input: in, Output: out, Effect: contract.EffectQuery}}}}}
 	snapshot := contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 7, Modules: []contract.ModuleDescriptor{module}, Installations: []contract.ModuleInstallation{{TenantID: scope.TenantID, ModuleID: module.ID, Version: module.Version, State: string(contract.ModuleActive)}}}
@@ -223,7 +225,7 @@ func TestApplicationCatalogFiltersSurfacesByActorGrant(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Data.PublishedQueries) != 1 || response.Data.PublishedQueries[0].Route != "/api/v1/modules/sales.orders/queries/list" || len(response.Data.PublishedProjections) != 1 || response.Data.PublishedProjections[0].Route != "/api/v1/modules/sales.orders/projections/history" || response.Data.Revision != 7 || len(response.Data.Schemas) != 2 {
+	if len(response.Data.PublishedQueries) != 1 || response.Data.PublishedQueries[0].Route != "/api/v1/modules/sales.orders/queries/list" || response.Data.PublishedQueries[0].Capability != query.Capability || response.Data.PublishedQueries[0].ReferenceLookup == nil || *response.Data.PublishedQueries[0].ReferenceLookup != *query.ReferenceLookup || len(response.Data.PublishedProjections) != 1 || response.Data.PublishedProjections[0].Route != "/api/v1/modules/sales.orders/projections/history" || response.Data.Revision != 7 || len(response.Data.Schemas) != 2 {
 		t.Fatalf("unexpected actor catalog: %+v", response.Data)
 	}
 }

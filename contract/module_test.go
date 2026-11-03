@@ -505,13 +505,29 @@ func TestApplicationCatalogValidatesAndBoundsSchemaDocuments(t *testing.T) {
 	out := SchemaRef{ID: "sales.output", Version: 1}
 	catalog := ApplicationCatalog{Revision: 1, BusinessScope: scope,
 		Modules:              []ApplicationCatalogModule{{ID: "sales.orders", Version: "1.0.0", State: string(ModuleActive)}},
-		PublishedQueries:     []ApplicationCatalogQuery{{OwnerModuleID: "sales.orders", Name: "list", Capability: "sales.read", Route: "/api/v1/modules/sales.orders/queries/list", InputSchema: in, OutputSchema: out, ScopePolicy: ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}},
+		PublishedQueries:     []ApplicationCatalogQuery{{OwnerModuleID: "sales.orders", Name: "list", Capability: "sales.read", Route: "/api/v1/modules/sales.orders/queries/list", InputSchema: in, OutputSchema: out, ScopePolicy: ScopeTenantShared, AllowedFields: []string{"id", "reference", "name"}, PageLimit: 10}},
 		PublishedProjections: []ApplicationCatalogProjection{},
 		Schemas:              []ModuleSchemaDocument{{Ref: in, Schema: []byte(`{"type":"object"}`)}, {Ref: out, Schema: []byte(`{"type":"array","items":{"type":"object"}}`)}},
 		AllowedEntityChoices: []BusinessScope{}, Blockers: []ModuleBlocker{}}
 	if err := catalog.Validate(); err != nil {
 		t.Fatalf("valid catalog rejected: %v", err)
 	}
+	lookup := PublishedReferenceLookup{ResourceType: "warehouse.location", SearchField: "search", ValueField: "reference", LabelField: "name"}
+	if err := lookup.Validate([]string{"reference", "name"}); err != nil {
+		t.Fatalf("valid reference lookup rejected: %v", err)
+	}
+	if err := lookup.Validate([]string{"reference"}); err == nil {
+		t.Fatal("lookup label outside published fields accepted")
+	}
+	catalog.PublishedQueries[0].ReferenceLookup = &lookup
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("valid typed lookup catalog rejected: %v", err)
+	}
+	catalog.PublishedQueries[0].ReferenceLookup = &PublishedReferenceLookup{ResourceType: "warehouse.location", ValueField: "private_id", LabelField: "name"}
+	if err := catalog.Validate(); err == nil {
+		t.Fatal("lookup over unpublished field accepted")
+	}
+	catalog.PublishedQueries[0].ReferenceLookup = nil
 	catalog.Schemas[0].Schema = []byte(`{"$ref":"https://example.com/schema.json"}`)
 	if err := catalog.Validate(); err == nil {
 		t.Fatal("remote schema reference accepted")
