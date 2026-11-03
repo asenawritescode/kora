@@ -477,15 +477,15 @@ func TestPinnedProviderReconciliationUsesStoredProviderAndRejectsConflictingOper
 	out := contract.SchemaRef{ID: "output", Version: 1}
 	leaseScope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
 	registration := ActionRegistration{Key: ActionKey{Name: "invoice.approve", Version: 1}, Class: ActionExternal, InputSchema: in, OutputSchema: out, RequiredGrant: grant, Capability: &contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: in, OutputSchema: out}, ProviderID: "billing.provider-new", BindingRevision: 9, CallerModuleID: "sales.orders", PinnedDispatcher: call,
-		CapabilityLease: &contract.CapabilityLease{ID: "lease-new", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-new", Operation: "issue", BindingRevision: 9, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}}
+		CapabilityLease: &contract.CapabilityLease{ID: "lease-new", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderModuleID: "billing", ProviderID: "billing.provider-new", Operation: "issue", BindingRevision: 9, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}}
 	if err := catalog.Register(registration); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalog.Freeze(); err != nil {
 		t.Fatal(err)
 	}
-	pinned := contract.PinnedDispatch{ExecutionID: "01K7EXECUTION000000000000000000", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-old", BindingRevision: 8, Operation: *registration.Capability, IdempotencyKey: "stable-key-01", InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
-	oldLease := contract.CapabilityLease{ID: "lease-old", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-old", Operation: "issue", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active", CredentialRef: "old-credential@v1"}
+	pinned := contract.PinnedDispatch{ExecutionID: "01K7EXECUTION000000000000000000", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderModuleID: "billing", ProviderID: "billing.provider-old", BindingRevision: 8, Operation: *registration.Capability, IdempotencyKey: "stable-key-01", InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	oldLease := contract.CapabilityLease{ID: "lease-old", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderModuleID: "billing", ProviderID: "billing.provider-old", Operation: "issue", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active", CredentialRef: "old-credential@v1"}
 	instances := &testPinnedInstanceRepository{testInstanceRepository: base, dispatch: pinned, lease: oldLease}
 	authz := &testInstanceAuthorizer{reconcile: true}
 	service, err := NewInstanceService(defs, instances, authz, catalog, testSchemas{}, testWaits{}, time.Now, nil)

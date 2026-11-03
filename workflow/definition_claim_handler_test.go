@@ -146,7 +146,7 @@ func newDefinitionHandlerWithGrants(t *testing.T, store *externalDispatchStore, 
 	if err := catalog.Freeze(); err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewDefinitionClaimHandler(store, instances, defs, catalog, externalDispatchSchemas{}, identity, claimHandlerScopes{scope: stepScope}, expression.NewTreeEvaluator())
+	handler, err := NewDefinitionClaimHandler(store, instances, defs, catalog, externalDispatchSchemas{}, identity, claimHandlerScopes{scope: stepScope}, expression.NewTreeEvaluator(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestDefinitionClaimHandlerDoesNotBlindlyRetryAmbiguousLocalCommit(t *testin
 	if err := catalog.Freeze(); err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewDefinitionClaimHandler(store, instances, definitions, catalog, externalDispatchSchemas{}, identity, claimHandlerScopes{scope: claimHandlerScope{value: expression.NullValue()}}, expression.NewTreeEvaluator())
+	handler, err := NewDefinitionClaimHandler(store, instances, definitions, catalog, externalDispatchSchemas{}, identity, claimHandlerScopes{scope: claimHandlerScope{value: expression.NullValue()}}, expression.NewTreeEvaluator(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
