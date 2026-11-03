@@ -134,10 +134,25 @@ func addV2SemanticRules(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("v2 schema is missing OperationReceipt")
 	}
 	status := func(values ...string) map[string]any { return map[string]any{"enum": values, "type": "string"} }
+	receiptProperties, _ := receipt["properties"].(map[string]any)
+	commonReceiptFields := []string{"business_scope", "execution_id", "operation_ref", "revision"}
+	receiptBranch := func(statusSchema map[string]any, extras []string, forbidden []string) map[string]any {
+		properties := make(map[string]any, len(commonReceiptFields)+len(extras)+1)
+		for _, field := range commonReceiptFields {
+			properties[field] = receiptProperties[field]
+		}
+		properties["status"] = statusSchema
+		required := append(append([]string(nil), commonReceiptFields...), "status")
+		for _, field := range extras {
+			properties[field] = receiptProperties[field]
+			required = append(required, field)
+		}
+		return object(properties, required, forbidAny(forbidden...))
+	}
 	receipt["oneOf"] = []any{
-		object(map[string]any{"status": map[string]any{"const": "completed", "type": "string"}}, []string{"status", "output", "output_schema"}, object(nil, []string{"error"}, nil)),
-		object(map[string]any{"status": status("accepted", "running")}, []string{"status"}, forbidAny("error", "output", "output_schema")),
-		object(map[string]any{"status": status("rejected", "conflict", "failed", "outcome_unknown")}, []string{"status", "error"}, forbidAny("output", "output_schema")),
+		receiptBranch(map[string]any{"const": "completed", "type": "string"}, []string{"output", "output_schema"}, []string{"error"}),
+		receiptBranch(status("accepted", "running"), nil, []string{"error", "output", "output_schema"}),
+		receiptBranch(status("rejected", "conflict", "failed", "outcome_unknown"), []string{"error"}, []string{"output", "output_schema"}),
 	}
 	receiptTargets := []map[string]any{receipt}
 	if rootReceipt, ok := rootProperties["OperationReceipt"].(map[string]any); ok {

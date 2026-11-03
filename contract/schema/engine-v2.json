@@ -2798,19 +2798,49 @@
       "oneOf": [
         {
           "not": {
-            "properties": null,
-            "required": [
-              "error"
-            ],
-            "type": "object"
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "error"
+                ],
+                "type": "object"
+              }
+            ]
           },
           "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "output": {
+              "x-max-json-bytes": 1048576,
+              "x-open-json-value": true
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
             "status": {
               "const": "completed",
               "type": "string"
             }
           },
           "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
             "status",
             "output",
             "output_schema"
@@ -2844,6 +2874,20 @@
             ]
           },
           "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
             "status": {
               "enum": [
                 "accepted",
@@ -2853,6 +2897,10 @@
             }
           },
           "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
             "status"
           ],
           "type": "object"
@@ -2877,6 +2925,24 @@
             ]
           },
           "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "error": {
+              "$ref": "#/$defs/Error",
+              "x-optional-pointer": true
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
             "status": {
               "enum": [
                 "rejected",
@@ -2888,6 +2954,10 @@
             }
           },
           "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
             "status",
             "error"
           ],
@@ -7869,19 +7939,49 @@
       "oneOf": [
         {
           "not": {
-            "properties": null,
-            "required": [
-              "error"
-            ],
-            "type": "object"
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "error"
+                ],
+                "type": "object"
+              }
+            ]
           },
           "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "output": {
+              "x-max-json-bytes": 1048576,
+              "x-open-json-value": true
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
             "status": {
               "const": "completed",
               "type": "string"
             }
           },
           "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
             "status",
             "output",
             "output_schema"
@@ -7915,6 +8015,20 @@
             ]
           },
           "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
             "status": {
               "enum": [
                 "accepted",
@@ -7924,6 +8038,10 @@
             }
           },
           "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
             "status"
           ],
           "type": "object"
@@ -7948,6 +8066,24 @@
             ]
           },
           "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "error": {
+              "$ref": "#/$defs/Error",
+              "x-optional-pointer": true
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
             "status": {
               "enum": [
                 "rejected",
@@ -7959,6 +8095,10 @@
             }
           },
           "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
             "status",
             "error"
           ],
