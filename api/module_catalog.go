@@ -176,7 +176,7 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 			if len(published.AllowedCallers) == 0 {
 				continue
 			}
-			catalog.PublishedOperations = append(catalog.PublishedOperations, contract.ApplicationCatalogOperation{OperationRef: contract.PublishedOperationRef(owner, published.Capability, published.Operation), OwnerModuleID: owner, Capability: published.Capability, Operation: published.Operation, InputSchema: operation.Input, OutputSchema: operation.Output, Availability: availability, Permissions: permissions, Presentation: published.Presentation, OfflineEligible: published.OfflineEligible})
+			catalog.PublishedOperations = append(catalog.PublishedOperations, contract.ApplicationCatalogOperation{OperationRef: contract.PublishedOperationRef(owner, published.Capability, published.Operation), OwnerModuleID: owner, Capability: published.Capability, Operation: published.Operation, InputSchema: operation.Input, OutputSchema: operation.Output, Availability: availability, Permissions: permissions, Presentation: published.Presentation, Checkout: published.Checkout, OfflineEligible: published.OfflineEligible})
 			moduleVisible = true
 			usedSchemas[operation.Input], usedSchemas[operation.Output] = true, true
 		}

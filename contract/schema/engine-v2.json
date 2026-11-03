@@ -135,6 +135,10 @@
         "capability": {
           "type": "string"
         },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
@@ -803,6 +807,93 @@
         "conversation_key",
         "session_id",
         "trusted_until"
+      ],
+      "type": "object"
+    },
+    "CheckoutInputBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "cart_items": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "customer_phone": {
+          "type": "string"
+        },
+        "customer_ref": {
+          "type": "string"
+        },
+        "payment_method": {
+          "type": "string"
+        },
+        "register_ref": {
+          "type": "string"
+        },
+        "requested_total": {
+          "type": "string"
+        },
+        "shift_ref": {
+          "type": "string"
+        },
+        "till_session_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cart_items",
+        "currency",
+        "payment_method",
+        "requested_total"
+      ],
+      "type": "object"
+    },
+    "CheckoutOperationContract": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/CheckoutInputBinding"
+        },
+        "outcomes": {
+          "items": {
+            "$ref": "#/$defs/CheckoutOutcomeBinding"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "outcomes"
+      ],
+      "type": "object"
+    },
+    "CheckoutOutcomeBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "payment_initiated",
+            "payment_settled",
+            "invoice_issued",
+            "fulfillment_completed"
+          ],
+          "type": "string"
+        },
+        "reference_field": {
+          "type": "string"
+        },
+        "status_field": {
+          "type": "string"
+        },
+        "success_value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "status_field",
+        "success_value"
       ],
       "type": "object"
     },
@@ -3839,6 +3930,10 @@
         "capability": {
           "type": "string"
         },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
         "name": {
           "type": "string"
         },
@@ -5576,6 +5671,10 @@
         "capability": {
           "type": "string"
         },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
         "input_schema": {
           "$ref": "#/$defs/SchemaRef"
         },
@@ -6244,6 +6343,93 @@
         "conversation_key",
         "session_id",
         "trusted_until"
+      ],
+      "type": "object"
+    },
+    "CheckoutInputBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "cart_items": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "customer_phone": {
+          "type": "string"
+        },
+        "customer_ref": {
+          "type": "string"
+        },
+        "payment_method": {
+          "type": "string"
+        },
+        "register_ref": {
+          "type": "string"
+        },
+        "requested_total": {
+          "type": "string"
+        },
+        "shift_ref": {
+          "type": "string"
+        },
+        "till_session_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cart_items",
+        "currency",
+        "payment_method",
+        "requested_total"
+      ],
+      "type": "object"
+    },
+    "CheckoutOperationContract": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/CheckoutInputBinding"
+        },
+        "outcomes": {
+          "items": {
+            "$ref": "#/$defs/CheckoutOutcomeBinding"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "outcomes"
+      ],
+      "type": "object"
+    },
+    "CheckoutOutcomeBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "payment_initiated",
+            "payment_settled",
+            "invoice_issued",
+            "fulfillment_completed"
+          ],
+          "type": "string"
+        },
+        "reference_field": {
+          "type": "string"
+        },
+        "status_field": {
+          "type": "string"
+        },
+        "success_value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "status_field",
+        "success_value"
       ],
       "type": "object"
     },
@@ -9255,6 +9441,10 @@
         "capability": {
           "type": "string"
         },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
         "name": {
           "type": "string"
         },
@@ -10856,6 +11046,12 @@
     "BusinessScopeKind": [
       "tenant",
       "legal_entity"
+    ],
+    "CheckoutOutcomeKind": [
+      "payment_initiated",
+      "payment_settled",
+      "invoice_issued",
+      "fulfillment_completed"
     ],
     "ConfigurationSurfaceKind": [
       "query",
