@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// ApplyDefaultValues fills fields that were omitted from a new document using
+// their DocType defaults. Explicit values, including explicit nils, are kept.
 func ApplyDefaultValues(dt *DocType, doc *Document) {
 	if dt == nil || doc == nil {
 		return
