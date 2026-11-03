@@ -7,12 +7,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/api"
 	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
@@ -23,6 +25,7 @@ import (
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/site"
+	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -168,7 +171,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	commandKernel.CommandSchemas = schemas
 	operation := contract.OperationSpec{Name: "issue", Input: inputSchema, Output: outputSchema, Effect: contract.EffectLocal}
 	offer := contract.CapabilityOffer{Name: "billing.invoice", Contract: outputSchema, Operations: []contract.OperationSpec{operation}}
-	owner := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}, PublishedOperations: []contract.PublishedOperation{{Name: "issue", Capability: offer.Name, Operation: operation.Name, ScopePolicy: contract.ScopeEntityOwned, AllowedCallers: []contract.ModuleID{"sales.orders"}}}}
+	owner := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}, PublishedOperations: []contract.PublishedOperation{{Name: "issue", Capability: offer.Name, Operation: operation.Name, ScopePolicy: contract.ScopeEntityOwned, OfflineEligible: true, AllowedCallers: []contract.ModuleID{"sales.orders"}}}}
 	caller := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: offer.Name, Contract: offer.Contract, Required: true}}}
 	providers, err := registeredKernelCommandProviders(tenant, database, registry, []contract.ModuleDescriptor{caller, owner}, commands, commandKernel, schemas, nil)
 	if err != nil {
@@ -391,6 +394,58 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	if publicErr != nil || publicReplay.ExecutionID != publicReceipt.ExecutionID {
 		t.Fatalf("public registered operation retry = (%+v,%v), want original %s", publicReplay, publicErr, publicReceipt.ExecutionID)
 	}
+	beforeHTTPRecords, beforeHTTPEvents, beforeHTTPAudits := moduleCommandCounts(t, ctx, database, dialect, invoice, tenant)
+	// Exercise the actual offline-intents HTTP boundary against the same durable
+	// SQL receipt executor used by tenant runtime assembly. Replaying the
+	// already committed idempotency key must return the original receipt and
+	// must not apply the owner command a second time.
+	moduleSnapshot, err = reloadedStore.Load(tenant)
+	if err != nil {
+		t.Fatal("load module snapshot for offline HTTP retry:", err)
+	}
+	runtimeServices := api.NewSiteRuntimeServices()
+	runtimeServices.Replace(string(tenant), api.SiteRuntimeService{
+		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return moduleSnapshot, nil },
+		ExecutePublishedOperation: func(requestCtx context.Context, actor policy.Execution, businessScope contract.BusinessScope, moduleOwner contract.ModuleID, publishedOperation contract.PublishedOperation, schemaRef contract.SchemaRef, meta contract.CommandMeta, inputJSON []byte) (contract.OperationReceipt, error) {
+			return executePublishedOperation(requestCtx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, actor, businessScope, moduleOwner, publishedOperation, schemaRef, meta, inputJSON)
+		},
+	})
+	handler := api.NewHandler(registry, nil)
+	handler.RuntimeServices = runtimeServices
+	intent := contract.OfflineIntent{
+		LocalOperationID: "offline-retry-" + suffix[:12], BusinessScope: scope,
+		OperationRef: contract.PublishedOperationRef(owner.ID, offer.Name, operation.Name),
+		InputSchema:  inputSchema, Input: payload, IdempotencyKey: publicMeta.IdempotencyKey,
+		CatalogRevision: moduleSnapshot.Revision,
+	}
+	requestBody, err := json.Marshal(contract.OfflineIntentsRequest{Intents: []contract.OfflineIntent{intent}})
+	if err != nil {
+		t.Fatal("encode offline intent request:", err)
+	}
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	requestContext, _ := gin.CreateTestContext(response)
+	requestContext.Request = httptest.NewRequest("POST", "/api/v2/offline/intents", strings.NewReader(string(requestBody)))
+	requestContext.Request.Header.Set("X-Kora-Legal-Entity-ID", scope.LegalEntityID)
+	requestContext.Set("site_name", string(tenant))
+	requestContext.Set("policy_execution", execution)
+	handler.HandleOfflineIntentsV2(requestContext)
+	if response.Code != 200 {
+		t.Fatalf("offline HTTP retry status=%d body=%s", response.Code, response.Body.String())
+	}
+	var offlineResponse struct {
+		Data contract.OfflineIntentsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &offlineResponse); err != nil {
+		t.Fatal("decode offline HTTP retry response:", err)
+	}
+	if len(offlineResponse.Data.Receipts) != 1 || offlineResponse.Data.Receipts[0].LocalOperationID != intent.LocalOperationID || offlineResponse.Data.Receipts[0].Receipt.ExecutionID != publicReceipt.ExecutionID {
+		t.Fatalf("offline HTTP retry did not preserve durable receipt identity: %+v; original=%+v", offlineResponse.Data, publicReceipt)
+	}
+	afterHTTPRecords, afterHTTPEvents, afterHTTPAudits := moduleCommandCounts(t, ctx, database, dialect, invoice, tenant)
+	if afterHTTPRecords != beforeHTTPRecords || afterHTTPEvents != beforeHTTPEvents || afterHTTPAudits != beforeHTTPAudits {
+		t.Fatalf("offline idempotent HTTP retry changed committed command effects from (%d,%d,%d) to (%d,%d,%d)", beforeHTTPRecords, beforeHTTPEvents, beforeHTTPAudits, afterHTTPRecords, afterHTTPEvents, afterHTTPAudits)
+	}
 	publicLookup, foundPublic, lookupErr := lookupPublishedOperation(ctx, reloadedStore, commandKernel, commands, resolvePublicPlan, execution, scope, owner.ID, owner.PublishedOperations[0], publicMeta.IdempotencyKey)
 	if lookupErr != nil || !foundPublic || publicLookup.ExecutionID != publicReceipt.ExecutionID {
 		t.Fatalf("public operation lookup = (%+v,%v,%v), want original %s", publicLookup, foundPublic, lookupErr, publicReceipt.ExecutionID)
@@ -529,6 +584,14 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 
 func assertModuleCommandCounts(t *testing.T, ctx context.Context, database *sql.DB, dialect kdb.Dialect, invoice *doctype.DocType, tenant contract.TenantID, wantRecords, wantEvents, wantAudits int) {
 	t.Helper()
+	records, events, audits := moduleCommandCounts(t, ctx, database, dialect, invoice, tenant)
+	if records != wantRecords || events != wantEvents || audits != wantAudits {
+		t.Fatalf("owner command effects (records=%d events=%d audits=%d), want (%d,%d,%d)", records, events, audits, wantRecords, wantEvents, wantAudits)
+	}
+}
+
+func moduleCommandCounts(t *testing.T, ctx context.Context, database *sql.DB, dialect kdb.Dialect, invoice *doctype.DocType, tenant contract.TenantID) (int, int, int) {
+	t.Helper()
 	var records, events, audits int
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(invoice.RawTableName())).Scan(&records); err != nil {
 		t.Fatal("count owner command records:", err)
@@ -539,7 +602,5 @@ func assertModuleCommandCounts(t *testing.T, ctx context.Context, database *sql.
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site=? AND command_name='finance.invoice.issue' AND status='completed'", string(tenant)).Scan(&audits); err != nil {
 		t.Fatal("count owner command audits:", err)
 	}
-	if records != wantRecords || events != wantEvents || audits != wantAudits {
-		t.Fatalf("owner command effects (records=%d events=%d audits=%d), want (%d,%d,%d)", records, events, audits, wantRecords, wantEvents, wantAudits)
-	}
+	return records, events, audits
 }
