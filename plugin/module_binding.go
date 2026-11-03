@@ -259,7 +259,7 @@ type PublishedQueryReplayExecutor interface {
 // ScopedPublishedQueryReplayExecutor preserves actor filtering in offline feeds.
 // Providers must apply this scope before selecting/page-limiting changes.
 type ScopedPublishedQueryReplayExecutor interface {
-	ReplayPublishedQueryForActor(context.Context, contract.ModuleExecution, contract.PublishedQuery, PublishedQueryActorScope, json.RawMessage, string, string, string, uint16) (contract.QueryReplayPage, error)
+	ReplayPublishedQueryForActor(context.Context, contract.ModuleExecution, contract.PublishedQuery, PublishedQueryActorScope, json.RawMessage, string, string, string, string, uint16) (contract.QueryReplayPage, error)
 }
 
 type ResolvedPublishedQuery struct {
@@ -296,14 +296,14 @@ func (p BindingPlan) ExecutePublishedQueryForActor(ctx context.Context, scope co
 // ReplayPublishedQueryForActor returns only the authenticated actor's published
 // changes. Providers without a source-level scoped replay implementation are
 // ineligible for offline feeds.
-func (p BindingPlan) ReplayPublishedQueryForActor(ctx context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, actorScope PublishedQueryActorScope, input json.RawMessage, afterCursor, throughCursor, replayCursor string, limit uint16) (contract.QueryReplayPage, error) {
+func (p BindingPlan) ReplayPublishedQueryForActor(ctx context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, actorScope PublishedQueryActorScope, input json.RawMessage, snapshotToken, afterCursor, throughCursor, replayCursor string, limit uint16) (contract.QueryReplayPage, error) {
 	key := PublishedQueryKey{Scope: scope, OwnerModuleID: owner, Name: name}
 	resolved, ok := p.Queries[key]
 	if !ok || resolved.replay == nil || resolved.validate == nil || resolved.Definition.OfflineEligible == false || actorScope.BusinessScope != scope || strings.TrimSpace(actorScope.SubjectID) == "" {
 		return contract.QueryReplayPage{}, fmt.Errorf("published query is not eligible for offline actor replay")
 	}
 	query := resolved.Definition
-	if scope.Validate() != nil || contract.ValidateResourceBusinessScope(scope, query.ScopePolicy) != nil || len(input) == 0 || len(input) > 65536 || !json.Valid(input) {
+	if scope.Validate() != nil || contract.ValidateResourceBusinessScope(scope, query.ScopePolicy) != nil || len(input) == 0 || len(input) > 65536 || !json.Valid(input) || strings.TrimSpace(snapshotToken) == "" || len(snapshotToken) > 2048 {
 		return contract.QueryReplayPage{}, fmt.Errorf("published query replay identity is invalid")
 	}
 	if limit == 0 {
@@ -323,7 +323,7 @@ func (p BindingPlan) ReplayPublishedQueryForActor(ctx context.Context, scope con
 	if err != nil {
 		return contract.QueryReplayPage{}, err
 	}
-	page, err := provider.ReplayPublishedQueryForActor(ctx, execution, query, actorScope, append(json.RawMessage(nil), input...), afterCursor, throughCursor, replayCursor, limit)
+	page, err := provider.ReplayPublishedQueryForActor(ctx, execution, query, actorScope, append(json.RawMessage(nil), input...), snapshotToken, afterCursor, throughCursor, replayCursor, limit)
 	if err != nil {
 		return contract.QueryReplayPage{}, err
 	}

@@ -229,7 +229,7 @@ func (h *Handler) HandleOfflinePullV2(c *gin.Context) {
 	if actorScope != nil {
 		actorScopeValue.AssignedFields = append([]string(nil), actorScope.AssignedFields...)
 	}
-	page, err := plan.ReplayPublishedQueryForActor(c.Request.Context(), request.BusinessScope, query.OwnerModuleID, query.Name, actorScopeValue, request.Source.Input, request.ReplayPosition, request.ThroughCursor, request.PageCursor, request.Limit)
+	page, err := plan.ReplayPublishedQueryForActor(c.Request.Context(), request.BusinessScope, query.OwnerModuleID, query.Name, actorScopeValue, request.Source.Input, request.SnapshotToken, request.ReplayPosition, request.ThroughCursor, request.PageCursor, request.Limit)
 	if err != nil {
 		writeError(c, http.StatusServiceUnavailable, "module.offline_replay_unavailable", "Published query replay is unavailable or revoked", nil)
 		return
