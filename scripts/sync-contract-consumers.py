@@ -22,8 +22,8 @@ CONSUMERS = {
 }
 ANDROID = PROJECTS / "kora-mobile"
 ANDROID_SCHEMA = ANDROID / "app/src/main/assets/contracts/engine-v2.json"
-ANDROID_TEST_SCHEMA = ANDROID / "app/src/test/resources/contracts/engine-v2.json"
 ANDROID_MANIFEST = ANDROID / "app/src/main/java/com/kora/mobile/generated/EngineContractManifest.kt"
+CLOUD_MANIFEST = PROJECTS / "kora-cloud/contract-fixtures/engine-v2-manifest.json"
 MANIFESTS = (
     ENGINE / "ui/src/generated/manifest.ts",
     PROJECTS / "kora-studio-mvp/src/generated/engine-v2.manifest.ts",
@@ -50,7 +50,7 @@ def source_revision(engine: Path = ENGINE) -> tuple[str, str]:
     return revision, "uncommitted" if dirty else "clean"
 
 
-def render_manifest(revision: str, source_tree: str, artifact_hash: str) -> bytes:
+def render_manifest(revision: str, source_tree: str, artifact_hash: str, schema_hash: str) -> bytes:
     text = (
         "// This manifest pins the Engine source revision and bytes used to generate\n"
         "// engine-v2.ts. Regenerate it only when the Engine contract artifact changes.\n"
@@ -60,6 +60,7 @@ def render_manifest(revision: str, source_tree: str, artifact_hash: str) -> byte
         f"  sourceTree: '{source_tree}',\n"
         "  artifact: 'contract/generated/engine-v2.ts',\n"
         f"  artifactSHA256: '{artifact_hash}',\n"
+        f"  schemaSHA256: '{schema_hash}',\n"
         "} as const\n"
     )
     return text.encode("utf-8")
@@ -80,17 +81,31 @@ def render_android_manifest(revision: str, source_tree: str, schema_hash: str) -
     return text.encode("utf-8")
 
 
+def render_cloud_manifest(revision: str, source_tree: str, artifact_hash: str, schema_hash: str) -> bytes:
+    document = {
+        "schema_version": 2,
+        "source_revision": revision,
+        "source_tree": source_tree,
+        "schema": "kora/contract/schema/engine-v2.json",
+        "schema_sha256": schema_hash,
+        "typescript": "kora/contract/generated/engine-v2.ts",
+        "typescript_sha256": artifact_hash,
+    }
+    return (json.dumps(document, indent=2) + "\n").encode("utf-8")
+
+
 def expected_files(update_snapshot_date: bool) -> dict[Path, bytes]:
     source = SOURCE_TYPESCRIPT.read_bytes()
     artifact_hash = sha256(source)
     revision, source_tree = source_revision()
     files = {path: source for path in CONSUMERS.values()}
-    manifest = render_manifest(revision, source_tree, artifact_hash)
-    files.update({path: manifest for path in MANIFESTS})
     schema = SOURCE_SCHEMA.read_bytes()
     schema_hash = sha256(schema)
+    manifest = render_manifest(revision, source_tree, artifact_hash, schema_hash)
+    files.update({path: manifest for path in MANIFESTS})
+    cloud_manifest = render_cloud_manifest(revision, source_tree, artifact_hash, schema_hash)
+    files[CLOUD_MANIFEST] = cloud_manifest
     files[ANDROID_SCHEMA] = schema
-    files[ANDROID_TEST_SCHEMA] = schema
     android_manifest = render_android_manifest(revision, source_tree, schema_hash)
     files[ANDROID_MANIFEST] = android_manifest
 
@@ -134,6 +149,8 @@ def expected_files(update_snapshot_date: bool) -> dict[Path, bytes]:
         contract_entry["android_schema_sha256"] = schema_hash
         contract_entry["android_manifest"] = "kora-mobile-app/app/src/main/java/com/kora/mobile/generated/EngineContractManifest.kt"
         contract_entry["android_manifest_sha256"] = sha256(android_manifest)
+        contract_entry["cloud_manifest"] = "kora-cloud/contract-fixtures/engine-v2-manifest.json"
+        contract_entry["cloud_manifest_sha256"] = sha256(cloud_manifest)
     files[FIXTURE_MANIFEST] = (json.dumps(fixture_manifest, indent=2) + "\n").encode("utf-8")
     return files
 
@@ -161,7 +178,7 @@ def main() -> int:
         print("run `make sync-contracts` from a checkout with all first-party repositories", file=sys.stderr)
         return 1
     if stale:
-        print(f"synchronized {len(CONSUMERS) + 2} Engine v2 contract copies and manifests")
+        print("synchronized generated Engine v2 consumers and manifests")
     else:
         print("Engine v2 contract copies and manifests are current")
     return 0

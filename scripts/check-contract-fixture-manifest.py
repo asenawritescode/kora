@@ -61,7 +61,7 @@ def main() -> int:
                 hash_key = f"{copy_key}_sha256"
                 verify(contract[copy_key], contract[hash_key])
                 checked += 1
-        for android_key in ("android_schema", "android_manifest"):
+        for android_key in ("android_schema", "android_manifest", "cloud_manifest"):
             if android_key in contract:
                 verify(contract[android_key], contract[f"{android_key}_sha256"])
                 checked += 1

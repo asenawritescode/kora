@@ -64,7 +64,9 @@
       "android_schema": "kora-mobile-app/app/src/main/assets/contracts/engine-v2.json",
       "android_schema_sha256": "d74f54702dba6bcafcf0b4500c84becdb1c4e90c976e47a05e1a864ac5f83d2e",
       "android_manifest": "kora-mobile-app/app/src/main/java/com/kora/mobile/generated/EngineContractManifest.kt",
-      "android_manifest_sha256": "ed7ca79d4374dc865196f0601965d5563e6947f17d1643280c55b853cb12da0d"
+      "android_manifest_sha256": "ed7ca79d4374dc865196f0601965d5563e6947f17d1643280c55b853cb12da0d",
+      "cloud_manifest": "kora-cloud/contract-fixtures/engine-v2-manifest.json",
+      "cloud_manifest_sha256": "3fb02a12230fd7093e4e443e2ace406ab7be02ce50ac1dd150485b8a3c5d151c"
     }
   ]
 }

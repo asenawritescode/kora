@@ -53,6 +53,17 @@ class AndroidManifestTest(unittest.TestCase):
         self.assertIn('app/src/main/assets/contracts/engine-v2.json', manifest)
         self.assertEqual(MODULE.sha256(schema), digest)
 
+    def test_typescript_and_cloud_pins_include_schema_and_artifact_hashes(self):
+        schema_hash = "a" * 64
+        artifact_hash = "b" * 64
+        typescript = MODULE.render_manifest("d19b735", "clean", artifact_hash, schema_hash).decode()
+        self.assertIn(f"schemaSHA256: '{schema_hash}'", typescript)
+        self.assertIn(f"artifactSHA256: '{artifact_hash}'", typescript)
+        cloud = MODULE.json.loads(MODULE.render_cloud_manifest("d19b735", "clean", artifact_hash, schema_hash))
+        self.assertEqual(cloud["source_revision"], "d19b735")
+        self.assertEqual(cloud["schema_sha256"], schema_hash)
+        self.assertEqual(cloud["typescript_sha256"], artifact_hash)
+
     def test_untracked_generator_input_dirties_contract_source(self):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
