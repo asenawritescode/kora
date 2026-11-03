@@ -497,7 +497,7 @@ func (c ApplicationCatalog) Validate() error {
 	queries := map[string]bool{}
 	for _, query := range c.PublishedQueries {
 		key := string(query.OwnerModuleID) + "/" + query.Name
-		if !modules[query.OwnerModuleID] || !validModuleName(query.Name) || query.Route != "/api/modules/"+string(query.OwnerModuleID)+"/queries/"+query.Name || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 || queries[key] || validateSurfacePresentation(query.Presentation) != nil {
+		if !modules[query.OwnerModuleID] || !validModuleName(query.Name) || query.Route != "/api/v1/modules/"+string(query.OwnerModuleID)+"/queries/"+query.Name || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 || queries[key] || validateSurfacePresentation(query.Presentation) != nil {
 			return fmt.Errorf("application catalog has an invalid or duplicate published query")
 		}
 		queries[key] = true
@@ -511,7 +511,7 @@ func (c ApplicationCatalog) Validate() error {
 	projections := map[string]bool{}
 	for _, projection := range c.PublishedProjections {
 		key := string(projection.OwnerModuleID) + "/" + projection.ID
-		if !modules[projection.OwnerModuleID] || !validModuleName(projection.ID) || projection.Route != "/api/modules/"+string(projection.OwnerModuleID)+"/projections/"+projection.ID || projection.ScopePolicy != ScopeTenantShared && projection.ScopePolicy != ScopeEntityOwned || len(projection.AllowedFields) == 0 || projections[key] {
+		if !modules[projection.OwnerModuleID] || !validModuleName(projection.ID) || projection.Route != "/api/v1/modules/"+string(projection.OwnerModuleID)+"/projections/"+projection.ID || projection.ScopePolicy != ScopeTenantShared && projection.ScopePolicy != ScopeEntityOwned || len(projection.AllowedFields) == 0 || projections[key] {
 			return fmt.Errorf("application catalog has an invalid or duplicate published projection")
 		}
 		projections[key] = true

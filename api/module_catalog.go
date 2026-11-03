@@ -113,7 +113,7 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 			if _, exists := plan.QueryDefinitions[plugin.PublishedQueryKey{Scope: scope, OwnerModuleID: owner, Name: query.Name}]; !exists {
 				continue
 			}
-			catalog.PublishedQueries = append(catalog.PublishedQueries, contract.ApplicationCatalogQuery{OwnerModuleID: owner, Name: query.Name, Route: "/api/modules/" + string(owner) + "/queries/" + query.Name, InputSchema: query.InputSchema, OutputSchema: query.OutputSchema, ScopePolicy: query.ScopePolicy, AllowedFields: append([]string(nil), query.AllowedFields...), PageLimit: query.PageLimit, Presentation: query.Presentation, OfflineEligible: plan.CanReplayPublishedQueryOffline(scope, owner, query.Name)})
+			catalog.PublishedQueries = append(catalog.PublishedQueries, contract.ApplicationCatalogQuery{OwnerModuleID: owner, Name: query.Name, Route: "/api/v1/modules/" + string(owner) + "/queries/" + query.Name, InputSchema: query.InputSchema, OutputSchema: query.OutputSchema, ScopePolicy: query.ScopePolicy, AllowedFields: append([]string(nil), query.AllowedFields...), PageLimit: query.PageLimit, Presentation: query.Presentation, OfflineEligible: plan.CanReplayPublishedQueryOffline(scope, owner, query.Name)})
 			moduleVisible = true
 			usedSchemas[query.InputSchema], usedSchemas[query.OutputSchema] = true, true
 		}
@@ -125,7 +125,7 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 			if !authorizePublishedProjection(execution, h.siteRegistry(c), projection, scope, projectionScope, "read") {
 				continue
 			}
-			catalog.PublishedProjections = append(catalog.PublishedProjections, contract.ApplicationCatalogProjection{OwnerModuleID: owner, ID: projection.ID, Route: "/api/modules/" + string(owner) + "/projections/" + projection.ID, OutputSchema: projection.OutputSchema, ScopePolicy: projectionScope, AllowedFields: append([]string(nil), projection.AllowedFields...)})
+			catalog.PublishedProjections = append(catalog.PublishedProjections, contract.ApplicationCatalogProjection{OwnerModuleID: owner, ID: projection.ID, Route: "/api/v1/modules/" + string(owner) + "/projections/" + projection.ID, OutputSchema: projection.OutputSchema, ScopePolicy: projectionScope, AllowedFields: append([]string(nil), projection.AllowedFields...)})
 			moduleVisible = true
 			usedSchemas[projection.OutputSchema] = true
 		}

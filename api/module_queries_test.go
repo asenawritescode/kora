@@ -223,7 +223,7 @@ func TestApplicationCatalogFiltersSurfacesByActorGrant(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Data.PublishedQueries) != 1 || len(response.Data.PublishedProjections) != 1 || response.Data.PublishedProjections[0].Route != "/api/modules/sales.orders/projections/history" || response.Data.Revision != 7 || len(response.Data.Schemas) != 2 {
+	if len(response.Data.PublishedQueries) != 1 || response.Data.PublishedQueries[0].Route != "/api/v1/modules/sales.orders/queries/list" || len(response.Data.PublishedProjections) != 1 || response.Data.PublishedProjections[0].Route != "/api/v1/modules/sales.orders/projections/history" || response.Data.Revision != 7 || len(response.Data.Schemas) != 2 {
 		t.Fatalf("unexpected actor catalog: %+v", response.Data)
 	}
 }
