@@ -41,6 +41,18 @@ class SourceRevisionTest(unittest.TestCase):
             (repo / "contract/types.go").write_text("package contract // changed\n")
             self.assertEqual(MODULE.source_revision(repo)[1], "uncommitted")
 
+
+class AndroidManifestTest(unittest.TestCase):
+    def test_android_manifest_pins_authoritative_schema_bytes(self):
+        schema = b'{"$defs":{},"title":"Kora Engine v2 wire contracts"}'
+        digest = MODULE.sha256(schema)
+        manifest = MODULE.render_android_manifest("abc123", "clean", digest).decode()
+        self.assertIn('const val sourceRevision = "abc123"', manifest)
+        self.assertIn('const val sourceTree = "clean"', manifest)
+        self.assertIn(f'const val schemaSHA256 = "{digest}"', manifest)
+        self.assertIn('app/src/main/assets/contracts/engine-v2.json', manifest)
+        self.assertEqual(MODULE.sha256(schema), digest)
+
     def test_untracked_generator_input_dirties_contract_source(self):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)

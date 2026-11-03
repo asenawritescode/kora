@@ -7,6 +7,47 @@ on:
     branches: [main]
 
 jobs:
+  contract-conformance:
+    name: Cross-repository contract conformance
+    runs-on: ubuntu-latest
+    env:
+      KORA_PROJECTS_ROOT: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: asenawritescode/kora-cloud
+          path: kora-cloud
+      - uses: actions/checkout@v4
+        with:
+          repository: asenawritescode/kora-ui
+          path: kora-studio-mvp
+      - uses: actions/checkout@v4
+        with:
+          repository: asenawritescode/kora-ts-extension-sdk
+          path: kora-ts-sdk
+      - uses: actions/checkout@v4
+        with:
+          repository: asenawritescode/kora-mobile-app
+          path: kora-mobile
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Verify producer generation and every consumer pin
+        run: |
+          go run ./cmd/contractgen -check
+          python3 scripts/sync-contract-consumers.py --check
+          python3 scripts/check-contract-fixture-manifest.py
+      - name: Decode shared Engine fixtures in the TypeScript SDK
+        run: |
+          cd kora-ts-sdk
+          bun install --frozen-lockfile
+          bun test src/contract-fixtures.test.ts
+          bun run build
+
   go:
     name: Go
     runs-on: ubuntu-latest

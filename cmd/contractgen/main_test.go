@@ -40,6 +40,27 @@ func TestGeneratorDeterministicAndIncludesWireDefinitions(t *testing.T) {
 	}
 }
 
+func TestV2SemanticRulesAreEmittedForStrictClientDecoding(t *testing.T) {
+	data, err := generateVersion("../../contract", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err = addV2SemanticRules(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"not"`) || !strings.Contains(string(data), `"legal_entity"`) || !strings.Contains(string(data), `"outcome_unknown"`) {
+		t.Fatal("generated v2 schema is missing scope and status-specific constraints")
+	}
+	ts, err := generateTypeScript(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ts), `schema.not !== undefined`) {
+		t.Fatal("generated TypeScript decoder does not enforce negated schema conditions")
+	}
+}
+
 func TestGeneratorDiscoversOnlyMarkedRoots(t *testing.T) {
 	dir := t.TempDir()
 	src := `package contract

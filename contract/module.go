@@ -226,6 +226,27 @@ type QueryResult struct {
 	Freshness      QueryFreshness `json:"freshness"`
 }
 
+// PublishedQueryRequest is the public request envelope for owner-published reads.
+// The module's registered input schema validates Input after this envelope.
+//
+//contract:wire:v2
+type PublishedQueryRequest struct {
+	//contract:maxJSONBytes=65536
+	//contract:json
+	Input json.RawMessage `json:"input"`
+	//contract:maxLength=1024
+	Cursor string `json:"cursor,omitempty"`
+	//contract:max=1000
+	Limit uint16 `json:"limit,omitempty"`
+}
+
+func (r PublishedQueryRequest) Validate() error {
+	if len(r.Input) == 0 || len(r.Input) > 65536 || !json.Valid(r.Input) || len(r.Cursor) > 1024 || r.Limit > 1000 {
+		return fmt.Errorf("published query request is invalid or exceeds bounds")
+	}
+	return nil
+}
+
 // ApplicationCatalog is the actor-filtered tenant-session view of published
 // module reads and actions. It contains presentation metadata and only schemas
 // referenced by surfaces this actor may access; it grants no execution rights.

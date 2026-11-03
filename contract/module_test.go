@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -573,5 +574,20 @@ func TestPublishedOperationsRequireExplicitCallerAllowlist(t *testing.T) {
 	module.PublishedOperations[0].AllowedCallers = []ModuleID{"sales.orders", "sales.orders"}
 	if err := module.Validate(nil); err == nil {
 		t.Fatal("duplicate trusted caller accepted")
+	}
+}
+
+func TestPublishedQueryRequestBoundsInputAndPagination(t *testing.T) {
+	request := PublishedQueryRequest{Input: json.RawMessage(`{"status":"open"}`), Cursor: "cursor-1", Limit: 25}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("valid published query request rejected: %v", err)
+	}
+	request.Input = json.RawMessage(`{`)
+	if err := request.Validate(); err == nil {
+		t.Fatal("invalid query input JSON accepted")
+	}
+	request = PublishedQueryRequest{Input: json.RawMessage(`{}`), Limit: 1001}
+	if err := request.Validate(); err == nil {
+		t.Fatal("query limit above public bound accepted")
 	}
 }

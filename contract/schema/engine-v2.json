@@ -484,6 +484,40 @@
     },
     "BusinessScope": {
       "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "properties": null,
+            "required": [
+              "legal_entity_id"
+            ],
+            "type": "object"
+          },
+          "properties": {
+            "kind": {
+              "const": "tenant"
+            }
+          },
+          "required": [
+            "kind",
+            "tenant_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "legal_entity"
+            }
+          },
+          "required": [
+            "kind",
+            "tenant_id",
+            "legal_entity_id"
+          ],
+          "type": "object"
+        }
+      ],
       "properties": {
         "kind": {
           "enum": [
@@ -493,9 +527,13 @@
           "type": "string"
         },
         "legal_entity_id": {
+          "maxLength": 160,
+          "minLength": 1,
           "type": "string"
         },
         "tenant_id": {
+          "maxLength": 160,
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -2345,6 +2383,105 @@
     },
     "OperationReceipt": {
       "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "properties": null,
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "properties": {
+            "status": {
+              "const": "completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "output",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "error"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "status": {
+              "enum": [
+                "accepted",
+                "running"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "output"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "status": {
+              "enum": [
+                "rejected",
+                "conflict",
+                "failed",
+                "outcome_unknown"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "error"
+          ],
+          "type": "object"
+        }
+      ],
       "properties": {
         "business_scope": {
           "$ref": "#/$defs/BusinessScope"
@@ -2371,6 +2508,8 @@
           "x-optional-pointer": true
         },
         "revision": {
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]*)$",
           "type": "string"
         },
         "status": {
@@ -3050,6 +3189,27 @@
         "page_limit",
         "presentation",
         "scope_policy"
+      ],
+      "type": "object"
+    },
+    "PublishedQueryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "limit": {
+          "maximum": 1000,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input"
       ],
       "type": "object"
     },
@@ -4999,6 +5159,40 @@
     },
     "BusinessScope": {
       "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "properties": null,
+            "required": [
+              "legal_entity_id"
+            ],
+            "type": "object"
+          },
+          "properties": {
+            "kind": {
+              "const": "tenant"
+            }
+          },
+          "required": [
+            "kind",
+            "tenant_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "legal_entity"
+            }
+          },
+          "required": [
+            "kind",
+            "tenant_id",
+            "legal_entity_id"
+          ],
+          "type": "object"
+        }
+      ],
       "properties": {
         "kind": {
           "enum": [
@@ -5008,9 +5202,13 @@
           "type": "string"
         },
         "legal_entity_id": {
+          "maxLength": 160,
+          "minLength": 1,
           "type": "string"
         },
         "tenant_id": {
+          "maxLength": 160,
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -6838,6 +7036,105 @@
     },
     "OperationReceipt": {
       "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "properties": null,
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "properties": {
+            "status": {
+              "const": "completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "output",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "error"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "status": {
+              "enum": [
+                "accepted",
+                "running"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "output"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "status": {
+              "enum": [
+                "rejected",
+                "conflict",
+                "failed",
+                "outcome_unknown"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "error"
+          ],
+          "type": "object"
+        }
+      ],
       "properties": {
         "business_scope": {
           "$ref": "#/$defs/BusinessScope"
@@ -6864,6 +7161,8 @@
           "x-optional-pointer": true
         },
         "revision": {
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]*)$",
           "type": "string"
         },
         "status": {
@@ -7543,6 +7842,27 @@
         "page_limit",
         "presentation",
         "scope_policy"
+      ],
+      "type": "object"
+    },
+    "PublishedQueryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "limit": {
+          "maximum": 1000,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input"
       ],
       "type": "object"
     },

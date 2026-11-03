@@ -136,10 +136,11 @@ type StepDefinition struct {
 
 //contract:wire:v2
 type WorkflowDefinition struct {
-	ID      DefinitionID   `json:"id"`
-	Version uint32         `json:"version"`
-	Entry   StepID         `json:"entry"`
-	Trigger *RecordTrigger `json:"trigger,omitempty"`
+	ID            DefinitionID   `json:"id"`
+	OwnerModuleID ModuleID       `json:"owner_module_id,omitempty"`
+	Version       uint32         `json:"version"`
+	Entry         StepID         `json:"entry"`
+	Trigger       *RecordTrigger `json:"trigger,omitempty"`
 	//contract:minItems=1
 	//contract:maxItems=100
 	Steps []StepDefinition `json:"steps"`

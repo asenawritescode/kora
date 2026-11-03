@@ -1,0 +1,76 @@
+{
+  "fixture_version": 1,
+  "engine_contract_version": "v2",
+  "valid": [
+    {
+      "contract": "BusinessScope",
+      "value": {"tenant_id": "tenant-a", "kind": "tenant"}
+    },
+    {
+      "contract": "BusinessScope",
+      "value": {"tenant_id": "tenant-a", "kind": "legal_entity", "legal_entity_id": "entity-a"}
+    },
+    {
+      "contract": "BusinessRef",
+      "value": {"provider_id": "billing", "resource_type": "invoice", "id": "inv-1", "scope": {"tenant_id": "tenant-a", "kind": "legal_entity", "legal_entity_id": "entity-a"}}
+    },
+    {
+      "contract": "PublishedQueryRequest",
+      "value": {"input": {"status": "open"}, "cursor": "page-1", "limit": 25}
+    },
+    {
+      "contract": "QueryResult",
+      "value": {"data": [{"id": "inv-1"}], "next_cursor": "page-2", "snapshot_token": "snap-7", "source_cursor": "change-9", "source_revision": "9", "as_of": "2026-11-03T09:00:00Z", "freshness": "fresh"}
+    },
+    {
+      "contract": "OperationReceipt",
+      "value": {"execution_id": "exec-1", "operation_ref": "finance.billing~billing.invoice~issue", "business_scope": {"tenant_id": "tenant-a", "kind": "legal_entity", "legal_entity_id": "entity-a"}, "status": "completed", "output_schema": {"id": "billing.issue.output", "version": 1}, "output": {"invoice_id": "inv-1"}, "revision": "7"}
+    },
+    {
+      "contract": "OperationReceipt",
+      "value": {"execution_id": "exec-2", "operation_ref": "finance.billing~billing.invoice~issue", "business_scope": {"tenant_id": "tenant-a", "kind": "tenant"}, "status": "outcome_unknown", "error": {"type": "outcome_unknown", "message": "provider outcome is being reconciled"}, "revision": "8"}
+    },
+    {
+      "contract": "WorkflowDefinition",
+      "value": {"id": "invoice-review", "version": 1, "entry": "wait", "steps": [{"id": "wait", "kind": "wait", "wait": {"on_timeout": "done", "timeout_seconds": 60}}, {"id": "done", "kind": "end", "end": {"outcome": "complete"}}]}
+    },
+    {
+      "contract": "ApplicationCatalog",
+      "value": {"revision": 7, "business_scope": {"tenant_id": "tenant-a", "kind": "tenant"}, "modules": [], "published_queries": [], "published_operations": [], "schemas": [], "allowed_entity_choices": [], "available_scopes": [], "blockers": []}
+    }
+  ],
+  "invalid": [
+    {
+      "contract": "BusinessScope",
+      "value": {"tenant_id": "tenant-a", "kind": "tenant", "legal_entity_id": "entity-a"}
+    },
+    {
+      "contract": "BusinessScope",
+      "value": {"tenant_id": "tenant-a", "kind": "legal_entity"}
+    },
+    {
+      "contract": "BusinessScope",
+      "value": {"tenant_id": "tenant-a", "kind": "workspace"}
+    },
+    {
+      "contract": "OperationReceipt",
+      "value": {"execution_id": "exec-3", "operation_ref": "finance.billing~billing.invoice~issue", "business_scope": {"tenant_id": "tenant-a", "kind": "tenant"}, "status": "completed", "output": {"ok": true}, "revision": "9"}
+    },
+    {
+      "contract": "OperationReceipt",
+      "value": {"execution_id": "exec-4", "operation_ref": "finance.billing~billing.invoice~issue", "business_scope": {"tenant_id": "tenant-a", "kind": "tenant"}, "status": "failed", "revision": "9"}
+    },
+    {
+      "contract": "OperationReceipt",
+      "value": {"execution_id": "exec-5", "operation_ref": "finance.billing~billing.invoice~issue", "business_scope": {"tenant_id": "tenant-a", "kind": "tenant"}, "status": "accepted", "error": {"type": "conflict", "message": "not accepted"}, "revision": "9"}
+    },
+    {
+      "contract": "OperationReceipt",
+      "value": {"execution_id": "exec-6", "operation_ref": "finance.billing~billing.invoice~issue", "business_scope": {"tenant_id": "tenant-a", "kind": "tenant"}, "status": "successful", "revision": "9"}
+    },
+    {
+      "contract": "QueryResult",
+      "value": {"data": [], "as_of": "2026-11-03T09:00:00Z", "freshness": "perfect"}
+    }
+  ]
+}

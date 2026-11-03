@@ -47,6 +47,10 @@ func main() {
 	if err != nil {
 		fatal(err.Error())
 	}
+	v2Data, err = addV2SemanticRules(v2Data)
+	if err != nil {
+		fatal(err.Error())
+	}
 	v2Validator, err := generateTypeScript(v2Data)
 	if err != nil {
 		fatal(err.Error())
@@ -75,6 +79,83 @@ func main() {
 			fatal("generated contract drift in " + path + "; run go run ./cmd/contractgen -write")
 		}
 	}
+}
+
+// addV2SemanticRules encodes invariants that Go's custom Validate methods
+// enforce but struct tags cannot express. They remain in the authoritative
+// JSON Schema so every generated decoder rejects the same malformed values.
+func addV2SemanticRules(data []byte) ([]byte, error) {
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, err
+	}
+	defs, ok := document["$defs"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("v2 schema is missing definitions")
+	}
+	object := func(properties map[string]any, required []string, not map[string]any) map[string]any {
+		branch := map[string]any{"type": "object", "properties": properties, "required": required}
+		if not != nil {
+			branch["not"] = not
+		}
+		return branch
+	}
+	forbidAny := func(fields ...string) map[string]any {
+		branches := make([]any, 0, len(fields))
+		for _, field := range fields {
+			branches = append(branches, object(nil, []string{field}, nil))
+		}
+		return map[string]any{"anyOf": branches}
+	}
+	scope, ok := defs["BusinessScope"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("v2 schema is missing BusinessScope")
+	}
+	scope["oneOf"] = []any{
+		object(map[string]any{"kind": map[string]any{"const": "tenant"}}, []string{"kind", "tenant_id"}, object(nil, []string{"legal_entity_id"}, nil)),
+		object(map[string]any{"kind": map[string]any{"const": "legal_entity"}}, []string{"kind", "tenant_id", "legal_entity_id"}, nil),
+	}
+	rootProperties, _ := document["properties"].(map[string]any)
+	scopeTargets := []map[string]any{scope}
+	if rootScope, ok := rootProperties["BusinessScope"].(map[string]any); ok {
+		rootScope["oneOf"] = scope["oneOf"]
+		scopeTargets = append(scopeTargets, rootScope)
+	}
+	for _, target := range scopeTargets {
+		properties, _ := target["properties"].(map[string]any)
+		for _, field := range []string{"tenant_id", "legal_entity_id"} {
+			if property, ok := properties[field].(map[string]any); ok {
+				property["minLength"], property["maxLength"] = 1, 160
+			}
+		}
+	}
+	receipt, ok := defs["OperationReceipt"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("v2 schema is missing OperationReceipt")
+	}
+	status := func(values ...string) map[string]any { return map[string]any{"enum": values, "type": "string"} }
+	receipt["oneOf"] = []any{
+		object(map[string]any{"status": map[string]any{"const": "completed", "type": "string"}}, []string{"status", "output", "output_schema"}, object(nil, []string{"error"}, nil)),
+		object(map[string]any{"status": status("accepted", "running")}, []string{"status"}, forbidAny("error", "output", "output_schema")),
+		object(map[string]any{"status": status("rejected", "conflict", "failed", "outcome_unknown")}, []string{"status", "error"}, forbidAny("output", "output_schema")),
+	}
+	receiptTargets := []map[string]any{receipt}
+	if rootReceipt, ok := rootProperties["OperationReceipt"].(map[string]any); ok {
+		rootReceipt["oneOf"] = receipt["oneOf"]
+		receiptTargets = append(receiptTargets, rootReceipt)
+	}
+	for _, target := range receiptTargets {
+		properties, _ := target["properties"].(map[string]any)
+		if revision, ok := properties["revision"].(map[string]any); ok {
+			revision["maxLength"] = 20
+			revision["pattern"] = "^(0|[1-9][0-9]*)$"
+		}
+	}
+	encoded, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(encoded, '\n'), nil
 }
 
 func fatal(message string) { fmt.Fprintln(os.Stderr, "contractgen:", message); os.Exit(1) }

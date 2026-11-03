@@ -42,10 +42,26 @@ func DecodeMarketplacePackageManifest(data []byte) (MarketplacePackageManifest, 
 			return MarketplacePackageManifest{}, err
 		}
 	}
+	if err := ValidateScheduledJobModuleOwners(manifest.ScheduledJobs, manifest.Modules); err != nil {
+		return MarketplacePackageManifest{}, err
+	}
 	if err := ValidateManifestPackRefs(manifest.Requires, manifest.Conflicts); err != nil {
 		return MarketplacePackageManifest{}, err
 	}
 	return manifest, nil
+}
+
+func ValidateScheduledJobModuleOwners(jobs []ScheduledJobDefinition, modules []ModuleDescriptor) error {
+	owners := make(map[ModuleID]bool, len(modules))
+	for _, module := range modules {
+		owners[module.ID] = true
+	}
+	for _, job := range jobs {
+		if job.OwnerModuleID != "" && !owners[job.OwnerModuleID] {
+			return fmt.Errorf("scheduled job %q names an undeclared owner module", job.Name)
+		}
+	}
+	return nil
 }
 
 // ValidateManifestPackRefs validates pinned package requirements and declared
@@ -97,6 +113,7 @@ func ValidateManifestPackRefs(requires, conflicts []ManifestPackRef) error {
 //contract:wire:v2
 type ScheduledJobDefinition struct {
 	Name              string         `json:"name"`
+	OwnerModuleID     ModuleID       `json:"owner_module_id,omitempty"`
 	Type              string         `json:"type"`
 	Schedule          string         `json:"schedule"`
 	Scope             *BusinessScope `json:"scope,omitempty"`
@@ -122,6 +139,9 @@ func ValidateScheduledJobDefinitions(jobs []ScheduledJobDefinition) error {
 		}
 		if names[name] {
 			return fmt.Errorf("scheduled job name %q is duplicated", name)
+		}
+		if job.OwnerModuleID != "" && !moduleIDPattern.MatchString(string(job.OwnerModuleID)) {
+			return fmt.Errorf("scheduled job %q has invalid owner module", name)
 		}
 		names[name] = true
 		if err := ValidateCronSchedule(job.Schedule); err != nil {

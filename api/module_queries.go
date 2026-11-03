@@ -12,12 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type publishedModuleQueryRequest struct {
-	Input  json.RawMessage `json:"input"`
-	Cursor string          `json:"cursor,omitempty"`
-	Limit  uint16          `json:"limit,omitempty"`
-}
-
 // HandlePublishedModuleQuery executes an owner-published query through the
 // tenant's pinned module provider plan. Actor authorization is performed
 // against the owner module's published query resource before dispatch.
@@ -54,10 +48,10 @@ func (h *Handler) HandlePublishedModuleQuery(c *gin.Context) {
 		writeError(c, http.StatusForbidden, "permission.denied", "Published query access is not granted", nil)
 		return
 	}
-	var request publishedModuleQueryRequest
+	var request contract.PublishedQueryRequest
 	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 65537))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil || len(request.Input) == 0 || len(request.Input) > 65536 {
+	if err := decoder.Decode(&request); err != nil || request.Validate() != nil {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid published query request", nil)
 		return
 	}

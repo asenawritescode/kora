@@ -105,7 +105,7 @@ func generateTypeScript(schemaBytes []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(&out, `type ContractSchema = { $defs: Record<string, ContractSchema>; properties?: Record<string, ContractSchema>; propertyNames?: ContractSchema; required?: string[]; items?: ContractSchema; additionalProperties?: boolean | ContractSchema; enum?: unknown[]; oneOf?: ContractSchema[]; anyOf?: ContractSchema[]; const?: unknown; type?: string; format?: string; pattern?: string; minimum?: number; maximum?: number; minLength?: number; maxLength?: number; minItems?: number; maxItems?: number; [key: string]: unknown };
+	fmt.Fprintf(&out, `type ContractSchema = { $defs: Record<string, ContractSchema>; properties?: Record<string, ContractSchema>; propertyNames?: ContractSchema; required?: string[]; items?: ContractSchema; additionalProperties?: boolean | ContractSchema; enum?: unknown[]; oneOf?: ContractSchema[]; anyOf?: ContractSchema[]; not?: ContractSchema; const?: unknown; type?: string; format?: string; pattern?: string; minimum?: number; maximum?: number; minLength?: number; maxLength?: number; minItems?: number; maxItems?: number; [key: string]: unknown };
 const contractSchema = JSON.parse(%s) as ContractSchema;
 
 function isJSONValue(value: unknown, depth = 0): boolean {
@@ -123,8 +123,9 @@ function matches(schema: ContractSchema, value: unknown, depth = 0): boolean {
   if (depth > 64) return false;
   if (schema["x-open-json-value"] === true) return isJSONValue(value) && (typeof schema["x-max-json-bytes"] !== "number" || new TextEncoder().encode(JSON.stringify(value)).length <= schema["x-max-json-bytes"]);
   if (schema.const !== undefined && value !== schema.const) return false;
-  if (Array.isArray(schema.oneOf)) return schema.oneOf.filter((branch) => matches(branch, value, depth + 1)).length === 1;
-  if (Array.isArray(schema.anyOf)) return schema.anyOf.some((branch) => matches(branch, value, depth + 1));
+  if (Array.isArray(schema.oneOf) && schema.oneOf.filter((branch) => matches(branch, value, depth + 1)).length !== 1) return false;
+  if (Array.isArray(schema.anyOf) && !schema.anyOf.some((branch) => matches(branch, value, depth + 1))) return false;
+  if (schema.not !== undefined && matches(schema.not, value, depth + 1)) return false;
   if (typeof schema.$ref === "string") {
     const name = schema.$ref.replace("#/$defs/", "");
     const target = contractSchema.$defs[name];
