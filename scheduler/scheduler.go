@@ -40,6 +40,7 @@ type JobHandler func(context.Context, *JobConfig) error
 // JobConfig holds the parsed scheduler configuration.
 type JobConfig struct {
 	Name              string                  `yaml:"name"     json:"name"`
+	OwnerModuleID     contract.ModuleID       `yaml:"owner_module_id,omitempty" json:"owner_module_id,omitempty"`
 	Type              JobType                 `yaml:"type"     json:"type"`
 	Schedule          string                  `yaml:"schedule" json:"schedule"` // Cron expression
 	Config            map[string]any          `yaml:"config"   json:"config"`
