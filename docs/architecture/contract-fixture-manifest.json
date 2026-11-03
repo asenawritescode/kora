@@ -31,7 +31,7 @@
     },
     {
       "name": "client-contracts-v2",
-      "sha256": "a9d9e3ff015ac5a4ce81dc050a30467946cc0f0f1187964c1808a79575eda4b8",
+      "sha256": "20cf71d21c1a6a0c8725e46f8eed0dd139ad66c234423708ccc07a8be841b95d",
       "consumers": [
         "kora/contract-fixtures/client-contracts-v2.json",
         "kora-cloud/contract-fixtures/client-contracts-v2.json",
@@ -45,28 +45,28 @@
     {
       "version": "v1",
       "schema": "kora/contract/schema/engine-v1.json",
-      "schema_sha256": "b69d9430fcfa5eb924a4934098e718cc820558313a72e580422430b3e0607307",
+      "schema_sha256": "9d56ea85961d45009615545f2a9ee15ca7874e751e93b950c202a76bf8862ff5",
       "typescript": "kora/contract/generated/engine-v1.ts",
-      "typescript_sha256": "a182066511ece83ad030b3ca988053cc4bb3d7f19d8f7f37595036e5deed2c33"
+      "typescript_sha256": "fa551819dc6fd6f8e5ff0e8cde8855f2ad33ecfa141f7429e410973816b8d219"
     },
     {
       "version": "v2",
       "schema": "kora/contract/schema/engine-v2.json",
-      "schema_sha256": "d74f54702dba6bcafcf0b4500c84becdb1c4e90c976e47a05e1a864ac5f83d2e",
+      "schema_sha256": "75763fe1da273c5e04f0f72cf4d743eb568c9bca5177ae74a868c602710ca693",
       "typescript": "kora/contract/generated/engine-v2.ts",
-      "typescript_sha256": "7d193bc1ecdcd5e8c7fccb54c6b76d14c4079b58ff995ad46112935aab9b82b4",
+      "typescript_sha256": "bcad9defd2b53e308d39f8c35751c99969ae8b85af15d09026601ba60c015674",
       "embedded_ui_copy": "kora/ui/src/generated/engine-v2.ts",
-      "embedded_ui_copy_sha256": "7d193bc1ecdcd5e8c7fccb54c6b76d14c4079b58ff995ad46112935aab9b82b4",
+      "embedded_ui_copy_sha256": "bcad9defd2b53e308d39f8c35751c99969ae8b85af15d09026601ba60c015674",
       "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
-      "studio_copy_sha256": "7d193bc1ecdcd5e8c7fccb54c6b76d14c4079b58ff995ad46112935aab9b82b4",
+      "studio_copy_sha256": "bcad9defd2b53e308d39f8c35751c99969ae8b85af15d09026601ba60c015674",
       "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
-      "sdk_copy_sha256": "7d193bc1ecdcd5e8c7fccb54c6b76d14c4079b58ff995ad46112935aab9b82b4",
+      "sdk_copy_sha256": "bcad9defd2b53e308d39f8c35751c99969ae8b85af15d09026601ba60c015674",
       "android_schema": "kora-mobile-app/app/src/main/assets/contracts/engine-v2.json",
-      "android_schema_sha256": "d74f54702dba6bcafcf0b4500c84becdb1c4e90c976e47a05e1a864ac5f83d2e",
+      "android_schema_sha256": "75763fe1da273c5e04f0f72cf4d743eb568c9bca5177ae74a868c602710ca693",
       "android_manifest": "kora-mobile-app/app/src/main/java/com/kora/mobile/generated/EngineContractManifest.kt",
-      "android_manifest_sha256": "ed7ca79d4374dc865196f0601965d5563e6947f17d1643280c55b853cb12da0d",
+      "android_manifest_sha256": "c735661d7390f4f8c93db063d17017305ee8c7fdc317a7bb9dad52d217c80475",
       "cloud_manifest": "kora-cloud/contract-fixtures/engine-v2-manifest.json",
-      "cloud_manifest_sha256": "3fb02a12230fd7093e4e443e2ace406ab7be02ce50ac1dd150485b8a3c5d151c"
+      "cloud_manifest_sha256": "0271d3477ee8fc26fa1d902fd64441603069ef336f576b9a95863b96dbe353ce"
     }
   ]
 }
