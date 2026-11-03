@@ -26,7 +26,7 @@ import (
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/site"
 	"github.com/gin-gonic/gin"
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 )
 
 type moduleCommandFixtureSchemas struct {
@@ -121,14 +121,40 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		t.Skip("set KORA_ENGINE_MODULE_COMMAND_DISPOSABLE_MYSQL_DSN to a fresh disposable MySQL database")
 	}
 	ctx := context.Background()
-	database, err := sql.Open("mysql", dsn)
+	rootConfig, err := mysql.ParseDSN(dsn)
 	if err != nil {
-		t.Fatal("open disposable MySQL:", err)
+		t.Fatal("parse disposable MySQL DSN:", err)
+	}
+	rootConfig.DBName = ""
+	root, err := sql.Open("mysql", rootConfig.FormatDSN())
+	if err != nil {
+		t.Fatal("open disposable MySQL server:", err)
+	}
+	if err := root.PingContext(ctx); err != nil {
+		_ = root.Close()
+		t.Fatal("ping disposable MySQL server:", err)
+	}
+	var databaseSuffix string
+	if err := root.QueryRowContext(ctx, "SELECT REPLACE(UUID(), '-', '')").Scan(&databaseSuffix); err != nil {
+		_ = root.Close()
+		t.Fatal("create disposable database identity:", err)
+	}
+	databaseName := "kora_module_command_" + databaseSuffix
+	if _, err := root.ExecContext(ctx, "CREATE DATABASE `"+databaseName+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
+		_ = root.Close()
+		t.Fatal("create isolated module command database:", err)
+	}
+	t.Cleanup(func() { _, _ = root.ExecContext(context.Background(), "DROP DATABASE IF EXISTS `"+databaseName+"`"); _ = root.Close() })
+	tenantConfig := *rootConfig
+	tenantConfig.DBName = databaseName
+	database, err := sql.Open("mysql", tenantConfig.FormatDSN())
+	if err != nil {
+		t.Fatal("open isolated module command database:", err)
 	}
 	database.SetMaxOpenConns(4)
 	t.Cleanup(func() { _ = database.Close() })
 	if err := database.PingContext(ctx); err != nil {
-		t.Fatal("ping disposable MySQL:", err)
+		t.Fatal("ping isolated module command database:", err)
 	}
 	dialect := kdb.Resolve("mysql")
 	if err := site.BootstrapSystemTables(database, dialect); err != nil {
@@ -149,10 +175,6 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	invoice := &doctype.DocType{Name: "ModuleInvoice" + suffix[:8], ModuleOwnerID: "finance.ar", ModuleOwnershipMode: string(contract.MutationCommands), BusinessScopePolicy: contract.ScopeEntityOwned, BusinessScopeField: "legal_entity_id", Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}, {Fieldname: "legal_entity_id", Fieldtype: "Data", Reqd: true}}}
 	registry := doctype.NewRegistry()
 	registry.LoadFull([]*doctype.DocType{invoice}, []*doctype.Role{{Name: doctype.AdminRole}}, []*doctype.Permission{{Doctype: invoice.Name, Role: doctype.AdminRole, Read: true, Create: true}, {Doctype: "module.finance.ar.operation.issue", Role: doctype.AdminRole, Write: true}})
-	var databaseName string
-	if err := database.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&databaseName); err != nil {
-		t.Fatal("read disposable database name:", err)
-	}
 	if err := schema.MigrateSiteFromRegistry(database, databaseName, registry, dialect); err != nil {
 		t.Fatal("migrate module owner resource:", err)
 	}
