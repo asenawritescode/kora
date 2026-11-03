@@ -548,6 +548,11 @@
           "properties": {
             "kind": {
               "const": "tenant"
+            },
+            "tenant_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
             }
           },
           "required": [
@@ -560,6 +565,16 @@
           "properties": {
             "kind": {
               "const": "legal_entity"
+            },
+            "legal_entity_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            "tenant_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
             }
           },
           "required": [
@@ -5626,6 +5641,11 @@
           "properties": {
             "kind": {
               "const": "tenant"
+            },
+            "tenant_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
             }
           },
           "required": [
@@ -5638,6 +5658,16 @@
           "properties": {
             "kind": {
               "const": "legal_entity"
+            },
+            "legal_entity_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            "tenant_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
             }
           },
           "required": [

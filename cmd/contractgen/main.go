@@ -112,8 +112,8 @@ func addV2SemanticRules(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("v2 schema is missing BusinessScope")
 	}
 	scope["oneOf"] = []any{
-		object(map[string]any{"kind": map[string]any{"const": "tenant"}}, []string{"kind", "tenant_id"}, object(nil, []string{"legal_entity_id"}, nil)),
-		object(map[string]any{"kind": map[string]any{"const": "legal_entity"}}, []string{"kind", "tenant_id", "legal_entity_id"}, nil),
+		object(map[string]any{"kind": map[string]any{"const": "tenant"}, "tenant_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 160}}, []string{"kind", "tenant_id"}, object(nil, []string{"legal_entity_id"}, nil)),
+		object(map[string]any{"kind": map[string]any{"const": "legal_entity"}, "tenant_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 160}, "legal_entity_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 160}}, []string{"kind", "tenant_id", "legal_entity_id"}, nil),
 	}
 	rootProperties, _ := document["properties"].(map[string]any)
 	scopeTargets := []map[string]any{scope}
