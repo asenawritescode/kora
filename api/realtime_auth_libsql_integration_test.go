@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
@@ -73,8 +75,11 @@ func TestLibSQLRealtimeReplayAndNATSUseCurrentOwner(t *testing.T) {
 		ctx.Set("site_db", database)
 		ctx.Set("site_registry", registry)
 		ctx.Set("site_name", siteName)
-		ctx.Set("user", user)
-		ctx.Set("user_roles", []string{"InvoiceOwner"})
+		execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: user, PrincipalType: contract.PrincipalHuman, Site: "tenant-a", Roles: []string{"InvoiceOwner"}, AuthenticatedAt: time.Now().UTC()})
+		if err != nil {
+			t.Fatal("create verified realtime actor:", err)
+		}
+		ctx.Set("policy_execution", execution)
 		return ctx
 	}
 
