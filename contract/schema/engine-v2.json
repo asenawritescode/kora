@@ -65,6 +65,12 @@
           },
           "type": "array"
         },
+        "published_projections": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogProjection"
+          },
+          "type": "array"
+        },
         "published_queries": {
           "items": {
             "$ref": "#/$defs/ApplicationCatalogQuery"
@@ -87,6 +93,7 @@
         "business_scope",
         "modules",
         "published_operations",
+        "published_projections",
         "published_queries",
         "revision",
         "schemas"
@@ -166,6 +173,45 @@
         "owner_module_id",
         "permissions",
         "presentation"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "route": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "id",
+        "output_schema",
+        "owner_module_id",
+        "route",
+        "scope_policy"
       ],
       "type": "object"
     },
@@ -5097,6 +5143,12 @@
           },
           "type": "array"
         },
+        "published_projections": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogProjection"
+          },
+          "type": "array"
+        },
         "published_queries": {
           "items": {
             "$ref": "#/$defs/ApplicationCatalogQuery"
@@ -5119,6 +5171,7 @@
         "business_scope",
         "modules",
         "published_operations",
+        "published_projections",
         "published_queries",
         "revision",
         "schemas"
@@ -5198,6 +5251,45 @@
         "owner_module_id",
         "permissions",
         "presentation"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "route": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "id",
+        "output_schema",
+        "owner_module_id",
+        "route",
+        "scope_policy"
       ],
       "type": "object"
     },

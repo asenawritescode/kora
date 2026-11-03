@@ -36,7 +36,7 @@
     },
     {
       "contract": "ApplicationCatalog",
-      "value": {"revision": 7, "business_scope": {"tenant_id": "tenant-a", "kind": "tenant"}, "modules": [], "published_queries": [], "published_operations": [], "schemas": [], "allowed_entity_choices": [], "available_scopes": [], "blockers": []}
+      "value": {"revision": 7, "business_scope": {"tenant_id": "tenant-a", "kind": "tenant"}, "modules": [], "published_queries": [], "published_projections": [], "published_operations": [], "schemas": [], "allowed_entity_choices": [], "available_scopes": [], "blockers": []}
     }
   ],
   "invalid": [

@@ -256,15 +256,16 @@ func (r PublishedQueryRequest) Validate() error {
 //
 //contract:wire:v2
 type ApplicationCatalog struct {
-	Revision             uint64                        `json:"revision"`
-	BusinessScope        BusinessScope                 `json:"business_scope"`
-	Modules              []ApplicationCatalogModule    `json:"modules"`
-	PublishedQueries     []ApplicationCatalogQuery     `json:"published_queries"`
-	PublishedOperations  []ApplicationCatalogOperation `json:"published_operations"`
-	Schemas              []ModuleSchemaDocument        `json:"schemas"`
-	AllowedEntityChoices []BusinessScope               `json:"allowed_entity_choices"`
-	AvailableScopes      []BusinessScope               `json:"available_scopes,omitempty"`
-	Blockers             []ModuleBlocker               `json:"blockers"`
+	Revision             uint64                         `json:"revision"`
+	BusinessScope        BusinessScope                  `json:"business_scope"`
+	Modules              []ApplicationCatalogModule     `json:"modules"`
+	PublishedQueries     []ApplicationCatalogQuery      `json:"published_queries"`
+	PublishedProjections []ApplicationCatalogProjection `json:"published_projections"`
+	PublishedOperations  []ApplicationCatalogOperation  `json:"published_operations"`
+	Schemas              []ModuleSchemaDocument         `json:"schemas"`
+	AllowedEntityChoices []BusinessScope                `json:"allowed_entity_choices"`
+	AvailableScopes      []BusinessScope                `json:"available_scopes,omitempty"`
+	Blockers             []ModuleBlocker                `json:"blockers"`
 }
 
 // ExecutePublishedOperation asks Engine to invoke a registered public module
@@ -389,6 +390,19 @@ type ApplicationCatalogQuery struct {
 	OfflineEligible bool                `json:"offline_eligible,omitempty"`
 }
 
+// ApplicationCatalogProjection identifies an owner-published, actor-authorized
+// historical read surface. It grants no rebuild or provider authority.
+//
+//contract:wire:v2
+type ApplicationCatalogProjection struct {
+	OwnerModuleID ModuleID          `json:"owner_module_id"`
+	ID            string            `json:"id"`
+	Route         string            `json:"route"`
+	OutputSchema  SchemaRef         `json:"output_schema"`
+	ScopePolicy   ResourceScopeKind `json:"scope_policy"`
+	AllowedFields []string          `json:"allowed_fields"`
+}
+
 //contract:enum:v2
 type OperationAvailability string
 
@@ -455,7 +469,7 @@ func validateSurfacePresentation(p SurfacePresentation) error {
 }
 
 func (c ApplicationCatalog) Validate() error {
-	if c.Revision == 0 || c.BusinessScope.Validate() != nil || len(c.Modules) > 500 || len(c.PublishedQueries) > 2000 || len(c.PublishedOperations) > 2000 || len(c.Schemas) > 4000 || len(c.AllowedEntityChoices) > 1000 || len(c.AvailableScopes) > 1001 || len(c.Blockers) > 100 {
+	if c.Revision == 0 || c.BusinessScope.Validate() != nil || len(c.Modules) > 500 || len(c.PublishedQueries) > 2000 || len(c.PublishedProjections) > 2000 || len(c.PublishedOperations) > 2000 || len(c.Schemas) > 4000 || len(c.AllowedEntityChoices) > 1000 || len(c.AvailableScopes) > 1001 || len(c.Blockers) > 100 {
 		return fmt.Errorf("application catalog identity or collection bounds are invalid")
 	}
 	modules := make(map[ModuleID]bool, len(c.Modules))
@@ -491,6 +505,17 @@ func (c ApplicationCatalog) Validate() error {
 			return err
 		}
 		if err := useSchema(query.OutputSchema); err != nil {
+			return err
+		}
+	}
+	projections := map[string]bool{}
+	for _, projection := range c.PublishedProjections {
+		key := string(projection.OwnerModuleID) + "/" + projection.ID
+		if !modules[projection.OwnerModuleID] || !validModuleName(projection.ID) || projection.Route != "/api/modules/"+string(projection.OwnerModuleID)+"/projections/"+projection.ID || projection.ScopePolicy != ScopeTenantShared && projection.ScopePolicy != ScopeEntityOwned || len(projection.AllowedFields) == 0 || projections[key] {
+			return fmt.Errorf("application catalog has an invalid or duplicate published projection")
+		}
+		projections[key] = true
+		if err := useSchema(projection.OutputSchema); err != nil {
 			return err
 		}
 	}

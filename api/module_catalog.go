@@ -35,7 +35,7 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "module.catalog_unavailable", "Module catalog is unavailable", nil)
 		return
 	}
-	catalog := contract.ApplicationCatalog{Revision: snapshot.Revision, BusinessScope: scope, Modules: []contract.ApplicationCatalogModule{}, PublishedQueries: []contract.ApplicationCatalogQuery{}, PublishedOperations: []contract.ApplicationCatalogOperation{}, Schemas: []contract.ModuleSchemaDocument{}, AllowedEntityChoices: []contract.BusinessScope{}, Blockers: []contract.ModuleBlocker{}}
+	catalog := contract.ApplicationCatalog{Revision: snapshot.Revision, BusinessScope: scope, Modules: []contract.ApplicationCatalogModule{}, PublishedQueries: []contract.ApplicationCatalogQuery{}, PublishedProjections: []contract.ApplicationCatalogProjection{}, PublishedOperations: []contract.ApplicationCatalogOperation{}, Schemas: []contract.ModuleSchemaDocument{}, AllowedEntityChoices: []contract.BusinessScope{}, Blockers: []contract.ModuleBlocker{}}
 	for _, blocker := range plan.Blockers {
 		catalog.Blockers = append(catalog.Blockers, contract.ModuleBlocker{Code: blocker.Code, Count: 1})
 	}
@@ -117,6 +117,18 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 			moduleVisible = true
 			usedSchemas[query.InputSchema], usedSchemas[query.OutputSchema] = true, true
 		}
+		for _, projection := range module.Projections {
+			definition, projectionScope, exists := publishedProjectionDefinition(plan, scope, owner, projection.ID)
+			if !exists || definition.ID != projection.ID || definition.OwnerModuleID != owner || projectionScope != projection.ScopePolicy || projection.ScopePolicy == contract.ScopeEntityOwned && scope.Kind != contract.ScopeKindLegalEntity {
+				continue
+			}
+			if !authorizePublishedProjection(execution, h.siteRegistry(c), projection, scope, projectionScope, "read") {
+				continue
+			}
+			catalog.PublishedProjections = append(catalog.PublishedProjections, contract.ApplicationCatalogProjection{OwnerModuleID: owner, ID: projection.ID, Route: "/api/modules/" + string(owner) + "/projections/" + projection.ID, OutputSchema: projection.OutputSchema, ScopePolicy: projectionScope, AllowedFields: append([]string(nil), projection.AllowedFields...)})
+			moduleVisible = true
+			usedSchemas[projection.OutputSchema] = true
+		}
 		for _, published := range module.PublishedOperations {
 			resource := "module." + string(owner) + ".operation." + published.Name
 			if _, authErr := policy.DecideForBusinessScope(execution, h.siteRegistry(c), resource, "write", scope, published.ScopePolicy == contract.ScopeEntityOwned); authErr != nil {
@@ -184,6 +196,13 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 			return a.OwnerModuleID < b.OwnerModuleID
 		}
 		return a.Name < b.Name
+	})
+	sort.Slice(catalog.PublishedProjections, func(i, j int) bool {
+		a, b := catalog.PublishedProjections[i], catalog.PublishedProjections[j]
+		if a.OwnerModuleID != b.OwnerModuleID {
+			return a.OwnerModuleID < b.OwnerModuleID
+		}
+		return a.ID < b.ID
 	})
 	sort.Slice(catalog.PublishedOperations, func(i, j int) bool {
 		return catalog.PublishedOperations[i].OperationRef < catalog.PublishedOperations[j].OperationRef
