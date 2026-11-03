@@ -52,21 +52,21 @@
     {
       "version": "v2",
       "schema": "kora/contract/schema/engine-v2.json",
-      "schema_sha256": "75763fe1da273c5e04f0f72cf4d743eb568c9bca5177ae74a868c602710ca693",
+      "schema_sha256": "c7ba49e0cb23aad0a1a231319378d4c56b5d83d86389f201dfc8f35e70871e62",
       "typescript": "kora/contract/generated/engine-v2.ts",
-      "typescript_sha256": "bcad9defd2b53e308d39f8c35751c99969ae8b85af15d09026601ba60c015674",
+      "typescript_sha256": "3a051c45a80f28bfbcc9b6fea28d3be2b12450e536e6d5d46cf3e3c353bf2ba5",
       "embedded_ui_copy": "kora/ui/src/generated/engine-v2.ts",
-      "embedded_ui_copy_sha256": "bcad9defd2b53e308d39f8c35751c99969ae8b85af15d09026601ba60c015674",
+      "embedded_ui_copy_sha256": "3a051c45a80f28bfbcc9b6fea28d3be2b12450e536e6d5d46cf3e3c353bf2ba5",
       "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
-      "studio_copy_sha256": "bcad9defd2b53e308d39f8c35751c99969ae8b85af15d09026601ba60c015674",
+      "studio_copy_sha256": "3a051c45a80f28bfbcc9b6fea28d3be2b12450e536e6d5d46cf3e3c353bf2ba5",
       "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
-      "sdk_copy_sha256": "bcad9defd2b53e308d39f8c35751c99969ae8b85af15d09026601ba60c015674",
+      "sdk_copy_sha256": "3a051c45a80f28bfbcc9b6fea28d3be2b12450e536e6d5d46cf3e3c353bf2ba5",
       "android_schema": "kora-mobile-app/app/src/main/assets/contracts/engine-v2.json",
-      "android_schema_sha256": "75763fe1da273c5e04f0f72cf4d743eb568c9bca5177ae74a868c602710ca693",
+      "android_schema_sha256": "c7ba49e0cb23aad0a1a231319378d4c56b5d83d86389f201dfc8f35e70871e62",
       "android_manifest": "kora-mobile-app/app/src/main/java/com/kora/mobile/generated/EngineContractManifest.kt",
-      "android_manifest_sha256": "c735661d7390f4f8c93db063d17017305ee8c7fdc317a7bb9dad52d217c80475",
+      "android_manifest_sha256": "76739a0c5feaca5572f040e31baba2e5acd83c47df2a8efe4563633d3c2d6ca9",
       "cloud_manifest": "kora-cloud/contract-fixtures/engine-v2-manifest.json",
-      "cloud_manifest_sha256": "0271d3477ee8fc26fa1d902fd64441603069ef336f576b9a95863b96dbe353ce"
+      "cloud_manifest_sha256": "dda5d54d25aaf7dc576467e89206151f9eb4ce5a65fb3da5eb50440e8e240c15"
     }
   ]
 }
