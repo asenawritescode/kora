@@ -204,6 +204,9 @@ type PublishedQuery struct {
 }
 
 // PublishedReferenceLookup binds a query result field to a stable business identity.
+// SearchField names the query input property used for text search. ValueField
+// must return a BusinessRef in the active catalog scope; Engine validates it
+// again when a consumer persists that reference.
 //
 //contract:wire:v2
 type PublishedReferenceLookup struct {
