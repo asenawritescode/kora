@@ -145,7 +145,7 @@ func handleConfigurationCheck(c *gin.Context, h *Handler, includeImpact bool) {
 // still match registered owner surfaces and the current provider plan. It does
 // not grant actor access; every execution endpoint reauthorizes independently.
 func validateConfigurationPublishedBindings(h *Handler, c *gin.Context, bindings []contract.ConfigurationSurfaceBinding, views []*doctype.View) ([]contract.ConfigurationSurfaceBinding, []contract.ModuleBlocker, []string) {
-	if len(bindings) == 0 {
+	if len(bindings) == 0 && !hasCheckoutComponent(views) {
 		return nil, nil, nil
 	}
 	if err := contract.ValidateConfigurationSurfaceBindings(bindings); err != nil {
@@ -180,9 +180,13 @@ func validateConfigurationPublishedBindings(h *Handler, c *gin.Context, bindings
 	for _, module := range snapshot.Modules {
 		modules[module.ID] = module
 	}
+	issues := make([]string, 0)
+	issues = append(issues, validateCheckoutViewBindings(views, bindings, modules)...)
+	if len(issues) > 0 {
+		return nil, nil, issues
+	}
 	canonical := make([]contract.ConfigurationSurfaceBinding, 0, len(bindings))
 	blockers := make([]contract.ModuleBlocker, 0)
-	issues := make([]string, 0)
 	for _, binding := range bindings {
 		if binding.BusinessScope.TenantID != snapshot.TenantID {
 			issues = append(issues, "published surface binding belongs to another tenant")
@@ -257,6 +261,84 @@ func validateConfigurationPublishedBindings(h *Handler, c *gin.Context, bindings
 		canonical = append(canonical, binding)
 	}
 	return canonical, blockers, issues
+}
+
+// validateCheckoutViewBindings requires every payment panel to name the exact
+// owner-published checkout operation bound to that view. This keeps a view
+// from selecting an arbitrary catalog operation at runtime.
+func validateCheckoutViewBindings(views []*doctype.View, bindings []contract.ConfigurationSurfaceBinding, modules map[contract.ModuleID]contract.ModuleDescriptor) []string {
+	var issues []string
+	for _, view := range views {
+		if view == nil {
+			continue
+		}
+		manifest := doctype.PageManifestFromView(view)
+		if manifest == nil {
+			continue
+		}
+		visitPageComponents(manifest.Spec.Layout.Children, func(component doctype.PageComponent) {
+			if component.Component != "payment_panel" {
+				return
+			}
+			props := component.Props
+			componentBindings, _ := props["bindings"].(map[string]any)
+			operationRef, _ := componentBindings["checkout_operation_ref"].(string)
+			if strings.TrimSpace(operationRef) == "" {
+				issues = append(issues, fmt.Sprintf("payment panel %q in view %q must bind checkout_operation_ref", component.ID, view.Name))
+				return
+			}
+			matchedBinding := false
+			for _, binding := range bindings {
+				if binding.Kind != contract.ConfigurationOperation || normalizeDocTypeName(binding.ViewName) != normalizeDocTypeName(view.Name) || binding.OperationRef != operationRef {
+					continue
+				}
+				parts := strings.Split(operationRef, "~")
+				if len(parts) != 3 {
+					continue
+				}
+				module, exists := modules[contract.ModuleID(parts[0])]
+				if !exists {
+					continue
+				}
+				for _, published := range module.PublishedOperations {
+					if contract.PublishedOperationRef(module.ID, published.Capability, published.Operation) == operationRef && published.Checkout != nil {
+						matchedBinding = true
+					}
+				}
+			}
+			if !matchedBinding {
+				issues = append(issues, fmt.Sprintf("payment panel %q in view %q must bind a current owner-published checkout operation", component.ID, view.Name))
+			}
+		})
+	}
+	return issues
+}
+
+func hasCheckoutComponent(views []*doctype.View) bool {
+	for _, view := range views {
+		if view == nil {
+			continue
+		}
+		manifest := doctype.PageManifestFromView(view)
+		if manifest == nil {
+			continue
+		}
+		found := false
+		visitPageComponents(manifest.Spec.Layout.Children, func(component doctype.PageComponent) {
+			found = found || component.Component == "payment_panel"
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func visitPageComponents(components []doctype.PageComponent, visit func(doctype.PageComponent)) {
+	for _, component := range components {
+		visit(component)
+		visitPageComponents(component.Children, visit)
+	}
 }
 
 func decodeDraftConfigurationRequest(c *gin.Context) (DraftConfigurationRequest, bool) {

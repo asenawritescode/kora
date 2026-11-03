@@ -63,6 +63,28 @@ func TestValidateConfigurationPublishedBindingsRequiresCurrentActiveOwnerSurface
 	}
 }
 
+func TestCheckoutViewMustBindItsOwnerPublishedCheckoutOperation(t *testing.T) {
+	schema := contract.SchemaRef{ID: "sales.checkout", Version: 1}
+	checkout := &contract.CheckoutOperationContract{Input: contract.CheckoutInputBinding{CartItems: "items", RequestedTotal: "total", Currency: "currency", PaymentMethod: "method"}, Outcomes: []contract.CheckoutOutcomeBinding{{Kind: contract.CheckoutInvoiceIssued, StatusField: "invoice_status", SuccessValue: "issued"}}}
+	operation := contract.PublishedOperation{Capability: "sales.checkout", Operation: "submit", Checkout: checkout}
+	module := contract.ModuleDescriptor{ID: "sales.orders", PublishedOperations: []contract.PublishedOperation{operation}}
+	view := &doctype.View{Name: "Register", PageManifest: &doctype.PageManifest{APIVersion: "ui.kora.dev/v1", Kind: "Page", Metadata: doctype.PageManifestMetadata{Name: "Register", Version: "1", Package: "sales", Status: "active"}, Spec: doctype.PageManifestSpec{Layout: doctype.PageManifestLayout{Children: []doctype.PageComponent{{ID: "pay", Component: "payment_panel", Props: map[string]any{"bindings": map[string]any{"checkout_operation_ref": "sales.orders~sales.checkout~submit"}}}}}}}}
+	binding := contract.ConfigurationSurfaceBinding{Kind: contract.ConfigurationOperation, ViewName: "Register", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, CatalogRevision: 4, OwnerModuleID: "sales.orders", OperationRef: "sales.orders~sales.checkout~submit", InputSchema: &schema, OutputSchema: schema}
+	modules := map[contract.ModuleID]contract.ModuleDescriptor{module.ID: module}
+	views := []*doctype.View{view}
+
+	if issues := validateCheckoutViewBindings(views, []contract.ConfigurationSurfaceBinding{binding}, modules); len(issues) != 0 {
+		t.Fatalf("valid exact checkout binding rejected: %v", issues)
+	}
+	if issues := validateCheckoutViewBindings(views, nil, modules); len(issues) != 1 || !strings.Contains(issues[0], "current owner-published checkout operation") {
+		t.Fatalf("unregistered checkout view binding accepted: %v", issues)
+	}
+	view.PageManifest.Spec.Layout.Children[0].Props["bindings"].(map[string]any)["checkout_operation_ref"] = "sales.orders~sales.checkout~other"
+	if issues := validateCheckoutViewBindings(views, []contract.ConfigurationSurfaceBinding{binding}, modules); len(issues) != 1 {
+		t.Fatalf("mismatched view operation ref accepted: %v", issues)
+	}
+}
+
 func TestConfigurationCheckRejectsOversizedBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, includeImpact := range []bool{false, true} {
