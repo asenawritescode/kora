@@ -218,6 +218,24 @@ type WorkflowEventData struct {
 	ChangeKind string     `json:"change_kind"`
 }
 
+// WorkflowHistoryEntry is the bounded, payload-free execution history exposed
+// to tenant clients.
+//
+//contract:wire:v2
+type WorkflowHistoryEntry struct {
+	//contract:min=1
+	Sequence uint64 `json:"sequence"`
+	//contract:maxLength=160
+	StepID StepID `json:"step_id"`
+	//contract:maxLength=80
+	Kind string `json:"kind"`
+	//contract:maxLength=80
+	Status string `json:"status"`
+	//contract:maxBytes=8192
+	Detail    string    `json:"detail,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 //contract:wire:v2
 type CancelWorkflow struct {
 	Meta CommandMeta `json:"meta"`

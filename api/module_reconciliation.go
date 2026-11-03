@@ -16,18 +16,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type businessReconciliationRunRequest struct {
-	OwnerModuleID string `json:"owner_module_id"`
-	RuleID        string `json:"rule_id"`
-	RunID         string `json:"run_id"`
-	PreviousRunID string `json:"previous_run_id,omitempty"`
-}
-
-type businessFindingDecisionRequest struct {
-	FindingID string `json:"finding_id"`
-	Reason    string `json:"reason,omitempty"`
-}
-
 type businessRuleAuthorization struct {
 	execution policy.Execution
 	roles     policy.RolePolicy
@@ -143,8 +131,8 @@ func (h *Handler) resolveBusinessReconciliationRule(c *gin.Context, owner contra
 }
 
 func (h *Handler) HandleBusinessReconciliationRun(c *gin.Context) {
-	var request businessReconciliationRunRequest
-	if err := decodeBusinessReconciliationBody(c, &request); err != nil || strings.TrimSpace(request.RunID) == "" {
+	var request contract.BusinessReconciliationRunRequest
+	if err := decodeBusinessReconciliationBody(c, &request); err != nil || request.Validate() != nil {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid business reconciliation run request", nil)
 		return
 	}
@@ -199,8 +187,8 @@ func (h *Handler) HandleBusinessReconciliationRepair(c *gin.Context) {
 		writeError(c, http.StatusForbidden, "permission.denied", "Business reconciliation rule is unavailable or not granted", nil)
 		return
 	}
-	var request businessFindingDecisionRequest
-	if err := decodeBusinessReconciliationBody(c, &request); err != nil || strings.TrimSpace(request.FindingID) == "" {
+	var request contract.BusinessFindingDecision
+	if err := decodeBusinessReconciliationBody(c, &request); err != nil || request.Validate(false) != nil {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "A finding ID is required", nil)
 		return
 	}
@@ -224,7 +212,7 @@ func (h *Handler) HandleBusinessReconciliationRepair(c *gin.Context) {
 		writeError(c, http.StatusConflict, "reconciliation.repair_pending", "Owner repair remains pending reconciliation", nil)
 		return
 	}
-	c.JSON(http.StatusOK, Response{Data: gin.H{"repaired": true}})
+	c.JSON(http.StatusOK, Response{Data: contract.BusinessFindingActionResult{FindingID: request.FindingID, Action: contract.BusinessFindingActionRepaired}})
 }
 
 type businessCapabilityRepairer struct {
@@ -279,8 +267,8 @@ func handleBusinessReconciliationFindingDecision(c *gin.Context, h *Handler, act
 		c.JSON(http.StatusOK, Response{Data: run})
 		return
 	}
-	var request businessFindingDecisionRequest
-	if err := decodeBusinessReconciliationBody(c, &request); err != nil || strings.TrimSpace(request.FindingID) == "" || strings.TrimSpace(request.Reason) == "" {
+	var request contract.BusinessFindingDecision
+	if err := decodeBusinessReconciliationBody(c, &request); err != nil || request.Validate(true) != nil {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "A finding ID and waiver reason are required", nil)
 		return
 	}
@@ -292,7 +280,7 @@ func handleBusinessReconciliationFindingDecision(c *gin.Context, h *Handler, act
 		writeError(c, http.StatusForbidden, "permission.denied", "Business finding waiver was not accepted", nil)
 		return
 	}
-	c.JSON(http.StatusOK, Response{Data: gin.H{"waived": true}})
+	c.JSON(http.StatusOK, Response{Data: contract.BusinessFindingActionResult{FindingID: request.FindingID, Action: contract.BusinessFindingActionWaived}})
 }
 
 func validateBusinessRunRegistration(ctx context.Context, service *recon.BusinessReconciliationService, scope contract.BusinessScope, runID string, registration plugin.BusinessReconciliationRule) error {
@@ -366,5 +354,5 @@ func (h *Handler) HandleBusinessReconciliationSummary(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "reconciliation.unavailable", "Business reconciliation inspection is unavailable", nil)
 		return
 	}
-	c.JSON(http.StatusOK, Response{Data: gin.H{"scope": scope, "unresolved_business_findings": count}})
+	c.JSON(http.StatusOK, Response{Data: contract.BusinessReconciliationSummary{Scope: scope, UnresolvedBusinessFindings: count}})
 }
