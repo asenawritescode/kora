@@ -31,6 +31,7 @@ type Services struct {
 	ModuleBindings                 *plugin.BindingPlan
 	ResolveModuleBindings          func(contract.BusinessScope) (plugin.BindingPlan, error)
 	ResolveCandidateModuleBindings func(contract.BusinessScope, []contract.InstalledPackage, []contract.ModuleDescriptor, []contract.ProviderSelection, uint64) (plugin.BindingPlan, error)
+	LoadModuleSnapshot             func() (contract.ModuleSnapshot, error)
 	PublishedProjections           *analytics.PublishedProjectionStore
 	BusinessReconciliation         *recon.BusinessReconciliationService
 	WorkAdmission                  *dbaccess.Admission

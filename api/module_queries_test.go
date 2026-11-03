@@ -179,3 +179,49 @@ func TestPublishedProjectionActorScopeFiltersRawRows(t *testing.T) {
 		t.Fatalf("filtered projection rows = %s, error=%v", data, err)
 	}
 }
+
+func TestApplicationCatalogFiltersSurfacesByActorGrant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	scope := contract.BusinessScope{TenantID: "catalog-tenant", Kind: contract.ScopeKindTenant}
+	in, out := contract.SchemaRef{ID: "catalog.input", Version: 1}, contract.SchemaRef{ID: "catalog.output", Version: 1}
+	query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "list", Capability: "sales.orders", Operation: "list", InputSchema: in, OutputSchema: out, ScopePolicy: contract.ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}
+	module := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Schemas: []contract.ModuleSchemaDocument{{Ref: in, Schema: json.RawMessage(`{"type":"object"}`)}, {Ref: out, Schema: json.RawMessage(`{"type":"array"}`)}}, Queries: []contract.PublishedQuery{query}, Provides: []contract.CapabilityOffer{{Name: query.Capability, Contract: out, Operations: []contract.OperationSpec{{Name: "list", Input: in, Output: out, Effect: contract.EffectQuery}}}}}
+	snapshot := contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 7, Modules: []contract.ModuleDescriptor{module}, Installations: []contract.ModuleInstallation{{TenantID: scope.TenantID, ModuleID: module.ID, Version: module.Version, State: string(contract.ModuleActive)}}}
+	plan, err := plugin.ResolveModules(scope, []contract.ModuleDescriptor{module}, []plugin.ProviderRegistration{{TenantID: scope.TenantID, ProviderID: "sales.internal", OwnerModuleID: module.ID, Kind: plugin.ProviderInternal, Offers: module.Provides, Queries: map[string]plugin.PublishedQueryExecutor{"list": historicalPublishedQueryExecutor{}}}}, nil, snapshot.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := doctype.NewRegistry()
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.query.list", Role: "Reader", Read: true})
+	execution, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "reader", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), Roles: []string{"Reader"}, AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := NewSiteRuntimeServices()
+	services.Replace(string(scope.TenantID), SiteRuntimeService{LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return snapshot, nil }, ResolveModuleBindings: func(got contract.BusinessScope) (plugin.BindingPlan, error) {
+		if got != scope {
+			t.Fatalf("scope=%+v", got)
+		}
+		return plan, nil
+	}})
+	handler := NewHandler(registry, nil)
+	handler.RuntimeServices = services
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("GET", "/api/v2/modules/catalog", nil)
+	ctx.Set("site_name", string(scope.TenantID))
+	ctx.Set("policy_execution", execution)
+	handler.HandleApplicationCatalog(ctx)
+	if recorder.Code != 200 {
+		t.Fatalf("catalog status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data contract.ApplicationCatalog `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data.PublishedQueries) != 1 || response.Data.Revision != 7 || len(response.Data.Schemas) != 2 {
+		t.Fatalf("unexpected actor catalog: %+v", response.Data)
+	}
+}

@@ -29,6 +29,194 @@
       ],
       "type": "object"
     },
+    "ApplicationCatalog": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_entity_choices": {
+          "items": {
+            "$ref": "#/$defs/BusinessScope"
+          },
+          "type": "array"
+        },
+        "available_scopes": {
+          "items": {
+            "$ref": "#/$defs/BusinessScope"
+          },
+          "type": "array"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogModule"
+          },
+          "type": "array"
+        },
+        "published_operations": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogOperation"
+          },
+          "type": "array"
+        },
+        "published_queries": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogQuery"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "schemas": {
+          "items": {
+            "$ref": "#/$defs/ModuleSchemaDocument"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_entity_choices",
+        "blockers",
+        "business_scope",
+        "modules",
+        "published_operations",
+        "published_queries",
+        "revision",
+        "schemas"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogModule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "enum": [
+            "available",
+            "unavailable",
+            "disabled",
+            "draining"
+          ],
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        }
+      },
+      "required": [
+        "availability",
+        "capability",
+        "input_schema",
+        "operation",
+        "operation_ref",
+        "output_schema",
+        "owner_module_id",
+        "permissions",
+        "presentation"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "page_limit": {
+          "type": "integer"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "route": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "input_schema",
+        "name",
+        "output_schema",
+        "owner_module_id",
+        "page_limit",
+        "presentation",
+        "route",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
     "ApplyModuleChange": {
       "additionalProperties": false,
       "properties": {
@@ -1923,6 +2111,12 @@
           },
           "type": "array"
         },
+        "published_operations": {
+          "items": {
+            "$ref": "#/$defs/PublishedOperation"
+          },
+          "type": "array"
+        },
         "queries": {
           "items": {
             "$ref": "#/$defs/PublishedQuery"
@@ -1938,6 +2132,12 @@
         "resources": {
           "items": {
             "$ref": "#/$defs/OwnedResource"
+          },
+          "type": "array"
+        },
+        "schemas": {
+          "items": {
+            "$ref": "#/$defs/ModuleSchemaDocument"
           },
           "type": "array"
         },
@@ -2038,6 +2238,23 @@
         "state",
         "tenant_id",
         "version"
+      ],
+      "type": "object"
+    },
+    "ModuleSchemaDocument": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "schema": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "ref",
+        "schema"
       ],
       "type": "object"
     },
@@ -2650,6 +2867,38 @@
       ],
       "type": "object"
     },
+    "PublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "capability",
+        "name",
+        "operation",
+        "presentation",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
     "PublishedQuery": {
       "additionalProperties": false,
       "properties": {
@@ -2683,6 +2932,9 @@
         "page_limit": {
           "type": "integer"
         },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
         "scope_policy": {
           "enum": [
             "tenant_shared",
@@ -2700,6 +2952,7 @@
         "output_schema",
         "owner_module_id",
         "page_limit",
+        "presentation",
         "scope_policy"
       ],
       "type": "object"
@@ -3828,6 +4081,27 @@
       ],
       "type": "object"
     },
+    "SurfacePresentation": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "form": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "list": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "TemplateDetailPageContent": {
       "additionalProperties": false,
       "properties": {
@@ -4171,6 +4445,194 @@
         "name",
         "next",
         "version"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalog": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_entity_choices": {
+          "items": {
+            "$ref": "#/$defs/BusinessScope"
+          },
+          "type": "array"
+        },
+        "available_scopes": {
+          "items": {
+            "$ref": "#/$defs/BusinessScope"
+          },
+          "type": "array"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogModule"
+          },
+          "type": "array"
+        },
+        "published_operations": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogOperation"
+          },
+          "type": "array"
+        },
+        "published_queries": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogQuery"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "schemas": {
+          "items": {
+            "$ref": "#/$defs/ModuleSchemaDocument"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_entity_choices",
+        "blockers",
+        "business_scope",
+        "modules",
+        "published_operations",
+        "published_queries",
+        "revision",
+        "schemas"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogModule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "enum": [
+            "available",
+            "unavailable",
+            "disabled",
+            "draining"
+          ],
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        }
+      },
+      "required": [
+        "availability",
+        "capability",
+        "input_schema",
+        "operation",
+        "operation_ref",
+        "output_schema",
+        "owner_module_id",
+        "permissions",
+        "presentation"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "page_limit": {
+          "type": "integer"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "route": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "input_schema",
+        "name",
+        "output_schema",
+        "owner_module_id",
+        "page_limit",
+        "presentation",
+        "route",
+        "scope_policy"
       ],
       "type": "object"
     },
@@ -6046,6 +6508,12 @@
           },
           "type": "array"
         },
+        "published_operations": {
+          "items": {
+            "$ref": "#/$defs/PublishedOperation"
+          },
+          "type": "array"
+        },
         "queries": {
           "items": {
             "$ref": "#/$defs/PublishedQuery"
@@ -6061,6 +6529,12 @@
         "resources": {
           "items": {
             "$ref": "#/$defs/OwnedResource"
+          },
+          "type": "array"
+        },
+        "schemas": {
+          "items": {
+            "$ref": "#/$defs/ModuleSchemaDocument"
           },
           "type": "array"
         },
@@ -6161,6 +6635,23 @@
         "state",
         "tenant_id",
         "version"
+      ],
+      "type": "object"
+    },
+    "ModuleSchemaDocument": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "schema": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "ref",
+        "schema"
       ],
       "type": "object"
     },
@@ -6773,6 +7264,38 @@
       ],
       "type": "object"
     },
+    "PublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "capability",
+        "name",
+        "operation",
+        "presentation",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
     "PublishedQuery": {
       "additionalProperties": false,
       "properties": {
@@ -6806,6 +7329,9 @@
         "page_limit": {
           "type": "integer"
         },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
         "scope_policy": {
           "enum": [
             "tenant_shared",
@@ -6823,6 +7349,7 @@
         "output_schema",
         "owner_module_id",
         "page_limit",
+        "presentation",
         "scope_policy"
       ],
       "type": "object"
@@ -7931,6 +8458,27 @@
       ],
       "type": "object"
     },
+    "SurfacePresentation": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "form": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "list": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "TemplateDetailPageContent": {
       "additionalProperties": false,
       "properties": {
@@ -8314,6 +8862,12 @@
     "MutationMode": [
       "crud",
       "commands_only"
+    ],
+    "OperationAvailability": [
+      "available",
+      "unavailable",
+      "disabled",
+      "draining"
     ],
     "OperationEffect": [
       "query",

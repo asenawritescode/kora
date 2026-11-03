@@ -497,3 +497,21 @@ func TestPlanCompositionBoundsConcreteCycleDiagnostics(t *testing.T) {
 		t.Fatalf("cycle diagnostic should be concrete and bounded: plan=%+v err=%v", plan, err)
 	}
 }
+
+func TestApplicationCatalogValidatesAndBoundsSchemaDocuments(t *testing.T) {
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}
+	in := SchemaRef{ID: "sales.input", Version: 1}
+	out := SchemaRef{ID: "sales.output", Version: 1}
+	catalog := ApplicationCatalog{Revision: 1, BusinessScope: scope,
+		Modules:              []ApplicationCatalogModule{{ID: "sales.orders", Version: "1.0.0", State: string(ModuleActive)}},
+		PublishedQueries:     []ApplicationCatalogQuery{{OwnerModuleID: "sales.orders", Name: "list", Route: "/api/modules/sales.orders/queries/list", InputSchema: in, OutputSchema: out, ScopePolicy: ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}},
+		Schemas:              []ModuleSchemaDocument{{Ref: in, Schema: []byte(`{"type":"object"}`)}, {Ref: out, Schema: []byte(`{"type":"array","items":{"type":"object"}}`)}},
+		AllowedEntityChoices: []BusinessScope{}, Blockers: []ModuleBlocker{}}
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("valid catalog rejected: %v", err)
+	}
+	catalog.Schemas[0].Schema = []byte(`{"$ref":"https://example.com/schema.json"}`)
+	if err := catalog.Validate(); err == nil {
+		t.Fatal("remote schema reference accepted")
+	}
+}

@@ -167,22 +167,34 @@ type CapabilityRequirement struct {
 	Required bool           `json:"required"`
 }
 
+// ModuleSchemaDocument is the bounded JSON Schema document published by a
+// module for its explicitly referenced client surfaces.
+//
+//contract:wire:v2
+type ModuleSchemaDocument struct {
+	Ref SchemaRef `json:"ref"`
+	//contract:maxJSONBytes=65536
+	//contract:json
+	Schema json.RawMessage `json:"schema"`
+}
+
 // PublishedQuery is an owner-controlled, read-only capability surface. The
 // operation must be declared by the owner module with EffectQuery; consumers
 // never receive direct access to the provider's tables.
 //
 //contract:wire:v2
 type PublishedQuery struct {
-	OwnerModuleID ModuleID          `json:"owner_module_id"`
-	Name          string            `json:"name"`
-	Capability    CapabilityName    `json:"capability"`
-	Operation     string            `json:"operation"`
-	InputSchema   SchemaRef         `json:"input_schema"`
-	OutputSchema  SchemaRef         `json:"output_schema"`
-	ScopePolicy   ResourceScopeKind `json:"scope_policy"`
-	AllowedFields []string          `json:"allowed_fields"`
-	OwnerField    string            `json:"owner_field,omitempty"`
-	PageLimit     uint16            `json:"page_limit"`
+	OwnerModuleID ModuleID            `json:"owner_module_id"`
+	Name          string              `json:"name"`
+	Capability    CapabilityName      `json:"capability"`
+	Operation     string              `json:"operation"`
+	InputSchema   SchemaRef           `json:"input_schema"`
+	OutputSchema  SchemaRef           `json:"output_schema"`
+	ScopePolicy   ResourceScopeKind   `json:"scope_policy"`
+	AllowedFields []string            `json:"allowed_fields"`
+	OwnerField    string              `json:"owner_field,omitempty"`
+	PageLimit     uint16              `json:"page_limit"`
+	Presentation  SurfacePresentation `json:"presentation"`
 }
 
 // QueryFreshness describes whether a published query result is current.
@@ -212,6 +224,173 @@ type QueryResult struct {
 	SourceRevision string         `json:"source_revision,omitempty"`
 	AsOf           time.Time      `json:"as_of"`
 	Freshness      QueryFreshness `json:"freshness"`
+}
+
+// ApplicationCatalog is the actor-filtered tenant-session view of published
+// module reads and actions. It contains presentation metadata and only schemas
+// referenced by surfaces this actor may access; it grants no execution rights.
+//
+//contract:wire:v2
+type ApplicationCatalog struct {
+	Revision             uint64                        `json:"revision"`
+	BusinessScope        BusinessScope                 `json:"business_scope"`
+	Modules              []ApplicationCatalogModule    `json:"modules"`
+	PublishedQueries     []ApplicationCatalogQuery     `json:"published_queries"`
+	PublishedOperations  []ApplicationCatalogOperation `json:"published_operations"`
+	Schemas              []ModuleSchemaDocument        `json:"schemas"`
+	AllowedEntityChoices []BusinessScope               `json:"allowed_entity_choices"`
+	AvailableScopes      []BusinessScope               `json:"available_scopes,omitempty"`
+	Blockers             []ModuleBlocker               `json:"blockers"`
+}
+
+//contract:wire:v2
+type ApplicationCatalogModule struct {
+	ID      ModuleID `json:"id"`
+	Version string   `json:"version"`
+	State   string   `json:"state"`
+}
+
+//contract:wire:v2
+type ApplicationCatalogQuery struct {
+	OwnerModuleID ModuleID            `json:"owner_module_id"`
+	Name          string              `json:"name"`
+	Route         string              `json:"route"`
+	InputSchema   SchemaRef           `json:"input_schema"`
+	OutputSchema  SchemaRef           `json:"output_schema"`
+	ScopePolicy   ResourceScopeKind   `json:"scope_policy"`
+	AllowedFields []string            `json:"allowed_fields"`
+	PageLimit     uint16              `json:"page_limit"`
+	Presentation  SurfacePresentation `json:"presentation"`
+}
+
+//contract:enum:v2
+type OperationAvailability string
+
+const (
+	OperationAvailable   OperationAvailability = "available"
+	OperationUnavailable OperationAvailability = "unavailable"
+	OperationDisabled    OperationAvailability = "disabled"
+	OperationDraining    OperationAvailability = "draining"
+)
+
+//contract:wire:v2
+type ApplicationCatalogOperation struct {
+	OperationRef  string                `json:"operation_ref"`
+	OwnerModuleID ModuleID              `json:"owner_module_id"`
+	Capability    CapabilityName        `json:"capability"`
+	Operation     string                `json:"operation"`
+	InputSchema   SchemaRef             `json:"input_schema"`
+	OutputSchema  SchemaRef             `json:"output_schema"`
+	Availability  OperationAvailability `json:"availability"`
+	Permissions   []string              `json:"permissions"`
+	Presentation  SurfacePresentation   `json:"presentation"`
+}
+
+//contract:wire:v2
+type SurfacePresentation struct {
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	Form        string `json:"form,omitempty"`
+	List        string `json:"list,omitempty"`
+}
+
+func PublishedOperationRef(owner ModuleID, capability CapabilityName, operation string) string {
+	return string(owner) + "/" + string(capability) + "/" + operation
+}
+
+func validateSurfacePresentation(p SurfacePresentation) error {
+	for _, value := range []struct {
+		name  string
+		value string
+		limit int
+	}{{"title", p.Title, 120}, {"description", p.Description, 500}, {"icon", p.Icon, 80}, {"form", p.Form, 160}, {"list", p.List, 160}} {
+		if len(value.value) > value.limit || strings.ContainsAny(value.value, "\r\n\x00") {
+			return fmt.Errorf("%s exceeds its presentation bound", value.name)
+		}
+	}
+	return nil
+}
+
+func (c ApplicationCatalog) Validate() error {
+	if c.Revision == 0 || c.BusinessScope.Validate() != nil || len(c.Modules) > 500 || len(c.PublishedQueries) > 2000 || len(c.PublishedOperations) > 2000 || len(c.Schemas) > 4000 || len(c.AllowedEntityChoices) > 1000 || len(c.AvailableScopes) > 1001 || len(c.Blockers) > 100 {
+		return fmt.Errorf("application catalog identity or collection bounds are invalid")
+	}
+	modules := make(map[ModuleID]bool, len(c.Modules))
+	for _, module := range c.Modules {
+		if !moduleIDPattern.MatchString(string(module.ID)) || !moduleSemverPattern.MatchString(module.Version) || (module.State != string(ModuleActive) && module.State != string(ModuleDraining) && module.State != string(ModuleDisabled)) || modules[module.ID] {
+			return fmt.Errorf("application catalog has an invalid or duplicate module")
+		}
+		modules[module.ID] = true
+	}
+	schemas := make(map[SchemaRef]bool, len(c.Schemas))
+	for _, schema := range c.Schemas {
+		if schema.Ref.ID == "" || schema.Ref.Version == 0 || len(schema.Schema) == 0 || len(schema.Schema) > 65536 || !json.Valid(schema.Schema) || validateLocalSchemaReferences(schema.Schema) != nil || schemas[schema.Ref] {
+			return fmt.Errorf("application catalog has an invalid or duplicate schema")
+		}
+		schemas[schema.Ref] = false
+	}
+	useSchema := func(ref SchemaRef) error {
+		_, ok := schemas[ref]
+		if !ok {
+			return fmt.Errorf("application catalog omits schema %s@%d", ref.ID, ref.Version)
+		}
+		schemas[ref] = true
+		return nil
+	}
+	queries := map[string]bool{}
+	for _, query := range c.PublishedQueries {
+		key := string(query.OwnerModuleID) + "/" + query.Name
+		if !modules[query.OwnerModuleID] || !validModuleName(query.Name) || query.Route != "/api/modules/"+string(query.OwnerModuleID)+"/queries/"+query.Name || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 || queries[key] || validateSurfacePresentation(query.Presentation) != nil {
+			return fmt.Errorf("application catalog has an invalid or duplicate published query")
+		}
+		queries[key] = true
+		if err := useSchema(query.InputSchema); err != nil {
+			return err
+		}
+		if err := useSchema(query.OutputSchema); err != nil {
+			return err
+		}
+	}
+	operations := map[string]bool{}
+	for _, operation := range c.PublishedOperations {
+		ref := PublishedOperationRef(operation.OwnerModuleID, operation.Capability, operation.Operation)
+		if !modules[operation.OwnerModuleID] || operation.OperationRef != ref || operation.Capability == "" || !validModuleName(operation.Operation) || operation.Availability != OperationAvailable && operation.Availability != OperationUnavailable && operation.Availability != OperationDisabled && operation.Availability != OperationDraining || len(operation.Permissions) == 0 || operations[ref] || validateSurfacePresentation(operation.Presentation) != nil {
+			return fmt.Errorf("application catalog has an invalid or duplicate published operation")
+		}
+		operations[ref] = true
+		if err := useSchema(operation.InputSchema); err != nil {
+			return err
+		}
+		if err := useSchema(operation.OutputSchema); err != nil {
+			return err
+		}
+	}
+	for ref, used := range schemas {
+		if !used {
+			return fmt.Errorf("application catalog contains unreferenced schema %s@%d", ref.ID, ref.Version)
+		}
+	}
+	choices := map[BusinessScope]bool{}
+	for _, choice := range c.AllowedEntityChoices {
+		if choice.Validate() != nil || choice.TenantID != c.BusinessScope.TenantID || choice.Kind != ScopeKindLegalEntity || choices[choice] {
+			return fmt.Errorf("application catalog has an invalid or duplicate legal entity choice")
+		}
+		choices[choice] = true
+	}
+	availableScopes := map[BusinessScope]bool{}
+	for _, available := range c.AvailableScopes {
+		if available.Validate() != nil || available.TenantID != c.BusinessScope.TenantID || availableScopes[available] {
+			return fmt.Errorf("application catalog has an invalid or duplicate available scope")
+		}
+		availableScopes[available] = true
+	}
+	for _, blocker := range c.Blockers {
+		if blocker.Code == "" || len(blocker.Code) > 80 || len(blocker.Examples) > 8 {
+			return fmt.Errorf("application catalog blocker exceeds its bounds")
+		}
+	}
+	return nil
 }
 
 // QueryReplayPage is one bounded page of owner-published changes after a
@@ -509,15 +688,30 @@ type ModuleStore interface {
 //
 //contract:wire:v2
 type ModuleDescriptor struct {
-	ID              ModuleID                `json:"id"`
-	Version         string                  `json:"version"`
-	Resources       []OwnedResource         `json:"resources,omitempty"`
-	Queries         []PublishedQuery        `json:"queries,omitempty"`
-	Projections     []ProjectionDefinition  `json:"projections,omitempty"`
-	Provides        []CapabilityOffer       `json:"provides,omitempty"`
-	Requires        []CapabilityRequirement `json:"requires,omitempty"`
-	ExtensionPoints []ExtensionPoint        `json:"extension_points,omitempty"`
-	Extensions      []ExtensionRegistration `json:"extensions,omitempty"`
+	ID                  ModuleID                `json:"id"`
+	Version             string                  `json:"version"`
+	Schemas             []ModuleSchemaDocument  `json:"schemas,omitempty"`
+	Resources           []OwnedResource         `json:"resources,omitempty"`
+	Queries             []PublishedQuery        `json:"queries,omitempty"`
+	PublishedOperations []PublishedOperation    `json:"published_operations,omitempty"`
+	Projections         []ProjectionDefinition  `json:"projections,omitempty"`
+	Provides            []CapabilityOffer       `json:"provides,omitempty"`
+	Requires            []CapabilityRequirement `json:"requires,omitempty"`
+	ExtensionPoints     []ExtensionPoint        `json:"extension_points,omitempty"`
+	Extensions          []ExtensionRegistration `json:"extensions,omitempty"`
+}
+
+// PublishedOperation explicitly makes one owner operation discoverable in the
+// actor catalog. Its capability and schema bindings are checked against the
+// module's existing offers; declaring it does not grant caller authority.
+//
+//contract:wire:v2
+type PublishedOperation struct {
+	Name         string              `json:"name"`
+	Capability   CapabilityName      `json:"capability"`
+	Operation    string              `json:"operation"`
+	ScopePolicy  ResourceScopeKind   `json:"scope_policy"`
+	Presentation SurfacePresentation `json:"presentation"`
 }
 
 // ExtensionKind is a behavior explicitly allowed by an owner-declared point.
@@ -1720,6 +1914,22 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 	if !moduleSemverPattern.MatchString(m.Version) {
 		return fmt.Errorf("module %q requires a semver version", m.ID)
 	}
+	moduleSchemas := make(map[SchemaRef]bool, len(m.Schemas))
+	for _, schema := range m.Schemas {
+		if schema.Ref.ID == "" || schema.Ref.Version == 0 || len(schema.Schema) == 0 || len(schema.Schema) > 65536 || !json.Valid(schema.Schema) {
+			return fmt.Errorf("module %q contains an invalid or oversized JSON Schema document", m.ID)
+		}
+		if moduleSchemas[schema.Ref] {
+			return fmt.Errorf("module %q duplicates schema %s@%d", m.ID, schema.Ref.ID, schema.Ref.Version)
+		}
+		if err := validateLocalSchemaReferences(schema.Schema); err != nil {
+			return fmt.Errorf("module %q schema %s@%d: %w", m.ID, schema.Ref.ID, schema.Ref.Version, err)
+		}
+		moduleSchemas[schema.Ref] = true
+	}
+	moduleSchemaRegistered := func(ref SchemaRef) bool {
+		return registeredSchema == nil || moduleSchemas[ref] || registeredSchema(ref)
+	}
 	resources := map[string]bool{}
 	for _, resource := range m.Resources {
 		key := fmt.Sprintf("%s/%s", resource.Ref.Namespace, resource.Ref.Name)
@@ -1775,12 +1985,30 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		if !ok || operation.Effect != EffectQuery || operation.Input != query.InputSchema || operation.Output != query.OutputSchema {
 			return fmt.Errorf("module %q query %q must match a declared query capability operation", m.ID, query.Name)
 		}
-		if err := validateModuleSchema(query.InputSchema, registeredSchema); err != nil {
+		if err := validateModuleSchema(query.InputSchema, moduleSchemaRegistered); err != nil {
 			return err
 		}
-		if err := validateModuleSchema(query.OutputSchema, registeredSchema); err != nil {
+		if err := validateModuleSchema(query.OutputSchema, moduleSchemaRegistered); err != nil {
 			return err
 		}
+	}
+	publishedOperationNames := map[string]bool{}
+	for _, published := range m.PublishedOperations {
+		key := string(published.Capability) + "/" + published.Operation
+		op, exists := queryOperations[key]
+		if !validModuleName(published.Name) || publishedOperationNames[published.Name] || !exists || (op.Effect != EffectLocal && op.Effect != EffectExternal) {
+			return fmt.Errorf("module %q has an invalid or duplicate published operation", m.ID)
+		}
+		if published.ScopePolicy != ScopeTenantShared && published.ScopePolicy != ScopeEntityOwned {
+			return fmt.Errorf("module %q operation %q requires an explicit scope policy", m.ID, published.Name)
+		}
+		if len("module.")+len(m.ID)+len(".operation.")+len(published.Name) > 160 {
+			return fmt.Errorf("module %q operation %q has an oversized permission resource", m.ID, published.Name)
+		}
+		if err := validateSurfacePresentation(published.Presentation); err != nil {
+			return fmt.Errorf("module %q operation %q presentation: %w", m.ID, published.Name, err)
+		}
+		publishedOperationNames[published.Name] = true
 	}
 	projectionIDs := map[string]bool{}
 	for _, projection := range m.Projections {
@@ -1788,7 +2016,7 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 			return fmt.Errorf("module %q has an invalid projection definition", m.ID)
 		}
 		projectionIDs[projection.ID] = true
-		if err := validateModuleSchema(projection.OutputSchema, registeredSchema); err != nil {
+		if err := validateModuleSchema(projection.OutputSchema, moduleSchemaRegistered); err != nil {
 			return err
 		}
 		for _, source := range projection.Sources {
@@ -1808,7 +2036,7 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 			return fmt.Errorf("module %q has empty or duplicate capability offer %q", m.ID, offer.Name)
 		}
 		capabilities[string(offer.Name)] = true
-		if err := validateModuleSchema(offer.Contract, registeredSchema); err != nil {
+		if err := validateModuleSchema(offer.Contract, moduleSchemaRegistered); err != nil {
 			return err
 		}
 		ops := map[string]bool{}
@@ -1820,12 +2048,17 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 			if op.Effect != EffectQuery && op.Effect != EffectLocal && op.Effect != EffectExternal {
 				return fmt.Errorf("module %q operation %q has unknown effect %q", m.ID, op.Name, op.Effect)
 			}
-			if err := validateModuleSchema(op.Input, registeredSchema); err != nil {
+			if err := validateModuleSchema(op.Input, moduleSchemaRegistered); err != nil {
 				return err
 			}
-			if err := validateModuleSchema(op.Output, registeredSchema); err != nil {
+			if err := validateModuleSchema(op.Output, moduleSchemaRegistered); err != nil {
 				return err
 			}
+		}
+	}
+	for _, query := range m.Queries {
+		if err := validateSurfacePresentation(query.Presentation); err != nil {
+			return fmt.Errorf("module %q query %q presentation: %w", m.ID, query.Name, err)
 		}
 	}
 	required := map[string]bool{}
@@ -1834,7 +2067,7 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 			return fmt.Errorf("module %q has empty or duplicate capability requirement", m.ID)
 		}
 		required[string(req.Name)] = true
-		if err := validateModuleSchema(req.Contract, registeredSchema); err != nil {
+		if err := validateModuleSchema(req.Contract, moduleSchemaRegistered); err != nil {
 			return err
 		}
 	}
@@ -1856,6 +2089,46 @@ func validScopeField(field string) bool {
 var moduleNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
 
 func validModuleName(name string) bool { return moduleNamePattern.MatchString(name) }
+
+func validateLocalSchemaReferences(data json.RawMessage) error {
+	var decoded any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return fmt.Errorf("schema document is invalid")
+	}
+	if _, ok := decoded.(map[string]any); !ok {
+		return fmt.Errorf("schema root must be an object")
+	}
+	nodes := 0
+	var visit func(any, int) error
+	visit = func(value any, level int) error {
+		nodes++
+		if nodes > 8192 || level > 64 {
+			return fmt.Errorf("schema document exceeds structural limits")
+		}
+		switch item := value.(type) {
+		case map[string]any:
+			for key, child := range item {
+				if key == "$ref" {
+					ref, ok := child.(string)
+					if !ok || !strings.HasPrefix(ref, "#") || len(ref) > 512 {
+						return fmt.Errorf("only bounded local schema references are supported")
+					}
+				}
+				if err := visit(child, level+1); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, child := range item {
+				if err := visit(child, level+1); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return visit(decoded, 0)
+}
 
 func validateModuleSchema(ref SchemaRef, registered func(SchemaRef) bool) error {
 	if strings.TrimSpace(ref.ID) == "" || ref.Version == 0 {

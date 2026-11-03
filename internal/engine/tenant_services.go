@@ -262,6 +262,9 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	services.ModuleBindings = &bindingPlan
 	services.ResolveModuleBindings = resolveModuleBindings
 	services.ResolveCandidateModuleBindings = resolveCandidateModuleBindings
+	services.LoadModuleSnapshot = func() (contract.ModuleSnapshot, error) {
+		return moduleStore.Load(tenantID)
+	}
 	services.PublishedProjections = &analytics.PublishedProjectionStore{DB: loaded.DB, Dialect: dialect, Site: loaded.SiteID}
 	workAdmission, err := site.ConnectionAdmission(cfg)
 	if err != nil {

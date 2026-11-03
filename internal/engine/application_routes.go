@@ -96,6 +96,8 @@ func RegisterApplicationRoutes(config ApplicationRouteConfig) (*auth.SessionMana
 	api.RegisterRoutesOnGroupWithRealtimeOwner(legacyAPIGroup, config.Registry, config.Transactions, nil, nil, config.ScriptRunner, nil, nil, config.HTTPAllowlist, nil, config.AsyncHookSink, nil, nil, config.KernelCommands, nil, config.AnalyticsCache, config.RealtimeConnections)
 	api.RegisterRequestRoutes(requestGroup, nil)
 	api.RegisterWorkflowRoutes(requestGroup, nil)
+	catalogHandler := api.NewHandler(config.Registry, config.Transactions)
+	requestGroup.GET("/modules/catalog", catalogHandler.HandleApplicationCatalog)
 	api.RegisterPublicRoutesOnGroupWithRuntimeServices(publicV1Group, config.Registry, config.Transactions, nil, nil)
 	api.RegisterPublicRoutesOnGroupWithRuntimeServices(publicLegacyGroup, config.Registry, config.Transactions, nil, nil)
 
