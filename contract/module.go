@@ -243,6 +243,93 @@ type ApplicationCatalog struct {
 	Blockers             []ModuleBlocker               `json:"blockers"`
 }
 
+// ExecutePublishedOperation asks Engine to invoke a registered public module
+// operation. Caller provenance and provider selection are resolved by Engine.
+//
+//contract:wire:v2
+type ExecutePublishedOperation struct {
+	Meta        CommandMeta `json:"meta"`
+	InputSchema SchemaRef   `json:"input_schema"`
+	//contract:maxJSONBytes=1048576
+	//contract:json
+	Input json.RawMessage `json:"input"`
+}
+
+func (r ExecutePublishedOperation) Validate() error {
+	if r.Meta.IdempotencyKey == "" || len(r.Meta.IdempotencyKey) > 256 || r.InputSchema.ID == "" || r.InputSchema.Version == 0 || len(r.Input) == 0 || len(r.Input) > 1<<20 || !json.Valid(r.Input) {
+		return fmt.Errorf("published operation request identity or input is invalid")
+	}
+	return nil
+}
+
+//contract:enum:v2
+type OperationReceiptStatus string
+
+const (
+	ReceiptAccepted       OperationReceiptStatus = "accepted"
+	ReceiptRunning        OperationReceiptStatus = "running"
+	ReceiptCompleted      OperationReceiptStatus = "completed"
+	ReceiptRejected       OperationReceiptStatus = "rejected"
+	ReceiptConflict       OperationReceiptStatus = "conflict"
+	ReceiptFailed         OperationReceiptStatus = "failed"
+	ReceiptOutcomeUnknown OperationReceiptStatus = "outcome_unknown"
+)
+
+// OperationReceipt reports one registered operation attempt. Transport status
+// does not determine this business outcome.
+//
+//contract:wire:v2
+type OperationReceipt struct {
+	ExecutionID   OperationID            `json:"execution_id"`
+	OperationRef  string                 `json:"operation_ref"`
+	BusinessScope BusinessScope          `json:"business_scope"`
+	Status        OperationReceiptStatus `json:"status"`
+	OutputSchema  *SchemaRef             `json:"output_schema,omitempty"`
+	//contract:maxJSONBytes=1048576
+	//contract:json
+	Output        json.RawMessage `json:"output,omitempty"`
+	Error         *Error          `json:"error,omitempty"`
+	CorrelationID string          `json:"correlation_id,omitempty"`
+	Revision      string          `json:"revision"`
+}
+
+func (r OperationReceipt) Validate() error {
+	if r.ExecutionID == "" || r.OperationRef == "" || len(r.OperationRef) > 256 || r.BusinessScope.Validate() != nil || r.Revision == "" || len(r.Revision) > 128 {
+		return fmt.Errorf("operation receipt identity or scope is invalid")
+	}
+	switch r.Status {
+	case ReceiptAccepted, ReceiptRunning, ReceiptCompleted, ReceiptRejected, ReceiptConflict, ReceiptFailed, ReceiptOutcomeUnknown:
+	default:
+		return fmt.Errorf("operation receipt status is invalid")
+	}
+	if r.Status == ReceiptCompleted {
+		if r.OutputSchema == nil || r.OutputSchema.ID == "" || r.OutputSchema.Version == 0 || len(r.Output) == 0 || len(r.Output) > 1<<20 || !json.Valid(r.Output) || r.Error != nil {
+			return fmt.Errorf("completed operation receipt requires schema-bound output")
+		}
+	} else if len(r.Output) > 0 || r.OutputSchema != nil {
+		return fmt.Errorf("non-completed operation receipt cannot contain output")
+	}
+	if len(r.Output) > 1<<20 || r.CorrelationID != "" && len(r.CorrelationID) > 160 {
+		return fmt.Errorf("operation receipt exceeds bounds")
+	}
+	return nil
+}
+
+// LookupPublishedOperation asks for a prior result without dispatching work.
+//
+//contract:wire:v2
+type LookupPublishedOperation struct {
+	OperationRef   string         `json:"operation_ref"`
+	IdempotencyKey IdempotencyKey `json:"idempotency_key"`
+}
+
+func (r LookupPublishedOperation) Validate() error {
+	if r.OperationRef == "" || len(r.OperationRef) > 256 || r.IdempotencyKey == "" || len(r.IdempotencyKey) > 256 {
+		return fmt.Errorf("operation lookup identity is invalid")
+	}
+	return nil
+}
+
 //contract:wire:v2
 type ApplicationCatalogModule struct {
 	ID      ModuleID `json:"id"`

@@ -1298,6 +1298,27 @@
       ],
       "type": "object"
     },
+    "ExecutePublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "meta"
+      ],
+      "type": "object"
+    },
     "ExecutionInspection": {
       "additionalProperties": false,
       "properties": {
@@ -1670,6 +1691,22 @@
         "package_id",
         "release_id",
         "version"
+      ],
+      "type": "object"
+    },
+    "LookupPublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "operation_ref"
       ],
       "type": "object"
     },
@@ -2303,6 +2340,58 @@
         "ownership",
         "revision",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "OperationReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Error",
+          "x-optional-pointer": true
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "revision": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "accepted",
+            "running",
+            "completed",
+            "rejected",
+            "conflict",
+            "failed",
+            "outcome_unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "execution_id",
+        "operation_ref",
+        "revision",
+        "status"
       ],
       "type": "object"
     },
@@ -5695,6 +5784,27 @@
       ],
       "type": "object"
     },
+    "ExecutePublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "meta"
+      ],
+      "type": "object"
+    },
     "ExecutionInspection": {
       "additionalProperties": false,
       "properties": {
@@ -6067,6 +6177,22 @@
         "package_id",
         "release_id",
         "version"
+      ],
+      "type": "object"
+    },
+    "LookupPublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "operation_ref"
       ],
       "type": "object"
     },
@@ -6700,6 +6826,58 @@
         "ownership",
         "revision",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "OperationReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Error",
+          "x-optional-pointer": true
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "revision": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "accepted",
+            "running",
+            "completed",
+            "rejected",
+            "conflict",
+            "failed",
+            "outcome_unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "execution_id",
+        "operation_ref",
+        "revision",
+        "status"
       ],
       "type": "object"
     },
@@ -8873,6 +9051,15 @@
       "query",
       "local_command",
       "external_command"
+    ],
+    "OperationReceiptStatus": [
+      "accepted",
+      "running",
+      "completed",
+      "rejected",
+      "conflict",
+      "failed",
+      "outcome_unknown"
     ],
     "OperationState": [
       "requested",

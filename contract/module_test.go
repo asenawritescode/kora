@@ -515,3 +515,32 @@ func TestApplicationCatalogValidatesAndBoundsSchemaDocuments(t *testing.T) {
 		t.Fatal("remote schema reference accepted")
 	}
 }
+
+func TestPublishedOperationWireValidationRequiresBoundedIntentAndCompletedOutput(t *testing.T) {
+	request := ExecutePublishedOperation{Meta: CommandMeta{IdempotencyKey: "retry-1"}, InputSchema: SchemaRef{ID: "sales.input", Version: 1}, Input: []byte(`{"amount":3}`)}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("valid execute request rejected: %v", err)
+	}
+	request.Input = []byte("{")
+	if err := request.Validate(); err == nil {
+		t.Fatal("invalid JSON input accepted")
+	}
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}
+	receipt := OperationReceipt{ExecutionID: "exec-1", OperationRef: "sales.orders/issue", BusinessScope: scope, Status: ReceiptCompleted, OutputSchema: &SchemaRef{ID: "sales.output", Version: 1}, Output: []byte(`{"ok":true}`), Revision: "r1"}
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("valid completed receipt rejected: %v", err)
+	}
+	receipt.Output = nil
+	if err := receipt.Validate(); err == nil {
+		t.Fatal("completed receipt without output accepted")
+	}
+}
+
+func TestPublishedOperationLookupValidationRejectsBlankKeys(t *testing.T) {
+	if err := (LookupPublishedOperation{OperationRef: "sales.orders/issue", IdempotencyKey: "retry-1"}).Validate(); err != nil {
+		t.Fatalf("valid lookup rejected: %v", err)
+	}
+	if err := (LookupPublishedOperation{OperationRef: "sales.orders/issue"}).Validate(); err == nil {
+		t.Fatal("lookup without idempotency key accepted")
+	}
+}
