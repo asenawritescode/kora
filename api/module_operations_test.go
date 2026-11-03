@@ -279,3 +279,117 @@ func TestExecutePublishedOperationRejectsForgedSchemaAndProviderBeforeDispatch(t
 		})
 	}
 }
+
+func TestOfflineIntentHTTPAuthorizesStrictlyAndPreservesRetryIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	scope := contract.BusinessScope{TenantID: "offline-intent-tenant", Kind: contract.ScopeKindTenant}
+	inputSchema := contract.SchemaRef{ID: "sales.issue.input", Version: 1}
+	outputSchema := contract.SchemaRef{ID: "sales.issue.output", Version: 1}
+	published := contract.PublishedOperation{
+		Name: "issue", Capability: "sales.invoice", Operation: "issue",
+		ScopePolicy: contract.ScopeTenantShared, OfflineEligible: true,
+	}
+	module := contract.ModuleDescriptor{
+		ID: "sales.invoices", Version: "1.0.0",
+		PublishedOperations: []contract.PublishedOperation{published},
+		Provides: []contract.CapabilityOffer{{Name: published.Capability, Contract: outputSchema, Operations: []contract.OperationSpec{{
+			Name: published.Operation, Input: inputSchema, Output: outputSchema, Effect: contract.EffectLocal,
+		}}}},
+	}
+	snapshot := contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 12, Modules: []contract.ModuleDescriptor{module}}
+	registry := doctype.NewRegistry()
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.invoices.operation.issue", Role: "Operator", Write: true})
+	operator, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "operator", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), Roles: []string{"Operator"}, AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "reader", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), Roles: []string{"Reader"}, AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := NewSiteRuntimeServices()
+	var calls int
+	var gotMeta contract.CommandMeta
+	var gotScope contract.BusinessScope
+	services.Replace(string(scope.TenantID), SiteRuntimeService{
+		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return snapshot, nil },
+		ExecutePublishedOperation: func(_ context.Context, execution policy.Execution, gotBusinessScope contract.BusinessScope, _ contract.ModuleID, gotPublished contract.PublishedOperation, gotSchema contract.SchemaRef, meta contract.CommandMeta, input []byte) (contract.OperationReceipt, error) {
+			calls++
+			gotMeta, gotScope = meta, gotBusinessScope
+			if execution.Actor().PrincipalID != "operator" || gotPublished.Name != published.Name || gotPublished.Capability != published.Capability || gotPublished.Operation != published.Operation || !gotPublished.OfflineEligible || gotSchema != inputSchema || string(input) != `{"invoice_id":"INV-1"}` {
+				t.Fatalf("offline dispatch identity changed: actor=%+v operation=%+v schema=%+v input=%s", execution.Actor(), gotPublished, gotSchema, input)
+			}
+			return contract.OperationReceipt{
+				ExecutionID: "execution-12", OperationRef: contract.PublishedOperationRef(module.ID, published.Capability, published.Operation),
+				BusinessScope: gotBusinessScope, Status: contract.ReceiptCompleted, OutputSchema: &outputSchema,
+				Output: json.RawMessage(`{"issued":true}`), Revision: "12",
+			}, nil
+		},
+	})
+	handler := NewHandler(registry, nil)
+	handler.RuntimeServices = services
+	intent := contract.OfflineIntent{
+		LocalOperationID: "local-invoice-12", BusinessScope: scope,
+		OperationRef: contract.PublishedOperationRef(module.ID, published.Capability, published.Operation),
+		InputSchema:  inputSchema, Input: json.RawMessage(`{"invoice_id":"INV-1"}`),
+		IdempotencyKey: "retry-invoice-12", ExpectedRevision: "11", CatalogRevision: snapshot.Revision,
+	}
+	invoke := func(execution policy.Execution, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v2/offline/intents", strings.NewReader(body))
+		ctx.Set("site_name", string(scope.TenantID))
+		ctx.Set("policy_execution", execution)
+		handler.HandleOfflineIntentsV2(ctx)
+		return recorder
+	}
+	validBody, err := json.Marshal(contract.OfflineIntentsRequest{Intents: []contract.OfflineIntent{intent}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := invoke(operator, string(validBody))
+	if response.Code != http.StatusOK {
+		t.Fatalf("valid offline intent: status=%d body=%s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Data contract.OfflineIntentsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Receipts) != 1 || result.Data.Receipts[0].LocalOperationID != intent.LocalOperationID || result.Data.Receipts[0].Receipt.ExecutionID != "execution-12" {
+		t.Fatalf("offline receipt did not preserve local operation identity: %+v", result.Data)
+	}
+	if calls != 1 || gotMeta.IdempotencyKey != intent.IdempotencyKey || gotMeta.ExpectedRevision != intent.ExpectedRevision || gotScope != scope {
+		t.Fatalf("dispatch identity changed: calls=%d meta=%+v scope=%+v", calls, gotMeta, gotScope)
+	}
+
+	unknownField := strings.Replace(string(validBody), `"operation_ref":`, `"unknown":true,"operation_ref":`, 1)
+	if rejected := invoke(operator, unknownField); rejected.Code != http.StatusBadRequest || calls != 1 {
+		t.Fatalf("unknown intent field was accepted or dispatched: status=%d calls=%d body=%s", rejected.Code, calls, rejected.Body.String())
+	}
+
+	wrongScope := intent
+	wrongScope.BusinessScope.TenantID = "another-tenant"
+	wrongScopeBody, _ := json.Marshal(contract.OfflineIntentsRequest{Intents: []contract.OfflineIntent{wrongScope}})
+	if rejected := invoke(operator, string(wrongScopeBody)); rejected.Code != http.StatusBadRequest || calls != 1 {
+		t.Fatalf("cross-tenant intent was accepted or dispatched: status=%d calls=%d body=%s", rejected.Code, calls, rejected.Body.String())
+	}
+	if rejected := invoke(reader, string(validBody)); rejected.Code != http.StatusForbidden || calls != 1 {
+		t.Fatalf("protected intent was accepted or dispatched: status=%d calls=%d body=%s", rejected.Code, calls, rejected.Body.String())
+	}
+
+	published.OfflineEligible = false
+	module.PublishedOperations = []contract.PublishedOperation{published}
+	module.Provides[0].Operations[0].Name = published.Operation
+	snapshot.Modules = []contract.ModuleDescriptor{module}
+	if rejected := invoke(operator, string(validBody)); rejected.Code != http.StatusForbidden || calls != 1 {
+		t.Fatalf("online-only operation was accepted or dispatched: status=%d calls=%d body=%s", rejected.Code, calls, rejected.Body.String())
+	}
+	module.PublishedOperations[0].OfflineEligible = true
+	snapshot.Revision++
+	if rejected := invoke(operator, string(validBody)); rejected.Code != http.StatusConflict || calls != 1 {
+		t.Fatalf("stale catalog intent was accepted or dispatched: status=%d calls=%d body=%s", rejected.Code, calls, rejected.Body.String())
+	}
+}
