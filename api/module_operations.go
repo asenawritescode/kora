@@ -152,6 +152,10 @@ func (h *Handler) HandleOfflineBootstrapV2(c *gin.Context) {
 		writeError(c, http.StatusForbidden, "permission.denied", "Published query access is not granted", nil)
 		return
 	}
+	if !plan.CanReplayPublishedQueryOfflineForActor(request.BusinessScope, query.OwnerModuleID, query.Name, actorScope) {
+		writeError(c, http.StatusForbidden, "module.query_online_only", "Published query actor scope is not eligible for offline sync", nil)
+		return
+	}
 	actorScopeValue := plugin.PublishedQueryActorScope{BusinessScope: request.BusinessScope, SubjectID: execution.Actor().SubjectUserID, OwnerOnly: actorScope != nil && actorScope.OwnerOnly, OwnerField: query.OwnerField}
 	if actorScopeValue.SubjectID == "" {
 		actorScopeValue.SubjectID = execution.Actor().PrincipalID
@@ -180,7 +184,7 @@ func (h *Handler) HandleOfflineBootstrapV2(c *gin.Context) {
 	if subject == "" {
 		subject = actor.PrincipalID
 	}
-	c.JSON(http.StatusOK, Response{Data: contract.OfflineSnapshotPage{Source: request.Source, InputHash: inputHash, BusinessScope: request.BusinessScope, SubjectID: subject, SchemaRevision: query.OutputSchema, CatalogRevision: snapshot.Revision, SnapshotToken: result.SnapshotToken, PageCursor: request.PageCursor, NextPageCursor: result.NextCursor, ReplayPosition: result.SourceCursor, Rows: result.Data, Complete: result.NextCursor == ""}})
+	c.JSON(http.StatusOK, Response{Data: contract.OfflineSnapshotPage{Source: request.Source, FactKeyField: query.OfflineFactKey, InputHash: inputHash, BusinessScope: request.BusinessScope, SubjectID: subject, SchemaRevision: query.OutputSchema, CatalogRevision: snapshot.Revision, SnapshotToken: result.SnapshotToken, PageCursor: request.PageCursor, NextPageCursor: result.NextCursor, ReplayPosition: result.SourceCursor, Rows: result.Data, Complete: result.NextCursor == ""}})
 }
 
 func (h *Handler) HandleOfflinePullV2(c *gin.Context) {
@@ -215,6 +219,10 @@ func (h *Handler) HandleOfflinePullV2(c *gin.Context) {
 	actorScope, authErr := authorizePublishedQueryActorScope(execution, h.siteRegistry(c), query, request.BusinessScope)
 	if authErr != nil {
 		writeError(c, http.StatusForbidden, "permission.denied", "Published query access is not granted", nil)
+		return
+	}
+	if !plan.CanReplayPublishedQueryOfflineForActor(request.BusinessScope, query.OwnerModuleID, query.Name, actorScope) {
+		writeError(c, http.StatusForbidden, "module.query_online_only", "Published query actor scope is not eligible for offline sync", nil)
 		return
 	}
 	hash := sha256.Sum256(request.Source.Input)

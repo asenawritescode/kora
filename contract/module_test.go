@@ -78,6 +78,41 @@ func TestPublishedQueriesAndProjectionSourcesAreValidated(t *testing.T) {
 	}
 }
 
+func TestOfflinePublishedQueryRequiresStableFactIdentity(t *testing.T) {
+	in, out := SchemaRef{ID: "q.in", Version: 1}, SchemaRef{ID: "q.out", Version: 1}
+	query := PublishedQuery{OwnerModuleID: "sales.orders", Name: "list", Capability: "sales.read", Operation: "list", InputSchema: in, OutputSchema: out, ScopePolicy: ScopeTenantShared, AllowedFields: []string{"id", "amount"}, PageLimit: 10, OfflineEligible: true, OfflineFactKey: "id"}
+	mod := ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Provides: []CapabilityOffer{{Name: query.Capability, Contract: out, Operations: []OperationSpec{{Name: "list", Input: in, Output: out, Effect: EffectQuery}}}}, Queries: []PublishedQuery{query}}
+	if err := mod.Validate(func(SchemaRef) bool { return true }); err != nil {
+		t.Fatal("valid offline query rejected:", err)
+	}
+	mod.Queries[0].OfflineFactKey = "missing"
+	if err := mod.Validate(func(SchemaRef) bool { return true }); err == nil {
+		t.Fatal("offline query accepted an unpublished fact key")
+	}
+}
+
+func TestOfflineSnapshotAndReplayRowsShareDeclaredStableKey(t *testing.T) {
+	query := PublishedQuery{AllowedFields: []string{"id", "amount"}, OfflineEligible: true, OfflineFactKey: "id", PageLimit: 10, ScopePolicy: ScopeTenantShared}
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}
+	asOf := time.Date(2026, 11, 3, 8, 0, 0, 0, time.UTC)
+	base := QueryResult{Data: json.RawMessage(`[{"id":"a-1","amount":2}]`), AsOf: asOf, Freshness: QueryFresh}
+	if err := base.Validate(query, 10, scope); err != nil {
+		t.Fatal("valid snapshot identity rejected:", err)
+	}
+	base.Data = json.RawMessage(`[{"amount":2}]`)
+	if err := base.Validate(query, 10, scope); err == nil {
+		t.Fatal("snapshot row without stable identity accepted")
+	}
+	page := QueryReplayPage{Changes: []QueryReplayChange{{FactKey: "a-1", Data: json.RawMessage(`{"id":"a-1","amount":3}`)}}, ThroughCursor: "c2", SourceRevision: "r2", AsOf: asOf, Freshness: QueryFresh}
+	if err := page.Validate(query, 10); err != nil {
+		t.Fatal("matching replay identity rejected:", err)
+	}
+	page.Changes[0].Data = json.RawMessage(`{"id":"a-2","amount":3}`)
+	if err := page.Validate(query, 10); err == nil {
+		t.Fatal("replay row whose identity differs from fact_key accepted")
+	}
+}
+
 func TestModuleExecutionSealCoversEveryAuthorityField(t *testing.T) {
 	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindLegalEntity, LegalEntityID: "entity-a"}
 	execution, err := NewCommandModuleExecution(scope, "sales.orders", "finance.ar", 7, "finance.invoice.issue", "finance.invoice.issue")

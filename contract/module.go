@@ -195,18 +195,15 @@ type PublishedQuery struct {
 	OwnerField    string              `json:"owner_field,omitempty"`
 	PageLimit     uint16              `json:"page_limit"`
 	Presentation  SurfacePresentation `json:"presentation"`
-	// ReferenceLookup declares how an authorized query row supplies a provider-qualified value.
-	// It is descriptive only: Engine still validates the BusinessRef on writes.
-	ReferenceLookup *PublishedReferenceLookup `json:"reference_lookup,omitempty"`
 	// OfflineEligible permits this published query to back an actor-scoped offline feed.
 	// Providers must still support pinned snapshots and actor-scoped replay.
 	OfflineEligible bool `json:"offline_eligible,omitempty"`
+	// OfflineFactKey names the stable scalar identity in offline snapshot rows.
+	OfflineFactKey  string                    `json:"offline_fact_key,omitempty"`
+	ReferenceLookup *PublishedReferenceLookup `json:"reference_lookup,omitempty"`
 }
 
-// PublishedReferenceLookup binds a query result field to a stable business identity.
-// SearchField names the query input property used for text search. ValueField
-// must return a BusinessRef in the active catalog scope; Engine validates it
-// again when a consumer persists that reference.
+// PublishedReferenceLookup binds a query row to a provider-qualified reference.
 //
 //contract:wire:v2
 type PublishedReferenceLookup struct {
@@ -216,15 +213,15 @@ type PublishedReferenceLookup struct {
 	LabelField   string `json:"label_field"`
 }
 
-func (r PublishedReferenceLookup) Validate(allowedFields []string) error {
-	if r.ResourceType == "" || len(r.ResourceType) > 160 || !validModuleName(r.SearchField) || !validModuleName(r.ValueField) || !validModuleName(r.LabelField) || r.ValueField == r.LabelField {
+func (r PublishedReferenceLookup) Validate(allowed []string) error {
+	if r.ResourceType == "" || !validModuleName(r.SearchField) || !validModuleName(r.ValueField) || !validModuleName(r.LabelField) || r.ValueField == r.LabelField {
 		return fmt.Errorf("published reference lookup identity is invalid")
 	}
-	allowed := make(map[string]bool, len(allowedFields))
-	for _, field := range allowedFields {
-		allowed[field] = true
+	set := map[string]bool{}
+	for _, f := range allowed {
+		set[f] = true
 	}
-	if !allowed[r.ValueField] || !allowed[r.LabelField] {
+	if !set[r.ValueField] || !set[r.LabelField] {
 		return fmt.Errorf("published reference lookup fields must be included in allowed fields")
 	}
 	return nil
@@ -419,6 +416,7 @@ type ApplicationCatalogQuery struct {
 	PageLimit       uint16                    `json:"page_limit"`
 	Presentation    SurfacePresentation       `json:"presentation"`
 	OfflineEligible bool                      `json:"offline_eligible,omitempty"`
+	OfflineFactKey  string                    `json:"offline_fact_key,omitempty"`
 	ReferenceLookup *PublishedReferenceLookup `json:"reference_lookup,omitempty"`
 }
 
@@ -456,19 +454,48 @@ type ApplicationCatalogOperation struct {
 	Availability    OperationAvailability      `json:"availability"`
 	Permissions     []string                   `json:"permissions"`
 	Presentation    SurfacePresentation        `json:"presentation"`
-	Checkout        *CheckoutOperationContract `json:"checkout,omitempty"`
 	OfflineEligible bool                       `json:"offline_eligible,omitempty"`
+	Checkout        *CheckoutOperationContract `json:"checkout,omitempty"`
 }
 
-// CheckoutOperationContract declares how a checkout client maps its exact
-// cart/context values into an owner's input schema and which business facts
-// the operation output confirms. OperationReceipt.completed alone never
-// implies payment, invoice, or fulfillment completion.
-//
 //contract:wire:v2
 type CheckoutOperationContract struct {
 	Input    CheckoutInputBinding     `json:"input"`
 	Outcomes []CheckoutOutcomeBinding `json:"outcomes"`
+}
+
+func (c CheckoutOperationContract) Validate(inputSchema, outputSchema json.RawMessage) error {
+	if len(c.Outcomes) == 0 || len(c.Outcomes) > 4 {
+		return fmt.Errorf("one to four checkout outcomes are required")
+	}
+	var in struct {
+		Type       string `json:"type"`
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+	}
+	var out struct {
+		Type       string `json:"type"`
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+	}
+	if json.Unmarshal(inputSchema, &in) != nil || in.Type != "object" || json.Unmarshal(outputSchema, &out) != nil || out.Type != "object" {
+		return fmt.Errorf("checkout schemas must be objects")
+	}
+	for _, f := range []struct{ name, field, typ string }{{"cart_items", c.Input.CartItems, "array"}, {"requested_total", c.Input.RequestedTotal, "string"}, {"currency", c.Input.Currency, "string"}, {"payment_method", c.Input.PaymentMethod, "string"}} {
+		if f.field == "" || in.Properties[f.field].Type != f.typ {
+			return fmt.Errorf("checkout input field %s has wrong schema", f.name)
+		}
+	}
+	seen := map[CheckoutOutcomeKind]bool{}
+	for _, o := range c.Outcomes {
+		if o.Kind == "" || seen[o.Kind] || !validModuleName(o.StatusField) || o.SuccessValue == "" || out.Properties[o.StatusField].Type != "string" || o.Kind == CheckoutInvoiceIssued && o.ReferenceField == "" {
+			return fmt.Errorf("checkout outcome identity is invalid")
+		}
+		seen[o.Kind] = true
+	}
+	return nil
 }
 
 //contract:wire:v2
@@ -494,9 +521,6 @@ const (
 	CheckoutFulfillmentEnded CheckoutOutcomeKind = "fulfillment_completed"
 )
 
-// CheckoutOutcomeBinding points to the output fact that confirms one
-// independently reported checkout outcome.
-//
 //contract:wire:v2
 type CheckoutOutcomeBinding struct {
 	Kind           CheckoutOutcomeKind `json:"kind"`
@@ -546,155 +570,6 @@ func validateSurfacePresentation(p SurfacePresentation) error {
 	return nil
 }
 
-func (c CheckoutOperationContract) Validate(inputSchema, outputSchema json.RawMessage) error {
-	inputProperties, err := checkoutSchemaProperties(inputSchema)
-	if err != nil {
-		return fmt.Errorf("input schema: %w", err)
-	}
-	outputProperties, err := checkoutSchemaProperties(outputSchema)
-	if err != nil {
-		return fmt.Errorf("output schema: %w", err)
-	}
-	inputFields := []struct {
-		name     string
-		field    string
-		wantType string
-		required bool
-	}{
-		{"cart_items", c.Input.CartItems, "array", true},
-		{"requested_total", c.Input.RequestedTotal, "string", true},
-		{"currency", c.Input.Currency, "string", true},
-		{"payment_method", c.Input.PaymentMethod, "string", true},
-		{"customer_ref", c.Input.CustomerRef, "business_ref", false},
-		{"register_ref", c.Input.RegisterRef, "business_ref", false},
-		{"shift_ref", c.Input.ShiftRef, "business_ref", false},
-		{"till_session_ref", c.Input.TillSessionRef, "business_ref", false},
-		{"customer_phone", c.Input.CustomerPhone, "string", false},
-	}
-	usedInputFields := map[string]bool{}
-	for _, binding := range inputFields {
-		if binding.field == "" {
-			if binding.required {
-				return fmt.Errorf("%s input field mapping is required", binding.name)
-			}
-			continue
-		}
-		if !validModuleName(binding.field) || usedInputFields[binding.field] {
-			return fmt.Errorf("input field mappings must be valid and unique")
-		}
-		usedInputFields[binding.field] = true
-		var fieldErr error
-		if binding.wantType == "business_ref" {
-			fieldErr = checkoutRequireBusinessRefField(inputProperties, binding.field)
-		} else {
-			fieldErr = checkoutRequireSchemaField(inputProperties, binding.field, binding.wantType)
-		}
-		if fieldErr != nil {
-			return fmt.Errorf("%s: %w", binding.name, fieldErr)
-		}
-	}
-	if len(c.Outcomes) == 0 || len(c.Outcomes) > 4 {
-		return fmt.Errorf("one to four checkout outcomes are required")
-	}
-	allowedOutcomes := map[CheckoutOutcomeKind]bool{CheckoutPaymentInitiated: true, CheckoutPaymentSettled: true, CheckoutInvoiceIssued: true, CheckoutFulfillmentEnded: true}
-	seenOutcomes := map[CheckoutOutcomeKind]bool{}
-	seenStatusFields := map[string]bool{}
-	for _, outcome := range c.Outcomes {
-		if !allowedOutcomes[outcome.Kind] || seenOutcomes[outcome.Kind] || !validModuleName(outcome.StatusField) || seenStatusFields[outcome.StatusField] || outcome.SuccessValue == "" || len(outcome.SuccessValue) > 120 || strings.ContainsAny(outcome.SuccessValue, "\r\n\x00") {
-			return fmt.Errorf("checkout outcome identity is invalid or duplicated")
-		}
-		seenOutcomes[outcome.Kind] = true
-		seenStatusFields[outcome.StatusField] = true
-		if err := checkoutRequireSchemaField(outputProperties, outcome.StatusField, "string"); err != nil {
-			return fmt.Errorf("checkout outcome status: %w", err)
-		}
-		property := outputProperties[outcome.StatusField]
-		var enum struct {
-			Enum []string `json:"enum"`
-		}
-		if json.Unmarshal(property, &enum) != nil || len(enum.Enum) == 0 {
-			return fmt.Errorf("checkout outcome status field must declare an enum")
-		}
-		foundSuccess := false
-		for _, value := range enum.Enum {
-			if value == outcome.SuccessValue {
-				foundSuccess = true
-				break
-			}
-		}
-		if !foundSuccess {
-			return fmt.Errorf("checkout outcome success value is absent from the output enum")
-		}
-		if outcome.ReferenceField != "" {
-			if !validModuleName(outcome.ReferenceField) {
-				return fmt.Errorf("checkout outcome reference field is invalid")
-			}
-			if err := checkoutRequireBusinessRefField(outputProperties, outcome.ReferenceField); err != nil {
-				return fmt.Errorf("checkout outcome reference: %w", err)
-			}
-		}
-		if outcome.Kind == CheckoutInvoiceIssued && outcome.ReferenceField == "" {
-			return fmt.Errorf("invoice-issued outcome requires a provider-qualified reference field")
-		}
-	}
-	return nil
-}
-
-func checkoutSchemaProperties(raw json.RawMessage) (map[string]json.RawMessage, error) {
-	var schema struct {
-		Type       string                     `json:"type"`
-		Properties map[string]json.RawMessage `json:"properties"`
-	}
-	if json.Unmarshal(raw, &schema) != nil || schema.Type != "object" || len(schema.Properties) == 0 {
-		return nil, fmt.Errorf("must be an object schema with declared properties")
-	}
-	return schema.Properties, nil
-}
-
-func checkoutRequireSchemaField(properties map[string]json.RawMessage, field, wantType string) error {
-	raw, ok := properties[field]
-	if !ok {
-		return fmt.Errorf("field %q is not declared by its schema", field)
-	}
-	var property struct {
-		Type string `json:"type"`
-	}
-	if json.Unmarshal(raw, &property) != nil || property.Type != wantType {
-		return fmt.Errorf("field %q must have schema type %q", field, wantType)
-	}
-	return nil
-}
-
-func checkoutRequireBusinessRefField(properties map[string]json.RawMessage, field string) error {
-	raw, ok := properties[field]
-	if !ok {
-		return fmt.Errorf("field %q is not declared by its schema", field)
-	}
-	var ref struct {
-		Type       string                     `json:"type"`
-		Properties map[string]json.RawMessage `json:"properties"`
-		Required   []string                   `json:"required"`
-	}
-	if json.Unmarshal(raw, &ref) != nil || ref.Type != "object" || len(ref.Properties) == 0 {
-		return fmt.Errorf("field %q must declare a BusinessRef object schema", field)
-	}
-	for _, name := range []string{"provider_id", "resource_type", "id", "scope"} {
-		if _, ok := ref.Properties[name]; !ok || !containsContractString(ref.Required, name) {
-			return fmt.Errorf("field %q BusinessRef must require %s", field, name)
-		}
-	}
-	return nil
-}
-
-func containsContractString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
-}
-
 func (c ApplicationCatalog) Validate() error {
 	if c.Revision == 0 || c.BusinessScope.Validate() != nil || len(c.Modules) > 500 || len(c.PublishedQueries) > 2000 || len(c.PublishedProjections) > 2000 || len(c.PublishedOperations) > 2000 || len(c.Schemas) > 4000 || len(c.AllowedEntityChoices) > 1000 || len(c.AvailableScopes) > 1001 || len(c.Blockers) > 100 {
 		return fmt.Errorf("application catalog identity or collection bounds are invalid")
@@ -707,13 +582,11 @@ func (c ApplicationCatalog) Validate() error {
 		modules[module.ID] = true
 	}
 	schemas := make(map[SchemaRef]bool, len(c.Schemas))
-	schemaDocuments := make(map[SchemaRef]ModuleSchemaDocument, len(c.Schemas))
 	for _, schema := range c.Schemas {
 		if schema.Ref.ID == "" || schema.Ref.Version == 0 || len(schema.Schema) == 0 || len(schema.Schema) > 65536 || !json.Valid(schema.Schema) || validateLocalSchemaReferences(schema.Schema) != nil || schemas[schema.Ref] {
 			return fmt.Errorf("application catalog has an invalid or duplicate schema")
 		}
 		schemas[schema.Ref] = false
-		schemaDocuments[schema.Ref] = schema
 	}
 	useSchema := func(ref SchemaRef) error {
 		_, ok := schemas[ref]
@@ -726,10 +599,27 @@ func (c ApplicationCatalog) Validate() error {
 	queries := map[string]bool{}
 	for _, query := range c.PublishedQueries {
 		key := string(query.OwnerModuleID) + "/" + query.Name
-		if !modules[query.OwnerModuleID] || !validModuleName(query.Name) || query.Capability == "" || query.Route != "/api/v1/modules/"+string(query.OwnerModuleID)+"/queries/"+query.Name || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 || queries[key] || validateSurfacePresentation(query.Presentation) != nil || query.ReferenceLookup != nil && query.ReferenceLookup.Validate(query.AllowedFields) != nil {
+		if !modules[query.OwnerModuleID] || !validModuleName(query.Name) || query.Route != "/api/v1/modules/"+string(query.OwnerModuleID)+"/queries/"+query.Name || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 || queries[key] || validateSurfacePresentation(query.Presentation) != nil {
 			return fmt.Errorf("application catalog has an invalid or duplicate published query")
 		}
 		queries[key] = true
+		if query.ReferenceLookup != nil && query.ReferenceLookup.Validate(query.AllowedFields) != nil {
+			return fmt.Errorf("application catalog has an invalid reference lookup")
+		}
+		if query.OfflineEligible {
+			if !validModuleName(query.OfflineFactKey) {
+				return fmt.Errorf("application catalog offline query has no stable fact-key field")
+			}
+			found := false
+			for _, field := range query.AllowedFields {
+				found = found || field == query.OfflineFactKey
+			}
+			if !found {
+				return fmt.Errorf("application catalog offline query fact key is not published")
+			}
+		} else if query.OfflineFactKey != "" {
+			return fmt.Errorf("application catalog online-only query declares an offline fact key")
+		}
 		if err := useSchema(query.InputSchema); err != nil {
 			return err
 		}
@@ -760,13 +650,6 @@ func (c ApplicationCatalog) Validate() error {
 		}
 		if err := useSchema(operation.OutputSchema); err != nil {
 			return err
-		}
-		if operation.Checkout != nil {
-			inputSchema, inputOK := schemaDocuments[operation.InputSchema]
-			outputSchema, outputOK := schemaDocuments[operation.OutputSchema]
-			if !inputOK || !outputOK || operation.Checkout.Validate(inputSchema.Schema, outputSchema.Schema) != nil {
-				return fmt.Errorf("application catalog has an invalid checkout operation contract")
-			}
 		}
 	}
 	for ref, used := range schemas {
@@ -914,6 +797,11 @@ func (q QueryResult) Validate(query PublishedQuery, limit uint16, scope Business
 				return fmt.Errorf("published query result contains an undeclared field")
 			}
 		}
+		if query.OfflineEligible {
+			if _, err := stableOfflineFactKey(row, query.OfflineFactKey); err != nil {
+				return fmt.Errorf("published query result has invalid offline row identity")
+			}
+		}
 	}
 	if len(q.NextCursor) > 2048 || len(q.SnapshotToken) > 2048 || len(q.SourceCursor) > 2048 || len(q.SourceRevision) > 256 {
 		return fmt.Errorf("published query result cursor or source revision is too large")
@@ -956,11 +844,40 @@ func (p QueryReplayPage) Validate(query PublishedQuery, limit uint16) error {
 				return fmt.Errorf("published query replay change contains an undeclared field")
 			}
 		}
+		if query.OfflineEligible {
+			rowKey, err := stableOfflineFactKey(fields, query.OfflineFactKey)
+			if err != nil || rowKey != change.FactKey {
+				return fmt.Errorf("published query replay row does not match its stable fact key")
+			}
+		}
 	}
 	if len(p.NextCursor) > 2048 || len(p.ThroughCursor) > 2048 || len(p.SourceRevision) > 256 {
 		return fmt.Errorf("published query replay cursor or revision is too large")
 	}
 	return nil
+}
+
+func stableOfflineFactKey(fields map[string]json.RawMessage, field string) (string, error) {
+	if !validModuleName(field) || len(fields[field]) == 0 {
+		return "", fmt.Errorf("offline fact key field is absent")
+	}
+	var value string
+	if err := json.Unmarshal(fields[field], &value); err == nil && strings.TrimSpace(value) != "" && len(value) <= 256 {
+		return value, nil
+	}
+	var number json.Number
+	decoder := json.NewDecoder(strings.NewReader(string(fields[field])))
+	decoder.UseNumber()
+	if err := decoder.Decode(&number); err == nil && number.String() != "" && len(number.String()) <= 256 {
+		return number.String(), nil
+	}
+	return "", fmt.Errorf("offline fact key must be a bounded non-empty string or number")
+}
+
+// OfflineQueryFactKey returns the canonical scalar identity declared by an
+// offline-eligible query. It is shared by snapshot and replay validators.
+func OfflineQueryFactKey(fields map[string]json.RawMessage, field string) (string, error) {
+	return stableOfflineFactKey(fields, field)
 }
 
 func (p ProjectionCheckpoint) Validate() error {
@@ -1110,15 +1027,15 @@ type ModuleDescriptor struct {
 //
 //contract:wire:v2
 type PublishedOperation struct {
-	Name           string                     `json:"name"`
-	Capability     CapabilityName             `json:"capability"`
-	Operation      string                     `json:"operation"`
-	ScopePolicy    ResourceScopeKind          `json:"scope_policy"`
-	AllowedCallers []ModuleID                 `json:"allowed_callers"`
-	Presentation   SurfacePresentation        `json:"presentation"`
-	Checkout       *CheckoutOperationContract `json:"checkout,omitempty"`
+	Name           string              `json:"name"`
+	Capability     CapabilityName      `json:"capability"`
+	Operation      string              `json:"operation"`
+	ScopePolicy    ResourceScopeKind   `json:"scope_policy"`
+	AllowedCallers []ModuleID          `json:"allowed_callers"`
+	Presentation   SurfacePresentation `json:"presentation"`
 	// OfflineEligible permits clients to queue this business intent for server replay.
-	OfflineEligible bool `json:"offline_eligible,omitempty"`
+	OfflineEligible bool                       `json:"offline_eligible,omitempty"`
+	Checkout        *CheckoutOperationContract `json:"checkout,omitempty"`
 }
 
 // ExtensionKind is a behavior explicitly allowed by an owner-declared point.
@@ -2322,7 +2239,7 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		return fmt.Errorf("module %q requires a semver version", m.ID)
 	}
 	moduleSchemas := make(map[SchemaRef]bool, len(m.Schemas))
-	moduleSchemaDocs := make(map[SchemaRef]ModuleSchemaDocument, len(m.Schemas))
+	schemaDocuments := make(map[SchemaRef]json.RawMessage, len(m.Schemas))
 	for _, schema := range m.Schemas {
 		if schema.Ref.ID == "" || schema.Ref.Version == 0 || len(schema.Schema) == 0 || len(schema.Schema) > 65536 || !json.Valid(schema.Schema) {
 			return fmt.Errorf("module %q contains an invalid or oversized JSON Schema document", m.ID)
@@ -2334,7 +2251,7 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 			return fmt.Errorf("module %q schema %s@%d: %w", m.ID, schema.Ref.ID, schema.Ref.Version, err)
 		}
 		moduleSchemas[schema.Ref] = true
-		moduleSchemaDocs[schema.Ref] = schema
+		schemaDocuments[schema.Ref] = schema.Schema
 	}
 	moduleSchemaRegistered := func(ref SchemaRef) bool {
 		return registeredSchema == nil || moduleSchemas[ref] || registeredSchema(ref)
@@ -2380,12 +2297,22 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		if query.PageLimit == 0 || query.PageLimit > 1000 || len(query.AllowedFields) == 0 {
 			return fmt.Errorf("module %q query %q requires allowed fields and a page limit from 1 to 1000", m.ID, query.Name)
 		}
+		if query.OfflineEligible {
+			if !validModuleName(query.OfflineFactKey) {
+				return fmt.Errorf("module %q offline query %q requires a stable fact-key field", m.ID, query.Name)
+			}
+		} else if query.OfflineFactKey != "" {
+			return fmt.Errorf("module %q online-only query %q cannot declare an offline fact key", m.ID, query.Name)
+		}
 		fields := map[string]bool{}
 		for _, field := range query.AllowedFields {
 			if !validModuleName(field) || fields[field] {
 				return fmt.Errorf("module %q query %q has an invalid or duplicate allowed field", m.ID, query.Name)
 			}
 			fields[field] = true
+		}
+		if query.OfflineEligible && !fields[query.OfflineFactKey] {
+			return fmt.Errorf("module %q offline query %q fact-key field must be published", m.ID, query.Name)
 		}
 		if query.OwnerField != "" && (!validModuleName(query.OwnerField) || !fields[query.OwnerField]) {
 			return fmt.Errorf("module %q query %q owner field must be declared in its published fields", m.ID, query.Name)
@@ -2428,13 +2355,21 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 			return fmt.Errorf("module %q operation %q presentation: %w", m.ID, published.Name, err)
 		}
 		if published.Checkout != nil {
-			inputDoc, inputOK := moduleSchemaDocs[op.Input]
-			outputDoc, outputOK := moduleSchemaDocs[op.Output]
-			if !inputOK || !outputOK {
-				return fmt.Errorf("module %q operation %q checkout contract requires published input and output schemas", m.ID, published.Name)
+			if !moduleSchemas[op.Input] || !moduleSchemas[op.Output] {
+				return fmt.Errorf("module %q operation %q checkout requires published input and output schemas", m.ID, published.Name)
 			}
-			if err := published.Checkout.Validate(inputDoc.Schema, outputDoc.Schema); err != nil {
-				return fmt.Errorf("module %q operation %q checkout contract: %w", m.ID, published.Name, err)
+			inputSchema, inputOK := schemaDocuments[op.Input]
+			outputSchema, outputOK := schemaDocuments[op.Output]
+			if inputOK && outputOK {
+				if err := published.Checkout.Validate(inputSchema, outputSchema); err != nil {
+					return fmt.Errorf("module %q operation %q checkout: %w", m.ID, published.Name, err)
+				}
+			}
+			if err := validateModuleSchema(op.Input, moduleSchemaRegistered); err != nil {
+				return err
+			}
+			if err := validateModuleSchema(op.Output, moduleSchemaRegistered); err != nil {
+				return err
 			}
 		}
 		publishedOperationNames[published.Name] = true
@@ -2488,11 +2423,6 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 	for _, query := range m.Queries {
 		if err := validateSurfacePresentation(query.Presentation); err != nil {
 			return fmt.Errorf("module %q query %q presentation: %w", m.ID, query.Name, err)
-		}
-		if query.ReferenceLookup != nil {
-			if err := query.ReferenceLookup.Validate(query.AllowedFields); err != nil {
-				return fmt.Errorf("module %q query %q reference lookup: %w", m.ID, query.Name, err)
-			}
 		}
 	}
 	required := map[string]bool{}

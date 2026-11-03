@@ -262,6 +262,14 @@ type ScopedPublishedQueryReplayExecutor interface {
 	ReplayPublishedQueryForActor(context.Context, contract.ModuleExecution, contract.PublishedQuery, PublishedQueryActorScope, json.RawMessage, string, string, string, string, uint16) (contract.QueryReplayPage, error)
 }
 
+// OfflineActorScopeSupport lets a provider fail closed for policy row scopes
+// it cannot enforce at its source. Providers without this optional interface
+// retain the existing contract and are expected to support every authorized
+// actor scope they advertise as offline eligible.
+type OfflineActorScopeSupport interface {
+	SupportsOfflineActorScope(PublishedQueryActorScope) bool
+}
+
 type ResolvedPublishedQuery struct {
 	Definition contract.PublishedQuery
 	ProviderID string
@@ -280,6 +288,17 @@ func (p BindingPlan) CanReplayPublishedQueryOffline(scope contract.BusinessScope
 	}
 	_, ok = resolved.replay.(ScopedPublishedQueryReplayExecutor)
 	return ok
+}
+
+func (p BindingPlan) CanReplayPublishedQueryOfflineForActor(scope contract.BusinessScope, owner contract.ModuleID, name string, actor *PublishedQueryActorScope) bool {
+	if !p.CanReplayPublishedQueryOffline(scope, owner, name) || actor == nil {
+		return p.CanReplayPublishedQueryOffline(scope, owner, name)
+	}
+	resolved := p.Queries[PublishedQueryKey{Scope: scope, OwnerModuleID: owner, Name: name}]
+	if support, ok := resolved.executor.(OfflineActorScopeSupport); ok {
+		return support.SupportsOfflineActorScope(*actor)
+	}
+	return true
 }
 
 func (p BindingPlan) ExecutePublishedQuery(ctx context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
@@ -329,6 +348,21 @@ func (p BindingPlan) ReplayPublishedQueryForActor(ctx context.Context, scope con
 	}
 	if err := page.Validate(query, limit); err != nil {
 		return contract.QueryReplayPage{}, err
+	}
+	if query.OfflineEligible {
+		for _, change := range page.Changes {
+			if change.Deleted {
+				continue
+			}
+			var row map[string]json.RawMessage
+			if err := json.Unmarshal(change.Data, &row); err != nil {
+				return contract.QueryReplayPage{}, fmt.Errorf("scoped replay returned an invalid row")
+			}
+			key, err := contract.OfflineQueryFactKey(row, query.OfflineFactKey)
+			if err != nil || key != change.FactKey {
+				return contract.QueryReplayPage{}, fmt.Errorf("scoped replay row does not match its fact key")
+			}
+		}
 	}
 	for _, change := range page.Changes {
 		if change.Deleted {

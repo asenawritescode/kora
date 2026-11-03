@@ -1,6 +1,9 @@
 package contract
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // OfflineCapabilities describes server bounds and the current catalog revision.
 //
@@ -44,6 +47,7 @@ type OfflineBootstrapRequest struct {
 //contract:wire:v2
 type OfflineSnapshotPage struct {
 	Source          OfflineSourceRef `json:"source"`
+	FactKeyField    string           `json:"fact_key_field"`
 	InputHash       string           `json:"input_hash"`
 	BusinessScope   BusinessScope    `json:"business_scope"`
 	SubjectID       string           `json:"subject_id"`
@@ -56,6 +60,25 @@ type OfflineSnapshotPage struct {
 	//contract:json
 	Rows     json.RawMessage `json:"rows"`
 	Complete bool            `json:"complete"`
+}
+
+func (p OfflineSnapshotPage) Validate(query PublishedQuery, limit uint16, scope BusinessScope) error {
+	if !query.OfflineEligible || p.FactKeyField != query.OfflineFactKey || p.BusinessScope != scope || p.SchemaRevision != query.OutputSchema || p.CatalogRevision == 0 || p.SnapshotToken == "" || p.ReplayPosition == "" {
+		return fmt.Errorf("offline snapshot identity does not match its published query")
+	}
+	if limit == 0 || limit > query.PageLimit || len(p.Rows) == 0 || !json.Valid(p.Rows) {
+		return fmt.Errorf("offline snapshot rows exceed their published query bounds")
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(p.Rows, &rows); err != nil || len(rows) > int(limit) {
+		return fmt.Errorf("offline snapshot rows must be a bounded row array")
+	}
+	for _, row := range rows {
+		if _, err := OfflineQueryFactKey(row, query.OfflineFactKey); err != nil {
+			return fmt.Errorf("offline snapshot row has no stable fact identity")
+		}
+	}
+	return nil
 }
 
 //contract:wire:v2
