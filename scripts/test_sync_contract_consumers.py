@@ -41,6 +41,31 @@ class SourceRevisionTest(unittest.TestCase):
             (repo / "contract/types.go").write_text("package contract // changed\n")
             self.assertEqual(MODULE.source_revision(repo)[1], "uncommitted")
 
+    def test_generated_artifact_commit_is_the_published_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Contract test"], check=True)
+            (repo / "contract/generated").mkdir(parents=True)
+            (repo / "contract/schema").mkdir(parents=True)
+            (repo / "cmd/contractgen").mkdir(parents=True)
+            (repo / "contract/types.go").write_text("package contract\n")
+            (repo / "cmd/contractgen/main.go").write_text("package main\n")
+            (repo / "contract/generated/engine-v2.ts").write_text("first\n")
+            (repo / "contract/schema/engine-v2.json").write_text("{}\n")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "contract source"], check=True)
+            (repo / "contract/generated/engine-v2.ts").write_text("regenerated\n")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "generated artifact"], check=True)
+
+            published_revision = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            self.assertEqual(MODULE.source_revision(repo), (published_revision, "clean"))
+
 
 class AndroidManifestTest(unittest.TestCase):
     def test_android_manifest_pins_authoritative_schema_bytes(self):
