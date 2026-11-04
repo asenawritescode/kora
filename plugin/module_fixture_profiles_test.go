@@ -338,6 +338,44 @@ func TestProgrammaticFixtureProfilesUseDeclaredOwnerOperations(t *testing.T) {
 		}
 	})
 
+	t.Run("external billing provider can be replaced by an internal owner for the same operation", func(t *testing.T) {
+		externalStore := &fixtureCommandStore{}
+		internalStore := &fixtureCommandStore{}
+		externalPlan, externalLease, execution := fixtureScenarioBinding(t, scope, "sales.orders", "finance.ar", "billing.invoice.issue", ProviderExternal, "billing-external-first", externalStore, 13)
+		internalPlan, internalLease, _ := fixtureScenarioBinding(t, scope, "sales.orders", "finance.ar", "billing.invoice.issue", ProviderInternal, "billing-internal-after", internalStore, 14)
+		payload := `{"source_id":"sale-provider-cutover","amount":"21.00","currency":"KES","entity_id":"entity-a"}`
+
+		externalResult, err := invokeFixture(t, externalPlan, externalLease, execution, scope, "sales.orders", "billing.invoice.issue", "invoice-external", payload)
+		if err != nil || externalResult.Status != "completed" {
+			t.Fatalf("external provider operation = %+v, %v", externalResult, err)
+		}
+		internalResult, err := invokeFixture(t, internalPlan, internalLease, execution, scope, "sales.orders", "billing.invoice.issue", "invoice-internal", payload)
+		if err != nil || internalResult.Status != "completed" {
+			t.Fatalf("internal provider operation after cutover = %+v, %v", internalResult, err)
+		}
+
+		var externalOutput, internalOutput struct {
+			Amount             string `json:"amount"`
+			Currency           string `json:"currency"`
+			SourceID           string `json:"source_id"`
+			EntityID           string `json:"entity_id"`
+			Balanced           bool   `json:"balanced"`
+			SourceAcknowledged bool   `json:"source_acknowledged"`
+		}
+		if err := json.Unmarshal(externalResult.Output, &externalOutput); err != nil {
+			t.Fatal("decode external provider result:", err)
+		}
+		if err := json.Unmarshal(internalResult.Output, &internalOutput); err != nil {
+			t.Fatal("decode internal provider result:", err)
+		}
+		if externalOutput != internalOutput {
+			t.Fatalf("provider replacement changed operation contract: external=%+v internal=%+v", externalOutput, internalOutput)
+		}
+		if externalStore.count != 1 || internalStore.count != 1 {
+			t.Fatalf("provider replacement effects external=%d internal=%d, want one historical and one new effect", externalStore.count, internalStore.count)
+		}
+	})
+
 	t.Run("pinned provider cutover preserves historical work and revocation blocks new effects", func(t *testing.T) {
 		oldStore, newStore := &fixtureCommandStore{}, &fixtureCommandStore{}
 		oldPlan, oldLease, execution := fixtureScenarioBinding(t, scope, "sales.orders", "finance.ar", "billing.invoice.issue", ProviderInternal, "billing-old", oldStore, 10)

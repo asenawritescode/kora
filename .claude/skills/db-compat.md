@@ -1,6 +1,6 @@
 # DB Compatibility Skill
 
-Ensures all SQL in the Kigae codebase works across MySQL and LibSQL (SQLite via Turso).
+Ensures all SQL in the Kora codebase works across MySQL and LibSQL (SQLite via Turso).
 Invoke this skill when writing new SQL, reviewing PRs that touch database code, or debugging
 database errors that differ between MySQL and LibSQL.
 
