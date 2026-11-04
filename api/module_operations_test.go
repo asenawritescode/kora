@@ -74,6 +74,93 @@ func TestOfflineCapabilitiesDeclareOnlyActorAuthorizedReadyOperations(t *testing
 	}
 }
 
+func TestOfflineReadRejectsIncompleteRuntimeAndTrailingPullJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	scope := contract.BusinessScope{TenantID: "offline-runtime-tenant", Kind: contract.ScopeKindTenant}
+	inputSchema := contract.SchemaRef{ID: "sales.orders.input", Version: 1}
+	execution, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "operator", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal("create verified execution:", err)
+	}
+	source := contract.OfflineSourceRef{OwnerModuleID: "sales.orders", QueryName: "mine", InputSchema: inputSchema, Input: json.RawMessage(`{}`)}
+	tests := []struct {
+		name    string
+		body    any
+		handler func(*Handler, *gin.Context)
+		service SiteRuntimeService
+	}{
+		{
+			name:    "bootstrap without a module snapshot loader",
+			body:    contract.OfflineBootstrapRequest{Source: source, BusinessScope: scope, CatalogRevision: 1, Limit: 10},
+			handler: func(h *Handler, c *gin.Context) { h.HandleOfflineBootstrapV2(c) },
+		},
+		{
+			name:    "pull without a module snapshot loader",
+			body:    contract.OfflinePullRequest{Source: source, BusinessScope: scope, CatalogRevision: 1, SnapshotToken: "snapshot:1", InputHash: "hash", ReplayPosition: "1", Limit: 10},
+			handler: func(h *Handler, c *gin.Context) { h.HandleOfflinePullV2(c) },
+		},
+		{
+			name:    "pull without a published query resolver",
+			body:    contract.OfflinePullRequest{Source: source, BusinessScope: scope, CatalogRevision: 1, SnapshotToken: "snapshot:1", InputHash: "hash", ReplayPosition: "1", Limit: 10},
+			handler: func(h *Handler, c *gin.Context) { h.HandleOfflinePullV2(c) },
+			service: SiteRuntimeService{LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) {
+				return contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 1}, nil
+			}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			services := NewSiteRuntimeServices()
+			services.Replace(string(scope.TenantID), test.service)
+			handler := NewHandler(doctype.NewRegistry(), nil)
+			handler.RuntimeServices = services
+			raw, err := json.Marshal(test.body)
+			if err != nil {
+				t.Fatal("marshal offline request:", err)
+			}
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v2/offline", strings.NewReader(string(raw)))
+			ctx.Set("site_name", string(scope.TenantID))
+			ctx.Set("policy_execution", execution)
+			test.handler(handler, ctx)
+			if recorder.Code != http.StatusServiceUnavailable {
+				t.Fatalf("incomplete runtime status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+
+	t.Run("pull rejects a second JSON value before resolving providers", func(t *testing.T) {
+		var resolverCalls int
+		services := NewSiteRuntimeServices()
+		services.Replace(string(scope.TenantID), SiteRuntimeService{
+			LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) {
+				return contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 1}, nil
+			},
+			ResolveModuleBindings: func(contract.BusinessScope) (plugin.BindingPlan, error) {
+				resolverCalls++
+				return plugin.BindingPlan{}, nil
+			},
+		})
+		handler := NewHandler(doctype.NewRegistry(), nil)
+		handler.RuntimeServices = services
+		request := contract.OfflinePullRequest{Source: source, BusinessScope: scope, CatalogRevision: 1, SnapshotToken: "snapshot:1", InputHash: "hash", ReplayPosition: "1", Limit: 10}
+		raw, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal("marshal offline pull:", err)
+		}
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v2/offline/pull", strings.NewReader(string(raw)+` {}`))
+		ctx.Set("site_name", string(scope.TenantID))
+		ctx.Set("policy_execution", execution)
+		handler.HandleOfflinePullV2(ctx)
+		if recorder.Code != http.StatusBadRequest || resolverCalls != 0 {
+			t.Fatalf("trailing JSON status=%d resolver_calls=%d body=%s", recorder.Code, resolverCalls, recorder.Body.String())
+		}
+	})
+}
+
 func TestExecutePublishedOperationUsesRegisteredSurfaceAndStrictRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	scope := contract.BusinessScope{TenantID: "operation-tenant", Kind: contract.ScopeKindTenant}

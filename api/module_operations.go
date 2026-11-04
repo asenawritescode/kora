@@ -141,6 +141,10 @@ func (h *Handler) HandleOfflineBootstrapV2(c *gin.Context) {
 		return
 	}
 	services := h.runtimeService(c, c.GetString("site_name"))
+	if services.LoadModuleSnapshot == nil {
+		writeError(c, http.StatusServiceUnavailable, "module.catalog_unavailable", "Module catalog is unavailable", nil)
+		return
+	}
 	snapshot, err := services.LoadModuleSnapshot()
 	if err != nil || request.CatalogRevision != snapshot.Revision {
 		writeError(c, http.StatusConflict, "module.stale_catalog", "Offline bootstrap catalog revision is stale", nil)
@@ -213,10 +217,22 @@ func (h *Handler) HandleOfflinePullV2(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.invalid_offline_pull", "Offline pull request is invalid", nil)
 		return
 	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		writeError(c, http.StatusBadRequest, "validation.invalid_offline_pull", "Invalid offline pull request", nil)
+		return
+	}
 	services := h.runtimeService(c, c.GetString("site_name"))
+	if services.LoadModuleSnapshot == nil {
+		writeError(c, http.StatusServiceUnavailable, "module.catalog_unavailable", "Module catalog is unavailable", nil)
+		return
+	}
 	snapshot, err := services.LoadModuleSnapshot()
 	if err != nil || request.CatalogRevision != snapshot.Revision {
 		writeError(c, http.StatusConflict, "module.stale_catalog", "Offline feed catalog revision is stale", nil)
+		return
+	}
+	if services.ResolveModuleBindings == nil {
+		writeError(c, http.StatusServiceUnavailable, "module.provider_unavailable", "Published query provider is unavailable", nil)
 		return
 	}
 	plan, err := services.ResolveModuleBindings(request.BusinessScope)
