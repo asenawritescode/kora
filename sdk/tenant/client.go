@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
@@ -251,7 +250,13 @@ func (c *ScopedClient) do(ctx context.Context, method, endpoint string, input an
 		body = bytes.NewReader(encoded)
 	}
 	endpointURL := *c.client.base
-	endpointURL.Path = path.Join(c.client.base.Path, "/s/"+url.PathEscape(c.client.site), relative.Path)
+	escapedPath := strings.TrimRight(c.client.base.EscapedPath(), "/") + "/s/" + url.PathEscape(c.client.site) + relative.EscapedPath()
+	decodedPath, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		return fmt.Errorf("encode tenant API path: %w", err)
+	}
+	endpointURL.Path = decodedPath
+	endpointURL.RawPath = escapedPath
 	request, err := http.NewRequestWithContext(ctx, method, endpointURL.String(), body)
 	if err != nil {
 		return fmt.Errorf("create tenant request: %w", err)

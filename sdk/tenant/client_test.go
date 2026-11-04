@@ -135,6 +135,27 @@ func TestScopedClientRejectsCatalogScopeMismatchAndUnsafeCalls(t *testing.T) {
 	}
 }
 
+func TestScopedClientEscapesSitePathExactlyOnce(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.EscapedPath(), "/s/tenant%20east/api/v2/modules/catalog"; got != want {
+			t.Errorf("escaped request path = %q, want %q", got, want)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": testCatalog(contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant})})
+	}))
+	defer server.Close()
+	client, err := NewClient(Config{BaseURL: server.URL, SiteName: "tenant east", Tokens: TokenSourceFunc(func(context.Context) (string, error) { return "actor-token", nil })})
+	if err != nil {
+		t.Fatal("NewClient:", err)
+	}
+	scoped, err := client.WithScope(contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant})
+	if err != nil {
+		t.Fatal("WithScope:", err)
+	}
+	if _, err := scoped.Catalog(context.Background()); err != nil {
+		t.Fatal("Catalog:", err)
+	}
+}
+
 func TestTenantRemoteErrorsRetainHTTPStatusAndEngineCode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
