@@ -17,18 +17,29 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+      - name: Require repository-scoped read-only access to private contract consumers
+        env:
+          KORA_CLOUD_READONLY_DEPLOY_KEY: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
+          KORA_UI_READONLY_DEPLOY_KEY: ${{ secrets.KORA_UI_READONLY_DEPLOY_KEY }}
+        run: |
+          if [ -z "$KORA_CLOUD_READONLY_DEPLOY_KEY" ] || [ -z "$KORA_UI_READONLY_DEPLOY_KEY" ]; then
+            echo "::error::Configure read-only deploy-key secrets for kora-cloud and kora-ui."
+            exit 1
+          fi
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-cloud
           # Pin the consumer contract revision until it is published on main.
           ref: 1541617a150e90dd6745e8ee4f433eec66f4b59b
           path: kora-cloud
+          ssh-key: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ui
           # Pin the consumer contract revision until it is published on main.
           ref: dba86c4d474c88d73afba3701ba7611977e3de3c
           path: kora-studio-mvp
+          ssh-key: ${{ secrets.KORA_UI_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ts-extension-sdk
