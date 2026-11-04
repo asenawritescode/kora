@@ -1,6 +1,6 @@
-# Kigae UI
+# Kora UI
 
-React 19 SPA for the Kigae config-driven application engine. Most workspace views are config-driven, and the UI includes an embedded page-manifest runtime for generated screens. It still has DocType-specific routes and does not yet match the RFC's standalone semantic renderer.
+React 19 SPA for the Kora config-driven application engine. Most workspace views are config-driven, and the UI includes an embedded page-manifest runtime for generated screens. It still has DocType-specific routes and does not yet match the RFC's standalone semantic renderer.
 
 ## Tech Stack
 
@@ -118,4 +118,4 @@ The SPA auto-detects the basepath (`/s/:site` prefix). The `sitePath()` helper p
 
 ### AI Chat Widget
 
-Floating panel (bottom-right), embedded in `RootLayout.tsx`. It restores its server-persisted transcript with `GET /api/v1/ai/chat` and sends turns with `POST /api/v1/ai/chat` through the shared API client. Transcripts are scoped to the signed-in user and page context. The backend tracks each turn as a durable AI run and executes tools from the current catalog. The old `/api/chat` and `/api/v1/chat` endpoints are retired.
+Floating Intercom-style panel (bottom-right), embedded in `RootLayout.tsx`. Uses `POST /api/chat` with CSRF token. The backend auto-generates OpenAI-compatible function definitions from the doctype registry.
