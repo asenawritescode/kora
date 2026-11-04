@@ -392,7 +392,7 @@ func (s *Store) SavePermissionsTx(tx *sql.Tx, permissions []*doctype.Permission,
 		}
 		upsertSQL := `INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
 				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, if_assigned, scope_json, site)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
 				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "if_assigned", "scope_json", "site"})
 		scopeJSON, err := json.Marshal(p.Scope)
