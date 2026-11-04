@@ -16,6 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - name: Require repository-scoped read-only access to private contract consumers
         env:
           KORA_CLOUD_READONLY_DEPLOY_KEY: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
