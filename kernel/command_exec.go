@@ -381,7 +381,12 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		if k.CommandSchemas == nil || !k.CommandSchemas.Registered(cmd.InputSchema) || !k.CommandSchemas.Registered(cmd.OutputSchema) {
 			return nil, contract.NewError(contract.CodeValidationFailed, "owner command input or output schema is not registered")
 		}
-		if err := k.CommandSchemas.Validate(cmd.InputSchema, op.Payload); err != nil {
+		// Module command schemas describe the business input exposed by the
+		// published operation. The kernel's {"data":{...}} envelope is an
+		// internal command transport detail and must not become part of that
+		// public schema contract.
+		inputPayload, _ := json.Marshal(input)
+		if err := k.CommandSchemas.Validate(cmd.InputSchema, inputPayload); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, "owner command input failed its registered schema")
 		}
 	}
