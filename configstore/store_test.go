@@ -219,13 +219,13 @@ func TestLoadPermissions(t *testing.T) {
 	rows := sqlmock.NewRows([]string{
 		"doctype", "role", "can_read", "can_write", "can_create", "can_delete",
 		"can_submit", "can_cancel", "can_amend", "can_export", "can_import",
-		"can_report", "if_owner", "if_assigned",
+		"can_report", "if_owner", "if_assigned", "scope_json",
 	}).
-		AddRow("Task", "Admin", 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, "[]").
-		AddRow("Task", "Editor", 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, `["assigned_to"]`).
-		AddRow("User", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, nil)
+		AddRow("Task", "Admin", 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, "[]", `{"tenant_id":"","kind":""}`).
+		AddRow("Task", "Editor", 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, `["assigned_to"]`, `{"tenant_id":"tenant-a","kind":"legal_entity","legal_entity_id":"entity-a"}`).
+		AddRow("User", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, nil, nil)
 
-	mock.ExpectQuery("SELECT doctype, role, can_read, can_write, can_create, can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, if_assigned FROM _kora_permission WHERE site = \\? OR site = '' ORDER BY doctype, role").
+	mock.ExpectQuery("SELECT doctype, role, can_read, can_write, can_create, can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, if_assigned, scope_json FROM _kora_permission WHERE site = \\? OR site = '' ORDER BY doctype, role").
 		WillReturnRows(rows)
 
 	perms, err := s.LoadPermissions("")
@@ -253,6 +253,9 @@ func TestLoadPermissions(t *testing.T) {
 	}
 	if perms[1].Delete {
 		t.Error("Editor/Task should NOT have delete")
+	}
+	if perms[1].Scope.TenantID != "tenant-a" || perms[1].Scope.LegalEntityID != "entity-a" {
+		t.Errorf("Editor/Task scope = %#v, want tenant-a/entity-a", perms[1].Scope)
 	}
 }
 
@@ -359,11 +362,11 @@ func TestSavePermissions(t *testing.T) {
 	mock.ExpectBegin()
 
 	mock.ExpectExec("INSERT INTO _kora_permission").
-		WithArgs("Task.Admin", "Task", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, "[]", "").
+		WithArgs("Task.Admin", "Task", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, "[]", `{"tenant_id":"","kind":""}`, "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectExec("INSERT INTO _kora_permission").
-		WithArgs("Task.Guest", "Task", "Guest", 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, `["assigned_to"]`, "").
+		WithArgs("Task.Guest", "Task", "Guest", 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, `["assigned_to"]`, `{"tenant_id":"","kind":""}`, "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectExec(`UPDATE _kora_auth_revision SET policy_revision = policy_revision \+ 1 WHERE id = 1`).WillReturnResult(sqlmock.NewResult(0, 1))
