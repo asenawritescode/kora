@@ -575,9 +575,11 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"can_import" INTEGER NOT NULL DEFAULT 0,
 			"can_report" INTEGER NOT NULL DEFAULT 0,
 			"if_owner" INTEGER NOT NULL DEFAULT 0,
-			"if_assigned" TEXT NOT NULL DEFAULT '[]'
+			"if_assigned" TEXT NOT NULL DEFAULT '[]',
+			"scope_json" TEXT NOT NULL DEFAULT '{}'
 		)`,
 		`ALTER TABLE "_kora_permission" ADD COLUMN "if_assigned" TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE "_kora_permission" ADD COLUMN "scope_json" TEXT NOT NULL DEFAULT '{}'`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_doctype_role" ON "_kora_permission" ("doctype", "role")`,
 		`CREATE INDEX IF NOT EXISTS "idx_permission_site" ON "_kora_permission" ("site")`,
 

@@ -391,15 +391,19 @@ func (s *Store) SavePermissionsTx(tx *sql.Tx, permissions []*doctype.Permission,
 			return fmt.Errorf("encoding assignment scope for %s: %w", name, err)
 		}
 		upsertSQL := `INSERT INTO _kora_permission (name, doctype, role, can_read, can_write, can_create,
-				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, if_assigned, site)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+				can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, if_assigned, scope_json, site)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
 			[]string{"name"}, []string{"can_read", "can_write", "can_create", "can_delete",
-				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "if_assigned", "site"})
+				"can_submit", "can_cancel", "can_amend", "can_export", "can_import", "can_report", "if_owner", "if_assigned", "scope_json", "site"})
+		scopeJSON, err := json.Marshal(p.Scope)
+		if err != nil {
+			return fmt.Errorf("encoding business scope for %s: %w", name, err)
+		}
 		_, err = tx.Exec(db.Rebind(s.Dialect, upsertSQL), name, p.Doctype, p.Role,
 			boolToInt(p.Read), boolToInt(p.Write), boolToInt(p.Create),
 			boolToInt(p.Delete), boolToInt(p.Submit), boolToInt(p.Cancel),
 			boolToInt(p.Amend), boolToInt(p.Export), boolToInt(p.Import),
-			boolToInt(p.Report), boolToInt(p.IfOwner), assignedFields, site,
+			boolToInt(p.Report), boolToInt(p.IfOwner), assignedFields, string(scopeJSON), site,
 		)
 		if err != nil {
 			return fmt.Errorf("saving permission %s: %w", name, err)
@@ -511,7 +515,7 @@ func (s *Store) LoadRoles(site string) ([]*doctype.Role, error) {
 func (s *Store) LoadPermissions(site string) ([]*doctype.Permission, error) {
 	rows, err := s.DB.Query(db.Rebind(s.Dialect, `
 		SELECT doctype, role, can_read, can_write, can_create, can_delete,
-			can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, if_assigned
+			can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, if_assigned, scope_json
 		FROM _kora_permission
 		WHERE site = ? OR site = ''
 		ORDER BY doctype, role
@@ -525,14 +529,19 @@ func (s *Store) LoadPermissions(site string) ([]*doctype.Permission, error) {
 	for rows.Next() {
 		p := &doctype.Permission{}
 		var read, write, create, del, submit, cancel, amend, export, imp, report, ifOwner int
-		var assignedFields sql.NullString
+		var assignedFields, scopeJSON sql.NullString
 		if err := rows.Scan(&p.Doctype, &p.Role, &read, &write, &create, &del,
-			&submit, &cancel, &amend, &export, &imp, &report, &ifOwner, &assignedFields); err != nil {
+			&submit, &cancel, &amend, &export, &imp, &report, &ifOwner, &assignedFields, &scopeJSON); err != nil {
 			return nil, err
 		}
 		if assignedFields.Valid && assignedFields.String != "" {
 			if err := json.Unmarshal([]byte(assignedFields.String), &p.IfAssigned); err != nil {
 				return nil, fmt.Errorf("decoding assignment scope for %s/%s: %w", p.Role, p.Doctype, err)
+			}
+		}
+		if scopeJSON.Valid && scopeJSON.String != "" && scopeJSON.String != "{}" {
+			if err := json.Unmarshal([]byte(scopeJSON.String), &p.Scope); err != nil {
+				return nil, fmt.Errorf("decoding business scope for %s/%s: %w", p.Role, p.Doctype, err)
 			}
 		}
 		p.Read = read == 1

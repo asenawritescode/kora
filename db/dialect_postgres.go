@@ -569,10 +569,12 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 			"can_import" SMALLINT NOT NULL DEFAULT 0,
 			"can_report" SMALLINT NOT NULL DEFAULT 0,
 			"if_owner" SMALLINT NOT NULL DEFAULT 0,
-			"if_assigned" TEXT NOT NULL DEFAULT '[]'
+			"if_assigned" TEXT NOT NULL DEFAULT '[]',
+			"scope_json" TEXT NOT NULL DEFAULT '{}'
 		)`,
 		`ALTER TABLE "_kora_permission" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_permission" ADD COLUMN IF NOT EXISTS "if_assigned" TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE "_kora_permission" ADD COLUMN IF NOT EXISTS "scope_json" TEXT NOT NULL DEFAULT '{}'`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_doctype_role" ON "_kora_permission" ("doctype", "role")`,
 
 		// _kora_config_version
