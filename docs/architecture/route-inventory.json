@@ -1,0 +1,1483 @@
+{
+  "format": 1,
+  "generator": "cmd/routeinventory",
+  "route_composition": "cli/serve.go API/auth/public/request registration functions; DocType and host routing are data/runtime dependent",
+  "registered_routes": [
+    {
+      "method": "GET",
+      "path": "/api/analytics/catalog",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/insights/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func12"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/metrics",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func9"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/metrics",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func8"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/metrics/:name",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func10"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/metrics/:name/query",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func11"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/query",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func4"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/rebuild",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func6"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/rebuild/:id",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func7"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/reports",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func2"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/reports/:name/query",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func3"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/status",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func5"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "handler": "github.com/asenawritescode/kora/auth.registerAuthRoutes.func1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "handler": "github.com/asenawritescode/kora/auth.registerAuthRoutes.func2"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cloud/conversations",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationCreate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cloud/conversations/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationGet-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cloud/conversations/:id/answers/:key/confirm",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationConfirm-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cloud/conversations/:id/messages",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationMessage-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cloud/conversations/:id/progress",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationProgress-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cloud/conversations/:id/support-ticket",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationSupport-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/files/*path",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleFileDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/files/*path",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleFileServe-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/internal/channel/managed-client/revoke",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleManagedChannelClientRevoke-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/internal/channel/managed-client/rotate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleManagedChannelClientRotate-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/internal/channel/mutate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelMutate-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/internal/channel/query",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelQuery-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/internal/channel/sessions/issue",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelSessionIssue-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/internal/channel/sessions/revoke",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelSessionRevoke-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/internal/channel/tools",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelTools-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/internal/site/identity",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleManagedSiteIdentity-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kernel/:command",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleKernelOperation-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/kernel/_registry",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleKernelRegistry-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/method/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMethod-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/method/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMethod-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/modules/:module/projections/:projection",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublishedModuleProjection-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/modules/:module/projections/:projection/rebuild",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleRebuildPublishedModuleProjection-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/modules/:module/queries/:query",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublishedModuleQuery-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/modules/reconciliation/findings",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationSummary-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/modules/reconciliation/runs",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationRun-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/modules/reconciliation/runs/:owner/:rule/:run",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationRead-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/modules/reconciliation/runs/:owner/:rule/:run/repair",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationRepair-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/modules/reconciliation/runs/:owner/:rule/:run/waive",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationWaive-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/openapi.json",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleOpenAPI-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/page-manifests",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePageManifestByRoute-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/files/*path",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicFileServe-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/resource/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicList-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/resource/:doctype/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicGet-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleList-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/resource/:doctype/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/:doctype/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleGet-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/resource/:doctype/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/:doctype/:name/history",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleRecordHistory-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/swagger-ui",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSwaggerUI-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/agents",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentManifests-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/agents/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentManifest-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/agents/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentManifest-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/agents/:id/effective-permissions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentEffectivePermissions-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/agents/:id/runs",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentRuns-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/agents/:id/runs",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentRuns-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/audit",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemAudit-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/branding",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemBranding-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config/diff",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigDiff-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/config/drafts",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigurationDraft-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/config/dry-run",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigurationDryRun-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/config/import",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigImport-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/config/validate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigurationValidate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config/versions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersions-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config/versions/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersion-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/config/versions/:id/activate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionActivate-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/config/versions/:id/discard",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionDiscard-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config/versions/:id/preview",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionPreview-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/config/versions/:id/rollback",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionRollback-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config/versions/:id/rollback-preview",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionRollbackPreview-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config/versions/:id/snapshot",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionSnapshot-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config/versions/active/snapshot",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleActiveConfigSnapshot-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config/versions/head/snapshot",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigHeadSnapshot-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/system/doctype/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/doctype/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctype-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/doctype/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/doctype/:doctype/references",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeReferences-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/doctype/dry-run",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeDryRun-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/doctype/validate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeValidate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/doctypes",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypes-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/experience",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemBranding-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/experience",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemExperienceUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/extension",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionList-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/extension",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/system/extension/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/extension/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionGet-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/extension/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/extension/:name/deliveries",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionDeliveries-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/extension/:name/replay",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionReplay-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/extension/:name/rotate-secret",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionRotateSecret-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/graph",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemGraph-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/navigation",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemNavigation-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/page-manifests",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifests-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/page-manifests",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifestCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/system/page-manifests/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifestDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/page-manifests/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifest-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/page-manifests/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifestUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/permissions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPermissions-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/permissions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPermissionsSave-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/permissions/catalog",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentPermissionCatalog-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/realtime",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRealtime-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/roles",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRoles-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/roles",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRoleCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/system/roles/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRoleDelete-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/roles/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRoleUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/script",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptList-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/script",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/system/script/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/script/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptGet-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/script/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/script/:name/executions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptExecutions-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/script/:name/validate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptValidate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/secrets",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSecretList-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/secrets",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSecretSet-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/system/secrets/:key",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSecretDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/settings",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSiteSettings-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/settings",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSiteSettingsUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/user-directory",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUserDirectory-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/users",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUserList-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/users/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUserGet-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/users/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUserUpdate-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/upload",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUpload-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicView-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicCreate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/ai/approvals",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAIListApprovals-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/ai/approvals/:id/grant",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAIGrantApproval-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/ai/chat",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAIChatConversation-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/ai/chat",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChat-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/ai/retention/cleanup",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAIRetentionCleanup-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/ai/runs/:id/cancel",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAICancel-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/ai/runs/:id/resume",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAIResume-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/analytics/catalog",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/analytics/insights/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func12"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/analytics/metrics",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func9"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/analytics/metrics",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func8"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/analytics/metrics/:name",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func10"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/analytics/metrics/:name/query",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func11"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/analytics/query",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func4"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/analytics/rebuild",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func6"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/analytics/rebuild/:id",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func7"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/analytics/reports",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func2"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/analytics/reports/:name/query",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func3"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/analytics/status",
+      "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func5"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cloud/conversations",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationCreate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/cloud/conversations/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationGet-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cloud/conversations/:id/answers/:key/confirm",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationConfirm-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cloud/conversations/:id/messages",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationMessage-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/cloud/conversations/:id/progress",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationProgress-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cloud/conversations/:id/support-ticket",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationSupport-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/files/*path",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleFileDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/files/*path",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleFileServe-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/internal/channel/managed-client/revoke",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleManagedChannelClientRevoke-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/internal/channel/managed-client/rotate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleManagedChannelClientRotate-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/internal/channel/mutate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelMutate-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/internal/channel/query",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelQuery-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/internal/channel/sessions/issue",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelSessionIssue-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/internal/channel/sessions/revoke",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelSessionRevoke-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/internal/channel/tools",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleChannelTools-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/internal/site/identity",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleManagedSiteIdentity-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kernel/:command",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleKernelOperation-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/kernel/_registry",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleKernelRegistry-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/method/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMethod-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/method/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMethod-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/modules/:module/projections/:projection",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublishedModuleProjection-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/modules/:module/projections/:projection/rebuild",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleRebuildPublishedModuleProjection-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/modules/:module/queries/:query",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublishedModuleQuery-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/modules/reconciliation/findings",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationSummary-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/modules/reconciliation/runs",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationRun-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/modules/reconciliation/runs/:owner/:rule/:run",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationRead-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/modules/reconciliation/runs/:owner/:rule/:run/repair",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationRepair-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/modules/reconciliation/runs/:owner/:rule/:run/waive",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleBusinessReconciliationWaive-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/openapi.json",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleOpenAPI-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/page-manifests",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePageManifestByRoute-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/public/files/*path",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicFileServe-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/public/resource/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicList-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/public/resource/:doctype/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicGet-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/resource/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleList-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/resource/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/resource/:doctype/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/resource/:doctype/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleGet-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/resource/:doctype/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/resource/:doctype/:name/history",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleRecordHistory-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/swagger-ui",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSwaggerUI-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/agents",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentManifests-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/agents/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentManifest-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/agents/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentManifest-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/agents/:id/effective-permissions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentEffectivePermissions-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/agents/:id/runs",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentRuns-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/agents/:id/runs",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentRuns-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/audit",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemAudit-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/branding",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemBranding-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/config/diff",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigDiff-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/config/drafts",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigurationDraft-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/config/dry-run",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigurationDryRun-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/config/import",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigImport-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/config/validate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigurationValidate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/config/versions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersions-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/config/versions/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersion-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/config/versions/:id/activate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionActivate-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/config/versions/:id/discard",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionDiscard-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/config/versions/:id/preview",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionPreview-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/config/versions/:id/rollback",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionRollback-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/config/versions/:id/rollback-preview",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionRollbackPreview-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/config/versions/:id/snapshot",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigVersionSnapshot-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/config/versions/active/snapshot",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleActiveConfigSnapshot-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/config/versions/head/snapshot",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConfigHeadSnapshot-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/system/doctype/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/doctype/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctype-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/doctype/:doctype",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/doctype/:doctype/references",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeReferences-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/doctype/dry-run",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeDryRun-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/doctype/validate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypeValidate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/doctypes",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemDoctypes-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/experience",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemBranding-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/experience",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemExperienceUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/extension",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionList-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/extension",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/system/extension/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/extension/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionGet-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/extension/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/extension/:name/deliveries",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionDeliveries-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/extension/:name/replay",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionReplay-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/extension/:name/rotate-secret",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleExtensionRotateSecret-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/graph",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemGraph-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/navigation",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemNavigation-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/page-manifests",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifests-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/page-manifests",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifestCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/system/page-manifests/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifestDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/page-manifests/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifest-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/page-manifests/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPageManifestUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/permissions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPermissions-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/permissions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemPermissionsSave-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/permissions/catalog",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAgentPermissionCatalog-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/realtime",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRealtime-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/roles",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRoles-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/roles",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRoleCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/system/roles/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRoleDelete-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/roles/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemRoleUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/script",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptList-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/script",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptCreate-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/system/script/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/script/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptGet-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/script/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/script/:name/executions",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptExecutions-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/script/:name/validate",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleScriptValidate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/secrets",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSecretList-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/system/secrets",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSecretSet-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/system/secrets/:key",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSecretDelete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/settings",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSiteSettings-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/settings",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSiteSettingsUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/user-directory",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUserDirectory-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/users",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUserList-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/users/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUserGet-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/users/:name",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUserUpdate-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/upload",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleUpload-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/v",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicView-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/v",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicCreate-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/view/action/:actionId",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleViewAction-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/webhooks/mpesa/stk",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMPesaSTKCallback-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/webhooks/mpesa/stk/:token",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMPesaSTKCallback-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/requests",
+      "handler": "github.com/asenawritescode/kora/api.(*requestHandler).list-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/requests",
+      "handler": "github.com/asenawritescode/kora/api.(*requestHandler).submit-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/requests/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*requestHandler).get-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/requests/:id/cancel",
+      "handler": "github.com/asenawritescode/kora/api.(*requestHandler).cancel-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/requests/:id/history",
+      "handler": "github.com/asenawritescode/kora/api.(*requestHandler).history-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/requests/:id/read",
+      "handler": "github.com/asenawritescode/kora/api.(*requestHandler).markRead-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/requests/:id/reassignments",
+      "handler": "github.com/asenawritescode/kora/api.(*requestHandler).reassign-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/requests/:id/responses",
+      "handler": "github.com/asenawritescode/kora/api.(*requestHandler).respond-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/requests/:id/responses/:decision",
+      "handler": "github.com/asenawritescode/kora/api.(*requestHandler).response-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/view/action/:actionId",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleViewAction-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhooks/mpesa/stk",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMPesaSTKCallback-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhooks/mpesa/stk/:token",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMPesaSTKCallback-fm"
+    }
+  ],
+  "conditional_routes": [
+    {
+      "method": "POST",
+      "path": "/_kora/admin/reload-site",
+      "condition": "always mounted; requires KORA_RELOAD_TOKEN at request time",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/ping",
+      "condition": "always mounted",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ping",
+      "condition": "always mounted",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "condition": "always mounted",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "GET",
+      "path": "/readyz",
+      "condition": "always mounted",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/console/login",
+      "condition": "system guard configured",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/console/change-password",
+      "condition": "system guard configured",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/console/sites",
+      "condition": "system guard configured",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/console/sites/:name",
+      "condition": "system guard configured",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/console/sites/:name",
+      "condition": "system guard configured",
+      "source": "cli/serve.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/management/v2/tenants/:id",
+      "condition": "KORA_ENGINE_MANAGEMENT_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured",
+      "source": "api/management_inspect.go; cli/serve.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/management/v2/tenants/resolve",
+      "condition": "KORA_ENGINE_MANAGEMENT_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured",
+      "source": "api/management_inspect.go; cli/serve.go"
+    }
+  ],
+  "fallback_routes": [
+    {
+      "behavior": "Serve SPA for /workspace, /console, /assets and /s/:site/*; unmatched paths return 404",
+      "condition": "embedded SPA index.html is present",
+      "source": "workspace/spa.go; cli/serve.go"
+    },
+    {
+      "behavior": "Register server-rendered /workspace routes and path-site routing",
+      "condition": "embedded SPA index.html is absent",
+      "source": "workspace/handler.go; net/site_router.go; cli/serve.go"
+    }
+  ]
+}
