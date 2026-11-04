@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -77,6 +78,11 @@ func TestPlanModuleLifecycleChangeDeterministicAndBlockedByDependentsAndWork(t *
 	request.ExpectedRevision++
 	if _, err := PlanModuleLifecycleChange(context.Background(), snapshot, request); err == nil {
 		t.Fatal("stale lifecycle plan request accepted")
+	} else {
+		var apiError *contract.Error
+		if !errors.As(err, &apiError) || apiError.Type != contract.CodeConflict {
+			t.Fatalf("stale lifecycle plan error = %v, want canonical conflict", err)
+		}
 	}
 }
 

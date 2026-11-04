@@ -19,8 +19,11 @@ import (
 // persisted module snapshot. Open-work inspection is deliberately supplied by
 // the domain owners instead of teaching the registry about domain tables.
 func PlanModuleLifecycleChange(ctx context.Context, snapshot contract.ModuleSnapshot, request contract.PlanModuleChange, inspectors ...contract.OpenWorkInspector) (contract.ModuleChangePlan, error) {
-	if ctx == nil || snapshot.TenantID == "" || request.ModuleID == "" || request.ExpectedRevision != snapshot.Revision {
-		return contract.ModuleChangePlan{}, fmt.Errorf("module change request is stale or incomplete")
+	if ctx == nil || snapshot.TenantID == "" || request.ModuleID == "" {
+		return contract.ModuleChangePlan{}, contract.NewError(contract.CodeValidationFailed, "module change request is incomplete")
+	}
+	if request.ExpectedRevision != snapshot.Revision {
+		return contract.ModuleChangePlan{}, contract.NewError(contract.CodeConflict, "module configuration revision is stale")
 	}
 	var installation *contract.ModuleInstallation
 	for i := range snapshot.Installations {
