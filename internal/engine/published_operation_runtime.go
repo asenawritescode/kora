@@ -21,6 +21,11 @@ import (
 
 type moduleBindingResolver func(contract.BusinessScope) (plugin.BindingPlan, error)
 
+func localPublishedCommandPayload(input []byte) json.RawMessage {
+	payload := append([]byte(`{"data":`), input...)
+	return append(payload, '}')
+}
+
 func executePublishedOperation(ctx context.Context, store *configstore.ModuleStore, resolve moduleBindingResolver, commandKernel *kernel.Kernel, commandRegistry *kernel.CommandRegistry, registry *doctype.Registry, execution policy.Execution, scope contract.BusinessScope, owner contract.ModuleID, published contract.PublishedOperation, inputSchema contract.SchemaRef, meta contract.CommandMeta, input []byte) (contract.OperationReceipt, error) {
 	if ctx == nil || store == nil || resolve == nil || commandKernel == nil || commandRegistry == nil || registry == nil || !execution.Valid() || execution.Tenant() != scope.TenantID || scope.Validate() != nil || meta.IdempotencyKey == "" || len(input) == 0 || len(input) > 1<<20 || !json.Valid(input) {
 		return contract.OperationReceipt{}, contract.NewError(contract.CodeValidationFailed, "published operation invocation identity is invalid")
@@ -223,7 +228,10 @@ func executePublishedOperation(ctx context.Context, store *configstore.ModuleSto
 	}
 
 	meta.IdempotencyKey = intentKey
-	result, invokeErr := plan.InvokeCapability(ctx, execution, lease, scope, caller, published.Capability, published.Operation, meta, json.RawMessage(input))
+	// Published operation contracts expose the business payload directly. The
+	// local command kernel consumes its established command envelope, so add
+	// that envelope only at the producer-to-command boundary.
+	result, invokeErr := plan.InvokeCapability(ctx, execution, lease, scope, caller, published.Capability, published.Operation, meta, localPublishedCommandPayload(input))
 	if invokeErr != nil {
 		status, operationErr := receiptFailureForError(invokeErr, spec.Effect == contract.EffectExternal)
 		if status == contract.ReceiptOutcomeUnknown {
