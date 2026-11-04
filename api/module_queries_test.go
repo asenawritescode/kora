@@ -237,3 +237,40 @@ func TestApplicationCatalogFiltersSurfacesByActorGrant(t *testing.T) {
 		t.Fatalf("unexpected actor catalog: %+v", response.Data)
 	}
 }
+
+func TestApplicationCatalogRejectsUnauthorizedLegalEntity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := doctype.NewRegistry()
+	execution, err := policy.NewVerifiedExecution("catalog-tenant", contract.ActorContext{
+		PrincipalID: "extension:scoped", PrincipalType: contract.PrincipalService, Site: "catalog-tenant",
+		AuthenticatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal("verified actor:", err)
+	}
+	services := NewSiteRuntimeServices()
+	services.Replace("catalog-tenant", SiteRuntimeService{
+		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) {
+			return contract.ModuleSnapshot{TenantID: "catalog-tenant", Revision: 3}, nil
+		},
+		ResolveModuleBindings: func(contract.BusinessScope) (plugin.BindingPlan, error) {
+			return plugin.BindingPlan{}, nil
+		},
+	})
+	handler := NewHandler(registry, nil)
+	handler.RuntimeServices = services
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("GET", "/api/v2/modules/catalog", nil)
+	ctx.Request.Header.Set("X-Kora-Legal-Entity-ID", "entity-not-granted")
+	ctx.Set("site_name", "catalog-tenant")
+	ctx.Set("policy_execution", execution)
+
+	handler.HandleApplicationCatalog(ctx)
+	if recorder.Code != 403 {
+		t.Fatalf("catalog status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"code":"permission.denied"`) {
+		t.Fatalf("catalog body=%s", recorder.Body.String())
+	}
+}
