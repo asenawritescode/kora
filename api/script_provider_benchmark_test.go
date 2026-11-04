@@ -28,6 +28,7 @@ func BenchmarkScriptProviderCRUD(b *testing.B) {
 	tx.CurrentUser = "benchmark@example.test"
 	tx.CurrentUserRole = doctype.AdminRole
 	tx.CurrentUserRoles = []string{doctype.AdminRole}
+	tx.Execution = integrationTestExecution(b, site, tx.CurrentUser, tx.CurrentUserRoles)
 	tx.ScriptRunner = &nestedScriptMutationRunner{}
 	tx.ScriptStore = &script.Store{DB: database, Dialect: db.Resolve("mysql")}
 	provider := NewScriptProvider(&tx, registry, site, nil, nil)
@@ -82,6 +83,7 @@ func TestScriptProviderCRUDLoad(t *testing.T) {
 		tx.CurrentUser = fmt.Sprintf("script-load-%02d@example.test", worker)
 		tx.CurrentUserRole = doctype.AdminRole
 		tx.CurrentUserRoles = []string{doctype.AdminRole}
+		tx.Execution = integrationTestExecution(t, site, tx.CurrentUser, tx.CurrentUserRoles)
 		tx.ScriptRunner = runner
 		tx.ScriptStore = store
 		providers[worker] = NewScriptProvider(&tx, registry, site, nil, nil)

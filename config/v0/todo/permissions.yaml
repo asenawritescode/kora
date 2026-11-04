@@ -3,7 +3,19 @@
   can_read: true
   can_write: true
   can_create: true
-  can_delete: true
+  can_delete: false
+  can_submit: true
+  if_owner: true
+  if_assigned: [assignee]
+
+- doctype: Todo
+  role: Task Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: false
 
 - doctype: Todo
   role: Administrator
@@ -11,3 +23,4 @@
   can_write: true
   can_create: true
   can_delete: true
+  can_submit: true

@@ -1,0 +1,15 @@
+appId: com.kora.mobile
+---
+- launchApp
+- tapOn:
+    id: input-server-url
+- eraseText: 100
+- inputText: http://localhost:8000
+- assertVisible: http://localhost:8000
+- tapOn:
+    id: input-site-optional
+- eraseText: 100
+- inputText: internal-requests-uat.local
+- assertVisible: internal-requests-uat.local
+- tapOn: Check server
+- waitForAnimationToEnd

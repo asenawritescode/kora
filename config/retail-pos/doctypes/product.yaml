@@ -1,5 +1,5 @@
 name: Product
-module: Retail Pos
+module: Products
 title_field: product_name
 search_fields: product_name, reference, category, status
 sort_field: modified
@@ -17,6 +17,7 @@ fields:
     label: Product name
     reqd: true
     in_list_view: true
+    search_index: true
   - fieldname: category
     fieldtype: Link
     options: Product Category
@@ -33,6 +34,10 @@ fields:
     label: Stock quantity
     default: 0
     in_list_view: true
+  - fieldname: stock_adjustment_reason
+    fieldtype: Data
+    label: Reason for stock change
+    description: Record why the stock quantity changed whenever you update it.
   - fieldname: image
     fieldtype: Data
     label: Image URL

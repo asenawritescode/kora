@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Loader2, Check, ChevronsUpDown, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Field, Document } from '@/types/kora'
+import { linkPickerDisplayFields, linkPickerSearchParams } from './link-search'
 
 interface LinkFieldProps {
   field: Field
@@ -24,6 +25,7 @@ export function LinkField({ field, value, onChange, disabled, error, compact }: 
   const [serverResults, setServerResults] = useState<Document[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const searchRequestID = useRef(0)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   // Fetch target doctype schema to get title_field.
@@ -35,11 +37,12 @@ export function LinkField({ field, value, onChange, disabled, error, compact }: 
   })
 
   const titleField = schemaQuery.data?.doctype?.title_field || 'name'
+  const displayFields = linkPickerDisplayFields(schemaQuery.data?.doctype)
 
   // Load first 50 records for initial display.
   const listQuery = useQuery({
-    queryKey: ['resource', targetDoctype, 'linkfield'],
-    queryFn: () => fetchList(targetDoctype!, { limit: 50, fields: ['name', titleField] }),
+    queryKey: ['resource', targetDoctype, 'linkfield', displayFields.join(',')],
+    queryFn: () => fetchList(targetDoctype!, { limit: 50, fields: displayFields }),
     enabled: !!targetDoctype,
     staleTime: 30_000,
   })
@@ -47,37 +50,30 @@ export function LinkField({ field, value, onChange, disabled, error, compact }: 
   const candidates: Document[] = listQuery.data?.data ?? []
 
   const doServerSearch = useCallback(
-    async (term: string) => {
+    async (term: string, requestID: number) => {
       if (term.length < 2 || !targetDoctype) return
-      setIsSearching(true)
       try {
-        const result = await fetchList(targetDoctype, {
-          limit: 10,
-          fields: ['name', titleField],
-          filters: JSON.stringify([[titleField, 'like', `%${term}%`]]),
-        })
-        setServerResults(result.data ?? [])
+        const result = await fetchList(targetDoctype, linkPickerSearchParams(term, displayFields))
+        if (searchRequestID.current === requestID) setServerResults(result.data ?? [])
       } catch {
-        setServerResults([])
+        if (searchRequestID.current === requestID) setServerResults([])
       } finally {
-        setIsSearching(false)
+        if (searchRequestID.current === requestID) setIsSearching(false)
       }
     },
-    [targetDoctype, titleField],
+    [targetDoctype, displayFields.join(',')],
   )
 
   useEffect(() => {
     if (searchTimeout.current) clearTimeout(searchTimeout.current)
+    const requestID = ++searchRequestID.current
+    setServerResults([])
     searchTimeout.current = setTimeout(() => {
-      const localHits = candidates.filter(
-        (d) =>
-          String(d[titleField] ?? '').toLowerCase().includes(search.toLowerCase()) ||
-          String(d.name).toLowerCase().includes(search.toLowerCase()),
-      )
-      if (localHits.length === 0 && search.length >= 2) {
-        doServerSearch(search)
+      if (search.trim().length >= 2) {
+        setIsSearching(true)
+        doServerSearch(search.trim(), requestID)
       } else {
-        setServerResults([])
+        setIsSearching(false)
       }
     }, 300)
     return () => { if (searchTimeout.current) clearTimeout(searchTimeout.current) }
@@ -99,15 +95,19 @@ export function LinkField({ field, value, onChange, disabled, error, compact }: 
     (d, i, arr) => arr.findIndex((x) => x.name === d.name) === i,
   )
 
-  const filtered = search.length > 0
-    ? allResults.filter((d) =>
-        String(d[titleField] ?? '').toLowerCase().includes(search.toLowerCase()) ||
-        String(d.name).toLowerCase().includes(search.toLowerCase()))
-    : allResults.slice(0, 20)
+  // Typed search is executed by Engine against the target DocType's configured
+  // indexed fields before pagination. Do not re-filter a partial client cache:
+  // doing so hides valid database matches (and can show stale cached rows).
+  const filtered = search.trim().length >= 2
+    ? serverResults
+    : search.length > 0
+      ? []
+      : allResults.slice(0, 20)
 
   const currentDoc = allResults.find((d) => d.name === value)
+  const currentTitle = currentDoc ? String(currentDoc[titleField] ?? '') : ''
   const displayValue = currentDoc
-    ? `${currentDoc.name} — ${String(currentDoc[titleField] ?? '')}`
+    ? (currentTitle && currentTitle !== currentDoc.name ? currentTitle : currentDoc.name)
     : (value || '')
 
   if (!targetDoctype) {
@@ -178,7 +178,7 @@ export function LinkField({ field, value, onChange, disabled, error, compact }: 
             <div className="max-h-60 overflow-auto p-1">
               {filtered.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">
-                  {listQuery.isLoading ? 'Loading...' : search.length >= 2 ? 'No results.' : 'Type to search...'}
+                  {listQuery.isLoading ? 'Loading...' : isSearching ? 'Searching...' : search.trim().length >= 2 ? 'No results.' : 'Type to search...'}
                 </p>
               ) : (
                 filtered.map((doc) => (
@@ -197,8 +197,8 @@ export function LinkField({ field, value, onChange, disabled, error, compact }: 
                   >
                     <Check className={cn('mr-2 h-4 w-4 shrink-0', value === doc.name ? 'opacity-100' : 'opacity-0')} />
                     <div className="flex flex-col min-w-0">
-                      <span className="font-mono text-xs">{doc.name}</span>
-                      <span className="text-xs text-muted-foreground truncate">{String(doc[titleField] ?? '')}</span>
+                      <span className="truncate text-sm">{String(doc[titleField] || doc.name)}</span>
+                      {doc.name !== doc[titleField] && <span className="text-xs text-muted-foreground truncate">{doc.name}</span>}
                     </div>
                   </button>
                 ))

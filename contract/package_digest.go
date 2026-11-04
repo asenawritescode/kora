@@ -183,13 +183,15 @@ func validPackageFileType(filePath, contentType string) bool {
 	case "doctype":
 		return strings.HasPrefix(filePath, "doctypes/") && (ext == ".yaml" || ext == ".yml")
 	case "roles":
-		return filePath == "roles.yaml" && ext == ".yaml"
+		return (filePath == "roles.yaml" || (strings.HasPrefix(filePath, "components/") && path.Base(filePath) == "roles.yaml")) && ext == ".yaml"
 	case "permissions":
-		return filePath == "permissions.yaml" && ext == ".yaml"
-	case "workflow":
-		return strings.Contains(filePath, "workflow") && (ext == ".yaml" || ext == ".yml")
+		return (filePath == "permissions.yaml" || (strings.HasPrefix(filePath, "components/") && path.Base(filePath) == "permissions.yaml")) && ext == ".yaml"
+	case "workflow_definition":
+		return strings.HasPrefix(filePath, "workflows/") && ext == ".json"
 	case "view":
 		return strings.HasPrefix(filePath, "views/") && (ext == ".yaml" || ext == ".yml")
+	case "report":
+		return strings.HasPrefix(filePath, "reports/") && (ext == ".yaml" || ext == ".yml")
 	case "script":
 		return strings.HasPrefix(filePath, "scripts/") && ext == ".js"
 	default:

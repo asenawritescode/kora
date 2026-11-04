@@ -1,4 +1,4 @@
-// Financial validation rules for Kora ERP Kenya
+// Financial validation rules for Kigae ERP Kenya
 var doc = __kora_event__.doc;
 var action = __kora_event__.action;
 

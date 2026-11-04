@@ -60,7 +60,8 @@ func capResultSize(content string, maxChars int) string {
 }
 
 func isToolError(content string) bool {
-	return strings.HasPrefix(content, "Error") || strings.HasPrefix(content, "Unknown")
+	return strings.HasPrefix(content, "Error") || strings.HasPrefix(content, "Unknown") ||
+		strings.HasPrefix(content, "Permission denied") || strings.HasPrefix(content, "recent authentication required")
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +285,7 @@ func unknownFields(args map[string]any, dt *doctype.DocType) []string {
 func unknownFieldsExcept(args map[string]any, dt *doctype.DocType, allowed map[string]bool) []string {
 	valid := make(map[string]bool)
 	for _, f := range dt.DataFields() {
-		if f.Fieldtype != "Table" {
+		if f.Fieldtype != "Table" && aiReadableField(f) {
 			valid[f.Fieldname] = true
 		}
 	}
@@ -304,7 +305,7 @@ func unknownFieldsExcept(args map[string]any, dt *doctype.DocType, allowed map[s
 func availableFieldNames(dt *doctype.DocType) string {
 	var names []string
 	for _, f := range dt.DataFields() {
-		if f.Fieldtype != "Table" {
+		if f.Fieldtype != "Table" && aiReadableField(f) {
 			names = append(names, f.Fieldname)
 		}
 	}

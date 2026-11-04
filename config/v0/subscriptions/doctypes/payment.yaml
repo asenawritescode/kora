@@ -1,28 +1,79 @@
 name: Payment
-module: Subscriptions
-title_field: reference
-search_fields: reference, status
-sort_field: modified
+module: Subscription and Recurring Services
+description: A payment received and allocated to a recurring invoice. Successful payments update the invoice balance in the same save; pending payments are applied only after confirmation.
+title_field: payment_reference
+search_fields: payment_reference, provider_transaction_id, status
+sort_field: paid_at
 sort_order: DESC
 
 fields:
-  - fieldname: reference
+  - fieldname: payment_reference
     fieldtype: Data
-    label: Reference
-    reqd: true
+    label: Payment reference
+    description: Generated automatically if left blank.
     unique: true
     in_list_view: true
-  - fieldname: source_record
+  - fieldname: invoice
+    fieldtype: Link
+    options: Recurring Invoice
+    label: Invoice
+    reqd: true
+    in_list_view: true
+  - fieldname: subscription
+    fieldtype: Link
+    options: Subscription
+    label: Subscription
+  - fieldname: customer
+    fieldtype: Link
+    options: Billing Customer
+    label: Customer
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount received
+    reqd: true
+    in_list_view: true
+  - fieldname: currency
+    fieldtype: Select
+    label: Currency
+    options: |
+      KES
+      USD
+      EUR
+      GBP
+    read_only: true
+  - fieldname: paid_at
+    fieldtype: Datetime
+    label: Paid at
+    reqd: true
+    in_list_view: true
+  - fieldname: method
+    fieldtype: Select
+    label: Payment method
+    options: |
+      Cash
+      Bank Transfer
+      Card
+      Mobile Money
+      Other
+    reqd: true
+    in_list_view: true
+  - fieldname: provider
     fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
+    label: Payment provider
+  - fieldname: provider_transaction_id
     fieldtype: Data
-    label: Assignee
+    label: Provider transaction ID
+    unique: true
   - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
+    fieldtype: Attach
+    label: Receipt or evidence
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
-    default: Draft
+    options: |
+      Pending
+      Succeeded
+      Failed
+      Reversed
+    default: Succeeded
     in_list_view: true

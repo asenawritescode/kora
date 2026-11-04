@@ -7,7 +7,6 @@ export interface ScriptRecord {
   doctype: string
   event: string
   method_path: string
-  workflow_action: string
   schedule: string
   priority: number
   is_active: boolean
@@ -42,7 +41,6 @@ export interface ScriptCreateRequest {
   doctype?: string
   event?: string
   method_path?: string
-  workflow_action?: string
   schedule?: string
   priority?: number
   run_as?: string
@@ -55,7 +53,6 @@ export interface ScriptUpdateRequest {
   doctype?: string
   event?: string
   method_path?: string
-  workflow_action?: string
   schedule?: string
   priority?: number
   is_active?: boolean

@@ -12,7 +12,7 @@ import { Breadcrumbs } from '@/components/layout/Breadcrumbs'
 import { FormSection, isLayoutField } from '@/components/forms/FormSection'
 import { buildDefaultFormData, buildFormSections } from '@/components/forms/form-runtime'
 import { toast } from '@/components/ui/Toast'
-import { clearDocumentDraft, loadDocumentDraft, saveDocumentDraft } from '@/lib/draft-storage'
+import { clearDocumentDraft, DraftPersistenceError, loadDocumentDraft, saveDocumentDraft } from '@/lib/draft-storage'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -27,6 +27,7 @@ export default function NewFormPage() {
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [draftSavedAt, setDraftSavedAt] = useState<Date | null>(null)
   const [draftRestored, setDraftRestored] = useState(false)
+  const [draftStorageError, setDraftStorageError] = useState<string | null>(null)
 
   if (doctype === 'pages') {
     return (
@@ -104,8 +105,13 @@ export default function NewFormPage() {
     if (!draftLoadedRef.current) return
     const timer = window.setTimeout(() => {
       if (Object.keys(formData).length === 0) return
-      void saveDocumentDraft({ doctype }, formData)
-      setDraftSavedAt(new Date())
+      void saveDocumentDraft({ doctype }, formData).then(() => {
+        setDraftSavedAt(new Date())
+        setDraftStorageError(null)
+      }).catch((cause: unknown) => {
+        setDraftSavedAt(null)
+        setDraftStorageError(cause instanceof DraftPersistenceError ? cause.message : 'The draft could not be saved in this browser.')
+      })
     }, 350)
     return () => window.clearTimeout(timer)
   }, [doctype, formData])
@@ -145,8 +151,14 @@ export default function NewFormPage() {
     try {
       const created = await createDocument(doctype, formData)
       setFormData({})
-      await clearDocumentDraft({ doctype })
+      let cleanupError: string | null = null
+      try {
+        await clearDocumentDraft({ doctype })
+      } catch (cause) {
+        cleanupError = cause instanceof DraftPersistenceError ? cause.message : 'The saved browser draft could not be cleared.'
+      }
       toast('success', `${dt?.name || doctype} created`)
+      if (cleanupError) toast('error', cleanupError, 6000)
       navigate({ to: '/workspace/$doctype/$name', params: { doctype, name: created.name } })
     } catch (err: any) {
       const msg = err.message || 'Failed to create'
@@ -198,6 +210,13 @@ export default function NewFormPage() {
         ]}
         className="mb-4"
       />
+
+      {draftStorageError && (
+        <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <p className="text-destructive">{draftStorageError}</p>
+        </div>
+      )}
 
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <Button

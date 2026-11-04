@@ -2,8 +2,8 @@ name: Purchase Request
 module: Purchasing
 is_submittable: true
 track_changes: true
-title_field: name
-search_fields: department, request_date
+title_field: requested_by
+search_fields: requested_by, department, request_date
 sort_field: request_date
 sort_order: DESC
 
@@ -30,6 +30,7 @@ fields:
   - fieldname: requested_by
     fieldtype: Data
     label: Requested By
+    search_index: true
 
   - fieldname: column_right
     fieldtype: Column Break

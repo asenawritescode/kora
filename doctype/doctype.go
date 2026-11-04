@@ -1,24 +1,36 @@
-// Package doctype defines the core types for Kora's config-driven data model.
+// Package doctype defines the core types for Kigae's config-driven data model.
 package doctype
+
+import "github.com/asenawritescode/kora/contract"
 
 // DocType represents a data entity definition. It defines the fields,
 // constraints, relationships, and UI hints for a document type.
 type DocType struct {
-	Name           string          `yaml:"name"          json:"name"`
-	ResourceName   string          `yaml:"resource_name" json:"resource_name,omitempty"`
-	Module         string          `yaml:"module"        json:"module"`
-	IsSubmittable  bool            `yaml:"is_submittable" json:"is_submittable"`
-	IsChildTable   bool            `yaml:"is_child_table" json:"is_child_table"`
-	IsSingle       bool            `yaml:"is_single"      json:"is_single"`
-	TrackChanges   bool            `yaml:"track_changes"  json:"track_changes"`
-	TitleField     string          `yaml:"title_field"    json:"title_field"`
-	SearchFields   string          `yaml:"search_fields"  json:"search_fields"`
-	SortField      string          `yaml:"sort_field"     json:"sort_field"`
-	SortOrder      string          `yaml:"sort_order"     json:"sort_order"`
-	Description    string          `yaml:"description"    json:"description"`
-	Fields         []Field         `yaml:"fields"         json:"fields"`
-	DocConstraints []DocConstraint `yaml:"doc_constraints" json:"doc_constraints"`
-	PublicAccess   *PublicAccess   `yaml:"public_access" json:"public_access,omitempty"`
+	Name                  string                     `yaml:"name"          json:"name"`
+	ResourceName          string                     `yaml:"resource_name" json:"resource_name,omitempty"`
+	BusinessResourceType  string                     `yaml:"business_resource_type,omitempty" json:"business_resource_type,omitempty"`
+	BusinessIdentityField string                     `yaml:"business_identity_field,omitempty" json:"business_identity_field,omitempty"`
+	Module                string                     `yaml:"module"        json:"module"`
+	ModuleOwnerID         string                     `yaml:"module_owner_id,omitempty" json:"module_owner_id,omitempty"`
+	ModuleAccess          contract.ModuleAccess      `yaml:"module_access,omitempty" json:"module_access,omitempty"`
+	ModuleOwnershipMode   string                     `yaml:"module_ownership_mode,omitempty" json:"module_ownership_mode,omitempty"`
+	BusinessScopePolicy   contract.ResourceScopeKind `yaml:"business_scope_policy,omitempty" json:"business_scope_policy,omitempty"`
+	BusinessScopeField    string                     `yaml:"business_scope_field,omitempty" json:"business_scope_field,omitempty"`
+	ReferenceRule         *contract.ReferenceRule    `yaml:"reference_rule,omitempty" json:"reference_rule,omitempty"`
+	IsSubmittable         bool                       `yaml:"is_submittable" json:"is_submittable"`
+	IsChildTable          bool                       `yaml:"is_child_table" json:"is_child_table"`
+	IsSingle              bool                       `yaml:"is_single"      json:"is_single"`
+	TrackChanges          bool                       `yaml:"track_changes"  json:"track_changes"`
+	AppendOnly            bool                       `yaml:"append_only"    json:"append_only,omitempty"`
+	TitleField            string                     `yaml:"title_field"    json:"title_field"`
+	SearchFields          string                     `yaml:"search_fields"  json:"search_fields"`
+	SortField             string                     `yaml:"sort_field"     json:"sort_field"`
+	SortOrder             string                     `yaml:"sort_order"     json:"sort_order"`
+	Description           string                     `yaml:"description"    json:"description"`
+	Fields                []Field                    `yaml:"fields"         json:"fields"`
+	DocConstraints        []DocConstraint            `yaml:"doc_constraints" json:"doc_constraints"`
+	PublicAccess          *PublicAccess              `yaml:"public_access" json:"public_access,omitempty"`
+	QuantityEffect        *QuantityEffect            `yaml:"quantity_effect" json:"quantity_effect,omitempty"`
 
 	metadataReady      bool
 	dataFields         []Field
@@ -26,6 +38,19 @@ type DocType struct {
 	tableFields        []Field
 	listFields         []Field
 	validSortColumns   map[string]bool
+}
+
+// QuantityEffect binds a record form to a configured transactional view action.
+// Clients may use the same binding to project the signed effect before sync.
+type QuantityEffect struct {
+	View                string `yaml:"view" json:"view"`
+	Component           string `yaml:"component" json:"component"`
+	Action              string `yaml:"action" json:"action"`
+	TargetDocType       string `yaml:"target_doctype" json:"target_doctype"`
+	TargetQuantityField string `yaml:"target_quantity_field" json:"target_quantity_field"`
+	SourceRecordField   string `yaml:"source_record_field" json:"source_record_field"`
+	DeltaField          string `yaml:"delta_field" json:"delta_field"`
+	ReasonField         string `yaml:"reason_field" json:"reason_field"`
 }
 
 // PublicAccess defines the explicit unauthenticated read surface for a DocType.
@@ -159,28 +184,30 @@ func (d *DocType) ensureDerivedMetadata() {
 
 // Field represents a single field in a DocType.
 type Field struct {
-	Fieldname          string       `yaml:"fieldname"           json:"fieldname"`
-	Fieldtype          string       `yaml:"fieldtype"           json:"fieldtype"`
-	Label              string       `yaml:"label"               json:"label"`
-	Options            string       `yaml:"options"             json:"options"`
-	Reqd               bool         `yaml:"reqd"                json:"reqd"`
-	Unique             bool         `yaml:"unique"              json:"unique"`
-	Default            string       `yaml:"default"             json:"default"`
-	Hidden             bool         `yaml:"hidden"              json:"hidden"`
-	ReadOnly           bool         `yaml:"read_only"           json:"read_only"`
-	Bold               bool         `yaml:"bold"                json:"bold"`
-	InListView         bool         `yaml:"in_list_view"        json:"in_list_view"`
-	InStandardFilter   bool         `yaml:"in_standard_filter"  json:"in_standard_filter"`
-	SearchIndex        bool         `yaml:"search_index"        json:"search_index"`
-	Description        string       `yaml:"description"         json:"description"`
-	DependsOn          string       `yaml:"depends_on"          json:"depends_on"`
-	MandatoryDependsOn string       `yaml:"mandatory_depends_on" json:"mandatory_depends_on"`
-	Constraints        []Constraint `yaml:"constraints"         json:"constraints"`
-	RenamedFrom        string       `yaml:"renamed_from"        json:"renamed_from"`
-	LinkedField        string       `yaml:"linked_field"        json:"linked_field,omitempty"`
-	Computed           string       `yaml:"computed"            json:"computed,omitempty"`
-	DependencyScope    string       `yaml:"dependency_scope"    json:"dependency_scope,omitempty"`
-	Accept             string       `yaml:"accept"              json:"accept,omitempty"`
+	Fieldname                string                  `yaml:"fieldname"           json:"fieldname"`
+	Fieldtype                string                  `yaml:"fieldtype"           json:"fieldtype"`
+	Label                    string                  `yaml:"label"               json:"label"`
+	Options                  string                  `yaml:"options"             json:"options"`
+	Reqd                     bool                    `yaml:"reqd"                json:"reqd"`
+	Unique                   bool                    `yaml:"unique"              json:"unique"`
+	Default                  string                  `yaml:"default"             json:"default"`
+	Hidden                   bool                    `yaml:"hidden"              json:"hidden"`
+	ReadOnly                 bool                    `yaml:"read_only"           json:"read_only"`
+	Bold                     bool                    `yaml:"bold"                json:"bold"`
+	InListView               bool                    `yaml:"in_list_view"        json:"in_list_view"`
+	InStandardFilter         bool                    `yaml:"in_standard_filter"  json:"in_standard_filter"`
+	SearchIndex              bool                    `yaml:"search_index"        json:"search_index"`
+	Description              string                  `yaml:"description"         json:"description"`
+	DependsOn                string                  `yaml:"depends_on"          json:"depends_on"`
+	MandatoryDependsOn       string                  `yaml:"mandatory_depends_on" json:"mandatory_depends_on"`
+	Constraints              []Constraint            `yaml:"constraints"         json:"constraints"`
+	RenamedFrom              string                  `yaml:"renamed_from"        json:"renamed_from"`
+	LinkedField              string                  `yaml:"linked_field"        json:"linked_field,omitempty"`
+	Computed                 string                  `yaml:"computed"            json:"computed,omitempty"`
+	DependencyScope          string                  `yaml:"dependency_scope"    json:"dependency_scope,omitempty"`
+	Accept                   string                  `yaml:"accept"              json:"accept,omitempty"`
+	ReferenceRule            *contract.ReferenceRule `yaml:"reference_rule,omitempty" json:"reference_rule,omitempty"`
+	HistoricalSnapshotSchema *contract.SchemaRef     `yaml:"historical_snapshot_schema,omitempty" json:"historical_snapshot_schema,omitempty"`
 }
 
 // IsDataField returns true if this field maps to a database column.

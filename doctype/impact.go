@@ -55,8 +55,6 @@ var impactLookup = map[string]impactRule{
 	"remove-role":           {Tier: TierWarning},
 	"add-perm":              {Tier: TierSafe},
 	"remove-perm":           {Tier: TierSafe},
-	"add-workflow":          {Tier: TierSafe},
-	"remove-workflow":       {Tier: TierWarning},
 	"add-metric":            {Tier: TierSafe},
 	"remove-metric":         {Tier: TierSafe},
 	"add-script-ref":        {Tier: TierSafe},

@@ -1,11 +1,16 @@
 package configstore
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/contract"
 	koraDB "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
@@ -43,6 +48,30 @@ func TestLoadAll_Empty(t *testing.T) {
 	}
 	if len(doctypes) != 0 {
 		t.Errorf("LoadAll returned %d doctypes, want 0", len(doctypes))
+	}
+}
+
+func TestLoadActiveSnapshotLoadsScheduledDefinitionsOnlyFromActiveVersion(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("sqlmock:", err)
+	}
+	defer database.Close()
+	store := newStore(database)
+	config := doctype.ToSExpr(&doctype.ConfigSnapshot{ScheduledJobs: []contract.ScheduledJobDefinition{{Name: "daily", Type: "custom", Schedule: "0 0 * * *"}}})
+	mock.ExpectQuery("SELECT id, config FROM _kora_config_version WHERE site = \\? AND status = 'Active' ORDER BY version DESC LIMIT 1").
+		WithArgs("tenant-a").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "config"}).AddRow("version-1", config))
+
+	snapshot, versionID, err := store.LoadActiveSnapshot("tenant-a")
+	if err != nil {
+		t.Fatal("LoadActiveSnapshot:", err)
+	}
+	if versionID != "version-1" || len(snapshot.ScheduledJobs) != 1 || snapshot.ScheduledJobs[0].Name != "daily" {
+		t.Fatalf("active snapshot = (%q, %#v), want version and scheduled definition", versionID, snapshot)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("unmet SQL expectation:", err)
 	}
 }
 
@@ -90,7 +119,7 @@ func TestLoadAll_WithDoctypes(t *testing.T) {
 		"description", "depends_on", "mandatory_depends_on", "constraints_json",
 		"renamed_from", "linked_field", "computed", "accept", "idx",
 	}).
-		AddRow("Task", "subject", "Data", "Subject", "", 1, 0, "", 0, 0, 0, 1, 0, 0, "", "", "", "[]", "", "", "", "", 0).
+		AddRow("Task", "subject", "Data", "Subject", "", 1, 0, "", 0, 0, 0, 1, 0, 0, "", "", "", `[{"type":"min","value":1,"message":"Subject is required."}]`, "", "", "", "", 0).
 		AddRow("Task", "status", "Select", "Status", "Open,Closed", 1, 0, "Open", 0, 0, 0, 1, 0, 0, "", "", "", "[]", "", "", "", "", 1).
 		AddRow("User", "email", "Data", "Email", "", 1, 1, "", 0, 0, 0, 1, 0, 0, "", "", "", "[]", "", "", "", "", 0)
 
@@ -120,6 +149,9 @@ func TestLoadAll_WithDoctypes(t *testing.T) {
 	}
 	if !doctypes[0].Fields[0].Reqd {
 		t.Error("subject should be required")
+	}
+	if len(doctypes[0].Fields[0].Constraints) != 1 || doctypes[0].Fields[0].Constraints[0].Type != "min" {
+		t.Fatalf("subject constraints = %#v, want persisted min constraint", doctypes[0].Fields[0].Constraints)
 	}
 	if doctypes[0].PublicAccess == nil || !doctypes[0].PublicAccess.Enabled {
 		t.Fatal("Task public access should be loaded from config_json")
@@ -153,6 +185,7 @@ func TestSaveRoles_RoundTrip(t *testing.T) {
 		{Name: "Admin", WorkspaceAccess: true, Description: "Administrator"},
 		{Name: "Editor", WorkspaceAccess: true, Description: "Editor role"},
 	}
+	mock.ExpectBegin()
 
 	for _, role := range roles {
 		expectUpsert := `INSERT INTO _kora_role`
@@ -160,6 +193,9 @@ func TestSaveRoles_RoundTrip(t *testing.T) {
 			WithArgs(role.Name, 1, role.Description, "").
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}
+	mock.ExpectExec(`UPDATE _kora_auth_revision SET policy_revision = policy_revision \+ 1 WHERE id = 1`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE _kora_config_revision SET revision = revision \+ 1 WHERE id = 1 AND revision < 9223372036854775807`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 
 	err = s.SaveRoles(roles, "")
 	if err != nil {
@@ -183,13 +219,13 @@ func TestLoadPermissions(t *testing.T) {
 	rows := sqlmock.NewRows([]string{
 		"doctype", "role", "can_read", "can_write", "can_create", "can_delete",
 		"can_submit", "can_cancel", "can_amend", "can_export", "can_import",
-		"can_report", "if_owner",
+		"can_report", "if_owner", "if_assigned",
 	}).
-		AddRow("Task", "Admin", 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0).
-		AddRow("Task", "Editor", 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0).
-		AddRow("User", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0)
+		AddRow("Task", "Admin", 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, "[]").
+		AddRow("Task", "Editor", 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, `["assigned_to"]`).
+		AddRow("User", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, nil)
 
-	mock.ExpectQuery("SELECT doctype, role, can_read, can_write, can_create, can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner FROM _kora_permission WHERE site = \\? OR site = '' ORDER BY doctype, role").
+	mock.ExpectQuery("SELECT doctype, role, can_read, can_write, can_create, can_delete, can_submit, can_cancel, can_amend, can_export, can_import, can_report, if_owner, if_assigned FROM _kora_permission WHERE site = \\? OR site = '' ORDER BY doctype, role").
 		WillReturnRows(rows)
 
 	perms, err := s.LoadPermissions("")
@@ -212,93 +248,11 @@ func TestLoadPermissions(t *testing.T) {
 	if perms[1].Doctype != "Task" || perms[1].Role != "Editor" {
 		t.Errorf("perms[1] = %s/%s, want Task/Editor", perms[1].Doctype, perms[1].Role)
 	}
+	if len(perms[1].IfAssigned) != 1 || perms[1].IfAssigned[0] != "assigned_to" {
+		t.Fatalf("assignment scope = %#v, want assigned_to", perms[1].IfAssigned)
+	}
 	if perms[1].Delete {
 		t.Error("Editor/Task should NOT have delete")
-	}
-}
-
-func TestLoadWorkflows(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	s := newStore(db)
-
-	configJSON := `{"name":"Task Workflow","document_type":"Task","is_active":true,"states":[{"state":"Draft","doc_status":0}],"transitions":[{"action":"Submit","from":"Draft","to":"Approved"}]}`
-
-	rows := sqlmock.NewRows([]string{"config_json"}).
-		AddRow(configJSON)
-
-	mock.ExpectQuery("SELECT config_json FROM _kora_workflow WHERE is_active = 1").
-		WillReturnRows(rows)
-
-	workflows, err := s.LoadWorkflows("")
-	if err != nil {
-		t.Fatalf("LoadWorkflows error = %v", err)
-	}
-	if len(workflows) != 1 {
-		t.Fatalf("LoadWorkflows returned %d workflows, want 1", len(workflows))
-	}
-	if workflows[0].Name != "Task Workflow" {
-		t.Errorf("workflow name = %q, want %q", workflows[0].Name, "Task Workflow")
-	}
-	if workflows[0].DocumentType != "Task" {
-		t.Errorf("document_type = %q, want %q", workflows[0].DocumentType, "Task")
-	}
-	if !workflows[0].IsActive {
-		t.Error("workflow should be active")
-	}
-	if len(workflows[0].States) != 1 {
-		t.Errorf("states = %d, want 1", len(workflows[0].States))
-	}
-	if len(workflows[0].Transitions) != 1 {
-		t.Errorf("transitions = %d, want 1", len(workflows[0].Transitions))
-	}
-}
-
-func TestSaveWorkflows_NormalizesAllowEdit(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	s := newStore(db)
-	wf := &doctype.Workflow{
-		Name:               "Task Workflow",
-		DocumentType:       "Task",
-		IsActive:           true,
-		WorkflowStateField: "status",
-		States: []doctype.WorkflowState{
-			{State: "Draft", DocStatus: 0, AllowEdit: "Administrator", Style: "default"},
-			{State: "Approved", DocStatus: 1, AllowEdit: "", Style: "success"},
-		},
-		Transitions: []doctype.WorkflowTransition{
-			{Action: "Approve", From: "Draft", To: "Approved", Allowed: "Administrator"},
-		},
-	}
-
-	mock.ExpectExec("INSERT INTO _kora_workflow \\(name, document_type, is_active, workflow_state_field, config_json, site\\)").
-		WithArgs("Task Workflow", "Task", 1, "status", sqlmock.AnyArg(), "test").
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("INSERT INTO _kora_workflow_state \\(name, workflow, state, doc_status, allow_edit, style, idx\\)").
-		WithArgs("Task Workflow.Draft", "Task Workflow", "Draft", 0, 1, "default", 0).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("INSERT INTO _kora_workflow_state \\(name, workflow, state, doc_status, allow_edit, style, idx\\)").
-		WithArgs("Task Workflow.Approved", "Task Workflow", "Approved", 1, 0, "success", 1).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("INSERT INTO _kora_workflow_transition \\(name, workflow, action, from_state, to_state, allowed, condition_expr, require_fields, idx\\)").
-		WithArgs("Task Workflow.Approve", "Task Workflow", "Approve", "Draft", "Approved", "Administrator", "", "", 0).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	if err := s.SaveWorkflows([]*doctype.Workflow{wf}, "test"); err != nil {
-		t.Fatalf("SaveWorkflows error = %v", err)
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
 	}
 }
 
@@ -313,13 +267,13 @@ func TestLoadScriptSnapshots(t *testing.T) {
 
 	rows := sqlmock.NewRows([]string{
 		"name", "script_type", "doctype", "event", "method_path",
-		"workflow_action", "schedule", "priority", "is_active", "run_as",
+		"schedule", "priority", "is_active", "run_as",
 		"timeout_ms", "script",
 	}).
-		AddRow("validate_task", "doc_event", "Task", "before_save", "", "", "", 10, 1, "", 5000, "console.log('validating')").
-		AddRow("daily_report", "scheduled", "", "", "", "", "0 9 * * *", 5, 1, "Admin", 30000, "console.log('report')")
+		AddRow("validate_task", "doc_event", "Task", "before_save", "", "", 10, 1, "", 5000, "console.log('validating')").
+		AddRow("daily_report", "scheduled", "", "", "", "0 9 * * *", 5, 1, "Admin", 30000, "console.log('report')")
 
-	mock.ExpectQuery("SELECT name, script_type, doctype, event, method_path, workflow_action, schedule, priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = \\?").
+	mock.ExpectQuery("SELECT name, script_type, doctype, event, method_path, schedule, priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = \\?").
 		WithArgs(true, "").
 		WillReturnRows(rows)
 
@@ -396,19 +350,25 @@ func TestSavePermissions(t *testing.T) {
 			Delete:  true,
 		},
 		{
-			Doctype: "Task",
-			Role:    "Guest",
-			Read:    true,
+			Doctype:    "Task",
+			Role:       "Guest",
+			Read:       true,
+			IfAssigned: []string{"assigned_to"},
 		},
 	}
+	mock.ExpectBegin()
 
 	mock.ExpectExec("INSERT INTO _kora_permission").
-		WithArgs("Task.Admin", "Task", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, "").
+		WithArgs("Task.Admin", "Task", "Admin", 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, "[]", "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectExec("INSERT INTO _kora_permission").
-		WithArgs("Task.Guest", "Task", "Guest", 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "").
+		WithArgs("Task.Guest", "Task", "Guest", 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, `["assigned_to"]`, "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	mock.ExpectExec(`UPDATE _kora_auth_revision SET policy_revision = policy_revision \+ 1 WHERE id = 1`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE _kora_config_revision SET revision = revision \+ 1 WHERE id = 1 AND revision < 9223372036854775807`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 
 	err = s.SavePermissions(perms, "")
 	if err != nil {
@@ -482,13 +442,13 @@ func TestCreateConfigVersionWithBase_UsesExplicitBaseVersionID(t *testing.T) {
 	mock.ExpectQuery("SELECT COALESCE\\(MAX\\(version\\), 0\\) FROM _kora_config_version WHERE site = \\?").
 		WithArgs("test").
 		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(3))
-	mock.ExpectQuery("SELECT config FROM _kora_config_version WHERE site = \\? AND version = \\?").
-		WithArgs("test", 3).
-		WillReturnRows(sqlmock.NewRows([]string{"config"}))
+	mock.ExpectQuery("SELECT config, version FROM _kora_config_version WHERE site = \\? AND id = \\?").
+		WithArgs("test", "cv-test-2").
+		WillReturnRows(sqlmock.NewRows([]string{"config", "version"}).AddRow(doctype.ToSExpr(&doctype.ConfigSnapshot{}), 2))
 	mock.ExpectExec("INSERT INTO _kora_config_version").
 		WithArgs(
-			"cv-test-4", "test", 4, "system", "Draft invoice", nil, "Draft", false, sqlmock.AnyArg(),
-			nil, sqlmock.AnyArg(), "cv-test-2", "",
+			"cv-test-4", "test", 4, "system", "Draft invoice", sqlmock.AnyArg(), "Draft", false, sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), "cv-test-2", "",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
@@ -521,13 +481,13 @@ func TestCreateConfigVersionActiveSupersedesPreviousActiveAndSetsFlag(t *testing
 	mock.ExpectExec("UPDATE _kora_config_version SET status = 'Superseded', is_active = \\? WHERE site = \\? AND status = 'Active'").
 		WithArgs(false, "test").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery("SELECT config FROM _kora_config_version WHERE site = \\? AND version = \\?").
-		WithArgs("test", 3).
-		WillReturnRows(sqlmock.NewRows([]string{"config"}).AddRow(""))
+	mock.ExpectQuery("SELECT config, version FROM _kora_config_version WHERE site = \\? AND id = \\?").
+		WithArgs("test", "cv-test-3").
+		WillReturnRows(sqlmock.NewRows([]string{"config", "version"}).AddRow(doctype.ToSExpr(&doctype.ConfigSnapshot{}), 3))
 	mock.ExpectExec("INSERT INTO _kora_config_version").
 		WithArgs(
-			"cv-test-4", "test", 4, "system", "Activated", nil, "Active", true, sqlmock.AnyArg(),
-			nil, sqlmock.AnyArg(), "cv-test-3", "",
+			"cv-test-4", "test", 4, "system", "Activated", sqlmock.AnyArg(), "Active", true, sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), "cv-test-3", "",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
@@ -541,6 +501,24 @@ func TestCreateConfigVersionActiveSupersedesPreviousActiveAndSetsFlag(t *testing
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestConfigVersionDiffStoresFullSnapshotChanges(t *testing.T) {
+	oldSnapshot := &doctype.ConfigSnapshot{Roles: []*doctype.Role{{Name: "Staff", WorkspaceAccess: true}}}
+	newSnapshot := &doctype.ConfigSnapshot{
+		Roles: []*doctype.Role{{Name: "Staff", WorkspaceAccess: true, Description: "Prepare records"}},
+	}
+	changeList, _, err := configVersionDiff(oldSnapshot, newSnapshot, 2, 3)
+	if err != nil {
+		t.Fatal("configVersionDiff:", err)
+	}
+	var diff doctype.ConfigDiffFull
+	if err := json.Unmarshal([]byte(changeList), &diff); err != nil {
+		t.Fatalf("stored change list is not a ConfigDiffFull: %v", err)
+	}
+	if diff.Doctypes == nil || len(diff.SectionChanges) != 1 {
+		t.Fatalf("stored change list omitted full snapshot sections: %#v", diff)
 	}
 }
 
@@ -578,3 +556,98 @@ func TestSupersedeSiblingDrafts(t *testing.T) {
 
 // Ensure the unused import compiles.
 var _ = errors.New
+
+func TestActivateSnapshotAtConfigRevisionUsesTransactionalCompareAndSet(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create SQL mock:", err)
+	}
+	defer database.Close()
+	dialect := koraDB.Resolve("postgres")
+	store := NewStore(database, dialect)
+	authUpdate := `UPDATE _kora_auth_revision SET policy_revision = policy_revision + 1 WHERE id = 1`
+	revisionUpdate := `UPDATE _kora_config_revision SET revision = revision + 1 WHERE id = 1 AND revision = $1 AND revision < 9223372036854775807`
+	mock.ExpectBegin()
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal("begin activation:", err)
+	}
+	mock.ExpectExec(regexp.QuoteMeta(authUpdate)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(revisionUpdate)).WithArgs(int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.ActivateSnapshotAtConfigRevision(tx, &doctype.ConfigSnapshot{}, "tenant-a", dialect, 11); err != nil {
+		t.Fatal("activate current revision:", err)
+	}
+	mock.ExpectCommit()
+	if err := tx.Commit(); err != nil {
+		t.Fatal("commit activation:", err)
+	}
+
+	mock.ExpectBegin()
+	tx, err = database.Begin()
+	if err != nil {
+		t.Fatal("begin stale activation:", err)
+	}
+	mock.ExpectExec(regexp.QuoteMeta(authUpdate)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(revisionUpdate)).WithArgs(int64(11)).WillReturnResult(sqlmock.NewResult(0, 0))
+	if err := store.ActivateSnapshotAtConfigRevision(tx, &doctype.ConfigSnapshot{}, "tenant-a", dialect, 11); err != ErrConfigRevisionConflict {
+		t.Fatalf("stale activation error = %v, want ErrConfigRevisionConflict", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal("rollback stale activation:", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("SQL expectations:", err)
+	}
+}
+
+func TestActivateSnapshotAtManagementClaimFencesBeforeConfigWrites(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create SQL mock:", err)
+	}
+	defer database.Close()
+	dialect := koraDB.Resolve("postgres")
+	store := NewStore(database, dialect)
+	digest := strings.Repeat("a", 64)
+	fenceQuery := "SELECT fence, expected_revision, artifact_digest FROM _kora_management_activation_fence WHERE site = $1 AND operation_id = $2 FOR UPDATE"
+	authUpdate := "UPDATE _kora_auth_revision SET policy_revision = policy_revision + 1 WHERE id = 1"
+	revisionUpdate := "UPDATE _kora_config_revision SET revision = revision + 1 WHERE id = 1 AND revision = $1 AND revision < 9223372036854775807"
+	journalUpdate := "UPDATE _kora_config_operation SET phase = $1, recovery_plan = $2, last_error = '', updated_at = CURRENT_TIMESTAMP WHERE site = $3 AND version_id = $4 AND kind = $5 AND phase = $6"
+
+	mock.ExpectBegin()
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal("begin current activation:", err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(fenceQuery)).WithArgs("tenant-a", "operation-a").
+		WillReturnRows(sqlmock.NewRows([]string{"fence", "expected_revision", "artifact_digest"}).AddRow(9, 12, digest))
+	mock.ExpectExec(regexp.QuoteMeta(authUpdate)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(revisionUpdate)).WithArgs(int64(12)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(journalUpdate)).WithArgs(ActivationActivated, "recovery-plan", "tenant-a", "operation-a", "management_package", ActivationApplying).WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.ActivateSnapshotAtManagementClaimWithJournal(context.Background(), tx, &doctype.ConfigSnapshot{}, "tenant-a", dialect, "operation-a", "management_package", ActivationApplying, "recovery-plan", 9, 12, digest); err != nil {
+		t.Fatal("activate current management claim:", err)
+	}
+	mock.ExpectCommit()
+	if err := tx.Commit(); err != nil {
+		t.Fatal("commit current activation:", err)
+	}
+
+	mock.ExpectBegin()
+	tx, err = database.Begin()
+	if err != nil {
+		t.Fatal("begin stale activation:", err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(fenceQuery)).WithArgs("tenant-a", "operation-a").
+		WillReturnRows(sqlmock.NewRows([]string{"fence", "expected_revision", "artifact_digest"}).AddRow(10, 12, digest))
+	if err := store.ActivateSnapshotAtManagementClaimWithJournal(context.Background(), tx, &doctype.ConfigSnapshot{}, "tenant-a", dialect, "operation-a", "management_package", ActivationApplying, "recovery-plan", 9, 12, digest); !errors.Is(err, ErrManagementActivationFence) {
+		t.Fatalf("stale claim activation error = %v, want fence conflict", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal("rollback stale activation:", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("SQL expectations:", err)
+	}
+}

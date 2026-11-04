@@ -1,9 +1,10 @@
 package cli
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -12,6 +13,7 @@ import (
 	"github.com/asenawritescode/kora/configstore"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/site"
 )
 
@@ -53,102 +55,101 @@ var analyticsStatusCmd = &cobra.Command{
 }
 
 func runAnalyticsBackfill(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	common := site.CommonConfigFromEnv()
 	startup := site.LoadStartupConfig()
 
-	platformDB, err := sql.Open(startup.DBType, startup.DBDSN)
+	platformDB, err := dbaccess.Open(startup.DBType, startup.DBDSN)
 	if err != nil {
 		return fmt.Errorf("connecting to platform DB: %w", err)
 	}
 	defer platformDB.Close()
-
-	sites, err := site.DiscoverSitesFromDB(platformDB)
+	platformAdmission, err := dbaccess.AdmissionFor(startup.DBType, startup.DBDSN)
 	if err != nil {
-		return fmt.Errorf("discovering sites: %w", err)
+		return fmt.Errorf("resolve platform work admission: %w", err)
 	}
-
-	var target *site.DBSiteInfo
-	for _, s := range sites {
-		if s.Name == backfillSite {
-			target = &s
-			break
+	if err := runCLIWork(ctx, platformAdmission, func() error { return platformDB.PingContext(ctx) }); err != nil {
+		return fmt.Errorf("ping platform DB: %w", err)
+	}
+	var target site.DBSiteInfo
+	err = runCLIWork(ctx, platformAdmission, func() error {
+		id, resolveErr := site.ResolveSiteAliasContext(ctx, platformDB, startup.DBType, backfillSite)
+		if resolveErr != nil {
+			return resolveErr
 		}
-	}
-	if target == nil {
-		return fmt.Errorf("site %q not found", backfillSite)
+		target, resolveErr = site.NewSQLSiteRegistry(platformDB, startup.DBType).GetByIDContext(ctx, id)
+		return resolveErr
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("site %q not found", backfillSite)
+		}
+		return fmt.Errorf("resolving site %q: %w", backfillSite, err)
 	}
 
-	siteCfg := site.ReconstructSiteConfigFromDBInfo(*target, common)
+	siteCfg := site.ReconstructSiteConfigFromDBInfo(target, common)
 	dialect := kdb.Resolve(siteCfg.DBType)
-	db, err := site.Connect(siteCfg)
+	release, err := acquireSiteCLIWork(ctx, siteCfg, true)
 	if err != nil {
+		return err
+	}
+	database, err := site.ConnectContext(ctx, siteCfg)
+	if err != nil {
+		release()
 		return fmt.Errorf("connecting to site DB: %w", err)
 	}
-	defer db.Close()
+	defer database.Close()
+	defer release()
 
-	if err := analytics.BootstrapTables(db, dialect); err != nil {
-		return fmt.Errorf("bootstrapping analytics tables: %w", err)
-	}
-
-	store := configstore.NewStore(db, dialect)
-	allDTs, err := store.LoadAll(target.Name)
+	store := configstore.NewStore(database, dialect)
+	docTypes, err := store.LoadAll(target.Name)
 	if err != nil {
 		return fmt.Errorf("loading doctypes: %w", err)
 	}
+	registry := doctype.NewRegistry()
+	for _, dt := range docTypes {
+		registry.Register(dt)
+	}
+	if backfillDoctype != "" && registry.Get(backfillDoctype) == nil {
+		return fmt.Errorf("doctype %q not found on site %q", backfillDoctype, target.Name)
+	}
 
-	fromDate := time.Now().AddDate(0, 0, -30)
+	from := time.Now().UTC().AddDate(0, 0, -30)
 	if backfillFrom != "" {
-		if t, err := time.Parse("2006-01-02", backfillFrom); err == nil {
-			fromDate = t
+		from, err = time.Parse("2006-01-02", backfillFrom)
+		if err != nil {
+			return fmt.Errorf("invalid --from date %q: expected YYYY-MM-DD", backfillFrom)
 		}
 	}
-
-	for _, dt := range allDTs {
-		if backfillDoctype != "" && dt.Name != backfillDoctype {
-			continue
-		}
-
-		if backfillDoctype != "" {
-			if err := resetAnalyticsForDoctype(db, dialect, target.Name, dt.Name); err != nil {
-				return fmt.Errorf("resetting analytics for %s: %w", dt.Name, err)
-			}
-		}
-
-		metrics := analytics.GenerateMetrics(dt)
-		if dt.IsSubmittable {
-			workflows, err := store.LoadWorkflows(target.Name)
-			if err != nil {
-				return fmt.Errorf("loading workflows for %s: %w", dt.Name, err)
-			}
-			for _, wf := range workflows {
-				if wf.DocumentType == dt.Name {
-					metrics = append(metrics, analytics.GenerateWorkflowMetrics(dt, wf)...)
-					break
-				}
-			}
-		}
-
-		fmt.Printf("Backfilling %s (%d metrics)...\n", dt.Name, len(metrics))
-		for _, m := range metrics {
-			if err := backfillMetric(db, dialect, dt, m, fromDate); err != nil {
-				slog.Warn("backfill metric failed", "metric", m.Name, "error", err)
-			}
-		}
-		fmt.Printf("  Done: %s\n", dt.Name)
+	metrics, err := analytics.BackfillContext(ctx, database, dialect, target.Name, registry, from, backfillDoctype)
+	if err != nil {
+		return fmt.Errorf("analytics rebuild failed: %w", err)
 	}
-
-	fmt.Println("Backfill complete.")
+	fmt.Printf("Backfill complete: %d metrics rebuilt.\n", metrics)
 	return nil
 }
 
 func runAnalyticsStatus(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	common := site.CommonConfigFromEnv()
 	siteCfg := site.ReconstructSiteConfig(backfillSite, common, nil)
-	db, err := site.Connect(siteCfg)
+	release, err := acquireSiteCLIWork(ctx, siteCfg, false)
 	if err != nil {
+		return err
+	}
+	database, err := site.ConnectContext(ctx, siteCfg)
+	if err != nil {
+		release()
 		return fmt.Errorf("connecting to site DB: %w", err)
 	}
-	defer db.Close()
+	defer database.Close()
+	defer release()
 
 	dialect := kdb.Resolve(siteCfg.DBType)
 	var daily, monthly, workflow int
@@ -157,7 +158,7 @@ func runAnalyticsStatus(cmd *cobra.Command, args []string) error {
 		dest  *int
 	}{{"_kora_analytics_daily", &daily}, {"_kora_analytics_monthly", &monthly}, {"_kora_analytics_workflow", &workflow}} {
 		query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE site = ?", dialect.QuoteIdent(count.table))
-		if err := db.QueryRow(kdb.Rebind(dialect, query), backfillSite).Scan(count.dest); err != nil {
+		if err := database.QueryRowContext(ctx, kdb.Rebind(dialect, query), backfillSite).Scan(count.dest); err != nil {
 			return fmt.Errorf("reading %s analytics status: %w", count.table, err)
 		}
 	}
@@ -167,90 +168,4 @@ func runAnalyticsStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Monthly rollup rows:  %d\n", monthly)
 	fmt.Printf("Workflow event rows:  %d\n", workflow)
 	return nil
-}
-
-func resetAnalyticsForDoctype(db *sql.DB, dialect kdb.Dialect, siteName, doctypeName string) error {
-	for _, table := range []string{"_kora_analytics_daily", "_kora_analytics_monthly", "_kora_analytics_workflow", "_kora_analytics_events"} {
-		query := fmt.Sprintf("DELETE FROM %s WHERE site = ? AND doctype = ?", dialect.QuoteIdent(table))
-		if _, err := db.Exec(kdb.Rebind(dialect, query), siteName, doctypeName); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func backfillMetric(db *sql.DB, dialect kdb.Dialect, dt *doctype.DocType, m *analytics.Metric, from time.Time) error {
-	q := dialect.QuoteIdent
-	table := dt.TableName()
-	timeColumn := q("creation")
-	if m.TimeField != "" {
-		timeColumn = q(m.TimeField)
-	}
-	timeBucket := fmt.Sprintf("DATE(%s)", timeColumn)
-	upsert := dialect.UpsertClause(
-		[]string{"site", "doctype", "metric", "dimension", "date"},
-		[]string{"value"},
-	)
-
-	switch m.Type {
-	case analytics.MetricCount, analytics.MetricCountByTime:
-		query := fmt.Sprintf(
-			`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-			 SELECT ?, ?, ?, '', %s, COUNT(*)
-			 FROM %s WHERE %s >= ?
-			 GROUP BY %s
-			 %s`,
-			timeBucket, table, timeColumn, timeBucket, upsert,
-		)
-		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
-		return err
-
-	case analytics.MetricCountByField:
-		col := q(m.Field)
-		query := fmt.Sprintf(
-			`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-			 SELECT ?, ?, ?, CONCAT('%s=', %s), %s, COUNT(*)
-			 FROM %s WHERE %s >= ? AND %s IS NOT NULL AND %s != ''
-			 GROUP BY %s, %s
-			 %s`,
-			m.Field, col, timeBucket, table, timeColumn, col, col, col, timeBucket, upsert,
-		)
-		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
-		return err
-
-	case analytics.MetricSum:
-		col := q(m.Field)
-		query := fmt.Sprintf(
-			`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-			 SELECT ?, ?, ?, '', %s, SUM(%s)
-			 FROM %s WHERE %s >= ? AND %s IS NOT NULL
-			 GROUP BY %s
-			 %s`,
-			timeBucket, col, table, timeColumn, col, timeBucket, upsert,
-		)
-		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
-		return err
-
-	case analytics.MetricSumByField:
-		col := q(m.Field)
-		groupCol := q(m.GroupByField)
-		query := fmt.Sprintf(`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value) SELECT ?, ?, ?, CONCAT('%s=', %s), %s, SUM(%s) FROM %s WHERE %s >= ? AND %s IS NOT NULL AND %s IS NOT NULL GROUP BY %s, %s %s`, m.GroupByField, groupCol, timeBucket, col, table, timeColumn, groupCol, col, timeBucket, groupCol, upsert)
-		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
-		return err
-
-	case analytics.MetricStateDistribution:
-		query := fmt.Sprintf(
-			`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value)
-			 SELECT ?, ?, ?, CONCAT('state=', CAST(doc_status AS CHAR)), %s, COUNT(*)
-			 FROM %s WHERE %s >= ?
-			 GROUP BY doc_status, %s
-			 %s`,
-			timeBucket, table, timeColumn, timeBucket, upsert,
-		)
-		_, err := db.Exec(query, backfillSite, dt.Name, m.Name, from)
-		return err
-
-	default:
-		return nil
-	}
 }

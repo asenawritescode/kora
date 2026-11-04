@@ -2,7 +2,7 @@ name: Goods Receipt
 module: Inventory
 is_submittable: true
 track_changes: true
-title_field: name
+title_field: purchase_order
 search_fields: purchase_order, supplier, receipt_date
 sort_field: receipt_date
 sort_order: DESC
@@ -16,6 +16,7 @@ fields:
     label: Purchase Order
     options: Purchase Order
     reqd: true
+    search_index: true
     in_list_view: true
     in_standard_filter: true
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -56,6 +57,7 @@ func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 		EventsToken: "secret",
 	})
 	relay.Start()
+	relay.Start()
 	defer relay.Stop()
 
 	now := time.Now().UTC()
@@ -88,6 +90,59 @@ func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 	}
 	if props["doctype"] != "Invoice" {
 		t.Fatalf("doctype = %#v", props["doctype"])
+	}
+	relay.Stop()
+	relay.Stop()
+}
+
+func TestCloudRelayRejectedSubscriptionCanStop(t *testing.T) {
+	inner := &multiBusStub{}
+	mb, err := NewDeferredMultiBus(inner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mb.SetMaxListeners(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := mb.TryAddListener(make(chan ChangeEvent, 1)); err != nil {
+		t.Fatal(err)
+	}
+	relay := NewCloudRelay(mb, "tenant", CloudRelayConfig{})
+	relay.Start()
+	done := make(chan struct{})
+	go func() {
+		relay.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Stop blocked after subscription rejection")
+	}
+	_ = mb.Close()
+}
+
+func TestCloudRelayProductEventQueueIsBounded(t *testing.T) {
+	relay := NewCloudRelay(nil, "tenant.example", CloudRelayConfig{AccountID: "acct-1"})
+	event := CloudProductEventDTO{Kind: "first_login", Properties: FirstLoginPropertiesDTO{User: "user@example.invalid"}}
+	for i := 0; i < cloudProductEventQueueCapacity; i++ {
+		if !relay.EnqueueProductEvent(event, "") {
+			t.Fatalf("EnqueueProductEvent() rejected event %d before queue capacity", i)
+		}
+	}
+	if relay.EnqueueProductEvent(event, "") {
+		t.Fatal("EnqueueProductEvent() accepted an event after the bounded queue filled")
+	}
+	if got := relay.ProductEventsDropped(); got != 1 {
+		t.Fatalf("ProductEventsDropped() = %d, want 1 for full queue", got)
+	}
+
+	oversized := CloudProductEventDTO{Kind: "first_login", Properties: FirstLoginPropertiesDTO{User: strings.Repeat("x", maxCloudProductEventBytes)}}
+	if relay.EnqueueProductEvent(oversized, "") {
+		t.Fatal("EnqueueProductEvent() accepted an oversized event")
+	}
+	if got := relay.ProductEventsDropped(); got != 2 {
+		t.Fatalf("ProductEventsDropped() after oversized event = %d, want 2", got)
 	}
 }
 

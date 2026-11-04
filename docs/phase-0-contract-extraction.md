@@ -1,4 +1,6 @@
-# Kora Engine — Phase 0 Contract Extraction (Evidence Record)
+# Kigae Engine — Phase 0 Contract Extraction (Evidence Record)
+
+Status: historical review/completion evidence. Statements and follow-up phases describe the original review period. Use [the target specification](architecture/target-state-spec.md) for new implementation work. Superseded source plans were removed from the active documentation.
 
 This document records the completion of **Phase 0 — contract extraction** from
 `KORA-ENGINE-RFC.md`. It is the evidence record required by the RFC handoff rule
@@ -94,4 +96,4 @@ Contract version tests live in `contract/*_test.go` and cover:
 - **Phase 3 / 3A** — workflow actors, AI safety & metering.
 - **Phase 4** — standalone composable UI (`kora-ui`).
 - **Phase 5** — offline vertical slice.
-- **Phase 6** — Kora Cloud control/data planes (`kora-cloud`).
+- **Phase 6** — Kigae Cloud control/data planes (`kora-cloud`).

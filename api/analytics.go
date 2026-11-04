@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -12,9 +13,11 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/asenawritescode/kora/analytics"
+	"github.com/asenawritescode/kora/contract"
 	db "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/natsprovider"
+	"github.com/asenawritescode/kora/policy"
 )
 
 // RegisterAnalyticsRoutes registers analytics API endpoints.
@@ -26,9 +29,21 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 }
 
 func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, dialect db.Dialect, runtimeServices *SiteRuntimeServices) {
-	ag := apiGroup.Group("/analytics")
-	queryCache := newAnalyticsQueryCache(30*time.Second, 256)
+	cache := DefaultAnalyticsQueryCache()
+	if runtimeServices != nil {
+		cache = runtimeServices.analyticsCacheOwner()
+	}
+	RegisterAnalyticsRoutesWithQueryCache(apiGroup, registry, siteDB, siteBuses, realtimeProviders, dialect, runtimeServices, cache)
+}
 
+// RegisterAnalyticsRoutesWithQueryCache installs analytics routes using the
+// process-owned cache supplied by Engine composition.
+func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, dialect db.Dialect, runtimeServices *SiteRuntimeServices, processCache *AnalyticsQueryCache) {
+	ag := apiGroup.Group("/analytics")
+	if processCache == nil || processCache.cache == nil {
+		processCache = DefaultAnalyticsQueryCache()
+	}
+	queryCache := processCache.cache
 	ag.GET("/catalog", func(c *gin.Context) {
 		siteRegistry := analyticsRegistry(c, registry)
 		docTypes := make([]*doctype.DocType, 0, len(siteRegistry.Names()))
@@ -41,11 +56,20 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 			internalError(c, "loading analytics reports", err)
 			return
 		}
+		if err := analytics.AddReportModels(catalog, reports); err != nil {
+			internalError(c, "adding report models to analytics catalog", err)
+			return
+		}
+		if err := analytics.ValidateReportModels(siteRegistry, reports); err != nil {
+			internalError(c, "validating report model sources", err)
+			return
+		}
 		catalog.Reports = reports
 		if err := catalog.Validate(); err != nil {
 			internalError(c, "building analytics catalog", err)
 			return
 		}
+		catalog = filterReadableAnalyticsCatalog(c, siteRegistry, catalog)
 		c.JSON(http.StatusOK, Response{Data: catalog})
 	})
 
@@ -56,7 +80,11 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 			internalError(c, "loading analytics reports", err)
 			return
 		}
-		c.JSON(http.StatusOK, Response{Data: reports})
+		if err := analytics.ValidateReportModels(siteRegistry, reports); err != nil {
+			internalError(c, "validating report model sources", err)
+			return
+		}
+		c.JSON(http.StatusOK, Response{Data: filterReadableAnalyticsReports(c, siteRegistry, reports)})
 	})
 
 	ag.POST("/reports/:name/query", func(c *gin.Context) {
@@ -74,6 +102,14 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB), dialect)
 		if err != nil {
 			internalError(c, "loading analytics reports", err)
+			return
+		}
+		if err := analytics.AddReportModels(catalog, reports); err != nil {
+			internalError(c, "adding report models to analytics catalog", err)
+			return
+		}
+		if err := analytics.ValidateReportModels(siteRegistry, reports); err != nil {
+			internalError(c, "validating report model sources", err)
 			return
 		}
 		catalog.Reports = reports
@@ -105,12 +141,19 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 		for _, query := range report.Queries {
 			request.Queries = append(request.Queries, analytics.ModelQuery{Model: query.Model, Measures: query.Measures, Dimensions: query.Dimensions, Filters: query.Filters})
 		}
+		if !checkRelatedReportPermissions(c, siteRegistry, report, catalog) {
+			return
+		}
 		qe := getQueryEngine(c, siteDB, dialect)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
 		}
-		result, err := qe.ResolveSemanticQuery(catalog, request)
+		if execution, valid := requestExecution(c); valid {
+			qe.BusinessScope = businessScopeFromRequest(c, execution)
+		}
+		applyProjectionActorScopes(c, qe)
+		result, err := qe.ResolveSemanticQuery(catalog, request, siteRegistry)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "analytics.invalid_query", err.Error(), nil)
 			return
@@ -130,34 +173,70 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 			docTypes = append(docTypes, siteRegistry.Get(name))
 		}
 		catalog := analytics.BuildSemanticCatalog(docTypes)
+		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB), dialect)
+		if err != nil {
+			internalError(c, "loading analytics reports", err)
+			return
+		}
+		if err := analytics.AddReportModels(catalog, reports); err != nil {
+			internalError(c, "adding report models to analytics catalog", err)
+			return
+		}
+		if err := analytics.ValidateReportModels(siteRegistry, reports); err != nil {
+			internalError(c, "validating report model sources", err)
+			return
+		}
+		catalog.Reports = reports
 		if err := catalog.Validate(); err != nil {
 			internalError(c, "building analytics catalog", err)
 			return
 		}
-		cacheKey := queryCache.key(c.GetString("site_name"), request)
-		if cached, ok := queryCache.get(cacheKey); ok {
-			c.JSON(http.StatusOK, Response{Data: cached})
+		if !checkRelatedModelPermissions(c, siteRegistry, catalog.Models, request) {
 			return
+		}
+		tenantID := c.GetString("site_id")
+		if tenantID == "" {
+			tenantID = c.GetString("site_name")
+		}
+		queryScope := contract.BusinessScope{TenantID: contract.TenantID(tenantID), Kind: contract.ScopeKindTenant}
+		if execution, valid := requestExecution(c); valid {
+			queryScope = businessScopeFromRequest(c, execution)
+		}
+		cacheKey := queryCache.key(tenantID, c.GetUint64("site_config_revision"), analyticsPermissionScope(c, siteRegistry)+"\x00"+string(queryScope.Kind)+"\x00"+queryScope.LegalEntityID, request)
+		cacheable := !analyticsRequestUsesPublishedProjection(catalog, request)
+		if cacheable {
+			if cached, ok := queryCache.get(cacheKey); ok {
+				c.JSON(http.StatusOK, Response{Data: cached})
+				return
+			}
 		}
 		qe := getQueryEngine(c, siteDB, dialect)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
 		}
-		result, err := qe.ResolveSemanticQuery(catalog, request)
+		if execution, valid := requestExecution(c); valid {
+			qe.BusinessScope = businessScopeFromRequest(c, execution)
+		}
+		applyProjectionActorScopes(c, qe)
+		result, err := qe.ResolveSemanticQuery(catalog, request, siteRegistry)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "analytics.invalid_query", err.Error(), nil)
 			return
 		}
-		queryCache.put(cacheKey, result)
+		if cacheable {
+			queryCache.put(cacheKey, result)
+		}
 		c.JSON(http.StatusOK, Response{Data: result})
 	})
 
 	// Status endpoint always available — reports whether analytics is running.
 	ag.GET("/status", func(c *gin.Context) {
 		siteName := c.GetString("site_name")
-		bus := siteBuses[siteName]
-		bus = RuntimeServiceForContext(c, runtimeServices, siteName).EventBus
+		bus := RuntimeServiceForContext(c, runtimeServices, siteName).EventBus
+		if bus == nil {
+			bus = siteBuses[siteName]
+		}
 		c.JSON(http.StatusOK, Response{
 			Data: analytics.GetStatus(bus),
 		})
@@ -166,7 +245,9 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 	// Rebuild is an administrator-triggered recovery operation. It runs in the
 	// server so customers never need database or terminal access.
 	ag.POST("/rebuild", func(c *gin.Context) {
-		if !userHasAdminRole(c.GetStringSlice("user_roles")) {
+		execution, verified := requestExecution(c)
+		decision, decisionErr := policy.Decide(execution, analyticsRegistry(c, registry), "Analytics", "write")
+		if !verified || decisionErr != nil || decision.OwnerOnly || len(decision.AssignedFields) > 0 {
 			c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{"code": "permission.admin_required", "message": "Administrator role required"}})
 			return
 		}
@@ -191,41 +272,19 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 		siteName := c.GetString("site_name")
 		siteDialect := siteDialectFromContext(c, dialect)
 		db := getSiteDB(c, siteDB)
+		services := RuntimeServiceForContext(c, runtimeServices, siteName)
+		if services.AnalyticsRebuild == nil {
+			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics rebuild worker is not available for this site", nil)
+			return
+		}
 		job := &analytics.RebuildJob{ID: fmt.Sprintf("analytics-rebuild-%d", time.Now().UnixNano()), Site: siteName, DocType: request.DocType, From: from, Status: "queued", StartedAt: now}
 		if err := analytics.CreateRebuildJob(db, siteDialect, job); err != nil {
 			internalError(c, "creating analytics rebuild job", err)
 			return
 		}
-		siteRegistry := analyticsRegistry(c, registry)
-		provider := realtimeProviders[siteName]
-		provider = RuntimeServiceForContext(c, runtimeServices, siteName).Realtime
-		if provider != nil {
-			payload, err := json.Marshal(map[string]any{"job_id": job.ID, "site": siteName, "doctype": request.DocType, "from": from.Format("2006-01-02")})
-			if err != nil {
-				_ = analytics.MarkRebuildFailed(db, siteDialect, siteName, job.ID, err)
-				internalError(c, "encoding analytics rebuild job", err)
-				return
-			}
-			cfg := provider.Config()
-			subject := cfg.SubjectPrefix + ".tasks.analytics-rebuild"
-			if err := provider.PublishSubject(c.Request.Context(), subject, payload, job.ID); err != nil {
-				_ = analytics.MarkRebuildFailed(db, siteDialect, siteName, job.ID, err)
-				internalError(c, "queueing analytics rebuild job", err)
-				return
-			}
-		} else {
-			// Local development remains usable without NATS, but status is still
-			// durable and tenant-scoped instead of living in process memory.
-			go func() {
-				_ = analytics.MarkRebuildRunning(db, siteDialect, siteName, job.ID)
-				count, err := analytics.Backfill(db, siteDialect, siteName, siteRegistry, from, request.DocType)
-				if err != nil {
-					_ = analytics.MarkRebuildFailed(db, siteDialect, siteName, job.ID, err)
-					return
-				}
-				_ = analytics.MarkRebuildCompleted(db, siteDialect, siteName, job.ID, count)
-			}()
-		}
+		// The tenant runtime owns this worker; HTTP only persists and signals.
+		// The durable tenant job table is authoritative, independent of NATS.
+		services.AnalyticsRebuild.Notify()
 		c.JSON(http.StatusAccepted, Response{Data: job})
 	})
 
@@ -244,6 +303,12 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 
 	// POST /metrics — create a custom metric.
 	ag.POST("/metrics", func(c *gin.Context) {
+		execution, valid := requestExecution(c)
+		decision, decideErr := policy.Decide(execution, analyticsRegistry(c, registry), "Analytics", "write")
+		if !valid || decideErr != nil || decision.OwnerOnly || len(decision.AssignedFields) > 0 {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{"code": "permission.denied", "message": "Analytics write permission is required"}})
+			return
+		}
 		var input analytics.Metric
 		if err := c.ShouldBindJSON(&input); err != nil {
 			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid JSON", nil)
@@ -277,14 +342,20 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 	})
 
 	ag.GET("/metrics", func(c *gin.Context) {
-		metrics := resolveMetrics(c, analyticsRegistry(c, registry), dialect)
+		siteRegistry := analyticsRegistry(c, registry)
+		metrics := filterReadableAnalyticsMetrics(c, siteRegistry, resolveMetrics(c, siteRegistry, dialect))
 		c.JSON(http.StatusOK, Response{Data: metrics})
 	})
 
 	ag.GET("/metrics/:name", func(c *gin.Context) {
-		metrics := resolveMetrics(c, analyticsRegistry(c, registry), dialect)
+		siteRegistry := analyticsRegistry(c, registry)
+		metrics := resolveMetrics(c, siteRegistry, dialect)
 		for _, m := range metrics {
 			if m.Name == c.Param("name") {
+				if !analyticsSourceReadable(c, siteRegistry, m.DocType) {
+					c.Status(http.StatusNotFound)
+					return
+				}
 				c.JSON(http.StatusOK, Response{Data: m})
 				return
 			}
@@ -293,17 +364,20 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 	})
 
 	ag.POST("/metrics/:name/query", func(c *gin.Context) {
+		var req analytics.QueryRequest
+		if !decodeAnalyticsQueryRequest(c, &req) {
+			return
+		}
+		if req.Metric != "" && req.Metric != c.Param("name") {
+			badRequestError(c, "analytics.query_invalid", "Query metric must match the route metric.", nil)
+			return
+		}
+		req.Metric = c.Param("name")
 		qe := getQueryEngine(c, siteDB, dialect)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
 		}
-
-		var req analytics.QueryRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			req = analytics.QueryRequest{}
-		}
-		req.Metric = c.Param("name")
 
 		metrics := resolveMetrics(c, analyticsRegistry(c, registry), dialect)
 		var metric *analytics.Metric
@@ -317,6 +391,9 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 			writeError(c, http.StatusNotFound, "analytics.metric_not_found", "Metric not found", nil)
 			return
 		}
+		if !checkAnalyticsRead(c, analyticsRegistry(c, registry), metric.DocType) {
+			return
+		}
 
 		result, err := qe.Resolve(metric, req)
 		if err != nil {
@@ -328,14 +405,20 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 	})
 
 	ag.GET("/insights/:doctype", func(c *gin.Context) {
+		doctypeName := c.Param("doctype")
+		siteRegistry := analyticsRegistry(c, registry)
+		if siteRegistry == nil || siteRegistry.Get(doctypeName) == nil {
+			writeError(c, http.StatusNotFound, "doctype.not_found", "DocType not found", nil)
+			return
+		}
+		if !checkAnalyticsRead(c, siteRegistry, doctypeName) {
+			return
+		}
 		qe := getQueryEngine(c, siteDB, dialect)
 		if qe == nil {
 			writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Analytics not available for this site", nil)
 			return
 		}
-
-		doctypeName := c.Param("doctype")
-		siteRegistry := analyticsRegistry(c, registry)
 		metrics := resolveMetrics(c, siteRegistry, dialect)
 		// Build the requested DocType's generated metrics directly as a safety
 		// net for path-based tenant requests and older metric registries.
@@ -350,6 +433,49 @@ func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, regis
 
 		c.JSON(http.StatusOK, Response{Data: insights})
 	})
+}
+
+func applyProjectionActorScopes(c *gin.Context, qe *analytics.QueryEngine) {
+	if c == nil || qe == nil {
+		return
+	}
+	if value, ok := c.Get("analytics_projection_actor_scopes"); ok {
+		if scopes, ok := value.(map[string]analytics.ProjectionActorScope); ok {
+			qe.ProjectionActorScopes = scopes
+		}
+	}
+}
+
+const analyticsQueryRequestBodyLimit = 64 << 10
+
+func decodeAnalyticsQueryRequest(c *gin.Context, target *analytics.QueryRequest) bool {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, analyticsQueryRequestBodyLimit)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		message := "Analytics query body is invalid or exceeds 64 KiB."
+		badRequestError(c, "analytics.query_invalid", message, nil)
+		return false
+	}
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		badRequestError(c, "analytics.query_invalid", "Analytics query body must be a JSON object.", nil)
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		badRequestError(c, "analytics.query_invalid", "Analytics query contains invalid or unknown fields.", nil)
+		return false
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		badRequestError(c, "analytics.query_invalid", "Analytics query body must contain exactly one JSON object.", nil)
+		return false
+	}
+	if err := target.Validate(); err != nil {
+		badRequestError(c, "analytics.query_invalid", err.Error(), nil)
+		return false
+	}
+	return true
 }
 
 func analyticsRegistry(c *gin.Context, fallback *doctype.Registry) *doctype.Registry {
@@ -427,11 +553,6 @@ func resolveMetrics(c *gin.Context, registry *doctype.Registry, dialect db.Diale
 			continue
 		}
 		all = append(all, analytics.GenerateMetrics(dt)...)
-		if dt.IsSubmittable {
-			if wf := registry.Workflows.Get(name); wf != nil {
-				all = append(all, analytics.GenerateWorkflowMetrics(dt, wf)...)
-			}
-		}
 	}
 	// Load custom metrics from DB.
 	database := getSiteDB(c, nil)

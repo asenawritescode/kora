@@ -1,0 +1,22 @@
+name: product_overview
+label: Stock on hand
+route: /reports/stock
+queries:
+  - id: stock_by_category
+    model: product
+    measures: [count, stock_qty_sum]
+    dimensions: [category]
+  - id: products_by_availability
+    model: product
+    measures: [count]
+    dimensions: [status]
+visuals:
+  - id: stock_by_category
+    type: bar
+    source: stock_by_category
+    x_field: category
+    series:
+      - field: stock_qty_sum
+        label: Units in stock
+        type: bar
+        format: number

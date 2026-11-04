@@ -1,0 +1,97 @@
+name: Shop POS
+route: /pos
+type: register
+layout: two_panel
+label: POS
+module: Sales
+source_doctype: Product
+components:
+  - id: categories
+    type: category_tabs
+    region: main
+    position: 0
+    label: Categories
+    source_doctype: Product
+    bindings:
+      group_field: category
+  - id: products
+    type: product_grid
+    region: main
+    position: 1
+    source_doctype: Product
+    label: Products
+    bindings:
+      title: product_name
+      subtitle: category
+      price: selling_price
+      badge: stock_qty
+    actions:
+      - id: tap
+        trigger: on_click
+        type: local_cart_add
+  - id: cart
+    type: cart_panel
+    region: side
+    position: 0
+    label: Basket
+  - id: payments
+    type: payment_panel
+    region: side
+    position: 1
+    label: Take payment
+    bindings:
+      methods: literal:cash
+      register: literal:REG-001
+    actions:
+      - id: complete
+        trigger: on_click
+        type: create_transaction
+        config:
+          target_doctype: Sale
+          allowed_context_values:
+            register: [REG-001]
+            payment_method: [Cash]
+          idempotency_prefix: pos-sale
+          reference_field: reference
+          reference_prefix: POS
+          fields:
+            entry_source: POS
+            sale_date: "$today"
+            till: REG-001
+          related_quantity_updates:
+            target_doctype: Product
+            target_quantity_field: stock_qty
+            source_record_field: product
+            source_quantity_field: quantity
+            whole_units: true
+          related_records:
+            - key: payment
+              doctype: Payment
+              fields:
+                reference: "PAY-$records.sale.name"
+                sale: "$records.sale.name"
+                amount: "$context.total"
+                method: "$context.payment_method"
+                register: "$context.register"
+                assignee: "$actor"
+          child_table: Sale Item
+          line_source: cart
+          line_fields:
+            product: product
+            unit_price: rate
+            quantity: quantity
+            discount_amount: discount_amount
+            tax_amount: tax_amount
+          line_defaults:
+            quantity: 1
+          totals:
+            subtotal_field: subtotal
+            discount_total_field: discount_amount
+            tax_total_field: tax_amount
+            total_field: total
+            lines:
+              quantity_field: quantity
+              unit_price_field: unit_price
+              discount_field: discount_amount
+              tax_field: tax_amount
+              line_total_field: line_total

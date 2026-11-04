@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { LinkField } from './LinkField'
 import { ChildTableEditor } from './ChildTableEditor'
 import { AttachmentField } from './AttachmentField'
-import { fetchUsers } from '@/lib/api/system'
+import { fetchUserDirectory, type UserDirectoryEntry } from '@/lib/api/system'
 import {
   Select,
   SelectContent,
@@ -364,14 +364,55 @@ export function FieldRenderer({
 }
 
 function UserField({ field, value, onChange, disabled, error, compact }: FieldRendererProps) {
-  const [users, setUsers] = useState<Array<{ name: string; full_name?: string; email?: string }> | null>(null)
-  useEffect(() => { fetchUsers().then(setUsers).catch(() => setUsers([])) }, [])
+  const [users, setUsers] = useState<UserDirectoryEntry[] | null>(null)
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  useEffect(() => {
+    let active = true
+    const term = search.trim()
+    const timer = window.setTimeout(async () => {
+      try {
+        const results = await fetchUserDirectory({ search: open ? term : undefined, limit: 25 })
+        if (!active) return
+        if (!open && value && !results.some((user) => user.name === value)) {
+          const selected = await fetchUserDirectory({ search: String(value), limit: 1 })
+          if (active) setUsers([...selected.filter((user) => user.name === value), ...results])
+        } else {
+          setUsers(results)
+        }
+      } catch {
+        if (active) setUsers([])
+      }
+    }, open && term ? 250 : 0)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [open, search, value])
+  const selected = (users ?? []).find((user) => user.name === value)
+  const visibleValue = open ? search : selected ? (selected.full_name || selected.email || selected.name) : value ? 'Workspace user unavailable' : ''
   return <div className={compact ? 'space-y-0.5' : 'space-y-1.5'}>
     <Label htmlFor={`field-${field.fieldname}`}>{field.label}{field.reqd && <span className="ml-1 text-destructive">*</span>}</Label>
-    <select id={`field-${field.fieldname}`} className="uk-select" value={value ?? ''} onChange={(event) => onChange(field.fieldname, event.target.value)} disabled={disabled}>
-      <option value="">Choose a user</option>
-      {(users ?? []).map((user) => <option key={user.name} value={user.name}>{user.full_name || user.email || user.name}</option>)}
-    </select>
+    <div className="relative">
+      <Input
+        id={`field-${field.fieldname}`}
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={`field-${field.fieldname}-options`}
+        autoComplete="off"
+        placeholder={users === null ? 'Loading users…' : 'Search users by name or email'}
+        value={visibleValue}
+        onFocus={() => { setOpen(true); setSearch('') }}
+        onChange={(event) => { setSearch(event.target.value); setOpen(true) }}
+        onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false) }}
+        disabled={disabled}
+      />
+      {open && !disabled && <div id={`field-${field.fieldname}-options`} role="listbox" className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
+        {(users ?? []).length === 0 ? <p className="py-4 text-center text-sm text-muted-foreground">{users === null ? 'Loading users…' : search.trim() ? 'No matching users.' : 'No active workspace users.'}</p> : (users ?? []).map((user) => (
+          <button key={user.name} type="button" role="option" aria-selected={user.name === value} onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(field.fieldname, user.name); setSearch(''); setOpen(false) }} className="flex w-full flex-col rounded-sm px-2 py-1.5 text-left hover:bg-accent">
+            <span className="truncate text-sm">{user.full_name || user.email || user.name}</span>
+            {user.email && user.full_name && <span className="truncate text-xs text-muted-foreground">{user.email}</span>}
+          </button>
+        ))}
+      </div>}
+    </div>
     {error && <p className="mt-1 text-sm text-destructive">{error}</p>}
   </div>
 }

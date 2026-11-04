@@ -1,23 +1,31 @@
-name: Agriculture and Farm Operations Workspace
+name: Farm Operations
 route: /agriculture
 type: workspace
 layout: two_panel
-label: Agriculture and Farm Operations
-module: Agriculture and Farm Operations
+label: Farm Operations
+module: Agriculture
 components:
   - id: primary_queue
     type: record_table
     region: main
     position: 0
     source_doctype: Crop Plan
-    label: Crop Plan Queue
-    desktop_columns: [name, reference, owner, status, due_date]
-    mobile_columns: [reference, status]
+    label: Crop plans
+    desktop_columns: [name, field, season, crop, owner_user, expected_harvest_date, status]
+    mobile_columns: [name, crop, expected_harvest_date, status]
   - id: evidence_queue
     type: record_table
     region: side
     position: 0
     source_doctype: Farm Task
-    label: Farm Task Queue
-    desktop_columns: [name, reference, source_record, status]
-    mobile_columns: [reference, status]
+    label: Field work
+    desktop_columns: [name, crop_plan, task_type, due_date, assigned_to, status]
+    mobile_columns: [name, due_date, status]
+  - id: harvest_queue
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Harvest Batch
+    label: Recent harvests
+    desktop_columns: [name, crop, field, harvest_date, quantity, quantity_unit, status]
+    mobile_columns: [name, harvest_date, quantity, status]

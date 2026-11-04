@@ -69,7 +69,7 @@ func diffConfig(old, new *sNode) []Change {
 	oldSections := collectSections(old.Children[1:])
 	newSections := collectSections(new.Children[1:])
 
-	sectionOrder := []string{"doctypes", "roles", "permissions", "workflows", "views", "analytics-metrics", "scripts"}
+	sectionOrder := []string{"doctypes", "roles", "permissions", "views", "analytics-metrics", "scripts"}
 	for _, sec := range sectionOrder {
 		oldSec, hasOld := oldSections[sec]
 		newSec, hasNew := newSections[sec]
@@ -106,7 +106,7 @@ func collectSections(children []*sNode) map[string]*sNode {
 		}
 		head := nodeStr(c.Children[0])
 		switch head {
-		case "doctypes", "roles", "permissions", "workflows", "views", "analytics-metrics", "scripts":
+		case "doctypes", "roles", "permissions", "views", "analytics-metrics", "scripts":
 			sections[head] = c
 		}
 	}

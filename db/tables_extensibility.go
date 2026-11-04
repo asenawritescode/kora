@@ -3,6 +3,12 @@ package db
 // ExtensibilityTablesMySQL returns MySQL-specific extensibility DDL.
 func ExtensibilityTablesMySQL() []string {
 	return []string{
+		`CREATE TABLE IF NOT EXISTS _kora_analytics_metric (
+			name VARCHAR(140) NOT NULL, label VARCHAR(255) NOT NULL DEFAULT '', type VARCHAR(50) NOT NULL DEFAULT '',
+			doctype VARCHAR(140) NOT NULL DEFAULT '', field_name VARCHAR(140) NOT NULL DEFAULT '',
+			link_field VARCHAR(140) NOT NULL DEFAULT '', group_by_field VARCHAR(140) NOT NULL DEFAULT '',
+			site VARCHAR(140) NOT NULL DEFAULT '', PRIMARY KEY (site, name)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		`CREATE TABLE IF NOT EXISTS _kora_script (
 			name VARCHAR(140) PRIMARY KEY,
 			site VARCHAR(140) NOT NULL DEFAULT '',
@@ -10,7 +16,6 @@ func ExtensibilityTablesMySQL() []string {
 			doctype VARCHAR(140) NOT NULL DEFAULT '',
 			event VARCHAR(100) NOT NULL DEFAULT '',
 			method_path VARCHAR(255) NOT NULL DEFAULT '',
-			workflow_action VARCHAR(255) NOT NULL DEFAULT '',
 			schedule VARCHAR(100) NOT NULL DEFAULT '',
 			priority INT NOT NULL DEFAULT 10,
 			is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -140,11 +145,17 @@ func ExtensibilityTablesMySQL() []string {
 // ExtensibilityTablesPostgres returns PostgreSQL-specific system DDL.
 func ExtensibilityTablesPostgres() []string {
 	return []string{
+		`CREATE TABLE IF NOT EXISTS _kora_analytics_metric (
+			name VARCHAR(140) NOT NULL, label VARCHAR(255) NOT NULL DEFAULT '', type VARCHAR(50) NOT NULL DEFAULT '',
+			doctype VARCHAR(140) NOT NULL DEFAULT '', field_name VARCHAR(140) NOT NULL DEFAULT '',
+			link_field VARCHAR(140) NOT NULL DEFAULT '', group_by_field VARCHAR(140) NOT NULL DEFAULT '',
+			site VARCHAR(140) NOT NULL DEFAULT '', PRIMARY KEY (site, name)
+		)`,
 		`CREATE TABLE IF NOT EXISTS _kora_script (
 			name VARCHAR(140) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
 			script_type VARCHAR(50) NOT NULL DEFAULT 'doc_event', doctype VARCHAR(140) NOT NULL DEFAULT '',
 			event VARCHAR(100) NOT NULL DEFAULT '', method_path VARCHAR(255) NOT NULL DEFAULT '',
-			workflow_action VARCHAR(255) NOT NULL DEFAULT '', schedule VARCHAR(100) NOT NULL DEFAULT '',
+			schedule VARCHAR(100) NOT NULL DEFAULT '',
 			priority INT NOT NULL DEFAULT 10, is_active BOOLEAN NOT NULL DEFAULT TRUE,
 			run_as VARCHAR(140) NOT NULL DEFAULT '', timeout_ms INT NOT NULL DEFAULT 5000,
 			script TEXT NOT NULL, compiled_at TIMESTAMPTZ, compile_error TEXT,
@@ -219,6 +230,12 @@ func ExtensibilityTablesPostgres() []string {
 // ExtensibilityTablesLibSQL returns LibSQL-compatible extensibility DDL.
 func ExtensibilityTablesLibSQL() []string {
 	return []string{
+		`CREATE TABLE IF NOT EXISTS _kora_analytics_metric (
+			name TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT '',
+			doctype TEXT NOT NULL DEFAULT '', field_name TEXT NOT NULL DEFAULT '',
+			link_field TEXT NOT NULL DEFAULT '', group_by_field TEXT NOT NULL DEFAULT '',
+			site TEXT NOT NULL DEFAULT '', PRIMARY KEY (site, name)
+		)`,
 		`CREATE TABLE IF NOT EXISTS _kora_script (
 			name TEXT PRIMARY KEY,
 			site TEXT NOT NULL DEFAULT '',
@@ -226,7 +243,6 @@ func ExtensibilityTablesLibSQL() []string {
 			doctype TEXT NOT NULL DEFAULT '',
 			event TEXT NOT NULL DEFAULT '',
 			method_path TEXT NOT NULL DEFAULT '',
-			workflow_action TEXT NOT NULL DEFAULT '',
 			schedule TEXT NOT NULL DEFAULT '',
 			priority INTEGER NOT NULL DEFAULT 10,
 			is_active INTEGER NOT NULL DEFAULT 1,

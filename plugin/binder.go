@@ -76,6 +76,12 @@ func NewBinder(strategy BindingStrategy) Binder {
 func (b *binder) Bind(ctx contract.OperationContext, manifests []component.Manifest, factories []ProviderFactory) (BindingReport, error) {
 	factoryByCap := make(map[contract.CapabilityName]ProviderFactory, len(factories))
 	for _, f := range factories {
+		if f == nil || f.Capability() == "" {
+			return BindingReport{}, fmt.Errorf("plugin: provider factory and capability are required")
+		}
+		if _, exists := factoryByCap[f.Capability()]; exists {
+			return BindingReport{}, fmt.Errorf("plugin: multiple providers offer capability %q; explicit selection is required", f.Capability())
+		}
 		factoryByCap[f.Capability()] = f
 	}
 

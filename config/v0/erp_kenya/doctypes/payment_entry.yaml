@@ -2,11 +2,24 @@ name: Payment Entry
 module: Finance
 is_submittable: true
 track_changes: true
-title_field: name
+title_field: reference_no
 search_fields: reference_no, party
 sort_field: payment_date
 sort_order: DESC
 fields:
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Submitted
+      Approved
+      Reconciled
+      Cancelled
+    default: Draft
+    read_only: true
+    in_list_view: true
+
   # --- Left Column ---
   - fieldname: col_left
     fieldtype: Column Break
@@ -70,6 +83,7 @@ fields:
     fieldtype: Data
     label: Reference No.
     in_list_view: true
+    search_index: true
     description: Cheque number, M-Pesa transaction code, or bank transfer reference.
 
   - fieldname: currency

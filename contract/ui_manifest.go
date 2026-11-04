@@ -15,7 +15,6 @@ import (
 )
 
 // PageManifest is the pure-data description of one page.
-//
 //contract:wire
 type PageManifest struct {
 	SchemaVersion string         `json:"schema_version"`
@@ -26,7 +25,6 @@ type PageManifest struct {
 }
 
 // Region is a named layout area containing blocks.
-//
 //contract:wire
 type Region struct {
 	Name   string  `json:"name"`
@@ -35,7 +33,6 @@ type Region struct {
 }
 
 // Layout records responsive column spans per breakpoint.
-//
 //contract:wire
 type Layout struct {
 	Desktop int `json:"desktop"`
@@ -44,7 +41,6 @@ type Layout struct {
 }
 
 // Block is one component of a region.
-//
 //contract:wire
 type Block struct {
 	Kind        string      `json:"kind"` // record | collection | form | custom-es-module
@@ -55,7 +51,6 @@ type Block struct {
 }
 
 // FieldRef references one field by name.
-//
 //contract:wire
 type FieldRef struct {
 	Name string `json:"name"`
@@ -64,7 +59,6 @@ type FieldRef struct {
 // ActionRef references a kernel command to invoke. IdempotencyKey marks the
 // action as eligible for optimistic UI; Requires is the capability scope the
 // action needs.
-//
 //contract:wire
 type ActionRef struct {
 	Label          string `json:"label"`

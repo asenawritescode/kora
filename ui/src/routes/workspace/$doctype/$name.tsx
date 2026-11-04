@@ -5,7 +5,6 @@ import { fetchDocument, updateDocument } from '@/lib/api/resources'
 import { applyComputedFields } from '@/lib/computed-fields'
 import { FieldRenderer } from '@/components/forms/FieldRenderer'
 import { RelatedDocs } from '@/components/forms/RelatedDocs'
-import { WorkflowActions } from '@/components/forms/WorkflowActions'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -17,7 +16,7 @@ import { ProgressBar } from '@/components/forms/ProgressBar'
 import { FormSection, isLayoutField } from '@/components/forms/FormSection'
 import { buildFormSections, isFieldRequired } from '@/components/forms/form-runtime'
 import { toast } from '@/components/ui/Toast'
-import { clearDocumentDraft, loadDocumentDraft, saveDocumentDraft } from '@/lib/draft-storage'
+import { clearDocumentDraft, DraftPersistenceError, loadDocumentDraft, saveDocumentDraft } from '@/lib/draft-storage'
 import { cn } from '@/lib/utils'
 import { titleCase } from '../admin/doctypes/editor-helpers'
 import { describeRealtimeState, useRealtimeConnection } from '@/lib/realtime'
@@ -31,6 +30,7 @@ export default function EditFormPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [draftLoaded, setDraftLoaded] = useState(false)
+  const [draftStorageError, setDraftStorageError] = useState<string | null>(null)
   const realtime = useRealtimeConnection()
 
   if (doctype === 'pages') {
@@ -63,7 +63,6 @@ export default function EditFormPage() {
   const layoutFields = dt?.fields ?? []
   const sections = useMemo(() => buildFormSections(layoutFields), [layoutFields])
   const hasSections = sections.length > 1
-
   useEffect(() => {
     if (!docQuery.data || fields.length === 0 || draftLoaded) return
     let cancelled = false
@@ -86,7 +85,11 @@ export default function EditFormPage() {
     if (!draftLoaded) return
     const timer = window.setTimeout(() => {
       if (Object.keys(formData).length === 0) return
-      void saveDocumentDraft({ doctype, name }, formData)
+      void saveDocumentDraft({ doctype, name }, formData).then(() => {
+        setDraftStorageError(null)
+      }).catch((cause: unknown) => {
+        setDraftStorageError(cause instanceof DraftPersistenceError ? cause.message : 'The draft could not be saved in this browser.')
+      })
     }, 350)
     return () => window.clearTimeout(timer)
   }, [doctype, formData, draftLoaded, name])
@@ -136,8 +139,14 @@ export default function EditFormPage() {
       queryClient.invalidateQueries({ queryKey: ['resource', doctype, name] })
       queryClient.invalidateQueries({ queryKey: ['resource', doctype] })
       queryClient.invalidateQueries({ queryKey: ['manifest-resource'] })
-      await clearDocumentDraft({ doctype, name })
+      let cleanupError: string | null = null
+      try {
+        await clearDocumentDraft({ doctype, name })
+      } catch (cause) {
+        cleanupError = cause instanceof DraftPersistenceError ? cause.message : 'The saved browser draft could not be cleared.'
+      }
       toast('success', `${dt?.name || doctype} ${name} saved`)
+      if (cleanupError) toast('error', cleanupError, 6000)
       navigate({ to: '/workspace/$doctype', params: { doctype } })
     } catch (err: any) {
       const msg = err.message || 'Failed to save'
@@ -169,7 +178,7 @@ export default function EditFormPage() {
   }
 
   const statusField = dt.fields.find(
-    (f: Field) => f.fieldname === (schemaQuery.data?.workflow?.state_field || 'status'),
+    (f: Field) => f.fieldname === 'status',
   )
   const statusValue = statusField ? formData[statusField.fieldname] : null
   const statusLabel = statusValue || `Draft (${docQuery.data.doc_status})`
@@ -193,6 +202,13 @@ export default function EditFormPage() {
         ]}
         className="mb-4"
       />
+
+      {draftStorageError && (
+        <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <p className="text-destructive">{draftStorageError}</p>
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Button
@@ -229,14 +245,6 @@ export default function EditFormPage() {
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
           <p className="text-destructive">{error}</p>
         </div>
-      )}
-
-      {schemaQuery.data?.workflow && (
-        <WorkflowActions
-          doctype={doctype}
-          name={name}
-          currentState={String(statusLabel)}
-        />
       )}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">

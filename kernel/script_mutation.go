@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
@@ -27,7 +28,8 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 	actorType := contract.PrincipalType(request.PrincipalType)
 	op := Operation{
 		Context: OperationContext{
-			Site: request.Site, Actor: contract.ActorContext{
+			Site: request.Site, TenantID: txMgr.Execution.Tenant(), Execution: txMgr.Execution, BusinessScope: txMgr.BusinessScope,
+			BusinessReferenceValidator: txMgr.BusinessReferenceValidator, HistoricalSnapshotValidator: txMgr.HistoricalSnapshotValidator, Actor: contract.ActorContext{
 				PrincipalID: request.PrincipalID, PrincipalType: actorType,
 				SubjectUserID: request.SubjectUserID, Site: request.Site, Roles: append([]string(nil), request.Roles...),
 			},
@@ -37,11 +39,20 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		},
 		Command: request.Command, Payload: request.Payload,
 	}
+	if !op.Context.Execution.Valid() {
+		return nil, contract.NewError(contract.CodeUnauthenticated, "nested script mutation requires verified execution identity")
+	}
+	if err := normalizeVerifiedExecution(&op); err != nil {
+		return nil, err
+	}
 	if err := k.validateContext(op); err != nil {
 		return nil, err
 	}
 	if authzErr := authorizeOp(txMgr.Registry, op, definition, nil); authzErr != nil {
 		return nil, authzErr
+	}
+	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, txMgr.Transaction, k.dialect(), op, txMgr.Registry, nil); admissionErr != nil {
+		return nil, admissionErr
 	}
 	doctypeName := payloadDoctype(op.Payload)
 	dt := txMgr.Registry.Get(doctypeName)
@@ -79,7 +90,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if validation := validateOperationDocument(txMgr, dt, doc, txMgr.Registry, nil); validation.HasErrors() {
+		if validation := validateOperationDocumentWithResolvers(txMgr, dt, doc, txMgr.Registry, nil, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); validation.HasErrors() {
 			return nil, validationContractError(validation)
 		}
 		if err := txMgr.PrepareInsert(dt, doc); err != nil {
@@ -91,7 +102,14 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 			owner = op.Context.User
 		}
 		if err := txMgr.InsertInTx(dbTx, dt, doc, owner, op.Context.User); err != nil {
+			slog.Error("authorized nested script record create failed", "doctype", dt.Name, "error", err)
 			return nil, wrapORMError(err)
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterInsert, doc, nil); hookErr != nil {
+			return nil, hookErr
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, nil); hookErr != nil {
+			return nil, hookErr
 		}
 		doc.IsNew = false
 		row := k.buildAuditRow(op, definition, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
@@ -99,10 +117,14 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if _, err := k.writeAudit(dbTx, row); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "nested script audit write failed")
 		}
+		if err := k.writeRecordHistory(dbTx, row, dt, nil, doc); err != nil {
+			return nil, contract.NewError(contract.CodeInternal, "nested script history write failed")
+		}
 		result = ResultData{Doctype: dt.Name, Name: doc.Name, Created: true, Document: doc.ToMap(), Operation: opID}
 		completeTx := *txMgr
 		completeTx.ScriptMutationExecutor = nil
 		completeTx.SkipHookScripts = nil
+		completeTx.Transaction = nil
 		txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteInsert(dt, doc) })
 
 	case CommandRecordUpdate:
@@ -110,8 +132,8 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := json.Unmarshal(op.Payload, &payload); err != nil || payload.Name == "" {
 			return nil, contract.NewError(contract.CodeValidationFailed, "invalid nested record.update payload")
 		}
-		owner := ownerForOperation(txMgr.Registry, op, dt.Name, "write")
-		oldDoc, err := txMgr.GetDoc(dt, payload.Name, owner)
+		scope := scopeForOperation(txMgr.Registry, op, dt.Name, "write")
+		oldDoc, err := txMgr.GetDocWithScope(dt, payload.Name, scope)
 		if err != nil {
 			if errors.Is(err, orm.ErrNotFound) {
 				return nil, contract.NewError(contract.CodeNotFound, "document not found")
@@ -125,25 +147,32 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := txMgr.RunHooksForValidate(dt, doc, oldDoc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if validation := validateOperationDocument(txMgr, dt, doc, txMgr.Registry, oldDoc); validation.HasErrors() {
+		if validation := validateOperationDocumentWithResolvers(txMgr, dt, doc, txMgr.Registry, oldDoc, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); validation.HasErrors() {
 			return nil, validationContractError(validation)
 		}
 		if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		beforeHash, afterHash := CanonicalDocHash(oldDoc.Fields), CanonicalDocHash(doc.Fields)
-		if err := txMgr.SaveInTx(dbTx, dt, doc, op.Context.User, owner, oldDoc); err != nil {
+		if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, op.Context.User, scope, oldDoc); err != nil {
 			return nil, wrapORMError(err)
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, definition, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
 		row.BeforeHash, row.AfterHash = beforeHash, afterHash
 		if _, err := k.writeAudit(dbTx, row); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "nested script audit write failed")
 		}
+		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, doc); err != nil {
+			return nil, contract.NewError(contract.CodeInternal, "nested script history write failed")
+		}
 		result = ResultData{Doctype: dt.Name, Name: doc.Name, Document: doc.ToMap(), Operation: opID}
 		completeTx := *txMgr
 		completeTx.ScriptMutationExecutor = nil
 		completeTx.SkipHookScripts = nil
+		completeTx.Transaction = nil
 		txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteSave(dt, doc, oldDoc) })
 
 	case CommandRecordDelete:
@@ -151,8 +180,8 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := json.Unmarshal(op.Payload, &payload); err != nil || payload.Name == "" {
 			return nil, contract.NewError(contract.CodeValidationFailed, "invalid nested record.delete payload")
 		}
-		owner := ownerForOperation(txMgr.Registry, op, dt.Name, "delete")
-		oldDoc, err := txMgr.GetDoc(dt, payload.Name, owner)
+		scope := scopeForOperation(txMgr.Registry, op, dt.Name, "delete")
+		oldDoc, err := txMgr.GetDocWithScope(dt, payload.Name, scope)
 		if err != nil {
 			if errors.Is(err, orm.ErrNotFound) {
 				return nil, contract.NewError(contract.CodeNotFound, "document not found")
@@ -162,18 +191,25 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := txMgr.PrepareDelete(dt, oldDoc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if err := txMgr.DeleteInTx(dbTx, dt, payload.Name, owner, oldDoc); err != nil {
+		if err := txMgr.DeleteInTxWithScope(dbTx, dt, payload.Name, scope, oldDoc); err != nil {
 			return nil, wrapORMError(err)
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterDelete, oldDoc, nil); hookErr != nil {
+			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, definition, opID, dt.Name, oldDoc.Name, contract.StatusCompleted, "")
 		row.BeforeHash = CanonicalDocHash(oldDoc.Fields)
 		if _, err := k.writeAudit(dbTx, row); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "nested script audit write failed")
 		}
+		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, nil); err != nil {
+			return nil, contract.NewError(contract.CodeInternal, "nested script history write failed")
+		}
 		result = ResultData{Doctype: dt.Name, Name: oldDoc.Name, Deleted: true, Operation: opID}
 		completeTx := *txMgr
 		completeTx.ScriptMutationExecutor = nil
 		completeTx.SkipHookScripts = nil
+		completeTx.Transaction = nil
 		txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteDelete(dt, oldDoc) })
 	}
 
@@ -182,4 +218,14 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		return nil, contract.NewError(contract.CodeInternal, "encode nested script result failed")
 	}
 	return encoded, nil
+}
+
+// ExecuteScriptMutationInTx is the narrow worker seam for script-provider
+// writes inside an already-owned operation transaction. It cannot open a new
+// transaction or bypass the kernel's authorization and domain validation.
+func (k *Kernel) ExecuteScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, txMgr *orm.TxManager, request script.MutationRequest) (json.RawMessage, error) {
+	if ctx == nil || dbTx == nil || txMgr == nil || txMgr.Transaction != dbTx {
+		return nil, contract.NewError(contract.CodeValidationFailed, "script mutation requires the active kernel transaction")
+	}
+	return k.executeScriptMutationInTx(ctx, dbTx, txMgr, request)
 }

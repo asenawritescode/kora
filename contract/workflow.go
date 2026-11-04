@@ -58,9 +58,22 @@ type ActionSpec struct {
 //contract:wire:v2
 type ConditionSpec struct {
 	//contract:maxLength=8192
-	Expression string `json:"expression"`
-	IfTrue     StepID `json:"if_true"`
-	IfFalse    StepID `json:"if_false"`
+	Expression string          `json:"expression,omitempty"`
+	Field      *FieldCondition `json:"field,omitempty"`
+	IfTrue     StepID          `json:"if_true"`
+	IfFalse    StepID          `json:"if_false"`
+}
+
+// FieldCondition is the table-bound, typed alternative to entering an
+// expression. Value must be a JSON scalar and Field must exist on the trigger table.
+//
+//contract:wire:v2
+type FieldCondition struct {
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	//contract:json
+	//contract:maxJSONBytes=8192
+	Value json.RawMessage `json:"value,omitempty"`
 }
 
 //contract:wire:v2
@@ -123,12 +136,33 @@ type StepDefinition struct {
 
 //contract:wire:v2
 type WorkflowDefinition struct {
-	ID      DefinitionID `json:"id"`
-	Version uint32       `json:"version"`
-	Entry   StepID       `json:"entry"`
+	ID            DefinitionID   `json:"id"`
+	OwnerModuleID ModuleID       `json:"owner_module_id,omitempty"`
+	Version       uint32         `json:"version"`
+	Entry         StepID         `json:"entry"`
+	Trigger       *RecordTrigger `json:"trigger,omitempty"`
 	//contract:minItems=1
 	//contract:maxItems=100
 	Steps []StepDefinition `json:"steps"`
+}
+
+// RecordTrigger starts a workflow from a committed tenant record mutation.
+// WatchedFields is empty for every update; otherwise at least one listed field
+// must have changed. Table names are canonical DocType names, never SQL names.
+//
+//contract:wire:v2
+type RecordTrigger struct {
+	Kind          string   `json:"kind"` // record.created | record.updated
+	Table         string   `json:"table"`
+	WatchedFields []string `json:"watched_fields,omitempty"`
+}
+
+//contract:wire:v2
+type RecordChangeEventData struct {
+	Table         string   `json:"table"`
+	RecordID      string   `json:"record_id"`
+	Revision      string   `json:"revision"`
+	ChangedFields []string `json:"changed_fields,omitempty"`
 }
 
 //contract:wire:v2
@@ -154,10 +188,11 @@ type ValidationResult struct {
 
 //contract:wire:v2
 type StartWorkflow struct {
-	Meta              CommandMeta  `json:"meta"`
-	DefinitionID      DefinitionID `json:"definition_id"`
-	DefinitionVersion uint32       `json:"definition_version"`
-	Subject           SubjectRef   `json:"subject"`
+	Meta              CommandMeta   `json:"meta"`
+	DefinitionID      DefinitionID  `json:"definition_id"`
+	DefinitionVersion uint32        `json:"definition_version"`
+	Subject           SubjectRef    `json:"subject"`
+	BusinessScope     BusinessScope `json:"business_scope,omitempty"`
 }
 
 //contract:wire:v2
@@ -167,6 +202,8 @@ type WorkflowInstance struct {
 	DefinitionID      DefinitionID   `json:"definition_id"`
 	DefinitionVersion uint32         `json:"definition_version"`
 	Subject           SubjectRef     `json:"subject"`
+	BusinessScope     BusinessScope  `json:"business_scope,omitempty"`
+	CausationDepth    uint16         `json:"causation_depth,omitempty"`
 	Status            InstanceStatus `json:"status"`
 	CurrentStep       StepID         `json:"current_step"`
 	NextWakeAt        *time.Time     `json:"next_wake_at,omitempty"`

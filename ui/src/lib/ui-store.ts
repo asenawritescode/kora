@@ -23,15 +23,28 @@ interface UIState {
 
 function getStoredTheme(): Theme {
   if (typeof window === 'undefined') return 'light'
-  const stored = localStorage.getItem('kora-theme')
+  let stored: string | null = null
+  try {
+    stored = window.localStorage.getItem('kora-theme')
+  } catch {
+    // Theme is a preference; blocked storage must not prevent the app loading.
+  }
   if (stored === 'dark' || stored === 'light') return stored
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  } catch {
+    return 'light'
+  }
 }
 
 function applyTheme(theme: Theme) {
   if (typeof document === 'undefined') return
   document.documentElement.classList.toggle('dark', theme === 'dark')
-  localStorage.setItem('kora-theme', theme)
+  try {
+    window.localStorage.setItem('kora-theme', theme)
+  } catch {
+    // Keep the current session's theme even when persistence is unavailable.
+  }
 }
 
 export const useUIStore = create<UIState>((set, get) => ({

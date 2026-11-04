@@ -37,6 +37,7 @@ type OperationContext struct {
 	Actor    string
 	TraceID  string
 	Deadline time.Time
+	Scope    BusinessScope
 }
 
 // CleanupEvidence records the ownership and release of a handle.

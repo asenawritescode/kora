@@ -1,17 +1,5 @@
 {{define "form.html"}}
 <div x-data="formView('{{.DocType.Name}}', '{{.DocName}}')" x-init="init()">
-    <!-- Workflow bar -->
-    <div class="flex items-center gap-2 mb-4 p-3 bg-gray-100 rounded-lg" x-show="workflowActions.length > 0">
-        <span class="text-sm font-medium text-gray-700 mr-2">Actions:</span>
-        <template x-for="action in workflowActions" :key="action.action">
-            <button @click="doWorkflowAction(action.action)"
-                    :class="workflowBtnClass(action.action)"
-                    class="btn text-sm">
-                <span x-text="action.action"></span>
-            </button>
-        </template>
-    </div>
-
     <!-- Status badge -->
     <div class="mb-4" x-show="status">
         <span :class="'badge badge-' + statusClass" x-text="status" class="badge text-sm"></span>
@@ -190,7 +178,6 @@
             status: '',
             saved: false,
             savedMsg: '',
-            workflowActions: [],
 
             async init() {
                 if (!this.isNew) {
@@ -207,46 +194,8 @@
                     const json = await resp.json();
                     this.doc = json.data || {};
                     this.status = this.doc.status || '';
-                    await this.loadWorkflowActions();
                 } catch(e) {
                     console.error('Failed to load document:', e);
-                }
-            },
-
-            async loadWorkflowActions() {
-                // Workflow actions are determined by the API.
-                // For now, show common actions based on status.
-                const status = this.doc.status || 'Draft';
-                const actions = {
-                    'Draft': ['Submit for Approval'],
-                    'Submitted': ['Approve', 'Reject'],
-                    'Approved': ['Begin Work'],
-                    'In Progress': ['Mark Complete'],
-                    'Rejected': ['Revise'],
-                    'Completed': [],
-                };
-                this.workflowActions = (actions[status] || []).map(a => ({action: a}));
-            },
-
-            async doWorkflowAction(action) {
-                try {
-                    const resp = await fetch(`/api/resource/${this.doctype}/${this.docname}/workflow_action`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({action: action})
-                    });
-                    if (resp.ok) {
-                        const json = await resp.json();
-                        this.doc = json.data || this.doc;
-                        this.status = this.doc.status || '';
-                        await this.loadWorkflowActions();
-                        showToast(`${action} successful!`);
-                    } else {
-                        const err = await resp.json();
-                        showToast(`Error: ${err.error?.message || 'Action failed'}`);
-                    }
-                } catch(e) {
-                    console.error('Workflow action failed:', e);
                 }
             },
 
@@ -297,12 +246,7 @@
                 return true;
             },
 
-            workflowBtnClass(action) {
-                if (action.includes('Approve')) return 'btn-success';
-                if (action.includes('Reject')) return 'btn-danger';
-                if (action.includes('Submit')) return 'btn-warning';
-                return 'btn-primary';
-            }
+
         }
     }
 </script>

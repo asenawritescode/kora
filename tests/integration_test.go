@@ -200,7 +200,6 @@ func TestIntegration_FullFieldworkLifecycle(t *testing.T) {
 	}
 
 	roles, permissions, _ := doctype.ParseRolesDirectory("../config/v0/fieldwork/doctypes")
-	workflows, _ := doctype.ParseWorkflowDirectory("../config/v0/fieldwork/doctypes")
 
 	store := configstore.NewStore(db, dialect)
 	for _, dt := range doctypes {
@@ -214,10 +213,6 @@ func TestIntegration_FullFieldworkLifecycle(t *testing.T) {
 
 	registry := doctype.NewRegistry()
 	registry.LoadFull(doctypes, roles, permissions)
-	for _, wf := range workflows {
-		registry.Workflows.Register(wf)
-	}
-
 	// Migrate.
 	var dbName string
 	db.QueryRow("SELECT DATABASE()").Scan(&dbName)
@@ -275,8 +270,8 @@ func TestIntegration_FullFieldworkLifecycle(t *testing.T) {
 	}
 
 	// Workflow: Draft → Submitted.
-	transition := executeKernelForTest(t, db, registry, dialect, siteName, "Administrator", kernel.CommandRecordWorkflowTransition,
-		kernel.RecordWorkflowTransitionPayload{Doctype: woDT.Name, Name: wo.Name, Action: "Submit for Approval"})
+	transition := executeKernelForTest(t, db, registry, dialect, siteName, "Administrator", kernel.CommandWorkflowStatusTransition,
+		kernel.WorkflowStatusTransitionPayload{Doctype: woDT.Name, Name: wo.Name, Action: "Submit for Approval"})
 	doc := orm.DocumentFromMap(registry, woDT.Name, transition.Document)
 	t.Logf("Transition: Draft → %s", doc.GetString("status"))
 

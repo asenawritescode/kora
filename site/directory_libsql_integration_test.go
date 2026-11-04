@@ -3,6 +3,7 @@ package site
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -70,8 +71,16 @@ func TestLiveLibSQLSiteDirectoryLifecycle(t *testing.T) {
 	if count, err := newConsumer().ProcessBatch(context.Background()); err != nil || count != 1 {
 		t.Fatalf("initial consumer batch = %d, %v", count, err)
 	}
-	if err := registry.SetStatus(info.SiteID, "suspended"); err != nil {
-		t.Fatal("set status:", err)
+	suspended, err := registry.SetStatusAtRevision(context.Background(), info.SiteID, "suspended", info.ConfigRevision)
+	if err != nil || suspended.Status != "suspended" || suspended.ConfigRevision != info.ConfigRevision+1 {
+		t.Fatalf("revision-fenced suspend = %+v, %v", suspended, err)
+	}
+	replayed, err := registry.SetStatusAtRevision(context.Background(), info.SiteID, "suspended", info.ConfigRevision)
+	if err != nil || replayed.ConfigRevision != suspended.ConfigRevision {
+		t.Fatalf("idempotent suspend replay = %+v, %v", replayed, err)
+	}
+	if _, err := registry.SetStatusAtRevision(context.Background(), info.SiteID, "active", info.ConfigRevision); !errors.Is(err, ErrSiteRevisionConflict) {
+		t.Fatalf("stale resume = %v, want revision conflict", err)
 	}
 	if count, err := newConsumer().ProcessBatch(context.Background()); err != nil || count != 1 {
 		t.Fatalf("consumer after restart = %d, %v", count, err)
@@ -101,5 +110,49 @@ func TestLiveLibSQLSiteDirectoryLifecycle(t *testing.T) {
 	latest, err := registry.CurrentDirectoryRevision()
 	if err != nil || resynced != latest {
 		t.Fatalf("snapshot resync revision = %d, latest = %d, err = %v", resynced, latest, err)
+	}
+}
+
+func TestLiveLibSQLProvisioningRegistrationBackfillsOnlyUnassignedRows(t *testing.T) {
+	dsn := os.Getenv("KORA_SITE_DIRECTORY_LIVE_LIBSQL_DSN")
+	if dsn == "" {
+		t.Skip("set KORA_SITE_DIRECTORY_LIVE_LIBSQL_DSN to a disposable LibSQL database")
+	}
+	database, err := sql.Open("libsql", dsn)
+	if err != nil {
+		t.Fatal("open disposable LibSQL database:", err)
+	}
+	defer database.Close()
+	if err := database.PingContext(t.Context()); err != nil {
+		t.Fatal("ping disposable LibSQL database:", err)
+	}
+	if err := BootstrapPlatformRegistryContext(t.Context(), database, kdb.Resolve("libsql")); err != nil {
+		t.Fatal("bootstrap LibSQL platform registry:", err)
+	}
+
+	stamp := time.Now().UnixNano()
+	hostname := fmt.Sprintf("provisioning-assignment-%d.example.invalid", stamp)
+	tenantID := fmt.Sprintf("tenant-provisioning-assignment-%d", stamp)
+	t.Cleanup(func() { _ = removePlatformSiteRegistration(database, "libsql", hostname) })
+	config := &SiteConfig{Hostname: hostname, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "tenant_db", DomainsList: []string{hostname}}
+	register := func(status, assignment string) error {
+		return ensurePlatformSiteRegistrationAssignmentContext(t.Context(), database, "libsql", config, status, assignment, tenantID)
+	}
+	if err := register("provisioning", ""); err != nil {
+		t.Fatal("create legacy provisioning row:", err)
+	}
+	if err := register("provisioning", "deployment-recovery"); err != nil {
+		t.Fatal("recover provisioning assignment:", err)
+	}
+	descriptor, err := NewSQLSiteRegistry(database, "libsql").GetDescriptorByIDContext(t.Context(), tenantID)
+	if err != nil || descriptor.RuntimeCellID != "deployment-recovery" {
+		t.Fatalf("recovered assignment = %q, %v; want deployment-recovery", descriptor.RuntimeCellID, err)
+	}
+	if err := register("active", "deployment-other"); err != nil {
+		t.Fatal("activate existing assignment row:", err)
+	}
+	descriptor, err = NewSQLSiteRegistry(database, "libsql").GetDescriptorByIDContext(t.Context(), tenantID)
+	if err != nil || descriptor.RuntimeCellID != "deployment-recovery" || descriptor.Status != "active" {
+		t.Fatalf("active assignment changed = %q status=%q err=%v; want deployment-recovery/active", descriptor.RuntimeCellID, descriptor.Status, err)
 	}
 }

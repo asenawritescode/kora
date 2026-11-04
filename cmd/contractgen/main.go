@@ -47,6 +47,10 @@ func main() {
 	if err != nil {
 		fatal(err.Error())
 	}
+	v2Data, err = addV2SemanticRules(v2Data)
+	if err != nil {
+		fatal(err.Error())
+	}
 	v2Validator, err := generateTypeScript(v2Data)
 	if err != nil {
 		fatal(err.Error())
@@ -75,6 +79,130 @@ func main() {
 			fatal("generated contract drift in " + path + "; run go run ./cmd/contractgen -write")
 		}
 	}
+}
+
+// addV2SemanticRules encodes invariants that Go's custom Validate methods
+// enforce but struct tags cannot express. They remain in the authoritative
+// JSON Schema so every generated decoder rejects the same malformed values.
+func addV2SemanticRules(data []byte) ([]byte, error) {
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, err
+	}
+	defs, ok := document["$defs"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("v2 schema is missing definitions")
+	}
+	object := func(properties map[string]any, required []string, not map[string]any) map[string]any {
+		branch := map[string]any{"type": "object", "properties": properties, "required": required}
+		if not != nil {
+			branch["not"] = not
+		}
+		return branch
+	}
+	forbidAny := func(fields ...string) map[string]any {
+		branches := make([]any, 0, len(fields))
+		for _, field := range fields {
+			branches = append(branches, object(nil, []string{field}, nil))
+		}
+		return map[string]any{"anyOf": branches}
+	}
+	scope, ok := defs["BusinessScope"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("v2 schema is missing BusinessScope")
+	}
+	scope["oneOf"] = []any{
+		object(map[string]any{"kind": map[string]any{"const": "tenant"}, "tenant_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 160}}, []string{"kind", "tenant_id"}, object(nil, []string{"legal_entity_id"}, nil)),
+		object(map[string]any{"kind": map[string]any{"const": "legal_entity"}, "tenant_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 160}, "legal_entity_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 160}}, []string{"kind", "tenant_id", "legal_entity_id"}, nil),
+	}
+	rootProperties, _ := document["properties"].(map[string]any)
+	scopeTargets := []map[string]any{scope}
+	if rootScope, ok := rootProperties["BusinessScope"].(map[string]any); ok {
+		rootScope["oneOf"] = scope["oneOf"]
+		scopeTargets = append(scopeTargets, rootScope)
+	}
+	for _, target := range scopeTargets {
+		properties, _ := target["properties"].(map[string]any)
+		for _, field := range []string{"tenant_id", "legal_entity_id"} {
+			if property, ok := properties[field].(map[string]any); ok {
+				property["minLength"], property["maxLength"] = 1, 160
+			}
+		}
+	}
+	receipt, ok := defs["OperationReceipt"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("v2 schema is missing OperationReceipt")
+	}
+	status := func(values ...string) map[string]any { return map[string]any{"enum": values, "type": "string"} }
+	receiptProperties, _ := receipt["properties"].(map[string]any)
+	commonReceiptFields := []string{"business_scope", "execution_id", "operation_ref", "revision"}
+	receiptBranch := func(statusSchema map[string]any, extras []string, forbidden []string) map[string]any {
+		properties := make(map[string]any, len(commonReceiptFields)+len(extras)+1)
+		for _, field := range commonReceiptFields {
+			properties[field] = receiptProperties[field]
+		}
+		properties["status"] = statusSchema
+		required := append(append([]string(nil), commonReceiptFields...), "status")
+		for _, field := range extras {
+			properties[field] = receiptProperties[field]
+			required = append(required, field)
+		}
+		return object(properties, required, forbidAny(forbidden...))
+	}
+	receipt["oneOf"] = []any{
+		receiptBranch(map[string]any{"const": "completed", "type": "string"}, []string{"output", "output_schema"}, []string{"error"}),
+		receiptBranch(status("accepted", "running"), nil, []string{"error", "output", "output_schema"}),
+		receiptBranch(status("rejected", "conflict", "failed", "outcome_unknown"), []string{"error"}, []string{"output", "output_schema"}),
+	}
+	receiptTargets := []map[string]any{receipt}
+	if rootReceipt, ok := rootProperties["OperationReceipt"].(map[string]any); ok {
+		rootReceipt["oneOf"] = receipt["oneOf"]
+		receiptTargets = append(receiptTargets, rootReceipt)
+	}
+	for _, target := range receiptTargets {
+		properties, _ := target["properties"].(map[string]any)
+		if revision, ok := properties["revision"].(map[string]any); ok {
+			revision["maxLength"] = 20
+			revision["pattern"] = "^(0|[1-9][0-9]*)$"
+		}
+	}
+	binding, ok := defs["ConfigurationSurfaceBinding"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("v2 schema is missing ConfigurationSurfaceBinding")
+	}
+	bindingProperties, _ := binding["properties"].(map[string]any)
+	bindingObject := func(kind string, required, forbidden []string) map[string]any {
+		properties := map[string]any{"kind": map[string]any{"const": kind, "type": "string"}}
+		for _, field := range required {
+			properties[field] = bindingProperties[field]
+		}
+		requiredFields := append([]string{"kind"}, required...)
+		var excluded map[string]any
+		if len(forbidden) > 0 {
+			excluded = forbidAny(forbidden...)
+		}
+		return object(properties, requiredFields, excluded)
+	}
+	binding["oneOf"] = []any{
+		bindingObject("query", []string{"catalog_revision", "business_scope", "owner_module_id", "name", "input_schema", "output_schema"}, []string{"operation_ref"}),
+		bindingObject("projection", []string{"catalog_revision", "business_scope", "owner_module_id", "name", "output_schema"}, []string{"operation_ref", "input_schema"}),
+		bindingObject("operation", []string{"catalog_revision", "business_scope", "owner_module_id", "operation_ref", "input_schema", "output_schema"}, []string{"name"}),
+	}
+	if rootBinding, ok := rootProperties["ConfigurationSurfaceBinding"].(map[string]any); ok {
+		rootBinding["oneOf"] = binding["oneOf"]
+	}
+	if revision, ok := bindingProperties["catalog_revision"].(map[string]any); ok {
+		revision["minimum"] = 1
+	}
+	if operationRef, ok := bindingProperties["operation_ref"].(map[string]any); ok {
+		operationRef["pattern"] = "^[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}$"
+		operationRef["maxLength"] = 386
+	}
+	encoded, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(encoded, '\n'), nil
 }
 
 func fatal(message string) { fmt.Fprintln(os.Stderr, "contractgen:", message); os.Exit(1) }

@@ -1,4 +1,4 @@
-// M-Pesa Daraja API integration for Kora ERP Kenya
+// M-Pesa Daraja API integration for Kigae ERP Kenya
 // This script handles M-Pesa transaction verification and auto-matching
 
 var doc = __kora_event__.doc;
@@ -52,9 +52,15 @@ function mpesaSTKPush(phone, amount, reference) {
   var consumerSecret = kora.secrets.get("mpesa_consumer_secret");
   var passkey = kora.secrets.get("mpesa_passkey");
   var shortCode = kora.secrets.get("mpesa_shortcode");
+  // This URL includes the tenant's opaque callback token path segment. Never
+  // accept a callback at the tokenless public route.
+  var callbackURL = kora.secrets.get("mpesa_callback_url");
 
   if (!consumerKey || !consumerSecret) {
     throw new Error("M-Pesa API credentials not configured. Set mpesa_consumer_key and mpesa_consumer_secret in Secrets.");
+  }
+  if (!callbackURL || callbackURL.indexOf("/api/v1/webhooks/mpesa/stk/") < 0) {
+    throw new Error("Configure mpesa_callback_url with the tenant tokenized /api/v1/webhooks/mpesa/stk/{token} URL.");
   }
 
   // Get OAuth token
@@ -86,9 +92,9 @@ function mpesaSTKPush(phone, amount, reference) {
       PartyA: phone,
       PartyB: shortCode,
       PhoneNumber: phone,
-      CallBackURL: "https://your-kora-server.com/api/v1/webhook/mpesa-callback",
+      CallBackURL: callbackURL,
       AccountReference: reference || "KORA-" + Date.now(),
-      TransactionDesc: "Payment for " + (reference || "Kora ERP")
+      TransactionDesc: "Payment for " + (reference || "Kigae ERP")
     })
   });
 

@@ -97,8 +97,8 @@ describe('page manifest editor helpers', () => {
 
   it('fails closed on unsupported queries and commands', () => {
     const next = manifest()
-    next.spec.resources[0].query = 'sql.raw' as any
-    next.spec.actions[0].command = 'javascript.eval' as any
+    next.spec.resources[0].query = 'sql.raw' as unknown as typeof next.spec.resources[0]['query']
+    next.spec.actions[0].command = 'javascript.eval' as unknown as typeof next.spec.actions[0]['command']
 
     const preflight = buildPublishPreflight(next)
 
@@ -121,6 +121,30 @@ describe('page manifest editor helpers', () => {
 
     clearManifestDraft('sales-order-table')
     expect(readManifestDraft('sales-order-table')).toBeNull()
+  })
+
+  it('surfaces failed draft writes and clears', () => {
+    const snapshot = { manifest: manifest(), savedAt: '2026-08-27T00:00:00.000Z', source: 'editor' as const }
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem: () => { throw new DOMException('quota exceeded', 'QuotaExceededError') },
+      removeItem: () => { throw new DOMException('storage disabled', 'SecurityError') },
+      clear: () => undefined,
+    })
+
+    expect(() => writeManifestDraft('sales-order-table', snapshot)).toThrow('quota exceeded')
+    expect(() => clearManifestDraft('sales-order-table')).toThrow('storage disabled')
+  })
+
+  it('surfaces local draft read access failures', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => { throw new DOMException('storage disabled', 'SecurityError') },
+      setItem: () => undefined,
+      removeItem: () => undefined,
+      clear: () => undefined,
+    })
+
+    expect(() => readManifestDraft('sales-order-table')).toThrow('storage disabled')
   })
 
   it('exposes deterministic preview viewport presets', () => {

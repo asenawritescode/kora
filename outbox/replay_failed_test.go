@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	kdb "github.com/asenawritescode/kora/db"
 )
 
 func TestReplayFailedResetsEligibleRows(t *testing.T) {
@@ -18,7 +19,8 @@ func TestReplayFailedResetsEligibleRows(t *testing.T) {
 		WithArgs(8).
 		WillReturnResult(sqlmock.NewResult(0, 3))
 
-	p := &Publisher{DB: db, MaxAttempts: 8}
+	admission := &dispatcherAdmissionProbe{}
+	p := &Publisher{DB: db, Dialect: kdb.Resolve("mysql"), MaxAttempts: 8, WorkAdmission: admission}
 	n, err := p.ReplayFailed(context.Background())
 	if err != nil {
 		t.Fatalf("ReplayFailed: %v", err)
@@ -26,8 +28,10 @@ func TestReplayFailedResetsEligibleRows(t *testing.T) {
 	if n != 3 {
 		t.Fatalf("ReplayFailed = %d, want 3", n)
 	}
+	if admission.calls.Load() != 1 || admission.active.Load() != 0 {
+		t.Fatalf("replay admission calls/active = %d/%d, want 1/0", admission.calls.Load(), admission.active.Load())
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
 	}
 }
-

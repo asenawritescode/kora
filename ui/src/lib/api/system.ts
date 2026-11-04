@@ -1,4 +1,5 @@
 import { api } from './client'
+import { getSitePrefix } from '../basepath'
 import type { NavigationConfig } from '@/types/api'
 import type { DocTypeSchema, DocType, ReferenceInfo } from '@/types/kora'
 
@@ -6,13 +7,12 @@ export async function fetchNavigation(): Promise<NavigationConfig> {
   return api.get<NavigationConfig>('/api/v1/system/navigation')
 }
 
-export async function fetchDoctypeSchema(
-  doctype: string,
-  state?: string,
-): Promise<DocTypeSchema> {
-  const params: Record<string, string | undefined> = {}
-  if (state) params.state = state
-  return api.get<DocTypeSchema>(`/api/v1/system/doctype/${encodeURIComponent(doctype)}`, params)
+export function navigationQueryKey() {
+  return ['navigation', getSitePrefix() || window.location.host] as const
+}
+
+export async function fetchDoctypeSchema(doctype: string): Promise<DocTypeSchema> {
+  return api.get<DocTypeSchema>(`/api/v1/system/doctype/${encodeURIComponent(doctype)}`)
 }
 
 // --- Admin: Doctypes ---
@@ -109,7 +109,6 @@ export interface ConfigVersionPreview {
   doctypes_in_snapshot: number
   roles_in_snapshot: number
   permissions_in_snapshot: number
-  workflows_in_snapshot: number
   diff_summary: string
   is_breaking: boolean
   newer_active_versions: number
@@ -145,8 +144,42 @@ export async function discardVersion(id: string): Promise<{ message: string; sta
   return api.post(`/api/v1/system/config/versions/${id}/discard`)
 }
 
-export async function rollbackVersion(id: string): Promise<{ message: string; status: string }> {
-  return api.post(`/api/v1/system/config/versions/${id}/rollback`)
+const rollbackIdempotencyKeys = new Map<string, string>()
+
+function rollbackKeyStorageKey(id: string): string {
+  const scope = typeof window === 'undefined' ? '' : getSitePrefix() || window.location.host
+  return `kora.config-rollback-key.v1.${scope}.${id}`
+}
+
+function rollbackIdempotencyKey(id: string, requestedKey?: string): string {
+  if (requestedKey) return requestedKey
+  const key = rollbackKeyStorageKey(id)
+  const cached = rollbackIdempotencyKeys.get(key)
+  if (cached) return cached
+  let stored = ''
+  try { stored = window.sessionStorage.getItem(key) || '' } catch { /* Keep the retry key in memory for this tab. */ }
+  const value = stored || crypto.randomUUID()
+  rollbackIdempotencyKeys.set(key, value)
+  try { window.sessionStorage.setItem(key, value) } catch { /* Server retries still use the in-memory key. */ }
+  return value
+}
+
+function clearRollbackIdempotencyKey(id: string): void {
+  const storageKey = rollbackKeyStorageKey(id)
+  rollbackIdempotencyKeys.delete(storageKey)
+  try { window.sessionStorage.removeItem(storageKey) } catch { /* The completed operation is safe to retry. */ }
+}
+
+export async function rollbackVersion(id: string, requestedKey?: string): Promise<{ message: string; status: string; operation_id?: string }> {
+  const key = rollbackIdempotencyKey(id, requestedKey)
+  const operation = await api.operation<{ message: string; status: string; operation_id?: string }>(
+    'POST', `/api/v1/system/config/versions/${id}/rollback`, undefined, undefined, key,
+  )
+  if (operation.status !== 'completed' || !operation.data) {
+    throw new Error(operation.error?.message || 'Config rollback did not complete.')
+  }
+  clearRollbackIdempotencyKey(id)
+  return operation.data
 }
 
 export interface VersionSnapshot {
@@ -159,7 +192,7 @@ export interface VersionSnapshot {
   roles_count: number
   permissions_count: number
   workflows_count: number
-  snapshot: Record<string, any>
+  snapshot: Record<string, unknown>
   pack_files: Array<{ path: string; content: string; content_type: string }>
 }
 
@@ -240,58 +273,6 @@ export async function savePermissions(permissions: Permission[]): Promise<{ mess
   return api.put<{ message: string }>('/api/v1/system/permissions', permissions)
 }
 
-// --- Admin: Workflows ---
-
-export interface WorkflowDef {
-  name: string
-  document_type: string
-  is_active: boolean
-  workflow_state_field: string
-  states: WorkflowState[]
-  transitions: WorkflowTransition[]
-  notifications: WorkflowNotification[]
-}
-
-export interface WorkflowState {
-  state: string
-  doc_status: number
-  allow_edit: string
-  style: string
-}
-
-export interface WorkflowTransition {
-  action: string
-  from: string
-  to: string
-  allowed: string
-  condition?: string
-  require_fields?: string[]
-}
-
-export interface WorkflowNotification {
-  event: string
-  to_state?: string
-  recipients: { field: string }[]
-  subject: string
-  message: string
-}
-
-export async function fetchWorkflows(): Promise<WorkflowDef[]> {
-  return api.get<WorkflowDef[]>('/api/v1/system/workflows')
-}
-
-export async function fetchWorkflow(doctype: string): Promise<WorkflowDef> {
-  return api.get<WorkflowDef>(`/api/v1/system/workflows/${encodeURIComponent(doctype)}`)
-}
-
-export async function saveWorkflow(data: WorkflowDef): Promise<WorkflowDef> {
-  return api.post<WorkflowDef>('/api/v1/system/workflows', data)
-}
-
-export async function deleteWorkflow(doctype: string): Promise<{ message: string }> {
-  return api.delete(`/api/v1/system/workflows/${encodeURIComponent(doctype)}`)
-}
-
 // --- Admin: Users ---
 
 export interface User {
@@ -304,46 +285,35 @@ export interface User {
   modified: string
 }
 
-export interface UserCreateRequest {
+export interface UserDirectoryEntry {
+  name: string
   email: string
-  password: string
   full_name: string
-  roles: string[]
+}
+
+export async function fetchUserDirectory(params?: { search?: string; limit?: number }): Promise<UserDirectoryEntry[]> {
+  return api.get<UserDirectoryEntry[]>('/api/v1/system/user-directory', {
+    q: params?.search,
+    limit: params?.limit,
+  })
+}
+
+export async function fetchUserDirectoryByNames(names: string[]): Promise<UserDirectoryEntry[]> {
+  if (names.length === 0) return []
+  return api.get<UserDirectoryEntry[]>('/api/v1/system/user-directory', { names: names.join(',') })
 }
 
 export interface UserUpdateRequest {
-  full_name?: string
   roles?: string[]
   enabled?: boolean
-  password?: string
-}
-
-export interface PasswordResetRequest {
-  password: string
 }
 
 export async function fetchUsers(): Promise<User[]> {
   return api.get<User[]>('/api/v1/system/users')
 }
 
-export async function fetchUser(name: string): Promise<User> {
-  return api.get<User>(`/api/v1/system/users/${encodeURIComponent(name)}`)
-}
-
-export async function createUser(data: UserCreateRequest): Promise<User> {
-  return api.post<User>('/api/v1/system/users', data)
-}
-
 export async function updateUser(name: string, data: UserUpdateRequest): Promise<User> {
   return api.put<User>(`/api/v1/system/users/${encodeURIComponent(name)}`, data)
-}
-
-export async function deleteUser(name: string): Promise<{ message: string }> {
-  return api.delete(`/api/v1/system/users/${encodeURIComponent(name)}`)
-}
-
-export async function resetUserPassword(name: string, data: PasswordResetRequest): Promise<{ message: string }> {
-  return api.post(`/api/v1/system/users/${encodeURIComponent(name)}/reset-password`, data)
 }
 
 // --- Admin: Secrets ---

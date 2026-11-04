@@ -1,28 +1,98 @@
 name: Sales Quote
 module: CRM
+description: A versioned commercial offer linked to a deal, with clear validity and customer decision.
 title_field: reference
-search_fields: reference, status
+search_fields: reference, deal, quote_status
 sort_field: modified
 sort_order: DESC
 
 fields:
   - fieldname: reference
     fieldtype: Data
-    label: Reference
+    label: Quote Number
+    search_index: true
     reqd: true
     unique: true
     in_list_view: true
+  - fieldname: deal
+    fieldtype: Link
+    options: Deal
+    label: Deal
+    search_index: true
+    reqd: true
+    in_list_view: true
+  - fieldname: version
+    fieldtype: Int
+    label: Version
+    default: "1"
+    reqd: true
+    constraints:
+      - type: min
+        value: 1
+        message: "Quote version must be 1 or greater."
+  - fieldname: quote_status
+    fieldtype: Select
+    label: Quote Status
+    search_index: true
+    options: |
+      Draft
+      Sent
+      Accepted
+      Rejected
+      Expired
+      Superseded
+    default: Draft
+    read_only: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: issue_date
+    fieldtype: Date
+    label: Issue Date
+  - fieldname: valid_until
+    fieldtype: Date
+    label: Valid Until
+    in_list_view: true
+  - fieldname: subtotal
+    fieldtype: Currency
+    label: Subtotal
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: "Quote subtotal cannot be negative."
+  - fieldname: discount
+    fieldtype: Currency
+    label: Discount
+    default: "0"
+    constraints:
+      - type: min
+        value: 0
+        message: "Discount cannot be negative."
+  - fieldname: total
+    fieldtype: Currency
+    label: Quoted Total
+    computed: "subtotal - discount"
+    read_only: true
+    in_list_view: true
+  - fieldname: payment_terms
+    fieldtype: Text
+    label: Payment and Delivery Terms
+  - fieldname: customer_decision_notes
+    fieldtype: Text
+    label: Customer Decision / Notes
   - fieldname: source_record
     fieldtype: Data
-    label: Source Record
+    label: Legacy Source Record
+    depends_on: source_record
   - fieldname: assignee
     fieldtype: Data
-    label: Assignee
+    label: Legacy Assignee
+    depends_on: assignee
   - fieldname: evidence
     fieldtype: Text
-    label: Evidence
+    label: Legacy Evidence
+    depends_on: evidence
   - fieldname: status
     fieldtype: Data
-    label: Status
-    default: Draft
-    in_list_view: true
+    label: Legacy Status
+    depends_on: status

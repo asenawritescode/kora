@@ -34,6 +34,45 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+func TestEveryDialectBootstrapsDurableInvitationJournal(t *testing.T) {
+	for _, driver := range []string{"mysql", "postgres", "libsql"} {
+		t.Run(driver, func(t *testing.T) {
+			ddl := Resolve(driver).SystemTableSQL()
+			found := false
+			for _, statement := range ddl {
+				if strings.Contains(statement, "CREATE TABLE") && strings.Contains(statement, "_kora_magic_link_delivery") {
+					found = true
+					for _, column := range []string{"operation_id", "tenant_id", "email", "magic_link_id", "status", "worker_fence", "created_at", "updated_at"} {
+						if !strings.Contains(statement, column) {
+							t.Errorf("%s invitation journal DDL omits %s: %s", driver, column, statement)
+						}
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("%s system DDL omits durable invitation journal", driver)
+			}
+		})
+	}
+}
+
+func TestEveryDialectPersistsAssignmentRowScopes(t *testing.T) {
+	for _, driver := range []string{"mysql", "postgres", "libsql"} {
+		t.Run(driver, func(t *testing.T) {
+			found := false
+			for _, statement := range Resolve(driver).SystemTableSQL() {
+				if strings.Contains(statement, "_kora_permission") && strings.Contains(statement, "if_assigned") {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("%s system DDL does not create or upgrade assignment row scopes", driver)
+			}
+		})
+	}
+}
+
 func TestMySQL_ColumnType(t *testing.T) {
 	d := &MySQLDialect{}
 
@@ -264,14 +303,14 @@ func TestLibSQL_CreateTable(t *testing.T) {
 	dt := &doctype.DocType{
 		Name: "Test DocType",
 		Fields: []doctype.Field{
-			{Fieldname: "title", Fieldtype: "Data", Label: "Title"},
+			{Fieldname: "title", Fieldtype: "Data", Label: "Title", SearchIndex: true},
 			{Fieldname: "qty", Fieldtype: "Int", Label: "Quantity"},
 		},
 	}
 
 	stmts := d.CreateTable(dt)
-	if len(stmts) != 2 {
-		t.Fatalf("CreateTable returned %d statements, want 2 (table + trigger)", len(stmts))
+	if len(stmts) != 3 {
+		t.Fatalf("CreateTable returned %d statements, want 3 (table + search index + trigger)", len(stmts))
 	}
 
 	first := stmts[0]
@@ -284,8 +323,11 @@ func TestLibSQL_CreateTable(t *testing.T) {
 	if !contains(first, `"qty" INTEGER`) {
 		t.Error("CreateTable should include qty column")
 	}
-	if !contains(stmts[1], "CREATE TRIGGER") {
-		t.Error("second statement should be CREATE TRIGGER")
+	if !contains(stmts[1], "COLLATE NOCASE") || !contains(stmts[1], "sidx_tabTest DocType_title") {
+		t.Errorf("search index should use case-insensitive prefix-search collation: %s", stmts[1])
+	}
+	if !contains(stmts[2], "CREATE TRIGGER IF NOT EXISTS") {
+		t.Error("last statement should create the modified trigger idempotently")
 	}
 }
 
@@ -687,6 +729,49 @@ func TestTableSuffix(t *testing.T) {
 			got := tt.dialect.TableSuffix()
 			if got != tt.want {
 				t.Errorf("TableSuffix = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSystemUserDirectoryIndexesMatchCaseInsensitivePrefixQueries(t *testing.T) {
+	tests := []struct {
+		name string
+		ddl  []string
+		want []string
+	}{
+		{
+			name: "mysql",
+			ddl:  (&MySQLDialect{}).SystemTableSQL(),
+			want: []string{
+				"CREATE INDEX idx_user_picker_name ON _kora_user (site, enabled, full_name)",
+				"CREATE INDEX idx_user_picker_email ON _kora_user (site, enabled, email)",
+			},
+		},
+		{
+			name: "libsql",
+			ddl:  (&LibSQLDialect{}).SystemTableSQL(),
+			want: []string{
+				`"full_name" COLLATE NOCASE`,
+				`"email" COLLATE NOCASE`,
+			},
+		},
+		{
+			name: "postgres",
+			ddl:  (&PostgresDialect{}).SystemTableSQL(),
+			want: []string{
+				`lower("full_name") text_pattern_ops`,
+				`lower("email") text_pattern_ops`,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			joined := strings.Join(test.ddl, "\n")
+			for _, expected := range test.want {
+				if !strings.Contains(joined, expected) {
+					t.Errorf("system table DDL does not contain user picker index fragment %q", expected)
+				}
 			}
 		})
 	}

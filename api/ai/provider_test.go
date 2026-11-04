@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -122,31 +121,19 @@ func TestCallAIWithRetryFailsOnNonTransientMalformedResponse(t *testing.T) {
 	}
 }
 
-func TestResolveProviderFallsBackToSharedEnv(t *testing.T) {
+func TestResolveProviderPrefersCloudGateway(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
-
-	mock.ExpectQuery("SELECT encrypted_value FROM _kora_secret WHERE site = \\? AND key_name = \\?").
-		WithArgs("site-a", "openai_api_key").
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT encrypted_value FROM _kora_secret WHERE site = \\? AND key_name = \\?").
-		WithArgs("site-a", "deepseek_api_key").
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT encrypted_value FROM _kora_secret WHERE site = \\? AND key_name = \\?").
-		WithArgs("site-a", "anthropic_api_key").
-		WillReturnError(sql.ErrNoRows)
-
-	t.Setenv("KORA_SHARED_AI_ENABLED", "true")
-	t.Setenv("KORA_SHARED_OPENAI_API_KEY", "shared-openai")
-	t.Setenv("KORA_SHARED_DEEPSEEK_API_KEY", "")
-	t.Setenv("KORA_SHARED_ANTHROPIC_API_KEY", "")
+	t.Setenv("KORA_CLOUD_AI_GATEWAY_URL", "http://127.0.0.1:8081/internal/engine/ai")
+	t.Setenv("KORA_CLOUD_AI_GATEWAY_TOKEN", "engine-cloud-token")
+	t.Setenv("KORA_CLOUD_AI_GATEWAY_MODEL", "cloud-model")
 
 	providerKey, apiKey, baseURL, model := resolveProvider(db, "site-a", "")
-	if providerKey != "openai_api_key" || apiKey != "shared-openai" || baseURL != "https://api.openai.com/v1" || model != "gpt-4o" {
-		t.Fatalf("unexpected shared provider fallback: %q %q %q %q", providerKey, apiKey, baseURL, model)
+	if providerKey != "kora_cloud" || apiKey != "engine-cloud-token" || baseURL != "http://127.0.0.1:8081/internal/engine/ai" || model != "cloud-model" {
+		t.Fatalf("unexpected Cloud provider resolution: %q %q %q %q", providerKey, apiKey, baseURL, model)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

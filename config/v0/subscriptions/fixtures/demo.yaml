@@ -3,4 +3,4 @@ seed_mode: demo
 records:
   - doctype: Subscription
     reference: DEMO-SUBSCRIPTIONS-001
-    status: Draft
+    status: Quoted

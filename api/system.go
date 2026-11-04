@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -20,9 +21,12 @@ import (
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/natsprovider"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/schema"
 )
 
@@ -79,25 +83,15 @@ type SystemAuditEntry struct {
 
 // SystemDoctypeResponse is the full schema response for a single DocType.
 type SystemDoctypeResponse struct {
-	DocType      *doctype.DocType             `json:"doctype"`
-	Status       string                       `json:"status"` // "Active" or "Draft"
-	Workflow     *WorkflowResponse            `json:"workflow,omitempty"`
-	Permissions  map[string]bool              `json:"permissions"`
-	Transitions  []doctype.WorkflowTransition `json:"transitions,omitempty"`
-	ReferencedBy []ReferenceInfo              `json:"referenced_by,omitempty"`
+	DocType      *doctype.DocType `json:"doctype"`
+	Status       string           `json:"status"` // "Active" or "Draft"
+	Permissions  map[string]bool  `json:"permissions"`
+	ReferencedBy []ReferenceInfo  `json:"referenced_by,omitempty"`
 }
 
-// WorkflowResponse holds the workflow definition for a DocType.
-type WorkflowResponse struct {
-	States      []doctype.WorkflowState      `json:"states"`
-	Transitions []doctype.WorkflowTransition `json:"transitions"`
-	StateField  string                       `json:"state_field"`
-}
-
-// HandleSystemDoctype returns the full DocType schema with workflow and permissions.
+// HandleSystemDoctype returns the full DocType schema and permissions.
 // GET /api/system/doctype/:doctype
 // Optional query param: ?format=yaml to get raw YAML output.
-// Optional query param: ?state=current_state to get available transitions.
 func (h *Handler) HandleSystemDoctype(c *gin.Context) {
 	doctypeName := c.Param("doctype")
 	reg := h.siteRegistry(c)
@@ -108,7 +102,7 @@ func (h *Handler) HandleSystemDoctype(c *gin.Context) {
 		})
 		return
 	}
-	if !canInspectDocType(c, dt.Name) {
+	if !canInspectDocType(c, reg, dt.Name) {
 		writeError(c, http.StatusForbidden, "permission.denied", "Token cannot inspect this DocType", map[string]any{"doctype": dt.Name})
 		return
 	}
@@ -144,79 +138,40 @@ func (h *Handler) HandleSystemDoctype(c *gin.Context) {
 	// Compute which doctypes link to this one (back-references).
 	resp.ReferencedBy = findReferencingDoctypes(reg, doctypeName)
 
-	// Attach workflow data if this doctype has one.
-	if reg.Workflows.Has(doctypeName) {
-		wf := reg.Workflows.Get(doctypeName)
-		resp.Workflow = &WorkflowResponse{
-			States:      wf.States,
-			Transitions: wf.Transitions,
-			StateField:  wf.WorkflowStateField,
-		}
-
-		// Compute available transitions for the current state and user.
-		currentState := c.Query("state")
-		if currentState != "" {
-			userRole := c.GetString("user_role")
-			if userRole == "" {
-				userRole = doctype.AdminRole
-			}
-			doc := doctype.NewDocument(doctypeName)
-			for key, vals := range c.Request.URL.Query() {
-				if key != "state" && len(vals) > 0 {
-					doc.Set(key, vals[0])
-				}
-			}
-			resp.Transitions = reg.Workflows.GetAvailableTransitions(doctypeName, currentState, userRole, doc)
-		}
-	}
-
 	c.JSON(http.StatusOK, Response{Data: resp})
 }
 
 // getUserPermissions returns a map of operation → allowed for the current user on a doctype.
 func getUserPermissions(reg *doctype.Registry, c *gin.Context, dt string) map[string]bool {
 	ops := []string{"read", "write", "create", "delete", "submit", "cancel", "amend", "export", "import", "report"}
-	authType := c.GetString("auth_type")
-	if authType == "extension" || authType == "channel_session" {
-		key := "extension_permissions"
-		if authType == "channel_session" {
-			key = "channel_permissions"
-		}
-		value, _ := c.Get(key)
-		permissions, _ := value.([]doctype.Permission)
-		result := make(map[string]bool, len(ops))
-		for _, operation := range ops {
-			result[operation] = auth.HasExtensionPermission(permissions, dt, operation)
-		}
+	result := make(map[string]bool, len(ops))
+	for _, operation := range ops {
+		result[operation] = false
+	}
+	execution, valid := requestExecution(c)
+	if !valid {
 		return result
 	}
-	userRoles := c.GetStringSlice("user_roles")
-	// If no roles set, return full access (bootstrapping / system user).
-	if len(userRoles) == 0 {
-		return map[string]bool{
-			"read": true, "write": true, "create": true, "delete": true,
-			"submit": true, "cancel": true, "amend": true,
-			"export": true, "import": true, "report": true,
-		}
+	for _, operation := range ops {
+		_, err := policy.Decide(execution, reg, dt, operation)
+		result[operation] = err == nil
 	}
-	perms := make(map[string]bool, len(ops))
-	for _, op := range ops {
-		allowed, _ := reg.CanUser(userRoles, dt, op)
-		perms[op] = allowed
-	}
-	return perms
+	return result
 }
 
 // --- System Navigation ---
 
 // NavigationResponse is the full navigation config for the SPA sidebar.
 type NavigationResponse struct {
-	Modules           []ModuleGroup  `json:"modules"`
-	Views             []ViewNavItem  `json:"views,omitempty"`
-	Branding          Branding       `json:"branding"`
-	Copy              ExperienceCopy `json:"copy"`
-	User              UserInfo       `json:"user"`
-	AdminCapabilities []string       `json:"admin_capabilities"`
+	Modules               []ModuleGroup  `json:"modules"`
+	Views                 []ViewNavItem  `json:"views,omitempty"`
+	HasConfiguration      bool           `json:"has_configuration"`
+	Branding              Branding       `json:"branding"`
+	Copy                  ExperienceCopy `json:"copy"`
+	User                  UserInfo       `json:"user"`
+	AdminCapabilities     []string       `json:"admin_capabilities"`
+	CapabilitiesVersion   string         `json:"capabilities_version,omitempty"`
+	SupportedCapabilities []string       `json:"supported_capabilities,omitempty"`
 }
 
 // ModuleGroup is a group of DocTypes under a module.
@@ -246,7 +201,7 @@ type ViewNavItem struct {
 }
 
 // AppBranding is the global branding config (set from common config at startup).
-var AppBranding = Branding{AppName: "Kora", PrimaryColor: "#2563eb"}
+var AppBranding = Branding{AppName: "Kigae", PrimaryColor: "#2563eb"}
 
 // Branding holds per-site branding configuration.
 type Branding struct {
@@ -302,7 +257,7 @@ func (h *Handler) HandleSystemNavigation(c *gin.Context) {
 	// Group by module, skip child tables.
 	moduleMap := make(map[string][]DocTypeNavItem)
 	for _, dt := range doctypes {
-		if dt.IsChildTable || !canInspectDocType(c, dt.Name) {
+		if dt.IsChildTable || !canBrowseDocType(c, reg, dt.Name) {
 			continue
 		}
 		module := dt.Module
@@ -394,15 +349,17 @@ func (h *Handler) HandleSystemNavigation(c *gin.Context) {
 	}
 	// Fallback: read individual context values.
 	if user.Name == "" {
-		user.Name = c.GetString("user")
+		user.Name = currentUser(c)
 	}
 	if len(user.Roles) == 0 {
-		user.Roles = c.GetStringSlice("user_roles")
+		if execution, valid := requestExecution(c); valid {
+			user.Roles = execution.Actor().Roles
+		}
 	}
 	if user.Email == "" {
 		user.Email = c.GetString("user_email")
 		if user.Email == "" {
-			user.Email = c.GetString("user")
+			user.Email = currentUser(c)
 		}
 	}
 	if user.FullName == "" {
@@ -413,25 +370,41 @@ func (h *Handler) HandleSystemNavigation(c *gin.Context) {
 	}
 
 	experience := h.resolveTenantExperience(c)
+	hasConfiguration := len(doctypes) > 0 || len(views) > 0
 
+	runtimeServices := h.runtimeService(c, c.GetString("site_name"))
+	workflowOrchestrationAvailable := runtimeServices.WorkflowDefinitions != nil && runtimeServices.WorkflowInstances != nil
 	// Admin capabilities: only users with the admin role see the Administrator section.
 	// Each string matches the `name` of an admin item in the sidebar (Sidebar.tsx:adminItems).
 	adminCapabilities := []string{}
-	if userHasAdminRole(user.Roles) {
+	if execution, valid := requestExecution(c); valid && userHasAdminRole(execution.Actor().Roles) {
 		adminCapabilities = []string{
-			"doctypes", "permissions", "workflows", "versions",
+			"doctypes", "permissions", "versions",
 			"users", "scripts", "extensions", "secrets", "analytics", "views",
 		}
+		if workflowOrchestrationAvailable {
+			adminCapabilities = append(adminCapabilities, "automations")
+		}
+	}
+	supportedCapabilities := []string{}
+	if strings.EqualFold(c.GetString("site_db_type"), "mysql") && runtimeServices.Requests != nil {
+		supportedCapabilities = append(supportedCapabilities, "requests.inbox.v2")
+	}
+	if workflowOrchestrationAvailable {
+		supportedCapabilities = append(supportedCapabilities, "workflow.orchestration.v2")
 	}
 
 	c.JSON(http.StatusOK, Response{
 		Data: NavigationResponse{
-			Modules:           modules,
-			Views:             views,
-			Branding:          experience.Branding,
-			Copy:              experience.Copy,
-			User:              user,
-			AdminCapabilities: adminCapabilities,
+			Modules:               modules,
+			Views:                 views,
+			HasConfiguration:      hasConfiguration,
+			Branding:              experience.Branding,
+			Copy:                  experience.Copy,
+			User:                  user,
+			AdminCapabilities:     adminCapabilities,
+			CapabilitiesVersion:   "2",
+			SupportedCapabilities: supportedCapabilities,
 		},
 	})
 }
@@ -495,7 +468,7 @@ func (h *Handler) HandleSystemDoctypes(c *gin.Context) {
 	var result []doctypeWithStatus
 	for _, dt := range doctypes {
 		if !dt.IsChildTable {
-			if !canInspectDocType(c, dt.Name) {
+			if !canInspectDocType(c, reg, dt.Name) {
 				continue
 			}
 			status := "Draft"
@@ -509,26 +482,28 @@ func (h *Handler) HandleSystemDoctypes(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{Data: result})
 }
 
+// canBrowseDocType keeps create-only supporting records out of the everyday
+// navigation while still allowing their schema to be used by forms and bundles.
+func canBrowseDocType(c *gin.Context, registry *doctype.Registry, doctypeName string) bool {
+	execution, valid := requestExecution(c)
+	if !valid || registry == nil {
+		return false
+	}
+	_, err := policy.Decide(execution, registry, doctypeName, "read")
+	return err == nil
+}
+
 // canInspectDocType keeps schema discovery inside the same least-privilege
 // boundary as record access. Browser sessions retain the existing behavior;
 // delegated and extension credentials only see DocTypes present in their
 // permission grant.
-func canInspectDocType(c *gin.Context, doctypeName string) bool {
-	authType := c.GetString("auth_type")
-	if authType != "extension" && authType != "channel_session" {
-		return true
-	}
-	key := "extension_permissions"
-	if authType == "channel_session" {
-		key = "channel_permissions"
-	}
-	value, ok := c.Get(key)
-	permissions, valid := value.([]doctype.Permission)
-	if !ok || !valid {
+func canInspectDocType(c *gin.Context, registry *doctype.Registry, doctypeName string) bool {
+	execution, valid := requestExecution(c)
+	if !valid || registry == nil {
 		return false
 	}
 	for _, operation := range []string{"read", "create", "write", "delete", "submit", "cancel", "amend", "export", "import", "report"} {
-		if auth.HasExtensionPermission(permissions, doctypeName, operation) {
+		if _, err := policy.Decide(execution, registry, doctypeName, operation); err == nil {
 			return true
 		}
 	}
@@ -568,6 +543,15 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	activate := c.Query("activate") != "false"
 
 	store := configstore.NewStore(db, h.siteDialect(c))
+	candidate, collectErr := store.CollectSnapshot(reg, siteName)
+	if collectErr != nil {
+		internalError(c, "collecting candidate configuration", collectErr)
+		return
+	}
+	doctype.UpsertSnapshotDocType(candidate, &dt)
+	if rejectInvalidSnapshotReferences(c, candidate, reg) {
+		return
+	}
 
 	if activate {
 		if !requireSafeDoctypeChange(c, nil, singleDocTypeSlice(&dt)) {
@@ -620,7 +604,7 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 		}
 	}
 
-	createdBy := c.GetString("user")
+	createdBy := currentUser(c)
 	if createdBy == "" {
 		createdBy = "system"
 	}
@@ -657,12 +641,11 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	})
 
 	if activate {
-		if cfg := analytics.LoadCloudRelayConfig(); cfg != nil {
-			siteName := c.GetString("site_name")
-			analytics.SendCloudProductEvent(nil, *cfg, analytics.CloudProductEventDTO{
-				SiteID:    siteName,
-				AccountID: cfg.AccountID,
-				Kind:      "first_doctype",
+		siteName := c.GetString("site_name")
+		if relay := h.runtimeService(c, siteName).AnalyticsRelay; relay != nil {
+			relay.EnqueueProductEvent(analytics.CloudProductEventDTO{
+				SiteID: siteName,
+				Kind:   "first_doctype",
 				Properties: analytics.FirstDocTypePropertiesDTO{
 					DocType: dt.Name,
 					Site:    siteName,
@@ -707,6 +690,15 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 	}
 
 	store := configstore.NewStore(db, h.siteDialect(c))
+	candidate, collectErr := store.CollectSnapshot(reg, siteName)
+	if collectErr != nil {
+		internalError(c, "collecting candidate configuration", collectErr)
+		return
+	}
+	doctype.UpsertSnapshotDocType(candidate, &newDT)
+	if rejectInvalidSnapshotReferences(c, candidate, reg) {
+		return
+	}
 	// Activate?
 	activate := c.Query("activate") != "false"
 	status := "Draft"
@@ -747,7 +739,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 			return
 		}
 	}
-	createdBy := c.GetString("user")
+	createdBy := currentUser(c)
 	if createdBy == "" {
 		createdBy = "system"
 	}
@@ -782,7 +774,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 // DELETE /api/system/doctype/:doctype?cleanup=config|full
 //
 //	cleanup=config (default): Delete config rows only. Business tables, analytics, permissions survive.
-//	cleanup=full: Full cleanup — also deletes analytics, permissions, workflows, and clears Link fields.
+//	cleanup=full: Full cleanup — also deletes analytics and permissions, and clears Link fields.
 //	cleanup=none: Soft delete — only remove from registry.
 func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 	doctypeName := c.Param("doctype")
@@ -803,24 +795,60 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 		return
 	}
 
-	// Delete from config tables (always).
+	// Delete from config tables and advance the tenant config revision in one
+	// transaction so management package requests cannot miss this mutation.
 	store := configstore.NewStore(db, h.siteDialect(c))
-	if _, err := db.Exec(h.siteQuery(c, "DELETE FROM _kora_field WHERE parent = ?"), doctypeName); err != nil {
+	candidate, collectErr := store.CollectSnapshot(reg, c.GetString("site_name"))
+	if collectErr != nil {
+		internalError(c, "collecting candidate configuration", collectErr)
+		return
+	}
+	remaining := candidate.DocTypes[:0]
+	for _, candidateDoc := range candidate.DocTypes {
+		if candidateDoc != nil && !strings.EqualFold(candidateDoc.Name, doctypeName) {
+			remaining = append(remaining, candidateDoc)
+		}
+	}
+	candidate.DocTypes = remaining
+	validationRegistry := doctype.NewRegistry()
+	for _, existing := range reg.All() {
+		if existing != nil && !strings.EqualFold(existing.Name, doctypeName) {
+			copy := *existing
+			validationRegistry.Register(&copy)
+		}
+	}
+	if rejectInvalidSnapshotReferences(c, candidate, validationRegistry) {
+		return
+	}
+	deleteTx, err := db.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		internalError(c, "beginning doctype deletion", err)
+		return
+	}
+	defer deleteTx.Rollback()
+	if _, err := deleteTx.Exec(h.siteQuery(c, "DELETE FROM _kora_field WHERE parent = ?"), doctypeName); err != nil {
 		internalError(c, "deleting fields", err)
 		return
 	}
-	if _, err := db.Exec(h.siteQuery(c, "DELETE FROM _kora_doctype WHERE name = ?"), doctypeName); err != nil {
+	if _, err := deleteTx.Exec(h.siteQuery(c, "DELETE FROM _kora_doctype WHERE name = ?"), doctypeName); err != nil {
 		internalError(c, "deleting doctype", err)
 		return
 	}
+	if err := configstore.BumpConfigRevisionTx(deleteTx, h.siteDialect(c)); err != nil {
+		internalError(c, "updating tenant config revision", err)
+		return
+	}
+	if err := deleteTx.Commit(); err != nil {
+		internalError(c, "committing doctype deletion", err)
+		return
+	}
 
-	// Full cleanup: also clean analytics, permissions, workflows, and dangling Link fields.
+	// Full cleanup: also clean analytics, permissions, and dangling Link fields.
 	if cleanup == "full" {
 		// Clean analytics rollup tables.
 		for _, table := range []string{
 			"_kora_analytics_daily",
 			"_kora_analytics_monthly",
-			"_kora_analytics_workflow",
 			"_kora_analytics_events",
 			"_kora_analytics_metric",
 		} {
@@ -830,13 +858,18 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 		}
 
 		// Clean permissions.
-		if _, err := db.Exec(h.siteQuery(c, "DELETE FROM _kora_permission WHERE doctype = ?"), doctypeName); err != nil {
-			slog.Warn("permission cleanup failed", "doctype", doctypeName, "error", err)
-		}
-
-		// Clean workflows.
-		if _, err := db.Exec(h.siteQuery(c, "DELETE FROM _kora_workflow WHERE document_type = ?"), doctypeName); err != nil {
-			slog.Warn("workflow cleanup failed", "doctype", doctypeName, "error", err)
+		if tx, txErr := db.BeginTx(c.Request.Context(), nil); txErr != nil {
+			slog.Warn("permission cleanup transaction failed", "doctype", doctypeName, "error", txErr)
+		} else {
+			if _, deleteErr := tx.Exec(h.siteQuery(c, "DELETE FROM _kora_permission WHERE doctype = ?"), doctypeName); deleteErr != nil {
+				_ = tx.Rollback()
+				slog.Warn("permission cleanup failed", "doctype", doctypeName, "error", deleteErr)
+			} else if bumpErr := configstore.BumpAuthorizationRevisionTx(tx, h.siteDialect(c), true, false); bumpErr != nil {
+				_ = tx.Rollback()
+				slog.Warn("permission revision update failed", "doctype", doctypeName, "error", bumpErr)
+			} else if commitErr := tx.Commit(); commitErr != nil {
+				slog.Warn("permission cleanup commit failed", "doctype", doctypeName, "error", commitErr)
+			}
 		}
 
 		// Clear dangling Link fields in OTHER doctypes that pointed to this one.
@@ -855,11 +888,11 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 
 	// Create config version recording the deletion.
 	snapshot, _ := store.CollectSnapshot(reg, c.GetString("site_name"))
-	createdBy := c.GetString("user")
+	createdBy := currentUser(c)
 	if createdBy == "" {
 		createdBy = "system"
 	}
-	_, _, err := store.CreateConfigVersion(
+	_, _, err = store.CreateConfigVersion(
 		c.GetString("site_name"), createdBy, "Deleted "+doctypeName+" via web", "Active", snapshot,
 	)
 	if err != nil {
@@ -982,12 +1015,12 @@ func (h *Handler) HandleSystemDoctypeReferences(c *gin.Context) {
 func (h *Handler) HandleConfigVersionPreview(c *gin.Context) {
 	versionID := c.Param("id")
 	db := h.siteTx(c).DB
-	reg := h.siteRegistry(c)
 
-	var configJSON, siteName, currentStatus, changeList string
+	var configJSON, siteName, currentStatus, baseVersionID string
+	var version int
 	err := db.QueryRow(
-		h.siteQuery(c, "SELECT config, site, status, COALESCE(change_list, '') FROM _kora_config_version WHERE id = ?"), versionID,
-	).Scan(&configJSON, &siteName, &currentStatus, &changeList)
+		h.siteQuery(c, "SELECT config, site, status, COALESCE(base_version_id, ''), version FROM _kora_config_version WHERE id = ?"), versionID,
+	).Scan(&configJSON, &siteName, &currentStatus, &baseVersionID, &version)
 	if err != nil {
 		writeConfigVersionReadError(c, "loading config version preview", err)
 		return
@@ -1009,67 +1042,52 @@ func (h *Handler) HandleConfigVersionPreview(c *gin.Context) {
 		return
 	}
 
-	var preview map[string]any
-
-	// If a stored change_list exists, use it directly (no re-computation).
-	if changeList != "" {
-		var fullDiff doctype.ConfigDiffFull
-		if parseErr := json.Unmarshal([]byte(changeList), &fullDiff); parseErr == nil {
-			preview = map[string]any{
-				"version_id":              versionID,
-				"status":                  currentStatus,
-				"doctypes_in_snapshot":    len(snapshot.DocTypes),
-				"roles_in_snapshot":       len(snapshot.Roles),
-				"permissions_in_snapshot": len(snapshot.Permissions),
-				"workflows_in_snapshot":   len(snapshot.Workflows),
-				"diff_summary":            fullDiff.Summary(),
-				"is_breaking":             fullDiff.Doctypes != nil && fullDiff.Doctypes.IsBreaking,
-				"newer_active_versions":   newerActiveCount,
-				"section_changes":         fullDiff.SectionChanges,
-				"change_list_version":     "v1",
-				"warning":                 "",
-			}
-			if newerActiveCount > 0 {
-				preview["warning"] = fmt.Sprintf("Activating this version will REVERT %d newer active version(s). Changes made since this version was created will be lost.", newerActiveCount)
-			}
-			if fullDiff.Doctypes != nil && fullDiff.Doctypes.IsBreaking {
-				if preview["warning"] != "" {
-					preview["warning"] = preview["warning"].(string) + " This version has BREAKING changes (field removals, type changes)."
-				} else {
-					preview["warning"] = "This version has BREAKING changes (field removals, type changes)."
-				}
-			}
-			c.JSON(http.StatusOK, Response{Data: preview})
+	// Review the target snapshot against the version it was based on so roles,
+	// permissions, views, and tables are all visible.
+	var baseConfig string
+	var baseErr error
+	if baseVersionID != "" {
+		baseErr = db.QueryRow(h.siteQuery(c, "SELECT config FROM _kora_config_version WHERE id = ? AND site = ?"), baseVersionID, siteName).Scan(&baseConfig)
+		if baseErr != nil && !errors.Is(baseErr, sql.ErrNoRows) {
+			internalError(c, "loading config version base", baseErr)
 			return
 		}
 	}
-
-	// Fallback: compute diff from current registry (for old versions without change_list).
-	currentDoctypes := make([]*doctype.DocType, 0)
-	for _, name := range reg.Names() {
-		if dt := reg.Get(name); dt != nil {
-			currentDoctypes = append(currentDoctypes, dt)
+	if baseConfig == "" {
+		baseErr = db.QueryRow(h.siteQuery(c, "SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' AND version < ? ORDER BY version DESC LIMIT 1"), siteName, version).Scan(&baseConfig)
+		if baseErr != nil && !errors.Is(baseErr, sql.ErrNoRows) {
+			internalError(c, "loading active config version for diff", baseErr)
+			return
 		}
 	}
-	diff := doctype.DiffConfigs(currentDoctypes, snapshot.DocTypes)
+	baseSnapshot := &doctype.ConfigSnapshot{}
+	if baseConfig != "" {
+		baseSnapshot, err = doctype.ParseConfig(baseConfig)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "version.parse_failed", "Failed to parse the base version", nil)
+			return
+		}
+	}
+	diff := doctype.DiffFullSnapshots(baseSnapshot, snapshot)
 
-	preview = map[string]any{
+	preview := map[string]any{
 		"version_id":              versionID,
 		"status":                  currentStatus,
 		"doctypes_in_snapshot":    len(snapshot.DocTypes),
 		"roles_in_snapshot":       len(snapshot.Roles),
 		"permissions_in_snapshot": len(snapshot.Permissions),
-		"workflows_in_snapshot":   len(snapshot.Workflows),
 		"diff_summary":            diff.Summary(),
-		"is_breaking":             diff.IsBreaking,
+		"is_breaking":             diff.Doctypes.IsBreaking,
 		"newer_active_versions":   newerActiveCount,
-		"change_list_version":     "legacy",
+		"changes":                 diff.Doctypes.Changes,
+		"section_changes":         diff.SectionChanges,
+		"change_list_version":     "full-snapshot",
 		"warning":                 "",
 	}
 	if newerActiveCount > 0 {
 		preview["warning"] = fmt.Sprintf("Activating this version will REVERT %d newer active version(s). Changes made since this version was created will be lost.", newerActiveCount)
 	}
-	if diff.IsBreaking {
+	if diff.Doctypes.IsBreaking {
 		if preview["warning"] != "" {
 			preview["warning"] = preview["warning"].(string) + " This version has BREAKING changes (field removals, type changes)."
 		} else {
@@ -1110,6 +1128,59 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	}
 
 	if currentStatus != "Draft" {
+		op, journalErr := configstore.LoadActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate")
+		if journalErr != nil && !errors.Is(journalErr, sql.ErrNoRows) {
+			internalError(c, "loading config activation recovery state", journalErr)
+			return
+		}
+		if journalErr == nil && (op.Phase == configstore.ActivationActivated || op.Phase == configstore.ActivationCompleted) {
+			if op.Phase == configstore.ActivationActivated {
+				recoveredSnapshot, parseErr := doctype.ParseConfig(configJSON)
+				if parseErr != nil {
+					internalError(c, "parsing recovered config activation", parseErr)
+					return
+				}
+				previousDoctypes := reg.All()
+				existing := make(map[string]bool, len(previousDoctypes))
+				for _, dt := range previousDoctypes {
+					if dt != nil {
+						existing[dt.Name] = true
+					}
+				}
+				configstore.ApplySnapshotToRegistry(recoveredSnapshot, reg)
+				if worker := h.siteAnalyticsWorker(c); worker != nil {
+					worker.InvalidateAllMetrics()
+				}
+				if bus := h.runtimeService(c, siteName).EventBus; bus != nil {
+					for _, dt := range recoveredSnapshot.DocTypes {
+						if dt == nil || strings.TrimSpace(dt.Name) == "" {
+							continue
+						}
+						busOp := eventstream.EventUpdate
+						if !existing[dt.Name] {
+							busOp = eventstream.EventInsert
+						}
+						_ = bus.Publish(eventstream.ChangeEvent{
+							ID:   fmt.Sprintf("config-%s-%s", versionID, strings.ToLower(strings.ReplaceAll(dt.Name, " ", "-"))),
+							Site: siteName, Doctype: dt.Name, DocName: versionID, Operation: eventstream.EventOp("config_activation"),
+							Timestamp: time.Now().UTC(), ModifiedBy: currentUser(c),
+							Data: map[string]any{"config_version_id": versionID, "new": busOp == eventstream.EventInsert, "source": "config_activation"},
+						})
+					}
+				}
+				if len(previousDoctypes) > 0 {
+					if err := analytics.MigrateRollupMetrics(db, h.siteDialect(c), siteName, previousDoctypes, recoveredSnapshot.DocTypes); err != nil {
+						slog.Error("recovered analytics rollup migration failed", "site", siteName, "error", err)
+					}
+				}
+				if err := configstore.UpdateActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationCompleted, op.DDLPlan, op.RecoveryPlan, ""); err != nil {
+					internalError(c, "completing recovered config activation", err)
+					return
+				}
+			}
+			c.JSON(http.StatusOK, Response{Data: map[string]any{"status": "Active", "recovered": true}})
+			return
+		}
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: map[string]string{"message": "Only Draft versions can be activated"},
 		})
@@ -1189,6 +1260,28 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		})
 		return
 	}
+	if len(snapshot.PublishedBindings) > 0 {
+		_, blockers, bindingErrors := validateConfigurationPublishedBindings(h, c, snapshot.PublishedBindings, snapshot.Views)
+		if len(blockers) > 0 || len(bindingErrors) > 0 {
+			writeError(c, http.StatusConflict, "configuration.published_bindings_stale", "Published module bindings changed or are unavailable; prepare a new configuration draft", map[string]any{"blockers": blockers, "errors": bindingErrors})
+			return
+		}
+	}
+	if rejectInvalidSnapshotReferences(c, snapshot, reg) {
+		return
+	}
+
+	journal, err := configstore.EnsureActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate", snapshot)
+	if err != nil {
+		internalError(c, "persisting config activation operation", err)
+		return
+	}
+	if journal.Phase == configstore.ActivationRequested {
+		if err := configstore.UpdateActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationSnapshot, "", "replan-from-live-schema", ""); err != nil {
+			internalError(c, "recording saved config activation snapshot", err)
+			return
+		}
+	}
 
 	store := configstore.NewStore(db, h.siteDialect(c))
 
@@ -1204,120 +1297,105 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		}
 	}
 
-	// Compute schema changes before opening the write transaction. Inspection
-	// uses *sql.DB; doing it after Begin can deadlock when the site pool has one
-	// connection because the transaction already holds that connection.
-	// Prefer stored change_list for precise DDL generation; fall back to
-	// live schema diff for legacy versions without a stored change_list.
-	var ddlStatements []string
+	// Recompute the schema plan from the live database on every attempt. This
+	// makes a retry safe after a non-transactional DDL statement succeeded but
+	// the process stopped before recording activation. Field removals remain
+	// quarantine operations, but are omitted once the source column has moved.
 	dbName := h.siteDatabaseName(c, db)
-
-	if changeList != "" {
-		var fullDiff doctype.ConfigDiffFull
-		if parseErr := json.Unmarshal([]byte(changeList), &fullDiff); parseErr == nil {
-			slog.Info("activation: generating DDL from stored change_list", "version", versionID)
-			var doctypeChanges []doctype.ConfigChange
-			if fullDiff.Doctypes != nil {
-				doctypeChanges = fullDiff.Doctypes.Changes
-			}
-			changes := doctype.ConvertConfigChanges(doctypeChanges, fullDiff.SectionChanges, snapshot)
-			ddlStatements, err = doctype.GenerateDDLFromDiff(changes, h.siteDialect(c))
-			if err != nil {
-				internalError(c, "generating schema changes for activation", err)
-				return
-			}
-			for _, stmt := range ddlStatements {
-				slog.Info("activation DDL (change_list)", "sql", stmt)
-			}
-		} else {
-			slog.Warn("activation: stored change_list parse failed, falling back to live schema diff",
-				"version", versionID, "error", parseErr)
-			changeList = ""
+	ddlStatements, err := schema.PlanSnapshotActivation(db, dbName, h.siteDialect(c), reg, snapshot, changeList, versionID)
+	if err != nil {
+		internalError(c, "planning config activation DDL", err)
+		return
+	}
+	planJSON, err := json.Marshal(ddlStatements)
+	if err != nil {
+		internalError(c, "encoding config activation plan", err)
+		return
+	}
+	if err := configstore.UpdateActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationApplying, string(planJSON), "replan-from-live-schema", ""); err != nil {
+		internalError(c, "recording config activation plan", err)
+		return
+	}
+	if err := schema.ApplySnapshotActivationDDL(c.Request.Context(), db, h.siteDialect(c), ddlStatements); err != nil {
+		if journalErr := configstore.UpdateActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationApplying, string(planJSON), "replan-from-live-schema", err.Error()); journalErr != nil {
+			err = fmt.Errorf("schema migration failed: %w; recording failure in config activation journal: %v", err, journalErr)
 		}
+		writeError(c, http.StatusInternalServerError, "schema.migration_failed", "Schema migration failed", map[string]any{"error": err.Error()})
+		return
+	}
+	if err := configstore.UpdateActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationValidated, string(planJSON), "replan-from-live-schema", ""); err != nil {
+		internalError(c, "recording validated config activation", err)
+		return
 	}
 
-	if changeList == "" {
-		liveSchema, schemaErr := schema.LoadLiveSchema(db, dbName, h.siteDialect(c))
-		if schemaErr != nil {
-			internalError(c, "loading live schema for config activation", schemaErr)
-			return
-		}
-		schemaDiff := schema.ComputeDiff(snapshot.DocTypes, reg.Get, liveSchema, h.siteDialect(c))
-		if !schemaDiff.IsEmpty() {
-			ddlStatements = schemaDiff.GenerateDDL(snapshot.DocTypes, reg.Get, h.siteDialect(c))
-			for _, stmt := range ddlStatements {
-				slog.Info("activation DDL (live diff)", "sql", stmt)
-			}
-		}
-	}
-
-	// Begin the activation transaction only after read-only schema inspection.
-	// Config writes and transactional DDL remain atomic from this point onward.
+	// Begin the config/version transaction after the independently committed DDL
+	// plan has been journaled and validated.
 	tx, err := db.Begin()
 	if err != nil {
+		err = rollbackConfigOperationTx(nil, db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationValidated, string(planJSON), "replan-from-live-schema", err)
 		internalError(c, "beginning activation transaction", err)
 		return
 	}
 	defer tx.Rollback() // no-op after successful commit
+	recordActivationFailure := func(cause error) error {
+		return rollbackConfigOperationTx(tx, db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationValidated, string(planJSON), "replan-from-live-schema", cause)
+	}
 
 	// Step 1: Save all config to DB within the transaction and rebuild the registry.
 	if err := store.ActivateSnapshot(tx, snapshot, siteName, h.siteDialect(c)); err != nil {
 		slog.Error("activation: config write failed — rolling back", "version", versionID, "error", err)
+		err = recordActivationFailure(err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: map[string]string{"message": "Config write failed: " + err.Error()},
 		})
 		return
 	}
 
-	// Step 2: Apply DDL.
-	// LibSQL: use ExecuteBatch (SQLite DDL auto-commits, cannot be inside a tx).
-	// MySQL: use ApplyDDLTx (wrapped in the activation transaction for rollback).
-	if len(ddlStatements) > 0 {
-		if h.siteDialect(c).DriverName() == "libsql" {
-			if err := h.siteDialect(c).ExecuteBatch(db, ddlStatements); err != nil {
-				slog.Error("activation: LibSQL DDL failed", "version", versionID, "error", err)
-				writeError(c, http.StatusInternalServerError, "schema.migration_failed", "Schema migration failed", map[string]any{"error": err.Error()})
-				return
-			}
-		} else {
-			if err := configstore.ApplyDDLTx(tx, ddlStatements); err != nil {
-				slog.Error("activation: DDL failed — rolling back", "version", versionID, "error", err)
-				writeError(c, http.StatusInternalServerError, "schema.migration_failed", "Schema migration failed", map[string]any{"error": err.Error()})
-				return
-			}
-		}
-	}
-
 	// Keep config rows, schema, and version history in one transaction. The
 	// newly Active record supersedes prior active records transactionally.
-	createdBy := c.GetString("user")
+	createdBy := currentUser(c)
 	if createdBy == "" {
 		createdBy = "system"
 	}
 	if _, _, err := store.CreateConfigVersionTx(tx, siteName, createdBy, "Activated version "+versionID, "Active", snapshot, baseVersionID); err != nil {
-		internalError(c, "recording active config version", err)
+		internalError(c, "recording active config version", recordActivationFailure(err))
 		return
 	}
 	draftResult, err := tx.Exec(h.siteQuery(c, "UPDATE _kora_config_version SET status = 'Superseded', is_active = ? WHERE site = ? AND id = ? AND status = 'Draft'"), 0, siteName, versionID)
 	if err != nil {
-		internalError(c, "marking activated draft as superseded", err)
+		internalError(c, "marking activated draft as superseded", recordActivationFailure(err))
 		return
 	}
 	if affected, err := draftResult.RowsAffected(); err != nil {
-		internalError(c, "verifying activated draft status", err)
+		internalError(c, "verifying activated draft status", recordActivationFailure(err))
 		return
 	} else if affected != 1 {
+		cause := fmt.Errorf("draft state changed while activation was in progress")
+		if journalErr := recordActivationFailure(cause); journalErr != nil && !errors.Is(journalErr, cause) {
+			internalError(c, "recording config activation conflict", journalErr)
+			return
+		}
 		writeError(c, http.StatusConflict, "version.state_changed", "Draft changed while activation was in progress; refresh and try again", nil)
 		return
 	}
 	if err := store.SupersedeSiblingDraftsTx(tx, siteName, versionID, baseVersionID); err != nil {
-		internalError(c, "superseding sibling config drafts", err)
+		internalError(c, "superseding sibling config drafts", recordActivationFailure(err))
+		return
+	}
+	if err := configstore.UpdateActivationOperationTx(tx, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationActivated, string(planJSON), "replan-from-live-schema"); err != nil {
+		internalError(c, "recording activated config operation", recordActivationFailure(err))
 		return
 	}
 
 	// Commit config, schema, and version state together.
 	if err := tx.Commit(); err != nil {
-		internalError(c, "committing activation transaction", err)
+		internalError(c, "committing activation transaction", recordActivationFailure(err))
+		return
+	}
+	if err := configstore.UpdateActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationCompleted, string(planJSON), "replan-from-live-schema", ""); err != nil {
+		// The config/version transaction committed with phase=activated. A retry
+		// recognizes that durable state and finishes this final transition.
+		internalError(c, "finalizing config activation journal", err)
 		return
 	}
 	configstore.ApplySnapshotToRegistry(snapshot, reg)
@@ -1333,15 +1411,15 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 			if dt == nil || strings.TrimSpace(dt.Name) == "" {
 				continue
 			}
-			op := analytics.EventUpdate
+			op := eventstream.EventUpdate
 			if !existingDoctypes[dt.Name] {
-				op = analytics.EventInsert
+				op = eventstream.EventInsert
 			}
-			_ = bus.Publish(analytics.ChangeEvent{
+			_ = bus.Publish(eventstream.ChangeEvent{
 				ID:   fmt.Sprintf("config-%s-%s", versionID, strings.ToLower(strings.ReplaceAll(dt.Name, " ", "-"))),
-				Site: siteName, Doctype: dt.Name, DocName: versionID, Operation: analytics.EventOp("config_activation"),
-				Timestamp: time.Now().UTC(), ModifiedBy: c.GetString("user"),
-				Data: map[string]any{"config_version_id": versionID, "new": op == analytics.EventInsert, "source": "config_activation"},
+				Site: siteName, Doctype: dt.Name, DocName: versionID, Operation: eventstream.EventOp("config_activation"),
+				Timestamp: time.Now().UTC(), ModifiedBy: currentUser(c),
+				Data: map[string]any{"config_version_id": versionID, "new": op == eventstream.EventInsert, "source": "config_activation"},
 			})
 		}
 	}
@@ -1355,7 +1433,9 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	// Migrate analytics rollups after commit, using the exact in-memory schema
 	// that was active before this snapshot was installed.
 	if len(previousDoctypes) > 0 {
-		analytics.MigrateRollupMetrics(db, siteName, previousDoctypes, snapshot.DocTypes)
+		if err := analytics.MigrateRollupMetrics(db, h.siteDialect(c), siteName, previousDoctypes, snapshot.DocTypes); err != nil {
+			slog.Error("analytics rollup migration failed", "site", siteName, "error", err)
+		}
 	}
 
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "activated", "status": "Active"}})
@@ -1485,79 +1565,193 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 		})
 		return
 	}
-
-	store := configstore.NewStore(db, h.siteDialect(c))
-
-	// Compute the rollback DDL by comparing current registry state against
-	// the target snapshot. This produces quarantine-aware DDL that renames
-	// tables/columns instead of dropping them.
-	// Generate quarantine-aware rollback DDL from the snapshot comparison.
-	rollbackDDL := doctype.RollbackDDLForVersion(reg, snapshot, h.siteDialect(c))
-	for _, stmt := range rollbackDDL {
-		slog.Info("rollback DDL", "sql", stmt)
+	dialect := h.siteDialect(c)
+	var baseActiveVersionID string
+	activeErr := db.QueryRow(h.siteQuery(c, "SELECT id FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1"), siteName).Scan(&baseActiveVersionID)
+	if activeErr != nil && !errors.Is(activeErr, sql.ErrNoRows) {
+		internalError(c, "checking active version before rollback", activeErr)
+		return
 	}
-
-	// Begin a transaction for the rollback.
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(idempotencyKey) > 256 {
+		badRequestError(c, "validation.invalid_idempotency_key", "Idempotency-Key must be at most 256 bytes", nil)
+		return
+	}
+	if idempotencyKey == "" {
+		idempotencyKey = contract.NewOperationID()
+	}
+	operationID := restoreOperationID(siteName, versionID, idempotencyKey)
+	operation, err := configstore.EnsureActivationOperation(db, dialect, siteName, operationID, "rollback", snapshot)
+	if err != nil {
+		internalError(c, "persisting config rollback operation", err)
+		return
+	}
+	var journalData restoreJournalData
+	if operation.RecoveryPlan != "" {
+		if err := json.Unmarshal([]byte(operation.RecoveryPlan), &journalData); err != nil {
+			internalError(c, "reading config rollback recovery plan", err)
+			return
+		}
+		if journalData.TargetVersionID != versionID {
+			writeError(c, http.StatusConflict, "operation.identity_conflict", "Idempotency key is already bound to another rollback target", nil)
+			return
+		}
+	} else {
+		journalData = restoreJournalData{TargetVersionID: versionID, BaseActiveVersionID: baseActiveVersionID}
+	}
+	if operation.Phase == configstore.ActivationActivated || operation.Phase == configstore.ActivationCompleted {
+		if operation.Phase == configstore.ActivationActivated {
+			if journalData.ResultVersionID == "" {
+				internalError(c, "config rollback journal lacks committed result identity", fmt.Errorf("operation %s has no result version", operationID))
+				return
+			}
+			if baseActiveVersionID == journalData.ResultVersionID {
+				previousDoctypes := reg.All()
+				configstore.ApplySnapshotToRegistry(snapshot, reg)
+				if worker := h.siteAnalyticsWorker(c); worker != nil {
+					worker.InvalidateAllMetrics()
+				}
+				if len(previousDoctypes) > 0 {
+					if err := analytics.MigrateRollupMetrics(db, dialect, siteName, previousDoctypes, snapshot.DocTypes); err != nil {
+						slog.Error("recovered rollback analytics migration failed", "site", siteName, "error", err)
+					}
+				}
+			}
+			if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "rollback", configstore.ActivationCompleted, operation.DDLPlan, operation.RecoveryPlan, ""); err != nil {
+				internalError(c, "completing recovered config rollback", err)
+				return
+			}
+		}
+		c.JSON(http.StatusOK, Response{Data: map[string]any{"message": "rolled back", "status": "Active", "operation_id": idempotencyKey, "recovered": true}})
+		return
+	}
+	if journalData.BaseActiveVersionID != baseActiveVersionID {
+		writeError(c, http.StatusConflict, "version.state_changed", "The active config changed while rollback was pending; refresh and start a new rollback", map[string]any{"expected_active_version_id": journalData.BaseActiveVersionID, "active_version_id": baseActiveVersionID})
+		return
+	}
+	if operation.Phase == configstore.ActivationRequested {
+		journalJSON, _ := json.Marshal(journalData)
+		if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "rollback", configstore.ActivationSnapshot, "", string(journalJSON), ""); err != nil {
+			internalError(c, "recording config rollback snapshot", err)
+			return
+		}
+	}
+	previousDoctypes := reg.All()
+	liveSchema, err := schema.LoadLiveSchema(db, h.siteDatabaseName(c, db), dialect)
+	if err != nil {
+		internalError(c, "loading live schema for config rollback", err)
+		return
+	}
+	rollbackDDL, err := buildConfigRestoreDDL(previousDoctypes, snapshot, liveSchema, dialect, operationID)
+	if err != nil {
+		writeError(c, http.StatusConflict, "schema.rollback_ambiguous", "Config rollback needs manual schema recovery", map[string]any{"error": err.Error()})
+		return
+	}
+	planJSON, err := json.Marshal(rollbackDDL)
+	if err != nil {
+		internalError(c, "encoding config rollback plan", err)
+		return
+	}
+	journalJSON, err := json.Marshal(journalData)
+	if err != nil {
+		internalError(c, "encoding config rollback identity", err)
+		return
+	}
+	if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "rollback", configstore.ActivationApplying, string(planJSON), string(journalJSON), ""); err != nil {
+		internalError(c, "recording config rollback DDL plan", err)
+		return
+	}
+	if len(rollbackDDL) > 0 {
+		if dialect.DriverName() == "libsql" {
+			err = dialect.ExecuteBatch(db, rollbackDDL)
+		} else {
+			for _, statement := range rollbackDDL {
+				if _, err = db.Exec(statement); err != nil {
+					break
+				}
+			}
+		}
+		if err != nil {
+			if journalErr := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "rollback", configstore.ActivationApplying, string(planJSON), string(journalJSON), err.Error()); journalErr != nil {
+				err = fmt.Errorf("rollback DDL failed: %w; recording failure in recovery journal: %v", err, journalErr)
+			}
+			writeError(c, http.StatusInternalServerError, "schema.rollback_failed", "Rollback DDL failed", map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "rollback", configstore.ActivationValidated, string(planJSON), string(journalJSON), ""); err != nil {
+		internalError(c, "recording validated config rollback", err)
+		return
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		internalError(c, "beginning rollback transaction", err)
 		return
 	}
 	defer tx.Rollback()
-
-	// Apply quarantine-aware DDL. LibSQL uses ExecuteBatch (DDL auto-commits).
-	if len(rollbackDDL) > 0 {
-		if h.siteDialect(c).DriverName() == "libsql" {
-			if err := h.siteDialect(c).ExecuteBatch(db, rollbackDDL); err != nil {
-				slog.Error("rollback: LibSQL DDL failed", "version", versionID, "error", err)
-				writeError(c, http.StatusInternalServerError, "schema.rollback_failed", "Rollback DDL failed", map[string]any{"error": err.Error()})
-				return
-			}
-		} else {
-			if err := configstore.ApplyDDLTx(tx, rollbackDDL); err != nil {
-				slog.Error("rollback: DDL failed — rolling back", "version", versionID, "error", err)
-				writeError(c, http.StatusInternalServerError, "schema.rollback_failed", "Rollback DDL failed", map[string]any{"error": err.Error()})
-				return
-			}
-		}
+	activeQuery := "SELECT id FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1"
+	if dialect.DriverName() != "libsql" {
+		activeQuery += " FOR UPDATE"
 	}
-
-	// Save the target version's config to DB within the transaction.
-	if err := store.ActivateSnapshot(tx, snapshot, siteName, h.siteDialect(c)); err != nil {
+	var lockedActiveVersionID string
+	activeErr = tx.QueryRow(h.siteQuery(c, activeQuery), siteName).Scan(&lockedActiveVersionID)
+	if activeErr != nil && !errors.Is(activeErr, sql.ErrNoRows) {
+		internalError(c, "locking active config version for rollback", activeErr)
+		return
+	}
+	if lockedActiveVersionID != journalData.BaseActiveVersionID {
+		writeError(c, http.StatusConflict, "version.state_changed", "The active config changed while rollback was being prepared", map[string]any{"expected_active_version_id": journalData.BaseActiveVersionID, "active_version_id": lockedActiveVersionID})
+		return
+	}
+	store := configstore.NewStore(db, dialect)
+	if err := store.ActivateSnapshot(tx, snapshot, siteName, dialect); err != nil {
 		internalError(c, "saving config during rollback", err)
 		return
 	}
-	createdBy := c.GetString("user")
+	createdBy := currentUser(c)
 	if createdBy == "" {
 		createdBy = "system"
 	}
-	if _, _, err := store.CreateConfigVersionTx(tx, siteName, createdBy, "Rollback to version "+versionID, "Active", snapshot, ""); err != nil {
+	resultVersionID, _, err := store.CreateConfigVersionTx(tx, siteName, createdBy, "Rollback to version "+versionID, "Active", snapshot, journalData.BaseActiveVersionID)
+	if err != nil {
 		internalError(c, "recording active config version during rollback", err)
 		return
 	}
-
-	// Commit the transaction.
+	journalData.ResultVersionID = resultVersionID
+	journalJSON, err = json.Marshal(journalData)
+	if err != nil {
+		internalError(c, "encoding committed rollback identity", err)
+		return
+	}
+	if err := configstore.UpdateActivationOperationTx(tx, dialect, siteName, operationID, "rollback", configstore.ActivationActivated, string(planJSON), string(journalJSON)); err != nil {
+		internalError(c, "recording activated config rollback", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		internalError(c, "committing rollback transaction", err)
 		return
 	}
 	configstore.ApplySnapshotToRegistry(snapshot, reg)
-
-	// Invalidate analytics worker — rollback restores old schema.
-	if w := h.siteAnalyticsWorker(c); w != nil {
-		w.InvalidateAllMetrics()
+	if worker := h.siteAnalyticsWorker(c); worker != nil {
+		worker.InvalidateAllMetrics()
 	}
-
-	// Collect quarantine info from the rollback DDL for user transparency.
+	if len(previousDoctypes) > 0 {
+		if err := analytics.MigrateRollupMetrics(db, dialect, siteName, previousDoctypes, snapshot.DocTypes); err != nil {
+			slog.Error("rollback analytics rollup migration failed", "site", siteName, "error", err)
+		}
+	}
+	if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "rollback", configstore.ActivationCompleted, string(planJSON), string(journalJSON), ""); err != nil {
+		internalError(c, "finalizing config rollback journal", err)
+		return
+	}
 	var quarantined []string
-	for _, stmt := range rollbackDDL {
-		if strings.Contains(stmt, "_dropquar_") || strings.Contains(stmt, "RENAME") {
-			quarantined = append(quarantined, stmt)
+	for _, statement := range rollbackDDL {
+		if strings.Contains(statement, "_dropquar_") || strings.Contains(statement, "RENAME") {
+			quarantined = append(quarantined, statement)
 		}
 	}
 	c.JSON(http.StatusOK, Response{Data: map[string]any{
-		"message":     "rolled back",
-		"status":      "Active",
+		"message": "rolled back", "status": "Active", "operation_id": idempotencyKey,
 		"quarantined": quarantined,
 	}})
 }
@@ -1565,15 +1759,44 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 // HandleConfigVersionSnapshot returns the full ConfigSnapshot for a version,
 // including ready-to-use YAML pack files for the Template Pack workflow.
 // GET /api/system/config/versions/:id/snapshot
+func (h *Handler) HandleConfigHeadSnapshot(c *gin.Context) {
+	var versionID string
+	err := h.siteTx(c).DB.QueryRow(h.siteQuery(c,
+		"SELECT id FROM _kora_config_version WHERE status IN ('Draft', 'Active') ORDER BY CASE WHEN status = 'Draft' THEN 0 ELSE 1 END, version DESC LIMIT 1",
+	)).Scan(&versionID)
+	if err != nil {
+		writeConfigVersionReadError(c, "loading current config version", err)
+		return
+	}
+	c.Params = append(c.Params, gin.Param{Key: "id", Value: versionID})
+	h.HandleConfigVersionSnapshot(c)
+}
+
+// HandleActiveConfigSnapshot returns only the configuration version currently
+// activated in the tenant runtime. Consumers that need pending drafts must use
+// the explicit head endpoint and inspect its status.
+func (h *Handler) HandleActiveConfigSnapshot(c *gin.Context) {
+	var versionID string
+	err := h.siteTx(c).DB.QueryRow(h.siteQuery(c,
+		"SELECT id FROM _kora_config_version WHERE status = 'Active' OR (status IS NULL AND is_active = 1) ORDER BY version DESC LIMIT 1",
+	)).Scan(&versionID)
+	if err != nil {
+		writeConfigVersionReadError(c, "loading active config version", err)
+		return
+	}
+	c.Params = append(c.Params, gin.Param{Key: "id", Value: versionID})
+	h.HandleConfigVersionSnapshot(c)
+}
+
 func (h *Handler) HandleConfigVersionSnapshot(c *gin.Context) {
 	versionID := c.Param("id")
 	db := h.siteTx(c).DB
 
-	var configJSON, siteName, label string
+	var configJSON, siteName, label, versionStatus string
 	var versionNum int
 	err := db.QueryRow(
-		h.siteQuery(c, "SELECT config, site, version, COALESCE(label, '') FROM _kora_config_version WHERE id = ?"), versionID,
-	).Scan(&configJSON, &siteName, &versionNum, &label)
+		h.siteQuery(c, "SELECT config, site, version, COALESCE(label, ''), COALESCE(status, CASE WHEN is_active = 1 THEN 'Active' ELSE 'Superseded' END) FROM _kora_config_version WHERE id = ?"), versionID,
+	).Scan(&configJSON, &siteName, &versionNum, &label, &versionStatus)
 	if err != nil {
 		writeConfigVersionReadError(c, "loading config version snapshot", err)
 		return
@@ -1649,25 +1872,6 @@ func (h *Handler) HandleConfigVersionSnapshot(c *gin.Context) {
 		})
 	}
 
-	// Workflows → workflows/<name>.yaml
-	for _, wf := range snapshot.Workflows {
-		if wf == nil {
-			continue
-		}
-		yamlBytes, err := yaml.Marshal(wf)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
-				Error: map[string]string{"message": fmt.Sprintf("Failed to serialize workflow %s: %v", wf.Name, err)},
-			})
-			return
-		}
-		packFiles = append(packFiles, configVersionSnapshotFile{
-			Path:        fmt.Sprintf("doctypes/%s_workflow.yaml", strings.ToLower(wf.Name)),
-			Content:     string(yamlBytes),
-			ContentType: "workflow",
-		})
-	}
-
 	// Full snapshot JSON (reference).
 	snapshotJSON, err := json.Marshal(snapshot)
 	if err != nil {
@@ -1680,13 +1884,13 @@ func (h *Handler) HandleConfigVersionSnapshot(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{Data: configVersionSnapshotResponse{
 		VersionID:        versionID,
 		Version:          versionNum,
+		Status:           versionStatus,
 		Site:             siteName,
 		Label:            label,
 		DoctypeNames:     doctypeNames,
 		DoctypeCount:     len(snapshot.DocTypes),
 		RolesCount:       len(snapshot.Roles),
 		PermissionsCount: len(snapshot.Permissions),
-		WorkflowsCount:   len(snapshot.Workflows),
 		Snapshot:         json.RawMessage(snapshotJSON),
 		PackFiles:        packFiles,
 	}})
@@ -1775,7 +1979,19 @@ func (h *Handler) HandleSystemRoleCreate(c *gin.Context) {
 		return
 	}
 	store := configstore.NewStore(db, h.siteDialect(c))
-	if err := store.SaveRoles([]*doctype.Role{&role}, c.GetString("site_name")); err != nil {
+	tx, err := db.BeginTx(c.Request.Context(), nil)
+	if err == nil {
+		err = store.SaveRolesTx(tx, []*doctype.Role{&role}, c.GetString("site_name"))
+	}
+	if err == nil {
+		err = configstore.BumpAuthorizationRevisionTx(tx, h.siteDialect(c), true, false)
+	}
+	if err == nil {
+		err = tx.Commit()
+	} else if tx != nil {
+		_ = tx.Rollback()
+	}
+	if err != nil {
 		internalError(c, "saving role", err)
 		return
 	}
@@ -1794,7 +2010,19 @@ func (h *Handler) HandleSystemRoleUpdate(c *gin.Context) {
 	}
 	role.Name = roleName
 	store := configstore.NewStore(db, h.siteDialect(c))
-	if err := store.SaveRoles([]*doctype.Role{&role}, c.GetString("site_name")); err != nil {
+	tx, err := db.BeginTx(c.Request.Context(), nil)
+	if err == nil {
+		err = store.SaveRolesTx(tx, []*doctype.Role{&role}, c.GetString("site_name"))
+	}
+	if err == nil {
+		err = configstore.BumpAuthorizationRevisionTx(tx, h.siteDialect(c), true, false)
+	}
+	if err == nil {
+		err = tx.Commit()
+	} else if tx != nil {
+		_ = tx.Rollback()
+	}
+	if err != nil {
 		internalError(c, "saving role", err)
 		return
 	}
@@ -1819,12 +2047,26 @@ func (h *Handler) HandleSystemRoleDelete(c *gin.Context) {
 		internalError(c, "checking role usage", err)
 		return
 	}
-	if _, err := db.Exec(h.siteQuery(c, "DELETE FROM _kora_role WHERE name = ?"), roleName); err != nil {
+	tx, err := db.BeginTx(c.Request.Context(), nil)
+	if err != nil {
 		internalError(c, "deleting role", err)
 		return
 	}
-	if _, err := db.Exec(h.siteQuery(c, "DELETE FROM _kora_permission WHERE role = ?"), roleName); err != nil {
+	defer tx.Rollback()
+	if _, err := tx.Exec(h.siteQuery(c, "DELETE FROM _kora_role WHERE name = ?"), roleName); err != nil {
+		internalError(c, "deleting role", err)
+		return
+	}
+	if _, err := tx.Exec(h.siteQuery(c, "DELETE FROM _kora_permission WHERE role = ?"), roleName); err != nil {
 		internalError(c, "deleting role permissions", err)
+		return
+	}
+	if err := configstore.BumpAuthorizationRevisionTx(tx, h.siteDialect(c), true, false); err != nil {
+		internalError(c, "updating policy revision", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(c, "committing role deletion", err)
 		return
 	}
 	c.JSON(http.StatusOK, Response{Data: deletedResponse{Message: "deleted", UsersWithRole: userCount}})
@@ -1855,7 +2097,19 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 		return
 	}
 	store := configstore.NewStore(db, h.siteDialect(c))
-	if err := store.SavePermissions(permissions, c.GetString("site_name")); err != nil {
+	tx, err := db.BeginTx(c.Request.Context(), nil)
+	if err == nil {
+		err = store.SavePermissionsTx(tx, permissions, c.GetString("site_name"))
+	}
+	if err == nil {
+		err = configstore.BumpAuthorizationRevisionTx(tx, h.siteDialect(c), true, false)
+	}
+	if err == nil {
+		err = tx.Commit()
+	} else if tx != nil {
+		_ = tx.Rollback()
+	}
+	if err != nil {
 		internalError(c, "saving permissions", err)
 		return
 	}
@@ -1869,8 +2123,35 @@ func (h *Handler) HandleSystemPermissionsSave(c *gin.Context) {
 // HandleSystemRealtime streams authenticated realtime connection events.
 // It supports WebSocket when the client upgrades, and SSE as a read-only fallback.
 func (h *Handler) HandleSystemRealtime(c *gin.Context) {
+	ReleaseTenantStreamAuthWork(c)
 	siteName := c.GetString("site_name")
 	services := h.runtimeService(c, siteName)
+	if services.RealtimeAdmission != nil {
+		release, err := services.RealtimeAdmission.Acquire(c.Request.Context())
+		if err != nil {
+			c.Header("Retry-After", "1")
+			writeError(c, http.StatusServiceUnavailable, "realtime.capacity_exhausted", "realtime stream capacity is exhausted", nil)
+			return
+		}
+		defer release()
+	}
+	var releaseReplay func()
+	if realtimeCursor(c) != "" && services.WorkAdmission != nil {
+		release, err := services.WorkAdmission.Acquire(c.Request.Context())
+		if err != nil {
+			c.Header("Retry-After", "1")
+			writeError(c, http.StatusServiceUnavailable, "dependency.unavailable", "tenant work capacity is temporarily exhausted", nil)
+			return
+		}
+		releaseReplay = func() {
+			if release != nil {
+				release()
+				release = nil
+			}
+		}
+	} else {
+		releaseReplay = func() {}
+	}
 	provider := services.Realtime
 	bus := services.EventBus
 	scopes := realtimeScopes(c)
@@ -1885,19 +2166,29 @@ func (h *Handler) HandleSystemRealtime(c *gin.Context) {
 		"user_agent", c.Request.UserAgent(),
 	)
 	if isWebSocketUpgrade(c.Request) {
-		h.handleSystemRealtimeWebSocket(c, provider, bus, siteName, scopes)
+		h.handleSystemRealtimeWebSocket(c, provider, bus, siteName, scopes, releaseReplay)
 		return
 	}
-	h.handleSystemRealtimeSSE(c, provider, bus, siteName, scopes)
+	h.handleSystemRealtimeSSE(c, provider, bus, siteName, scopes, releaseReplay)
 }
 
-func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natsprovider.Provider, bus analytics.EventBus, siteName string, scopes []string) {
+func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natsprovider.Provider, bus eventstream.Bus, siteName string, scopes []string, releaseReplay func()) {
 	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
+		releaseReplay()
 		internalError(c, "realtime websocket upgrade failed", err)
 		return
+	}
+	streamCtx, cancelStream := context.WithCancel(c.Request.Context())
+	c.Request = c.Request.WithContext(streamCtx)
+	defer cancelStream()
+	if h.RealtimeConnections != nil {
+		defer h.RealtimeConnections.Register(func() {
+			cancelStream()
+			_ = conn.CloseNow()
+		})()
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "closed")
 	send := func(msg []byte) error {
@@ -1906,10 +2197,11 @@ func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natspr
 	if err := h.replayRealtime(c, realtimeCursor(c), scopes, send); err != nil {
 		slog.Warn("realtime replay failed", "site", siteName, "error", err)
 	}
+	releaseReplay()
 	h.streamRealtime(c, send, provider, bus, siteName, scopes)
 }
 
-func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider.Provider, bus analytics.EventBus, siteName string, scopes []string) {
+func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider.Provider, bus eventstream.Bus, siteName string, scopes []string, releaseReplay func()) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -1917,6 +2209,7 @@ func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
+		releaseReplay()
 		writeError(c, http.StatusInternalServerError, "server.streaming_unsupported", "streaming unsupported", nil)
 		return
 	}
@@ -1961,6 +2254,7 @@ func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider
 	if err := h.replayRealtime(c, realtimeCursor(c), scopes, send); err != nil {
 		slog.Warn("realtime replay failed", "site", siteName, "error", err)
 	}
+	releaseReplay()
 	h.streamRealtime(c, send, provider, bus, siteName, scopes)
 }
 
@@ -2038,24 +2332,52 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 		return nil
 	}
 	siteDB := h.siteTx(c).DB
-	query := db.Rebind(h.siteDialect(c), `SELECT id, event_type, site, aggregate_type, aggregate_id, created_at
+	query := db.Rebind(h.siteDialect(c), `SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at
 		FROM _kora_outbox WHERE site = ? AND id > ? ORDER BY id LIMIT 501`)
 	rows, err := siteDB.QueryContext(c.Request.Context(), query, c.GetString("site_name"), after)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	type replayEntry struct {
+		id, eventType, site, aggregateType, aggregateID string
+		payload                                         []byte
+		occurredAt                                      time.Time
+	}
+	entries := make([]replayEntry, 0, 501)
+	for rows.Next() {
+		var entry replayEntry
+		var occurredAt any
+		if err := rows.Scan(&entry.id, &entry.eventType, &entry.site, &entry.aggregateType, &entry.aggregateID, &entry.payload, &occurredAt); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		entry.occurredAt, err = parseRealtimeTimestamp(occurredAt)
+		if err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("parse realtime event timestamp: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
 	const replayLimit = 500
 	replayed := 0
 	truncated := false
 	lastID := after
-	for rows.Next() {
-		var id, eventType, site, aggregateType, aggregateID string
-		var occurredAt time.Time
-		if err := rows.Scan(&id, &eventType, &site, &aggregateType, &aggregateID, &occurredAt); err != nil {
-			return err
+	for _, entry := range entries {
+		if !matchesRealtimeScope(scopes, "doctype:"+entry.aggregateType, entry.aggregateType) {
+			continue
 		}
-		if !matchesRealtimeScope(scopes, "doctype:"+aggregateType, aggregateType) {
+		var envelope struct {
+			BusinessScope contract.BusinessScope `json:"business_scope"`
+		}
+		_ = json.Unmarshal(entry.payload, &envelope)
+		if !h.realtimeEventVisible(c, entry.aggregateType, entry.aggregateID, nil, eventstream.EventOp(realtimeOperation(entry.eventType)), envelope.BusinessScope) {
 			continue
 		}
 		if replayed >= replayLimit {
@@ -2063,10 +2385,10 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 			break
 		}
 		payload, err := json.Marshal(map[string]any{
-			"id": id, "type": "change", "transport": "replay", "site": site,
-			"resource": "doctype:" + aggregateType, "doctype": aggregateType,
-			"doc_name": aggregateID, "operation": realtimeOperation(eventType),
-			"occurred_at": occurredAt,
+			"id": entry.id, "type": "change", "transport": "replay", "site": entry.site,
+			"resource": "doctype:" + entry.aggregateType, "doctype": entry.aggregateType,
+			"doc_name": entry.aggregateID, "operation": realtimeOperation(entry.eventType),
+			"occurred_at": entry.occurredAt,
 		})
 		if err != nil || send(payload) != nil {
 			if err != nil {
@@ -2075,10 +2397,7 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 			return c.Request.Context().Err()
 		}
 		replayed++
-		lastID = id
-	}
-	if err := rows.Err(); err != nil {
-		return err
+		lastID = entry.id
 	}
 	marker, err := json.Marshal(map[string]any{
 		"type": "replay_complete", "transport": "replay", "cursor": lastID,
@@ -2097,13 +2416,16 @@ func realtimeOperation(eventType string) string {
 	return "update"
 }
 
-func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provider *natsprovider.Provider, bus analytics.EventBus, siteName string, scopes []string) {
+func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provider *natsprovider.Provider, bus eventstream.Bus, siteName string, scopes []string) {
 	if provider == nil {
-		var ch <-chan analytics.ChangeEvent
+		var ch <-chan eventstream.ChangeEvent
 		var remove func()
 		if multi, ok := bus.(*analytics.MultiBus); ok {
-			listener := make(chan analytics.ChangeEvent, 256)
-			multi.AddListener(listener)
+			listener := multi.NewListenerQueue(true)
+			if err := multi.AddRealtimeListener(listener); err != nil {
+				slog.Warn("realtime local subscription rejected", "site", siteName, "error", err)
+				return
+			}
 			ch = listener
 			remove = func() { multi.RemoveListener(listener) }
 		} else if bus != nil {
@@ -2127,21 +2449,35 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 				if !ok {
 					return
 				}
-				if event.Operation == analytics.EventNotification && !realtimeNotificationMatchesRecipient(event.Data, c.GetString("user")) {
-					continue
-				}
 				if !matchesRealtimeScope(scopes, "doctype:"+event.Doctype, event.Doctype) {
 					continue
+				}
+				if !h.realtimeEventVisible(c, event.Doctype, event.DocName, event.Data, event.Operation) {
+					continue
+				}
+				data := event.Data
+				if event.Operation != eventstream.EventNotification {
+					if dt := h.siteRegistry(c).Get(event.Doctype); dt != nil {
+						data = visibleRealtimeFields(dt, event.Data)
+					}
 				}
 				payload, err := json.Marshal(map[string]any{
 					"id": event.ID, "type": "change", "transport": "local", "site": event.Site,
 					"resource": "doctype:" + event.Doctype, "doctype": event.Doctype,
-					"doc_name": event.DocName, "operation": event.Operation, "occurred_at": event.Timestamp, "payload": event.Data,
+					"doc_name": event.DocName, "operation": event.Operation, "occurred_at": event.Timestamp, "payload": data,
 				})
 				if err == nil && send(payload) != nil {
 					return
 				}
 			case <-ticker.C:
+				valid, err := auth.RevalidateRealtimeIdentity(c)
+				if !valid {
+					if err != nil {
+						slog.Warn("realtime authorization refresh failed", "site", siteName, "error", err)
+					}
+					_ = send([]byte(`{"type":"authorization_ended"}`))
+					return
+				}
 				if err := send([]byte(`{"type":"heartbeat","transport":"local"}`)); err != nil {
 					return
 				}
@@ -2168,16 +2504,25 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 			if !ok {
 				return
 			}
-			if !realtimePayloadVisibleToUser(msg.Data, c.GetString("user")) {
-				continue
-			}
 			if !realtimePayloadMatchesScopes(msg.Data, scopes) {
 				continue
 			}
-			if err := send(msg.Data); err != nil {
+			visible, allowed := h.authorizeRealtimeEnvelope(c, msg.Data)
+			if !allowed {
+				continue
+			}
+			if err := send(visible); err != nil {
 				return
 			}
 		case <-ticker.C:
+			valid, err := auth.RevalidateRealtimeIdentity(c)
+			if !valid {
+				if err != nil {
+					slog.Warn("realtime authorization refresh failed", "site", siteName, "error", err)
+				}
+				_ = send([]byte(`{"type":"authorization_ended"}`))
+				return
+			}
 			if err := send([]byte(`{"type":"heartbeat","transport":"nats"}`)); err != nil {
 				return
 			}
@@ -2190,7 +2535,7 @@ func realtimePayloadVisibleToUser(payload []byte, user string) bool {
 		Operation string         `json:"operation"`
 		Payload   map[string]any `json:"payload"`
 	}
-	if err := json.Unmarshal(payload, &envelope); err != nil || envelope.Operation != string(analytics.EventNotification) {
+	if err := json.Unmarshal(payload, &envelope); err != nil || envelope.Operation != string(eventstream.EventNotification) {
 		return true
 	}
 	return realtimeNotificationMatchesRecipient(envelope.Payload, user)
@@ -2203,80 +2548,6 @@ func realtimeNotificationMatchesRecipient(payload map[string]any, user string) b
 
 func isWebSocketUpgrade(req *http.Request) bool {
 	return strings.EqualFold(req.Header.Get("Upgrade"), "websocket") && strings.Contains(strings.ToLower(req.Header.Get("Connection")), "upgrade")
-}
-
-// --- Workflows ---
-
-// HandleSystemWorkflows returns all workflows.
-// GET /api/system/workflows
-func (h *Handler) HandleSystemWorkflows(c *gin.Context) {
-	db := h.siteTx(c).DB
-	store := configstore.NewStore(db, h.siteDialect(c))
-	workflows, err := store.LoadWorkflows(c.GetString("site_name"))
-	if err != nil {
-		internalError(c, "loading workflows", err)
-		return
-	}
-	c.JSON(http.StatusOK, Response{Data: workflows})
-}
-
-// HandleSystemWorkflowByDoctype returns the workflow for a specific doctype.
-// GET /api/system/workflows/:doctype
-func (h *Handler) HandleSystemWorkflowByDoctype(c *gin.Context) {
-	reg := h.siteRegistry(c)
-	doctypeName := c.Param("doctype")
-	wf := reg.Workflows.Get(doctypeName)
-	if wf == nil {
-		writeError(c, http.StatusNotFound, "workflow.not_found", "No workflow for doctype", map[string]any{"doctype": doctypeName})
-		return
-	}
-	c.JSON(http.StatusOK, Response{Data: wf})
-}
-
-// HandleSystemWorkflowSave creates or updates a workflow.
-// POST /api/system/workflows
-func (h *Handler) HandleSystemWorkflowSave(c *gin.Context) {
-	db := h.siteTx(c).DB
-	reg := h.siteRegistry(c)
-	var wf doctype.Workflow
-	if err := c.ShouldBindJSON(&wf); err != nil {
-		badRequestError(c, "validation.invalid_json", "Invalid request", nil)
-		return
-	}
-	if wf.DocumentType == "" || wf.Name == "" {
-		badRequestError(c, "validation.required_field", "name and document_type are required", map[string]any{"fields": []string{"name", "document_type"}})
-		return
-	}
-	store := configstore.NewStore(db, h.siteDialect(c))
-	if err := store.SaveWorkflows([]*doctype.Workflow{&wf}, c.GetString("site_name")); err != nil {
-		internalError(c, "saving workflow", err)
-		return
-	}
-	// Register in runtime.
-	if wf.IsActive {
-		reg.Workflows.Register(&wf)
-	}
-	c.JSON(http.StatusOK, Response{Data: &wf})
-}
-
-// HandleSystemWorkflowDelete removes a workflow for a doctype.
-// DELETE /api/system/workflows/:doctype
-func (h *Handler) HandleSystemWorkflowDelete(c *gin.Context) {
-	db := h.siteTx(c).DB
-	reg := h.siteRegistry(c)
-	doctypeName := c.Param("doctype")
-	if _, err := db.Exec(h.siteQuery(c, "DELETE FROM _kora_workflow WHERE document_type = ?"), doctypeName); err != nil {
-		internalError(c, "deleting workflow", err)
-		return
-	}
-	if _, err := db.Exec(h.siteQuery(c, "DELETE FROM _kora_workflow_state WHERE workflow IN (SELECT name FROM _kora_workflow WHERE document_type = ?)"), doctypeName); err != nil {
-		slog.Warn("workflow state cleanup", "error", err)
-	}
-	if _, err := db.Exec(h.siteQuery(c, "DELETE FROM _kora_workflow_transition WHERE workflow IN (SELECT name FROM _kora_workflow WHERE document_type = ?)"), doctypeName); err != nil {
-		slog.Warn("workflow transition cleanup", "error", err)
-	}
-	reg.Workflows.Remove(doctypeName)
-	c.JSON(http.StatusOK, Response{Data: savedResponse{Message: "deleted"}})
 }
 
 // HandleSystemAudit returns a redacted operation-audit projection for
@@ -2386,18 +2657,12 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.PUT("/permissions", handler.HandleSystemPermissionsSave)
 
 		// Workflows.
-		system.GET("/workflows", handler.HandleSystemWorkflows)
-		system.GET("/workflows/:doctype", handler.HandleSystemWorkflowByDoctype)
-		system.POST("/workflows", handler.HandleSystemWorkflowSave)
-		system.DELETE("/workflows/:doctype", handler.HandleSystemWorkflowDelete)
 
 		// Users.
+		system.GET("/user-directory", handler.HandleUserDirectory)
 		system.GET("/users", handler.HandleUserList)
-		system.POST("/users", handler.HandleUserCreate)
 		system.GET("/users/:name", handler.HandleUserGet)
 		system.PUT("/users/:name", handler.HandleUserUpdate)
-		system.DELETE("/users/:name", handler.HandleUserDelete)
-		system.POST("/users/:name/reset-password", handler.HandleUserResetPassword)
 
 		// Secrets.
 		system.GET("/secrets", handler.HandleSecretList)

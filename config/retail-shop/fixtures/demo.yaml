@@ -1,0 +1,8 @@
+pack: retail-shop
+seed_mode: demo
+records:
+  - doctype: Register
+    reference: REG-001
+    register_name: Shop till
+    location: Front counter
+    status: Active

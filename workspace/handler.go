@@ -108,7 +108,7 @@ func (h *Handler) RegisterRoutesOnGroup(desk *gin.RouterGroup) {
 func (h *Handler) HandleHome(c *gin.Context) {
 	data := PageData{
 		Title:    "Home",
-		SiteName: "Kora",
+		SiteName: "Kigae",
 		DocTypes: h.siteRegistry(c).All(),
 		User:     c.GetString("user"),
 		UserRole: c.GetString("user_role"),
@@ -121,7 +121,7 @@ func (h *Handler) HandleHome(c *gin.Context) {
 
 // HandleLoginPage renders the login form.
 func (h *Handler) HandleLoginPage(c *gin.Context) {
-	data := PageData{Title: "Login", SiteName: "Kora"}
+	data := PageData{Title: "Login", SiteName: "Kigae"}
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	tmpl.ExecuteTemplate(c.Writer, "login.html", data)
 }
@@ -137,7 +137,7 @@ func (h *Handler) HandleListView(c *gin.Context) {
 
 	data := PageData{
 		Title:    dt.Name,
-		SiteName: "Kora",
+		SiteName: "Kigae",
 		DocTypes: h.siteRegistry(c).All(),
 		DocType:  dt,
 		User:     c.GetString("user"),
@@ -161,16 +161,11 @@ func (h *Handler) HandleNewForm(c *gin.Context) {
 
 	data := PageData{
 		Title:    "New " + dt.Name,
-		SiteName: "Kora",
+		SiteName: "Kigae",
 		DocTypes: h.siteRegistry(c).All(),
 		DocType:  dt,
 		User:     c.GetString("user"),
 		UserRole: c.GetString("user_role"),
-	}
-
-	// Check for workflow and available transitions.
-	if h.siteRegistry(c).Workflows.Has(doctypeName) {
-		// New documents start in Draft — no transitions needed yet.
 	}
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
@@ -191,7 +186,7 @@ func (h *Handler) HandleEditForm(c *gin.Context) {
 
 	data := PageData{
 		Title:    name,
-		SiteName: "Kora",
+		SiteName: "Kigae",
 		DocTypes: h.siteRegistry(c).All(),
 		DocType:  dt,
 		DocName:  name,
@@ -209,7 +204,7 @@ func (h *Handler) HandleEditForm(c *gin.Context) {
 func (h *Handler) HandleConfigView(c *gin.Context) {
 	data := PageData{
 		Title:    "Config Manager",
-		SiteName: "Kora",
+		SiteName: "Kigae",
 		DocTypes: h.siteRegistry(c).All(),
 		User:     c.GetString("user"),
 		UserRole: c.GetString("user_role"),

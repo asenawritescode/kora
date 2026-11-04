@@ -1,0 +1,81 @@
+name: Sale
+module: Sales
+is_submittable: true
+title_field: reference
+search_fields: reference, status, customer_name
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: sale_date
+    fieldtype: Date
+    label: Sale date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: entry_source
+    fieldtype: Select
+    label: Entry source
+    options: |
+      POS
+      Book entry
+    default: Book entry
+    in_list_view: true
+  - fieldname: payment_method
+    fieldtype: Select
+    label: Payment method
+    options: |
+      Cash
+      Card
+      M-Pesa
+      Bank Transfer
+  - fieldname: till
+    fieldtype: Data
+    label: Till
+    hidden: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Paid
+      Refunded
+      Cancelled
+    default: Draft
+    in_list_view: true
+  - fieldname: cashier
+    fieldtype: User
+    label: Recorded by
+    hidden: true
+    read_only: true
+    in_list_view: true
+  - fieldname: subtotal
+    fieldtype: Currency
+    label: Subtotal
+    computed: "SUM(items.line_total)"
+    read_only: true
+  - fieldname: discount_amount
+    fieldtype: Currency
+    label: Discount
+    default: 0
+  - fieldname: tax_amount
+    fieldtype: Currency
+    label: Tax
+    default: 0
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    default: 0
+    in_list_view: true
+  - fieldname: items
+    fieldtype: Table
+    label: Items
+    options: Sale Item
+    reqd: true

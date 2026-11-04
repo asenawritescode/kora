@@ -1,0 +1,18 @@
+# Optional ProxySQL example for MySQL. The supported compose stack does not
+# enable it. Do not route session-dependent bootstrap/deletion locks through
+# multiplexed connections, and do not recommend this endpoint until the
+# target-spec ProxySQL compatibility tests pass.
+datadir="/var/lib/proxysql"
+admin_variables=
+{
+  admin_credentials="admin:replace-before-use"
+  mysql_ifaces="127.0.0.1:6032"
+}
+mysql_variables=
+{
+  interfaces="127.0.0.1:6033"
+  max_connections=200
+  default_query_delay=0
+  default_query_timeout=30000
+  connect_timeout_server=5000
+}

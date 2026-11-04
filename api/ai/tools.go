@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 )
 
 type ToolDescriptor struct {
@@ -80,7 +82,7 @@ type ToolCatalog struct {
 func fieldNamesForDescription(dt *doctype.DocType) []string {
 	var names []string
 	for _, f := range dt.DataFields() {
-		if f.Fieldtype != "Table" {
+		if f.Fieldtype != "Table" && aiReadableField(f) {
 			name := f.Fieldname
 			if f.Reqd {
 				name += " (required)"
@@ -101,7 +103,7 @@ func buildFunctions(reg *doctype.Registry) []map[string]any {
 		props := make(map[string]any)
 		required := []string{}
 		for _, f := range dt.DataFields() {
-			if f.Fieldtype == "Table" {
+			if f.Fieldtype == "Table" || !aiReadableField(f) {
 				continue
 			}
 			s := map[string]any{"description": f.Label}
@@ -176,12 +178,12 @@ func buildFunctions(reg *doctype.Registry) []map[string]any {
 func BuildToolCatalog(reg *doctype.Registry) ToolCatalog {
 	var catalog []ToolDescriptor
 	for _, dt := range reg.All() {
-		if dt.IsChildTable {
+		if dt.IsChildTable || dt.ModuleOwnerID != "" {
 			continue
 		}
 		catalog = append(catalog, buildDoctypeToolDescriptors(dt)...)
 	}
-	for _, raw := range buildSystemFunctions() {
+	for _, raw := range buildSystemFunctions(reg) {
 		if descriptor, ok := descriptorFromRawFunction(raw); ok {
 			catalog = append(catalog, descriptor)
 		}
@@ -231,11 +233,11 @@ func buildDoctypeToolDescriptors(dt *doctype.DocType) []ToolDescriptor {
 		}
 	}
 	create := common(lower+"_create", "create", "Create a new "+dt.Name+". Available fields: "+strings.Join(fieldNamesForDescription(dt), ", "), buildCreateSchema(dt))
-	create.RequiresConfirmation = true
-	create.RequiresRecentAuth = true
+	// A user's explicit request to create or update a record is the intent for
+	// that operation. The kernel still enforces tenant policy, invariants,
+	// idempotency, audit, and outbox behavior. Workflow state changes remain
+	// restricted to their registered transition command.
 	update := common(lower+"_update", "update", "Update an existing "+dt.Name+". Requires the stable document name and writable fields.", buildUpdateSchema(dt))
-	update.RequiresConfirmation = true
-	update.RequiresRecentAuth = true
 	return []ToolDescriptor{
 		common(lower+"_find", "find", "Find "+dt.Name+" records using typed filters.", buildFindSchema()),
 		common(lower+"_list", "list", "List "+dt.Name+" documents (recent first). Use find when filters are present.", buildListSchema()),
@@ -264,7 +266,20 @@ func descriptorFromRawFunction(raw map[string]any) (ToolDescriptor, bool) {
 		ArgumentContractVersion: "v2",
 		Operation:               "system",
 	}
-	if name == "script_create" || name == "update_doctype_draft" || name == "create_doctype_draft" {
+	if name == "mutate_records" {
+		// Multi-record writes can create linked business records and advance a
+		// configured workflow, so this operation always requires explicit approval.
+		descriptor.RequiresConfirmation = true
+		// Its durable approval is bound to an AI run and is not implemented for
+		// the channel tool endpoint's header-only confirmation handshake.
+		descriptor.ChannelAllowlist = []string{"web"}
+	}
+	if name == "script_create" {
+		// AI may write an inactive script draft after an explicit user request.
+		// Activation remains an Administrator action in the script editor.
+		descriptor.RequiresRecentAuth = true
+	}
+	if name == "update_doctype_draft" || name == "create_doctype_draft" {
 		descriptor.RequiresConfirmation = true
 		descriptor.RequiresRecentAuth = true
 	}
@@ -287,6 +302,7 @@ func buildFindSchema() map[string]any {
 		"properties": map[string]any{
 			"filters": map[string]any{
 				"type":        "array",
+				"maxItems":    20,
 				"description": "Typed filters. Each item is {field, op, value}.",
 				"items": map[string]any{
 					"type":                 "object",
@@ -300,16 +316,16 @@ func buildFindSchema() map[string]any {
 				},
 			},
 			"limit":    map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "description": "Max results (default 5)"},
-			"offset":   map[string]any{"type": "integer", "minimum": 0, "description": "Pagination offset"},
+			"offset":   map[string]any{"type": "integer", "minimum": 0, "maximum": 10000, "description": "Pagination offset"},
 			"order_by": map[string]any{"type": "string", "description": "Sort expression such as modified DESC using a valid field."},
 		},
 	}
 }
 
 func buildListSchema() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{
-		"limit":  map[string]any{"type": "integer", "description": "Max results (default 20)"},
-		"offset": map[string]any{"type": "integer", "description": "Pagination offset"},
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+		"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "description": "Max results (default 20)"},
+		"offset": map[string]any{"type": "integer", "minimum": 0, "maximum": 10000, "description": "Pagination offset"},
 	}}
 }
 
@@ -323,7 +339,7 @@ func buildCreateSchema(dt *doctype.DocType) map[string]any {
 	props := map[string]any{}
 	required := []string{}
 	for _, f := range dt.DataFields() {
-		if f.Fieldtype == "Table" || f.ReadOnly || f.Computed != "" {
+		if f.Fieldtype == "Table" || f.ReadOnly || f.Computed != "" || !aiReadableField(f) {
 			continue
 		}
 		props[f.Fieldname] = aiFieldSchema(&f)
@@ -343,7 +359,7 @@ func buildUpdateSchema(dt *doctype.DocType) map[string]any {
 		"name": map[string]any{"type": "string", "description": "Stable document name to update"},
 	}
 	for _, f := range dt.DataFields() {
-		if f.Fieldtype == "Table" || f.ReadOnly || f.Computed != "" {
+		if f.Fieldtype == "Table" || f.ReadOnly || f.Computed != "" || !aiReadableField(f) {
 			continue
 		}
 		props[f.Fieldname] = aiFieldSchema(&f)
@@ -392,6 +408,9 @@ func aiFieldSchema(f *doctype.Field) map[string]any {
 func buildFieldHints(dt *doctype.DocType) []FieldHint {
 	hints := make([]FieldHint, 0, len(dt.DataFields()))
 	for _, f := range dt.DataFields() {
+		if !aiReadableField(f) {
+			continue
+		}
 		schema := aiFieldSchema(&f)
 		hint := FieldHint{
 			Name:           f.Fieldname,
@@ -465,7 +484,15 @@ func defaultString(value, fallback string) string {
 }
 
 func ExecuteTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName string) string {
-	return executeSingleToolWithMutationKey(tx, reg, toolName, args, owner, siteName, "", "", "", false, rolesForTool(tx))
+	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", "", false, rolesForTool(tx), tx.Execution)
+}
+
+// ExecuteToolWithExecution is the authenticated-adapter entry point. It keeps
+// the existing tool catalog and confirmation policy while binding resulting
+// kernel commands to the verified principal supplied by the authentication
+// boundary.
+func ExecuteToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName string, execution policy.Execution) string {
+	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", "", false, rolesForTool(tx), execution)
 }
 
 // ExecuteConfirmedToolWithIdempotencyKey is for authenticated adapters that
@@ -473,8 +500,15 @@ func ExecuteTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args
 // boundary. Kernel authorization still runs; the adapter must pass the
 // client's Idempotency-Key to make retried mutations replay-safe.
 func ExecuteConfirmedToolWithIdempotencyKey(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, idempotencyKey string) string {
+	return ExecuteConfirmedToolWithExecution(tx, reg, toolName, args, owner, siteName, idempotencyKey, tx.Execution)
+}
+
+// ExecuteConfirmedToolWithExecution is for authenticated delegated adapters.
+// The confirmation boundary and its idempotency key are retained while the
+// resulting kernel command is bound to the verified delegated grant.
+func ExecuteConfirmedToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, idempotencyKey string, execution policy.Execution) string {
 	key := channelToolMutationIdempotencyKey(siteName, idempotencyKey)
-	return executeSingleToolWithMutationKey(tx, reg, toolName, args, owner, siteName, "", "", key, true, rolesForTool(tx))
+	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", key, true, rolesForTool(tx), execution)
 }
 
 func rolesForTool(tx *orm.TxManager) []string {
@@ -557,7 +591,11 @@ func argsToJSON(args map[string]any, key string) string {
 // These always create as Draft. Only a human can activate a draft.
 // ---------------------------------------------------------------------------
 
-func buildSystemFunctions() []map[string]any {
+func buildSystemFunctions(registries ...*doctype.Registry) []map[string]any {
+	var registry *doctype.Registry
+	if len(registries) > 0 {
+		registry = registries[0]
+	}
 	// YAML examples embedded in tool descriptions so the AI generates correct syntax.
 	simpleExample := `name: Supplier
 module: Buying
@@ -681,6 +719,7 @@ fields:
     read_only: true`
 
 	return []map[string]any{
+		mutateRecordsToolDef(registry),
 		analyticsToolDef(),
 		analyticsCatalogToolDef(),
 		analyticsQueryToolDef(),
@@ -744,20 +783,19 @@ fields:
 			"type": "function",
 			"function": map[string]any{
 				"name":        "script_create",
-				"description": "Create a new JavaScript script that automates business logic. Scripts run on document events, custom API endpoints, workflow actions, or schedules.\n\nSCRIPT TYPES:\n- doc_event: Runs on document lifecycle. Requires doctype + event.\n- api_method: Custom API at /api/method/{method_path}.\n- workflow_action: Fires on workflow transitions.\n- scheduled: Runs on a cron schedule.\n- computed: Computes field values from other fields.\n- validate: Custom validation logic.\n\nEVENTS (for doc_event): before_insert, after_insert, before_save, after_save, before_delete, after_delete, before_submit, after_submit, before_cancel, after_cancel, validate\n\nAVAILABLE JS API (kora global): kora.log.info/warn/error(msg...), kora.getDoc(doctype,name), kora.getList(doctype,filters,orderBy,limit,offset), kora.saveDoc(doctype,doc), kora.createDoc(doctype,doc), kora.deleteDoc(doctype,name), kora.secrets.get(key), kora.http.fetch({method,url,headers,body}), kora.context.user/roles/site, kora.now()\n\nEXAMPLE: {name:\"validate_order\", script_type:\"doc_event\", doctype:\"Order\", event:\"before_save\", script:\"if (!event.doc.total || event.doc.total <= 0) { throw new Error('Total required'); } return { doc: event.doc };\"}",
+				"description": "Create an INACTIVE JavaScript script draft after the user explicitly requests it. A workspace Administrator must review and activate it in Workspace → Admin → Scripts before it runs. Never claim the draft is live. Scripts must use authorized Kora APIs and may not bypass domain workflows or approvals.\n\nSCRIPT TYPES:\n- doc_event: Runs on document lifecycle. Requires doctype + event.\n- api_method: Custom API at /api/method/{method_path}.\n- scheduled: Runs on a cron schedule.\n- computed: Computes field values from other fields.\n- validate: Custom validation logic.\n\nEVENTS (for doc_event): before_insert, after_insert, before_save, after_save, before_delete, after_delete, before_submit, after_submit, before_cancel, after_cancel, validate\n\nAVAILABLE JS API (kora global): kora.log.info/warn/error(msg...), kora.getDoc(doctype,name), kora.getList(doctype,filters,orderBy,limit,offset), kora.saveDoc(doctype,doc), kora.createDoc(doctype,doc), kora.deleteDoc(doctype,name), kora.secrets.get(key), kora.http.fetch({method,url,headers,body}), kora.context.user/roles/site, kora.now()\n\nEXAMPLE: {name:\"validate_order\", script_type:\"doc_event\", doctype:\"Order\", event:\"before_save\", script:\"if (!event.doc.total || event.doc.total <= 0) { throw new Error('Total required'); } return { doc: event.doc };\"}",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"name":            map[string]any{"type": "string", "description": "Unique script name (lowercase, underscores)"},
-						"script_type":     map[string]any{"type": "string", "description": "Type: doc_event, api_method, workflow_action, scheduled, computed, validate"},
-						"script":          map[string]any{"type": "string", "description": "JavaScript code (ES5.1+). Access event.doc and kora.* API."},
-						"doctype":         map[string]any{"type": "string", "description": "Target doctype (required for doc_event, computed, validate)"},
-						"event":           map[string]any{"type": "string", "description": "Event name (required for doc_event)"},
-						"method_path":     map[string]any{"type": "string", "description": "API path (required for api_method, e.g., 'send_invoice')"},
-						"schedule":        map[string]any{"type": "string", "description": "Cron expression (required for scheduled, e.g., '0 9 * * *')"},
-						"workflow_action": map[string]any{"type": "string", "description": "Action name (required for workflow_action)"},
-						"description":     map[string]any{"type": "string", "description": "Human-readable description of what this script does"},
-						"priority":        map[string]any{"type": "integer", "description": "Execution order (1-100, default 10)"},
+						"name":        map[string]any{"type": "string", "description": "Unique script name (lowercase, underscores)"},
+						"script_type": map[string]any{"type": "string", "description": "Type: doc_event, api_method, scheduled, computed, validate"},
+						"script":      map[string]any{"type": "string", "description": "JavaScript code (ES5.1+). Access event.doc and kora.* API."},
+						"doctype":     map[string]any{"type": "string", "description": "Target doctype (required for doc_event, computed, validate)"},
+						"event":       map[string]any{"type": "string", "description": "Event name (required for doc_event)"},
+						"method_path": map[string]any{"type": "string", "description": "API path (required for api_method, e.g., 'send_invoice')"},
+						"schedule":    map[string]any{"type": "string", "description": "Cron expression (required for scheduled, e.g., '0 9 * * *')"},
+						"description": map[string]any{"type": "string", "description": "Human-readable description of what this script does"},
+						"priority":    map[string]any{"type": "integer", "description": "Execution order (1-100, default 10)"},
 					},
 					"required": []string{"name", "script_type", "script"},
 				},
@@ -854,7 +892,7 @@ fields:
 			"type": "function",
 			"function": map[string]any{
 				"name":        "create_view",
-				"description": "Create a new view as DRAFT. Always call validate_view first. Available component types: record_table, record_list, record_cards, record_form, record_detail, filter_bar, search_box, workflow_actions, split_view, kanban_board, approval_queue, calendar_view, dashboard_grid, metric_card, chart, scanner_input, product_grid, cart_panel, payment_panel, scanner_count, document_preview, confirmation_step, receipt_preview, drawer, category_tabs, tabs, line_item_builder, wizard, checklist, recent_records, public_form, workspace_dashboard, print_layout. Use JSON format: {\"name\":\"...\",\"route\":\"/...\",\"type\":\"workspace\",\"layout\":\"two_panel\",\"components\":[...]}",
+				"description": "Create a new view as DRAFT. Always call validate_view first. Available component types: record_table, record_list, record_cards, record_form, record_detail, filter_bar, search_box, split_view, kanban_board, approval_queue, calendar_view, dashboard_grid, metric_card, chart, scanner_input, product_grid, cart_panel, payment_panel, scanner_count, document_preview, confirmation_step, receipt_preview, drawer, category_tabs, tabs, line_item_builder, wizard, checklist, recent_records, public_form, workspace_dashboard, print_layout. Use JSON format: {\"name\":\"...\",\"route\":\"/...\",\"type\":\"workspace\",\"layout\":\"two_panel\",\"components\":[...]}",
 				"parameters": map[string]any{
 					"type":       "object",
 					"properties": map[string]any{"view": map[string]any{"type": "object", "description": "View config JSON"}},
@@ -886,6 +924,25 @@ fields:
 
 // executeToolCallsForAI runs tool calls and returns results in OpenAI tool message format.
 func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner, siteName, runID, stepID, conversationID string, userRoles []string) []map[string]any {
+	return executeToolCallsForAIWithExecution(ctx, tx, reg, toolCalls, owner, siteName, runID, stepID, conversationID, userRoles, tx.Execution)
+}
+
+func executeToolCallsForAIWithExecution(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner, siteName, runID, stepID, conversationID string, userRoles []string, execution policy.Execution) []map[string]any {
+	if !execution.Valid() && tx != nil {
+		execution = tx.Execution
+	}
+	if execution.Valid() {
+		actor := execution.Actor()
+		userRoles = actor.Roles
+		if actor.SubjectUserID != "" {
+			owner = actor.SubjectUserID
+		} else {
+			owner = actor.PrincipalID
+		}
+		tx.Execution = execution
+	} else {
+		userRoles = nil
+	}
 	ctx = WithDialect(ctx, tx.Dialect)
 	tx.Context = WithDialect(tx.Context, tx.Dialect)
 	var results []map[string]any
@@ -963,7 +1020,7 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 			continue
 		}
 
-		result := executeSingleToolWithRolesAndCallID(tx, reg, name, args, owner, siteName, runID, stepID, id, userRoles)
+		result := executeSingleToolWithRolesAndCallIDAndExecution(tx, reg, name, args, owner, siteName, runID, stepID, id, userRoles, execution)
 		status := "completed"
 		if isToolError(result) {
 			status = "failed"
@@ -994,32 +1051,53 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 // tools use the same role permission matrix as human requests and derive a
 // mutation receipt key from the persisted run/step/tool-call identity.
 func executeSingleToolWithRolesAndCallID(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, toolCallID string, userRoles []string) string {
+	return executeSingleToolWithRolesAndCallIDAndExecution(tx, reg, toolName, args, owner, siteName, runID, stepID, toolCallID, userRoles, tx.Execution)
+}
+
+func executeSingleToolWithRolesAndCallIDAndExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, toolCallID string, userRoles []string, execution policy.Execution) string {
 	key := aiToolMutationIdempotencyKey(siteName, runID, stepID, toolCallID)
-	return executeSingleToolWithMutationKey(tx, reg, toolName, args, owner, siteName, runID, stepID, key, false, userRoles)
+	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, runID, stepID, key, false, userRoles, execution)
 }
 
 func executeSingleToolWithMutationKey(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, idempotencyKey string, adapterConfirmed bool, userRoles []string) string {
+	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, runID, stepID, idempotencyKey, adapterConfirmed, userRoles, tx.Execution)
+}
+
+func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, idempotencyKey string, adapterConfirmed bool, userRoles []string, execution policy.Execution) string {
+	if !execution.Valid() && tx != nil {
+		execution = tx.Execution
+	}
+	if !execution.Valid() {
+		return "Permission denied: verified execution is required"
+	}
+	actor := execution.Actor()
+	userRoles = actor.Roles
+	if tx != nil {
+		tx.Execution = execution
+	}
 	if err := requireRecentAuthForTool(tx.Context, toolName); err != nil {
 		return err.Error()
 	}
 	// --- System tools (no doctype prefix) ---
 	switch toolName {
+	case "mutate_records":
+		return executeAIMutationBundle(tx, reg, args, owner, siteName, runID, stepID, idempotencyKey, execution)
 	case "list_doctypes":
 		return executeListDoctypes(reg)
 	case "validate_doctype_yaml":
 		yamlStr, _ := args["yaml"].(string)
 		return executeValidateYAML(yamlStr)
 	case "get_analytics_catalog":
-		return executeAnalyticsCatalog(reg, tx, siteName)
+		return executeAnalyticsCatalog(reg, tx, siteName, execution)
 	case "query_analytics":
-		return executeAnalyticsQuery(reg, tx, siteName, args)
+		return executeAnalyticsQuery(reg, tx, siteName, args, execution)
 	case "list_analytics_reports":
-		return executeAnalyticsReports(reg, tx, siteName)
+		return executeAnalyticsReports(reg, tx, siteName, execution)
 	case "run_analytics_report":
-		return executeAnalyticsReport(reg, tx, siteName, args)
+		return executeAnalyticsReport(reg, tx, siteName, args, execution)
 	case "get_analytics_insights", "analytics_insights":
 		doctypeName, _ := args["doctype"].(string)
-		return executeAnalyticsInsights(tx, reg, doctypeName, siteName)
+		return executeAnalyticsInsights(tx, reg, doctypeName, siteName, execution)
 	case "create_doctype_draft":
 		yamlStr, _ := args["yaml"].(string)
 		if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
@@ -1045,16 +1123,10 @@ func executeSingleToolWithMutationKey(tx *orm.TxManager, reg *doctype.Registry, 
 		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
 		return result
 	case "script_create":
-		if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
-			_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
-			if stepID != "" && runID != "" {
-				_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
-			}
-			return "Approval required for script_create. A durable approval has been recorded and the tool was not executed."
+		if !executionHasRole(execution, doctype.AdminRole) {
+			return "Permission denied: only a workspace Administrator can author script drafts."
 		}
-		result := executeScriptCreate(tx, args, siteName, owner)
-		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
-		return result
+		return executeScriptCreate(tx, args, siteName, owner)
 	case "script_list":
 		return executeScriptList(tx, siteName)
 	case "script_validate":
@@ -1123,16 +1195,25 @@ func executeSingleToolWithMutationKey(tx *orm.TxManager, reg *doctype.Registry, 
 	if dt == nil {
 		return fmt.Sprintf("DocType %q not found", doctypeName)
 	}
+	if dt.ModuleOwnerID != "" {
+		return "Permission denied: module records are available only through their published query contract"
+	}
 	permissionOperation := map[string]string{"find": "read", "list": "read", "get": "read", "create": "create", "update": "write"}[operation]
-	if permissionOperation != "" {
-		if len(userRoles) == 0 && !adapterConfirmed {
-			return fmt.Sprintf("Permission denied: no roles assigned for %s", dt.Name)
+	if permissionOperation == "" {
+		return "Permission denied: unsupported DocType operation"
+	}
+	decision, decisionErr := policy.DecideForBusinessScope(execution, reg, dt.Name, permissionOperation, tx.BusinessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned)
+	if decisionErr != nil {
+		return fmt.Sprintf("Permission denied: cannot %s on %s", permissionOperation, dt.Name)
+	}
+	rowScope := policy.RowScope{Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...), Business: tx.BusinessScope}
+	if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
+		rowScope.UserID = actor.SubjectUserID
+		if rowScope.UserID == "" {
+			rowScope.UserID = actor.PrincipalID
 		}
-		if len(userRoles) > 0 && !adapterConfirmed {
-			allowed, _ := reg.CanUser(userRoles, dt.Name, permissionOperation)
-			if !allowed {
-				return fmt.Sprintf("Permission denied: cannot %s on %s", permissionOperation, dt.Name)
-			}
+		if rowScope.UserID == "" {
+			return "Permission denied: row-scoped access requires an actor subject"
 		}
 	}
 
@@ -1142,7 +1223,7 @@ func executeSingleToolWithMutationKey(tx *orm.TxManager, reg *doctype.Registry, 
 		if err != nil {
 			return fmt.Sprintf("Error finding %s: %v", dt.Name, err)
 		}
-		docs, total, err := tx.GetList(dt, filter, orderBy, limit, offset, "")
+		docs, total, err := tx.GetListWithScope(dt, filter, orderBy, limit, offset, rowScope, nil, "")
 		if err != nil {
 			return fmt.Sprintf("Error finding %s: %v", dt.Name, err)
 		}
@@ -1163,11 +1244,11 @@ func executeSingleToolWithMutationKey(tx *orm.TxManager, reg *doctype.Registry, 
 		}
 		return fmt.Sprintf("Found %d matching %s:\n%s", total, dt.Name, strings.Join(summaries, "\n"))
 	case "list":
-		limit := 20
-		if v, ok := args["limit"].(float64); ok {
-			limit = int(v)
+		limit, offset, err := buildValidatedListArgs(args)
+		if err != nil {
+			return fmt.Sprintf("Error listing %s: %v", dt.Name, err)
 		}
-		docs, total, err := tx.GetList(dt, "", "", limit, 0, "")
+		docs, total, err := tx.GetListWithScope(dt, "", "", limit, offset, rowScope, nil, "")
 		if err != nil {
 			return fmt.Sprintf("Error listing %s: %v", dt.Name, err)
 		}
@@ -1181,50 +1262,34 @@ func executeSingleToolWithMutationKey(tx *orm.TxManager, reg *doctype.Registry, 
 		return fmt.Sprintf("%d %s found:\n%s", total, dt.Name, strings.Join(summaries, "\n"))
 	case "get":
 		name, _ := args["name"].(string)
-		doc, err := tx.GetDoc(dt, name, "")
+		doc, err := tx.GetDocWithScope(dt, name, rowScope)
 		if err != nil {
 			return fmt.Sprintf("%s %q not found.", dt.Name, name)
 		}
-		return fmt.Sprintf("%s %q: %v", dt.Name, name, doc.Fields)
-	case "create":
-		if !adapterConfirmed {
-			if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
-				_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
-				if stepID != "" && runID != "" {
-					_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
-				}
-				return fmt.Sprintf("Approval required for %s_create. A durable approval has been recorded and the tool was not executed.", dt.Name)
-			}
+		result, marshalErr := json.Marshal(map[string]any{
+			"doctype":  dt.Name,
+			"name":     doc.Name,
+			"revision": doc.Revision,
+			"fields":   aiReadableDocumentFields(dt, doc.Fields),
+		})
+		if marshalErr != nil {
+			return fmt.Sprintf("Error formatting %s %q.", dt.Name, name)
 		}
+		return string(result)
+	case "create":
 		// Validate field names — reject unknown fields with a helpful message.
 		if unknown := unknownFields(args, dt); len(unknown) > 0 {
 			slog.Warn("Rejecting unknown fields in tool call", "unknown", unknown, "valid", availableFieldNames(dt), "doctype", dt.Name)
 			return fmt.Sprintf("Error: unknown fields: %s. Valid fields: %s",
 				strings.Join(unknown, ", "), availableFieldNames(dt))
 		}
-		result, err := executeAIRecordMutationWithKey(tx, reg, kernel.CommandRecordCreate, dt.Name, "", args, owner, userRoles, idempotencyKey, adapterConfirmed)
+		result, err := executeAIRecordMutationWithExecution(tx, reg, kernel.CommandRecordCreate, dt.Name, "", args, owner, userRoles, idempotencyKey, adapterConfirmed, execution)
 		if err != nil {
 			return fmt.Sprintf("Error creating %s: %v", dt.Name, err)
 		}
-		if !adapterConfirmed {
-			_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
-		}
 		return fmt.Sprintf("Created %s %q.", dt.Name, result.Name)
 	case "update":
-		if !adapterConfirmed {
-			if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
-				_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
-				if stepID != "" && runID != "" {
-					_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
-				}
-				return fmt.Sprintf("Approval required for %s_update. A durable approval has been recorded and the tool was not executed.", dt.Name)
-			}
-		}
-		result := executeUpdateToolWithKey(tx, reg, dt, args, owner, userRoles, idempotencyKey, adapterConfirmed)
-		if !adapterConfirmed {
-			_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
-		}
-		return result
+		return executeUpdateToolWithExecution(tx, reg, dt, args, owner, userRoles, idempotencyKey, adapterConfirmed, execution)
 	default:
 		return fmt.Sprintf("Unknown operation: %s", operation)
 	}
@@ -1250,6 +1315,18 @@ func requireRecentAuthForTool(ctx context.Context, toolName string) error {
 	return nil
 }
 
+func executionHasRole(execution policy.Execution, role string) bool {
+	if !execution.Valid() || strings.TrimSpace(role) == "" {
+		return false
+	}
+	for _, actorRole := range execution.Actor().Roles {
+		if actorRole == role {
+			return true
+		}
+	}
+	return false
+}
+
 func toolDescriptorForName(toolName string) *ToolDescriptor {
 	for _, dt := range buildSystemFunctions() {
 		if descriptor, ok := descriptorFromRawFunction(dt); ok && descriptor.Name == toolName {
@@ -1260,6 +1337,10 @@ func toolDescriptorForName(toolName string) *ToolDescriptor {
 }
 
 func executeUpdateToolWithKey(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, args map[string]any, owner string, userRoles []string, idempotencyKey string, adapterConfirmed bool) string {
+	return executeUpdateToolWithExecution(tx, reg, dt, args, owner, userRoles, idempotencyKey, adapterConfirmed, policy.Execution{})
+}
+
+func executeUpdateToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, args map[string]any, owner string, userRoles []string, idempotencyKey string, adapterConfirmed bool, execution policy.Execution) string {
 	name, _ := args["name"].(string)
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -1285,7 +1366,7 @@ func executeUpdateToolWithKey(tx *orm.TxManager, reg *doctype.Registry, dt *doct
 	if len(changes) == 0 {
 		return fmt.Sprintf("Error updating %s: provide at least one writable field.", dt.Name)
 	}
-	result, err := executeAIRecordMutationWithKey(tx, reg, kernel.CommandRecordUpdate, dt.Name, name, changes, owner, userRoles, idempotencyKey, adapterConfirmed)
+	result, err := executeAIRecordMutationWithExecution(tx, reg, kernel.CommandRecordUpdate, dt.Name, name, changes, owner, userRoles, idempotencyKey, adapterConfirmed, execution)
 	if err != nil {
 		return fmt.Sprintf("Error updating %s: %v", dt.Name, err)
 	}
@@ -1293,6 +1374,17 @@ func executeUpdateToolWithKey(tx *orm.TxManager, reg *doctype.Registry, dt *doct
 }
 
 func executeAIRecordMutationWithKey(tx *orm.TxManager, reg *doctype.Registry, command, doctypeName, name string, fields map[string]any, owner string, roles []string, idempotencyKey string, allowDelegated bool) (*kernel.ResultData, error) {
+	return executeAIRecordMutationWithExecution(tx, reg, command, doctypeName, name, fields, owner, roles, idempotencyKey, allowDelegated, policy.Execution{})
+}
+
+func executeAIRecordMutationWithExecution(tx *orm.TxManager, reg *doctype.Registry, command, doctypeName, name string, fields map[string]any, owner string, roles []string, idempotencyKey string, allowDelegated bool, execution policy.Execution) (*kernel.ResultData, error) {
+	if tx == nil || !execution.Valid() {
+		return nil, contract.NewError(contract.CodeUnauthenticated, "AI record mutation requires verified execution identity")
+	}
+	actor := execution.Actor()
+	if actor.Site != tx.SiteName {
+		return nil, fmt.Errorf("verified execution does not match AI tenant")
+	}
 	payload := struct {
 		Doctype string         `json:"doctype"`
 		Name    string         `json:"name,omitempty"`
@@ -1306,22 +1398,18 @@ func executeAIRecordMutationWithKey(tx *orm.TxManager, reg *doctype.Registry, co
 	if site == "" {
 		return nil, fmt.Errorf("operation site is missing")
 	}
-	principal := owner
-	if principal == "" {
-		principal = "ai-assistant"
-	}
-	actorRoles := append([]string(nil), roles...)
-	if len(actorRoles) == 0 && !allowDelegated {
-		return nil, fmt.Errorf("permission denied: no actor roles")
-	}
-	role := tx.CurrentUserRole
-	if role == "" && len(actorRoles) > 0 {
+	actorRoles := actor.Roles
+	role := ""
+	if len(actorRoles) > 0 {
 		role = actorRoles[0]
 	}
-	actor := contract.ActorContext{
-		PrincipalID: principal, PrincipalType: contract.PrincipalAgent, SubjectUserID: owner,
-		Site: site, Roles: actorRoles, AuthenticatedAt: time.Now().UTC(),
+	user := actor.SubjectUserID
+	if user == "" {
+		user = actor.PrincipalID
 	}
+	_ = roles          // compatibility parameter; authorization uses the verified execution.
+	_ = allowDelegated // exact delegated grants are carried by the verified execution.
+	tx.Execution = execution
 	engine := kernel.New(tx.Dialect, tx.Outbox)
 	engine.TxManager = tx
 	ctx := tx.Context
@@ -1329,7 +1417,7 @@ func executeAIRecordMutationWithKey(tx *orm.TxManager, reg *doctype.Registry, co
 		ctx = context.Background()
 	}
 	result, cerr := engine.Execute(ctx, tx.DB, reg, kernel.Operation{
-		Context: kernel.OperationContext{Site: site, Actor: actor, User: owner, UserRole: role, Roles: actorRoles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
+		Context: kernel.OperationContext{Site: site, TenantID: execution.Tenant(), Execution: execution, BusinessScope: tx.BusinessScope, BusinessReferenceValidator: tx.BusinessReferenceValidator, Actor: actor, User: user, UserRole: role, Roles: actorRoles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
 		Command: command, Payload: raw,
 	})
 	if cerr != nil {
@@ -1363,7 +1451,7 @@ func channelToolMutationIdempotencyKey(site, clientKey string) string {
 func formatDocSummary(dt *doctype.DocType, doc *doctype.Document, index int) string {
 	fields := map[string]any{}
 	if doc != nil && doc.Fields != nil {
-		fields = doc.Fields
+		fields = aiReadableDocumentFields(dt, doc.Fields)
 	}
 	primary := primaryDisplayValue(dt, fields)
 	parts := []string{fmt.Sprintf("%d. %s", index, primary)}
@@ -1389,7 +1477,7 @@ func formatDocSummary(dt *doctype.DocType, doc *doctype.Document, index int) str
 func primaryDisplayValue(dt *doctype.DocType, fields map[string]any) string {
 	candidates := []string{dt.TitleField, "name"}
 	for _, f := range dt.DataFields() {
-		if f.InListView {
+		if f.InListView && aiReadableField(f) {
 			candidates = append(candidates, f.Fieldname)
 		}
 	}
@@ -1409,7 +1497,7 @@ func summaryFields(dt *doctype.DocType) []doctype.Field {
 	var fields []doctype.Field
 	seen := map[string]bool{}
 	add := func(f doctype.Field) {
-		if seen[f.Fieldname] || !isUserDisplayField(f) {
+		if seen[f.Fieldname] || !isUserDisplayField(f) || !aiReadableField(f) {
 			return
 		}
 		seen[f.Fieldname] = true
@@ -1440,6 +1528,26 @@ func isUserDisplayField(f doctype.Field) bool {
 		return false
 	}
 	return true
+}
+
+func aiReadableField(field doctype.Field) bool {
+	return !field.Hidden && field.Fieldtype != "Password"
+}
+
+func aiReadableDocumentFields(dt *doctype.DocType, fields map[string]any) map[string]any {
+	visible := make(map[string]any, len(fields))
+	if dt == nil {
+		return visible
+	}
+	for _, field := range dt.DataFields() {
+		if !aiReadableField(field) {
+			continue
+		}
+		if value, ok := fields[field.Fieldname]; ok {
+			visible[field.Fieldname] = value
+		}
+	}
+	return visible
 }
 
 func isEmptyDisplayValue(value any) bool {
@@ -1499,13 +1607,13 @@ func buildValidatedFindArgs(dt *doctype.DocType, args map[string]any) (string, i
 			return "", 0, 0, "", fmt.Errorf("unsupported find argument %q; use filters, limit, offset, and order_by", key)
 		}
 	}
-	limit := intArg(args["limit"], 5)
-	if limit < 1 || limit > 100 {
-		return "", 0, 0, "", fmt.Errorf("limit must be between 1 and 100")
+	limit, err := boundedQueryInt(args["limit"], 5, 1, 100)
+	if err != nil {
+		return "", 0, 0, "", fmt.Errorf("limit must be an integer between 1 and 100")
 	}
-	offset := intArg(args["offset"], 0)
-	if offset < 0 {
-		return "", 0, 0, "", fmt.Errorf("offset must be greater than or equal to 0")
+	offset, err := boundedQueryInt(args["offset"], 0, 0, 10000)
+	if err != nil {
+		return "", 0, 0, "", fmt.Errorf("offset must be an integer between 0 and 10000")
 	}
 	orderBy, _ := args["order_by"].(string)
 	if strings.TrimSpace(orderBy) != "" && !validOrderByFields(dt, orderBy) {
@@ -1530,6 +1638,52 @@ func buildValidatedFindArgs(dt *doctype.DocType, args map[string]any) (string, i
 	return string(data), limit, offset, orderBy, nil
 }
 
+func buildValidatedListArgs(args map[string]any) (int, int, error) {
+	for key := range args {
+		if key != "limit" && key != "offset" {
+			return 0, 0, fmt.Errorf("unsupported list argument %q; use limit and offset", key)
+		}
+	}
+	limit, err := boundedQueryInt(args["limit"], 20, 1, 100)
+	if err != nil {
+		return 0, 0, fmt.Errorf("limit must be an integer between 1 and 100")
+	}
+	offset, err := boundedQueryInt(args["offset"], 0, 0, 10000)
+	if err != nil {
+		return 0, 0, fmt.Errorf("offset must be an integer between 0 and 10000")
+	}
+	return limit, offset, nil
+}
+
+func boundedQueryInt(value any, fallback, minimum, maximum int) (int, error) {
+	if value == nil {
+		return fallback, nil
+	}
+	var number float64
+	switch v := value.(type) {
+	case float64:
+		number = v
+	case float32:
+		number = float64(v)
+	case int:
+		number = float64(v)
+	case int64:
+		number = float64(v)
+	case json.Number:
+		parsed, err := v.Float64()
+		if err != nil {
+			return 0, err
+		}
+		number = parsed
+	default:
+		return 0, fmt.Errorf("expected integer")
+	}
+	if math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number || number < float64(minimum) || number > float64(maximum) {
+		return 0, fmt.Errorf("integer outside allowed range")
+	}
+	return int(number), nil
+}
+
 func parseToolFilters(raw any) ([]toolFilterArg, error) {
 	if raw == nil {
 		return nil, nil
@@ -1537,6 +1691,9 @@ func parseToolFilters(raw any) ([]toolFilterArg, error) {
 	items, ok := raw.([]any)
 	if !ok {
 		return nil, fmt.Errorf("filters must be an array")
+	}
+	if len(items) > 20 {
+		return nil, fmt.Errorf("filters must contain at most 20 items")
 	}
 	filters := make([]toolFilterArg, 0, len(items))
 	for _, item := range items {
@@ -1574,6 +1731,9 @@ func validateAndCoerceFilter(dt *doctype.DocType, filter toolFilterArg) (any, er
 		if op == "between" && len(values) != 2 {
 			return nil, fmt.Errorf("between requires exactly two values")
 		}
+		if len(values) > 100 {
+			return nil, fmt.Errorf("filter value array must contain at most 100 items")
+		}
 		out := make([]any, 0, len(values))
 		for _, value := range values {
 			coerced, err := coerceFilterValue(fieldType, value)
@@ -1603,7 +1763,7 @@ func filterFieldType(dt *doctype.DocType, field string) (string, bool) {
 		return "Int", true
 	}
 	for _, f := range dt.DataFields() {
-		if f.Fieldname == field && f.Fieldtype != "Table" {
+		if f.Fieldname == field && f.Fieldtype != "Table" && aiReadableField(f) {
 			return f.Fieldtype, true
 		}
 	}
@@ -1628,6 +1788,9 @@ func isNumericOrBooleanField(fieldType string) bool {
 }
 
 func coerceFilterValue(fieldType string, value any) (any, error) {
+	if text, ok := value.(string); ok && len(text) > 4096 {
+		return nil, fmt.Errorf("filter text must be at most 4096 bytes")
+	}
 	switch fieldType {
 	case "Int":
 		switch v := value.(type) {
@@ -1660,20 +1823,6 @@ func coerceFilterValue(fieldType string, value any) (any, error) {
 		return s, nil
 	}
 	return value, nil
-}
-
-func intArg(value any, fallback int) int {
-	switch v := value.(type) {
-	case float64:
-		return int(v)
-	case int:
-		return v
-	case string:
-		if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-			return parsed
-		}
-	}
-	return fallback
 }
 
 func validOrderByFields(dt *doctype.DocType, orderBy string) bool {

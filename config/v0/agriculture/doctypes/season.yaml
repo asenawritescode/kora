@@ -1,28 +1,40 @@
 name: Season
 module: Agriculture
-title_field: reference
-search_fields: reference, status
-sort_field: modified
+description: A production season for a farm, with start and end dates.
+title_field: season_name
+search_fields: season_name, farm
+sort_field: start_date
 sort_order: DESC
 
 fields:
-  - fieldname: reference
+  - fieldname: season_name
     fieldtype: Data
-    label: Reference
+    label: Season name
     reqd: true
-    unique: true
     in_list_view: true
-  - fieldname: source_record
-    fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
+    search_index: true
+  - fieldname: farm
+    fieldtype: Link
+    label: Farm
+    options: Farm
+    reqd: true
+    in_list_view: true
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start date
+    reqd: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: End date
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
-    default: Draft
+    options: |
+      Planning
+      Active
+      Complete
+    default: Planning
     in_list_view: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

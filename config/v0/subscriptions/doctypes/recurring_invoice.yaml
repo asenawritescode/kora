@@ -1,8 +1,9 @@
 name: Recurring Invoice
-module: Subscriptions
-title_field: reference
-search_fields: reference, status
-sort_field: modified
+module: Subscription and Recurring Services
+description: An invoice raised for a subscription billing period. Creating a draft from an active subscription fills customer, currency, active line items, tax, total, and balance; later payment changes keep the balance in sync.
+title_field: invoice_number
+search_fields: invoice_number, status
+sort_field: due_date
 sort_order: DESC
 
 fields:
@@ -10,19 +11,88 @@ fields:
     fieldtype: Data
     label: Reference
     reqd: true
-    unique: true
+    read_only: true
     in_list_view: true
+    description: Idempotent reference to the subscription billing period.
   - fieldname: source_record
     fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
+    label: Source record
+    reqd: true
+    read_only: true
+    description: Subscription record that produced this invoice.
+  - fieldname: invoice_number
     fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
+    label: Invoice number
+    description: Generated automatically if left blank.
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: subscription
+    fieldtype: Link
+    options: Subscription
+    label: Subscription
+    reqd: true
+    in_list_view: true
+  - fieldname: customer
+    fieldtype: Link
+    options: Billing Customer
+    label: Customer
+    in_list_view: true
+  - fieldname: billing_schedule
+    fieldtype: Link
+    options: Billing Schedule
+    label: Billing schedule
+  - fieldname: issue_date
+    fieldtype: Date
+    label: Issue date
+    reqd: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due date
+    reqd: true
+    in_list_view: true
+  - fieldname: subtotal
+    fieldtype: Currency
+    label: Subtotal
+    read_only: true
+  - fieldname: tax_amount
+    fieldtype: Currency
+    label: Tax amount
+    default: 0
+    read_only: true
+  - fieldname: total
+    fieldtype: Currency
+    label: Invoice total
+    read_only: true
+    in_list_view: true
+  - fieldname: amount_paid
+    fieldtype: Currency
+    label: Amount paid
+    default: 0
+    read_only: true
+  - fieldname: balance
+    fieldtype: Currency
+    label: Balance due
+    read_only: true
+    in_list_view: true
+  - fieldname: currency
+    fieldtype: Select
+    label: Currency
+    options: |
+      KES
+      USD
+      EUR
+      GBP
+    read_only: true
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
+    options: |
+      Draft
+      Issued
+      Partially Paid
+      Paid
+      Overdue
+      Void
     default: Draft
     in_list_view: true

@@ -14,6 +14,15 @@ import (
 	"time"
 )
 
+// Cloud membership and Engine tenant roles are separate authority domains.
+// At signup, a Cloud organization owner receives the Engine tenant
+// Administrator role. Engine enforces that role within the routed tenant;
+// Cloud retains organization membership and billing authority.
+const (
+	CloudMembershipRoleOwner = "owner"
+	CloudOwnerEngineRole     = "Administrator"
+)
+
 // ProviderFamily classifies a sign-in provider family. Families are advertised
 // by capability, never inferred from a rendered button.
 //

@@ -1,3 +1,6 @@
+- name: Administrator
+  workspace_access: true
+  description: Full access to all doctypes.
 - name: Business Owner
   workspace_access: true
   description: Manages the business catalogue, sales, and money records.

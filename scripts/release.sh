@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kora Release Script
+# Kigae Release Script
 # Usage: ./scripts/release.sh v0.2.0
 #
 # Does:
@@ -20,7 +20,7 @@ fi
 # Strip 'v' prefix for version number
 VERSION="${TAG#v}"
 
-echo "=== Kora Release: $TAG ==="
+echo "=== Kigae Release: $TAG ==="
 
 # --- Step 1: Pre-tag validation ---
 echo ""

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	kdb "github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/internal/engine"
 	_ "github.com/lib/pq"
 )
 
@@ -46,7 +47,7 @@ func TestLivePostgresActiveConfigMinKoraVersion(t *testing.T) {
 		VALUES ('active-1', 'tenant.example.test', 'Active', 1, '2.4.0')`); err != nil {
 		t.Fatal("insert active config fixture:", err)
 	}
-	got, err := activeConfigMinKoraVersion(database, &kdb.PostgresDialect{}, "tenant.example.test")
+	got, err := engine.ActiveConfigMinKoraVersion(database, &kdb.PostgresDialect{}, "tenant.example.test")
 	if err != nil {
 		t.Fatal("read active config minimum version:", err)
 	}

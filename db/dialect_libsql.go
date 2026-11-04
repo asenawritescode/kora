@@ -6,10 +6,11 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 )
 
 // LibSQLDialect implements Dialect for LibSQL (Turso's SQLite fork).
-// LibSQL can be deployed as a managed database — Kora connects to it remotely
+// LibSQL can be deployed as a managed database — Kigae connects to it remotely
 // via HTTP. This adapter handles SQL dialect differences:
 // PRAGMA instead of INFORMATION_SCHEMA, SQLite types, and constraint errors.
 type LibSQLDialect struct{}
@@ -34,7 +35,7 @@ func (d *LibSQLDialect) Open(cfg DBConfig) (*sql.DB, error) {
 	if dsn == "" {
 		dsn = fmt.Sprintf("file:%s?mode=rwc", cfg.Name)
 	}
-	db, err := sql.Open("libsql", dsn)
+	db, err := dbaccess.Open("libsql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening libsql: %w", err)
 	}
@@ -52,13 +53,11 @@ func (d *LibSQLDialect) Open(cfg DBConfig) (*sql.DB, error) {
 func (d *LibSQLDialect) LoadSchema(db *sql.DB, _ string) (*LiveSchema, error) {
 	schema := &LiveSchema{Tables: make(map[string]*LiveTable)}
 
-	// Get all tables matching the Kora prefix.
+	// Get all tables matching the Kigae prefix.
 	tableRows, err := db.Query("SELECT name FROM pragma_table_list WHERE name LIKE 'tab%'")
 	if err != nil {
 		return nil, fmt.Errorf("listing tables: %w", err)
 	}
-	defer tableRows.Close()
-
 	var tableNames []string
 	for tableRows.Next() {
 		var name string
@@ -68,7 +67,11 @@ func (d *LibSQLDialect) LoadSchema(db *sql.DB, _ string) (*LiveSchema, error) {
 		tableNames = append(tableNames, name)
 	}
 	if err := tableRows.Err(); err != nil {
+		tableRows.Close()
 		return nil, err
+	}
+	if err := tableRows.Close(); err != nil {
+		return nil, fmt.Errorf("closing table list: %w", err)
 	}
 
 	for _, tableName := range tableNames {
@@ -105,6 +108,11 @@ func (d *LibSQLDialect) LoadSchema(db *sql.DB, _ string) (*LiveSchema, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading indexes for %s: %w", tableName, err)
 		}
+		type indexInfo struct {
+			name   string
+			unique int
+		}
+		var indexes []indexInfo
 		for idxRows.Next() {
 			var seq, unique int
 			var idxName, origin string
@@ -113,11 +121,22 @@ func (d *LibSQLDialect) LoadSchema(db *sql.DB, _ string) (*LiveSchema, error) {
 				idxRows.Close()
 				return nil, err
 			}
-			// Get columns in this index via PRAGMA index_info.
-			infoRows, err := db.Query(fmt.Sprintf("PRAGMA index_info('%s')", idxName))
+			indexes = append(indexes, indexInfo{name: idxName, unique: unique})
+		}
+		if err := idxRows.Err(); err != nil {
+			idxRows.Close()
+			return nil, err
+		}
+		if err := idxRows.Close(); err != nil {
+			return nil, fmt.Errorf("closing index list for %s: %w", tableName, err)
+		}
+		for _, idx := range indexes {
+			// Do not hold the index-list cursor while opening index_info. With a
+			// single-connection LibSQL pool, nested queries would deadlock waiting
+			// for the connection held by idxRows.
+			infoRows, err := db.Query(fmt.Sprintf("PRAGMA index_info('%s')", idx.name))
 			if err != nil {
-				idxRows.Close()
-				return nil, err
+				return nil, fmt.Errorf("reading index columns for %s: %w", idx.name, err)
 			}
 			var columns []string
 			for infoRows.Next() {
@@ -125,22 +144,23 @@ func (d *LibSQLDialect) LoadSchema(db *sql.DB, _ string) (*LiveSchema, error) {
 				var colName string
 				if err := infoRows.Scan(&seqno, &cid, &colName); err != nil {
 					infoRows.Close()
-					idxRows.Close()
 					return nil, err
 				}
 				columns = append(columns, colName)
 			}
-			infoRows.Close()
+			if err := infoRows.Err(); err != nil {
+				infoRows.Close()
+				return nil, err
+			}
+			if err := infoRows.Close(); err != nil {
+				return nil, fmt.Errorf("closing index columns for %s: %w", idx.name, err)
+			}
 
 			table.Indexes = append(table.Indexes, LiveIndex{
-				Name:     idxName,
+				Name:     idx.name,
 				Columns:  columns,
-				IsUnique: unique == 1,
+				IsUnique: idx.unique == 1,
 			})
-		}
-		idxRows.Close()
-		if err := idxRows.Err(); err != nil {
-			return nil, err
 		}
 
 		schema.Tables[tableName] = table
@@ -192,7 +212,7 @@ func (d *LibSQLDialect) CreateTable(dt *doctype.DocType) []string {
 	statements = append(statements, ddl)
 	for _, f := range dt.DataFields() {
 		if f.SearchIndex {
-			statements = append(statements, d.CreateIndex(dt.RawTableName(), f.Fieldname, false))
+			statements = append(statements, d.CreateSearchIndex(dt.RawTableName(), f.Fieldname))
 		}
 	}
 
@@ -205,7 +225,7 @@ func (d *LibSQLDialect) CreateTable(dt *doctype.DocType) []string {
 
 	// ON UPDATE trigger for the modified column (SQLite has no ON UPDATE attribute).
 	triggerName := d.QuoteIdent(dt.RawTableName() + "_modified_on_update")
-	triggerDDL := fmt.Sprintf("CREATE TRIGGER %s AFTER UPDATE ON %s FOR EACH ROW BEGIN UPDATE %s SET \"modified\" = STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', 'NOW') WHERE \"name\" = NEW.\"name\"; END",
+	triggerDDL := fmt.Sprintf("CREATE TRIGGER IF NOT EXISTS %s AFTER UPDATE ON %s FOR EACH ROW BEGIN UPDATE %s SET \"modified\" = STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', 'NOW') WHERE \"name\" = NEW.\"name\"; END",
 		triggerName, tableName, tableName)
 	statements = append(statements, triggerDDL)
 
@@ -248,8 +268,18 @@ func (d *LibSQLDialect) CreateIndex(tableName, fieldName string, unique bool) st
 		uq, d.QuoteIdent(indexName), d.QuoteIdent(tableName), d.QuoteIdent(fieldName))
 }
 
+func (d *LibSQLDialect) CreateSearchIndex(tableName, fieldName string) string {
+	indexName := d.SearchIndexName(tableName, fieldName)
+	return fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s COLLATE NOCASE)",
+		d.QuoteIdent(indexName), d.QuoteIdent(tableName), d.QuoteIdent(fieldName))
+}
+
+func (d *LibSQLDialect) SearchIndexName(tableName, fieldName string) string {
+	return fmt.Sprintf("sidx_%s_%s", tableName, fieldName)
+}
+
 func (d *LibSQLDialect) DropIndex(tableName, indexName string) string {
-	return fmt.Sprintf("DROP INDEX %s", d.QuoteIdent(indexName))
+	return fmt.Sprintf("DROP INDEX IF EXISTS %s", d.QuoteIdent(indexName))
 }
 
 func (d *LibSQLDialect) DropColumn(tableName, columnName string) string {
@@ -369,6 +399,10 @@ func (d *LibSQLDialect) UpsertClause(conflictCols []string, updateCols []string)
 }
 
 func (d *LibSQLDialect) UpsertIncrement(conflictCols []string, incrementCols []string) string {
+	return d.UpsertIncrementForTable("", conflictCols, incrementCols)
+}
+
+func (d *LibSQLDialect) UpsertIncrementForTable(_ string, conflictCols []string, incrementCols []string) string {
 	var quotedCols []string
 	for _, col := range conflictCols {
 		quotedCols = append(quotedCols, d.QuoteIdent(col))
@@ -540,8 +574,10 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"can_export" INTEGER NOT NULL DEFAULT 0,
 			"can_import" INTEGER NOT NULL DEFAULT 0,
 			"can_report" INTEGER NOT NULL DEFAULT 0,
-			"if_owner" INTEGER NOT NULL DEFAULT 0
+			"if_owner" INTEGER NOT NULL DEFAULT 0,
+			"if_assigned" TEXT NOT NULL DEFAULT '[]'
 		)`,
+		`ALTER TABLE "_kora_permission" ADD COLUMN "if_assigned" TEXT NOT NULL DEFAULT '[]'`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_doctype_role" ON "_kora_permission" ("doctype", "role")`,
 		`CREATE INDEX IF NOT EXISTS "idx_permission_site" ON "_kora_permission" ("site")`,
 
@@ -626,6 +662,8 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_user" ADD COLUMN "email_verified_at" TEXT`,
 		`DROP INDEX IF EXISTS "idx_email"`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_site_email" ON "_kora_user" ("site", "email")`,
+		`CREATE INDEX IF NOT EXISTS "idx_user_picker_name" ON "_kora_user" ("site", "enabled", "full_name" COLLATE NOCASE, "name")`,
+		`CREATE INDEX IF NOT EXISTS "idx_user_picker_email" ON "_kora_user" ("site", "enabled", "email" COLLATE NOCASE, "full_name", "name")`,
 		// _kora_session
 		`CREATE TABLE IF NOT EXISTS "_kora_session" (
 			"sid" TEXT NOT NULL PRIMARY KEY,
@@ -653,42 +691,17 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_magic_token_hash" ON "_kora_magic_link" ("token_hash")`,
 		`CREATE INDEX IF NOT EXISTS "idx_magic_site_email" ON "_kora_magic_link" ("site", "email")`,
 		`CREATE INDEX IF NOT EXISTS "idx_magic_expires" ON "_kora_magic_link" ("expires_at")`,
-
-		// _kora_workflow
-		`CREATE TABLE IF NOT EXISTS "_kora_workflow" (
-			"name" TEXT NOT NULL PRIMARY KEY,
-			"site" TEXT NOT NULL DEFAULT '',
-			"document_type" TEXT NOT NULL DEFAULT '',
-			"is_active" INTEGER NOT NULL DEFAULT 1,
-			"workflow_state_field" TEXT NOT NULL DEFAULT '',
-			"config_json" TEXT
+		`CREATE TABLE IF NOT EXISTS "_kora_magic_link_delivery" (
+			"operation_id" TEXT NOT NULL PRIMARY KEY,
+			"tenant_id" TEXT NOT NULL,
+			"email" TEXT NOT NULL,
+			"magic_link_id" TEXT NOT NULL,
+			"status" TEXT NOT NULL,
+			"worker_fence" INTEGER NOT NULL,
+			"created_at" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
+			"updated_at" TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
 		)`,
-
-		// _kora_workflow_state
-		`CREATE TABLE IF NOT EXISTS "_kora_workflow_state" (
-			"name" TEXT NOT NULL PRIMARY KEY,
-			"site" TEXT NOT NULL DEFAULT '',
-			"workflow" TEXT NOT NULL,
-			"state" TEXT NOT NULL DEFAULT '',
-			"doc_status" INTEGER NOT NULL DEFAULT 0,
-			"allow_edit" INTEGER NOT NULL DEFAULT 1,
-			"style" TEXT NOT NULL DEFAULT '',
-			"idx" INTEGER NOT NULL DEFAULT 0
-		)`,
-
-		// _kora_workflow_transition
-		`CREATE TABLE IF NOT EXISTS "_kora_workflow_transition" (
-			"name" TEXT NOT NULL PRIMARY KEY,
-			"site" TEXT NOT NULL DEFAULT '',
-			"workflow" TEXT NOT NULL,
-			"action" TEXT NOT NULL DEFAULT '',
-			"from_state" TEXT NOT NULL DEFAULT '',
-			"to_state" TEXT NOT NULL DEFAULT '',
-			"allowed" TEXT NOT NULL DEFAULT '',
-			"condition_expr" TEXT,
-			"require_fields" TEXT,
-			"idx" INTEGER NOT NULL DEFAULT 0
-		)`,
+		`CREATE INDEX IF NOT EXISTS "idx_magic_delivery_tenant_status" ON "_kora_magic_link_delivery" ("tenant_id", "status")`,
 
 		// _kora_secret
 		`CREATE TABLE IF NOT EXISTS "_kora_secret" (
@@ -702,16 +715,12 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 
 		// Backwards compat: add columns to existing tables.
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "config_json" TEXT`,
-		`ALTER TABLE "_kora_workflow" ADD COLUMN "config_json" TEXT`,
 
 		// Add site columns for multi-tenant isolation (LibSQL backwards compat).
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_field" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_role" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_permission" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE "_kora_workflow" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE "_kora_workflow_state" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE "_kora_workflow_transition" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 
 		// _kora_view
 		`CREATE TABLE IF NOT EXISTS "_kora_view" (

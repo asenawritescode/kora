@@ -2,5 +2,5 @@ pack: internal-requests
 seed_mode: demo
 records:
   - doctype: Internal Request
-    reference: DEMO-INTERNAL-REQUESTS-001
-    status: Draft
+    title: Demo ticket
+    status: Open

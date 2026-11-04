@@ -9,7 +9,7 @@ export const STANDARD_PAGE_KINDS: Array<{ kind: StandardPageKind; label: string;
   { kind: 'cards', label: 'Card board', description: 'Scannable customer-facing or mobile-friendly records.' },
   { kind: 'form', label: 'Create form', description: 'A clean entry screen for collecting new records.' },
   { kind: 'detail', label: 'Detail page', description: 'A focused record summary with supporting list context.' },
-  { kind: 'overview', label: 'Custom overview', description: 'A guided landing page with summary cards and a record table.' },
+  { kind: 'overview', label: 'Custom overview', description: 'A guided landing page with search, filters, and a record table.' },
 ]
 
 export function createStandardPageManifest(doctype: DocType, kind: StandardPageKind): PageManifest {
@@ -72,10 +72,10 @@ export function bindComponentToPrimaryResource(component: PageComponent, doctype
 export function selectListFields(doctype: DocType): string[] {
   const visible = doctype.fields
     .filter(isDisplayField)
-    .filter((field) => field.in_list_view || field.search_index || field.fieldname === doctype.title_field)
+    .filter((field) => field.in_list_view || field.fieldname === doctype.title_field)
     .map((field) => field.fieldname)
   const fallback = doctype.fields.filter(isDisplayField).map((field) => field.fieldname)
-  return unique(['name', ...visible, ...fallback]).slice(0, 8)
+  return unique(['name', ...visible, ...(visible.length === 0 ? fallback : [])]).slice(0, 8)
 }
 
 function componentsForKind(doctype: DocType, kind: StandardPageKind, listFields: string[], title: string, withInsights: boolean): PageComponent[] {
@@ -90,13 +90,11 @@ function componentsForKind(doctype: DocType, kind: StandardPageKind, listFields:
 
   if (kind === 'detail') {
     return [
-      summaryGrid(0, doctype),
-      insightsPanel(1, doctype, withInsights),
-      component('record_detail', 'main', 2, {
+      component('record_detail', 'main', 0, {
         title: `${doctype.name} detail`,
         source_doctype: doctype.name,
       }, ['detail']),
-      component('record_table', 'side', 3, {
+      component('record_table', 'side', 1, {
         title: `Recent ${doctype.name}`,
         source_doctype: doctype.name,
         desktop_columns: listFields.slice(0, 4),
@@ -107,11 +105,9 @@ function componentsForKind(doctype: DocType, kind: StandardPageKind, listFields:
 
   if (kind === 'overview') {
     return [
-      summaryGrid(0, doctype),
-      insightsPanel(1, doctype, withInsights),
-      component('search_box', 'main', 2, { title: `Search ${doctype.name}` }, ['filters'], undefined),
-      component('filter_bar', 'main', 3, { title: `Filter ${doctype.name}` }, ['filters'], undefined),
-      component('record_table', 'main', 4, {
+      component('search_box', 'main', 0, { title: `Search ${doctype.name}` }, ['filters'], undefined),
+      component('filter_bar', 'main', 1, { title: `Filter ${doctype.name}` }, ['filters'], undefined),
+      component('record_table', 'main', 2, {
         title: `${doctype.name} records`,
         source_doctype: doctype.name,
         desktop_columns: listFields,
@@ -122,11 +118,10 @@ function componentsForKind(doctype: DocType, kind: StandardPageKind, listFields:
 
   if (kind === 'cards') {
     return [
-      summaryGrid(0, doctype),
-      insightsPanel(1, doctype, withInsights),
-      component('search_box', 'main', 2, { title: `Search ${doctype.name}` }, ['filters'], undefined),
-      component('filter_bar', 'main', 3, { title: `Filter ${doctype.name}` }, ['filters'], undefined),
-      component('record_cards', 'main', 4, {
+      insightsPanel(0, doctype, withInsights),
+      component('search_box', 'main', 1, { title: `Search ${doctype.name}` }, ['filters'], undefined),
+      component('filter_bar', 'main', 2, { title: `Filter ${doctype.name}` }, ['filters'], undefined),
+      component('record_cards', 'main', 3, {
         title: doctype.name,
         source_doctype: doctype.name,
         bindings: {
@@ -138,11 +133,9 @@ function componentsForKind(doctype: DocType, kind: StandardPageKind, listFields:
   }
 
   return [
-    summaryGrid(0, doctype),
-    insightsPanel(1, doctype, withInsights),
-    component('search_box', 'main', 2, { title: `Search ${doctype.name}` }, ['filters'], undefined),
-    component('filter_bar', 'main', 3, { title: `Filter ${doctype.name}` }, ['filters'], undefined),
-    component('record_table', 'main', 4, {
+    component('search_box', 'main', 0, { title: `Search ${doctype.name}` }, ['filters'], undefined),
+    component('filter_bar', 'main', 1, { title: `Filter ${doctype.name}` }, ['filters'], undefined),
+    component('record_table', 'main', 2, {
       title: doctype.name,
       source_doctype: doctype.name,
       desktop_columns: listFields,
@@ -163,53 +156,6 @@ function insightsPanel(position: number, doctype: DocType, enabled: boolean): Pa
     },
     data: enabled ? 'insights.data' : 'primary.data',
     required_capabilities: enabled ? ['dashboard', 'charts', 'analytics'] : ['dashboard'],
-    offline: 'read_only',
-  }
-}
-
-function summaryGrid(position: number, doctype: DocType): PageComponent {
-  const statusField = doctype.fields.find((field) => field.fieldname === 'status' || field.label.toLowerCase() === 'status')?.fieldname
-  const amountField = doctype.fields.find((field) => ['Currency', 'Float', 'Int'].includes(field.fieldtype))?.fieldname
-  const children: PageComponent[] = [
-    metric('total_records', 0, 'Total records', { metric: 'count' }),
-  ]
-
-  if (statusField) {
-    children.push(metric('open_records', 1, 'Open records', { metric: 'count', filter_field: statusField, filter_value: 'Open' }))
-  }
-  if (amountField) {
-    children.push(metric('total_amount', children.length, `Total ${amountField.replace(/_/g, ' ')}`, { metric: 'sum', value_field: amountField }))
-  }
-  if (children.length < 3) {
-    children.push(metric('recent_records', children.length, 'Preview records', { metric: 'count' }))
-  }
-
-  return {
-    id: 'summary_cards',
-    component: 'dashboard_grid',
-    version: 1,
-    region: 'main',
-    position,
-    props: { title: `${doctype.name} summary` },
-    required_capabilities: ['dashboard'],
-    offline: 'read_only',
-    children,
-  }
-}
-
-function metric(id: string, position: number, title: string, bindings: Record<string, string>): PageComponent {
-  return {
-    id,
-    component: 'metric_card',
-    version: 1,
-    region: 'main',
-    position,
-    props: {
-      title,
-      bindings,
-    },
-    data: 'primary.data',
-    required_capabilities: ['dashboard'],
     offline: 'read_only',
   }
 }

@@ -3,6 +3,8 @@ package doctype
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 func TestToSExpr_RoundTrip(t *testing.T) {
@@ -21,6 +23,15 @@ func TestToSExpr_RoundTrip(t *testing.T) {
 	sexpr2 := ToSExpr(parsed)
 	if sexpr != sexpr2 {
 		t.Errorf("round-trip mismatch:\noriginal:\n%s\n\nre-serialized:\n%s", sexpr, sexpr2)
+	}
+}
+
+func TestFromSExprRejectsUnsupportedConfigSections(t *testing.T) {
+	if _, err := FromSExpr("(config (doctypes) (unsupported-config))"); err == nil {
+		t.Fatal("unsupported config section was silently ignored")
+	}
+	if _, err := FromSExpr("(config (doctypes) (workflows))"); err == nil {
+		t.Fatal("retired lifecycle workflow section was accepted")
 	}
 }
 
@@ -80,9 +91,6 @@ func TestToSExpr_AllSections(t *testing.T) {
 	if len(parsed.Permissions) != len(snapshot.Permissions) {
 		t.Errorf("permissions: got %d, want %d", len(parsed.Permissions), len(snapshot.Permissions))
 	}
-	if len(parsed.Workflows) != len(snapshot.Workflows) {
-		t.Errorf("workflows: got %d, want %d", len(parsed.Workflows), len(snapshot.Workflows))
-	}
 	if len(parsed.AnalyticsMetrics) != len(snapshot.AnalyticsMetrics) {
 		t.Errorf("analytics_metrics: got %d, want %d", len(parsed.AnalyticsMetrics), len(snapshot.AnalyticsMetrics))
 	}
@@ -93,19 +101,6 @@ func TestToSExpr_AllSections(t *testing.T) {
 		t.Errorf("min_kora_version: got %q, want %q", parsed.MinKoraVersion, snapshot.MinKoraVersion)
 	}
 
-	// Check specific data points
-	if len(parsed.Workflows) > 0 {
-		wf := parsed.Workflows[0]
-		if len(wf.States) != 2 {
-			t.Errorf("workflow states: got %d, want 2", len(wf.States))
-		}
-		if len(wf.Transitions) != 1 {
-			t.Errorf("workflow transitions: got %d, want 1", len(wf.Transitions))
-		}
-		if !wf.IsActive {
-			t.Error("workflow should be active")
-		}
-	}
 	if len(parsed.DocTypes) > 0 {
 		dt := parsed.DocTypes[0]
 		if !dt.IsSubmittable {
@@ -132,6 +127,66 @@ func TestToSExpr_RoundTripReports(t *testing.T) {
 	}
 	if len(parsed.Reports) != 1 || string(parsed.Reports[0]) != string(snapshot.Reports[0]) {
 		t.Fatalf("reports were not preserved: %#v", parsed.Reports)
+	}
+}
+
+func TestToSExpr_RoundTripsScheduledJobDefinitions(t *testing.T) {
+	snapshot := &ConfigSnapshot{ScheduledJobs: []contract.ScheduledJobDefinition{{
+		Name: "invoice-generation", Type: "subscription_invoice", Schedule: "0 0 * * *",
+		Config: json.RawMessage(`{"due_days":14,"include_paused":false}`),
+	}}}
+	sexpr := ToSExpr(snapshot)
+	parsed, err := FromSExpr(sexpr)
+	if err != nil {
+		t.Fatalf("FromSExpr: %v", err)
+	}
+	if len(parsed.ScheduledJobs) != 1 || parsed.ScheduledJobs[0].Name != snapshot.ScheduledJobs[0].Name || string(parsed.ScheduledJobs[0].Config) != string(snapshot.ScheduledJobs[0].Config) {
+		t.Fatalf("scheduled jobs were not preserved: %#v", parsed.ScheduledJobs)
+	}
+	if got := ToSExpr(parsed); got != sexpr {
+		t.Fatalf("scheduled jobs did not serialize canonically:\nfirst: %s\nsecond: %s", sexpr, got)
+	}
+}
+
+func TestToSExpr_RoundTripsModuleDescriptors(t *testing.T) {
+	snapshot := &ConfigSnapshot{Modules: []contract.ModuleDescriptor{{
+		ID: "finance.ar", Version: "1.2.3",
+		Resources: []contract.OwnedResource{{
+			Ref:    contract.ResourceRef{Namespace: "tenant", Name: "Invoice", Version: 1},
+			Access: contract.ModulePrivate, MutationMode: contract.MutationCommands,
+			ScopeKind: contract.ScopeEntityOwned, ScopeField: "legal_entity",
+		}},
+	}}}
+	encoded := ToSExpr(snapshot)
+	parsed, err := FromSExpr(encoded)
+	if err != nil {
+		t.Fatalf("parse module descriptor snapshot: %v", err)
+	}
+	if len(parsed.Modules) != 1 || parsed.Modules[0].ID != "finance.ar" || parsed.Modules[0].Resources[0].Ref.Name != "Invoice" || parsed.Modules[0].Resources[0].ScopeField != "legal_entity" {
+		t.Fatalf("module ownership metadata was not preserved: %#v", parsed.Modules)
+	}
+	if got := ToSExpr(parsed); got != encoded {
+		t.Fatalf("module snapshot did not serialize canonically:\nfirst: %s\nsecond: %s", encoded, got)
+	}
+}
+
+func TestToSExpr_RoundTripsPublishedSurfaceBindings(t *testing.T) {
+	snapshot := &ConfigSnapshot{PublishedBindings: []contract.ConfigurationSurfaceBinding{{
+		Kind: contract.ConfigurationOperation, ViewName: "Invoice Detail", CatalogRevision: 9,
+		BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"},
+		OwnerModuleID: "sales.orders", OperationRef: contract.PublishedOperationRef("sales.orders", "sales.invoice", "issue"),
+		InputSchema: &contract.SchemaRef{ID: "sales.invoice.issue.input", Version: 2}, OutputSchema: contract.SchemaRef{ID: "sales.invoice.issue.output", Version: 1},
+	}}}
+	encoded := ToSExpr(snapshot)
+	parsed, err := FromSExpr(encoded)
+	if err != nil {
+		t.Fatalf("parse published surface bindings: %v", err)
+	}
+	if len(parsed.PublishedBindings) != 1 || parsed.PublishedBindings[0].OperationRef != snapshot.PublishedBindings[0].OperationRef || parsed.PublishedBindings[0].BusinessScope != snapshot.PublishedBindings[0].BusinessScope {
+		t.Fatalf("published surface bindings were not preserved: %#v", parsed.PublishedBindings)
+	}
+	if got := ToSExpr(parsed); got != encoded {
+		t.Fatalf("published surface bindings did not serialize canonically:\nfirst: %s\nsecond: %s", encoded, got)
 	}
 }
 
@@ -294,112 +349,6 @@ func TestFromSExpr_FieldsWithConstraints(t *testing.T) {
 	}
 }
 
-func TestFromSExpr_WorkflowWithActionsAndNotifications(t *testing.T) {
-	snapshot := &ConfigSnapshot{
-		Workflows: []*Workflow{
-			{
-				Name:               "Order Workflow",
-				DocumentType:       "Order",
-				IsActive:           true,
-				WorkflowStateField: "status",
-				States: []WorkflowState{
-					{State: "Draft", DocStatus: 0, AllowEdit: "Administrator", Style: "default"},
-					{State: "Approved", DocStatus: 1, Style: "success"},
-				},
-				Transitions: []WorkflowTransition{
-					{
-						Action:  "Approve",
-						From:    "Draft",
-						To:      "Approved",
-						Allowed: "Manager",
-						OnTransition: []WorkflowAction{
-							{Type: "script", Script: "validate_order"},
-						},
-						OnSuccess: []WorkflowAction{
-							{Type: "webhook", WebhookURL: "https://hooks.example.com/order-approved", Async: true},
-						},
-					},
-				},
-				Notifications: []WorkflowNotification{
-					{
-						Event:   "on_submit",
-						ToState: "Approved",
-						Recipients: []map[string]string{
-							{"role": "Manager"},
-							{"email": "admin@example.com"},
-						},
-						Subject: "Order Approved",
-						Message: "Order {{name}} has been approved.",
-					},
-				},
-			},
-		},
-	}
-
-	sexpr := ToSExpr(snapshot)
-	t.Logf("Workflow with actions/notifications:\n%s", sexpr)
-
-	parsed, err := FromSExpr(sexpr)
-	if err != nil {
-		t.Fatalf("FromSExpr error = %v", err)
-	}
-
-	if len(parsed.Workflows) != 1 {
-		t.Fatalf("expected 1 workflow, got %d", len(parsed.Workflows))
-	}
-	wf := parsed.Workflows[0]
-	if wf.Name != "Order Workflow" {
-		t.Errorf("workflow name = %q, want %q", wf.Name, "Order Workflow")
-	}
-	if wf.DocumentType != "Order" {
-		t.Errorf("document_type = %q, want %q", wf.DocumentType, "Order")
-	}
-	if !wf.IsActive {
-		t.Error("workflow should be active")
-	}
-
-	if len(wf.States) != 2 {
-		t.Fatalf("states: got %d, want 2", len(wf.States))
-	}
-	if wf.States[0].State != "Draft" || wf.States[0].DocStatus != 0 {
-		t.Errorf("first state: got %s/%d, want Draft/0", wf.States[0].State, wf.States[0].DocStatus)
-	}
-
-	if len(wf.Transitions) != 1 {
-		t.Fatalf("transitions: got %d, want 1", len(wf.Transitions))
-	}
-	tr := wf.Transitions[0]
-	if tr.Action != "Approve" {
-		t.Errorf("transition action = %q, want %q", tr.Action, "Approve")
-	}
-	if tr.From != "Draft" || tr.To != "Approved" {
-		t.Errorf("transition: %s -> %s, want Draft -> Approved", tr.From, tr.To)
-	}
-	if len(tr.OnTransition) != 1 {
-		t.Errorf("on_transition: got %d, want 1", len(tr.OnTransition))
-	}
-	if len(tr.OnSuccess) != 1 {
-		t.Errorf("on_success: got %d, want 1", len(tr.OnSuccess))
-	}
-
-	if len(wf.Notifications) != 1 {
-		t.Fatalf("notifications: got %d, want 1", len(wf.Notifications))
-	}
-	notif := wf.Notifications[0]
-	if notif.Event != "on_submit" {
-		t.Errorf("notification event = %q, want %q", notif.Event, "on_submit")
-	}
-	if len(notif.Recipients) != 2 {
-		t.Errorf("recipients: got %d, want 2", len(notif.Recipients))
-	}
-
-	// Canonical comparison
-	sexpr2 := ToSExpr(parsed)
-	if sexpr != sexpr2 {
-		t.Errorf("round-trip mismatch:\n%s\n\n%s", sexpr, sexpr2)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -486,27 +435,7 @@ func buildFullTestSnapshot() *ConfigSnapshot {
 		},
 		Permissions: []*Permission{
 			{Doctype: "Invoice", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true, Submit: true},
-			{Doctype: "Invoice", Role: "Guest", Read: true},
-		},
-		Workflows: []*Workflow{
-			{
-				Name:               "InvoiceWorkflow",
-				DocumentType:       "Invoice",
-				IsActive:           true,
-				WorkflowStateField: "status",
-				States: []WorkflowState{
-					{State: "Draft", DocStatus: 0},
-					{State: "Submitted", DocStatus: 1},
-				},
-				Transitions: []WorkflowTransition{
-					{
-						Action:  "Submit",
-						From:    "Draft",
-						To:      "Submitted",
-						Allowed: "Administrator",
-					},
-				},
-			},
+			{Doctype: "Invoice", Role: "Guest", Read: true, IfAssigned: []string{"assignee_user"}},
 		},
 		AnalyticsMetrics: []*AnalyticsMetricConfig{
 			{

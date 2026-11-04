@@ -65,7 +65,6 @@ func TestExternalOperationProviderScriptsUseScriptStoreAcrossDialects(t *testing
 			}
 			for _, rec := range []script.ScriptRecord{
 				{Name: "hook-portability", Site: siteName, ScriptType: script.TypeDocEvent, DocType: "Unrelated DocType", Event: script.EventValidate, IsActive: true},
-				{Name: "workflow-portability", Site: siteName, ScriptType: script.TypeWorkflowAction, WorkflowAction: "Approve", IsActive: true},
 			} {
 				if err := store.Insert(rec); err != nil {
 					t.Fatalf("insert %s script on %s: %v", rec.Name, tc.driver, err)
@@ -77,10 +76,7 @@ func TestExternalOperationProviderScriptsUseScriptStoreAcrossDialects(t *testing
 			if method, err := store.LoadMethodScript(siteName, "provider.test"); err != nil || method == nil || method.Name != "provider-fails" {
 				t.Fatalf("load method script on %s: script=%#v err=%v", tc.driver, method, err)
 			}
-			if actions, err := store.LoadWorkflowActionScripts(siteName, "Approve"); err != nil || len(actions) != 1 {
-				t.Fatalf("load workflow scripts on %s: count=%d err=%v", tc.driver, len(actions), err)
-			}
-			if all, err := store.LoadAllForSite(siteName); err != nil || len(all) != 3 {
+			if all, err := store.LoadAllForSite(siteName); err != nil || len(all) != 2 {
 				t.Fatalf("load all scripts on %s: count=%d err=%v", tc.driver, len(all), err)
 			}
 			handler := NewHandler(registry, nil)

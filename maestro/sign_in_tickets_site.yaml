@@ -1,0 +1,18 @@
+appId: com.kora.mobile
+---
+- tapOn:
+    id: input-site-optional
+- eraseText: 100
+- inputText: tickets-uat.local
+- tapOn: Check server
+- waitForAnimationToEnd
+- assertVisible: Welcome back
+- tapOn:
+    id: input-email
+- inputText: ${MAESTRO_TICKETS_EMAIL}
+- tapOn:
+    id: input-password
+- inputText: ${MAESTRO_TICKETS_PASSWORD}
+- hideKeyboard
+- tapOn: Sign in
+- waitForAnimationToEnd

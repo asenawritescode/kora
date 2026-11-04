@@ -1,16 +1,20 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/email"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -33,6 +37,315 @@ func TestBuildMagicLinkURL_PathBasedSite(t *testing.T) {
 	}
 }
 
+func TestFindUserByEmailContextHonorsCancellation(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	manager := &SessionManager{DB: database}
+	if _, err := manager.FindUserByEmailContext(ctx, "tenant-a", "owner@example.test"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("FindUserByEmailContext error = %v, want context.Canceled", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTenantMagicLinkURLUsesOwnedHostAndHTTPS(t *testing.T) {
+	link, err := TenantMagicLinkURL("Acme.example.test.", "token+value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link != "https://acme.example.test/workspace/auth/login?magic_token=token%2Bvalue" {
+		t.Fatalf("tenant magic-link URL = %q", link)
+	}
+	if _, err := TenantMagicLinkURL("https://attacker.example", "token"); err == nil {
+		t.Fatal("URL-valued invitation host was accepted")
+	}
+}
+
+func TestTenantPathMagicLinkURLUsesConfiguredApplicationOrigin(t *testing.T) {
+	link, err := TenantPathMagicLinkURL("http://localhost:5173/", "Clientele", "token+value")
+	if err != nil {
+		t.Fatal("build path-based magic link:", err)
+	}
+	const want = "http://localhost:5173/s/clientele/workspace/auth/login?magic_token=token%2Bvalue"
+	if link != want {
+		t.Fatalf("path-based magic-link URL = %q, want %q", link, want)
+	}
+}
+
+func TestPublicAppBaseURLRejectsUnsafeOrAmbiguousOrigins(t *testing.T) {
+	for _, base := range []string{
+		"http://app.example.test",
+		"https://user:pass@app.example.test",
+		"https://app.example.test/subpath",
+		"https://app.example.test?next=//attacker.test",
+		"https://app.example.test#fragment",
+	} {
+		t.Run(base, func(t *testing.T) {
+			if err := ValidatePublicAppBaseURL(base); err == nil {
+				t.Fatalf("unsafe public app base URL %q was accepted", base)
+			}
+		})
+	}
+	if _, err := TenantPathMagicLinkURL("https://app.example.test", "../attacker", "token"); err == nil {
+		t.Fatal("noncanonical tenant path segment was accepted")
+	}
+}
+
+type exhaustedSessionCleanupAdmission struct{ called chan struct{} }
+
+func (a exhaustedSessionCleanupAdmission) Acquire(context.Context) (func(), error) {
+	select {
+	case a.called <- struct{}{}:
+	default:
+	}
+	return nil, dbaccess.ErrExhausted
+}
+
+func TestSessionDatabaseCleanupDefersWhenWorkAdmissionIsExhausted(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	admissionCalled := make(chan struct{}, 1)
+	sm := newPausedSessionManager(database)
+	sm.SetCleanupAdmission(exhaustedSessionCleanupAdmission{called: admissionCalled})
+	sm.cleanupDatabaseRows()
+	select {
+	case <-admissionCalled:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup did not attempt work admission")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database cleanup ran without admission: %v", err)
+	}
+	_ = sm.Close()
+}
+
+func TestOwnedSessionManagerCloseStopsAndJoinsSweeper(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sm := NewOwnedSessionManager(db)
+	select {
+	case <-sm.done:
+		t.Fatal("sweeper stopped before close")
+	default:
+	}
+	if err := sm.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sm.done:
+	default:
+		t.Fatal("Close returned before sweeper exited")
+	}
+	if err := sm.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+func TestPausedOwnedSessionManagerStartsOnlyOnRequestAndClosePreventsLateStart(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sm := NewOwnedSessionManagerPaused(db)
+	select {
+	case <-sm.done:
+		t.Fatal("paused manager closed before start")
+	default:
+	}
+	if sm.started {
+		t.Fatal("paused manager started its sweeper during construction")
+	}
+	sm.StartCleanup()
+	if !sm.started {
+		t.Fatal("StartCleanup did not start the sweeper")
+	}
+	if err := sm.Close(); err != nil {
+		t.Fatal("Close:", err)
+	}
+	sm.StartCleanup()
+	select {
+	case <-sm.done:
+	default:
+		t.Fatal("late StartCleanup restarted a closed manager")
+	}
+}
+
+func TestSessionManagersAreIndependentAndClosable(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	first := NewSessionManager(db)
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second := NewSessionManager(db)
+	if second == first {
+		t.Fatal("NewSessionManager returned shared state for the same database")
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSessionCacheBudgetBoundsAggregateAcrossManagersAndReleasesOnClose(t *testing.T) {
+	user := &User{Name: "user", Email: "user@example.test", Roles: []string{"Reader"}}
+	firstSize := estimateSessionCacheEntryBytes("session-0", "tenant", user)
+	budget, err := NewSessionCacheBudget(firstSize * 2)
+	if err != nil {
+		t.Fatal("create aggregate cache budget:", err)
+	}
+	managers := []*SessionManager{
+		newSessionManagerWithCacheLimits(nil, 1<<20, 100),
+		newSessionManagerWithCacheLimits(nil, 1<<20, 100),
+		newSessionManagerWithCacheLimits(nil, 1<<20, 100),
+	}
+	for _, manager := range managers {
+		manager.SetCacheBudget(budget)
+	}
+	now := time.Now()
+	for i, manager := range managers {
+		manager.cacheSession(
+			fmt.Sprintf("session-%d", i), "tenant", user,
+			now, now.Add(time.Hour), now,
+		)
+	}
+	if got := budget.Snapshot().Bytes; got != firstSize*2 {
+		t.Fatalf("shared cache bytes = %d, want cap of two entries %d", got, firstSize*2)
+	}
+	if managers[0].CacheSnapshot().Entries != 1 || managers[1].CacheSnapshot().Entries != 1 || managers[2].CacheSnapshot().Entries != 0 {
+		t.Fatalf("manager cache entries = %d, %d, %d; expected global budget to refuse third retention", managers[0].CacheSnapshot().Entries, managers[1].CacheSnapshot().Entries, managers[2].CacheSnapshot().Entries)
+	}
+	if err := managers[0].Close(); err != nil {
+		t.Fatal("close first manager:", err)
+	}
+	managers[2].cacheSession("session-3", "tenant", &User{Name: "user", Email: "user@example.test", Roles: []string{"Reader"}}, now, now.Add(time.Hour), now)
+	if managers[2].CacheSnapshot().Entries != 1 {
+		t.Fatal("released global cache capacity was not reused")
+	}
+	for _, manager := range managers[1:] {
+		if err := manager.Close(); err != nil {
+			t.Fatal("close manager:", err)
+		}
+	}
+	if got := budget.Snapshot().Bytes; got != 0 {
+		t.Fatalf("shared cache bytes after manager close = %d, want 0", got)
+	}
+}
+
+func TestSessionCacheBudgetConcurrentManagersStayWithinAggregateLimit(t *testing.T) {
+	user := &User{Name: "user", Email: "user@example.test", Roles: []string{"Reader"}}
+	entryBytes := estimateSessionCacheEntryBytes("session-000", "tenant", user)
+	budget, err := NewSessionCacheBudget(entryBytes * 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const count = 64
+	managers := make([]*SessionManager, count)
+	for index := range managers {
+		managers[index] = newSessionManagerWithCacheLimits(nil, 1<<20, 100)
+		managers[index].SetCacheBudget(budget)
+	}
+	now := time.Now()
+	var workers sync.WaitGroup
+	for index, manager := range managers {
+		workers.Add(1)
+		go func(index int, manager *SessionManager) {
+			defer workers.Done()
+			manager.cacheSession(fmt.Sprintf("session-%03d", index), "tenant", user, now, now.Add(time.Hour), now)
+		}(index, manager)
+	}
+	workers.Wait()
+	snapshot := budget.Snapshot()
+	if snapshot.Bytes > snapshot.MaxBytes || snapshot.Bytes == 0 {
+		t.Fatalf("concurrent aggregate cache snapshot = %+v", snapshot)
+	}
+	var managerBytes uint64
+	for _, manager := range managers {
+		managerBytes += manager.CacheSnapshot().Bytes
+	}
+	if managerBytes != snapshot.Bytes {
+		t.Fatalf("manager cache bytes = %d, shared accounting = %d", managerBytes, snapshot.Bytes)
+	}
+	for _, manager := range managers {
+		if err := manager.Close(); err != nil {
+			t.Fatal("close manager:", err)
+		}
+	}
+	if got := budget.Snapshot().Bytes; got != 0 {
+		t.Fatalf("shared cache bytes after concurrent manager close = %d, want 0", got)
+	}
+}
+
+func TestSessionManagerChangingSharedCacheBudgetReleasesPriorEntries(t *testing.T) {
+	first, err := NewSessionCacheBudget(4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewSessionCacheBudget(4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newSessionManagerWithCacheLimits(nil, 1<<20, 100)
+	manager.SetCacheBudget(first)
+	now := time.Now()
+	manager.cacheSession("session", "tenant", &User{Name: "user"}, now, now.Add(time.Hour), now)
+	if first.Snapshot().Bytes == 0 {
+		t.Fatal("first shared budget did not account for cached entry")
+	}
+	manager.SetCacheBudget(second)
+	if first.Snapshot().Bytes != 0 || second.Snapshot().Bytes != 0 || manager.CacheSnapshot().Entries != 0 {
+		t.Fatalf("budget switch state: first=%+v second=%+v cache=%+v", first.Snapshot(), second.Snapshot(), manager.CacheSnapshot())
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRequestUsesRuntimeOwnedSessionManager(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	expected := NewOwnedSessionManager(nil)
+	defer expected.Close()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set("site_session_manager", expected)
+	got := sessionManagerForRequest(c, nil)
+	if got != expected {
+		t.Fatal("request did not use the routed tenant runtime's manager")
+	}
+}
+
+func TestRequestFallbackSessionManagerIsRequestScopedWithoutSweeper(t *testing.T) {
+	firstContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	first := sessionManagerForRequest(firstContext, nil)
+	if sessionManagerForRequest(firstContext, nil) != first {
+		t.Fatal("same request did not reuse its fallback session manager")
+	}
+	select {
+	case <-first.done:
+	default:
+		t.Fatal("request-scoped fallback started a background sweeper")
+	}
+	secondContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	if second := sessionManagerForRequest(secondContext, nil); second == first {
+		t.Fatal("separate requests shared a session manager")
+	}
+}
+
 func TestBuildMagicLinkURL_HostBasedSite(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -47,6 +360,21 @@ func TestBuildMagicLinkURL_HostBasedSite(t *testing.T) {
 	want := "https://live-demo.kora.test/workspace/auth/login?magic_token=abc123"
 	if got != want {
 		t.Fatalf("buildMagicLinkURL() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildMagicLinkURLUsesConfiguredPublicAppBaseURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "https://tenant-alias.example.test/api/auth/magic-link/request", nil)
+	c.Set("site_name", "clientele")
+	got, err := buildMagicLinkURLWithPublicAppBaseURL(c, "token+value", "http://localhost:5173")
+	if err != nil {
+		t.Fatal("build configured path-based magic link:", err)
+	}
+	const want = "http://localhost:5173/s/clientele/workspace/auth/login?magic_token=token%2Bvalue"
+	if got != want {
+		t.Fatalf("configured magic-link URL = %q, want %q", got, want)
 	}
 }
 
@@ -82,126 +410,6 @@ func TestHashPassword(t *testing.T) {
 	}
 }
 
-func TestAuthenticateUser_ValidCredentials(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sm := NewSessionManager(db)
-
-	hash, _ := HashPassword("validpass")
-	rows := sqlmock.NewRows([]string{"name", "email", "password_hash", "full_name", "enabled", "roles"}).
-		AddRow("john", "john@test.com", hash, "John Doe", true, "Admin,Editor")
-
-	mock.ExpectQuery("SELECT name, email, password_hash, full_name, enabled, COALESCE\\(roles, ''\\) FROM _kora_user WHERE site = \\? AND email = \\?").
-		WithArgs("test.local", "john@test.com").
-		WillReturnRows(rows)
-
-	user, err := sm.AuthenticateUser("test.local", "john@test.com", "validpass")
-	if err != nil {
-		t.Fatalf("AuthenticateUser error = %v", err)
-	}
-	if user.Name != "john" {
-		t.Errorf("user.Name = %q, want %q", user.Name, "john")
-	}
-	if user.Email != "john@test.com" {
-		t.Errorf("user.Email = %q, want %q", user.Email, "john@test.com")
-	}
-	if user.FullName != "John Doe" {
-		t.Errorf("user.FullName = %q, want %q", user.FullName, "John Doe")
-	}
-	if !user.Enabled {
-		t.Error("user.Enabled should be true")
-	}
-	if len(user.Roles) == 0 || user.Roles[0] != "Admin" {
-		t.Errorf("user.Roles = %v, want [Admin Editor]", user.Roles)
-	}
-}
-
-func TestAuthenticateUser_InvalidPassword(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sm := NewSessionManager(db)
-
-	hash, _ := HashPassword("correctpass")
-	rows := sqlmock.NewRows([]string{"name", "email", "password_hash", "full_name", "enabled", "roles"}).
-		AddRow("john", "john@test.com", hash, "John Doe", true, "Admin")
-
-	mock.ExpectQuery("SELECT name, email, password_hash, full_name, enabled, COALESCE\\(roles, ''\\) FROM _kora_user WHERE site = \\? AND email = \\?").
-		WithArgs("test.local", "john@test.com").
-		WillReturnRows(rows)
-
-	_, err = sm.AuthenticateUser("test.local", "john@test.com", "wrongpass")
-	if err == nil {
-		t.Fatal("AuthenticateUser should error for wrong password")
-	}
-	if err.Error() != "invalid credentials" {
-		t.Errorf("error = %q, want %q", err.Error(), "invalid credentials")
-	}
-}
-
-func TestAuthenticateUser_UnknownEmail(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sm := NewSessionManager(db)
-
-	mock.ExpectQuery("SELECT name, email, password_hash, full_name, enabled, COALESCE\\(roles, ''\\) FROM _kora_user WHERE site = \\? AND email = \\?").
-		WithArgs("test.local", "unknown@test.com").
-		WillReturnError(sql.ErrNoRows)
-
-	_, err = sm.AuthenticateUser("test.local", "unknown@test.com", "anypass")
-	if err == nil {
-		t.Fatal("AuthenticateUser should error for unknown email")
-	}
-	if err.Error() != "invalid credentials" {
-		t.Errorf("error = %q, want %q", err.Error(), "invalid credentials")
-	}
-}
-
-func TestAuthenticateUser_DisabledAccount(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sm := NewSessionManager(db)
-
-	hash, _ := HashPassword("somepass")
-	rows := sqlmock.NewRows([]string{"name", "email", "password_hash", "full_name", "enabled", "roles"}).
-		AddRow("john", "john@test.com", hash, "John Doe", false, "Admin")
-
-	mock.ExpectQuery("SELECT name, email, password_hash, full_name, enabled, COALESCE\\(roles, ''\\) FROM _kora_user WHERE site = \\? AND email = \\?").
-		WithArgs("test.local", "john@test.com").
-		WillReturnRows(rows)
-
-	_, err = sm.AuthenticateUser("test.local", "john@test.com", "somepass")
-	if err == nil {
-		t.Fatal("AuthenticateUser should error for disabled account")
-	}
-	if err.Error() != "invalid credentials" {
-		t.Errorf("error = %q, want %q", err.Error(), "invalid credentials")
-	}
-}
-
-func TestAuthenticateUser_NoDatabase(t *testing.T) {
-	sm := NewSessionManager(nil)
-	_, err := sm.AuthenticateUser("test.local", "user@test.com", "pass")
-	if err == nil {
-		t.Fatal("AuthenticateUser should error when DB is nil")
-	}
-}
-
 func TestCreateSession(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -210,6 +418,7 @@ func TestCreateSession(t *testing.T) {
 	defer db.Close()
 
 	sm := NewSessionManager(db)
+	defer sm.Close()
 	SessionLifetime = 24 * time.Hour
 
 	user := &User{
@@ -238,6 +447,7 @@ func TestCreateSession(t *testing.T) {
 
 func TestCreateSession_NoDatabase(t *testing.T) {
 	sm := NewSessionManager(nil)
+	defer sm.Close()
 	_, err := sm.CreateSession("test.local", &User{Name: "test"})
 	if err == nil {
 		t.Fatal("CreateSession should error when DB is nil")
@@ -252,6 +462,7 @@ func TestDeleteSession(t *testing.T) {
 	defer db.Close()
 
 	sm := NewSessionManager(db)
+	defer sm.Close()
 
 	mock.ExpectExec("DELETE FROM _kora_session WHERE sid = ?").
 		WithArgs("test-sid-123").
@@ -263,10 +474,10 @@ func TestDeleteSession(t *testing.T) {
 
 func TestDeleteSession_NoDatabase(t *testing.T) {
 	sm := NewSessionManager(nil)
+	defer sm.Close()
 	// Should not panic with nil DB.
 	sm.DeleteSession("some-sid")
 }
-
 
 func TestGetSessionRejectsCrossSiteCacheHit(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -276,6 +487,7 @@ func TestGetSessionRejectsCrossSiteCacheHit(t *testing.T) {
 	defer db.Close()
 
 	sm := NewSessionManager(db)
+	defer sm.Close()
 	user := &User{Name: "cached-user", Email: "cached@test.com", Roles: []string{"Admin"}, Enabled: true}
 	sm.cacheMu.Lock()
 	sm.cache["sid-123"] = &sessionCacheEntry{
@@ -308,6 +520,7 @@ func TestGetSession_CacheHit(t *testing.T) {
 	defer db.Close()
 
 	sm := NewSessionManager(db)
+	defer sm.Close()
 
 	// Pre-populate cache.
 	user := &User{Name: "cached-user", Email: "cached@test.com", Roles: []string{"Admin"}, Enabled: true}
@@ -332,6 +545,69 @@ func TestGetSession_CacheHit(t *testing.T) {
 	// Ensure we didn't make any DB calls.
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unexpected DB calls: %v", err)
+	}
+}
+
+func TestSessionCacheEnforcesByteLimitAndLRUEviction(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sm := NewSessionManager(db)
+	defer sm.Close()
+	sm.cacheMaxBytes = 700
+	sm.cacheMaxEntries = 4
+	now := time.Now()
+	user := &User{Name: "User", Email: "user@example.test", FullName: "Example User", Roles: []string{"Reader"}}
+	for _, sid := range []string{"sid-a", "sid-b"} {
+		sm.cacheSession(sid, "tenant", user, now, now.Add(time.Hour), now)
+	}
+	cachedUser, _, err := sm.GetSession("tenant", "sid-a")
+	if err != nil {
+		t.Fatalf("cache hit: %v", err)
+	}
+	cachedUser.Roles[0] = "MutatedOutsideCache"
+	secondRead, _, err := sm.GetSession("tenant", "sid-a")
+	if err != nil || secondRead.Roles[0] != "Reader" {
+		t.Fatalf("cache user escaped mutable: user=%+v err=%v", secondRead, err)
+	}
+	sm.cacheSession("sid-c", "tenant", user, now, now.Add(time.Hour), now)
+	sm.cacheMu.RLock()
+	_, hasA := sm.cache["sid-a"]
+	_, hasB := sm.cache["sid-b"]
+	_, hasC := sm.cache["sid-c"]
+	sm.cacheMu.RUnlock()
+	if !hasA || hasB || !hasC {
+		t.Fatalf("LRU members: a=%v b=%v c=%v", hasA, hasB, hasC)
+	}
+	snapshot := sm.CacheSnapshot()
+	if snapshot.Bytes > snapshot.MaxBytes || snapshot.Entries != 2 {
+		t.Fatalf("cache snapshot = %+v", snapshot)
+	}
+}
+
+func TestSessionCacheSkipsOversizedEntriesAndSweepsExpiredBytes(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sm := NewSessionManager(db)
+	defer sm.Close()
+	sm.cacheMaxBytes = 300
+	now := time.Now()
+	tooLarge := &User{Name: strings.Repeat("x", 512)}
+	sm.cacheSession("large", "tenant", tooLarge, now, now.Add(time.Hour), now)
+	if got := sm.CacheSnapshot(); got.Entries != 0 || got.Bytes != 0 {
+		t.Fatalf("oversized cache snapshot = %+v", got)
+	}
+	sm.cacheMaxBytes = 1 << 20
+	user := &User{Name: "small"}
+	sm.cacheSession("expired", "tenant", user, now, now.Add(time.Hour), now.Add(-3*sessionCacheTTL))
+	sm.sweepExpiredCache(now)
+	if got := sm.CacheSnapshot(); got.Entries != 0 || got.Bytes != 0 {
+		t.Fatalf("after TTL sweep = %+v", got)
 	}
 }
 
@@ -502,294 +778,64 @@ func TestSplitRolesStr(t *testing.T) {
 var _ = errors.New
 var _ = strings.TrimSpace
 
-func TestMagicLinks_ListRequiresSessionValidationWithinAuthRoutes(t *testing.T) {
+func TestCloudOwnedInteractiveSignInRoutesAreRetired(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	db, mock, err := sqlmock.New()
+	db, _, err := sqlmock.New()
 	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
+		t.Fatal("sqlmock:", err)
 	}
 	defer db.Close()
-
 	sm := NewSessionManager(db)
+	defer sm.Close()
 	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set("site_name", "test.local")
-		c.Set("site_db", db)
-		c.Next()
-	})
 	RegisterAuthRoutes(router, sm, db, nil)
-
-	userJSON, err := json.Marshal(map[string]any{
-		"name":      "john",
-		"email":     "john@test.com",
-		"full_name": "John Doe",
-		"roles":     []string{"Administrator"},
-	})
-	if err != nil {
-		t.Fatalf("marshal user json: %v", err)
-	}
-	expiresAt := time.Now().Add(time.Hour).Format("2006-01-02 15:04:05")
-	mock.ExpectQuery("SELECT data, expires_at, created_at FROM _kora_session WHERE site = \\? AND sid = \\?").
-		WithArgs("test.local", "valid-session").
-		WillReturnRows(sqlmock.NewRows([]string{"data", "expires_at", "created_at"}).AddRow(string(userJSON), expiresAt, time.Now().Add(-time.Minute)))
-	mock.ExpectQuery("SELECT id, email, created_at, expires_at, used_at, revoked_at FROM _kora_magic_link").
-		WithArgs("test.local", "john@test.com", sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "email", "created_at", "expires_at", "used_at", "revoked_at"}))
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/magic-links", nil)
-	req.AddCookie(&http.Cookie{Name: "kora_sid", Value: "valid-session"})
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
+	for _, path := range []string{"/api/auth/login", "/api/auth/providers", "/api/auth/magic-link/request", "/api/auth/magic-link/verify", "/api/auth/magic-links"} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Errorf("%s status = %d, want %d", path, response.Code, http.StatusNotFound)
+		}
 	}
 }
 
-func TestMagicLinkVerify_RejectsReusedLinkWhenConsumeAffectsZeroRows(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+type testMagicLinkMailer struct{}
 
-	db, mock, err := sqlmock.New()
+func (testMagicLinkMailer) SendContext(context.Context, *email.Message) error { return nil }
+
+func TestMagicLinkRoutesRequireConfiguredDelivery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, _, err := sqlmock.New()
 	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
+		t.Fatal("sqlmock:", err)
 	}
 	defer db.Close()
-
 	sm := NewSessionManager(db)
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set("site_name", "test.local")
-		c.Set("site_db", db)
-		c.Next()
-	})
-	RegisterAuthRoutes(router, sm, db, nil)
+	defer sm.Close()
+	const publicURL = "https://app.kora.test"
 
-	token := "magic-token"
-	tokenHash := hashMagicLinkToken(token)
-	future := time.Now().Add(time.Hour).Format(time.RFC3339)
-	mock.ExpectQuery("SELECT id, email, CASE WHEN used_at IS NULL THEN 0 ELSE 1 END, CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END, expires_at FROM _kora_magic_link").
-		WithArgs("test.local", tokenHash).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "email", "used_flag", "revoked_flag", "expires_at"}).
-			AddRow("ml-1", "john@test.com", 0, 0, future))
-	mock.ExpectExec("UPDATE _kora_magic_link SET used_at = \\? WHERE id = \\? AND used_at IS NULL").
-		WithArgs(sqlmock.AnyArg(), "ml-1").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-
-	body := `{"token":"magic-token"}`
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/magic-link/verify", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusUnauthorized, w.Body.String())
-	}
-	if strings.Contains(w.Body.String(), "failed to create session") {
-		t.Fatalf("unexpected session creation path reached: %s", w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
-	}
-}
-
-func TestMagicLinkLifecycle_EndToEnd(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	oldTokenFn := generateMagicLinkTokenFn
-	generateMagicLinkTokenFn = func() string { return "fixed-magic-token" }
-	defer func() { generateMagicLinkTokenFn = oldTokenFn }()
-
-	sm := NewSessionManager(db)
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set("site_name", "test.local")
-		c.Set("site_db", db)
-		c.Next()
-	})
-	RegisterAuthRoutes(router, sm, db, nil)
-
-	magicLinkRows := sqlmock.NewRows([]string{"id", "email", "created_at", "expires_at", "used_at", "revoked_at"}).
-		AddRow("ml-1", "john@test.com", time.Now().Add(-time.Minute), time.Now().Add(time.Hour), nil, nil)
-	sessionRows := sqlmock.NewRows([]string{"data", "expires_at", "created_at"}).
-		AddRow(`{"name":"john","email":"john@test.com","full_name":"John Doe","roles":["Administrator"]}`, time.Now().Add(time.Hour).Format("2006-01-02 15:04:05"), time.Now().Add(-time.Minute).Format("2006-01-02 15:04:05"))
-
-	mock.ExpectQuery("SELECT name, email, full_name, enabled, COALESCE\\(roles, ''\\) FROM _kora_user WHERE site = \\? AND email = \\?").
-		WithArgs("test.local", "john@test.com").
-		WillReturnRows(sqlmock.NewRows([]string{"name", "email", "full_name", "enabled", "roles"}).
-			AddRow("john", "john@test.com", "John Doe", true, "Administrator"))
-	mock.ExpectExec("INSERT INTO _kora_magic_link \\(id, site, email, token_hash, expires_at, created_at\\)").
-		WithArgs(sqlmock.AnyArg(), "test.local", "john@test.com", hashMagicLinkToken("fixed-magic-token"), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/magic-link/request", strings.NewReader(`{"email":"john@test.com"}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("request status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-
-	mock.ExpectQuery("SELECT id, email, CASE WHEN used_at IS NULL THEN 0 ELSE 1 END, CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END, expires_at FROM _kora_magic_link").
-		WithArgs("test.local", hashMagicLinkToken("fixed-magic-token")).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "email", "used_flag", "revoked_flag", "expires_at"}).
-			AddRow("ml-1", "john@test.com", 0, 0, time.Now().Add(time.Hour)))
-	mock.ExpectExec("UPDATE _kora_magic_link SET used_at = \\? WHERE id = \\? AND used_at IS NULL").
-		WithArgs(sqlmock.AnyArg(), "ml-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery("SELECT name, email, full_name, enabled, COALESCE\\(roles, ''\\) FROM _kora_user WHERE site = \\? AND email = \\?").
-		WithArgs("test.local", "john@test.com").
-		WillReturnRows(sqlmock.NewRows([]string{"name", "email", "full_name", "enabled", "roles"}).
-			AddRow("john", "john@test.com", "John Doe", true, "Administrator"))
-	mock.ExpectExec("UPDATE _kora_user\\s+SET email_verified_at = COALESCE\\(email_verified_at, \\?\\), modified = CURRENT_TIMESTAMP\\s+WHERE site = \\? AND email = \\?").
-		WithArgs(sqlmock.AnyArg(), "test.local", "john@test.com").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("INSERT INTO _kora_session \\(sid, site, user, data, expires_at, created_at\\)").
-		WithArgs(sqlmock.AnyArg(), "test.local", "john", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	req = httptest.NewRequest(http.MethodPost, "/api/auth/magic-link/verify", strings.NewReader(`{"token":"fixed-magic-token"}`))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("verify status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	var verifyResp struct {
-		SID string `json:"sid"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &verifyResp); err != nil {
-		t.Fatalf("unmarshal verify response: %v", err)
-	}
-	if verifyResp.SID == "" {
-		t.Fatal("verify response did not include sid")
-	}
-
-	mock.ExpectQuery("SELECT data, expires_at, created_at FROM _kora_session WHERE site = \\? AND sid = \\?").
-		WithArgs("test.local", verifyResp.SID).
-		WillReturnRows(sessionRows)
-	mock.ExpectQuery("SELECT id, email, created_at, expires_at, used_at, revoked_at FROM _kora_magic_link").
-		WithArgs("test.local", "john@test.com", sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnRows(magicLinkRows)
-
-	req = httptest.NewRequest(http.MethodGet, "/api/auth/magic-links", nil)
-	req.AddCookie(&http.Cookie{Name: "kora_sid", Value: verifyResp.SID})
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("list status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-
-	mock.ExpectExec("UPDATE _kora_magic_link\\s+SET revoked_at = COALESCE\\(revoked_at, \\?\\)\\s+WHERE site = \\? AND email = \\? AND id = \\?").
-		WithArgs(sqlmock.AnyArg(), "test.local", "john@test.com", "ml-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	req = httptest.NewRequest(http.MethodPost, "/api/auth/magic-links/ml-1/revoke", nil)
-	req.AddCookie(&http.Cookie{Name: "kora_sid", Value: verifyResp.SID})
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("revoke status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
-	}
-}
-
-func TestMagicLinkRevokeAll(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sm := NewSessionManager(db)
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set("site_name", "test.local")
-		c.Set("site_db", db)
-		c.Next()
-	})
-	RegisterAuthRoutes(router, sm, db, nil)
-
-	userJSON, err := json.Marshal(map[string]any{
-		"name":      "john",
-		"email":     "john@test.com",
-		"full_name": "John Doe",
-		"roles":     []string{"Administrator"},
-	})
-	if err != nil {
-		t.Fatalf("marshal user json: %v", err)
-	}
-	sessionRows := sqlmock.NewRows([]string{"data", "expires_at", "created_at"}).
-		AddRow(string(userJSON), time.Now().Add(time.Hour).Format("2006-01-02 15:04:05"), time.Now().Add(-time.Minute).Format("2006-01-02 15:04:05"))
-
-	mock.ExpectQuery("SELECT data, expires_at, created_at FROM _kora_session WHERE site = \\? AND sid = \\?").
-		WithArgs("test.local", "valid-session").
-		WillReturnRows(sessionRows)
-	mock.ExpectExec("UPDATE _kora_magic_link\\s+SET revoked_at = COALESCE\\(revoked_at, \\?\\)\\s+WHERE site = \\? AND email = \\? AND revoked_at IS NULL AND used_at IS NULL").
-		WithArgs(sqlmock.AnyArg(), "test.local", "john@test.com").
-		WillReturnResult(sqlmock.NewResult(0, 2))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/magic-links/revoke-all", nil)
-	req.AddCookie(&http.Cookie{Name: "kora_sid", Value: "valid-session"})
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("revoke-all status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
-	}
-}
-
-func TestMagicLinkVerifyRejectsRevokedLink(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	sm := NewSessionManager(db)
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set("site_name", "test.local")
-		c.Set("site_db", db)
-		c.Next()
-	})
-	RegisterAuthRoutes(router, sm, db, nil)
-
-	token := "magic-token"
-	tokenHash := hashMagicLinkToken(token)
-	future := time.Now().Add(time.Hour).Format(time.RFC3339)
-	mock.ExpectQuery("SELECT id, email, CASE WHEN used_at IS NULL THEN 0 ELSE 1 END, CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END, expires_at FROM _kora_magic_link").
-		WithArgs("test.local", tokenHash).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "email", "used_flag", "revoked_flag", "expires_at"}).
-			AddRow("ml-1", "john@test.com", 0, 1, future))
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/magic-link/verify", strings.NewReader(`{"token":"magic-token"}`))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusUnauthorized, w.Body.String())
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
+	for _, tc := range []struct {
+		name       string
+		mailer     MagicLinkMailer
+		wantStatus int
+	}{
+		{name: "delivery unavailable", wantStatus: http.StatusNotFound},
+		{name: "delivery configured", mailer: testMagicLinkMailer{}, wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			if err := RegisterAuthRoutesWithPublicAppBaseURL(router, sm, db, tc.mailer, publicURL); err != nil {
+				t.Fatal("register routes:", err)
+			}
+			for _, path := range []string{"/api/auth/magic-link/request", "/api/auth/magic-link/verify"} {
+				request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+				request.Header.Set("Authorization", "Bearer native-api-client")
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, request)
+				if response.Code != tc.wantStatus {
+					t.Errorf("%s status = %d, want %d; body=%s", path, response.Code, tc.wantStatus, response.Body.String())
+				}
+			}
+		})
 	}
 }

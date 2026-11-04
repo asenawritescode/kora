@@ -195,6 +195,21 @@ func TestFieldValidation(t *testing.T) {
 	t.Logf("validation error (expected): %v", err)
 }
 
+func TestDependsOnCanReferenceLaterFieldAndRejectsUnknownField(t *testing.T) {
+	base := func(dependsOn string) *DocType {
+		return &DocType{Name: "StageRecord", Module: "Test", Fields: []Field{
+			{Fieldname: "loss_reason", Fieldtype: "Text", DependsOn: dependsOn},
+			{Fieldname: "stage", Fieldtype: "Select", Options: "New\nLost"},
+		}}
+	}
+	if err := base("stage").Validate(); err != nil {
+		t.Fatalf("forward depends_on reference should validate: %v", err)
+	}
+	if err := base("missing_stage").Validate(); err == nil || !strings.Contains(err.Error(), `depends_on references unknown field "missing_stage"`) {
+		t.Fatalf("unknown depends_on reference error = %v", err)
+	}
+}
+
 func TestFieldValidationRejectsInvalidTemporalDefaults(t *testing.T) {
 	tests := []struct {
 		name      string

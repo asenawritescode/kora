@@ -64,6 +64,10 @@ func (h *Handler) HandleAgentManifest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": saved})
 }
 
+func (h *Handler) HandleAgentManifests(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": h.agentStore(c).Manifests()})
+}
+
 func (h *Handler) validateAgentPermissions(c *gin.Context, m org.AgentManifest) error {
 	reg := h.siteRegistry(c)
 	if reg == nil {

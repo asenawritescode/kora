@@ -6,6 +6,7 @@ package doctype
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 )
 
@@ -29,7 +30,6 @@ func evaluateCondition(exprStr string, doc *Document, userRoles []string) bool {
 	if exprStr == "" {
 		return true
 	}
-
 	docFields := make(map[string]any)
 	if doc != nil {
 		for k, v := range doc.Fields {
@@ -55,6 +55,9 @@ func evaluateCondition(exprStr string, doc *Document, userRoles []string) bool {
 		if handled, result := evalLegacyEquals(exprStr, docFields); handled {
 			return result
 		}
+		if handled, result := evalLegacyComparison(exprStr, docFields); handled {
+			return result
+		}
 		if handled, result := evalLegacyHasRole(exprStr, userRoles); handled {
 			return result
 		}
@@ -75,6 +78,52 @@ func evaluateCondition(exprStr string, doc *Document, userRoles []string) bool {
 		return false
 	}
 	return isTruthy(result)
+}
+
+// evalLegacyComparison handles the comparison operators used by workflow and
+// validation conditions. It fails closed when either side cannot be read as a
+// number; an unparsed condition must never silently become truthy.
+func evalLegacyComparison(expr string, values map[string]any) (bool, bool) {
+	for _, operator := range []string{">=", "<=", ">", "<"} {
+		index := strings.Index(expr, operator)
+		if index < 0 {
+			continue
+		}
+		left := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(expr[:index]), "doc."))
+		right := strings.TrimSpace(expr[index+len(operator):])
+		leftValue, leftOK := numericConditionValue(values[left])
+		rightValue, rightErr := strconv.ParseFloat(right, 64)
+		if !leftOK || rightErr != nil {
+			return true, false
+		}
+		switch operator {
+		case ">=":
+			return true, leftValue >= rightValue
+		case "<=":
+			return true, leftValue <= rightValue
+		case ">":
+			return true, leftValue > rightValue
+		case "<":
+			return true, leftValue < rightValue
+		}
+	}
+	return false, false
+}
+
+func numericConditionValue(value any) (float64, bool) {
+	switch number := value.(type) {
+	case float64:
+		return number, true
+	case int:
+		return float64(number), true
+	case int64:
+		return float64(number), true
+	case string:
+		parsed, err := strconv.ParseFloat(number, 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
 }
 
 // evalLegacyEquals handles doc.field == "value" and doc.field != "value".

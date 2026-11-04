@@ -56,7 +56,6 @@ func TestLivePostgresDirectoryRevisionReplacesRoutedRuntime(t *testing.T) {
 	initialRuntime := &knet.LoadedSite{
 		SiteID: initialInfo.SiteID, ConfigRevision: initialInfo.ConfigRevision, Status: initialInfo.Status,
 		Name: initialInfo.Name, Config: knet.SiteRouterConfig{Hostname: initialInfo.Name, Domains: initialInfo.Domains},
-		RuntimeServices: initialInfo.ConfigRevision,
 	}
 	router := knet.NewSiteRouter([]*knet.LoadedSite{initialRuntime})
 	consumer := &DirectoryConsumer{Registry: registry, ID: "integration:runtime-revision:" + name, InitialCursor: startCursor}
@@ -72,7 +71,6 @@ func TestLivePostgresDirectoryRevisionReplacesRoutedRuntime(t *testing.T) {
 		next := &knet.LoadedSite{
 			SiteID: info.SiteID, ConfigRevision: info.ConfigRevision, Status: info.Status,
 			Name: info.Name, Config: knet.SiteRouterConfig{Hostname: info.Name, Domains: info.Domains},
-			RuntimeServices: info.ConfigRevision,
 		}
 		_, err = router.ReplaceSite(next)
 		return err
@@ -94,14 +92,14 @@ func TestLivePostgresDirectoryRevisionReplacesRoutedRuntime(t *testing.T) {
 	requestRouter := gin.New()
 	requestRouter.Use(router.Middleware())
 	requestRouter.GET("/runtime", func(c *gin.Context) {
-		bundle, _ := c.Get("site_runtime_services")
-		c.String(200, fmt.Sprint(bundle))
+		revision, _ := c.Get("site_config_revision")
+		c.String(200, fmt.Sprint(revision))
 	})
 	request := httptest.NewRequest("GET", "/runtime", nil)
 	request.Host = "alias." + name
 	response := httptest.NewRecorder()
 	requestRouter.ServeHTTP(response, request)
 	if response.Code != 200 || response.Body.String() != fmt.Sprint(updated.ConfigRevision) {
-		t.Fatalf("alias request did not receive refreshed runtime bundle: status=%d body=%q want=%d", response.Code, response.Body.String(), updated.ConfigRevision)
+		t.Fatalf("alias request did not receive refreshed runtime revision: status=%d body=%q want=%d", response.Code, response.Body.String(), updated.ConfigRevision)
 	}
 }

@@ -29,6 +29,7 @@ type PageManifestMetadata struct {
 type PageManifestSpec struct {
 	Route        string             `json:"route"`
 	Runtime      string             `json:"runtime"`
+	Task         *ViewTask          `json:"task,omitempty"`
 	Permissions  []string           `json:"permissions"`
 	Capabilities []string           `json:"capabilities"`
 	Offline      string             `json:"offline"`
@@ -60,19 +61,20 @@ type PageManifestLayout struct {
 }
 
 type PageComponent struct {
-	ID                   string          `json:"id"`
-	Component            string          `json:"component"`
-	Version              int             `json:"version"`
-	Region               string          `json:"region"`
-	Position             int             `json:"position"`
-	Span                 int             `json:"span,omitempty"`
-	Props                map[string]any  `json:"props"`
-	Data                 string          `json:"data,omitempty"`
-	Actions              []string        `json:"actions,omitempty"`
-	RequiredCapabilities []string        `json:"required_capabilities,omitempty"`
-	Permissions          []string        `json:"permissions,omitempty"`
-	Offline              string          `json:"offline,omitempty"`
-	Children             []PageComponent `json:"children,omitempty"`
+	ID                   string            `json:"id"`
+	Component            string            `json:"component"`
+	Version              int               `json:"version"`
+	Region               string            `json:"region"`
+	Position             int               `json:"position"`
+	Span                 int               `json:"span,omitempty"`
+	Props                map[string]any    `json:"props"`
+	Data                 string            `json:"data,omitempty"`
+	ResourceBindings     map[string]string `json:"resource_bindings,omitempty"`
+	Actions              []string          `json:"actions,omitempty"`
+	RequiredCapabilities []string          `json:"required_capabilities,omitempty"`
+	Permissions          []string          `json:"permissions,omitempty"`
+	Offline              string            `json:"offline,omitempty"`
+	Children             []PageComponent   `json:"children,omitempty"`
 }
 
 func (p *PageManifest) Validate() error {
@@ -100,12 +102,21 @@ func (p *PageManifest) Validate() error {
 	if p.Spec.Layout.Type == "" {
 		return fmt.Errorf("spec.layout.type is required")
 	}
+	if p.Spec.Task != nil {
+		if err := p.Spec.Task.Validate(); err != nil {
+			return fmt.Errorf("spec.task: %w", err)
+		}
+	}
 	return nil
 }
 
 func PageManifestFromView(v *View) *PageManifest {
 	if v == nil {
 		return nil
+	}
+	if v.PageManifest != nil {
+		manifest := *v.PageManifest
+		return &manifest
 	}
 	status := "draft"
 	offline := "read_only"
@@ -121,9 +132,19 @@ func PageManifestFromView(v *View) *PageManifest {
 	}
 	resources := []PageResource{}
 	resourceByDocType := make(map[string]string)
+	for _, resource := range v.Resources {
+		resources = append(resources, resource)
+		if doctypeName, ok := resource.Params["doctype"].(string); ok && strings.TrimSpace(doctypeName) != "" {
+			if _, exists := resourceByDocType[doctypeName]; !exists {
+				resourceByDocType[doctypeName] = resource.ID
+			}
+		}
+	}
 	if v.SourceDocType != "" {
-		resources = append(resources, pageResource("primary", v.SourceDocType))
-		resourceByDocType[v.SourceDocType] = "primary"
+		if _, exists := resourceByDocType[v.SourceDocType]; !exists {
+			resources = append(resources, pageResource("primary", v.SourceDocType))
+			resourceByDocType[v.SourceDocType] = "primary"
+		}
 	}
 	collectViewResources(v.Components, v.SourceDocType, &resources, resourceByDocType)
 	children := pageComponentsFromView(v.Components)
@@ -140,6 +161,7 @@ func PageManifestFromView(v *View) *PageManifest {
 		Spec: PageManifestSpec{
 			Route:        v.Route,
 			Runtime:      ">=2.0.0 <3.0.0",
+			Task:         v.Task,
 			Permissions:  []string{},
 			Capabilities: capabilities,
 			Offline:      offline,
@@ -165,11 +187,19 @@ func pageResource(id, doctypeName string) PageResource {
 func collectViewResources(components []ViewComponent, primaryDocType string, resources *[]PageResource, resourceByDocType map[string]string) {
 	for _, component := range components {
 		docTypeName := strings.TrimSpace(component.SourceDocType)
-		if docTypeName != "" && docTypeName != primaryDocType {
+		if docTypeName == "" {
+			collectViewResources(component.Components, primaryDocType, resources, resourceByDocType)
+			continue
+		}
+		if len(component.Filters) > 0 {
+			resourceID := uniqueViewResourceID(normalizeResourceName(component.ID, docTypeName), *resources)
+			*resources = append(*resources, pageResourceForViewComponent(resourceID, docTypeName, component))
+			resourceByDocType[viewComponentResourceKey(docTypeName, component.ID)] = resourceID
+		} else {
 			if _, exists := resourceByDocType[docTypeName]; !exists {
-				resourceID := normalizeResourceName("", docTypeName)
+				resourceID := uniqueViewResourceID(normalizeResourceName("", docTypeName), *resources)
 				if resourceID == "primary" {
-					resourceID = "doctype-primary"
+					resourceID = uniqueViewResourceID("doctype-primary", *resources)
 				}
 				resourceByDocType[docTypeName] = resourceID
 				*resources = append(*resources, pageResource(resourceID, docTypeName))
@@ -179,12 +209,54 @@ func collectViewResources(components []ViewComponent, primaryDocType string, res
 	}
 }
 
+func uniqueViewResourceID(base string, resources []PageResource) string {
+	used := make(map[string]struct{}, len(resources))
+	for _, resource := range resources {
+		used[resource.ID] = struct{}{}
+	}
+	if _, exists := used[base]; !exists {
+		return base
+	}
+	for suffix := 2; ; suffix++ {
+		candidate := fmt.Sprintf("%s-%d", base, suffix)
+		if _, exists := used[candidate]; !exists {
+			return candidate
+		}
+	}
+}
+
+func pageResourceForViewComponent(id, doctypeName string, component ViewComponent) PageResource {
+	resource := pageResource(id, doctypeName)
+	if len(component.Filters) == 0 {
+		return resource
+	}
+	filters := make([]map[string]any, 0, len(component.Filters))
+	for _, filter := range component.Filters {
+		op := map[string]string{
+			"equals": "=", "not_equals": "!=", "gt": ">", "gte": ">=", "lt": "<", "lte": "<=",
+			"like": "like", "in": "in",
+		}[filter.Op]
+		filters = append(filters, map[string]any{"field": filter.Field, "op": op, "value": filter.Value})
+	}
+	resource.Params["filters"] = filters
+	return resource
+}
+
+func viewComponentResourceKey(doctypeName, componentID string) string {
+	return doctypeName + "\x00" + componentID
+}
+
 func bindViewComponentResources(components []PageComponent, resourceByDocType map[string]string) {
 	for i := range components {
 		component := &components[i]
 		if component.Data == "" && componentNeedsDataBinding(component.Component) {
 			if docTypeName, ok := component.Props["source_doctype"].(string); ok {
-				if resourceID := resourceByDocType[strings.TrimSpace(docTypeName)]; resourceID != "" {
+				docTypeName = strings.TrimSpace(docTypeName)
+				resourceID := resourceByDocType[viewComponentResourceKey(docTypeName, component.ID)]
+				if resourceID == "" {
+					resourceID = resourceByDocType[docTypeName]
+				}
+				if resourceID != "" {
 					component.Data = resourceID + ".data"
 				}
 			}
@@ -228,6 +300,34 @@ func (p *PageManifest) ToView() *View {
 			sourceDocType = value
 		}
 	}
+	components := viewComponentsFromPage(p.Spec.Layout.Children)
+	pageActions := make(map[string]PageAction, len(p.Spec.Actions))
+	for _, action := range p.Spec.Actions {
+		pageActions[action.ID] = action
+	}
+	var bindActions func([]PageComponent, []ViewComponent)
+	bindActions = func(pages []PageComponent, views []ViewComponent) {
+		for i := range pages {
+			for _, actionID := range pages[i].Actions {
+				if action, ok := pageActions[actionID]; ok {
+					resolved := ViewAction{ID: action.ID, Trigger: "on_click", Type: action.Command, Config: action.Input}
+					replaced := false
+					for actionIndex := range views[i].Actions {
+						if views[i].Actions[actionIndex].ID == action.ID {
+							views[i].Actions[actionIndex] = resolved
+							replaced = true
+							break
+						}
+					}
+					if !replaced {
+						views[i].Actions = append(views[i].Actions, resolved)
+					}
+				}
+			}
+			bindActions(pages[i].Children, views[i].Components)
+		}
+	}
+	bindActions(p.Spec.Layout.Children, components)
 	return &View{
 		Name:          p.Metadata.Name,
 		Route:         p.Spec.Route,
@@ -236,7 +336,10 @@ func (p *PageManifest) ToView() *View {
 		Label:         p.Metadata.Name,
 		Module:        p.Metadata.Package,
 		SourceDocType: sourceDocType,
-		Components:    viewComponentsFromPage(p.Spec.Layout.Children),
+		Resources:     append([]PageResource(nil), p.Spec.Resources...),
+		Task:          p.Spec.Task,
+		Components:    components,
+		PageManifest:  p,
 		PublicAccess: &ViewPublicAccess{
 			Enabled:        p.Metadata.Status == "active",
 			Components:     p.Spec.Capabilities,
@@ -267,17 +370,21 @@ func pageComponentsFromView(components []ViewComponent) []PageComponent {
 			}
 			props["actions"] = actions
 		}
+		if len(c.Filters) > 0 {
+			props["filters"] = append([]ViewFilter(nil), c.Filters...)
+		}
 		out = append(out, PageComponent{
-			ID:        c.ID,
-			Component: c.Type,
-			Version:   1,
-			Region:    c.Region,
-			Position:  c.Position,
-			Span:      c.Span,
-			Props:     props,
-			Data:      c.Data,
-			Actions:   actionIDsFromView(c.Actions),
-			Children:  pageComponentsFromView(c.Components),
+			ID:               c.ID,
+			Component:        c.Type,
+			Version:          1,
+			Region:           c.Region,
+			Position:         c.Position,
+			Span:             c.Span,
+			Props:            props,
+			Data:             c.Data,
+			ResourceBindings: c.ResourceBindings,
+			Actions:          actionIDsFromView(c.Actions),
+			Children:         pageComponentsFromView(c.Components),
 		})
 	}
 	return out
@@ -287,19 +394,21 @@ func viewComponentsFromPage(components []PageComponent) []ViewComponent {
 	out := make([]ViewComponent, 0, len(components))
 	for _, c := range components {
 		out = append(out, ViewComponent{
-			ID:             c.ID,
-			Type:           c.Component,
-			Region:         c.Region,
-			Label:          stringProp(c.Props, "title", c.Component),
-			SourceDocType:  stringProp(c.Props, "source_doctype", ""),
-			Data:           c.Data,
-			Bindings:       stringMapProp(c.Props, "bindings"),
-			Actions:        viewActionsFromIDs(c.Actions),
-			DesktopColumns: stringSliceProp(c.Props, "desktop_columns"),
-			MobileColumns:  stringSliceProp(c.Props, "mobile_columns"),
-			Components:     viewComponentsFromPage(c.Children),
-			Position:       c.Position,
-			Span:           c.Span,
+			ID:               c.ID,
+			Type:             c.Component,
+			Region:           c.Region,
+			Label:            stringProp(c.Props, "title", c.Component),
+			SourceDocType:    stringProp(c.Props, "source_doctype", ""),
+			Data:             c.Data,
+			ResourceBindings: c.ResourceBindings,
+			Bindings:         stringMapProp(c.Props, "bindings"),
+			Filters:          viewFiltersFromProps(c.Props["filters"]),
+			Actions:          viewActionsFromIDs(c.Actions),
+			DesktopColumns:   stringSliceProp(c.Props, "desktop_columns"),
+			MobileColumns:    stringSliceProp(c.Props, "mobile_columns"),
+			Components:       viewComponentsFromPage(c.Children),
+			Position:         c.Position,
+			Span:             c.Span,
 		})
 	}
 	return out
@@ -472,4 +581,27 @@ func stringSliceProp(props map[string]any, key string) []string {
 		}
 	}
 	return out
+}
+
+func viewFiltersFromProps(value any) []ViewFilter {
+	if typed, ok := value.([]ViewFilter); ok {
+		return append([]ViewFilter(nil), typed...)
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	filters := make([]ViewFilter, 0, len(items))
+	for _, item := range items {
+		fields, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		field, fieldOK := fields["field"].(string)
+		op, opOK := fields["op"].(string)
+		if fieldOK && opOK {
+			filters = append(filters, ViewFilter{Field: field, Op: op, Value: fields["value"]})
+		}
+	}
+	return filters
 }

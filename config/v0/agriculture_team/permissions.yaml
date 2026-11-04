@@ -1,0 +1,54 @@
+- doctype: Farm Labor Entry
+  role: Farm Team Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm Labor Entry
+  role: Farm Team Supervisor
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm Labor Entry
+  role: Farm Team Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Field Observation
+  role: Farm Team Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Field Observation
+  role: Farm Team Supervisor
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Field Observation
+  role: Farm Team Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm Cost Entry
+  role: Farm Team Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm Cost Entry
+  role: Farm Team Supervisor
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Farm Cost Entry
+  role: Farm Team Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false

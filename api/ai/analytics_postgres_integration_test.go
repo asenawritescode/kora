@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	_ "github.com/lib/pq"
 )
 
@@ -42,12 +44,20 @@ func TestLivePostgresAnalyticsInsights(t *testing.T) {
 	if _, err := database.Exec(`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value) VALUES ($1,$2,$3,$4,CURRENT_DATE,$5)`, "site-pg", "Sale", "sale_count", "", 3.0); err != nil {
 		t.Fatal("insert analytics rollup fixture:", err)
 	}
-	tx := &orm.TxManager{DB: database, Registry: doctype.NewRegistry(), Dialect: kdb.Resolve("postgres")}
-	all := executeAnalyticsInsights(tx, tx.Registry, "all", "site-pg")
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Sale"})
+	registry.Permissions.AddRole(&doctype.Role{Name: doctype.AdminRole})
+	actor := contract.ActorContext{PrincipalID: "analytics-admin", PrincipalType: contract.PrincipalHuman, Site: "site-pg", Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now().UTC()}
+	execution, err := policy.NewVerifiedExecution("site-pg", actor)
+	if err != nil {
+		t.Fatal("create analytics execution:", err)
+	}
+	tx := &orm.TxManager{DB: database, Registry: registry, Dialect: kdb.Resolve("postgres"), Execution: execution}
+	all := executeAnalyticsInsights(tx, registry, "all", "site-pg", execution)
 	if !strings.Contains(all, "Sale") {
 		t.Fatalf("PostgreSQL analytics doctype discovery = %q, want Sale", all)
 	}
-	insights := executeAnalyticsInsights(tx, tx.Registry, "Sale", "site-pg")
+	insights := executeAnalyticsInsights(tx, registry, "Sale", "site-pg", execution)
 	if !strings.Contains(insights, "Total: 3") {
 		t.Fatalf("PostgreSQL analytics insights = %q, want total 3", insights)
 	}

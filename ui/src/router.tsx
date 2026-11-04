@@ -18,7 +18,7 @@ const AdminDoctypesPage = lazy(() => import('@/routes/workspace/admin/doctypes')
 const AdminDoctypeEditorPage = lazy(() => import('@/routes/workspace/admin/doctypes/editor'))
 const AdminVersionsPage = lazy(() => import('@/routes/workspace/admin/versions'))
 const AdminPermissionsPage = lazy(() => import('@/routes/workspace/admin/permissions'))
-const AdminWorkflowsPage = lazy(() => import('@/routes/workspace/admin/workflows'))
+const AdminAutomationsPage = lazy(() => import('@/routes/workspace/admin/automations'))
 const AdminUsersPage = lazy(() => import('@/routes/workspace/admin/users'))
 const AdminSecretsPage = lazy(() => import('@/routes/workspace/admin/secrets'))
 const AdminScriptsPage = lazy(() => import('@/routes/workspace/admin/scripts'))
@@ -28,6 +28,8 @@ const AdminApprovalsPage = lazy(() => import('@/routes/workspace/admin/approvals
 const AdminPageManifestsPage = lazy(() => import('@/routes/workspace/admin/page-manifests'))
 const AdminPageManifestEditorPage = lazy(() => import('@/routes/workspace/admin/page-manifests/editor'))
 const StudioPage = lazy(() => import('@/routes/workspace/studio'))
+const RequestsInboxPage = lazy(() => import('@/routes/workspace/requests/index'))
+const RequestDetailPage = lazy(() => import('@/routes/workspace/requests/$id'))
 const OnboardingPage = lazy(() => import('@/routes/workspace/onboarding'))
 const ConsoleLoginPage = lazy(() => import('@/routes/console/login'))
 const ConsoleDashboard = lazy(() => import('@/routes/console/index'))
@@ -74,6 +76,18 @@ const dashboardRoute = createRoute({
   getParentRoute: () => workspaceLayout,
   path: '/',
   component: DashboardPage,
+})
+
+const requestsInboxRoute = createRoute({
+  getParentRoute: () => workspaceLayout,
+  path: 'requests',
+  component: RequestsInboxPage,
+})
+
+const requestDetailRoute = createRoute({
+  getParentRoute: () => workspaceLayout,
+  path: 'requests/$id',
+  component: RequestDetailPage,
 })
 
 // Doctype CRUD routes.
@@ -136,10 +150,10 @@ const adminPermissionsRoute = createRoute({
   component: AdminPermissionsPage,
 })
 
-const adminWorkflowsRoute = createRoute({
+const adminAutomationsRoute = createRoute({
   getParentRoute: () => adminRoute,
-  path: 'workflows',
-  component: AdminWorkflowsPage,
+  path: 'automations',
+  component: AdminAutomationsPage,
 })
 
 const adminUsersRoute = createRoute({
@@ -253,6 +267,8 @@ const routeTree = rootRoute.addChildren([
   ]),
   workspaceLayout.addChildren([
     dashboardRoute,
+    requestsInboxRoute,
+    requestDetailRoute,
     studioRoute,
     onboardingRoute,
     adminRoute.addChildren([
@@ -261,14 +277,14 @@ const routeTree = rootRoute.addChildren([
       adminDoctypeEditRoute,
       adminVersionsRoute,
       adminPermissionsRoute,
-      adminWorkflowsRoute,
+      adminAutomationsRoute,
       adminUsersRoute,
       adminScriptsRoute,
-  adminExtensionsRoute,
-  adminSecretsRoute,
-  adminAnalyticsRoute,
-  adminApprovalsRoute,
-  adminPageManifestsListRoute,
+      adminExtensionsRoute,
+      adminSecretsRoute,
+      adminAnalyticsRoute,
+      adminApprovalsRoute,
+      adminPageManifestsListRoute,
       adminPageManifestsNewRoute,
       adminPageManifestsEditRoute,
     ]),

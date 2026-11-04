@@ -61,13 +61,10 @@ register_from_file "Kenya Tax Compliance" "doc_event" "Sales Invoice" "before_sa
 # 3. M-Pesa Auto-Matching
 register_from_file "M-Pesa Auto-Matching" "doc_event" "M-Pesa Payment" "after_insert" "config/v0/erp_kenya/scripts/mpesa_integration.js"
 
-# 4. eTIMS Invoice Submission
-register_from_file "eTIMS Invoice Submission" "doc_event" "Sales Invoice" "on_submit" "config/v0/erp_kenya/scripts/etims_integration.js"
-
-# 5. Kenya Payroll Computation
+# 4. Kenya Payroll Computation
 register_from_file "Kenya Payroll Computation" "doc_event" "Payroll Period" "before_save" "config/v0/erp_kenya/scripts/payroll_kenya.js"
 
-# 6. Stock Validation Rules
+# 5. Stock Validation Rules
 register_from_file "Stock Validation Rules" "doc_event" "Stock Movement" "before_save" "config/v0/erp_kenya/scripts/stock_validation.js"
 
 echo ""

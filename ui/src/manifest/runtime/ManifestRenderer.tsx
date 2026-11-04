@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useQueries, keepPreviousData } from '@tanstack/react-query'
 import { AlertTriangle, Ban, CloudOff, Loader2, RefreshCcw, ShieldAlert, WifiOff } from 'lucide-react'
 import type { PageComponent, PageManifest, PageResource } from '@/manifest/schema/page'
@@ -7,7 +7,7 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { cn } from '../../lib/utils'
 import { fetchInsights } from '@/lib/api/analytics'
-import { isAllowedResourceQuery, resourcePolicyError } from './policy'
+import { documentListParams, documentListResourceWithFilter, isAllowedResourceQuery, resourcePolicyError } from './policy'
 import { useCartStore } from '@/lib/cart-store'
 
 export type ManifestRenderMode = 'editor' | 'preview' | 'runtime'
@@ -42,10 +42,18 @@ export function ManifestRenderer({
   onAction,
   className,
 }: ManifestRendererProps) {
-  const runtimeResources = useManifestRuntimeResources(manifest, !resourceState)
-  const resources = resourceState ?? runtimeResources
   const [filters, setFilters] = useState<Record<string, { field?: string; value?: string }>>({})
-  const filteredResources = useMemo(() => applyResourceFilters(manifest, resources, filters), [manifest, resources, filters])
+  const [queryFilters, setQueryFilters] = useState(filters)
+  useEffect(() => {
+    const timeout = setTimeout(() => setQueryFilters(filters), 250)
+    return () => clearTimeout(timeout)
+  }, [filters])
+  const runtimeResources = useManifestRuntimeResources(manifest, !resourceState, queryFilters)
+  const resources = resourceState ?? runtimeResources
+  const filteredResources = useMemo(
+    () => resourceState ? applyResourceFilters(manifest, resources, filters) : resources,
+    [manifest, resources, filters, resourceState],
+  )
   const regions = regionsForLayout(manifest.spec.layout.type)
   const addCartItem = useCartStore((state) => state.addItem)
 
@@ -145,6 +153,9 @@ export function ManifestComponentRenderer({
   const actionsById = useMemo(() => new Map(manifest.spec.actions.map((action) => [action.id, action])), [manifest.spec.actions])
   const registeredComponent = useMemo(() => pageComponentToRegisteredConfig(component, actionsById), [component, actionsById])
   const resource = resolveComponentResource(component, manifest.spec.resources, resources)
+  const boundResources = Object.fromEntries(Object.entries(component.resource_bindings ?? {}).map(([role, resourceID]) => [role, resources[resourceID]]))
+  const failedBoundResource = Object.values(boundResources).find(shouldRenderResourceState)
+  const blockingResource = shouldRenderResourceState(resource) ? resource : failedBoundResource
   const disabled = mode !== 'runtime'
   const showChrome = mode === 'editor'
 
@@ -167,13 +178,14 @@ export function ManifestComponentRenderer({
 
   const body = !entry || !Component ? (
     <UnsupportedComponent config={registeredComponent} onAction={() => {}} />
-  ) : shouldRenderResourceState(resource) ? (
-    <ResourceStateBlock state={resource} />
+  ) : blockingResource ? (
+    <ResourceStateBlock state={blockingResource} />
   ) : (
     <Suspense fallback={<ComponentLoading />}>
       <Component
         config={registeredComponent}
         data={resource?.data}
+        resources={boundResources}
         isLoading={resource?.kind === 'loading'}
         disabled={disabled}
         readonly={disabled}
@@ -270,6 +282,7 @@ function pageComponentToRegisteredConfig(
     desktop_columns: component.props.desktop_columns as string[] | undefined,
     mobile_columns: component.props.mobile_columns as string[] | undefined,
     filters: component.props.filters as Array<{ field: string; op?: string; value?: unknown }> | undefined,
+    resource_bindings: component.resource_bindings,
     components: component.children?.map((child) => pageComponentToRegisteredConfig(child, actionsById)),
     position: component.position,
     span: component.span,
@@ -305,21 +318,28 @@ export function createSimulatedResourceState(
   return Object.fromEntries(manifest.spec.resources.map((resource) => [resource.id, createResourceState(resource, kind)]))
 }
 
-function useManifestRuntimeResources(manifest: PageManifest, enabled: boolean): Record<string, ManifestResourceState> {
+function useManifestRuntimeResources(
+  manifest: PageManifest,
+  enabled: boolean,
+  filters: Record<string, { field?: string; value?: string }>,
+): Record<string, ManifestResourceState> {
   const queries = useQueries({
-    queries: manifest.spec.resources.map((resource) => ({
+    queries: manifest.spec.resources.map((sourceResource) => {
+      const resource = documentListResourceWithFilter(sourceResource, filters[sourceResource.id])
+      return {
       queryKey: ['manifest-resource', manifest.metadata.name, resource.id, resource.query, resource.params],
       queryFn: () => fetchManifestResource(resource),
       enabled,
       staleTime: 30_000,
       placeholderData: keepPreviousData,
-    })),
+    }}),
   })
 
   return Object.fromEntries(manifest.spec.resources.map((resource, index) => {
+    const queryResource = documentListResourceWithFilter(resource, filters[resource.id])
     const query = queries[index]
     if (!enabled) return [resource.id, createResourceState(resource, 'normal')]
-    const policyError = resourcePolicyError(resource)
+    const policyError = resourcePolicyError(queryResource)
     if (policyError) return [resource.id, { kind: 'error', message: policyError }]
     if (query.isLoading) return [resource.id, createResourceState(resource, 'loading')]
     if (query.isError) return [resource.id, { kind: 'error', message: query.error instanceof Error ? query.error.message : 'Resource failed to load.' }]
@@ -335,9 +355,8 @@ async function fetchManifestResource(resource: PageResource) {
   if (resource.query === 'document.list') {
     const { fetchList } = await import('../../lib/api/resources')
     const doctype = String(resource.params.doctype || '')
-    const limit = typeof resource.params.limit === 'number' ? resource.params.limit : 50
     if (!doctype) return { data: [], meta: { total: 0, doctype: '' } }
-    return fetchList(doctype, { limit })
+    return fetchList(doctype, documentListParams(resource))
   }
   if (resource.query === 'analytics.insights') {
     const doctype = String(resource.params.doctype || '')

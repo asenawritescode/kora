@@ -44,7 +44,7 @@ func GenerateOpenAPISpec(reg *doctype.Registry, siteName string) *openapi3.T {
 	spec := &openapi3.T{
 		OpenAPI: "3.0.3",
 		Info: &openapi3.Info{
-			Title:       fmt.Sprintf("Kora — %s API", siteName),
+			Title:       fmt.Sprintf("Kigae — %s API", siteName),
 			Description: "Auto-generated API documentation. Endpoints reflect the currently loaded doctypes.",
 			Version:     "1.0.0",
 		},
@@ -81,83 +81,7 @@ func addStaticPaths(spec *openapi3.T) {
 			Responses:   openapi3.NewResponses(openapi3.WithStatus(200, resp("pong"))),
 		},
 	})
-	spec.Paths.Set("/api/auth/login", &openapi3.PathItem{
-		Post: &openapi3.Operation{
-			OperationID: "login",
-			Summary:     "Authenticate and get session cookie",
-			RequestBody: &openapi3.RequestBodyRef{
-				Value: openapi3.NewRequestBody().
-					WithRequired(true).
-					WithJSONSchema(openapi3.NewObjectSchema().
-						WithProperty("email", openapi3.NewStringSchema()).
-						WithProperty("password", openapi3.NewStringSchema())),
-			},
-			Responses: openapi3.NewResponses(
-				openapi3.WithStatus(200, resp("Session created")),
-				openapi3.WithStatus(401, resp("Invalid credentials")),
-			),
-		},
-	})
-	spec.Paths.Set("/api/auth/providers", &openapi3.PathItem{
-		Get: &openapi3.Operation{
-			OperationID: "authProviders",
-			Summary:     "List supported authentication providers",
-			Responses:   openapi3.NewResponses(openapi3.WithStatus(200, resp("Provider list"))),
-		},
-	})
-	spec.Paths.Set("/api/auth/magic-link/request", &openapi3.PathItem{
-		Post: &openapi3.Operation{
-			OperationID: "magicLinkRequest",
-			Summary:     "Request a one-time magic sign-in link",
-			RequestBody: &openapi3.RequestBodyRef{
-				Value: openapi3.NewRequestBody().
-					WithRequired(true).
-					WithJSONSchema(openapi3.NewObjectSchema().
-						WithProperty("email", openapi3.NewStringSchema())),
-			},
-			Responses: openapi3.NewResponses(
-				openapi3.WithStatus(200, resp("Magic link queued")),
-				openapi3.WithStatus(400, resp("Invalid request")),
-			),
-		},
-	})
-	spec.Paths.Set("/api/auth/magic-link/verify", &openapi3.PathItem{
-		Post: &openapi3.Operation{
-			OperationID: "magicLinkVerify",
-			Summary:     "Verify a one-time magic sign-in link",
-			RequestBody: &openapi3.RequestBodyRef{
-				Value: openapi3.NewRequestBody().
-					WithRequired(true).
-					WithJSONSchema(openapi3.NewObjectSchema().
-						WithProperty("token", openapi3.NewStringSchema())),
-			},
-			Responses: openapi3.NewResponses(
-				openapi3.WithStatus(200, resp("Session created")),
-				openapi3.WithStatus(401, resp("Invalid or expired magic link")),
-			),
-		},
-	})
-	spec.Paths.Set("/api/auth/magic-links", &openapi3.PathItem{
-		Get: &openapi3.Operation{
-			OperationID: "magicLinksList",
-			Summary:     "List active magic links for the current account",
-			Responses:   openapi3.NewResponses(openapi3.WithStatus(200, resp("Magic link list"))),
-		},
-	})
-	spec.Paths.Set("/api/auth/magic-links/{id}/revoke", &openapi3.PathItem{
-		Post: &openapi3.Operation{
-			OperationID: "magicLinksRevoke",
-			Summary:     "Revoke a magic link",
-			Responses:   openapi3.NewResponses(openapi3.WithStatus(200, resp("Magic link revoked"))),
-		},
-	})
-	spec.Paths.Set("/api/auth/magic-links/revoke-all", &openapi3.PathItem{
-		Post: &openapi3.Operation{
-			OperationID: "magicLinksRevokeAll",
-			Summary:     "Revoke all active magic links for the current account",
-			Responses:   openapi3.NewResponses(openapi3.WithStatus(200, resp("Magic links revoked"))),
-		},
-	})
+
 	spec.Paths.Set("/api/auth/logout", &openapi3.PathItem{
 		Post: &openapi3.Operation{
 			OperationID: "logout", Summary: "Destroy current session",
@@ -212,18 +136,7 @@ func addDoctypePaths(spec *openapi3.T, dt *doctype.DocType) {
 			Responses: openapi3.NewResponses(openapi3.WithStatus(200, resp(name+" deleted"))),
 		},
 	})
-	if dt.IsSubmittable {
-		spec.Paths.Set(detailPath+"/workflow_action", &openapi3.PathItem{
-			Post: &openapi3.Operation{
-				OperationID: opID + "_workflow", Summary: "Execute workflow action on " + name,
-				RequestBody: &openapi3.RequestBodyRef{
-					Value: openapi3.NewRequestBody().WithRequired(true).
-						WithJSONSchema(openapi3.NewObjectSchema().WithProperty("action", openapi3.NewStringSchema())),
-				},
-				Responses: openapi3.NewResponses(openapi3.WithStatus(200, resp("Transition applied"))),
-			},
-		})
-	}
+
 }
 
 func doctypeToSchemaRef(dt *doctype.DocType, reg *doctype.Registry) *openapi3.SchemaRef {
@@ -270,7 +183,7 @@ const swaggerUIHTML = `<!DOCTYPE html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Kora API Docs</title>
+  <title>Kigae API Docs</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css" />
 </head>
 <body>

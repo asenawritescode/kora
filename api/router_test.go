@@ -4,18 +4,24 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/gin-gonic/gin"
 
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 	"github.com/asenawritescode/kora/storage"
 )
@@ -61,12 +67,65 @@ func setupTestHandler(t *testing.T) (*Handler, *doctype.Registry, sqlmock.Sqlmoc
 	return handler, reg, mock, mockDB
 }
 
+func TestFallbackStorageConcurrentInitialization(t *testing.T) {
+	const callers = 32
+	var wg sync.WaitGroup
+	errCh := make(chan error, callers)
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backend, err := (&Handler{}).siteStorage(nil)
+			if err == nil && backend == nil {
+				err = errors.New("fallback storage is nil")
+			}
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("initialize fallback storage: %v", err)
+		}
+	}
+}
+
+func TestSiteStorageResolvesGenerationSnapshotWithoutCompatibilityMaps(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	backend := fakePublicStorage{}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("site_name", "tenant.example")
+	ctx.Set("site_runtime_services", SiteRuntimeService{Storage: backend})
+
+	got, err := (&Handler{}).siteStorage(ctx)
+	if err != nil {
+		t.Fatalf("siteStorage: %v", err)
+	}
+	if got != backend {
+		t.Fatal("site storage did not resolve from the routed tenant snapshot")
+	}
+}
+
 // injectContext sets standard test context values.
 func injectContext(c *gin.Context) {
 	c.Set("site_name", "test.local")
+	c.Set("site_id", "test-tenant")
 	c.Set("user", "admin")
 	c.Set("user_role", "Administrator")
 	c.Set("user_roles", []string{"Administrator"})
+	c.Set("policy_execution", routerTestExecution([]string{"Administrator"}, nil))
+}
+
+func routerTestExecution(roles []string, grants []policy.Grant) policy.Execution {
+	execution, err := policy.NewVerifiedExecutionWithGrants("test-tenant", contract.ActorContext{
+		PrincipalID: "admin", PrincipalType: contract.PrincipalHuman, SubjectUserID: "admin",
+		Site: "test.local", Roles: roles, AuthenticatedAt: time.Now().UTC(),
+	}, grants)
+	if err != nil {
+		panic(err)
+	}
+	return execution
 }
 
 // injectDB sets the database and registry on the Gin context (used by siteTx).
@@ -86,6 +145,33 @@ func TestSiteDialectUsesPerRuntimeDatabaseType(t *testing.T) {
 	ctxWithoutSite, _ := gin.CreateTestContext(httptest.NewRecorder())
 	if got := handler.siteDialect(ctxWithoutSite).DriverName(); got != "mysql" {
 		t.Fatalf("fallback site dialect = %q, want mysql", got)
+	}
+}
+
+func TestSiteTxCarriesDurableHookIdentityFromVerifiedRuntimeSnapshot(t *testing.T) {
+	handler, reg, _, database := setupTestHandler(t)
+	defer database.Close()
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat", nil)
+	injectContext(ctx)
+	injectDB(ctx, database, reg)
+	ctx.Set("site_name", "test.local")
+	ctx.Set("site_config_revision", uint64(73))
+	store := &script.Store{DB: database, Dialect: db.Resolve("mysql")}
+	ctx.Set("site_runtime_services", SiteRuntimeService{
+		ScriptStore: store, AsyncHookInvocations: store,
+	})
+
+	tx := handler.siteTx(ctx)
+	if tx.AsyncHookTenantID != "test-tenant" {
+		t.Fatalf("async hook tenant ID = %q, want verified tenant ID", tx.AsyncHookTenantID)
+	}
+	if tx.AsyncHookConfigRevision != 73 {
+		t.Fatalf("async hook config revision = %d, want pinned runtime revision 73", tx.AsyncHookConfigRevision)
+	}
+	if tx.AsyncHookInvocations != store || tx.ScriptStore != store {
+		t.Fatal("site transaction did not retain the runtime's durable hook store")
 	}
 }
 
@@ -182,12 +268,16 @@ func TestRoleDeleteUsesPostgresMembershipExpressionAndBindings(t *testing.T) {
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_user WHERE POSITION\(',' \|\| \$1 \|\| ',' IN ',' \|\| REPLACE\(roles, ', ', ','\) \|\| ','\) > 0`).
 		WithArgs("Store Manager").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM _kora_role WHERE name = \$1`).
 		WithArgs("Store Manager").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`DELETE FROM _kora_permission WHERE role = \$1`).
 		WithArgs("Store Manager").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE _kora_auth_revision SET policy_revision = policy_revision \+ 1 WHERE id = 1`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE _kora_config_revision SET revision = revision \+ 1 WHERE id = 1 AND revision < 9223372036854775807`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	handler.HandleSystemRoleDelete(ctx)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("PostgreSQL role delete returned HTTP %d: %s", recorder.Code, recorder.Body.String())
@@ -276,6 +366,143 @@ func TestHandleList_Empty(t *testing.T) {
 	}
 }
 
+func TestHandleListRejectsSearchOver128Characters(t *testing.T) {
+	handler, reg, mock, sqlDB := setupTestHandler(t)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/resource/TestDoc?search="+strings.Repeat("a", 129), nil)
+	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
+	injectDB(c, sqlDB, reg)
+	injectContext(c)
+
+	handler.HandleList(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected database query: %v", err)
+	}
+}
+
+func TestHandleListPushesLiteralPrefixSearchIntoDatabaseBeforePaging(t *testing.T) {
+	handler, reg, mock, sqlDB := setupTestHandler(t)
+	defer sqlDB.Close()
+	dt := reg.Get("TestDoc")
+	dt.SearchFields = "title"
+	dt.Fields[0].SearchIndex = true
+
+	searchWhere := "1=1 AND (`title` LIKE ? ESCAPE '!' OR `name` = ?)"
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM `tabTestDoc` WHERE "+searchWhere)).
+		WithArgs("Acme!%!_%", "Acme%_").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT `title`, `name`, `owner`, `creation`, `modified`, `modified_by`, `doc_status` FROM `tabTestDoc` WHERE "+searchWhere+" ORDER BY `modified` DESC LIMIT ? OFFSET ?")).
+		WithArgs("Acme!%!_%", "Acme%_", 10, 20).
+		WillReturnRows(sqlmock.NewRows([]string{"title", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).AddRow("Acme%_ Systems", "TESTDOC-001", "admin", time.Now(), time.Now(), "admin", 0))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/resource/TestDoc?search=Acme%25_&limit=10&offset=20", nil)
+	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
+	injectDB(c, sqlDB, reg)
+	injectContext(c)
+
+	handler.HandleList(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database search was not applied before paging: %v", err)
+	}
+}
+
+func TestHandleListRequiresVerifiedExecution(t *testing.T) {
+	handler, reg, mock, sqlDB := setupTestHandler(t)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/resource/TestDoc", nil)
+	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
+	injectDB(c, sqlDB, reg)
+	c.Set("site_name", "test.local")
+	c.Set("user", "admin")
+	c.Set("user_roles", []string{"Administrator"})
+	handler.HandleList(c)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusForbidden, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("permission rejection reached storage: %v", err)
+	}
+}
+
+func TestGenericHTTPReadsDenyModuleOwnedRecordsBeforeStorage(t *testing.T) {
+	handler, registry, mock, database := setupTestHandler(t)
+	defer database.Close()
+	docType := registry.Get("TestDoc")
+	docType.ModuleOwnerID = "finance.ar"
+	docType.ModuleAccess = contract.ModulePrivate
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "TestDoc", Role: "Administrator", Read: true})
+
+	for _, method := range []string{"list", "get", "history"} {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		target := "/api/resource/TestDoc"
+		switch method {
+		case "get":
+			target += "/INV-1"
+		case "history":
+			target += "/INV-1/history"
+		}
+		ctx.Request = httptest.NewRequest(http.MethodGet, target, nil)
+		ctx.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
+		if method != "list" {
+			ctx.Params = append(ctx.Params, gin.Param{Key: "name", Value: "INV-1"})
+		}
+		injectDB(ctx, database, registry)
+		injectContext(ctx)
+		switch method {
+		case "list":
+			handler.HandleList(ctx)
+		case "get":
+			handler.HandleGet(ctx)
+		case "history":
+			handler.HandleRecordHistory(ctx)
+		}
+		if recorder.Code != http.StatusForbidden {
+			t.Errorf("generic %s of module-owned record status=%d, want forbidden: %s", method, recorder.Code, recorder.Body.String())
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("denied generic module reads reached storage: %v", err)
+	}
+}
+
+func TestHandleListUsesRoutedTenantPermissions(t *testing.T) {
+	handler, _, mock, sqlDB := setupTestHandler(t)
+	siteRegistry := doctype.NewRegistry()
+	siteRegistry.Register(&doctype.DocType{Name: "TestDoc", SortField: "modified", SortOrder: "DESC", Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data"}}})
+	siteRegistry.Permissions.SetPermission(&doctype.Permission{Doctype: "TestDoc", Role: "Sales Rep", Read: true})
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM `tabTestDoc` WHERE 1=1").WillReturnRows(sqlmock.NewRows([]string{"count(*)"}).AddRow(0))
+	mock.ExpectQuery("SELECT .+ FROM `tabTestDoc` WHERE 1=1 ORDER BY `modified` DESC LIMIT \\? OFFSET \\?").
+		WithArgs(50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"name", "owner", "creation", "modified", "modified_by", "doc_status", "title"}))
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/resource/TestDoc", nil)
+	c.Params = gin.Params{{Key: "doctype", Value: "TestDoc"}}
+	injectDB(c, sqlDB, siteRegistry)
+	c.Set("policy_execution", routerTestExecutionForUser("test-tenant", "test.local", "sales-rep", []string{"Sales Rep"}))
+	c.Set("user", "sales-rep")
+	handler.HandleList(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("routed tenant read status=%d body=%s", w.Code, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("routed tenant read did not query records: %v", err)
+	}
+}
+
 func TestHandlePublicList_RequiresExplicitPublicAccess(t *testing.T) {
 	handler, _, _, _ := setupTestHandler(t)
 
@@ -288,6 +515,19 @@ func TestHandlePublicList_RequiresExplicitPublicAccess(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusNotFound, w.Body.String())
+	}
+}
+
+func TestHandlePublicListRejectsModuleOwnedResourceEvenWhenExplicitlyPublic(t *testing.T) {
+	handler, registry, _, _ := setupTestHandler(t)
+	registry.Register(&doctype.DocType{Name: "ModuleRecord", ModuleOwnerID: "billing.ar", ModuleAccess: contract.ModulePublished, PublicAccess: &doctype.PublicAccess{Enabled: true, List: true, Read: true, Fields: []string{"title"}}})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/public/resource/ModuleRecord", nil)
+	c.Params = gin.Params{{Key: "doctype", Value: "ModuleRecord"}}
+	handler.HandlePublicList(c)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("public route exposed module resource: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -468,6 +708,92 @@ func TestHandleGet_Found(t *testing.T) {
 	}
 }
 
+func TestHandleGetAllowsOnlyCurrentAssignee(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Task", Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data"}, {Fieldname: "assigned_to", Fieldtype: "User"}}})
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Task", Role: "Assignee", Read: true, IfAssigned: []string{"assigned_to"}})
+	handler := NewHandler(registry, &orm.TxManager{DB: database, Registry: registry, Dialect: db.Resolve("mysql")})
+	mock.ExpectQuery("SELECT title, assigned_to, name, owner, creation, modified, modified_by, doc_status, revision FROM .* WHERE name = \\? AND \\(`assigned_to` = \\?\\)").
+		WithArgs("TASK-1", "alice").WillReturnRows(sqlmock.NewRows([]string{"title", "assigned_to", "name", "owner", "creation", "modified", "modified_by", "doc_status", "revision"}).AddRow("Call", "alice", "TASK-1", "creator", nil, nil, nil, 0, 1))
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/resource/Task/TASK-1", nil)
+	c.Params = gin.Params{{Key: "doctype", Value: "Task"}, {Key: "name", Value: "TASK-1"}}
+	c.Set("site_name", "tenant.test")
+	c.Set("site_id", "tenant-id")
+	c.Set("user", "alice")
+	c.Set("user_roles", []string{"Assignee"})
+	c.Set("policy_execution", routerTestExecutionForUser("tenant-id", "tenant.test", "alice", []string{"Assignee"}))
+	handler.HandleGet(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("assigned get status=%d body=%s", w.Code, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckPermResolvesResourceAliasForScopedRole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Lead"})
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Lead", Role: "Sales Rep", Create: true, Read: true, IfOwner: true})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/resource/lead", nil)
+	c.Set("site_name", "tenant.test")
+	c.Set("site_id", "tenant-id")
+	c.Set("user", "rep-1")
+	c.Set("user_roles", []string{"Sales Rep"})
+	c.Set("policy_execution", routerTestExecutionForUser("tenant-id", "tenant.test", "rep-1", []string{"Sales Rep"}))
+	if _, forbidden := checkPerm(c, registry, "lead", "create"); forbidden {
+		t.Fatalf("resource alias denied despite canonical Sales Rep create permission: %s", w.Body.String())
+	}
+}
+
+func TestCheckPermRequiresExactEntityGrantRegardlessOfTenantRole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Invoice", BusinessScopePolicy: contract.ScopeEntityOwned})
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Invoice", Role: "Administrator", Read: true, Create: true, Write: true})
+	actor := contract.ActorContext{PrincipalID: "admin", SubjectUserID: "admin", PrincipalType: contract.PrincipalHuman, Site: "tenant.test", Roles: []string{"Administrator"}, AuthenticatedAt: time.Now().UTC()}
+	scopeA := contract.BusinessScope{TenantID: "tenant-id", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	for _, tc := range []struct {
+		entity string
+		grants []policy.Grant
+		want   bool
+	}{{entity: "entity-a", want: false}, {entity: "entity-a", grants: []policy.Grant{{Resource: "Invoice", Operation: "read", Scope: scopeA}}, want: true}, {entity: "entity-b", grants: []policy.Grant{{Resource: "Invoice", Operation: "read", Scope: scopeA}}, want: false}} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/resource/Invoice", nil)
+		c.Request.Header.Set("X-Kora-Legal-Entity-ID", tc.entity)
+		execution, err := policy.NewVerifiedExecutionWithGrants("tenant-id", actor, tc.grants)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Set("site_name", "tenant.test")
+		c.Set("policy_execution", execution)
+		_, forbidden := checkPerm(c, registry, "Invoice", "read")
+		if gotAllowed := !forbidden; gotAllowed != tc.want {
+			t.Fatalf("entity %q allowed=%t, want %t; response=%s", tc.entity, gotAllowed, tc.want, w.Body.String())
+		}
+	}
+}
+
+func routerTestExecutionForUser(tenant, site, user string, roles []string) policy.Execution {
+	execution, err := policy.NewVerifiedExecution(contract.TenantID(tenant), contract.ActorContext{PrincipalID: user, SubjectUserID: user, PrincipalType: contract.PrincipalHuman, Site: site, Roles: roles, AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		panic(err)
+	}
+	return execution
+}
+
 func TestHandleGet_NotFound(t *testing.T) {
 	handler, reg, mock, sqlDB := setupTestHandler(t)
 
@@ -581,6 +907,7 @@ func TestHandleList_PermissionDenied(t *testing.T) {
 	// Set a role that has no permissions configured, triggering denial.
 	c.Set("user_role", "Guest")
 	c.Set("user_roles", []string{"Guest"})
+	c.Set("policy_execution", routerTestExecution([]string{"Guest"}, nil))
 
 	handler.HandleList(c)
 
@@ -610,7 +937,9 @@ func TestExtensionPermission_ReadGranted(t *testing.T) {
 	injectDB(c, sqlDB, reg)
 	c.Set("auth_type", "extension")
 	c.Set("extension_name", "test-bot")
-	c.Set("extension_permissions", []doctype.Permission{{Doctype: "TestDoc", Read: true}})
+	permissions := []doctype.Permission{{Doctype: "TestDoc", Read: true}}
+	c.Set("extension_permissions", permissions)
+	c.Set("policy_execution", routerTestExecution(nil, []policy.Grant{{Resource: "TestDoc", Operation: "read"}}))
 
 	handler.HandleList(c)
 
@@ -637,6 +966,7 @@ func TestExtensionPermission_DeleteDenied(t *testing.T) {
 	c.Set("auth_type", "extension")
 	c.Set("extension_name", "test-bot")
 	c.Set("extension_permissions", []doctype.Permission{{Doctype: "TestDoc", Read: true}})
+	c.Set("policy_execution", routerTestExecution(nil, []policy.Grant{{Resource: "TestDoc", Operation: "read"}}))
 
 	handler.HandleDelete(c)
 

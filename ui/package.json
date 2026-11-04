@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:standalone": "tsc -b && vite build",
+    "check:contracts": "node scripts/check-engine-contracts.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

@@ -3,7 +3,11 @@ import type { ConsoleSite } from '@/types/api'
 const BASE = '/api/console'
 
 function getToken(): string | null {
-  return localStorage.getItem('kora_console_token')
+  try {
+    return localStorage.getItem('kora_console_token')
+  } catch {
+    return null
+  }
 }
 
 function headers(): Record<string, string> {
@@ -45,27 +49,6 @@ export async function listSites(): Promise<ConsoleSite[]> {
   return json.data || []
 }
 
-export async function createSite(data: {
-  hostname: string; db_type: string; db_host: string; db_port: number; db_name: string
-  db_user: string; db_password: string; domains?: string
-  admin_email: string; admin_password: string; admin_full_name?: string
-}): Promise<{ hostname: string; db_name: string; status: string; admin: string }> {
-  const resp = await fetch(BASE + '/sites', {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify(data),
-    credentials: 'same-origin',
-  })
-  const json = await resp.json()
-  if (!resp.ok) {
-    const msg = typeof json.error === 'string'
-      ? json.error
-      : json.error?.message || json.error?.errors?.[0]?.message || 'Failed to create site'
-    throw new Error(msg)
-  }
-  return json.data
-}
-
 export async function updateSite(name: string, domains: string[]): Promise<void> {
   const resp = await fetch(BASE + '/sites/' + encodeURIComponent(name), {
     method: 'PUT',
@@ -105,18 +88,5 @@ export async function deleteSite(name: string): Promise<void> {
   if (!resp.ok) {
     const json = await resp.json()
     throw new Error(json.error?.message || 'Failed to delete site')
-  }
-}
-
-export async function resetSitePassword(name: string, email: string, newPassword: string): Promise<void> {
-  const resp = await fetch(BASE + '/sites/' + encodeURIComponent(name) + '/reset-password', {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify({ email, new_password: newPassword }),
-    credentials: 'same-origin',
-  })
-  if (!resp.ok) {
-    const json = await resp.json()
-    throw new Error(json.error?.message || 'Failed to reset password')
   }
 }

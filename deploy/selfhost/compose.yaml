@@ -1,0 +1,121 @@
+name: kora-selfhost
+
+services:
+  mysql:
+    image: mysql:8.4.11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${KORA_MYSQL_ROOT_PASSWORD:?Set KORA_MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: kora_platform
+      MYSQL_USER: kora
+      MYSQL_PASSWORD: ${KORA_DB_PASSWORD:?Set KORA_DB_PASSWORD in .env}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/001-kora-grants.sql:/docker-entrypoint-initdb.d/001-kora-grants.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 30s
+    networks: [backend]
+
+  engine:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${KORA_ENGINE_VERSION:-selfhost-local}
+    restart: unless-stopped
+    # Engine owns a bounded 30-second graceful shutdown and may retry an
+    # incomplete drain once before Run returns. Leave room for both attempts.
+    stop_grace_period: 65s
+    environment:
+      KORA_DB_TYPE: mysql
+      DB_DSN: "kora:${KORA_DB_PASSWORD:?Set KORA_DB_PASSWORD in .env}@tcp(mysql:3306)/kora_platform?parseTime=true&multiStatements=true"
+      KORA_STORAGE_BACKEND: local
+      KORA_STORAGE_LOCAL_PATH: /sites
+      KORA_DB_HOST: mysql
+      KORA_DB_PORT: "3306"
+      KORA_DB_USER: kora
+      KORA_DB_PASSWORD: ${KORA_DB_PASSWORD:?Set KORA_DB_PASSWORD in .env}
+      CONSOLE_EMAIL: ${KORA_ADMIN_EMAIL:?Set KORA_ADMIN_EMAIL in .env}
+      CONSOLE_PASSWORD: ${KORA_ADMIN_PASSWORD:?Set KORA_ADMIN_PASSWORD in .env}
+      KORA_DB_SERVER_MAX_CONNECTIONS: ${KORA_DB_SERVER_MAX_CONNECTIONS:-160}
+      KORA_DB_SERVER_RESERVED_CONNECTIONS: ${KORA_DB_SERVER_RESERVED_CONNECTIONS:-32}
+      KORA_DB_ENGINE_REPLICAS: ${KORA_DB_ENGINE_REPLICAS:-1}
+      KORA_DB_CONNECTION_BUDGET: ${KORA_DB_CONNECTION_BUDGET:-64}
+      KORA_DB_CONNECTION_WAITERS: ${KORA_DB_CONNECTION_WAITERS:-}
+      KORA_DB_CONNECTION_WAIT_MS: ${KORA_DB_CONNECTION_WAIT_MS:-1500}
+      KORA_DB_ACTIVE_WORK_BUDGET: ${KORA_DB_ACTIVE_WORK_BUDGET:-16}
+      KORA_DB_ACTIVE_WORK_WAITERS: ${KORA_DB_ACTIVE_WORK_WAITERS:-}
+      KORA_DB_ACTIVE_WORK_WAIT_MS: ${KORA_DB_ACTIVE_WORK_WAIT_MS:-1000}
+      KORA_DB_SERVER_MAX_HEAVY_JOBS: ${KORA_DB_SERVER_MAX_HEAVY_JOBS:-1}
+      KORA_MAX_RESIDENT_TENANTS: ${KORA_MAX_RESIDENT_TENANTS:-256}
+      KORA_TENANT_ACTIVATION_WAITERS: ${KORA_TENANT_ACTIVATION_WAITERS:-32}
+      KORA_TENANT_ACTIVATION_WAIT_MS: ${KORA_TENANT_ACTIVATION_WAIT_MS:-1500}
+      KORA_ANALYTICS_PROCESS_MAX_QUEUED_BYTES: ${KORA_ANALYTICS_PROCESS_MAX_QUEUED_BYTES:-536870912}
+      KORA_ANALYTICS_MAX_QUEUED_BYTES: ${KORA_ANALYTICS_MAX_QUEUED_BYTES:-67108864}
+      KORA_ANALYTICS_MAX_SUBSCRIBERS: ${KORA_ANALYTICS_MAX_SUBSCRIBERS:-4096}
+      KORA_ANALYTICS_MAX_EVENT_BYTES: ${KORA_ANALYTICS_MAX_EVENT_BYTES:-1048576}
+      KORA_ASYNC_HOOK_QUEUE_SIZE: ${KORA_ASYNC_HOOK_QUEUE_SIZE:-1000}
+      KORA_ASYNC_HOOK_MAX_QUEUED_BYTES: ${KORA_ASYNC_HOOK_MAX_QUEUED_BYTES:-67108864}
+      KORA_ASYNC_HOOK_MAX_EVENT_BYTES: ${KORA_ASYNC_HOOK_MAX_EVENT_BYTES:-1048576}
+      KORA_PUBLIC_APP_BASE_URL: ${KORA_PUBLIC_APP_BASE_URL:-}
+      # Dedicated token for the narrow managed-channel credential endpoints.
+      # Keep it identical to Cloud's KORA_CLOUD_ENGINE_PROVISIONING_TOKEN.
+      KORA_ENGINE_PROVISIONING_TOKEN: ${KORA_ENGINE_PROVISIONING_TOKEN:-}
+      # Optional Cloud management API. Keep the token identical to
+      # KORA_CLOUD_ENGINE_MANAGEMENT_TOKEN and set the deployment/allocation
+      # values to the same identifiers configured in Cloud.
+      KORA_ENGINE_MANAGEMENT_TOKEN: ${KORA_ENGINE_MANAGEMENT_TOKEN:-}
+      KORA_ENGINE_MANAGEMENT_CALLER_ID: ${KORA_ENGINE_MANAGEMENT_CALLER_ID:-}
+      KORA_ENGINE_DEPLOYMENT_ID: ${KORA_ENGINE_DEPLOYMENT_ID:-}
+      KORA_ENGINE_MANAGEMENT_DATABASE_ALLOCATION_REF: ${KORA_ENGINE_MANAGEMENT_DATABASE_ALLOCATION_REF:-}
+      KORA_SMTP_HOST: ${KORA_SMTP_HOST:-}
+      KORA_SMTP_PORT: ${KORA_SMTP_PORT:-0}
+      KORA_SMTP_USERNAME: ${KORA_SMTP_USERNAME:-}
+      KORA_SMTP_PASSWORD: ${KORA_SMTP_PASSWORD:-}
+      KORA_SMTP_FROM: ${KORA_SMTP_FROM:-}
+      KORA_SMTP_TLS_MODE: ${KORA_SMTP_TLS_MODE:-auto}
+      KORA_SCRIPT_MAX_CONCURRENCY: ${KORA_SCRIPT_MAX_CONCURRENCY:-2}
+      KORA_SCRIPT_MAX_WAITERS: ${KORA_SCRIPT_MAX_WAITERS:-4}
+      KORA_SCRIPT_MAX_ACTIVE_TENANTS: ${KORA_SCRIPT_MAX_ACTIVE_TENANTS:-256}
+      KORA_SCRIPT_WAIT_MS: ${KORA_SCRIPT_WAIT_MS:-1000}
+      KORA_SCRIPT_TIMEOUT_MS: ${KORA_SCRIPT_TIMEOUT_MS:-5000}
+      KORA_REALTIME_MAX_STREAMS: ${KORA_REALTIME_MAX_STREAMS:-128}
+      KORA_SESSION_CACHE_MAX_BYTES: ${KORA_SESSION_CACHE_MAX_BYTES:-268435456}
+      KORA_UPLOAD_MAX_ACTIVE: ${KORA_UPLOAD_MAX_ACTIVE:-4}
+      KORA_UPLOAD_ACTIVE_BUDGET_BYTES: ${KORA_UPLOAD_ACTIVE_BUDGET_BYTES:-536870912}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - engine_sites:/sites
+    expose: ["8000"]
+    networks: [backend]
+
+  workspace:
+    build:
+      context: ${KORA_UI_SOURCE:-../../../kora-studio-mvp}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      KORA_ENGINE_URL: http://engine:8000
+      # Cloud remains optional; unset routes return 404 and the workspace
+      # falls back to Engine-backed features. Set this only for an operator-
+      # configured Cloud service on the same private network.
+      KORA_CLOUD_URL: ${KORA_CLOUD_URL:-}
+    depends_on:
+      - engine
+    ports:
+      - "${KORA_HTTP_BIND:-127.0.0.1:8080}:8080"
+    networks: [backend]
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  engine_sites:

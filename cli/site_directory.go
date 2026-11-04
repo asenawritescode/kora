@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -12,8 +12,11 @@ import (
 	"github.com/spf13/cobra"
 
 	kdb "github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/site"
 )
+
+const siteDirectoryProbeConcurrency = 8
 
 var siteDirectoryCmd = &cobra.Command{
 	Use:   "site-directory",
@@ -32,16 +35,32 @@ var siteDirectoryMigrateCmd = &cobra.Command{
 		if startup.DBDSN == "" {
 			return fmt.Errorf("DB_DSN is required to migrate the site directory")
 		}
-		database, err := sql.Open(startup.DBType, startup.DBDSN)
+		database, err := dbaccess.Open(startup.DBType, startup.DBDSN)
 		if err != nil {
 			return fmt.Errorf("open platform registry database: %w", err)
 		}
 		defer database.Close()
-		if err := database.Ping(); err != nil {
-			return fmt.Errorf("ping platform registry database: %w", err)
+		ctx := cmd.Context()
+		if ctx == nil {
+			ctx = context.Background()
 		}
-		if err := site.BootstrapPlatformRegistry(database, kdb.Resolve(startup.DBType)); err != nil {
-			return fmt.Errorf("migrate site directory: %w", err)
+		releasePing, err := acquireCLIWork(ctx, startup.DBType, startup.DBDSN, false)
+		if err != nil {
+			return err
+		}
+		pingErr := database.PingContext(ctx)
+		releasePing()
+		if pingErr != nil {
+			return fmt.Errorf("ping platform registry database: %w", pingErr)
+		}
+		releaseBootstrap, err := acquireCLIWork(ctx, startup.DBType, startup.DBDSN, true)
+		if err != nil {
+			return err
+		}
+		bootstrapErr := site.BootstrapPlatformRegistry(database, kdb.Resolve(startup.DBType))
+		releaseBootstrap()
+		if bootstrapErr != nil {
+			return fmt.Errorf("migrate site directory: %w", bootstrapErr)
 		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Site directory identity and alias projection are migrated.")
 		return err
@@ -62,7 +81,7 @@ var siteDirectoryProbeCmd = &cobra.Command{
 	Short: "Measure read-only site database connection latency",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		report, err := runSiteDirectoryProbe()
+		report, err := runSiteDirectoryProbe(cmd.Context())
 		if err != nil {
 			return err
 		}
@@ -88,18 +107,33 @@ var siteDirectoryPruneCmd = &cobra.Command{
 		if startup.DBDSN == "" {
 			return fmt.Errorf("DB_DSN is required to prune site directory history")
 		}
-		database, err := sql.Open(startup.DBType, startup.DBDSN)
+		database, err := dbaccess.Open(startup.DBType, startup.DBDSN)
 		if err != nil {
 			return fmt.Errorf("open platform registry database: %w", err)
 		}
 		defer database.Close()
-		if err := database.Ping(); err != nil {
-			return fmt.Errorf("ping platform registry database: %w", err)
+		ctx := cmd.Context()
+		if ctx == nil {
+			ctx = context.Background()
 		}
-		registry := site.NewSQLSiteRegistry(database, startup.DBType)
-		deleted, err := registry.PruneOutboxBefore(time.Now().Add(-siteDirectoryPruneOlderThan))
+		releasePing, err := acquireCLIWork(ctx, startup.DBType, startup.DBDSN, false)
 		if err != nil {
 			return err
+		}
+		pingErr := database.PingContext(ctx)
+		releasePing()
+		if pingErr != nil {
+			return fmt.Errorf("ping platform registry database: %w", pingErr)
+		}
+		registry := site.NewSQLSiteRegistry(database, startup.DBType)
+		releasePrune, err := acquireCLIWork(ctx, startup.DBType, startup.DBDSN, true)
+		if err != nil {
+			return err
+		}
+		deleted, pruneErr := registry.PruneOutboxBeforeContext(ctx, time.Now().Add(-siteDirectoryPruneOlderThan))
+		releasePrune()
+		if pruneErr != nil {
+			return pruneErr
 		}
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Pruned %d applied site-directory changes.\n", deleted)
 		return err
@@ -116,7 +150,10 @@ type siteDirectoryProbeReport struct {
 	Sites        []siteProbeResult `json:"sites"`
 }
 
-func runSiteDirectoryProbe() (siteDirectoryProbeReport, error) {
+func runSiteDirectoryProbe(ctx context.Context) (siteDirectoryProbeReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	startup := site.LoadStartupConfig()
 	if err := startup.Validate(); err != nil {
 		return siteDirectoryProbeReport{}, err
@@ -124,22 +161,31 @@ func runSiteDirectoryProbe() (siteDirectoryProbeReport, error) {
 	if startup.DBDSN == "" {
 		return siteDirectoryProbeReport{}, fmt.Errorf("DB_DSN is required for the read-only site probe")
 	}
-	platformDB, err := sql.Open(startup.DBType, startup.DBDSN)
+	platformDB, err := dbaccess.Open(startup.DBType, startup.DBDSN)
 	if err != nil {
 		return siteDirectoryProbeReport{}, fmt.Errorf("open platform registry database: %w", err)
 	}
 	defer platformDB.Close()
-	if err := platformDB.Ping(); err != nil {
+	platformAdmission, err := dbaccess.AdmissionFor(startup.DBType, startup.DBDSN)
+	if err != nil {
+		return siteDirectoryProbeReport{}, fmt.Errorf("resolve platform probe admission: %w", err)
+	}
+	if err := runCLIWork(ctx, platformAdmission, func() error { return platformDB.PingContext(ctx) }); err != nil {
 		return siteDirectoryProbeReport{}, fmt.Errorf("ping platform registry database: %w", err)
 	}
-	dbSites, err := site.DiscoverSitesFromDB(platformDB)
+	var dbSites []site.DBSiteInfo
+	err = runCLIWork(ctx, platformAdmission, func() error {
+		var discoverErr error
+		dbSites, discoverErr = site.DiscoverSitesFromDBContext(ctx, platformDB)
+		return discoverErr
+	})
 	if err != nil {
 		return siteDirectoryProbeReport{}, fmt.Errorf("read site directory snapshot: %w", err)
 	}
 	if len(dbSites) == 0 {
 		return siteDirectoryProbeReport{ReadOnly: true}, nil
 	}
-	concurrency := siteStartupParallelism
+	concurrency := siteDirectoryProbeConcurrency
 	if concurrency > len(dbSites) {
 		concurrency = len(dbSites)
 	}
@@ -155,16 +201,26 @@ func runSiteDirectoryProbe() (siteDirectoryProbeReport, error) {
 			for index := range jobs {
 				info := dbSites[index]
 				result := siteProbeResult{SiteID: info.SiteID, Hostname: info.Name}
-				begin := time.Now()
-				database, connectErr := site.Connect(site.ReconstructSiteConfigFromDBInfo(info, common))
-				result.LatencyMS = float64(time.Since(begin).Microseconds()) / 1000
-				if connectErr != nil {
+				config := site.ReconstructSiteConfigFromDBInfo(info, common)
+				tenantAdmission, admissionErr := site.ConnectionAdmission(config)
+				if admissionErr != nil {
 					result.Failed = true
 				} else {
-					stats := database.Stats()
-					result.OpenConnections = stats.OpenConnections
-					result.IdleConnections = stats.Idle
-					_ = database.Close()
+					begin := time.Now()
+					connectErr := runCLIWork(ctx, tenantAdmission, func() error {
+						database, err := site.ConnectContext(ctx, config)
+						if err != nil {
+							return err
+						}
+						stats := database.Stats()
+						result.OpenConnections = stats.OpenConnections
+						result.IdleConnections = stats.Idle
+						return database.Close()
+					})
+					result.LatencyMS = float64(time.Since(begin).Microseconds()) / 1000
+					if connectErr != nil {
+						result.Failed = true
+					}
 				}
 				report.Sites[index] = result
 			}
@@ -201,7 +257,9 @@ func percentile(sorted []float64, percentile float64) float64 {
 func init() {
 	siteDirectoryCmd.AddCommand(siteDirectoryMigrateCmd)
 	siteDirectoryCmd.AddCommand(siteDirectoryListCmd)
+	siteDirectoryCmd.AddCommand(siteDirectoryAssignmentSummaryCmd)
 	siteDirectoryCmd.AddCommand(siteDirectoryAssignCellCmd)
+	siteDirectoryCmd.AddCommand(siteDirectoryAssignDeploymentCmd)
 	siteDirectoryCmd.AddCommand(siteDirectoryProbeCmd)
 	siteDirectoryPruneCmd.Flags().DurationVar(&siteDirectoryPruneOlderThan, "older-than", 0, "retain at least this much directory history (for example 720h)")
 	siteDirectoryCmd.AddCommand(siteDirectoryPruneCmd)

@@ -131,8 +131,9 @@ export default function StudioPage() {
   const [viewport, setViewport] = useState<'desktop' | 'tablet' | 'mobile'>('desktop')
   const [proposedManifest, setProposedManifest] = useState<PageManifest | null>(null)
   const [activeQuery, setActiveQuery] = useState<QuerySpec>(defaultQuery)
-  const [sourceDoctype, setSourceDoctype] = useState('Kora resource')
+  const [sourceDoctype, setSourceDoctype] = useState('Kigae resource')
   const [confirmAction, setConfirmAction] = useState<'remove' | 'reset' | null>(null)
+  const [storageError, setStorageError] = useState<string | null>(null)
 
   useEffect(() => {
     void koraStudioDataAdapter.load('primary').then((state) => {
@@ -161,6 +162,17 @@ export default function StudioPage() {
   const selected = useMemo(() => findComponent(manifest.spec.layout.children, selectedId), [manifest.spec.layout.children, selectedId])
   const queryAnswer = useMemo<QueryAnswer>(() => executeLocalQuery(activeQuery, resourceState.primary?.data), [activeQuery, resourceState.primary])
 
+  const persistRevision = (next: GeneratedPageRevision): boolean => {
+    try {
+      saveGeneratedRevision(next)
+      setStorageError(null)
+      return true
+    } catch {
+      setStorageError('This change could not be saved in this browser. Free storage space or allow site storage, then try again.')
+      return false
+    }
+  }
+
   const runQuestion = (question: string) => {
     setAiPrompt(question)
     if (/active.*department/i.test(question)) setActiveQuery({ ...defaultQuery, filters: [{ field: 'status', operator: 'equals', value: 'Active' }] })
@@ -168,26 +180,27 @@ export default function StudioPage() {
     else setActiveQuery(defaultQuery)
   }
 
-  const syncSource = (next: PageManifest) => {
+  const syncSource = (next: PageManifest): boolean => {
     const accepted = acceptGeneratedPage(next, studioTenant)
-    if (!accepted.manifest) return
+    if (!accepted.manifest) return false
+    const nextRevision = createGeneratedRevision(accepted.manifest, studioTenant, revision.revision + 1)
+    if (!persistRevision(nextRevision)) return false
     setPastManifests((past) => [...past.slice(-19), manifest])
     setFutureManifests([])
-    const nextRevision = createGeneratedRevision(accepted.manifest, studioTenant, revision.revision + 1)
     setManifest(accepted.manifest)
     setRevision(nextRevision)
-    saveGeneratedRevision(nextRevision)
+    return true
   }
 
   const restoreManifest = (next: PageManifest, remaining: PageManifest[], future: PageManifest[]) => {
     const accepted = acceptGeneratedPage(next, studioTenant)
     if (!accepted.manifest) return
     const nextRevision = createGeneratedRevision(accepted.manifest, studioTenant, revision.revision + 1)
+    if (!persistRevision(nextRevision)) return
     setManifest(accepted.manifest)
     setRevision(nextRevision)
     setPastManifests(remaining)
     setFutureManifests(future)
-    saveGeneratedRevision(nextRevision)
   }
 
   const undo = () => {
@@ -223,7 +236,7 @@ export default function StudioPage() {
       ? { ...addedManifest, spec: { ...addedManifest.spec, layout: { ...addedManifest.spec.layout, children: updateComponents(addedManifest.spec.layout.children, addedId, (component) => ({
           ...component,
           data: ['search_box', 'filter_bar'].includes(component.component) ? undefined : 'primary.data',
-          props: { ...component.props, ...(sourceDoctype !== 'Kora resource' ? { source_doctype: sourceDoctype } : {}) },
+          props: { ...component.props, ...(sourceDoctype !== 'Kigae resource' ? { source_doctype: sourceDoctype } : {}) },
         })) } } }
       : addedManifest
     setSelectedId(addedId)
@@ -231,10 +244,10 @@ export default function StudioPage() {
   }
 
   const publishDraft = () => {
-    setPublishedRevision(revision.revision)
     const published = { ...revision, state: 'published' as const, updatedAt: new Date().toISOString() }
+    if (!persistRevision(published)) return
+    setPublishedRevision(revision.revision)
     setRevision(published)
-    saveGeneratedRevision(published)
   }
 
   const removeSelectedComponent = () => {
@@ -282,8 +295,7 @@ export default function StudioPage() {
 
   const applyProposal = () => {
     if (!proposedManifest) return
-    syncSource(proposedManifest)
-    setProposedManifest(null)
+    if (syncSource(proposedManifest)) setProposedManifest(null)
   }
 
   return (
@@ -295,8 +307,8 @@ export default function StudioPage() {
                   <PanelsTopLeft className="h-4 w-4" />
                 </div>
                 <div className="leading-tight">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Kora Studio</div>
-              <div className="text-sm font-semibold text-white">Kora Insights</div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Kigae Studio</div>
+              <div className="text-sm font-semibold text-white">Kigae Insights</div>
                 </div>
               </div>
           <div className="kora-studio-actions ml-auto flex min-w-0 items-center gap-2">
@@ -309,6 +321,8 @@ export default function StudioPage() {
           </div>
         </div>
       </div>
+
+      {storageError && <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-5 py-2 text-sm text-destructive">{storageError}</div>}
 
       <div className="border-b border-[#3a2c2a] bg-[#1d1717] px-5 py-3">
         <div className="mx-auto flex max-w-[1500px] items-center gap-3 rounded-xl border border-[#3a2c2a] bg-[#241b1b] px-3 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.16)]">
@@ -374,7 +388,7 @@ export default function StudioPage() {
               <div className="rounded-xl border border-[#3a2c2a] bg-[#1d1717] p-3">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3 text-xs text-slate-500">
                   <span><strong className="text-slate-200">Answering:</strong> {aiPrompt}</span>
-                  <span className="text-slate-400">{queryAnswer.total} matching records · {sourceDoctype} · {resourceState.primary?.kind === 'normal' ? 'Kora live data' : 'waiting for Kora data'}</span>
+                  <span className="text-slate-400">{queryAnswer.total} matching records · {sourceDoctype} · {resourceState.primary?.kind === 'normal' ? 'Kigae live data' : 'waiting for Kigae data'}</span>
                 </div>
                 <div onClick={() => setSelectedId(null)}>
                   <div className="kora-generated-ui dark uk-theme-zinc text-slate-100">
@@ -513,7 +527,13 @@ export default function StudioPage() {
         title={confirmAction === 'reset' ? 'Reset this design?' : 'Remove this component?'}
         description={confirmAction === 'reset' ? 'This will replace the current draft with the starting layout. Your saved revision history remains available.' : 'This removes the selected block from the current draft. You can restore it with Undo.'}
         confirmLabel={confirmAction === 'reset' ? 'Reset design' : 'Remove component'}
-        onConfirm={() => confirmAction === 'reset' ? (setConfirmAction(null), syncSource(starterManifest())) : confirmRemove()}
+        onConfirm={() => {
+          if (confirmAction === 'reset') {
+            if (syncSource(starterManifest())) setConfirmAction(null)
+            return
+          }
+          confirmRemove()
+        }}
       />
     </div>
   )

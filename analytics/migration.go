@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
 
 // MigrateRollupMetrics consumes a ConfigDiff and updates _kora_analytics_daily
 // and _kora_analytics_monthly to reflect field renames and doctype changes.
 // Call after config activation/rollback.
-func MigrateRollupMetrics(db *sql.DB, siteName string, oldDoctypes, newDoctypes []*doctype.DocType) error {
+func MigrateRollupMetrics(db *sql.DB, dialect kdb.Dialect, siteName string, oldDoctypes, newDoctypes []*doctype.DocType) error {
 	if db == nil {
 		return nil
 	}
@@ -24,18 +25,15 @@ func MigrateRollupMetrics(db *sql.DB, siteName string, oldDoctypes, newDoctypes 
 	for _, change := range diff.Changes {
 		switch change.Type {
 		case doctype.ChangeFieldRenamed:
-			if err := migrateFieldRename(db, siteName, change); err != nil {
-				slog.Warn("analytics: field rename migration failed",
-					"doctype", change.DocType, "old", change.OldValue, "new", change.NewValue, "error", err)
-			} else {
-				slog.Info("analytics: migrated rollup data after field rename",
-					"doctype", change.DocType, "old_field", change.OldValue, "new_field", change.NewValue)
+			if err := migrateFieldRename(db, dialect, siteName, change); err != nil {
+				return fmt.Errorf("migrating rollups for %s field rename: %w", change.DocType, err)
 			}
+			slog.Info("analytics: migrated rollup data after field rename", "doctype", change.DocType, "old_field", change.OldValue, "new_field", change.NewValue)
 
 		case doctype.ChangeDocTypeRemoved:
 			// Mark all metrics for this doctype as archived.
-			if err := archiveDoctypeMetrics(db, siteName, change.DocType); err != nil {
-				slog.Warn("analytics: doctype removal archive failed", "doctype", change.DocType, "error", err)
+			if err := archiveDoctypeMetrics(db, dialect, siteName, change.DocType); err != nil {
+				return fmt.Errorf("archiving metrics for removed doctype %s: %w", change.DocType, err)
 			}
 		}
 	}
@@ -46,7 +44,7 @@ func MigrateRollupMetrics(db *sql.DB, siteName string, oldDoctypes, newDoctypes 
 // migrateFieldRename updates metric names and dimension prefixes after a field rename.
 // Example: status → state → updates "customer_count_by_status" → "customer_count_by_state"
 // and dimension "status=Active" → "state=Active".
-func migrateFieldRename(db *sql.DB, siteName string, change doctype.ConfigChange) error {
+func migrateFieldRename(db *sql.DB, dialect kdb.Dialect, siteName string, change doctype.ConfigChange) error {
 	oldField := change.OldValue
 	newField := change.NewValue
 	doctypeName := change.DocType
@@ -57,9 +55,9 @@ func migrateFieldRename(db *sql.DB, siteName string, change doctype.ConfigChange
 
 	// Update _kora_analytics_daily: metric names.
 	_, err := db.Exec(
-		`UPDATE _kora_analytics_daily
+		kdb.Rebind(dialect, `UPDATE _kora_analytics_daily
 		 SET metric = REPLACE(metric, ?, ?)
-		 WHERE site = ? AND doctype = ? AND metric LIKE ?`,
+		 WHERE site = ? AND doctype = ? AND metric LIKE ?`),
 		oldSuffix, newSuffix, siteName, doctypeName, "%"+oldSuffix,
 	)
 	if err != nil {
@@ -70,9 +68,9 @@ func migrateFieldRename(db *sql.DB, siteName string, change doctype.ConfigChange
 	oldDimPrefix := oldField + "="
 	newDimPrefix := newField + "="
 	_, err = db.Exec(
-		`UPDATE _kora_analytics_daily
+		kdb.Rebind(dialect, `UPDATE _kora_analytics_daily
 		 SET dimension = REPLACE(dimension, ?, ?)
-		 WHERE site = ? AND doctype = ? AND dimension LIKE ?`,
+		 WHERE site = ? AND doctype = ? AND dimension LIKE ?`),
 		oldDimPrefix, newDimPrefix, siteName, doctypeName, oldDimPrefix+"%",
 	)
 	if err != nil {
@@ -81,9 +79,9 @@ func migrateFieldRename(db *sql.DB, siteName string, change doctype.ConfigChange
 
 	// Same for monthly.
 	_, err = db.Exec(
-		`UPDATE _kora_analytics_monthly
+		kdb.Rebind(dialect, `UPDATE _kora_analytics_monthly
 		 SET metric = REPLACE(metric, ?, ?)
-		 WHERE site = ? AND doctype = ? AND metric LIKE ?`,
+		 WHERE site = ? AND doctype = ? AND metric LIKE ?`),
 		oldSuffix, newSuffix, siteName, doctypeName, "%"+oldSuffix,
 	)
 	if err != nil {
@@ -91,9 +89,9 @@ func migrateFieldRename(db *sql.DB, siteName string, change doctype.ConfigChange
 	}
 
 	_, err = db.Exec(
-		`UPDATE _kora_analytics_monthly
+		kdb.Rebind(dialect, `UPDATE _kora_analytics_monthly
 		 SET dimension = REPLACE(dimension, ?, ?)
-		 WHERE site = ? AND doctype = ? AND dimension LIKE ?`,
+		 WHERE site = ? AND doctype = ? AND dimension LIKE ?`),
 		oldDimPrefix, newDimPrefix, siteName, doctypeName, oldDimPrefix+"%",
 	)
 	if err != nil {
@@ -104,10 +102,14 @@ func migrateFieldRename(db *sql.DB, siteName string, change doctype.ConfigChange
 }
 
 // archiveDoctypeMetrics marks all rollup rows for a deleted doctype.
-func archiveDoctypeMetrics(db *sql.DB, siteName, doctypeName string) error {
+func archiveDoctypeMetrics(db *sql.DB, dialect kdb.Dialect, siteName, doctypeName string) error {
+	appendExpr := "CONCAT(dimension, ' [archived]')"
+	if dialect.DriverName() != "mysql" {
+		appendExpr = "dimension || ' [archived]'"
+	}
 	for _, table := range []string{"_kora_analytics_daily", "_kora_analytics_monthly"} {
 		_, err := db.Exec(
-			fmt.Sprintf("UPDATE %s SET dimension = CONCAT(dimension, ' [archived]') WHERE site = ? AND doctype = ?", table),
+			kdb.Rebind(dialect, fmt.Sprintf("UPDATE %s SET dimension = %s WHERE site = ? AND doctype = ?", table, appendExpr)),
 			siteName, doctypeName,
 		)
 		if err != nil {

@@ -12,6 +12,7 @@ export async function fetchList(
   }
   if (params.order_by) queryParams.order_by = params.order_by
   if (params.filters) queryParams.filters = params.filters
+  if (params.search) queryParams.search = params.search
   if (params.fields) queryParams.fields = JSON.stringify(params.fields)
 
   // Use getEnvelope to preserve meta (total, doctype).
@@ -46,6 +47,7 @@ export async function fetchPublicList(
   }
   if (params.order_by) queryParams.order_by = params.order_by
   if (params.filters) queryParams.filters = params.filters
+  if (params.search) queryParams.search = params.search
   if (params.fields) queryParams.fields = JSON.stringify(params.fields)
 
   const result = await api.getEnvelope<Document[]>(
@@ -78,15 +80,4 @@ export async function updateDocument(
 
 export async function deleteDocument(doctype: string, name: string): Promise<void> {
   return api.delete(`/api/v1/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`)
-}
-
-export async function submitWorkflowAction(
-  doctype: string,
-  name: string,
-  action: string,
-): Promise<Document> {
-  return api.post<Document>(
-    `/api/v1/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}/workflow_action`,
-    { action },
-  )
 }

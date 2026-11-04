@@ -1,9 +1,9 @@
 - name: Subscription and Recurring Services Operator
   workspace_access: true
-  description: Creates and executes Subscription and Recurring Services work.
+  description: Manages customers, subscriptions, payments, usage, and day-to-day billing operations.
 - name: Subscription and Recurring Services Reviewer
   workspace_access: true
-  description: Reviews evidence, exceptions, and approvals.
+  description: Reviews plans, invoices, payment exceptions, and subscription lifecycle decisions.
 - name: Subscription and Recurring Services Administrator
   workspace_access: true
-  description: Configures Subscription and Recurring Services and manages access.
+  description: Configures the billing model and manages all subscription records and access.

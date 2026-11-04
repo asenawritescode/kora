@@ -1,0 +1,6 @@
+- doctype: Ticket
+  role: Ticket User
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false

@@ -1,4 +1,4 @@
-// Package doctype provides the core types for Kora's config-driven view system.
+// Package doctype provides the core types for Kigae's config-driven view system.
 //
 // Views are first-class config objects that define how DocTypes are presented
 // to users. A View specifies a route, layout, and a tree of components — each
@@ -12,6 +12,7 @@
 package doctype
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -29,8 +30,11 @@ type View struct {
 	Label         string            `json:"label"          yaml:"label"`
 	Module        string            `json:"module"         yaml:"module"`
 	SourceDocType string            `json:"source_doctype" yaml:"source_doctype,omitempty"`
+	Task          *ViewTask         `json:"task,omitempty" yaml:"task,omitempty"`
+	Resources     []PageResource    `json:"resources,omitempty" yaml:"resources,omitempty"`
 	Components    []ViewComponent   `json:"components"     yaml:"components"`
 	PublicAccess  *ViewPublicAccess `json:"public_access"  yaml:"public_access,omitempty"`
+	PageManifest  *PageManifest     `json:"page_manifest,omitempty" yaml:"page_manifest,omitempty"`
 }
 
 // Validate checks that the view definition is structurally valid.
@@ -53,6 +57,11 @@ func (v *View) Validate() error {
 			return fmt.Errorf("view %q: %w", v.Name, err)
 		}
 	}
+	if v.Task != nil {
+		if err := v.Task.Validate(); err != nil {
+			return fmt.Errorf("view %q: %w", v.Name, err)
+		}
+	}
 
 	// Validate components.
 	seenIDs := make(map[string]bool)
@@ -65,6 +74,42 @@ func (v *View) Validate() error {
 
 	// Normalize defaults after validation passes.
 	v.Normalize()
+	return nil
+}
+
+// ViewTask records why a custom view exists in the user's work. Ordinary
+// table routes and saved filters do not need a task contract; distinct
+// operational workflows should declare one so their purpose can be reviewed.
+type ViewTask struct {
+	User             string   `json:"user" yaml:"user"`
+	Trigger          string   `json:"trigger" yaml:"trigger"`
+	Outcome          string   `json:"outcome" yaml:"outcome"`
+	Reads            []string `json:"reads" yaml:"reads"`
+	Writes           []string `json:"writes,omitempty" yaml:"writes,omitempty"`
+	CompletionSignal string   `json:"completion_signal" yaml:"completion_signal"`
+}
+
+func (t *ViewTask) Validate() error {
+	if strings.TrimSpace(t.User) == "" {
+		return fmt.Errorf("task.user is required")
+	}
+	if strings.TrimSpace(t.Trigger) == "" {
+		return fmt.Errorf("task.trigger is required")
+	}
+	if strings.TrimSpace(t.Outcome) == "" {
+		return fmt.Errorf("task.outcome is required")
+	}
+	if len(t.Reads) == 0 {
+		return fmt.Errorf("task.reads must name at least one record type")
+	}
+	for _, name := range append(append([]string(nil), t.Reads...), t.Writes...) {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("task record types must not be blank")
+		}
+	}
+	if strings.TrimSpace(t.CompletionSignal) == "" {
+		return fmt.Errorf("task.completion_signal is required")
+	}
 	return nil
 }
 
@@ -89,21 +134,22 @@ func (v *View) Normalize() {
 // Components can nest — a dashboard_grid contains metric_cards, a split_view
 // contains a queue and detail panel.
 type ViewComponent struct {
-	ID             string            `json:"id" yaml:"id"`
-	Type           string            `json:"type" yaml:"type"`
-	Region         string            `json:"region" yaml:"region"`
-	Label          string            `json:"label,omitempty" yaml:"label,omitempty"`
-	SourceDocType  string            `json:"source_doctype,omitempty" yaml:"source_doctype,omitempty"`
-	Data           string            `json:"data,omitempty" yaml:"data,omitempty"`
-	Bindings       map[string]string `json:"bindings,omitempty" yaml:"bindings,omitempty"`
-	Filters        []ViewFilter      `json:"filters,omitempty" yaml:"filters,omitempty"`
-	Actions        []ViewAction      `json:"actions,omitempty" yaml:"actions,omitempty"`
-	Rules          []ViewRule        `json:"rules,omitempty" yaml:"rules,omitempty"`
-	Components     []ViewComponent   `json:"components,omitempty" yaml:"components,omitempty"`
-	DesktopColumns []string          `json:"desktop_columns,omitempty" yaml:"desktop_columns,omitempty"`
-	MobileColumns  []string          `json:"mobile_columns,omitempty" yaml:"mobile_columns,omitempty"`
-	Position       int               `json:"position" yaml:"position"`
-	Span           int               `json:"span,omitempty" yaml:"span,omitempty"`
+	ID               string            `json:"id" yaml:"id"`
+	Type             string            `json:"type" yaml:"type"`
+	Region           string            `json:"region" yaml:"region"`
+	Label            string            `json:"label,omitempty" yaml:"label,omitempty"`
+	SourceDocType    string            `json:"source_doctype,omitempty" yaml:"source_doctype,omitempty"`
+	Data             string            `json:"data,omitempty" yaml:"data,omitempty"`
+	ResourceBindings map[string]string `json:"resource_bindings,omitempty" yaml:"resource_bindings,omitempty"`
+	Bindings         map[string]string `json:"bindings,omitempty" yaml:"bindings,omitempty"`
+	Filters          []ViewFilter      `json:"filters,omitempty" yaml:"filters,omitempty"`
+	Actions          []ViewAction      `json:"actions,omitempty" yaml:"actions,omitempty"`
+	Rules            []ViewRule        `json:"rules,omitempty" yaml:"rules,omitempty"`
+	Components       []ViewComponent   `json:"components,omitempty" yaml:"components,omitempty"`
+	DesktopColumns   []string          `json:"desktop_columns,omitempty" yaml:"desktop_columns,omitempty"`
+	MobileColumns    []string          `json:"mobile_columns,omitempty" yaml:"mobile_columns,omitempty"`
+	Position         int               `json:"position" yaml:"position"`
+	Span             int               `json:"span,omitempty" yaml:"span,omitempty"`
 }
 
 // Validate checks structural validity of a single component.
@@ -205,13 +251,13 @@ var validActionTypes = map[string]bool{
 	"update_record":               true,
 	"delete_record":               true,
 	"navigate":                    true,
-	"workflow_transition":         true,
 	"local_cart_add":              true,
 	"local_cart_remove":           true,
 	"local_state_set":             true,
 	"call_script":                 true,
 	"call_webhook":                true,
 	"create_transaction":          true,
+	"create_quantity_effect":      true,
 	"initiate_external_operation": true,
 	"validate_external_operation": true,
 }
@@ -242,7 +288,7 @@ func (a *ViewAction) Validate() error {
 func (a *ViewAction) IsMutation() bool {
 	switch a.Type {
 	case "create_record", "update_record", "delete_record",
-		"workflow_transition", "create_transaction",
+		"create_transaction",
 		"call_script", "call_webhook", "initiate_external_operation", "validate_external_operation":
 		return true
 	default:
@@ -445,7 +491,10 @@ func ParseViewYAML(data []byte) (*View, error) {
 func ParseViewsDirectory(path string) ([]*View, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return nil, nil // No views directory is fine.
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil // No views directory is fine.
+		}
+		return nil, fmt.Errorf("read views directory %s: %w", path, err)
 	}
 
 	var views []*View

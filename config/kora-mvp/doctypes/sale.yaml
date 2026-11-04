@@ -3,7 +3,7 @@ module: Point of Sale
 is_submittable: true
 title_field: reference
 search_fields: reference, status, payment_method
-sort_field: modified
+sort_field: invoice_date
 sort_order: DESC
 fields:
   - fieldname: reference
@@ -11,6 +11,10 @@ fields:
     label: Receipt number
     reqd: true
     unique: true
+    in_list_view: true
+  - fieldname: invoice_date
+    fieldtype: Date
+    label: Sale date
     in_list_view: true
   - fieldname: status
     fieldtype: Select

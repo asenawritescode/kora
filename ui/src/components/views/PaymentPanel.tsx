@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { ViewComponentProps } from './registry'
 import { Button } from '@/components/ui/button'
 import { useCartStore } from '@/lib/cart-store'
+import { readPaymentSession, writePaymentSession } from '@/lib/payment-session'
 import { Banknote, CreditCard, Smartphone, Loader2, Unlock } from 'lucide-react'
 
 const PAYMENT_ICONS: Record<string, ReactNode> = {
@@ -10,6 +11,12 @@ const PAYMENT_ICONS: Record<string, ReactNode> = {
   mobile_money: <Smartphone className="h-5 w-5" />,
   mobile: <Smartphone className="h-5 w-5" />,
   mpesa: <Smartphone className="h-5 w-5" />,
+}
+
+function actionResultRecord(result: unknown): Record<string, unknown> {
+  if (!result || typeof result !== 'object') return {}
+  const data = 'data' in result ? result.data : result
+  return data && typeof data === 'object' ? data as Record<string, unknown> : {}
 }
 
 export default function PaymentPanel(props: ViewComponentProps) {
@@ -21,8 +28,9 @@ export default function PaymentPanel(props: ViewComponentProps) {
   const [paymentStatus, setPaymentStatus] = useState('')
   const [phoneError, setPhoneError] = useState('')
   const [openingCash, setOpeningCash] = useState('0')
-  const [activeShift, setActiveShift] = useState(() => sessionStorage.getItem('kora-pos-active-shift') || '')
-  const [activeTillSession, setActiveTillSession] = useState(() => sessionStorage.getItem('kora-pos-active-till-session') || '')
+  const [activeShift, setActiveShift] = useState(() => readPaymentSession('kora-pos-active-shift'))
+  const [activeTillSession, setActiveTillSession] = useState(() => readPaymentSession('kora-pos-active-till-session'))
+  const [sessionStorageUnavailable, setSessionStorageUnavailable] = useState(false)
   const { items, total, clearCart } = useCartStore()
   const cartTotal = total()
 
@@ -65,11 +73,13 @@ export default function PaymentPanel(props: ViewComponentProps) {
             status: 'Open',
             started_at: new Date().toISOString(),
           })
-          const created = (result as any)?.data || result
-          shiftName = created?.name || created?.reference || reference
+          const created = actionResultRecord(result)
+          shiftName = (typeof created.name === 'string' && created.name)
+            || (typeof created.reference === 'string' && created.reference)
+            || reference
           if (shiftName) {
             setActiveShift(shiftName)
-            sessionStorage.setItem('kora-pos-active-shift', shiftName)
+            if (!writePaymentSession('kora-pos-active-shift', shiftName)) setSessionStorageUnavailable(true)
           }
         }
       }
@@ -87,11 +97,13 @@ export default function PaymentPanel(props: ViewComponentProps) {
             expected_cash: Number(openingCash || 0),
             status: 'Open',
           })
-          const created = (result as any)?.data || result
-          const tillName = created?.name || created?.reference || reference
+          const created = actionResultRecord(result)
+          const tillName = (typeof created.name === 'string' && created.name)
+            || (typeof created.reference === 'string' && created.reference)
+            || reference
           if (tillName) {
             setActiveTillSession(tillName)
-            sessionStorage.setItem('kora-pos-active-till-session', tillName)
+            if (!writePaymentSession('kora-pos-active-till-session', tillName)) setSessionStorageUnavailable(true)
           }
         }
       }
@@ -166,6 +178,11 @@ export default function PaymentPanel(props: ViewComponentProps) {
 
   return (
     <div className="space-y-3 rounded-lg border p-4">
+      {sessionStorageUnavailable && (
+        <p role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          Shift details are available for this session but could not be saved for a page reload.
+        </p>
+      )}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Payment</h3>
         <span className="text-lg font-bold">{cartTotal.toLocaleString()}</span>

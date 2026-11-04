@@ -1,7 +1,7 @@
 name: Activity
 module: CRM
 title_field: subject
-search_fields: subject, description, contact, deal
+search_fields: subject, contact, deal
 sort_field: due_date
 sort_order: ASC
 
@@ -56,6 +56,12 @@ fields:
     label: Due Date
     in_list_view: true
 
+  - fieldname: assigned_to
+    fieldtype: User
+    label: Assigned to
+    in_list_view: true
+    description: Select an existing workspace user.
+
   - fieldname: status
     fieldtype: Select
     label: Status
@@ -76,6 +82,7 @@ fields:
   - fieldname: contact
     fieldtype: Link
     label: Contact
+    search_index: true
     options: Contact
     in_list_view: true
 
@@ -87,6 +94,7 @@ fields:
   - fieldname: deal
     fieldtype: Link
     label: Deal
+    search_index: true
     options: Deal
 
   # --- Section: Details ---
@@ -101,3 +109,11 @@ fields:
   - fieldname: outcome
     fieldtype: Text
     label: Outcome / Notes
+
+  - fieldname: cancellation_reason
+    fieldtype: Data
+    label: Cancellation Reason
+
+  - fieldname: reopen_reason
+    fieldtype: Data
+    label: Reopen Reason

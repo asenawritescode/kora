@@ -16,13 +16,26 @@ services:
     build: .
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - KORA_DB_TYPE=mysql
       - DB_DSN=root:kora123@tcp(mysql:3306)/kora?parseTime=true
+      - KORA_DB_HOST=mysql
+      - KORA_DB_PORT=3306
       - CONSOLE_EMAIL=admin@kora.local
       - CONSOLE_PASSWORD=kora123
       - KORA_DB_USER=root
       - KORA_DB_PASSWORD=kora123
+      - KORA_PUBLIC_APP_BASE_URL=${KORA_PUBLIC_APP_BASE_URL:-}
+      - KORA_ENGINE_CLOUD_IDENTITY_URL=${KORA_ENGINE_CLOUD_IDENTITY_URL:-http://host.docker.internal:8081/internal/identity/handoff/redeem}
+      - KORA_ENGINE_CLOUD_IDENTITY_TOKEN=${KORA_ENGINE_CLOUD_IDENTITY_TOKEN:-${KORA_CLOUD_ENGINE_PROVISIONING_TOKEN:-local-kora-cloud-engine-identity-token}}
+      - KORA_ENGINE_PROVISIONING_TOKEN=${KORA_ENGINE_PROVISIONING_TOKEN:-${KORA_CLOUD_ENGINE_PROVISIONING_TOKEN:-local-kora-cloud-engine-identity-token}}
+      - KORA_RELOAD_TOKEN=${KORA_CLOUD_KORA_RELOAD_TOKEN:-local-kora-cloud-reload-token}
+      - KORA_ENGINE_MANAGEMENT_TOKEN=${KORA_ENGINE_MANAGEMENT_TOKEN:-local-engine-management-token}
+      - KORA_ENGINE_MANAGEMENT_CALLER_ID=${KORA_ENGINE_MANAGEMENT_CALLER_ID:-cloud-control-plane}
+      - KORA_ENGINE_DEPLOYMENT_ID=${KORA_ENGINE_DEPLOYMENT_ID:-deployment-local}
+      - KORA_ENGINE_MANAGEMENT_DATABASE_ALLOCATION_REF=${KORA_ENGINE_MANAGEMENT_DATABASE_ALLOCATION_REF:-mysql:local-kora}
     depends_on:
       mysql:
         condition: service_healthy

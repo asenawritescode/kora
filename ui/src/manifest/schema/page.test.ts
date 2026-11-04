@@ -89,6 +89,15 @@ describe('PageManifest validation', () => {
     ]))
   })
 
+  it('validates component resource role bindings against declared page resources', () => {
+    const manifest = validManifest()
+    manifest.spec.layout.children[0].resource_bindings = { categories: 'missing_categories' }
+
+    expect(validatePageManifestContract(manifest)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'spec.layout.children.0.resource_bindings.categories' }),
+    ]))
+  })
+
   it('rejects malformed top-level manifest contract fields', () => {
     const manifest = validManifest()
     manifest.apiVersion = 'bad' as PageManifest['apiVersion']
@@ -102,12 +111,12 @@ describe('PageManifest validation', () => {
     ]))
   })
 
-  it('rejects reserved routes that would shadow Kora core routes', () => {
+  it('rejects reserved routes that would shadow Kigae core routes', () => {
     const manifest = validManifest()
     manifest.spec.route = '/workspace/admin/page-manifests'
 
     expect(validatePageManifestContract(manifest)).toEqual(expect.arrayContaining([
-      { path: 'spec.route', message: 'Route conflicts with a reserved Kora route.' },
+      { path: 'spec.route', message: 'Route conflicts with a reserved Kigae route.' },
     ]))
   })
 

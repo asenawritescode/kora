@@ -234,6 +234,25 @@
       ],
       "type": "object"
     },
+    "BusinessScope": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "legal_entity_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
     "Capability": {
       "additionalProperties": false,
       "properties": {
@@ -674,8 +693,14 @@
         "aggregate_type": {
           "type": "string"
         },
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "capability": {
           "$ref": "#/$defs/ResourceRef"
+        },
+        "causation_depth": {
+          "type": "integer"
         },
         "causation_id": {
           "type": "string"
@@ -2634,8 +2659,14 @@
         "aggregate_type": {
           "type": "string"
         },
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "capability": {
           "$ref": "#/$defs/ResourceRef"
+        },
+        "causation_depth": {
+          "type": "integer"
         },
         "causation_id": {
           "type": "string"

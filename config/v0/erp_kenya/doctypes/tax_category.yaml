@@ -1,6 +1,7 @@
 name: Tax Category
 module: Finance
 title_field: category_name
+search_fields: category_name
 sort_field: category_name
 sort_order: ASC
 fields:

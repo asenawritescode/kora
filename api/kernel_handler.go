@@ -11,16 +11,19 @@ import (
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
 )
 
 // kernelRequest is the wire shape for POST /api/v1/kernel/:command.
 type kernelRequest struct {
-	IdempotencyKey  string          `json:"idempotency_key"`
-	CorrelationID   string          `json:"correlation_id"`
-	CausationID     string          `json:"causation_id"`
-	ExpectedVersion string          `json:"expected_version"`
-	Payload         json.RawMessage `json:"payload"`
+	IdempotencyKey  string `json:"idempotency_key"`
+	CorrelationID   string `json:"correlation_id"`
+	CausationID     string `json:"causation_id"`
+	ExpectedVersion string `json:"expected_version"`
+	// Internal adapter-only concurrency fence; never accepted from the public JSON body.
+	ExpectedConfigRevision uint64          `json:"-"`
+	Payload                json.RawMessage `json:"payload"`
 }
 
 // sourceForAuthType maps the gin auth context onto a kernel Source. The
@@ -33,6 +36,8 @@ func sourceForAuthType(authType string) kernel.Source {
 		return kernel.SourceIntegration
 	case "channel_session":
 		return kernel.SourceUI
+	case "provider_callback":
+		return kernel.SourceIntegration
 	default:
 		return kernel.SourceHTTP
 	}
@@ -42,7 +47,7 @@ func sourceForAuthType(authType string) kernel.Source {
 // context, falling back to the site map on the handler.
 func (h *Handler) siteOutboxWriter(c *gin.Context) outbox.Writer {
 	siteName, _ := c.Get("site_name")
-	if s, ok := siteName.(string); ok && (h.SiteOutboxes != nil || h.RuntimeServices != nil) {
+	if s, ok := siteName.(string); ok {
 		if w := h.runtimeService(c, s).Outbox; w != nil {
 			return w
 		}
@@ -124,20 +129,38 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 		return contract.CommandResult{}, contract.NewError(contract.CodeDependencyUnavailable, "site database unavailable")
 	}
 	reg := h.siteRegistry(c)
+	if h.KernelCommands != nil {
+		for _, ownerCommand := range h.KernelCommands.OwnerCommands() {
+			if ownerCommand.FullName() == commandName {
+				return contract.CommandResult{}, contract.NewError(contract.CodePermissionDenied, "owner module commands must be invoked through their published capability")
+			}
+		}
+	}
 	if req.IdempotencyKey == "" {
 		req.IdempotencyKey = c.GetHeader("Idempotency-Key")
 	}
 	authType := c.GetString("auth_type")
-	user := c.GetString("user")
+	execution, verified := requestExecution(c)
 	if commandName == kernel.CommandPublicFormSubmit {
-		user = "public"
-	} else if authType == "extension" {
-		user = "extension:" + c.GetString("extension_name")
-	} else if authType == "channel_session" {
-		user = "channel:" + c.GetString("channel_sender_address")
+		tenantID := c.GetString("site_id")
+		if tenantID == "" {
+			tenantID = site
+		}
+		publicExecution, err := policy.NewVerifiedExecution(contract.TenantID(tenantID), contract.ActorContext{
+			PrincipalID: "public-form", PrincipalType: contract.PrincipalPublic, Site: site, AuthenticatedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			return contract.CommandResult{}, contract.NewError(contract.CodeUnauthenticated, "public form execution identity is invalid")
+		}
+		execution, verified = publicExecution, true
 	}
+	if !verified {
+		return contract.CommandResult{}, contract.NewError(contract.CodeUnauthenticated, "verified execution identity is required")
+	}
+	actor := execution.Actor()
+	user := actor.SubjectUserID
 	if user == "" {
-		user = "system"
+		user = actor.PrincipalID
 	}
 
 	// Delegated credentials carry DocType grants instead of human roles. Check
@@ -162,7 +185,7 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 			operation = "write"
 		case kernel.CommandRecordDelete:
 			operation = "delete"
-		case kernel.CommandRecordWorkflowTransition:
+		case kernel.CommandWorkflowStatusTransition:
 			operation = "submit"
 		}
 		if operation == "" {
@@ -173,41 +196,34 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 		}
 	}
 	opCtx := kernel.OperationContext{
-		Site:                site,
-		User:                user,
-		Roles:               c.GetStringSlice("user_roles"),
-		UserRole:            c.GetString("user_role"),
-		Source:              sourceForAuthType(authType),
-		CorrelationID:       req.CorrelationID,
-		CausationID:         req.CausationID,
-		ExpectedVersion:     req.ExpectedVersion,
-		IdempotencyKey:      req.IdempotencyKey,
-		AllowReadOnlyFields: allowReadOnlyFields,
+		Site:                   site,
+		TenantID:               execution.Tenant(),
+		BusinessScope:          businessScopeFromRequest(c, execution),
+		Execution:              execution,
+		User:                   user,
+		Roles:                  actor.Roles,
+		Source:                 sourceForAuthType(authType),
+		CorrelationID:          req.CorrelationID,
+		CausationID:            req.CausationID,
+		ExpectedVersion:        req.ExpectedVersion,
+		ExpectedConfigRevision: req.ExpectedConfigRevision,
+		ConfigRevision:         c.GetUint64("site_config_revision"),
+		IdempotencyKey:         req.IdempotencyKey,
+		AllowReadOnlyFields:    allowReadOnlyFields,
 	}
-	principalType := contract.PrincipalHuman
-	if commandName == kernel.CommandPublicFormSubmit {
-		principalType = contract.PrincipalPublic
-	} else if authType == "service" {
-		principalType = contract.PrincipalService
-	} else if authType == "extension" {
-		principalType = contract.PrincipalService
-	} else if authType == "channel_session" {
-		principalType = contract.PrincipalAgent
+	services := h.runtimeService(c, site)
+	if len(actor.Roles) > 0 {
+		opCtx.UserRole = actor.Roles[0]
 	}
-	opCtx.Actor = contract.ActorContext{
-		PrincipalID:     user,
-		PrincipalType:   principalType,
-		SubjectUserID:   user,
-		Site:            site,
-		Roles:           opCtx.Roles,
-		AuthenticatedAt: time.Now(),
-	}
+	opCtx.Actor = actor
 
 	txManager := h.siteTx(c)
-	txManager.CurrentUserRole = c.GetString("user_role")
+	opCtx.BusinessReferenceValidator = txManager.BusinessReferenceValidator
+	txManager.CurrentUserRole = opCtx.UserRole
 	k := kernel.New(h.siteDialect(c), h.siteOutboxWriter(c))
 	k.TxManager = txManager
 	k.Commands = h.KernelCommands
+	k.CommandSchemas = services.CommandSchemas
 	result, cerr := k.Execute(c.Request.Context(), sqlDB, reg, kernel.Operation{
 		Context:  opCtx,
 		Command:  commandName,
@@ -218,7 +234,11 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 }
 
 func (h *Handler) executeResourceMutation(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, status int) {
-	doc, cerr := h.runKernelResourceMutation(c, commandName, doctypeName, name, data)
+	h.executeResourceMutationWithKey(c, commandName, doctypeName, name, data, status, "")
+}
+
+func (h *Handler) executeResourceMutationWithKey(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, status int, idempotencyKey string, expectedVersions ...string) {
+	doc, cerr := h.runKernelResourceMutationWithKey(c, commandName, doctypeName, name, data, idempotencyKey, expectedVersions...)
 	if cerr != nil {
 		h.writeKernelError(c, cerr)
 		return
@@ -235,15 +255,15 @@ func (h *Handler) runKernelResourceMutation(c *gin.Context, commandName, doctype
 	return h.runKernelResourceMutationWithKey(c, commandName, doctypeName, name, data, "")
 }
 
-func (h *Handler) runKernelResourceMutationWithKey(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, idempotencyKey string) (*doctype.Document, *contract.Error) {
-	return h.runKernelResourceMutationWithOptions(c, commandName, doctypeName, name, data, idempotencyKey, false)
+func (h *Handler) runKernelResourceMutationWithKey(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, idempotencyKey string, expectedVersions ...string) (*doctype.Document, *contract.Error) {
+	return h.runKernelResourceMutationWithOptions(c, commandName, doctypeName, name, data, idempotencyKey, false, expectedVersions...)
 }
 
 func (h *Handler) runKernelTrustedReadOnlyResourceMutationWithKey(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, idempotencyKey string) (*doctype.Document, *contract.Error) {
 	return h.runKernelResourceMutationWithOptions(c, commandName, doctypeName, name, data, idempotencyKey, true)
 }
 
-func (h *Handler) runKernelResourceMutationWithOptions(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, idempotencyKey string, allowReadOnlyFields bool) (*doctype.Document, *contract.Error) {
+func (h *Handler) runKernelResourceMutationWithOptions(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, idempotencyKey string, allowReadOnlyFields bool, expectedVersions ...string) (*doctype.Document, *contract.Error) {
 	payload := map[string]any{"doctype": doctypeName}
 	if name != "" {
 		payload["name"] = name
@@ -255,7 +275,11 @@ func (h *Handler) runKernelResourceMutationWithOptions(c *gin.Context, commandNa
 	if err != nil {
 		return nil, contract.NewError(contract.CodeInternal, "encoding resource mutation failed")
 	}
-	result, cerr := h.executeKernelOperationWithReadOnlyFields(c, commandName, kernelRequest{Payload: rawPayload, IdempotencyKey: idempotencyKey}, allowReadOnlyFields)
+	expectedVersion := ""
+	if len(expectedVersions) > 0 {
+		expectedVersion = expectedVersions[0]
+	}
+	result, cerr := h.executeKernelOperationWithReadOnlyFields(c, commandName, kernelRequest{Payload: rawPayload, IdempotencyKey: idempotencyKey, ExpectedVersion: expectedVersion}, allowReadOnlyFields)
 	if cerr != nil {
 		return nil, cerr
 	}
@@ -273,6 +297,12 @@ func (h *Handler) runKernelResourceMutationWithOptions(c *gin.Context, commandNa
 	doc := orm.DocumentFromMap(h.siteRegistry(c), doctypeName, operation.Document)
 	if doc == nil {
 		return nil, contract.NewError(contract.CodeInternal, "kernel did not return the resource document")
+	}
+	// DocumentFromMap omits system fields used by business forms. Preserve the
+	// kernel's persisted modified timestamp here so REST responses can issue a
+	// version token that the next write will accept.
+	if modified, ok := operation.Document["modified"]; ok {
+		doc.Set("modified", modified)
 	}
 	return doc, nil
 }
@@ -298,48 +328,6 @@ func (h *Handler) runKernelMutationBundle(c *gin.Context, payload kernel.RecordM
 	return &operation, result.Replayed, nil
 }
 
-func (h *Handler) runKernelWorkflowTransition(c *gin.Context, doctypeName, name, action string, expectedRevision uint64) (*doctype.Document, *contract.Error) {
-	payload, err := json.Marshal(kernel.RecordWorkflowTransitionPayload{
-		Doctype: doctypeName, Name: name, Action: action, ExpectedRevision: expectedRevision,
-	})
-	if err != nil {
-		return nil, contract.NewError(contract.CodeInternal, "encoding workflow transition failed")
-	}
-	result, cerr := h.executeKernelOperation(c, kernel.CommandRecordWorkflowTransition, kernelRequest{Payload: payload})
-	if cerr != nil {
-		return nil, cerr
-	}
-	if result.Replayed {
-		c.Header("X-Kora-Replay", "true")
-	}
-	var operation kernel.ResultData
-	if err := json.Unmarshal(result.Data, &operation); err != nil {
-		return nil, contract.NewError(contract.CodeInternal, "decoding workflow result failed")
-	}
-	doc := orm.DocumentFromMap(h.siteRegistry(c), doctypeName, operation.Document)
-	if doc == nil {
-		return nil, contract.NewError(contract.CodeInternal, "kernel did not return the workflow document")
-	}
-	return doc, nil
-}
-
-func (h *Handler) writeWorkflowKernelError(c *gin.Context, cerr *contract.Error) {
-	status := http.StatusBadRequest
-	switch cerr.Type {
-	case contract.CodePermissionDenied:
-		status = http.StatusForbidden
-	case contract.CodeUnauthenticated:
-		status = http.StatusUnauthorized
-	case contract.CodeNotFound:
-		status = http.StatusNotFound
-	case contract.CodeConflict, contract.CodeIdempotencyKeyReused:
-		status = http.StatusConflict
-	case contract.CodeInternal, contract.CodeDependencyUnavailable:
-		status = http.StatusInternalServerError
-	}
-	c.JSON(status, ErrorResponse{Error: map[string]string{"message": cerr.Message}})
-}
-
 func (h *Handler) writeKernelError(c *gin.Context, cerr *contract.Error) {
 	status := http.StatusInternalServerError
 	switch cerr.Type {
@@ -351,8 +339,12 @@ func (h *Handler) writeKernelError(c *gin.Context, cerr *contract.Error) {
 		status = http.StatusBadRequest
 	case contract.CodeNotFound:
 		status = http.StatusNotFound
-	case contract.CodeConflict, contract.CodeIdempotencyKeyReused:
+	case contract.CodeConflict, contract.CodeIdempotencyKeyReused, contract.CodeStaleSubject, contract.CodeLeaseLost, contract.CodeOutcomeUnknown, contract.CodeUnsupportedVersion:
 		status = http.StatusConflict
+	case contract.CodeResourceExhausted:
+		status = http.StatusTooManyRequests
+	case contract.CodeDependencyUnavailable:
+		status = http.StatusServiceUnavailable
 	case contract.CodeDeadlineExceeded:
 		status = http.StatusGatewayTimeout
 	}

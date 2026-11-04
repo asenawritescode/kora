@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -183,123 +182,21 @@ func TestLiveEngineProcessResilienceToNATSAndPlatformDatabaseOutages(t *testing.
 		return fmt.Errorf("%v\nengine log:\n%s", engineExitErr, strings.TrimSpace(string(logs)))
 	})
 
-	// Exercise the public self-service endpoint in the actual Engine process.
-	// It must provision the tenant, install the canonical directory runtime,
-	// and only then report the job active and route its hostname.
-	onboardHost := fmt.Sprintf("onboard-%d.example.invalid", time.Now().UnixNano())
-	onboardPassword := "acceptance-only-password"
-	onboardBody := fmt.Sprintf(`{"hostname":%q,"admin_email":"onboarding@example.invalid","admin_password":%q}`, onboardHost, onboardPassword)
-	onboardResponse, err := client.Post(fmt.Sprintf("http://127.0.0.1:%d/api/console/sites/onboard", port), "application/json", strings.NewReader(onboardBody))
+	// Engine no longer exposes password-based self-service tenant bootstrap;
+	// Cloud owns signup and provisions a passwordless Cloud-linked principal.
+	retired, err := client.Post(fmt.Sprintf("http://127.0.0.1:%d/api/console/sites/onboard", port), "application/json", strings.NewReader(`{"hostname":"retired.example.invalid","admin_email":"owner@example.invalid","admin_password":"no-longer-supported"}`))
 	if err != nil {
-		t.Fatal("POST live self-service onboarding endpoint:", err)
+		t.Fatal("request retired Engine password bootstrap route:", err)
 	}
-	var onboardAccepted struct {
-		Data struct {
-			JobID string `json:"job_id"`
-		} `json:"data"`
-	}
-	if onboardResponse.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(onboardResponse.Body)
-		onboardResponse.Body.Close()
-		diagnostic := strings.ReplaceAll(string(body), onboardPassword, "[redacted]")
-		_ = logFile.Sync()
-		engineLogs, _ := os.ReadFile(logFile.Name())
-		redactedLogs := strings.ReplaceAll(string(engineLogs), "acceptance-only", "[redacted]")
-		redactedLogs = strings.ReplaceAll(redactedLogs, onboardPassword, "[redacted]")
-		t.Fatalf("self-service onboarding returned HTTP %d, want %d (response: %s; engine log: %s)", onboardResponse.StatusCode, http.StatusAccepted, strings.TrimSpace(diagnostic), strings.TrimSpace(redactedLogs))
-	}
-	if err := json.NewDecoder(onboardResponse.Body).Decode(&onboardAccepted); err != nil {
-		onboardResponse.Body.Close()
-		t.Fatal("decode onboarding acceptance response:", err)
-	}
-	onboardResponse.Body.Close()
-	if onboardAccepted.Data.JobID == "" {
-		t.Fatal("self-service onboarding response omitted provisioning job ID")
+	retired.Body.Close()
+	if retired.StatusCode != http.StatusNotFound {
+		t.Fatalf("retired Engine password bootstrap returned HTTP %d, want 404", retired.StatusCode)
 	}
 
-	var onboardState string
-	for {
-		statusResponse, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/console/sites/onboard/%s", port, onboardAccepted.Data.JobID))
-		if err != nil {
-			t.Fatal("read self-service onboarding status:", err)
-		}
-		var status struct {
-			Data struct {
-				State     string `json:"state"`
-				LastError string `json:"last_error"`
-			} `json:"data"`
-		}
-		decodeErr := json.NewDecoder(statusResponse.Body).Decode(&status)
-		statusResponse.Body.Close()
-		if decodeErr != nil {
-			t.Fatal("decode self-service onboarding status:", decodeErr)
-		}
-		if statusResponse.StatusCode != http.StatusOK {
-			t.Fatalf("self-service onboarding status returned HTTP %d", statusResponse.StatusCode)
-		}
-		onboardState = status.Data.State
-		if onboardState == string(site.OnboardingActive) {
-			break
-		}
-		if onboardState == string(site.OnboardingFailed) {
-			errMsg := strings.ReplaceAll(status.Data.LastError, onboardPassword, "[redacted]")
-			t.Fatalf("self-service onboarding failed for disposable site (error: %s)", errMsg)
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("self-service onboarding job did not become active (last state %q): %v", onboardState, ctx.Err())
-		case <-time.After(250 * time.Millisecond):
-		}
-	}
-	onboardInfo, err := registry.ResolveAlias(onboardHost)
-	if err != nil {
-		t.Fatal("self-service site missing from canonical directory:", err)
-	}
-	if onboardInfo.SiteID == "" || onboardInfo.ConfigRevision == 0 || onboardInfo.DBType != "mysql" {
-		t.Fatalf("self-service site has incomplete canonical directory metadata: site_id_present=%t revision=%d db_type=%q", onboardInfo.SiteID != "", onboardInfo.ConfigRevision, onboardInfo.DBType)
-	}
-	onboardDB, err := sql.Open("mysql", fmt.Sprintf("root:acceptance-only@tcp(%s)/%s?parseTime=true", platformAddress, onboardInfo.DBName))
-	if err != nil {
-		t.Fatal("open disposable self-service tenant DB:", err)
-	}
-	var onboardAdmins int
-	if err := onboardDB.QueryRow(`SELECT COUNT(*) FROM _kora_user WHERE email = ?`, "onboarding@example.invalid").Scan(&onboardAdmins); err != nil {
-		onboardDB.Close()
-		t.Fatal("verify self-service admin was created in tenant DB:", err)
-	}
-	if err := onboardDB.Close(); err != nil {
-		t.Fatal("close disposable self-service tenant DB:", err)
-	}
-	if onboardAdmins != 1 {
-		t.Fatalf("self-service tenant has %d matching admin records, want exactly 1", onboardAdmins)
-	}
-	if status := enginePing(client, port, onboardHost); status != http.StatusOK {
-		t.Fatalf("self-service site was not routable after job became active: HTTP %d", status)
-	}
-	updatedOnboardAlias := "revised." + onboardHost
-	if err := site.UpdatePlatformSiteRegistration(database, "mysql", onboardHost, []string{onboardHost, updatedOnboardAlias}, "local", ""); err != nil {
-		t.Fatal("commit post-onboarding directory revision:", err)
-	}
 	latest, err := registry.CurrentDirectoryRevision()
 	if err != nil {
-		t.Fatal("read post-onboarding directory revision:", err)
+		t.Fatal("read current directory revision:", err)
 	}
-	waitForConsumerCursor(ctx, t, database, consumerID, latest)
-	if status := enginePing(client, port, updatedOnboardAlias); status != http.StatusOK {
-		t.Fatalf("self-service runtime did not accept a later directory revision: HTTP %d", status)
-	}
-	if err := registry.SetStatus(onboardInfo.SiteID, "deleted"); err != nil {
-		t.Fatal("tombstone self-service acceptance site:", err)
-	}
-	latest, err = registry.CurrentDirectoryRevision()
-	if err != nil {
-		t.Fatal("read self-service tombstone revision:", err)
-	}
-	waitForConsumerCursor(ctx, t, database, consumerID, latest)
-	if status := enginePing(client, port, onboardHost); status != http.StatusNotFound {
-		t.Fatalf("tombstoned self-service site remained routable: HTTP %d", status)
-	}
-
 	// Exercise the directory consumer's complete runtime lifecycle while the
 	// real Engine process is serving: hot-add a site, then tombstone it.
 	hotAddedHost := fmt.Sprintf("hot-added-%d.example.invalid", time.Now().UnixNano())

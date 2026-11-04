@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/asenawritescode/kora/db"
@@ -17,16 +16,30 @@ import (
 // across processes. The in-process mutex also serializes LibSQL bootstrap in
 // standalone/single-process deployments, where cross-process Engine cells are
 // not supported by the current runtime contract.
-var platformRegistryBootstrapMu sync.Mutex
+var platformRegistryBootstrapGate = make(chan struct{}, 1)
 
 func bootstrapPlatformRegistryWithLock(database *sql.DB, dialect db.Dialect) (err error) {
+	return bootstrapPlatformRegistryWithLockContext(context.Background(), database, dialect)
+}
+
+func bootstrapPlatformRegistryWithLockContext(parent context.Context, database *sql.DB, dialect db.Dialect) (err error) {
 	if database == nil || dialect == nil {
 		return errors.New("platform registry database and dialect are required")
 	}
-	platformRegistryBootstrapMu.Lock()
-	defer platformRegistryBootstrapMu.Unlock()
+	if parent == nil {
+		return errors.New("platform registry bootstrap requires context")
+	}
+	if err := parent.Err(); err != nil {
+		return err
+	}
+	select {
+	case platformRegistryBootstrapGate <- struct{}{}:
+		defer func() { <-platformRegistryBootstrapGate }()
+	case <-parent.Done():
+		return parent.Err()
+	}
 
-	release, err := acquirePlatformRegistryBootstrapLock(database, dialect)
+	release, err := acquirePlatformRegistryBootstrapLockContext(parent, database, dialect)
 	if err != nil {
 		return err
 	}
@@ -35,10 +48,20 @@ func bootstrapPlatformRegistryWithLock(database *sql.DB, dialect db.Dialect) (er
 			err = fmt.Errorf("release platform registry bootstrap lock: %w", releaseErr)
 		}
 	}()
-	return bootstrapPlatformRegistryUnlocked(database, dialect)
+	return bootstrapPlatformRegistryUnlockedContext(parent, database, dialect)
 }
 
 func acquirePlatformRegistryBootstrapLock(database *sql.DB, dialect db.Dialect) (func() error, error) {
+	return acquirePlatformRegistryBootstrapLockContext(context.Background(), database, dialect)
+}
+
+func acquirePlatformRegistryBootstrapLockContext(parent context.Context, database *sql.DB, dialect db.Dialect) (func() error, error) {
+	if parent == nil {
+		return nil, errors.New("platform registry bootstrap lock requires context")
+	}
+	if err := parent.Err(); err != nil {
+		return nil, err
+	}
 	driver := dialect.DriverName()
 	if driver != "mysql" && driver != "postgres" {
 		return func() error { return nil }, nil
@@ -55,7 +78,7 @@ func acquirePlatformRegistryBootstrapLock(database *sql.DB, dialect db.Dialect) 
 			database.SetMaxOpenConns(previousMax)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
 	defer cancel()
 	connection, err := database.Conn(ctx)
 	if err != nil {
@@ -81,8 +104,10 @@ func acquirePlatformRegistryBootstrapLock(database *sql.DB, dialect db.Dialect) 
 			return nil, errors.New("timed out acquiring MySQL platform registry bootstrap lock")
 		}
 		release := func() error {
+			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			var released sql.NullInt64
-			err := connection.QueryRowContext(context.Background(), `SELECT RELEASE_LOCK(?)`, lockName).Scan(&released)
+			err := connection.QueryRowContext(releaseCtx, `SELECT RELEASE_LOCK(?)`, lockName).Scan(&released)
 			closeErr := connection.Close()
 			restorePoolLimit()
 			if err != nil {
@@ -103,9 +128,11 @@ func acquirePlatformRegistryBootstrapLock(database *sql.DB, dialect db.Dialect) 
 		return nil, fmt.Errorf("acquire PostgreSQL platform registry bootstrap lock: %w", err)
 	}
 	release := func() error {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		var ignored any
 		var unlocked bool
-		err := connection.QueryRowContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1)::bigint)::text, true`, lockName).Scan(&ignored, &unlocked)
+		err := connection.QueryRowContext(releaseCtx, `SELECT pg_advisory_unlock(hashtext($1)::bigint)::text, true`, lockName).Scan(&ignored, &unlocked)
 		closeErr := connection.Close()
 		restorePoolLimit()
 		if err != nil {

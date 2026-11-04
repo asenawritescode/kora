@@ -1,4 +1,4 @@
-// Package script provides the JavaScript runtime for Kora's extensibility system.
+// Package script provides the JavaScript runtime for Kigae's extensibility system.
 // It defines the Runner interface and types for script execution.
 package script
 
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/db"
 )
 
@@ -17,10 +18,9 @@ import (
 type Type string
 
 const (
-	TypeDocEvent       Type = "doc_event"
-	TypeAPIMethod      Type = "api_method"
-	TypeWorkflowAction Type = "workflow_action"
-	TypeScheduled      Type = "scheduled"
+	TypeDocEvent  Type = "doc_event"
+	TypeAPIMethod Type = "api_method"
+	TypeScheduled Type = "scheduled"
 )
 
 // Event is the lifecycle hook point.
@@ -46,19 +46,20 @@ const (
 
 // ExecuteRequest carries all context for a single script execution.
 type ExecuteRequest struct {
-	Script      string         // JavaScript source
-	ScriptType  Type           // doc_event, api_method, etc.
-	ScriptName  string         // from _kora_script.name
-	DocType     string         // doctype being operated on
-	Event       Event          // lifecycle hook point
-	Document    map[string]any // current document state
-	OldDocument map[string]any // previous document state (nil for inserts)
-	User        string         // authenticated user email
-	UserRoles   []string       // user's roles
-	Site        string         // site hostname
-	Timeout     time.Duration  // per-execution timeout
+	Script        string         // JavaScript source
+	ScriptType    Type           // doc_event, api_method, etc.
+	ScriptName    string         // from _kora_script.name
+	DocType       string         // doctype being operated on
+	Event         Event          // lifecycle hook point
+	Document      map[string]any // current document state
+	OldDocument   map[string]any // previous document state (nil for inserts)
+	User          string         // authenticated user email
+	UserRoles     []string       // user's roles
+	Site          string         // site hostname
+	Timeout       time.Duration  // per-execution timeout
+	Deterministic bool           // disables wall-clock and random JS sources
 
-	// Provider bridges the JS runtime to the Kora engine.
+	// Provider bridges the JS runtime to the Kigae engine.
 	// If nil, kora.getDoc/kora.saveDoc etc. return safe defaults.
 	Provider KoraProvider
 }
@@ -146,25 +147,24 @@ func (s *Store) rebind(query string) string {
 
 // ScriptRecord mirrors a _kora_script row.
 type ScriptRecord struct {
-	Name           string     `json:"name"`
-	Site           string     `json:"site"`
-	ScriptType     Type       `json:"script_type"`
-	DocType        string     `json:"doctype"`
-	Event          Event      `json:"event"`
-	MethodPath     string     `json:"method_path"`
-	WorkflowAction string     `json:"workflow_action"`
-	Schedule       string     `json:"schedule"`
-	Priority       int        `json:"priority"`
-	IsActive       bool       `json:"is_active"`
-	RunAs          string     `json:"run_as"`
-	TimeoutMs      int        `json:"timeout_ms"`
-	Script         string     `json:"script"`
-	CompiledAt     *time.Time `json:"compiled_at,omitempty"`
-	CompileError   string     `json:"compile_error,omitempty"`
-	CreatedBy      string     `json:"created_by"`
-	UpdatedBy      string     `json:"updated_by"`
-	CreatedAt      time.Time  `json:"creation"`
-	UpdatedAt      time.Time  `json:"modified"`
+	Name         string     `json:"name"`
+	Site         string     `json:"site"`
+	ScriptType   Type       `json:"script_type"`
+	DocType      string     `json:"doctype"`
+	Event        Event      `json:"event"`
+	MethodPath   string     `json:"method_path"`
+	Schedule     string     `json:"schedule"`
+	Priority     int        `json:"priority"`
+	IsActive     bool       `json:"is_active"`
+	RunAs        string     `json:"run_as"`
+	TimeoutMs    int        `json:"timeout_ms"`
+	Script       string     `json:"script"`
+	CompiledAt   *time.Time `json:"compiled_at,omitempty"`
+	CompileError string     `json:"compile_error,omitempty"`
+	CreatedBy    string     `json:"created_by"`
+	UpdatedBy    string     `json:"updated_by"`
+	CreatedAt    time.Time  `json:"creation"`
+	UpdatedAt    time.Time  `json:"modified"`
 }
 
 // scriptTimestamp accepts both native time values and the text timestamps
@@ -207,7 +207,26 @@ func (t *scriptTimestamp) parse(value string) error {
 
 // LoadActiveScripts returns all active scripts for a site, filtered by optional doctype+event.
 func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]ScriptRecord, error) {
-	query := `SELECT name, site, script_type, doctype, event, method_path, workflow_action, schedule,
+	return s.loadActiveScripts(context.Background(), s.DB, site, doctype, event)
+}
+
+// LoadActiveScriptsTx selects lifecycle scripts through the caller's tenant
+// transaction. Kernel operations use this so their selected script snapshot
+// shares the same database view as the record mutation and any durable
+// invocation rows written before commit.
+func (s *Store) LoadActiveScriptsTx(ctx context.Context, tx *sql.Tx, site string, doctype string, event Event) ([]ScriptRecord, error) {
+	if ctx == nil || tx == nil {
+		return nil, fmt.Errorf("script: transaction-bound load requires context and transaction")
+	}
+	return s.loadActiveScripts(ctx, tx, site, doctype, event)
+}
+
+type activeScriptQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func (s *Store) loadActiveScripts(ctx context.Context, queryer activeScriptQueryer, site string, doctype string, event Event) ([]ScriptRecord, error) {
+	query := `SELECT name, site, script_type, doctype, event, method_path, schedule,
 		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 		created_by, updated_by, creation, modified
 		FROM _kora_script
@@ -224,7 +243,7 @@ func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]S
 	}
 	query += " ORDER BY priority ASC"
 
-	rows, err := s.DB.Query(s.rebind(query), args...)
+	rows, err := queryer.QueryContext(ctx, s.rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("script: load active: %w", err)
 	}
@@ -236,7 +255,7 @@ func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]S
 		var compiledAt, compileError, createdBy, updatedBy sql.NullString
 		var createdAt, updatedAt scriptTimestamp
 		if err := rows.Scan(&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,
-			&r.MethodPath, &r.WorkflowAction, &r.Schedule,
+			&r.MethodPath, &r.Schedule,
 			&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
 			&compiledAt, &compileError, &createdBy, &updatedBy, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("script: scan: %w", err)
@@ -257,7 +276,7 @@ func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]S
 
 // LoadMethodScript returns the active api_method script for a given method path, or nil.
 func (s *Store) LoadMethodScript(site string, methodPath string) (*ScriptRecord, error) {
-	query := `SELECT name, site, script_type, doctype, event, method_path, workflow_action, schedule,
+	query := `SELECT name, site, script_type, doctype, event, method_path, schedule,
 		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 		created_by, updated_by, creation, modified
 		FROM _kora_script
@@ -269,7 +288,7 @@ func (s *Store) LoadMethodScript(site string, methodPath string) (*ScriptRecord,
 	var createdAt, updatedAt scriptTimestamp
 	err := s.DB.QueryRow(s.rebind(query), site, true, string(TypeAPIMethod), methodPath).Scan(
 		&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,
-		&r.MethodPath, &r.WorkflowAction, &r.Schedule,
+		&r.MethodPath, &r.Schedule,
 		&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
 		&compiledAt, &compileError, &createdBy, &updatedBy, &createdAt, &updatedAt,
 	)
@@ -289,46 +308,6 @@ func (s *Store) LoadMethodScript(site string, methodPath string) (*ScriptRecord,
 		r.CompiledAt = &t
 	}
 	return &r, nil
-}
-
-// LoadWorkflowActionScripts returns active workflow_action scripts for a given workflow action name.
-func (s *Store) LoadWorkflowActionScripts(site string, actionName string) ([]ScriptRecord, error) {
-	query := `SELECT name, site, script_type, doctype, event, method_path, workflow_action, schedule,
-		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
-		created_by, updated_by, creation, modified
-		FROM _kora_script
-		WHERE site = ? AND is_active = ? AND script_type = ? AND workflow_action = ?
-		ORDER BY priority ASC`
-
-	rows, err := s.DB.Query(s.rebind(query), site, true, string(TypeWorkflowAction), actionName)
-	if err != nil {
-		return nil, fmt.Errorf("script: load workflow actions: %w", err)
-	}
-	defer rows.Close()
-
-	var scripts []ScriptRecord
-	for rows.Next() {
-		var r ScriptRecord
-		var compiledAt, compileError, createdBy, updatedBy sql.NullString
-		var createdAt, updatedAt scriptTimestamp
-		if err := rows.Scan(&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,
-			&r.MethodPath, &r.WorkflowAction, &r.Schedule,
-			&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
-			&compiledAt, &compileError, &createdBy, &updatedBy, &createdAt, &updatedAt); err != nil {
-			return nil, fmt.Errorf("script: scan workflow action: %w", err)
-		}
-		r.CompileError = compileError.String
-		r.CreatedBy = createdBy.String
-		r.UpdatedBy = updatedBy.String
-		r.CreatedAt = createdAt.Time
-		r.UpdatedAt = updatedAt.Time
-		if compiledAt.Valid {
-			t, _ := time.Parse("2006-01-02 15:04:05.999999", compiledAt.String)
-			r.CompiledAt = &t
-		}
-		scripts = append(scripts, r)
-	}
-	return scripts, rows.Err()
 }
 
 // LogExecution records a script execution in _kora_script_execution.
@@ -375,7 +354,7 @@ func IsAfterEvent(e Event) bool {
 // LoadAllForSite returns all scripts for a site.
 func (s *Store) LoadAllForSite(site string) ([]ScriptRecord, error) {
 	rows, err := s.DB.Query(s.rebind(
-		`SELECT name, site, script_type, doctype, event, method_path, workflow_action, schedule,
+		`SELECT name, site, script_type, doctype, event, method_path, schedule,
 			 priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 			 created_by, updated_by, creation, modified
 			 FROM _kora_script WHERE site = ? ORDER BY creation DESC`), site)
@@ -392,11 +371,11 @@ func (s *Store) LoadByName(site, name string) (*ScriptRecord, error) {
 	var compiledAt, compileError, createdBy, updatedBy sql.NullString
 	var createdAt, updatedAt scriptTimestamp
 	err := s.DB.QueryRow(s.rebind(
-		`SELECT name, site, script_type, doctype, event, method_path, workflow_action, schedule,
+		`SELECT name, site, script_type, doctype, event, method_path, schedule,
 			 priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 			 created_by, updated_by, creation, modified
 			 FROM _kora_script WHERE site = ? AND name = ?`), site, name).Scan(
-		&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event, &r.MethodPath, &r.WorkflowAction, &r.Schedule,
+		&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event, &r.MethodPath, &r.Schedule,
 		&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
 		&compiledAt, &compileError, &createdBy, &updatedBy, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
@@ -419,28 +398,37 @@ func (s *Store) LoadByName(site, name string) (*ScriptRecord, error) {
 
 // Insert creates a new script record.
 func (s *Store) Insert(r ScriptRecord) error {
-	query := fmt.Sprintf(`INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, workflow_action, schedule,
+	query := fmt.Sprintf(`INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, schedule,
 		 priority, is_active, run_as, timeout_ms, script, created_by, updated_by, creation, modified)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, %[1]s, %[1]s)`, s.dialect().NowTimestamp())
-	_, err := s.DB.Exec(s.rebind(query),
-		r.Name, r.Site, string(r.ScriptType), r.DocType, string(r.Event), r.MethodPath, r.WorkflowAction, r.Schedule,
-		r.Priority, r.IsActive, r.RunAs, r.TimeoutMs, r.Script, r.CreatedBy, r.UpdatedBy)
-	return err
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, %[1]s, %[1]s)`, s.dialect().NowTimestamp())
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin script insert: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(s.rebind(query),
+		r.Name, r.Site, string(r.ScriptType), r.DocType, string(r.Event), r.MethodPath, r.Schedule,
+		r.Priority, r.IsActive, r.RunAs, r.TimeoutMs, r.Script, r.CreatedBy, r.UpdatedBy); err != nil {
+		return err
+	}
+	if err := configstore.BumpConfigRevisionTx(tx, s.dialect()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ScriptUpdateRequest carries the fields that can be updated on a script.
 type ScriptUpdateRequest struct {
-	ScriptType     *string `json:"script_type,omitempty"`
-	DocType        *string `json:"doctype,omitempty"`
-	Event          *string `json:"event,omitempty"`
-	MethodPath     *string `json:"method_path,omitempty"`
-	WorkflowAction *string `json:"workflow_action,omitempty"`
-	Schedule       *string `json:"schedule,omitempty"`
-	Priority       *int    `json:"priority,omitempty"`
-	IsActive       *bool   `json:"is_active,omitempty"`
-	RunAs          *string `json:"run_as,omitempty"`
-	TimeoutMs      *int    `json:"timeout_ms,omitempty"`
-	Script         *string `json:"script,omitempty"`
+	ScriptType *string `json:"script_type,omitempty"`
+	DocType    *string `json:"doctype,omitempty"`
+	Event      *string `json:"event,omitempty"`
+	MethodPath *string `json:"method_path,omitempty"`
+	Schedule   *string `json:"schedule,omitempty"`
+	Priority   *int    `json:"priority,omitempty"`
+	IsActive   *bool   `json:"is_active,omitempty"`
+	RunAs      *string `json:"run_as,omitempty"`
+	TimeoutMs  *int    `json:"timeout_ms,omitempty"`
+	Script     *string `json:"script,omitempty"`
 }
 
 // Update modifies an existing script record. Only non-nil fields are applied.
@@ -463,10 +451,6 @@ func (s *Store) Update(site, name string, req ScriptUpdateRequest, updatedBy str
 	if req.MethodPath != nil {
 		sets = append(sets, "method_path = ?")
 		args = append(args, *req.MethodPath)
-	}
-	if req.WorkflowAction != nil {
-		sets = append(sets, "workflow_action = ?")
-		args = append(args, *req.WorkflowAction)
 	}
 	if req.Schedule != nil {
 		sets = append(sets, "schedule = ?")
@@ -503,14 +487,50 @@ func (s *Store) Update(site, name string, req ScriptUpdateRequest, updatedBy str
 	args = append(args, site, name)
 
 	query := fmt.Sprintf("UPDATE _kora_script SET %s WHERE site = ? AND name = ?", strings.Join(sets, ", "))
-	_, err := s.DB.Exec(s.rebind(query), args...)
-	return err
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin script update: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(s.rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check script update: %w", err)
+	}
+	if changed == 0 {
+		return tx.Commit()
+	}
+	if err := configstore.BumpConfigRevisionTx(tx, s.dialect()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Delete removes a script by site and name.
 func (s *Store) Delete(site, name string) error {
-	_, err := s.DB.Exec(s.rebind(`DELETE FROM _kora_script WHERE site = ? AND name = ?`), site, name)
-	return err
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin script deletion: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(s.rebind(`DELETE FROM _kora_script WHERE site = ? AND name = ?`), site, name)
+	if err != nil {
+		return err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check script deletion: %w", err)
+	}
+	if deleted == 0 {
+		return tx.Commit()
+	}
+	if err := configstore.BumpConfigRevisionTx(tx, s.dialect()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // LoadExecutions returns recent executions for a script.
@@ -549,7 +569,7 @@ func scanScripts(rows *sql.Rows) ([]ScriptRecord, error) {
 		var compiledAt, compileError, createdBy, updatedBy sql.NullString
 		var createdAt, updatedAt scriptTimestamp
 		if err := rows.Scan(&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,
-			&r.MethodPath, &r.WorkflowAction, &r.Schedule,
+			&r.MethodPath, &r.Schedule,
 			&r.Priority, &r.IsActive, &r.RunAs, &r.TimeoutMs, &r.Script,
 			&compiledAt, &compileError, &createdBy, &updatedBy, &createdAt, &updatedAt); err != nil {
 			return nil, err

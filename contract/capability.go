@@ -164,11 +164,6 @@ func BaselineCapabilities() []Capability {
 			Risks:       []BlockingRisk{RiskAuthorization, RiskCredentialScope},
 		},
 		{
-			Name:        "workflow.actor",
-			Description: "Actor-based workflows with lease/fencing (RFC §10, Phase 3).",
-			Status:      CapabilitySupported,
-		},
-		{
 			Name:        "offline.sync",
 			Description: "Branch/device offline synchronization (RFC §12, Phase 5).",
 			Status:      CapabilitySupported,

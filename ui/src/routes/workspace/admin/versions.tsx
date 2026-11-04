@@ -343,8 +343,6 @@ export default function AdminVersionsPage() {
                     <div>{preview.data.roles_in_snapshot}</div>
                     <div className="text-muted-foreground">Permissions</div>
                     <div>{preview.data.permissions_in_snapshot}</div>
-                    <div className="text-muted-foreground">Workflows</div>
-                    <div>{preview.data.workflows_in_snapshot}</div>
                     <div className="text-muted-foreground">Newer active versions</div>
                     <div>{preview.data.newer_active_versions}</div>
                   </dl>

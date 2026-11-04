@@ -1,7 +1,8 @@
 name: Subscription Line
-module: Subscriptions
+module: Subscription and Recurring Services
+description: An additional priced item attached to a subscription.
 title_field: reference
-search_fields: reference, status
+search_fields: reference, description, status
 sort_field: modified
 sort_order: DESC
 
@@ -12,17 +13,36 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
+  - fieldname: subscription
+    fieldtype: Link
+    options: Subscription
+    label: Subscription
+    reqd: true
+    in_list_view: true
+  - fieldname: description
     fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
+    label: Description
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    default: 1
+    reqd: true
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit price
+    reqd: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Line amount
+    reqd: true
+    in_list_view: true
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
-    default: Draft
+    options: |
+      Active
+      Cancelled
+    default: Active
     in_list_view: true

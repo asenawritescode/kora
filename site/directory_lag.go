@@ -1,6 +1,7 @@
 package site
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -22,8 +23,16 @@ type DirectoryConsumerLag struct {
 // compaction; in that case the consumer's last cursor-update time is used as a
 // conservative stale-snapshot age until the required full resync succeeds.
 func (r *SQLSiteRegistry) ConsumerLag(consumerID string) (DirectoryConsumerLag, error) {
+	return r.ConsumerLagContext(context.Background(), consumerID)
+}
+
+// ConsumerLagContext reads directory lag under the owning monitor context.
+func (r *SQLSiteRegistry) ConsumerLagContext(ctx context.Context, consumerID string) (DirectoryConsumerLag, error) {
 	if r == nil || r.database == nil || consumerID == "" {
 		return DirectoryConsumerLag{}, errors.New("site registry and consumer identity are required")
+	}
+	if ctx == nil {
+		return DirectoryConsumerLag{}, errors.New("directory lag query requires a context")
 	}
 	query := `SELECT c.directory_revision, m.directory_revision, MIN(o.created_at), c.updated_at
 		FROM _kora_site_directory_consumers c
@@ -41,7 +50,7 @@ func (r *SQLSiteRegistry) ConsumerLag(consumerID string) (DirectoryConsumerLag, 
 	}
 	var status DirectoryConsumerLag
 	var oldestRaw, updatedRaw any
-	if err := r.database.QueryRow(query, consumerID).Scan(&status.ConsumerRevision, &status.LatestRevision, &oldestRaw, &updatedRaw); err != nil {
+	if err := r.database.QueryRowContext(ctx, query, consumerID).Scan(&status.ConsumerRevision, &status.LatestRevision, &oldestRaw, &updatedRaw); err != nil {
 		return DirectoryConsumerLag{}, fmt.Errorf("read site directory consumer lag: %w", err)
 	}
 	status.ObservedAt = time.Now().UTC()

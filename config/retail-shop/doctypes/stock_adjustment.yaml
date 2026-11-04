@@ -1,0 +1,42 @@
+name: Stock Adjustment
+module: Products
+title_field: reason
+search_fields: product, reason
+sort_field: creation
+sort_order: DESC
+description: Signed stock change with a recorded reason.
+append_only: true
+quantity_effect:
+  view: Stock adjustment action
+  component: adjustment
+  action: apply
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  source_record_field: product
+  delta_field: delta
+  reason_field: reason
+fields:
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product
+    reqd: true
+    in_list_view: true
+  - fieldname: delta
+    fieldtype: Int
+    label: Quantity change
+    description: Positive to add stock, negative to remove stock.
+    reqd: true
+    in_list_view: true
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+    reqd: true
+    in_list_view: true
+  - fieldname: adjusted_at
+    fieldtype: Datetime
+    label: Adjusted at
+    default: now
+    read_only: true
+    hidden: true
+    in_list_view: true

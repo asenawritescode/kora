@@ -10,6 +10,7 @@ fields:
     label: Customer name
     reqd: true
     in_list_view: true
+    search_index: true
   - fieldname: phone
     fieldtype: Data
     label: Phone

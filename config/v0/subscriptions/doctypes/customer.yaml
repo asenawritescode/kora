@@ -1,0 +1,51 @@
+name: Billing Customer
+module: Subscription and Recurring Services
+description: A customer who can hold one or more subscriptions.
+title_field: customer_name
+search_fields: customer_name, customer_code, email, phone
+sort_field: customer_name
+sort_order: ASC
+
+fields:
+  - fieldname: customer_code
+    fieldtype: Data
+    label: Customer code
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: customer_name
+    fieldtype: Data
+    label: Customer name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: email
+    fieldtype: Data
+    label: Billing email
+    options: Email
+    in_list_view: true
+    search_index: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Billing phone
+    options: Phone
+    search_index: true
+  - fieldname: billing_address
+    fieldtype: Text
+    label: Billing address
+  - fieldname: tax_identifier
+    fieldtype: Data
+    label: Tax identifier
+  - fieldname: external_customer_id
+    fieldtype: Data
+    label: External customer ID
+    unique: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true

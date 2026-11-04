@@ -38,7 +38,7 @@ var natsValidateCmd = &cobra.Command{
 
 var natsBootstrapCmd = &cobra.Command{
 	Use:   "bootstrap",
-	Short: "Idempotently create or validate Kora NATS resources",
+	Short: "Idempotently create or validate Kigae NATS resources",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		p, err := connectNATSProvider()
 		if err != nil {

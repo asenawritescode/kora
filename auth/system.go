@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -22,6 +24,9 @@ const consoleSessionLifetime = 24 * time.Hour
 
 // consoleSessionCleanupInterval is how often expired sessions are purged.
 const consoleSessionCleanupInterval = 10 * time.Minute
+const MaxConsoleSessions = 8192
+
+var ErrConsoleSessionCapacity = errors.New("console session capacity exhausted")
 
 // ConsoleSession represents an authenticated console session stored server-side.
 type ConsoleSession struct {
@@ -45,12 +50,28 @@ type SystemGuard struct {
 	isDefault    bool   // true if using baked-in default password (forces change)
 
 	// In-memory session store for console sessions.
-	mu       sync.RWMutex
-	sessions map[string]*ConsoleSession
+	mu            sync.RWMutex
+	sessions      map[string]*ConsoleSession
+	cleanupMu     sync.Mutex
+	cleanupClosed bool
+	cleanupCancel context.CancelFunc
+	cleanupDone   chan struct{}
+	cleanupStart  sync.Once
+	closeOnce     sync.Once
 }
 
 // LoadSystemGuard reads system_credentials.yaml, hashes the password, and returns a guard.
 func LoadSystemGuard(path string) (*SystemGuard, error) {
+	return loadSystemGuard(path, true)
+}
+
+// LoadSystemGuardPaused loads credentials without starting its cleanup worker.
+// Engine owns that worker and starts it from Engine.Run.
+func LoadSystemGuardPaused(path string) (*SystemGuard, error) {
+	return loadSystemGuard(path, false)
+}
+
+func loadSystemGuard(path string, startCleanup bool) (*SystemGuard, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading system credentials: %w (create system_credentials.yaml)", err)
@@ -75,9 +96,9 @@ func LoadSystemGuard(path string) (*SystemGuard, error) {
 		passwordHash: string(hash),
 		sessions:     make(map[string]*ConsoleSession),
 	}
-
-	// Start background cleanup of expired sessions.
-	go guard.cleanupLoop()
+	if startCleanup {
+		guard.startCleanup()
+	}
 
 	slog.Info("system guard loaded", "email", creds.SystemAdmin.Email)
 	return guard, nil
@@ -86,17 +107,39 @@ func LoadSystemGuard(path string) (*SystemGuard, error) {
 // CreateSession creates a new console session for the given email.
 // Returns a cryptographically random session ID.
 func (g *SystemGuard) CreateSession(email string) string {
+	sid, _ := g.CreateSessionBounded(email)
+	return sid
+}
+
+// CreateSessionBounded creates a console session after removing expired
+// entries if the bounded in-memory store is full.
+func (g *SystemGuard) CreateSessionBounded(email string) (string, error) {
+	if g == nil {
+		return "", errors.New("system guard is unavailable")
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-
-	sid := generateConsoleSessionID()
+	if g.sessions == nil {
+		g.sessions = make(map[string]*ConsoleSession)
+	}
 	now := time.Now()
+	if len(g.sessions) >= MaxConsoleSessions {
+		for existingID, existing := range g.sessions {
+			if existing == nil || !now.Before(existing.ExpiresAt) {
+				delete(g.sessions, existingID)
+			}
+		}
+		if len(g.sessions) >= MaxConsoleSessions {
+			return "", ErrConsoleSessionCapacity
+		}
+	}
+	sid := generateConsoleSessionID()
 	g.sessions[sid] = &ConsoleSession{
 		Email:     email,
 		CreatedAt: now,
 		ExpiresAt: now.Add(consoleSessionLifetime),
 	}
-	return sid
+	return sid, nil
 }
 
 // ValidateSession checks whether a session ID is valid and returns the associated email.
@@ -126,12 +169,59 @@ func (g *SystemGuard) DeleteSession(sid string) {
 }
 
 // cleanupLoop periodically removes expired sessions.
-func (g *SystemGuard) cleanupLoop() {
+func (g *SystemGuard) startCleanup() {
+	g.cleanupMu.Lock()
+	defer g.cleanupMu.Unlock()
+	if g.cleanupClosed {
+		return
+	}
+	g.cleanupStart.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		g.cleanupCancel = cancel
+		g.cleanupDone = make(chan struct{})
+		go g.cleanupLoop(ctx)
+	})
+}
+
+// StartCleanup starts the owned console-session cleanup worker once.
+func (g *SystemGuard) StartCleanup() {
+	if g != nil {
+		g.startCleanup()
+	}
+}
+
+func (g *SystemGuard) cleanupLoop(ctx context.Context) {
+	defer close(g.cleanupDone)
 	ticker := time.NewTicker(consoleSessionCleanupInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		g.cleanupExpired()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			g.cleanupExpired()
+		}
 	}
+}
+
+// Close cancels and joins the system-session cleanup worker.
+func (g *SystemGuard) Close() error {
+	if g == nil {
+		return nil
+	}
+	g.closeOnce.Do(func() {
+		g.cleanupMu.Lock()
+		g.cleanupClosed = true
+		cancel, done := g.cleanupCancel, g.cleanupDone
+		g.cleanupMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		if done != nil {
+			<-done
+		}
+	})
+	return nil
 }
 
 func (g *SystemGuard) cleanupExpired() {
@@ -225,6 +315,16 @@ func (g *SystemGuard) UpdatePassword(newPassword string) error {
 // Falls back to baked-in defaults if env vars are not set.
 // Default: admin@kora.local / kora123 (isDefault=true forces password change).
 func LoadSystemGuardFromEnv() *SystemGuard {
+	return loadSystemGuardFromEnv(true)
+}
+
+// LoadSystemGuardFromEnvPaused loads environment credentials without starting
+// the cleanup worker; Engine.Run activates that worker.
+func LoadSystemGuardFromEnvPaused() *SystemGuard {
+	return loadSystemGuardFromEnv(false)
+}
+
+func loadSystemGuardFromEnv(startCleanup bool) *SystemGuard {
 	email := os.Getenv("CONSOLE_EMAIL")
 	password := os.Getenv("CONSOLE_PASSWORD")
 	isDefault := false
@@ -249,8 +349,9 @@ func LoadSystemGuardFromEnv() *SystemGuard {
 		isDefault:    isDefault,
 		sessions:     make(map[string]*ConsoleSession),
 	}
-
-	go guard.cleanupLoop()
+	if startCleanup {
+		guard.startCleanup()
+	}
 
 	slog.Info("system guard loaded from env", "email", email, "is_default", isDefault)
 	return guard

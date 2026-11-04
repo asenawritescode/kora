@@ -1,0 +1,38 @@
+{
+  "manifest": {
+    "schema_version": 1,
+    "package_id": "inventory",
+    "release_id": "inventory-1.2.0",
+    "version": "1.2.0",
+    "kind": "module",
+    "public": {
+      "slug": "inventory",
+      "name": "Inventory",
+      "summary": "Track stock and movements",
+      "category": "Operations",
+      "outcomes": ["See current stock", "Record movements"]
+    },
+    "requires": [
+      {"package_id": "base", "release_id": "base-1.0.0"}
+    ],
+    "exports": {
+      "doctypes": ["Stock Item", "Stock Movement"],
+      "capabilities": ["inventory.read", "inventory.write"]
+    },
+    "engine": {"min_version": "1.0.0"}
+  },
+  "files": [
+    {
+      "path": "doctypes/stock_movement.yaml",
+      "content_type": "doctype",
+      "content": "name: Stock Movement\nmodule: Inventory\nfields: []\n"
+    },
+    {
+      "path": "doctypes/stock_item.yaml",
+      "content_type": "doctype",
+      "content": "name: Stock Item\nmodule: Inventory\nfields: []\n"
+    }
+  ],
+  "manifest_sha256": "a216a5ce6f9935fc125fd05c8f9d895c41465d1952fbccccb51a85e9fd89a723",
+  "artifact_sha256": "3dfe436854b805d8a2f285a45a9552f8e1f2f9b0dd0d4641b5d7c22f90a12294"
+}

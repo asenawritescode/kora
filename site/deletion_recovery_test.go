@@ -2,12 +2,31 @@ package site
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"regexp"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
+
+func TestDeleteRegisteredSiteWithAllocationRejectsStaleCheckpointTarget(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	query := `SELECT site_id, COALESCE(runtime_cell_id, ''), site, db_type, db_host, db_port, db_name, db_user, COALESCE(db_password, ''), db_password_encrypted, COALESCE(domains_json, '[]'), COALESCE(file_storage, 'local'), COALESCE(storage_bucket, ''), status, config_revision FROM _kora_site_registry WHERE site_id = ?`
+	mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs("tenant-1").WillReturnRows(sqlmock.NewRows([]string{"site_id", "runtime_cell_id", "site", "db_type", "db_host", "db_port", "db_name", "db_user", "db_password", "db_password_encrypted", "domains_json", "file_storage", "storage_bucket", "status", "config_revision"}).
+		AddRow("tenant-1", "", "tenant.example.test", "mysql", "db.internal", 3306, "tenant_db", "db-user", "secret", 0, `["tenant.example.test"]`, "local", "", "active", 7))
+	err = DeleteRegisteredSiteWithAllocation(context.Background(), database, "mysql", "tenant-1", "tenant.example.test", "sha256:stale-allocation", nil)
+	if !errors.Is(err, ErrSiteAllocationConflict) {
+		t.Fatalf("DeleteRegisteredSiteWithAllocation() error = %v, want allocation conflict", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestAcquireSiteDeletionLockReleasesMySQLAdvisoryLock(t *testing.T) {
 	database, mock, err := sqlmock.New()

@@ -1,0 +1,30 @@
+appId: com.kora.mobile
+---
+- launchApp
+- assertVisible: Tickets Uat Workspace
+- takeScreenshot: 01-workspace
+- tapOn: Browse
+- waitForAnimationToEnd
+- assertVisible: Ticket
+- tapOn: Ticket
+- waitForAnimationToEnd
+- assertVisible: + New
+- takeScreenshot: 02-ticket-list
+- tapOn: + New
+- waitForAnimationToEnd
+- assertVisible: New Ticket
+- takeScreenshot: 03-new-ticket
+- tapOn:
+    id: input-ticket
+- eraseText: 80
+- inputText: ${MAESTRO_DEMO_TICKET_TITLE}
+- tapOn: Choose assignee
+- waitForAnimationToEnd
+- tapOn: Administrator
+- hideKeyboard
+- assertVisible: Save
+- takeScreenshot: 04-ticket-ready
+- tapOn: Save
+- waitForAnimationToEnd
+- assertVisible: ${MAESTRO_DEMO_TICKET_TITLE}
+- takeScreenshot: 05-ticket-created

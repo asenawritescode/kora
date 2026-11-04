@@ -100,28 +100,6 @@ export interface PublicAccess {
   cache_max_age: number
 }
 
-export interface WorkflowState {
-  state: string
-  doc_status: number
-  allow_edit: string
-  style: 'default' | 'warning' | 'success' | 'danger' | 'info'
-}
-
-export interface WorkflowTransition {
-  action: string
-  from: string
-  to: string
-  allowed: string
-  condition?: string
-  require_fields?: string[]
-}
-
-export interface Workflow {
-  states: WorkflowState[]
-  transitions: WorkflowTransition[]
-  state_field: string
-}
-
 export interface PermissionMap {
   [operation: string]: boolean
 }
@@ -135,9 +113,7 @@ export interface ReferenceInfo {
 export interface DocTypeSchema {
   doctype: DocType
   status?: string  // "Active" | "Draft"
-  workflow?: Workflow
   permissions: PermissionMap
-  transitions?: WorkflowTransition[]
   referenced_by?: ReferenceInfo[]
 }
 

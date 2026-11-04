@@ -1,28 +1,79 @@
 name: Crop Plan
 module: Agriculture
+description: A field and season-specific plan that links assigned work, input use, and harvest results.
+is_submittable: true
 title_field: reference
-search_fields: reference, status
+search_fields: reference, crop, status
 sort_field: modified
 sort_order: DESC
 
 fields:
   - fieldname: reference
     fieldtype: Data
-    label: Reference
+    label: Plan reference
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
-    fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
-  - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
-  - fieldname: status
-    fieldtype: Data
-    label: Status
-    default: Draft
+    search_index: true
+  - fieldname: field
+    fieldtype: Link
+    label: Field
+    options: Field
+    reqd: true
     in_list_view: true
+  - fieldname: season
+    fieldtype: Link
+    label: Season
+    options: Season
+    reqd: true
+    in_list_view: true
+  - fieldname: crop
+    fieldtype: Link
+    label: Crop
+    options: Crop
+    reqd: true
+    in_list_view: true
+  - fieldname: variety
+    fieldtype: Data
+    label: Variety
+  - fieldname: planting_date
+    fieldtype: Date
+    label: Planting date
+  - fieldname: expected_harvest_date
+    fieldtype: Date
+    label: Expected harvest date
+  - fieldname: harvest_batch
+    fieldtype: Link
+    label: Harvest batch
+    options: Harvest Batch
+    description: Required before the plan can be marked harvested.
+  - fieldname: target_quantity
+    fieldtype: Float
+    label: Target harvest quantity
+  - fieldname: quantity_unit
+    fieldtype: Data
+    label: Quantity unit
+    description: Use the unit your team records, such as kg, crate, or bag.
+  - fieldname: owner_user
+    fieldtype: User
+    label: Plan owner
+    reqd: true
+    in_list_view: true
+    description: Select an existing workspace user.
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      draft
+      active
+      harvested
+      closed
+    default: draft
+    read_only: true
+    in_list_view: true
+  - fieldname: exception_reason
+    fieldtype: Text
+    label: Blocked or exception reason

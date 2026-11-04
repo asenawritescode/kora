@@ -1,0 +1,24 @@
+name: Record Stock Movement
+route: /stock-movement-entry
+type: form
+layout: single
+label: Record stock movement
+module: Inventory
+source_doctype: Stock Movement
+components:
+  - id: adjustment
+    type: record_form
+    region: main
+    label: Record stock movement
+    source_doctype: Stock Movement
+    actions:
+      - id: apply
+        trigger: on_submit
+        type: create_quantity_effect
+        config:
+          target_doctype: Stock Movement
+          related_doctype: Product
+          source_record_field: product
+          delta_field: delta
+          reason_field: reason
+          related_quantity_field: stock_qty

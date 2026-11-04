@@ -33,6 +33,14 @@ type SchemaDialect interface {
 	QuoteIdent(name string) string
 }
 
+// SearchIndexDialect may provide a non-unique index compatible with the
+// dialect's prefix-search predicates. Unique constraints remain separate and
+// keep their existing comparison rules.
+type SearchIndexDialect interface {
+	CreateSearchIndex(tableName, fieldName string) string
+	SearchIndexName(tableName, fieldName string) string
+}
+
 // QueryDialect is the DML subset (insert/update/select helpers).
 type QueryDialect interface {
 	UpsertClause(conflictCols []string, updateCols []string) string
@@ -42,6 +50,27 @@ type QueryDialect interface {
 	NameGenQuery(tableName, prefix string) string
 	Placeholder(n int) string
 	NowTimestamp() string
+}
+
+// BoolParam returns the bound representation used by Kora's boolean-like SQL
+// columns. PostgreSQL's system tables store several of these flags as SMALLINT
+// for compatibility with existing schemas; MySQL and LibSQL accept bool.
+func BoolParam(dialect QueryDialect, value bool) any {
+	named, ok := dialect.(interface{ DriverName() string })
+	if ok && named.DriverName() == "postgres" {
+		if value {
+			return int64(1)
+		}
+		return int64(0)
+	}
+	return value
+}
+
+// TableQualifiedIncrementDialect provides an incrementing upsert expression
+// that can qualify the existing target row. PostgreSQL needs this when the
+// inserted and existing rows both expose the incremented column name.
+type TableQualifiedIncrementDialect interface {
+	UpsertIncrementForTable(tableName string, conflictCols []string, incrementCols []string) string
 }
 
 // ErrorDialect is the error-parsing subset.

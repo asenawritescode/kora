@@ -19,12 +19,13 @@ import (
 
 // ColumnInfo represents a column in the live database schema.
 type ColumnInfo struct {
-	Name       string
-	Type       string
-	Nullable   bool
-	Default    sql.NullString
-	Indexed    bool
-	IndexNames []string // names of indexes covering this column (for old→new name migration)
+	Name             string
+	Type             string
+	Nullable         bool
+	Default          sql.NullString
+	Indexed          bool
+	IndexNames       []string // names of indexes covering this column (for old→new name migration)
+	UniqueIndexNames []string
 }
 
 // TableInfo represents a table in the live database schema.
@@ -68,6 +69,7 @@ type IndexAdd struct {
 	Table   string
 	Columns []string
 	Unique  bool
+	Search  bool
 }
 
 // OrphanedColumn is a column that exists in the database but not in the registry.
@@ -101,6 +103,9 @@ func LoadLiveSchema(database *sql.DB, dbName string, dialect db.Dialect) (map[st
 				if col, ok := cols[idxCol]; ok {
 					col.Indexed = true
 					col.IndexNames = append(col.IndexNames, idx.Name)
+					if idx.IsUnique {
+						col.UniqueIndexNames = append(col.UniqueIndexNames, idx.Name)
+					}
 				}
 			}
 		}
@@ -168,41 +173,75 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 					continue
 				}
 
-				// Expected new-style names (include table name for global uniqueness).
 				expectedIdxName := fmt.Sprintf("idx_%s_%s", tableName, field.Fieldname)
+				searchIndexName := ""
+				if searchDialect, ok := dialect.(db.SearchIndexDialect); ok {
+					searchIndexName = searchDialect.SearchIndexName(tableName, field.Fieldname)
+				}
 				expectedUqName := fmt.Sprintf("uq_%s_%s", tableName, field.Fieldname)
-				// Old-style names (field name only — conflict-prone).
 				oldIdxName := fmt.Sprintf("idx_%s", field.Fieldname)
 				oldUqName := fmt.Sprintf("uq_%s", field.Fieldname)
-
 				hasNewStyle := false
+				hasSearchStyle := false
 				var oldStyleName string
 				for _, idxName := range col.IndexNames {
-					if idxName == expectedIdxName || idxName == expectedUqName {
+					if idxName == expectedIdxName || idxName == expectedUqName || (searchIndexName != "" && idxName == searchIndexName) {
 						hasNewStyle = true
-						break
+					}
+					if searchIndexName != "" && idxName == searchIndexName {
+						hasSearchStyle = true
 					}
 					if idxName == oldIdxName || idxName == oldUqName {
 						oldStyleName = idxName
 					}
 				}
-
-				if !col.Indexed || (!hasNewStyle && oldStyleName != "") {
-					// Either the column isn't indexed at all, or it's indexed
-					// with an old-style name that needs migration.
-					diff.NewIndexes[tableName] = append(diff.NewIndexes[tableName], IndexAdd{
-						Table:   tableName,
-						Columns: []string{field.Fieldname},
-						Unique:  field.Unique,
-					})
+				if searchIndexName != "" {
+					if !hasSearchStyle {
+						diff.NewIndexes[tableName] = append(diff.NewIndexes[tableName], IndexAdd{Table: tableName, Columns: []string{field.Fieldname}, Search: true})
+					}
+					if field.Unique {
+						hasUniqueStyle := false
+						for _, idxName := range col.UniqueIndexNames {
+							hasUniqueStyle = hasUniqueStyle || idxName == expectedUqName
+						}
+						if !hasUniqueStyle {
+							diff.NewIndexes[tableName] = append(diff.NewIndexes[tableName], IndexAdd{Table: tableName, Columns: []string{field.Fieldname}, Unique: true})
+						}
+					}
+				} else if !col.Indexed || (!hasNewStyle && oldStyleName != "") {
+					diff.NewIndexes[tableName] = append(diff.NewIndexes[tableName], IndexAdd{Table: tableName, Columns: []string{field.Fieldname}, Unique: field.Unique})
 				}
-
-				// Drop old-style index so it doesn't conflict globally.
 				if oldStyleName != "" {
-					diff.DropIndexes = append(diff.DropIndexes, IndexDrop{
-						Table: tableName,
-						Name:  oldStyleName,
-					})
+					diff.DropIndexes = append(diff.DropIndexes, IndexDrop{Table: tableName, Name: oldStyleName})
+				}
+			}
+
+			// Unique constraints are independent of search indexing. When a
+			// uniqueness rule is relaxed, retain a search index but remove the
+			// generated unique index after the replacement is created.
+			if field.IsDataField() && !field.Unique {
+				col, exists := liveTable.Columns[field.Fieldname]
+				if !exists {
+					continue
+				}
+				expectedIdxName := fmt.Sprintf("idx_%s_%s", tableName, field.Fieldname)
+				searchIndexName := ""
+				if searchDialect, ok := dialect.(db.SearchIndexDialect); ok {
+					searchIndexName = searchDialect.SearchIndexName(tableName, field.Fieldname)
+				}
+				expectedUqName := fmt.Sprintf("uq_%s_%s", tableName, field.Fieldname)
+				hasExpectedIndex, hasExpectedUnique := false, false
+				for _, indexName := range col.IndexNames {
+					hasExpectedIndex = hasExpectedIndex || indexName == expectedIdxName || (searchIndexName != "" && indexName == searchIndexName)
+				}
+				for _, indexName := range col.UniqueIndexNames {
+					hasExpectedUnique = hasExpectedUnique || indexName == expectedUqName
+				}
+				if hasExpectedUnique && field.SearchIndex && !hasExpectedIndex && searchIndexName == "" {
+					diff.NewIndexes[tableName] = append(diff.NewIndexes[tableName], IndexAdd{Table: tableName, Columns: []string{field.Fieldname}})
+				}
+				if hasExpectedUnique {
+					diff.DropIndexes = append(diff.DropIndexes, IndexDrop{Table: tableName, Name: expectedUqName})
 				}
 			}
 		}
@@ -217,7 +256,7 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 			registryFields[sc.Name] = true
 			if _, exists := liveTable.Columns[sc.Name]; !exists && sc.Name == "revision" {
 				// Legacy test fixtures and partially-created tables may not yet
-				// contain the normal system timestamp. Only upgrade a real Kora
+				// contain the normal system timestamp. Only upgrade a real Kigae
 				// document table here; table creation gets revision from DDL.
 				if _, hasModified := liveTable.Columns["modified"]; !hasModified {
 					continue
@@ -353,19 +392,29 @@ func (d *Diff) GenerateDDL(doctypes []*doctype.DocType, getDocType func(string) 
 		}
 	}
 
-	// Drop deprecated (old-style) indexes before creating replacements.
-	// This handles migration from idx_<field> to idx_<table>_<field> naming.
-	for _, idx := range d.DropIndexes {
-		stmt := dialect.DropIndex(idx.Table, idx.Name)
-		statements = append(statements, stmt)
-	}
-
 	// CREATE INDEX statements.
 	for tableName, idxs := range d.NewIndexes {
 		for _, idx := range idxs {
-			stmt := dialect.CreateIndex(tableName, idx.Columns[0], idx.Unique)
+			var stmt string
+			if idx.Search {
+				if searchDialect, ok := dialect.(db.SearchIndexDialect); ok {
+					stmt = searchDialect.CreateSearchIndex(tableName, idx.Columns[0])
+				} else {
+					stmt = dialect.CreateIndex(tableName, idx.Columns[0], false)
+				}
+			} else {
+				stmt = dialect.CreateIndex(tableName, idx.Columns[0], idx.Unique)
+			}
 			statements = append(statements, stmt)
 		}
+	}
+
+	// Drop deprecated indexes after replacements are present. This handles
+	// both old-style names and unique-to-non-unique changes without a period
+	// where the field has no supporting index.
+	for _, idx := range d.DropIndexes {
+		stmt := dialect.DropIndex(idx.Table, idx.Name)
+		statements = append(statements, stmt)
 	}
 
 	return statements

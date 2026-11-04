@@ -1,28 +1,92 @@
 name: Risk
 module: CRM
+description: A deal risk that needs an accountable owner, mitigation, and review date.
 title_field: reference
-search_fields: reference, status
-sort_field: modified
-sort_order: DESC
+search_fields: reference, deal, category, severity, status
+sort_field: review_date
+sort_order: ASC
 
 fields:
   - fieldname: reference
     fieldtype: Data
-    label: Reference
+    label: Risk Title
+    search_index: true
     reqd: true
-    unique: true
+    in_list_view: true
+  - fieldname: deal
+    fieldtype: Link
+    options: Deal
+    label: Deal
+    search_index: true
+    reqd: true
+    in_list_view: true
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    search_index: true
+    options: |
+      Budget
+      Decision process
+      Timing
+      Competition
+      Technical fit
+      Stakeholder
+      Other
+    reqd: true
+    in_list_view: true
+  - fieldname: severity
+    fieldtype: Select
+    label: Severity
+    search_index: true
+    options: |
+      Low
+      Medium
+      High
+      Critical
+    default: Medium
+    reqd: true
+    in_list_view: true
+  - fieldname: owner_user
+    fieldtype: User
+    label: Risk Owner
+    description: Select an existing workspace user.
+    in_list_view: true
+  - fieldname: review_date
+    fieldtype: Date
+    label: Review Date
+    in_list_view: true
+  - fieldname: mitigation
+    fieldtype: Text
+    label: Mitigation / Next Action
+  - fieldname: resolution
+    fieldtype: Text
+    label: Resolution Notes
+  - fieldname: risk_status
+    fieldtype: Select
+    label: Risk Status
+    options: |
+      Open
+      Monitoring
+      Mitigated
+      Accepted
+      Closed
+    default: Open
+    read_only: true
     in_list_view: true
   - fieldname: source_record
     fieldtype: Data
-    label: Source Record
+    label: Legacy Source Record
+    depends_on: source_record
   - fieldname: assignee
     fieldtype: Data
-    label: Assignee
+    label: Legacy Assignee
+    depends_on: assignee
   - fieldname: evidence
     fieldtype: Text
-    label: Evidence
+    label: Legacy Evidence
+    depends_on: evidence
   - fieldname: status
     fieldtype: Data
-    label: Status
-    default: Draft
-    in_list_view: true
+    label: Legacy Status
+    search_index: true
+    depends_on: status

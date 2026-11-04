@@ -54,14 +54,14 @@ func TestVersioning_Assumption1_SnapshotContainsOnlyDoctypes(t *testing.T) {
 		t.Error("ASSUMPTION CONFIRMED: snapshot is a JSON array (starts with '['), not an object with metadata")
 	}
 
-	// Verify there's no roles, permissions, or workflows in the JSON.
+	// Verify the legacy snapshot is a plain doctype array.
 	var raw interface{}
 	json.Unmarshal(configJSON, &raw)
 	if arr, ok := raw.([]interface{}); ok {
 		for _, item := range arr {
 			if obj, ok := item.(map[string]interface{}); ok {
-				// Check no role/permission/workflow fields leaked in
-				for _, forbidden := range []string{"roles", "permissions", "workflows", "analytics_metrics"} {
+				// Check no authorization/config metadata leaked into the array.
+				for _, forbidden := range []string{"roles", "permissions", "analytics_metrics"} {
 					if _, exists := obj[forbidden]; exists {
 						t.Errorf("ASSUMPTION VIOLATED: snapshot contains '%s' field — it shouldn't", forbidden)
 					}
@@ -78,9 +78,9 @@ func TestVersioning_Assumption1_SnapshotContainsOnlyDoctypes(t *testing.T) {
 	}
 }
 
-// ---- Assumption 2: Roles/permissions/workflows NOT in snapshots ---------------
+// ---- Assumption 2: Roles and permissions are not in legacy snapshots ----------
 
-func TestVersioning_Assumption2_RolesPermissionsWorkflowsNotVersioned(t *testing.T) {
+func TestVersioning_Assumption2_RolesPermissionsNotVersioned(t *testing.T) {
 	// Activation handler at api/system.go:743-745:
 	//   roles, _ := store.LoadRoles()       ← from LIVE DB, not snapshot
 	//   permissions, _ := store.LoadPermissions() ← from LIVE DB, not snapshot
@@ -91,7 +91,6 @@ func TestVersioning_Assumption2_RolesPermissionsWorkflowsNotVersioned(t *testing
 
 	t.Log("CONFIRMED: Activation loads roles/permissions from LIVE _kora_role/_kora_permission tables")
 	t.Log("CONFIRMED: These are NOT sourced from _kora_config_version.config snapshot")
-	t.Log("CONFIRMED: Workflows are NOT loaded AT ALL during activation")
 	t.Log("")
 	t.Log("Consequence: If you change permissions between v5 and v6,")
 	t.Log("then roll back v6→v5, your permissions stay at the post-v6 state.")
@@ -264,7 +263,7 @@ func TestVersioning_Assumption5_CLIRollbackDeadCode(t *testing.T) {
 	t.Log("CONFIRMED: Running 'kora config rollback --site X --to-version 3' does nothing useful")
 }
 
-// ---- Assumption 6: API rollback doesn't restore roles/permissions/workflows ---
+// ---- Assumption 6: API rollback doesn't restore roles/permissions -------------
 
 func TestVersioning_Assumption6_APIRollbackPartialRestore(t *testing.T) {
 	// API rollback at api/system.go:803:
@@ -315,7 +314,7 @@ func TestVersioning_Assumption7_BackwardCompatibility(t *testing.T) {
 
 	// Test detection logic.
 	oldFormat := `[{"name":"Customer","fields":[{"fieldname":"name","fieldtype":"Data"}]}]`
-	newFormat := `{"doctypes":[{"name":"Customer","fields":[{"fieldname":"name","fieldtype":"Data"}]}],"roles":[],"permissions":[],"workflows":[]}`
+	newFormat := `{"doctypes":[{"name":"Customer","fields":[{"fieldname":"name","fieldtype":"Data"}]}],"roles":[],"permissions":[]}`
 
 	// Detection: trim space, check first character.
 	isOldFormat := func(s string) bool {

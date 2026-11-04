@@ -1,5 +1,5 @@
 /**
- * Safe s-expression evaluator for Kora computed fields.
+ * Safe s-expression evaluator for Kigae computed fields.
  *
  * Recursive-descent parser + whitelist evaluator for a safe subset of s-expressions.
  * No Function constructor, no eval, no code injection.

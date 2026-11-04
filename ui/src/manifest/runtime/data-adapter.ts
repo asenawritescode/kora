@@ -24,7 +24,7 @@ const fieldType = (type: string): GeneratedResourceDescriptor['fields'][number][
 
 async function koraJson<T>(path: string): Promise<T> {
   const response = await fetch(path, { credentials: 'same-origin' })
-  if (!response.ok) throw new Error(`Kora request failed (${response.status})`)
+  if (!response.ok) throw new Error(`Kigae request failed (${response.status})`)
   const body = await response.json()
   return (body?.data ?? body) as T
 }
@@ -42,7 +42,7 @@ export const koraStudioDataAdapter: GeneratedDataAdapter = {
       )
       return { kind: 'normal', data: { data: records, meta: { total: records.length, doctype: doctype.name, source: 'Kora' } } }
     } catch (error) {
-      return { kind: 'error', error: error instanceof Error ? error.message : 'Unable to load Kora data' }
+      return { kind: 'error', error: error instanceof Error ? error.message : 'Unable to load Kigae data' }
     }
   },
 }

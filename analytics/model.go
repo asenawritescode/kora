@@ -1,43 +1,37 @@
 package analytics
 
-import (
-	"fmt"
-
-	"github.com/asenawritescode/kora/doctype"
-)
+import "github.com/asenawritescode/kora/doctype"
 
 // DataPointKind is the generic analytical shape derived from a DocType.
 // It is the stable model behind auto-generated metrics and page insights.
 type DataPointKind string
 
 const (
-	DataPointCount              DataPointKind = "count"
-	DataPointCreatedDaily       DataPointKind = "created_daily"
-	DataPointCountByField       DataPointKind = "count_by_field"
+	DataPointCount             DataPointKind = "count"
+	DataPointCreatedDaily      DataPointKind = "created_daily"
+	DataPointCountByField      DataPointKind = "count_by_field"
 	DataPointSum               DataPointKind = "sum"
-	DataPointStateDistribution  DataPointKind = "state_distribution"
-	DataPointWorkflowDuration   DataPointKind = "workflow_duration"
+	DataPointStateDistribution DataPointKind = "state_distribution"
 )
 
 // DataPointSpec describes one analytic fact family that can be tracked for a
 // DocType. A single DocType can yield many point specs from its fields and
 // workflow definition.
 type DataPointSpec struct {
-	Name       string        `json:"name" yaml:"name"`
-	Label      string        `json:"label" yaml:"label"`
-	Kind       DataPointKind `json:"kind" yaml:"kind"`
-	DocType    string        `json:"doctype" yaml:"doctype"`
-	Field      string        `json:"field,omitempty" yaml:"field,omitempty"`
-	LinkField  string        `json:"link_field,omitempty" yaml:"link_field,omitempty"`
-	TimeField  string        `json:"time_field,omitempty" yaml:"time_field,omitempty"`
-	FromState  string        `json:"from_state,omitempty" yaml:"from_state,omitempty"`
-	ToState    string        `json:"to_state,omitempty" yaml:"to_state,omitempty"`
-	Auto       bool          `json:"auto" yaml:"auto"`
+	Name      string        `json:"name" yaml:"name"`
+	Label     string        `json:"label" yaml:"label"`
+	Kind      DataPointKind `json:"kind" yaml:"kind"`
+	DocType   string        `json:"doctype" yaml:"doctype"`
+	Field     string        `json:"field,omitempty" yaml:"field,omitempty"`
+	LinkField string        `json:"link_field,omitempty" yaml:"link_field,omitempty"`
+	TimeField string        `json:"time_field,omitempty" yaml:"time_field,omitempty"`
+	FromState string        `json:"from_state,omitempty" yaml:"from_state,omitempty"`
+	ToState   string        `json:"to_state,omitempty" yaml:"to_state,omitempty"`
+	Auto      bool          `json:"auto" yaml:"auto"`
 }
 
-// BuildDataPointCatalog returns the generic data points implied by a DocType
-// and its workflow. This is the shape we can expose in page manifests.
-func BuildDataPointCatalog(dt *doctype.DocType, wf *doctype.Workflow) []DataPointSpec {
+// BuildDataPointCatalog returns the generic data points implied by a DocType.
+func BuildDataPointCatalog(dt *doctype.DocType) []DataPointSpec {
 	if dt == nil {
 		return nil
 	}
@@ -50,12 +44,12 @@ func BuildDataPointCatalog(dt *doctype.DocType, wf *doctype.Workflow) []DataPoin
 			Auto:    true,
 		},
 		{
-			Name:    metricName(dt.Name) + "_created_daily",
-			Label:   dt.Name + " Created (Daily)",
-			Kind:    DataPointCreatedDaily,
-			DocType: dt.Name,
+			Name:      metricName(dt.Name) + "_created_daily",
+			Label:     dt.Name + " Created (Daily)",
+			Kind:      DataPointCreatedDaily,
+			DocType:   dt.Name,
 			TimeField: "creation",
-			Auto:    true,
+			Auto:      true,
 		},
 	}
 
@@ -76,12 +70,12 @@ func BuildDataPointCatalog(dt *doctype.DocType, wf *doctype.Workflow) []DataPoin
 			})
 		case "Int", "Float", "Currency", "Percent":
 			out = append(out, DataPointSpec{
-				Name:     metricName(dt.Name) + "_sum_" + metricName(f.Fieldname),
-				Label:    "Total " + f.Label,
-				Kind:     DataPointSum,
-				DocType:  dt.Name,
-				Field:    f.Fieldname,
-				Auto:     true,
+				Name:    metricName(dt.Name) + "_sum_" + metricName(f.Fieldname),
+				Label:   "Total " + f.Label,
+				Kind:    DataPointSum,
+				DocType: dt.Name,
+				Field:   f.Fieldname,
+				Auto:    true,
 			})
 		}
 	}
@@ -94,26 +88,6 @@ func BuildDataPointCatalog(dt *doctype.DocType, wf *doctype.Workflow) []DataPoin
 			DocType: dt.Name,
 			Auto:    true,
 		})
-	}
-
-	if wf != nil {
-		seen := make(map[string]struct{})
-		for _, t := range wf.Transitions {
-			key := t.From + "→" + t.To
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			out = append(out, DataPointSpec{
-				Name:     fmt.Sprintf("%s_avg_%s_to_%s_time", metricName(dt.Name), metricName(t.From), metricName(t.To)),
-				Label:    fmt.Sprintf("Avg Time: %s → %s", t.From, t.To),
-				Kind:     DataPointWorkflowDuration,
-				DocType:  dt.Name,
-				FromState: t.From,
-				ToState:  t.To,
-				Auto:     true,
-			})
-		}
 	}
 
 	return out

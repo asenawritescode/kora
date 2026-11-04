@@ -5,7 +5,6 @@ import "errors"
 // SiteAggregateKey is the ordering key for durable events (DURABLE-001).
 // Providers must preserve per-key FIFO; events with the same key are delivered
 // in publish order.
-//
 //contract:wire
 type SiteAggregateKey struct {
 	Site          string

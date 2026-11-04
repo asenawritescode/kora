@@ -1,0 +1,51 @@
+name: sales_by_item
+label: Sales by item
+route: /reports/sales-by-item
+models:
+  - name: sales_items
+    label: Sales items
+    description: Paid sale lines grouped by product and filtered using the parent sale date.
+    source_doctype: Sale
+    time_dimension: invoice_date
+    relation:
+      parent_doctype: Sale
+      child_doctype: Sale Item
+      child_table_field: items
+      parent_time_field: invoice_date
+      filters:
+        - source: parent
+          field: status
+          operator: =
+          value: Paid
+    dimensions:
+      - name: product
+        label: Product or service
+        field: product
+        type: category
+        source: child
+        link_doctype: Product
+        link_label_field: product_name
+      - name: invoice_date
+        label: Sale date
+        field: invoice_date
+        type: time
+        source: parent
+        supported_granularities: [day, week, month, quarter, year]
+    measures:
+      - name: quantity_sold
+        label: Quantity sold
+        field: quantity
+        aggregation: sum
+        format: number
+        source: child
+      - name: sales_total
+        label: Sales total
+        field: line_total
+        aggregation: sum
+        format: currency
+        source: child
+queries:
+  - id: items
+    model: sales_items
+    measures: [quantity_sold, sales_total]
+    dimensions: [product]

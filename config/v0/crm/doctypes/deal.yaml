@@ -27,6 +27,7 @@ fields:
   - fieldname: contact
     fieldtype: Link
     label: Primary Contact
+    search_index: true
     options: Contact
     reqd: true
     in_list_view: true
@@ -34,9 +35,17 @@ fields:
   - fieldname: company
     fieldtype: Link
     label: Company
+    search_index: true
     options: Company
     in_list_view: true
     in_standard_filter: true
+
+  - fieldname: owner_user
+    fieldtype: User
+    label: Deal owner
+    in_list_view: true
+    in_standard_filter: true
+    description: Select an existing workspace user.
 
   - fieldname: col_right
     fieldtype: Column Break
@@ -45,10 +54,13 @@ fields:
     fieldtype: Date
     label: Expected Close Date
     in_list_view: true
-    constraints:
-      - type: min_date
-        value: today
-        message: "Expected close date must be today or later."
+
+  - fieldname: actual_close_date
+    fieldtype: Date
+    label: Actual Close Date
+    description: Historical date this deal was won or lost; leave blank while it is open.
+    in_list_view: true
+    in_standard_filter: true
 
   - fieldname: probability
     fieldtype: Percent
@@ -74,6 +86,17 @@ fields:
       Partner
       Existing Customer
       Other
+    in_standard_filter: true
+
+  - fieldname: next_step
+    fieldtype: Data
+    label: Next action
+    in_list_view: true
+
+  - fieldname: next_step_due_date
+    fieldtype: Date
+    label: Next action due
+    in_list_view: true
     in_standard_filter: true
 
   # --- Section: Financials ---
@@ -119,7 +142,20 @@ fields:
 
   - fieldname: status
     fieldtype: Data
+    label: Legacy Stage
+    description: Preserved for records from the earlier CRM release.
+    depends_on: status
+
+  - fieldname: pipeline_stage
+    fieldtype: Select
     label: Stage
+    options: |
+      Lead
+      Qualified
+      Proposal
+      Negotiation
+      Closed Won
+      Closed Lost
     default: Lead
     read_only: true
     in_list_view: true
@@ -137,4 +173,13 @@ fields:
   - fieldname: loss_reason
     fieldtype: Text
     label: Loss Reason
-    depends_on: status
+    depends_on: pipeline_stage
+
+  - fieldname: competitor
+    fieldtype: Link
+    options: Competitor
+    label: Competitor
+
+  - fieldname: competitor_notes
+    fieldtype: Text
+    label: Competitive Notes

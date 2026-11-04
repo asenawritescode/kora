@@ -212,7 +212,7 @@ func TestViewSExpr_DiffAfterViewChange(t *testing.T) {
 func TestViewSExpr_BackwardCompatible(t *testing.T) {
 	// Old format: doctypes-only JSON array should parse fine even
 	// when ConfigSnapshot now has a Views field.
-	oldJSON := `{"doctypes":[],"roles":null,"permissions":null,"workflows":null,"views":null}`
+	oldJSON := `{"doctypes":[],"roles":null,"permissions":null,"views":null}`
 	snapshot, err := ParseSnapshot(oldJSON)
 	if err != nil {
 		t.Fatalf("ParseSnapshot old format: %v", err)
@@ -232,5 +232,20 @@ func TestViewSExpr_BackwardCompatible(t *testing.T) {
 	}
 	if snapshot2.Views[0].Name != "Test" {
 		t.Errorf("expected view name 'Test', got %q", snapshot2.Views[0].Name)
+	}
+}
+
+func TestParseSnapshotRejectsUnsupportedConfigSections(t *testing.T) {
+	if _, err := ParseSnapshot(`{"doctypes":[],"unsupported_config":[]}`); err == nil {
+		t.Fatal("unsupported snapshot section was silently ignored")
+	}
+	if _, err := ParseSnapshot(`{"doctypes":[],"workflows":[]}`); err == nil {
+		t.Fatal("retired lifecycle workflow section was accepted")
+	}
+}
+
+func TestParseStoredConfigSnapshotRejectsRetiredWorkflowField(t *testing.T) {
+	if _, err := ParseStoredConfigSnapshot(`{"doctypes":[],"workflows":[]}`); err == nil {
+		t.Fatal("retired workflow field was accepted from stored config")
 	}
 }

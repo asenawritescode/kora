@@ -1,13 +1,37 @@
 package site
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	sqlDialect "github.com/asenawritescode/kora/db"
 )
+
+func TestConnectionIdentityIsOpaqueAndTracksPoolCompatibility(t *testing.T) {
+	base := &SiteConfig{DBType: "mysql", DBHost: "db.internal", DBPort: 3306, DBName: "tenant", DBUser: "app", DBPassword: "secret", DBMaxOpenConns: 8, DBMaxIdleConns: 2}
+	identity := ConnectionIdentity(base)
+	if identity == "" || strings.Contains(identity, "secret") || strings.Contains(identity, "db.internal") {
+		t.Fatalf("identity must be opaque: %q", identity)
+	}
+	copyConfig := *base
+	if got := ConnectionIdentity(&copyConfig); got != identity {
+		t.Fatalf("identical target identity = %q, want %q", got, identity)
+	}
+	copyConfig.DBPassword = "different"
+	if ConnectionIdentity(&copyConfig) == identity {
+		t.Fatal("credential change must not reuse existing target identity")
+	}
+	copyConfig = *base
+	copyConfig.DBMaxOpenConns++
+	if ConnectionIdentity(&copyConfig) == identity {
+		t.Fatal("pool limit change must not reuse existing target identity")
+	}
+}
 
 func TestDSN_MySQL(t *testing.T) {
 	cfg := &SiteConfig{
@@ -34,9 +58,9 @@ func TestSiteBootstrapWritesRebindForPostgres(t *testing.T) {
 	dialect := sqlDialect.Resolve("postgres")
 
 	mock.ExpectExec("INSERT INTO _kora_user").
-		WithArgs(sqlmock.AnyArg(), "site-pg", "owner@example.com", "$kora$passwordless$disabled", "Owner", "Administrator").
+		WithArgs("cloud-user-pg", "site-pg", "owner@example.com", "$kora$passwordless$disabled", "Owner", "Administrator").
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	if err := createAdminUser(database, dialect, "owner@example.com", "", "Owner", "site-pg"); err != nil {
+	if err := createPasswordlessAdminUserContext(context.Background(), database, dialect, "owner@example.com", "Owner", "site-pg", "cloud-user-pg"); err != nil {
 		t.Fatalf("create PostgreSQL admin user: %v", err)
 	}
 
@@ -47,7 +71,92 @@ func TestSiteBootstrapWritesRebindForPostgres(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).
 		WithArgs(1, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
-	ensureConfigVersion(database, dialect, "site-pg", []string{"site-pg"})
+	mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).
+		WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(1))
+	if err := ensureConfigVersion(database, dialect, "site-pg", []string{"site-pg"}); err != nil {
+		t.Fatalf("create PostgreSQL config version: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureConfigVersionReportsPersistenceFailures(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(sqlmock.Sqlmock)
+	}{
+		{
+			name: "version lookup",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnError(errors.New("lookup failed"))
+			},
+		},
+		{
+			name: "version insert",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+				mock.ExpectExec(`INSERT INTO _kora_config_version`).WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).WillReturnError(errors.New("insert failed"))
+			},
+		},
+		{
+			name: "activation update",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+				mock.ExpectExec(`INSERT INTO _kora_config_version`).WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).WithArgs(1, sqlmock.AnyArg()).WillReturnError(errors.New("activation failed"))
+			},
+		},
+		{
+			name: "activation affected no row",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+				mock.ExpectExec(`INSERT INTO _kora_config_version`).WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).WithArgs(1, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(0))
+			},
+		},
+		{
+			name: "activation verification",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+				mock.ExpectExec(`INSERT INTO _kora_config_version`).WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).WithArgs(1, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).WithArgs(sqlmock.AnyArg()).WillReturnError(errors.New("verification read failed"))
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			test.setup(mock)
+			if err := ensureConfigVersion(database, sqlDialect.Resolve("postgres"), "site-pg", []string{"site-pg"}); err == nil {
+				t.Fatal("ensureConfigVersion returned nil after injected persistence failure")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestEnsureConfigVersionRecoversInterruptedActivation(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id FROM _kora_config_version WHERE site = \$1 AND status = 'Active' ORDER BY version DESC LIMIT 1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("version-1"))
+	mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).WithArgs(1, "version-1").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).WithArgs("version-1").WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(1))
+	if err := ensureConfigVersion(database, sqlDialect.Resolve("postgres"), "site-pg", []string{"site-pg"}); err != nil {
+		t.Fatalf("recover config version activation: %v", err)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +180,34 @@ func TestCreateSiteDefaultsPostgresPort(t *testing.T) {
 	}
 }
 
+func TestValidateTenantDatabaseNameBoundsAndRejectsDSNMetacharacters(t *testing.T) {
+	tests := []struct {
+		name   string
+		driver string
+		value  string
+		valid  bool
+	}{
+		{name: "mysql normal", driver: "mysql", value: "tenant_example-com", valid: true},
+		{name: "postgres maximum", driver: "postgres", value: strings.Repeat("a", 63), valid: true},
+		{name: "mysql too long", driver: "mysql", value: strings.Repeat("a", 65)},
+		{name: "postgres too long", driver: "postgres", value: strings.Repeat("a", 64)},
+		{name: "dsn query injection", driver: "mysql", value: "tenant?parseTime=false"},
+		{name: "identifier quote injection", driver: "mysql", value: "tenant` CREATE USER root"},
+		{name: "path separator", driver: "postgres", value: "tenant/other"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateTenantDatabaseName(test.driver, test.value)
+			if test.valid && err != nil {
+				t.Fatalf("ValidateTenantDatabaseName(%q) error = %v", test.value, err)
+			}
+			if !test.valid && err == nil {
+				t.Fatalf("ValidateTenantDatabaseName(%q) unexpectedly succeeded", test.value)
+			}
+		})
+	}
+}
+
 func TestCreateAdminUserAllowsPasswordlessBootstrap(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -79,10 +216,10 @@ func TestCreateAdminUserAllowsPasswordlessBootstrap(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectExec("INSERT INTO _kora_user").
-		WithArgs(sqlmock.AnyArg(), "live-demo", "owner@example.com", "$kora$passwordless$disabled", "Owner", "Administrator").
+		WithArgs("cloud-user-live", "live-demo", "owner@example.com", "$kora$passwordless$disabled", "Owner", "Administrator").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	if err := createAdminUser(db, sqlDialect.Resolve("mysql"), "owner@example.com", "", "Owner", "live-demo"); err != nil {
+	if err := createPasswordlessAdminUserContext(context.Background(), db, sqlDialect.Resolve("mysql"), "owner@example.com", "Owner", "live-demo", "cloud-user-live"); err != nil {
 		t.Fatalf("createAdminUser: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -249,8 +386,8 @@ func TestCommonConfigFromEnv_Defaults(t *testing.T) {
 	if cfg.LogFormat != "json" {
 		t.Errorf("LogFormat = %q, want %q", cfg.LogFormat, "json")
 	}
-	if cfg.AppName != "Kora" {
-		t.Errorf("AppName = %q, want %q", cfg.AppName, "Kora")
+	if cfg.AppName != "Kigae" {
+		t.Errorf("AppName = %q, want %q", cfg.AppName, "Kigae")
 	}
 	if cfg.Version != "0.3.0" {
 		t.Errorf("Version = %q, want %q", cfg.Version, "0.3.0")

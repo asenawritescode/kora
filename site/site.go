@@ -2,12 +2,15 @@
 package site
 
 import (
+	"context"
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +19,30 @@ import (
 	"gopkg.in/yaml.v3"
 
 	sqlDialect "github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 )
+
+var tenantDatabaseNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// ValidateTenantDatabaseName bounds identifiers before they are interpolated
+// into backend-specific CREATE DATABASE statements or DSNs.
+func ValidateTenantDatabaseName(driver, name string) error {
+	maxBytes := 128
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "", "mysql", "mariadb":
+		maxBytes = 64
+	case "postgres", "postgresql":
+		maxBytes = 63
+	case "libsql":
+		maxBytes = 128
+	default:
+		return fmt.Errorf("unsupported database type %q", driver)
+	}
+	if len(name) == 0 || len(name) > maxBytes || !tenantDatabaseNamePattern.MatchString(name) {
+		return fmt.Errorf("tenant database name must be 1 to %d ASCII letters, digits, underscores, or hyphens", maxBytes)
+	}
+	return nil
+}
 
 // SiteConfig holds the configuration for a single site/tenant.
 type SiteConfig struct {
@@ -27,8 +53,9 @@ type SiteConfig struct {
 	DBName     string `yaml:"db_name"`
 	DBUser     string `yaml:"db_user"`
 	DBPassword string `yaml:"db_password"`
-	// Per-tenant pool bounds inherited from the platform configuration unless
-	// explicitly supplied for this site.
+	// Per-tenant *sql.DB pool bounds inherited from the platform configuration
+	// unless explicitly supplied for this site. They do not define the physical
+	// server limit; internal/dbaccess applies the shared endpoint budget.
 	DBMaxOpenConns int `yaml:"db_max_open_conns,omitempty"`
 	DBMaxIdleConns int `yaml:"db_max_idle_conns,omitempty"`
 
@@ -191,7 +218,7 @@ func LoadCommonConfig(path string) (*CommonConfig, error) {
 		Workers:              4,
 		LogLevel:             "info",
 		LogFormat:            "json",
-		AppName:              "Kora",
+		AppName:              "Kigae",
 		Version:              "0.1.0",
 		PrimaryColor:         "#2563eb",
 		SessionLifetimeHours: 24,
@@ -287,7 +314,7 @@ func CommonConfigFromEnv() *CommonConfig {
 		HTTPPort:             getEnvInt("KORA_HTTP_PORT", 8000),
 		LogLevel:             getEnv("KORA_LOG_LEVEL", "info"),
 		LogFormat:            getEnv("KORA_LOG_FORMAT", "json"),
-		AppName:              getEnv("KORA_APP_NAME", "Kora"),
+		AppName:              getEnv("KORA_APP_NAME", "Kigae"),
 		Version:              getEnv("KORA_VERSION", "0.3.0"),
 		PrimaryColor:         getEnv("KORA_PRIMARY_COLOR", "#000000"),
 		SessionLifetimeHours: getEnvInt("KORA_SESSION_HOURS", 72),
@@ -371,7 +398,20 @@ func LoadSiteConfig(path string) (*SiteConfig, error) {
 
 // DiscoverSitesFromDB reads the canonical platform site directory.
 func DiscoverSitesFromDB(db *sql.DB) ([]DBSiteInfo, error) {
-	return discoverSitesFromRegistry(db)
+	return DiscoverSitesFromDBContext(context.Background(), db)
+}
+
+// DiscoverSitesFromDBContext reads the canonical platform site directory with
+// the caller's cancellation and deadline.
+func DiscoverSitesFromDBContext(ctx context.Context, db *sql.DB) ([]DBSiteInfo, error) {
+	return discoverSitesFromRegistryContext(ctx, db)
+}
+
+// DiscoverAllSitesFromDBContext returns every tenant in the canonical site
+// registry, including inactive tenants. Migration tools use it to avoid
+// leaving stored configuration behind on a suspended tenant.
+func DiscoverAllSitesFromDBContext(ctx context.Context, db *sql.DB) ([]DBSiteInfo, error) {
+	return discoverRegistrySitesContext(ctx, db, false)
 }
 
 // ReconstructSiteConfig builds a SiteConfig from platform defaults and persisted domains.
@@ -436,6 +476,46 @@ func ReconstructSiteConfigFromDBInfo(info DBSiteInfo, common *CommonConfig) *Sit
 
 // Connect opens a database connection for the site.
 func Connect(cfg *SiteConfig) (*sql.DB, error) {
+	return ConnectContext(context.Background(), cfg)
+}
+
+// ConnectContext opens a tenant database through the shared process connection
+// budget and bounds the initial ping by the caller's activation/probe context.
+func ConnectContext(ctx context.Context, cfg *SiteConfig) (*sql.DB, error) {
+	if ctx == nil || cfg == nil {
+		return nil, fmt.Errorf("database connection requires context and site config")
+	}
+	driver, dsn := databaseTarget(cfg)
+	db, err := dbaccess.Open(driver, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("opening database connection: %w", err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("pinging database: %w", err)
+	}
+	tuneConnectionPool(db, driver, cfg.DBMaxOpenConns, cfg.DBMaxIdleConns)
+	return db, nil
+}
+
+// ConnectionAdmission returns the endpoint-shared work limiter corresponding
+// to Connect's resolved driver and DSN.
+func ConnectionAdmission(cfg *SiteConfig) (*dbaccess.Admission, error) {
+	driver, dsn := databaseTarget(cfg)
+	return dbaccess.AdmissionFor(driver, dsn)
+}
+
+// ConnectionServerKey identifies the physical endpoint selected by a site
+// configuration without exposing its DSN or credentials to callers.
+func ConnectionServerKey(cfg *SiteConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	driver, dsn := databaseTarget(cfg)
+	return dbaccess.ServerKey(driver, dsn)
+}
+
+func databaseTarget(cfg *SiteConfig) (string, string) {
 	dsn := cfg.DSN()
 	// DB_DSN env var overrides per-site DSN only for LibSQL (shared-DB mode)
 	// or when the site config has no explicit DB credentials.
@@ -453,20 +533,26 @@ func Connect(cfg *SiteConfig) (*sql.DB, error) {
 	if driver == "" {
 		driver = "mysql" // Backwards compat: existing site configs may not have db_type.
 	}
-	db, err := sql.Open(driver, dsn)
-	if err != nil {
-		return nil, fmt.Errorf("opening database connection: %w", err)
-	}
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("pinging database: %w", err)
-	}
-	tuneConnectionPool(db, driver, cfg.DBMaxOpenConns, cfg.DBMaxIdleConns)
-	return db, nil
+	return driver, dsn
 }
 
-// tuneConnectionPool keeps driver-specific connection lifetimes shorter than the
-// backend's idle timeout so pooled sockets are retired before the server drops them.
+// ConnectionIdentity returns a stable, non-reversible identifier for the
+// fully resolved database target and pool limits. It is suitable for deciding
+// whether a runtime reload may reuse an existing tenant pool; the DSN and its
+// credentials are never returned or logged.
+func ConnectionIdentity(cfg *SiteConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	driver, dsn := databaseTarget(cfg)
+	material := fmt.Sprintf("%s\x00%s\x00%d\x00%d", driver, dsn, cfg.DBMaxOpenConns, cfg.DBMaxIdleConns)
+	sum := sha256.Sum256([]byte(material))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+// tuneConnectionPool applies per-handle pool bounds and keeps driver-specific
+// connection lifetimes shorter than the backend idle timeout. The shared
+// internal/dbaccess connector enforces the aggregate process allocation.
 func tuneConnectionPool(db *sql.DB, driver string, maxOpen, maxIdle int) {
 	useDriverDefaults := maxOpen <= 0 && maxIdle <= 0
 	if maxOpen <= 0 {
@@ -521,6 +607,22 @@ func NewSite(cfg *SiteConfig) (*Site, error) {
 // CreateDatabase creates the site's database if it doesn't exist.
 // Connects without a database name, issues CREATE DATABASE IF NOT EXISTS.
 func CreateDatabase(input CreateSiteInput, cfg *SiteConfig) error {
+	return CreateDatabaseContext(context.Background(), input, cfg)
+}
+
+func CreateDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *SiteConfig) error {
+	if ctx == nil {
+		return fmt.Errorf("database creation requires context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if cfg == nil {
+		return fmt.Errorf("database creation requires site config")
+	}
+	if err := ValidateTenantDatabaseName(cfg.DBType, cfg.DBName); err != nil {
+		return err
+	}
 	driver := cfg.DBType
 	if driver == "" {
 		driver = os.Getenv("KORA_DB_TYPE")
@@ -529,7 +631,7 @@ func CreateDatabase(input CreateSiteInput, cfg *SiteConfig) error {
 		driver = "mysql" // Backwards compat: existing site configs may not have db_type.
 	}
 	if driver == "postgres" {
-		return createPostgresDatabase(input, cfg)
+		return createPostgresDatabaseContext(ctx, input, cfg)
 	}
 	// LibSQL creates the remote database through its provider — no CREATE DATABASE needed.
 	if driver == "libsql" {
@@ -542,7 +644,7 @@ func CreateDatabase(input CreateSiteInput, cfg *SiteConfig) error {
 	// Prefer the already-open platform connection when available. This keeps
 	// DB_DSN-based startup working without requiring separate host/user env vars.
 	if input.PlatformDB != nil {
-		if _, err := input.PlatformDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", cfg.DBName)); err != nil {
+		if _, err := input.PlatformDB.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", cfg.DBName)); err != nil {
 			return fmt.Errorf("creating database %s: %w", cfg.DBName, err)
 		}
 		return nil
@@ -562,23 +664,27 @@ func CreateDatabase(input CreateSiteInput, cfg *SiteConfig) error {
 		return fmt.Errorf("parsing MySQL DSN: %w", err)
 	}
 
-	db, err := sql.Open("mysql", baseDSN)
+	db, err := dbaccess.Open("mysql", baseDSN)
 	if err != nil {
 		return fmt.Errorf("connecting to MySQL server: %w", err)
 	}
 	defer db.Close()
 
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("pinging MySQL server: %w", err)
 	}
 
-	if _, err := db.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", cfg.DBName)); err != nil {
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", cfg.DBName)); err != nil {
 		return fmt.Errorf("creating database %s: %w", cfg.DBName, err)
 	}
 	return nil
 }
 
 func createPostgresDatabase(input CreateSiteInput, cfg *SiteConfig) error {
+	return createPostgresDatabaseContext(context.Background(), input, cfg)
+}
+
+func createPostgresDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *SiteConfig) error {
 	databaseName := cfg.DBName
 	if strings.TrimSpace(databaseName) == "" || len(databaseName) > 63 {
 		return fmt.Errorf("invalid PostgreSQL database name length")
@@ -601,7 +707,7 @@ func createPostgresDatabase(input CreateSiteInput, cfg *SiteConfig) error {
 			dsn = adminConfig.DSN()
 		}
 		var err error
-		adminDB, err = sql.Open("postgres", dsn)
+		adminDB, err = dbaccess.Open("postgres", dsn)
 		if err != nil {
 			return fmt.Errorf("connecting to PostgreSQL admin database: %w", err)
 		}
@@ -610,21 +716,21 @@ func createPostgresDatabase(input CreateSiteInput, cfg *SiteConfig) error {
 	if owned {
 		defer adminDB.Close()
 	}
-	if err := adminDB.Ping(); err != nil {
+	if err := adminDB.PingContext(ctx); err != nil {
 		return fmt.Errorf("pinging PostgreSQL admin database: %w", err)
 	}
 	var exists bool
-	if err := adminDB.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, databaseName).Scan(&exists); err != nil {
+	if err := adminDB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, databaseName).Scan(&exists); err != nil {
 		return fmt.Errorf("checking PostgreSQL database %s: %w", databaseName, err)
 	}
 	if exists {
 		return nil
 	}
 	quotedName := `"` + strings.ReplaceAll(databaseName, `"`, `""`) + `"`
-	if _, err := adminDB.Exec(`CREATE DATABASE ` + quotedName); err != nil {
+	if _, err := adminDB.ExecContext(ctx, `CREATE DATABASE `+quotedName); err != nil {
 		// Concurrent idempotent provisioning can race between the existence
 		// check and CREATE DATABASE. Accept only if the target now exists.
-		if checkErr := adminDB.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, databaseName).Scan(&exists); checkErr == nil && exists {
+		if checkErr := adminDB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, databaseName).Scan(&exists); checkErr == nil && exists {
 			return nil
 		}
 		return fmt.Errorf("creating PostgreSQL database %s: %w", databaseName, err)
@@ -717,7 +823,7 @@ func DeleteSite(input DeleteSiteInput) error {
 		if err != nil {
 			return fmt.Errorf("parsing MySQL DSN: %w", err)
 		}
-		tempDB, err := sql.Open("mysql", dsn)
+		tempDB, err := dbaccess.Open("mysql", dsn)
 		if err != nil {
 			return fmt.Errorf("connecting for teardown: %w", err)
 		}
@@ -745,7 +851,7 @@ func DeleteSite(input DeleteSiteInput) error {
 			if err != nil {
 				return fmt.Errorf("building PostgreSQL admin DSN: %w", err)
 			}
-			adminDB, err = sql.Open("postgres", dsn)
+			adminDB, err = dbaccess.Open("postgres", dsn)
 			if err != nil {
 				return fmt.Errorf("connecting for PostgreSQL teardown: %w", err)
 			}

@@ -1,0 +1,3 @@
+- name: Shop Owner
+  workspace_access: true
+  description: Runs the shop's sales, stock, expenses, and reports.

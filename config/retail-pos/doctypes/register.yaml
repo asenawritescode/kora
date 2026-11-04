@@ -14,6 +14,7 @@ fields:
     label: Register name
     reqd: true
     in_list_view: true
+    search_index: true
   - fieldname: location
     fieldtype: Data
     label: Location

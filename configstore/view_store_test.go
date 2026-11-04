@@ -59,6 +59,7 @@ func TestViewStore_SaveAndLoad(t *testing.T) {
 			"Test Workspace", "Testing", "", 0, "", 0, string(configJSON), 0,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE _kora_config_revision SET revision = revision \+ 1 WHERE id = 1 AND revision < 9223372036854775807`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	if err := s.SaveView(v, "test-site"); err != nil {
@@ -130,9 +131,12 @@ func TestViewStore_LoadMultiple(t *testing.T) {
 func TestViewStore_Delete(t *testing.T) {
 	s, mock := newViewStoreForTest(t)
 
+	mock.ExpectBegin()
 	mock.ExpectExec("DELETE FROM _kora_view WHERE name = \\? AND site = \\?").
 		WithArgs("Deletable", "test-site").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE _kora_config_revision SET revision = revision \+ 1 WHERE id = 1 AND revision < 9223372036854775807`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 
 	if err := s.DeleteView("Deletable", "test-site"); err != nil {
 		t.Fatalf("DeleteView: %v", err)
@@ -167,6 +171,7 @@ func TestViewStore_PublicAccessRoundTrip(t *testing.T) {
 			"", 1, string(publicComponentsJSON), 1, string(configJSON), 0,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE _kora_config_revision SET revision = revision \+ 1 WHERE id = 1 AND revision < 9223372036854775807`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	if err := s.SaveView(v, "test-site"); err != nil {
@@ -219,12 +224,14 @@ func TestViewStore_SaveViewDoesNotReplaceExistingViews(t *testing.T) {
 	mock.ExpectExec("INSERT INTO _kora_view").
 		WithArgs("View A", "test-site", "/a", "workspace", "single", "", "Workspace", "", 0, "", 0, string(configA), 0).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE _kora_config_revision SET revision = revision \+ 1 WHERE id = 1 AND revision < 9223372036854775807`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO _kora_view").
 		WithArgs("View B", "test-site", "/b", "dashboard", "single", "", "Workspace", "", 0, "", 0, string(configB), 0).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE _kora_config_revision SET revision = revision \+ 1 WHERE id = 1 AND revision < 9223372036854775807`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	if err := s.SaveView(first, "test-site"); err != nil {

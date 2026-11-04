@@ -1,7 +1,7 @@
 name: Contact
 module: CRM
 title_field: full_name
-search_fields: first_name, last_name, email, company
+search_fields: first_name, last_name, full_name, email, company
 sort_field: modified
 sort_order: DESC
 
@@ -34,6 +34,8 @@ fields:
     label: Full Name
     read_only: true
     in_list_view: true
+    search_index: true
+    computed: '(concat first_name " " last_name)'
 
   - fieldname: col_right
     fieldtype: Column Break
@@ -41,6 +43,7 @@ fields:
   - fieldname: email
     fieldtype: Data
     label: Email
+    search_index: true
     options: Email
     in_list_view: true
     constraints:
@@ -66,6 +69,7 @@ fields:
   - fieldname: company
     fieldtype: Link
     label: Company
+    search_index: true
     options: Company
     in_list_view: true
     in_standard_filter: true

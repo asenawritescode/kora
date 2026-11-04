@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -37,6 +38,55 @@ func TestGeneratorDeterministicAndIncludesWireDefinitions(t *testing.T) {
 	}
 	if !strings.Contains(string(ts), "export interface EventEnvelope") || !strings.Contains(string(ts), "export function decodeContract") || !strings.Contains(string(ts), "unknown") {
 		t.Fatal("generated TypeScript types or runtime decoder are missing")
+	}
+}
+
+func TestV2SemanticRulesAreEmittedForStrictClientDecoding(t *testing.T) {
+	data, err := generateVersion("../../contract", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err = addV2SemanticRules(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"not"`) || !strings.Contains(string(data), `"legal_entity"`) || !strings.Contains(string(data), `"outcome_unknown"`) {
+		t.Fatal("generated v2 schema is missing scope and status-specific constraints")
+	}
+	ts, err := generateTypeScript(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ts), `schema.not !== undefined`) {
+		t.Fatal("generated TypeScript decoder does not enforce negated schema conditions")
+	}
+}
+
+func TestConfigurationSurfaceBindingsHaveStrictGeneratedShapes(t *testing.T) {
+	data, err := generateVersion("../../contract", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err = addV2SemanticRules(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	defs := document["$defs"].(map[string]any)
+	binding := defs["ConfigurationSurfaceBinding"].(map[string]any)
+	branches := binding["oneOf"].([]any)
+	if len(branches) != 3 {
+		t.Fatalf("surface binding union has %d branches, want query/projection/operation", len(branches))
+	}
+	for _, name := range []string{"ConfigurationCandidateV2", "ConfigurationCheckV2", "ConfigurationDraftV2"} {
+		properties := defs[name].(map[string]any)["properties"].(map[string]any)
+		bindings := properties["published_bindings"].(map[string]any)
+		if bindings["maxItems"] != float64(512) {
+			t.Fatalf("%s published_bindings maxItems = %v, want 512", name, bindings["maxItems"])
+		}
 	}
 }
 

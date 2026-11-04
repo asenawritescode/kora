@@ -1,5 +1,5 @@
 name: Expense
-module: Money
+module: Finance
 is_submittable: true
 title_field: reference
 search_fields: reference, payee, reason
@@ -25,6 +25,20 @@ fields:
   - fieldname: amount
     fieldtype: Currency
     label: Amount
+    reqd: true
+    in_list_view: true
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Stock purchase
+      Rent
+      Utilities
+      Wages
+      Transport
+      Fees
+      Repairs
+      Other
     reqd: true
     in_list_view: true
   - fieldname: payment_method

@@ -1,6 +1,6 @@
-// Package ingress routes site requests to the Engine cell that owns the site.
-// It is deliberately independent of Kora Cloud so self-hosted deployments can
-// use the same SQL-backed site directory and cell routing.
+// Package ingress is the Engine's compatibility router for site requests whose
+// deployment assignment belongs to another Engine. The public deployment
+// ingress is separate; this package remains until its cutover gate passes.
 package ingress
 
 import (
@@ -16,13 +16,18 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/site"
 )
 
-const defaultCellID = "default"
+// ingressHopHeader is set only by a gateway when forwarding to a direct
+// Engine origin. A receiving Engine may serve the request locally, but must
+// not forward it again. This bounds routing to one ingress hop even when an
+// endpoint is accidentally configured as another public ingress.
+const ingressHopHeader = "X-Kora-Ingress-Hop"
 
 type routeSnapshot struct {
-	byAlias map[string][]contract.SiteDescriptor
-	byID    map[string]contract.SiteDescriptor
+	byAlias map[string][]contract.SiteDirectoryEntryV2
+	byID    map[string]contract.SiteDirectoryEntryV2
 	updated time.Time
 }
 
@@ -117,6 +122,13 @@ func ParseCellURLs(value string) (map[string]string, error) {
 	return result, nil
 }
 
+// ParseDeploymentURLs is the deployment-named form of ParseCellURLs. It keeps
+// the same strict direct-origin rules while the legacy cell flag remains an
+// adapter over the same deployment assignment.
+func ParseDeploymentURLs(value string) (map[string]string, error) {
+	return ParseCellURLs(value)
+}
+
 func parseCellURL(raw string) (*url.URL, error) {
 	target, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Hostname() == "" || target.User != nil || target.RawQuery != "" || target.Fragment != "" || (target.Path != "" && target.Path != "/") {
@@ -142,97 +154,104 @@ func normalizeCellID(value string) (string, error) {
 // ReplaceDirectory atomically swaps the complete credential-free placement
 // snapshot. Non-routable lifecycle states remain represented so requests fail
 // closed rather than falling through to a different site's runtime.
-func (g *Gateway) ReplaceDirectory(descriptors []contract.SiteDescriptor) {
-	byID := make(map[string]contract.SiteDescriptor, len(descriptors))
+func (g *Gateway) ReplaceDirectory(descriptors []contract.SiteDescriptor) error {
+	byID := make(map[string]contract.SiteDirectoryEntryV2, len(descriptors))
 	for _, descriptor := range descriptors {
-		if descriptor.SiteID == "" {
-			continue
+		entry, err := site.DeploymentEntryV2FromDescriptor(descriptor, descriptor.DirectoryRevision)
+		if err != nil {
+			return fmt.Errorf("project site %q into deployment routing directory: %w", descriptor.SiteID, err)
 		}
-		byID[descriptor.SiteID] = cloneDescriptor(descriptor)
+		if _, exists := byID[string(entry.SiteID)]; exists {
+			return fmt.Errorf("deployment routing directory contains duplicate site ID %q", entry.SiteID)
+		}
+		byID[string(entry.SiteID)] = cloneEntry(entry)
 	}
 	g.storeSnapshot(byID, time.Now())
+	return nil
 }
 
 // ApplyDescriptor updates one site's routing record from the current directory
 // projection. The caller should pass the authoritative descriptor, not an old
 // outbox payload.
-func (g *Gateway) ApplyDescriptor(descriptor contract.SiteDescriptor) {
+func (g *Gateway) ApplyDescriptor(descriptor contract.SiteDescriptor) error {
 	if descriptor.SiteID == "" {
-		return
+		return errors.New("deployment routing update requires a site ID")
+	}
+	var entry contract.SiteDirectoryEntryV2
+	var err error
+	if descriptor.Status != "deleted" {
+		entry, err = site.DeploymentEntryV2FromDescriptor(descriptor, descriptor.DirectoryRevision)
+		if err != nil {
+			return fmt.Errorf("project site %q into deployment routing directory: %w", descriptor.SiteID, err)
+		}
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	byID := make(map[string]contract.SiteDescriptor)
+	byID := make(map[string]contract.SiteDirectoryEntryV2)
 	if current := g.snapshot.Load(); current != nil {
 		for id, item := range current.byID {
-			byID[id] = item
+			byID[id] = cloneEntry(item)
 		}
 	}
 	if descriptor.Status == "deleted" {
 		delete(byID, descriptor.SiteID)
 	} else {
-		byID[descriptor.SiteID] = cloneDescriptor(descriptor)
+		byID[descriptor.SiteID] = cloneEntry(entry)
 	}
 	g.storeSnapshotLocked(byID, time.Now())
+	return nil
 }
 
-func cloneDescriptor(descriptor contract.SiteDescriptor) contract.SiteDescriptor {
-	descriptor.Aliases = append([]string(nil), descriptor.Aliases...)
-	return descriptor
+func cloneEntry(entry contract.SiteDirectoryEntryV2) contract.SiteDirectoryEntryV2 {
+	entry.Aliases = append([]string(nil), entry.Aliases...)
+	return entry
 }
 
-func (g *Gateway) storeSnapshot(byID map[string]contract.SiteDescriptor, updated time.Time) {
+func (g *Gateway) storeSnapshot(byID map[string]contract.SiteDirectoryEntryV2, updated time.Time) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.storeSnapshotLocked(byID, updated)
 }
 
-func (g *Gateway) storeSnapshotLocked(byID map[string]contract.SiteDescriptor, updated time.Time) {
-	byAlias := make(map[string][]contract.SiteDescriptor)
+func (g *Gateway) storeSnapshotLocked(byID map[string]contract.SiteDirectoryEntryV2, updated time.Time) {
+	byAlias := make(map[string][]contract.SiteDirectoryEntryV2)
 	for _, descriptor := range byID {
 		// Site IDs are stable routing keys as well as identity keys. This lets
 		// Cloud worker URLs survive hostname/domain changes; aliases remain valid
 		// for customer-facing host and legacy /s/<hostname> requests.
 		aliases := make(map[string]struct{}, len(descriptor.Aliases)+1)
-		for _, alias := range append(append([]string(nil), descriptor.Aliases...), descriptor.SiteID) {
+		for _, alias := range append(append([]string(nil), descriptor.Aliases...), string(descriptor.SiteID)) {
 			if alias = normalizeAlias(alias); alias != "" {
 				aliases[alias] = struct{}{}
 			}
 		}
 		for alias := range aliases {
-			byAlias[alias] = append(byAlias[alias], descriptor)
+			byAlias[alias] = append(byAlias[alias], cloneEntry(descriptor))
 		}
 	}
 	g.snapshot.Store(&routeSnapshot{byAlias: byAlias, byID: byID, updated: updated})
 }
 
-// ValidateDirectory ensures this cell knows a direct endpoint for every other
-// active cell before it starts accepting shared ingress traffic.
+// ValidateDirectory ensures this Engine knows a direct endpoint for every
+// other assigned deployment before it starts accepting routed traffic.
 func (g *Gateway) ValidateDirectory(descriptors []contract.SiteDescriptor) error {
 	for _, descriptor := range descriptors {
 		if descriptor.Status != "active" && descriptor.Status != "degraded" {
 			continue
 		}
-		cellID, valid := effectiveCellID(descriptor.RuntimeCellID)
-		if !valid {
-			return fmt.Errorf("site %s has an invalid runtime cell assignment", descriptor.SiteID)
+		entry, err := site.DeploymentEntryV2FromDescriptor(descriptor, descriptor.DirectoryRevision)
+		if err != nil {
+			return fmt.Errorf("site %s has an invalid deployment assignment: %w", descriptor.SiteID, err)
 		}
-		if cellID != g.cellID && g.cellURLs[cellID] == nil {
-			return fmt.Errorf("no direct Engine endpoint configured for assigned cell %q", cellID)
+		deploymentID := string(entry.DeploymentID)
+		if deploymentID != g.cellID && g.cellURLs[deploymentID] == nil {
+			return fmt.Errorf("no direct Engine endpoint configured for assigned deployment %q", deploymentID)
 		}
 	}
 	return nil
 }
 
-func effectiveCellID(value string) (string, bool) {
-	if strings.TrimSpace(value) == "" {
-		return defaultCellID, true
-	}
-	cellID, err := normalizeCellID(value)
-	return cellID, err == nil
-}
-
-// Wrap forwards requests whose resolved site belongs to another cell and lets
+// Wrap forwards requests whose resolved site belongs to another deployment and lets
 // the local Engine handle its own sites. Unknown paths are left to Engine's
 // existing 404/system routing.
 func (g *Gateway) Wrap(next http.Handler) http.Handler {
@@ -254,32 +273,35 @@ func (g *Gateway) Wrap(next http.Handler) http.Handler {
 			writeRoutingError(w, http.StatusServiceUnavailable, "site_unavailable")
 			return
 		}
-		cellID, valid := effectiveCellID(descriptor.RuntimeCellID)
-		if !valid {
-			writeRoutingError(w, http.StatusServiceUnavailable, "site_cell_unavailable")
-			return
-		}
-		if cellID == g.cellID {
-			if !g.isLocalReady(descriptor.SiteID) {
+		deploymentID := string(descriptor.DeploymentID)
+		if deploymentID == g.cellID {
+			if !g.isLocalReady(string(descriptor.SiteID)) {
 				writeRoutingError(w, http.StatusServiceUnavailable, "site_runtime_not_ready")
 				return
 			}
+			// The destination Engine has reached the owning runtime. Do not
+			// propagate gateway metadata into tenant handlers or application code.
+			r.Header.Del(ingressHopHeader)
 			next.ServeHTTP(w, r)
 			return
 		}
-		endpoint := g.cellURLs[cellID]
-		if endpoint == nil {
-			writeRoutingError(w, http.StatusServiceUnavailable, "site_cell_unavailable")
+		if r.Header.Get(ingressHopHeader) != "" {
+			writeRoutingError(w, http.StatusLoopDetected, "ingress_forwarding_loop")
 			return
 		}
-		g.proxies[cellID].ServeHTTP(w, r)
+		endpoint := g.cellURLs[deploymentID]
+		if endpoint == nil {
+			writeRoutingError(w, http.StatusServiceUnavailable, "site_deployment_unavailable")
+			return
+		}
+		g.proxies[deploymentID].ServeHTTP(w, r)
 	})
 }
 
-func (g *Gateway) resolve(r *http.Request) (contract.SiteDescriptor, bool, bool) {
+func (g *Gateway) resolve(r *http.Request) (contract.SiteDirectoryEntryV2, bool, bool) {
 	snapshot := g.snapshot.Load()
 	if snapshot == nil {
-		return contract.SiteDescriptor{}, false, false
+		return contract.SiteDirectoryEntryV2{}, false, false
 	}
 	alias := ""
 	if strings.HasPrefix(r.URL.Path, "/s/") {
@@ -289,21 +311,21 @@ func (g *Gateway) resolve(r *http.Request) (contract.SiteDescriptor, bool, bool)
 		}
 		decoded, err := url.PathUnescape(selector)
 		if err != nil {
-			return contract.SiteDescriptor{}, false, false
+			return contract.SiteDirectoryEntryV2{}, false, false
 		}
 		alias = normalizeAlias(decoded)
 	} else {
 		alias = normalizeHost(r.Host)
 	}
 	if alias == "" {
-		return contract.SiteDescriptor{}, false, false
+		return contract.SiteDirectoryEntryV2{}, false, false
 	}
 	matches := snapshot.byAlias[alias]
 	if len(matches) == 0 {
-		return contract.SiteDescriptor{}, false, false
+		return contract.SiteDirectoryEntryV2{}, false, false
 	}
 	if len(matches) > 1 {
-		return contract.SiteDescriptor{}, true, true
+		return contract.SiteDirectoryEntryV2{}, true, true
 	}
 	return matches[0], true, false
 }
@@ -329,6 +351,7 @@ func newProxy(endpoint *url.URL) *httputil.ReverseProxy {
 		host := request.Host
 		originalDirector(request)
 		request.Host = host
+		request.Header.Set(ingressHopHeader, "1")
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, _ error) {
 		writeRoutingError(w, http.StatusBadGateway, "site_cell_unavailable")

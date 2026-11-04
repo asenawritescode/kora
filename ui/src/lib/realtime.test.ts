@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { QueryClient } from '@tanstack/react-query'
 import { extractInvalidationKey, mapRealtimeInvalidation, attachRealtimeInvalidation, describeRealtimeState } from './realtime'
 
 describe('realtime invalidation', () => {
@@ -7,6 +8,7 @@ describe('realtime invalidation', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     delete (globalThis as any).window
     delete (globalThis as any).WebSocket
     delete (globalThis as any).EventSource
@@ -215,5 +217,52 @@ describe('realtime invalidation', () => {
     expect(timers.length).toBeGreaterThan(0)
 
     cleanup()
+  })
+
+  it('closes the tenant stream and removes listeners when its scope is retired', () => {
+    const queryClient = { invalidateQueries: vi.fn() } as unknown as QueryClient
+    const listeners = new Map<string, Set<EventListener>>()
+    const fakeWindow = {
+      location: { href: 'http://localhost/s/acme/workspace', pathname: '/s/acme/workspace' } as Location,
+      setTimeout: vi.fn(() => 1),
+      clearTimeout: vi.fn(),
+      addEventListener(type: string, handler: EventListener) {
+        const handlers = listeners.get(type) ?? new Set()
+        handlers.add(handler)
+        listeners.set(type, handlers)
+      },
+      removeEventListener(type: string, handler: EventListener) {
+        listeners.get(type)?.delete(handler)
+      },
+    }
+
+    class FakeSocket {
+      static instances: FakeSocket[] = []
+      readonly url: string
+      onclose: ((event: CloseEvent) => void) | null = null
+      close = vi.fn(() => this.onclose?.({} as CloseEvent))
+      constructor(url: string) {
+        this.url = url
+        FakeSocket.instances.push(this)
+      }
+    }
+
+    vi.stubGlobal('window', fakeWindow as unknown as Window)
+    vi.stubGlobal('WebSocket', FakeSocket as unknown as typeof WebSocket)
+    vi.stubGlobal('EventSource', class FakeEventSource {})
+    vi.stubGlobal('navigator', { onLine: true } as Navigator)
+
+    const cleanup = attachRealtimeInvalidation('/s/acme/api/v1/system/realtime', queryClient)
+    const socket = FakeSocket.instances[0]
+    expect(socket?.url).toBe('/s/acme/api/v1/system/realtime')
+    expect(listeners.get('online')?.size).toBe(1)
+    expect(listeners.get('offline')?.size).toBe(1)
+
+    cleanup()
+
+    expect(socket?.close).toHaveBeenCalledOnce()
+    expect(listeners.get('online')?.size ?? 0).toBe(0)
+    expect(listeners.get('offline')?.size ?? 0).toBe(0)
+    expect(fakeWindow.setTimeout).not.toHaveBeenCalled()
   })
 })

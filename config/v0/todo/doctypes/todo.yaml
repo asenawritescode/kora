@@ -1,7 +1,7 @@
 name: Todo
 module: Tasks
 title_field: title
-search_fields: title, description
+search_fields: title
 sort_field: modified
 sort_order: DESC
 
@@ -18,13 +18,22 @@ fields:
     fieldtype: Text
     label: Description
 
+  - fieldname: assignee
+    fieldtype: User
+    label: Assignee
+    in_list_view: true
+    in_standard_filter: true
+    description: Choose one existing workspace user who is responsible for completing this task.
+
   - fieldname: status
     fieldtype: Select
     label: Status
     options: |
       Pending
       In Progress
+      Blocked
       Done
+      Cancelled
     default: Pending
     in_list_view: true
     in_standard_filter: true
@@ -44,3 +53,15 @@ fields:
     fieldtype: Date
     label: Due Date
     in_list_view: true
+
+  - fieldname: blocked_reason
+    fieldtype: Text
+    label: Blocker
+
+  - fieldname: cancellation_reason
+    fieldtype: Text
+    label: Cancellation reason
+
+  - fieldname: reopen_reason
+    fieldtype: Text
+    label: Reopen reason

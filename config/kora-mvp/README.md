@@ -1,11 +1,9 @@
-# Kora small-business MVP
+# Kigae small-business MVP
 
-This is the base configuration for the small-business POS pilot. It includes
-Point of Sale and the records needed to track expenses. Sales are recorded by
-the POS; expenses are available as records without a separate Money overview
-screen. Products can represent either goods or services and do not carry stock
-quantities. Inventory is intentionally not included here; it can be offered as
-a separately installed module after customer validation.
+This is the base configuration for the small-business POS pilot, organized as
+two focused modules: Point of Sale (products, categories, sales) and Finance
+(expenses). The Engine provides generic record and transaction operations;
+tenant-specific business rules belong in tenant-owned domain capabilities.
 
 Pricing remains a Cloud billing decision, not a field in this application
 configuration. The initial commercial test is one business subscription with

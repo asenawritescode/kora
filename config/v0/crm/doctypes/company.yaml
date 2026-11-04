@@ -21,11 +21,11 @@ fields:
     bold: true
     in_list_view: true
     search_index: true
-    unique: true
 
   - fieldname: website
     fieldtype: Data
     label: Website
+    search_index: true
     options: URL
     in_list_view: true
 
@@ -40,6 +40,7 @@ fields:
   - fieldname: industry
     fieldtype: Select
     label: Industry
+    search_index: true
     options: |
       Technology
       Healthcare
@@ -65,6 +66,13 @@ fields:
       Vendor
       Investor
     default: Prospect
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: first_engaged_date
+    fieldtype: Date
+    label: First Engaged
+    description: Date the company first entered the sales relationship, for historical reporting.
     in_list_view: true
     in_standard_filter: true
 

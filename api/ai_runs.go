@@ -18,7 +18,7 @@ type aiResumeRequest struct {
 }
 
 type aiGrantApprovalRequest struct {
-	GrantedBy string `json:"granted_by"`
+	GrantedBy string `json:"granted_by"` // legacy input; grant attribution uses verified execution
 }
 
 type aiApprovalListItem struct {
@@ -73,19 +73,15 @@ func (h *Handler) HandleAIResume(c *gin.Context) {
 
 // HandleAIGrantApproval transitions a durable approval row from pending_approval to granted.
 func (h *Handler) HandleAIGrantApproval(c *gin.Context) {
+	grantedBy, verified := requestUserID(c)
+	if !verified {
+		writeError(c, http.StatusUnauthorized, "auth.execution_required", "Verified execution identity is required.", nil)
+		return
+	}
 	tx := h.siteTx(c)
 	approvalID := c.Param("id")
-	var req aiGrantApprovalRequest
-	_ = c.ShouldBindJSON(&req)
-	if req.GrantedBy == "" {
-		if user, ok := c.Get("user"); ok {
-			if s, ok := user.(string); ok {
-				req.GrantedBy = s
-			}
-		}
-	}
 	ctx := ai.WithDialect(c.Request.Context(), tx.Dialect)
-	rec, err := ai.GrantApproval(ctx, tx.DB, approvalID, req.GrantedBy)
+	rec, err := ai.GrantApprovalForOwner(ctx, tx.DB, c.GetString("site_name"), approvalID, grantedBy)
 	if err != nil {
 		writeError(c, http.StatusNotFound, "ai_run.not_found", err.Error(), nil)
 		return
@@ -106,6 +102,11 @@ func (h *Handler) HandleAIGrantApproval(c *gin.Context) {
 
 // HandleAIListApprovals returns approval rows for the current site.
 func (h *Handler) HandleAIListApprovals(c *gin.Context) {
+	ownerID, verified := requestUserID(c)
+	if !verified {
+		writeError(c, http.StatusUnauthorized, "auth.execution_required", "Verified execution identity is required.", nil)
+		return
+	}
 	tx := h.siteTx(c)
 	if err := ai.EnsureAIRunTables(c.Request.Context(), tx.DB, tx.Dialect); err != nil {
 		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
@@ -118,8 +119,8 @@ func (h *Handler) HandleAIListApprovals(c *gin.Context) {
 	rows, err := tx.DB.QueryContext(c.Request.Context(), h.siteQuery(c, `
 SELECT id, operation_id, actor_principal_id, actor_principal_type, tool_name, state, target_fingerprint, argument_hash, record_version, requested_at, expires_at, granted_at, granted_by, auth_session_id
 FROM _kora_ai_approval
-WHERE site = ? AND state = ?
-ORDER BY requested_at DESC`), c.GetString("site_name"), state)
+WHERE site = ? AND actor_principal_id = ? AND state = ?
+ORDER BY requested_at DESC`), c.GetString("site_name"), ownerID, state)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
 		return

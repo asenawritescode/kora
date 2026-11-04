@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -14,20 +15,13 @@ import (
 
 	"github.com/asenawritescode/kora/api/ai"
 	"github.com/asenawritescode/kora/auth"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/webhook"
 	"github.com/gin-gonic/gin"
 )
 
-type channelSessionIssueRequest struct {
-	ClientName      string               `json:"client_name"`
-	ConversationKey string               `json:"conversation_key"`
-	Provider        string               `json:"provider"`
-	SenderAddress   string               `json:"sender_address"`
-	Permissions     []doctype.Permission `json:"permissions"`
-	TrustedUntil    string               `json:"trusted_until"`
-	SensitiveUntil  string               `json:"sensitive_until"`
-}
+type channelSessionIssueRequest = contract.ChannelSessionIssueRequestV2
 
 type channelSessionRevokeRequest struct {
 	SessionID string `json:"session_id"`
@@ -79,7 +73,7 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 		ConversationKey: req.ConversationKey,
 		Provider:        req.Provider,
 		SenderAddress:   req.SenderAddress,
-		Permissions:     req.Permissions,
+		Permissions:     channelPermissionGrants(req.Permissions),
 		TrustedUntil:    trustedUntil,
 		SensitiveUntil:  sensitiveUntil,
 	})
@@ -96,6 +90,18 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 	}})
 }
 
+func channelPermissionGrants(grants []contract.PermissionGrant) []doctype.Permission {
+	permissions := make([]doctype.Permission, 0, len(grants))
+	for _, grant := range grants {
+		permissions = append(permissions, doctype.Permission{
+			Doctype: grant.Doctype, Role: grant.Role, Read: grant.Read, Write: grant.Write,
+			Create: grant.Create, Delete: grant.Delete, Submit: grant.Submit, Cancel: grant.Cancel,
+			Amend: grant.Amend, Export: grant.Export, Import: grant.Import, Report: grant.Report, IfOwner: grant.IfOwner,
+		})
+	}
+	return permissions
+}
+
 // HandleManagedChannelClientRotate is the narrow Engine-owned provisioning
 // operation used by Cloud to install or rotate its site-scoped access token.
 // The dedicated service token is accepted only for this exact route by
@@ -103,6 +109,10 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 	if c.GetString("auth_type") != "engine_provisioner" {
 		writeError(c, http.StatusForbidden, "auth.engine_provisioner_required", "Engine provisioning authentication required", nil)
+		return
+	}
+	if status := strings.TrimSpace(c.GetString("site_status")); status != "" && status != "active" {
+		writeError(c, http.StatusConflict, "site.not_active", "Managed credentials can only be issued for an active tenant", nil)
 		return
 	}
 	db := h.queryDB(c)
@@ -124,7 +134,7 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 	idempotencyHash := hex.EncodeToString(idempotencyHashBytes[:])
 	const clientName = "kora-cloud-channel"
 	const endpoint = "https://kora-cloud.internal/channel"
-	const displayName = "Kora Cloud Channel"
+	const displayName = "Kigae Cloud Channel"
 	const description = "Managed site-scoped channel access client"
 	const emptyJSON = "[]"
 	ctx := c.Request.Context()
@@ -202,6 +212,132 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 	}
 	slog.Info("managed channel credential issued", "site", siteName, "client", clientName)
 	writeManagedChannelCredential(c, clientName, token)
+}
+
+// HandleManagedChannelClientRevoke disables the Cloud-managed credential only
+// if its current token still matches Cloud's expected fingerprint. This makes
+// deletion retries idempotent while preventing a delayed retry from disabling
+// a newer credential rotation.
+func (h *Handler) HandleManagedChannelClientRevoke(c *gin.Context) {
+	if c.GetString("auth_type") != "engine_provisioner" {
+		writeError(c, http.StatusForbidden, "auth.engine_provisioner_required", "Engine provisioning authentication required", nil)
+		return
+	}
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(idempotencyKey) < 8 || len(idempotencyKey) > 200 {
+		writeError(c, http.StatusBadRequest, "validation.idempotency_key_required", "Idempotency-Key must contain 8 to 200 characters", nil)
+		return
+	}
+	idempotencyHash := sha256.Sum256([]byte(idempotencyKey))
+	idempotencyHashText := hex.EncodeToString(idempotencyHash[:])
+	var request contract.RevokeManagedChannelClientV2
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_request", "Invalid managed credential revocation request", nil)
+		return
+	}
+	if err := contract.ValidateRevokeManagedChannelClientV2(request); err != nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_request", err.Error(), nil)
+		return
+	}
+	db := h.queryDB(c)
+	if db == nil {
+		writeError(c, http.StatusServiceUnavailable, "server.database_unavailable", "Database not available", nil)
+		return
+	}
+	siteName := c.GetString("site_name")
+	if strings.TrimSpace(siteName) == "" {
+		writeError(c, http.StatusBadRequest, "site.unresolved", "Site could not be resolved", nil)
+		return
+	}
+	const clientName = "kora-cloud-channel"
+	ctx := c.Request.Context()
+	var token string
+	err := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&token)
+	if err == sql.ErrNoRows {
+		if err := revokeManagedChannelSessions(ctx, db, func(query string) string { return h.siteQuery(c, query) }, siteName, clientName); err != nil {
+			internalError(c, "revoke managed channel sessions", err)
+			return
+		}
+		c.JSON(http.StatusOK, Response{Data: contract.RevokeManagedChannelClientResultV2{Revoked: true}})
+		return
+	}
+	if err != nil {
+		internalError(c, "read managed channel credential for revocation", err)
+		return
+	}
+	fingerprint := sha256.Sum256([]byte(token))
+	expected, _ := hex.DecodeString(request.CredentialFingerprint)
+	if subtle.ConstantTimeCompare(fingerprint[:], expected) != 1 {
+		writeError(c, http.StatusConflict, "extension.credential_changed", "Managed credential changed before revocation; reload current credential state", nil)
+		return
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		internalError(c, "begin managed channel revocation", err)
+		return
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, h.siteQuery(c, `UPDATE _kora_extension SET is_active = FALSE, managed_idempotency_key = ?, updated_at = CURRENT_TIMESTAMP WHERE site = ? AND name = ? AND access_token = ? AND is_active = TRUE`), idempotencyHashText, siteName, clientName, token)
+	if err != nil {
+		internalError(c, "revoke managed channel credential", err)
+		return
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		internalError(c, "confirm managed channel credential revocation", err)
+		return
+	}
+	if changed == 1 {
+		if err := revokeManagedChannelSessions(ctx, tx, func(query string) string { return h.siteQuery(c, query) }, siteName, clientName); err != nil {
+			internalError(c, "revoke managed channel sessions", err)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			internalError(c, "commit managed channel revocation", err)
+			return
+		}
+	} else {
+		if err := tx.Rollback(); err != nil {
+			internalError(c, "rollback unchanged managed channel revocation", err)
+			return
+		}
+		var currentToken string
+		var active bool
+		readErr := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token, is_active FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&currentToken, &active)
+		if readErr == sql.ErrNoRows {
+			if err := revokeManagedChannelSessions(ctx, db, func(query string) string { return h.siteQuery(c, query) }, siteName, clientName); err != nil {
+				internalError(c, "revoke managed channel sessions", err)
+				return
+			}
+			c.JSON(http.StatusOK, Response{Data: contract.RevokeManagedChannelClientResultV2{Revoked: true}})
+			return
+		}
+		if readErr != nil {
+			internalError(c, "confirm managed channel credential revocation", readErr)
+			return
+		}
+		currentFingerprint := sha256.Sum256([]byte(currentToken))
+		if subtle.ConstantTimeCompare(currentFingerprint[:], expected) != 1 {
+			writeError(c, http.StatusConflict, "extension.credential_changed", "Managed credential changed before revocation; reload current credential state", nil)
+			return
+		}
+		if active {
+			writeError(c, http.StatusConflict, "extension.credential_revocation_conflict", "Managed credential could not be revoked; retry the same operation", nil)
+			return
+		}
+		if err := revokeManagedChannelSessions(ctx, db, func(query string) string { return h.siteQuery(c, query) }, siteName, clientName); err != nil {
+			internalError(c, "revoke managed channel sessions", err)
+			return
+		}
+	}
+	c.JSON(http.StatusOK, Response{Data: contract.RevokeManagedChannelClientResultV2{Revoked: true}})
+}
+
+func revokeManagedChannelSessions(ctx context.Context, executor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, rebind func(string) string, siteName, clientName string) error {
+	_, err := executor.ExecContext(ctx, rebind(`UPDATE _kora_channel_session SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = ? WHERE site = ? AND client_name = ? AND revoked_at IS NULL`), "tenant_deletion", siteName, clientName)
+	return err
 }
 
 func writeManagedChannelCredential(c *gin.Context, name, token string) {
@@ -338,7 +474,12 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 	siteName, _ := c.Get("site_name")
 	siteNameStr, _ := siteName.(string)
 	owner := "channel:" + c.GetString("channel_sender_address")
-	result := ai.ExecuteConfirmedToolWithIdempotencyKey(h.siteTx(c), h.siteRegistry(c), req.ToolName, req.Args, owner, siteNameStr, strings.TrimSpace(c.GetHeader("Idempotency-Key")))
+	execution, verified := requestExecution(c)
+	if !verified {
+		writeError(c, http.StatusUnauthorized, "auth.execution_required", "Verified tenant execution identity is required.", nil)
+		return
+	}
+	result := ai.ExecuteConfirmedToolWithExecution(h.siteTx(c), h.siteRegistry(c), req.ToolName, req.Args, owner, siteNameStr, strings.TrimSpace(c.GetHeader("Idempotency-Key")), execution)
 	status := "success"
 	var errorMessage string
 	if strings.HasPrefix(result, "Error:") || strings.HasPrefix(result, "Unknown tool:") {

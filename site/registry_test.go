@@ -1,6 +1,7 @@
 package site
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,168 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
+
+func TestDiscoverSitesFromDBContextHonorsCancellation(t *testing.T) {
+	database, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := DiscoverSitesFromDBContext(ctx, database); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled directory discovery error = %v, want context.Canceled", err)
+	}
+}
+
+func TestCanonicalSiteIDRegistrationPreservesStableIdentity(t *testing.T) {
+	tests := []struct {
+		name, driver, query string
+	}{
+		{"mysql", "mysql", `SELECT site_id, status FROM _kora_site_registry WHERE site = ? FOR UPDATE`},
+		{"postgres", "postgres", `SELECT site_id, status FROM _kora_site_registry WHERE site = $1 FOR UPDATE`},
+		{"libsql", "libsql", `SELECT site_id, status FROM _kora_site_registry WHERE site = ?`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal("create sqlmock:", err)
+			}
+			defer database.Close()
+			mock.ExpectBegin()
+			mock.ExpectQuery(regexp.QuoteMeta(test.query)).WithArgs("acme.example.test").WillReturnRows(sqlmock.NewRows([]string{"site_id", "status"}).AddRow("tenant-stable-001", "active"))
+			tx, err := database.Begin()
+			if err != nil {
+				t.Fatal("begin transaction:", err)
+			}
+			mock.ExpectRollback()
+			got, err := canonicalSiteIDForRegistration(tx, test.driver, "acme.example.test", "tenant-stable-001")
+			if err != nil || got != "tenant-stable-001" {
+				t.Fatalf("same stable identity = %q, %v", got, err)
+			}
+			if err := tx.Rollback(); err != nil {
+				t.Fatal("rollback:", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal("SQL expectations:", err)
+			}
+		})
+	}
+}
+
+func TestCanonicalSiteIDRegistrationRejectsTenantIdentityReplacement(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create sqlmock:", err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site_id, status FROM _kora_site_registry WHERE site = ? FOR UPDATE`)).
+		WithArgs("acme.example.test").WillReturnRows(sqlmock.NewRows([]string{"site_id", "status"}).AddRow("tenant-stable-001", "active"))
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal("begin transaction:", err)
+	}
+	mock.ExpectRollback()
+	_, err = canonicalSiteIDForRegistration(tx, "mysql", "acme.example.test", "tenant-replacement-002")
+	if err == nil {
+		t.Fatal("registration accepted replacement of a stable tenant identity")
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal("rollback:", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("SQL expectations:", err)
+	}
+}
+
+func TestCanonicalSiteIDRegistrationRejectsDeletingTenant(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site_id, status FROM _kora_site_registry WHERE site = ? FOR UPDATE`)).
+		WithArgs("acme.example.test").WillReturnRows(sqlmock.NewRows([]string{"site_id", "status"}).AddRow("tenant-stable-001", "deleting"))
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectRollback()
+	if _, err := canonicalSiteIDForRegistration(tx, "mysql", "acme.example.test", "tenant-stable-001"); err == nil {
+		t.Fatal("registration replaced an allocation while deletion was fenced")
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetDeletingAtAllocationFencesDirectoryRevisionAndAllocation(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	info := DBSiteInfo{SiteID: "tenant-1", RuntimeCellID: "", Name: "tenant.example.test", DBType: "mysql", DBHost: "db.internal", DBPort: 3306, DBName: "tenant_db", FileStorage: "local", Status: "active", ConfigRevision: 5, Domains: []string{"tenant.example.test"}}
+	allocation := DataPlaneReference(info)
+	query := `SELECT site_id, COALESCE(runtime_cell_id, ''), site, db_type, db_host, db_port, db_name, COALESCE(domains_json, '[]'), COALESCE(file_storage, 'local'), COALESCE(storage_bucket, ''), status, config_revision FROM _kora_site_registry WHERE site_id = ? FOR UPDATE`
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(info.SiteID).WillReturnRows(sqlmock.NewRows([]string{"site_id", "runtime_cell_id", "site", "db_type", "db_host", "db_port", "db_name", "domains_json", "file_storage", "storage_bucket", "status", "config_revision"}).AddRow(info.SiteID, "", info.Name, info.DBType, info.DBHost, info.DBPort, info.DBName, `["tenant.example.test"]`, "local", "", "active", 5))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_registry SET status = 'deleting', config_revision = config_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE site_id = ? AND config_revision = ?`)).
+		WithArgs(info.SiteID, uint64(5)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_directory_meta SET directory_revision = directory_revision + 1 WHERE id = 1`)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT directory_revision FROM _kora_site_directory_meta WHERE id = 1`)).WillReturnRows(sqlmock.NewRows([]string{"directory_revision"}).AddRow(12))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO _kora_site_directory_outbox (id, directory_revision, site_id, config_revision, payload) VALUES (?, ?, ?, ?, ?)`)).
+		WithArgs(sqlmock.AnyArg(), uint64(12), info.SiteID, uint64(6), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	descriptor, err := NewSQLSiteRegistry(database, "mysql").SetDeletingAtAllocation(context.Background(), info.SiteID, info.ConfigRevision, allocation)
+	if err != nil {
+		t.Fatalf("SetDeletingAtAllocation() error = %v", err)
+	}
+	if descriptor.Status != "deleting" || descriptor.ConfigRevision != 6 || descriptor.DataPlaneRef != allocation {
+		t.Fatalf("deletion descriptor = %+v", descriptor)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSQLSiteRegistryDirectoryDescriptorPagesAreBoundedAndCredentialFree(t *testing.T) {
+	tests := []struct {
+		name, dialect, query string
+	}{
+		{"mysql", "mysql", `SELECT site_id, COALESCE(runtime_cell_id, ''), site, COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry WHERE site_id > ? AND COALESCE(NULLIF(runtime_cell_id, ''), 'default') = ? ORDER BY site_id LIMIT ?`},
+		{"postgres", "postgres", `SELECT site_id, COALESCE(runtime_cell_id, ''), site, COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry WHERE site_id > $1 AND COALESCE(NULLIF(runtime_cell_id, ''), 'default') = $2 ORDER BY site_id LIMIT $3`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			mock.ExpectQuery(regexp.QuoteMeta(test.query)).WithArgs("site-0", "cell-a", int64(2)).WillReturnRows(sqlmock.NewRows([]string{"site_id", "runtime_cell_id", "site", "domains_json", "status", "config_revision"}).AddRow("site-1", "cell-a", "tenant.example", `["tenant.example"]`, "active", 9))
+			page, err := NewSQLSiteRegistry(database, test.dialect).GetDirectoryDescriptorPageContext(context.Background(), "cell-a", "site-0", 2)
+			if err != nil {
+				t.Fatal("read paged descriptors:", err)
+			}
+			if len(page) != 1 || page[0].SiteID != "site-1" || page[0].ConfigRevision != 9 {
+				t.Fatalf("unexpected descriptor page: %#v", page)
+			}
+			if page[0].RuntimeCellID != "cell-a" || len(page[0].Aliases) != 1 || page[0].Aliases[0] != "tenant.example" {
+				t.Fatalf("unexpected descriptor projection: %#v", page[0])
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestSQLSiteRegistrySetStatusAdvancesRevision(t *testing.T) {
 	database, mock, err := sqlmock.New()
@@ -154,6 +317,22 @@ func TestSQLSiteRegistryPrunesOnlyHistoryAppliedBySlowestConsumer(t *testing.T) 
 	}
 }
 
+func TestSQLSiteRegistryPruneOutboxBeforeContextHonorsCancellation(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := NewSQLSiteRegistry(database, "mysql").PruneOutboxBeforeContext(ctx, time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled directory prune error = %v, want context.Canceled", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("canceled prune issued unexpected SQL: %v", err)
+	}
+}
+
 func TestSQLSiteRegistryGetByIDReturnsInactiveSites(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
@@ -198,15 +377,15 @@ func TestSQLSiteRegistryGetSnapshotForCellFiltersBeforeLoadingCredentials(t *tes
 	}
 }
 
-func TestSQLSiteRegistrySetRuntimeCellIDWritesRevisionedChange(t *testing.T) {
+func TestSQLSiteRegistrySetRuntimeCellIDAtRevisionWritesRevisionedChange(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_registry SET runtime_cell_id = ?, config_revision = config_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE site_id = ?`)).
-		WithArgs("cell-a", "site-1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_registry SET runtime_cell_id = ?, config_revision = config_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE site_id = ? AND config_revision = ?`)).
+		WithArgs("cell-a", "site-1", uint64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site_id, COALESCE(runtime_cell_id, ''), site, COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry WHERE site_id = ?`)).
 		WithArgs("site-1").WillReturnRows(sqlmock.NewRows([]string{"site_id", "runtime_cell_id", "site", "domains_json", "status", "config_revision"}).AddRow("site-1", "cell-a", "demo", `["demo.example"]`, "active", 3))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_directory_meta SET directory_revision = directory_revision + 1 WHERE id = 1`)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -214,12 +393,33 @@ func TestSQLSiteRegistrySetRuntimeCellIDWritesRevisionedChange(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO _kora_site_directory_outbox (id, directory_revision, site_id, config_revision, payload) VALUES (?, ?, ?, ?, ?)`)).
 		WithArgs(sqlmock.AnyArg(), uint64(8), "site-1", uint64(3), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	descriptor, err := NewSQLSiteRegistry(database, "mysql").SetRuntimeCellID("site-1", " cell-a ")
+	descriptor, err := NewSQLSiteRegistry(database, "mysql").SetRuntimeCellIDAtRevisionContext(context.Background(), "site-1", " cell-a ", 2)
 	if err != nil {
-		t.Fatal("SetRuntimeCellID:", err)
+		t.Fatal("SetRuntimeCellIDAtRevisionContext:", err)
 	}
 	if descriptor.RuntimeCellID != "cell-a" || descriptor.SiteID != "site-1" || descriptor.ConfigRevision != 3 {
 		t.Fatalf("unexpected assignment descriptor: %+v", descriptor)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSQLSiteRegistrySetRuntimeCellIDAtRevisionRejectsStaleWriter(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_registry SET runtime_cell_id = ?, config_revision = config_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE site_id = ? AND config_revision = ?`)).
+		WithArgs("deployment-b", "site-1", uint64(4)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site_id, COALESCE(runtime_cell_id, ''), site, COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry WHERE site_id = ?`)).
+		WithArgs("site-1").WillReturnRows(sqlmock.NewRows([]string{"site_id", "runtime_cell_id", "site", "domains_json", "status", "config_revision"}).AddRow("site-1", "deployment-a", "demo", `[]`, "active", 5))
+	mock.ExpectRollback()
+	_, err = NewSQLSiteRegistry(database, "mysql").SetRuntimeCellIDAtRevisionContext(context.Background(), "site-1", "deployment-b", 4)
+	if !errors.Is(err, ErrSiteRevisionConflict) {
+		t.Fatalf("stale placement update error = %v, want ErrSiteRevisionConflict", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -265,6 +465,29 @@ func TestSQLSiteRegistryDirectoryDescriptorsAreCredentialFree(t *testing.T) {
 }
 
 const registrySelect = `SELECT site_id, COALESCE(runtime_cell_id, ''), site, db_type, db_host, db_port, db_name, db_user, COALESCE(db_password, ''), db_password_encrypted, COALESCE(domains_json, '[]'), COALESCE(file_storage, 'local'), COALESCE(storage_bucket, ''), status, config_revision FROM _kora_site_registry WHERE status = 'active' ORDER BY site`
+
+func TestDiscoverAllSitesFromDBIncludesInactiveTenants(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("sqlmock.New:", err)
+	}
+	defer database.Close()
+	allSitesQuery := `SELECT site_id, COALESCE(runtime_cell_id, ''), site, db_type, db_host, db_port, db_name, db_user, COALESCE(db_password, ''), db_password_encrypted, COALESCE(domains_json, '[]'), COALESCE(file_storage, 'local'), COALESCE(storage_bucket, ''), status, config_revision FROM _kora_site_registry ORDER BY site`
+	rows := sqlmock.NewRows([]string{"site_id", "runtime_cell_id", "site", "db_type", "db_host", "db_port", "db_name", "db_user", "db_password", "db_password_encrypted", "domains_json", "file_storage", "storage_bucket", "status", "config_revision"}).
+		AddRow("site_inactive_0123456789abcdef0123456789abcdef", "cell-a", "suspended.example", "mysql", "db.internal", 3306, "suspended_db", "tenant_user", "", 0, `[]`, "local", "", "suspended", 9)
+	mock.ExpectQuery(regexp.QuoteMeta(allSitesQuery)).WillReturnRows(rows)
+
+	sites, err := DiscoverAllSitesFromDBContext(context.Background(), database)
+	if err != nil {
+		t.Fatal("DiscoverAllSitesFromDBContext:", err)
+	}
+	if len(sites) != 1 || sites[0].Status != "suspended" {
+		t.Fatalf("discovered sites = %#v; want suspended tenant included", sites)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal("unmet SQL expectations:", err)
+	}
+}
 
 func TestDiscoverSitesFromDBUsesRegistryWhenAvailable(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -429,6 +652,10 @@ func TestSiteDescriptorIsCredentialFreeAndNormalizesAliases(t *testing.T) {
 		Domains:        []string{"ACME.EXAMPLE.COM", " POS.Example.com. "},
 		Status:         "active",
 		ConfigRevision: 9,
+		DBType:         "mysql",
+		DBHost:         "db.internal",
+		DBPort:         3306,
+		DBName:         "tenant_db",
 		DBPassword:     "must-not-leak",
 		DBUser:         "tenant-user",
 	})
@@ -441,6 +668,28 @@ func TestSiteDescriptorIsCredentialFreeAndNormalizesAliases(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "must-not-leak") || strings.Contains(string(encoded), "tenant-user") || strings.Contains(string(encoded), "db_password") {
 		t.Fatalf("descriptor leaked internal connection settings: %s", encoded)
+	}
+	if descriptor.DataPlaneRef == "" || strings.Contains(descriptor.DataPlaneRef, "db.internal") {
+		t.Fatalf("data plane reference is missing or exposes connection details: %q", descriptor.DataPlaneRef)
+	}
+}
+
+func TestDataPlaneReferenceTracksAllocationWithoutCredentials(t *testing.T) {
+	base := DBSiteInfo{DBType: "mysql", DBHost: "db.internal", DBPort: 3306, DBName: "tenant_a", DBUser: "user-a", DBPassword: "secret-a", FileStorage: "local"}
+	ref := DataPlaneReference(base)
+	if ref == "" || ref != DataPlaneReference(base) || strings.Contains(ref, "secret") || strings.Contains(ref, "db.internal") {
+		t.Fatalf("reference is unstable or leaks allocation details: %q", ref)
+	}
+	changed := base
+	changed.DBName = "tenant_b"
+	if DataPlaneReference(changed) == ref {
+		t.Fatal("different tenant database allocation produced the same reference")
+	}
+	changed = base
+	changed.DBPassword = "secret-b"
+	changed.DBUser = "user-b"
+	if DataPlaneReference(changed) != ref {
+		t.Fatal("credential rotation unexpectedly changed the data-plane allocation reference")
 	}
 }
 
@@ -466,13 +715,21 @@ func TestUpdatePlatformSiteRegistrationUpdatesStorageSettings(t *testing.T) {
 	defer db.Close()
 
 	metadataQuery := `INSERT INTO _kora_site_alias_meta (id, initialized) VALUES (1, ?) ON DUPLICATE KEY UPDATE initialized = VALUES(initialized)`
-	mock.ExpectExec(regexp.QuoteMeta(metadataQuery)).WithArgs(0).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_registry
 			 SET file_storage = ?, storage_bucket = ?, domains_json = ?, status = 'active', config_revision = config_revision + 1, updated_at = ?
 			 WHERE site = ?`)).
 		WithArgs("s3", "kora-cms", `["kora-cms","app.kora.dev"]`, sqlmock.AnyArg(), "kora-cms").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site_id FROM _kora_site_registry WHERE site = ?`)).
+		WithArgs("kora-cms").WillReturnRows(sqlmock.NewRows([]string{"site_id"}).AddRow("site-1"))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM _kora_site_alias WHERE site_id = ?`)).
+		WithArgs("site-1").WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO _kora_site_alias (alias, site_id) VALUES (?, ?)`)).
+		WithArgs("kora-cms", "site-1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO _kora_site_alias (alias, site_id) VALUES (?, ?)`)).
+		WithArgs("app.kora.dev", "site-1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(metadataQuery)).WithArgs(1).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site_id, COALESCE(runtime_cell_id, ''), site, COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry WHERE site = ?`)).
 		WithArgs("kora-cms").WillReturnRows(sqlmock.NewRows([]string{"site_id", "runtime_cell_id", "site", "domains_json", "status", "config_revision"}).AddRow("site-1", "", "kora-cms", `["kora-cms","app.kora.dev"]`, "active", 2))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_directory_meta SET directory_revision = directory_revision + 1 WHERE id = 1`)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -480,17 +737,6 @@ func TestUpdatePlatformSiteRegistrationUpdatesStorageSettings(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO _kora_site_directory_outbox (id, directory_revision, site_id, config_revision, payload) VALUES (?, ?, ?, ?, ?)`)).
 		WithArgs(sqlmock.AnyArg(), uint64(1), "site-1", uint64(2), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site_id FROM _kora_site_registry WHERE site = ?`)).
-		WithArgs("kora-cms").WillReturnRows(sqlmock.NewRows([]string{"site_id"}).AddRow("site-1"))
-	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM _kora_site_alias WHERE site_id = ?`)).
-		WithArgs("site-1").WillReturnResult(sqlmock.NewResult(0, 2))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT IGNORE INTO _kora_site_alias (alias, site_id) VALUES (?, ?)`)).
-		WithArgs("kora-cms", "site-1").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT IGNORE INTO _kora_site_alias (alias, site_id) VALUES (?, ?)`)).
-		WithArgs("app.kora.dev", "site-1").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-	mock.ExpectExec(regexp.QuoteMeta(metadataQuery)).WithArgs(1).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	if err := UpdatePlatformSiteRegistration(db, "mysql", "kora-cms", []string{"kora-cms", "app.kora.dev"}, "s3", ""); err != nil {
 		t.Fatalf("UpdatePlatformSiteRegistration: %v", err)

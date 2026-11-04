@@ -74,6 +74,9 @@ func TestSiteDirectoryMigrationCommand_Exists(t *testing.T) {
 	if findSubCommand(root, "probe") == nil {
 		t.Fatal("site-directory probe command not found")
 	}
+	if findSubCommand(root, "summarize-assignments") == nil {
+		t.Fatal("site-directory summarize-assignments command not found")
+	}
 }
 
 func TestConfigCommand_Exists(t *testing.T) {

@@ -1,146 +1,178 @@
 package site
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
-
 	"github.com/asenawritescode/kora/db"
+	"strings"
 )
 
-// bootstrapSiteAliasIndex maintains a normalized, indexed alias projection.
-// The composite key intentionally allows an alias to point at multiple sites
-// during report-only rollout; resolution detects and reports that conflict
-// instead of choosing an arbitrary site.
-func bootstrapSiteAliasIndex(database *sql.DB, dialect db.Dialect) error {
-	if _, err := database.Exec(`CREATE TABLE IF NOT EXISTS _kora_site_alias (
-		alias VARCHAR(255) NOT NULL,
-		site_id VARCHAR(64) NOT NULL,
-		PRIMARY KEY (alias, site_id)
-	)`); err != nil {
-		return fmt.Errorf("create site alias index: %w", err)
+var ErrSiteAliasIndexUnavailable = errors.New("site alias index is unavailable")
+
+func bootstrapSiteAliasIndexContext(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
+	if ctx == nil {
+		return errors.New("alias bootstrap context required")
+	}
+	if _, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _kora_site_alias (alias VARCHAR(255) NOT NULL, site_id VARCHAR(64) NOT NULL, PRIMARY KEY (alias, site_id))`); err != nil {
+		return fmt.Errorf("alias table: %w", err)
 	}
 	indexDDL := `CREATE INDEX IF NOT EXISTS idx_kora_site_alias_site ON _kora_site_alias (site_id)`
-	if _, isMySQL := dialect.(*db.MySQLDialect); isMySQL {
+	if _, ok := dialect.(*db.MySQLDialect); ok {
 		indexDDL = `CREATE INDEX idx_kora_site_alias_site ON _kora_site_alias (site_id)`
 	}
-	if _, err := database.Exec(indexDDL); err != nil && !isAlreadyAppliedMigration(err) {
-		return fmt.Errorf("index site aliases by site: %w", err)
+	if _, err := database.ExecContext(ctx, indexDDL); err != nil && !isAlreadyAppliedMigration(err) {
+		return fmt.Errorf("alias index: %w", err)
 	}
-	if _, err := database.Exec(`CREATE TABLE IF NOT EXISTS _kora_site_alias_meta (
-		id INTEGER PRIMARY KEY,
-		initialized INTEGER NOT NULL DEFAULT 0
-	)`); err != nil {
-		return fmt.Errorf("create site alias index metadata: %w", err)
+	if _, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _kora_site_alias_meta (id INTEGER PRIMARY KEY, initialized INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		return fmt.Errorf("alias table metadata: %w", err)
 	}
 	var initialized int
-	err := database.QueryRow(`SELECT initialized FROM _kora_site_alias_meta WHERE id = 1`).Scan(&initialized)
-	if err == nil && initialized == 1 {
-		return nil
-	}
+	err := database.QueryRowContext(ctx, `SELECT initialized FROM _kora_site_alias_meta WHERE id = 1`).Scan(&initialized)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("read site alias index metadata: %w", err)
+		return fmt.Errorf("alias metadata: %w", err)
 	}
-	if err := backfillSiteAliasIndex(database, dialect); err != nil {
+	if initialized != 1 {
+		if err := backfillSiteAliasIndexContext(ctx, database, dialect); err != nil {
+			return err
+		}
+	}
+	if err := ensureUniqueSiteAliasIndex(ctx, database, dialect); err != nil {
 		return err
 	}
-	if err := setSiteAliasIndexState(database, dialect, true); err != nil {
-		return fmt.Errorf("mark site alias index initialized: %w", err)
+	if err := setSiteAliasIndexStateContext(ctx, database, dialect, true); err != nil {
+		return fmt.Errorf("mark alias index: %w", err)
 	}
 	return nil
 }
-
-func backfillSiteAliasIndex(database *sql.DB, dialect db.Dialect) error {
-	rows, err := database.Query(`SELECT site_id, site, COALESCE(domains_json, '[]') FROM _kora_site_registry ORDER BY site`)
+func ensureUniqueSiteAliasIndex(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
+	var alias string
+	var owners int
+	err := database.QueryRowContext(ctx, `SELECT alias, COUNT(DISTINCT site_id) FROM _kora_site_alias GROUP BY alias HAVING COUNT(DISTINCT site_id) > 1 ORDER BY alias LIMIT 1`).Scan(&alias, &owners)
+	if err == nil {
+		return fmt.Errorf("site alias %q has %d tenant owners; resolve legacy alias ownership conflict before startup", alias, owners)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check ownership: %w", err)
+	}
+	query := `CREATE UNIQUE INDEX IF NOT EXISTS idx_kora_site_alias_unique ON _kora_site_alias (alias)`
+	if _, ok := dialect.(*db.MySQLDialect); ok {
+		query = `CREATE UNIQUE INDEX idx_kora_site_alias_unique ON _kora_site_alias (alias)`
+	}
+	if _, err := database.ExecContext(ctx, query); err != nil && !isAlreadyAppliedMigration(err) {
+		return fmt.Errorf("create unique alias index: %w", err)
+	}
+	err = verifySiteAliasUniqueIndex(ctx, database, dialect)
 	if err != nil {
-		return fmt.Errorf("read aliases for site index backfill: %w", err)
+		return err
 	}
-	type item struct {
-		siteID string
-		name   string
-		json   string
+	return nil
+}
+func verifySiteAliasUniqueIndex(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
+	defer tx.Rollback()
+	id, err := newCanonicalSiteID()
+	if err != nil {
+		return err
+	}
+	alias := "kora-probe-" + strings.ToLower(id)
+	if err := insertSiteAliases(tx, dialect, "probe-a", alias); err != nil {
+		return fmt.Errorf("probe: %w", err)
+	}
+	err = insertSiteAliases(tx, dialect, "probe-b", alias)
+	if err == nil {
+		return errors.New("not unique")
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "unique") && !strings.Contains(msg, "duplicate") {
+		return fmt.Errorf("probe: %w", err)
+	}
+	return nil
+}
+func backfillSiteAliasIndexContext(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
+	rows, err := database.QueryContext(ctx, `SELECT site_id, site, COALESCE(domains_json, '[]') FROM _kora_site_registry ORDER BY site`)
+	if err != nil {
+		return err
+	}
+	type item struct{ id, name, domains string }
 	var sites []item
 	for rows.Next() {
-		var value item
-		if err := rows.Scan(&value.siteID, &value.name, &value.json); err != nil {
+		var v item
+		if err := rows.Scan(&v.id, &v.name, &v.domains); err != nil {
 			rows.Close()
-			return fmt.Errorf("scan site alias backfill row: %w", err)
+			return err
 		}
-		sites = append(sites, value)
+		sites = append(sites, v)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return fmt.Errorf("iterate site alias backfill rows: %w", err)
+		return err
 	}
 	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close site alias backfill rows: %w", err)
+		return err
 	}
-	tx, err := database.Begin()
+	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin site alias index backfill: %w", err)
+		return err
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`DELETE FROM _kora_site_alias`); err != nil {
-		return fmt.Errorf("clear site alias projection before resync: %w", err)
-	}
-	for _, value := range sites {
-		var aliases []string
-		if err := json.Unmarshal([]byte(value.json), &aliases); err != nil {
-			return fmt.Errorf("decode site aliases for %s: %w", value.name, err)
-		}
-		aliases = append(aliases, value.name)
-		if err := insertSiteAliases(tx, dialect, value.siteID, aliases...); err != nil {
-			return fmt.Errorf("index aliases for %s: %w", value.name, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit site alias index backfill: %w", err)
-	}
-	return nil
-}
-
-func syncSiteAliases(database *sql.DB, dialect db.Dialect, siteID string, aliases ...string) error {
-	if database == nil || siteID == "" {
-		return nil
-	}
-	tx, err := database.Begin()
-	if err != nil {
-		return fmt.Errorf("begin site alias update: %w", err)
-	}
-	defer tx.Rollback()
-	deleteQuery := `DELETE FROM _kora_site_alias WHERE site_id = ?`
-	if strings.EqualFold(dialect.DriverName(), "postgres") {
-		deleteQuery = `DELETE FROM _kora_site_alias WHERE site_id = $1`
-	}
-	if _, err := tx.Exec(deleteQuery, siteID); err != nil {
-		return fmt.Errorf("remove previous site aliases: %w", err)
-	}
-	if err := insertSiteAliases(tx, dialect, siteID, aliases...); err != nil {
 		return err
 	}
+	for _, v := range sites {
+		var aliases []string
+		if err := json.Unmarshal([]byte(v.domains), &aliases); err != nil {
+			return fmt.Errorf("decode %s aliases: %w", v.name, err)
+		}
+		aliases = append(aliases, v.name)
+		if err := insertSiteAliases(tx, dialect, v.id, aliases...); err != nil {
+			return fmt.Errorf("index %s aliases: %w", v.name, err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit site alias update: %w", err)
+		return err
 	}
 	return nil
 }
-
-func invalidateSiteAliasIndex(database *sql.DB, dialect db.Dialect) error {
-	return setSiteAliasIndexState(database, dialect, false)
+func replaceSiteAliasesTx(tx *sql.Tx, dialect db.Dialect, siteID string, aliases ...string) error {
+	q := `DELETE FROM _kora_site_alias WHERE site_id = ?`
+	if strings.EqualFold(dialect.DriverName(), "postgres") {
+		q = `DELETE FROM _kora_site_alias WHERE site_id = $1`
+	}
+	if _, err := tx.Exec(q, siteID); err != nil {
+		return fmt.Errorf("remove old aliases: %w", err)
+	}
+	return insertSiteAliases(tx, dialect, siteID, aliases...)
 }
-
-func setSiteAliasIndexState(database *sql.DB, dialect db.Dialect, initialized bool) error {
-	value := 0
+func aliasStateQuery(dialect db.Dialect) string {
+	q := fmt.Sprintf(`INSERT INTO _kora_site_alias_meta (id, initialized) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET initialized = excluded.initialized`, dialect.Placeholder(1))
+	if _, ok := dialect.(*db.MySQLDialect); ok {
+		q = `INSERT INTO _kora_site_alias_meta (id, initialized) VALUES (1, ?) ON DUPLICATE KEY UPDATE initialized = VALUES(initialized)`
+	}
+	return q
+}
+func setSiteAliasIndexStateContext(ctx context.Context, database *sql.DB, dialect db.Dialect, initialized bool) error {
+	if ctx == nil {
+		return errors.New("nil alias-state context")
+	}
+	v := 0
 	if initialized {
-		value = 1
+		v = 1
 	}
-	query := fmt.Sprintf(`INSERT INTO _kora_site_alias_meta (id, initialized) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET initialized = excluded.initialized`, dialect.Placeholder(1))
-	if _, isMySQL := dialect.(*db.MySQLDialect); isMySQL {
-		query = `INSERT INTO _kora_site_alias_meta (id, initialized) VALUES (1, ?) ON DUPLICATE KEY UPDATE initialized = VALUES(initialized)`
+	_, err := database.ExecContext(ctx, aliasStateQuery(dialect), v)
+	return err
+}
+func setSiteAliasIndexStateTx(tx *sql.Tx, dialect db.Dialect, initialized bool) error {
+	v := 0
+	if initialized {
+		v = 1
 	}
-	_, err := database.Exec(query, value)
+	_, err := tx.Exec(aliasStateQuery(dialect), v)
 	return err
 }
 
@@ -149,43 +181,53 @@ type aliasExecer interface {
 }
 
 func insertSiteAliases(execer aliasExecer, dialect db.Dialect, siteID string, aliases ...string) error {
-	query := fmt.Sprintf(`INSERT INTO _kora_site_alias (alias, site_id) VALUES (%s, %s)`, dialect.Placeholder(1), dialect.Placeholder(2))
-	switch strings.ToLower(dialect.DriverName()) {
-	case "mysql":
-		query = strings.Replace(query, "INSERT INTO", "INSERT IGNORE INTO", 1)
-	case "libsql", "postgres":
-		query += ` ON CONFLICT (alias, site_id) DO NOTHING`
+	q := fmt.Sprintf(`INSERT INTO _kora_site_alias (alias, site_id) VALUES (%s, %s)`, dialect.Placeholder(1), dialect.Placeholder(2))
+	if d := strings.ToLower(dialect.DriverName()); d == "libsql" || d == "postgres" {
+		q += ` ON CONFLICT (alias, site_id) DO NOTHING`
 	}
 	seen := make(map[string]struct{}, len(aliases))
-	for _, alias := range aliases {
-		alias = NormalizeSiteAlias(alias)
-		if alias == "" {
+	for _, a := range aliases {
+		a = NormalizeSiteAlias(a)
+		if a == "" {
 			continue
 		}
-		if _, ok := seen[alias]; ok {
+		if _, ok := seen[a]; ok {
 			continue
 		}
-		seen[alias] = struct{}{}
-		if _, err := execer.Exec(query, alias, siteID); err != nil {
-			return fmt.Errorf("insert alias %q: %w", alias, err)
+		seen[a] = struct{}{}
+		if _, err := execer.Exec(q, a, siteID); err != nil {
+			return fmt.Errorf("insert alias %q: %w", a, err)
 		}
 	}
 	return nil
 }
-
-// ResolveSiteAlias returns exactly one site for a normalized alias. Ambiguous
-// aliases are surfaced as errors so request routing never depends on row order.
 func ResolveSiteAlias(database *sql.DB, platformDBType, alias string) (string, error) {
+	return ResolveSiteAliasContext(context.Background(), database, platformDBType, alias)
+}
+func ResolveSiteAliasContext(ctx context.Context, database *sql.DB, platformDBType, alias string) (string, error) {
 	if database == nil {
 		return "", errors.New("site registry unavailable")
 	}
-	query := `SELECT site_id FROM _kora_site_alias WHERE alias = ? ORDER BY site_id LIMIT 2`
-	if strings.EqualFold(platformDBType, "postgres") {
-		query = `SELECT site_id FROM _kora_site_alias WHERE alias = $1 ORDER BY site_id LIMIT 2`
+	if ctx == nil {
+		return "", errors.New("site alias resolution requires context")
 	}
-	rows, err := database.Query(query, NormalizeSiteAlias(alias))
+	var initialized int
+	if err := database.QueryRowContext(ctx, `SELECT initialized FROM _kora_site_alias_meta WHERE id = 1`).Scan(&initialized); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrSiteAliasIndexUnavailable
+		}
+		return "", fmt.Errorf("check alias index state: %w", err)
+	}
+	if initialized != 1 {
+		return "", ErrSiteAliasIndexUnavailable
+	}
+	q := `SELECT site_id FROM _kora_site_alias WHERE alias = ? ORDER BY site_id LIMIT 2`
+	if strings.EqualFold(platformDBType, "postgres") {
+		q = `SELECT site_id FROM _kora_site_alias WHERE alias = $1 ORDER BY site_id LIMIT 2`
+	}
+	rows, err := database.QueryContext(ctx, q, NormalizeSiteAlias(alias))
 	if err != nil {
-		return "", fmt.Errorf("resolve site alias: %w", err)
+		return "", fmt.Errorf("resolve alias route: %w", err)
 	}
 	defer rows.Close()
 	var ids []string

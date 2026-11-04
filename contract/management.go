@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/mail"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -35,6 +36,7 @@ const (
 	ManagementCapabilityTenantDeleteRetry     ManagementCapability = "tenant.delete.reconcile"
 	ManagementCapabilityTenantInvitation      ManagementCapability = "tenant.invitation.deliver"
 	ManagementCapabilityTenantInvitationRetry ManagementCapability = "tenant.invitation.reconcile"
+	ManagementCapabilityModuleLifecycle ManagementCapability = "tenant.module.lifecycle"
 	ManagementCapabilityOperationRead         ManagementCapability = "operation.read"
 )
 
@@ -43,8 +45,46 @@ const (
 //
 //contract:wire:v2
 type ManagementCapabilitiesV2 struct {
-	Version      uint16                 `json:"version"`
-	Capabilities []ManagementCapability `json:"capabilities"`
+	Version       uint16                 `json:"version"`
+	Capabilities  []ManagementCapability `json:"capabilities"`
+	EngineVersion string                 `json:"engine_version,omitempty"`
+}
+
+// EngineVersionAtLeast compares stable numeric Engine versions in MAJOR.MINOR.PATCH form.
+func EngineVersionAtLeast(running, required string) (bool, error) {
+	parse := func(value string) ([3]uint64, error) {
+		var result [3]uint64
+		value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+		parts := strings.Split(value, ".")
+		if len(parts) != 3 {
+			return result, fmt.Errorf("version %q must use MAJOR.MINOR.PATCH", value)
+		}
+		for i, part := range parts {
+			if part == "" || strings.ContainsAny(part, "-+") {
+				return result, fmt.Errorf("version %q must use stable numeric MAJOR.MINOR.PATCH", value)
+			}
+			n, err := strconv.ParseUint(part, 10, 64)
+			if err != nil {
+				return result, fmt.Errorf("version %q must use stable numeric MAJOR.MINOR.PATCH", value)
+			}
+			result[i] = n
+		}
+		return result, nil
+	}
+	got, err := parse(running)
+	if err != nil {
+		return false, err
+	}
+	want, err := parse(required)
+	if err != nil {
+		return false, err
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return got[i] > want[i], nil
+		}
+	}
+	return true, nil
 }
 
 func ValidateManagementCapabilitiesV2(value ManagementCapabilitiesV2) error {
@@ -58,6 +98,7 @@ func ValidateManagementCapabilitiesV2(value ManagementCapabilitiesV2) error {
 		ManagementCapabilityTenantDelete: {}, ManagementCapabilityTenantDeleteRetry: {},
 		ManagementCapabilityTenantInvitation:      {},
 		ManagementCapabilityTenantInvitationRetry: {},
+		ManagementCapabilityModuleLifecycle: {},
 		ManagementCapabilityOperationRead:         {},
 	}
 	seen := make(map[ManagementCapability]struct{}, len(value.Capabilities))
@@ -96,6 +137,11 @@ type ProvisionTenant struct {
 	//contract:minLength=3
 	//contract:maxLength=254
 	BootstrapAdminEmail string `json:"bootstrap_admin_email"`
+	// BootstrapAdminSubject is the immutable Cloud user ID. Email is only a
+	// verified contact attribute and is never the principal key.
+	//contract:minLength=3
+	//contract:maxLength=160
+	BootstrapAdminSubject string `json:"bootstrap_admin_subject"`
 	// PrimaryAlias is the canonical hostname used for tenant application routes
 	// and configuration records. Aliases contains only additional hostnames.
 	//contract:minLength=1
@@ -160,6 +206,15 @@ type ApplyPackage struct {
 	//contract:maxLength=160
 	//contract:pattern=^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$
 	ArtifactRef string `json:"artifact_ref"`
+	// Optional immutable module releases selected for this template package.
+	// The Engine passes these IDs back to Cloud when resolving the artifact so
+	// that artifact delivery reproduces the exact composition Cloud approved.
+	//contract:maxItems=50
+	OptionalReleaseIDs []string `json:"optional_release_ids,omitempty"`
+	// ProviderSelections pins provider choices for capabilities needed by this
+	// activation. Choices are included in the durable command for recovery.
+	//contract:maxItems=256
+	ProviderSelections []ProviderSelection `json:"provider_selections,omitempty"`
 	//contract:minLength=64
 	//contract:maxLength=64
 	//contract:pattern=^[a-f0-9]{64}$
@@ -302,6 +357,9 @@ func ValidateProvisionTenant(cmd ProvisionTenant) error {
 	if len(cmd.BootstrapAdminEmail) < 3 || len(cmd.BootstrapAdminEmail) > 254 {
 		return fmt.Errorf("bootstrap administrator email must be between 3 and 254 bytes")
 	}
+	if len(cmd.BootstrapAdminSubject) < 3 || len(cmd.BootstrapAdminSubject) > 160 {
+		return fmt.Errorf("bootstrap administrator Cloud subject must be between 3 and 160 bytes")
+	}
 	parsedEmail, err := mail.ParseAddress(cmd.BootstrapAdminEmail)
 	if err != nil || parsedEmail.Address != cmd.BootstrapAdminEmail {
 		return fmt.Errorf("bootstrap administrator email must be a single mailbox address")
@@ -367,6 +425,32 @@ func ValidateApplyPackage(cmd ApplyPackage) error {
 	}
 	if len(cmd.ArtifactRef) < 3 || !managementRefPattern.MatchString(cmd.ArtifactRef) || strings.Contains(cmd.ArtifactRef, "..") {
 		return fmt.Errorf("artifact reference must be an opaque provider reference")
+	}
+	if len(cmd.OptionalReleaseIDs) > 50 {
+		return fmt.Errorf("package component release list exceeds the supported limit")
+	}
+	if len(cmd.ProviderSelections) > 256 {
+		return fmt.Errorf("provider selection list exceeds the supported limit")
+	}
+	seenBindings := make(map[BindingKey]bool, len(cmd.ProviderSelections))
+	for _, selection := range cmd.ProviderSelections {
+		if err := selection.Validate(); err != nil || selection.Key.Scope.TenantID != cmd.Tenant {
+			return fmt.Errorf("provider selection must identify a valid binding in this tenant")
+		}
+		if seenBindings[selection.Key] {
+			return fmt.Errorf("provider selections must have unique binding keys")
+		}
+		seenBindings[selection.Key] = true
+	}
+	seenComponents := make(map[string]struct{}, len(cmd.OptionalReleaseIDs))
+	for _, id := range cmd.OptionalReleaseIDs {
+		if len(id) < 3 || len(id) > 160 || !managementRefPattern.MatchString(id) || strings.Contains(id, "..") {
+			return fmt.Errorf("package component release ID is invalid")
+		}
+		if _, ok := seenComponents[id]; ok {
+			return fmt.Errorf("package component release IDs must be unique")
+		}
+		seenComponents[id] = struct{}{}
 	}
 	if !packageDigestPattern.MatchString(cmd.Digest) {
 		return fmt.Errorf("package digest must be lowercase SHA-256 hex")

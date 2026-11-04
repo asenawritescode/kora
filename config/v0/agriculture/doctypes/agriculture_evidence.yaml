@@ -1,25 +1,72 @@
 name: Harvest Batch
-module: Agriculture and Farm Operations
-title_field: reference
-search_fields: reference, status
+module: Agriculture
+description: A harvested quantity traceable to its field, crop plan, and season.
+title_field: batch_reference
+search_fields: batch_reference, crop, status
+sort_field: harvest_date
+sort_order: DESC
+
 fields:
-  - fieldname: reference
+  - fieldname: batch_reference
     fieldtype: Data
-    label: Reference
+    label: Batch reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: crop_plan
+    fieldtype: Link
+    label: Crop plan
+    options: Crop Plan
     reqd: true
     in_list_view: true
-  - fieldname: source_record
+  - fieldname: field
+    fieldtype: Link
+    label: Field
+    options: Field
+    reqd: true
+  - fieldname: crop
+    fieldtype: Link
+    label: Crop
+    options: Crop
+    reqd: true
+  - fieldname: harvest_date
+    fieldtype: Date
+    label: Harvest date
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Harvested quantity
+    reqd: true
+  - fieldname: quantity_unit
     fieldtype: Data
-    label: Primary Record
+    label: Unit
+    reqd: true
+  - fieldname: grade
+    fieldtype: Data
+    label: Grade or quality
+  - fieldname: storage_location
+    fieldtype: Data
+    label: Storage location
+  - fieldname: recorded_by
+    fieldtype: User
+    label: Recorded by
     reqd: true
   - fieldname: evidence
-    fieldtype: Text
-    label: Evidence
-  - fieldname: decision
-    fieldtype: Text
-    label: Decision
+    fieldtype: Attach
+    label: Harvest evidence
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
-    default: Pending
+    options: |
+      Recorded
+      Stored
+      Allocated
+      Sold
+      Rejected
+    default: Recorded
     in_list_view: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

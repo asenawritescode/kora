@@ -4,7 +4,6 @@ import "time"
 
 // CapabilityContract describes what may be done without prescribing its
 // executor.
-//
 //contract:wire
 type CapabilityContract struct {
 	Ref         ResourceRef     `json:"ref"`
@@ -17,7 +16,6 @@ type CapabilityContract struct {
 }
 
 // SkillContract is a versioned procedure attached to a capability.
-//
 //contract:wire
 type SkillContract struct {
 	Ref        ResourceRef `json:"ref"`
@@ -36,7 +34,6 @@ const (
 )
 
 // PolicyEvaluation is safe to persist as provenance for an operation.
-//
 //contract:wire
 type PolicyEvaluation struct {
 	Decision    PolicyDecision `json:"decision"`

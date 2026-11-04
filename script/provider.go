@@ -1,5 +1,7 @@
 package script
 
+import "context"
+
 // DocProvider is the interface for document CRUD operations.
 // Consumers that only need document access should accept this interface.
 type DocProvider interface {
@@ -18,6 +20,17 @@ type SecretProvider interface {
 // HTTPProvider is the interface for making external HTTP requests.
 type HTTPProvider interface {
 	DoHTTP(req *HTTPRequest) (*HTTPResponse, error)
+}
+
+// ExternalEffectJournal must durably record the start of a non-transactional
+// effect before the provider sends it. It is used by recoverable async hooks.
+type ExternalEffectJournal interface {
+	BeforeExternalEffect(context.Context) error
+}
+
+// ExternalEffectScopedProvider attaches a per-invocation effect journal.
+type ExternalEffectScopedProvider interface {
+	WithExternalEffectJournal(ExternalEffectJournal) KoraProvider
 }
 
 // KoraProvider is the composed interface for backward compatibility.

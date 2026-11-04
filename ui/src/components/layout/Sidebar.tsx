@@ -1,6 +1,6 @@
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { fetchNavigation } from '@/lib/api/system'
+import { fetchNavigation, navigationQueryKey } from '@/lib/api/system'
 import { useAuthStore } from '@/lib/auth-store'
 import { useUIStore } from '@/lib/ui-store'
 import { cn } from '@/lib/utils'
@@ -19,6 +19,7 @@ import {
   Boxes,
   Search,
   X,
+  ClipboardCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -150,7 +151,7 @@ function FlyoutMenu({ label, items, collapsed, icon: Icon, isOpen, onOpen, onClo
 
 export function Sidebar({ mobile = false }: { mobile?: boolean }) {
   const { data, isLoading } = useQuery({
-    queryKey: ['navigation'],
+    queryKey: navigationQueryKey(),
     queryFn: fetchNavigation,
     staleTime: 5 * 60_000,
   })
@@ -194,7 +195,7 @@ export function Sidebar({ mobile = false }: { mobile?: boolean }) {
   const allAdminItems = useMemo(() => ([
     { name: 'doctypes', label: 'DocTypes', to: '/workspace/admin/doctypes' },
     { name: 'permissions', label: 'Permissions', to: '/workspace/admin/permissions' },
-    { name: 'workflows', label: 'Workflows', to: '/workspace/admin/workflows' },
+    { name: 'automations', label: 'Automations', to: '/workspace/admin/automations' },
     { name: 'versions', label: 'Versions', to: '/workspace/admin/versions' },
     { name: 'users', label: 'Users', to: '/workspace/admin/users' },
     { name: 'scripts', label: 'Scripts', to: '/workspace/admin/scripts' },
@@ -264,7 +265,7 @@ export function Sidebar({ mobile = false }: { mobile?: boolean }) {
         {!collapsed && (
           <span className="text-lg font-bold tracking-tight truncate flex items-center gap-2">
             <LogoMark size={20} />
-            {data?.branding?.app_name || 'Kora'}
+            {data?.branding?.app_name || 'Kigae'}
           </span>
         )}
         {!mobile && (
@@ -287,6 +288,13 @@ export function Sidebar({ mobile = false }: { mobile?: boolean }) {
             <LayoutDashboard className="h-4 w-4 shrink-0" />
             {!collapsed && 'Home'}
           </NavItem>
+
+          {data?.supported_capabilities?.includes('requests.inbox.v2') && (
+            <NavItem to="/workspace/requests" collapsed={collapsed}>
+              <ClipboardCheck className="h-4 w-4 shrink-0" />
+              {!collapsed && 'Requests'}
+            </NavItem>
+          )}
 
           {!collapsed && (
             <div className="px-1 pb-2 pt-1">

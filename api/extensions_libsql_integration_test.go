@@ -1,7 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
@@ -126,5 +129,31 @@ func TestLiveLibSQLManagedCredentialLifecycle(t *testing.T) {
 	}
 	if storedToken != rotatedCredential.AccessToken || storedKey == "" || storedToken == firstCredential.AccessToken {
 		t.Fatal("LibSQL managed credential did not persist the latest token and idempotency receipt")
+	}
+	sessionHash := sha256.Sum256([]byte("libsql-managed-session"))
+	if _, err := database.Exec(`INSERT INTO _kora_channel_session (id, site, client_name, conversation_key, provider, sender_address, token_hash, api_permissions, trusted_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, "managed-session", siteName, "kora-cloud-channel", "conversation", "whatsapp", "sender", hex.EncodeToString(sessionHash[:]), "[]", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal("insert disposable LibSQL managed session:", err)
+	}
+	fingerprint := sha256.Sum256([]byte(rotatedCredential.AccessToken))
+	revokeBody, _ := json.Marshal(contract.RevokeManagedChannelClientV2{CredentialFingerprint: hex.EncodeToString(fingerprint[:])})
+	revokeRecorder := httptest.NewRecorder()
+	revokeContext := extensionTestContext(revokeRecorder, database, registry, siteName, http.MethodPost, string(revokeBody), "")
+	revokeContext.Set("site_db_type", "libsql")
+	revokeContext.Set("auth_type", "engine_provisioner")
+	revokeContext.Request.Header.Set("Idempotency-Key", "libsql-delete-revoke-0001")
+	handler.HandleManagedChannelClientRevoke(revokeContext)
+	if revokeRecorder.Code != http.StatusOK {
+		t.Fatalf("LibSQL managed credential revocation returned HTTP %d: %s", revokeRecorder.Code, revokeRecorder.Body.String())
+	}
+	var active bool
+	if err := database.QueryRow(`SELECT is_active FROM _kora_extension WHERE site = ? AND name = ?`, siteName, "kora-cloud-channel").Scan(&active); err != nil {
+		t.Fatal("read LibSQL managed credential state:", err)
+	}
+	var revokedReason string
+	if err := database.QueryRow(`SELECT revoked_reason FROM _kora_channel_session WHERE id = ?`, "managed-session").Scan(&revokedReason); err != nil {
+		t.Fatal("read LibSQL channel session revocation:", err)
+	}
+	if active || revokedReason != "tenant_deletion" {
+		t.Fatal("LibSQL revocation did not disable the credential and session")
 	}
 }

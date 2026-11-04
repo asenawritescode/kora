@@ -2,7 +2,7 @@
 
 Source workbook: `/home/asena/Downloads/Cake_Business_Accounts_Fixed (1).xlsx`
 
-This draft is intentionally outside the repository. It models the workbook as Kora DocTypes using the backend capabilities currently implemented:
+This draft is intentionally outside the repository. It models the workbook as Kigae DocTypes using the backend capabilities currently implemented:
 
 - S-expression computed fields: arithmetic, `sum`, `count`, `round`, `if`, comparisons, `today`, `datediff`, and `concat`.
 - `linked_field` auto-population from Link fields.

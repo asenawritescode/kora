@@ -39,23 +39,18 @@ describe('standard page generator', () => {
       query: 'document.list',
       params: { doctype: 'Sales Order' },
     })
+    expect(manifest.spec.layout.children.map((component) => component.component)).toEqual([
+      'search_box',
+      'filter_bar',
+      'record_table',
+    ])
     expect(manifest.spec.layout.children[0]).toMatchObject({
-      id: 'summary_cards',
-      component: 'dashboard_grid',
-      children: expect.arrayContaining([
-        expect.objectContaining({ component: 'metric_card', data: 'primary.data' }),
-      ]),
-    })
-    expect(manifest.spec.layout.children[1]).toMatchObject({
-      component: 'insights_panel',
-    })
-    expect(manifest.spec.layout.children[2]).toMatchObject({
       component: 'search_box',
     })
-    expect(manifest.spec.layout.children[3]).toMatchObject({
+    expect(manifest.spec.layout.children[1]).toMatchObject({
       component: 'filter_bar',
     })
-    expect(manifest.spec.layout.children[4]).toMatchObject({
+    expect(manifest.spec.layout.children[2]).toMatchObject({
       component: 'record_table',
       data: 'primary.data',
       props: {
@@ -70,21 +65,20 @@ describe('standard page generator', () => {
 
     expect(manifest.spec.layout.type).toBe('single')
     expect(manifest.spec.layout.children.map((component) => component.component)).toEqual([
-      'dashboard_grid',
       'insights_panel',
       'search_box',
       'filter_bar',
       'record_cards',
     ])
-    expect(manifest.spec.layout.children[2]).toMatchObject({
+    expect(manifest.spec.layout.children[1]).toMatchObject({
       component: 'search_box',
       data: 'primary.data',
     })
-    expect(manifest.spec.layout.children[3]).toMatchObject({
+    expect(manifest.spec.layout.children[2]).toMatchObject({
       component: 'filter_bar',
       data: 'primary.data',
     })
-    expect(manifest.spec.layout.children[4]).toMatchObject({
+    expect(manifest.spec.layout.children[3]).toMatchObject({
       data: 'primary.data',
       props: {
         source_doctype: 'Sales Order',
@@ -131,10 +125,11 @@ describe('standard page generator', () => {
     const manifest = createStandardPageManifest(doctype, 'overview')
 
     expect(manifest.spec.capabilities).toContain('charts')
-    expect(manifest.spec.layout.children[1]).toMatchObject({
-      component: 'insights_panel',
-      required_capabilities: ['dashboard', 'charts', 'analytics'],
-    })
+    expect(manifest.spec.layout.children.map((component) => component.component)).toEqual([
+      'search_box',
+      'filter_bar',
+      'record_table',
+    ])
   })
 
   it('keeps generated form and detail pages contract-valid', () => {

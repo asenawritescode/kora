@@ -204,7 +204,6 @@ func TestVersioning_Risk8_SnapshotSizeGrowth(t *testing.T) {
 		DocTypes:    makeDoctypes(23), // 23 doctypes like the ERP demo
 		Roles:       makeRoles(5),
 		Permissions: makePermissions(23, 5),
-		Workflows:   makeWorkflows(3),
 	}
 	// Add the large one.
 	snapshot.DocTypes = append(snapshot.DocTypes, largeDT)
@@ -212,14 +211,13 @@ func TestVersioning_Risk8_SnapshotSizeGrowth(t *testing.T) {
 	jsonBytes, _ := json.Marshal(snapshot)
 	sizeKB := float64(len(jsonBytes)) / 1024.0
 
-	t.Logf("Snapshot with 24 doctypes, 5 roles, 115 permissions, 3 workflows: %.1f KB", sizeKB)
+	t.Logf("Snapshot with 24 doctypes, 5 roles, 115 permissions: %.1f KB", sizeKB)
 
 	// Estimate for 100 doctypes, 10 roles.
 	bigSnapshot := ConfigSnapshot{
 		DocTypes:    makeDoctypes(100),
 		Roles:       makeRoles(10),
 		Permissions: makePermissions(100, 10),
-		Workflows:   makeWorkflows(5),
 	}
 	bigJSON, _ := json.Marshal(bigSnapshot)
 	bigKB := float64(len(bigJSON)) / 1024.0
@@ -410,27 +408,6 @@ func makePermissions(numDoctypes, numRoles int) []*Permission {
 				Write:   r < 3,
 				Create:  r < 2,
 			})
-		}
-	}
-	return result
-}
-
-func makeWorkflows(n int) []*Workflow {
-	result := make([]*Workflow, n)
-	for i := range result {
-		result[i] = &Workflow{
-			Name:         fmt.Sprintf("Workflow%d", i),
-			DocumentType: fmt.Sprintf("DocType%d", i*3),
-			IsActive:     true,
-			States: []WorkflowState{
-				{State: "Draft", DocStatus: 0},
-				{State: "Submitted", DocStatus: 1},
-				{State: "Approved", DocStatus: 2},
-			},
-			Transitions: []WorkflowTransition{
-				{Action: "Submit", From: "Draft", To: "Submitted"},
-				{Action: "Approve", From: "Submitted", To: "Approved"},
-			},
 		}
 	}
 	return result

@@ -1,28 +1,63 @@
 name: Input Application
 module: Agriculture
+description: A record of input used on a crop plan, including amount and application date.
 title_field: reference
-search_fields: reference, status
-sort_field: modified
+search_fields: reference, input_name, status
+sort_field: applied_on
 sort_order: DESC
 
 fields:
   - fieldname: reference
     fieldtype: Data
-    label: Reference
+    label: Application reference
     reqd: true
     unique: true
     in_list_view: true
-  - fieldname: source_record
+  - fieldname: crop_plan
+    fieldtype: Link
+    label: Crop plan
+    options: Crop Plan
+    reqd: true
+    in_list_view: true
+  - fieldname: farm_task
+    fieldtype: Link
+    label: Related task
+    options: Farm Task
+  - fieldname: input_name
+    fieldtype: Link
+    label: Input used
+    options: Farm Input
+    reqd: true
+    in_list_view: true
+    description: Record the product name as shown on its package or source document.
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity used
+    reqd: true
+  - fieldname: unit
     fieldtype: Data
-    label: Source Record
-  - fieldname: assignee
-    fieldtype: Data
-    label: Assignee
+    label: Unit
+    reqd: true
+  - fieldname: applied_on
+    fieldtype: Date
+    label: Applied on
+    reqd: true
+  - fieldname: applied_by
+    fieldtype: User
+    label: Applied by
+    reqd: true
   - fieldname: evidence
+    fieldtype: Attach
+    label: Photo or document
+  - fieldname: notes
     fieldtype: Text
-    label: Evidence
+    label: Notes
   - fieldname: status
-    fieldtype: Data
+    fieldtype: Select
     label: Status
-    default: Draft
+    options: |
+      Recorded
+      Voided
+    default: Recorded
+    read_only: true
     in_list_view: true

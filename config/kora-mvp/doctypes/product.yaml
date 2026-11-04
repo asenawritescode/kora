@@ -10,6 +10,7 @@ fields:
     label: Product or service name
     reqd: true
     in_list_view: true
+    search_index: true
   - fieldname: item_type
     fieldtype: Select
     label: Type

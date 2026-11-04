@@ -28,6 +28,7 @@ func (p *LocalProvider) Publish(ctx context.Context, event contract.EventEnvelop
 
 	change := ChangeEvent{
 		ID:        event.ID,
+		Sequence:  string(event.Sequence),
 		Site:      event.Site,
 		Doctype:   event.AggregateType,
 		DocName:   event.AggregateID,

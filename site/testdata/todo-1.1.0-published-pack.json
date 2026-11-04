@@ -1,0 +1,17 @@
+[
+  {
+    "path": "doctypes/todo.yaml",
+    "content": "name: Todo\nmodule: Tasks\ntitle_field: title\nsearch_fields: title, description\nsort_field: modified\nsort_order: DESC\n\nfields:\n  - fieldname: title\n    fieldtype: Data\n    label: Task\n    reqd: true\n    bold: true\n    in_list_view: true\n    search_index: true\n\n  - fieldname: description\n    fieldtype: Text\n    label: Description\n\n  - fieldname: assignee\n    fieldtype: User\n    label: Assignee\n    in_list_view: true\n    in_standard_filter: true\n\n  - fieldname: status\n    fieldtype: Select\n    label: Status\n    options: |\n      Pending\n      In Progress\n      Done\n    default: Pending\n    in_list_view: true\n    in_standard_filter: true\n\n  - fieldname: priority\n    fieldtype: Select\n    label: Priority\n    options: |\n      Low\n      Medium\n      High\n    default: Medium\n    in_list_view: true\n    in_standard_filter: true\n\n  - fieldname: due_date\n    fieldtype: Date\n    label: Due Date\n    in_list_view: true\n",
+    "content_type": "doctype"
+  },
+  {
+    "path": "permissions.yaml",
+    "content": "- doctype: Todo\n  role: Todo User\n  can_read: true\n  can_write: true\n  can_create: true\n  can_delete: true\n\n- doctype: Todo\n  role: Administrator\n  can_read: true\n  can_write: true\n  can_create: true\n  can_delete: true\n",
+    "content_type": "permissions"
+  },
+  {
+    "path": "roles.yaml",
+    "content": "- name: Todo User\n  workspace_access: true\n  description: Can create and manage todos.\n\n- name: Administrator\n  workspace_access: true\n  description: Full system access.\n",
+    "content_type": "roles"
+  }
+]

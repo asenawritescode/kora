@@ -3,13 +3,15 @@ package doctype
 import (
 	"fmt"
 	"sync"
+
+	"github.com/asenawritescode/kora/contract"
 )
 
 // ComputedHookFunc is called to evaluate a script-based computed field.
 // It receives the doctype name, field name, and document, and returns the computed value.
 type ComputedHookFunc func(doctypeName, fieldName string, doc *Document) (any, error)
 
-// Registry holds all DocType definitions, permissions, and workflows.
+// Registry holds all DocType definitions and permissions.
 // It is rebuilt from the active config version on startup and after config
 // changes. This is the current application model: DocType-centric with views
 // and page manifests projected on top. It is not yet the RFC's full generic
@@ -19,18 +21,16 @@ type Registry struct {
 	doctypes      map[string]*DocType // keyed by doctype name
 	aliases       map[string]string   // resource-safe aliases → primary doctype name
 	Permissions   *PermissionMatrix
-	Workflows     *WorkflowMap
 	Views         *ViewRegistry
 	ComputedHooks ComputedHookFunc // optional — runs script-based computed fields
 }
 
-// NewRegistry creates an empty registry with blank permission matrix and workflow map.
+// NewRegistry creates an empty registry with a blank permission matrix.
 func NewRegistry() *Registry {
 	return &Registry{
 		doctypes:    make(map[string]*DocType),
 		aliases:     make(map[string]string),
 		Permissions: NewPermissionMatrix(),
-		Workflows:   NewWorkflowMap(),
 		Views:       NewViewRegistry(),
 	}
 }
@@ -70,6 +70,17 @@ func (r *Registry) Has(name string) bool {
 	}
 	_, ok = r.aliases[name]
 	return ok
+}
+
+// IsPrivateModuleResource treats every module-owned resource as private to
+// generic read surfaces. Owners publish only the fields and operations they
+// intend to expose through an explicit query contract.
+func (r *Registry) IsPrivateModuleResource(name string) bool {
+	if r == nil {
+		return false
+	}
+	dt := r.Get(name)
+	return dt != nil && dt.ModuleOwnerID != ""
 }
 
 // Unregister removes a DocType from the registry. Safe to call if the doctype
@@ -190,4 +201,22 @@ func (r *Registry) Remove(name string) {
 // CanUser checks permission for a user with given roles.
 func (r *Registry) CanUser(userRoles []string, doctype, operation string) (allowed bool, ownerOnly bool) {
 	return r.Permissions.UserCan(userRoles, doctype, operation)
+}
+
+// RowScopeFor returns operation-specific row restrictions from the current
+// tenant permission matrix.
+func (r *Registry) RowScopeFor(userRoles []string, doctype, operation string) (bool, []string) {
+	if r == nil || r.Permissions == nil {
+		return false, nil
+	}
+	return r.Permissions.RowScopeFor(userRoles, doctype, operation)
+}
+
+// CanUserInBusinessScope resolves only a permission row explicitly assigned
+// to one legal entity.
+func (r *Registry) CanUserInBusinessScope(userRoles []string, doctype, operation string, scope contract.BusinessScope) (bool, bool, []string) {
+	if r == nil || r.Permissions == nil {
+		return false, false, nil
+	}
+	return r.Permissions.CanUserInBusinessScope(userRoles, doctype, operation, scope)
 }

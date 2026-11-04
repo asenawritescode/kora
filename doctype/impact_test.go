@@ -142,20 +142,6 @@ func TestAnalyzeImpactFromChanges_Tiers(t *testing.T) {
 			wantTier: doctype.TierSafe,
 		},
 		{
-			name: "add-workflow is safe",
-			changes: []doctype.Change{
-				{Type: "add-workflow", Section: "workflows", Entity: "Product"},
-			},
-			wantTier: doctype.TierSafe,
-		},
-		{
-			name: "remove-workflow is warning",
-			changes: []doctype.Change{
-				{Type: "remove-workflow", Section: "workflows", Entity: "Product"},
-			},
-			wantTier: doctype.TierWarning,
-		},
-		{
 			name: "add-metric is safe",
 			changes: []doctype.Change{
 				{Type: "add-metric", Section: "analytics_metrics", Entity: "total_sales"},

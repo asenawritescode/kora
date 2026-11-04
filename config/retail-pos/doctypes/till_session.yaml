@@ -12,6 +12,7 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
+    search_index: true
   - fieldname: source_record
     fieldtype: Data
     label: Source Record

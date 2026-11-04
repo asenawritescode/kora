@@ -29,6 +29,298 @@
       ],
       "type": "object"
     },
+    "ApplicationCatalog": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_entity_choices": {
+          "items": {
+            "$ref": "#/$defs/BusinessScope"
+          },
+          "type": "array"
+        },
+        "available_scopes": {
+          "items": {
+            "$ref": "#/$defs/BusinessScope"
+          },
+          "type": "array"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogModule"
+          },
+          "type": "array"
+        },
+        "published_operations": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogOperation"
+          },
+          "type": "array"
+        },
+        "published_projections": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogProjection"
+          },
+          "type": "array"
+        },
+        "published_queries": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogQuery"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "schemas": {
+          "items": {
+            "$ref": "#/$defs/ModuleSchemaDocument"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_entity_choices",
+        "blockers",
+        "business_scope",
+        "modules",
+        "published_operations",
+        "published_projections",
+        "published_queries",
+        "revision",
+        "schemas"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogModule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "enum": [
+            "available",
+            "unavailable",
+            "disabled",
+            "draining"
+          ],
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "offline_eligible": {
+          "type": "boolean"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        }
+      },
+      "required": [
+        "availability",
+        "capability",
+        "input_schema",
+        "operation",
+        "operation_ref",
+        "output_schema",
+        "owner_module_id",
+        "permissions",
+        "presentation"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "route": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "id",
+        "output_schema",
+        "owner_module_id",
+        "route",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
+        },
+        "offline_fact_key": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "page_limit": {
+          "type": "integer"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
+        "route": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "capability",
+        "input_schema",
+        "name",
+        "output_schema",
+        "owner_module_id",
+        "page_limit",
+        "presentation",
+        "route",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "ApplyModuleChange": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "plan_hash": {
+          "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "meta",
+        "module_id",
+        "plan_hash",
+        "target_state"
+      ],
+      "type": "object"
+    },
     "ApplyPackage": {
       "additionalProperties": false,
       "properties": {
@@ -49,6 +341,20 @@
         },
         "meta": {
           "$ref": "#/$defs/CommandMeta"
+        },
+        "optional_release_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "maxItems": 256,
+          "type": "array"
         },
         "tenant_id": {
           "type": "string"
@@ -155,6 +461,170 @@
       ],
       "type": "object"
     },
+    "BindingInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "capability_name": {
+          "type": "string"
+        },
+        "consumer_module_id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "capability_name",
+        "consumer_module_id",
+        "provider_id"
+      ],
+      "type": "object"
+    },
+    "BindingKey": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "consumer_module_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        }
+      },
+      "required": [
+        "capability_name",
+        "consumer_module_id",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "BusinessEventDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "type": "string"
+        },
+        "payload_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "payload_schema",
+        "type"
+      ],
+      "type": "object"
+    },
+    "BusinessRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        }
+      },
+      "required": [
+        "id",
+        "provider_id",
+        "resource_type",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "BusinessScope": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "properties": null,
+            "required": [
+              "legal_entity_id"
+            ],
+            "type": "object"
+          },
+          "properties": {
+            "kind": {
+              "const": "tenant"
+            },
+            "tenant_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "tenant_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "legal_entity"
+            },
+            "legal_entity_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            "tenant_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "tenant_id",
+            "legal_entity_id"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "tenant",
+            "legal_entity"
+          ],
+          "type": "string"
+        },
+        "legal_entity_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "tenant_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
     "CancelRequest": {
       "additionalProperties": false,
       "properties": {
@@ -186,6 +656,92 @@
       "required": [
         "meta",
         "reason"
+      ],
+      "type": "object"
+    },
+    "CapabilityAction": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "operation_name": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "capability_name",
+        "input_schema",
+        "operation_name",
+        "output_schema"
+      ],
+      "type": "object"
+    },
+    "CapabilityInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "type": "object"
+    },
+    "CapabilityOffer": {
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OperationSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "contract",
+        "name",
+        "operations"
+      ],
+      "type": "object"
+    },
+    "CapabilityRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "contract",
+        "name",
+        "required"
       ],
       "type": "object"
     },
@@ -257,6 +813,93 @@
       ],
       "type": "object"
     },
+    "CheckoutInputBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "cart_items": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "customer_phone": {
+          "type": "string"
+        },
+        "customer_ref": {
+          "type": "string"
+        },
+        "payment_method": {
+          "type": "string"
+        },
+        "register_ref": {
+          "type": "string"
+        },
+        "requested_total": {
+          "type": "string"
+        },
+        "shift_ref": {
+          "type": "string"
+        },
+        "till_session_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cart_items",
+        "currency",
+        "payment_method",
+        "requested_total"
+      ],
+      "type": "object"
+    },
+    "CheckoutOperationContract": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/CheckoutInputBinding"
+        },
+        "outcomes": {
+          "items": {
+            "$ref": "#/$defs/CheckoutOutcomeBinding"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "outcomes"
+      ],
+      "type": "object"
+    },
+    "CheckoutOutcomeBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "payment_initiated",
+            "payment_settled",
+            "invoice_issued",
+            "fulfillment_completed"
+          ],
+          "type": "string"
+        },
+        "reference_field": {
+          "type": "string"
+        },
+        "status_field": {
+          "type": "string"
+        },
+        "success_value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "status_field",
+        "success_value"
+      ],
+      "type": "object"
+    },
     "CommandMeta": {
       "additionalProperties": false,
       "properties": {
@@ -272,12 +915,82 @@
       ],
       "type": "object"
     },
+    "CompositionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bindings": {
+          "items": {
+            "$ref": "#/$defs/BindingInspection"
+          },
+          "type": "array"
+        },
+        "conflicts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cycle_paths": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "disabled_optional": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRequirement"
+          },
+          "type": "array"
+        },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/ResolvedModuleExtension"
+          },
+          "type": "array"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/InstalledPackage"
+          },
+          "type": "array"
+        },
+        "plan_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "activation_order",
+        "bindings",
+        "modules",
+        "plan_hash"
+      ],
+      "type": "object"
+    },
     "ConditionSpec": {
       "additionalProperties": false,
       "properties": {
         "expression": {
           "maxLength": 8192,
           "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/FieldCondition",
+          "x-optional-pointer": true
         },
         "if_false": {
           "type": "string"
@@ -287,7 +1000,6 @@
         }
       },
       "required": [
-        "expression",
         "if_false",
         "if_true"
       ],
@@ -317,6 +1029,13 @@
         "proposal_id": {
           "type": "string"
         },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
+          "type": "array"
+        },
         "roles": {
           "items": {
             "x-open-json-value": true
@@ -335,7 +1054,7 @@
           },
           "type": "array"
         },
-        "workflows": {
+        "workflow_definitions": {
           "items": {
             "x-open-json-value": true
           },
@@ -371,10 +1090,23 @@
           },
           "type": "array"
         },
+        "module_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
         "ordered_doctypes": {
           "items": {
             "type": "string"
           },
+          "type": "array"
+        },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
           "type": "array"
         },
         "valid": {
@@ -477,9 +1209,22 @@
         "proposal_id": {
           "type": "string"
         },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
+          "type": "array"
+        },
         "roles": {
           "items": {
             "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "scheduled_jobs": {
+          "items": {
+            "$ref": "#/$defs/ScheduledJobDefinition"
           },
           "type": "array"
         },
@@ -495,7 +1240,7 @@
           },
           "type": "array"
         },
-        "workflows": {
+        "workflow_definitions": {
           "items": {
             "x-open-json-value": true
           },
@@ -532,6 +1277,346 @@
       ],
       "type": "object"
     },
+    "ConfigurationSnapshotFileV2": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "content_type",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ConfigurationSnapshotResponseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "doctype_count": {
+          "type": "integer"
+        },
+        "doctype_names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "pack_files": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSnapshotFileV2"
+          },
+          "type": "array"
+        },
+        "permissions_count": {
+          "type": "integer"
+        },
+        "roles_count": {
+          "type": "integer"
+        },
+        "site": {
+          "type": "string"
+        },
+        "snapshot": {
+          "x-open-json-value": true
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "version_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "doctype_count",
+        "doctype_names",
+        "label",
+        "pack_files",
+        "permissions_count",
+        "roles_count",
+        "site",
+        "snapshot",
+        "status",
+        "version",
+        "version_id"
+      ],
+      "type": "object"
+    },
+    "ConfigurationSurfaceBinding": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "operation_ref"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "kind": {
+              "const": "query",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 160,
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "name",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "operation_ref"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "input_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "projection",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 160,
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "name",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "kind": {
+              "const": "operation",
+              "type": "string"
+            },
+            "operation_ref": {
+              "maxLength": 386,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "operation_ref",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "query",
+            "projection",
+            "operation"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "operation_ref": {
+          "maxLength": 386,
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}$",
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+          "type": "string"
+        },
+        "view_name": {
+          "maxLength": 160,
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "kind",
+        "output_schema",
+        "owner_module_id",
+        "view_name"
+      ],
+      "type": "object"
+    },
+    "ConfigurationVersionSummaryV2": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "site",
+        "status",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ConsumerDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_event_schemas": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SchemaRef"
+          },
+          "type": "object"
+        },
+        "consumer_id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted_event_schemas",
+        "consumer_id",
+        "owner_module_id"
+      ],
+      "type": "object"
+    },
     "ContinuationView": {
       "additionalProperties": false,
       "properties": {
@@ -552,6 +1637,38 @@
       "required": [
         "operation_id",
         "state"
+      ],
+      "type": "object"
+    },
+    "CrossEntityOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "source_entity_id": {
+          "type": "string"
+        },
+        "target_entity_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "operation_id",
+        "resource",
+        "source_entity_id",
+        "target_entity_id",
+        "tenant_id"
       ],
       "type": "object"
     },
@@ -627,6 +1744,249 @@
       "required": [
         "message",
         "type"
+      ],
+      "type": "object"
+    },
+    "ExecutePublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "meta"
+      ],
+      "type": "object"
+    },
+    "ExecutionInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "caller_module_id": {
+          "type": "string"
+        },
+        "contract": {
+          "$ref": "#/$defs/CapabilityAction"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "delivery_state": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "reconciliation_state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "caller_module_id",
+        "contract",
+        "correlation_id",
+        "delivery_state",
+        "execution_id",
+        "owner_module_id",
+        "provider_id",
+        "reconciliation_state"
+      ],
+      "type": "object"
+    },
+    "ExtensionField": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "key",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "ExtensionPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_kinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "execution_phase": {
+          "type": "string"
+        },
+        "failure_policy": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "protected_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "target": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "allowed_kinds",
+        "execution_phase",
+        "failure_policy",
+        "id",
+        "input_schema",
+        "output_schema",
+        "owner_module_id",
+        "target",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ExtensionRegistration": {
+      "additionalProperties": false,
+      "properties": {
+        "added_fields": {
+          "items": {
+            "$ref": "#/$defs/ExtensionField"
+          },
+          "type": "array"
+        },
+        "artifact_digest": {
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "event": {
+          "type": "string"
+        },
+        "extender_module_id": {
+          "type": "string"
+        },
+        "handler_ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "fields",
+            "validation",
+            "post_commit"
+          ],
+          "type": "string"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "point_id": {
+          "type": "string"
+        },
+        "point_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_digest",
+        "extender_module_id",
+        "handler_ref",
+        "id",
+        "kind",
+        "order",
+        "point_id",
+        "point_version"
+      ],
+      "type": "object"
+    },
+    "FieldCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "operator": {
+          "type": "string"
+        },
+        "value": {
+          "x-max-json-bytes": 8192,
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "field",
+        "operator"
+      ],
+      "type": "object"
+    },
+    "HistoricalSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "captured_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "source": {
+          "$ref": "#/$defs/BusinessRef"
+        }
+      },
+      "required": [
+        "business_scope",
+        "captured_at",
+        "data",
+        "schema",
+        "source"
       ],
       "type": "object"
     },
@@ -747,6 +2107,58 @@
       ],
       "type": "object"
     },
+    "InstalledPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "package_id",
+        "release_id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "LookupPublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "operation_ref"
+      ],
+      "type": "object"
+    },
     "ManagedChannelClientV2": {
       "additionalProperties": false,
       "properties": {
@@ -841,11 +2253,15 @@
               "tenant.delete.reconcile",
               "tenant.invitation.deliver",
               "tenant.invitation.reconcile",
+              "tenant.module.lifecycle",
               "operation.read"
             ],
             "type": "string"
           },
           "type": "array"
+        },
+        "engine_version": {
+          "type": "string"
         },
         "version": {
           "type": "integer"
@@ -1033,6 +2449,12 @@
         "kind": {
           "type": "string"
         },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
         "package_id": {
           "type": "string"
         },
@@ -1045,6 +2467,12 @@
         "requires": {
           "items": {
             "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "scheduled_jobs": {
+          "items": {
+            "$ref": "#/$defs/ScheduledJobDefinition"
           },
           "type": "array"
         },
@@ -1063,6 +2491,958 @@
         "release_id",
         "schema_version",
         "version"
+      ],
+      "type": "object"
+    },
+    "ModuleBlocker": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "examples": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "count"
+      ],
+      "type": "object"
+    },
+    "ModuleChangePlan": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "type": "integer"
+        },
+        "binding_changes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dependency_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "open_work_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "plan_hash": {
+          "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_revision",
+        "module_id",
+        "plan_hash",
+        "target_state"
+      ],
+      "type": "object"
+    },
+    "ModuleDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "extension_points": {
+          "items": {
+            "$ref": "#/$defs/ExtensionPoint"
+          },
+          "type": "array"
+        },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/ExtensionRegistration"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "projections": {
+          "items": {
+            "$ref": "#/$defs/ProjectionDefinition"
+          },
+          "type": "array"
+        },
+        "provides": {
+          "items": {
+            "$ref": "#/$defs/CapabilityOffer"
+          },
+          "type": "array"
+        },
+        "published_operations": {
+          "items": {
+            "$ref": "#/$defs/PublishedOperation"
+          },
+          "type": "array"
+        },
+        "queries": {
+          "items": {
+            "$ref": "#/$defs/PublishedQuery"
+          },
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRequirement"
+          },
+          "type": "array"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/OwnedResource"
+          },
+          "type": "array"
+        },
+        "schemas": {
+          "items": {
+            "$ref": "#/$defs/ModuleSchemaDocument"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ModuleInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "items": {
+            "$ref": "#/$defs/BindingInspection"
+          },
+          "type": "array"
+        },
+        "blocking_reasons": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "capability_availability": {
+          "items": {
+            "$ref": "#/$defs/CapabilityInspection"
+          },
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "integer"
+        },
+        "installations": {
+          "items": {
+            "$ref": "#/$defs/ModuleInstallation"
+          },
+          "type": "array"
+        },
+        "pending_work": {
+          "$ref": "#/$defs/PendingWorkSummary"
+        },
+        "resource_owners": {
+          "items": {
+            "$ref": "#/$defs/ResourceOwnership"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bindings",
+        "blocking_reasons",
+        "capability_availability",
+        "config_revision",
+        "installations",
+        "pending_work",
+        "resource_owners"
+      ],
+      "type": "object"
+    },
+    "ModuleInstallation": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_digest": {
+          "type": "string"
+        },
+        "last_lifecycle_operation_id": {
+          "type": "string"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "state_changed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_digest",
+        "module_id",
+        "revision",
+        "state",
+        "tenant_id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ModuleSchemaDocument": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "schema": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "ref",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "ModuleSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "installations": {
+          "items": {
+            "$ref": "#/$defs/ModuleInstallation"
+          },
+          "type": "array"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
+        "ownership": {
+          "items": {
+            "$ref": "#/$defs/ResourceOwnership"
+          },
+          "type": "array"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/InstalledPackage"
+          },
+          "type": "array"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "installations",
+        "ownership",
+        "revision",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "OfflineBootstrapRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "limit",
+        "source"
+      ],
+      "type": "object"
+    },
+    "OfflineCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "max_batch_size": {
+          "type": "integer"
+        },
+        "max_page_size": {
+          "type": "integer"
+        },
+        "offline_operations": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogOperation"
+          },
+          "type": "array"
+        },
+        "offline_queries": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogQuery"
+          },
+          "type": "array"
+        },
+        "protocol_version": {
+          "type": "integer"
+        },
+        "snapshot_lifetime_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "catalog_revision",
+        "max_batch_size",
+        "max_page_size",
+        "offline_operations",
+        "offline_queries",
+        "protocol_version",
+        "snapshot_lifetime_seconds"
+      ],
+      "type": "object"
+    },
+    "OfflineChange": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "x-open-json-value": true
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "fact_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deleted",
+        "fact_key"
+      ],
+      "type": "object"
+    },
+    "OfflineIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "expected_revision": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "input": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "local_operation_id": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "idempotency_key",
+        "input",
+        "input_schema",
+        "local_operation_id",
+        "operation_ref"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "local_operation_id": {
+          "type": "string"
+        },
+        "receipt": {
+          "$ref": "#/$defs/OperationReceipt"
+        }
+      },
+      "required": [
+        "local_operation_id",
+        "receipt"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "intents": {
+          "items": {
+            "$ref": "#/$defs/OfflineIntent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "intents"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentsResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "receipts": {
+          "items": {
+            "$ref": "#/$defs/OfflineIntentReceipt"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "receipts"
+      ],
+      "type": "object"
+    },
+    "OfflinePullRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "input_hash",
+        "limit",
+        "replay_position",
+        "snapshot_token",
+        "source"
+      ],
+      "type": "object"
+    },
+    "OfflinePullResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/OfflineChange"
+          },
+          "type": "array"
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "next_page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "schema_revision": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "subject_id": {
+          "type": "string"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "changes",
+        "has_more",
+        "input_hash",
+        "replay_position",
+        "schema_revision",
+        "snapshot_token",
+        "source",
+        "subject_id",
+        "through_cursor"
+      ],
+      "type": "object"
+    },
+    "OfflineSnapshotPage": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "fact_key_field": {
+          "type": "string"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "next_page_cursor": {
+          "type": "string"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "rows": {
+          "x-open-json-value": true
+        },
+        "schema_revision": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "subject_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "complete",
+        "fact_key_field",
+        "input_hash",
+        "replay_position",
+        "rows",
+        "schema_revision",
+        "snapshot_token",
+        "source",
+        "subject_id"
+      ],
+      "type": "object"
+    },
+    "OfflineSourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "query_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "owner_module_id",
+        "query_name"
+      ],
+      "type": "object"
+    },
+    "OperationReceipt": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "error"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "output": {
+              "x-max-json-bytes": 1048576,
+              "x-open-json-value": true
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
+            "status": {
+              "const": "completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
+            "status",
+            "output",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "error"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "accepted",
+                "running"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "output"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "error": {
+              "$ref": "#/$defs/Error",
+              "x-optional-pointer": true
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "rejected",
+                "conflict",
+                "failed",
+                "outcome_unknown"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
+            "status",
+            "error"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Error",
+          "x-optional-pointer": true
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "revision": {
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "accepted",
+            "running",
+            "completed",
+            "rejected",
+            "conflict",
+            "failed",
+            "outcome_unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "execution_id",
+        "operation_ref",
+        "revision",
+        "status"
+      ],
+      "type": "object"
+    },
+    "OperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "effect": {
+          "enum": [
+            "query",
+            "local_command",
+            "external_command"
+          ],
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "effect",
+        "input",
+        "name",
+        "output"
+      ],
+      "type": "object"
+    },
+    "OwnedResource": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "enum": [
+            "private",
+            "published"
+          ],
+          "type": "string"
+        },
+        "mutation_mode": {
+          "enum": [
+            "crud",
+            "commands_only"
+          ],
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "scope_field": {
+          "type": "string"
+        },
+        "scope_kind": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "access",
+        "mutation_mode",
+        "ref",
+        "scope_kind"
       ],
       "type": "object"
     },
@@ -1113,8 +3493,20 @@
     "PackManifest": {
       "additionalProperties": false,
       "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
         "exports": {
           "$ref": "#/$defs/ManifestExports"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
         },
         "name": {
           "type": "string"
@@ -1122,6 +3514,12 @@
         "requires": {
           "items": {
             "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "scheduled_jobs": {
+          "items": {
+            "$ref": "#/$defs/ScheduledJobDefinition"
           },
           "type": "array"
         },
@@ -1159,6 +3557,28 @@
       ],
       "type": "object"
     },
+    "PackageDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_id",
+        "required"
+      ],
+      "type": "object"
+    },
     "PageRequest": {
       "additionalProperties": false,
       "properties": {
@@ -1173,6 +3593,34 @@
       },
       "required": [
         "limit"
+      ],
+      "type": "object"
+    },
+    "PendingWorkSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_count": {
+          "type": "integer"
+        },
+        "open_obligation_count": {
+          "type": "integer"
+        },
+        "scheduled_count": {
+          "type": "integer"
+        },
+        "unknown_outcome_count": {
+          "type": "integer"
+        },
+        "workflow_count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "delivery_count",
+        "open_obligation_count",
+        "scheduled_count",
+        "unknown_outcome_count",
+        "workflow_count"
       ],
       "type": "object"
     },
@@ -1236,6 +3684,200 @@
       ],
       "type": "object"
     },
+    "PinnedDispatch": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "caller_module_id": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/$defs/CapabilityAction"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "provider_module_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "caller_module_id",
+        "execution_id",
+        "idempotency_key",
+        "input_hash",
+        "operation",
+        "provider_id",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "PlanModuleChange": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "module_id",
+        "target_state"
+      ],
+      "type": "object"
+    },
+    "ProjectionCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "entity_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "projection_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "entity_scope",
+        "projection_id",
+        "source_id",
+        "tenant_id",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "ProjectionDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fact_key": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_field": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "rebuild_strategy": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/ProjectionSource"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "fact_key",
+        "id",
+        "output_schema",
+        "owner_module_id",
+        "rebuild_strategy",
+        "scope_policy",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "ProjectionSource": {
+      "additionalProperties": false,
+      "properties": {
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "query_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "output_schema",
+        "owner_module_id",
+        "query_name"
+      ],
+      "type": "object"
+    },
+    "ProviderSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/BindingKey"
+        },
+        "provider_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "provider_id"
+      ],
+      "type": "object"
+    },
     "ProvisionTenant": {
       "additionalProperties": false,
       "properties": {
@@ -1249,6 +3891,11 @@
         },
         "bootstrap_admin_email": {
           "maxLength": 254,
+          "minLength": 3,
+          "type": "string"
+        },
+        "bootstrap_admin_subject": {
+          "maxLength": 160,
           "minLength": 3,
           "type": "string"
         },
@@ -1283,11 +3930,269 @@
       "required": [
         "aliases",
         "bootstrap_admin_email",
+        "bootstrap_admin_subject",
         "database_allocation_ref",
         "deployment_id",
         "meta",
         "primary_alias",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "PublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_callers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_callers",
+        "capability",
+        "name",
+        "operation",
+        "presentation",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "PublishedQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
+        },
+        "offline_fact_key": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_field": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "page_limit": {
+          "type": "integer"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "capability",
+        "input_schema",
+        "name",
+        "operation",
+        "output_schema",
+        "owner_module_id",
+        "page_limit",
+        "presentation",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "PublishedQueryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "limit": {
+          "maximum": 1000,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "PublishedReferenceLookup": {
+      "additionalProperties": false,
+      "properties": {
+        "label_field": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "search_field": {
+          "type": "string"
+        },
+        "value_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label_field",
+        "resource_type",
+        "search_field",
+        "value_field"
+      ],
+      "type": "object"
+    },
+    "QueryReplayChange": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "x-open-json-value": true
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "fact_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_key"
+      ],
+      "type": "object"
+    },
+    "QueryReplayPage": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/QueryReplayChange"
+          },
+          "type": "array"
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "incomplete"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "changes",
+        "freshness",
+        "source_revision",
+        "through_cursor"
+      ],
+      "type": "object"
+    },
+    "QueryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "incomplete"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source_cursor": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "data",
+        "freshness"
       ],
       "type": "object"
     },
@@ -1443,6 +4348,73 @@
         "outcome",
         "reason",
         "step_id"
+      ],
+      "type": "object"
+    },
+    "RecordChangeEventData": {
+      "additionalProperties": false,
+      "properties": {
+        "changed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "record_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "table": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "record_id",
+        "revision",
+        "table"
+      ],
+      "type": "object"
+    },
+    "RecordTrigger": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "table": {
+          "type": "string"
+        },
+        "watched_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "table"
+      ],
+      "type": "object"
+    },
+    "ReferenceRule": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "resource_type"
       ],
       "type": "object"
     },
@@ -1695,6 +4667,62 @@
       ],
       "type": "object"
     },
+    "ResolvedModuleExtension": {
+      "additionalProperties": false,
+      "properties": {
+        "point": {
+          "$ref": "#/$defs/ExtensionPoint"
+        },
+        "registration": {
+          "$ref": "#/$defs/ExtensionRegistration"
+        }
+      },
+      "required": [
+        "point",
+        "registration"
+      ],
+      "type": "object"
+    },
+    "ResourceOwnership": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "resource",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "ResourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "namespace",
+        "version"
+      ],
+      "type": "object"
+    },
     "RespondRequest": {
       "additionalProperties": false,
       "properties": {
@@ -1849,6 +4877,42 @@
       ],
       "type": "object"
     },
+    "ScheduledJobDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "x-open-json-value": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "required_operation": {
+          "type": "string"
+        },
+        "required_resource": {
+          "type": "string"
+        },
+        "schedule": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope",
+          "x-optional-pointer": true
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "schedule",
+        "type"
+      ],
+      "type": "object"
+    },
     "SchemaRef": {
       "additionalProperties": false,
       "properties": {
@@ -1945,6 +5009,9 @@
     "StartWorkflow": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "definition_id": {
           "type": "string"
         },
@@ -2155,6 +5222,27 @@
       ],
       "type": "object"
     },
+    "SurfacePresentation": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "form": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "list": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "TemplateDetailPageContent": {
       "additionalProperties": false,
       "properties": {
@@ -2353,6 +5441,9 @@
         "id": {
           "type": "string"
         },
+        "owner_module_id": {
+          "type": "string"
+        },
         "steps": {
           "items": {
             "$ref": "#/$defs/StepDefinition"
@@ -2360,6 +5451,10 @@
           "maxItems": 100,
           "minItems": 1,
           "type": "array"
+        },
+        "trigger": {
+          "$ref": "#/$defs/RecordTrigger",
+          "x-optional-pointer": true
         },
         "version": {
           "type": "integer"
@@ -2396,6 +5491,12 @@
     "WorkflowInstance": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "causation_depth": {
+          "type": "integer"
+        },
         "created_at": {
           "format": "date-time",
           "type": "string"
@@ -2488,6 +5589,298 @@
       ],
       "type": "object"
     },
+    "ApplicationCatalog": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_entity_choices": {
+          "items": {
+            "$ref": "#/$defs/BusinessScope"
+          },
+          "type": "array"
+        },
+        "available_scopes": {
+          "items": {
+            "$ref": "#/$defs/BusinessScope"
+          },
+          "type": "array"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogModule"
+          },
+          "type": "array"
+        },
+        "published_operations": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogOperation"
+          },
+          "type": "array"
+        },
+        "published_projections": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogProjection"
+          },
+          "type": "array"
+        },
+        "published_queries": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogQuery"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "schemas": {
+          "items": {
+            "$ref": "#/$defs/ModuleSchemaDocument"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_entity_choices",
+        "blockers",
+        "business_scope",
+        "modules",
+        "published_operations",
+        "published_projections",
+        "published_queries",
+        "revision",
+        "schemas"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogModule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "enum": [
+            "available",
+            "unavailable",
+            "disabled",
+            "draining"
+          ],
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "offline_eligible": {
+          "type": "boolean"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        }
+      },
+      "required": [
+        "availability",
+        "capability",
+        "input_schema",
+        "operation",
+        "operation_ref",
+        "output_schema",
+        "owner_module_id",
+        "permissions",
+        "presentation"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "route": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "id",
+        "output_schema",
+        "owner_module_id",
+        "route",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "ApplicationCatalogQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
+        },
+        "offline_fact_key": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "page_limit": {
+          "type": "integer"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
+        "route": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "capability",
+        "input_schema",
+        "name",
+        "output_schema",
+        "owner_module_id",
+        "page_limit",
+        "presentation",
+        "route",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "ApplyModuleChange": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "plan_hash": {
+          "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "meta",
+        "module_id",
+        "plan_hash",
+        "target_state"
+      ],
+      "type": "object"
+    },
     "ApplyPackage": {
       "additionalProperties": false,
       "properties": {
@@ -2508,6 +5901,20 @@
         },
         "meta": {
           "$ref": "#/$defs/CommandMeta"
+        },
+        "optional_release_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "maxItems": 256,
+          "type": "array"
         },
         "tenant_id": {
           "type": "string"
@@ -2614,6 +6021,170 @@
       ],
       "type": "object"
     },
+    "BindingInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "capability_name": {
+          "type": "string"
+        },
+        "consumer_module_id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "capability_name",
+        "consumer_module_id",
+        "provider_id"
+      ],
+      "type": "object"
+    },
+    "BindingKey": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "consumer_module_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        }
+      },
+      "required": [
+        "capability_name",
+        "consumer_module_id",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "BusinessEventDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "type": "string"
+        },
+        "payload_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "payload_schema",
+        "type"
+      ],
+      "type": "object"
+    },
+    "BusinessRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        }
+      },
+      "required": [
+        "id",
+        "provider_id",
+        "resource_type",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "BusinessScope": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "properties": null,
+            "required": [
+              "legal_entity_id"
+            ],
+            "type": "object"
+          },
+          "properties": {
+            "kind": {
+              "const": "tenant"
+            },
+            "tenant_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "tenant_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "legal_entity"
+            },
+            "legal_entity_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            "tenant_id": {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "tenant_id",
+            "legal_entity_id"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "tenant",
+            "legal_entity"
+          ],
+          "type": "string"
+        },
+        "legal_entity_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "tenant_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
     "CancelRequest": {
       "additionalProperties": false,
       "properties": {
@@ -2645,6 +6216,92 @@
       "required": [
         "meta",
         "reason"
+      ],
+      "type": "object"
+    },
+    "CapabilityAction": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "operation_name": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "capability_name",
+        "input_schema",
+        "operation_name",
+        "output_schema"
+      ],
+      "type": "object"
+    },
+    "CapabilityInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "type": "object"
+    },
+    "CapabilityOffer": {
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OperationSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "contract",
+        "name",
+        "operations"
+      ],
+      "type": "object"
+    },
+    "CapabilityRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "contract",
+        "name",
+        "required"
       ],
       "type": "object"
     },
@@ -2716,6 +6373,93 @@
       ],
       "type": "object"
     },
+    "CheckoutInputBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "cart_items": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "customer_phone": {
+          "type": "string"
+        },
+        "customer_ref": {
+          "type": "string"
+        },
+        "payment_method": {
+          "type": "string"
+        },
+        "register_ref": {
+          "type": "string"
+        },
+        "requested_total": {
+          "type": "string"
+        },
+        "shift_ref": {
+          "type": "string"
+        },
+        "till_session_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cart_items",
+        "currency",
+        "payment_method",
+        "requested_total"
+      ],
+      "type": "object"
+    },
+    "CheckoutOperationContract": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/CheckoutInputBinding"
+        },
+        "outcomes": {
+          "items": {
+            "$ref": "#/$defs/CheckoutOutcomeBinding"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "outcomes"
+      ],
+      "type": "object"
+    },
+    "CheckoutOutcomeBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "payment_initiated",
+            "payment_settled",
+            "invoice_issued",
+            "fulfillment_completed"
+          ],
+          "type": "string"
+        },
+        "reference_field": {
+          "type": "string"
+        },
+        "status_field": {
+          "type": "string"
+        },
+        "success_value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "status_field",
+        "success_value"
+      ],
+      "type": "object"
+    },
     "CommandMeta": {
       "additionalProperties": false,
       "properties": {
@@ -2731,12 +6475,82 @@
       ],
       "type": "object"
     },
+    "CompositionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bindings": {
+          "items": {
+            "$ref": "#/$defs/BindingInspection"
+          },
+          "type": "array"
+        },
+        "conflicts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cycle_paths": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "disabled_optional": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRequirement"
+          },
+          "type": "array"
+        },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/ResolvedModuleExtension"
+          },
+          "type": "array"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/InstalledPackage"
+          },
+          "type": "array"
+        },
+        "plan_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "activation_order",
+        "bindings",
+        "modules",
+        "plan_hash"
+      ],
+      "type": "object"
+    },
     "ConditionSpec": {
       "additionalProperties": false,
       "properties": {
         "expression": {
           "maxLength": 8192,
           "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/FieldCondition",
+          "x-optional-pointer": true
         },
         "if_false": {
           "type": "string"
@@ -2746,7 +6560,6 @@
         }
       },
       "required": [
-        "expression",
         "if_false",
         "if_true"
       ],
@@ -2776,6 +6589,13 @@
         "proposal_id": {
           "type": "string"
         },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
+          "type": "array"
+        },
         "roles": {
           "items": {
             "x-open-json-value": true
@@ -2794,7 +6614,7 @@
           },
           "type": "array"
         },
-        "workflows": {
+        "workflow_definitions": {
           "items": {
             "x-open-json-value": true
           },
@@ -2830,10 +6650,23 @@
           },
           "type": "array"
         },
+        "module_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
         "ordered_doctypes": {
           "items": {
             "type": "string"
           },
+          "type": "array"
+        },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
           "type": "array"
         },
         "valid": {
@@ -2936,9 +6769,22 @@
         "proposal_id": {
           "type": "string"
         },
+        "published_bindings": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSurfaceBinding"
+          },
+          "maxItems": 512,
+          "type": "array"
+        },
         "roles": {
           "items": {
             "x-open-json-value": true
+          },
+          "type": "array"
+        },
+        "scheduled_jobs": {
+          "items": {
+            "$ref": "#/$defs/ScheduledJobDefinition"
           },
           "type": "array"
         },
@@ -2954,7 +6800,7 @@
           },
           "type": "array"
         },
-        "workflows": {
+        "workflow_definitions": {
           "items": {
             "x-open-json-value": true
           },
@@ -2991,6 +6837,343 @@
       ],
       "type": "object"
     },
+    "ConfigurationSnapshotFileV2": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "content_type",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ConfigurationSnapshotResponseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "doctype_count": {
+          "type": "integer"
+        },
+        "doctype_names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "pack_files": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationSnapshotFileV2"
+          },
+          "type": "array"
+        },
+        "permissions_count": {
+          "type": "integer"
+        },
+        "roles_count": {
+          "type": "integer"
+        },
+        "site": {
+          "type": "string"
+        },
+        "snapshot": {
+          "x-open-json-value": true
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "version_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "doctype_count",
+        "doctype_names",
+        "label",
+        "pack_files",
+        "permissions_count",
+        "roles_count",
+        "site",
+        "snapshot",
+        "status",
+        "version",
+        "version_id"
+      ],
+      "type": "object"
+    },
+    "ConfigurationSurfaceBinding": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "operation_ref"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "kind": {
+              "const": "query",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 160,
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "name",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "operation_ref"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "input_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "projection",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 160,
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "name",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "catalog_revision": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "kind": {
+              "const": "operation",
+              "type": "string"
+            },
+            "operation_ref": {
+              "maxLength": 386,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}~[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef"
+            },
+            "owner_module_id": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "catalog_revision",
+            "business_scope",
+            "owner_module_id",
+            "operation_ref",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "kind": {
+          "enum": [
+            "query",
+            "projection",
+            "operation"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+          "type": "string"
+        },
+        "view_name": {
+          "maxLength": 160,
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "kind",
+        "output_schema",
+        "owner_module_id",
+        "view_name"
+      ],
+      "type": "object"
+    },
+    "ConfigurationVersionSummaryV2": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "site": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "site",
+        "status",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ConsumerDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_event_schemas": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SchemaRef"
+          },
+          "type": "object"
+        },
+        "consumer_id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted_event_schemas",
+        "consumer_id",
+        "owner_module_id"
+      ],
+      "type": "object"
+    },
     "ContinuationView": {
       "additionalProperties": false,
       "properties": {
@@ -3011,6 +7194,38 @@
       "required": [
         "operation_id",
         "state"
+      ],
+      "type": "object"
+    },
+    "CrossEntityOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "source_entity_id": {
+          "type": "string"
+        },
+        "target_entity_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "operation_id",
+        "resource",
+        "source_entity_id",
+        "target_entity_id",
+        "tenant_id"
       ],
       "type": "object"
     },
@@ -3064,6 +7279,249 @@
       },
       "required": [
         "outcome"
+      ],
+      "type": "object"
+    },
+    "ExecutePublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "meta"
+      ],
+      "type": "object"
+    },
+    "ExecutionInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "caller_module_id": {
+          "type": "string"
+        },
+        "contract": {
+          "$ref": "#/$defs/CapabilityAction"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "delivery_state": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "reconciliation_state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "caller_module_id",
+        "contract",
+        "correlation_id",
+        "delivery_state",
+        "execution_id",
+        "owner_module_id",
+        "provider_id",
+        "reconciliation_state"
+      ],
+      "type": "object"
+    },
+    "ExtensionField": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "key",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "ExtensionPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_kinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "execution_phase": {
+          "type": "string"
+        },
+        "failure_policy": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "protected_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "target": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "allowed_kinds",
+        "execution_phase",
+        "failure_policy",
+        "id",
+        "input_schema",
+        "output_schema",
+        "owner_module_id",
+        "target",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ExtensionRegistration": {
+      "additionalProperties": false,
+      "properties": {
+        "added_fields": {
+          "items": {
+            "$ref": "#/$defs/ExtensionField"
+          },
+          "type": "array"
+        },
+        "artifact_digest": {
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "event": {
+          "type": "string"
+        },
+        "extender_module_id": {
+          "type": "string"
+        },
+        "handler_ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "fields",
+            "validation",
+            "post_commit"
+          ],
+          "type": "string"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "point_id": {
+          "type": "string"
+        },
+        "point_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_digest",
+        "extender_module_id",
+        "handler_ref",
+        "id",
+        "kind",
+        "order",
+        "point_id",
+        "point_version"
+      ],
+      "type": "object"
+    },
+    "FieldCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "operator": {
+          "type": "string"
+        },
+        "value": {
+          "x-max-json-bytes": 8192,
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "field",
+        "operator"
+      ],
+      "type": "object"
+    },
+    "HistoricalSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "captured_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "source": {
+          "$ref": "#/$defs/BusinessRef"
+        }
+      },
+      "required": [
+        "business_scope",
+        "captured_at",
+        "data",
+        "schema",
+        "source"
       ],
       "type": "object"
     },
@@ -3184,6 +7642,58 @@
       ],
       "type": "object"
     },
+    "InstalledPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "package_id",
+        "release_id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "LookupPublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "operation_ref"
+      ],
+      "type": "object"
+    },
     "ManagedChannelClientV2": {
       "additionalProperties": false,
       "properties": {
@@ -3278,11 +7788,15 @@
               "tenant.delete.reconcile",
               "tenant.invitation.deliver",
               "tenant.invitation.reconcile",
+              "tenant.module.lifecycle",
               "operation.read"
             ],
             "type": "string"
           },
           "type": "array"
+        },
+        "engine_version": {
+          "type": "string"
         },
         "version": {
           "type": "integer"
@@ -3470,6 +7984,12 @@
         "kind": {
           "type": "string"
         },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
         "package_id": {
           "type": "string"
         },
@@ -3482,6 +8002,12 @@
         "requires": {
           "items": {
             "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "scheduled_jobs": {
+          "items": {
+            "$ref": "#/$defs/ScheduledJobDefinition"
           },
           "type": "array"
         },
@@ -3500,6 +8026,958 @@
         "release_id",
         "schema_version",
         "version"
+      ],
+      "type": "object"
+    },
+    "ModuleBlocker": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "examples": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "count"
+      ],
+      "type": "object"
+    },
+    "ModuleChangePlan": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "type": "integer"
+        },
+        "binding_changes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dependency_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "open_work_blockers": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "plan_hash": {
+          "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_revision",
+        "module_id",
+        "plan_hash",
+        "target_state"
+      ],
+      "type": "object"
+    },
+    "ModuleDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "extension_points": {
+          "items": {
+            "$ref": "#/$defs/ExtensionPoint"
+          },
+          "type": "array"
+        },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/ExtensionRegistration"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "projections": {
+          "items": {
+            "$ref": "#/$defs/ProjectionDefinition"
+          },
+          "type": "array"
+        },
+        "provides": {
+          "items": {
+            "$ref": "#/$defs/CapabilityOffer"
+          },
+          "type": "array"
+        },
+        "published_operations": {
+          "items": {
+            "$ref": "#/$defs/PublishedOperation"
+          },
+          "type": "array"
+        },
+        "queries": {
+          "items": {
+            "$ref": "#/$defs/PublishedQuery"
+          },
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRequirement"
+          },
+          "type": "array"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/OwnedResource"
+          },
+          "type": "array"
+        },
+        "schemas": {
+          "items": {
+            "$ref": "#/$defs/ModuleSchemaDocument"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ModuleInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "items": {
+            "$ref": "#/$defs/BindingInspection"
+          },
+          "type": "array"
+        },
+        "blocking_reasons": {
+          "items": {
+            "$ref": "#/$defs/ModuleBlocker"
+          },
+          "type": "array"
+        },
+        "capability_availability": {
+          "items": {
+            "$ref": "#/$defs/CapabilityInspection"
+          },
+          "type": "array"
+        },
+        "config_revision": {
+          "type": "integer"
+        },
+        "installations": {
+          "items": {
+            "$ref": "#/$defs/ModuleInstallation"
+          },
+          "type": "array"
+        },
+        "pending_work": {
+          "$ref": "#/$defs/PendingWorkSummary"
+        },
+        "resource_owners": {
+          "items": {
+            "$ref": "#/$defs/ResourceOwnership"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bindings",
+        "blocking_reasons",
+        "capability_availability",
+        "config_revision",
+        "installations",
+        "pending_work",
+        "resource_owners"
+      ],
+      "type": "object"
+    },
+    "ModuleInstallation": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_digest": {
+          "type": "string"
+        },
+        "last_lifecycle_operation_id": {
+          "type": "string"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "state_changed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_digest",
+        "module_id",
+        "revision",
+        "state",
+        "tenant_id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ModuleSchemaDocument": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "schema": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "ref",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "ModuleSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "installations": {
+          "items": {
+            "$ref": "#/$defs/ModuleInstallation"
+          },
+          "type": "array"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
+        },
+        "ownership": {
+          "items": {
+            "$ref": "#/$defs/ResourceOwnership"
+          },
+          "type": "array"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/InstalledPackage"
+          },
+          "type": "array"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "installations",
+        "ownership",
+        "revision",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "OfflineBootstrapRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "limit",
+        "source"
+      ],
+      "type": "object"
+    },
+    "OfflineCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "max_batch_size": {
+          "type": "integer"
+        },
+        "max_page_size": {
+          "type": "integer"
+        },
+        "offline_operations": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogOperation"
+          },
+          "type": "array"
+        },
+        "offline_queries": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogQuery"
+          },
+          "type": "array"
+        },
+        "protocol_version": {
+          "type": "integer"
+        },
+        "snapshot_lifetime_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "catalog_revision",
+        "max_batch_size",
+        "max_page_size",
+        "offline_operations",
+        "offline_queries",
+        "protocol_version",
+        "snapshot_lifetime_seconds"
+      ],
+      "type": "object"
+    },
+    "OfflineChange": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "x-open-json-value": true
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "fact_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deleted",
+        "fact_key"
+      ],
+      "type": "object"
+    },
+    "OfflineIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "expected_revision": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "input": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "local_operation_id": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "idempotency_key",
+        "input",
+        "input_schema",
+        "local_operation_id",
+        "operation_ref"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "local_operation_id": {
+          "type": "string"
+        },
+        "receipt": {
+          "$ref": "#/$defs/OperationReceipt"
+        }
+      },
+      "required": [
+        "local_operation_id",
+        "receipt"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "intents": {
+          "items": {
+            "$ref": "#/$defs/OfflineIntent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "intents"
+      ],
+      "type": "object"
+    },
+    "OfflineIntentsResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "receipts": {
+          "items": {
+            "$ref": "#/$defs/OfflineIntentReceipt"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "receipts"
+      ],
+      "type": "object"
+    },
+    "OfflinePullRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "input_hash",
+        "limit",
+        "replay_position",
+        "snapshot_token",
+        "source"
+      ],
+      "type": "object"
+    },
+    "OfflinePullResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/OfflineChange"
+          },
+          "type": "array"
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "next_page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "schema_revision": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "subject_id": {
+          "type": "string"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "changes",
+        "has_more",
+        "input_hash",
+        "replay_position",
+        "schema_revision",
+        "snapshot_token",
+        "source",
+        "subject_id",
+        "through_cursor"
+      ],
+      "type": "object"
+    },
+    "OfflineSnapshotPage": {
+      "additionalProperties": false,
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "catalog_revision": {
+          "type": "integer"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "fact_key_field": {
+          "type": "string"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "next_page_cursor": {
+          "type": "string"
+        },
+        "page_cursor": {
+          "type": "string"
+        },
+        "replay_position": {
+          "type": "string"
+        },
+        "rows": {
+          "x-open-json-value": true
+        },
+        "schema_revision": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfflineSourceRef"
+        },
+        "subject_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "catalog_revision",
+        "complete",
+        "fact_key_field",
+        "input_hash",
+        "replay_position",
+        "rows",
+        "schema_revision",
+        "snapshot_token",
+        "source",
+        "subject_id"
+      ],
+      "type": "object"
+    },
+    "OfflineSourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "query_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "input",
+        "input_schema",
+        "owner_module_id",
+        "query_name"
+      ],
+      "type": "object"
+    },
+    "OperationReceipt": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "error"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "output": {
+              "x-max-json-bytes": 1048576,
+              "x-open-json-value": true
+            },
+            "output_schema": {
+              "$ref": "#/$defs/SchemaRef",
+              "x-optional-pointer": true
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
+            "status": {
+              "const": "completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
+            "status",
+            "output",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "error"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "accepted",
+                "running"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": null,
+                "required": [
+                  "output"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": null,
+                "required": [
+                  "output_schema"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "properties": {
+            "business_scope": {
+              "$ref": "#/$defs/BusinessScope"
+            },
+            "error": {
+              "$ref": "#/$defs/Error",
+              "x-optional-pointer": true
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "operation_ref": {
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "rejected",
+                "conflict",
+                "failed",
+                "outcome_unknown"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "business_scope",
+            "execution_id",
+            "operation_ref",
+            "revision",
+            "status",
+            "error"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Error",
+          "x-optional-pointer": true
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "operation_ref": {
+          "type": "string"
+        },
+        "output": {
+          "x-max-json-bytes": 1048576,
+          "x-open-json-value": true
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef",
+          "x-optional-pointer": true
+        },
+        "revision": {
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "accepted",
+            "running",
+            "completed",
+            "rejected",
+            "conflict",
+            "failed",
+            "outcome_unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "business_scope",
+        "execution_id",
+        "operation_ref",
+        "revision",
+        "status"
+      ],
+      "type": "object"
+    },
+    "OperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "effect": {
+          "enum": [
+            "query",
+            "local_command",
+            "external_command"
+          ],
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/SchemaRef"
+        }
+      },
+      "required": [
+        "effect",
+        "input",
+        "name",
+        "output"
+      ],
+      "type": "object"
+    },
+    "OwnedResource": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "enum": [
+            "private",
+            "published"
+          ],
+          "type": "string"
+        },
+        "mutation_mode": {
+          "enum": [
+            "crud",
+            "commands_only"
+          ],
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "scope_field": {
+          "type": "string"
+        },
+        "scope_kind": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "access",
+        "mutation_mode",
+        "ref",
+        "scope_kind"
       ],
       "type": "object"
     },
@@ -3550,8 +9028,20 @@
     "PackManifest": {
       "additionalProperties": false,
       "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
         "exports": {
           "$ref": "#/$defs/ManifestExports"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleDescriptor"
+          },
+          "type": "array"
         },
         "name": {
           "type": "string"
@@ -3559,6 +9049,12 @@
         "requires": {
           "items": {
             "$ref": "#/$defs/ManifestPackRef"
+          },
+          "type": "array"
+        },
+        "scheduled_jobs": {
+          "items": {
+            "$ref": "#/$defs/ScheduledJobDefinition"
           },
           "type": "array"
         },
@@ -3596,6 +9092,28 @@
       ],
       "type": "object"
     },
+    "PackageDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "package_id": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_id",
+        "required"
+      ],
+      "type": "object"
+    },
     "PageRequest": {
       "additionalProperties": false,
       "properties": {
@@ -3610,6 +9128,34 @@
       },
       "required": [
         "limit"
+      ],
+      "type": "object"
+    },
+    "PendingWorkSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_count": {
+          "type": "integer"
+        },
+        "open_obligation_count": {
+          "type": "integer"
+        },
+        "scheduled_count": {
+          "type": "integer"
+        },
+        "unknown_outcome_count": {
+          "type": "integer"
+        },
+        "workflow_count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "delivery_count",
+        "open_obligation_count",
+        "scheduled_count",
+        "unknown_outcome_count",
+        "workflow_count"
       ],
       "type": "object"
     },
@@ -3673,6 +9219,200 @@
       ],
       "type": "object"
     },
+    "PinnedDispatch": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_revision": {
+          "type": "integer"
+        },
+        "caller_module_id": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "input_hash": {
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/$defs/CapabilityAction"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "provider_module_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        }
+      },
+      "required": [
+        "binding_revision",
+        "caller_module_id",
+        "execution_id",
+        "idempotency_key",
+        "input_hash",
+        "operation",
+        "provider_id",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "PlanModuleChange": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "provider_selections": {
+          "items": {
+            "$ref": "#/$defs/ProviderSelection"
+          },
+          "type": "array"
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "target_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "module_id",
+        "target_state"
+      ],
+      "type": "object"
+    },
+    "ProjectionCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "entity_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "projection_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "entity_scope",
+        "projection_id",
+        "source_id",
+        "tenant_id",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "ProjectionDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fact_key": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_field": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "rebuild_strategy": {
+          "type": "string"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/ProjectionSource"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "fact_key",
+        "id",
+        "output_schema",
+        "owner_module_id",
+        "rebuild_strategy",
+        "scope_policy",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "ProjectionSource": {
+      "additionalProperties": false,
+      "properties": {
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "query_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "output_schema",
+        "owner_module_id",
+        "query_name"
+      ],
+      "type": "object"
+    },
+    "ProviderSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/BindingKey"
+        },
+        "provider_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "provider_id"
+      ],
+      "type": "object"
+    },
     "ProvisionTenant": {
       "additionalProperties": false,
       "properties": {
@@ -3686,6 +9426,11 @@
         },
         "bootstrap_admin_email": {
           "maxLength": 254,
+          "minLength": 3,
+          "type": "string"
+        },
+        "bootstrap_admin_subject": {
+          "maxLength": 160,
           "minLength": 3,
           "type": "string"
         },
@@ -3720,11 +9465,269 @@
       "required": [
         "aliases",
         "bootstrap_admin_email",
+        "bootstrap_admin_subject",
         "database_allocation_ref",
         "deployment_id",
         "meta",
         "primary_alias",
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "PublishedOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_callers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "checkout": {
+          "$ref": "#/$defs/CheckoutOperationContract",
+          "x-optional-pointer": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_callers",
+        "capability",
+        "name",
+        "operation",
+        "presentation",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "PublishedQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "name": {
+          "type": "string"
+        },
+        "offline_eligible": {
+          "type": "boolean"
+        },
+        "offline_fact_key": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/SchemaRef"
+        },
+        "owner_field": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "page_limit": {
+          "type": "integer"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SurfacePresentation"
+        },
+        "reference_lookup": {
+          "$ref": "#/$defs/PublishedReferenceLookup",
+          "x-optional-pointer": true
+        },
+        "scope_policy": {
+          "enum": [
+            "tenant_shared",
+            "entity_owned"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed_fields",
+        "capability",
+        "input_schema",
+        "name",
+        "operation",
+        "output_schema",
+        "owner_module_id",
+        "page_limit",
+        "presentation",
+        "scope_policy"
+      ],
+      "type": "object"
+    },
+    "PublishedQueryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "input": {
+          "x-max-json-bytes": 65536,
+          "x-open-json-value": true
+        },
+        "limit": {
+          "maximum": 1000,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "PublishedReferenceLookup": {
+      "additionalProperties": false,
+      "properties": {
+        "label_field": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "search_field": {
+          "type": "string"
+        },
+        "value_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label_field",
+        "resource_type",
+        "search_field",
+        "value_field"
+      ],
+      "type": "object"
+    },
+    "QueryReplayChange": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "x-open-json-value": true
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "fact_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_key"
+      ],
+      "type": "object"
+    },
+    "QueryReplayPage": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/QueryReplayChange"
+          },
+          "type": "array"
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "incomplete"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "through_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "changes",
+        "freshness",
+        "source_revision",
+        "through_cursor"
+      ],
+      "type": "object"
+    },
+    "QueryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "x-open-json-value": true
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "incomplete"
+          ],
+          "type": "string"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "snapshot_token": {
+          "type": "string"
+        },
+        "source_cursor": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "data",
+        "freshness"
       ],
       "type": "object"
     },
@@ -3880,6 +9883,73 @@
         "outcome",
         "reason",
         "step_id"
+      ],
+      "type": "object"
+    },
+    "RecordChangeEventData": {
+      "additionalProperties": false,
+      "properties": {
+        "changed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "record_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "table": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "record_id",
+        "revision",
+        "table"
+      ],
+      "type": "object"
+    },
+    "RecordTrigger": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "table": {
+          "type": "string"
+        },
+        "watched_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "table"
+      ],
+      "type": "object"
+    },
+    "ReferenceRule": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "resource_type"
       ],
       "type": "object"
     },
@@ -4132,6 +10202,42 @@
       ],
       "type": "object"
     },
+    "ResolvedModuleExtension": {
+      "additionalProperties": false,
+      "properties": {
+        "point": {
+          "$ref": "#/$defs/ExtensionPoint"
+        },
+        "registration": {
+          "$ref": "#/$defs/ExtensionRegistration"
+        }
+      },
+      "required": [
+        "point",
+        "registration"
+      ],
+      "type": "object"
+    },
+    "ResourceOwnership": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/$defs/ResourceRef"
+        },
+        "tenant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "resource",
+        "tenant_id"
+      ],
+      "type": "object"
+    },
     "RespondRequest": {
       "additionalProperties": false,
       "properties": {
@@ -4286,6 +10392,42 @@
       ],
       "type": "object"
     },
+    "ScheduledJobDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "x-open-json-value": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "required_operation": {
+          "type": "string"
+        },
+        "required_resource": {
+          "type": "string"
+        },
+        "schedule": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope",
+          "x-optional-pointer": true
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "schedule",
+        "type"
+      ],
+      "type": "object"
+    },
     "SchemaRef": {
       "additionalProperties": false,
       "properties": {
@@ -4382,6 +10524,9 @@
     "StartWorkflow": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
         "definition_id": {
           "type": "string"
         },
@@ -4592,6 +10737,27 @@
       ],
       "type": "object"
     },
+    "SurfacePresentation": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "form": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "list": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "TemplateDetailPageContent": {
       "additionalProperties": false,
       "properties": {
@@ -4790,6 +10956,9 @@
         "id": {
           "type": "string"
         },
+        "owner_module_id": {
+          "type": "string"
+        },
         "steps": {
           "items": {
             "$ref": "#/$defs/StepDefinition"
@@ -4797,6 +10966,10 @@
           "maxItems": 100,
           "minItems": 1,
           "type": "array"
+        },
+        "trigger": {
+          "$ref": "#/$defs/RecordTrigger",
+          "x-optional-pointer": true
         },
         "version": {
           "type": "integer"
@@ -4833,6 +11006,12 @@
     "WorkflowInstance": {
       "additionalProperties": false,
       "properties": {
+        "business_scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "causation_depth": {
+          "type": "integer"
+        },
         "created_at": {
           "format": "date-time",
           "type": "string"
@@ -4912,6 +11091,26 @@
       "superseded",
       "cancelled"
     ],
+    "BusinessScopeKind": [
+      "tenant",
+      "legal_entity"
+    ],
+    "CheckoutOutcomeKind": [
+      "payment_initiated",
+      "payment_settled",
+      "invoice_issued",
+      "fulfillment_completed"
+    ],
+    "ConfigurationSurfaceKind": [
+      "query",
+      "projection",
+      "operation"
+    ],
+    "ExtensionKind": [
+      "fields",
+      "validation",
+      "post_commit"
+    ],
     "InboxView": [
       "needs_action",
       "sent",
@@ -4943,7 +11142,36 @@
       "tenant.delete.reconcile",
       "tenant.invitation.deliver",
       "tenant.invitation.reconcile",
+      "tenant.module.lifecycle",
       "operation.read"
+    ],
+    "ModuleAccess": [
+      "private",
+      "published"
+    ],
+    "MutationMode": [
+      "crud",
+      "commands_only"
+    ],
+    "OperationAvailability": [
+      "available",
+      "unavailable",
+      "disabled",
+      "draining"
+    ],
+    "OperationEffect": [
+      "query",
+      "local_command",
+      "external_command"
+    ],
+    "OperationReceiptStatus": [
+      "accepted",
+      "running",
+      "completed",
+      "rejected",
+      "conflict",
+      "failed",
+      "outcome_unknown"
     ],
     "OperationState": [
       "requested",
@@ -4951,6 +11179,12 @@
       "succeeded",
       "failed",
       "recovery_required"
+    ],
+    "QueryFreshness": [
+      "fresh",
+      "stale",
+      "unknown",
+      "incomplete"
     ],
     "ReconciliationOutcome": [
       "confirmed_succeeded",
@@ -4988,6 +11222,10 @@
       "cancelled",
       "expired",
       "stale"
+    ],
+    "ResourceScopeKind": [
+      "tenant_shared",
+      "entity_owned"
     ],
     "ResponseKind": [
       "approve",

@@ -35,8 +35,21 @@ func TestToolCatalogContractParity(t *testing.T) {
 	if contractCreate.Operation != "create" || contractCreate.Doctype != "Customer" {
 		t.Errorf("contract create op/doctype = %q/%q, want create/Customer", contractCreate.Operation, contractCreate.Doctype)
 	}
-	if !contractCreate.RequiresConfirmation || !contractCreate.RequiresRecentAuth {
-		t.Errorf("contract create should preserve safety guards: %+v", contractCreate)
+	if contractCreate.RequiresConfirmation || contractCreate.RequiresRecentAuth || contractCreate.SafetyLevel != "guarded" {
+		t.Errorf("contract create should use explicit user intent with guarded kernel authorization: %+v", contractCreate)
+	}
+	contractUpdate := findContractTool(t, contractCat.Tools, "customer_update")
+	if contractUpdate.Operation != "update" || contractUpdate.Doctype != "Customer" || contractUpdate.RequiresConfirmation || contractUpdate.RequiresRecentAuth {
+		t.Errorf("contract update should use explicit user intent with guarded kernel authorization: %+v", contractUpdate)
+	}
+	contractBundle := findContractTool(t, contractCat.Tools, "mutate_records")
+	if !contractBundle.RequiresConfirmation || contractBundle.Operation != "system" {
+		t.Errorf("related-record mutation must preserve its explicit approval requirement in the shared contract: %+v", contractBundle)
+	}
+	for _, channel := range contractBundle.ChannelAllowlist {
+		if channel == "whatsapp" {
+			t.Errorf("durably approved mutation bundle must not use header-only WhatsApp confirmation: %+v", contractBundle.ChannelAllowlist)
+		}
 	}
 	if len(contractCreate.ChannelAllowlist) != len(create.ChannelAllowlist) {
 		t.Errorf("channel allowlist length mismatch: %d vs %d", len(contractCreate.ChannelAllowlist), len(create.ChannelAllowlist))

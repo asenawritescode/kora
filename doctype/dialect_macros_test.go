@@ -3,6 +3,7 @@ package doctype_test
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -201,7 +202,7 @@ func TestMySQL_AddIndex(t *testing.T) {
 	}
 }
 
-func TestMySQL_RemoveFieldDDL(t *testing.T) {
+func TestMySQL_RemoveFieldDDLQuarantinesData(t *testing.T) {
 	d := db.MySQL()
 	c := doctype.Change{
 		Type: "remove-field", Section: "doctypes", Entity: "Product", Field: "obsolete",
@@ -214,11 +215,54 @@ func TestMySQL_RemoveFieldDDL(t *testing.T) {
 	if len(stmts) == 0 {
 		t.Fatal("expected at least one DDL statement")
 	}
-	if !strings.Contains(stmts[0], "DROP COLUMN") {
-		t.Errorf("expected DROP COLUMN, got: %s", stmts[0])
+	if !strings.Contains(stmts[0], "RENAME COLUMN") || !strings.Contains(stmts[0], "_dropquar_obsolete") {
+		t.Errorf("expected removed field to be renamed into quarantine, got: %s", stmts[0])
 	}
-	if !strings.Contains(stmts[0], "quarantine") {
-		t.Errorf("expected quarantine comment, got: %s", stmts[0])
+	if strings.Contains(stmts[0], "DROP COLUMN") {
+		t.Errorf("removed field data must not be dropped implicitly: %s", stmts[0])
+	}
+}
+
+func TestRemoveFieldDDLQuarantinesDataAcrossDialects(t *testing.T) {
+	for _, dbType := range []string{"mysql", "postgres", "libsql"} {
+		t.Run(dbType, func(t *testing.T) {
+			d := db.Resolve(dbType)
+			stmts, err := doctype.GenerateDDLFromDiff([]doctype.Change{{
+				Type: "remove-field", Entity: "Product", Field: "obsolete",
+			}}, d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(stmts) != 1 || !strings.Contains(stmts[0], "_dropquar_obsolete") || strings.Contains(stmts[0], "DROP COLUMN") {
+				t.Fatalf("expected non-destructive quarantine rename, got %#v", stmts)
+			}
+		})
+	}
+}
+
+func TestQuarantineNameForRevisionIsBoundedAndRevisionScoped(t *testing.T) {
+	field := strings.Repeat("é", 40)
+	first := doctype.QuarantineNameForRevision(field, "revision-1")
+	second := doctype.QuarantineNameForRevision(field, "revision-2")
+	if len(first) > 64 {
+		t.Fatalf("quarantine identifier is %d bytes, exceeds MySQL's 64-byte limit", len(first))
+	}
+	if first == second {
+		t.Fatal("different config revisions reused the same quarantine identifier")
+	}
+	if !utf8.ValidString(first) {
+		t.Fatalf("quarantine identifier is not valid UTF-8: %q", first)
+	}
+}
+
+func TestQuarantineTableNameForRevisionIsBoundedAndRevisionScoped(t *testing.T) {
+	first := doctype.QuarantineTableNameForRevision("tab"+strings.Repeat("LongTable", 12), "rollback-1")
+	second := doctype.QuarantineTableNameForRevision("tab"+strings.Repeat("LongTable", 12), "rollback-2")
+	if first == second {
+		t.Fatal("different restore operations reused a quarantine table name")
+	}
+	if len(first) > 64 || !strings.HasPrefix(first, "_dropquar_tab") {
+		t.Fatalf("quarantine table name is invalid for MySQL: %q (%d bytes)", first, len(first))
 	}
 }
 
@@ -337,12 +381,10 @@ func TestDDL_NonDoctypeChangesProduceEmpty(t *testing.T) {
 	changes := []doctype.Change{
 		{Type: "add-role", Section: "roles", Entity: "Manager"},
 		{Type: "add-perm", Section: "permissions", Entity: "Product|Manager"},
-		{Type: "add-workflow", Section: "workflows", Entity: "Product"},
 		{Type: "add-metric", Section: "analytics_metrics", Entity: "total_sales"},
 		{Type: "add-script-ref", Section: "scripts", Entity: "validate_order"},
 		{Type: "remove-role", Section: "roles", Entity: "Manager"},
 		{Type: "remove-perm", Section: "permissions", Entity: "Product|Manager"},
-		{Type: "remove-workflow", Section: "workflows", Entity: "Product"},
 		{Type: "remove-metric", Section: "analytics_metrics", Entity: "total_sales"},
 		{Type: "remove-script-ref", Section: "scripts", Entity: "validate_order"},
 	}

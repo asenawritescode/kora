@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/lib/pq"
 )
 
 // PostgresDialect implements Dialect for PostgreSQL.
-// It is a proof-of-concept that adding a new dialect to Kora requires
+// It is a proof-of-concept that adding a new dialect to Kigae requires
 // only a single file implementing the Dialect interface.
 type PostgresDialect struct{}
 
@@ -32,7 +33,7 @@ func (d *PostgresDialect) Open(cfg DBConfig) (*sql.DB, error) {
 	for k, v := range cfg.Params {
 		dsn += fmt.Sprintf("&%s=%s", k, v)
 	}
-	db, err := sql.Open("postgres", dsn)
+	db, err := dbaccess.Open("postgres", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +201,7 @@ func (d *PostgresDialect) CreateTable(dt *doctype.DocType) []string {
 
 	for _, f := range dt.DataFields() {
 		if f.SearchIndex {
-			statements = append(statements, d.CreateIndex(dt.RawTableName(), f.Fieldname, false))
+			statements = append(statements, d.CreateSearchIndex(dt.RawTableName(), f.Fieldname))
 		}
 	}
 	for _, f := range dt.DataFields() {
@@ -245,6 +246,19 @@ func (d *PostgresDialect) CreateIndex(tableName, fieldName string, unique bool) 
 	}
 	return fmt.Sprintf("CREATE %sINDEX IF NOT EXISTS %s ON %s (%s)",
 		uq, d.QuoteIdent(indexName), d.QuoteIdent(tableName), d.QuoteIdent(fieldName))
+}
+
+// CreateSearchIndex creates a B-tree operator-class index suitable for the
+// left-anchored LIKE predicates used by quick search. This keeps PostgreSQL
+// from falling back to a table scan for configured picker fields.
+func (d *PostgresDialect) CreateSearchIndex(tableName, fieldName string) string {
+	indexName := d.SearchIndexName(tableName, fieldName)
+	return fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s text_pattern_ops)",
+		d.QuoteIdent(indexName), d.QuoteIdent(tableName), d.QuoteIdent(fieldName))
+}
+
+func (d *PostgresDialect) SearchIndexName(tableName, fieldName string) string {
+	return fmt.Sprintf("sidx_%s_%s", tableName, fieldName)
 }
 
 func (d *PostgresDialect) DropIndex(tableName, indexName string) string {
@@ -385,6 +399,10 @@ func (d *PostgresDialect) UpsertClause(conflictCols []string, updateCols []strin
 }
 
 func (d *PostgresDialect) UpsertIncrement(conflictCols []string, incrementCols []string) string {
+	return d.UpsertIncrementForTable("", conflictCols, incrementCols)
+}
+
+func (d *PostgresDialect) UpsertIncrementForTable(tableName string, conflictCols []string, incrementCols []string) string {
 	var quotedCols []string
 	for _, col := range conflictCols {
 		quotedCols = append(quotedCols, d.QuoteIdent(col))
@@ -392,7 +410,11 @@ func (d *PostgresDialect) UpsertIncrement(conflictCols []string, incrementCols [
 	var parts []string
 	for _, col := range incrementCols {
 		q := d.QuoteIdent(col)
-		parts = append(parts, fmt.Sprintf("%s = %s + EXCLUDED.%s", q, q, q))
+		current := q
+		if tableName != "" {
+			current = d.QuoteIdent(tableName) + "." + q
+		}
+		parts = append(parts, fmt.Sprintf("%s = %s + EXCLUDED.%s", q, current, q))
 	}
 	return fmt.Sprintf("ON CONFLICT(%s) DO UPDATE SET %s", strings.Join(quotedCols, ", "), strings.Join(parts, ", "))
 }
@@ -546,9 +568,11 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 			"can_export" SMALLINT NOT NULL DEFAULT 0,
 			"can_import" SMALLINT NOT NULL DEFAULT 0,
 			"can_report" SMALLINT NOT NULL DEFAULT 0,
-			"if_owner" SMALLINT NOT NULL DEFAULT 0
+			"if_owner" SMALLINT NOT NULL DEFAULT 0,
+			"if_assigned" TEXT NOT NULL DEFAULT '[]'
 		)`,
 		`ALTER TABLE "_kora_permission" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_permission" ADD COLUMN IF NOT EXISTS "if_assigned" TEXT NOT NULL DEFAULT '[]'`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_doctype_role" ON "_kora_permission" ("doctype", "role")`,
 
 		// _kora_config_version
@@ -635,6 +659,8 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_user" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_user" ADD COLUMN "email_verified_at" TIMESTAMP`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_site_email" ON "_kora_user" ("site", "email")`,
+		`CREATE INDEX IF NOT EXISTS "idx_user_picker_name" ON "_kora_user" ("site", "enabled", lower("full_name") text_pattern_ops, "name")`,
+		`CREATE INDEX IF NOT EXISTS "idx_user_picker_email" ON "_kora_user" ("site", "enabled", lower("email") text_pattern_ops, "full_name", "name")`,
 
 		// _kora_session
 		`CREATE TABLE IF NOT EXISTS "_kora_session" (
@@ -663,44 +689,17 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_magic_token_hash" ON "_kora_magic_link" ("token_hash")`,
 		`CREATE INDEX IF NOT EXISTS "idx_magic_site_email" ON "_kora_magic_link" ("site", "email")`,
 		`CREATE INDEX IF NOT EXISTS "idx_magic_expires" ON "_kora_magic_link" ("expires_at")`,
-
-		// _kora_workflow
-		`CREATE TABLE IF NOT EXISTS "_kora_workflow" (
-			"name" VARCHAR(140) PRIMARY KEY,
-			"site" VARCHAR(140) NOT NULL DEFAULT '',
-			"document_type" VARCHAR(140) NOT NULL DEFAULT '',
-			"is_active" SMALLINT NOT NULL DEFAULT 1,
-			"workflow_state_field" VARCHAR(140) NOT NULL DEFAULT '',
-			"config_json" JSONB
+		`CREATE TABLE IF NOT EXISTS "_kora_magic_link_delivery" (
+			"operation_id" VARCHAR(255) PRIMARY KEY,
+			"tenant_id" VARCHAR(140) NOT NULL,
+			"email" VARCHAR(255) NOT NULL,
+			"magic_link_id" VARCHAR(255) NOT NULL,
+			"status" VARCHAR(20) NOT NULL,
+			"worker_fence" BIGINT NOT NULL,
+			"created_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+			"updated_at" TIMESTAMP NOT NULL DEFAULT NOW()
 		)`,
-		`ALTER TABLE "_kora_workflow" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
-		`ALTER TABLE "_kora_workflow" ADD COLUMN "config_json" JSONB`,
-
-		// _kora_workflow_state
-		`CREATE TABLE IF NOT EXISTS "_kora_workflow_state" (
-			"name" VARCHAR(255) NOT NULL,
-			"workflow" VARCHAR(140) NOT NULL,
-			"state" VARCHAR(140) NOT NULL DEFAULT '',
-			"doc_status" SMALLINT NOT NULL DEFAULT 0,
-			"allow_edit" SMALLINT NOT NULL DEFAULT 1,
-			"style" VARCHAR(255) NOT NULL DEFAULT '',
-			"idx" INTEGER NOT NULL DEFAULT 0,
-			PRIMARY KEY ("name")
-		)`,
-
-		// _kora_workflow_transition
-		`CREATE TABLE IF NOT EXISTS "_kora_workflow_transition" (
-			"name" VARCHAR(255) NOT NULL,
-			"workflow" VARCHAR(140) NOT NULL,
-			"action" VARCHAR(140) NOT NULL DEFAULT '',
-			"from_state" VARCHAR(255) NOT NULL DEFAULT '',
-			"to_state" VARCHAR(255) NOT NULL DEFAULT '',
-			"allowed" VARCHAR(255) NOT NULL DEFAULT '',
-			"condition_expr" TEXT,
-			"require_fields" TEXT,
-			"idx" INTEGER NOT NULL DEFAULT 0,
-			PRIMARY KEY ("name")
-		)`,
+		`CREATE INDEX IF NOT EXISTS "idx_magic_delivery_tenant_status" ON "_kora_magic_link_delivery" ("tenant_id", "status")`,
 
 		// _kora_secret
 		`CREATE TABLE IF NOT EXISTS "_kora_secret" (

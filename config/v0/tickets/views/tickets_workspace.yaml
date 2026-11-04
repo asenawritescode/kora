@@ -1,0 +1,15 @@
+name: Ticket Workspace
+route: /tickets
+type: workspace
+layout: one_panel
+label: Tickets
+module: Tickets
+components:
+  - id: ticket_queue
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Ticket
+    label: Tickets
+    desktop_columns: [title, creation, status, assignee]
+    mobile_columns: [title, status, assignee]

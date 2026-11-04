@@ -86,6 +86,23 @@ func TestExportGoldenVectors(t *testing.T) {
 	t.Logf("validated %d golden vectors", len(vectors))
 }
 
+func TestComputedContactFullNameUsesDisplayedName(t *testing.T) {
+	dt := &DocType{Name: "Contact", Fields: []Field{
+		{Fieldname: "first_name", Fieldtype: "Data"},
+		{Fieldname: "last_name", Fieldtype: "Data"},
+		{Fieldname: "full_name", Fieldtype: "Data", Computed: `(concat first_name " " last_name)`},
+	}}
+	doc := NewDocument("Contact")
+	doc.Set("first_name", "Amina")
+	doc.Set("last_name", "Njoroge Demo 01")
+	if err := ComputeFields(dt, doc); err != nil {
+		t.Fatalf("ComputeFields: %v", err)
+	}
+	if got := doc.Get("full_name"); got != "Amina Njoroge Demo 01" {
+		t.Fatalf("full_name = %#v, want displayed contact name", got)
+	}
+}
+
 func TestComputeFieldsWithHookKeepsConcurrentScriptContextsIsolated(t *testing.T) {
 	dt := &DocType{Name: "Task", Fields: []Field{{Fieldname: "tenant_value", Fieldtype: "Data", Computed: "@script:tenant-value"}}}
 	results := []string{"site-a-value", "site-b-value"}

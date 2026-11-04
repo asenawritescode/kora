@@ -9,6 +9,7 @@ fields:
     reqd: true
     bold: true
     in_list_view: true
+    search_index: true
   - fieldname: location
     fieldtype: Data
     label: Location

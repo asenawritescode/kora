@@ -3,10 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConsoleAuthStore } from '@/lib/console-auth-store'
 import {
   listSites,
-  createSite,
   updateSiteStorage,
   deleteSite,
-  resetSitePassword,
 } from '@/lib/api/console'
 import type { ConsoleSite } from '@/types/api'
 import { Button } from '@/components/ui/button'
@@ -66,7 +64,6 @@ export default function ConsoleDashboard() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [editingSite, setEditingSite] = useState<ConsoleSite | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
 
   const { data: health } = useHealth()
   const { data: versionInfo } = useVersion()
@@ -96,7 +93,7 @@ export default function ConsoleDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage your Kora sites</p>
+          <p className="text-sm text-muted-foreground mt-1">Manage your Kigae sites</p>
         </div>
         <div className="flex items-center gap-1.5 text-xs">
           <Circle className={`h-2 w-2 ${dbConnected ? 'fill-green-500 text-green-500' : 'fill-muted-foreground/40 text-muted-foreground/40'}`} />
@@ -152,7 +149,7 @@ export default function ConsoleDashboard() {
             </div>
             <div>
               <p className="text-sm font-semibold font-mono">{versionInfo?.version ?? '...'}</p>
-              <p className="text-xs text-muted-foreground">Kora Version</p>
+              <p className="text-xs text-muted-foreground">Kigae Version</p>
             </div>
           </CardContent>
         </Card>
@@ -178,9 +175,6 @@ export default function ConsoleDashboard() {
                   className="pl-8 h-8 text-xs w-[180px]"
                 />
               </div>
-              <Button size="sm" onClick={() => setCreateOpen(true)}>
-                <Plus className="h-3.5 w-3.5 mr-1" /> Create Site
-              </Button>
             </div>
           </div>
         </CardHeader>
@@ -199,9 +193,6 @@ export default function ConsoleDashboard() {
                 <div className="space-y-2">
                   <Globe className="h-8 w-8 mx-auto text-muted-foreground/40" />
                   <p>No sites yet.</p>
-                  <Button variant="outline" size="sm" onClick={() => setCreateOpen(true)}>
-                    <Plus className="h-3.5 w-3.5 mr-1" /> Create your first site
-                  </Button>
                 </div>
               )}
             </div>
@@ -261,12 +252,6 @@ export default function ConsoleDashboard() {
         onUpdated={() => refetch()}
       />
 
-      {/* Create Site Sheet */}
-      <CreateSiteSheet
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreated={() => { refetch(); setCreateOpen(false); }}
-      />
     </div>
   )
 }
@@ -292,12 +277,6 @@ function SiteEditSheet({
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
-  // Reset password state
-  const [resetEmail, setResetEmail] = useState('')
-  const [resetPassword, setResetPassword] = useState('')
-  const [resetting, setResetting] = useState(false)
-  const [resetMsg, setResetMsg] = useState<{ text: string; ok: boolean } | null>(null)
-
   // Delete state
   const [deleteConfirm, setDeleteConfirm] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -310,9 +289,6 @@ function SiteEditSheet({
       setFileStorage(site.file_storage || 'local')
       setStorageBucket(site.storage_bucket || '')
       setMsg(null)
-      setResetEmail('')
-      setResetPassword('')
-      setResetMsg(null)
       setDeleteConfirm('')
       setDeleteMsg(null)
     }
@@ -348,21 +324,6 @@ function SiteEditSheet({
       setMsg({ text: err.message, ok: false })
     }
     setSaving(false)
-  }
-
-  const handleResetPassword = async () => {
-    if (!site || !resetEmail || !resetPassword) return
-    setResetting(true)
-    setResetMsg(null)
-    try {
-      await resetSitePassword(site.name, resetEmail, resetPassword)
-      setResetMsg({ text: 'Password reset successfully.', ok: true })
-      setResetEmail('')
-      setResetPassword('')
-    } catch (err: any) {
-      setResetMsg({ text: err.message, ok: false })
-    }
-    setResetting(false)
   }
 
   const handleDelete = async () => {
@@ -483,39 +444,6 @@ function SiteEditSheet({
             </p>
           </div>
 
-          {/* Reset Password */}
-          <div className="space-y-3 border-t pt-6">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Reset Admin Password</Label>
-            <div className="space-y-2">
-              <Input
-                type="email"
-                placeholder="User email"
-                value={resetEmail}
-                onChange={e => setResetEmail(e.target.value)}
-                className="h-8 text-xs"
-              />
-              <PasswordInput
-                placeholder="New password"
-                value={resetPassword}
-                onChange={e => setResetPassword(e.target.value)}
-                className="h-8 text-xs"
-              />
-            </div>
-            {resetMsg && (
-              <p className={`text-xs ${resetMsg.ok ? 'text-green-600' : 'text-destructive'}`}>{resetMsg.text}</p>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleResetPassword}
-              disabled={resetting || !resetEmail || !resetPassword}
-              className="w-full"
-            >
-              {resetting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <KeyRound className="h-3.5 w-3.5 mr-1" />}
-              Reset Password
-            </Button>
-          </div>
-
           {/* Danger Zone */}
           <div className="space-y-3 border-t pt-6">
             <Label className="text-xs font-medium text-destructive uppercase tracking-wider">Danger Zone</Label>
@@ -547,179 +475,6 @@ function SiteEditSheet({
         <SheetFooter>
           <Button variant="outline" className="w-full" onClick={onClose}>Close</Button>
         </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Create Site Sheet
-// ────────────────────────────────────────────────────────────────────────────
-
-function CreateSiteSheet({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean
-  onClose: () => void
-  onCreated: () => void
-}) {
-  const isMobile = useIsMobile()
-  const [form, setForm] = useState({
-    hostname: '', db_type: '', db_host: '', db_port: '',
-    db_name: '', db_user: '', db_password: '', domains: '',
-    admin_email: '', admin_password: '',
-  })
-  const [creating, setCreating] = useState(false)
-  const [msg, setMsg] = useState<{ text: string; ok: boolean; link?: string } | null>(null)
-  const [showAdvanced, setShowAdvanced] = useState(false)
-
-  const derivedDBName = form.hostname.replace(/\./g, '_')
-  const effectiveDBName = form.db_name || derivedDBName
-
-  const update = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.value }))
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setCreating(true)
-    setMsg(null)
-    try {
-      await createSite({
-        hostname: form.hostname,
-        db_type: form.db_type,
-        db_host: form.db_host,
-        db_port: parseInt(form.db_port) || 3306,
-        db_name: effectiveDBName,
-        db_user: form.db_user,
-        db_password: form.db_password,
-        domains: form.domains || undefined,
-        admin_email: form.admin_email,
-        admin_password: form.admin_password,
-      })
-      const workspaceUrl = `/s/${form.hostname}/workspace`
-      setMsg({ text: `Site "${form.hostname}" created!`, ok: true, link: workspaceUrl })
-      setForm(f => ({ ...f, hostname: '', db_type: '', db_name: '', admin_email: '', admin_password: '', db_password: '' }))
-      setTimeout(() => onCreated(), 1000)
-    } catch (err: any) {
-      setMsg({ text: err.message || 'Failed', ok: false })
-    }
-    setCreating(false)
-  }
-
-  return (
-    <Sheet open={open} onOpenChange={(open) => { if (!open) onClose() }}>
-      <SheetContent side={isMobile ? 'bottom' : 'right'} className="w-full sm:max-w-lg flex flex-col">
-        <SheetHeader>
-          <SheetTitle>Create Site</SheetTitle>
-          <SheetDescription>
-            Only hostname, admin email, and password are required. Database defaults are used unless you provide your own.
-          </SheetDescription>
-        </SheetHeader>
-
-        <form onSubmit={handleCreate} className="flex-1 overflow-y-auto space-y-4 py-4">
-          {msg && (
-            <div className={`rounded-lg border px-3 py-2 text-xs ${
-              msg.ok ? 'border-green-200 bg-green-50 text-green-800' : 'border-destructive/50 bg-destructive/10 text-destructive'
-            }`}>
-              {msg.text}
-              {msg.link && (
-                <a href={msg.link} className="ml-2 underline font-medium hover:no-opacity-80 inline-flex items-center gap-0.5">
-                  Open Workspace <ExternalLink className="h-3 w-3" />
-                </a>
-              )}
-            </div>
-          )}
-
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="hostname">Hostname *</Label>
-              <Input id="hostname" placeholder="airtime.local" value={form.hostname} onChange={update('hostname')} required />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="domains">Domains</Label>
-              <Input id="domains" placeholder="e.g. kora.sslip.io (comma-separated)" value={form.domains} onChange={update('domains')} />
-              <p className="text-[0.8rem] text-muted-foreground">Additional hostnames for this site.</p>
-            </div>
-            {form.hostname && (
-              <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Database className="h-3 w-3" />
-                Database: <span className="font-mono font-medium text-foreground">{effectiveDBName}</span>
-                {form.db_name ? ' (manual)' : ' (auto)'}
-              </div>
-            )}
-          </div>
-
-          <div className="border-t pt-4">
-            <p className="text-xs font-medium text-muted-foreground mb-3">Admin Account</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="admin_email">Admin Email *</Label>
-                <Input id="admin_email" type="email" placeholder="admin@airtime.local" value={form.admin_email} onChange={update('admin_email')} required />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="admin_password">Admin Password *</Label>
-                <PasswordInput id="admin_password" value={form.admin_password} onChange={update('admin_password')} required />
-              </div>
-            </div>
-          </div>
-
-          <div className="border-t pt-4">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-full text-left"
-            >
-              {showAdvanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-              Advanced: Self-hosted database (optional)
-            </button>
-            {showAdvanced && (
-              <div className="grid grid-cols-2 gap-3 mt-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="db_type">DB Type</Label>
-                  <Select value={form.db_type} onValueChange={(v) => setForm(f => ({ ...f, db_type: v ?? '' }))}>
-                    <SelectTrigger id="db_type"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="mysql">MySQL / MariaDB</SelectItem>
-                      <SelectItem value="libsql">LibSQL</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="db_host">DB Host</Label>
-                  <Input id="db_host" placeholder="Default: 127.0.0.1" value={form.db_host} onChange={update('db_host')} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="db_port">DB Port</Label>
-                  <Input id="db_port" type="number" placeholder="Default: 3306" value={form.db_port} onChange={update('db_port')} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="db_name">DB Name</Label>
-                  <Input id="db_name" placeholder="Auto: derived from hostname" value={form.db_name} onChange={update('db_name')} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="db_user">DB User</Label>
-                  <Input id="db_user" placeholder="Default: root" value={form.db_user} onChange={update('db_user')} />
-                </div>
-                <div className="space-y-1.5 col-span-2">
-                  <Label htmlFor="db_password">DB Password</Label>
-                  <PasswordInput id="db_password" placeholder="(leave empty if no password)" value={form.db_password} onChange={update('db_password')} />
-                </div>
-              </div>
-            )}
-          </div>
-
-          <SheetFooter>
-            <div className="flex gap-2 w-full">
-              <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
-              <Button type="submit" disabled={creating} className="flex-1">
-                {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Create Site
-              </Button>
-            </div>
-          </SheetFooter>
-        </form>
       </SheetContent>
     </Sheet>
   )

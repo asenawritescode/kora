@@ -64,6 +64,7 @@ export interface PageComponent {
   span?: number
   props: Record<string, unknown>
   data?: string
+  resource_bindings?: Record<string, string>
   actions?: string[]
   required_capabilities?: string[]
   permissions?: string[]
@@ -136,7 +137,7 @@ export function validatePageManifestContract(manifest: PageManifest): PageManife
     issues.push({ path: 'spec.route', message: 'Route must be a single safe page segment like /pos.' })
   }
   if (isReservedManifestRoute(manifest.spec.route)) {
-    issues.push({ path: 'spec.route', message: 'Route conflicts with a reserved Kora route.' })
+    issues.push({ path: 'spec.route', message: 'Route conflicts with a reserved Kigae route.' })
   }
   if (!manifest.spec.runtime.trim()) issues.push({ path: 'spec.runtime', message: 'Runtime range is required.' })
   if (!['single', 'two_panel', 'three_panel', 'grid'].includes(manifest.spec.layout.type)) {
@@ -187,6 +188,10 @@ export function validatePageManifestContract(manifest: PageManifest): PageManife
           issues.push({ path: `${path}.props.source_doctype`, message: `Component source_doctype must match resource doctype ${resourceDoctype}.` })
         }
       }
+    }
+    for (const [role, resourceID] of Object.entries(component.resource_bindings ?? {})) {
+      if (!resourceID.trim()) issues.push({ path: `${path}.resource_bindings.${role}`, message: 'Resource role bindings must name a page resource.' })
+      else if (!resourceIds.has(resourceID)) issues.push({ path: `${path}.resource_bindings.${role}`, message: `Unknown resource ${resourceID} for role ${role}.` })
     }
     const bindings = component.props.bindings
     if (bindings && typeof bindings === 'object' && !Array.isArray(bindings)) {

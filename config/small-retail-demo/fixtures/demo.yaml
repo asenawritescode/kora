@@ -1,0 +1,29 @@
+pack: small-retail-demo
+seed_mode: demo
+records:
+  - doctype: Register
+    reference: REG-001
+    register_name: Shop till
+    location: Front counter
+    status: Active
+  - doctype: Product
+    reference: DEMO-001
+    product_name: Rice 2 kg
+    category: Pantry
+    selling_price: 420
+    stock_qty: 24
+    status: Active
+  - doctype: Product
+    reference: DEMO-002
+    product_name: Fresh milk 1 L
+    category: Drinks
+    selling_price: 135
+    stock_qty: 18
+    status: Active
+  - doctype: Product
+    reference: DEMO-003
+    product_name: Laundry soap
+    category: Household
+    selling_price: 160
+    stock_qty: 12
+    status: Active

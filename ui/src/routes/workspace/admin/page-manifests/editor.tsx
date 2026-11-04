@@ -3,6 +3,7 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { createPageManifest, fetchPageManifestByName, updatePageManifest } from '@/lib/api/page-manifests'
 import { fetchDoctypes } from '@/lib/api/system'
+import { resolveComponentEntry } from '@/components/views/registry'
 import type { DocType } from '@/types/kora'
 import {
   PAGE_COMPONENT_LIBRARY,
@@ -98,6 +99,7 @@ export default function PageManifestWorkbench() {
   const [previewViewport, setPreviewViewport] = useState<'desktop' | 'tablet' | 'mobile'>('desktop')
   const [saving, setSaving] = useState(false)
   const [draftStatus, setDraftStatus] = useState<'idle' | 'restored' | 'saved' | 'error'>('idle')
+  const [draftStorageError, setDraftStorageError] = useState<string | null>(null)
 
   const { data: existingManifest, isLoading, error } = useQuery({
     queryKey: ['page-manifest', name],
@@ -114,7 +116,13 @@ export default function PageManifestWorkbench() {
   useEffect(() => {
     if (existingManifest) {
       const next = normalizePageManifest(existingManifest)
-      const restored = readManifestDraft(name)
+      let restored: ReturnType<typeof readManifestDraft> = null
+      try {
+        restored = readManifestDraft(name)
+      } catch {
+        setDraftStatus('error')
+        setDraftStorageError('Browser storage is unavailable; this page has no recoverable local draft.')
+      }
       if (restored) {
         const restoredManifest = normalizePageManifest(restored.manifest)
         setManifest(restoredManifest)
@@ -150,8 +158,14 @@ export default function PageManifestWorkbench() {
       source: mode === 'source' ? 'source' : 'editor',
     } as const
     const timeout = window.setTimeout(() => {
-      writeManifestDraft(name, nextDraft)
-      setDraftStatus('saved')
+      try {
+        writeManifestDraft(name, nextDraft)
+        setDraftStatus('saved')
+        setDraftStorageError(null)
+      } catch {
+        setDraftStatus('error')
+        setDraftStorageError('This page draft could not be saved in browser storage.')
+      }
     }, 300)
     return () => window.clearTimeout(timeout)
   }, [manifest, mode, name])
@@ -274,16 +288,23 @@ export default function PageManifestWorkbench() {
 
     setSaving(true)
     try {
-      if (isNew) {
+      const shouldNavigate = isNew
+      if (shouldNavigate) {
         await createPageManifest(normalizePageManifest(manifest))
-        toast('success', 'Draft page manifest saved.')
-        navigate({ to: '/workspace/admin/page-manifests/$name', params: { name: manifest.metadata.name } })
       } else {
         await updatePageManifest(name!, normalizePageManifest(manifest))
-        toast('success', 'Draft page manifest saved.')
       }
-      clearManifestDraft(name)
-      setDraftStatus('saved')
+      toast('success', 'Draft page manifest saved.')
+      try {
+        clearManifestDraft(name)
+        setDraftStatus('saved')
+        setDraftStorageError(null)
+      } catch {
+        setDraftStatus('error')
+        setDraftStorageError('The page manifest was saved, but its browser draft could not be cleared.')
+        toast('error', 'The page manifest was saved, but its browser draft could not be cleared.')
+      }
+      if (shouldNavigate) navigate({ to: '/workspace/admin/page-manifests/$name', params: { name: manifest.metadata.name } })
     } catch (err) {
       setDraftStatus('error')
       toast('error', err instanceof Error ? err.message : 'Failed to save manifest.')
@@ -343,6 +364,7 @@ export default function PageManifestWorkbench() {
         <Badge variant={draftStatus === 'error' ? 'destructive' : draftStatus === 'restored' ? 'secondary' : 'outline'}>
           Draft {draftStatus}
         </Badge>
+        {draftStorageError && <span role="alert" className="text-xs text-destructive">{draftStorageError}</span>}
         <div className="flex items-center gap-1 rounded-lg border bg-muted/20 p-0.5">
           {previewViewportOptions().map((option) => (
             <Button
@@ -840,7 +862,7 @@ function ManifestCanvas({
           <CardTitle>{mode === 'design' ? 'Design canvas' : 'Preview runtime'}</CardTitle>
       <CardDescription>
         {mode === 'design'
-          ? `Editor chrome wraps the real registered Kora components without changing the manifest tree. ${viewport === 'desktop' ? 'Desktop' : viewport === 'tablet' ? 'Tablet' : 'Mobile'} preview keeps the same manifest tree and only changes the rendering width.`
+          ? `Editor chrome wraps the real registered Kigae components without changing the manifest tree. ${viewport === 'desktop' ? 'Desktop' : viewport === 'tablet' ? 'Tablet' : 'Mobile'} preview keeps the same manifest tree and only changes the rendering width.`
           : `Preview renders the same manifest path without editor controls or unsafe actions. ${viewport === 'desktop' ? 'Desktop' : viewport === 'tablet' ? 'Tablet' : 'Mobile'} preview keeps the same manifest tree and only changes the rendering width.`}
       </CardDescription>
       </CardHeader>
@@ -986,7 +1008,7 @@ function ActionEditor({
       <SelectField
         label="Command"
         value={action.command}
-        options={['document.create', 'document.update', 'document.delete', 'document.submit', 'document.cancel', 'workflow.transition']}
+        options={['document.create', 'document.update', 'document.delete', 'document.submit', 'document.cancel']}
         onChange={(command) => update({ command })}
       />
       <ActionInvalidatePicker action={action} resources={resources} update={update} />
@@ -1097,6 +1119,8 @@ function ComponentInspector({
     )
   }
 
+  const resourceRoles = resolveComponentEntry(component.component)?.resourceRoles || []
+
   return (
     <div className="space-y-3 border-b p-4">
       <SectionTitle icon={Boxes} title="Component" />
@@ -1109,6 +1133,29 @@ function ComponentInspector({
         options={resourceOptions.map((option) => option.value)}
         onChange={(data) => updateComponent({ data })}
       />
+      {resourceRoles.map((role) => role.dataBinding ? (
+        <div key={role.name} className="rounded-md border bg-muted/30 px-2.5 py-2 text-xs">
+          <span className="text-muted-foreground">{role.label}: </span>
+          <span className="font-mono">{component.resource_bindings?.[role.name] || component.data?.split('.')[0] || 'Choose a data binding above'}</span>
+        </div>
+      ) : (
+        <label key={role.name} className="space-y-1.5">
+          <span className="block text-xs font-medium">{role.label} resource</span>
+          <select
+            value={component.resource_bindings?.[role.name] || ''}
+            onChange={(event) => {
+              const resource_bindings = { ...(component.resource_bindings || {}) }
+              if (event.target.value) resource_bindings[role.name] = event.target.value
+              else delete resource_bindings[role.name]
+              updateComponent({ resource_bindings })
+            }}
+            className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+          >
+            <option value="">No separate resource</option>
+            {resourceOptions.map((option) => <option key={option.value} value={option.value}>{option.value}{option.description ? ` — ${option.description}` : ''}</option>)}
+          </select>
+        </label>
+      ))}
       <SelectField label="Region" value={component.region} options={['main', 'side', 'left', 'right', 'header', 'footer']} onChange={(region) => updateComponent({ region })} />
       <TokenField label="Required capabilities" value={component.required_capabilities || []} onChange={(required_capabilities) => updateComponent({ required_capabilities })} />
       <TokenField label="Actions" value={component.actions || []} onChange={(actions) => updateComponent({ actions })} />

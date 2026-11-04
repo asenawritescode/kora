@@ -3,12 +3,11 @@ package sdk
 import "time"
 
 const (
-	TypeDocEvent       = "doc_event"
-	TypeAPIMethod      = "api_method"
-	TypeWorkflowAction = "workflow_action"
-	TypeScheduled      = "scheduled"
-	TypeComputed       = "computed"
-	TypeValidate       = "validate"
+	TypeDocEvent  = "doc_event"
+	TypeAPIMethod = "api_method"
+	TypeScheduled = "scheduled"
+	TypeComputed  = "computed"
+	TypeValidate  = "validate"
 )
 
 const (
@@ -23,23 +22,22 @@ const (
 )
 
 type ScriptRecord struct {
-	Name           string    `json:"name"`
-	ScriptType     string    `json:"script_type"`
-	DocType        string    `json:"doctype,omitempty"`
-	Event          string    `json:"event,omitempty"`
-	MethodPath     string    `json:"method_path,omitempty"`
-	WorkflowAction string    `json:"workflow_action,omitempty"`
-	Schedule       string    `json:"schedule,omitempty"`
-	Script         string    `json:"script"`
-	Priority       int       `json:"priority"`
-	IsActive       bool      `json:"is_active"`
-	RunAs          string    `json:"run_as,omitempty"`
-	TimeoutMs      int       `json:"timeout_ms"`
-	Description    string    `json:"description,omitempty"`
-	Site           string    `json:"site"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	CreatedBy      string    `json:"created_by"`
+	Name        string    `json:"name"`
+	ScriptType  string    `json:"script_type"`
+	DocType     string    `json:"doctype,omitempty"`
+	Event       string    `json:"event,omitempty"`
+	MethodPath  string    `json:"method_path,omitempty"`
+	Schedule    string    `json:"schedule,omitempty"`
+	Script      string    `json:"script"`
+	Priority    int       `json:"priority"`
+	IsActive    bool      `json:"is_active"`
+	RunAs       string    `json:"run_as,omitempty"`
+	TimeoutMs   int       `json:"timeout_ms"`
+	Description string    `json:"description,omitempty"`
+	Site        string    `json:"site"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	CreatedBy   string    `json:"created_by"`
 }
 
 type ExecuteRequest struct {

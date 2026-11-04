@@ -26,8 +26,140 @@
   can_create: true
   can_delete: false
 - doctype: Recurring Invoice
+  role: Subscription and Recurring Services Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Recurring Invoice
   role: Subscription and Recurring Services Reviewer
   can_read: true
   can_write: true
   can_create: true
   can_delete: false
+- doctype: Billing Customer
+  role: Subscription and Recurring Services Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Plan
+  role: Subscription and Recurring Services Operator
+  can_read: true
+  can_write: false
+  can_create: false
+  can_delete: false
+- doctype: Subscription Line
+  role: Subscription and Recurring Services Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Payment
+  role: Subscription and Recurring Services Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Entitlement
+  role: Subscription and Recurring Services Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Usage Record
+  role: Subscription and Recurring Services Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Billing Customer
+  role: Subscription and Recurring Services Reviewer
+  can_read: true
+  can_write: false
+  can_create: false
+  can_delete: false
+- doctype: Plan
+  role: Subscription and Recurring Services Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Billing Schedule
+  role: Subscription and Recurring Services Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Subscription Line
+  role: Subscription and Recurring Services Reviewer
+  can_read: true
+  can_write: false
+  can_create: false
+  can_delete: false
+- doctype: Payment
+  role: Subscription and Recurring Services Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Entitlement
+  role: Subscription and Recurring Services Reviewer
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Usage Record
+  role: Subscription and Recurring Services Reviewer
+  can_read: true
+  can_write: false
+  can_create: false
+  can_delete: false
+- doctype: Billing Customer
+  role: Subscription and Recurring Services Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Plan
+  role: Subscription and Recurring Services Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Billing Schedule
+  role: Subscription and Recurring Services Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Recurring Invoice
+  role: Subscription and Recurring Services Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Subscription Line
+  role: Subscription and Recurring Services Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Payment
+  role: Subscription and Recurring Services Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Entitlement
+  role: Subscription and Recurring Services Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Usage Record
+  role: Subscription and Recurring Services Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

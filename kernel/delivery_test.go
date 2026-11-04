@@ -60,7 +60,7 @@ func TestLocalProviderDeliveryAfterCommit(t *testing.T) {
 	}
 	select {
 	case ev := <-bus.events:
-		if ev.Site != s.Name || ev.DocName == "" {
+		if ev.Site != s.Name || ev.DocName == "" || ev.Sequence == "" {
 			t.Fatalf("unexpected change event %+v", ev)
 		}
 	case <-time.After(2 * time.Second):

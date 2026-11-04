@@ -102,16 +102,17 @@ func TestCommandEnvelopeJSONRoundTrip(t *testing.T) {
 func TestEventEnvelopeJSONRoundTrip(t *testing.T) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
 	in := EventEnvelope{
-		ID:            NewEventID(),
-		Type:          "kora.document.sales_invoice.submitted",
-		Version:       1,
-		Source:        "kora.kernel",
-		Site:          "acme.example.com",
-		AggregateType: "Sales Invoice",
-		AggregateID:   "SINV-0001",
-		OccurredAt:    now,
-		CorrelationID: "req-123",
-		Data:          json.RawMessage(`{"projection":"changed_fields","changed_fields":["status"]}`),
+		ID:             NewEventID(),
+		Type:           "kora.document.sales_invoice.submitted",
+		Version:        1,
+		Source:         "kora.kernel",
+		Site:           "acme.example.com",
+		AggregateType:  "Sales Invoice",
+		AggregateID:    "SINV-0001",
+		OccurredAt:     now,
+		CorrelationID:  "req-123",
+		CausationDepth: 4,
+		Data:           json.RawMessage(`{"projection":"changed_fields","changed_fields":["status"]}`),
 	}
 
 	b, err := json.Marshal(in)
@@ -119,7 +120,7 @@ func TestEventEnvelopeJSONRoundTrip(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	for _, key := range []string{"id", "type", "version", "source", "site", "aggregate_type", "aggregate_id", "occurred_at", "data"} {
+	for _, key := range []string{"id", "type", "version", "source", "site", "aggregate_type", "aggregate_id", "occurred_at", "causation_depth", "data"} {
 		if !strings.Contains(string(b), `"`+key+`"`) {
 			t.Errorf("marshaled event missing key %q: %s", key, b)
 		}
@@ -129,7 +130,7 @@ func TestEventEnvelopeJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(b, &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if out.AggregateType != "Sales Invoice" || out.AggregateID != "SINV-0001" {
+	if out.AggregateType != "Sales Invoice" || out.AggregateID != "SINV-0001" || out.CausationDepth != 4 {
 		t.Errorf("aggregate round-trip mismatch: %+v", out)
 	}
 }
@@ -146,6 +147,17 @@ func TestEventEnvelopeValidateRejectsMalformedEvents(t *testing.T) {
 		if err := event.Validate(); err == nil {
 			t.Fatalf("malformed event accepted: %+v", event)
 		}
+	}
+}
+
+func TestEventEnvelopeRejectsCausationDepthBeyondDispatchBound(t *testing.T) {
+	event := EventEnvelope{ID: "evt-depth", Type: "record.updated", Version: 1, Source: "kora.kernel", Site: "acme", OccurredAt: time.Now(), CausationDepth: MaxEventCausationDepth + 1, Data: json.RawMessage(`{}`)}
+	if err := event.Validate(); err == nil || !strings.Contains(err.Error(), "causation depth") {
+		t.Fatalf("event over dispatch bound was not rejected: %v", err)
+	}
+	event.CausationDepth = MaxEventCausationDepth
+	if err := event.Validate(); err != nil {
+		t.Fatalf("event at dispatch bound rejected: %v", err)
 	}
 }
 

@@ -11,9 +11,11 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 )
 
 func TestHandleAIGrantApprovalTransitionsPendingRow(t *testing.T) {
@@ -29,31 +31,15 @@ func TestHandleAIGrantApprovalTransitionsPendingRow(t *testing.T) {
 	handler := NewHandler(reg, &orm.TxManager{DB: mockDB, Registry: reg, Dialect: db.Resolve("mysql")})
 
 	requestedAt := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
-	pendingRows := sqlmock.NewRows([]string{
-		"id", "site", "operation_id", "actor_principal_id", "actor_principal_type",
-		"tool_name", "state", "target_fingerprint", "argument_hash", "record_version",
-		"requested_at", "expires_at", "granted_at", "granted_by", "auth_session_id",
-	}).AddRow(
-		"approval-1", "test.local", "op-1", "user-1", "human",
-		"customer_update", "pending_approval", "fingerprint", "fingerprint", 1,
-		requestedAt, nil, nil, "", "sess-1",
-	)
-	mock.ExpectQuery("SELECT id, site, operation_id, actor_principal_id, actor_principal_type, tool_name, state, target_fingerprint, argument_hash, record_version, requested_at, expires_at, granted_at, granted_by, auth_session_id FROM _kora_ai_approval WHERE id = \\?").
-		WithArgs("approval-1").
-		WillReturnRows(pendingRows)
-	mock.ExpectExec("INSERT INTO _kora_ai_approval").
-		WithArgs(
-			"approval-1", "test.local", "op-1", "user-1", "human",
-			"customer_update", "granted", "fingerprint", "fingerprint", 1,
-			sqlmock.AnyArg(), nil, sqlmock.AnyArg(), "alice", "sess-1",
-		).
+	mock.ExpectExec("UPDATE _kora_ai_approval SET state = 'granted', granted_at = \\?, granted_by = \\? WHERE id = \\? AND site = \\? AND actor_principal_id = \\? AND state = 'pending_approval'").
+		WithArgs(sqlmock.AnyArg(), "alice", "approval-1", "test.local", "alice").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	grantedRows := sqlmock.NewRows([]string{
 		"id", "site", "operation_id", "actor_principal_id", "actor_principal_type",
 		"tool_name", "state", "target_fingerprint", "argument_hash", "record_version",
 		"requested_at", "expires_at", "granted_at", "granted_by", "auth_session_id",
 	}).AddRow(
-		"approval-1", "test.local", "op-1", "user-1", "human",
+		"approval-1", "test.local", "op-1", "alice", "agent",
 		"customer_update", "granted", "fingerprint", "fingerprint", 1,
 		requestedAt, nil, time.Date(2026, 8, 13, 11, 0, 0, 0, time.UTC), "alice", "sess-1",
 	)
@@ -78,11 +64,20 @@ func TestHandleAIGrantApprovalTransitionsPendingRow(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/ai/approvals/approval-1/grant", nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/ai/approvals/approval-1/grant", strings.NewReader(`{"granted_by":"mallory"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
 	c.Params = gin.Params{{Key: "id", Value: "approval-1"}}
 	c.Set("site_db", mockDB)
 	c.Set("site_registry", reg)
-	c.Set("user", "alice")
+	c.Set("site_name", "test.local")
+	c.Set("user", "mallory")
+	execution, err := policy.NewVerifiedExecution("tenant-stable", contract.ActorContext{
+		PrincipalID: "alice", PrincipalType: contract.PrincipalHuman, SubjectUserID: "alice", Site: "test.local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Set("policy_execution", execution)
 
 	handler.HandleAIGrantApproval(c)
 
@@ -94,6 +89,56 @@ func TestHandleAIGrantApprovalTransitionsPendingRow(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestHandleAIGrantApprovalRejectsDifferentOwner(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer mockDB.Close()
+	reg := doctype.NewRegistry()
+	handler := NewHandler(reg, &orm.TxManager{DB: mockDB, Registry: reg, Dialect: db.Resolve("mysql")})
+	mock.ExpectExec("UPDATE _kora_ai_approval SET state = 'granted', granted_at = \\?, granted_by = \\? WHERE id = \\? AND site = \\? AND actor_principal_id = \\? AND state = 'pending_approval'").
+		WithArgs(sqlmock.AnyArg(), "alice", "approval-foreign", "test.local", "alice").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/ai/approvals/approval-foreign/grant", nil)
+	c.Params = gin.Params{{Key: "id", Value: "approval-foreign"}}
+	c.Set("site_db", mockDB)
+	c.Set("site_registry", reg)
+	c.Set("site_name", "test.local")
+	execution, err := policy.NewVerifiedExecution("tenant-stable", contract.ActorContext{
+		PrincipalID: "alice", PrincipalType: contract.PrincipalHuman, SubjectUserID: "alice", Site: "test.local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Set("policy_execution", execution)
+	handler.HandleAIGrantApproval(c)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusNotFound, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestHandleAIListApprovalsRequiresVerifiedExecution(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(doctype.NewRegistry(), nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/ai/approvals", nil)
+	c.Set("user", "attacker")
+	c.Set("user_role", "Administrator")
+	c.Set("user_roles", []string{"Administrator"})
+	handler.HandleAIListApprovals(c)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusUnauthorized, w.Body.String())
 	}
 }
 

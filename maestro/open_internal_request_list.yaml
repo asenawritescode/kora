@@ -1,0 +1,11 @@
+appId: com.kora.mobile
+---
+- assertVisible: Internal Requests Uat Workspace
+- pressKey: Back
+- waitForAnimationToEnd
+- tapOn: Browse
+- waitForAnimationToEnd
+- assertVisible: Internal Request
+- tapOn: Internal Request
+- waitForAnimationToEnd
+- assertVisible: 0 records

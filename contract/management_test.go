@@ -6,7 +6,7 @@ import (
 )
 
 func TestManagementCommandsValidateOpaqueReferencesAndDeploymentAuthority(t *testing.T) {
-	base := ProvisionTenant{Meta: CommandMeta{IdempotencyKey: "provision-key-1"}, Tenant: "tenant-1", BootstrapAdminEmail: "admin@tenant.example.test", PrimaryAlias: "tenant.example.test", Deployment: "deploy-1", DatabaseAllocationRef: "mysql:allocation-1"}
+	base := ProvisionTenant{Meta: CommandMeta{IdempotencyKey: "provision-key-1"}, Tenant: "tenant-1", BootstrapAdminEmail: "admin@tenant.example.test", BootstrapAdminSubject: "usr_test_subject_1", PrimaryAlias: "tenant.example.test", Deployment: "deploy-1", DatabaseAllocationRef: "mysql:allocation-1"}
 	if err := ValidateProvisionTenant(base); err != nil {
 		t.Fatal("valid provision command:", err)
 	}
@@ -59,6 +59,29 @@ func TestManagementCommandsRequireExpectedRevisionAndConstrainedState(t *testing
 	if err := ValidateApplyPackage(valid); err != nil {
 		t.Fatal("valid package command:", err)
 	}
+	valid.OptionalReleaseIDs = []string{"team-release-1.0.0", "reports-release-1.0.0"}
+	if err := ValidateApplyPackage(valid); err != nil {
+		t.Fatal("valid selected package components:", err)
+	}
+	valid.ProviderSelections = []ProviderSelection{{Key: BindingKey{Scope: BusinessScope{TenantID: valid.Tenant, Kind: ScopeKindTenant}, ConsumerModuleID: "sales.orders", CapabilityName: "billing.issue"}, ProviderID: "billing-external"}}
+	if err := ValidateApplyPackage(valid); err != nil {
+		t.Fatal("valid provider selection:", err)
+	}
+	valid.ProviderSelections[0].Key.Scope.TenantID = "tenant-2"
+	if err := ValidateApplyPackage(valid); err == nil {
+		t.Fatal("accepted cross-tenant provider selection")
+	}
+	valid.ProviderSelections[0].Key.Scope.TenantID = valid.Tenant
+	valid.ProviderSelections = append(valid.ProviderSelections, valid.ProviderSelections[0])
+	if err := ValidateApplyPackage(valid); err == nil {
+		t.Fatal("accepted duplicate provider selection")
+	}
+	valid.ProviderSelections = nil
+	valid.OptionalReleaseIDs = []string{"team-release-1.0.0", "team-release-1.0.0"}
+	if err := ValidateApplyPackage(valid); err == nil {
+		t.Fatal("accepted duplicate package component release IDs")
+	}
+	valid.OptionalReleaseIDs = nil
 	valid.ExpectedConfigRevision = ""
 	if err := ValidateApplyPackage(valid); err == nil {
 		t.Fatal("accepted package command without revision binding")
@@ -140,6 +163,26 @@ func TestManagementCapabilitiesV2Validation(t *testing.T) {
 				t.Fatalf("ValidateManagementCapabilitiesV2(%+v) error = %v, valid=%v", test.value, err, test.valid)
 			}
 		})
+	}
+}
+
+func TestEngineVersionAtLeast(t *testing.T) {
+	tests := []struct {
+		running, required string
+		want              bool
+		wantErr           bool
+	}{
+		{running: "1.2.3", required: "1.2.3", want: true},
+		{running: "v1.3.0", required: "1.2.9", want: true},
+		{running: "1.2.2", required: "1.2.3", want: false},
+		{running: "1.0", required: "1.0.0", wantErr: true},
+		{running: "1.0.0-alpha", required: "1.0.0", wantErr: true},
+	}
+	for _, tc := range tests {
+		got, err := EngineVersionAtLeast(tc.running, tc.required)
+		if (err != nil) != tc.wantErr || (err == nil && got != tc.want) {
+			t.Errorf("EngineVersionAtLeast(%q, %q) = %v, %v", tc.running, tc.required, got, err)
+		}
 	}
 }
 

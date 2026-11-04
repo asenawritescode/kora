@@ -183,6 +183,9 @@ func evalComputedLisp(expr string, dt *DocType, doc *Document, sandbox *LispSand
 	if err != nil {
 		return nil, fmt.Errorf("lisp eval of %q: %w", expr, err)
 	}
+	if text, ok := result.(string); ok {
+		return text, nil
+	}
 	return asFloat64(result), nil
 }
 

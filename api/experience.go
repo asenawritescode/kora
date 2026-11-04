@@ -20,7 +20,7 @@ var approvedExperienceFonts = map[string]struct{}{
 }
 
 // resolveTenantExperience returns safe tenant settings with neutral defaults.
-// It is deliberately independent of Kora's global console branding.
+// It is deliberately independent of Kigae's global console branding.
 func (h *Handler) resolveTenantExperience(c *gin.Context) TenantExperience {
 	siteName := c.GetString("site_name")
 	branding := Branding{

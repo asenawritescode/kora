@@ -74,12 +74,14 @@ func TestAIRecordMutationAdapterUsesKernelAcrossDialects(t *testing.T) {
 				Context: context.Background(), CurrentUser: "alice@example.test", CurrentUserRole: doctype.AdminRole,
 				CurrentUserRoles: []string{doctype.AdminRole}, Outbox: outbox.NewSQLWriter(dialect),
 			}
+			execution := testAIExecution(t, site, "alice@example.test", []string{doctype.AdminRole})
+			tx.Execution = execution
 
-			first, err := executeAIRecordMutationWithKey(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "AI adapter"}, "alice@example.test", []string{doctype.AdminRole}, "ai-cross-dialect-"+suffix, false)
+			first, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "AI adapter"}, "alice@example.test", []string{doctype.AdminRole}, "ai-cross-dialect-"+suffix, false, execution)
 			if err != nil {
 				t.Fatalf("AI create on %s: %v", tc.name, err)
 			}
-			replay, err := executeAIRecordMutationWithKey(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "AI adapter"}, "alice@example.test", []string{doctype.AdminRole}, "ai-cross-dialect-"+suffix, false)
+			replay, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "AI adapter"}, "alice@example.test", []string{doctype.AdminRole}, "ai-cross-dialect-"+suffix, false, execution)
 			if err != nil {
 				t.Fatalf("AI create replay on %s: %v", tc.name, err)
 			}

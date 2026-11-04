@@ -8,7 +8,6 @@ package contract
 import "time"
 
 // DesiredStatus describes the current lifecycle posture of a desired state set.
-//
 //contract:enum
 type DesiredStatus string
 
@@ -21,7 +20,6 @@ const (
 
 // DesiredResource represents one resource the platform intends to have active
 // at a target generation.
-//
 //contract:wire
 type DesiredResource struct {
 	Ref          ResourceRef   `json:"ref"`
@@ -31,7 +29,6 @@ type DesiredResource struct {
 
 // DesiredReport is the signed desired-state batch published by Cloud or an
 // activation controller.
-//
 //contract:wire
 type DesiredReport struct {
 	DeploymentID string            `json:"deployment_id"`

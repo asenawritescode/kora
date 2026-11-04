@@ -5,32 +5,57 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	sqlDialect "github.com/asenawritescode/kora/db"
 )
 
 type OnboardingStore struct {
-	DB   *sql.DB
-	mu   sync.Mutex
-	path string
+	DB      *sql.DB
+	dialect sqlDialect.Dialect
+	mu      sync.Mutex
+	path    string
 }
 
-func NewOnboardingStore(db *sql.DB) *OnboardingStore {
+func NewOnboardingStore(db *sql.DB, dbType ...string) *OnboardingStore {
+	typeName := ""
+	if len(dbType) > 0 {
+		typeName = dbType[0]
+	}
+	if typeName == "" {
+		typeName = os.Getenv("KORA_DB_TYPE")
+	}
 	path := os.Getenv("KORA_CONFIG_DIR")
 	if path == "" {
 		path = "."
 	}
-	return &OnboardingStore{DB: db, path: filepath.Join(path, "_kora_provisioning_jobs.json")}
+	return &OnboardingStore{DB: db, dialect: sqlDialect.Resolve(typeName), path: filepath.Join(path, "_kora_provisioning_jobs.json")}
 }
 
 func (s *OnboardingStore) Bootstrap() error {
 	if s.DB == nil {
 		return nil
 	}
-	_, err := s.DB.Exec(`
+	timestampType := "DATETIME"
+	booleanType := "TINYINT(1)"
+	booleanDefault := "0"
+	if _, ok := s.dialect.(*sqlDialect.PostgresDialect); ok {
+		timestampType = "TIMESTAMP"
+		booleanType = "BOOLEAN"
+		booleanDefault = "FALSE"
+	} else if _, ok := s.dialect.(*sqlDialect.LibSQLDialect); ok {
+		booleanType = "INTEGER"
+	}
+	uniqueConstraint := "UNIQUE KEY uq_kora_provisioning_dedupe (site, resource, operation_id, dedupe_hash)"
+	if _, ok := s.dialect.(*sqlDialect.MySQLDialect); !ok {
+		uniqueConstraint = "CONSTRAINT uq_kora_provisioning_dedupe UNIQUE (site, resource, operation_id, dedupe_hash)"
+	}
+	_, err := s.DB.Exec(fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS _kora_provisioning_job (
   id VARCHAR(140) NOT NULL,
   site VARCHAR(140) NOT NULL DEFAULT '',
@@ -44,15 +69,15 @@ CREATE TABLE IF NOT EXISTS _kora_provisioning_job (
   output_id VARCHAR(255) NOT NULL DEFAULT '',
   attempt INT NOT NULL DEFAULT 0,
   lease_owner VARCHAR(140) NOT NULL DEFAULT '',
-  lease_until DATETIME,
-  retry_at DATETIME,
+  lease_until %s,
+  retry_at %s,
   last_error TEXT,
-  created_at DATETIME NOT NULL,
-  updated_at DATETIME,
+  created_at %s NOT NULL,
+  updated_at %s,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_kora_provisioning_dedupe (site, resource, operation_id, dedupe_hash)
+  %s
 )
-`)
+`, timestampType, timestampType, timestampType, timestampType, uniqueConstraint))
 	if err != nil {
 		return err
 	}
@@ -60,15 +85,15 @@ CREATE TABLE IF NOT EXISTS _kora_provisioning_job (
 	if err != nil && !strings.Contains(err.Error(), "Duplicate column name") && !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
 		return err
 	}
-	_, err = s.DB.Exec(`
+	_, err = s.DB.Exec(fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS _kora_provisioning_checkpoint (
   job_id VARCHAR(140) NOT NULL,
   stage VARCHAR(140) NOT NULL,
-  completed TINYINT(1) NOT NULL DEFAULT 0,
-  recorded_at DATETIME NOT NULL,
+  completed %s NOT NULL DEFAULT %s,
+  recorded_at %s NOT NULL,
   PRIMARY KEY (job_id, stage)
 )
-`)
+`, booleanType, booleanDefault, timestampType))
 	return err
 }
 
@@ -76,28 +101,17 @@ func (s *OnboardingStore) UpsertJob(job OnboardingJob) error {
 	if s.DB == nil {
 		return s.upsertFile(job)
 	}
-	_, err := s.DB.Exec(`
+	query := `
 INSERT INTO _kora_provisioning_job (
   id, site, resource, state, operation_id, idempotency_key, input_fingerprint, dedupe_hash, provider_request_id, output_id,
   attempt, lease_owner, lease_until, retry_at, last_error, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE
-  site=VALUES(site),
-  resource=VALUES(resource),
-  state=VALUES(state),
-  operation_id=VALUES(operation_id),
-  idempotency_key=VALUES(idempotency_key),
-  input_fingerprint=VALUES(input_fingerprint),
-  dedupe_hash=VALUES(dedupe_hash),
-  provider_request_id=VALUES(provider_request_id),
-  output_id=VALUES(output_id),
-  attempt=VALUES(attempt),
-  lease_owner=VALUES(lease_owner),
-  lease_until=VALUES(lease_until),
-  retry_at=VALUES(retry_at),
-  last_error=VALUES(last_error),
-  updated_at=VALUES(updated_at)
-`,
+`
+	query += "\n" + s.dialect.UpsertClause(
+		[]string{"site", "resource", "operation_id", "dedupe_hash"},
+		[]string{"site", "resource", "state", "operation_id", "idempotency_key", "input_fingerprint", "dedupe_hash", "provider_request_id", "output_id", "attempt", "lease_owner", "lease_until", "retry_at", "last_error", "updated_at"},
+	)
+	_, err := s.DB.Exec(sqlDialect.Rebind(s.dialect, query),
 		job.ID, job.Site, job.Resource, string(job.State), job.OperationID, job.IdempotencyKey, job.InputFingerprint, dedupeHash(job.Site, job.Resource, job.OperationID, job.IdempotencyKey, job.InputFingerprint), job.ProviderRequestID, job.OutputID,
 		job.Attempt, job.LeaseOwner, nullableTime(job.LeaseUntil), nullableTime(job.RetryAt), job.LastError, job.CreatedAt, nullableTime(job.UpdatedAt),
 	)
@@ -108,11 +122,16 @@ func (s *OnboardingStore) UpsertCheckpoint(cp OnboardingCheckpoint) error {
 	if s.DB == nil {
 		return s.upsertCheckpointFile(cp)
 	}
-	_, err := s.DB.Exec(`
+	query := `
 INSERT INTO _kora_provisioning_checkpoint (job_id, stage, completed, recorded_at)
 VALUES (?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE completed=VALUES(completed), recorded_at=VALUES(recorded_at)
-`, cp.JobID, cp.Stage, boolToInt(cp.Completed), cp.RecordedAt)
+`
+	query += "\n" + s.dialect.UpsertClause([]string{"job_id", "stage"}, []string{"completed", "recorded_at"})
+	completed := any(boolToInt(cp.Completed))
+	if _, ok := s.dialect.(*sqlDialect.PostgresDialect); ok {
+		completed = cp.Completed
+	}
+	_, err := s.DB.Exec(sqlDialect.Rebind(s.dialect, query), cp.JobID, cp.Stage, completed, cp.RecordedAt)
 	return err
 }
 
@@ -120,13 +139,13 @@ func (s *OnboardingStore) LoadJob(site, resource, operationID, idempotencyKey, f
 	if s.DB == nil {
 		return s.loadJobFile(site, resource, operationID, idempotencyKey, fingerprint)
 	}
-	row := s.DB.QueryRow(`
+	row := s.DB.QueryRow(sqlDialect.Rebind(s.dialect, `
 SELECT id, site, resource, state, operation_id, idempotency_key, input_fingerprint, provider_request_id, output_id,
        attempt, lease_owner, lease_until, retry_at, last_error, created_at, updated_at
 FROM _kora_provisioning_job
 WHERE site = ? AND resource = ? AND operation_id = ? AND dedupe_hash = ?
 ORDER BY created_at DESC LIMIT 1
-`, site, resource, operationID, dedupeHash(site, resource, operationID, idempotencyKey, fingerprint))
+`), site, resource, operationID, dedupeHash(site, resource, operationID, idempotencyKey, fingerprint))
 	var job OnboardingJob
 	var leaseUntil, retryAt, updatedAt sql.NullTime
 	var leaseOwner, providerReq, outputID, lastError sql.NullString
@@ -165,12 +184,12 @@ func (s *OnboardingStore) LoadJobByID(id string) (*OnboardingJob, error) {
 		}
 		return nil, sql.ErrNoRows
 	}
-	row := s.DB.QueryRow(`
+	row := s.DB.QueryRow(sqlDialect.Rebind(s.dialect, `
 SELECT id, site, resource, state, operation_id, idempotency_key, input_fingerprint, provider_request_id, output_id,
        attempt, lease_owner, lease_until, retry_at, last_error, created_at, updated_at
 FROM _kora_provisioning_job
 WHERE id = ?
-`, id)
+`), id)
 	var job OnboardingJob
 	var leaseUntil, retryAt, updatedAt sql.NullTime
 	var leaseOwner, providerReq, outputID, lastError sql.NullString
@@ -281,7 +300,48 @@ func (s *OnboardingStore) writeFileState(state onboardingFileState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, b, 0o600)
+	return writeFileAtomically(s.path, b, 0o600)
+}
+
+func writeFileAtomically(path string, data []byte, mode os.FileMode) (err error) {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".kora-state-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary state file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("set temporary state file permissions: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temporary state file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync temporary state file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary state file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("publish state file: %w", err)
+	}
+	if d, openErr := os.Open(dir); openErr == nil {
+		defer func() {
+			if closeErr := d.Close(); err == nil && closeErr != nil {
+				err = fmt.Errorf("close state directory: %w", closeErr)
+			}
+		}()
+		if syncErr := d.Sync(); syncErr != nil {
+			return fmt.Errorf("sync state directory: %w", syncErr)
+		}
+	} else {
+		return fmt.Errorf("open state directory for sync: %w", openErr)
+	}
+	return nil
 }
 
 func (s *OnboardingStore) upsertFile(job OnboardingJob) error {

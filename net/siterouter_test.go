@@ -10,7 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/tenantruntime"
+	"github.com/asenawritescode/kora/plugin"
+	"github.com/asenawritescode/kora/script"
 	"github.com/gin-gonic/gin"
 
 	"github.com/asenawritescode/kora/doctype"
@@ -108,6 +112,105 @@ func TestSiteRouter_ResolveByHost(t *testing.T) {
 	}
 }
 
+func TestSiteRouter_UnknownExplicitSiteCookieNeverFallsBackToDefaultTenant(t *testing.T) {
+	defaultTenant := testSite("restaurant-demo.local")
+	sr := NewSiteRouter([]*LoadedSite{defaultTenant})
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(sr.Middleware())
+	router.GET("/api/system/branding", func(c *gin.Context) {
+		c.String(http.StatusOK, c.GetString("site_name"))
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/system/branding", nil)
+	request.Host = "localhost:5173"
+	request.AddCookie(&http.Cookie{Name: "kora_site", Value: "demo"})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("unknown explicit tenant cookie fell through to default tenant: status=%d body=%q", response.Code, response.Body.String())
+	}
+	if response.Body.String() == defaultTenant.Name {
+		t.Fatal("unknown tenant request exposed the default tenant identity")
+	}
+}
+
+func TestSiteRouterMiddlewareActivatesColdTenantOnDemand(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sr := NewSiteRouter(nil)
+	calls := 0
+	sr.SetLazyDirectory([]contract.SiteDescriptor{{
+		SiteID: "tenant-cold", Aliases: []string{"cold.example.test"}, Status: "active", ConfigRevision: 1,
+	}}, func(_ context.Context, siteID string) error {
+		calls++
+		return sr.AddSite(&LoadedSite{
+			SiteID: siteID, Name: "cold.example.test", ConfigRevision: 1,
+			Config: SiteRouterConfig{Hostname: "cold.example.test"}, Registry: doctype.NewRegistry(),
+		})
+	})
+	router := gin.New()
+	router.Use(sr.Middleware())
+	router.GET("/api/v1/test", func(c *gin.Context) {
+		c.String(http.StatusOK, c.GetString("site_id"))
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
+	request.Host = "cold.example.test"
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "tenant-cold" || calls != 1 {
+		t.Fatalf("cold host route status/body/activations = %d/%q/%d, want 200/tenant-cold/1", response.Code, response.Body.String(), calls)
+	}
+}
+
+func TestSiteRouterMiddlewareFailsClosedWhenColdActivationFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sr := NewSiteRouter(nil)
+	sr.SetLazyDirectory([]contract.SiteDescriptor{{
+		SiteID: "tenant-cold", Aliases: []string{"cold.example.test"}, Status: "active",
+	}}, func(context.Context, string) error { return errors.New("tenant DB unavailable") })
+	router := gin.New()
+	router.Use(sr.Middleware())
+	router.GET("/api/v1/test", func(c *gin.Context) { c.Status(http.StatusOK) })
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
+	request.Host = "cold.example.test"
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failed cold activation status = %d, want 503", response.Code)
+	}
+}
+
+func TestSiteRouterLeavesVersionedManagementRoutesOnPlatformPlane(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(NewSiteRouter(nil).Middleware())
+	router.GET("/api/management/v2/tenants/:id", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	router.GET("/api/v1/tenant-resource", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	management := httptest.NewRecorder()
+	managementRequest := httptest.NewRequest(http.MethodGet, "/api/management/v2/tenants/tenant-a", nil)
+	managementRequest.Host = "engine-control.example.test"
+	router.ServeHTTP(management, managementRequest)
+	if management.Code != http.StatusNoContent {
+		t.Fatalf("management route required a tenant host: status=%d body=%s", management.Code, management.Body.String())
+	}
+
+	tenant := httptest.NewRecorder()
+	tenantRequest := httptest.NewRequest(http.MethodGet, "/api/v1/tenant-resource", nil)
+	tenantRequest.Host = "engine-control.example.test"
+	router.ServeHTTP(tenant, tenantRequest)
+	if tenant.Code != http.StatusNotFound {
+		t.Fatalf("tenant route bypassed site resolution: status=%d body=%s", tenant.Code, tenant.Body.String())
+	}
+}
+
 func TestSiteRouterMiddlewareCarriesPerSiteDatabaseType(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	loaded := testSite("tenant.example.test")
@@ -185,6 +288,86 @@ func TestSiteRouterAppliesRevisionedStatusBeforeServingTraffic(t *testing.T) {
 	}
 }
 
+func TestDirectoryRevisionAdvancesIndependentlyOfConfigRevision(t *testing.T) {
+	loaded := testSite("site-revisions.example")
+	loaded.SiteID = "site-revisions"
+	loaded.ConfigRevision = 5
+	loaded.DirectoryRevision = 20
+	router := NewSiteRouter([]*LoadedSite{loaded})
+	if err := router.ApplySiteDescriptor(contract.SiteDescriptor{
+		SiteID: "site-revisions", Status: "active", Aliases: []string{"site-revisions.example"},
+		ConfigRevision: 5, DirectoryRevision: 21,
+	}); err != nil {
+		t.Fatal("apply directory-only revision:", err)
+	}
+	if loaded.ConfigRevision != 5 || loaded.DirectoryRevision != 21 {
+		t.Fatalf("revisions after apply: config=%d directory=%d; want 5 and 21", loaded.ConfigRevision, loaded.DirectoryRevision)
+	}
+	if err := router.ApplySiteDescriptor(contract.SiteDescriptor{
+		SiteID: "site-revisions", Status: "active", Aliases: []string{"site-revisions.example"},
+		ConfigRevision: 5, DirectoryRevision: 20,
+	}); err == nil {
+		t.Fatal("stale directory revision was accepted when config revision matched")
+	}
+	if err := router.AdvanceDirectoryRevision("site-revisions", 22); err != nil {
+		t.Fatal("advance directory cursor after no-op event:", err)
+	}
+	if err := router.ApplySiteDescriptor(contract.SiteDescriptor{
+		SiteID: "site-revisions", Status: "active", Aliases: []string{"site-revisions.example", "new-revision-alias.example"},
+		ConfigRevision: 5, DirectoryRevision: 23,
+	}); err != nil {
+		t.Fatal("apply alias change without rebuilding config:", err)
+	}
+	if got, ambiguous := router.SiteByHost("new-revision-alias.example"); ambiguous || got != loaded {
+		t.Fatalf("same-config alias owner=%p ambiguous=%t, want tenant runtime", got, ambiguous)
+	}
+	if err := router.ApplySiteDescriptor(contract.SiteDescriptor{
+		SiteID: "site-revisions", Status: "suspended", Aliases: []string{"site-revisions.example", "new-revision-alias.example"},
+		ConfigRevision: 5, DirectoryRevision: 24,
+	}); err != nil {
+		t.Fatal("apply status change at newer directory revision:", err)
+	}
+	if loaded.Status != "suspended" || loaded.ConfigRevision != 5 || loaded.DirectoryRevision != 24 {
+		t.Fatalf("directory-only status update changed wrong revisions/state: %+v", loaded)
+	}
+	if err := router.ApplySiteDescriptor(contract.SiteDescriptor{
+		SiteID: "site-revisions", Status: "active", Aliases: []string{"site-revisions.example"},
+		ConfigRevision: 5, DirectoryRevision: 24,
+	}); err == nil {
+		t.Fatal("same-cursor status mutation was accepted")
+	}
+	if err := router.AdvanceDirectoryRevision("site-revisions", 25); err != nil {
+		t.Fatal("advance directory cursor after projection:", err)
+	}
+	if err := router.AdvanceDirectoryRevision("site-revisions", 19); err == nil {
+		t.Fatal("stale directory cursor was accepted")
+	}
+}
+
+func TestSiteRouterInjectsDirectoryRevisionFromRuntimeSnapshot(t *testing.T) {
+	loaded := testSite("site-revision-context.example")
+	loaded.SiteID = "site-revision-context"
+	loaded.ConfigRevision = 8
+	loaded.DirectoryRevision = 37
+	router := NewSiteRouter([]*LoadedSite{loaded})
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(router.Middleware())
+	r.GET("/revision", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"config":    c.GetUint64("site_config_revision"),
+			"directory": c.GetUint64("site_directory_revision"),
+		})
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/revision", nil)
+	req.Host = loaded.Name
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Body.String() != "{\"config\":8,\"directory\":37}" {
+		t.Fatalf("revision context response = %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestSiteRouterAppliesDirectoryDescriptorInPlace(t *testing.T) {
 	loaded := testSite("descriptor.example")
 	loaded.SiteID = "site-descriptor-id"
@@ -197,7 +380,9 @@ func TestSiteRouterAppliesDirectoryDescriptorInPlace(t *testing.T) {
 	if router.SiteByID(loaded.SiteID) != loaded || loaded.ConfigRevision != 2 || loaded.Status != "suspended" {
 		t.Fatalf("directory update replaced runtime or failed to apply: %+v", loaded)
 	}
-	if router.sites["new-alias.example"] != loaded || router.sites["descriptor.example"] != loaded {
+	newAlias, newAmbiguous := router.SiteByHost("new-alias.example")
+	oldAlias, oldAmbiguous := router.SiteByHost("descriptor.example")
+	if newAmbiguous || oldAmbiguous || newAlias != loaded || oldAlias != loaded {
 		t.Fatal("directory aliases were not reindexed")
 	}
 	if err := router.ApplySiteDescriptor(descriptor); err != nil {
@@ -526,7 +711,7 @@ func TestSiteRouter_ResolvesDomainAlias(t *testing.T) {
 	}
 }
 
-func TestSiteRouter_SkipsHealthAndSystemPaths(t *testing.T) {
+func TestSiteRouter_SkipsHealthReadinessAndSystemPaths(t *testing.T) {
 	sites := []*LoadedSite{
 		testSite("app.example.com"),
 	}
@@ -538,6 +723,9 @@ func TestSiteRouter_SkipsHealthAndSystemPaths(t *testing.T) {
 	r.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "healthy")
 	})
+	r.GET("/readyz", func(c *gin.Context) {
+		c.String(http.StatusOK, "ready")
+	})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/health", nil)
@@ -546,6 +734,13 @@ func TestSiteRouter_SkipsHealthAndSystemPaths(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/readyz", nil)
+	req.Host = "unknown.example.com"
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Body.String() != "ready" {
+		t.Errorf("readiness status = %d body=%q; expected system-path bypass", w.Code, w.Body.String())
 	}
 }
 
@@ -700,7 +895,8 @@ func TestSiteRouter_AmbiguousStartupAliasNeverRoutesArbitrarily(t *testing.T) {
 func TestReplaceSiteDrainsRequestsAgainstRetiredRuntime(t *testing.T) {
 	old := &LoadedSite{SiteID: "site-refresh", ConfigRevision: 1, Status: "active", Name: "refresh.example", Config: SiteRouterConfig{Hostname: "refresh.example"}}
 	router := NewSiteRouter([]*LoadedSite{old})
-	if !old.acquireRequest() {
+	request, acquired := old.AcquireRuntime()
+	if !acquired {
 		t.Fatal("failed to acquire request on current runtime")
 	}
 	next := &LoadedSite{SiteID: old.SiteID, ConfigRevision: 2, Status: "active", Name: old.Name, Config: SiteRouterConfig{Hostname: old.Name, Domains: []string{"new.refresh.example"}}}
@@ -711,8 +907,8 @@ func TestReplaceSiteDrainsRequestsAgainstRetiredRuntime(t *testing.T) {
 	if retired != old || router.SiteByID(old.SiteID) != next {
 		t.Fatal("replacement did not atomically publish the new runtime")
 	}
-	if old.acquireRequest() {
-		old.releaseRequest()
+	if handle, ok := old.AcquireRuntime(); ok {
+		handle.Release()
 		t.Fatal("retired runtime accepted a new request")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -720,8 +916,168 @@ func TestReplaceSiteDrainsRequestsAgainstRetiredRuntime(t *testing.T) {
 	if err := old.WaitForRequests(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("WaitForRequests before release = %v, want deadline", err)
 	}
-	old.releaseRequest()
+	request.Release()
 	if err := old.WaitForRequests(context.Background()); err != nil {
 		t.Fatalf("WaitForRequests after release: %v", err)
+	}
+}
+
+func TestReplaceSiteKeepsProviderBindingPinnedToAdmittedGeneration(t *testing.T) {
+	tenant := contract.TenantID("site-provider-generation")
+	scope := contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}
+	key := plugin.BindingKey{Scope: scope, ConsumerModuleID: "sales.orders", CapabilityName: "billing.issue"}
+	plan := func(providerID string, revision uint64) plugin.BindingPlan {
+		return plugin.BindingPlan{Revision: revision, Bindings: []plugin.ResolvedBinding{{
+			Key: key, ProviderID: providerID, Revision: revision,
+		}}}
+	}
+	oldPlan := plan("billing-a", 7)
+	oldServices := tenantruntime.Services{ModuleBindings: &oldPlan}
+	old := &LoadedSite{SiteID: string(tenant), ConfigRevision: 1, Status: "active", Name: "provider.example", Config: SiteRouterConfig{Hostname: "provider.example"}, RuntimeServices: &oldServices}
+	router := NewSiteRouter([]*LoadedSite{old})
+	request, acquired := old.AcquireRuntime()
+	if !acquired {
+		t.Fatal("failed to acquire request on provider generation 7")
+	}
+	defer request.Release()
+	requestSnapshot := request.Snapshot()
+
+	newPlan := plan("billing-b", 8)
+	newServices := tenantruntime.Services{ModuleBindings: &newPlan}
+	replacement := &LoadedSite{SiteID: string(tenant), ConfigRevision: 2, Status: "active", Name: old.Name, Config: SiteRouterConfig{Hostname: old.Name}, RuntimeServices: &newServices}
+	retired, err := router.ReplaceSite(replacement)
+	if err != nil || retired != old {
+		t.Fatalf("replace provider generation = retired %p, err %v", retired, err)
+	}
+
+	oldBinding, ok := requestSnapshot.Services.ModuleBindings.Resolve(key)
+	if !ok || oldBinding.ProviderID != "billing-a" || oldBinding.Revision != 7 || requestSnapshot.Generation != old.EnsureRuntimeGeneration() {
+		t.Fatalf("admitted request lost its pinned provider plan: snapshot generation=%d binding=%+v found=%t", requestSnapshot.Generation, oldBinding, ok)
+	}
+	newRequest, ok := replacement.AcquireRuntime()
+	if !ok {
+		t.Fatal("replacement rejected a request in generation 8")
+	}
+	defer newRequest.Release()
+	newBinding, found := newRequest.Snapshot().Services.ModuleBindings.Resolve(key)
+	if !found || newBinding.ProviderID != "billing-b" || newBinding.Revision != 8 || newRequest.Snapshot().Generation == requestSnapshot.Generation {
+		t.Fatalf("new request did not receive replacement provider plan: snapshot generation=%d binding=%+v found=%t", newRequest.Snapshot().Generation, newBinding, found)
+	}
+}
+
+func TestFailedReplaceSitePreservesActiveRuntime(t *testing.T) {
+	old := &LoadedSite{SiteID: "site-stable", ConfigRevision: 9, Status: "active", Name: "stable.example", Config: SiteRouterConfig{Hostname: "stable.example"}}
+	conflicting := &LoadedSite{SiteID: "site-other", Status: "active", Name: "other.example", Config: SiteRouterConfig{Hostname: "other.example", Domains: []string{"reserved.example"}}}
+	router := NewSiteRouter([]*LoadedSite{old, conflicting})
+	replacement := &LoadedSite{SiteID: old.SiteID, ConfigRevision: old.ConfigRevision, Status: "active", Name: old.Name, Config: SiteRouterConfig{Hostname: old.Name, Domains: []string{"reserved.example"}}}
+	if retired, err := router.ReplaceSite(replacement); err == nil || retired != nil {
+		t.Fatalf("ReplaceSite() = (%p, %v), want alias conflict without retirement", retired, err)
+	}
+	if got := router.SiteByID(old.SiteID); got != old {
+		t.Fatal("failed replacement changed the active site snapshot")
+	}
+	if handle, ok := old.AcquireRuntime(); !ok {
+		t.Fatal("failed replacement left the prior runtime marked draining")
+	} else {
+		handle.Release()
+	}
+	if got := router.SiteByName(old.Name); got != old {
+		t.Fatal("failed replacement changed canonical alias routing")
+	}
+}
+
+func TestReplaceSiteSameRevisionStillPublishesNewGeneration(t *testing.T) {
+	old := &LoadedSite{SiteID: "same-revision-site", ConfigRevision: 4, Status: "active", Name: "same.example", Config: SiteRouterConfig{Hostname: "same.example"}}
+	router := NewSiteRouter([]*LoadedSite{old})
+	oldRequest, ok := old.AcquireRuntime()
+	if !ok {
+		t.Fatal("old generation rejected initial request")
+	}
+	oldWorkerCtx := old.WorkerContext(context.Background())
+	oldWorkerStarted := make(chan struct{})
+	if !old.StartWorker(context.Background(), func(ctx context.Context) {
+		close(oldWorkerStarted)
+		<-ctx.Done()
+	}) {
+		t.Fatal("old generation worker was not admitted")
+	}
+	<-oldWorkerStarted
+	replacement := &LoadedSite{SiteID: old.SiteID, ConfigRevision: old.ConfigRevision, Status: "active", Name: old.Name, Config: SiteRouterConfig{Hostname: old.Name}}
+	nextWorkerCtx := replacement.WorkerContext(context.Background())
+	nextWorkerStarted := make(chan struct{})
+	if !replacement.StartWorker(context.Background(), func(ctx context.Context) {
+		close(nextWorkerStarted)
+		<-ctx.Done()
+	}) {
+		t.Fatal("replacement generation worker was not admitted")
+	}
+	<-nextWorkerStarted
+	retired, err := router.ReplaceSite(replacement)
+	if err != nil {
+		t.Fatal("ReplaceSite:", err)
+	}
+	if retired != old || router.SiteByID(old.SiteID) != replacement {
+		t.Fatal("same-revision replacement did not publish the new runtime generation")
+	}
+	if handle, ok := old.AcquireRuntime(); ok {
+		handle.Release()
+		t.Fatal("retired same-revision runtime accepted new work")
+	}
+	if handle, ok := replacement.AcquireRuntime(); !ok {
+		t.Fatal("new generation was marked draining with the retired generation")
+	} else {
+		handle.Release()
+	}
+	oldRequest.Release()
+	if err := old.WaitForRequests(context.Background()); err != nil {
+		t.Fatal("old generation did not drain after request release:", err)
+	}
+	old.StopWorkers()
+	if oldWorkerCtx.Err() == nil {
+		t.Fatal("retiring the old generation did not cancel its workers")
+	}
+	if nextWorkerCtx.Err() != nil {
+		t.Fatalf("retiring the old generation canceled replacement workers: %v", nextWorkerCtx.Err())
+	}
+	replacement.StopWorkers()
+}
+
+func TestRuntimeContextCarriesTenantOwnedSessionManager(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := auth.NewOwnedSessionManager(nil)
+	defer manager.Close()
+	site := &LoadedSite{Name: "tenant.example", SessionManager: manager}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	injectSiteRuntimeContext(c, site.Snapshot())
+	value, ok := c.Get("site_session_manager")
+	if !ok || value != manager {
+		t.Fatal("tenant runtime session manager was not injected into request context")
+	}
+}
+
+func TestRuntimeContextCopiesTypedServiceSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldStore, replacementStore := &script.Store{}, &script.Store{}
+	services := tenantruntime.Services{ScriptStore: oldStore}
+	site := &LoadedSite{Name: "tenant.example", RuntimeServices: &services}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	injectSiteRuntimeContext(c, site.Snapshot())
+	services.ScriptStore = replacementStore
+	value, ok := c.Get("site_runtime_services")
+	if !ok {
+		t.Fatal("published runtime snapshot was not injected")
+	}
+	got, ok := value.(tenantruntime.Services)
+	if !ok || got.ScriptStore != oldStore {
+		t.Fatal("request context did not retain the immutable typed snapshot")
+	}
+}
+
+func TestRuntimeContextLeavesAbsentServiceSnapshotUnset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	injectSiteRuntimeContext(c, (&LoadedSite{Name: "legacy.example"}).Snapshot())
+	if _, ok := c.Get("site_runtime_services"); ok {
+		t.Fatal("unset service snapshot should permit compatibility fallback")
 	}
 }

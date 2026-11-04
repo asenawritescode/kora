@@ -1,0 +1,31 @@
+name: Farm Team
+route: /farm-team
+type: workspace
+layout: two_panel
+label: Farm Team
+module: Farm Team Controls
+components:
+  - id: field_observations
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Field Observation
+    label: Field observations
+    desktop_columns: [name, field, crop_plan, observation_type, severity, follow_up_owner, status]
+    mobile_columns: [name, field, severity, status]
+  - id: labor_entries
+    type: record_table
+    region: side
+    position: 0
+    source_doctype: Farm Labor Entry
+    label: Labor log
+    desktop_columns: [name, work_date, crop_plan, worker, hours]
+    mobile_columns: [name, work_date, hours]
+  - id: cost_entries
+    type: record_table
+    region: side
+    position: 1
+    source_doctype: Farm Cost Entry
+    label: Crop-cycle costs
+    desktop_columns: [name, incurred_on, crop_plan, cost_category, amount, status]
+    mobile_columns: [name, incurred_on, amount]

@@ -5,6 +5,18 @@ layout: two_panel
 label: Register
 module: Retail POS and Store Operations
 source_doctype: Product
+resources:
+  - id: categories
+    query: document.list
+    params:
+      doctype: Product Category
+      limit: 100
+      fields: [name, category_name]
+      order_by: display_order ASC
+      filters:
+        - field: is_active
+          op: =
+          value: 1
 components:
   - id: categories
     type: category_tabs
@@ -12,8 +24,13 @@ components:
     position: 0
     label: Product categories
     source_doctype: Product
+    data: primary.data
+    resource_bindings:
+      products: primary
+      categories: categories
     bindings:
       group_field: category
+      category_label_field: category_name
   - id: products
     type: product_grid
     region: main
@@ -40,30 +57,9 @@ components:
     position: 1
     label: Take payment
     bindings:
-      methods: "literal:cash, card, mpesa"
+      methods: "literal:cash"
       register: "literal:REG-001"
     actions:
-      - id: open_shift
-        trigger: on_click
-        type: create_record
-        config:
-          target_doctype: Shift
-      - id: open_till_session
-        trigger: on_click
-        type: create_record
-        config:
-          target_doctype: Till Session
-      - id: initiate_payment
-        trigger: on_click
-        type: initiate_external_operation
-        config:
-          operation_type: Payment
-          purpose: POS sale payment
-          source_doctype: Sale
-          provider: M-Pesa
-      - id: validate_payment
-        trigger: on_click
-        type: validate_external_operation
       - id: complete_mobile
         trigger: on_click
         type: create_transaction

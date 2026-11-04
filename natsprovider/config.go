@@ -5,8 +5,18 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+)
+
+const (
+	DefaultEventStreamMaxBytes    int64 = 1 << 30
+	MaximumEventStreamMaxBytes    int64 = 1 << 36
+	DefaultEventStreamMaxMessages       = 1_000_000
+	MaximumEventStreamMaxMessages       = 100_000_000
+	DirectoryStreamMaxBytes       int64 = 64 << 20
+	DirectoryStreamMaxMessages          = 100_000
 )
 
 // Config controls the self-hosted NATS provider connection and bootstrap
@@ -24,6 +34,8 @@ type Config struct {
 	AckWait           time.Duration
 	DeadLetterSubject string
 	MaxDeliver        int
+	StreamMaxBytes    int64
+	StreamMaxMessages int
 }
 
 // DeploymentManifest captures the operator-facing bootstrap/status fields from
@@ -62,11 +74,14 @@ func FromEnv() Config {
 		ConsumerName:      envOrDefault("KORA_NATS_CONSUMER", "kora-worker"),
 		DeadLetterSubject: envOrDefault("KORA_NATS_DEAD_LETTER", "kora.deadletter"),
 		MaxDeliver:        5,
+		StreamMaxBytes:    envInt64("KORA_NATS_STREAM_MAX_BYTES", DefaultEventStreamMaxBytes),
+		StreamMaxMessages: envInt("KORA_NATS_STREAM_MAX_MESSAGES", DefaultEventStreamMaxMessages),
 	}
 }
 
 // Validate checks the provider configuration without touching the network.
 func (c Config) Validate() error {
+	c = c.withDefaults()
 	if len(c.ServerURLs) == 0 {
 		return fmt.Errorf("natsprovider: at least one server url is required")
 	}
@@ -79,6 +94,12 @@ func (c Config) Validate() error {
 	if c.MaxDeliver <= 0 {
 		return fmt.Errorf("natsprovider: max deliver must be positive")
 	}
+	if c.StreamMaxBytes < 1 || c.StreamMaxBytes > MaximumEventStreamMaxBytes {
+		return fmt.Errorf("natsprovider: stream max bytes must be between 1 and %d", MaximumEventStreamMaxBytes)
+	}
+	if c.StreamMaxMessages < 1 || c.StreamMaxMessages > MaximumEventStreamMaxMessages {
+		return fmt.Errorf("natsprovider: stream max messages must be between 1 and %d", MaximumEventStreamMaxMessages)
+	}
 	for _, raw := range c.ServerURLs {
 		if _, err := url.ParseRequestURI(raw); err != nil {
 			return fmt.Errorf("natsprovider: invalid server url %q: %w", raw, err)
@@ -88,6 +109,16 @@ func (c Config) Validate() error {
 		return fmt.Errorf("natsprovider: invalid subject prefix: %w", err)
 	}
 	return nil
+}
+
+func (c Config) withDefaults() Config {
+	if c.StreamMaxBytes == 0 {
+		c.StreamMaxBytes = DefaultEventStreamMaxBytes
+	}
+	if c.StreamMaxMessages == 0 {
+		c.StreamMaxMessages = DefaultEventStreamMaxMessages
+	}
+	return c
 }
 
 // SortedServerURLs returns a canonical copy for hashing/comparison.
@@ -112,6 +143,30 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envInt64(key string, fallback int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value == 0 {
+		return -1
+	}
+	return value
+}
+
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value == 0 {
+		return -1
+	}
+	return value
 }
 
 func filterEmpty(values []string) []string {

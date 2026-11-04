@@ -26,8 +26,6 @@ resources:
     - create_purchase_order
     - receive_goods
     - notify_supplier
-  workflows:
-    - low_stock_procurement
 cleanup:
   - disable package-owned commands and views
   - retain append-only business records

@@ -1,0 +1,4 @@
+appId: com.kora.mobile
+---
+- tapOn: Assignee input
+- waitForAnimationToEnd

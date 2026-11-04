@@ -1,68 +1,26 @@
-// Package analytics provides the dynamic, per-site analytics engine for Kora.
-// It uses a rollup-based approach: document writes emit events, a worker
-// pre-computes aggregates into _kora_analytics_* tables in the operational DB.
 package analytics
 
-import "time"
+import "github.com/asenawritescode/kora/eventstream"
 
-// EventOp describes the type of document change.
-type EventOp string
+// Runtime event types are aliased here for source compatibility. New
+// persistence, routing, and transport code should depend on eventstream.
+type EventOp = eventstream.EventOp
+type ChangeEvent = eventstream.ChangeEvent
+type EventBus = eventstream.Bus
+type EventWALAcknowledger = eventstream.WALAcknowledger
+
+// WALBatchDrainer reads at most limit events from durable local storage.
+// A non-positive limit means all available events. Workers use this optional
+// capability to bound per-batch memory while retaining the EventBus contract.
+type WALBatchDrainer interface {
+	DrainWALBatch(limit int, handler func(ChangeEvent)) (int, error)
+}
 
 const (
-	EventInsert EventOp = "insert"
-	EventUpdate EventOp = "update"
-	EventDelete EventOp = "delete"
-	EventSubmit EventOp = "submit"
-	EventCancel EventOp = "cancel"
-	// EventNotification carries a recipient-scoped workflow notification over
-	// the realtime bridge; it is not a document mutation for analytics/webhooks.
-	EventNotification EventOp = "notification"
+	EventInsert       = eventstream.EventInsert
+	EventUpdate       = eventstream.EventUpdate
+	EventDelete       = eventstream.EventDelete
+	EventSubmit       = eventstream.EventSubmit
+	EventCancel       = eventstream.EventCancel
+	EventNotification = eventstream.EventNotification
 )
-
-// ChangeEvent carries document mutations and internal realtime signals.
-// Document mutations are emitted by the ORM after every write; the notification
-// operation is recipient-scoped and must not be treated as a document mutation.
-type ChangeEvent struct {
-	ID         string         `json:"id,omitempty"`
-	Site       string         `json:"site"`
-	Doctype    string         `json:"doctype"`
-	DocName    string         `json:"doc_name"`
-	Operation  EventOp        `json:"operation"`
-	Timestamp  time.Time      `json:"timestamp"`
-	ModifiedBy string         `json:"modified_by"`
-	Data       map[string]any `json:"data"`               // full document fields after write
-	OldData    map[string]any `json:"old_data,omitempty"` // previous state (update/delete only)
-}
-
-// EventBus is the interface for publishing and subscribing to change events.
-// The default implementation is an in-process buffered channel with WAL-first
-// durability: every event is written to disk before entering the channel.
-type EventBus interface {
-	// Publish sends an event. Never blocks — writes to WAL first, then
-	// best-effort channel send. Returns nil even on WAL failure (logs + counts).
-	Publish(event ChangeEvent) error
-
-	// Subscribe returns a channel that receives events. Only one subscriber per bus.
-	Subscribe() (<-chan ChangeEvent, error)
-
-	// DrainWAL replays any events in the WAL through the given handler.
-	// Called once at startup before consuming live events to recover from crashes.
-	DrainWAL(handler func(ChangeEvent)) (int, error)
-
-	// RotateWAL atomically swaps the current WAL file with a fresh one.
-	// Returns the path of the old WAL file. After a successful DB flush, the
-	// caller should call CommitWALRotation() to delete the old file.
-	// If CommitWALRotation is not called (crash), the old WAL is replayed on
-	// next restart alongside the current WAL.
-	RotateWAL() (oldWALPath string, err error)
-
-	// CommitWALRotation deletes a rotated WAL file after its events have been
-	// flushed to the database. This confirms the data is safely in the DB.
-	CommitWALRotation(oldWALPath string) error
-
-	// Dropped returns the count of events lost due to WAL write failures.
-	Dropped() int64
-
-	// Close shuts down the event bus and flushes any pending WAL.
-	Close() error
-}

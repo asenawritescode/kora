@@ -10,13 +10,22 @@ import { Badge } from '@/components/ui/badge'
 export default function ProductGrid(props: ViewComponentProps) {
   const { data, isLoading, config, onAction } = props
 
-  const titleField = config.bindings?.title || 'product_name'
-  const priceField = config.bindings?.price || 'selling_price'
-  const badgeField = config.bindings?.badge || 'stock_qty'
-  const imageField = config.bindings?.image || 'image'
+  const titleField = config.bindings?.title
+  const priceField = config.bindings?.price
+  const badgeField = config.bindings?.badge
+  const imageField = config.bindings?.image
+  const skuField = config.bindings?.sku
   const subtitleField = config.bindings?.subtitle
 
   const products = data?.data || []
+
+  if (!titleField || !priceField) {
+    return (
+      <div className="rounded-lg border p-4 text-sm text-muted-foreground">
+        Configure title and price field bindings for this product grid.
+      </div>
+    )
+  }
 
   if (isLoading) {
     return (
@@ -50,7 +59,7 @@ export default function ProductGrid(props: ViewComponentProps) {
             row: product,
           })}
         >
-          {product[imageField] ? (
+          {imageField && product[imageField] ? (
             <img src={product[imageField]} alt={product[titleField]} className="h-16 w-16 object-cover rounded-md mb-2" />
           ) : (
             <div className="h-16 w-16 rounded-md bg-muted flex items-center justify-center mb-2">
@@ -58,13 +67,16 @@ export default function ProductGrid(props: ViewComponentProps) {
             </div>
           )}
           <span className="text-xs font-medium line-clamp-2">{product[titleField] || product.name}</span>
+          {skuField && product[skuField] && (
+            <span className="text-[10px] text-muted-foreground">{product[skuField]}</span>
+          )}
           {subtitleField && product[subtitleField] && (
             <span className="text-[10px] text-muted-foreground">{product[subtitleField]}</span>
           )}
           <span className="text-sm font-bold mt-1">
             {product[priceField] != null ? Number(product[priceField]).toLocaleString() : '—'}
           </span>
-          {product[badgeField] != null && (
+          {badgeField && product[badgeField] != null && (
             <Badge variant={product[badgeField] < 10 ? 'destructive' : 'secondary'} className="mt-1 text-[10px]">
               {product[badgeField]} in stock
             </Badge>

@@ -1,5 +1,5 @@
 import { useMemo, useState, useRef, useEffect, type KeyboardEvent, type ReactNode } from 'react'
-import { useRouterState } from '@tanstack/react-router'
+import { Link, useRouterState } from '@tanstack/react-router'
 import { useUIStore } from '@/lib/ui-store'
 import { useChat } from './useChat'
 import { MessageCircle, X, Send, Loader2, Sparkles, Wand2, Search, FilePlus2 } from 'lucide-react'
@@ -16,15 +16,9 @@ type Suggestion = {
 export function ChatWidget() {
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
-  const { messages, loading, error, send } = useChat()
   const routerState = useRouterState()
   const { shellMode } = useUIStore()
   const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  // Auto-scroll to bottom when new messages arrive or loading state changes.
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
 
   const context = useMemo(() => {
     const pathname = routerState.location.pathname
@@ -40,6 +34,12 @@ export function ChatWidget() {
       documentName,
     }
   }, [routerState.location.pathname, shellMode])
+  const { messages, loading, restoring, error, errorCode, lastRunID, send } = useChat(context)
+
+  // Auto-scroll to bottom when new messages arrive or loading state changes.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
 
   const suggestions = useMemo(() => {
     const base: Suggestion[] = [
@@ -69,9 +69,9 @@ export function ChatWidget() {
 
   const handleSend = async (textOverride?: string) => {
     const text = (textOverride ?? input).trim()
-    if (!text || loading) return
-    setInput('')
-    await send(text, context)
+    if (!text || loading || restoring) return
+    const sent = await send(text, context)
+    if (sent && !textOverride) setInput('')
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -94,7 +94,7 @@ export function ChatWidget() {
       )}
 
       {open && (
-        <div className="fixed bottom-6 right-6 z-50 flex h-[560px] w-[400px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+        <div data-ai-run-id={lastRunID ?? undefined} className="fixed bottom-6 right-6 z-50 flex h-[560px] w-[400px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
           <div className="border-b bg-gradient-to-r from-primary/10 to-transparent px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -123,7 +123,7 @@ export function ChatWidget() {
                   key={s.label}
                   type="button"
                   onClick={() => handleSend(s.prompt)}
-                  disabled={loading}
+                  disabled={loading || restoring}
                   className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
                 >
                   {s.icon}
@@ -134,10 +134,13 @@ export function ChatWidget() {
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-            {messages.length === 0 && !loading && (
+            {messages.length === 0 && !loading && !restoring && (
               <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-5 text-sm text-muted-foreground">
                 Ask me to summarize this page, find records, or draft the next action.
               </div>
+            )}
+            {restoring && messages.length === 0 && (
+              <div className="text-center text-xs text-muted-foreground">Loading this conversation…</div>
             )}
             {messages.map((msg, i) => (
               <div
@@ -209,6 +212,11 @@ export function ChatWidget() {
             {error && (
               <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
+                {errorCode === 'ai.provider_not_configured' && (
+                  <Link to="/workspace/admin/secrets" className="ml-1 font-medium underline underline-offset-2">
+                    Configure a provider
+                  </Link>
+                )}
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -230,12 +238,12 @@ export function ChatWidget() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={context.doctype ? `Ask about ${context.doctype}...` : 'Ask something...'}
-                disabled={loading}
+                disabled={loading || restoring}
                 className="flex-1 rounded-xl border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <button
                 onClick={() => handleSend()}
-                disabled={loading || !input.trim()}
+                disabled={loading || restoring || !input.trim()}
                 className="inline-flex items-center justify-center rounded-xl bg-primary px-3.5 py-2.5 text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 <Send className="h-4 w-4" />

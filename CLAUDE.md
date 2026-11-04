@@ -41,7 +41,9 @@ docker compose up -d mysql                   # MySQL 8.0 (root:kora123)
 
 ## Architecture
 
-Kora is currently a **DocType-centric config-driven application engine**. The codebase has kernel, contract, workflow, AI/MCP, and reconciliation capabilities, while the generic resource/runtime architecture is still evolving.
+For restructuring work, follow [the target-state specification](docs/architecture/target-state-spec.md). Its G0–G10 groups define migration order and contract compatibility. The descriptions below refer to the current implementation; do not treat existing startup ownership as the target.
+
+Kigae is currently a **DocType-centric config-driven application engine**. The codebase has kernel, contract, workflow, AI/MCP, and reconciliation capabilities, while the generic resource/runtime architecture is still evolving.
 
 ### Startup Flow (`cli/serve.go`)
 
@@ -121,7 +123,7 @@ The workspace sidebar has an Administrator section with ten views. Some are conf
 |------|-------|---------|
 | DocTypes | `/workspace/admin/doctypes` | CRUD doctypes via visual form builder + live YAML panel |
 | Permissions | `/workspace/admin/permissions` | Role × DocType permission matrix, inline editing |
-| Workflows | `/workspace/admin/workflows` | Define state machines for submittable doctypes |
+| Automations | `/workspace/admin/automations` | Build record-triggered flows and manage status transitions |
 | Versions | `/workspace/admin/versions` | Config version history with Activate/Discard/Rollback |
 | Scripts | `/workspace/admin/scripts` | JS script editor, test runner, console log viewer |
 | Extensions | `/workspace/admin/extensions` | Webhook endpoints, custom API methods, event hooks |
@@ -156,7 +158,7 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 | `orm/` | Generic CRUD (Insert, Save, GetDoc, GetList, Delete), filter parsing, DB-level unique enforcement, batched child INSERTs, diff-based Save, ULID name generation, NOT NULL error parsing |
 | `db/` | SQL Dialect abstraction — MySQL/LibSQL DDL, DML, error parsing, schema introspection |
 | `schema/` | Diff registry vs live schema → DDL via dialect; column rename via `renamed_from` |
-| `api/` | REST handlers, envelope, CRUD, workflow actions, system endpoints, YAML validation, AI Chat, User management (`users.go`), Secrets management (`secrets.go`), OpenAPI spec generation. Kernel entrypoints exist but are not the only RFC target surface. |
+| `api/` | REST handlers, envelope, CRUD, unified automations and status transitions, system endpoints, YAML validation, AI Chat, User management (`users.go`), Secrets management (`secrets.go`), OpenAPI spec generation. Kernel entrypoints exist but are not the only RFC target surface. |
 | `auth/` | Session auth (bcrypt), in-memory session cache (30s TTL), CSRF (double-submit cookie), SystemGuard, SiteGuard |
 | `net/` | SiteRouter with host validation, security headers, CORS, rate limiter, TLS (autocert), ULID request IDs |
 | `cli/` | Cobra CLI: serve, setup, migrate, config (import/export/versions/diff/rollback), new-site, mcp, secret |
@@ -202,26 +204,13 @@ The backend is resolved per site from the `file_storage` column in `_kora_site_r
 
 ### AI Chat System
 
-The AI chat at `POST /api/chat` auto-generates OpenAI-compatible function definitions from the doctype registry and executes tools via the ORM. Supports OpenAI, DeepSeek, and Anthropic providers (all via `/chat/completions` endpoint). API keys are configured via the Secrets admin page at `/workspace/admin/secrets` — no CLI required.
+The canonical chat flow is `GET/POST /api/v1/ai/chat`. GET restores the durable transcript for the signed-in user and current page context; POST accepts only the new turn and context. The backend owns conversation history, creates a tracked run for each turn, and records messages, steps, tool execution, usage, and audit evidence. The shared UI API client must be used so path-routed `/s/:site` workspaces send chat to the active tenant.
 
-#### Tool Generation (`api/chat.go`)
+Run cancellation, resume, and approval records live under `/api/v1/ai/runs` and `/api/v1/ai/approvals`. The old `/api/chat` and `/api/v1/chat` endpoints are retired. Site provider keys are configured at `/workspace/admin/secrets`; shared provider keys can be enabled by the system administrator. `ai.chat` remains experimental while authorization and durable-effect risks are still open.
 
-For each non-child-table DocType, `buildFunctions()` generates tools:
+#### Tool Catalog (`api/ai/tools.go`)
 
-| Tool pattern | Purpose |
-|-------------|---------|
-| `<doctype>_find` | Search by field values (duplicate check before create) |
-| `<doctype>_list` | List documents (paginated, markdown table format) |
-| `<doctype>_get` | Get single document by name |
-| `<doctype>_create` | Create a new document |
-
-Plus system-level tools from `buildSystemFunctions()`:
-
-| Tool | Purpose |
-|------|---------|
-| `list_doctypes` | List all doctypes with field counts |
-| `validate_doctype_yaml` | Validate YAML without saving, returns line-numbered errors |
-| `create_doctype_draft` | Create new DocType as **Draft only** — never activates, never runs migrations |
+`BuildToolCatalog()` is the canonical source for chat tools. Each non-child DocType contributes typed `_find`, `_list`, `_get`, `_create`, and `_update` tools. The system catalog also includes analytics, DocType draft, script, and view tools. Create/update and administrative mutations require confirmation and recent authentication where configured. Record mutations use the kernel command path; reads and domain-specific system tools retain their owning service contracts.
 
 #### Multi-Round Tool Execution Loop
 
@@ -290,7 +279,7 @@ Database errors are parsed via `db.Dialect.ParseError()` — dialect-neutral:
 #### Frontend Chat Widget
 
 - `ui/src/components/chat/ChatWidget.tsx` — floating Intercom-style panel (bottom-right)
-- `ui/src/components/chat/useChat.ts` — React hook, sends `POST /api/chat` with CSRF token
+- `ui/src/components/chat/useChat.ts` — React hook, restores the context-scoped transcript and sends new turns through `POST /api/v1/ai/chat` using the shared API client
 - Embedded in `RootLayout.tsx` — available on every page
 
 #### MCP Server (`mcp/server.go`)
@@ -299,13 +288,13 @@ Separate from chat API. Auto-generates MCP tools from the doctype registry for u
 
 ### Extensibility System
 
-Kora provides a comprehensive extensibility system for customizing application behavior without modifying core code.
+Kigae provides a comprehensive extensibility system for customizing application behavior without modifying core code.
 
 #### Script Engine (`script/`)
 
 JavaScript runtime based on Go's JavaScript engine. Scripts run in a sandboxed environment with configurable RAM limits (`KORA_SCRIPTS_MAX_RAM`) and HTTP/domain allowlists. Disabled by default — enable with `KORA_SCRIPTS_ENABLED=true`.
 
-- **Script types**: Event hooks, custom API methods, workflow actions, scheduled scripts
+- **Script types**: Event hooks, custom API methods, scheduled scripts, and computed fields. Automations are defined and run by the Engine v2 workflow system; scripts are not workflow steps.
 - **Sandboxing**: Memory limits, CPU limits, timeout enforcement, no filesystem or network access
 - **Admin UI**: Script editor at `/workspace/admin/scripts` with syntax highlighting, test runner, and console log viewer
 
@@ -330,9 +319,9 @@ Hooks receive the document as context and can modify it, validate it, or perform
 
 Register custom REST endpoints implemented in JavaScript. Accessed at `/api/v1/x/:site/:method_name`. Useful for custom business logic, integrations, and specialized queries.
 
-#### Workflow Actions
+#### Automations
 
-Custom actions that run during workflow transitions. A workflow action is a JavaScript function that executes when a document moves from one state to another. Actions can validate, transform, or create related records.
+Record-triggered automations are configured in the Automations workspace. Their effects use registered Engine actions and are validated, previewed, and published through the v2 workflow API. Do not add a second script-based workflow executor or load the retired document workflow configuration.
 
 #### Scheduled Scripts
 
@@ -341,7 +330,7 @@ Cron-style scheduled jobs written in JavaScript. Configured via the Extensions a
 #### Webhook Extensions (`webhook/`)
 
 - **Outgoing webhooks**: Trigger HTTP calls to external services on document events (create, update, delete, submit, cancel). Configure payload templates, headers, and retry policies.
-- **Incoming webhooks**: External services can push data to Kora via signed webhook endpoints. Each endpoint validates a secret token before processing.
+- **Incoming webhooks**: External services can push data to Kigae via signed webhook endpoints. Each endpoint validates a secret token before processing.
 
 #### Extension Auth
 
@@ -367,9 +356,9 @@ All endpoints documented in the auto-generated OpenAPI 3.0 spec at `/api/swagger
 
 ### SDKs
 
-Kora provides two official SDKs for building integrations:
+Kigae provides two official SDKs for building integrations:
 
-- **Go SDK** (`sdk/`): `import "github.com/asenawritescode/kora/sdk"` — full CRUD client, filter building, connection pooling. Use for Go services that need to interact with Kora programmatically.
+- **Go SDK** (`sdk/`): `import "github.com/asenawritescode/kora/sdk"` — full CRUD client, filter building, connection pooling. Use for Go services that need to interact with Kigae programmatically.
 - **TypeScript SDK** (`@kora/sdk`): Available on npm, integrates with any JS/TS runtime (Node, Bun, Deno, browser). Full type safety with generated TypeScript types from doctype definitions.
 
 ### Code Quality

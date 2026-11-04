@@ -14,6 +14,7 @@ fields:
     label: Account name
     reqd: true
     in_list_view: true
+    search_index: true
   - fieldname: account_type
     fieldtype: Select
     label: Account type

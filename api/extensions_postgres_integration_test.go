@@ -1,7 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
@@ -151,6 +154,31 @@ func TestLivePostgresExtensionRoutes(t *testing.T) {
 	}
 	if storedManagedToken == managedPayload.Data.AccessToken {
 		t.Fatal("new idempotency key did not rotate the managed channel credential")
+	}
+	sessionHash := sha256.Sum256([]byte("postgres-managed-session"))
+	if _, err := database.Exec(`INSERT INTO _kora_channel_session (id, site, client_name, conversation_key, provider, sender_address, token_hash, api_permissions, trusted_until) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, "managed-session-a", "site-a", "kora-cloud-channel", "conversation-a", "whatsapp", "sender-a", hex.EncodeToString(sessionHash[:]), "[]", time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal("insert disposable managed channel session:", err)
+	}
+	fingerprint := sha256.Sum256([]byte(storedManagedToken))
+	body, _ := json.Marshal(contract.RevokeManagedChannelClientV2{CredentialFingerprint: hex.EncodeToString(fingerprint[:])})
+	revokeRecorder := httptest.NewRecorder()
+	revokeContext := extensionTestContext(revokeRecorder, database, registry, "site-a", http.MethodPost, string(body), "")
+	revokeContext.Set("auth_type", "engine_provisioner")
+	revokeContext.Request.Header.Set("Idempotency-Key", "postgres-delete-revoke-0001")
+	handler.HandleManagedChannelClientRevoke(revokeContext)
+	if revokeRecorder.Code != http.StatusOK {
+		t.Fatalf("PostgreSQL managed credential revocation returned HTTP %d: %s", revokeRecorder.Code, revokeRecorder.Body.String())
+	}
+	var managedActive bool
+	if err := database.QueryRow(`SELECT is_active FROM _kora_extension WHERE site = $1 AND name = $2`, "site-a", "kora-cloud-channel").Scan(&managedActive); err != nil {
+		t.Fatal("read PostgreSQL managed credential state:", err)
+	}
+	var revokedAt sql.NullTime
+	if err := database.QueryRow(`SELECT revoked_at FROM _kora_channel_session WHERE id = $1`, "managed-session-a").Scan(&revokedAt); err != nil {
+		t.Fatal("read PostgreSQL channel session revocation:", err)
+	}
+	if managedActive || !revokedAt.Valid {
+		t.Fatal("PostgreSQL revocation did not disable the credential and session")
 	}
 	if _, err := database.Exec(`INSERT INTO _kora_webhook_delivery (id, site, extension_name, event_id, event_type, endpoint_url, status, attempt, response_status, error_message, duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11),($12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
 		"delivery-site-a", "site-a", "demo-ext", "event-a", "doc.updated", "https://a.test/hook", "delivered", 1, 200, "", 12,

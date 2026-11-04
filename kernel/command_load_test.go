@@ -62,6 +62,69 @@ func TestLoadCommandDirFailsClosedOnInvalid(t *testing.T) {
 	}
 }
 
+func TestParseCommandResourceRejectsUnimplementedPreconditions(t *testing.T) {
+	definition := `
+name: issue_invoice
+namespace: finance
+version: 1
+input:
+  record: Invoice
+preconditions:
+  - invoice_is_draft
+transaction:
+  - create:
+      record: Invoice
+      values:
+        amount: $input.amount
+`
+	if _, err := kernel.ParseCommandResource([]byte(definition)); err == nil || !strings.Contains(err.Error(), "preconditions are not supported") {
+		t.Fatalf("unimplemented precondition must fail command registration, got %v", err)
+	}
+}
+
+func TestCommandResourceCapabilityMetadataMustBeCompleteAndUnique(t *testing.T) {
+	base := `name: issue
+namespace: finance.invoice
+version: 1
+input:
+  record: Invoice
+module_owner_id: finance.ar
+capability: billing.invoice
+operation: issue
+input_schema:
+  id: billing.issue.input
+  version: 1
+output_schema:
+  id: billing.issue.output
+  version: 1
+transaction:
+  - create:
+      record: Invoice
+      values:
+        title: $input.title
+`
+	command, err := kernel.ParseCommandResource([]byte(base))
+	if err != nil {
+		t.Fatal("valid capability command rejected:", err)
+	}
+	registry := kernel.NewCommandRegistry()
+	if err := registry.Register(command); err != nil {
+		t.Fatal("register capability command:", err)
+	}
+	if got, ok := registry.LookupCapability("billing.invoice", "issue"); !ok || got.FullName() != command.FullName() {
+		t.Fatalf("capability lookup = (%v,%t), want %q", got, ok, command.FullName())
+	}
+	partial := strings.Replace(base, "output_schema:\n  id: billing.issue.output\n  version: 1\n", "", 1)
+	if _, err := kernel.ParseCommandResource([]byte(partial)); err == nil {
+		t.Fatal("incomplete capability command schema metadata accepted")
+	}
+	duplicate := *command
+	duplicate.Name = "issue_again"
+	if err := registry.Register(&duplicate); err == nil {
+		t.Fatal("duplicate capability operation registered to another owner command")
+	}
+}
+
 func TestCommandRegistryDuplicateRejected(t *testing.T) {
 	r := kernel.NewCommandRegistry()
 	def, err := kernel.ParseCommandResource([]byte("name: x.create\nnamespace: n\nversion: 1\ninput:\n  record: T\ntransaction:\n  - create:\n      record: T\n      values:\n        a: b\n"))
@@ -73,5 +136,42 @@ func TestCommandRegistryDuplicateRejected(t *testing.T) {
 	}
 	if err := r.Register(def); err == nil {
 		t.Fatalf("duplicate registration must be rejected")
+	}
+}
+
+func TestCrossEntityCommandRequiresExplicitStepScopes(t *testing.T) {
+	definition := `
+name: transfer.apply
+namespace: finance
+version: 1
+input:
+  record: Transfer
+cross_entity:
+  resource: Intercompany Transfer
+  operation: write
+  target_entity_field: input.target_entity_id
+transaction:
+  - create:
+      record: Transfer
+      business_scope: source
+      values:
+        title: $input.title
+  - create:
+      record: Transfer
+      business_scope: target
+      values:
+        title: $input.title
+`
+	parsed, err := kernel.ParseCommandResource([]byte(definition))
+	if err != nil || parsed.CrossEntity == nil {
+		t.Fatalf("valid registered cross-entity command rejected: command=%+v err=%v", parsed, err)
+	}
+	unsafe := strings.Replace(definition, "      business_scope: target\n", "", 1)
+	if _, err := kernel.ParseCommandResource([]byte(unsafe)); err == nil {
+		t.Fatal("cross-entity command with an implicit step scope was registered")
+	}
+	undeclared := strings.Replace(definition, "cross_entity:\n  resource: Intercompany Transfer\n  operation: write\n  target_entity_field: input.target_entity_id\n", "", 1)
+	if _, err := kernel.ParseCommandResource([]byte(undeclared)); err == nil {
+		t.Fatal("step scope was accepted without a registered cross-entity operation")
 	}
 }

@@ -22,12 +22,30 @@ type DirectoryChangeFeed interface {
 	ReconcileConsumerCursor(consumerID, ownerID string, expected, snapshotRevision uint64) error
 }
 
+// ContextDirectoryChangeFeed exposes cancellable SQL operations while the
+// original interface remains available to compatibility implementations.
+type ContextDirectoryChangeFeed interface {
+	LoadConsumerCursorContext(context.Context, string, uint64) (uint64, error)
+	AcquireConsumerLeaseContext(context.Context, string, string, time.Duration) error
+	VerifyConsumerLeaseContext(context.Context, string, string) error
+	RenewConsumerLeaseContext(context.Context, string, string, time.Duration) error
+	ReleaseConsumerLeaseContext(context.Context, string, string) error
+	ChangesAfterContext(context.Context, uint64, int) ([]SiteDirectoryChange, error)
+	CurrentDirectoryRevisionContext(context.Context) (uint64, error)
+	AdvanceConsumerCursorContext(context.Context, string, string, uint64, uint64) error
+	ReconcileConsumerCursorContext(context.Context, string, string, uint64, uint64) error
+}
+
 // DirectoryConsumer applies the Engine-owned outbox feed before advancing its
 // durable cursor. A failed application is retried from the same cursor after a
 // restart; applications must therefore be revision-idempotent.
 type DirectoryConsumer struct {
-	Registry DirectoryChangeFeed
-	ID       string
+	Registry        DirectoryChangeFeed
+	ContextRegistry ContextDirectoryChangeFeed
+	WorkAdmission   interface {
+		Acquire(context.Context) (func(), error)
+	}
+	ID string
 	// OwnerID is unique per process incarnation, while ID remains stable across
 	// restarts. The lease owner fences accidental duplicate consumer identities.
 	OwnerID  string
@@ -67,7 +85,12 @@ func (c *DirectoryConsumer) ProcessBatch(ctx context.Context) (int, error) {
 		pageSize = 100
 	}
 	if !c.loaded {
-		cursor, err := c.Registry.LoadConsumerCursor(c.ID, c.InitialCursor)
+		var cursor uint64
+		err := c.withWork(ctx, func() error {
+			var loadErr error
+			cursor, loadErr = c.loadConsumerCursor(ctx, c.ID, c.InitialCursor)
+			return loadErr
+		})
 		if err != nil {
 			return 0, err
 		}
@@ -76,28 +99,38 @@ func (c *DirectoryConsumer) ProcessBatch(ctx context.Context) (int, error) {
 	}
 	now := time.Now()
 	if !c.leaseClaimed {
-		if err := c.Registry.AcquireConsumerLease(c.ID, c.OwnerID, directoryConsumerLeaseDuration); err != nil {
+		if err := c.withWork(ctx, func() error { return c.acquireConsumerLease(ctx, c.ID, c.OwnerID, directoryConsumerLeaseDuration) }); err != nil {
 			return 0, err
 		}
 		c.leaseClaimed = true
 		c.lastHeartbeat = now
 	} else if now.Sub(c.lastHeartbeat) >= directoryConsumerHeartbeatInterval {
-		if err := c.Registry.RenewConsumerLease(c.ID, c.OwnerID, directoryConsumerLeaseDuration); err != nil {
+		if err := c.withWork(ctx, func() error { return c.renewConsumerLease(ctx, c.ID, c.OwnerID, directoryConsumerLeaseDuration) }); err != nil {
 			c.leaseClaimed = false
 			return 0, err
 		}
 		c.lastHeartbeat = now
-	} else if err := c.Registry.VerifyConsumerLease(c.ID, c.OwnerID); err != nil {
+	} else if err := c.withWork(ctx, func() error { return c.verifyConsumerLease(ctx, c.ID, c.OwnerID) }); err != nil {
 		c.leaseClaimed = false
 		return 0, err
 	}
 	cursor := c.cursor
-	changes, err := c.Registry.ChangesAfter(cursor, pageSize)
+	var changes []SiteDirectoryChange
+	err := c.withWork(ctx, func() error {
+		var readErr error
+		changes, readErr = c.changesAfter(ctx, cursor, pageSize)
+		return readErr
+	})
 	if err != nil {
 		return 0, err
 	}
 	if len(changes) == 0 {
-		latest, err := c.Registry.CurrentDirectoryRevision()
+		var latest uint64
+		err := c.withWork(ctx, func() error {
+			var readErr error
+			latest, readErr = c.currentDirectoryRevision(ctx)
+			return readErr
+		})
 		if err != nil {
 			return 0, err
 		}
@@ -111,14 +144,19 @@ func (c *DirectoryConsumer) ProcessBatch(ctx context.Context) (int, error) {
 			return applied, err
 		}
 		if time.Since(c.lastHeartbeat) >= directoryConsumerHeartbeatInterval {
-			if err := c.Registry.RenewConsumerLease(c.ID, c.OwnerID, directoryConsumerLeaseDuration); err != nil {
+			if err := c.withWork(ctx, func() error { return c.renewConsumerLease(ctx, c.ID, c.OwnerID, directoryConsumerLeaseDuration) }); err != nil {
 				c.leaseClaimed = false
 				return applied, err
 			}
 			c.lastHeartbeat = time.Now()
 		}
 		if change.Cursor != cursor+1 {
-			latest, err := c.Registry.CurrentDirectoryRevision()
+			var latest uint64
+			err := c.withWork(ctx, func() error {
+				var readErr error
+				latest, readErr = c.currentDirectoryRevision(ctx)
+				return readErr
+			})
 			if err != nil {
 				return applied, err
 			}
@@ -130,7 +168,7 @@ func (c *DirectoryConsumer) ProcessBatch(ctx context.Context) (int, error) {
 		if err := c.Apply(ctx, change); err != nil {
 			return applied, fmt.Errorf("apply directory change %d (%s): %w", change.Cursor, change.ID, err)
 		}
-		if err := c.Registry.AdvanceConsumerCursor(c.ID, c.OwnerID, cursor, change.Cursor); err != nil {
+		if err := c.withWork(ctx, func() error { return c.advanceConsumerCursor(ctx, c.ID, c.OwnerID, cursor, change.Cursor) }); err != nil {
 			if errors.Is(err, ErrDirectoryConsumerLeaseLost) {
 				c.leaseClaimed = false
 			}
@@ -144,6 +182,81 @@ func (c *DirectoryConsumer) ProcessBatch(ctx context.Context) (int, error) {
 	return applied, nil
 }
 
+func (c *DirectoryConsumer) withWork(ctx context.Context, work func() error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.WorkAdmission == nil {
+		return work()
+	}
+	release, err := c.WorkAdmission.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return work()
+}
+
+func (c *DirectoryConsumer) contextFeed() ContextDirectoryChangeFeed {
+	if c.ContextRegistry != nil {
+		return c.ContextRegistry
+	}
+	feed, _ := c.Registry.(ContextDirectoryChangeFeed)
+	return feed
+}
+
+func (c *DirectoryConsumer) loadConsumerCursor(ctx context.Context, id string, initial uint64) (uint64, error) {
+	if feed := c.contextFeed(); feed != nil {
+		return feed.LoadConsumerCursorContext(ctx, id, initial)
+	}
+	return c.Registry.LoadConsumerCursor(id, initial)
+}
+func (c *DirectoryConsumer) acquireConsumerLease(ctx context.Context, id, owner string, ttl time.Duration) error {
+	if feed := c.contextFeed(); feed != nil {
+		return feed.AcquireConsumerLeaseContext(ctx, id, owner, ttl)
+	}
+	return c.Registry.AcquireConsumerLease(id, owner, ttl)
+}
+func (c *DirectoryConsumer) verifyConsumerLease(ctx context.Context, id, owner string) error {
+	if feed := c.contextFeed(); feed != nil {
+		return feed.VerifyConsumerLeaseContext(ctx, id, owner)
+	}
+	return c.Registry.VerifyConsumerLease(id, owner)
+}
+func (c *DirectoryConsumer) renewConsumerLease(ctx context.Context, id, owner string, ttl time.Duration) error {
+	if feed := c.contextFeed(); feed != nil {
+		return feed.RenewConsumerLeaseContext(ctx, id, owner, ttl)
+	}
+	return c.Registry.RenewConsumerLease(id, owner, ttl)
+}
+func (c *DirectoryConsumer) changesAfter(ctx context.Context, cursor uint64, limit int) ([]SiteDirectoryChange, error) {
+	if feed := c.contextFeed(); feed != nil {
+		return feed.ChangesAfterContext(ctx, cursor, limit)
+	}
+	return c.Registry.ChangesAfter(cursor, limit)
+}
+func (c *DirectoryConsumer) currentDirectoryRevision(ctx context.Context) (uint64, error) {
+	if feed := c.contextFeed(); feed != nil {
+		return feed.CurrentDirectoryRevisionContext(ctx)
+	}
+	return c.Registry.CurrentDirectoryRevision()
+}
+func (c *DirectoryConsumer) advanceConsumerCursor(ctx context.Context, id, owner string, expected, next uint64) error {
+	if feed := c.contextFeed(); feed != nil {
+		return feed.AdvanceConsumerCursorContext(ctx, id, owner, expected, next)
+	}
+	return c.Registry.AdvanceConsumerCursor(id, owner, expected, next)
+}
+func (c *DirectoryConsumer) reconcileConsumerCursor(ctx context.Context, id, owner string, expected, next uint64) error {
+	if feed := c.contextFeed(); feed != nil {
+		return feed.ReconcileConsumerCursorContext(ctx, id, owner, expected, next)
+	}
+	return c.Registry.ReconcileConsumerCursor(id, owner, expected, next)
+}
+
 func (c *DirectoryConsumer) resync(ctx context.Context, cursor, latest uint64) error {
 	if c.Resync == nil {
 		return fmt.Errorf("directory history expired after cursor %d (latest %d) and no snapshot resync is configured", cursor, latest)
@@ -151,7 +264,7 @@ func (c *DirectoryConsumer) resync(ctx context.Context, cursor, latest uint64) e
 	if err := c.Resync(ctx, latest); err != nil {
 		return fmt.Errorf("apply directory snapshot at revision %d: %w", latest, err)
 	}
-	if err := c.Registry.ReconcileConsumerCursor(c.ID, c.OwnerID, cursor, latest); err != nil {
+	if err := c.withWork(ctx, func() error { return c.reconcileConsumerCursor(ctx, c.ID, c.OwnerID, cursor, latest) }); err != nil {
 		if errors.Is(err, ErrDirectoryConsumerLeaseLost) {
 			c.leaseClaimed = false
 		}
@@ -190,7 +303,14 @@ func (c *DirectoryConsumer) releaseLease() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.leaseClaimed {
-		if err := c.Registry.ReleaseConsumerLease(c.ID, c.OwnerID); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := c.withWork(ctx, func() error {
+			if feed := c.contextFeed(); feed != nil {
+				return feed.ReleaseConsumerLeaseContext(ctx, c.ID, c.OwnerID)
+			}
+			return c.Registry.ReleaseConsumerLease(c.ID, c.OwnerID)
+		}); err != nil {
 			// A lease is bounded and will expire if graceful release fails.
 			return
 		}

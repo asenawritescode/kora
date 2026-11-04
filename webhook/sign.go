@@ -1,4 +1,4 @@
-// Package webhook provides the webhook delivery system for Kora extensions.
+// Package webhook provides the webhook delivery system for Kigae extensions.
 package webhook
 
 import (

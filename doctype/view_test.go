@@ -2,6 +2,7 @@ package doctype
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -93,6 +94,34 @@ func TestViewValidate_KeepsExplicitDefaults(t *testing.T) {
 	}
 }
 
+func TestViewValidateTaskContract(t *testing.T) {
+	tests := []struct {
+		name    string
+		task    *ViewTask
+		wantErr string
+	}{
+		{name: "complete task", task: &ViewTask{User: "Cashier", Trigger: "At shift close", Outcome: "Reconcile cash and card totals", Reads: []string{"Sale"}, Writes: []string{"Shift"}, CompletionSignal: "Shift marked reviewed"}},
+		{name: "missing user", task: &ViewTask{Trigger: "At shift close", Outcome: "Reconcile", Reads: []string{"Sale"}, CompletionSignal: "Reviewed"}, wantErr: `view "Cash-up": task.user is required`},
+		{name: "missing read source", task: &ViewTask{User: "Cashier", Trigger: "At shift close", Outcome: "Reconcile", CompletionSignal: "Reviewed"}, wantErr: `view "Cash-up": task.reads must name at least one record type`},
+		{name: "blank write source", task: &ViewTask{User: "Cashier", Trigger: "At shift close", Outcome: "Reconcile", Reads: []string{"Sale"}, Writes: []string{" "}, CompletionSignal: "Reviewed"}, wantErr: `view "Cash-up": task record types must not be blank`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			view := View{Name: "Cash-up", Route: "/cash-up", Type: "workflow", Task: tt.task}
+			err := view.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("Validate() error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestPageManifestEnsurePrimaryDataBindings_RepairsMissingFormBinding(t *testing.T) {
 	manifest := &PageManifest{
 		APIVersion: "ui.kora.dev/v1",
@@ -178,6 +207,7 @@ func TestPageManifestFromViewRoundTripPreservesCurrentProjection(t *testing.T) {
 		Layout:        "two_panel",
 		Module:        "Sales",
 		SourceDocType: "Sales Invoice",
+		Task:          &ViewTask{User: "Sales manager", Trigger: "At end of day", Outcome: "Review daily totals", Reads: []string{"Sales Invoice"}, CompletionSignal: "Daily review completed"},
 		PublicAccess: &ViewPublicAccess{
 			Enabled:        true,
 			Components:     []string{"record_form"},
@@ -206,6 +236,9 @@ func TestPageManifestFromViewRoundTripPreservesCurrentProjection(t *testing.T) {
 	if manifest.Spec.Resources[0].Params["doctype"] != "Sales Invoice" {
 		t.Fatalf("expected primary doctype projection, got %+v", manifest.Spec.Resources[0])
 	}
+	if manifest.Spec.Task == nil || manifest.Spec.Task.Outcome != view.Task.Outcome {
+		t.Fatalf("task metadata was not projected: got %#v", manifest.Spec.Task)
+	}
 
 	back := manifest.ToView()
 	if back.Name != view.Name || back.Route != view.Route {
@@ -216,6 +249,9 @@ func TestPageManifestFromViewRoundTripPreservesCurrentProjection(t *testing.T) {
 	}
 	if back.Module != "tenant.sales" {
 		t.Fatalf("expected module normalization to survive projection, got %q", back.Module)
+	}
+	if back.Task == nil || back.Task.CompletionSignal != view.Task.CompletionSignal {
+		t.Fatalf("task metadata did not survive round-trip: got %#v", back.Task)
 	}
 	if back.PublicAccess == nil || !back.PublicAccess.Enabled || !back.PublicAccess.AllowMutations {
 		t.Fatalf("expected public access projection to survive round-trip: %+v", back.PublicAccess)
@@ -233,7 +269,7 @@ func TestPageManifestFromViewBindsEachComponentToItsDocTypeResource(t *testing.T
 		SourceDocType: "Sale",
 		Components: []ViewComponent{
 			{ID: "income", Type: "record_table", SourceDocType: "Sale"},
-			{ID: "expenses", Type: "record_table", SourceDocType: "Expense"},
+			{ID: "expenses", Type: "record_table", SourceDocType: "Expense", Filters: []ViewFilter{{Field: "status", Op: "in", Value: []any{"Open", "In Progress"}}}},
 		},
 	}
 
@@ -244,11 +280,117 @@ func TestPageManifestFromViewBindsEachComponentToItsDocTypeResource(t *testing.T
 	if got := manifest.Spec.Layout.Children[0].Data; got != "primary.data" {
 		t.Fatalf("income data binding = %q, want primary.data", got)
 	}
-	if got := manifest.Spec.Layout.Children[1].Data; got != "expense.data" {
-		t.Fatalf("expense data binding = %q, want expense.data", got)
+	if got := manifest.Spec.Layout.Children[1].Data; got != "expenses.data" {
+		t.Fatalf("expense data binding = %q, want expenses.data", got)
 	}
 	if got := manifest.Spec.Resources[1].Params["doctype"]; got != "Expense" {
 		t.Fatalf("expense resource doctype = %v, want Expense", got)
+	}
+	filters, ok := manifest.Spec.Resources[1].Params["filters"].([]map[string]any)
+	if !ok || len(filters) != 1 || filters[0]["field"] != "status" || filters[0]["op"] != "in" {
+		t.Fatalf("expense query filters = %#v, want status IN filter", manifest.Spec.Resources[1].Params["filters"])
+	}
+	back := manifest.ToView()
+	if len(back.Components[1].Filters) != 1 || back.Components[1].Filters[0].Field != "status" {
+		t.Fatalf("filter did not survive manifest round-trip: %#v", back.Components[1].Filters)
+	}
+}
+
+func TestLegacyViewResourceAndComponentBindingsRoundTrip(t *testing.T) {
+	view := &View{
+		Name: "POS", Route: "/pos", Type: "register", SourceDocType: "Product",
+		Resources: []PageResource{{ID: "categories", Query: "document.list", Params: map[string]any{"doctype": "Product Category", "limit": 100}}},
+		Components: []ViewComponent{{
+			ID: "categories", Type: "category_tabs", SourceDocType: "Product", Data: "primary.data",
+			ResourceBindings: map[string]string{"products": "primary", "categories": "categories"},
+			Bindings:         map[string]string{"group_field": "category", "category_label_field": "category_name"},
+		}},
+	}
+	parsed, err := FromSExpr(ToSExpr(&ConfigSnapshot{Views: []*View{view}}))
+	if err != nil {
+		t.Fatalf("round-trip view config: %v", err)
+	}
+	if len(parsed.Views) != 1 || len(parsed.Views[0].Resources) != 1 || parsed.Views[0].Resources[0].ID != "categories" {
+		t.Fatalf("view resources were not preserved: %#v", parsed.Views)
+	}
+	component := parsed.Views[0].Components[0]
+	if component.Data != "primary.data" || component.ResourceBindings["categories"] != "categories" || component.ResourceBindings["products"] != "primary" {
+		t.Fatalf("component resource bindings were not preserved: %#v", component)
+	}
+}
+
+func TestPageManifestFromViewIncludesBoundCategoryResource(t *testing.T) {
+	view := &View{
+		Name: "POS", Route: "/pos", Type: "register", SourceDocType: "Product",
+		Resources: []PageResource{{ID: "categories", Query: "document.list", Params: map[string]any{"doctype": "Product Category"}}},
+		Components: []ViewComponent{
+			{ID: "categories", Type: "category_tabs", SourceDocType: "Product", Data: "primary.data", ResourceBindings: map[string]string{"products": "primary", "categories": "categories"}, Bindings: map[string]string{"group_field": "category", "category_label_field": "category_name"}},
+			{ID: "products", Type: "product_grid", SourceDocType: "Product"},
+		},
+	}
+	manifest := PageManifestFromView(view)
+	if manifest == nil || len(manifest.Spec.Resources) != 2 {
+		t.Fatalf("expected product and category resources, got %#v", manifest)
+	}
+	if manifest.Spec.Resources[0].ID != "categories" && manifest.Spec.Resources[1].ID != "categories" {
+		t.Fatalf("category resource was not projected: %#v", manifest.Spec.Resources)
+	}
+	categoryTabs := manifest.Spec.Layout.Children[0]
+	if categoryTabs.ResourceBindings["categories"] != "categories" || categoryTabs.Data != "primary.data" {
+		t.Fatalf("category resource/data bindings were not projected: %#v", categoryTabs)
+	}
+	if manifest.Spec.Layout.Children[1].Data != "primary.data" {
+		t.Fatalf("product grid did not share product list resource: %#v", manifest.Spec.Layout.Children[1])
+	}
+}
+
+func TestPageManifestFromViewUsesSeparateFilteredResourceForSameDocType(t *testing.T) {
+	view := &View{
+		Name:          "Activities",
+		SourceDocType: "Deal",
+		Components: []ViewComponent{
+			{ID: "all", Type: "record_table", SourceDocType: "Activity"},
+			{ID: "open", Type: "record_table", SourceDocType: "Activity", Filters: []ViewFilter{{Field: "status", Op: "equals", Value: "Open"}}},
+		},
+	}
+	manifest := PageManifestFromView(view)
+	if got := manifest.Spec.Layout.Children[0].Data; got != "activity.data" {
+		t.Fatalf("unfiltered component binding = %q", got)
+	}
+	if got := manifest.Spec.Layout.Children[1].Data; got != "open.data" {
+		t.Fatalf("filtered component binding = %q", got)
+	}
+	if len(manifest.Spec.Resources) != 3 || manifest.Spec.Resources[2].Params["doctype"] != "Activity" {
+		t.Fatalf("expected separate filtered Activity resource, got %#v", manifest.Spec.Resources)
+	}
+}
+
+func TestCRMWorkspaceProjectsOpenActivitiesIntoDatabaseFilter(t *testing.T) {
+	view, err := ParseViewFile(filepath.Join("..", "config", "v0", "crm", "views", "crm_workspace.yaml"))
+	if err != nil {
+		t.Fatalf("parse CRM workspace: %v", err)
+	}
+	manifest := PageManifestFromView(view)
+	var followUp *PageResource
+	for i := range manifest.Spec.Resources {
+		if manifest.Spec.Resources[i].Params["doctype"] == "Activity" {
+			followUp = &manifest.Spec.Resources[i]
+			break
+		}
+	}
+	if followUp == nil {
+		t.Fatalf("CRM workspace has no Activity query resource: %#v", manifest.Spec.Resources)
+	}
+	filters, ok := followUp.Params["filters"].([]map[string]any)
+	if !ok || len(filters) != 1 || filters[0]["field"] != "status" || filters[0]["op"] != "in" {
+		t.Fatalf("Activity query filters = %#v, want a status IN database filter", followUp.Params["filters"])
+	}
+	values, ok := filters[0]["value"].([]any)
+	if !ok || len(values) != 2 || values[0] != "Open" || values[1] != "In Progress" {
+		t.Fatalf("Activity status filter values = %#v, want Open and In Progress", filters[0]["value"])
+	}
+	if got := manifest.Spec.Layout.Children[1].Data; got != followUp.ID+".data" {
+		t.Fatalf("Next actions data binding = %q, want filtered resource %q", got, followUp.ID+".data")
 	}
 }
 
@@ -423,6 +565,11 @@ func TestViewActionValidate(t *testing.T) {
 			wantErr: `unknown action type "send_email"`,
 		},
 		{
+			name:    "retired workflow transition action",
+			action:  ViewAction{ID: "advance", Trigger: "on_click", Type: "workflow_transition"},
+			wantErr: `unknown action type "workflow_transition"`,
+		},
+		{
 			name:   "valid action",
 			action: ViewAction{ID: "save", Trigger: "on_click", Type: "create_record"},
 		},
@@ -451,7 +598,7 @@ func TestViewActionValidate(t *testing.T) {
 func TestViewAction_IsMutation(t *testing.T) {
 	mutations := []string{
 		"create_record", "update_record", "delete_record",
-		"workflow_transition", "create_transaction",
+		"create_transaction",
 		"call_script", "call_webhook",
 	}
 	nonMutations := []string{"navigate", "local_cart_add", "local_cart_remove", "local_state_set"}
@@ -472,7 +619,7 @@ func TestViewAction_IsMutation(t *testing.T) {
 
 func TestViewAction_IsLocal(t *testing.T) {
 	locals := []string{"local_cart_add", "local_cart_remove", "local_state_set", "navigate"}
-	remotes := []string{"create_record", "update_record", "workflow_transition", "create_transaction"}
+	remotes := []string{"create_record", "update_record", "create_transaction"}
 
 	for _, typ := range locals {
 		a := ViewAction{Type: typ}

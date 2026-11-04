@@ -3,39 +3,47 @@ package api
 import (
 	"sync"
 
-	"github.com/asenawritescode/kora/analytics"
-	"github.com/asenawritescode/kora/natsprovider"
-	"github.com/asenawritescode/kora/outbox"
-	"github.com/asenawritescode/kora/script"
-	"github.com/asenawritescode/kora/secret"
+	"github.com/asenawritescode/kora/internal/tenantruntime"
 	"github.com/asenawritescode/kora/storage"
-	"github.com/asenawritescode/kora/webhook"
 	"github.com/gin-gonic/gin"
 )
 
-// SiteRuntimeServices is the concurrency-safe, replaceable set of per-site
-// services used by HTTP handlers. Directory updates publish a complete service
-// bundle under one lock; request handlers never read a map while it is being
-// mutated. It intentionally contains process-local services, not registry data.
+// SiteRuntimeServices is a source-compatible per-site service fallback for
+// external API consumers. Engine tenant requests use the immutable service
+// bundle pinned in request context instead of consulting this mutable map.
 type SiteRuntimeServices struct {
-	mu    sync.RWMutex
-	sites map[string]SiteRuntimeService
+	mu             sync.RWMutex
+	sites          map[string]SiteRuntimeService
+	analyticsCache *AnalyticsQueryCache
+}
+
+// AnalyticsQueryCacheSnapshot reports the process router's retained semantic
+// query cache budget for Engine resource metrics.
+func (s *SiteRuntimeServices) AnalyticsQueryCacheSnapshot() AnalyticsQueryCacheSnapshot {
+	// Retain this method for existing resource-metrics adapters. Engine process
+	// composition observes its explicitly owned cache directly.
+	return s.analyticsCacheOwner().AnalyticsQueryCacheSnapshot()
 }
 
 // SiteRuntimeService is the process-local service bundle for one loaded site.
-type SiteRuntimeService struct {
-	EventBus       analytics.EventBus
-	AnalyticsRelay *analytics.CloudRelay
-	Realtime       *natsprovider.Provider
-	ScriptStore    *script.Store
-	SecretStore    *secret.Store
-	WebhookWorker  *webhook.Worker
-	Outbox         outbox.Writer
-	Storage        storage.Backend
-}
+type SiteRuntimeService = tenantruntime.Services
 
 func NewSiteRuntimeServices() *SiteRuntimeServices {
-	return &SiteRuntimeServices{sites: make(map[string]SiteRuntimeService)}
+	return NewSiteRuntimeServicesWithAnalyticsQueryCache(DefaultAnalyticsQueryCache())
+}
+
+func NewSiteRuntimeServicesWithAnalyticsQueryCache(cache *AnalyticsQueryCache) *SiteRuntimeServices {
+	if cache == nil {
+		cache = DefaultAnalyticsQueryCache()
+	}
+	return &SiteRuntimeServices{sites: make(map[string]SiteRuntimeService), analyticsCache: cache}
+}
+
+func (s *SiteRuntimeServices) analyticsCacheOwner() *AnalyticsQueryCache {
+	if s == nil || s.analyticsCache == nil {
+		return DefaultAnalyticsQueryCache()
+	}
+	return s.analyticsCache
 }
 
 // Replace publishes the complete bundle for a site atomically.

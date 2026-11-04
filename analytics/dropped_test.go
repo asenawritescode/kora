@@ -7,9 +7,11 @@ import (
 
 func TestChannelBusDroppedCountsWALFailures(t *testing.T) {
 	bus := &channelBus{
-		ch:      make(chan ChangeEvent, 1),
-		walDir:  "/proc/analytics_test_wal",
-		capacity: 1,
+		ch:             make(chan ChangeEvent, 1),
+		walDir:         "/proc/analytics_test_wal",
+		capacity:       1,
+		maxEventBytes:  DefaultMaxEventBytes,
+		maxQueuedBytes: DefaultMaxQueuedBytes,
 	}
 
 	_ = bus.Publish(ChangeEvent{
@@ -23,5 +25,7 @@ func TestChannelBusDroppedCountsWALFailures(t *testing.T) {
 	if got := bus.Dropped(); got != 1 {
 		t.Fatalf("Dropped() = %d, want 1", got)
 	}
+	if causes := bus.DropCauses(); causes.WALWriteFailures != 1 || causes.PayloadRejected != 0 {
+		t.Fatalf("DropCauses() = %+v, want one WAL failure only", causes)
+	}
 }
-
