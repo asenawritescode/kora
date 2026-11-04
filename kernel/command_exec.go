@@ -193,6 +193,14 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 	if reg == nil {
 		return ErrPermission
 	}
+	// A published module operation has already been authorized against its
+	// module resource before the owner command is dispatched.  For
+	// command-owned records, the verified module execution is the authority at
+	// this boundary; requiring the caller to also hold private record CRUD
+	// permission would either reject first-party extensions or create a CRUD
+	// bypass around module ownership.  Non-module-owned steps still use the
+	// ordinary permission matrix below.
+	moduleCommandAuthorized := dyn != nil && dynamicCommandTouchesCommandOnly(reg, dyn)
 	for _, step := range dyn.Steps {
 		stepOp, scopeErr := operationForCommandStep(op, dyn, step)
 		if scopeErr != nil {
@@ -204,6 +212,9 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if dt == nil {
 				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", step.Create.Record))
 			}
+			if moduleCommandAuthorized && dt.ModuleOwnershipMode == string(contract.MutationCommands) {
+				continue
+			}
 			if _, err := decideOperationResource(stepOp, reg, dt, "create"); err != nil {
 				return err
 			}
@@ -214,6 +225,9 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			}
 			if dt.AppendOnly {
 				return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
+			}
+			if moduleCommandAuthorized && dt.ModuleOwnershipMode == string(contract.MutationCommands) {
+				continue
 			}
 			if _, err := decideOperationResource(stepOp, reg, dt, "write"); err != nil {
 				return err

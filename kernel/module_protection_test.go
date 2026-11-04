@@ -10,6 +10,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/policy"
 )
 
 func TestModuleLifecycleAdmissionFencesOwnerCommands(t *testing.T) {
@@ -147,6 +148,49 @@ func TestGenericMutationCannotUseCommandOnlyModuleExecution(t *testing.T) {
 	op.Context.ModuleExecution = &forged
 	if validModuleExecution(op.Context.ModuleExecution, op, registry) {
 		t.Fatal("forged module execution was accepted")
+	}
+}
+
+func TestVerifiedOwnerCommandDoesNotRequirePrivateCRUDGrant(t *testing.T) {
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{
+		Name:                "Invoice",
+		ModuleOwnerID:       "finance.ar",
+		ModuleOwnershipMode: string(contract.MutationCommands),
+	})
+	command := &CommandResource{
+		Name:          "issue",
+		Namespace:     "finance.invoice",
+		Version:       1,
+		ModuleOwnerID: "finance.ar",
+		Capability:    "billing.invoice",
+		Operation:     "issue",
+		InputSchema:   contract.SchemaRef{ID: "billing.invoice.issue.input", Version: 1},
+		OutputSchema:  contract.SchemaRef{ID: "billing.invoice.issue.output", Version: 1},
+		Steps: []CommandStep{{Create: &StepCreate{
+			Record: "Invoice",
+			Values: map[string]string{"title": "$input.title"},
+		}}},
+	}
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{
+		PrincipalID: "extension:scoped", PrincipalType: contract.PrincipalService, Site: "tenant-a",
+		AuthenticatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal("verified actor:", err)
+	}
+	moduleExecution, err := contract.NewCommandModuleExecution(scope, "sales.orders", "finance.ar", 1, command.FullName(), command.FullName())
+	if err != nil {
+		t.Fatal("module execution:", err)
+	}
+	op := Operation{
+		Command: command.FullName(),
+		Payload: json.RawMessage(`{"title":"published invoice"}`),
+		Context: OperationContext{TenantID: "tenant-a", Site: "tenant-a", BusinessScope: scope, Execution: execution, ModuleExecution: &moduleExecution},
+	}
+	if authErr := authorizeOp(registry, op, CommandDefinition{Name: command.FullName()}, command); authErr != nil {
+		t.Fatalf("verified owner command required private CRUD grant: %v", authErr)
 	}
 }
 
