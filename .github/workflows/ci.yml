@@ -14,6 +14,8 @@ jobs:
       KORA_PROJECTS_ROOT: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Require repository-scoped read-only access to private contract consumers
         env:
           KORA_CLOUD_READONLY_DEPLOY_KEY: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
@@ -26,20 +28,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-cloud
+          # Pin the E3 consumer contract revision until it is published on main.
+          ref: 45798738b75a1aab29f29564a2dee81fa82337cf
           path: kora-cloud
           ssh-key: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ui
+          # Pin the E3 consumer contract revision until it is published on main.
+          ref: 1097f7751b939e3e06890ad472da94a73e9be431
           path: kora-studio-mvp
           ssh-key: ${{ secrets.KORA_UI_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ts-extension-sdk
+          # Pin the E3 consumer contract revision until it is published on main.
+          ref: 4485a6827de57e308ebde7aea2577ff3e517aad8
           path: kora-ts-sdk
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-mobile-app
+          # Pin the E3 consumer contract revision until it is published on main.
+          ref: 96b37833971e106887891f81a09a3c519c0ba37c
           path: kora-mobile
       - uses: actions/setup-go@v5
         with:
