@@ -14,24 +14,25 @@ jobs:
       KORA_PROJECTS_ROOT: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
-      - name: Require read-only access to private contract consumers
+      - name: Require repository-scoped read-only access to private contract consumers
         env:
-          KORA_CROSS_REPO_READ_TOKEN: ${{ secrets.KORA_CROSS_REPO_READ_TOKEN }}
+          KORA_CLOUD_READONLY_DEPLOY_KEY: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
+          KORA_UI_READONLY_DEPLOY_KEY: ${{ secrets.KORA_UI_READONLY_DEPLOY_KEY }}
         run: |
-          if [ -z "$KORA_CROSS_REPO_READ_TOKEN" ]; then
-            echo "::error::Configure KORA_CROSS_REPO_READ_TOKEN with read-only access to kora-cloud and kora-ui."
+          if [ -z "$KORA_CLOUD_READONLY_DEPLOY_KEY" ] || [ -z "$KORA_UI_READONLY_DEPLOY_KEY" ]; then
+            echo "::error::Configure read-only deploy-key secrets for kora-cloud and kora-ui."
             exit 1
           fi
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-cloud
           path: kora-cloud
-          token: ${{ secrets.KORA_CROSS_REPO_READ_TOKEN }}
+          ssh-key: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ui
           path: kora-studio-mvp
-          token: ${{ secrets.KORA_CROSS_REPO_READ_TOKEN }}
+          ssh-key: ${{ secrets.KORA_UI_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ts-extension-sdk
