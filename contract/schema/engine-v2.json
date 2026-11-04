@@ -505,6 +505,52 @@
       ],
       "type": "object"
     },
+    "BusinessEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "currency": {
+          "maxLength": 16,
+          "minLength": 1,
+          "type": "string"
+        },
+        "entity_id": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "lifecycle": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "target_ref": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency",
+        "entity_id",
+        "key",
+        "occurred_at",
+        "target_ref"
+      ],
+      "type": "object"
+    },
     "BusinessEventDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -522,6 +568,206 @@
         "owner_module_id",
         "payload_schema",
         "type"
+      ],
+      "type": "object"
+    },
+    "BusinessFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "items": {
+            "$ref": "#/$defs/BusinessEffect"
+          },
+          "type": "array"
+        },
+        "evidence": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "expected": {
+          "$ref": "#/$defs/BusinessObligation"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "missing_effect",
+            "duplicate_effect",
+            "amount_mismatch",
+            "scope_mismatch",
+            "unknown_outcome",
+            "pending_grace",
+            "lifecycle_mismatch"
+          ],
+          "type": "string"
+        },
+        "source_ref": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "open",
+            "investigating",
+            "resolved",
+            "waived"
+          ],
+          "type": "string"
+        },
+        "target_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "type": "array"
+        }
+      },
+      "required": [
+        "expected",
+        "id",
+        "key",
+        "kind",
+        "source_ref",
+        "state"
+      ],
+      "type": "object"
+    },
+    "BusinessFindingActionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "waived",
+            "repaired"
+          ],
+          "type": "string"
+        },
+        "finding_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "finding_id"
+      ],
+      "type": "object"
+    },
+    "BusinessFindingDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "finding_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "finding_id"
+      ],
+      "type": "object"
+    },
+    "BusinessObligation": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "currency": {
+          "maxLength": 16,
+          "minLength": 1,
+          "type": "string"
+        },
+        "entity_id": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "lifecycle": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "source_ref": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency",
+        "entity_id",
+        "key",
+        "occurred_at",
+        "source_ref"
+      ],
+      "type": "object"
+    },
+    "BusinessReconciliationRunRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "previous_run_id": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "rule_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "run_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "rule_id",
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "BusinessReconciliationSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "unresolved_business_findings": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "scope",
+        "unresolved_business_findings"
       ],
       "type": "object"
     },
@@ -547,6 +793,128 @@
         "resource_type",
         "scope"
       ],
+      "type": "object"
+    },
+    "BusinessRun": {
+      "additionalProperties": false,
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "cursors": {
+          "$ref": "#/$defs/BusinessRunCursor"
+        },
+        "cutoff": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/BusinessFinding"
+          },
+          "maxItems": 10000,
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "watermarks": {
+          "$ref": "#/$defs/BusinessRunWatermarks"
+        }
+      },
+      "required": [
+        "complete",
+        "created_at",
+        "cutoff",
+        "id",
+        "owner_module_id",
+        "rule_id",
+        "scope",
+        "tenant_id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "BusinessRunCursor": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "source_complete": {
+          "type": "boolean"
+        },
+        "source_rows": {
+          "items": {
+            "$ref": "#/$defs/BusinessObligation"
+          },
+          "maxItems": 10000,
+          "type": "array"
+        },
+        "target": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "target_complete": {
+          "type": "boolean"
+        },
+        "target_rows": {
+          "items": {
+            "$ref": "#/$defs/BusinessEffect"
+          },
+          "maxItems": 10000,
+          "type": "array"
+        },
+        "watermarks": {
+          "$ref": "#/$defs/BusinessRunWatermarks"
+        }
+      },
+      "type": "object"
+    },
+    "BusinessRunWatermarks": {
+      "additionalProperties": false,
+      "properties": {
+        "source_as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "source_snapshot": {
+          "type": "string"
+        },
+        "target_as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "target_revision": {
+          "type": "string"
+        },
+        "target_snapshot": {
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "BusinessScope": {
@@ -5488,6 +5856,43 @@
       ],
       "type": "object"
     },
+    "WorkflowHistoryEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "kind": {
+          "maxLength": 80,
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "status": {
+          "maxLength": 80,
+          "type": "string"
+        },
+        "step_id": {
+          "maxLength": 160,
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "kind",
+        "sequence",
+        "status",
+        "step_id"
+      ],
+      "type": "object"
+    },
     "WorkflowInstance": {
       "additionalProperties": false,
       "properties": {
@@ -6065,6 +6470,52 @@
       ],
       "type": "object"
     },
+    "BusinessEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "currency": {
+          "maxLength": 16,
+          "minLength": 1,
+          "type": "string"
+        },
+        "entity_id": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "lifecycle": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "target_ref": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency",
+        "entity_id",
+        "key",
+        "occurred_at",
+        "target_ref"
+      ],
+      "type": "object"
+    },
     "BusinessEventDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -6082,6 +6533,206 @@
         "owner_module_id",
         "payload_schema",
         "type"
+      ],
+      "type": "object"
+    },
+    "BusinessFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "items": {
+            "$ref": "#/$defs/BusinessEffect"
+          },
+          "type": "array"
+        },
+        "evidence": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "expected": {
+          "$ref": "#/$defs/BusinessObligation"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "missing_effect",
+            "duplicate_effect",
+            "amount_mismatch",
+            "scope_mismatch",
+            "unknown_outcome",
+            "pending_grace",
+            "lifecycle_mismatch"
+          ],
+          "type": "string"
+        },
+        "source_ref": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "open",
+            "investigating",
+            "resolved",
+            "waived"
+          ],
+          "type": "string"
+        },
+        "target_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "type": "array"
+        }
+      },
+      "required": [
+        "expected",
+        "id",
+        "key",
+        "kind",
+        "source_ref",
+        "state"
+      ],
+      "type": "object"
+    },
+    "BusinessFindingActionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "waived",
+            "repaired"
+          ],
+          "type": "string"
+        },
+        "finding_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "finding_id"
+      ],
+      "type": "object"
+    },
+    "BusinessFindingDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "finding_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        }
+      },
+      "required": [
+        "finding_id"
+      ],
+      "type": "object"
+    },
+    "BusinessObligation": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "currency": {
+          "maxLength": 16,
+          "minLength": 1,
+          "type": "string"
+        },
+        "entity_id": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "lifecycle": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "source_ref": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency",
+        "entity_id",
+        "key",
+        "occurred_at",
+        "source_ref"
+      ],
+      "type": "object"
+    },
+    "BusinessReconciliationRunRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "owner_module_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "previous_run_id": {
+          "maxLength": 160,
+          "type": "string"
+        },
+        "rule_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "run_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_module_id",
+        "rule_id",
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "BusinessReconciliationSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "unresolved_business_findings": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "scope",
+        "unresolved_business_findings"
       ],
       "type": "object"
     },
@@ -6107,6 +6758,128 @@
         "resource_type",
         "scope"
       ],
+      "type": "object"
+    },
+    "BusinessRun": {
+      "additionalProperties": false,
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "cursors": {
+          "$ref": "#/$defs/BusinessRunCursor"
+        },
+        "cutoff": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/BusinessFinding"
+          },
+          "maxItems": 10000,
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "owner_module_id": {
+          "type": "string"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BusinessScope"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "watermarks": {
+          "$ref": "#/$defs/BusinessRunWatermarks"
+        }
+      },
+      "required": [
+        "complete",
+        "created_at",
+        "cutoff",
+        "id",
+        "owner_module_id",
+        "rule_id",
+        "scope",
+        "tenant_id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "BusinessRunCursor": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "source_complete": {
+          "type": "boolean"
+        },
+        "source_rows": {
+          "items": {
+            "$ref": "#/$defs/BusinessObligation"
+          },
+          "maxItems": 10000,
+          "type": "array"
+        },
+        "target": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "target_complete": {
+          "type": "boolean"
+        },
+        "target_rows": {
+          "items": {
+            "$ref": "#/$defs/BusinessEffect"
+          },
+          "maxItems": 10000,
+          "type": "array"
+        },
+        "watermarks": {
+          "$ref": "#/$defs/BusinessRunWatermarks"
+        }
+      },
+      "type": "object"
+    },
+    "BusinessRunWatermarks": {
+      "additionalProperties": false,
+      "properties": {
+        "source_as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "source_snapshot": {
+          "type": "string"
+        },
+        "target_as_of": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "target_revision": {
+          "type": "string"
+        },
+        "target_snapshot": {
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "BusinessScope": {
@@ -11003,6 +11776,43 @@
       ],
       "type": "object"
     },
+    "WorkflowHistoryEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192
+        },
+        "kind": {
+          "maxLength": 80,
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "status": {
+          "maxLength": 80,
+          "type": "string"
+        },
+        "step_id": {
+          "maxLength": 160,
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "kind",
+        "sequence",
+        "status",
+        "step_id"
+      ],
+      "type": "object"
+    },
     "WorkflowInstance": {
       "additionalProperties": false,
       "properties": {
@@ -11090,6 +11900,25 @@
       "responded",
       "superseded",
       "cancelled"
+    ],
+    "BusinessFindingAction": [
+      "waived",
+      "repaired"
+    ],
+    "BusinessFindingKind": [
+      "missing_effect",
+      "duplicate_effect",
+      "amount_mismatch",
+      "scope_mismatch",
+      "unknown_outcome",
+      "pending_grace",
+      "lifecycle_mismatch"
+    ],
+    "BusinessFindingState": [
+      "open",
+      "investigating",
+      "resolved",
+      "waived"
     ],
     "BusinessScopeKind": [
       "tenant",

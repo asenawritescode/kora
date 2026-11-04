@@ -17,20 +17,7 @@ import (
 
 // BusinessRun is the durable result of comparing one immutable rule version at
 // a cutoff. Tenant and entity scope are part of the persisted identity.
-type BusinessRun struct {
-	TenantID      contract.TenantID      `json:"tenant_id"`
-	OwnerModuleID contract.ModuleID      `json:"owner_module_id"`
-	ID            string                 `json:"id"`
-	RuleID        string                 `json:"rule_id"`
-	Version       uint32                 `json:"version"`
-	Scope         contract.BusinessScope `json:"scope"`
-	Cutoff        time.Time              `json:"cutoff"`
-	Complete      bool                   `json:"complete"`
-	Cursors       BusinessRunCursor      `json:"cursors,omitempty"`
-	Watermarks    BusinessRunWatermarks  `json:"watermarks,omitempty"`
-	Findings      []BusinessFinding      `json:"findings,omitempty"`
-	CreatedAt     time.Time              `json:"created_at"`
-}
+type BusinessRun = contract.BusinessRun
 
 // BusinessRunStore persists reconciliation evidence through the existing SQL
 // dialect abstraction. Run IDs are immutable: retries use a new run ID and

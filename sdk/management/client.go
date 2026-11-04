@@ -201,7 +201,8 @@ func (c *httpClient) PlanModuleChange(ctx context.Context, tenant contract.Tenan
 	var result contract.ModuleChangePlan
 	endpoint := "/api/management/v2/tenants/" + url.PathEscape(string(tenant)) + "/modules/plan"
 	err := c.do(ctx, http.MethodPost, endpoint, http.StatusOK, request, &result)
-	if err == nil && (result.ModuleID != request.ModuleID || result.TargetState != request.TargetState || result.TargetVersion != request.TargetVersion || !reflect.DeepEqual(result.ProviderSelections, request.ProviderSelections) || result.BaseRevision != request.ExpectedRevision || len(result.PlanHash) != 64) {
+	providerSelectionsMatch := len(result.ProviderSelections) == len(request.ProviderSelections) && (len(result.ProviderSelections) == 0 || reflect.DeepEqual(result.ProviderSelections, request.ProviderSelections))
+	if err == nil && (result.ModuleID != request.ModuleID || result.TargetState != request.TargetState || result.TargetVersion != request.TargetVersion || !providerSelectionsMatch || result.BaseRevision != request.ExpectedRevision || len(result.PlanHash) != 64) {
 		err = fmt.Errorf("management module plan response identity is invalid")
 	}
 	if err == nil {
