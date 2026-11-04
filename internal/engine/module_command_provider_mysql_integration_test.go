@@ -101,11 +101,9 @@ func (s *moduleCommandFixtureSchemas) Validate(ref contract.SchemaRef, raw json.
 	}
 	if ref == s.input {
 		var payload struct {
-			Data struct {
-				Title string `json:"title"`
-			} `json:"data"`
+			Title string `json:"title"`
 		}
-		if err := json.Unmarshal(raw, &payload); err != nil || (payload.Data.Title != "issued invoice" && payload.Data.Title != "different invoice") {
+		if err := json.Unmarshal(raw, &payload); err != nil || (payload.Title != "issued invoice" && payload.Title != "different invoice") {
 			return errors.New("input does not match registered contract")
 		}
 	}
