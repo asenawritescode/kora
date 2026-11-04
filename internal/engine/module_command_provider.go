@@ -135,7 +135,16 @@ func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invo
 	if !ok || command.ModuleOwnerID != h.factory.owner || command.Capability != h.factory.capability || command.Operation != invocation.Operation.Name || command.InputSchema != invocation.Operation.Input || command.OutputSchema != invocation.Operation.Output {
 		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodePermissionDenied, "local capability operation has no matching owner command contract")
 	}
-	if err := h.factory.validateSchema(command.InputSchema, invocation.Payload); err != nil {
+	// Published operation schemas describe the business input. The provider
+	// receives the kernel's internal command envelope, so validate its data
+	// member rather than leaking that transport shape into the public schema.
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(invocation.Payload, &envelope); err != nil || len(envelope.Data) == 0 || !json.Valid(envelope.Data) {
+		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeValidationFailed, "owner command input envelope is invalid")
+	}
+	if err := h.factory.validateSchema(command.InputSchema, envelope.Data); err != nil {
 		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeValidationFailed, "owner command input failed its registered schema")
 	}
 	moduleExecution, err := contract.NewCommandModuleExecution(h.scope, invocation.ModuleExecution.CallerModuleID, h.factory.owner, invocation.ModuleExecution.BindingRevision, command.FullName(), command.FullName())
