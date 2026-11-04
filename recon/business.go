@@ -14,29 +14,11 @@ import (
 	"github.com/asenawritescode/kora/contract"
 )
 
-// BusinessObligation is supplied by the owning domain. Amounts are decimal
-// strings so reconciliation never introduces binary floating point rounding.
-type BusinessObligation struct {
-	Key        string    `json:"key"`
-	SourceRef  string    `json:"source_ref"`
-	EntityID   string    `json:"entity_id"`
-	Amount     string    `json:"amount"`
-	Currency   string    `json:"currency"`
-	OccurredAt time.Time `json:"occurred_at"`
-	Lifecycle  string    `json:"lifecycle,omitempty"`
-}
+type BusinessObligation = contract.BusinessObligation
 
 // BusinessEffect is an owner-query result representing an actual downstream
 // business effect, independent of transport delivery receipts.
-type BusinessEffect struct {
-	Key        string    `json:"key"`
-	TargetRef  string    `json:"target_ref"`
-	EntityID   string    `json:"entity_id"`
-	Amount     string    `json:"amount"`
-	Currency   string    `json:"currency"`
-	OccurredAt time.Time `json:"occurred_at"`
-	Lifecycle  string    `json:"lifecycle,omitempty"`
-}
+type BusinessEffect = contract.BusinessEffect
 
 // BusinessReconciliationRule binds a source and target to owner-published
 // queries. The query executor is supplied by the existing module binding plan,
@@ -87,24 +69,8 @@ func PublishedBusinessQueryReader(plan PublishedBusinessQueryPlan) BusinessQuery
 	}
 }
 
-type BusinessRunCursor struct {
-	Source         string                `json:"source,omitempty"`
-	Target         string                `json:"target,omitempty"`
-	SourceRows     []BusinessObligation  `json:"source_rows,omitempty"`
-	TargetRows     []BusinessEffect      `json:"target_rows,omitempty"`
-	Watermarks     BusinessRunWatermarks `json:"watermarks,omitempty"`
-	SourceComplete bool                  `json:"source_complete,omitempty"`
-	TargetComplete bool                  `json:"target_complete,omitempty"`
-}
-
-type BusinessRunWatermarks struct {
-	SourceRevision string    `json:"source_revision,omitempty"`
-	TargetRevision string    `json:"target_revision,omitempty"`
-	SourceSnapshot string    `json:"source_snapshot,omitempty"`
-	TargetSnapshot string    `json:"target_snapshot,omitempty"`
-	SourceAsOf     time.Time `json:"source_as_of,omitempty"`
-	TargetAsOf     time.Time `json:"target_as_of,omitempty"`
-}
+type BusinessRunCursor = contract.BusinessRunCursor
+type BusinessRunWatermarks = contract.BusinessRunWatermarks
 
 var businessDecimalPattern = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$`)
 
@@ -216,37 +182,27 @@ func readBusinessPages[T BusinessObligation | BusinessEffect](ctx context.Contex
 	return rows, cursor, watermark, cursor == "", nil
 }
 
-type BusinessFindingKind string
+type BusinessFindingKind = contract.BusinessFindingKind
 
 const (
-	FindingMissingEffect     BusinessFindingKind = "missing_effect"
-	FindingDuplicateEffect   BusinessFindingKind = "duplicate_effect"
-	FindingAmountMismatch    BusinessFindingKind = "amount_mismatch"
-	FindingScopeMismatch     BusinessFindingKind = "scope_mismatch"
-	FindingUnknownOutcome    BusinessFindingKind = "unknown_outcome"
-	FindingPendingGrace      BusinessFindingKind = "pending_grace"
-	FindingLifecycleMismatch BusinessFindingKind = "lifecycle_mismatch"
+	FindingMissingEffect     = contract.FindingMissingEffect
+	FindingDuplicateEffect   = contract.FindingDuplicateEffect
+	FindingAmountMismatch    = contract.FindingAmountMismatch
+	FindingScopeMismatch     = contract.FindingScopeMismatch
+	FindingUnknownOutcome    = contract.FindingUnknownOutcome
+	FindingPendingGrace      = contract.FindingPendingGrace
+	FindingLifecycleMismatch = contract.FindingLifecycleMismatch
 )
 
-type BusinessFinding struct {
-	ID         string
-	Kind       BusinessFindingKind
-	Key        string
-	SourceRef  string
-	TargetRefs []string
-	Expected   BusinessObligation
-	Actual     []BusinessEffect
-	State      BusinessFindingState
-	Evidence   string
-}
+type BusinessFinding = contract.BusinessFinding
 
-type BusinessFindingState string
+type BusinessFindingState = contract.BusinessFindingState
 
 const (
-	BusinessFindingOpen          BusinessFindingState = "open"
-	BusinessFindingInvestigating BusinessFindingState = "investigating"
-	BusinessFindingResolved      BusinessFindingState = "resolved"
-	BusinessFindingWaived        BusinessFindingState = "waived"
+	BusinessFindingOpen          = contract.BusinessFindingOpen
+	BusinessFindingInvestigating = contract.BusinessFindingInvestigating
+	BusinessFindingResolved      = contract.BusinessFindingResolved
+	BusinessFindingWaived        = contract.BusinessFindingWaived
 )
 
 type BusinessReconciliationInput struct {

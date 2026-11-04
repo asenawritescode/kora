@@ -2,13 +2,14 @@ package cli
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/asenawritescode/kora/site"
 )
 
-func TestSetupConfigImportUsesBoundedMaintenanceAdmission(t *testing.T) {
+func TestSetupConfigImportUsesJournaledImporterAdmission(t *testing.T) {
 	t.Setenv("KORA_DB_BUDGET_KEY", "")
 	t.Setenv("KORA_DB_MAX_BUDGET_ENDPOINTS", "64")
 	t.Setenv("KORA_DB_ACTIVE_WORK_BUDGET", "2")
@@ -26,26 +27,16 @@ func TestSetupConfigImportUsesBoundedMaintenanceAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal("hold tenant maintenance capacity:", err)
 	}
-	called := false
 	waitCtx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	err = runSetupConfigImport(waitCtx, config, func() error {
-		called = true
-		return nil
-	})
+	err = runConfigImportForSiteContext(waitCtx, "setup.example.invalid", t.TempDir(), config, "tenant-setup-test")
 	cancel()
-	if err == nil || called {
-		t.Fatalf("setup import under saturated maintenance admission = (err %v, called %t), want rejected before import", err, called)
+	if err == nil {
+		t.Fatal("setup import under saturated maintenance admission succeeded, want timeout")
 	}
 
 	held()
-	if err := runSetupConfigImport(context.Background(), config, func() error {
-		called = true
-		return nil
-	}); err != nil {
-		t.Fatal("setup import after maintenance capacity release:", err)
-	}
-	if !called {
-		t.Fatal("setup import callback was not run after maintenance admission")
+	if err := runConfigImportForSiteContext(context.Background(), "setup.example.invalid", t.TempDir(), config, "tenant-setup-test"); err == nil || !strings.Contains(err.Error(), "connecting to database") {
+		t.Fatalf("setup import after admission = %v, want database connection failure after admission", err)
 	}
 	probe, err := acquireSiteCLIWork(context.Background(), config, true)
 	if err != nil {
