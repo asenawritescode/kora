@@ -145,6 +145,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	cfg := site.ReconstructSiteConfigFromDBInfo(info, config.Common)
 	dialect := kdb.Resolve(cfg.DBType)
 	domainKernel := kernel.New(dialect, outbox.NewSQLWriter(dialect))
+	domainKernel.Commands = config.KernelCommands
 	domainKernel.CommandSchemas = config.ModuleSchemas
 	backend, err := resolveTenantStorage(services.Storage, config.ResolveStorage, cfg)
 	if err != nil {
