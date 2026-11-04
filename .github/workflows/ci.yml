@@ -29,28 +29,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-cloud
-          # Pin the E3 consumer contract revision until it is published on main.
-          ref: 45798738b75a1aab29f29564a2dee81fa82337cf
+          # Pin the consumer contract revision until it is published on main.
+          ref: bce2dd965843de2ed99103f130380a5e41023098
           path: kora-cloud
           ssh-key: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ui
-          # Pin the E3 consumer contract revision until it is published on main.
-          ref: 1097f7751b939e3e06890ad472da94a73e9be431
+          # Pin the consumer contract revision until it is published on main.
+          ref: f71be68a7acb8f9552af78262b9c1baf9ffbc18e
           path: kora-studio-mvp
           ssh-key: ${{ secrets.KORA_UI_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ts-extension-sdk
-          # Pin the E3 consumer contract revision until it is published on main.
-          ref: 4485a6827de57e308ebde7aea2577ff3e517aad8
+          # Pin the consumer contract revision until it is published on main.
+          ref: 5063e8f22275112d4c45fe3daa0ff609dc156373
           path: kora-ts-sdk
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-mobile-app
-          # Pin the E3 consumer contract revision until it is published on main.
-          ref: 96b37833971e106887891f81a09a3c519c0ba37c
+          # Pin the consumer contract revision until it is published on main.
+          ref: d8ff07c9c9c678999b27ddc44011400e388c6c6a
           path: kora-mobile
       - uses: actions/setup-go@v5
         with:
