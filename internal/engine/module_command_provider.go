@@ -61,6 +61,11 @@ type kernelCommandProviderHandle struct {
 	revoked bool
 }
 
+func kernelCommandPayload(input []byte) json.RawMessage {
+	payload := append([]byte(`{"data":`), input...)
+	return append(payload, '}')
+}
+
 func (h *kernelCommandProviderHandle) Name() contract.CapabilityName { return h.factory.capability }
 func (*kernelCommandProviderHandle) Scope() contract.GrantScope      { return contract.GrantScopeOperation }
 func (h *kernelCommandProviderHandle) Revoke()                       { h.revoked = true }
@@ -135,16 +140,7 @@ func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invo
 	if !ok || command.ModuleOwnerID != h.factory.owner || command.Capability != h.factory.capability || command.Operation != invocation.Operation.Name || command.InputSchema != invocation.Operation.Input || command.OutputSchema != invocation.Operation.Output {
 		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodePermissionDenied, "local capability operation has no matching owner command contract")
 	}
-	// Published operation schemas describe the business input. The provider
-	// receives the kernel's internal command envelope, so validate its data
-	// member rather than leaking that transport shape into the public schema.
-	var envelope struct {
-		Data json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(invocation.Payload, &envelope); err != nil || len(envelope.Data) == 0 || !json.Valid(envelope.Data) {
-		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeValidationFailed, "owner command input envelope is invalid")
-	}
-	if err := h.factory.validateSchema(command.InputSchema, envelope.Data); err != nil {
+	if err := h.factory.validateSchema(command.InputSchema, invocation.Payload); err != nil {
 		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeValidationFailed, "owner command input failed its registered schema")
 	}
 	moduleExecution, err := contract.NewCommandModuleExecution(h.scope, invocation.ModuleExecution.CallerModuleID, h.factory.owner, invocation.ModuleExecution.BindingRevision, command.FullName(), command.FullName())
@@ -160,7 +156,7 @@ func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invo
 	if len(actor.Roles) > 0 {
 		primaryRole = actor.Roles[0]
 	}
-	operation := kernel.Operation{Command: command.FullName(), Payload: append(json.RawMessage(nil), invocation.Payload...), Context: kernel.OperationContext{
+	operation := kernel.Operation{Command: command.FullName(), Payload: kernelCommandPayload(invocation.Payload), Context: kernel.OperationContext{
 		ModuleExecution: &moduleExecution, BusinessScope: h.scope, BusinessReferenceValidator: invocation.BusinessReferenceValidator, Site: actor.Site, TenantID: invocation.Execution.Tenant(),
 		Execution: invocation.Execution, Actor: actor, User: user, Owner: user, UserRole: primaryRole, Roles: append([]string(nil), actor.Roles...),
 		Source: kernel.SourceWorker, ExpectedVersion: string(invocation.Meta.ExpectedRevision), IdempotencyKey: string(invocation.Meta.IdempotencyKey),

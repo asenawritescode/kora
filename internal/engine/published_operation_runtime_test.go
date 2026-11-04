@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestLocalPublishedCommandPayloadWrapsPublishedInput(t *testing.T) {
-	got := localPublishedCommandPayload([]byte(`{"title":"invoice"}`))
+func TestKernelCommandProviderPayloadWrapsPublishedInput(t *testing.T) {
+	got := kernelCommandPayload([]byte(`{"title":"invoice"}`))
 	var decoded struct {
 		Data map[string]string `json:"data"`
 	}
