@@ -11,4 +11,3 @@ export function linkPickerDisplayFields(doctype?: Pick<DocType, 'title_field' | 
 export function linkPickerSearchParams(term: string, fields: string[]) {
   return { limit: 10, fields, search: term }
 }
-
