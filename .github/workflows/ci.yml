@@ -44,7 +44,7 @@ jobs:
         with:
           repository: asenawritescode/kora-ts-extension-sdk
           # Pin the consumer contract revision until it is published on main.
-          ref: 75a35ddaf317ab1c27041e0b7b5ae5d557a6c360
+          ref: c441374c38233fba0a082e7f42ab3cefa1b0ac42
           path: kora-ts-sdk
       - uses: actions/checkout@v4
         with:
