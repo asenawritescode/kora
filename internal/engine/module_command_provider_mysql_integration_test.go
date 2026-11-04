@@ -142,7 +142,10 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		_ = root.Close()
 		t.Fatal("create isolated module command database:", err)
 	}
-	t.Cleanup(func() { _, _ = root.ExecContext(context.Background(), "DROP DATABASE IF EXISTS `"+databaseName+"`"); _ = root.Close() })
+	t.Cleanup(func() {
+		_, _ = root.ExecContext(context.Background(), "DROP DATABASE IF EXISTS `"+databaseName+"`")
+		_ = root.Close()
+	})
 	tenantConfig := *rootConfig
 	tenantConfig.DBName = databaseName
 	database, err := sql.Open("mysql", tenantConfig.FormatDSN())
