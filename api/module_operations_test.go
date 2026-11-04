@@ -11,9 +11,68 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
 )
+
+func TestOfflineCapabilitiesDeclareOnlyActorAuthorizedReadyOperations(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	scope := contract.BusinessScope{TenantID: "offline-capability-tenant", Kind: contract.ScopeKindTenant}
+	input := contract.SchemaRef{ID: "sales.action.input", Version: 1}
+	output := contract.SchemaRef{ID: "sales.action.output", Version: 1}
+	makeSurface := func(name string, eligible bool) contract.PublishedOperation {
+		return contract.PublishedOperation{Name: name, Capability: contract.CapabilityName("sales." + name), Operation: name, ScopePolicy: contract.ScopeTenantShared, AllowedCallers: []contract.ModuleID{"sales.client"}, OfflineEligible: eligible}
+	}
+	issue, onlineOnly, forbidden, unavailable := makeSurface("issue", true), makeSurface("preview", false), makeSurface("archive", true), makeSurface("submit", true)
+	operations := []contract.PublishedOperation{issue, onlineOnly, forbidden, unavailable}
+	offers := make([]contract.CapabilityOffer, 0, len(operations))
+	bindings := make([]plugin.ResolvedBinding, 0, len(operations)-1)
+	for _, published := range operations {
+		spec := contract.OperationSpec{Name: published.Operation, Input: input, Output: output, Effect: contract.EffectLocal}
+		offers = append(offers, contract.CapabilityOffer{Name: published.Capability, Contract: output, Operations: []contract.OperationSpec{spec}})
+		if published.Name != unavailable.Name {
+			bindings = append(bindings, plugin.ResolvedBinding{Key: plugin.BindingKey{Scope: scope, ConsumerModuleID: "sales.invoices", CapabilityName: published.Capability}, OwnerModuleID: "sales.invoices", ProviderID: "sales.provider", Revision: 4})
+		}
+	}
+	module := contract.ModuleDescriptor{ID: "sales.invoices", Version: "1.0.0", Provides: offers, PublishedOperations: operations, Schemas: []contract.ModuleSchemaDocument{{Ref: input, Schema: json.RawMessage(`{"type":"object"}`)}, {Ref: output, Schema: json.RawMessage(`{"type":"object"}`)}}}
+	snapshot := contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 4, Modules: []contract.ModuleDescriptor{module}, Installations: []contract.ModuleInstallation{{TenantID: scope.TenantID, ModuleID: module.ID, Version: module.Version, State: string(contract.ModuleActive)}}}
+	registry := doctype.NewRegistry()
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.invoices.operation.issue", Role: "Operator", Write: true})
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.invoices.operation.preview", Role: "Operator", Write: true})
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.invoices.operation.submit", Role: "Operator", Write: true})
+	execution, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "operator", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), Roles: []string{"Operator"}, AuthenticatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := NewSiteRuntimeServices()
+	services.Replace(string(scope.TenantID), SiteRuntimeService{LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return snapshot, nil }, ResolveModuleBindings: func(contract.BusinessScope) (plugin.BindingPlan, error) {
+		return plugin.BindingPlan{Revision: snapshot.Revision, Bindings: bindings}, nil
+	}})
+	handler := NewHandler(registry, nil)
+	handler.RuntimeServices = services
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("GET", "/api/v2/offline/capabilities", nil)
+	ctx.Set("site_name", string(scope.TenantID))
+	ctx.Set("policy_execution", execution)
+	handler.HandleOfflineCapabilitiesV2(ctx)
+	if recorder.Code != 200 {
+		t.Fatalf("capabilities status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data contract.OfflineCapabilities `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if err := response.Data.Validate(); err != nil {
+		t.Fatalf("capabilities failed contract validation: %v", err)
+	}
+	if len(response.Data.OfflineOperations) != 1 || response.Data.OfflineOperations[0].OperationRef != contract.PublishedOperationRef(module.ID, issue.Capability, issue.Operation) {
+		t.Fatalf("capabilities exposed unauthorized, online-only, or unavailable operations: %+v", response.Data.OfflineOperations)
+	}
+}
 
 func TestExecutePublishedOperationUsesRegisteredSurfaceAndStrictRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)

@@ -27,17 +27,30 @@ func (h *Handler) HandleOfflineCapabilitiesV2(c *gin.Context) {
 		writeError(c, http.StatusUnauthorized, "auth.unauthenticated", "Verified identity is required", nil)
 		return
 	}
-	services := h.runtimeService(c, c.GetString("site_name"))
-	if services.LoadModuleSnapshot == nil {
+	scope := businessScopeFromRequest(c, execution)
+	catalog, err := h.buildApplicationCatalog(c, execution, scope)
+	if err != nil {
 		writeError(c, http.StatusServiceUnavailable, "module.catalog_unavailable", "Module catalog is unavailable", nil)
 		return
 	}
-	snapshot, err := services.LoadModuleSnapshot()
-	if err != nil || snapshot.TenantID != execution.Tenant() {
-		writeError(c, http.StatusServiceUnavailable, "module.catalog_unavailable", "Module catalog is unavailable", nil)
+	queries := make([]contract.ApplicationCatalogQuery, 0, len(catalog.PublishedQueries))
+	for _, query := range catalog.PublishedQueries {
+		if query.OfflineEligible {
+			queries = append(queries, query)
+		}
+	}
+	operations := make([]contract.ApplicationCatalogOperation, 0, len(catalog.PublishedOperations))
+	for _, operation := range catalog.PublishedOperations {
+		if operation.OfflineEligible && operation.Availability == contract.OperationAvailable {
+			operations = append(operations, operation)
+		}
+	}
+	capabilities := contract.OfflineCapabilities{ProtocolVersion: 2, CatalogRevision: catalog.Revision, MaxBatchSize: offlineIntentBatchLimit, MaxPageSize: 100, SnapshotLifetimeSeconds: 86400, OfflineQueries: queries, OfflineOperations: operations}
+	if err := capabilities.Validate(); err != nil {
+		writeError(c, http.StatusServiceUnavailable, "module.catalog_invalid", "Offline capabilities are unavailable", nil)
 		return
 	}
-	c.JSON(http.StatusOK, Response{Data: contract.OfflineCapabilities{ProtocolVersion: 2, CatalogRevision: snapshot.Revision, MaxBatchSize: offlineIntentBatchLimit, MaxPageSize: 100, SnapshotLifetimeSeconds: 86400}})
+	c.JSON(http.StatusOK, Response{Data: capabilities})
 }
 
 func (h *Handler) HandleOfflineIntentsV2(c *gin.Context) {

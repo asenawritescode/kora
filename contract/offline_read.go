@@ -9,11 +9,39 @@ import (
 //
 //contract:wire:v2
 type OfflineCapabilities struct {
-	ProtocolVersion         uint16 `json:"protocol_version"`
-	CatalogRevision         uint64 `json:"catalog_revision"`
-	MaxBatchSize            uint16 `json:"max_batch_size"`
-	MaxPageSize             uint16 `json:"max_page_size"`
-	SnapshotLifetimeSeconds uint32 `json:"snapshot_lifetime_seconds"`
+	ProtocolVersion         uint16                        `json:"protocol_version"`
+	CatalogRevision         uint64                        `json:"catalog_revision"`
+	MaxBatchSize            uint16                        `json:"max_batch_size"`
+	MaxPageSize             uint16                        `json:"max_page_size"`
+	SnapshotLifetimeSeconds uint32                        `json:"snapshot_lifetime_seconds"`
+	OfflineQueries          []ApplicationCatalogQuery     `json:"offline_queries"`
+	OfflineOperations       []ApplicationCatalogOperation `json:"offline_operations"`
+}
+
+func (c OfflineCapabilities) Validate() error {
+	if c.ProtocolVersion != 2 || c.CatalogRevision == 0 || c.MaxBatchSize == 0 || c.MaxBatchSize > 20 || c.MaxPageSize == 0 || c.MaxPageSize > 100 || c.SnapshotLifetimeSeconds == 0 || len(c.OfflineQueries) > 2000 || len(c.OfflineOperations) > 2000 {
+		return fmt.Errorf("offline capability identity or bounds are invalid")
+	}
+	queries := make(map[string]bool, len(c.OfflineQueries))
+	for _, query := range c.OfflineQueries {
+		key := string(query.OwnerModuleID) + "/" + query.Name
+		factKeyPublished := false
+		for _, field := range query.AllowedFields {
+			factKeyPublished = factKeyPublished || field == query.OfflineFactKey
+		}
+		if !query.OfflineEligible || query.OwnerModuleID == "" || !validModuleName(query.Name) || query.InputSchema.ID == "" || query.InputSchema.Version == 0 || query.OutputSchema.ID == "" || query.OutputSchema.Version == 0 || query.ScopePolicy != ScopeTenantShared && query.ScopePolicy != ScopeEntityOwned || query.PageLimit == 0 || query.PageLimit > 1000 || !validModuleName(query.OfflineFactKey) || !factKeyPublished || queries[key] {
+			return fmt.Errorf("offline capability contains an invalid or duplicate query")
+		}
+		queries[key] = true
+	}
+	operations := make(map[string]bool, len(c.OfflineOperations))
+	for _, operation := range c.OfflineOperations {
+		if !operation.OfflineEligible || operation.Availability != OperationAvailable || operation.OperationRef == "" || operation.InputSchema.ID == "" || operation.InputSchema.Version == 0 || operation.OutputSchema.ID == "" || operation.OutputSchema.Version == 0 || operations[operation.OperationRef] {
+			return fmt.Errorf("offline capability contains an invalid or duplicate operation")
+		}
+		operations[operation.OperationRef] = true
+	}
+	return nil
 }
 
 // OfflineSourceRef selects one owner-published query. Input is validated by

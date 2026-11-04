@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 
@@ -20,20 +21,26 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 		return
 	}
 	scope := businessScopeFromRequest(c, execution)
-	services := h.runtimeService(c, c.GetString("site_name"))
-	if services.LoadModuleSnapshot == nil || services.ResolveModuleBindings == nil {
-		writeError(c, http.StatusServiceUnavailable, "module.catalog_unavailable", "Module catalog is unavailable", nil)
-		return
-	}
-	snapshot, err := services.LoadModuleSnapshot()
-	if err != nil || snapshot.TenantID != execution.Tenant() || snapshot.Revision == 0 {
-		writeError(c, http.StatusServiceUnavailable, "module.catalog_unavailable", "Module catalog is unavailable", nil)
-		return
-	}
-	plan, err := services.ResolveModuleBindings(scope)
+	catalog, err := h.buildApplicationCatalog(c, execution, scope)
 	if err != nil {
 		writeError(c, http.StatusServiceUnavailable, "module.catalog_unavailable", "Module catalog is unavailable", nil)
 		return
+	}
+	c.JSON(http.StatusOK, Response{Data: catalog})
+}
+
+func (h *Handler) buildApplicationCatalog(c *gin.Context, execution policy.Execution, scope contract.BusinessScope) (contract.ApplicationCatalog, error) {
+	services := h.runtimeService(c, c.GetString("site_name"))
+	if services.LoadModuleSnapshot == nil || services.ResolveModuleBindings == nil {
+		return contract.ApplicationCatalog{}, fmt.Errorf("module catalog runtime is unavailable")
+	}
+	snapshot, err := services.LoadModuleSnapshot()
+	if err != nil || snapshot.TenantID != execution.Tenant() || snapshot.Revision == 0 {
+		return contract.ApplicationCatalog{}, fmt.Errorf("module catalog snapshot is unavailable")
+	}
+	plan, err := services.ResolveModuleBindings(scope)
+	if err != nil {
+		return contract.ApplicationCatalog{}, fmt.Errorf("module catalog bindings are unavailable")
 	}
 	catalog := contract.ApplicationCatalog{Revision: snapshot.Revision, BusinessScope: scope, Modules: []contract.ApplicationCatalogModule{}, PublishedQueries: []contract.ApplicationCatalogQuery{}, PublishedProjections: []contract.ApplicationCatalogProjection{}, PublishedOperations: []contract.ApplicationCatalogOperation{}, Schemas: []contract.ModuleSchemaDocument{}, AllowedEntityChoices: []contract.BusinessScope{}, Blockers: []contract.ModuleBlocker{}}
 	for _, blocker := range plan.Blockers {
@@ -215,10 +222,9 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 		return catalog.Schemas[i].Ref.Version < catalog.Schemas[j].Ref.Version
 	})
 	if err := catalog.Validate(); err != nil {
-		writeError(c, http.StatusServiceUnavailable, "module.catalog_invalid", "Module catalog is unavailable", nil)
-		return
+		return contract.ApplicationCatalog{}, fmt.Errorf("module catalog is invalid: %w", err)
 	}
-	c.JSON(http.StatusOK, Response{Data: catalog})
+	return catalog, nil
 }
 
 func catalogQueryAllowed(execution policy.Execution, roles policy.RolePolicy, query contract.PublishedQuery, scope contract.BusinessScope) bool {

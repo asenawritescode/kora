@@ -2837,6 +2837,18 @@
         "max_page_size": {
           "type": "integer"
         },
+        "offline_operations": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogOperation"
+          },
+          "type": "array"
+        },
+        "offline_queries": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogQuery"
+          },
+          "type": "array"
+        },
         "protocol_version": {
           "type": "integer"
         },
@@ -2848,6 +2860,8 @@
         "catalog_revision",
         "max_batch_size",
         "max_page_size",
+        "offline_operations",
+        "offline_queries",
         "protocol_version",
         "snapshot_lifetime_seconds"
       ],
@@ -8358,6 +8372,18 @@
         "max_page_size": {
           "type": "integer"
         },
+        "offline_operations": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogOperation"
+          },
+          "type": "array"
+        },
+        "offline_queries": {
+          "items": {
+            "$ref": "#/$defs/ApplicationCatalogQuery"
+          },
+          "type": "array"
+        },
         "protocol_version": {
           "type": "integer"
         },
@@ -8369,6 +8395,8 @@
         "catalog_revision",
         "max_batch_size",
         "max_page_size",
+        "offline_operations",
+        "offline_queries",
         "protocol_version",
         "snapshot_lifetime_seconds"
       ],
