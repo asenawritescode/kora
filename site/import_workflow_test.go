@@ -26,13 +26,13 @@ func TestParseConfigPackRejectsRetiredLifecycleAndAcceptsTriggerWorkflows(t *tes
 	}
 }
 
-func TestParseWorkflowDefinitionDirectoryRejectsLegacyFields(t *testing.T) {
+func TestParseWorkflowDefinitionsDirectoryRejectsLegacyFields(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "order.json")
 	if err := os.WriteFile(path, []byte(`{"id":"order-flow","version":1,"entry":"finish","steps":[{"id":"finish","kind":"end","end":{"outcome":"complete"}}],"document_type":"Order"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if definitions, err := parseWorkflowDefinitionDirectory(directory); err == nil || definitions != nil {
+	if definitions, err := ParseWorkflowDefinitionsDirectory(directory); err == nil || definitions != nil {
 		t.Fatalf("legacy workflow fields were accepted: definitions=%+v err=%v", definitions, err)
 	}
 }

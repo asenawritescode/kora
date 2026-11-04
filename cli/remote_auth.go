@@ -198,6 +198,15 @@ func (o *remoteOptions) remoteProfile() (string, remoteProfile, *url.URL, error)
 	if o.Site != "" {
 		profile.Site = o.Site
 	}
+	if o.TokenEnv != "" {
+		profile.TokenEnv = o.TokenEnv
+	}
+	if o.TenantID != "" {
+		profile.TenantID = o.TenantID
+	}
+	if o.LegalEntityID != "" {
+		profile.LegalEntityID = o.LegalEntityID
+	}
 	if o.AllowHTTP {
 		profile.AllowHTTP = true
 	}

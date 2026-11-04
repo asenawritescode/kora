@@ -23,10 +23,12 @@ import (
 const defaultRemoteTokenEnv = "KORA_REMOTE_TOKEN"
 
 type remoteProfile struct {
-	URL       string `json:"url"`
-	Site      string `json:"site,omitempty"`
-	TokenEnv  string `json:"token_env"`
-	AllowHTTP bool   `json:"allow_http,omitempty"`
+	URL           string `json:"url"`
+	Site          string `json:"site,omitempty"`
+	TokenEnv      string `json:"token_env"`
+	TenantID      string `json:"tenant_id,omitempty"`
+	LegalEntityID string `json:"legal_entity_id,omitempty"`
+	AllowHTTP     bool   `json:"allow_http,omitempty"`
 }
 
 type remoteProfileFile struct {
@@ -35,15 +37,17 @@ type remoteProfileFile struct {
 }
 
 type remoteOptions struct {
-	Profile   string
-	URL       string
-	Site      string
-	TokenEnv  string
-	AllowHTTP bool
-	Timeout   time.Duration
-	Config    string
-	Out       io.Writer
-	In        io.Reader
+	Profile       string
+	URL           string
+	Site          string
+	TokenEnv      string
+	TenantID      string
+	LegalEntityID string
+	AllowHTTP     bool
+	Timeout       time.Duration
+	Config        string
+	Out           io.Writer
+	In            io.Reader
 }
 
 type remoteClient struct {
@@ -73,6 +77,8 @@ file. The remote site applies its normal role and DocType permission checks.`,
 	cmd.PersistentFlags().StringVar(&opts.URL, "url", "", "Kigae base URL (overrides the profile)")
 	cmd.PersistentFlags().StringVar(&opts.Site, "site", "", "Site name for a shared /s/<site> endpoint")
 	cmd.PersistentFlags().StringVar(&opts.TokenEnv, "token-env", "", "Environment variable containing the bearer token")
+	cmd.PersistentFlags().StringVar(&opts.TenantID, "tenant", "", "Canonical Engine tenant ID for published business operations")
+	cmd.PersistentFlags().StringVar(&opts.LegalEntityID, "legal-entity", "", "Authorized legal entity ID for published business operations")
 	cmd.PersistentFlags().BoolVar(&opts.AllowHTTP, "allow-http", false, "Allow unencrypted HTTP for a non-local host")
 	cmd.PersistentFlags().DurationVar(&opts.Timeout, "timeout", 30*time.Second, "Request timeout")
 	cmd.PersistentFlags().StringVar(&opts.Config, "config", "", "Profile file path (defaults to the user config directory)")
@@ -83,13 +89,14 @@ file. The remote site applies its normal role and DocType permission checks.`,
 	cmd.AddCommand(newRemoteSchemaCommand(opts))
 	cmd.AddCommand(newRemotePageManifestCommand(opts))
 	cmd.AddCommand(newRemoteRecordsCommand(opts))
+	cmd.AddCommand(newRemoteCatalogCommand(opts), newRemoteQueryCommand(opts), newRemoteOperationCommand(opts), newRemoteWorkflowCommand(opts), newRemoteReconciliationCommand(opts))
 	return cmd
 }
 
 func newRemoteProfileCommand(opts *remoteOptions) *cobra.Command {
 	profile := &cobra.Command{Use: "profile", Short: "Manage remote connection profiles"}
 
-	var setURL, setSite, setTokenEnv string
+	var setURL, setSite, setTokenEnv, setTenantID, setLegalEntityID string
 	var setAllowHTTP bool
 	set := &cobra.Command{
 		Use:   "set <name>",
@@ -117,7 +124,10 @@ func newRemoteProfileCommand(opts *remoteOptions) *cobra.Command {
 			if name == "" {
 				return errors.New("profile name is required")
 			}
-			cfg.Profiles[name] = remoteProfile{URL: strings.TrimRight(setURL, "/"), Site: strings.TrimSpace(setSite), TokenEnv: setTokenEnv, AllowHTTP: setAllowHTTP}
+			if setLegalEntityID != "" && setTenantID == "" {
+				return errors.New("--tenant is required when --legal-entity is set")
+			}
+			cfg.Profiles[name] = remoteProfile{URL: strings.TrimRight(setURL, "/"), Site: strings.TrimSpace(setSite), TokenEnv: setTokenEnv, TenantID: strings.TrimSpace(setTenantID), LegalEntityID: strings.TrimSpace(setLegalEntityID), AllowHTTP: setAllowHTTP}
 			if cfg.Current == "" {
 				cfg.Current = name
 			}
@@ -131,6 +141,8 @@ func newRemoteProfileCommand(opts *remoteOptions) *cobra.Command {
 	set.Flags().StringVar(&setURL, "url", "", "Kigae base URL")
 	set.Flags().StringVar(&setSite, "site", "", "Site name for shared-host routing")
 	set.Flags().StringVar(&setTokenEnv, "token-env", defaultRemoteTokenEnv, "Environment variable containing the bearer token")
+	set.Flags().StringVar(&setTenantID, "tenant", "", "Canonical Engine tenant ID")
+	set.Flags().StringVar(&setLegalEntityID, "legal-entity", "", "Default legal entity ID")
 	set.Flags().BoolVar(&setAllowHTTP, "allow-http", false, "Allow HTTP for a non-local host")
 
 	list := &cobra.Command{
@@ -394,6 +406,12 @@ func (o *remoteOptions) client() (*remoteClient, string, error) {
 	}
 	if o.Site != "" {
 		p.Site = o.Site
+	}
+	if o.TenantID != "" {
+		p.TenantID = o.TenantID
+	}
+	if o.LegalEntityID != "" {
+		p.LegalEntityID = o.LegalEntityID
 	}
 	if o.TokenEnv != "" {
 		p.TokenEnv = o.TokenEnv

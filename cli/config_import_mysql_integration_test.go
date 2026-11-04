@@ -57,8 +57,15 @@ func TestMySQLConfigImportRetriesJournaledPackWithoutDuplicateVersion(t *testing
 	if err := os.MkdirAll(filepath.Join(pack, "doctypes"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(pack, "workflows"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	config := "name: Task\nmodule: Test\nfields:\n  - fieldname: title\n    fieldtype: Data\n    label: Title\n"
 	if err := os.WriteFile(filepath.Join(pack, "doctypes", "task.yaml"), []byte(config), 0644); err != nil {
+		t.Fatal(err)
+	}
+	workflow := `{"id":"imported-task-created","version":1,"entry":"done","trigger":{"kind":"record.created","table":"Task"},"steps":[{"id":"done","kind":"end","end":{"outcome":"complete"}}]}`
+	if err := os.WriteFile(filepath.Join(pack, "workflows", "task-created.json"), []byte(workflow), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,6 +96,13 @@ func TestMySQLConfigImportRetriesJournaledPackWithoutDuplicateVersion(t *testing
 	if failedPhase != configstore.ActivationApplying || !strings.Contains(failureMessage, "injected config import version failure") {
 		t.Fatalf("failed import journal = phase %q error %q", failedPhase, failureMessage)
 	}
+	var revisionAfterRollback uint64
+	if err := adminDB.QueryRow("SELECT revision FROM `" + databaseName + "`._kora_config_revision WHERE id = 1").Scan(&revisionAfterRollback); err != nil {
+		t.Fatal("read revision after rolled-back activation:", err)
+	}
+	if revisionAfterRollback != 1 {
+		t.Fatalf("config revision after rejected activation = %d, want unchanged revision 1", revisionAfterRollback)
+	}
 	if _, err := adminDB.Exec("DROP TRIGGER `" + databaseName + "`.fail_import_version"); err != nil {
 		t.Fatal("remove disposable failure trigger:", err)
 	}
@@ -115,5 +129,19 @@ func TestMySQLConfigImportRetriesJournaledPackWithoutDuplicateVersion(t *testing
 	}
 	if phase != configstore.ActivationCompleted || lastError != "" {
 		t.Fatalf("import operation = phase %q error %q, want completed without error", phase, lastError)
+	}
+	var workflowCount int
+	if err := adminDB.QueryRow("SELECT COUNT(*) FROM `"+databaseName+"`._kora_workflow_definition WHERE tenant_id = ? AND definition_id = ?", "import-test.example", "imported-task-created").Scan(&workflowCount); err != nil {
+		t.Fatal("count imported workflow definitions:", err)
+	}
+	if workflowCount != 1 {
+		t.Fatalf("imported workflow versions = %d, want one idempotent definition", workflowCount)
+	}
+	var finalRevision uint64
+	if err := adminDB.QueryRow("SELECT revision FROM `" + databaseName + "`._kora_config_revision WHERE id = 1").Scan(&finalRevision); err != nil {
+		t.Fatal("read final config revision:", err)
+	}
+	if finalRevision != 2 {
+		t.Fatalf("config revision after retry/replay = %d, want 2", finalRevision)
 	}
 }
