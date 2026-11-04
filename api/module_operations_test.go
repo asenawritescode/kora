@@ -159,6 +159,36 @@ func TestOfflineReadRejectsIncompleteRuntimeAndTrailingPullJSON(t *testing.T) {
 			t.Fatalf("trailing JSON status=%d resolver_calls=%d body=%s", recorder.Code, resolverCalls, recorder.Body.String())
 		}
 	})
+
+	t.Run("pull rejects trailing bytes beyond the body limit", func(t *testing.T) {
+		var resolverCalls int
+		services := NewSiteRuntimeServices()
+		services.Replace(string(scope.TenantID), SiteRuntimeService{
+			LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) {
+				return contract.ModuleSnapshot{TenantID: scope.TenantID, Revision: 1}, nil
+			},
+			ResolveModuleBindings: func(contract.BusinessScope) (plugin.BindingPlan, error) {
+				resolverCalls++
+				return plugin.BindingPlan{}, nil
+			},
+		})
+		handler := NewHandler(doctype.NewRegistry(), nil)
+		handler.RuntimeServices = services
+		request := contract.OfflinePullRequest{Source: source, BusinessScope: scope, CatalogRevision: 1, SnapshotToken: "snapshot:1", InputHash: "hash", ReplayPosition: "1", Limit: 10}
+		raw, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal("marshal offline pull:", err)
+		}
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v2/offline/pull", strings.NewReader(string(raw)+strings.Repeat(" ", offlineQueryBodyLimit)))
+		ctx.Set("site_name", string(scope.TenantID))
+		ctx.Set("policy_execution", execution)
+		handler.HandleOfflinePullV2(ctx)
+		if recorder.Code != http.StatusBadRequest || resolverCalls != 0 {
+			t.Fatalf("oversized trailing bytes status=%d resolver_calls=%d body=%s", recorder.Code, resolverCalls, recorder.Body.String())
+		}
+	})
 }
 
 func TestExecutePublishedOperationUsesRegisteredSurfaceAndStrictRequest(t *testing.T) {

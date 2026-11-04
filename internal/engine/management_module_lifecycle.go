@@ -70,6 +70,13 @@ func (i tenantScheduledWorkInspector) InspectOpenWork(ctx context.Context, tenan
 	if runtime == nil || runtime.DB == nil || runtime.Activation.Tenant != tenant {
 		return nil, fmt.Errorf("tenant scheduler runtime identity is inconsistent")
 	}
+	return inspectScheduledModuleWork(ctx, runtime, tenant, module, limit)
+}
+
+func inspectScheduledModuleWork(ctx context.Context, runtime *tenantruntime.Snapshot, tenant contract.TenantID, module contract.ModuleID, limit uint16) ([]contract.ModuleBlocker, error) {
+	if runtime == nil || runtime.DB == nil || runtime.Activation.Tenant != tenant {
+		return nil, fmt.Errorf("tenant scheduler runtime identity is inconsistent")
+	}
 	dialect := db.Resolve(runtime.DBType)
 	if dialect == nil {
 		return nil, fmt.Errorf("tenant scheduler dialect is unsupported")
@@ -77,6 +84,11 @@ func (i tenantScheduledWorkInspector) InspectOpenWork(ctx context.Context, tenan
 	store, err := schedsql.New(runtime.DB, dialect)
 	if err != nil {
 		return nil, err
+	}
+	if err := withTenantWorkAdmission(ctx, runtime.Services.WorkAdmission, "ensure scheduler schema for module inspection", func() error {
+		return store.Ensure(ctx)
+	}); err != nil {
+		return nil, fmt.Errorf("prepare scheduled-work inspection store: %w", err)
 	}
 	blockers, err := store.InspectOpenWork(ctx, tenant, module, limit)
 	if err != nil {

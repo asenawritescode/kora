@@ -166,6 +166,13 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if moduleErr := contract.ValidateInstalledPackages(moduleSnapshot.Packages); moduleErr != nil {
 		return fmt.Errorf("validate installed package composition for tenant %s: %w", loaded.Name, moduleErr)
 	}
+	baseModuleSchemas := config.ModuleSchemas
+	config.ModuleSchemas, moduleErr = newModulePayloadSchemas(moduleSnapshot.Modules, baseModuleSchemas)
+	if moduleErr != nil {
+		return fmt.Errorf("compile module payload schemas for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	services.CommandSchemas = config.ModuleSchemas
+	domainKernel.CommandSchemas = config.ModuleSchemas
 	if moduleErr := validateModuleExtensionSchemas(moduleSnapshot.Modules, config.ModuleSchemas); moduleErr != nil {
 		return fmt.Errorf("validate module extension schemas for tenant %s: %w", loaded.Name, moduleErr)
 	}
@@ -185,6 +192,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return fmt.Errorf("load module providers for tenant %s: %w", loaded.Name, moduleErr)
 		}
 	}
+	configuredProviders := append([]plugin.ProviderRegistration(nil), providers...)
 	internalProviders, moduleErr := registeredKernelCommandProviders(tenantID, loaded.DB, loaded.Registry, moduleSnapshot.Modules, config.KernelCommands, domainKernel, config.ModuleSchemas, providers)
 	if moduleErr != nil {
 		return fmt.Errorf("register internal module command providers for tenant %s: %w", loaded.Name, moduleErr)
@@ -218,16 +226,33 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		if scope.TenantID != contract.TenantID(loaded.SiteID) {
 			return plugin.BindingPlan{}, contract.NewError(contract.CodePermissionDenied, "module binding scope belongs to another tenant")
 		}
-		if err := validateModuleExtensionSchemas(modules, config.ModuleSchemas); err != nil {
+		candidateSchemas, err := newModulePayloadSchemas(modules, baseModuleSchemas)
+		if err != nil {
 			return plugin.BindingPlan{}, err
 		}
+		if err := validateModuleExtensionSchemas(modules, candidateSchemas); err != nil {
+			return plugin.BindingPlan{}, err
+		}
+		candidateKernel := kernel.New(dialect, outbox.NewSQLWriter(dialect))
+		candidateKernel.CommandSchemas = candidateSchemas
+		candidateProviders := append([]plugin.ProviderRegistration(nil), configuredProviders...)
+		commands, err := registeredKernelCommandProviders(tenantID, loaded.DB, loaded.Registry, modules, config.KernelCommands, candidateKernel, candidateSchemas, candidateProviders)
+		if err != nil {
+			return plugin.BindingPlan{}, err
+		}
+		candidateProviders = append(candidateProviders, commands...)
+		queries, err := registeredSQLPublishedQueryProviders(config.ProcessContext, tenantID, loaded.DB, dialect, modules, candidateSchemas, candidateProviders)
+		if err != nil {
+			return plugin.BindingPlan{}, err
+		}
+		candidateProviders = append(candidateProviders, queries...)
 		baseSelections := filterProviderSelections(selections, scope)
 		candidateExtra := filterProviderSelections(extra, scope)
 		candidateSelections, err := mergeProviderSelections(tenantID, baseSelections, candidateExtra)
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}
-		plan, err := plugin.ResolveInstalledModules(scope, packages, modules, providers, pluginProviderSelections(candidateSelections), revision)
+		plan, err := plugin.ResolveInstalledModules(scope, packages, modules, candidateProviders, pluginProviderSelections(candidateSelections), revision)
 		if err != nil {
 			return plan, err
 		}

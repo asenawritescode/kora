@@ -21,6 +21,26 @@ const publishedOperationBodyLimit = (1 << 20) + 4096
 
 const offlineIntentBatchLimit = 20
 
+const offlineQueryBodyLimit = 70000
+
+const offlineIntentBodyLimit = offlineIntentBatchLimit * publishedOperationBodyLimit
+
+func decodeOfflineJSONBody(c *gin.Context, maxBytes int64, destination any) error {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err == nil {
+			return errors.New("request contains multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
 func (h *Handler) HandleOfflineCapabilitiesV2(c *gin.Context) {
 	execution, ok := requestExecution(c)
 	if !ok {
@@ -60,14 +80,8 @@ func (h *Handler) HandleOfflineIntentsV2(c *gin.Context) {
 		return
 	}
 	var request contract.OfflineIntentsRequest
-	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, publishedOperationBodyLimit))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil || len(request.Intents) == 0 || len(request.Intents) > offlineIntentBatchLimit {
+	if err := decodeOfflineJSONBody(c, offlineIntentBodyLimit, &request); err != nil || len(request.Intents) == 0 || len(request.Intents) > offlineIntentBatchLimit {
 		writeError(c, http.StatusBadRequest, "validation.invalid_offline_batch", "Expected 1 to 20 offline intents", nil)
-		return
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		writeError(c, http.StatusBadRequest, "validation.invalid_offline_batch", "Invalid offline intent batch", nil)
 		return
 	}
 	services := h.runtimeService(c, c.GetString("site_name"))
@@ -130,14 +144,8 @@ func (h *Handler) HandleOfflineBootstrapV2(c *gin.Context) {
 		return
 	}
 	var request contract.OfflineBootstrapRequest
-	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 70000))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil || request.BusinessScope != businessScopeFromRequest(c, execution) || request.CatalogRevision == 0 || request.Source.InputSchema.ID == "" || len(request.Source.Input) == 0 || request.Limit == 0 || request.Limit > 100 {
+	if err := decodeOfflineJSONBody(c, offlineQueryBodyLimit, &request); err != nil || request.BusinessScope != businessScopeFromRequest(c, execution) || request.CatalogRevision == 0 || request.Source.InputSchema.ID == "" || len(request.Source.Input) == 0 || request.Limit == 0 || request.Limit > 100 {
 		writeError(c, http.StatusBadRequest, "validation.invalid_offline_bootstrap", "Offline bootstrap request is invalid", nil)
-		return
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		writeError(c, http.StatusBadRequest, "validation.invalid_offline_bootstrap", "Invalid offline bootstrap request", nil)
 		return
 	}
 	services := h.runtimeService(c, c.GetString("site_name"))
@@ -211,14 +219,8 @@ func (h *Handler) HandleOfflinePullV2(c *gin.Context) {
 		return
 	}
 	var request contract.OfflinePullRequest
-	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 70000))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil || request.BusinessScope != businessScopeFromRequest(c, execution) || request.CatalogRevision == 0 || request.SnapshotToken == "" || request.InputHash == "" || request.ReplayPosition == "" || request.Limit == 0 || request.Limit > 100 {
+	if err := decodeOfflineJSONBody(c, offlineQueryBodyLimit, &request); err != nil || request.BusinessScope != businessScopeFromRequest(c, execution) || request.CatalogRevision == 0 || request.SnapshotToken == "" || request.InputHash == "" || request.ReplayPosition == "" || request.Limit == 0 || request.Limit > 100 {
 		writeError(c, http.StatusBadRequest, "validation.invalid_offline_pull", "Offline pull request is invalid", nil)
-		return
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		writeError(c, http.StatusBadRequest, "validation.invalid_offline_pull", "Invalid offline pull request", nil)
 		return
 	}
 	services := h.runtimeService(c, c.GetString("site_name"))

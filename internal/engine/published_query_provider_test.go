@@ -15,6 +15,37 @@ import (
 
 type publishedQueryTestSchemas map[contract.SchemaRef]bool
 
+func TestIncomingModuleSchemasRegisterOfflineProviderForEmptyRuntime(t *testing.T) {
+	database, err := sql.Open("sqlite3", t.TempDir()+"/candidate.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	in := contract.SchemaRef{ID: "incoming.input", Version: 1}
+	out := contract.SchemaRef{ID: "incoming.output", Version: 1}
+	query := contract.PublishedQuery{OwnerModuleID: "incoming.owner", Name: "list", Capability: "incoming.read", Operation: "list", InputSchema: in, OutputSchema: out, ScopePolicy: contract.ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10, OfflineEligible: true, OfflineFactKey: "id"}
+	modules := []contract.ModuleDescriptor{{ID: query.OwnerModuleID, Version: "1.0.0", Queries: []contract.PublishedQuery{query}, Schemas: []contract.ModuleSchemaDocument{{Ref: in, Schema: json.RawMessage(`{"type":"object"}`)}, {Ref: out, Schema: json.RawMessage(`{"type":"array"}`)}}, Provides: []contract.CapabilityOffer{{Name: query.Capability, Contract: out, Operations: []contract.OperationSpec{{Name: "list", Input: in, Output: out, Effect: contract.EffectQuery}}}}}}
+	schemas, err := newModulePayloadSchemas(modules, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := registeredSQLPublishedQueryProviders(t.Context(), "tenant-new", database, db.Resolve("libsql"), modules, schemas, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := contract.BusinessScope{TenantID: "tenant-new", Kind: contract.ScopeKindTenant}
+	plan, err := plugin.ResolveModules(scope, modules, providers, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Blockers) != 0 || len(plan.QueryDefinitions) != 1 {
+		t.Fatalf("incoming candidate unresolved: blockers=%v queries=%d", plan.Blockers, len(plan.QueryDefinitions))
+	}
+	if !plan.CanReplayPublishedQueryOffline(scope, query.OwnerModuleID, query.Name) {
+		t.Fatal("incoming published query is not replayable")
+	}
+}
+
 func (s publishedQueryTestSchemas) Registered(ref contract.SchemaRef) bool { return s[ref] }
 func (s publishedQueryTestSchemas) Validate(_ contract.SchemaRef, raw json.RawMessage) error {
 	if !json.Valid(raw) {

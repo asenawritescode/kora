@@ -772,14 +772,6 @@ func (s *ModuleStore) SchemaStatement() string {
 	return `CREATE TABLE IF NOT EXISTS _kora_module_snapshot (tenant_id TEXT PRIMARY KEY, revision BIGINT NOT NULL, snapshot_json TEXT NOT NULL)`
 }
 
-func (s *ModuleStore) EnsureTxSchema(tx *sql.Tx) error {
-	if tx == nil || s == nil || s.Dialect == nil {
-		return fmt.Errorf("module store transaction and dialect are required")
-	}
-	_, err := tx.Exec(s.SchemaStatement())
-	return err
-}
-
 func (s *ModuleStore) Load(tenant contract.TenantID) (contract.ModuleSnapshot, error) {
 	if s == nil || s.DB == nil || s.Dialect == nil || tenant == "" {
 		return contract.ModuleSnapshot{}, fmt.Errorf("module snapshot tenant is required")

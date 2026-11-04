@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/asenawritescode/kora/configstore"
@@ -153,7 +154,8 @@ func (e *managementModuleLifecycleExecutor) InspectModules(ctx context.Context, 
 		for _, inspector := range e.moduleInspectors(installation.ModuleID, runtime.Services) {
 			values, inspectErr := inspector.InspectOpenWork(ctx, tenant, installation.ModuleID, 100)
 			if inspectErr != nil {
-				return contract.ModuleInspection{}, inspectErr
+				slog.ErrorContext(ctx, "tenant module open-work inspection failed", "tenant_id", tenant, "module_id", installation.ModuleID, "error", inspectErr)
+				return contract.ModuleInspection{}, fmt.Errorf("inspect open work for module %s: %w", installation.ModuleID, inspectErr)
 			}
 			for _, item := range values {
 				inspection.BlockingReasons = appendModuleBlocker(inspection.BlockingReasons, item.Code, item.Count)

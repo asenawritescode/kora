@@ -8,9 +8,43 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
+
+func TestManagementModuleCommitKeepsSchemaDDLOutsideTransaction(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewStore(database, db.Resolve("postgres"))
+	mock.ExpectBegin()
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("a", 64)
+	mock.ExpectQuery("SELECT fence, expected_revision, artifact_digest").WithArgs("tenant-a", "operation-a").WillReturnRows(sqlmock.NewRows([]string{"fence", "expected_revision", "artifact_digest"}).AddRow(4, 1, digest))
+	mock.ExpectExec("UPDATE _kora_auth_revision").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE _kora_config_revision").WithArgs(int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
+	readFailure := errors.New("injected module snapshot read failure")
+	// Any schema DDL after the revision write is unexpected: on MySQL it
+	// would commit those writes before this later failure could roll back.
+	mock.ExpectQuery("SELECT revision, snapshot_json FROM _kora_module_snapshot").WithArgs("tenant-a").WillReturnError(readFailure)
+	_, _, err = store.CommitManagementActivation(context.Background(), tx, &doctype.ConfigSnapshot{Modules: []contract.ModuleDescriptor{{ID: "owner.module", Version: "1.0.0"}}}, "tenant-a", db.Resolve("postgres"), ManagementActivationCommit{OperationID: "operation-a", JournalKind: "management_package", FromPhase: ActivationValidated, CreatedBy: "management", VersionLabel: "Apply package", Fence: 4, ExpectedRevision: 1, ArtifactDigest: digest, ModuleTenantID: "tenant-a"})
+	if !errors.Is(err, readFailure) {
+		t.Fatalf("expected module read failure without intervening DDL, got %v", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestCommitManagementActivationVersionFailureRequiresTransactionRollback(t *testing.T) {
 	database, mock, err := sqlmock.New()

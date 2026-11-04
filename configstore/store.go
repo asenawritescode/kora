@@ -1143,9 +1143,8 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 			return "", 0, fmt.Errorf("module snapshot tenant identity is invalid: %w", err)
 		}
 		moduleStore := NewModuleStore(s.DB, dialect)
-		if err := moduleStore.EnsureTxSchema(tx); err != nil {
-			return "", 0, err
-		}
+		// The executor ensures module tables before opening this transaction.
+		// DDL here would implicitly commit prior configuration writes on MySQL.
 		tenantID := commit.ModuleTenantID
 		existing, err := loadModuleSnapshotTx(ctx, tx, dialect, tenantID)
 		if err != nil {

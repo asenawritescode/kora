@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"github.com/asenawritescode/kora/configstore"
@@ -312,6 +313,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		PackageConstraints: []contract.InstalledPackage{packageConstraint},
 	})
 	if err != nil {
+		slog.ErrorContext(ctx, "management package configuration commit failed", "operation_id", operation.ID, "tenant_id", operation.Tenant, "error", err)
 		_ = tx.Rollback()
 		releaseTenantWork()
 		handle.Release()
