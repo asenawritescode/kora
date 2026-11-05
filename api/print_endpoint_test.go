@@ -46,7 +46,11 @@ func TestPrintEndpoint(t *testing.T) {
 		{"forbidden", rec, ErrPrintForbidden, "/p/a?record=Sale&name=S-1", 403, "print.forbidden"},
 		{"not found", rec, ErrPrintNotFound, "/p/a?record=Sale&name=S-1", 404, "print.not_found"},
 		{"target mismatch", rec, nil, "/p/a?record=Other&name=S-1", 400, "print.target_mismatch"},
-		{"pdf unsupported", rec, nil, "/p/a?record=Sale&name=S-1&as=pdf", 400, "print.format_unsupported"},
+		{"bad format", rec, nil, "/p/a?record=Sale&name=S-1&as=docx", 400, "print.format_unsupported"},
+		{"html record", rec, nil, "/p/a?record=Sale&name=S-1&as=html", 200, "<pre>Shop Tea</pre>"},
+		{"html receipt", op, nil, "/p/b?operation_ref=pos~pos.sales~record_sale&execution_id=e1&as=html", 200, "<pre>R1 Doc</pre>"},
+		{"pdf record", rec, nil, "/p/a?record=Sale&name=S-1&as=pdf", 200, "%PDF-"},
+		{"pdf receipt", op, nil, "/p/b?operation_ref=pos~pos.sales~record_sale&execution_id=e1&as=pdf", 200, "%PDF-"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

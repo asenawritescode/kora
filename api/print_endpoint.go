@@ -25,15 +25,16 @@ type PrintSource interface {
 	Tenant(c *gin.Context) (map[string]any, print.Options)
 }
 
-// NewPrintHandler serves GET /api/v1/print/:format_name (as=text).
+// NewPrintHandler serves GET /api/v1/print/:format_name (as=text|html|pdf).
 func NewPrintHandler(src PrintSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if src == nil {
 			notFoundError(c, "print.not_configured", "Print is not configured", nil)
 			return
 		}
-		if as := c.DefaultQuery("as", "text"); as != "text" {
-			badRequestError(c, "print.format_unsupported", "Only as=text is supported", nil)
+		as := c.DefaultQuery("as", "text")
+		if as != "text" && as != "html" && as != "pdf" {
+			badRequestError(c, "print.format_unsupported", "as must be text, html or pdf", nil)
 			return
 		}
 		f, err := src.Format(c, c.Param("format_name"))
@@ -62,12 +63,26 @@ func NewPrintHandler(src PrintSource) gin.HandlerFunc {
 			printError(c, err)
 			return
 		}
-		out, err := f.RenderText(data, opt)
+		var out []byte
+		ctype := "text/plain; charset=utf-8"
+		switch as {
+		case "html":
+			var h string
+			h, err = f.RenderHTML(data, opt)
+			out, ctype = []byte(h), "text/html; charset=utf-8"
+		case "pdf":
+			out, err = f.RenderPDF(data, opt)
+			ctype = "application/pdf"
+		default:
+			var t string
+			t, err = f.RenderText(data, opt)
+			out = []byte(t)
+		}
 		if err != nil {
 			writeError(c, http.StatusUnprocessableEntity, "print.render_failed", "Print render failed", nil)
 			return
 		}
-		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(out))
+		c.Data(http.StatusOK, ctype, out)
 	}
 }
 
