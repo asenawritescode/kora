@@ -1,0 +1,41 @@
+name: record_sale
+namespace: pos
+version: 1
+permission: create
+input:
+  record: Sale
+compute:
+  total: {sum: $input.items, expr: "quantity * unit_price"}
+transaction:
+  - as: sale
+    create:
+      record: Sale
+      values:
+        register: $input.register
+        till_session: $input.till_session
+        customer: $input.customer
+        items: $input.items
+        payments: $input.payments
+        status: Paid
+  - for_each: $input.items
+    update:
+      record: Stock Balance
+      where:
+        item: $item.item
+        location: $input.location
+      adjust:
+        quantity: { decrease: $item.quantity, min: "0" }
+  - for_each: $input.items
+    create:
+      record: Stock Entry
+      values:
+        item: $item.item
+        location: $input.location
+        quantity: $item.quantity
+        entry_type: Issue
+        remarks: $steps.sale.name
+output:
+  reference: $steps.sale.name
+  total: $computed.total
+emit:
+  - pos.sale.recorded
