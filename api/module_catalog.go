@@ -121,6 +121,7 @@ func (h *Handler) buildApplicationCatalog(c *gin.Context, execution policy.Execu
 		}
 	}
 	usedSchemas := map[contract.SchemaRef]bool{}
+	visibleQueries := map[string]bool{}
 	for owner, module := range modules {
 		moduleVisible := false
 		for _, query := range module.Queries {
@@ -135,6 +136,7 @@ func (h *Handler) buildApplicationCatalog(c *gin.Context, execution policy.Execu
 				continue
 			}
 			catalog.PublishedQueries = append(catalog.PublishedQueries, contract.ApplicationCatalogQuery{OwnerModuleID: owner, Name: query.Name, Capability: query.Capability, Route: "/api/v1/modules/" + string(owner) + "/queries/" + query.Name, InputSchema: query.InputSchema, OutputSchema: query.OutputSchema, ScopePolicy: query.ScopePolicy, AllowedFields: append([]string(nil), query.AllowedFields...), PageLimit: query.PageLimit, Presentation: query.Presentation, OfflineEligible: plan.CanReplayPublishedQueryOfflineForActor(scope, owner, query.Name, actorScope), OfflineFactKey: query.OfflineFactKey, ReferenceLookup: query.ReferenceLookup})
+			visibleQueries[contract.PublishedOperationRef(owner, query.Capability, query.Operation)] = true
 			moduleVisible = true
 			usedSchemas[query.InputSchema], usedSchemas[query.OutputSchema] = true, true
 		}
@@ -205,6 +207,7 @@ func (h *Handler) buildApplicationCatalog(c *gin.Context, execution policy.Execu
 			catalog.Modules = append(catalog.Modules, contract.ApplicationCatalogModule{ID: owner, Version: installed[owner].Version, State: installed[owner].State})
 		}
 	}
+	downgradeUnreachableLineEntry(&catalog, visibleQueries)
 	for ref := range usedSchemas {
 		if schema, ok := schemaDocs[ref]; ok {
 			catalog.Schemas = append(catalog.Schemas, schema)
@@ -251,4 +254,15 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// downgradeUnreachableLineEntry falls back to the form layout when the actor
+// cannot execute the hint's lookup query.
+func downgradeUnreachableLineEntry(catalog *contract.ApplicationCatalog, visible map[string]bool) {
+	for i := range catalog.PublishedOperations {
+		p := &catalog.PublishedOperations[i].Presentation
+		if p.Layout == "line_entry" && (p.LineEntry == nil || !visible[p.LineEntry.LookupQuery]) {
+			p.Layout, p.LineEntry = "form", nil
+		}
+	}
 }
