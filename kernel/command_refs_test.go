@@ -34,7 +34,7 @@ func TestForEachExpandsInputListAndResolvesReferences(t *testing.T) {
 	input := map[string]any{"member": "MEM-1", "due": "2026-11-30", "books": []any{
 		map[string]any{"book": "B-1"}, map[string]any{"book": "B-2"},
 	}}
-	instances, err := expandCommandSteps(def.Steps, input, nil)
+	instances, err := expandCommandSteps(def.Steps, refEnv{input: input}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestForEachRejectsInvalidDefinitionsAndInputs(t *testing.T) {
 		"missing list":   {},
 		"too many items": {"books": manyBooks(MaxCommandStepInstances + 1)},
 	} {
-		if _, err := expandCommandSteps(def.Steps, input, nil); err == nil {
+		if _, err := expandCommandSteps(def.Steps, refEnv{input: input}, nil); err == nil {
 			t.Fatalf("%s: input was accepted", name)
 		}
 	}
@@ -167,14 +167,14 @@ func TestForEachGuardRowsParseAndExpand(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := map[string][]map[string]any{"original.items": {{"item": "A"}, {"item": nil}}}
-	instances, err := expandCommandSteps(def.Steps, map[string]any{"items": []any{map[string]any{"item": "ignored"}}}, rows)
+	instances, err := expandCommandSteps(def.Steps, refEnv{input: map[string]any{"items": []any{map[string]any{"item": "ignored"}}}}, rows)
 	if err != nil || len(instances) != 3 || instances[1].item["item"] != "A" || instances[2].item["item"] != nil {
 		t.Fatalf("instances = %#v, %v", instances, err)
 	}
-	if instances, err = expandCommandSteps(def.Steps, nil, nil); err != nil || len(instances) != 1 {
+	if instances, err = expandCommandSteps(def.Steps, refEnv{input: nil}, nil); err != nil || len(instances) != 1 {
 		t.Fatalf("empty table: %#v, %v", instances, err)
 	}
-	if _, err = expandCommandSteps(def.Steps, nil, map[string][]map[string]any{"original.items": make([]map[string]any, MaxCommandStepInstances+1)}); err == nil {
+	if _, err = expandCommandSteps(def.Steps, refEnv{input: nil}, map[string][]map[string]any{"original.items": make([]map[string]any, MaxCommandStepInstances+1)}); err == nil {
 		t.Fatal("oversized table was accepted")
 	}
 	for name, yaml := range map[string]string{
@@ -185,6 +185,48 @@ func TestForEachGuardRowsParseAndExpand(t *testing.T) {
 	} {
 		if _, err := ParseCommandResource([]byte(yaml)); err == nil {
 			t.Fatalf("%s: definition was accepted", name)
+		}
+	}
+}
+
+func whereDef(t *testing.T, where, forEach string) (*CommandResource, error) {
+	t.Helper()
+	return ParseCommandResource([]byte("name: t.w\nversion: 1\ninput:\n  record: Loan\ntransaction:\n  - " + forEach + "\n    where: " + where + "\n    create:\n      record: Loan\n      values:\n        book: $input.m\n"))
+}
+
+func TestForEachWhereFiltersElements(t *testing.T) {
+	pay := func(m string, n int) any { return map[string]any{"method": m, "n": n, "kind": "x"} }
+	input := map[string]any{"m": "Cash", "p": []any{pay("Cash", 1), pay("Card", 2), pay("Cash", 3)}}
+	for name, tc := range map[string]struct {
+		where string
+		want  int
+	}{
+		"match":     {"{method: Cash}", 2},
+		"no match":  {"{method: Mpesa}", 0},
+		"two keys":  {"{method: Cash, n: 3}", 1},
+		"ref value": {"{method: $input.m}", 2},
+		"missing":   {"{nokey: a}", 0},
+	} {
+		def, err := whereDef(t, tc.where, "for_each: $input.p")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got, err := expandCommandSteps(def.Steps, refEnv{input: input}, nil)
+		if err != nil || len(got) != tc.want {
+			t.Fatalf("%s: %d instances, %v; want %d", name, len(got), err, tc.want)
+		}
+	}
+}
+
+func TestForEachWhereRejectedAtLoad(t *testing.T) {
+	for name, tc := range map[string]struct{ where, forEach string }{
+		"without for_each": {"{method: Cash}", "as: a"},
+		"item value":       {"{method: $item.method}", "for_each: $input.p"},
+		"unknown root":     {"{method: $bogus.x}", "for_each: $input.p"},
+		"bad steps ref":    {"{method: $steps.nope.name}", "for_each: $input.p"},
+	} {
+		if _, err := whereDef(t, tc.where, tc.forEach); err == nil {
+			t.Fatalf("%s: expected load error", name)
 		}
 	}
 }

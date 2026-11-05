@@ -450,7 +450,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		auditFailure(rowsErr.Type)
 		return nil, rowsErr
 	}
-	instances, expandErr := expandCommandSteps(cmd.Steps, input, rows)
+	instances, expandErr := expandCommandSteps(cmd.Steps, refEnv{input: input, steps: stepNames, computed: computed, now: pinnedNow, actor: user}, rows)
 	if expandErr != nil {
 		return nil, contract.NewError(contract.CodeValidationFailed, expandErr.Error())
 	}
