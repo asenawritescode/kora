@@ -953,6 +953,8 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 		handler.PrintSource = sitePrintSource{h: handler}
 	}
 	apiGroup.GET("/print/:format_name", NewPrintHandler(handler.PrintSource))
+	apiGroup.POST("/payments", handler.HandlePaymentRequest)
+	apiGroup.GET("/payments/:id", handler.HandlePaymentGet)
 
 	resource := apiGroup.Group("/resource")
 	{
