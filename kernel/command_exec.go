@@ -209,6 +209,17 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 		}
 	}
 	for _, step := range dyn.Steps {
+		if alias, ok := iteratedGuardAlias(step); ok {
+			dt := dyn.guardRecord(reg, alias)
+			if dt == nil {
+				return contract.NewError(contract.CodeNotFound, "for_each guard record not found")
+			}
+			if !(moduleCommandAuthorized && dt.ModuleOwnershipMode == string(contract.MutationCommands)) {
+				if _, err := decideOperationResource(op, reg, dt, "read"); err != nil {
+					return err
+				}
+			}
+		}
 		stepOp, scopeErr := operationForCommandStep(op, dyn, step)
 		if scopeErr != nil {
 			return scopeErr
@@ -424,10 +435,6 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 	outcomes := make([]stepOutcome, 0, len(cmd.Steps))
 	lastRecord, lastName := "", ""
 	lastBusinessScope := op.Context.BusinessScope
-	instances, expandErr := expandCommandSteps(cmd.Steps, input)
-	if expandErr != nil {
-		return nil, contract.NewError(contract.CodeValidationFailed, expandErr.Error())
-	}
 	stepNames := map[string]string{}
 	pinnedNow := time.Now().UTC()
 	computed, computeErr := evalCompute(cmd.Compute, input)
@@ -437,6 +444,15 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 	if cerr := k.checkCommandGuards(dbTx, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames, computed: computed, now: pinnedNow, actor: user}); cerr != nil {
 		auditFailure(cerr.Type)
 		return nil, cerr
+	}
+	rows, rowsErr := k.loadGuardRows(txMgr, reg, op, cmd, stepNames)
+	if rowsErr != nil {
+		auditFailure(rowsErr.Type)
+		return nil, rowsErr
+	}
+	instances, expandErr := expandCommandSteps(cmd.Steps, input, rows)
+	if expandErr != nil {
+		return nil, contract.NewError(contract.CodeValidationFailed, expandErr.Error())
 	}
 
 	for _, instance := range instances {
