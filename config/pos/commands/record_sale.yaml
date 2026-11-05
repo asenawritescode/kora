@@ -4,6 +4,12 @@ version: 1
 permission: create
 input:
   record: Sale
+require:
+  - payment:
+      for_each: $input.payments
+      reference: $item.reference
+      amount: $item.amount
+      currency: $input.currency
 compute:
   total: {sum: $input.items, expr: "quantity * unit_price"}
 transaction:
