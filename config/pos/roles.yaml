@@ -4,7 +4,7 @@
 
 - name: Manager
   workspace_access: true
-  description: Oversees registers, shifts, sales, and stock.
+  description: Oversees registers, shifts, and sales.
 - name: Owner
   workspace_access: true
   description: Full control of the POS package.

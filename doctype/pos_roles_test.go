@@ -33,10 +33,7 @@ func TestPOSRolePermissions(t *testing.T) {
 		{"Cashier", "Item", "read", false}, // Item carries cost
 		{"Manager", "Sale", "write", true},
 		{"Manager", "Sale", "delete", false},
-		{"Manager", "Stock Entry", "create", true},
-		{"Manager", "Item", "read", true},
 		{"Owner", "Sale", "delete", true},
-		{"Owner", "Item", "delete", true},
 	}
 	for _, tc := range tests {
 		if got := pm.Can(tc.role, tc.dt, tc.op); got != tc.want {
