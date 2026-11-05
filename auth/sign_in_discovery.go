@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	kdb "github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/secret"
 	"github.com/gin-gonic/gin"
 )
 
@@ -55,7 +56,7 @@ func localSignInDisabled(c *gin.Context, database *sql.DB) bool {
 // registerSignInDiscovery lists the sign-in options a tenant's login page
 // should offer: local magic links (when mail is configured and policy allows)
 // and enabled OIDC providers.
-func registerSignInDiscovery(group *gin.RouterGroup, db *sql.DB, magicLinkConfigured bool) {
+func registerSignInDiscovery(group *gin.RouterGroup, db *sql.DB, magicLinkConfigured bool, cloudIssuer string) {
 	group.GET("/providers", func(c *gin.Context) {
 		site := c.GetString("site_name")
 		database := requestSiteDB(c, db)
@@ -71,7 +72,7 @@ func registerSignInDiscovery(group *gin.RouterGroup, db *sql.DB, magicLinkConfig
 			allowed = false
 		}
 		result := signInDiscovery{MagicLink: magicLinkConfigured && allowed, Providers: []SignInOption{}}
-		providers, err := SQLAuthProviders{DB: database, Dialect: dialect}.List(ctx, site)
+		providers, err := newSiteProviders(c, SQLAuthProviders{DB: database, Dialect: dialect}, secret.NewStore(database, dialect), cloudIssuer).List(ctx, site)
 		if err != nil {
 			slog.Error("listing sign-in providers", "site", site, "error", err)
 		}

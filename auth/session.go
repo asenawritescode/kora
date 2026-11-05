@@ -1294,8 +1294,9 @@ func registerAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB, mail
 		})
 	}
 	magicLinkConfigured := mailer != nil && strings.TrimSpace(publicAppBaseURL) != ""
-	registerSignInDiscovery(auth, db, magicLinkConfigured)
-	(&OIDCLogin{PublicAppBaseURL: publicAppBaseURL}).Register(router.Group("/api/v1/auth"))
+	cloudIssuer := koraCloudIssuerFromEnv()
+	registerSignInDiscovery(auth, db, magicLinkConfigured, cloudIssuer)
+	(&OIDCLogin{PublicAppBaseURL: publicAppBaseURL, CloudIssuer: cloudIssuer}).Register(router.Group("/api/v1/auth"))
 	if magicLinkConfigured {
 		registerMagicLinkRoutes(auth, db, mailer, publicAppBaseURL)
 	}
