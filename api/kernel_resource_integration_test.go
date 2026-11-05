@@ -1527,8 +1527,8 @@ func TestExternalOperationProviderFailureKeepsPaymentAndEventConsistent(t *testi
 	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id IN (?, (SELECT name FROM `tabPayment` WHERE external_operation = ?))", site, secondOperationName, secondOperationName).Scan(&operationEvents); err != nil {
 		t.Fatal("count operation bundle outbox after event failure:", err)
 	}
-	if eventCount != 0 || operationAudits != 2 || operationEvents != 4 {
-		t.Fatalf("event-write rollback left events=%d audits=%d record_outbox=%d; want 0/2/4 (initial operation events plus record-created events only)", eventCount, operationAudits, operationEvents)
+	if eventCount != 0 || operationAudits != 2 || operationEvents != 2 {
+		t.Fatalf("event-write rollback left events=%d audits=%d record_outbox=%d; want 0/2/2 (the initial change events only)", eventCount, operationAudits, operationEvents)
 	}
 }
 

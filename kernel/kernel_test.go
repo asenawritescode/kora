@@ -1344,8 +1344,8 @@ func TestRecordWorkflowTransitionUsesCanonicalPipeline(t *testing.T) {
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ?", s.Name, docName, kernel.CommandWorkflowStatusTransition); n != 1 {
 		t.Fatalf("workflow audit rows = %d, want 1", n)
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", s.Name, docName); n != 4 {
-		t.Fatalf("create + transition outbox rows = %d, want two business events and two record trigger events", n)
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", s.Name, docName); n != 2 {
+		t.Fatalf("create + transition outbox rows = %d, want one change event per mutation", n)
 	}
 }
 
@@ -1445,8 +1445,8 @@ func TestMutationBundleRunsAuthorizedWorkflowTransitionAtomically(t *testing.T) 
 	if n := s.count(t, "SELECT COUNT(*) FROM `tabTask`"); n != 2 {
 		t.Fatalf("bundle rows=%d, want two atomic records", n)
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 6 {
-		t.Fatalf("bundle outbox rows=%d, want four record-trigger events and two business events", n)
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 3 {
+		t.Fatalf("bundle outbox rows=%d, want one change event per mutation", n)
 	}
 }
 
@@ -1517,8 +1517,8 @@ func TestMutationBundleRollsBackTransitionWhenRelatedWriteFails(t *testing.T) {
 	if state != "Open" || title != "Original" || s.taskCount(t) != 2 {
 		t.Fatalf("failed bundle left business effects: state=%q title=%q count=%d", state, title, s.taskCount(t))
 	}
-	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 4 {
-		t.Fatalf("failed bundle changed outbox count to %d, want only four committed seed events", n)
+	if n := s.count(t, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", s.Name); n != 2 {
+		t.Fatalf("failed bundle changed outbox count to %d, want only the two committed seed events", n)
 	}
 	if n := s.count(t, "SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.mutate_bundle'", s.Name); n != 0 {
 		t.Fatalf("failed bundle committed %d operation receipts", n)
