@@ -1,0 +1,77 @@
+name: Integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mysql:
+    name: Integration (MySQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          # Matches the local test fixtures, some of which also dial port 3312.
+          MYSQL_ROOT_PASSWORD: kora-test-only
+        ports:
+          - 3306:3306
+          - 3312:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pkora-test-only"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    env:
+      MYSQL_ROOT_PASSWORD: kora-test-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Prepare embed
+        run: mkdir -p workspace/dist && touch workspace/dist/index.html
+      - name: Test (MySQL)
+        run: scripts/ci-integration.sh mysql 2>&1 | tee test.log
+        shell: bash -o pipefail {0}
+      - name: Summarize failures
+        if: failure()
+        run: grep -E 'FAIL|panic:|_test\.go:[0-9]+:' test.log | head -150 || true
+
+  postgres:
+    name: Integration (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kora
+          POSTGRES_PASSWORD: kora123
+          POSTGRES_DB: kora
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U kora -d kora"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    env:
+      PGUSER: kora
+      PGPASSWORD: kora123
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Prepare embed
+        run: mkdir -p workspace/dist && touch workspace/dist/index.html
+      - name: Test (Postgres)
+        run: scripts/ci-integration.sh postgres 2>&1 | tee test.log
+        shell: bash -o pipefail {0}
+      - name: Summarize failures
+        if: failure()
+        run: grep -E 'FAIL|panic:|_test\.go:[0-9]+:' test.log | head -150 || true
