@@ -1,0 +1,24 @@
+- doctype: Register
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Shift
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Till Session
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false

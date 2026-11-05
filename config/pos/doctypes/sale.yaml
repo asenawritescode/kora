@@ -1,0 +1,44 @@
+name: Sale
+module: POS
+naming_series: SALE-.YYYY.-.#####
+title_field: name
+search_fields: register, customer
+sort_field: creation
+sort_order: DESC
+fields:
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+    reqd: true
+    in_list_view: true
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till Session
+  - fieldname: customer
+    fieldtype: Data
+    label: Customer
+  - fieldname: items
+    fieldtype: Table
+    options: Sale Item
+    label: Items
+    reqd: true
+  - fieldname: payments
+    fieldtype: Table
+    options: Sale Payment
+    label: Payments
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    computed: "SUM(items.amount)"
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Paid
+      Void
+    default: Draft
+    in_list_view: true
