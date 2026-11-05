@@ -344,8 +344,9 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		t.Fatal(err)
 	}
 	ztxt, err := zf.RenderText(print.Data{
-		Doc:    map[string]any{"name": till, "opening_float": 500, "expected_cash": 800, "closing_count": 790, "variance": -10, "payments_by_method": byMethod.Rows},
-		Tenant: map[string]any{"name": "Shop"}, Now: time.Now(),
+		Doc:     map[string]any{"name": till, "opening_float": 500, "expected_cash": 800, "closing_count": 790, "variance": -10},
+		Queries: map[string][]map[string]any{"by_method": byMethod.Rows, "refunds": nil},
+		Tenant:  map[string]any{"name": "Shop"}, Now: time.Now(),
 	}, print.Options{Currency: "KES", Precision: 2})
 	if err != nil || !strings.Contains(ztxt, "Cash") || !strings.Contains(ztxt, "VARIANCE") {
 		t.Fatalf("z report: %v\n%s", err, ztxt)

@@ -169,6 +169,9 @@
 - doctype: module.pos.core.query.payments_by_method
   role: Owner
   read: true
+- doctype: module.pos.core.query.refunds_by_method
+  role: Owner
+  read: true
 - doctype: module.pos.core.query.recent_sales
   role: Owner
   read: true
@@ -200,6 +203,9 @@
   role: Manager
   read: true
 - doctype: module.pos.core.query.payments_by_method
+  role: Manager
+  read: true
+- doctype: module.pos.core.query.refunds_by_method
   role: Manager
   read: true
 - doctype: module.pos.core.query.recent_sales

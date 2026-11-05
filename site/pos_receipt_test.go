@@ -47,28 +47,41 @@ func TestPOSSaleReceiptRenders(t *testing.T) {
 }
 
 func TestPOSZReportRenders(t *testing.T) {
-	body, err := os.ReadFile("../config/pos/print_formats/z_report.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := print.Load(body)
-	if err != nil {
-		t.Fatal(err)
-	}
 	data := print.Data{
-		Doc: map[string]any{"name": "TILL-1", "opening_float": 500.0, "expected_cash": 800.0, "closing_count": 790.0, "variance": -10.0,
-			"payments_by_method": []any{map[string]any{"method": "Cash", "payment_count": 2, "total": 300.0}, map[string]any{"method": "Card", "payment_count": 1, "total": 50.0}}},
+		Doc: map[string]any{"name": "TILL-1", "opening_float": 500.0, "expected_cash": 700.0, "closing_count": 690.0, "variance": -10.0},
+		Queries: map[string][]map[string]any{
+			"by_method": {{"method": "Cash", "payment_count": 2, "total": 300.0}, {"method": "Card", "payment_count": 1, "total": 200.0}},
+			"refunds":   {{"method": "Cash", "payment_count": 1, "total": 100.0}},
+		},
 		Tenant: map[string]any{"name": "Shop"},
 		Now:    time.Unix(0, 0).UTC(),
 	}
-	txt, err := f.RenderText(data, print.Options{Currency: "KES", Precision: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, w := range []string{"Z REPORT", "Cash", "Card", "KES 300.00", "VARIANCE"} {
-		if !strings.Contains(txt, w) {
-			t.Errorf("missing %q\n%s", w, txt)
+	var outs []string
+	for _, file := range []string{"z_report.yaml", "z_report_reprint.yaml"} {
+		body, err := os.ReadFile("../config/pos/print_formats/" + file)
+		if err != nil {
+			t.Fatal(err)
 		}
+		f, err := print.Load(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(f.Queries) != 2 {
+			t.Fatalf("%s queries = %v", file, f.Queries)
+		}
+		txt, err := f.RenderText(data, print.Options{Currency: "KES", Precision: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range []string{"Z REPORT", "TILL-1", "KES 300.00", "KES 200.00", "REFUNDS", "KES 100.00", "KES 500.00", "KES 700.00", "KES 690.00", "VARIANCE", "-10.00"} {
+			if !strings.Contains(txt, w) {
+				t.Errorf("%s missing %q\n%s", file, w, txt)
+			}
+		}
+		outs = append(outs, txt)
+	}
+	if outs[0] != outs[1] {
+		t.Errorf("reprint differs from operation print")
 	}
 }
 

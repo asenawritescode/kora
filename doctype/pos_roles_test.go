@@ -70,7 +70,7 @@ func TestPOSRolePermissions(t *testing.T) {
 	}
 	posOps := []string{"open_shift", "close_shift", "open_till", "close_till", "record_sale", "return_sale", "void_sale"}
 	invOps := []string{"receive_stock", "adjust_stock"}
-	posQ := []string{"open_till", "payments_by_method", "recent_sales", "today_totals"}
+	posQ := []string{"open_till", "payments_by_method", "refunds_by_method", "recent_sales", "today_totals"}
 	invQ := []string{"item_search", "item_stock", "low_stock"}
 	grant := func(role, owner, kind string, names []string, op string, want bool) {
 		for _, n := range names {
@@ -89,7 +89,7 @@ func TestPOSRolePermissions(t *testing.T) {
 	grant("Manager", "inventory.core", "operation", invOps, "write", false)
 	grant("Cashier", "pos.core", "operation", posOps, "write", true)
 	grant("Cashier", "pos.core", "query", []string{"open_till"}, "read", true)
-	grant("Cashier", "pos.core", "query", []string{"recent_sales", "today_totals", "payments_by_method"}, "read", false)
+	grant("Cashier", "pos.core", "query", []string{"recent_sales", "today_totals", "payments_by_method", "refunds_by_method"}, "read", false)
 	grant("Cashier", "inventory.core", "query", []string{"item_search"}, "read", true)
 	grant("Cashier", "inventory.core", "query", []string{"item_stock", "low_stock"}, "read", false)
 	grant("Cashier", "inventory.core", "operation", invOps, "write", false)
