@@ -179,3 +179,24 @@ func firstNonEmpty(v ...string) string {
 }
 
 var _ payment.Provider = (*Provider)(nil)
+
+// ParseCallback validates the callback token and decodes the STK result into a
+// payment.Confirmation. It implements payment.CallbackProvider.
+func (p *Provider) ParseCallback(_ context.Context, _ string, token string, body []byte) (payment.Confirmation, error) {
+	s, err := p.secrets()
+	if err != nil {
+		return payment.Confirmation{}, err
+	}
+	if !TokenValid(token, s["mpesa_callback_token"]) {
+		return payment.Confirmation{}, payment.ErrInvalidCallbackToken
+	}
+	id, ok, receipt, desc, err := ParseCallback(body)
+	if err != nil {
+		return payment.Confirmation{}, err
+	}
+	c := payment.Confirmation{Provider: p.Name(), ProviderRequestID: id, Success: ok, ProviderReference: receipt}
+	if !ok {
+		c.FailureReason = desc
+	}
+	return c, nil
+}
