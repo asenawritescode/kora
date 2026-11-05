@@ -90,6 +90,7 @@ type OIDCLogin struct {
 
 	mu       sync.Mutex
 	metadata map[string]cachedMetadata
+	jwks     map[string]cachedJWKS
 }
 
 type tenantUsersFactory func(c *gin.Context, database *sql.DB) tenantUsers
@@ -132,6 +133,7 @@ func (l *OIDCLogin) Register(group *gin.RouterGroup) {
 		return sessionManagerForRequest(c, database)
 	}
 	group.GET("/oidc/:provider/start", func(c *gin.Context) { l.handleStart(c, users) })
+	group.GET("/oidc/callback", func(c *gin.Context) { l.handleCallback(c, users) })
 }
 
 func (l *OIDCLogin) handleStart(c *gin.Context, users tenantUsersFactory) {
