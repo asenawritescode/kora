@@ -54,6 +54,12 @@ type CommandInput struct {
 // CommandStep is one transactional write. Values map target record fields to
 // literal values or "$input.field" references into the operation payload.
 type CommandStep struct {
+	// ForEach repeats the step once per object in an input list; values may
+	// then reference the element as $item.field.
+	ForEach string `yaml:"for_each,omitempty" json:"for_each,omitempty"`
+	// As names the record this step writes so later steps can reference it
+	// as $steps.<as>.name.
+	As     string      `yaml:"as,omitempty" json:"as,omitempty"`
 	Create *StepCreate `yaml:"create,omitempty" json:"create,omitempty"`
 	Update *StepUpdate `yaml:"update,omitempty" json:"update,omitempty"`
 }
@@ -116,6 +122,9 @@ func (c *CommandResource) validate() error {
 	}
 	if c.Input.Record == "" {
 		return fmt.Errorf("command %q: input.record required in this slice", c.Name)
+	}
+	if err := c.validateStepReferences(); err != nil {
+		return err
 	}
 	if c.ModuleOwnerID != "" || c.Capability != "" || c.Operation != "" || c.InputSchema.ID != "" || c.InputSchema.Version != 0 || c.OutputSchema.ID != "" || c.OutputSchema.Version != 0 {
 		if c.ModuleOwnerID == "" || c.Capability == "" || c.Operation == "" || c.InputSchema.ID == "" || c.InputSchema.Version == 0 || c.OutputSchema.ID == "" || c.OutputSchema.Version == 0 {

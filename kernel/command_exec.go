@@ -423,8 +423,15 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 	outcomes := make([]stepOutcome, 0, len(cmd.Steps))
 	lastRecord, lastName := "", ""
 	lastBusinessScope := op.Context.BusinessScope
+	instances, expandErr := expandCommandSteps(cmd.Steps, input)
+	if expandErr != nil {
+		return nil, contract.NewError(contract.CodeValidationFailed, expandErr.Error())
+	}
+	stepNames := map[string]string{}
 
-	for i, step := range cmd.Steps {
+	for _, instance := range instances {
+		i, step := instance.index, instance.step
+		env := refEnv{input: input, item: instance.item, steps: stepNames}
 		stepOp, scopeErr := operationForCommandStep(op, cmd, step)
 		if scopeErr != nil {
 			return nil, scopeErr
@@ -441,7 +448,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			}
 			doc := doctype.NewDocument(dt.Name)
 			for field, ref := range step.Create.Values {
-				v, rerr := resolveRef(ref, input)
+				v, rerr := resolveEnvRef(ref, env)
 				if rerr != nil {
 					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 				}
@@ -487,13 +494,16 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteInsert(dt, doc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: doc.Name, Created: true})
 			lastRecord, lastName = dt.Name, doc.Name
+			if step.As != "" {
+				stepNames[step.As] = doc.Name
+			}
 
 		case step.Update != nil:
 			dt := reg.Get(step.Update.Record)
 			if dt == nil {
 				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("command %q: record %q not found", def.Name, step.Update.Record))
 			}
-			targetName, rerr := resolveStringRef(step.Update.Name, input)
+			targetName, rerr := resolveEnvStringRef(step.Update.Name, env)
 			if rerr != nil || targetName == "" {
 				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 			}
@@ -517,7 +527,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			}
 			doc := cloneDoc(oldDoc)
 			for field, ref := range step.Update.Values {
-				v, rerr := resolveRef(ref, input)
+				v, rerr := resolveEnvRef(ref, env)
 				if rerr != nil {
 					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 				}
@@ -549,6 +559,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteSave(dt, doc, oldDoc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: targetName, Created: false})
 			lastRecord, lastName = dt.Name, targetName
+			if step.As != "" {
+				stepNames[step.As] = targetName
+			}
 		}
 	}
 
@@ -656,18 +669,7 @@ func resolveRef(ref string, input map[string]any) (any, error) {
 	if !strings.HasPrefix(ref, "$input.") {
 		return ref, nil
 	}
-	cur := any(input)
-	for _, part := range strings.Split(strings.TrimPrefix(ref, "$input."), ".") {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("reference %q path invalid", ref)
-		}
-		cur, ok = m[part]
-		if !ok {
-			return nil, fmt.Errorf("reference %q missing in input", ref)
-		}
-	}
-	return cur, nil
+	return walkRef(ref, input, strings.TrimPrefix(ref, "$input."))
 }
 
 func resolveStringRef(ref string, input map[string]any) (string, error) {
