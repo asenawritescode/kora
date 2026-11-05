@@ -1,8 +1,12 @@
 package doctype
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestPOSRolePermissions(t *testing.T) {
@@ -31,14 +35,28 @@ func TestPOSRolePermissions(t *testing.T) {
 		role, dt, op string
 		want         bool
 	}{
-		{"Cashier", "Sale", "create", true},
+		{"Cashier", "Sale", "read", true},
+		{"Cashier", "Sale", "create", false},
+		{"Cashier", "Sale", "write", false},
 		{"Cashier", "Sale", "delete", false},
+		{"Cashier", "Sale Line Balance", "read", true},
+		{"Cashier", "Sale Line Balance", "write", false},
+		{"Cashier", "Shift", "read", true},
+		{"Cashier", "Shift", "write", false},
+		{"Cashier", "Till Session", "read", true},
+		{"Cashier", "Till Session", "create", false},
+		{"Cashier", "Till Session", "write", false},
+		{"Cashier", "Register", "read", true},
+		{"Cashier", "Register", "write", false},
 		{"Cashier", "Stock Entry", "create", false},
 		{"Cashier", "Stock Balance", "write", false},
 		{"Cashier", "Item", "read", false}, // Item carries cost
-		{"Manager", "Sale", "write", true},
-		{"Manager", "Sale", "delete", false},
-		{"Owner", "Sale", "delete", true},
+		{"Manager", "Sale", "read", true},
+		{"Manager", "Sale", "write", false},
+		{"Manager", "Till Session", "write", false},
+		{"Owner", "Sale", "read", true},
+		{"Owner", "Sale", "delete", false}, // corrections go through void_sale/return_sale
+		{"Owner", "Till Session", "write", false},
 		{"Owner", "Item", "read", true},
 		{"Owner", "Item", "create", true},
 		{"Owner", "Location", "create", true},
@@ -82,5 +100,45 @@ func TestPOSRolePermissions(t *testing.T) {
 		if pm.GetRole(n) == nil {
 			t.Errorf("missing role %s", n)
 		}
+	}
+}
+
+func TestPOSPackOwnershipAndItemSearchHidesCost(t *testing.T) {
+	for _, tc := range []struct{ file, owner, mode string }{
+		{"pos/doctypes/sale.yaml", "pos.core", "commands_only"},
+		{"pos/doctypes/sale_item.yaml", "pos.core", "commands_only"},
+		{"pos/doctypes/sale_payment.yaml", "pos.core", "commands_only"},
+		{"pos/doctypes/sale_line_balance.yaml", "pos.core", "commands_only"},
+		{"pos/doctypes/shift.yaml", "pos.core", "commands_only"},
+		{"pos/doctypes/till_session.yaml", "pos.core", "commands_only"},
+		{"inventory/doctypes/item.yaml", "inventory.core", "crud"},
+		{"pos/doctypes/register.yaml", "", ""},
+		{"inventory/doctypes/stock_balance.yaml", "", ""},
+		{"inventory/doctypes/stock_entry.yaml", "", ""},
+		{"inventory/doctypes/location.yaml", "", ""},
+	} {
+		body, err := os.ReadFile(filepath.Join("..", "config", tc.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dt DocType
+		if err := yaml.Unmarshal(body, &dt); err != nil {
+			t.Fatalf("%s: %v", tc.file, err)
+		}
+		access := string(dt.ModuleAccess)
+		wantAccess := ""
+		if tc.owner != "" {
+			wantAccess = "published"
+		}
+		if dt.ModuleOwnerID != tc.owner || dt.ModuleOwnershipMode != tc.mode || access != wantAccess {
+			t.Errorf("%s: owner=%q mode=%q access=%q, want %q %q %q", tc.file, dt.ModuleOwnerID, dt.ModuleOwnershipMode, access, tc.owner, tc.mode, wantAccess)
+		}
+	}
+	body, err := os.ReadFile(filepath.Join("..", "config", "inventory", "queries", "item_search.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "cost") {
+		t.Error("item_search must never expose cost")
 	}
 }

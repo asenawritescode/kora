@@ -1,4 +1,7 @@
 name: Item
+module_owner_id: inventory.core
+module_ownership_mode: crud
+module_access: published
 module: Inventory
 title_field: item_name
 search_fields: item_name, barcode
