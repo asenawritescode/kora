@@ -30,12 +30,12 @@ func TestHandleExtensionCreateStoresOnlyTokenVerifier(t *testing.T) {
 	defer db.Close()
 	var storedHash string
 	mock.ExpectExec("INSERT INTO _kora_extension \\(name, site, display_name, description, endpoint_url, secret, access_token, access_token_hash, .*VALUES \\(\\?, \\?, \\?, \\?, \\?, \\?, '', \\?").
-		WithArgs("billing-bot", "tenant-1", "Billing", "", "https://hooks.example.com/kora", sqlmock.AnyArg(), capturedArg{&storedHash}, sqlmock.AnyArg(), "[]").
+		WithArgs("billing-bot", "tenant-1", "Billing", "", "https://203.0.113.10/kora", sqlmock.AnyArg(), capturedArg{&storedHash}, sqlmock.AnyArg(), "[]").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/system/extension", strings.NewReader(`{"name":"billing-bot","display_name":"Billing","endpoint_url":"https://hooks.example.com/kora"}`))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/system/extension", strings.NewReader(`{"name":"billing-bot","display_name":"Billing","endpoint_url":"https://203.0.113.10/kora"}`))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	ctx.Set("site_db", db)
 	ctx.Set("site_name", "tenant-1")
