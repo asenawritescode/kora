@@ -1,6 +1,7 @@
 package doctype
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -54,7 +55,7 @@ func TestTillSessionVarianceComputed(t *testing.T) {
 		if err := ComputeFields(dt, doc); err != nil {
 			t.Fatal(err)
 		}
-		if got, ok := doc.Fields["variance"].(string); !ok || got != c.want {
+		if got := fmt.Sprint(doc.Fields["variance"]); got != c.want {
 			t.Errorf("variance(%v,%v) = %#v, want %v", c.count, c.expected, doc.Fields["variance"], c.want)
 		}
 	}
