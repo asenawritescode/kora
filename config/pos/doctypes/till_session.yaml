@@ -1,4 +1,7 @@
 name: Till Session
+module_owner_id: pos.core
+module_ownership_mode: commands_only
+module_access: published
 module: POS
 title_field: shift
 search_fields: shift

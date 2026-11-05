@@ -9,7 +9,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/print"
 )
 
@@ -64,4 +66,52 @@ func loadPrintFormats(dir string, doctypes []*doctype.DocType, queries map[strin
 		out = append(out, raw)
 	}
 	return out, nil
+}
+
+// resolvePrintOperations rewrites each print format's for.operation, given as
+// a command full name (namespace.name), to the published operation ref of the
+// merged pack tree. A value containing "~" must already be a published ref.
+func resolvePrintOperations(snapshot *doctype.ConfigSnapshot) error {
+	published := map[string]bool{}
+	for _, m := range snapshot.Modules {
+		for _, p := range m.PublishedOperations {
+			published[contract.PublishedOperationRef(m.ID, p.Capability, p.Operation)] = true
+		}
+	}
+	byName := map[string]string{}
+	for _, raw := range snapshot.Commands {
+		cmd, err := kernel.ParseCommandResourceDraftJSON(raw)
+		if err != nil {
+			return fmt.Errorf("pack.command_invalid: %w", err)
+		}
+		if cmd.ModuleOwnerID == "" {
+			continue
+		}
+		ref := contract.PublishedOperationRef(contract.ModuleID(cmd.ModuleOwnerID), cmd.Capability, cmd.Operation)
+		if published[ref] {
+			byName[cmd.Namespace+"."+cmd.Name] = ref
+		}
+	}
+	for i, raw := range snapshot.PrintFormats {
+		f, err := print.Decode(raw)
+		if err != nil {
+			return fmt.Errorf("decode print format: %w", err)
+		}
+		op := f.For.Operation
+		if op == "" {
+			continue
+		}
+		ref := op
+		if !strings.Contains(op, "~") {
+			ref = byName[op]
+		}
+		if !published[ref] {
+			return fmt.Errorf("print.operation_unpublished: print format %s: operation %q is not a published operation", f.Name, op)
+		}
+		f.For.Operation = ref
+		if snapshot.PrintFormats[i], err = print.Encode(f); err != nil {
+			return fmt.Errorf("encoding print format %s: %w", f.Name, err)
+		}
+	}
+	return nil
 }
