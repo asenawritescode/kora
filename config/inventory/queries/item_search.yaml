@@ -7,11 +7,13 @@ permission: read
 scope: tenant
 input:
   term: {type: string, max_length: 80}
+  category: {type: string, max_length: 140}
 filters:
   - any:
       - {field: item_name, op: contains, value: $input.term, optional: true}
       - {field: barcode, op: eq, value: $input.term, optional: true}
     optional: true
-fields: [name, item_name, barcode, uom, price]
+  - {field: category, op: eq, value: $input.category, optional: true}
+fields: [name, item_name, barcode, uom, price, category, image]
 sort: [{field: item_name, dir: asc}]
 offline_eligible: true

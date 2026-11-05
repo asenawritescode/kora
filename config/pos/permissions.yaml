@@ -130,6 +130,18 @@
   write: true
   create: true
   delete: false
+- doctype: Item Category
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Item Category
+  role: Manager
+  read: true
+  write: false
+  create: false
+  delete: false
 - doctype: Stock Balance
   role: Owner
   read: true
@@ -247,6 +259,9 @@
 - doctype: module.inventory.core.query.item_search
   role: Owner
   read: true
+- doctype: module.inventory.core.query.item_categories
+  role: Owner
+  read: true
 - doctype: module.inventory.core.query.item_stock
   role: Owner
   read: true
@@ -256,6 +271,9 @@
 - doctype: module.inventory.core.query.item_search
   role: Manager
   read: true
+- doctype: module.inventory.core.query.item_categories
+  role: Manager
+  read: true
 - doctype: module.inventory.core.query.item_stock
   role: Manager
   read: true
@@ -263,5 +281,8 @@
   role: Manager
   read: true
 - doctype: module.inventory.core.query.item_search
+  role: Cashier
+  read: true
+- doctype: module.inventory.core.query.item_categories
   role: Cashier
   read: true

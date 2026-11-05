@@ -22,15 +22,26 @@ func TestInventoryPackageValidatesAndInstalls(t *testing.T) {
 		}
 		reg.Register(dt)
 	}
-	for _, name := range []string{"Item", "Location", "Stock Entry", "Stock Balance"} {
+	for _, name := range []string{"Item", "Location", "Stock Entry", "Stock Balance", "Item Category"} {
 		if reg.Get(name) == nil {
 			t.Errorf("registry missing %s", name)
 		}
 	}
 	item := reg.Get("Item")
-	for _, f := range []string{"price", "cost", "barcode", "uom"} {
+	for _, f := range []string{"price", "cost", "barcode", "uom", "category", "image"} {
 		if item.GetField(f) == nil {
 			t.Errorf("Item missing field %s", f)
+		}
+	}
+	if f := item.GetField("category"); f.Fieldtype != "Link" || f.Options != "Item Category" || f.Reqd {
+		t.Errorf("Item.category = %+v, want optional Link to Item Category", f)
+	}
+	if f := item.GetField("image"); f.Fieldtype != "Attach Image" || f.Reqd {
+		t.Errorf("Item.image = %+v, want optional Attach Image", f)
+	}
+	for _, f := range []string{"category_name", "display_order", "enabled"} {
+		if reg.Get("Item Category").GetField(f) == nil {
+			t.Errorf("Item Category missing field %s", f)
 		}
 	}
 	if item.GetField("reorder_level") != nil {

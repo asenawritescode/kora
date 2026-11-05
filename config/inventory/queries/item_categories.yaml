@@ -1,0 +1,12 @@
+name: item_categories
+module_owner_id: inventory.core
+capability: inventory.items
+operation: item_categories
+source: Item Category
+permission: read
+scope: tenant
+filters:
+  - {field: enabled, op: eq, value: 1}
+fields: [name, category_name, display_order]
+sort: [{field: display_order, dir: asc}, {field: category_name, dir: asc}]
+offline_eligible: true
