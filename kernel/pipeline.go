@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -322,24 +321,11 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 				doc = cloneDoc(oldDoc)
 			}
 			if operation == "decrement" || operation == "adjust" {
-				var deltas map[string]float64
-				if err := json.Unmarshal(data, &deltas); err != nil || len(deltas) != 1 {
-					return nil, contract.NewError(contract.CodeValidationFailed, "quantity adjustment requires one numeric field")
+				adjusted, err := adjustQuantity(recordDT, oldDoc, operation, data)
+				if err != nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 				}
-				for field, amount := range deltas {
-					definition := recordDT.GetField(field)
-					if definition == nil || (definition.Fieldtype != "Int" && definition.Fieldtype != "Float" && definition.Fieldtype != "Currency") || amount == 0 || math.IsNaN(amount) || math.IsInf(amount, 0) || definition.Fieldtype == "Int" && math.Trunc(amount) != amount || operation == "decrement" && amount < 0 {
-						return nil, contract.NewError(contract.CodeValidationFailed, "invalid or insufficient quantity")
-					}
-					newValue := oldDoc.GetFloat(field) + amount
-					if operation == "decrement" {
-						newValue = oldDoc.GetFloat(field) - amount
-					}
-					if newValue < 0 {
-						return nil, contract.NewError(contract.CodeValidationFailed, "invalid or insufficient quantity")
-					}
-					data, _ = json.Marshal(map[string]any{field: newValue})
-				}
+				data = adjusted
 			}
 			if err := applyData(recordDT, doc, data, reg, operation == "update" && !op.Context.AllowReadOnlyFields); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
