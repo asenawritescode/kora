@@ -83,3 +83,22 @@ func TestComputeValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestOutputValidation(t *testing.T) {
+	tests := []struct{ name, out, want string }{
+		{"ok", "{ref: $steps.s.name, total: $computed.n, who: $actor, lit: done}", ""},
+		{"unknown computed", "{t: $computed.zzz}", "must name a compute key"},
+		{"unknown step", "{t: $steps.nope.name}", "must name a step alias"},
+		{"item", "{t: $item.x}", "cannot use"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := "name: s\nnamespace: n\nversion: 1\ninput: {record: Sale}\ncompute:\n  n: {count: $input.lines}\noutput: " + tt.out +
+				"\ntransaction:\n  - as: s\n    create: {record: Sale, values: {x: a}}\n"
+			_, err := ParseCommandResource([]byte(src))
+			if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
+				t.Fatalf("want %q, got %v", tt.want, err)
+			}
+		})
+	}
+}

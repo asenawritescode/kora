@@ -585,7 +585,20 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		}
 	}
 
-	raw, _ := json.Marshal(map[string]any{"command": def.Name, "steps": outcomes})
+	result := map[string]any{"command": def.Name, "steps": outcomes}
+	if len(cmd.Output) > 0 {
+		outEnv := refEnv{input: input, steps: stepNames, computed: computed, now: pinnedNow, actor: user}
+		out := make(map[string]any, len(cmd.Output))
+		for key, ref := range cmd.Output {
+			v, rerr := resolveEnvRef(ref, outEnv)
+			if rerr != nil {
+				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("output %q: %v", key, rerr))
+			}
+			out[key] = v
+		}
+		result["output"] = out
+	}
+	raw, _ := json.Marshal(result)
 	if cmd.ModuleOwnerID != "" {
 		if err := k.CommandSchemas.Validate(cmd.OutputSchema, raw); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, "owner command output failed its registered schema")
