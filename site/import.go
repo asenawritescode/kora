@@ -90,11 +90,19 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encoding commands: %w", err)
 	}
-	printFormats, err := loadPrintFormats(filepath.Join(configPath, "print_formats"), doctypes)
+	queryDefs, err := query.LoadDir(filepath.Join(configPath, "queries"), registryOf(doctypes))
+	if err != nil {
+		return nil, fmt.Errorf("parsing queries: %w", err)
+	}
+	queries, err := query.Encode(queryDefs)
 	if err != nil {
 		return nil, err
 	}
-	queries, err := encodeQueriesDir(filepath.Join(configPath, "queries"), doctypes)
+	known := map[string]bool{}
+	for _, d := range queryDefs {
+		known[d.ModuleOwnerID+"/"+d.Name] = true
+	}
+	printFormats, err := loadPrintFormats(filepath.Join(configPath, "print_formats"), doctypes, known)
 	if err != nil {
 		return nil, err
 	}
@@ -126,14 +134,6 @@ func registryOf(dts []*doctype.DocType) *doctype.Registry {
 		reg.Register(dt)
 	}
 	return reg
-}
-
-func encodeQueriesDir(dir string, dts []*doctype.DocType) ([]json.RawMessage, error) {
-	defs, err := query.LoadDir(dir, registryOf(dts))
-	if err != nil {
-		return nil, fmt.Errorf("parsing queries: %w", err)
-	}
-	return query.Encode(defs)
 }
 
 func ParseWorkflowDefinitionsDirectory(directory string) ([]contract.WorkflowDefinition, error) {

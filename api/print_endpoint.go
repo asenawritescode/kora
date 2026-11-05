@@ -15,6 +15,8 @@ import (
 var (
 	ErrPrintNotFound  = errors.New("print: not found")
 	ErrPrintForbidden = errors.New("print: forbidden")
+	// ErrPrintRenderFailed marks a data source failure that maps to 422.
+	ErrPrintRenderFailed = errors.New("print: render failed")
 )
 
 // PrintSource supplies print formats and permission-checked data.
@@ -28,6 +30,9 @@ type PrintSource interface {
 	// read rules to a format's targets without needing a record.
 	Formats(c *gin.Context) []*print.Format
 	Authorize(c *gin.Context, f *print.Format) error
+	// Query runs a published query as the viewer; it returns ErrPrintForbidden
+	// on a denied grant and ErrPrintNotFound for an unknown query.
+	Query(c *gin.Context, module, name string, input map[string]any) ([]map[string]any, error)
 }
 
 type printFormatMeta struct {
@@ -130,7 +135,19 @@ func NewPrintHandler(src PrintSource) gin.HandlerFunc {
 				data.Doc, err = src.Record(c, f.For.Doc, name)
 			}
 		}
+		if err == nil && len(f.Queries) > 0 {
+			data.Queries = map[string][]map[string]any{}
+			for key, spec := range f.Queries {
+				module, name, _ := spec.Ref()
+				var rows []map[string]any
+				if rows, err = src.Query(c, module, name, spec.ResolveInput(data.Doc, data.Receipt)); err != nil {
+					break
+				}
+				data.Queries[key] = rows
+			}
+		}
 		if err != nil {
+			// A denied or failed query renders nothing: no partial rows.
 			printError(c, err)
 			return
 		}
@@ -163,6 +180,8 @@ func printError(c *gin.Context, err error) {
 		writeError(c, http.StatusForbidden, "print.forbidden", "Not permitted", nil)
 	case errors.Is(err, ErrPrintNotFound):
 		notFoundError(c, "print.not_found", "Not found", nil)
+	case errors.Is(err, ErrPrintRenderFailed):
+		writeError(c, http.StatusUnprocessableEntity, print.ErrRenderFailed, "Print render failed", nil)
 	default:
 		writeError(c, http.StatusInternalServerError, "print.failed", "Print failed", nil)
 	}

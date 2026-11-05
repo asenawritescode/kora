@@ -25,10 +25,12 @@ type Data struct {
 	Receipt map[string]any
 	Tenant  map[string]any
 	Now     time.Time
+	// Queries holds the rows of each format query, keyed by its queries: key.
+	Queries map[string][]map[string]any
 }
 
 func (d Data) tmplValue() map[string]any {
-	return map[string]any{"doc": d.Doc, "receipt": d.Receipt, "tenant": d.Tenant, "now": d.Now}
+	return map[string]any{"doc": d.Doc, "receipt": d.Receipt, "tenant": d.Tenant, "now": d.Now, "queries": d.Queries}
 }
 
 // RenderText renders the text template at the paper width.

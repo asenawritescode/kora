@@ -15,7 +15,7 @@ import (
 
 // loadPrintFormats reads print_formats/*.yaml sorted by file name and encodes
 // each for the config snapshot. A missing directory yields no formats.
-func loadPrintFormats(dir string, doctypes []*doctype.DocType) ([]json.RawMessage, error) {
+func loadPrintFormats(dir string, doctypes []*doctype.DocType, queries map[string]bool) ([]json.RawMessage, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -51,6 +51,11 @@ func loadPrintFormats(dir string, doctypes []*doctype.DocType) ([]json.RawMessag
 		seen[f.Name] = true
 		if f.For.Record != "" && !known[f.For.Record] {
 			return nil, fmt.Errorf("print format %s: %s: %w", n, print.ErrTemplateInvalid, errors.New("unknown record "+f.For.Record))
+		}
+		for key, q := range f.Queries {
+			if !queries[q.Query] {
+				return nil, fmt.Errorf("print format %s: %s: %w", n, print.ErrTemplateInvalid, errors.New("query "+key+": unknown query "+q.Query))
+			}
 		}
 		raw, err := print.Encode(f)
 		if err != nil {

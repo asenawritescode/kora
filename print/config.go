@@ -39,6 +39,9 @@ type Format struct {
 	Paper string `yaml:"paper" json:"paper"`
 	Text  string `yaml:"text" json:"text"`
 	HTML  string `yaml:"html,omitempty" json:"html,omitempty"`
+	// Queries run published queries under the viewer's permissions; templates
+	// read the rows as .queries.<key>.
+	Queries map[string]QuerySpec `yaml:"queries,omitempty" json:"queries,omitempty"`
 
 	tmpl *template.Template
 }
@@ -72,6 +75,9 @@ func Load(data []byte) (*Format, error) {
 	}
 	if f.For.Doc != "" && f.For.Operation == "" {
 		return nil, invalid("for.doc requires operation")
+	}
+	if err := validateQueries(f.Queries); err != nil {
+		return nil, err
 	}
 	if Columns(f.Paper) == 0 {
 		return nil, invalid("unknown paper %q", f.Paper)
