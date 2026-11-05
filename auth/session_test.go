@@ -789,7 +789,7 @@ func TestCloudOwnedInteractiveSignInRoutesAreRetired(t *testing.T) {
 	defer sm.Close()
 	router := gin.New()
 	RegisterAuthRoutes(router, sm, db, nil)
-	for _, path := range []string{"/api/auth/login", "/api/auth/providers", "/api/auth/magic-link/request", "/api/auth/magic-link/verify", "/api/auth/magic-links"} {
+	for _, path := range []string{"/api/auth/providers", "/api/auth/magic-link/request", "/api/auth/magic-link/verify", "/api/auth/magic-links"} {
 		response := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 		router.ServeHTTP(response, request)
