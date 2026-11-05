@@ -950,6 +950,7 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 
 	// File attachments: upload + authenticated serving (Range-aware for audio/video).
 	apiGroup.POST("/upload", handler.HandleUpload)
+	apiGroup.POST("/import", handler.HandleImport)
 	apiGroup.GET("/files/*path", handler.HandleFileServe)
 	apiGroup.DELETE("/files/*path", handler.HandleFileDelete)
 

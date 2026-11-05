@@ -119,20 +119,33 @@ func (h *Handler) executeKernelOperation(c *gin.Context, commandName string, req
 // adapters whose domain contract must update UI-read-only fields. The public
 // kernel endpoint never derives this privilege from request data.
 func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, commandName string, req kernelRequest, allowReadOnlyFields bool) (contract.CommandResult, *contract.Error) {
+	k, op, sqlDB, reg, cerr := h.buildKernelOperation(c, commandName, req, allowReadOnlyFields)
+	if cerr != nil {
+		return contract.CommandResult{}, cerr
+	}
+	return k.Execute(c.Request.Context(), sqlDB, reg, op)
+}
+
+// buildKernelOperation resolves identity, tenant services and the base
+// Operation shared by single-command and bulk execution.
+func (h *Handler) buildKernelOperation(c *gin.Context, commandName string, req kernelRequest, allowReadOnlyFields bool) (*kernel.Kernel, kernel.Operation, *sql.DB, *doctype.Registry, *contract.Error) {
+	fail := func(e *contract.Error) (*kernel.Kernel, kernel.Operation, *sql.DB, *doctype.Registry, *contract.Error) {
+		return nil, kernel.Operation{}, nil, nil, e
+	}
 	site := c.GetString("site_name")
 	if site == "" {
-		return contract.CommandResult{}, contract.NewError(contract.CodeValidationFailed, "no tenant context")
+		return fail(contract.NewError(contract.CodeValidationFailed, "no tenant context"))
 	}
 	dbVal, _ := c.Get("site_db")
 	sqlDB, ok := dbVal.(*sql.DB)
 	if !ok || sqlDB == nil {
-		return contract.CommandResult{}, contract.NewError(contract.CodeDependencyUnavailable, "site database unavailable")
+		return fail(contract.NewError(contract.CodeDependencyUnavailable, "site database unavailable"))
 	}
 	reg := h.siteRegistry(c)
 	if commands := h.kernelCommands(h.runtimeService(c, site)); commands != nil {
 		for _, ownerCommand := range commands.OwnerCommands() {
 			if ownerCommand.FullName() == commandName {
-				return contract.CommandResult{}, contract.NewError(contract.CodePermissionDenied, "owner module commands must be invoked through their published capability")
+				return fail(contract.NewError(contract.CodePermissionDenied, "owner module commands must be invoked through their published capability"))
 			}
 		}
 	}
@@ -150,12 +163,12 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 			PrincipalID: "public-form", PrincipalType: contract.PrincipalPublic, Site: site, AuthenticatedAt: time.Now().UTC(),
 		})
 		if err != nil {
-			return contract.CommandResult{}, contract.NewError(contract.CodeUnauthenticated, "public form execution identity is invalid")
+			return fail(contract.NewError(contract.CodeUnauthenticated, "public form execution identity is invalid"))
 		}
 		execution, verified = publicExecution, true
 	}
 	if !verified {
-		return contract.CommandResult{}, contract.NewError(contract.CodeUnauthenticated, "verified execution identity is required")
+		return fail(contract.NewError(contract.CodeUnauthenticated, "verified execution identity is required"))
 	}
 	actor := execution.Actor()
 	user := actor.SubjectUserID
@@ -171,11 +184,11 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 			DocType string `json:"doctype"`
 		}
 		if err := json.Unmarshal(req.Payload, &target); err != nil || target.DocType == "" {
-			return contract.CommandResult{}, contract.NewError(contract.CodeValidationFailed, "payload.doctype is required")
+			return fail(contract.NewError(contract.CodeValidationFailed, "payload.doctype is required"))
 		}
 		dt := reg.Get(target.DocType)
 		if dt == nil {
-			return contract.CommandResult{}, contract.NewError(contract.CodeNotFound, "DocType not found: "+target.DocType)
+			return fail(contract.NewError(contract.CodeNotFound, "DocType not found: "+target.DocType))
 		}
 		operation := ""
 		switch commandName {
@@ -189,10 +202,10 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 			operation = "submit"
 		}
 		if operation == "" {
-			return contract.CommandResult{}, contract.NewError(contract.CodePermissionDenied, "delegated token cannot execute this command")
+			return fail(contract.NewError(contract.CodePermissionDenied, "delegated token cannot execute this command"))
 		}
 		if _, forbidden := checkPerm(c, reg, dt.Name, operation); forbidden {
-			return contract.CommandResult{}, contract.NewError(contract.CodePermissionDenied, "not permitted")
+			return fail(contract.NewError(contract.CodePermissionDenied, "not permitted"))
 		}
 	}
 	opCtx := kernel.OperationContext{
@@ -224,13 +237,12 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 	k.TxManager = txManager
 	k.Commands = h.kernelCommands(services)
 	k.CommandSchemas = services.CommandSchemas
-	result, cerr := k.Execute(c.Request.Context(), sqlDB, reg, kernel.Operation{
+	return k, kernel.Operation{
 		Context:  opCtx,
 		Command:  commandName,
 		Payload:  req.Payload,
 		Deadline: time.Now().Add(30 * time.Second),
-	})
-	return result, cerr
+	}, sqlDB, reg, nil
 }
 
 func (h *Handler) executeResourceMutation(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, status int) {
