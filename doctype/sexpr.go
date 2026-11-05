@@ -278,7 +278,35 @@ func writeSExprDocType(b *strings.Builder, dt *DocType, indent string) {
 		props = append(props, sExprProp{"naming-series", quoteSExprString(dt.NamingSeries)})
 	}
 
-	// Fields sorted by name
+	// Ownership, scope and resource identity must survive a snapshot
+	// round-trip: dropping them would silently unprotect module-owned DocTypes.
+	for _, kv := range [][2]string{
+		{"module-owner-id", dt.ModuleOwnerID}, {"module-access", string(dt.ModuleAccess)},
+		{"module-ownership-mode", dt.ModuleOwnershipMode}, {"business-scope-policy", string(dt.BusinessScopePolicy)},
+		{"business-scope-field", dt.BusinessScopeField}, {"resource-name", dt.ResourceName},
+		{"business-resource-type", dt.BusinessResourceType}, {"business-identity-field", dt.BusinessIdentityField},
+	} {
+		if kv[1] != "" {
+			props = append(props, sExprProp{kv[0], quoteSExprString(kv[1])})
+		}
+	}
+	if dt.AppendOnly {
+		props = append(props, sExprProp{"append-only", "true"})
+	}
+	for _, kv := range []struct {
+		key string
+		val any
+		set bool
+	}{{"reference-rule-json", dt.ReferenceRule, dt.ReferenceRule != nil}, {"public-access-json", dt.PublicAccess, dt.PublicAccess != nil}, {"quantity-effect-json", dt.QuantityEffect, dt.QuantityEffect != nil}} {
+		if !kv.set {
+			continue
+		}
+		if encoded, err := json.Marshal(kv.val); err == nil {
+			props = append(props, sExprProp{kv.key, quoteSExprString(string(encoded))})
+		}
+	}
+
+	// Fields sorted by name (canonical form).
 	subIndent := indent + "  "
 	if len(props) > 0 {
 		b.WriteString("\n")
@@ -1308,6 +1336,33 @@ func applyDocTypeKeywords(dt *DocType, kw map[string]string) {
 	dt.SortOrder = kw["sort-order"]
 	dt.Description = kw["description"]
 	dt.NamingSeries = kw["naming-series"]
+	dt.ModuleOwnerID = kw["module-owner-id"]
+	dt.ModuleAccess = contract.ModuleAccess(kw["module-access"])
+	dt.ModuleOwnershipMode = kw["module-ownership-mode"]
+	dt.BusinessScopePolicy = contract.ResourceScopeKind(kw["business-scope-policy"])
+	dt.BusinessScopeField = kw["business-scope-field"]
+	dt.ResourceName = kw["resource-name"]
+	dt.BusinessResourceType = kw["business-resource-type"]
+	dt.BusinessIdentityField = kw["business-identity-field"]
+	dt.AppendOnly = kwBool(kw, "append-only")
+	if raw := kw["reference-rule-json"]; raw != "" {
+		var v contract.ReferenceRule
+		if json.Unmarshal([]byte(raw), &v) == nil {
+			dt.ReferenceRule = &v
+		}
+	}
+	if raw := kw["public-access-json"]; raw != "" {
+		var v PublicAccess
+		if json.Unmarshal([]byte(raw), &v) == nil {
+			dt.PublicAccess = &v
+		}
+	}
+	if raw := kw["quantity-effect-json"]; raw != "" {
+		var v QuantityEffect
+		if json.Unmarshal([]byte(raw), &v) == nil {
+			dt.QuantityEffect = &v
+		}
+	}
 }
 
 func parseField(node *sNode) (*Field, error) {
