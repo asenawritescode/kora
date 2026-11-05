@@ -8,8 +8,8 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 
 **Scope**
 - One ticket = one PR, branched from `main` only after its "Depends on" items are merged. No stacked PRs.
-- ≤300 changed lines including tests. Tests prove every "Done when" point.
-- Stay inside the ticket. Out-of-scope bugs or ideas become a new issue (labels `m1-next,blocked`), never a side fix.
+- ≤300 changed lines including tests. Overages are allowed only for tests and must be noted in the PR. Tests prove every "Done when" point.
+- Stay inside the ticket. Out-of-scope bugs or ideas become a new issue (labels `m1-next,blocked`, plus a "Depends on" list), never a side fix.
 - Spec gap or unclear ticket: comment the question on the ticket, label it `blocked`, stop. Never invent design.
 - No hard-coding: verticals (POS, inventory) are config packages on generic core features. No vertical names in Engine or client code.
 
@@ -20,10 +20,12 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 - UI changes: embed screenshots in the PR via the `pr-assets` branch.
 
 **Git and CI**
-- Work in a worktree off a fresh `git fetch`; never edit the main checkout.
+- Work in a worktree off a fresh `git fetch`; never edit the main checkout. The user's own clones (`~/projects/kora`, `~/projects/kora-studio-mvp`, etc.) hold uncommitted work: use worktrees only.
 - Push only to the `kora-upstream` remote. In the local clone, `origin` points at a different repo (kora-ui); never push there.
 - Never force-push. Never delete branches you did not create.
-- Never merge on a red or pending Go or UI check. After 3 failed fix rounds, comment the blocker on the ticket, label it `blocked`, close the PR.
+- Never merge on a red or pending Go or UI check. A green Go check is required even when the failure looks unrelated.
+- kora-ui merges also require the `contracts` check (lint ratchet: no new `any`, `react-refresh/only-export-components`, set-state-in-effect).
+- Never run the contract sync script with default paths; it writes into the user's real sibling clones. Point `KORA_PROJECTS_ROOT` at a scratch directory. After 3 failed fix rounds, comment the blocker on the ticket, label it `blocked`, close the PR.
 - PR title `<ticket-id>: <title>`, body ≤10 lines with `Closes #N`.
 
 **Shared machine state**
@@ -210,7 +212,7 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 - Workflow runtime and reconciliation primitives exist, but they are smaller than the RFC target.
 - The current frontend is React-based, with an embedded manifest runtime, not Franken UI-based.
 - Docs should distinguish implemented behavior from aspirational RFC sections.
-- PostgreSQL/MySQL parity work is intentionally excluded from follow-up implementation tickets unless explicitly reintroduced later.
+- New PostgreSQL/MySQL feature-parity work is intentionally excluded from follow-up implementation tickets unless explicitly reintroduced later. This does not waive verification: changes to existing dual-dialect code must still pass on both MySQL and Postgres (see Agent Rules).
 
 ### File Attachments & Storage
 
