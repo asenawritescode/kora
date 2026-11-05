@@ -98,6 +98,7 @@ func BuildApplication(config ApplicationConfig) (*Application, error) {
 		BinaryVersion: config.BinaryVersion, AnalyticsCache: analyticsCache, RealtimeConnections: realtimeConnections,
 		PublicAppBaseURL: config.PublicAppBaseURL,
 		CloudIdentityURL: config.CloudIdentityURL, CloudIdentityToken: config.CloudIdentityToken,
+		ExtensionTokenCacheTTL: time.Duration(config.Common.ExtensionTokenCacheSeconds) * time.Second,
 	})
 	if err != nil {
 		return nil, err

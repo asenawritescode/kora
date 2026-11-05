@@ -9,8 +9,10 @@ import (
 
 	"github.com/asenawritescode/kora/api"
 	"github.com/asenawritescode/kora/auth"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/email"
+	"github.com/asenawritescode/kora/extension/tokencache"
 	"github.com/asenawritescode/kora/kernel"
 	knet "github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/orm"
@@ -46,6 +48,10 @@ type ApplicationRouteConfig struct {
 	CloudIdentityToken  string
 	AnalyticsCache      *api.AnalyticsQueryCache
 	RealtimeConnections *api.RealtimeConnectionOwner
+
+	// ExtensionTokenCacheTTL caches extension token verification per process;
+	// zero disables it. It bounds cross-replica revocation lag.
+	ExtensionTokenCacheTTL time.Duration
 }
 
 // RegisterApplicationRoutes installs the canonical, compatibility, request,
@@ -76,6 +82,13 @@ func RegisterApplicationRoutes(config ApplicationRouteConfig) (*auth.SessionMana
 		return nil, fmt.Errorf("register Cloud handoff route: %w", err)
 	}
 	siteGuard := auth.NewSiteGuardWithSessionManager(sessionManager)
+	if config.ExtensionTokenCacheTTL > 0 {
+		tokenCache := tokencache.New(tokencache.Config{TTL: config.ExtensionTokenCacheTTL})
+		siteGuard.ExtensionTokens = func(database *sql.DB, dialect kdb.QueryDialect) auth.ExtensionTokenVerifier {
+			return tokenCache.Wrap(auth.OpenSQLExtensionTokens(database, dialect))
+		}
+		siteGuard.ExtensionTokensChanged = tokenCache.InvalidateSite
+	}
 
 	apiGroup := config.Router.Group("/api/v1")
 	apiGroup.Use(siteGuard.Middleware(false))
