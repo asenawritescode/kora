@@ -194,19 +194,21 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 	if reg == nil {
 		return ErrPermission
 	}
-	// A published module operation has already been authorized against its
-	// module resource before the owner command is dispatched.  For
-	// command-owned records, the verified module execution is the authority at
-	// this boundary; requiring the caller to also hold private record CRUD
-	// permission would either reject first-party extensions or create a CRUD
-	// bypass around module ownership.  Non-module-owned steps still use the
-	// ordinary permission matrix below.
-	moduleCommandAuthorized := dyn != nil && dynamicCommandTouchesCommandOnly(reg, dyn)
+	// A published operation called through its verified module execution runs
+	// with the operation's authority: the caller's operation grant is checked
+	// once, then steps on records the command's owner module owns (any mode)
+	// or that no module owns skip the caller's matrix. Records owned by
+	// another module keep their protection. Without a verified execution
+	// (direct kernel route, scripts) every step uses the actor's matrix.
+	moduleCommandAuthorized := validPublishedExecution(op.Context.ModuleExecution, op, reg, dyn)
 	if moduleCommandAuthorized {
 		resource := "module." + string(dyn.ModuleOwnerID) + ".operation." + dyn.Operation
 		if _, authErr := policy.DecideForBusinessScope(op.Context.Execution, reg, resource, "write", op.Context.BusinessScope, op.Context.BusinessScope.Kind == contract.ScopeKindLegalEntity); authErr != nil {
 			return authErr
 		}
+	}
+	operationAuthority := func(dt *doctype.DocType) bool {
+		return moduleCommandAuthorized && (dt.ModuleOwnerID == "" || contract.ModuleID(dt.ModuleOwnerID) == dyn.ModuleOwnerID)
 	}
 	for _, step := range dyn.Steps {
 		if alias, ok := iteratedGuardAlias(step); ok {
@@ -214,7 +216,7 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if dt == nil {
 				return contract.NewError(contract.CodeNotFound, "for_each guard record not found")
 			}
-			if !(moduleCommandAuthorized && dt.ModuleOwnershipMode == string(contract.MutationCommands)) {
+			if !operationAuthority(dt) {
 				if _, err := decideOperationResource(op, reg, dt, "read"); err != nil {
 					return err
 				}
@@ -230,7 +232,7 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if dt == nil {
 				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", step.Create.Record))
 			}
-			if moduleCommandAuthorized && dt.ModuleOwnershipMode == string(contract.MutationCommands) {
+			if operationAuthority(dt) {
 				continue
 			}
 			if _, err := decideOperationResource(stepOp, reg, dt, "create"); err != nil {
@@ -244,7 +246,7 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if dt.AppendOnly {
 				return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
 			}
-			if moduleCommandAuthorized && dt.ModuleOwnershipMode == string(contract.MutationCommands) {
+			if operationAuthority(dt) {
 				continue
 			}
 			if _, err := decideOperationResource(stepOp, reg, dt, "write"); err != nil {
@@ -268,8 +270,14 @@ func dynamicCommandTouchesCommandOnly(reg *doctype.Registry, command *CommandRes
 	return false
 }
 
+// validPublishedExecution reports whether execution is a verified, sealed
+// module execution of this published command for its own owner module.
+func validPublishedExecution(execution *contract.ModuleExecution, op Operation, reg *doctype.Registry, command *CommandResource) bool {
+	return validDynamicBase(execution, op, reg, command) && execution.OwnerModuleID == command.ModuleOwnerID
+}
+
 func validDynamicModuleExecution(execution *contract.ModuleExecution, op Operation, reg *doctype.Registry, command *CommandResource) bool {
-	if execution == nil || !execution.Verified() || execution.TenantID != op.Context.TenantID || execution.Scope != op.Context.BusinessScope || execution.AuthorizedCommand != op.Command || execution.AllowedOperation != op.Command || command == nil || command.FullName() != op.Command || command.ModuleOwnerID == "" || command.Capability == "" || command.Operation == "" || command.InputSchema.ID == "" || command.InputSchema.Version == 0 || command.OutputSchema.ID == "" || command.OutputSchema.Version == 0 || reg == nil {
+	if !validDynamicBase(execution, op, reg, command) {
 		return false
 	}
 	protected := false
@@ -286,6 +294,10 @@ func validDynamicModuleExecution(execution *contract.ModuleExecution, op Operati
 		}
 	}
 	return protected
+}
+
+func validDynamicBase(execution *contract.ModuleExecution, op Operation, reg *doctype.Registry, command *CommandResource) bool {
+	return execution != nil && execution.Verified() && execution.TenantID == op.Context.TenantID && execution.Scope == op.Context.BusinessScope && execution.AuthorizedCommand == op.Command && execution.AllowedOperation == op.Command && command != nil && command.FullName() == op.Command && command.ModuleOwnerID != "" && command.Capability != "" && command.Operation != "" && command.InputSchema.ID != "" && command.InputSchema.Version != 0 && command.OutputSchema.ID != "" && command.OutputSchema.Version != 0 && reg != nil
 }
 
 func validModuleExecution(execution *contract.ModuleExecution, op Operation, reg *doctype.Registry) bool {
