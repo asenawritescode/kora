@@ -5,16 +5,35 @@ permission: create
 input:
   record: Sale
 require:
+  - lock:
+      record: Sale
+      name: $input.return_against
   - exists:
       record: Sale
       where:
         name: $input.return_against
+        register: $input.register
         status: Paid
     as: original
     message: Only a paid sale can be returned
+  - exists:
+      record: Register
+      where:
+        name: $input.register
+        location: $input.location
+    message: Register does not belong to this location
 compute:
   total: {sum: $input.items, expr: "quantity * unit_price"}
 transaction:
+  - for_each: $input.items
+    update:
+      record: Sale Line Balance
+      where:
+        sale: $steps.original.name
+        item: $item.item
+        unit_price: $item.unit_price
+      adjust:
+        remaining_quantity: { decrease: $item.quantity, min: "0" }
   - as: ret
     create:
       record: Sale

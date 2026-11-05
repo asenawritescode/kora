@@ -100,3 +100,21 @@
   write: false
   create: false
   delete: false
+- doctype: Sale Line Balance
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale Line Balance
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale Line Balance
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
