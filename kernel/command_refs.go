@@ -126,6 +126,12 @@ func (c *CommandResource) validateStepReferences() error {
 		if step.Update != nil {
 			values = step.Update.Values
 			refs = append(refs, step.Update.Name)
+			for _, ref := range step.Update.Where {
+				refs = append(refs, ref)
+			}
+			for _, change := range step.Update.Adjust {
+				refs = append(refs, change.Increase, change.Decrease)
+			}
 		}
 		for _, ref := range values {
 			refs = append(refs, ref)

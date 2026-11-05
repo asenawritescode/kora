@@ -72,10 +72,14 @@ type StepCreate struct {
 }
 
 type StepUpdate struct {
-	Record string            `yaml:"record"        json:"record"`
-	Name   string            `yaml:"name"          json:"name"` // "$input.field" reference
+	Record string `yaml:"record"        json:"record"`
+	Name   string `yaml:"name"          json:"name"` // "$input.field" reference
+	// Where finds the single target by declared fields when Name is not set.
+	Where  map[string]string `yaml:"where,omitempty" json:"where,omitempty"`
 	Scope  string            `yaml:"business_scope" json:"business_scope,omitempty"`
 	Values map[string]string `yaml:"values"         json:"values"`
+	// Adjust changes numeric fields relative to their stored value.
+	Adjust map[string]FieldAdjust `yaml:"adjust,omitempty" json:"adjust,omitempty"`
 }
 
 // ParseCommandResource parses one command definition from YAML bytes with
@@ -114,8 +118,16 @@ func (c *CommandResource) validate() error {
 				return fmt.Errorf("command %q: step %d create requires record and values", c.Name, i)
 			}
 		case s.Update != nil:
-			if s.Update.Record == "" || s.Update.Name == "" || len(s.Update.Values) == 0 {
-				return fmt.Errorf("command %q: step %d update requires record, name ref, values", c.Name, i)
+			if s.Update.Record == "" || (s.Update.Name == "") == (len(s.Update.Where) == 0) || len(s.Update.Values)+len(s.Update.Adjust) == 0 {
+				return fmt.Errorf("command %q: step %d update requires record, exactly one of name or where, and values or adjust", c.Name, i)
+			}
+			for field, change := range s.Update.Adjust {
+				if _, set := s.Update.Values[field]; set {
+					return fmt.Errorf("command %q: step %d sets and adjusts %q", c.Name, i, field)
+				}
+				if err := change.validate(); err != nil {
+					return fmt.Errorf("command %q: step %d %s: %w", c.Name, i, field, err)
+				}
 			}
 		default:
 			return fmt.Errorf("command %q: step %d has neither create nor update", c.Name, i)
