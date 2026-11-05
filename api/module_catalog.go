@@ -135,7 +135,8 @@ func (h *Handler) buildApplicationCatalog(c *gin.Context, execution policy.Execu
 			if _, exists := plan.QueryDefinitions[plugin.PublishedQueryKey{Scope: scope, OwnerModuleID: owner, Name: query.Name}]; !exists {
 				continue
 			}
-			catalog.PublishedQueries = append(catalog.PublishedQueries, contract.ApplicationCatalogQuery{OwnerModuleID: owner, Name: query.Name, Capability: query.Capability, Route: "/api/v1/modules/" + string(owner) + "/queries/" + query.Name, InputSchema: query.InputSchema, OutputSchema: query.OutputSchema, ScopePolicy: query.ScopePolicy, AllowedFields: append([]string(nil), query.AllowedFields...), PageLimit: query.PageLimit, Presentation: query.Presentation, OfflineEligible: plan.CanReplayPublishedQueryOfflineForActor(scope, owner, query.Name, actorScope), OfflineFactKey: query.OfflineFactKey, ReferenceLookup: query.ReferenceLookup})
+			offlineEligible := plan.CanReplayPublishedQueryOfflineForActor(scope, owner, query.Name, actorScope)
+			catalog.PublishedQueries = append(catalog.PublishedQueries, contract.ApplicationCatalogQuery{OwnerModuleID: owner, Name: query.Name, Capability: query.Capability, Route: "/api/v1/modules/" + string(owner) + "/queries/" + query.Name, InputSchema: query.InputSchema, OutputSchema: query.OutputSchema, ScopePolicy: query.ScopePolicy, AllowedFields: append([]string(nil), query.AllowedFields...), PageLimit: query.PageLimit, Presentation: query.Presentation, OfflineEligible: offlineEligible, OfflineFactKey: catalogOfflineFactKey(query.OfflineFactKey, offlineEligible), ReferenceLookup: query.ReferenceLookup})
 			visibleQueries[contract.PublishedOperationRef(owner, query.Capability, query.Operation)] = true
 			moduleVisible = true
 			usedSchemas[query.InputSchema], usedSchemas[query.OutputSchema] = true, true
@@ -265,4 +266,13 @@ func downgradeUnreachableLineEntry(catalog *contract.ApplicationCatalog, visible
 			p.Layout, p.LineEntry = "form", nil
 		}
 	}
+}
+
+// catalogOfflineFactKey exposes the fact key only for offline-eligible queries;
+// the catalog contract rejects online-only queries that declare one.
+func catalogOfflineFactKey(key string, eligible bool) string {
+	if !eligible {
+		return ""
+	}
+	return key
 }
