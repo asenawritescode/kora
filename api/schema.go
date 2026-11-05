@@ -22,7 +22,13 @@ func FieldToJSONSchema(f *doctype.Field) map[string]any {
 		schema["format"] = "int64"
 	case "Float", "Currency", "Percent":
 		schema["type"] = "number"
-		schema["format"] = "double"
+		schema["format"] = "decimal"
+		if f.Precision != nil {
+			schema["x-kora-precision"] = *f.Precision
+		}
+		if f.Fieldtype == "Currency" && f.Options != "" {
+			schema["x-kora-currency-field"] = f.Options
+		}
 	case "Check":
 		schema["type"] = "boolean"
 	case "Date":

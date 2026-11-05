@@ -208,6 +208,7 @@ type Field struct {
 	Computed                 string                  `yaml:"computed"            json:"computed,omitempty"`
 	DependencyScope          string                  `yaml:"dependency_scope"    json:"dependency_scope,omitempty"`
 	Accept                   string                  `yaml:"accept"              json:"accept,omitempty"`
+	Precision                *int                    `yaml:"precision,omitempty" json:"precision,omitempty"`
 	ReferenceRule            *contract.ReferenceRule `yaml:"reference_rule,omitempty" json:"reference_rule,omitempty"`
 	HistoricalSnapshotSchema *contract.SchemaRef     `yaml:"historical_snapshot_schema,omitempty" json:"historical_snapshot_schema,omitempty"`
 }

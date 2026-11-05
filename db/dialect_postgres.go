@@ -555,6 +555,7 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_field" ADD COLUMN "linked_field" VARCHAR(255) NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_field" ADD COLUMN "computed" TEXT`,
 		`ALTER TABLE "_kora_field" ADD COLUMN "accept" TEXT`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "field_precision" INTEGER`,
 		`ALTER TABLE "_kora_field" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS "idx_parent" ON "_kora_field" ("parent")`,
 		`CREATE INDEX IF NOT EXISTS "idx_parent_fieldname" ON "_kora_field" ("parent", "fieldname")`,

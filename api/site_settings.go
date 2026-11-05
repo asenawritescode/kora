@@ -8,12 +8,33 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// SupportedCurrencies is intentionally small and explicit. Currency affects
-// financial display across a tenant, so arbitrary values must not reach the UI.
-var SupportedCurrencies = map[string]struct{}{
-	"AUD": {}, "CAD": {}, "CHF": {}, "CNY": {}, "EUR": {}, "GBP": {},
-	"GHS": {}, "INR": {}, "JPY": {}, "KES": {}, "NGN": {}, "RWF": {},
-	"TZS": {}, "UGX": {}, "USD": {}, "ZAR": {},
+// SupportedCurrencies maps each allowed tenant currency to its ISO 4217 minor
+// units (decimal places). Currency affects financial display across a tenant,
+// so arbitrary values must not reach the UI.
+var SupportedCurrencies = map[string]int{
+	"AUD": 2, "CAD": 2, "CHF": 2, "CNY": 2, "EUR": 2, "GBP": 2,
+	"GHS": 2, "INR": 2, "JPY": 0, "KES": 2, "NGN": 2, "RWF": 0,
+	"TZS": 2, "UGX": 0, "USD": 2, "ZAR": 2,
+}
+
+const defaultTenantCurrency = "KES"
+
+// tenantCurrency returns the site's configured currency, or the default when
+// none is stored.
+func (h *Handler) tenantCurrency(c *gin.Context) (string, error) {
+	var stored string
+	err := h.siteTx(c).DB.QueryRow(
+		h.siteQuery(c, "SELECT setting_value FROM _kora_site_setting WHERE site = ? AND setting_key = ?"),
+		c.GetString("site_name"), "currency",
+	).Scan(&stored)
+	if err == sql.ErrNoRows || err == nil && stored == "" {
+		return defaultTenantCurrency, nil
+	}
+	return stored, err
+}
+
+func currencySettings(currency string) map[string]any {
+	return map[string]any{"currency": currency, "currency_precision": SupportedCurrencies[currency]}
 }
 
 type siteSettingsRequest struct {
@@ -23,20 +44,12 @@ type siteSettingsRequest struct {
 // HandleSiteSettings returns safe, non-secret settings for the current site.
 // GET /api/system/settings
 func (h *Handler) HandleSiteSettings(c *gin.Context) {
-	site := c.GetString("site_name")
-	currency := "KES"
-	var stored string
-	err := h.siteTx(c).DB.QueryRow(
-		h.siteQuery(c, "SELECT setting_value FROM _kora_site_setting WHERE site = ? AND setting_key = ?"),
-		site, "currency",
-	).Scan(&stored)
-	if err == nil && stored != "" {
-		currency = stored
-	} else if err != nil && err != sql.ErrNoRows {
+	currency, err := h.tenantCurrency(c)
+	if err != nil {
 		internalError(c, "reading site settings", err)
 		return
 	}
-	c.JSON(http.StatusOK, Response{Data: map[string]string{"currency": currency}})
+	c.JSON(http.StatusOK, Response{Data: currencySettings(currency)})
 }
 
 // HandleSiteSettingsUpdate updates tenant-scoped settings. Settings are kept
@@ -64,5 +77,5 @@ func (h *Handler) HandleSiteSettingsUpdate(c *gin.Context) {
 		internalError(c, "saving site settings", err)
 		return
 	}
-	c.JSON(http.StatusOK, Response{Data: map[string]string{"currency": currency}})
+	c.JSON(http.StatusOK, Response{Data: currencySettings(currency)})
 }

@@ -63,3 +63,25 @@ func TestDecimalDefaultsAreExact(t *testing.T) {
 		t.Fatalf("invalid default = %#v, want nil", got)
 	}
 }
+
+func TestCanonicalizeDecimalRoundsToFieldPrecision(t *testing.T) {
+	two, zero := 2, 0
+	for _, tt := range []struct {
+		field doctype.Field
+		in    any
+		want  json.Number
+	}{
+		{doctype.Field{Fieldname: "total", Fieldtype: "Currency", Precision: &two}, "10.005", "10.01"},
+		{doctype.Field{Fieldname: "total", Fieldtype: "Currency", Precision: &two}, -10.005, "-10.01"},
+		{doctype.Field{Fieldname: "yen", Fieldtype: "Currency", Precision: &zero}, "1500.5", "1501"},
+		{doctype.Field{Fieldname: "qty", Fieldtype: "Float"}, "0.123456789", "0.123456789"},
+	} {
+		doc := doctype.NewDocument("Thing")
+		if _, err := canonicalizeDecimal(doc, tt.field, tt.in); err != nil {
+			t.Fatal(err)
+		}
+		if got := doc.Get(tt.field.Fieldname); got != tt.want {
+			t.Fatalf("%v -> %#v, want %s", tt.in, got, tt.want)
+		}
+	}
+}
