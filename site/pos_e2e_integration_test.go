@@ -316,23 +316,46 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		o, _ := s["output"].(map[string]any)
 		return fmt.Sprint(o["reference"])
 	}
-	void := func(sale string) *contract.Error {
-		raw, _ := json.Marshal(map[string]any{"data": map[string]any{"sale": sale, "shift": shiftName, "till_session": till, "location": loc, "items": one}})
+	voidAt := func(sale, location string, extra map[string]any) *contract.Error {
+		data := map[string]any{"sale": sale, "shift": shiftName, "till_session": till, "register": register, "location": location}
+		for k, v := range extra {
+			data[k] = v
+		}
+		raw, _ := json.Marshal(map[string]any{"data": data})
 		_, cerr := k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.void_sale", Payload: raw, Context: kernel.OperationContext{
 			Site: siteName, User: "Administrator", Roles: []string{doctype.AdminRole}, Actor: actor,
 			Execution: execution, TenantID: contract.TenantID(siteName), Source: kernel.SourceIntegration,
 		}})
 		return cerr
 	}
+	void := func(sale string) *contract.Error { return voidAt(sale, loc, nil) }
 	s3 := newSale()
 	if got := stock(bread); got != 2 {
 		t.Fatalf("bread after sale = %v, want 2", got)
 	}
-	if cerr := void(s3); cerr != nil {
+	teaBefore := stock(tea)
+	if cerr := voidAt(s3, "no-such-location", nil); cerr == nil {
+		t.Fatal("void with a location outside the register must be refused")
+	}
+	if got := stock(bread); got != 2 {
+		t.Fatalf("bread after refused void = %v, want 2", got)
+	}
+	// Forged input lines are ignored: only the stored lines restock.
+	forged := map[string]any{"items": []map[string]any{{"item": tea, "quantity": 50, "unit_price": 1, "amount": 50}}}
+	if cerr := voidAt(s3, loc, forged); cerr != nil {
 		t.Fatalf("void open: %+v", cerr)
 	}
 	if got := stock(bread); got != 3 {
-		t.Fatalf("bread after void = %v, want 3", got)
+		t.Fatalf("bread after void = %v, want 3 (stored line)", got)
+	}
+	if got := stock(tea); got != teaBefore {
+		t.Fatalf("tea after forged void = %v, want %v", got, teaBefore)
+	}
+	if cerr := void(s3); cerr == nil {
+		t.Fatal("second void must be refused")
+	}
+	if got := stock(bread); got != 3 {
+		t.Fatalf("bread after second void = %v, want 3", got)
 	}
 	if st := scalar("SELECT status FROM "+table("Sale")+" WHERE name = ?", s3); st != "Void" {
 		t.Fatalf("status = %s", st)
