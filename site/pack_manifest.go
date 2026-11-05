@@ -377,8 +377,8 @@ func validatePackFileSyntax(file PackFile) error {
 		}
 		return nil
 	case "pack":
-		if file.Path != packFileName {
-			return fmt.Errorf("content type pack requires path %s", packFileName)
+		if !isPackManifestPath(file.Path) {
+			return fmt.Errorf("content type pack requires path %s or components/<ns>/%s", packFileName, packFileName)
 		}
 		return nil // parsed and name-checked by ParseConfigPack
 	default:
