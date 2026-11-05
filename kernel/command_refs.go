@@ -102,7 +102,7 @@ func resolveEnvStringRef(ref string, env refEnv) (string, error) {
 
 // expandCommandSteps turns each for_each step into one instance per element
 // of its input list. Elements must be objects.
-func expandCommandSteps(steps []CommandStep, input map[string]any, rows map[string][]map[string]any) ([]stepInstance, error) {
+func expandCommandSteps(steps []CommandStep, env refEnv, rows map[string][]map[string]any) ([]stepInstance, error) {
 	out := make([]stepInstance, 0, len(steps))
 	for i, step := range steps {
 		if step.ForEach == "" {
@@ -115,7 +115,7 @@ func expandCommandSteps(steps []CommandStep, input map[string]any, rows map[stri
 				list = append(list, row)
 			}
 		} else {
-			value, err := resolveEnvRef(step.ForEach, refEnv{input: input})
+			value, err := resolveEnvRef(step.ForEach, refEnv{input: env.input})
 			if err != nil {
 				return nil, fmt.Errorf("step %d: %w", i, err)
 			}
@@ -123,18 +123,47 @@ func expandCommandSteps(steps []CommandStep, input map[string]any, rows map[stri
 				return nil, fmt.Errorf("step %d: for_each %q must resolve to a list", i, step.ForEach)
 			}
 		}
+		want, err := resolveWhere(step.Where, env)
+		if err != nil {
+			return nil, fmt.Errorf("step %d: where: %w", i, err)
+		}
 		for _, element := range list {
 			item, ok := element.(map[string]any)
 			if !ok {
 				return nil, fmt.Errorf("step %d: for_each %q elements must be objects", i, step.ForEach)
 			}
-			out = append(out, stepInstance{index: i, step: step, item: item})
+			if matchesWhere(item, want) {
+				out = append(out, stepInstance{index: i, step: step, item: item})
+			}
 		}
 		if len(out) > MaxCommandStepInstances {
 			return nil, fmt.Errorf("command expands to more than %d writes", MaxCommandStepInstances)
 		}
 	}
 	return out, nil
+}
+
+func resolveWhere(where map[string]string, env refEnv) (map[string]any, error) {
+	want := make(map[string]any, len(where))
+	for field, ref := range where {
+		v, err := resolveEnvRef(ref, refEnv{input: env.input, steps: env.steps, computed: env.computed, now: env.now, actor: env.actor})
+		if err != nil {
+			return nil, err
+		}
+		want[field] = v
+	}
+	return want, nil
+}
+
+// matchesWhere reports whether every wanted field equals the element's value.
+func matchesWhere(item, want map[string]any) bool {
+	for field, v := range want {
+		got, ok := item[field]
+		if !ok || fmt.Sprint(got) != fmt.Sprint(v) {
+			return false
+		}
+	}
+	return true
 }
 
 // validateStepReferences checks, at load time, that every reference names a
@@ -155,7 +184,16 @@ func (c *CommandResource) validateStepReferences() error {
 				return fmt.Errorf("command %q: step %d for_each must reference $input or a require alias's table field", c.FullName(), i)
 			}
 		}
+		if len(step.Where) > 0 && step.ForEach == "" {
+			return fmt.Errorf("command %q: step %d where requires for_each", c.FullName(), i)
+		}
 		refs := []string{}
+		for _, ref := range step.Where {
+			if strings.HasPrefix(ref, "$item.") {
+				return fmt.Errorf("command %q: step %d where cannot use %q", c.FullName(), i, ref)
+			}
+			refs = append(refs, ref)
+		}
 		var values map[string]string
 		if step.Create != nil {
 			values = step.Create.Values
