@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/db"
 )
+
+// ErrTooManyGroups is the code reported when an aggregate query yields more than limit groups.
+const ErrTooManyGroups = "query.too_many_groups"
 
 // ErrInputInvalid is the code reported (HTTP 400) for bad call input.
 const ErrInputInvalid = "query.input_invalid"
@@ -146,6 +150,9 @@ func (b *builder) keyset(sorts []Sort) (string, error) {
 // len(sort) selected columns are cursor values.
 func Build(d *Definition, dialect db.Dialect, req Request) (string, []any, []Sort, error) {
 	b := &builder{d: dialect, req: req}
+	if len(d.Aggregates) > 0 {
+		return buildAggregate(b, d)
+	}
 	sorts := append([]Sort{}, d.Sort...)
 	sorts = append(sorts, Sort{Field: "name", Dir: "asc"})
 	cols := make([]string, 0, len(d.Fields)+len(sorts))
@@ -204,6 +211,9 @@ func Run(ctx context.Context, conn *sql.DB, dialect db.Dialect, d *Definition, r
 	if err != nil {
 		return nil, err
 	}
+	if len(d.Aggregates) > 0 {
+		return runAggregate(ctx, conn, d, q, args)
+	}
 	rs, err := conn.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query %s: %w", d.Name, err)
@@ -238,4 +248,109 @@ func Run(ctx context.Context, conn *sql.DB, dialect db.Dialect, d *Definition, r
 		lastCursor = vals[len(d.Fields):]
 	}
 	return page, rs.Err()
+}
+
+// buildAggregate renders the grouped SELECT; filters, owner and scope apply before GROUP BY.
+func buildAggregate(b *builder, d *Definition) (string, []any, []Sort, error) {
+	if b.req.Cursor != nil {
+		return "", nil, nil, fmt.Errorf("%s: aggregate queries take no cursor", ErrInputInvalid)
+	}
+	q := b.d
+	var cols, group []string
+	for _, g := range d.GroupBy {
+		cols = append(cols, q.QuoteIdent(g))
+		group = append(group, q.QuoteIdent(g))
+	}
+	for _, a := range d.Aggregates {
+		if a.Fn == "count" {
+			cols = append(cols, "COUNT(*)")
+		} else {
+			cols = append(cols, "COALESCE(SUM("+q.QuoteIdent(a.Field)+"), 0)")
+		}
+	}
+	var where []string
+	for _, f := range d.Filters {
+		s, ok, err := b.filter(f)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		if ok {
+			where = append(where, s)
+		}
+	}
+	if d.OwnerField != "" && !b.req.FullRead {
+		where = append(where, q.QuoteIdent(d.OwnerField)+" = "+b.bind(b.req.Actor))
+	}
+	if b.req.ScopeField != "" {
+		where = append(where, q.QuoteIdent(b.req.ScopeField)+" = "+b.bind(b.req.ScopeValue))
+	}
+	sql := "SELECT " + strings.Join(cols, ", ") + " FROM " + q.QuoteIdent(d.Source)
+	if len(where) > 0 {
+		sql += " WHERE " + strings.Join(where, " AND ")
+	}
+	sorts := d.Sort
+	if len(sorts) == 0 {
+		for _, g := range d.GroupBy {
+			sorts = append(sorts, Sort{Field: g, Dir: "asc"})
+		}
+	}
+	if len(group) > 0 {
+		order := make([]string, len(sorts))
+		for i, s := range sorts {
+			order[i] = q.QuoteIdent(s.Field) + " " + strings.ToUpper(orDefault(s.Dir, "asc"))
+		}
+		sql += " GROUP BY " + strings.Join(group, ", ") + " ORDER BY " + strings.Join(order, ", ")
+	}
+	sql += fmt.Sprintf(" LIMIT %d", d.Limit+1)
+	return db.Rebind(q, sql), b.args, sorts, nil
+}
+
+func runAggregate(ctx context.Context, conn *sql.DB, d *Definition, q string, args []any) (*Page, error) {
+	rs, err := conn.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query %s: %w", d.Name, err)
+	}
+	defer rs.Close()
+	n := len(d.Fields)
+	page := &Page{}
+	for rs.Next() {
+		vals := make([]any, n)
+		ptrs := make([]any, n)
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rs.Scan(ptrs...); err != nil {
+			return nil, fmt.Errorf("query %s: %w", d.Name, err)
+		}
+		if len(page.Rows) == d.Limit {
+			return nil, fmt.Errorf("%s: query %s has more than %d groups", ErrTooManyGroups, d.Name, d.Limit)
+		}
+		row := make(map[string]any, n)
+		for i, f := range d.Fields {
+			row[f] = aggValue(d, i, vals[i])
+		}
+		page.Rows = append(page.Rows, row)
+	}
+	return page, rs.Err()
+}
+
+// aggValue keeps count as an integer and sums as exact decimal text.
+func aggValue(d *Definition, i int, v any) any {
+	k := i - len(d.GroupBy)
+	if k < 0 {
+		if bs, ok := v.([]byte); ok {
+			return string(bs)
+		}
+		return v
+	}
+	if d.Aggregates[k].Fn == "count" {
+		return v
+	}
+	switch x := v.(type) {
+	case []byte:
+		return string(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	}
+	return fmt.Sprint(v)
 }
