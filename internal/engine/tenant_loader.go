@@ -26,14 +26,16 @@ import (
 // never closes those borrowed resources.
 func LoadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.CommonConfig, reusable *knet.LoadedSite, binaryVersion string) (runtime *knet.LoadedSite, err error) {
 	return loadTenantRuntime(ctx, info, common, reusable, binaryVersion, tenantRuntimeDependencies{
-		connect:   site.Connect,
-		bootstrap: site.BootstrapSystemTables,
+		connect:    site.Connect,
+		bootstrap:  site.BootstrapSystemTables,
+		claimOwner: site.ClaimDatabaseOwner,
 	})
 }
 
 type tenantRuntimeDependencies struct {
-	connect   func(*site.SiteConfig) (*sql.DB, error)
-	bootstrap func(*sql.DB, kdb.Dialect) error
+	connect    func(*site.SiteConfig) (*sql.DB, error)
+	bootstrap  func(*sql.DB, kdb.Dialect) error
+	claimOwner func(context.Context, *sql.DB, kdb.Dialect, string) error
 }
 
 func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.CommonConfig, reusable *knet.LoadedSite, binaryVersion string, dependencies tenantRuntimeDependencies) (runtime *knet.LoadedSite, err error) {
@@ -88,6 +90,13 @@ func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 	phase.End()
 	if err != nil {
 		return nil, fmt.Errorf("bootstrapping system tables: %w", err)
+	}
+	// LibSQL tenants all resolve to the shared DB_DSN database and its business
+	// tables are not tenant-prefixed, so only one tenant may own it.
+	if siteCfg.DBType == "libsql" && dependencies.claimOwner != nil {
+		if err = dependencies.claimOwner(ctx, database, dialect, info.SiteID); err != nil {
+			return nil, fmt.Errorf("claiming tenant database: %w", err)
+		}
 	}
 	_, phase = tracer.Start(ctx, "engine.tenant.load_config")
 	store := configstore.NewStore(database, dialect)

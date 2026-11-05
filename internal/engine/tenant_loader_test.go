@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -79,5 +80,45 @@ func TestLoadTenantRuntimeNeverClosesBorrowedDBOnFailedReplacement(t *testing.T)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLoadTenantRuntimeRefusesSecondTenantOnSharedLibSQL(t *testing.T) {
+	tests := []struct {
+		name      string
+		dbType    string
+		wantClaim bool
+	}{
+		{name: "libsql tenant must claim the shared database", dbType: "libsql", wantClaim: true},
+		{name: "mysql tenant has its own database", dbType: "mysql", wantClaim: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			database, _, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			claimed := ""
+			_, err = loadTenantRuntime(context.Background(), site.DBSiteInfo{SiteID: "tenant-b", Name: "b.example", DBType: tt.dbType, DBHost: "libsql://shared.example", DBName: "tenant_b"}, nil, nil, "test-version", tenantRuntimeDependencies{
+				connect:   func(*site.SiteConfig) (*sql.DB, error) { return database, nil },
+				bootstrap: func(*sql.DB, kdb.Dialect) error { return nil },
+				claimOwner: func(_ context.Context, _ *sql.DB, _ kdb.Dialect, tenantID string) error {
+					claimed = tenantID
+					return fmt.Errorf("%w: owned by tenant-a", site.ErrDatabaseOwnedByAnotherTenant)
+				},
+			})
+			if tt.wantClaim {
+				if claimed != "tenant-b" {
+					t.Fatalf("claimed tenant = %q, want tenant-b", claimed)
+				}
+				if !errors.Is(err, site.ErrDatabaseOwnedByAnotherTenant) {
+					t.Fatalf("LoadTenantRuntime error = %v, want ownership refusal", err)
+				}
+				return
+			}
+			if claimed != "" {
+				t.Fatalf("mysql tenant unexpectedly claimed database as %q", claimed)
+			}
+		})
 	}
 }
