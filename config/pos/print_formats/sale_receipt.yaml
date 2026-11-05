@@ -1,0 +1,34 @@
+name: sale_receipt
+for: {operation: pos.record_sale, doc: Sale}
+paper: thermal_80
+text: |
+  {{ center (upper .tenant.name) }}
+  {{ center (date .now) }}
+  {{ line }}
+  Receipt: {{ .doc.name }}
+  {{ line }}
+  {{- range .doc.items }}
+  {{ left 24 .item }}{{ right 6 (num .quantity) }}{{ right 18 (money .amount) }}
+  {{- end }}
+  {{ line }}
+  {{ left 24 "TOTAL" }}{{ right 24 (money .doc.total) }}
+  {{- range .doc.payments }}
+  {{ left 24 .method }}{{ right 24 (money .amount) }}
+  {{- end }}
+  {{ line }}
+  {{ center "Thank you" }}
+html: |
+  <article class="receipt">
+    <h1>{{ .tenant.name }}</h1>
+    <p>Receipt {{ .doc.name }} &middot; {{ date .now }}</p>
+    <table>
+      {{- range .doc.items }}
+      <tr><td>{{ .item }}</td><td>{{ num .quantity }}</td><td>{{ money .amount }}</td></tr>
+      {{- end }}
+    </table>
+    <p><strong>Total {{ money .doc.total }}</strong></p>
+    {{- range .doc.payments }}
+    <p>{{ .method }} {{ money .amount }}</p>
+    {{- end }}
+    <p>Thank you</p>
+  </article>
