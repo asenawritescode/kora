@@ -270,4 +270,58 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	if len(low.Rows) != 1 || fmt.Sprint(low.Rows[0]["item"]) != bread {
 		t.Fatalf("low_stock = %v, want only bread (3 <= 4)", low.Rows)
 	}
+
+	// Return restocks; void restocks only while the shift is open.
+	stock := func(item string) float64 {
+		return num("SELECT quantity FROM "+table("Stock Balance")+" WHERE item = ?", item)
+	}
+	one := []map[string]any{{"item": bread, "quantity": 1, "unit_price": 50, "amount": 50}}
+	ret := run("pos.return_sale", map[string]any{"data": map[string]any{
+		"register": register, "till_session": till, "location": loc, "return_against": ref,
+		"items":    []map[string]any{{"item": tea, "quantity": 1, "unit_price": 100, "amount": 100}},
+		"payments": []map[string]any{{"method": "Cash", "amount": 100}},
+	}})
+	if got := stock(tea); got != 9 {
+		t.Fatalf("tea after return = %v, want 9", got)
+	}
+	if r, _ := ret["output"].(map[string]any); r["refund"] == nil {
+		t.Fatalf("return output has no refund: %v", ret)
+	}
+	newSale := func() string {
+		s := run("pos.record_sale", map[string]any{"data": map[string]any{
+			"register": register, "till_session": till, "location": loc, "items": one,
+			"payments": []map[string]any{{"method": "Cash", "amount": 50}},
+		}})
+		o, _ := s["output"].(map[string]any)
+		return fmt.Sprint(o["reference"])
+	}
+	void := func(sale string) *contract.Error {
+		raw, _ := json.Marshal(map[string]any{"data": map[string]any{"sale": sale, "shift": shiftName, "till_session": till, "location": loc, "items": one}})
+		_, cerr := k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.void_sale", Payload: raw, Context: kernel.OperationContext{
+			Site: siteName, User: "Administrator", Roles: []string{doctype.AdminRole}, Actor: actor,
+			Execution: execution, TenantID: contract.TenantID(siteName), Source: kernel.SourceIntegration,
+		}})
+		return cerr
+	}
+	s3 := newSale()
+	if got := stock(bread); got != 2 {
+		t.Fatalf("bread after sale = %v, want 2", got)
+	}
+	if cerr := void(s3); cerr != nil {
+		t.Fatalf("void open: %+v", cerr)
+	}
+	if got := stock(bread); got != 3 {
+		t.Fatalf("bread after void = %v, want 3", got)
+	}
+	if st := scalar("SELECT status FROM "+table("Sale")+" WHERE name = ?", s3); st != "Void" {
+		t.Fatalf("status = %s", st)
+	}
+	s4 := newSale()
+	run("pos.close_shift", map[string]any{"data": map[string]any{"register": register}})
+	if cerr := void(s4); cerr == nil {
+		t.Fatal("void after shift close must be refused")
+	}
+	if got := stock(bread); got != 2 {
+		t.Fatalf("bread after refused void = %v, want 2", got)
+	}
 }

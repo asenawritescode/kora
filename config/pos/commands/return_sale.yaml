@@ -1,0 +1,49 @@
+name: return_sale
+namespace: pos
+version: 1
+permission: create
+input:
+  record: Sale
+require:
+  - exists:
+      record: Sale
+      where:
+        name: $input.return_against
+        status: Paid
+    as: original
+    message: Only a paid sale can be returned
+compute:
+  total: {sum: $input.items, expr: "quantity * unit_price"}
+transaction:
+  - as: ret
+    create:
+      record: Sale
+      values:
+        register: $input.register
+        till_session: $input.till_session
+        return_against: $steps.original.name
+        items: $input.items
+        payments: $input.payments
+        status: Return
+  - for_each: $input.items
+    update:
+      record: Stock Balance
+      where:
+        item: $item.item
+        location: $input.location
+      adjust:
+        quantity: { increase: $item.quantity }
+  - for_each: $input.items
+    create:
+      record: Stock Entry
+      values:
+        item: $item.item
+        location: $input.location
+        quantity: $item.quantity
+        entry_type: Receipt
+        remarks: $steps.ret.name
+output:
+  reference: $steps.ret.name
+  refund: $computed.total
+emit:
+  - pos.sale.returned
