@@ -212,6 +212,19 @@ func (d *Definition) validateFilter(f Filter, check func(string, string) error, 
 	if err := check("filters", f.Field); err != nil {
 		return err
 	}
+	if s, ok := f.Value.(string); ok && strings.HasPrefix(s, "$field.") {
+		switch f.Op {
+		case "eq", "ne", "lt", "lte", "gt", "gte":
+		default:
+			return fmt.Errorf("filters: %s not allowed with operator %q", s, f.Op)
+		}
+		if f.Optional {
+			return fmt.Errorf("filters: %s cannot be optional", s)
+		}
+		if err := check("filters", strings.TrimPrefix(s, "$field.")); err != nil {
+			return err
+		}
+	}
 	if s, ok := f.Value.(string); ok && strings.HasPrefix(s, "$input.") {
 		if _, ok := d.Input[strings.TrimPrefix(s, "$input.")]; !ok {
 			return fmt.Errorf("filters: %s references undeclared input", s)

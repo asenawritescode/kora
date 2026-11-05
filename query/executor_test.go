@@ -88,3 +88,42 @@ func TestRunKeysetStableUnderInsert(t *testing.T) {
 		t.Fatalf("page2 %+v %v", p2, err)
 	}
 }
+
+func TestFieldRefFilter(t *testing.T) {
+	conn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Skip(err)
+	}
+	conn.SetMaxOpenConns(1)
+	if _, err := conn.Exec("CREATE TABLE `Purchase Request` (name TEXT, title TEXT, modified TEXT, owner TEXT, qty INT, lvl INT)"); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []struct {
+		n    string
+		q, l int
+	}{{"A", 1, 5}, {"B", 5, 5}, {"C", 9, 5}} {
+		if _, err := conn.Exec("INSERT INTO `Purchase Request` VALUES (?,?,?,?,?,?)", r.n, "t", r.n, "u", r.q, r.l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fl := []Filter{
+		{Field: "qty", Op: "lte", Value: "$field.lvl"},
+		{Any: []Filter{{Field: "name", Op: "ne", Value: "$input.search"}}},
+	}
+	d := def(fl)
+	d.Limit = 10
+	req := Request{FullRead: true, Input: map[string]any{"search": "B"}}
+	q, args, _, err := Build(d, db.Resolve("libsql"), req)
+	if err != nil || !strings.Contains(q, `"qty" <= "lvl"`) || len(args) != 1 || args[0] != "B" {
+		t.Fatalf("q=%s args=%v err=%v", q, args, err)
+	}
+	p, err := Run(context.Background(), conn, db.Resolve("libsql"), d, req)
+	if err != nil || len(p.Rows) != 1 || p.Rows[0]["name"] != "A" {
+		t.Fatalf("rows %+v %v", p.Rows, err)
+	}
+	req.Input = nil
+	d.Filters = fl[:1]
+	if p, err = Run(context.Background(), conn, db.Resolve("libsql"), d, req); err != nil || len(p.Rows) != 2 {
+		t.Fatalf("rows %+v %v", p.Rows, err)
+	}
+}

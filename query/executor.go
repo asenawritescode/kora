@@ -62,6 +62,14 @@ var likeEscaper = strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
 
 // leaf renders one comparison; ok=false means an optional input was absent.
 func (b *builder) leaf(f Filter) (string, bool, error) {
+	if s, ok := f.Value.(string); ok && strings.HasPrefix(s, "$field.") {
+		ops := map[string]string{"eq": "=", "ne": "<>", "lt": "<", "lte": "<=", "gt": ">", "gte": ">="}
+		op, ok := ops[f.Op]
+		if !ok {
+			return "", false, fmt.Errorf("%s: $field needs a comparison operator", ErrInputInvalid)
+		}
+		return b.d.QuoteIdent(f.Field) + " " + op + " " + b.d.QuoteIdent(strings.TrimPrefix(s, "$field.")), true, nil
+	}
 	v, present, err := b.value(f.Value)
 	if err != nil {
 		return "", false, err
