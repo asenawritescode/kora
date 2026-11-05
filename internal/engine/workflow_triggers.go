@@ -2,11 +2,9 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
@@ -80,49 +78,13 @@ func RunWorkflowTriggerDispatcher(ctx context.Context, dispatcher *outbox.Dispat
 }
 
 // registerRecordTriggerConsumer delivers record change events to start as
-// record trigger envelopes. Legacy record.* types drain events written before
-// each mutation had a single change event.
+// record trigger envelopes.
 func registerRecordTriggerConsumer(dispatcher *outbox.Dispatcher, start func(context.Context, contract.EventEnvelope) error) error {
-	return dispatcher.RegisterForPatterns("workflow-record-triggers", []string{
-		"kora.%.after!_insert", "kora.%.after!_save", "record.created", "record.updated",
-	}, func(ctx context.Context, event contract.EventEnvelope) error {
-		trigger, ok := recordTriggerEvent(event)
+	return dispatcher.RegisterForPatterns("workflow-record-triggers", workflow.RecordTriggerEventPatterns, func(ctx context.Context, event contract.EventEnvelope) error {
+		trigger, ok := workflow.RecordTriggerFromChangeEvent(event)
 		if !ok {
 			return nil
 		}
 		return start(ctx, trigger)
 	})
-}
-
-// recordTriggerEvent projects a kernel change event onto the record trigger
-// contract. Writes without record identity, and updates that changed no
-// field, start no workflow.
-func recordTriggerEvent(event contract.EventEnvelope) (contract.EventEnvelope, bool) {
-	if event.Type == "record.created" || event.Type == "record.updated" {
-		return event, true
-	}
-	kind := ""
-	switch {
-	case strings.HasSuffix(event.Type, ".after_insert"):
-		kind = "record.created"
-	case strings.HasSuffix(event.Type, ".after_save"):
-		kind = "record.updated"
-	default:
-		return contract.EventEnvelope{}, false
-	}
-	var payload contract.RecordChangeEventData
-	if err := json.Unmarshal(event.Data, &payload); err != nil || payload.Table == "" || payload.RecordID == "" || payload.Revision == "" {
-		return contract.EventEnvelope{}, false
-	}
-	if kind == "record.updated" && len(payload.ChangedFields) == 0 {
-		return contract.EventEnvelope{}, false
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return contract.EventEnvelope{}, false
-	}
-	trigger := event
-	trigger.Type = kind
-	trigger.Data = data
-	return trigger, true
 }

@@ -1,4 +1,4 @@
-package engine
+package workflow
 
 import (
 	"encoding/json"
@@ -32,7 +32,7 @@ func TestRecordTriggerEventProjection(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := recordTriggerEvent(tt.event)
+			got, ok := RecordTriggerFromChangeEvent(tt.event)
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
 			}
