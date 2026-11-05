@@ -391,6 +391,22 @@ ON DUPLICATE KEY UPDATE current = LAST_INSERT_ID(current + 1), modified = NOW(6)
 	return allocated, nil
 }
 
+func (d *MySQLDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed int64) (int64, error) {
+	if _, err := tx.Exec(
+		`INSERT INTO _kora_naming_series (doctype, prefix, current, modified)
+VALUES (?, ?, LAST_INSERT_ID(?), NOW(6))
+ON DUPLICATE KEY UPDATE current = LAST_INSERT_ID(current + 1), modified = NOW(6)`,
+		doctypeName, key, seed+1,
+	); err != nil {
+		return 0, fmt.Errorf("allocating series number: %w", err)
+	}
+	var allocated int64
+	if err := tx.QueryRow("SELECT LAST_INSERT_ID()").Scan(&allocated); err != nil {
+		return 0, fmt.Errorf("reading allocated series number: %w", err)
+	}
+	return allocated, nil
+}
+
 func (d *MySQLDialect) NameGenQuery(tableName, prefix string) string {
 	return fmt.Sprintf(
 		"SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(name, '-', -1) AS UNSIGNED)), 0) FROM %s WHERE name LIKE '%s-%%'",

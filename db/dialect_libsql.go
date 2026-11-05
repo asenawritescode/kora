@@ -417,6 +417,29 @@ func (d *LibSQLDialect) UpsertIncrementForTable(_ string, conflictCols []string,
 
 func (d *LibSQLDialect) InsertOrIgnorePrefix() string { return "INSERT OR IGNORE" }
 
+func (d *LibSQLDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed int64) (int64, error) {
+	if _, err := tx.Exec(
+		`INSERT INTO "_kora_naming_series" ("doctype", "prefix", "current", "modified")
+VALUES (?, ?, ?, STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
+ON CONFLICT("doctype", "prefix") DO NOTHING`,
+		doctypeName, key, seed,
+	); err != nil {
+		return 0, fmt.Errorf("initializing series counter: %w", err)
+	}
+	var allocated int64
+	if err := tx.QueryRow(
+		`UPDATE "_kora_naming_series"
+SET "current" = "current" + 1,
+    "modified" = STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')
+WHERE "doctype" = ? AND "prefix" = ?
+RETURNING "current"`,
+		doctypeName, key,
+	).Scan(&allocated); err != nil {
+		return 0, fmt.Errorf("allocating series number: %w", err)
+	}
+	return allocated, nil
+}
+
 func (d *LibSQLDialect) AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error) {
 	var maxNum sql.NullInt64
 	if err := tx.QueryRow(d.NameGenQuery(tableName, prefix)).Scan(&maxNum); err != nil {

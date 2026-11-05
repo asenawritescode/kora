@@ -448,6 +448,22 @@ RETURNING "current"`,
 	return allocated, nil
 }
 
+func (d *PostgresDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed int64) (int64, error) {
+	var allocated int64
+	if err := tx.QueryRow(
+		`INSERT INTO "_kora_naming_series" ("doctype", "prefix", "current", "modified")
+VALUES ($1, $2, $3, NOW())
+ON CONFLICT ("doctype", "prefix")
+DO UPDATE SET "current" = "_kora_naming_series"."current" + 1,
+              "modified" = NOW()
+RETURNING "current"`,
+		doctypeName, key, seed+1,
+	).Scan(&allocated); err != nil {
+		return 0, fmt.Errorf("allocating series number: %w", err)
+	}
+	return allocated, nil
+}
+
 func (d *PostgresDialect) NameGenQuery(tableName, prefix string) string {
 	// PostgreSQL: SPLIT_PART(name, '-', 2) extracts the text after the first dash.
 	return fmt.Sprintf(
