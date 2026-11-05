@@ -204,6 +204,25 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if got := qty(); !strings.HasPrefix(got, "19") {
 				t.Fatalf("stock after return = %s, want 19", got)
 			}
+			// Invalid input (unknown top-level "currency") is a validation error
+			// naming the field, never a 200 failed receipt; stock is untouched
+			// and a replay of the same key returns the same error.
+			badReturn := fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"return_against":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":"refund"}]}`, till, sale1)
+			salesBefore := count("Sale")
+			for i := 0; i < 2; i++ {
+				for _, o := range cat.Data.PublishedOperations {
+					if !strings.HasSuffix(o.OperationRef, "~return_sale") {
+						continue
+					}
+					rec := serve("Cashier", http.MethodPost, "/op/"+o.OperationRef, fmt.Sprintf(`{"meta":{"idempotency_key":"k-bad"},"input_schema":{"id":%q,"version":%d},"input":%s}`, o.InputSchema.ID, o.InputSchema.Version, badReturn))
+					if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "currency") || !strings.Contains(rec.Body.String(), "VALIDATION") {
+						t.Fatalf("invalid return_sale attempt %d status=%d body=%s", i, rec.Code, rec.Body.String())
+					}
+				}
+			}
+			if got := qty(); !strings.HasPrefix(got, "19") || count("Sale") != salesBefore {
+				t.Fatalf("invalid return changed state: stock=%s sales=%s want %s", got, count("Sale"), salesBefore)
+			}
 			run("record_sale", "k-sale2", saleBody(till, 1, intent("pay-2", 180)))
 			sale2 := one("SELECT name FROM "+tbl("Sale")+" WHERE return_against IS NULL AND name <> ?", sale1)
 			run("void_sale", "k-void", fmt.Sprintf(`{"sale":%q,"shift":%q,"till_session":%q,"register":"REG-1","location":"LOC-1"}`, sale2, shift, till))

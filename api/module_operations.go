@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -342,7 +343,27 @@ func (h *Handler) HandleExecutePublishedOperation(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "module.invalid_operation_receipt", "Published operation returned an invalid receipt", nil)
 		return
 	}
+	if writeReceiptValidationError(c, receipt) {
+		return
+	}
 	c.JSON(http.StatusOK, Response{Data: receipt})
+}
+
+var schemaFieldPattern = regexp.MustCompile(`additional properties '([^']+)'|at '/?([^']+)'`)
+
+// writeReceiptValidationError reports a stored schema-validation rejection as
+// a 400 naming the offending field. The receipt stays the idempotency record,
+// so a replay of the same key yields the same response.
+func writeReceiptValidationError(c *gin.Context, receipt contract.OperationReceipt) bool {
+	if receipt.Status != contract.ReceiptRejected || receipt.Error == nil || receipt.Error.Type != contract.CodeValidationFailed {
+		return false
+	}
+	details := map[string]any{"execution_id": receipt.ExecutionID}
+	if m := schemaFieldPattern.FindStringSubmatch(receipt.Error.Message); m != nil {
+		details["field"] = m[1] + m[2]
+	}
+	writeError(c, http.StatusBadRequest, string(receipt.Error.Type), receipt.Error.Message, details)
+	return true
 }
 
 func (h *Handler) HandleLookupPublishedOperation(c *gin.Context) {
