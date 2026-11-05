@@ -18,6 +18,15 @@ transaction:
         payments: $input.payments
         status: Paid
   - for_each: $input.items
+    create:
+      record: Sale Line Balance
+      values:
+        sale: $steps.sale.name
+        item: $item.item
+        unit_price: $item.unit_price
+        sold_quantity: $item.quantity
+        remaining_quantity: $item.quantity
+  - for_each: $input.items
     update:
       record: Stock Balance
       where:

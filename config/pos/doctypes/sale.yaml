@@ -16,6 +16,10 @@ fields:
     fieldtype: Link
     options: Till Session
     label: Till Session
+  - fieldname: return_against
+    fieldtype: Link
+    options: Sale
+    label: Return Against
   - fieldname: customer
     fieldtype: Data
     label: Customer
@@ -45,5 +49,6 @@ fields:
       Draft
       Paid
       Void
+      Return
     default: Draft
     in_list_view: true

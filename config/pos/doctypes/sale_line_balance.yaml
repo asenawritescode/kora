@@ -1,0 +1,28 @@
+name: Sale Line Balance
+module: POS
+fields:
+  - fieldname: sale
+    fieldtype: Link
+    options: Sale
+    label: Sale
+    reqd: true
+    in_list_view: true
+  - fieldname: item
+    fieldtype: Link
+    options: Item
+    label: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit Price
+    reqd: true
+  - fieldname: sold_quantity
+    fieldtype: Float
+    label: Sold Quantity
+    reqd: true
+  - fieldname: remaining_quantity
+    fieldtype: Float
+    label: Remaining Quantity
+    reqd: true
+    in_list_view: true

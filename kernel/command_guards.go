@@ -14,7 +14,7 @@ import (
 )
 
 // CommandGuard is a precondition checked inside the command transaction before
-// any step writes. Exactly one of Lock, Exists or NotExists is set.
+// any step writes. Exactly one of Lock, Exists, NotExists or Payment is set.
 //
 //   - lock serializes concurrent commands on one record (SELECT ... FOR UPDATE),
 //     so a following not_exists check and create cannot race.
@@ -22,11 +22,12 @@ import (
 //     for later steps as $steps.<as>.name.
 //   - not_exists requires that no record matches.
 type CommandGuard struct {
-	Lock      *GuardLock  `yaml:"lock,omitempty" json:"lock,omitempty"`
-	Exists    *GuardMatch `yaml:"exists,omitempty" json:"exists,omitempty"`
-	NotExists *GuardMatch `yaml:"not_exists,omitempty" json:"not_exists,omitempty"`
-	Message   string      `yaml:"message,omitempty" json:"message,omitempty"`
-	As        string      `yaml:"as,omitempty" json:"as,omitempty"`
+	Lock      *GuardLock    `yaml:"lock,omitempty" json:"lock,omitempty"`
+	Exists    *GuardMatch   `yaml:"exists,omitempty" json:"exists,omitempty"`
+	NotExists *GuardMatch   `yaml:"not_exists,omitempty" json:"not_exists,omitempty"`
+	Payment   *GuardPayment `yaml:"payment,omitempty" json:"payment,omitempty"`
+	Message   string        `yaml:"message,omitempty" json:"message,omitempty"`
+	As        string        `yaml:"as,omitempty" json:"as,omitempty"`
 }
 
 // GuardLock names one record to lock, usually "$input.field".
@@ -48,18 +49,22 @@ func (c *CommandResource) validateGuards(aliases map[string]bool) error {
 			return err
 		}
 		set := 0
-		for _, present := range []bool{guard.Lock != nil, guard.Exists != nil, guard.NotExists != nil} {
+		for _, present := range []bool{guard.Lock != nil, guard.Exists != nil, guard.NotExists != nil, guard.Payment != nil} {
 			if present {
 				set++
 			}
 		}
 		if set != 1 {
-			return fmt.Errorf("command %q: require %d must set exactly one of lock, exists or not_exists", c.FullName(), i)
+			return fmt.Errorf("command %q: require %d must set exactly one of lock, exists, not_exists or payment", c.FullName(), i)
 		}
 		switch {
 		case guard.Lock != nil:
 			if guard.Lock.Record == "" || guard.Lock.Name == "" {
 				return fmt.Errorf("command %q: require %d lock needs record and name", c.FullName(), i)
+			}
+		case guard.Payment != nil:
+			if err := c.validatePaymentGuard(i, guard.Payment); err != nil {
+				return err
 			}
 		default:
 			match := guard.Exists
@@ -83,10 +88,16 @@ func (c *CommandResource) validateGuards(aliases map[string]bool) error {
 	return nil
 }
 
-func (k *Kernel) checkCommandGuards(dbTx *sql.Tx, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, cmd *CommandResource, env refEnv) *contract.Error {
+func (k *Kernel) checkCommandGuards(dbTx *sql.Tx, opID string, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, cmd *CommandResource, env refEnv) *contract.Error {
 	for i, guard := range cmd.Require {
 		if guard.Lock != nil {
 			if cerr := k.lockGuardRecord(dbTx, reg, guard, env, i); cerr != nil {
+				return cerr
+			}
+			continue
+		}
+		if guard.Payment != nil {
+			if cerr := k.consumePaymentGuard(dbTx, op.Context.Site, opID, guard.Payment, env, i); cerr != nil {
 				return cerr
 			}
 			continue

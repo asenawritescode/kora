@@ -52,13 +52,32 @@ func TestRecordSaleCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(def.Steps) != 3 || def.Steps[0].As != "sale" || def.Steps[1].ForEach != "$input.items" || def.Steps[2].ForEach != "$input.items" {
+	if len(def.Steps) != 4 || def.Steps[0].As != "sale" || def.Steps[1].Create.Record != "Sale Line Balance" || def.Steps[2].ForEach != "$input.items" || def.Steps[3].ForEach != "$input.items" {
 		t.Fatalf("steps = %#v", def.Steps)
 	}
-	if got := def.Steps[1].Update.Adjust["quantity"]; got.Decrease != "$item.quantity" || got.Min != "0" {
+	if got := def.Steps[2].Update.Adjust["quantity"]; got.Decrease != "$item.quantity" || got.Min != "0" {
 		t.Fatalf("stock must decrease without going negative: %+v", got)
 	}
 	if def.Output["reference"] != "$steps.sale.name" || def.Output["total"] != "$computed.total" {
 		t.Fatalf("receipt output = %v", def.Output)
+	}
+}
+
+func TestPOSReturnAndVoidCommandsParse(t *testing.T) {
+	for name, guards := range map[string]int{"return_sale": 3, "void_sale": 6} {
+		raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", name+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		def, err := ParseCommandResource(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(def.Require) != guards {
+			t.Fatalf("%s: guards = %d, want %d", name, len(def.Require), guards)
+		}
+		if got := def.Steps[len(def.Steps)-2].Update.Adjust["quantity"]; got.Increase != "$item.quantity" {
+			t.Fatalf("%s must restock: %+v", name, got)
+		}
 	}
 }

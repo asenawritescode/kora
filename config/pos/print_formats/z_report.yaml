@@ -1,0 +1,31 @@
+name: z_report
+for: {operation: pos.close_till, doc: Till Session}
+paper: thermal_80
+text: |
+  {{ center (upper .tenant.name) }}
+  {{ center "Z REPORT" }}
+  {{ center (date .now) }}
+  {{ line }}
+  Till: {{ .doc.name }}
+  {{ line }}
+  {{- range .doc.payments_by_method }}
+  {{ left 24 .method }}{{ right 6 (num .payment_count) }}{{ right 18 (money .total) }}
+  {{- end }}
+  {{ line }}
+  {{ left 24 "Opening float" }}{{ right 24 (money .doc.opening_float) }}
+  {{ left 24 "Expected cash" }}{{ right 24 (money .doc.expected_cash) }}
+  {{ left 24 "Counted" }}{{ right 24 (money .doc.closing_count) }}
+  {{ left 24 "VARIANCE" }}{{ right 24 (money .doc.variance) }}
+  {{ line }}
+html: |
+  <article class="z-report">
+    <h1>{{ .tenant.name }} &middot; Z report</h1>
+    <p>{{ .doc.name }} &middot; {{ date .now }}</p>
+    <table>
+      {{- range .doc.payments_by_method }}
+      <tr><td>{{ .method }}</td><td>{{ num .payment_count }}</td><td>{{ money .total }}</td></tr>
+      {{- end }}
+    </table>
+    <p>Expected cash {{ money .doc.expected_cash }} &middot; Counted {{ money .doc.closing_count }}</p>
+    <p><strong>Variance {{ money .doc.variance }}</strong></p>
+  </article>

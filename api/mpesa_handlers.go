@@ -1,7 +1,6 @@
 package api
 
 import (
-	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
+	"github.com/asenawritescode/kora/payment/mpesa"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/secret"
 	"github.com/gin-gonic/gin"
@@ -34,7 +34,7 @@ func (h *Handler) HandleMPesaSTKCallback(c *gin.Context) {
 		return
 	}
 	provided := c.Param("token")
-	if provided == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+	if !mpesa.TokenValid(provided, expected) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid M-Pesa callback credential"})
 		return
 	}
@@ -182,33 +182,12 @@ func mpesaCallbackMatchesTerminal(operation *doctype.Document, callback mpesaSTK
 	return operation.GetString("status") == "Failed" && operation.GetString("error_message") == callback.ResultDesc
 }
 
-type mpesaCallbackEnvelope struct {
-	Body struct {
-		STKCallback mpesaSTKCallback `json:"stkCallback"`
-	} `json:"Body"`
-}
+type (
+	mpesaCallbackEnvelope = mpesa.CallbackEnvelope
+	mpesaSTKCallback      = mpesa.STKCallback
+)
 
-type mpesaSTKCallback struct {
-	MerchantRequestID string `json:"MerchantRequestID"`
-	CheckoutRequestID string `json:"CheckoutRequestID"`
-	ResultCode        int    `json:"ResultCode"`
-	ResultDesc        string `json:"ResultDesc"`
-	CallbackMetadata  struct {
-		Item []struct {
-			Name  string `json:"Name"`
-			Value any    `json:"Value"`
-		} `json:"Item"`
-	} `json:"CallbackMetadata"`
-}
-
-func callbackReceipt(callback mpesaSTKCallback) string {
-	for _, item := range callback.CallbackMetadata.Item {
-		if item.Name == "MpesaReceiptNumber" {
-			return fmt.Sprint(item.Value)
-		}
-	}
-	return ""
-}
+func callbackReceipt(callback mpesaSTKCallback) string { return callback.Receipt() }
 
 func isTerminalPaymentStatus(status string) bool {
 	return status == "Succeeded" || status == "Failed" || status == "Cancelled" || status == "Expired" || status == "Finalized"

@@ -491,7 +491,7 @@ func (d *PostgresDialect) ExecuteBatch(db *sql.DB, statements []string) error {
 }
 
 func (d *PostgresDialect) SystemTableSQL() []string {
-	return []string{
+	return append([]string{
 		// _kora_naming_series
 		`CREATE TABLE IF NOT EXISTS "_kora_naming_series" (
 			"doctype" VARCHAR(140) NOT NULL,
@@ -753,5 +753,5 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 
 		// Backward compat: existing _kora_view tables may lack idx column.
 		`ALTER TABLE "_kora_view" ADD COLUMN IF NOT EXISTS "idx" INTEGER NOT NULL DEFAULT 0`,
-	}
+	}, PaymentTablesPostgres()...)
 }

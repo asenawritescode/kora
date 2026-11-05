@@ -1,0 +1,119 @@
+//go:build integration
+
+package api
+
+import (
+	"database/sql"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
+
+	"github.com/asenawritescode/kora/configstore"
+	kdb "github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/print"
+	"github.com/asenawritescode/kora/site"
+)
+
+// Set KORA_PRINT_META_MYSQL_DSN / KORA_PRINT_META_POSTGRES_DSN to disposable servers.
+func TestPrintFormatMetaAcrossDialects(t *testing.T) {
+	for _, tc := range []struct{ driver, env string }{
+		{"mysql", "KORA_PRINT_META_MYSQL_DSN"},
+		{"postgres", "KORA_PRINT_META_POSTGRES_DSN"},
+	} {
+		t.Run(tc.driver, func(t *testing.T) {
+			dsn := os.Getenv(tc.env)
+			if dsn == "" {
+				t.Skipf("set %s", tc.env)
+			}
+			admin, err := sql.Open(tc.driver, dsn)
+			if err != nil || admin.Ping() != nil {
+				t.Fatalf("connect: %v", err)
+			}
+			defer admin.Close()
+			name := fmt.Sprintf("kora_pm_%x", time.Now().UnixNano())
+			target := dsn
+			if tc.driver == "postgres" {
+				admin.Exec(`CREATE SCHEMA "` + name + `"`)
+				defer admin.Exec(`DROP SCHEMA "` + name + `" CASCADE`)
+				u, _ := url.Parse(dsn)
+				q := u.Query()
+				q.Set("search_path", name)
+				u.RawQuery = q.Encode()
+				target = u.String()
+			} else {
+				if _, err := admin.Exec("CREATE DATABASE `" + name + "`"); err != nil {
+					t.Fatal(err)
+				}
+				defer admin.Exec("DROP DATABASE `" + name + "`")
+				target = strings.Replace(dsn, "/?", "/"+name+"?", 1)
+			}
+			conn, err := sql.Open(tc.driver, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			dialect := kdb.Resolve(tc.driver)
+			if err := site.BootstrapSystemTables(conn, dialect); err != nil {
+				t.Fatal(err)
+			}
+			reg := doctype.NewRegistry()
+			const siteName = "print-meta.example.test"
+			if err := site.ImportConfig(conn, reg, name, siteName, filepath.Join("..", "config", "pos"), dialect); err != nil {
+				t.Fatal(err)
+			}
+			snap, _, err := configstore.NewStore(conn, dialect).LoadActiveSnapshotContext(t.Context(), siteName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			formats := map[string]*print.Format{}
+			for _, raw := range snap.PrintFormats {
+				f, err := print.Decode(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				formats[f.Name] = f
+			}
+			svc := NewSiteRuntimeServices()
+			svc.Replace(siteName, SiteRuntimeService{PrintFormats: formats})
+			h := NewHandler(reg, nil)
+			h.RuntimeServices = svc
+			get := func(path string, roles []string) *httptest.ResponseRecorder {
+				r := gin.New()
+				r.Use(func(c *gin.Context) {
+					c.Set("site_name", siteName)
+					c.Set("site_registry", reg)
+					c.Set("policy_execution", integrationTestExecution(t, siteName, "u@example.test", roles))
+				})
+				src := sitePrintSource{h: h}
+				r.GET("/print-formats", NewPrintListHandler(src))
+				r.GET("/print-formats/:format_name", NewPrintMetaHandler(src))
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+				return w
+			}
+			if w := get("/print-formats/sale_receipt", []string{"Cashier"}); w.Code != 200 || !strings.Contains(w.Body.String(), `"paper":"thermal_80"`) {
+				t.Fatalf("cashier: %d %s", w.Code, w.Body.String())
+			}
+			if w := get("/print-formats/sale_receipt", []string{"Stranger"}); w.Code != 403 {
+				t.Fatalf("stranger get: %d %s", w.Code, w.Body.String())
+			}
+			if w := get("/print-formats", []string{"Cashier"}); !strings.Contains(w.Body.String(), `"sale_receipt"`) {
+				t.Fatalf("cashier list: %s", w.Body.String())
+			}
+			if w := get("/print-formats", []string{"Stranger"}); strings.Contains(w.Body.String(), `"sale_receipt"`) {
+				t.Fatalf("stranger list leaks: %s", w.Body.String())
+			}
+		})
+	}
+}

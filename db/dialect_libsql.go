@@ -502,7 +502,7 @@ func (d *LibSQLDialect) ExecuteBatch(db *sql.DB, statements []string) error {
 }
 
 func (d *LibSQLDialect) SystemTableSQL() []string {
-	return []string{
+	return append([]string{
 		// _kora_naming_series
 		`CREATE TABLE IF NOT EXISTS "_kora_naming_series" (
 			"doctype" TEXT NOT NULL,
@@ -768,7 +768,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		)`,
 		`CREATE INDEX IF NOT EXISTS "idx_view_site" ON "_kora_view" ("site")`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_view_route_unique" ON "_kora_view" ("site", "route")`,
-	}
+	}, PaymentTablesLibSQL()...)
 }
 
 // parseLibSQLConstraintField extracts the column name from SQLite constraint error messages.

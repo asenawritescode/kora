@@ -20,6 +20,8 @@ type refEnv struct {
 	input map[string]any
 	item  map[string]any
 	steps map[string]string
+	// rows holds stored child rows of guarded records, keyed alias.field.
+	rows map[string][]map[string]any
 	// computed holds values derived by the command's compute block.
 	computed map[string]any
 	// now is pinned once per execution; actor is the verified principal.
@@ -100,20 +102,26 @@ func resolveEnvStringRef(ref string, env refEnv) (string, error) {
 
 // expandCommandSteps turns each for_each step into one instance per element
 // of its input list. Elements must be objects.
-func expandCommandSteps(steps []CommandStep, input map[string]any) ([]stepInstance, error) {
+func expandCommandSteps(steps []CommandStep, input map[string]any, rows map[string][]map[string]any) ([]stepInstance, error) {
 	out := make([]stepInstance, 0, len(steps))
 	for i, step := range steps {
 		if step.ForEach == "" {
 			out = append(out, stepInstance{index: i, step: step})
 			continue
 		}
-		value, err := resolveEnvRef(step.ForEach, refEnv{input: input})
-		if err != nil {
-			return nil, fmt.Errorf("step %d: %w", i, err)
-		}
-		list, ok := value.([]any)
-		if !ok {
-			return nil, fmt.Errorf("step %d: for_each %q must resolve to a list", i, step.ForEach)
+		var list []any
+		if key, ok := guardRowsKey(step.ForEach); ok {
+			for _, row := range rows[key] {
+				list = append(list, row)
+			}
+		} else {
+			value, err := resolveEnvRef(step.ForEach, refEnv{input: input})
+			if err != nil {
+				return nil, fmt.Errorf("step %d: %w", i, err)
+			}
+			if list, ok = value.([]any); !ok {
+				return nil, fmt.Errorf("step %d: for_each %q must resolve to a list", i, step.ForEach)
+			}
 		}
 		for _, element := range list {
 			item, ok := element.(map[string]any)
@@ -136,9 +144,16 @@ func (c *CommandResource) validateStepReferences() error {
 	if err := c.validateGuards(aliases); err != nil {
 		return err
 	}
+	guardAliases := map[string]bool{}
+	for alias := range aliases {
+		guardAliases[alias] = true
+	}
 	for i, step := range c.Steps {
 		if step.ForEach != "" && !strings.HasPrefix(step.ForEach, "$input.") {
-			return fmt.Errorf("command %q: step %d for_each must reference $input", c.FullName(), i)
+			alias, field, ok := strings.Cut(strings.TrimPrefix(step.ForEach, "$steps."), ".")
+			if !strings.HasPrefix(step.ForEach, "$steps.") || !ok || field == "name" || strings.Contains(field, ".") || !guardAliases[alias] {
+				return fmt.Errorf("command %q: step %d for_each must reference $input or a require alias's table field", c.FullName(), i)
+			}
 		}
 		refs := []string{}
 		var values map[string]string
@@ -208,4 +223,10 @@ func (c *CommandResource) validateOutputRefs(aliases map[string]bool) error {
 		}
 	}
 	return nil
+}
+
+// guardRowsKey returns the alias.field key of a $steps for_each reference.
+func guardRowsKey(ref string) (string, bool) {
+	key, ok := strings.CutPrefix(ref, "$steps.")
+	return key, ok
 }
