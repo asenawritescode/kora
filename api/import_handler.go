@@ -2,12 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/policy"
 )
@@ -19,11 +21,13 @@ type importSpec struct {
 		KeyFields []string `json:"key_fields"`
 	} `json:"target"`
 	Mapping map[string]string `json:"mapping"`
+	GroupBy string            `json:"group_by"`
 	DryRun  bool              `json:"dry_run"`
 }
 
 type importRowResult struct {
 	Row        int             `json:"row"`
+	LastRow    int             `json:"last_row,omitempty"`
 	OK         bool            `json:"ok"`
 	ReceiptRef string          `json:"receipt_ref,omitempty"`
 	Error      *contract.Error `json:"error,omitempty"`
@@ -41,7 +45,7 @@ func (h *Handler) HandleImport(c *gin.Context) {
 	}
 	for k := range top {
 		switch k {
-		case "import_id", "target", "mapping", "dry_run":
+		case "import_id", "target", "mapping", "dry_run", "group_by":
 		default:
 			badRequestError(c, "import.unsupported", "unsupported spec key: "+k, nil)
 			return
@@ -94,12 +98,12 @@ func (h *Handler) HandleImport(c *gin.Context) {
 	}
 	defer func() { _ = f.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(f, importMaxBytes+1))
-	header, table, err := parseCSVTable(raw)
+	header, rows, err := parseCSVTable(raw)
 	if err != nil {
 		badRequestError(c, "import.mapping_invalid", err.Error(), nil)
 		return
 	}
-	if len(table) > importMaxRows || len(raw) > importMaxBytes {
+	if len(rows) > importMaxRows || len(raw) > importMaxBytes {
 		writeError(c, http.StatusRequestEntityTooLarge, "import.too_large", "over 5000 rows or 5MB", nil)
 		return
 	}
@@ -107,15 +111,25 @@ func (h *Handler) HandleImport(c *gin.Context) {
 	for i, name := range header {
 		col[name] = i
 	}
-	for csvCol, field := range spec.Mapping {
-		if _, ok := col[csvCol]; !ok || dt.GetField(field) == nil {
-			badRequestError(c, "import.mapping_invalid", "mapping column or field unknown: "+csvCol, nil)
-			return
+	head, child, table, merr := groupMapping(reg, dt, spec.Mapping)
+	if _, ok := col[spec.GroupBy]; merr == nil && spec.GroupBy != "" && !ok {
+		merr = fmt.Errorf("group_by column not in header: %s", spec.GroupBy)
+	}
+	if merr == nil && spec.GroupBy == "" && len(child) > 0 {
+		merr = fmt.Errorf("table mappings require group_by")
+	}
+	for csvCol := range spec.Mapping {
+		if _, ok := col[csvCol]; !ok && merr == nil {
+			merr = fmt.Errorf("mapping column or field unknown: %s", csvCol)
 		}
+	}
+	if merr != nil {
+		badRequestError(c, "import.mapping_invalid", merr.Error(), nil)
+		return
 	}
 
 	mapped := map[string]bool{}
-	for _, field := range spec.Mapping {
+	for _, field := range head {
 		mapped[field] = true
 	}
 	for _, kf := range spec.Target.KeyFields {
@@ -125,39 +139,32 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		}
 	}
 
+	var units []importUnit
+	if spec.GroupBy != "" {
+		var childDT *doctype.DocType
+		if table != "" {
+			childDT = reg.Get(dt.GetField(table).Options)
+		}
+		units = assembleImportGroups(dt, childDT, table, head, child, col, spec.GroupBy, rows)
+	} else {
+		units = assembleImportRows(dt, spec.Mapping, col, rows)
+	}
 	var bulk []kernel.BulkRow
 	results := map[int]importRowResult{}
-	for i, rec := range table {
-		idx := i + 1
-		data := map[string]any{}
-		var perr *contract.Error
-		for csvCol, field := range spec.Mapping {
-			var cell string
-			if ci := col[csvCol]; ci < len(rec) {
-				cell = rec[ci]
-			}
-			v, e := parseImportValue(dt.GetField(field), cell)
-			if e != nil {
-				perr = contract.NewError(contract.CodeValidationFailed, e.Error())
-				perr.Details, _ = json.Marshal(map[string]string{"field": field})
-				break
-			}
-			if v != nil {
-				data[field] = v
-			}
-		}
+	for _, u := range units {
+		perr := u.Err
 		for _, kf := range spec.Target.KeyFields {
-			if perr == nil && data[kf] == nil {
+			if perr == nil && u.Data[kf] == nil {
 				perr = contract.NewError(contract.CodeValidationFailed, "import.key_missing: empty key "+kf)
 				perr.Details, _ = json.Marshal(map[string]string{"field": kf})
 			}
 		}
 		if perr != nil {
-			results[idx] = importRowResult{Row: idx, Error: perr}
+			results[u.First] = importRowResult{Row: u.First, LastRow: u.lastIfGrouped(spec.GroupBy), Error: perr}
 			continue
 		}
-		payload, _ := json.Marshal(map[string]any{"doctype": dt.Name, "data": data})
-		bulk = append(bulk, kernel.BulkRow{Index: idx, Payload: payload})
+		payload, _ := json.Marshal(map[string]any{"doctype": dt.Name, "data": u.Data})
+		bulk = append(bulk, kernel.BulkRow{Index: u.First, Payload: payload})
 	}
 
 	payload, _ := json.Marshal(map[string]any{"doctype": dt.Name})
@@ -177,8 +184,9 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		results[r.Index] = rr
 	}
 	out, succeeded, failed := []importRowResult{}, 0, 0
-	for idx := 1; idx <= len(table); idx++ {
-		r := results[idx]
+	for _, u := range units {
+		r := results[u.First]
+		r.LastRow = u.lastIfGrouped(spec.GroupBy)
 		if r.OK {
 			succeeded++
 			if succeeded > 20 {
@@ -189,5 +197,5 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		}
 		out = append(out, r)
 	}
-	c.JSON(http.StatusOK, gin.H{"import_id": spec.ImportID, "total": len(table), "succeeded": succeeded, "failed": failed, "dry_run": spec.DryRun, "rows": out})
+	c.JSON(http.StatusOK, gin.H{"import_id": spec.ImportID, "total": len(units), "succeeded": succeeded, "failed": failed, "dry_run": spec.DryRun, "rows": out})
 }
