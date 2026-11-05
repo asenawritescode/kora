@@ -294,3 +294,35 @@ func TestAuthorizePublishedQueryRequiresSourceDocTypeRead(t *testing.T) {
 		t.Fatalf("query with source read denied: %v", authErr)
 	}
 }
+
+// A child-source query is authorized on its parent DocType (Sale), not the child.
+func TestAuthorizePublishedQueryChildSourceChecksParent(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	q := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "z", ScopePolicy: contract.ScopeTenantShared}
+	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "reader", PrincipalType: contract.PrincipalHuman, Site: "tenant-route", Roles: []string{"Reader"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		perms []*doctype.Permission
+		deny  bool
+	}{
+		{"parent read only", []*doctype.Permission{{Doctype: "Sale", Role: "Reader", Read: true}}, false},
+		{"no parent read", []*doctype.Permission{{Doctype: "Sale Payment", Role: "Reader", Read: true}}, true},
+		{"owner-only parent", []*doctype.Permission{{Doctype: "Sale", Role: "Reader", Read: true, IfOwner: true}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := doctype.NewRegistry()
+			registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.query.z", Role: "Reader", Read: true})
+			for _, p := range tt.perms {
+				registry.Permissions.SetPermission(p)
+			}
+			registry.SetQuerySource("module.sales.orders.query.z", "Sale")
+			if got := authorizePublishedQuery(execution, registry, q, scope); (got != nil) != tt.deny {
+				t.Fatalf("deny=%v err=%v", tt.deny, got)
+			}
+		})
+	}
+}

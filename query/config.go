@@ -53,6 +53,7 @@ type Definition struct {
 	Capability      string               `yaml:"capability" json:"capability,omitempty"`
 	Operation       string               `yaml:"operation" json:"operation,omitempty"`
 	Source          string               `yaml:"source" json:"source,omitempty"`
+	Via             string               `yaml:"via" json:"via,omitempty"`
 	Permission      string               `yaml:"permission" json:"permission,omitempty"`
 	Scope           string               `yaml:"scope" json:"scope,omitempty"`
 	OwnerField      string               `yaml:"owner_field" json:"owner_field,omitempty"`
@@ -65,6 +66,12 @@ type Definition struct {
 	Limit           int                  `yaml:"limit" json:"limit,omitempty"`
 	OfflineEligible bool                 `yaml:"offline_eligible" json:"offline_eligible,omitempty"`
 	Presentation    map[string]string    `yaml:"presentation" json:"presentation,omitempty"`
+}
+
+// ParentDocType returns the parent DocType of a child source ("" otherwise).
+func (d *Definition) ParentDocType() string {
+	parent, _, _ := strings.Cut(d.Via, ".")
+	return parent
 }
 
 // CatalogRef is owner~capability~operation.
@@ -154,22 +161,65 @@ func (d *Definition) validate(reg *doctype.Registry) error {
 	if dt == nil {
 		return fmt.Errorf("source doctype %q not found", d.Source)
 	}
+	if err := d.validateVia(dt, reg); err != nil {
+		return err
+	}
 	check := func(ctx, f string) error {
-		if systemCols[f] {
+		if systemCols[f] || (d.Via != "" && f == "parent") {
 			return nil
 		}
-		fld := dt.GetField(f)
-		if fld == nil {
-			return fmt.Errorf("%s: field %q not on %s", ctx, f, d.Source)
+		if pf, ok := strings.CutPrefix(f, "parent."); ok && d.Via != "" && ctx == "filters" {
+			return checkField(reg.Get(d.ParentDocType()), ctx, f, pf)
 		}
-		if bannedTypes[fld.Fieldtype] {
-			return fmt.Errorf("%s: field %q has unselectable type %s", ctx, f, fld.Fieldtype)
-		}
-		return nil
+		return checkField(dt, ctx, f, f)
 	}
 	if err := d.validateAggregates(dt, check); err != nil {
 		return err
 	}
+	return d.validateRest(dt, check)
+}
+
+// checkField validates column name against dt for a selectable field.
+func checkField(dt *doctype.DocType, ctx, shown, name string) error {
+	if systemCols[name] {
+		return nil
+	}
+	fld := dt.GetField(name)
+	if fld == nil {
+		return fmt.Errorf("%s: field %q not on %s", ctx, shown, dt.Name)
+	}
+	if bannedTypes[fld.Fieldtype] {
+		return fmt.Errorf("%s: field %q has unselectable type %s", ctx, shown, fld.Fieldtype)
+	}
+	return nil
+}
+
+// validVia checks the via/is_child_table pairing and the parent Table field.
+func (d *Definition) validateVia(dt *doctype.DocType, reg *doctype.Registry) error {
+	if !dt.IsChildTable {
+		if d.Via != "" {
+			return fmt.Errorf("via is only allowed on a child-table source")
+		}
+		return nil
+	}
+	parent, field, ok := strings.Cut(d.Via, ".")
+	if !ok || parent == "" || field == "" {
+		return fmt.Errorf("child source %q needs via: Parent.table_field", d.Source)
+	}
+	pdt := reg.Get(parent)
+	if pdt == nil {
+		return fmt.Errorf("via: parent doctype %q not found", parent)
+	}
+	if f := pdt.GetField(field); f == nil || f.Fieldtype != "Table" || f.Options != d.Source {
+		return fmt.Errorf("via: %s is not a Table field with options %q", d.Via, d.Source)
+	}
+	if d.OwnerField != "" {
+		return fmt.Errorf("owner_field is not allowed on child sources")
+	}
+	return nil
+}
+
+func (d *Definition) validateRest(dt *doctype.DocType, check func(string, string) error) error {
 	if len(d.Fields) == 0 {
 		return fmt.Errorf("fields must not be empty")
 	}
@@ -298,7 +348,7 @@ func (d *Definition) validateFilter(f Filter, check func(string, string) error, 
 		if f.Optional {
 			return fmt.Errorf("filters: %s cannot be optional", s)
 		}
-		if err := check("filters", strings.TrimPrefix(s, "$field.")); err != nil {
+		if err := check("filters value", strings.TrimPrefix(s, "$field.")); err != nil {
 			return err
 		}
 	}
