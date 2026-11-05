@@ -33,6 +33,7 @@ func TestPrintEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec, _ := print.Load([]byte("name: a\nfor: {record: Sale}\npaper: thermal_58\ntext: \"{{ .tenant.name }} {{ .doc.title }}\"\n"))
 	op, _ := print.Load([]byte("name: b\nfor: {operation: pos~pos.sales~record_sale}\npaper: thermal_58\ntext: \"{{ .receipt.reference }} {{ .doc.title }}\"\n"))
+	withDoc, _ := print.Load([]byte("name: c\nfor: {operation: pos~pos.sales~record_sale, doc: Sale}\npaper: thermal_58\ntext: \"{{ .receipt.reference }} {{ .doc.title }}\"\n"))
 	cases := []struct {
 		name   string
 		f      *print.Format
@@ -43,6 +44,7 @@ func TestPrintEndpoint(t *testing.T) {
 	}{
 		{"record", rec, nil, "/p/a?record=Sale&name=S-1", 200, "Shop Tea"},
 		{"operation", op, nil, "/p/b?operation_ref=pos~pos.sales~record_sale&execution_id=e1", 200, "R1 Doc"},
+		{"operation doc", withDoc, nil, "/p/c?operation_ref=pos~pos.sales~record_sale&execution_id=e1", 200, "R1 Tea"},
 		{"forbidden", rec, ErrPrintForbidden, "/p/a?record=Sale&name=S-1", 403, "print.forbidden"},
 		{"not found", rec, ErrPrintNotFound, "/p/a?record=Sale&name=S-1", 404, "print.not_found"},
 		{"target mismatch", rec, nil, "/p/a?record=Other&name=S-1", 400, "print.target_mismatch"},

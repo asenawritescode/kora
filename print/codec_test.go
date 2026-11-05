@@ -22,3 +22,10 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		t.Fatal("expected invalid")
 	}
 }
+
+func TestLoadDocRequiresOperation(t *testing.T) {
+	_, err := Load([]byte("name: a\nfor: {record: Sale, doc: Sale}\npaper: thermal_58\ntext: x\n"))
+	if err == nil {
+		t.Fatal("want error")
+	}
+}

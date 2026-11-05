@@ -28,6 +28,8 @@ const ErrRenderFailed = "print.render_failed"
 type Target struct {
 	Record    string `yaml:"record,omitempty" json:"record,omitempty"`
 	Operation string `yaml:"operation,omitempty" json:"operation,omitempty"`
+	// Doc names the DocType of the record in receipt.output.reference.
+	Doc string `yaml:"doc,omitempty" json:"doc,omitempty"`
 }
 
 // Format is one print_formats/*.yaml document.
@@ -67,6 +69,9 @@ func Load(data []byte) (*Format, error) {
 	}
 	if (f.For.Record == "") == (f.For.Operation == "") {
 		return nil, invalid("for needs exactly one of record or operation")
+	}
+	if f.For.Doc != "" && f.For.Operation == "" {
+		return nil, invalid("for.doc requires operation")
 	}
 	if Columns(f.Paper) == 0 {
 		return nil, invalid("unknown paper %q", f.Paper)

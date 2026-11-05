@@ -1,11 +1,14 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/print"
 )
@@ -42,9 +45,41 @@ func (s sitePrintSource) Record(c *gin.Context, dtName, name string) (map[string
 	return docToMap(doc, dt, registry, nil), nil
 }
 
-// Receipt targets are not supported yet (#143).
-func (s sitePrintSource) Receipt(*gin.Context, string, string) (map[string]any, map[string]any, error) {
-	return nil, nil, ErrPrintNotFound
+// Receipt returns the completed receipt output of an operation execution the
+// actor may see; the endpoint loads .doc separately.
+func (s sitePrintSource) Receipt(c *gin.Context, ref, executionID string) (map[string]any, map[string]any, error) {
+	execution, ok := requestExecution(c)
+	if !ok {
+		return nil, nil, ErrPrintForbidden
+	}
+	id, err := contract.ParseOperationID(strings.TrimSpace(executionID))
+	if err != nil {
+		return nil, nil, ErrPrintNotFound
+	}
+	services := s.h.runtimeService(c, c.GetString("site_name"))
+	if services.LookupPublishedOperationByID == nil {
+		return nil, nil, ErrPrintNotFound
+	}
+	scope := businessScopeFromRequest(c, execution)
+	receipt, found, err := services.LookupPublishedOperationByID(c.Request.Context(), execution, scope, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !found || receipt.OperationRef != ref || receipt.Status != contract.ReceiptCompleted {
+		return nil, nil, ErrPrintNotFound
+	}
+	_, operation, ok := publishedOperationByRef(services, receipt.OperationRef)
+	if !ok {
+		return nil, nil, ErrPrintNotFound
+	}
+	if _, authErr := authorizePublishedOperation(execution, s.h.siteRegistry(c), operation.owner, operation.published, scope); authErr != nil {
+		return nil, nil, ErrPrintForbidden
+	}
+	var out map[string]any
+	if err := json.Unmarshal(receipt.Output, &out); err != nil {
+		return nil, nil, ErrPrintNotFound
+	}
+	return out, nil, nil
 }
 
 // Tenant reads print.* overrides from the site secret store.
