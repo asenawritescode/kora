@@ -9,6 +9,9 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/kernel"
+	"github.com/asenawritescode/kora/print"
+	"github.com/asenawritescode/kora/query"
 )
 
 func mergeManagementPackageConstraints(existing []contract.InstalledPackage, incoming contract.InstalledPackage) ([]contract.InstalledPackage, error) {
@@ -45,13 +48,44 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (
 	merged.Views = mergeSnapshotItems(current.Views, incoming.Views, func(v *doctype.View) string { return v.Name })
 	merged.AnalyticsMetrics = mergeSnapshotItems(current.AnalyticsMetrics, incoming.AnalyticsMetrics, func(v *doctype.AnalyticsMetricConfig) string { return v.Name })
 	merged.Scripts = mergeSnapshotItems(current.Scripts, incoming.Scripts, func(v *doctype.ScriptSnapshot) string { return v.Name })
-	merged.Reports = append([]json.RawMessage(nil), current.Reports...)
-	merged.ScheduledJobs = mergeScheduledJobs(current.ScheduledJobs, incoming.ScheduledJobs)
 	modules, err := mergeModuleDescriptors(current.Modules, incoming.Modules)
 	if err != nil {
 		return nil, err
 	}
 	merged.Modules = modules
+	registry := doctype.NewRegistry()
+	for _, dt := range merged.DocTypes {
+		registry.Register(dt)
+	}
+	if merged.Commands, err = mergeRawSnapshotItems(current.Commands, incoming.Commands, func(raw json.RawMessage) (string, error) {
+		def, err := kernel.ParseCommandResourceJSON(raw)
+		if err != nil {
+			return "", err
+		}
+		return def.Namespace + "." + def.Name, nil
+	}); err != nil {
+		return nil, fmt.Errorf("merge package commands: %w", err)
+	}
+	if merged.Queries, err = mergeRawSnapshotItems(current.Queries, incoming.Queries, func(raw json.RawMessage) (string, error) {
+		def, err := query.Parse(raw, registry)
+		if err != nil {
+			return "", err
+		}
+		return def.ModuleOwnerID + "/" + def.Name, nil
+	}); err != nil {
+		return nil, fmt.Errorf("merge package queries: %w", err)
+	}
+	if merged.PrintFormats, err = mergeRawSnapshotItems(current.PrintFormats, incoming.PrintFormats, func(raw json.RawMessage) (string, error) {
+		def, err := print.Decode(raw)
+		if err != nil {
+			return "", err
+		}
+		return def.Name, nil
+	}); err != nil {
+		return nil, fmt.Errorf("merge package print formats: %w", err)
+	}
+	merged.Reports = append([]json.RawMessage(nil), current.Reports...)
+	merged.ScheduledJobs = mergeScheduledJobs(current.ScheduledJobs, incoming.ScheduledJobs)
 	if err := validateMergedViewRoutes(merged.Views); err != nil {
 		return nil, err
 	}
@@ -288,4 +322,27 @@ func validateMergedViewRoutes(views []*doctype.View) error {
 		owners[route] = view.Name
 	}
 	return nil
+}
+
+// mergeRawSnapshotItems merges raw snapshot entries by decoded key: an incoming
+// entry replaces the current one with the same key, new ones are appended. An
+// entry that cannot be decoded fails the merge.
+func mergeRawSnapshotItems(current, incoming []json.RawMessage, key func(json.RawMessage) (string, error)) ([]json.RawMessage, error) {
+	items := make([]json.RawMessage, 0, len(current)+len(incoming))
+	indices := make(map[string]int, len(current)+len(incoming))
+	for _, group := range [][]json.RawMessage{current, incoming} {
+		for _, raw := range group {
+			name, err := key(raw)
+			if err != nil {
+				return nil, err
+			}
+			if idx, ok := indices[name]; ok {
+				items[idx] = raw
+				continue
+			}
+			indices[name] = len(items)
+			items = append(items, raw)
+		}
+	}
+	return items, nil
 }
