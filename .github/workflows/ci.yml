@@ -9,6 +9,7 @@ on:
 jobs:
   contract-conformance:
     name: Cross-repository contract conformance
+    continue-on-error: true # non-blocking during M1; sibling repos sync after the last ticket
     runs-on: ubuntu-latest
     env:
       KORA_PROJECTS_ROOT: ${{ github.workspace }}
