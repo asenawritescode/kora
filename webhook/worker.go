@@ -15,6 +15,7 @@ import (
 
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/eventstream"
+	"github.com/asenawritescode/kora/internal/netguard"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -85,6 +86,7 @@ func NewWorker(database *sql.DB, bus interface {
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
+				DialContext:     netguard.PublicDialer(10*time.Second, 30*time.Second).DialContext,
 				MaxIdleConns:    20,
 				IdleConnTimeout: 60 * time.Second,
 			},

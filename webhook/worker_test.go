@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/eventstream"
+	"github.com/asenawritescode/kora/internal/netguard"
 )
 
 type testEventBus struct {
@@ -282,6 +284,8 @@ func TestWorkerStopCancelsAndJoinsInFlightDelivery(t *testing.T) {
 
 	bus := &testEventBus{}
 	worker := NewWorker(db, bus, "test")
+	// The test server listens on loopback, which the production dialer refuses.
+	worker.client = server.Client()
 	worker.StartContext(context.Background())
 	bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "Invoice", Operation: eventstream.EventInsert, Timestamp: time.Now()})
 	select {
@@ -304,5 +308,21 @@ func TestWorkerStopCancelsAndJoinsInFlightDelivery(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("worker did not finish its delivery bookkeeping: %v", err)
+	}
+}
+
+func TestWorkerClientRefusesInternalDestinations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("webhook reached a loopback endpoint")
+	}))
+	defer server.Close()
+	worker := NewWorker(nil, nil, "test")
+	resp, err := worker.client.Post(server.URL, "application/json", strings.NewReader("{}"))
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("webhook client delivered to a loopback endpoint")
+	}
+	if !errors.Is(err, netguard.ErrDisallowedDestination) {
+		t.Fatalf("delivery error = %v, want ErrDisallowedDestination", err)
 	}
 }

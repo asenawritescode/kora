@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // IsPrivateHost reports whether host names or is a private, loopback or
@@ -93,4 +95,24 @@ func CheckURL(ctx context.Context, raw string, resolver Resolver) error {
 		}
 	}
 	return nil
+}
+
+// PublicDialer returns a dialer that refuses to connect to disallowed
+// addresses. The check runs on the resolved address at connect time, so a
+// hostname that re-resolves to an internal address is still refused.
+func PublicDialer(timeout, keepAlive time.Duration) *net.Dialer {
+	return &net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: keepAlive,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return fmt.Errorf("%w: %s", ErrDisallowedDestination, address)
+			}
+			if IsDisallowedIP(net.ParseIP(host)) {
+				return fmt.Errorf("%w: %s", ErrDisallowedDestination, host)
+			}
+			return nil
+		},
+	}
 }

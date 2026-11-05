@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"time"
 )
 
 func TestIsPrivateHost(t *testing.T) {
@@ -81,5 +82,21 @@ func TestCheckURL(t *testing.T) {
 				t.Fatalf("CheckURL(%q) error = %v, want ErrDisallowedDestination", tt.url, err)
 			}
 		})
+	}
+}
+
+func TestPublicDialerRefusesLoopback(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	conn, err := PublicDialer(time.Second, 0).DialContext(context.Background(), "tcp", listener.Addr().String())
+	if err == nil {
+		conn.Close()
+		t.Fatal("PublicDialer connected to a loopback listener")
+	}
+	if !errors.Is(err, ErrDisallowedDestination) {
+		t.Fatalf("dial error = %v, want ErrDisallowedDestination", err)
 	}
 }
