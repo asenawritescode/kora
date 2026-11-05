@@ -1,5 +1,5 @@
 name: item_search
-module_owner_id: inventory
+module_owner_id: inventory.core
 capability: inventory.items
 operation: item_search
 source: Item

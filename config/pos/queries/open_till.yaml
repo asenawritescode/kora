@@ -1,5 +1,5 @@
 name: open_till
-module_owner_id: pos
+module_owner_id: pos.core
 capability: pos.till
 operation: open_till
 source: Till Session

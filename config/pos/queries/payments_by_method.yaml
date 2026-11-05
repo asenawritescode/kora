@@ -1,5 +1,5 @@
 name: payments_by_method
-module_owner_id: pos
+module_owner_id: pos.core
 capability: pos.sales
 operation: payments_by_method
 source: Sale Payment
