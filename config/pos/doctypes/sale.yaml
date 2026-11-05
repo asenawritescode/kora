@@ -28,8 +28,13 @@ fields:
     fieldtype: Table
     options: Sale Payment
     label: Payments
+  - fieldname: currency
+    fieldtype: Data
+    label: Currency
+    default: KES
   - fieldname: total
     fieldtype: Currency
+    options: currency
     label: Total
     computed: "SUM(items.amount)"
     in_list_view: true

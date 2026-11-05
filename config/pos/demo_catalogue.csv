@@ -1,0 +1,9 @@
+item_name,barcode,uom,price,cost,reorder_level
+Maize Flour 2kg,6001000000011,Each,180,150,10
+Sugar 1kg,6001000000028,Each,160,135,10
+Cooking Oil 1L,6001000000035,Each,320,280,6
+Bread 400g,6001000000042,Each,65,50,20
+Milk 500ml,6001000000059,Each,60,48,24
+Tea Leaves 250g,6001000000066,Each,130,105,8
+Rice 1kg,6001000000073,Each,210,175,10
+Bar Soap,6001000000080,Each,50,38,15
