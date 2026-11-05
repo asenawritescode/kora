@@ -1235,7 +1235,7 @@ func registerAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB, mail
 			c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 		})
 
-		auth.GET("/me", func(c *gin.Context) {
+		auth.GET("/me", issueCSRFCookie, func(c *gin.Context) {
 			sid, _ := c.Cookie("kora_sid")
 			if sid == "" {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
