@@ -79,6 +79,16 @@ func auditConfigPack(t *testing.T, root string) {
 		t.Logf("pack contains %d override doctype definitions; last definition is effective", duplicates)
 	}
 
+	for _, dep := range requiredPackDirs(t, root, map[string]bool{}) {
+		depTypes, err := ParseConfigTree(dep)
+		if err != nil {
+			t.Fatalf("parse required pack %s: %v", dep, err)
+		}
+		for _, docType := range depTypes {
+			doctypeNames[docType.Name] = true
+		}
+	}
+
 	roles, permissions, err := ParseRolesDirectory(filepath.Join(root, "doctypes"))
 	if err != nil {
 		t.Fatalf("parse roles and permissions: %v", err)
@@ -209,4 +219,33 @@ func checkConfigPackViewBindings(t *testing.T, components []ViewComponent, docty
 		}
 		checkConfigPackViewBindings(t, component.Components, doctypeNames)
 	}
+}
+
+// requiredPackDirs is a small local copy of site.ResolvePackTree (site imports
+// doctype, so the resolver cannot be called from here).
+func requiredPackDirs(t *testing.T, root string, seen map[string]bool) []string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(root, "pack.yaml"))
+	if err != nil {
+		return nil
+	}
+	var manifest struct {
+		Requires []struct {
+			PackageID string `yaml:"package_id"`
+		} `yaml:"requires"`
+	}
+	if err := yaml.Unmarshal(body, &manifest); err != nil {
+		t.Fatalf("parse pack.yaml: %v", err)
+	}
+	var dirs []string
+	for _, ref := range manifest.Requires {
+		dep := filepath.Join(filepath.Dir(root), ref.PackageID)
+		if seen[dep] {
+			continue
+		}
+		seen[dep] = true
+		dirs = append(dirs, dep)
+		dirs = append(dirs, requiredPackDirs(t, dep, seen)...)
+	}
+	return dirs
 }
