@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -458,6 +459,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			doc := doctype.NewDocument(dt.Name)
 			for field, ref := range step.Create.Values {
 				v, rerr := resolveEnvRef(ref, env)
+				if errors.Is(rerr, errRefAbsent) {
+					continue
+				}
 				if rerr != nil {
 					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 				}
@@ -550,6 +554,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			doc := cloneDoc(oldDoc)
 			for field, ref := range step.Update.Values {
 				v, rerr := resolveEnvRef(ref, env)
+				if errors.Is(rerr, errRefAbsent) {
+					continue
+				}
 				if rerr != nil {
 					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 				}

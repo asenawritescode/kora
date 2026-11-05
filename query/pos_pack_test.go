@@ -62,8 +62,8 @@ func TestPOSTodayTotals(t *testing.T) {
 	}
 	conn.SetMaxOpenConns(1)
 	for _, s := range []string{
-		"CREATE TABLE `Sale` (name TEXT, register TEXT, status TEXT, creation TEXT, total NUMERIC)",
-		"INSERT INTO `Sale` VALUES ('S1','R1','Paid','2026-01-02 10:00:00',10),('S2','R1','Paid','2026-01-02 11:00:00',5),('S3','R1','Draft','2026-01-02 12:00:00',99),('S4','R1','Paid','2025-12-31 10:00:00',77),('S5','R2','Paid','2026-01-02 09:00:00',7)",
+		"CREATE TABLE `tabSale` (name TEXT, register TEXT, status TEXT, creation TEXT, total NUMERIC)",
+		"INSERT INTO `tabSale` VALUES ('S1','R1','Paid','2026-01-02 10:00:00',10),('S2','R1','Paid','2026-01-02 11:00:00',5),('S3','R1','Draft','2026-01-02 12:00:00',99),('S4','R1','Paid','2025-12-31 10:00:00',77),('S5','R2','Paid','2026-01-02 09:00:00',7)",
 	} {
 		if _, err := conn.Exec(s); err != nil {
 			t.Fatal(err)
