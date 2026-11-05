@@ -4,7 +4,7 @@ module_ownership_mode: commands_only
 module_access: published
 module: POS
 naming_series: SALE-.YYYY.-.#####
-title_field: customer
+title_field: register
 search_fields: customer, register
 sort_field: creation
 sort_order: DESC
@@ -14,6 +14,7 @@ fields:
     options: Register
     label: Register
     reqd: true
+    search_index: true
     in_list_view: true
   - fieldname: till_session
     fieldtype: Link
