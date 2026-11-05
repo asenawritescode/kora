@@ -37,6 +37,8 @@ func ToSExpr(snapshot *ConfigSnapshot) string {
 	writeAnalyticsMetricsSection(&b, snapshot.AnalyticsMetrics)
 	writeReportsSection(&b, snapshot.Reports)
 	writeCommandsSection(&b, snapshot.Commands)
+	writeJSONSection(&b, "queries", "query-json", snapshot.Queries)
+	writeJSONSection(&b, "print-formats", "print-format-json", snapshot.PrintFormats)
 	writeScriptsSection(&b, snapshot.Scripts)
 	writeScheduledJobsSection(&b, snapshot.ScheduledJobs)
 	writeModuleDescriptorsSection(&b, snapshot.Modules)
@@ -166,6 +168,19 @@ func writeCommandsSection(b *strings.Builder, commands []json.RawMessage) {
 	for _, command := range commands {
 		b.WriteString("\n    (command-json ")
 		b.WriteString(quoteSExprString(string(command)))
+		b.WriteString(")")
+	}
+	b.WriteString(")")
+}
+
+func writeJSONSection(b *strings.Builder, section, form string, items []json.RawMessage) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString("\n  (" + section)
+	for _, item := range items {
+		b.WriteString("\n    (" + form + " ")
+		b.WriteString(quoteSExprString(string(item)))
 		b.WriteString(")")
 	}
 	b.WriteString(")")
@@ -1108,6 +1123,18 @@ func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 					return nil, err
 				}
 				snapshot.Commands = commands
+			case "queries":
+				items, err := parseJSONForms(child.Children[1:], "query-json")
+				if err != nil {
+					return nil, err
+				}
+				snapshot.Queries = items
+			case "print-formats":
+				items, err := parseJSONForms(child.Children[1:], "print-format-json")
+				if err != nil {
+					return nil, err
+				}
+				snapshot.PrintFormats = items
 			case "scripts":
 				scripts, err := parseScriptSnapshots(child.Children[1:])
 				if err != nil {
@@ -1585,6 +1612,21 @@ func parseReports(nodes []*sNode) ([]json.RawMessage, error) {
 		reports = append(reports, report)
 	}
 	return reports, nil
+}
+
+func parseJSONForms(nodes []*sNode, form string) ([]json.RawMessage, error) {
+	items := make([]json.RawMessage, 0, len(nodes))
+	for _, node := range nodes {
+		if !node.IsList || len(node.Children) != 2 || nodeStr(node.Children[0]) != form {
+			return nil, fmt.Errorf("invalid %s form", form)
+		}
+		var item json.RawMessage
+		if err := json.Unmarshal([]byte(nodeStr(node.Children[1])), &item); err != nil {
+			return nil, fmt.Errorf("invalid %s JSON: %w", form, err)
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }
 
 func parseCommandsJSON(nodes []*sNode) ([]json.RawMessage, error) {

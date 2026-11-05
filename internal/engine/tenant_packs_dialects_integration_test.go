@@ -66,10 +66,11 @@ func TestTenantPackQueriesPrintAndRequiresAcrossDialects(t *testing.T) {
 				t.Fatal("required inventory pack was not imported with pos")
 			}
 
-			// Snapshot round-trip is blocked on #202 (S-expr drops queries/print_formats).
-			if persisted, _ := tenantConfigQueries(ctx, database, dialect, siteName, reg); len(persisted) == 0 {
-				t.Log("snapshot round-trip skipped: blocked on #202")
-			} else if formats, err := tenantPrintFormats(ctx, database, dialect, siteName); err != nil || formats["sale_receipt"] == nil {
+			// Snapshot round-trip: queries and print formats survive the persisted S-expr.
+			if persisted, err := tenantConfigQueries(ctx, database, dialect, siteName, reg); err != nil || len(persisted) == 0 {
+				t.Fatalf("persisted queries = %d, %v", len(persisted), err)
+			}
+			if formats, err := tenantPrintFormats(ctx, database, dialect, siteName); err != nil || formats["sale_receipt"] == nil {
 				t.Fatalf("print formats = %v, %v", formats, err)
 			}
 			defs, err := query.LoadDir(filepath.Join("..", "..", "config", "pos", "queries"), reg)

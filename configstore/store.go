@@ -883,7 +883,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 	// package activation cannot silently erase them while collecting live rows.
 	var activeConfig string
 	err = s.DB.QueryRow(db.Rebind(s.Dialect, "SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1"), site).Scan(&activeConfig)
-	var reports []json.RawMessage
+	var reports, queries, printFormats []json.RawMessage
 	var minKoraVersion string
 	var scheduledJobs []contract.ScheduledJobDefinition
 	var modules []contract.ModuleDescriptor
@@ -897,6 +897,8 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 			return nil, fmt.Errorf("parsing active config snapshot metadata: %w", parseErr)
 		}
 		reports = append([]json.RawMessage(nil), activeSnapshot.Reports...)
+		queries = append([]json.RawMessage(nil), activeSnapshot.Queries...)
+		printFormats = append([]json.RawMessage(nil), activeSnapshot.PrintFormats...)
 		minKoraVersion = activeSnapshot.MinKoraVersion
 		scheduledJobs = append([]contract.ScheduledJobDefinition(nil), activeSnapshot.ScheduledJobs...)
 		modules = append([]contract.ModuleDescriptor(nil), activeSnapshot.Modules...)
@@ -910,6 +912,8 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 		AnalyticsMetrics:  analyticsMetrics,
 		Scripts:           scripts,
 		Reports:           reports,
+		Queries:           queries,
+		PrintFormats:      printFormats,
 		MinKoraVersion:    minKoraVersion,
 		ScheduledJobs:     scheduledJobs,
 		Modules:           modules,

@@ -472,3 +472,24 @@ func TestToSExpr_RoundTripCommands(t *testing.T) {
 		t.Fatalf("commands were not preserved: %#v", parsed.Commands)
 	}
 }
+
+func TestToSExpr_RoundTripQueriesAndPrintFormats(t *testing.T) {
+	snapshot := &ConfigSnapshot{
+		Queries:      []json.RawMessage{json.RawMessage(`{"name":"recent_sales","sql":"a \"b\""}`)},
+		PrintFormats: []json.RawMessage{json.RawMessage(`{"name":"sale_receipt"}`), json.RawMessage(`{"name":"x"}`)},
+	}
+	parsed, err := ParseConfig(ToSExpr(snapshot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Queries) != 1 || string(parsed.Queries[0]) != string(snapshot.Queries[0]) {
+		t.Fatalf("queries not preserved: %#v", parsed.Queries)
+	}
+	if len(parsed.PrintFormats) != 2 || string(parsed.PrintFormats[1]) != `{"name":"x"}` {
+		t.Fatalf("print formats not preserved: %#v", parsed.PrintFormats)
+	}
+	old, err := ParseConfig(ToSExpr(&ConfigSnapshot{}))
+	if err != nil || len(old.Queries) != 0 || len(old.PrintFormats) != 0 {
+		t.Fatalf("old snapshot: %v %#v", err, old)
+	}
+}
