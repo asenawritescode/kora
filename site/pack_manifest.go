@@ -350,27 +350,7 @@ func normalizePackPath(value string) (string, error) {
 }
 
 func validPackFileType(filePath, contentType string) bool {
-	ext := strings.ToLower(path.Ext(filePath))
-	switch contentType {
-	case "doctype":
-		return strings.HasPrefix(filePath, "doctypes/") && (ext == ".yaml" || ext == ".yml")
-	case "roles":
-		return (filePath == "roles.yaml" || (strings.HasPrefix(filePath, "components/") && path.Base(filePath) == "roles.yaml")) && ext == ".yaml"
-	case "permissions":
-		return (filePath == "permissions.yaml" || (strings.HasPrefix(filePath, "components/") && path.Base(filePath) == "permissions.yaml")) && ext == ".yaml"
-	case "workflow_definition":
-		return strings.HasPrefix(filePath, "workflows/") && ext == ".json"
-	case "view":
-		return strings.HasPrefix(filePath, "views/") && (ext == ".yaml" || ext == ".yml")
-	case "report":
-		return strings.HasPrefix(filePath, "reports/") && (ext == ".yaml" || ext == ".yml")
-	case "script":
-		return strings.HasPrefix(filePath, "scripts/") && ext == ".js"
-	case "pack":
-		return filePath == packFileName
-	default:
-		return false
-	}
+	return contract.ValidPackageFileType(filePath, contentType)
 }
 
 // PackDigest computes the kora-pack-v1 digest over the canonical manifest and
