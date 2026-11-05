@@ -84,6 +84,8 @@ type OIDCLogin struct {
 	HTTPClient       *http.Client
 	Now              func() time.Time
 	PublicAppBaseURL string
+	// CloudIssuer enables the built-in kora-cloud provider when set.
+	CloudIssuer string
 	// Deps builds the per-tenant stores for a request. When nil, SQL stores on
 	// the routed tenant database are used.
 	Deps func(c *gin.Context) (oidcLoginDeps, error)
@@ -118,9 +120,10 @@ func (l *OIDCLogin) deps(c *gin.Context, fallback tenantUsersFactory) (oidcLogin
 		return oidcLoginDeps{}, errors.New("tenant database unavailable")
 	}
 	dialect := requestDialect(c)
+	secrets := secret.NewStore(database, dialect)
 	return oidcLoginDeps{
-		Providers: SQLAuthProviders{DB: database, Dialect: dialect},
-		Secrets:   secret.NewStore(database, dialect),
+		Providers: newSiteProviders(c, SQLAuthProviders{DB: database, Dialect: dialect}, secrets, l.CloudIssuer),
+		Secrets:   secrets,
 		States:    SQLLoginStates{DB: database, Dialect: dialect},
 		Links:     SQLIdentityLinks{DB: database, Dialect: dialect},
 		Users:     fallback(c, database),
