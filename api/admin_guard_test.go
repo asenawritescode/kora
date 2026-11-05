@@ -136,3 +136,32 @@ func TestManagementRoutesAllowAdministrator(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestSystemDoctypeCreateRejectsModuleOwnership(t *testing.T) {
+	r, _ := adminGuardRouter(t, []string{doctype.AdminRole}, RegisterSystemRoutes)
+	body := `{"name":"Invoice","module":"Accounting","module_owner_id":"finance.billing","fields":[{"fieldname":"title","fieldtype":"Data"}]}`
+	w := serve(r, http.MethodPost, "/api/system/doctype", body)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "doctype.module_ownership_immutable") {
+		t.Fatalf("status = %d body=%s, want 400 doctype.module_ownership_immutable", w.Code, w.Body.String())
+	}
+}
+
+func TestPreserveModuleOwnershipKeepsInstalledOwner(t *testing.T) {
+	current := &doctype.DocType{Name: "Invoice", ModuleOwnerID: "finance.billing", ModuleOwnershipMode: "owned", ModuleAccess: "published"}
+	tests := []struct {
+		name string
+		edit doctype.DocType
+	}{
+		{"stripped", doctype.DocType{Name: "Invoice"}},
+		{"reassigned", doctype.DocType{Name: "Invoice", ModuleOwnerID: "attacker.module", ModuleOwnershipMode: "shared", ModuleAccess: "private"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			edit := tc.edit
+			preserveModuleOwnership(&edit, current)
+			if edit.ModuleOwnerID != current.ModuleOwnerID || edit.ModuleOwnershipMode != current.ModuleOwnershipMode || edit.ModuleAccess != current.ModuleAccess {
+				t.Fatalf("ownership = %q/%q/%q, want installed %q/%q/%q", edit.ModuleOwnerID, edit.ModuleOwnershipMode, edit.ModuleAccess, current.ModuleOwnerID, current.ModuleOwnershipMode, current.ModuleAccess)
+			}
+		})
+	}
+}

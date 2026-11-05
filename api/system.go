@@ -524,6 +524,10 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 		badRequestError(c, "validation.invalid_json", "Invalid request format: "+err.Error(), nil)
 		return
 	}
+	if declaresModuleOwnership(&dt) {
+		badRequestError(c, "doctype.module_ownership_immutable", "Module ownership can only be set by installing a package", map[string]any{"doctype": dt.Name})
+		return
+	}
 
 	// Validate the doctype.
 	if err := dt.Validate(); err != nil {
@@ -680,6 +684,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 
 	// Name must match.
 	newDT.Name = doctypeName
+	preserveModuleOwnership(&newDT, oldDT)
 
 	// Validate.
 	if err := newDT.Validate(); err != nil {
