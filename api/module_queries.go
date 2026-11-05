@@ -86,6 +86,15 @@ func authorizePublishedQueryActorScope(execution policy.Execution, roles policy.
 	if authErr != nil {
 		return nil, authErr
 	}
+	if src, ok := roles.(interface{ QuerySource(string) (string, bool) }); ok {
+		if source, ok := src.QuerySource(resource); ok {
+			srcDecision, srcErr := policy.Decide(execution, roles, source, "read")
+			if srcErr != nil {
+				return nil, srcErr
+			}
+			decision.OwnerOnly = decision.OwnerOnly || srcDecision.OwnerOnly
+		}
+	}
 	if decision.OwnerOnly && query.OwnerField == "" {
 		return nil, contract.NewError(contract.CodePermissionDenied, "published query does not declare an owner field for this grant")
 	}
