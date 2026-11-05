@@ -1092,7 +1092,12 @@ func (h *Handler) executeInitiateExternalOperation(c *gin.Context, action *docty
 	doc.Set("status", initialStatus)
 	doc.Set("currency", getString(action.Config, "currency"))
 	if doc.GetString("currency") == "" {
-		doc.Set("currency", "KES")
+		currency, err := h.tenantCurrency(c)
+		if err != nil {
+			internalError(c, "reading tenant currency", err)
+			return
+		}
+		doc.Set("currency", currency)
 	}
 	if value, ok := ctx["total"]; ok {
 		doc.Set("amount", value)

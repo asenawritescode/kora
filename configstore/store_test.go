@@ -39,7 +39,7 @@ func TestLoadAll_Empty(t *testing.T) {
 			"reqd", "unique_constraint", "default_value", "hidden", "read_only",
 			"bold", "in_list_view", "in_standard_filter", "search_index",
 			"description", "depends_on", "mandatory_depends_on", "constraints_json",
-			"renamed_from", "linked_field", "computed", "accept", "idx",
+			"renamed_from", "linked_field", "computed", "accept", "field_precision", "idx",
 		}))
 
 	doctypes, err := s.LoadAll("")
@@ -82,9 +82,9 @@ func TestLoadAllFieldsRebindsPostgresPlaceholders(t *testing.T) {
 	}
 	defer database.Close()
 	store := &Store{DB: database, Dialect: &koraDB.PostgresDialect{}}
-	mock.ExpectQuery("SELECT parent, fieldname, fieldtype, label, options, reqd, unique_constraint, default_value, hidden, read_only, bold, in_list_view, in_standard_filter, search_index, description, depends_on, mandatory_depends_on, constraints_json, renamed_from, COALESCE\\(linked_field,''\\) as linked_field, COALESCE\\(computed,''\\) as computed, COALESCE\\(accept,''\\) as accept, idx FROM _kora_field WHERE site = \\$1 OR site = '' ORDER BY parent, idx").
+	mock.ExpectQuery("SELECT parent, fieldname, fieldtype, label, options, reqd, unique_constraint, default_value, hidden, read_only, bold, in_list_view, in_standard_filter, search_index, description, depends_on, mandatory_depends_on, constraints_json, renamed_from, COALESCE\\(linked_field,''\\) as linked_field, COALESCE\\(computed,''\\) as computed, COALESCE\\(accept,''\\) as accept, field_precision, idx FROM _kora_field WHERE site = \\$1 OR site = '' ORDER BY parent, idx").
 		WithArgs("tenant").
-		WillReturnRows(sqlmock.NewRows([]string{"parent", "fieldname", "fieldtype", "label", "options", "reqd", "unique_constraint", "default_value", "hidden", "read_only", "bold", "in_list_view", "in_standard_filter", "search_index", "description", "depends_on", "mandatory_depends_on", "constraints_json", "renamed_from", "linked_field", "computed", "accept", "idx"}))
+		WillReturnRows(sqlmock.NewRows([]string{"parent", "fieldname", "fieldtype", "label", "options", "reqd", "unique_constraint", "default_value", "hidden", "read_only", "bold", "in_list_view", "in_standard_filter", "search_index", "description", "depends_on", "mandatory_depends_on", "constraints_json", "renamed_from", "linked_field", "computed", "accept", "field_precision", "idx"}))
 	if _, err := store.loadAllFields("tenant"); err != nil {
 		t.Fatalf("loadAllFields: %v", err)
 	}
@@ -117,11 +117,11 @@ func TestLoadAll_WithDoctypes(t *testing.T) {
 		"reqd", "unique_constraint", "default_value", "hidden", "read_only",
 		"bold", "in_list_view", "in_standard_filter", "search_index",
 		"description", "depends_on", "mandatory_depends_on", "constraints_json",
-		"renamed_from", "linked_field", "computed", "accept", "idx",
+		"renamed_from", "linked_field", "computed", "accept", "field_precision", "idx",
 	}).
-		AddRow("Task", "subject", "Data", "Subject", "", 1, 0, "", 0, 0, 0, 1, 0, 0, "", "", "", `[{"type":"min","value":1,"message":"Subject is required."}]`, "", "", "", "", 0).
-		AddRow("Task", "status", "Select", "Status", "Open,Closed", 1, 0, "Open", 0, 0, 0, 1, 0, 0, "", "", "", "[]", "", "", "", "", 1).
-		AddRow("User", "email", "Data", "Email", "", 1, 1, "", 0, 0, 0, 1, 0, 0, "", "", "", "[]", "", "", "", "", 0)
+		AddRow("Task", "subject", "Data", "Subject", "", 1, 0, "", 0, 0, 0, 1, 0, 0, "", "", "", `[{"type":"min","value":1,"message":"Subject is required."}]`, "", "", "", "", nil, 0).
+		AddRow("Task", "status", "Select", "Status", "Open,Closed", 1, 0, "Open", 0, 0, 0, 1, 0, 0, "", "", "", "[]", "", "", "", "", nil, 1).
+		AddRow("User", "email", "Data", "Email", "", 1, 1, "", 0, 0, 0, 1, 0, 0, "", "", "", "[]", "", "", "", "", nil, 0)
 
 	mock.ExpectQuery("SELECT .* FROM _kora_field WHERE .* ORDER BY parent, idx").
 		WillReturnRows(fieldRows)

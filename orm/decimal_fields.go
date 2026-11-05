@@ -19,6 +19,10 @@ func canonicalizeDecimal(doc *doctype.Document, f doctype.Field, val any) (any, 
 	if err != nil {
 		return nil, fmt.Errorf("field %s: %w", f.Fieldname, err)
 	}
+	if f.Precision != nil && normalized != nil {
+		exact, _ := numeric.Parse(normalized)
+		normalized = numeric.Number(exact.Round(int32(*f.Precision)))
+	}
 	if doc != nil {
 		doc.Set(f.Fieldname, normalized)
 	}
