@@ -92,7 +92,7 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 	}
 	printFormats, err := loadPrintFormats(filepath.Join(configPath, "print_formats"), doctypes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	queries, err := encodeQueriesDir(filepath.Join(configPath, "queries"), doctypes)
 	if err != nil {
