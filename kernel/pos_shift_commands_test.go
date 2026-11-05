@@ -58,6 +58,9 @@ func TestRecordSaleCommand(t *testing.T) {
 	if got := def.Steps[3].Update.Adjust["quantity"]; got.Decrease != "$item.quantity" || got.Min != "0" {
 		t.Fatalf("stock must decrease without going negative: %+v", got)
 	}
+	if def.Steps[0].Create.Values["location"] != "$input.location" {
+		t.Fatalf("sale must record its location: %v", def.Steps[0].Create.Values)
+	}
 	if def.Output["reference"] != "$steps.sale.name" || def.Output["total"] != "$computed.total" {
 		t.Fatalf("receipt output = %v", def.Output)
 	}
@@ -79,5 +82,41 @@ func TestPOSReturnAndVoidCommandsParse(t *testing.T) {
 		if got := def.Steps[len(def.Steps)-3].Update.Adjust["quantity"]; got.Increase != "$item.quantity" {
 			t.Fatalf("%s must restock: %+v", name, got)
 		}
+	}
+}
+
+// TestPOSOpenSessionCommandParse (#326): one command opens the shift and the
+// till together and stamps register, location and cashier on the till.
+func TestPOSOpenSessionCommandParse(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", "open_session.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := ParseCommandResource(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def.Input.Record != "Till Session" || len(def.Steps) != 2 || def.Steps[0].As != "shift" {
+		t.Fatalf("open_session steps = %#v", def.Steps)
+	}
+	if v := def.Steps[0].Create.Values; v["register"] != "$input.register" || v["cashier"] != "$actor" || v["status"] != "Open" {
+		t.Fatalf("shift values = %v", v)
+	}
+	if v := def.Steps[1].Create.Values; def.Steps[1].Create.Record != "Till Session" || v["shift"] != "$steps.shift.name" || v["register"] != "$input.register" || v["location"] != "$input.location" || v["cashier"] != "$actor" || v["expected_cash"] != "$input.opening_float" {
+		t.Fatalf("till values = %v", v)
+	}
+	var registerOpen, cashierOpen, locationChecked bool
+	for _, g := range def.Require {
+		switch {
+		case g.NotExists != nil && g.NotExists.Record == "Shift":
+			registerOpen = g.NotExists.Where["register"] == "$input.register" && g.NotExists.Where["status"] == "Open"
+		case g.NotExists != nil && g.NotExists.Record == "Till Session":
+			cashierOpen = g.NotExists.Where["cashier"] == "$actor" && g.NotExists.Where["status"] == "Open"
+		case g.Exists != nil && g.Exists.Record == "Register":
+			locationChecked = g.Exists.Where["location"] == "$input.location"
+		}
+	}
+	if !registerOpen || !cashierOpen || !locationChecked {
+		t.Fatalf("guards register=%v cashier=%v location=%v", registerOpen, cashierOpen, locationChecked)
 	}
 }
