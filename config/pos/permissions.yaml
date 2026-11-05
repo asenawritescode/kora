@@ -118,3 +118,27 @@
   write: true
   create: true
   delete: false
+- doctype: Item
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Location
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Stock Balance
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Stock Entry
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
