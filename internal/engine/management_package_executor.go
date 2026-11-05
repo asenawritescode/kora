@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
@@ -15,6 +17,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/management"
 	knet "github.com/asenawritescode/kora/net"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/site"
 )
@@ -200,12 +203,12 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		}
 		plan, planErr := services.ResolveCandidateModuleBindings(
 			contract.BusinessScope{TenantID: tenantID, Kind: contract.ScopeKindTenant},
-			candidatePackages, target.Modules, command.ProviderSelections, moduleSnapshot.Revision+1,
+			candidatePackages, target.Modules, target, command.ProviderSelections, moduleSnapshot.Revision+1,
 		)
 		if planErr != nil || len(plan.Blockers) > 0 {
 			releaseTenantWork()
 			handle.Release()
-			return failed(contract.CodeConflict, "package module provider bindings failed activation preflight"), nil
+			return bindingPreflightFailed(planErr, plan.Blockers), nil
 		}
 		if err := contract.ValidateInstalledPackages(candidatePackages); err != nil {
 			releaseTenantWork()
@@ -420,6 +423,65 @@ func (e *managementPackageExecutor) complete(ctx context.Context, original site.
 	}
 	defer database.Close()
 	return configstore.CompleteManagementActivation(ctx, database, db.Resolve(info.DBType), info.Name, operation, fence, expectedRevision, digest)
+}
+
+// Bounds for the activation preflight failure detail: enough for an operator
+// to see which module/capability blocked, without an unbounded error body.
+const (
+	maxPreflightCauseBytes = 512
+	maxPreflightBlockers   = 10
+)
+
+type preflightBlocker struct {
+	ConsumerModuleID contract.ModuleID       `json:"consumer_module_id"`
+	CapabilityName   contract.CapabilityName `json:"capability_name"`
+	Code             string                  `json:"code"`
+}
+
+// bindingPreflightFailed reports why candidate module provider bindings failed:
+// the bounded resolution error and the first blockers, in both the message and
+// structured details.
+func bindingPreflightFailed(planErr error, blockers []plugin.BindingDiagnostic) management.FinishResult {
+	details := struct {
+		Cause        string             `json:"cause,omitempty"`
+		Blockers     []preflightBlocker `json:"blockers,omitempty"`
+		BlockerCount int                `json:"blocker_count"`
+	}{BlockerCount: len(blockers)}
+	message := "package module provider bindings failed activation preflight"
+	if planErr != nil {
+		details.Cause = truncateUTF8(planErr.Error(), maxPreflightCauseBytes)
+		message += ": " + details.Cause
+	}
+	codes := make([]string, 0, maxPreflightBlockers)
+	for i, blocker := range blockers {
+		if i == maxPreflightBlockers {
+			break
+		}
+		details.Blockers = append(details.Blockers, preflightBlocker{ConsumerModuleID: blocker.Key.ConsumerModuleID, CapabilityName: blocker.Key.CapabilityName, Code: blocker.Code})
+		codes = append(codes, fmt.Sprintf("%s/%s: %s", blocker.Key.ConsumerModuleID, blocker.Key.CapabilityName, blocker.Code))
+	}
+	if len(codes) > 0 {
+		message += "; blockers: " + strings.Join(codes, ", ")
+		if len(blockers) > len(codes) {
+			message += fmt.Sprintf(" and %d more", len(blockers)-len(codes))
+		}
+	}
+	result := failed(contract.CodeConflict, message)
+	if raw, err := json.Marshal(details); err == nil {
+		result.Error.Details = raw
+	}
+	return result
+}
+
+func truncateUTF8(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut] + "..."
 }
 
 func failed(code contract.Code, message string) management.FinishResult {

@@ -219,7 +219,7 @@ func validateModuleProviderCutovers(ctx context.Context, runtime *tenantruntime.
 		for _, selection := range byKey {
 			selections = append(selections, selection)
 		}
-		plan, err := runtime.Services.ResolveCandidateModuleBindings(scope, snapshot.Packages, snapshot.Modules, selections, snapshot.Revision+1)
+		plan, err := runtime.Services.ResolveCandidateModuleBindings(scope, snapshot.Packages, snapshot.Modules, nil, selections, snapshot.Revision+1)
 		if err != nil || len(plan.Blockers) > 0 {
 			return fmt.Errorf("provider cutover failed candidate binding validation")
 		}
