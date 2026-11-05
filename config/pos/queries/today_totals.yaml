@@ -6,7 +6,7 @@ source: Sale
 permission: read
 scope: tenant
 input:
-  since: {type: string, max_length: 40}
+  since: {type: string, max_length: 40, default: $today}
   register: {type: string, max_length: 140}
 filters:
   - {field: status, op: eq, value: Paid}

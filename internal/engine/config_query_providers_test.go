@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -178,5 +179,42 @@ func TestGeneratedPackModulesRegisterEveryQuery(t *testing.T) {
 	}
 	if len(providers) != 1 || len(providers[0].Queries) != 2 {
 		t.Fatalf("registered %+v", providers)
+	}
+}
+
+// TestConfigQueryExecutorReportsCallerInputErrors keeps a caller's mistake
+// distinguishable from a provider fault (#317).
+func TestConfigQueryExecutorReportsCallerInputErrors(t *testing.T) {
+	database, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	database.SetMaxOpenConns(1)
+	if _, err := database.Exec("CREATE TABLE `tabItem` (name TEXT PRIMARY KEY, title TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	base, _ := configQueryFixture()
+	base.Input = map[string]query.InputSpec{"title": {Type: "string"}}
+	base.Filters = []query.Filter{{Field: "title", Op: "eq", Value: "$input.title"}}
+	tests := []struct {
+		name      string
+		input     string
+		cursor    string
+		wantField string
+	}{
+		{"missing required input", `{}`, "", "title"},
+		{"input not an object", `[]`, "", ""},
+		{"malformed cursor", `{"title":"x"}`, "!!", "cursor"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := &configQueryExecutor{db: database, dialect: db.Resolve("libsql"), def: base}
+			_, err := exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, plugin.PublishedQueryActorScope{SubjectID: "u1"}, json.RawMessage(tc.input), tc.cursor, 2)
+			var inputErr *plugin.QueryInputError
+			if !errors.As(err, &inputErr) || inputErr.Field != tc.wantField {
+				t.Fatalf("err = %#v, want *plugin.QueryInputError field %q", err, tc.wantField)
+			}
+		})
 	}
 }

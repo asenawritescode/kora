@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -125,5 +126,66 @@ func TestFieldRefFilter(t *testing.T) {
 	d.Filters = fl[:1]
 	if p, err = Run(context.Background(), conn, db.Resolve("libsql"), d, req); err != nil || len(p.Rows) != 2 {
 		t.Fatalf("rows %+v %v", p.Rows, err)
+	}
+}
+
+func TestInputDefaultsAndRequired(t *testing.T) {
+	now := time.Date(2026, 11, 6, 15, 4, 5, 0, time.UTC)
+	since := Filter{Field: "creation", Op: "gte", Value: "$input.since"}
+	tests := []struct {
+		name      string
+		spec      InputSpec
+		input     map[string]any
+		wantArg   any
+		wantField string // non-empty: expect *InputError naming it
+	}{
+		{"missing and no default is a caller error", InputSpec{Type: "string"}, nil, nil, "since"},
+		{"null counts as missing", InputSpec{Type: "string"}, map[string]any{"since": nil}, nil, "since"},
+		{"default $today", InputSpec{Type: "string", Default: "$today"}, nil, "2026-11-06", ""},
+		{"default $now", InputSpec{Type: "string", Default: "$now"}, nil, "2026-11-06 15:04:05", ""},
+		{"literal default", InputSpec{Type: "string", Default: "2020-01-01"}, nil, "2020-01-01", ""},
+		{"supplied input wins over default", InputSpec{Type: "string", Default: "$today"}, map[string]any{"since": "2026-01-01"}, "2026-01-01", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := def([]Filter{since})
+			d.Input = map[string]InputSpec{"since": tc.spec}
+			_, args, _, err := Build(d, db.MySQL(), Request{FullRead: true, Now: now, Input: tc.input})
+			if tc.wantField != "" {
+				var ie *InputError
+				if !errors.As(err, &ie) || ie.Field != tc.wantField || !strings.Contains(ie.Error(), ErrInputInvalid) {
+					t.Fatalf("err = %v, want *InputError for %s", err, tc.wantField)
+				}
+				return
+			}
+			if err != nil || len(args) != 1 || args[0] != tc.wantArg {
+				t.Fatalf("args=%v err=%v, want %v", args, err, tc.wantArg)
+			}
+		})
+	}
+}
+
+func TestRequiredInputs(t *testing.T) {
+	opt := func(in string) Filter { return Filter{Field: "a", Op: "eq", Value: "$input." + in, Optional: true} }
+	req := func(in string) Filter { return Filter{Field: "a", Op: "eq", Value: "$input." + in} }
+	tests := []struct {
+		name    string
+		filters []Filter
+		input   map[string]InputSpec
+		want    []string
+	}{
+		{"none", []Filter{opt("a")}, map[string]InputSpec{"a": {Type: "string"}}, nil},
+		{"required sorted", []Filter{req("b"), req("a"), opt("c")}, map[string]InputSpec{"a": {}, "b": {}, "c": {}}, []string{"a", "b"}},
+		{"defaulted is not required", []Filter{req("a")}, map[string]InputSpec{"a": {Type: "string", Default: "$today"}}, nil},
+		{"in any group", []Filter{{Any: []Filter{req("a"), opt("b")}}}, map[string]InputSpec{"a": {}, "b": {}}, []string{"a"}},
+		{"literals ignored", []Filter{{Field: "a", Op: "eq", Value: "Paid"}}, nil, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := (&Definition{Filters: tc.filters, Input: tc.input}).RequiredInputs()
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
 	}
 }

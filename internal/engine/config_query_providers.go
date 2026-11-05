@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -155,17 +156,21 @@ func (e *configQueryExecutor) run(ctx context.Context, scope contract.BusinessSc
 		req.ScopeValue = string(scope.LegalEntityID)
 	}
 	if err := json.Unmarshal(input, &req.Input); err != nil {
-		return contract.QueryResult{}, contract.NewError(contract.CodeValidationFailed, "query input must be an object")
+		return contract.QueryResult{}, &plugin.QueryInputError{Message: "query input must be an object"}
 	}
 	if cursor != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(cursor)
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
 		if err != nil || dec.Decode(&req.Cursor) != nil {
-			return contract.QueryResult{}, contract.NewError(contract.CodeValidationFailed, "query cursor is invalid")
+			return contract.QueryResult{}, &plugin.QueryInputError{Field: "cursor", Message: "query cursor is invalid"}
 		}
 	}
 	page, err := query.Run(ctx, e.db, e.dialect, e.def, req)
+	var inputErr *query.InputError
+	if errors.As(err, &inputErr) {
+		return contract.QueryResult{}, &plugin.QueryInputError{Field: inputErr.Field, Message: inputErr.Msg}
+	}
 	if err != nil {
 		return contract.QueryResult{}, err
 	}

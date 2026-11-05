@@ -18,6 +18,16 @@ const ErrTooManyGroups = "query.too_many_groups"
 // ErrInputInvalid is the code reported (HTTP 400) for bad call input.
 const ErrInputInvalid = "query.input_invalid"
 
+// InputError is a call the caller got wrong: a missing required input, an
+// empty "in" list, a cursor that does not match the sort. Callers report it
+// as a validation failure, never as a server fault.
+type InputError struct {
+	Field string
+	Msg   string
+}
+
+func (e *InputError) Error() string { return ErrInputInvalid + ": " + e.Msg }
+
 // Request carries one call's verified context. Permission checks happen
 // before the executor; it applies scope and owner_field row limits.
 type Request struct {
@@ -37,10 +47,11 @@ type Page struct {
 }
 
 type builder struct {
-	d    db.Dialect
-	via  bool
-	req  Request
-	args []any
+	d      db.Dialect
+	inputs map[string]InputSpec
+	via    bool
+	req    Request
+	args   []any
 }
 
 // col renders a column reference; child sources qualify every column with
@@ -88,8 +99,14 @@ func (b *builder) value(v any) (any, bool, error) {
 	case s == "$today":
 		return b.req.Now.UTC().Format("2006-01-02"), true, nil
 	case strings.HasPrefix(s, "$input."):
-		in, ok := b.req.Input[strings.TrimPrefix(s, "$input.")]
-		return in, ok && in != nil, nil
+		name := strings.TrimPrefix(s, "$input.")
+		if in, ok := b.req.Input[name]; ok && in != nil {
+			return in, true, nil
+		}
+		if def := b.inputs[name].Default; def != nil {
+			return b.value(def)
+		}
+		return nil, false, nil
 	}
 	return nil, false, fmt.Errorf("%s: unknown value reference %q", ErrInputInvalid, s)
 }
@@ -118,7 +135,9 @@ func (b *builder) leaf(f Filter) (string, bool, error) {
 		if f.Optional {
 			return "", false, nil
 		}
-		return "", false, fmt.Errorf("%s: missing value for %s", ErrInputInvalid, f.Field)
+		name, _ := f.Value.(string)
+		name = strings.TrimPrefix(name, "$input.")
+		return "", false, &InputError{Field: name, Msg: "input " + name + " is required"}
 	}
 	switch f.Op {
 	case "eq", "ne", "lt", "lte", "gt", "gte":
@@ -133,7 +152,7 @@ func (b *builder) leaf(f Filter) (string, bool, error) {
 	case "in":
 		list, _ := v.([]any)
 		if len(list) == 0 {
-			return "", false, fmt.Errorf("%s: in needs a non-empty list for %s", ErrInputInvalid, f.Field)
+			return "", false, &InputError{Field: f.Field, Msg: "in needs a non-empty list for " + f.Field}
 		}
 		ph := make([]string, len(list))
 		for i, e := range list {
@@ -167,7 +186,7 @@ func (b *builder) filter(f Filter) (string, bool, error) {
 // keyset renders the "after cursor" predicate over sort columns + name.
 func (b *builder) keyset(sorts []Sort) (string, error) {
 	if len(b.req.Cursor) != len(sorts) {
-		return "", fmt.Errorf("%s: cursor does not match sort", ErrInputInvalid)
+		return "", &InputError{Field: "cursor", Msg: "cursor does not match sort"}
 	}
 	var ors []string
 	for i, s := range sorts {
@@ -189,7 +208,7 @@ func (b *builder) keyset(sorts []Sort) (string, error) {
 // The sort list always ends with name for a stable keyset; the last
 // len(sort) selected columns are cursor values.
 func Build(d *Definition, dialect db.Dialect, req Request) (string, []any, []Sort, error) {
-	b := &builder{d: dialect, req: req, via: d.Via != ""}
+	b := &builder{d: dialect, inputs: d.Input, req: req, via: d.Via != ""}
 	if len(d.Aggregates) > 0 {
 		return buildAggregate(b, d)
 	}
@@ -293,7 +312,7 @@ func Run(ctx context.Context, conn *sql.DB, dialect db.Dialect, d *Definition, r
 // buildAggregate renders the grouped SELECT; filters, owner and scope apply before GROUP BY.
 func buildAggregate(b *builder, d *Definition) (string, []any, []Sort, error) {
 	if b.req.Cursor != nil {
-		return "", nil, nil, fmt.Errorf("%s: aggregate queries take no cursor", ErrInputInvalid)
+		return "", nil, nil, &InputError{Field: "cursor", Msg: "aggregate queries take no cursor"}
 	}
 	q := b.d
 	var cols, group []string

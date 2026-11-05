@@ -360,3 +360,82 @@ func TestAuthorizePublishedQueryOwnerSourceSkipsSourceRead(t *testing.T) {
 		})
 	}
 }
+
+type failingPublishedQueryExecutor struct{ err error }
+
+func (e failingPublishedQueryExecutor) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, uint16) (contract.QueryResult, error) {
+	return contract.QueryResult{}, e.err
+}
+
+// TestPublishedQueryCallerMistakesAre4xx covers #317: a caller's mistake is a
+// bounded 400, a provider fault stays a 503 that leaks nothing.
+func TestPublishedQueryCallerMistakesAre4xx(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name       string
+		body       string
+		execErr    error
+		inputErr   error
+		wantStatus int
+		wantCode   string
+		wantField  string
+		wantMsg    string
+	}{
+		{"executor input error", `{"input":{}}`, &plugin.QueryInputError{Field: "since", Message: "input since is required"}, nil, 400, "validation.invalid_query_request", "since", "input since is required"},
+		{"schema failure hides validator text", `{"input":{}}`, nil, errors.New("jsonschema secret-internal-detail"), 400, "validation.invalid_query_request", "", "query input is invalid"},
+		{"limit beyond page bound", `{"input":{},"limit":11}`, nil, nil, 400, "validation.invalid_query_request", "limit", "limit"},
+		{"provider fault stays 503", `{"input":{}}`, errors.New("dial tcp 10.0.0.1: secret-host"), nil, 503, "module.query_failed", "", "Published query could not be completed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scope := contract.BusinessScope{TenantID: "tenant-inputs", Kind: contract.ScopeKindTenant}
+			inputSchema := contract.SchemaRef{ID: "sales.inputs.input", Version: 1}
+			outputSchema := contract.SchemaRef{ID: "sales.inputs.output", Version: 1}
+			query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "totals", Capability: "sales.totals", Operation: "list", InputSchema: inputSchema, OutputSchema: outputSchema, ScopePolicy: contract.ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}
+			operation := contract.OperationSpec{Name: query.Operation, Input: inputSchema, Output: outputSchema, Effect: contract.EffectQuery}
+			module := contract.ModuleDescriptor{ID: query.OwnerModuleID, Version: "1.0.0", Provides: []contract.CapabilityOffer{{Name: query.Capability, Contract: outputSchema, Operations: []contract.OperationSpec{operation}}}, Queries: []contract.PublishedQuery{query}}
+			provider := plugin.ProviderRegistration{TenantID: scope.TenantID, ProviderID: "sales.internal", OwnerModuleID: module.ID, Kind: plugin.ProviderInternal, Offers: module.Provides, Queries: map[string]plugin.PublishedQueryExecutor{"totals": failingPublishedQueryExecutor{err: tc.execErr}}, ValidateSchema: func(ref contract.SchemaRef, _ []byte) error {
+				if ref == inputSchema {
+					return tc.inputErr
+				}
+				return nil
+			}}
+			selection := plugin.ProviderSelection{Key: plugin.BindingKey{Scope: scope, ConsumerModuleID: module.ID, CapabilityName: query.Capability}, ProviderID: provider.ProviderID}
+			services := SiteRuntimeService{ResolveModuleBindings: func(requested contract.BusinessScope) (plugin.BindingPlan, error) {
+				return plugin.ResolveModules(requested, []contract.ModuleDescriptor{module}, []plugin.ProviderRegistration{provider}, []plugin.ProviderSelection{selection}, 1)
+			}}
+			serviceRegistry := NewSiteRuntimeServices()
+			serviceRegistry.Replace(string(scope.TenantID), services)
+			registry := doctype.NewRegistry()
+			registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.query.totals", Role: "Reader", Read: true})
+			handler := NewHandler(registry, nil)
+			handler.RuntimeServices = serviceRegistry
+			execution, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "reader", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), Roles: []string{"Reader"}, AuthenticatedAt: time.Now().UTC()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest("POST", "/api/modules/sales.orders/queries/totals", strings.NewReader(tc.body))
+			ctx.Params = gin.Params{{Key: "module", Value: "sales.orders"}, {Key: "query", Value: "totals"}}
+			ctx.Set("site_name", string(scope.TenantID))
+			ctx.Set("policy_execution", execution)
+			handler.HandlePublishedModuleQuery(ctx)
+			var body struct {
+				Error ErrorBody `json:"error"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("body %q: %v", recorder.Body.String(), err)
+			}
+			if recorder.Code != tc.wantStatus || body.Error.Code != tc.wantCode || !strings.Contains(body.Error.Message, tc.wantMsg) {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if field, _ := body.Error.Details["field"].(string); field != tc.wantField {
+				t.Fatalf("field = %q, want %q: %s", field, tc.wantField, recorder.Body.String())
+			}
+			if strings.Contains(recorder.Body.String(), "secret") {
+				t.Fatalf("internal detail leaked: %s", recorder.Body.String())
+			}
+		})
+	}
+}
