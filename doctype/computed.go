@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/asenawritescode/kora/numeric"
 )
 
 // ComputedScriptHook evaluates a script-backed computed field for one document.
@@ -125,6 +127,16 @@ func ComputeFieldsWithHook(dt *DocType, doc *Document, hook ComputedScriptHook) 
 
 	for _, pass := range passes {
 		for _, cf := range pass {
+			if numeric.IsDecimalFieldtype(cf.field.Fieldtype) {
+				sexpr := cf.expr
+				if !strings.HasPrefix(sexpr, "(") {
+					sexpr = InfixToSExpr(sexpr)
+				}
+				if exact, ok := evalDecimalSExpr(sexpr, doc); ok {
+					doc.Set(cf.field.Fieldname, numeric.Number(exact))
+					continue
+				}
+			}
 			val, err := evalComputedWithCtx(cf.expr, dt, doc, sandbox)
 			if err != nil {
 				slog.Warn("computed field evaluation failed", "field", cf.field.Fieldname, "expr", cf.expr, "error", err)
