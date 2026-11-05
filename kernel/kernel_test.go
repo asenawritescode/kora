@@ -25,6 +25,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	mysql "github.com/go-sql-driver/mysql"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -119,6 +120,14 @@ func newSite(t *testing.T, name string) *siteFixture {
 		if _, err := sdb.Exec(ddl); err != nil {
 			t.Fatalf("kernel table: %v", err)
 		}
+	}
+	for _, ddl := range configstore.ConfigRevisionSchema(dialect) {
+		if _, err := sdb.Exec(ddl); err != nil {
+			t.Fatalf("config revision table: %v", err)
+		}
+	}
+	if err := configstore.SeedConfigRevision(context.Background(), sdb, dialect); err != nil {
+		t.Fatalf("seed config revision: %v", err)
 	}
 
 	taskDT := &doctype.DocType{
@@ -2119,6 +2128,17 @@ func TestTrustedOwnerCommandValidatesBeforeBusinessEffects(t *testing.T) {
 	s.Registry.Permissions.SetPermission(&doctype.Permission{Doctype: invoice.Name, Role: doctype.AdminRole, Read: true, Create: true, Write: true, Delete: true})
 	if err := schema.MigrateSiteFromRegistry(s.DB, s.Name, s.Registry, s.Dialect); err != nil {
 		t.Fatal("migrate protected invoice resource:", err)
+	}
+
+	if err := configstore.NewModuleStore(s.DB, s.Dialect).EnsureSchema(); err != nil {
+		t.Fatal("create module lifecycle snapshot table:", err)
+	}
+	lifecycle, _ := json.Marshal(contract.ModuleSnapshot{TenantID: contract.TenantID(s.Name), Revision: 1,
+		Modules:       []contract.ModuleDescriptor{{ID: "finance.ar", Version: "1.0.0"}},
+		Installations: []contract.ModuleInstallation{{TenantID: contract.TenantID(s.Name), ModuleID: "finance.ar", Version: "1.0.0", ArtifactDigest: "fixture", State: string(contract.ModuleActive), Revision: 1}},
+	})
+	if _, err := s.DB.Exec(`INSERT INTO _kora_module_snapshot (tenant_id,revision,snapshot_json) VALUES (?,?,?)`, s.Name, 1, string(lifecycle)); err != nil {
+		t.Fatal("persist active module snapshot:", err)
 	}
 
 	k := newKernel(s)

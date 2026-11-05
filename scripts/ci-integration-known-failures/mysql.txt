@@ -2,13 +2,10 @@
 # These suites never ran in CI before; fix the cause, then delete the line.
 
 # Test fixtures predate the _kora_config_revision table.
-TestRecordCreateUsesOperationScopedComputedScriptHook  # fixture lacks _kora_config_revision
-TestConfiguredCommandUsesRecordLifecyclePipeline  # fixture lacks _kora_config_revision
 TestIntegration_FullFieldworkLifecycle  # fixture lacks _kora_config_revision
 TestIntegration_ExtensionPermissions  # fixture lacks _kora_config_revision
 
 # Test inputs or fixtures out of date with merged product changes.
-TestTrustedOwnerCommandValidatesBeforeBusinessEffects  # "module lifecycle admission could not be fenced"
 TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction  # capability lease fixture rejected as invalid
 TestLiveManagementProvisionRouteAndWorker  # "module lifecycle executor requires tenant runtime router"
 TestLiveMySQLCreateSiteRegistersCanonicalDirectoryAndRetries  # input lacks required Cloud subject ID
