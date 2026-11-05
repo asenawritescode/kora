@@ -18,6 +18,8 @@ type refEnv struct {
 	input map[string]any
 	item  map[string]any
 	steps map[string]string
+	// computed holds values derived by the command's compute block.
+	computed map[string]any
 }
 
 type stepInstance struct {
@@ -37,6 +39,12 @@ func resolveEnvRef(ref string, env refEnv) (any, error) {
 			return nil, fmt.Errorf("reference %q is only valid inside for_each", ref)
 		}
 		return walkRef(ref, env.item, strings.TrimPrefix(ref, "$item."))
+	case strings.HasPrefix(ref, "$computed."):
+		v, found := env.computed[strings.TrimPrefix(ref, "$computed.")]
+		if !found {
+			return nil, fmt.Errorf("reference %q does not name a computed value", ref)
+		}
+		return v, nil
 	case strings.HasPrefix(ref, "$steps."):
 		alias, ok := strings.CutSuffix(strings.TrimPrefix(ref, "$steps."), ".name")
 		name, found := env.steps[alias]
@@ -140,6 +148,10 @@ func (c *CommandResource) validateStepReferences() error {
 			switch {
 			case strings.HasPrefix(ref, "$item.") && step.ForEach == "":
 				return fmt.Errorf("command %q: step %d uses %q outside for_each", c.FullName(), i, ref)
+			case strings.HasPrefix(ref, "$computed."):
+				if !c.hasComputeKey(strings.TrimPrefix(ref, "$computed.")) {
+					return fmt.Errorf("command %q: step %d reference %q must name a compute key", c.FullName(), i, ref)
+				}
 			case strings.HasPrefix(ref, "$steps."):
 				alias, ok := strings.CutSuffix(strings.TrimPrefix(ref, "$steps."), ".name")
 				if !ok || !aliases[alias] {
