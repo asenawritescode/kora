@@ -177,11 +177,17 @@ func normalizePackagePath(value string) (string, error) {
 	return clean, nil
 }
 
+// ValidPackageFileType reports whether contentType is allowed at filePath.
+func ValidPackageFileType(filePath, contentType string) bool {
+	return validPackageFileType(filePath, contentType)
+}
+
 func validPackageFileType(filePath, contentType string) bool {
 	ext := strings.ToLower(path.Ext(filePath))
+	yml := ext == ".yaml" || ext == ".yml"
 	switch contentType {
 	case "doctype":
-		return strings.HasPrefix(filePath, "doctypes/") && (ext == ".yaml" || ext == ".yml")
+		return strings.HasPrefix(filePath, "doctypes/") && yml
 	case "roles":
 		return (filePath == "roles.yaml" || (strings.HasPrefix(filePath, "components/") && path.Base(filePath) == "roles.yaml")) && ext == ".yaml"
 	case "permissions":
@@ -189,16 +195,57 @@ func validPackageFileType(filePath, contentType string) bool {
 	case "workflow_definition":
 		return strings.HasPrefix(filePath, "workflows/") && ext == ".json"
 	case "view":
-		return strings.HasPrefix(filePath, "views/") && (ext == ".yaml" || ext == ".yml")
+		return strings.HasPrefix(filePath, "views/") && yml
 	case "report":
-		return strings.HasPrefix(filePath, "reports/") && (ext == ".yaml" || ext == ".yml")
+		return strings.HasPrefix(filePath, "reports/") && yml
 	case "script":
 		return strings.HasPrefix(filePath, "scripts/") && ext == ".js"
+	case "query":
+		return strings.HasPrefix(filePath, "queries/") && yml
+	case "command":
+		return strings.HasPrefix(filePath, "commands/") && yml
+	case "print_format":
+		return strings.HasPrefix(filePath, "print_formats/") && yml
 	case "pack":
-		return filePath == "pack.yaml"
+		return filePath == "pack.yaml" || (PackFileComponent(filePath) != "" && path.Base(filePath) == "pack.yaml" && path.Dir(filePath) == "components/"+PackFileComponent(filePath))
 	default:
 		return false
 	}
+}
+
+// PackFileComponent returns the component namespace (16 lowercase hex chars)
+// of a "components/<ns>/..." or "<dir>/components/<ns>/..." path, or "" for
+// root files.
+func PackFileComponent(filePath string) string {
+	parts := strings.Split(filePath, "/")
+	for i := 0; i+2 < len(parts); i++ {
+		if parts[i] == "components" && isPackNamespace(parts[i+1]) {
+			return parts[i+1]
+		}
+	}
+	return ""
+}
+
+func isPackNamespace(s string) bool {
+	if len(s) != 16 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// PackageFileType infers the content type of a package file from its path.
+func PackageFileType(filePath string) (string, bool) {
+	for _, t := range []string{"doctype", "roles", "permissions", "workflow_definition", "view", "report", "script", "query", "command", "print_format", "pack"} {
+		if validPackageFileType(filePath, t) {
+			return t, true
+		}
+	}
+	return "", false
 }
 
 func writePackageLength(w interface{ Write([]byte) (int, error) }, value uint64) {
