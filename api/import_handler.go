@@ -17,8 +17,9 @@ import (
 type importSpec struct {
 	ImportID string `json:"import_id"`
 	Target   struct {
-		DocType   string   `json:"doctype"`
-		KeyFields []string `json:"key_fields"`
+		DocType      string   `json:"doctype"`
+		OperationRef string   `json:"operation_ref"`
+		KeyFields    []string `json:"key_fields"`
 	} `json:"target"`
 	Mapping map[string]string `json:"mapping"`
 	GroupBy string            `json:"group_by"`
@@ -57,29 +58,50 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		return
 	}
 	reg := h.siteRegistry(c)
-	dt := reg.Get(spec.Target.DocType)
-	if dt == nil || dt.IsChildTable {
-		badRequestError(c, "import.target_invalid", "target DocType not found or is a child table", nil)
-		return
-	}
-	if dt.ModuleOwnerID != "" {
-		badRequestError(c, "import.target_owned", "module-owned DocTypes cannot be imported into", nil)
-		return
-	}
+	var opTarget *importOperation
+	var dt *doctype.DocType
 	execution, ok := requestExecution(c)
-	if !ok {
-		writeError(c, http.StatusForbidden, "permission.denied", "verified execution is required", nil)
-		return
-	}
-	scope := businessScopeFromRequest(c, execution)
-	needed := []string{"create", "import"}
-	if len(spec.Target.KeyFields) > 0 {
-		needed = append(needed, "write")
-	}
-	for _, op := range needed {
-		if _, err := policy.DecideForBusinessScope(execution, reg, dt.Name, op, scope, dt.BusinessScopePolicy == contract.ScopeEntityOwned); err != nil {
-			writeError(c, http.StatusForbidden, "permission.denied", "cannot "+op+" on "+dt.Name, nil)
+	if spec.Target.OperationRef != "" {
+		if spec.Target.DocType != "" {
+			badRequestError(c, "import.target_invalid", "target takes exactly one of doctype or operation_ref", nil)
 			return
+		}
+		if len(spec.Target.KeyFields) > 0 {
+			badRequestError(c, "import.unsupported", "key_fields is not supported with operation_ref", nil)
+			return
+		}
+		if !ok {
+			writeError(c, http.StatusForbidden, "permission.denied", "verified execution is required", nil)
+			return
+		}
+		if opTarget, ok = h.resolveImportOperation(c, reg, execution, spec.Target.OperationRef); !ok {
+			return
+		}
+		dt = opTarget.dt
+	} else {
+		dt = reg.Get(spec.Target.DocType)
+		if dt == nil || dt.IsChildTable {
+			badRequestError(c, "import.target_invalid", "target DocType not found or is a child table", nil)
+			return
+		}
+		if dt.ModuleOwnerID != "" {
+			badRequestError(c, "import.target_owned", "module-owned DocTypes cannot be imported into", map[string]any{"operations": h.ownedImportOperations(c, dt)})
+			return
+		}
+		if !ok {
+			writeError(c, http.StatusForbidden, "permission.denied", "verified execution is required", nil)
+			return
+		}
+		scope := businessScopeFromRequest(c, execution)
+		needed := []string{"create", "import"}
+		if len(spec.Target.KeyFields) > 0 {
+			needed = append(needed, "write")
+		}
+		for _, op := range needed {
+			if _, err := policy.DecideForBusinessScope(execution, reg, dt.Name, op, scope, dt.BusinessScopePolicy == contract.ScopeEntityOwned); err != nil {
+				writeError(c, http.StatusForbidden, "permission.denied", "cannot "+op+" on "+dt.Name, nil)
+				return
+			}
 		}
 	}
 	fh, err := c.FormFile("file")
@@ -163,22 +185,47 @@ func (h *Handler) HandleImport(c *gin.Context) {
 			results[u.First] = importRowResult{Row: u.First, LastRow: u.lastIfGrouped(spec.GroupBy), Error: perr}
 			continue
 		}
+		if opTarget != nil {
+			payload, _ := json.Marshal(u.Data)
+			bulk = append(bulk, kernel.BulkRow{Index: u.First, Payload: payload})
+			continue
+		}
 		payload, _ := json.Marshal(map[string]any{"doctype": dt.Name, "data": u.Data})
 		bulk = append(bulk, kernel.BulkRow{Index: u.First, Payload: payload})
 	}
 
-	payload, _ := json.Marshal(map[string]any{"doctype": dt.Name})
-	k, base, sqlDB, reg, cerr := h.buildKernelOperation(c, kernel.CommandRecordCreate, kernelRequest{Payload: payload}, false)
-	if cerr != nil {
-		h.writeKernelError(c, cerr)
-		return
+	var bulkResults []kernel.BulkRowResult
+	if opTarget != nil {
+		// A dry run validates and authorizes only: published providers have no
+		// rollback hook, so nothing is executed.
+		if spec.DryRun {
+			for _, r := range bulk {
+				bulkResults = append(bulkResults, kernel.BulkRowResult{Index: r.Index})
+			}
+		} else {
+			bulkResults = opTarget.run(c, execution, spec.ImportID, bulk)
+		}
+	} else {
+		payload, _ := json.Marshal(map[string]any{"doctype": dt.Name})
+		k, base, sqlDB, reg, cerr := h.buildKernelOperation(c, kernel.CommandRecordCreate, kernelRequest{Payload: payload}, false)
+		if cerr != nil {
+			h.writeKernelError(c, cerr)
+			return
+		}
+		bulkResults = k.ExecuteBulk(c.Request.Context(), sqlDB, reg, base, bulk, kernel.BulkOptions{ImportID: spec.ImportID, DryRun: spec.DryRun, KeyFields: spec.Target.KeyFields})
 	}
-	for _, r := range k.ExecuteBulk(c.Request.Context(), sqlDB, reg, base, bulk, kernel.BulkOptions{ImportID: spec.ImportID, DryRun: spec.DryRun, KeyFields: spec.Target.KeyFields}) {
+	for _, r := range bulkResults {
 		rr := importRowResult{Row: r.Index, OK: r.Error == nil, Error: r.Error}
 		if r.Error == nil {
 			var rd kernel.ResultData
 			if json.Unmarshal(r.Result.Data, &rd) == nil {
 				rr.ReceiptRef, _ = rd.Document["name"].(string)
+			}
+			var op struct {
+				ReceiptRef string `json:"receipt_ref"`
+			}
+			if opTarget != nil && json.Unmarshal(r.Result.Data, &op) == nil {
+				rr.ReceiptRef = op.ReceiptRef
 			}
 		}
 		results[r.Index] = rr
@@ -197,5 +244,9 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		}
 		out = append(out, r)
 	}
-	c.JSON(http.StatusOK, gin.H{"import_id": spec.ImportID, "total": len(units), "succeeded": succeeded, "failed": failed, "dry_run": spec.DryRun, "rows": out})
+	resp := gin.H{"import_id": spec.ImportID, "total": len(units), "succeeded": succeeded, "failed": failed, "dry_run": spec.DryRun, "rows": out}
+	if opTarget != nil && spec.DryRun {
+		resp["executed"] = false
+	}
+	c.JSON(http.StatusOK, resp)
 }

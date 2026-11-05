@@ -58,6 +58,14 @@ func (k *Kernel) ExecuteBulk(ctx context.Context, siteDB *sql.DB, reg *doctype.R
 	return runBulk(base, rows, opts, exec)
 }
 
+// SequenceBulk visits rows in order, never stopping, with each row's
+// idempotency key. runBulk and published-operation imports share it.
+func SequenceBulk(importID string, rows []BulkRow, fn func(row BulkRow, key string)) {
+	for _, row := range rows {
+		fn(row, BulkRowKey(importID, row.Index))
+	}
+}
+
 func runBulk(base Operation, rows []BulkRow, opts BulkOptions, exec func(Operation) (contract.CommandResult, *contract.Error)) []BulkRowResult {
 	out := make([]BulkRowResult, 0, len(rows))
 	for _, row := range rows {
