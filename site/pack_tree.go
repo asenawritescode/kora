@@ -126,6 +126,11 @@ func mergePackSnapshot(dst, next *doctype.ConfigSnapshot, names map[string]bool)
 			return err
 		}
 	}
+	for _, m := range next.Modules {
+		if err := claim("module", string(m.ID)); err != nil {
+			return err
+		}
+	}
 	have := map[string]bool{}
 	for _, r := range dst.Roles {
 		have[r.Name] = true
@@ -140,6 +145,7 @@ func mergePackSnapshot(dst, next *doctype.ConfigSnapshot, names map[string]bool)
 	dst.Views = append(dst.Views, next.Views...)
 	dst.Reports = append(dst.Reports, next.Reports...)
 	dst.Commands = append(dst.Commands, next.Commands...)
+	dst.Modules = append(dst.Modules, next.Modules...)
 	dst.Queries = append(dst.Queries, next.Queries...)
 	dst.PrintFormats = append(dst.PrintFormats, next.PrintFormats...)
 	dst.WorkflowDefinitions = append(dst.WorkflowDefinitions, next.WorkflowDefinitions...)

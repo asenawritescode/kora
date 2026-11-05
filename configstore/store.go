@@ -1157,35 +1157,9 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 		return "", 0, err
 	}
 	if len(snapshot.Modules) > 0 || len(commit.PackageConstraints) > 0 {
-		if _, err := contract.ParseTenantID(string(commit.ModuleTenantID)); err != nil {
-			return "", 0, fmt.Errorf("module snapshot tenant identity is invalid: %w", err)
-		}
-		moduleStore := NewModuleStore(s.DB, dialect)
 		// The executor ensures module tables before opening this transaction.
 		// DDL here would implicitly commit prior configuration writes on MySQL.
-		tenantID := commit.ModuleTenantID
-		existing, err := loadModuleSnapshotTx(ctx, tx, dialect, tenantID)
-		if err != nil {
-			return "", 0, err
-		}
-		if existing.Revision != commit.ModuleSnapshotRevision {
-			return "", 0, fmt.Errorf("module snapshot revision conflict: expected %d, actual %d", commit.ModuleSnapshotRevision, existing.Revision)
-		}
-		allModules := mergeInstalledDescriptors(existing.Modules, snapshot.Modules)
-		ownership, err := replaceModuleOwnership(existing.Ownership, tenantID, snapshot.Modules)
-		if err != nil {
-			return "", 0, err
-		}
-		selections := existing.ProviderSelections
-		if commit.ProviderSelections != nil {
-			selections = commit.ProviderSelections
-		}
-		packages := mergeInstalledPackages(existing.Packages, commit.PackageConstraints)
-		moduleSnapshot := contract.ModuleSnapshot{TenantID: tenantID, Modules: allModules, Packages: packages, Installations: replaceModuleInstallations(existing.Installations, tenantID, snapshot.Modules, commit.ArtifactDigest), Ownership: ownership, ProviderSelections: append([]contract.ProviderSelection(nil), selections...)}
-		if err := validateModuleSnapshot(moduleSnapshot); err != nil {
-			return "", 0, err
-		}
-		if _, err := moduleStore.CommitActivationTx(ctx, tx, commit.ModuleSnapshotRevision, moduleSnapshot); err != nil {
+		if err := s.CommitModulesTx(ctx, tx, dialect, commit.ModuleTenantID, snapshot.Modules, commit.ArtifactDigest, commit.ModuleSnapshotRevision, commit.ProviderSelections, commit.PackageConstraints); err != nil {
 			return "", 0, err
 		}
 	}

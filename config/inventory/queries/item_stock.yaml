@@ -1,5 +1,5 @@
 name: item_stock
-module_owner_id: inventory
+module_owner_id: inventory.core
 capability: inventory.stock
 operation: item_stock
 source: Stock Balance

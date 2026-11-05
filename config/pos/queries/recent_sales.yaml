@@ -1,5 +1,5 @@
 name: recent_sales
-module_owner_id: pos
+module_owner_id: pos.core
 capability: pos.sales
 operation: recent_sales
 source: Sale

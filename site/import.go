@@ -115,7 +115,7 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 		reports = append(reports, data)
 	}
 
-	return &doctype.ConfigSnapshot{
+	snapshot := &doctype.ConfigSnapshot{
 		DocTypes:            doctypes,
 		Roles:               roles,
 		Permissions:         permissions,
@@ -125,8 +125,37 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 		Commands:            commands,
 		PrintFormats:        printFormats,
 		Queries:             queries,
-	}, nil
+	}
+	manifest, ok, err := ParsePackFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		if len(queries) > 0 || hasOwnerTaggedCommand(commands) {
+			return nil, fmt.Errorf("pack.manifest_required: %s has queries or module-owned commands but no %s", configPath, packFileName)
+		}
+		return snapshot, nil
+	}
+	if snapshot.Modules, err = GeneratePackModules(manifest, snapshot); err != nil {
+		return nil, err
+	}
+	return snapshot, nil
 }
+
+func hasOwnerTaggedCommand(commands []json.RawMessage) bool {
+	for _, raw := range commands {
+		var head struct {
+			Owner string `json:"module_owner_id"`
+		}
+		if json.Unmarshal(raw, &head) == nil && head.Owner != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// afterModuleRevisionRead is a test seam for the module CAS race window.
+var afterModuleRevisionRead func()
 
 func registryOf(dts []*doctype.DocType) *doctype.Registry {
 	reg := doctype.NewRegistry()
@@ -407,6 +436,39 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	if err != nil {
 		return fmt.Errorf("reading config revision for activation preflight: %w", err)
 	}
+	// MySQL DDL commits implicitly, so module tables exist before BeginTx.
+	moduleStore := configstore.NewModuleStore(database, dialect)
+	var moduleRevision uint64
+	var moduleDigest string
+	commitModules := false
+	if len(snapshotCopy.Modules) > 0 {
+		if err := moduleStore.EnsureSchema(); err != nil {
+			return fmt.Errorf("ensuring module snapshot schema: %w", err)
+		}
+		current, err := moduleStore.Load(tenant)
+		if err != nil {
+			return fmt.Errorf("loading module snapshot: %w", err)
+		}
+		moduleRevision = current.Revision
+		modulesJSON, err := json.Marshal(snapshotCopy.Modules)
+		if err != nil {
+			return fmt.Errorf("encoding module descriptors: %w", err)
+		}
+		sum := sha256.Sum256(modulesJSON)
+		moduleDigest = hex.EncodeToString(sum[:])
+		installed := map[contract.ModuleID]string{}
+		for _, in := range current.Installations {
+			installed[in.ModuleID] = in.ArtifactDigest
+		}
+		for _, m := range snapshotCopy.Modules {
+			if installed[m.ID] != moduleDigest {
+				commitModules = true
+			}
+		}
+		if afterModuleRevisionRead != nil {
+			afterModuleRevisionRead()
+		}
+	}
 	operationID := configImportOperationID(siteName, snapshotBytes)
 	operation, err := configstore.EnsureActivationOperation(database, dialect, siteName, operationID, "import", &snapshotCopy)
 	if err != nil {
@@ -440,6 +502,11 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 		defer tx.Rollback()
 		if err := store.ActivateSnapshotAtConfigRevision(tx, &snapshotCopy, siteName, dialect, expectedRevision); err != nil {
 			return fmt.Errorf("activating config snapshot at expected revision %d: %w", expectedRevision, err)
+		}
+		if commitModules {
+			if err := store.CommitModulesTx(ctx, tx, dialect, tenant, snapshotCopy.Modules, moduleDigest, moduleRevision, nil, nil); err != nil {
+				return fmt.Errorf("committing pack modules: %w", err)
+			}
 		}
 		var version int
 		versionID, version, err = store.CreateConfigVersionTx(tx, siteName, "system", label, "Active", &snapshotCopy, "")
