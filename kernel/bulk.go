@@ -31,6 +31,9 @@ type BulkOptions struct {
 	ImportID string
 	// DryRun executes each row and rolls it back; nothing is persisted.
 	DryRun bool
+	// KeyFields switches to upsert: a row updates the single record matching
+	// its key values, or creates one when none matches.
+	KeyFields []string
 }
 
 // BulkRowKey returns the idempotency key for a row of a bulk run.
@@ -43,6 +46,9 @@ func BulkRowKey(importID string, index int) string {
 // row. It never stops on failure: every row is reported. Each row carries its own
 // idempotency key so re-running a bulk skips completed rows (replayed receipts).
 func (k *Kernel) ExecuteBulk(ctx context.Context, siteDB *sql.DB, reg *doctype.Registry, base Operation, rows []BulkRow, opts BulkOptions) []BulkRowResult {
+	if len(opts.KeyFields) > 0 {
+		return k.executeBulkUpsert(ctx, siteDB, reg, base, rows, opts)
+	}
 	exec := func(op Operation) (contract.CommandResult, *contract.Error) {
 		if opts.DryRun {
 			return k.dryRun(ctx, siteDB, reg, op)
