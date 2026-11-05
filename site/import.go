@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/asenawritescode/kora/query"
+	"github.com/goccy/go-yaml"
 	"os"
 	"path/filepath"
 	"sort"
@@ -583,23 +584,80 @@ type PackFile = contract.PackFile
 // or process-local registry changes. Callers can persist the returned snapshot
 // through the durable configuration activation path.
 func ParseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot, map[string]string, error) {
-	snapshot, scripts, err := parseConfigPack(packName, files)
-	if err != nil {
-		return nil, nil, err
-	}
+	parts := map[string][]PackFile{}
 	for _, f := range files {
-		if f.Path != packFileName {
-			continue
-		}
-		manifest, _, err := parsePackManifest([]byte(f.Content), packName)
+		ns := contract.PackFileComponent(strings.TrimSpace(f.Path))
+		parts[ns] = append(parts[ns], f)
+	}
+	if len(parts) == 0 {
+		parts[""] = nil // parseConfigPack reports the empty pack
+	}
+	namespaces := make([]string, 0, len(parts))
+	for ns := range parts {
+		namespaces = append(namespaces, ns)
+	}
+	sort.Strings(namespaces) // root ("") first, then components by ns
+
+	merged := &doctype.ConfigSnapshot{}
+	names := map[string]bool{}
+	scripts := map[string]string{}
+	packNames := map[string]bool{}
+	for _, ns := range namespaces {
+		part := parts[ns]
+		snapshot, partScripts, err := parseConfigPack(packName, part)
 		if err != nil {
 			return nil, nil, err
 		}
-		if snapshot.Modules, err = GeneratePackModules(manifest, snapshot); err != nil {
+		found := false
+		for _, f := range part {
+			if !isPackManifestPath(strings.TrimSpace(f.Path)) {
+				continue
+			}
+			found = true
+			name := packName
+			if ns != "" {
+				var head struct {
+					Name string `yaml:"name"`
+				}
+				if err := yaml.Unmarshal([]byte(f.Content), &head); err != nil {
+					return nil, nil, fmt.Errorf("parse %s: %w", f.Path, err)
+				}
+				name = head.Name
+				if packNames[name] {
+					return nil, nil, fmt.Errorf("pack.resource_conflict: pack %q defined in more than one component", name)
+				}
+				packNames[name] = true
+			}
+			manifest, _, err := parsePackManifest([]byte(f.Content), name)
+			if err != nil {
+				return nil, nil, err
+			}
+			if snapshot.Modules, err = GeneratePackModules(manifest, snapshot); err != nil {
+				return nil, nil, err
+			}
+			applyPackOwnership(snapshot, snapshot.Modules)
+		}
+		if !found && (len(snapshot.Queries) > 0 || hasOwnerTaggedCommand(snapshot.Commands)) {
+			return nil, nil, fmt.Errorf("pack.manifest_required: component %q has queries or module-owned commands but no %s", ns, packFileName)
+		}
+		if err := mergePackSnapshot(merged, snapshot, names); err != nil {
 			return nil, nil, err
 		}
+		merged.Scripts = append(merged.Scripts, snapshot.Scripts...)
+		for h, body := range partScripts {
+			scripts[h] = body
+		}
 	}
-	return snapshot, scripts, nil
+	if err := resolvePrintOperations(merged); err != nil {
+		return nil, nil, err
+	}
+	return merged, scripts, nil
+}
+
+// isPackManifestPath reports whether p is the root or a component pack.yaml.
+func isPackManifestPath(p string) bool {
+	t, ok := contract.PackageFileType(p)
+	return ok && t == "pack"
 }
 
 // ImportConfigFromPack imports a template pack from in-memory YAML files.
@@ -650,7 +708,7 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 	for _, f := range files {
 		f.Path = strings.TrimSpace(f.Path)
 		f.ContentType = strings.TrimSpace(f.ContentType)
-		if f.Path == packFileName {
+		if isPackManifestPath(f.Path) {
 			continue // manifest, consumed by ParseConfigPack
 		}
 
