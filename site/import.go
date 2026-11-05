@@ -11,6 +11,7 @@ import (
 	"github.com/asenawritescode/kora/query"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -639,6 +640,9 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 	var workflowDefinitions []contract.WorkflowDefinition
 	var views []*doctype.View
 	var reports []json.RawMessage
+	var commandDefs []*kernel.CommandResource
+	var commandPaths []string
+	var queryFiles, printFiles []PackFile
 	var scripts []*doctype.ScriptSnapshot
 	scriptBodyByHash := make(map[string]string)
 	var totalSize int
@@ -701,6 +705,10 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 			if !strings.HasPrefix(f.Path, "reports/") {
 				return nil, nil, fmt.Errorf("pack file %q: content_type report requires path under reports/", f.Path)
 			}
+		case "query", "command", "print_format":
+			if dir := map[string]string{"query": "queries/", "command": "commands/", "print_format": "print_formats/"}[f.ContentType]; !strings.HasPrefix(f.Path, dir) {
+				return nil, nil, fmt.Errorf("pack file %q: content_type %s requires path under %s", f.Path, f.ContentType, dir)
+			}
 		case "script":
 			if !strings.HasPrefix(f.Path, "scripts/") {
 				return nil, nil, fmt.Errorf("pack file %q: content_type script requires path under scripts/", f.Path)
@@ -710,7 +718,7 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 				return nil, nil, fmt.Errorf("pack file %q: script files must be .js, got %q", f.Path, ext)
 			}
 		default:
-			return nil, nil, fmt.Errorf("pack file %q: unknown content_type %q (allowed: doctype, roles, permissions, workflow_definition, view, report, script)", f.Path, f.ContentType)
+			return nil, nil, fmt.Errorf("pack file %q: unknown content_type %q (allowed: doctype, roles, permissions, workflow_definition, view, report, query, command, print_format, script)", f.Path, f.ContentType)
 		}
 
 		// ── Size limits ────────────────────────────────────────────
@@ -772,6 +780,20 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 			}
 			reports = append(reports, encoded)
 
+		case "command":
+			def, err := kernel.ParseCommandResource(data)
+			if err != nil {
+				return nil, nil, fmt.Errorf("pack file %q: %w", f.Path, err)
+			}
+			commandDefs = append(commandDefs, def)
+			commandPaths = append(commandPaths, f.Path)
+
+		case "query":
+			queryFiles = append(queryFiles, f)
+
+		case "print_format":
+			printFiles = append(printFiles, f)
+
 		case "script":
 			h := sha256.Sum256(data)
 			doctypeName, eventName := packScriptBinding(f.Path)
@@ -794,6 +816,10 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 		}
 	}
 
+	commands, queries, printFormats, err := parsePackTail(doctypes, commandDefs, commandPaths, queryFiles, printFiles)
+	if err != nil {
+		return nil, nil, err
+	}
 	return &doctype.ConfigSnapshot{
 		DocTypes:            doctypes,
 		Roles:               roles,
@@ -801,6 +827,9 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 		WorkflowDefinitions: workflowDefinitions,
 		Views:               views,
 		Reports:             reports,
+		Commands:            commands,
+		Queries:             queries,
+		PrintFormats:        printFormats,
 		Scripts:             scripts,
 	}, scriptBodyByHash, nil
 }
@@ -819,4 +848,42 @@ func packScriptBinding(path string) (doctypeName, eventName string) {
 	default:
 		return "", ""
 	}
+}
+
+// parsePackTail encodes package commands, queries and print formats the way
+// parsePackSnapshot does for a config tree, sorted by path like import sorts
+// by file name. Queries and print formats are checked against the DocTypes.
+func parsePackTail(doctypes []*doctype.DocType, cmds []*kernel.CommandResource, cmdPaths []string, queryFiles, printFiles []PackFile) (commands, queries, printFormats []json.RawMessage, err error) {
+	idx := make([]int, len(cmds))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.Slice(idx, func(a, b int) bool { return cmdPaths[idx[a]] < cmdPaths[idx[b]] })
+	sorted := make([]*kernel.CommandResource, 0, len(cmds))
+	for _, i := range idx {
+		sorted = append(sorted, cmds[i])
+	}
+	if commands, err = kernel.EncodeCommandResources(sorted); err != nil {
+		return nil, nil, nil, fmt.Errorf("encoding commands: %w", err)
+	}
+	sort.Slice(queryFiles, func(a, b int) bool { return queryFiles[a].Path < queryFiles[b].Path })
+	reg := registryOf(doctypes)
+	var defs []*query.Definition
+	known := map[string]bool{}
+	for _, f := range queryFiles {
+		d, err := query.Parse([]byte(f.Content), reg)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("pack file %q: %w", f.Path, err)
+		}
+		defs = append(defs, d)
+		known[d.ModuleOwnerID+"/"+d.Name] = true
+	}
+	if queries, err = query.Encode(defs); err != nil {
+		return nil, nil, nil, err
+	}
+	sort.Slice(printFiles, func(a, b int) bool { return printFiles[a].Path < printFiles[b].Path })
+	if printFormats, err = encodePrintFormats(printFiles, doctypes, known); err != nil {
+		return nil, nil, nil, err
+	}
+	return commands, queries, printFormats, nil
 }

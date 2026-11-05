@@ -25,10 +25,6 @@ func loadPrintFormats(dir string, doctypes []*doctype.DocType, queries map[strin
 	if err != nil {
 		return nil, fmt.Errorf("reading print formats: %w", err)
 	}
-	known := map[string]bool{}
-	for _, dt := range doctypes {
-		known[dt.Name] = true
-	}
 	var names []string
 	for _, e := range entries {
 		if ext := strings.ToLower(filepath.Ext(e.Name())); !e.IsDir() && (ext == ".yaml" || ext == ".yml") {
@@ -36,14 +32,29 @@ func loadPrintFormats(dir string, doctypes []*doctype.DocType, queries map[strin
 		}
 	}
 	sort.Strings(names)
-	seen := map[string]bool{}
-	var out []json.RawMessage
+	files := make([]PackFile, 0, len(names))
 	for _, n := range names {
 		body, err := os.ReadFile(filepath.Join(dir, n))
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", n, err)
 		}
-		f, err := print.Load(body)
+		files = append(files, PackFile{Path: n, Content: string(body)})
+	}
+	return encodePrintFormats(files, doctypes, queries)
+}
+
+// encodePrintFormats parses print format files in the given order and checks
+// names, records and query refs. Shared by tree import and package parsing.
+func encodePrintFormats(files []PackFile, doctypes []*doctype.DocType, queries map[string]bool) ([]json.RawMessage, error) {
+	known := map[string]bool{}
+	for _, dt := range doctypes {
+		known[dt.Name] = true
+	}
+	seen := map[string]bool{}
+	var out []json.RawMessage
+	for _, file := range files {
+		n := file.Path
+		f, err := print.Load([]byte(file.Content))
 		if err != nil {
 			return nil, fmt.Errorf("print format %s: %w", n, err)
 		}
