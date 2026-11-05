@@ -139,6 +139,7 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 	if snapshot.Modules, err = GeneratePackModules(manifest, snapshot); err != nil {
 		return nil, err
 	}
+	applyPackOwnership(snapshot, snapshot.Modules)
 	return snapshot, nil
 }
 
