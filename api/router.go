@@ -436,7 +436,7 @@ func permScope(c *gin.Context, registry *doctype.Registry, docType, operation st
 		return policy.RowScope{}, &permDenial{http.StatusForbidden, "verified execution is required"}
 	}
 	dt := registry.Get(docType)
-	if operation == "read" && dt != nil && dt.ModuleOwnerID != "" {
+	if operation == "read" && registry.IsPrivateModuleResource(docType) {
 		return policy.RowScope{}, &permDenial{http.StatusForbidden, "module-owned records are available only through their published query contract"}
 	}
 	businessScope := contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}

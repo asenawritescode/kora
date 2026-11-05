@@ -246,3 +246,29 @@ func TestDecideUsesVerifiedIdentityAndCurrentRolePolicy(t *testing.T) {
 		t.Fatalf("unverified decision error = %v, want UNAUTHENTICATED", decideErr)
 	}
 }
+
+func TestIsPrivateModuleResourcePredicate(t *testing.T) {
+	registry := doctype.NewRegistry()
+	for name, dt := range map[string]*doctype.DocType{
+		"Plain":     {Name: "Plain"},
+		"Private":   {Name: "Private", ModuleOwnerID: "m.core", ModuleAccess: contract.ModulePrivate},
+		"Unset":     {Name: "Unset", ModuleOwnerID: "m.core"},
+		"Published": {Name: "Published", ModuleOwnerID: "m.core", ModuleAccess: contract.ModulePublished},
+	} {
+		registry.Register(dt)
+		_ = name
+	}
+	for name, want := range map[string]bool{"Plain": false, "Private": true, "Unset": true, "Published": false, "Missing": false} {
+		if got := registry.IsPrivateModuleResource(name); got != want {
+			t.Errorf("IsPrivateModuleResource(%s) = %v, want %v", name, got, want)
+		}
+	}
+	execution, err := NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "r", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", Roles: []string{"Administrator"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Published", Role: "Administrator", Read: true})
+	if _, authErr := Decide(execution, registry, "Published", "read"); authErr != nil {
+		t.Errorf("published owned read denied: %v", authErr)
+	}
+}
