@@ -251,8 +251,8 @@ func (h *Handler) HandleManagedChannelClientRevoke(c *gin.Context) {
 	}
 	const clientName = "kora-cloud-channel"
 	ctx := c.Request.Context()
-	var token string
-	err := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&token)
+	var tokenHash string
+	err := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token_hash FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&tokenHash)
 	if err == sql.ErrNoRows {
 		if err := revokeManagedChannelSessions(ctx, db, func(query string) string { return h.siteQuery(c, query) }, siteName, clientName); err != nil {
 			internalError(c, "revoke managed channel sessions", err)
@@ -265,9 +265,9 @@ func (h *Handler) HandleManagedChannelClientRevoke(c *gin.Context) {
 		internalError(c, "read managed channel credential for revocation", err)
 		return
 	}
-	fingerprint := sha256.Sum256([]byte(token))
+	fingerprint, _ := hex.DecodeString(tokenHash)
 	expected, _ := hex.DecodeString(request.CredentialFingerprint)
-	if subtle.ConstantTimeCompare(fingerprint[:], expected) != 1 {
+	if len(fingerprint) == 0 || subtle.ConstantTimeCompare(fingerprint, expected) != 1 {
 		writeError(c, http.StatusConflict, "extension.credential_changed", "Managed credential changed before revocation; reload current credential state", nil)
 		return
 	}
@@ -277,7 +277,7 @@ func (h *Handler) HandleManagedChannelClientRevoke(c *gin.Context) {
 		return
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, h.siteQuery(c, `UPDATE _kora_extension SET is_active = FALSE, managed_idempotency_key = ?, updated_at = CURRENT_TIMESTAMP WHERE site = ? AND name = ? AND access_token = ? AND is_active = TRUE`), idempotencyHashText, siteName, clientName, token)
+	result, err := tx.ExecContext(ctx, h.siteQuery(c, `UPDATE _kora_extension SET is_active = FALSE, managed_idempotency_key = ?, updated_at = CURRENT_TIMESTAMP WHERE site = ? AND name = ? AND access_token_hash = ? AND is_active = TRUE`), idempotencyHashText, siteName, clientName, tokenHash)
 	if err != nil {
 		internalError(c, "revoke managed channel credential", err)
 		return
@@ -301,9 +301,9 @@ func (h *Handler) HandleManagedChannelClientRevoke(c *gin.Context) {
 			internalError(c, "rollback unchanged managed channel revocation", err)
 			return
 		}
-		var currentToken string
+		var currentHash string
 		var active bool
-		readErr := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token, is_active FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&currentToken, &active)
+		readErr := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token_hash, is_active FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&currentHash, &active)
 		if readErr == sql.ErrNoRows {
 			if err := revokeManagedChannelSessions(ctx, db, func(query string) string { return h.siteQuery(c, query) }, siteName, clientName); err != nil {
 				internalError(c, "revoke managed channel sessions", err)
@@ -316,8 +316,8 @@ func (h *Handler) HandleManagedChannelClientRevoke(c *gin.Context) {
 			internalError(c, "confirm managed channel credential revocation", readErr)
 			return
 		}
-		currentFingerprint := sha256.Sum256([]byte(currentToken))
-		if subtle.ConstantTimeCompare(currentFingerprint[:], expected) != 1 {
+		currentFingerprint, _ := hex.DecodeString(currentHash)
+		if len(currentFingerprint) == 0 || subtle.ConstantTimeCompare(currentFingerprint, expected) != 1 {
 			writeError(c, http.StatusConflict, "extension.credential_changed", "Managed credential changed before revocation; reload current credential state", nil)
 			return
 		}

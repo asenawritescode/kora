@@ -35,9 +35,9 @@ func TestExtensionReadExecutorMySQLOwnerScopedRead(t *testing.T) {
 	}
 
 	for _, statement := range []string{
-		`CREATE TEMPORARY TABLE _kora_extension (name VARCHAR(191), api_permissions TEXT, site VARCHAR(191), access_token VARCHAR(255), is_active TINYINT NOT NULL)`,
+		`CREATE TEMPORARY TABLE _kora_extension (name VARCHAR(191), api_permissions TEXT, site VARCHAR(191), access_token VARCHAR(255), access_token_hash CHAR(64) NOT NULL DEFAULT '', is_active TINYINT NOT NULL)`,
 		`CREATE TEMPORARY TABLE tabTask (title VARCHAR(255), name VARCHAR(191) PRIMARY KEY, owner VARCHAR(191), creation DATETIME, modified DATETIME, modified_by VARCHAR(191), doc_status INT NOT NULL DEFAULT 0)`,
-		`INSERT INTO _kora_extension (name, api_permissions, site, access_token, is_active) VALUES ('reader', '[{"doctype":"Task","read":true,"if_owner":true}]', 'tenant.example', 'test-token', 1)`,
+		`INSERT INTO _kora_extension (name, api_permissions, site, access_token_hash, is_active) VALUES ('reader', '[{"doctype":"Task","read":true,"if_owner":true}]', 'tenant.example', '4c5dc9b7708905f77f5e5d16316b5dfb425e68cb326dcd55a860e90a7707031e', 1)`,
 		`INSERT INTO tabTask (title, name, owner) VALUES ('mine', 'TASK-1', 'extension:reader'), ('private', 'TASK-2', 'another-user')`,
 	} {
 		if _, err := database.ExecContext(context.Background(), statement); err != nil {
