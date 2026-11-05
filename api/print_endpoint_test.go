@@ -14,6 +14,7 @@ import (
 type fakePrint struct {
 	f    *print.Format
 	err  error
+	qerr error
 	last string
 }
 
@@ -29,6 +30,10 @@ func (p *fakePrint) Formats(*gin.Context) []*print.Format        { return []*pri
 func (p *fakePrint) Authorize(*gin.Context, *print.Format) error { return p.err }
 func (p *fakePrint) Tenant(*gin.Context) (map[string]any, print.Options) {
 	return map[string]any{"name": "Shop"}, print.Options{Currency: "KES", Precision: 2}
+}
+
+func (p *fakePrint) Query(*gin.Context, string, string, map[string]any) ([]map[string]any, error) {
+	return nil, p.qerr
 }
 
 func TestPrintEndpoint(t *testing.T) {

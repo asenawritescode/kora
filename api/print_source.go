@@ -10,6 +10,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/print"
 )
 
@@ -138,4 +139,46 @@ func (s sitePrintSource) Tenant(c *gin.Context) (map[string]any, print.Options) 
 		}
 	}
 	return map[string]any{"name": name}, opt
+}
+
+// Query runs a published query through the same plan and actor grant as
+// HandlePublishedModuleQuery, capped at the query's own page limit.
+func (s sitePrintSource) Query(c *gin.Context, module, name string, input map[string]any) ([]map[string]any, error) {
+	execution, ok := requestExecution(c)
+	if !ok {
+		return nil, ErrPrintForbidden
+	}
+	scope := businessScopeFromRequest(c, execution)
+	services := s.h.runtimeService(c, c.GetString("site_name"))
+	if services.ResolveModuleBindings == nil {
+		return nil, ErrPrintRenderFailed
+	}
+	plan, err := services.ResolveModuleBindings(scope)
+	if err != nil {
+		return nil, ErrPrintRenderFailed
+	}
+	moduleID := contract.ModuleID(module)
+	query, found := plan.QueryDefinitions[plugin.PublishedQueryKey{Scope: scope, OwnerModuleID: moduleID, Name: name}]
+	if !found {
+		return nil, ErrPrintNotFound
+	}
+	actorScope, authErr := authorizePublishedQueryActorScope(execution, s.h.siteRegistry(c), query, scope)
+	if authErr != nil {
+		return nil, ErrPrintForbidden
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return nil, ErrPrintRenderFailed
+	}
+	var result contract.QueryResult
+	if actorScope == nil {
+		result, err = plan.ExecutePublishedQuery(c.Request.Context(), scope, moduleID, name, raw, "", query.PageLimit)
+	} else {
+		result, err = plan.ExecutePublishedQueryForActor(c.Request.Context(), scope, moduleID, name, *actorScope, raw, "", query.PageLimit)
+	}
+	var rows []map[string]any
+	if err != nil || json.Unmarshal(result.Data, &rows) != nil {
+		return nil, ErrPrintRenderFailed
+	}
+	return rows, nil
 }
