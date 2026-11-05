@@ -26,6 +26,19 @@ func (h *Handler) HandleApplicationCatalog(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "module.catalog_unavailable", "Module catalog is unavailable", nil)
 		return
 	}
+	// A legal-entity catalog is an authorization decision, not just a
+	// descriptive empty view.  Returning 200 with no surfaces for an entity
+	// outside the actor's grants lets callers mistake an unauthorized scope
+	// switch for a valid, empty workspace.  Tenant-shared surfaces remain
+	// visible when they are authorized, so only a completely empty entity
+	// catalog is rejected here.
+	if scope.Kind == contract.ScopeKindLegalEntity &&
+		len(catalog.PublishedQueries) == 0 &&
+		len(catalog.PublishedProjections) == 0 &&
+		len(catalog.PublishedOperations) == 0 {
+		writeError(c, http.StatusForbidden, "permission.denied", "Published module access is not granted for this legal entity", nil)
+		return
+	}
 	c.JSON(http.StatusOK, Response{Data: catalog})
 }
 

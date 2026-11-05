@@ -101,11 +101,9 @@ func (s *moduleCommandFixtureSchemas) Validate(ref contract.SchemaRef, raw json.
 	}
 	if ref == s.input {
 		var payload struct {
-			Data struct {
-				Title string `json:"title"`
-			} `json:"data"`
+			Title string `json:"title"`
 		}
-		if err := json.Unmarshal(raw, &payload); err != nil || (payload.Data.Title != "issued invoice" && payload.Data.Title != "different invoice") {
+		if err := json.Unmarshal(raw, &payload); err != nil || (payload.Title != "issued invoice" && payload.Title != "different invoice") {
 			return errors.New("input does not match registered contract")
 		}
 	}
@@ -144,7 +142,10 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		_ = root.Close()
 		t.Fatal("create isolated module command database:", err)
 	}
-	t.Cleanup(func() { _, _ = root.ExecContext(context.Background(), "DROP DATABASE IF EXISTS `"+databaseName+"`"); _ = root.Close() })
+	t.Cleanup(func() {
+		_, _ = root.ExecContext(context.Background(), "DROP DATABASE IF EXISTS `"+databaseName+"`")
+		_ = root.Close()
+	})
 	tenantConfig := *rootConfig
 	tenantConfig.DBName = databaseName
 	database, err := sql.Open("mysql", tenantConfig.FormatDSN())
@@ -256,7 +257,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	}
 	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 0, 0, 0)
 	meta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("issue-" + suffix[:12])}
-	payload := json.RawMessage(`{"data":{"title":"issued invoice"}}`)
+	payload := json.RawMessage(`{"title":"issued invoice"}`)
 	if _, err := plan.InvokeCapability(ctx, execution, lease, scope, caller.ID, offer.Name, operation.Name, meta, payload); err == nil {
 		t.Fatal("output-schema rejection unexpectedly committed a local command")
 	}
@@ -305,7 +306,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		t.Fatalf("capability idempotency replay = %+v, err=%v; want original execution %q", replayed, err, result.ExecutionID)
 	}
 	assertModuleCommandCounts(t, ctx, database, dialect, invoice, tenant, 1, 1, 1)
-	conflictingPayload := json.RawMessage(`{"data":{"title":"different invoice"}}`)
+	conflictingPayload := json.RawMessage(`{"title":"different invoice"}`)
 	_, err = plan.InvokeCapability(ctx, execution, lease, scope, caller.ID, offer.Name, operation.Name, meta, conflictingPayload)
 	var conflict *contract.Error
 	if !errors.As(err, &conflict) || conflict.Type != contract.CodeIdempotencyKeyReused {

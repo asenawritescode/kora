@@ -193,6 +193,20 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 	if reg == nil {
 		return ErrPermission
 	}
+	// A published module operation has already been authorized against its
+	// module resource before the owner command is dispatched.  For
+	// command-owned records, the verified module execution is the authority at
+	// this boundary; requiring the caller to also hold private record CRUD
+	// permission would either reject first-party extensions or create a CRUD
+	// bypass around module ownership.  Non-module-owned steps still use the
+	// ordinary permission matrix below.
+	moduleCommandAuthorized := dyn != nil && dynamicCommandTouchesCommandOnly(reg, dyn)
+	if moduleCommandAuthorized {
+		resource := "module." + string(dyn.ModuleOwnerID) + ".operation." + dyn.Operation
+		if _, authErr := policy.DecideForBusinessScope(op.Context.Execution, reg, resource, "write", op.Context.BusinessScope, op.Context.BusinessScope.Kind == contract.ScopeKindLegalEntity); authErr != nil {
+			return authErr
+		}
+	}
 	for _, step := range dyn.Steps {
 		stepOp, scopeErr := operationForCommandStep(op, dyn, step)
 		if scopeErr != nil {
@@ -204,6 +218,9 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if dt == nil {
 				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", step.Create.Record))
 			}
+			if moduleCommandAuthorized && dt.ModuleOwnershipMode == string(contract.MutationCommands) {
+				continue
+			}
 			if _, err := decideOperationResource(stepOp, reg, dt, "create"); err != nil {
 				return err
 			}
@@ -214,6 +231,9 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			}
 			if dt.AppendOnly {
 				return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
+			}
+			if moduleCommandAuthorized && dt.ModuleOwnershipMode == string(contract.MutationCommands) {
+				continue
 			}
 			if _, err := decideOperationResource(stepOp, reg, dt, "write"); err != nil {
 				return err
@@ -381,7 +401,12 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		if k.CommandSchemas == nil || !k.CommandSchemas.Registered(cmd.InputSchema) || !k.CommandSchemas.Registered(cmd.OutputSchema) {
 			return nil, contract.NewError(contract.CodeValidationFailed, "owner command input or output schema is not registered")
 		}
-		if err := k.CommandSchemas.Validate(cmd.InputSchema, op.Payload); err != nil {
+		// Module command schemas describe the business input exposed by the
+		// published operation. The kernel's {"data":{...}} envelope is an
+		// internal command transport detail and must not become part of that
+		// public schema contract.
+		inputPayload, _ := json.Marshal(input)
+		if err := k.CommandSchemas.Validate(cmd.InputSchema, inputPayload); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, "owner command input failed its registered schema")
 		}
 	}

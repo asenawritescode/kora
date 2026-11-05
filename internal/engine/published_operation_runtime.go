@@ -223,7 +223,10 @@ func executePublishedOperation(ctx context.Context, store *configstore.ModuleSto
 	}
 
 	meta.IdempotencyKey = intentKey
-	result, invokeErr := plan.InvokeCapability(ctx, execution, lease, scope, caller, published.Capability, published.Operation, meta, json.RawMessage(input))
+	// Published capability providers receive the business payload described by
+	// the immutable operation schema. The selected local command provider adds
+	// its established kernel envelope at its own implementation boundary.
+	result, invokeErr := plan.InvokeCapability(ctx, execution, lease, scope, caller, published.Capability, published.Operation, meta, input)
 	if invokeErr != nil {
 		status, operationErr := receiptFailureForError(invokeErr, spec.Effect == contract.EffectExternal)
 		if status == contract.ReceiptOutcomeUnknown {
