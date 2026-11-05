@@ -29,6 +29,7 @@ require:
       where:
         name: $input.till_session
         shift: $input.shift
+        status: Open
     message: Till does not belong to this shift
   - exists:
       record: Sale
@@ -68,5 +69,12 @@ transaction:
         quantity: $item.quantity
         entry_type: Receipt
         remarks: $steps.original.name
+  - for_each: $steps.original.payments
+    where: {method: Cash}
+    update:
+      record: Till Session
+      name: $input.till_session
+      adjust:
+        expected_cash: { decrease: $item.amount }
 emit:
   - pos.sale.voided

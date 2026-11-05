@@ -14,14 +14,18 @@ require:
       record: Till Session
       where:
         shift: $input.shift
+        status: Open
     as: till
-    message: No till opened for this shift
+    message: No open till for this shift
 transaction:
   - update:
       record: Till Session
       name: $steps.till.name
       values:
         closing_count: $input.closing_count
-        expected_cash: $input.expected_cash
+        status: Closed
+        closed_at: $now
+output:
+  reference: $steps.till.name
 emit:
   - pos.till.closed

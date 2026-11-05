@@ -23,6 +23,18 @@ fields:
   - fieldname: expected_cash
     fieldtype: Currency
     label: Expected Cash
+    read_only: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Open
+      Closed
+    default: Open
+    in_list_view: true
+  - fieldname: closed_at
+    fieldtype: Datetime
+    label: Closed At
   - fieldname: variance
     fieldtype: Currency
     label: Variance

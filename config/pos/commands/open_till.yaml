@@ -27,5 +27,7 @@ transaction:
       values:
         shift: $input.shift
         opening_float: $input.opening_float
+        expected_cash: $input.opening_float
+        status: Open
 emit:
   - pos.till.opened
