@@ -201,6 +201,12 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 	// bypass around module ownership.  Non-module-owned steps still use the
 	// ordinary permission matrix below.
 	moduleCommandAuthorized := dyn != nil && dynamicCommandTouchesCommandOnly(reg, dyn)
+	if moduleCommandAuthorized {
+		resource := "module." + string(dyn.ModuleOwnerID) + ".operation." + dyn.Operation
+		if _, authErr := policy.DecideForBusinessScope(op.Context.Execution, reg, resource, "write", op.Context.BusinessScope, op.Context.BusinessScope.Kind == contract.ScopeKindLegalEntity); authErr != nil {
+			return authErr
+		}
+	}
 	for _, step := range dyn.Steps {
 		stepOp, scopeErr := operationForCommandStep(op, dyn, step)
 		if scopeErr != nil {

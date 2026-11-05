@@ -173,10 +173,10 @@ func TestVerifiedOwnerCommandDoesNotRequirePrivateCRUDGrant(t *testing.T) {
 		}}},
 	}
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
-	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{
+	execution, err := policy.NewVerifiedExecutionWithGrants("tenant-a", contract.ActorContext{
 		PrincipalID: "extension:scoped", PrincipalType: contract.PrincipalService, Site: "tenant-a",
 		AuthenticatedAt: time.Now().UTC(),
-	})
+	}, []policy.Grant{{Resource: "module.finance.ar.operation.issue", Operation: "write", Scope: scope}})
 	if err != nil {
 		t.Fatal("verified actor:", err)
 	}
@@ -191,6 +191,17 @@ func TestVerifiedOwnerCommandDoesNotRequirePrivateCRUDGrant(t *testing.T) {
 	}
 	if authErr := authorizeOp(registry, op, CommandDefinition{Name: command.FullName()}, command); authErr != nil {
 		t.Fatalf("verified owner command required private CRUD grant: %v", authErr)
+	}
+	otherScope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	otherExecution, err := contract.NewCommandModuleExecution(otherScope, "sales.orders", "finance.ar", 1, command.FullName(), command.FullName())
+	if err != nil {
+		t.Fatal("other-scope module execution:", err)
+	}
+	otherOp := op
+	otherOp.Context.BusinessScope = otherScope
+	otherOp.Context.ModuleExecution = &otherExecution
+	if authErr := authorizeOp(registry, otherOp, CommandDefinition{Name: command.FullName()}, command); authErr == nil {
+		t.Fatal("entity-A module grant authorized owner command in entity B")
 	}
 }
 
