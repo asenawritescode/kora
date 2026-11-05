@@ -4,8 +4,8 @@ module_ownership_mode: commands_only
 module_access: published
 module: POS
 naming_series: SALE-.YYYY.-.#####
-title_field: name
-search_fields: register, customer
+title_field: customer
+search_fields: customer, register
 sort_field: creation
 sort_order: DESC
 fields:
@@ -26,6 +26,7 @@ fields:
   - fieldname: customer
     fieldtype: Data
     label: Customer
+    search_index: true
   - fieldname: items
     fieldtype: Table
     options: Sale Item

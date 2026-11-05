@@ -165,8 +165,8 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 					t.Errorf("owner catalog lacks operation %s", name)
 				}
 			}
-			if len(ownerQueries) != 7 {
-				t.Errorf("owner queries = %d, want 7: %v", len(ownerQueries), ownerQueries)
+			if len(ownerQueries) != 8 {
+				t.Errorf("owner queries = %d, want 8: %v", len(ownerQueries), ownerQueries)
 			}
 			checkSchemas("Owner", owner)
 			sale := false
@@ -261,7 +261,31 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 					saleSchema = o.InputSchema
 				}
 			}
-			in := fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","currency":"KES","items":[{"item":"ITM-1","quantity":2,"unit_price":100,"amount":200}],"payments":[{"method":"Cash","amount":200,"currency":"KES","reference":%q}]}`, intent.ID)
+			// record_sale requires an open till (#233): open a shift and till through the published routes first.
+			opRun := func(suffix, key, body string) {
+				t.Helper()
+				var sch contract.SchemaRef
+				ref := ""
+				for _, o := range cashier.PublishedOperations {
+					if strings.HasSuffix(o.OperationRef, "~"+suffix) {
+						ref, sch = o.OperationRef, o.InputSchema
+					}
+				}
+				rec := serve(router, http.MethodPost, "/op/"+ref, fmt.Sprintf(`{"meta":{"idempotency_key":%q},"input_schema":{"id":%q,"version":%d},"input":%s}`, key, sch.ID, sch.Version, body))
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s as Cashier status=%d body=%s", suffix, rec.Code, rec.Body.String())
+				}
+			}
+			opRun("open_shift", "e2e-shift", `{"register":"REG-1"}`)
+			var shiftName, tillName string
+			if err := database.QueryRow("SELECT name FROM " + tbl("Shift")).Scan(&shiftName); err != nil {
+				t.Fatalf("shift: %v", err)
+			}
+			opRun("open_till", "e2e-till", fmt.Sprintf(`{"shift":%q,"opening_float":500}`, shiftName))
+			if err := database.QueryRow("SELECT name FROM " + tbl("Till Session")).Scan(&tillName); err != nil {
+				t.Fatalf("till: %v", err)
+			}
+			in := fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":2,"unit_price":100,"amount":200}],"payments":[{"method":"Cash","amount":200,"currency":"KES","reference":%q}]}`, tillName, intent.ID)
 			rec := serve(router, http.MethodPost, "/op/"+saleRef, fmt.Sprintf(`{"meta":{"idempotency_key":"e2e-saleOut-1"},"input_schema":{"id":%q,"version":%d},"input":%s}`, saleSchema.ID, saleSchema.Version, in))
 			if rec.Code != http.StatusOK {
 				t.Fatalf("record_sale as Cashier status=%d body=%s", rec.Code, rec.Body.String())

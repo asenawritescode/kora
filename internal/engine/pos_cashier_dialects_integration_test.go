@@ -229,8 +229,8 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if got := qty(); !strings.HasPrefix(got, "19") {
 				t.Fatalf("stock after void = %s, want 19", got)
 			}
-			// expected_cash is an input of close_till today (no till status/expected-cash derivation yet, #233).
-			run("close_till", "k-close", fmt.Sprintf(`{"shift":%q,"closing_count":860,"expected_cash":860}`, shift))
+			// expected_cash is server-derived (#233): 500 float + 360 - 180 + 180 - 180 = 680; close_till takes only the closing count.
+			run("close_till", "k-close", fmt.Sprintf(`{"shift":%q,"closing_count":680}`, shift))
 
 			// 4. Refusals: 403 and nothing written.
 			sales, entries := count("Sale"), count("Stock Entry")
@@ -253,7 +253,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if a, b := count("Sale"), count("Stock Entry"); a != sales || b != entries {
 				t.Errorf("refused calls wrote data: sales %s->%s entries %s->%s", sales, a, entries, b)
 			}
-			if got := one("SELECT expected_cash FROM "+tbl("Till Session")+" WHERE name = ?", till); !strings.HasPrefix(got, "860") {
+			if got := one("SELECT expected_cash FROM "+tbl("Till Session")+" WHERE name = ?", till); !strings.HasPrefix(got, "680") {
 				t.Errorf("expected_cash changed to %s", got)
 			}
 			if got := one("SELECT COUNT(*) FROM "+tbl("Sale")+" WHERE name = ?", sale1); got != "1" {

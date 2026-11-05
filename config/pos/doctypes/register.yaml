@@ -8,6 +8,7 @@ fields:
     label: Register Name
     reqd: true
     unique: true
+    search_index: true
     in_list_view: true
   - fieldname: location
     fieldtype: Link

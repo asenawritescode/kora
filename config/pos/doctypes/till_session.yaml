@@ -11,6 +11,7 @@ fields:
     options: Shift
     label: Shift
     reqd: true
+    search_index: true
     in_list_view: true
   - fieldname: opening_float
     fieldtype: Currency

@@ -17,7 +17,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/query"
 	"github.com/asenawritescode/kora/site"
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 )
 
@@ -140,7 +140,12 @@ func isolatedDB(t *testing.T, driver, dsn string) (*sql.DB, string) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { admin.Exec("DROP DATABASE `" + name + "`"); admin.Close() })
-		target = strings.Replace(dsn, "/?", "/"+name+"?", 1)
+		cfg, err := mysql.ParseDSN(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.DBName = name // DSNs naming a database must not be shared across tenants
+		target = cfg.FormatDSN()
 	}
 	conn, err := sql.Open(driver, target)
 	if err != nil {
