@@ -10,13 +10,23 @@ import (
 // strictness as the YAML loader: unknown keys are rejected and the definition
 // is validated before it can be registered.
 func ParseCommandResourceJSON(raw []byte) (*CommandResource, error) {
+	return parseCommandJSON(raw, true)
+}
+
+// ParseCommandResourceDraftJSON is ParseCommandResourceJSON for a command whose
+// schema refs the pack generator has not filled yet.
+func ParseCommandResourceDraftJSON(raw []byte) (*CommandResource, error) {
+	return parseCommandJSON(raw, false)
+}
+
+func parseCommandJSON(raw []byte, needSchemas bool) (*CommandResource, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var def CommandResource
 	if err := dec.Decode(&def); err != nil {
 		return nil, fmt.Errorf("command definition: %w", err)
 	}
-	if err := def.validate(); err != nil {
+	if err := def.validateWith(needSchemas); err != nil {
 		return nil, err
 	}
 	return &def, nil

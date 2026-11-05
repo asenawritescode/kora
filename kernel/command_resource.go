@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -37,6 +38,28 @@ type CommandResource struct {
 	Emits          []string                           `yaml:"emit"                     json:"emit,omitempty"`
 	BusinessEvents []contract.BusinessEventDefinition `yaml:"business_events" json:"business_events,omitempty"`
 	Labels         map[string]string                  `yaml:"labels"                   json:"labels,omitempty"`
+
+	// Presentation and OfflineEligible are published with the operation.
+	Presentation    *CommandPresentation `yaml:"presentation,omitempty" json:"presentation,omitempty"`
+	OfflineEligible bool                 `yaml:"offline_eligible,omitempty" json:"offline_eligible,omitempty"`
+}
+
+// CommandPresentation is a SurfacePresentation read from YAML through its
+// JSON keys, so the wire type needs no yaml tags.
+type CommandPresentation contract.SurfacePresentation
+
+func (p *CommandPresentation) UnmarshalYAML(node *yaml.Node) error {
+	var generic any
+	if err := node.Decode(&generic); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(generic)
+	if err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode((*contract.SurfacePresentation)(p))
 }
 
 // CrossEntityCommand registers a command that requires exact grants in both
@@ -97,13 +120,17 @@ func ParseCommandResource(raw []byte) (*CommandResource, error) {
 	if err := dec.Decode(&def); err != nil {
 		return nil, fmt.Errorf("command definition: %w", err)
 	}
-	if err := def.validate(); err != nil {
+	if err := def.validateWith(false); err != nil {
 		return nil, err
 	}
 	return &def, nil
 }
 
-func (c *CommandResource) validate() error {
+func (c *CommandResource) validate() error { return c.validateWith(true) }
+
+// validateWith checks the definition. With needSchemas false (config YAML) the
+// versioned schema refs may be absent: the pack generator fills them.
+func (c *CommandResource) validateWith(needSchemas bool) error {
 	if c.Name == "" {
 		return fmt.Errorf("command definition: missing name")
 	}
@@ -148,7 +175,8 @@ func (c *CommandResource) validate() error {
 		return err
 	}
 	if c.ModuleOwnerID != "" || c.Capability != "" || c.Operation != "" || c.InputSchema.ID != "" || c.InputSchema.Version != 0 || c.OutputSchema.ID != "" || c.OutputSchema.Version != 0 {
-		if c.ModuleOwnerID == "" || c.Capability == "" || c.Operation == "" || c.InputSchema.ID == "" || c.InputSchema.Version == 0 || c.OutputSchema.ID == "" || c.OutputSchema.Version == 0 {
+		noSchemas := !needSchemas && c.InputSchema == (contract.SchemaRef{}) && c.OutputSchema == (contract.SchemaRef{})
+		if c.ModuleOwnerID == "" || c.Capability == "" || c.Operation == "" || !noSchemas && (c.InputSchema.ID == "" || c.InputSchema.Version == 0 || c.OutputSchema.ID == "" || c.OutputSchema.Version == 0) {
 			return fmt.Errorf("command %q: module capability metadata requires owner, capability, operation, and versioned input/output schemas", c.FullName())
 		}
 	}

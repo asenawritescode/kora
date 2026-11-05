@@ -89,7 +89,13 @@ func GeneratePackModules(manifest contract.PackManifest, snapshot *doctype.Confi
 	for _, n := range names {
 		core.Provides = append(core.Provides, *offers[n])
 	}
-	return []contract.ModuleDescriptor{core, {ID: contract.ModuleID(manifest.Name + ".app"), Version: version}}, nil
+	app := contract.ModuleDescriptor{ID: contract.ModuleID(manifest.Name + ".app"), Version: version}
+	if snapshot != nil {
+		if err := addPackCommands(&core, &app, snapshot); err != nil {
+			return nil, err
+		}
+	}
+	return []contract.ModuleDescriptor{core, app}, nil
 }
 
 func querySchema(def query.Definition) json.RawMessage {
