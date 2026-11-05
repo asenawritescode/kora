@@ -190,4 +190,3 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 		})
 	}
 }
-
