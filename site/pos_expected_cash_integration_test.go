@@ -145,6 +145,10 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 		t.Fatal(cerr)
 	}
 	sale := ref(out)
+	// Walk-in sale (no customer): the link-picker title must be non-empty.
+	if tf := reg.Get("Sale").TitleField; tf != "register" || str("SELECT "+dialect.QuoteIdent(tf)+" FROM "+table("Sale")+" WHERE name = ?", sale) == "" {
+		t.Fatalf("walk-in sale title field %q blank", tf)
+	}
 	if _, cerr = sell(2, func() map[string]any { p := pay("cash", 200); p["method"] = "Card"; return p }()); cerr != nil {
 		t.Fatal(cerr)
 	}
