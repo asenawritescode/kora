@@ -54,6 +54,7 @@ type ConfigSnapshot struct {
 	Reports             []json.RawMessage                      `json:"reports,omitempty"`
 	Commands            []json.RawMessage                      `json:"commands,omitempty"`
 	PrintFormats        []json.RawMessage                      `json:"print_formats,omitempty"`
+	Queries             []json.RawMessage                      `json:"queries,omitempty"`
 	Scripts             []*ScriptSnapshot                      `json:"scripts,omitempty"`
 	ScheduledJobs       []contract.ScheduledJobDefinition      `json:"scheduled_jobs,omitempty"`
 	Modules             []contract.ModuleDescriptor            `json:"modules,omitempty"`

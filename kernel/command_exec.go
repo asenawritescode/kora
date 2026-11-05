@@ -428,18 +428,19 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		return nil, contract.NewError(contract.CodeValidationFailed, expandErr.Error())
 	}
 	stepNames := map[string]string{}
+	pinnedNow := time.Now().UTC()
 	computed, computeErr := evalCompute(cmd.Compute, input)
 	if computeErr != nil {
 		return nil, contract.NewError(contract.CodeValidationFailed, computeErr.Error())
 	}
-	if cerr := k.checkCommandGuards(dbTx, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames, computed: computed}); cerr != nil {
+	if cerr := k.checkCommandGuards(dbTx, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames, computed: computed, now: pinnedNow, actor: user}); cerr != nil {
 		auditFailure(cerr.Type)
 		return nil, cerr
 	}
 
 	for _, instance := range instances {
 		i, step := instance.index, instance.step
-		env := refEnv{input: input, item: instance.item, steps: stepNames, computed: computed}
+		env := refEnv{input: input, item: instance.item, steps: stepNames, computed: computed, now: pinnedNow, actor: user}
 		stepOp, scopeErr := operationForCommandStep(op, cmd, step)
 		if scopeErr != nil {
 			return nil, scopeErr
