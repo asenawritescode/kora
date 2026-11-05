@@ -184,3 +184,31 @@ func hasIssue(result contract.ValidationResult, code string) bool {
 	}
 	return false
 }
+
+func TestValidateDefinitionChecksOwnerModuleID(t *testing.T) {
+	cases := []struct {
+		owner contract.ModuleID
+		valid bool
+	}{
+		{owner: "", valid: true},
+		{owner: "finance.ar", valid: true},
+		{owner: "pos.till-sessions", valid: true},
+		{owner: "Finance.AR", valid: false},
+		{owner: "finance", valid: false},
+		{owner: "finance..ar", valid: false},
+	}
+	for _, tc := range cases {
+		def := validTestDefinition()
+		def.OwnerModuleID = tc.owner
+		result := ValidateDefinition(def, frozenTestCatalog(t), testSchemas{}, testWaits{})
+		flagged := false
+		for _, issue := range result.Issues {
+			if issue.Path == "owner_module_id" && issue.Code == "invalid_module_owner" {
+				flagged = true
+			}
+		}
+		if flagged == tc.valid {
+			t.Fatalf("owner %q flagged=%v, want valid=%v (issues %+v)", tc.owner, flagged, tc.valid, result.Issues)
+		}
+	}
+}
