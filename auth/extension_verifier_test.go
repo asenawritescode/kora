@@ -49,3 +49,20 @@ func TestSiteGuardUsesInjectedExtensionTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestNotifyExtensionTokensChangedReachesGuardHook(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var invalidated []string
+	guard := &SiteGuard{ExtensionTokensChanged: func(site string) { invalidated = append(invalidated, site) }}
+	router := gin.New()
+	router.Use(guard.Middleware(true))
+	router.GET("/api/ping", func(c *gin.Context) { NotifyExtensionTokensChanged(c, "acme") })
+
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/ping", nil))
+	if len(invalidated) != 1 || invalidated[0] != "acme" {
+		t.Fatalf("invalidated = %v, want [acme]", invalidated)
+	}
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	NotifyExtensionTokensChanged(c, "acme") // no hook installed: must be a no-op
+}

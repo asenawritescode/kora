@@ -169,6 +169,7 @@ func (h *Handler) HandleExtensionDelete(c *gin.Context) {
 		internalError(c, "deleting extension", err)
 		return
 	}
+	auth.NotifyExtensionTokensChanged(c, siteNameStr)
 	c.JSON(http.StatusOK, Response{Data: extensionDeleteResponse{Status: "deleted"}})
 }
 

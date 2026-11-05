@@ -119,6 +119,9 @@ type CommonConfig struct {
 	SessionLifetimeHours int  `yaml:"session_lifetime_hours"`
 	CSRFSecure           bool `yaml:"csrf_secure"`
 
+	// ExtensionTokenCacheSeconds caches extension token checks (max 30, 0 disables).
+	ExtensionTokenCacheSeconds int `yaml:"extension_token_cache_secs"`
+
 	// Rate limiting.
 	RateLimitRPS   int `yaml:"rate_limit_rps"`
 	RateLimitBurst int `yaml:"rate_limit_burst"`
@@ -232,6 +235,8 @@ func LoadCommonConfig(path string) (*CommonConfig, error) {
 		WriteTimeout:         30,
 		IdleTimeout:          120,
 		AdminRole:            "Administrator",
+
+		ExtensionTokenCacheSeconds: 30,
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parsing common config: %w", err)
@@ -335,6 +340,8 @@ func CommonConfigFromEnv() *CommonConfig {
 		SMTPPassword:         getEnv("KORA_SMTP_PASSWORD", ""),
 		SMTPFrom:             getEnv("KORA_SMTP_FROM", ""),
 		SMTPTLSMode:          getEnv("KORA_SMTP_TLS_MODE", "auto"),
+
+		ExtensionTokenCacheSeconds: getEnvInt("KORA_EXTENSION_TOKEN_CACHE_SECONDS", 30),
 	}
 }
 

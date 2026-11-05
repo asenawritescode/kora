@@ -214,6 +214,7 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 		internalError(c, "commit managed channel credential", err)
 		return
 	}
+	auth.NotifyExtensionTokensChanged(c, siteName)
 	slog.Info("managed channel credential issued", "site", siteName, "client", clientName)
 	writeManagedChannelCredential(c, clientName, token)
 }
@@ -300,6 +301,7 @@ func (h *Handler) HandleManagedChannelClientRevoke(c *gin.Context) {
 			internalError(c, "commit managed channel revocation", err)
 			return
 		}
+		auth.NotifyExtensionTokensChanged(c, siteName)
 	} else {
 		if err := tx.Rollback(); err != nil {
 			internalError(c, "rollback unchanged managed channel revocation", err)

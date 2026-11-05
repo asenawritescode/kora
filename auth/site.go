@@ -40,6 +40,22 @@ type SiteGuard struct {
 	// ExtensionTokens opens the tenant's extension credential verifier. Nil
 	// uses the SQL store.
 	ExtensionTokens ExtensionTokenOpener
+	// ExtensionTokensChanged, when set, is told about credential writes for a
+	// site so cached verifications are dropped. Handlers reach it through
+	// NotifyExtensionTokensChanged.
+	ExtensionTokensChanged func(site string)
+}
+
+const extensionTokensChangedKey = "extension_tokens_changed"
+
+// NotifyExtensionTokensChanged reports that extension credentials for site
+// were created, rotated, revoked or deleted on this request.
+func NotifyExtensionTokensChanged(c *gin.Context, site string) {
+	if notify, ok := c.Get(extensionTokensChangedKey); ok {
+		if fn, ok := notify.(func(string)); ok && fn != nil {
+			fn(site)
+		}
+	}
 }
 
 // ExtensionTokenVerifier resolves the active extension owning a token verifier.
@@ -92,6 +108,9 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 	csrf := CSRFMiddleware()
 
 	return func(c *gin.Context) {
+		if g.ExtensionTokensChanged != nil {
+			c.Set(extensionTokensChangedKey, g.ExtensionTokensChanged)
+		}
 		// Skip auth for login endpoint and health check.
 		path := c.Request.URL.Path
 		if path == "/api/ping" ||
