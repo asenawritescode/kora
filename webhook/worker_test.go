@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -324,5 +325,37 @@ func TestWorkerClientRefusesInternalDestinations(t *testing.T) {
 	}
 	if !errors.Is(err, netguard.ErrDisallowedDestination) {
 		t.Fatalf("delivery error = %v, want ErrDisallowedDestination", err)
+	}
+}
+
+type maxLenArg int
+
+func (m maxLenArg) Match(v driver.Value) bool {
+	s, ok := v.(string)
+	return ok && len(s) <= int(m)
+}
+
+func TestDeliverStoresBoundedResponseBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", 10*maxStoredResponseBody)))
+	}))
+	defer server.Close()
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectExec("INSERT INTO _kora_webhook_delivery").
+		WithArgs(sqlmock.AnyArg(), "ext", sqlmock.AnyArg(), sqlmock.AnyArg(), server.URL, "delivered", 1, http.StatusOK, maxLenArg(maxStoredResponseBody), "", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE _kora_extension SET consecutive_failures = 0").WillReturnResult(sqlmock.NewResult(0, 1))
+	worker := NewWorker(database, nil, "test")
+	worker.client = server.Client()
+	err = worker.deliver(context.Background(), Extension{Name: "ext", EndpointURL: server.URL, Secret: "secret"}, eventstream.ChangeEvent{ID: "evt-1", Site: "test", Doctype: "Invoice", Timestamp: time.Now()}, "kora.invoice.after_insert")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
