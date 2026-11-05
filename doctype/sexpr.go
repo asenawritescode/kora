@@ -36,6 +36,7 @@ func ToSExpr(snapshot *ConfigSnapshot) string {
 	writeViewsSection(&b, snapshot.Views)
 	writeAnalyticsMetricsSection(&b, snapshot.AnalyticsMetrics)
 	writeReportsSection(&b, snapshot.Reports)
+	writeCommandsSection(&b, snapshot.Commands)
 	writeScriptsSection(&b, snapshot.Scripts)
 	writeScheduledJobsSection(&b, snapshot.ScheduledJobs)
 	writeModuleDescriptorsSection(&b, snapshot.Modules)
@@ -152,6 +153,19 @@ func writeReportsSection(b *strings.Builder, reports []json.RawMessage) {
 	for _, report := range reports {
 		b.WriteString("\n    (report-json ")
 		b.WriteString(quoteSExprString(string(report)))
+		b.WriteString(")")
+	}
+	b.WriteString(")")
+}
+
+func writeCommandsSection(b *strings.Builder, commands []json.RawMessage) {
+	if len(commands) == 0 {
+		return
+	}
+	b.WriteString("\n  (commands")
+	for _, command := range commands {
+		b.WriteString("\n    (command-json ")
+		b.WriteString(quoteSExprString(string(command)))
 		b.WriteString(")")
 	}
 	b.WriteString(")")
@@ -1083,6 +1097,12 @@ func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 					return nil, err
 				}
 				snapshot.Reports = reports
+			case "commands":
+				commands, err := parseCommandsJSON(child.Children[1:])
+				if err != nil {
+					return nil, err
+				}
+				snapshot.Commands = commands
 			case "scripts":
 				scripts, err := parseScriptSnapshots(child.Children[1:])
 				if err != nil {
@@ -1559,6 +1579,21 @@ func parseReports(nodes []*sNode) ([]json.RawMessage, error) {
 		reports = append(reports, report)
 	}
 	return reports, nil
+}
+
+func parseCommandsJSON(nodes []*sNode) ([]json.RawMessage, error) {
+	commands := make([]json.RawMessage, 0, len(nodes))
+	for _, node := range nodes {
+		if !node.IsList || len(node.Children) != 2 || nodeStr(node.Children[0]) != "command-json" {
+			return nil, fmt.Errorf("invalid command form")
+		}
+		var command json.RawMessage
+		if err := json.Unmarshal([]byte(nodeStr(node.Children[1])), &command); err != nil {
+			return nil, fmt.Errorf("invalid command JSON: %w", err)
+		}
+		commands = append(commands, command)
+	}
+	return commands, nil
 }
 
 func parseScriptSnapshots(nodes []*sNode) ([]*ScriptSnapshot, error) {

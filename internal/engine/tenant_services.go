@@ -194,6 +194,13 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		}
 	}
 	configuredProviders := append([]plugin.ProviderRegistration(nil), providers...)
+	tenantCommands, moduleErr := tenantCommandRegistry(config.ProcessContext, loaded.DB, dialect, loaded.Name, config.KernelCommands)
+	if moduleErr != nil {
+		return fmt.Errorf("load configured commands for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	config.KernelCommands = tenantCommands
+	services.KernelCommands = tenantCommands
+	domainKernel.Commands = tenantCommands
 	internalProviders, moduleErr := registeredKernelCommandProviders(tenantID, loaded.DB, loaded.Registry, moduleSnapshot.Modules, config.KernelCommands, domainKernel, config.ModuleSchemas, providers)
 	if moduleErr != nil {
 		return fmt.Errorf("register internal module command providers for tenant %s: %w", loaded.Name, moduleErr)

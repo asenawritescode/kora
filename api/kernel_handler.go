@@ -62,7 +62,7 @@ func (h *Handler) siteOutboxWriter(c *gin.Context) outbox.Writer {
 func (h *Handler) HandleKernelRegistry(c *gin.Context) {
 	siteName, _ := c.Get("site_name")
 	site, _ := siteName.(string)
-	commands := h.KernelCommands
+	commands := h.kernelCommands(h.runtimeService(c, site))
 	if commands == nil {
 		commands = kernel.NewCommandRegistry()
 	}
@@ -129,8 +129,8 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 		return contract.CommandResult{}, contract.NewError(contract.CodeDependencyUnavailable, "site database unavailable")
 	}
 	reg := h.siteRegistry(c)
-	if h.KernelCommands != nil {
-		for _, ownerCommand := range h.KernelCommands.OwnerCommands() {
+	if commands := h.kernelCommands(h.runtimeService(c, site)); commands != nil {
+		for _, ownerCommand := range commands.OwnerCommands() {
 			if ownerCommand.FullName() == commandName {
 				return contract.CommandResult{}, contract.NewError(contract.CodePermissionDenied, "owner module commands must be invoked through their published capability")
 			}
@@ -222,7 +222,7 @@ func (h *Handler) executeKernelOperationWithReadOnlyFields(c *gin.Context, comma
 	txManager.CurrentUserRole = opCtx.UserRole
 	k := kernel.New(h.siteDialect(c), h.siteOutboxWriter(c))
 	k.TxManager = txManager
-	k.Commands = h.KernelCommands
+	k.Commands = h.kernelCommands(services)
 	k.CommandSchemas = services.CommandSchemas
 	result, cerr := k.Execute(c.Request.Context(), sqlDB, reg, kernel.Operation{
 		Context:  opCtx,
@@ -365,4 +365,13 @@ func (h *Handler) writeKernelError(c *gin.Context, cerr *contract.Error) {
 		}
 	}
 	writeError(c, status, "kernel."+string(cerr.Type), cerr.Message, details)
+}
+
+// kernelCommands prefers the tenant generation's registry, which includes
+// commands from the tenant's active configuration, over the process default.
+func (h *Handler) kernelCommands(services SiteRuntimeService) *kernel.CommandRegistry {
+	if services.KernelCommands != nil {
+		return services.KernelCommands
+	}
+	return h.KernelCommands
 }
