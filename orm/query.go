@@ -18,6 +18,7 @@ import (
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/eventstream"
+	"github.com/asenawritescode/kora/numeric"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
@@ -352,6 +353,10 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 			val = convertDefault(f.Default, f.Fieldtype)
 			doc.Set(f.Fieldname, val)
 		}
+		val, err := canonicalizeDecimal(doc, f, val)
+		if err != nil {
+			return err
+		}
 		// Normalize JSON fields: arrays/objects marshalled to string for SQL binding.
 		if normalized, err := normalizeSQLValue(f, val); err != nil {
 			return fmt.Errorf("field %s: %w", f.Fieldname, err)
@@ -504,7 +509,13 @@ func (tx *TxManager) populateLinkedFields(ex db.Queryer, dt *doctype.DocType, do
 		if bytes, ok := value.([]byte); ok {
 			textValue := string(bytes)
 			switch targetMeta.Fieldtype {
-			case "Int", "Float", "Currency", "Percent":
+			case "Float", "Currency", "Percent":
+				if number, err := numeric.Normalize(textValue); err == nil {
+					value = number
+				} else {
+					value = textValue
+				}
+			case "Int":
 				if number, err := strconv.ParseFloat(textValue, 64); err == nil {
 					value = number
 				} else {
@@ -536,7 +547,10 @@ func updateDerivedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Do
 		if (f.Computed == "" && f.LinkedField == "") || f.Fieldtype == "Table" {
 			continue
 		}
-		val := doc.Get(f.Fieldname)
+		val, err := canonicalizeDecimal(doc, f, doc.Get(f.Fieldname))
+		if err != nil {
+			return err
+		}
 		if val != nil {
 			setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
 			values = append(values, val)
@@ -596,9 +610,12 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 		// Note: read_only is a UI hint, not an ORM constraint.
 		// Kernel command policy decides whether the current operation may change
 		// the field (for example, a trusted workflow transition).
-		newVal := doc.Get(f.Fieldname)
+		newVal, err := canonicalizeDecimal(doc, f, doc.Get(f.Fieldname))
+		if err != nil {
+			return err
+		}
 		if oldDoc != nil {
-			if oldVal := oldDoc.Get(f.Fieldname); oldVal == newVal {
+			if oldVal := oldDoc.Get(f.Fieldname); oldVal == doc.Get(f.Fieldname) {
 				continue
 			}
 		}
@@ -1396,7 +1413,7 @@ func normalizeScannedFieldValue(field *doctype.Field, value any) any {
 			return number
 		}
 	case "Float", "Currency", "Percent":
-		if number, err := strconv.ParseFloat(text, 64); err == nil {
+		if number, err := numeric.Normalize(text); err == nil {
 			return number
 		}
 	}
@@ -1410,6 +1427,9 @@ func intVal(v any) int {
 	switch n := v.(type) {
 	case int64:
 		return int(n)
+	case json.Number:
+		f, _ := n.Float64()
+		return int(f)
 	case float64:
 		return int(n)
 	case int:
@@ -1425,9 +1445,10 @@ func convertDefault(def string, fieldtype string) any {
 		fmt.Sscanf(def, "%d", &n)
 		return n
 	case "Float", "Currency", "Percent":
-		var f float64
-		fmt.Sscanf(def, "%f", &f)
-		return f
+		if number, err := numeric.Normalize(def); err == nil {
+			return number
+		}
+		return nil
 	case "Check":
 		return def == "1" || def == "true"
 	case "Date":

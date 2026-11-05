@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"encoding/json"
 	"regexp"
 	"testing"
 
@@ -50,10 +51,10 @@ func TestInsertInTx_AppliesDefaultsBeforeComputedFields(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO `tabSale__items`")).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE `tabSale__items` SET line_total = ?, modified = ? WHERE name = ?")).
-		WithArgs(float64(140), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("140", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE `tabSale` SET subtotal = ?, total_amount = ? WHERE name = ?")).
-		WithArgs(float64(140), float64(140), "SALE-TEST").
+		WithArgs("140", "140", "SALE-TEST").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
@@ -69,10 +70,10 @@ func TestInsertInTx_AppliesDefaultsBeforeComputedFields(t *testing.T) {
 	if err := dbTx.Commit(); err != nil {
 		t.Fatalf("commit transaction: %v", err)
 	}
-	if got := doc.Get("discount_amount"); got != float64(0) {
+	if got := doc.Get("discount_amount"); got != json.Number("0") {
 		t.Fatalf("discount_amount default: got %#v, want 0", got)
 	}
-	if got := doc.Get("total_amount"); got != float64(140) {
+	if got := doc.Get("total_amount"); got != json.Number("140") {
 		t.Fatalf("total_amount: got %#v, want 140", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
