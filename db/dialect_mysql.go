@@ -452,7 +452,7 @@ func isIgnorableMySQLCreateError(err error, stmt string) bool {
 }
 
 func (d *MySQLDialect) SystemTableSQL() []string {
-	return []string{
+	return append([]string{
 		// _kora_naming_series
 		"CREATE TABLE IF NOT EXISTS _kora_naming_series (\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\tprefix VARCHAR(32) NOT NULL,\n\t\t\tcurrent BIGINT NOT NULL DEFAULT 0,\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tPRIMARY KEY (doctype, prefix)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
@@ -538,7 +538,7 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_view ADD COLUMN idx INT NOT NULL DEFAULT 0",
 		"ALTER TABLE _kora_view DROP PRIMARY KEY",
 		"ALTER TABLE _kora_view ADD PRIMARY KEY (name)",
-	}
+	}, PaymentTablesMySQL()...)
 }
 
 func parseMySQLKeyField(msg string) string {
