@@ -207,7 +207,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				SiteID: info.SiteID, Name: info.Name, Status: "active", DBType: test.driver,
 				DB: database, Registry: doctype.NewRegistry(), ConfigRevision: initialRevision,
 				Config: knet.SiteRouterConfig{Hostname: info.Name, Domains: []string{info.Name}},
-				RuntimeServices: &tenantruntime.Services{ResolveCandidateModuleBindings: func(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, selections []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
+				RuntimeServices: &tenantruntime.Services{ResolveCandidateModuleBindings: func(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, _ *doctype.ConfigSnapshot, selections []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
 					candidatePreflights++
 					if !providerAvailable {
 						return plugin.BindingPlan{}, errors.New("external warehouse is offline")

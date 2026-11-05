@@ -208,6 +208,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("load configured queries for tenant %s: %w", loaded.Name, moduleErr)
 	}
 	services.ConfigQueries = configQueries
+	baseCommands := config.KernelCommands
 	config.KernelCommands = tenantCommands
 	services.KernelCommands = tenantCommands
 	domainKernel.Commands = tenantCommands
@@ -245,9 +246,16 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		plan.LeaseReader = moduleStore
 		return plan, nil
 	}
-	resolveCandidateModuleBindings := func(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, extra []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
+	resolveCandidateModuleBindings := func(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, candidate *doctype.ConfigSnapshot, extra []contract.ProviderSelection, revision uint64) (plugin.BindingPlan, error) {
 		if scope.TenantID != contract.TenantID(loaded.SiteID) {
 			return plugin.BindingPlan{}, contract.NewError(contract.CodePermissionDenied, "module binding scope belongs to another tenant")
+		}
+		candidateCommands, candidateRegistry, candidateQueries := config.KernelCommands, loaded.Registry, configQueries
+		if candidate != nil {
+			var err error
+			if candidateCommands, candidateRegistry, candidateQueries, err = candidateConfigResources(baseCommands, candidate); err != nil {
+				return plugin.BindingPlan{}, err
+			}
 		}
 		candidateSchemas, err := newModulePayloadSchemas(modules, baseModuleSchemas)
 		if err != nil {
@@ -259,12 +267,12 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		candidateKernel := kernel.New(dialect, outbox.NewSQLWriter(dialect))
 		candidateKernel.CommandSchemas = candidateSchemas
 		candidateProviders := append([]plugin.ProviderRegistration(nil), configuredProviders...)
-		commands, err := registeredKernelCommandProviders(tenantID, loaded.DB, loaded.Registry, modules, config.KernelCommands, candidateKernel, candidateSchemas, candidateProviders)
+		commands, err := registeredKernelCommandProviders(tenantID, loaded.DB, candidateRegistry, modules, candidateCommands, candidateKernel, candidateSchemas, candidateProviders)
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}
 		candidateProviders = append(candidateProviders, commands...)
-		configProviders, err := registeredConfigQueryProviders(tenantID, loaded.DB, dialect, loaded.Registry, modules, configQueriesForModules(configQueries, modules), candidateSchemas, true)
+		configProviders, err := registeredConfigQueryProviders(tenantID, loaded.DB, dialect, candidateRegistry, modules, configQueriesForModules(candidateQueries, modules), candidateSchemas, true)
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}

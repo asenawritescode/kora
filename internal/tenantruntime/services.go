@@ -6,6 +6,7 @@ import (
 	"context"
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/email"
 	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/internal/dbaccess"
@@ -35,11 +36,14 @@ type Services struct {
 	// PrintFormats are the tenant's configured print formats keyed by name.
 	PrintFormats map[string]*print.Format
 	// ConfigQueries are the queries carried by the tenant's active configuration.
-	ConfigQueries                  []*query.Definition
-	CommandSchemas                 kernel.CommandSchemaRegistry
-	ModuleBindings                 *plugin.BindingPlan
-	ResolveModuleBindings          func(contract.BusinessScope) (plugin.BindingPlan, error)
-	ResolveCandidateModuleBindings func(contract.BusinessScope, []contract.InstalledPackage, []contract.ModuleDescriptor, []contract.ProviderSelection, uint64) (plugin.BindingPlan, error)
+	ConfigQueries         []*query.Definition
+	CommandSchemas        kernel.CommandSchemaRegistry
+	ModuleBindings        *plugin.BindingPlan
+	ResolveModuleBindings func(contract.BusinessScope) (plugin.BindingPlan, error)
+	// ResolveCandidateModuleBindings preflights a candidate module set. A
+	// non-nil candidate configuration supplies the commands and queries that
+	// activation would install; nil keeps the active configuration's.
+	ResolveCandidateModuleBindings func(contract.BusinessScope, []contract.InstalledPackage, []contract.ModuleDescriptor, *doctype.ConfigSnapshot, []contract.ProviderSelection, uint64) (plugin.BindingPlan, error)
 	LoadModuleSnapshot             func() (contract.ModuleSnapshot, error)
 	ExecutePublishedOperation      func(context.Context, policy.Execution, contract.BusinessScope, contract.ModuleID, contract.PublishedOperation, contract.SchemaRef, contract.CommandMeta, []byte) (contract.OperationReceipt, error)
 	LookupPublishedOperation       func(context.Context, policy.Execution, contract.BusinessScope, contract.ModuleID, contract.PublishedOperation, contract.IdempotencyKey) (contract.OperationReceipt, bool, error)
