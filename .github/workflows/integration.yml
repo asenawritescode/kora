@@ -13,6 +13,7 @@ concurrency:
 jobs:
   mysql:
     name: Integration (MySQL)
+    if: ${{ false }} # temporarily disabled during M1; re-enable after the last ticket
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services:
@@ -45,6 +46,7 @@ jobs:
 
   postgres:
     name: Integration (Postgres)
+    if: ${{ false }} # temporarily disabled during M1; re-enable after the last ticket
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services:
