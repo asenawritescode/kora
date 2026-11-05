@@ -166,7 +166,7 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 	}
 	defer tx.Rollback()
 	if missing {
-		_, err = tx.Exec(h.siteQuery(c, `INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, managed_idempotency_key, subscriptions, api_permissions, installed_at, updated_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE)`), clientName, siteName, displayName, description, endpoint, secret, token, idempotencyHash, emptyJSON, emptyJSON)
+		_, err = tx.Exec(h.siteQuery(c, `INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, access_token_hash, managed_idempotency_key, subscriptions, api_permissions, installed_at, updated_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE)`), clientName, siteName, displayName, description, endpoint, secret, token, auth.HashExtensionAccessToken(token), idempotencyHash, emptyJSON, emptyJSON)
 		if err != nil {
 			_ = tx.Rollback()
 			var racedToken, racedKey string
@@ -183,8 +183,8 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 			return
 		}
 	} else {
-		query := h.siteQuery(c, `UPDATE _kora_extension SET access_token = ?, managed_idempotency_key = ?, updated_at = CURRENT_TIMESTAMP, is_active = TRUE WHERE site = ? AND name = ? AND managed_idempotency_key = ?`)
-		result, execErr := tx.Exec(query, token, idempotencyHash, siteName, clientName, currentKey)
+		query := h.siteQuery(c, `UPDATE _kora_extension SET access_token = ?, access_token_hash = ?, managed_idempotency_key = ?, updated_at = CURRENT_TIMESTAMP, is_active = TRUE WHERE site = ? AND name = ? AND managed_idempotency_key = ?`)
+		result, execErr := tx.Exec(query, token, auth.HashExtensionAccessToken(token), idempotencyHash, siteName, clientName, currentKey)
 		if execErr != nil {
 			internalError(c, "rotate managed channel credential", execErr)
 			return
