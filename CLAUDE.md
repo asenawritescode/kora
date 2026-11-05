@@ -2,6 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Agent Rules (read first)
+
+Standing rules for every agent ticket (source: the M1 tracker, #123). They override convenience.
+
+**Scope**
+- One ticket = one PR, branched from `main` only after its "Depends on" items are merged. No stacked PRs.
+- ≤300 changed lines including tests. Tests prove every "Done when" point.
+- Stay inside the ticket. Out-of-scope bugs or ideas become a new issue (labels `m1-next,blocked`), never a side fix.
+- Spec gap or unclear ticket: comment the question on the ticket, label it `blocked`, stop. Never invent design.
+- No hard-coding: verticals (POS, inventory) are config packages on generic core features. No vertical names in Engine or client code.
+
+**Code and verification**
+- All SQL goes through the dialect (`db/`). Changes must pass Integration (MySQL) and Integration (Postgres).
+- Integration CI is temporarily disabled (`if: ${{ false }}` in `.github/workflows/integration.yml`). Until it is re-enabled, verify every DB-touching change locally against disposable `mysql:8.0` and `postgres:16` containers (DSN env vars as in the workflow), running the affected integration tests or `scripts/ci-integration.sh mysql|postgres`. State the result in the PR.
+- Do not trust unit tests with fake tables for SQL changes. They once hid a real table-prefix bug; run against a real database.
+- UI changes: embed screenshots in the PR via the `pr-assets` branch.
+
+**Git and CI**
+- Work in a worktree off a fresh `git fetch`; never edit the main checkout.
+- Push only to the `kora-upstream` remote. In the local clone, `origin` points at a different repo (kora-ui); never push there.
+- Never force-push. Never delete branches you did not create.
+- Never merge on a red or pending Go or UI check. After 3 failed fix rounds, comment the blocker on the ticket, label it `blocked`, close the PR.
+- PR title `<ticket-id>: <title>`, body ≤10 lines with `Closes #N`.
+
+**Shared machine state**
+- Do not run `go clean`, delete module/build caches, prune Docker, or otherwise remove shared state other agents depend on. Use disposable, uniquely named containers and remove only what you created.
+
+**Tickets** use `.github/ISSUE_TEMPLATE/agent-task.md` (Goal, Done when, Depends on, Rules).
+
 ## Build & Run
 
 ```bash
@@ -398,7 +427,7 @@ Dialect is resolved once at startup via `db.Resolve(common.DBType)` and threaded
 
 ### Config is DB-Sourced
 
-No YAML files for site config. `CommonConfigFromEnv()` builds all config from `KORA_*` environment variables. Sites are discovered from `_kora_config_version`. YAML doctype files are used only for bulk import/export (`cli/config_impl.go`).
+No YAML files for site config. `CommonConfigFromEnv()` builds all config from `KORA_*` environment variables. Sites are discovered from `_kora_site_registry` (see Startup Flow). YAML doctype files are used only for bulk import/export (`cli/config_impl.go`).
 
 Key environment variables for extensibility and analytics:
 - `KORA_SCRIPTS_ENABLED` — Enable the JS script engine (default: `false`)
