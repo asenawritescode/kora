@@ -31,7 +31,3 @@ fields:
   - fieldname: cost
     fieldtype: Currency
     label: Cost
-  - fieldname: reorder_level
-    fieldtype: Float
-    label: Reorder Level
-    default: 0
