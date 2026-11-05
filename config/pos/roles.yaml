@@ -2,3 +2,9 @@
   workspace_access: true
   description: Rings up sales and runs shifts.
 
+- name: Manager
+  workspace_access: true
+  description: Oversees registers, shifts, and sales.
+- name: Owner
+  workspace_access: true
+  description: Full control of the POS package.
