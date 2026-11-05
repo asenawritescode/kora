@@ -111,6 +111,9 @@ func expandCommandSteps(steps []CommandStep, input map[string]any) ([]stepInstan
 // root available to its step.
 func (c *CommandResource) validateStepReferences() error {
 	aliases := map[string]bool{}
+	if err := c.validateGuards(aliases); err != nil {
+		return err
+	}
 	for i, step := range c.Steps {
 		if step.ForEach != "" && !strings.HasPrefix(step.ForEach, "$input.") {
 			return fmt.Errorf("command %q: step %d for_each must reference $input", c.FullName(), i)

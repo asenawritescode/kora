@@ -30,6 +30,7 @@ type CommandResource struct {
 	OutputSchema   contract.SchemaRef                 `yaml:"output_schema,omitempty" json:"output_schema,omitempty"`
 	CrossEntity    *CrossEntityCommand                `yaml:"cross_entity,omitempty"   json:"cross_entity,omitempty"`
 	Preconditions  []string                           `yaml:"preconditions"            json:"preconditions,omitempty"`
+	Require        []CommandGuard                     `yaml:"require,omitempty"        json:"require,omitempty"`
 	Steps          []CommandStep                      `yaml:"transaction"              json:"transaction"`
 	Emits          []string                           `yaml:"emit"                     json:"emit,omitempty"`
 	BusinessEvents []contract.BusinessEventDefinition `yaml:"business_events" json:"business_events,omitempty"`
@@ -98,7 +99,7 @@ func (c *CommandResource) validate() error {
 		return fmt.Errorf("command definition: missing name")
 	}
 	if len(c.Preconditions) != 0 {
-		return fmt.Errorf("command %q: preconditions are not supported by this runtime", c.FullName())
+		return fmt.Errorf("command %q: free-form preconditions are not supported; use require", c.FullName())
 	}
 	if strings.Count(c.Name, ".") == 0 && c.Namespace == "" {
 		return fmt.Errorf("command %q: namespaced name or namespace required", c.Name)
