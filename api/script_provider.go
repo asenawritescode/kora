@@ -13,6 +13,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/netguard"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/policy"
@@ -538,7 +539,7 @@ func (p *scriptProvider) checkHTTPAllowlist(urlStr string) error {
 	host = strings.ToLower(host)
 
 	// Block private IPs.
-	if isPrivateHost(host) {
+	if netguard.IsPrivateHost(host) {
 		return fmt.Errorf("http: requests to private/internal hosts are not allowed")
 	}
 
@@ -562,28 +563,6 @@ func (p *scriptProvider) checkHTTPAllowlist(urlStr string) error {
 	}
 
 	return fmt.Errorf("http: domain %q is not in the allowed list", host)
-}
-
-// isPrivateHost checks if a hostname resolves to or matches a private IP range.
-func isPrivateHost(host string) bool {
-	// Check hostname patterns.
-	privSuffixes := []string{
-		".local", ".internal", ".localhost",
-	}
-	for _, s := range privSuffixes {
-		if strings.HasSuffix(host, s) {
-			return true
-		}
-	}
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		return true
-	}
-	// Check IP ranges.
-	ip := net.ParseIP(host)
-	if ip != nil {
-		return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
-	}
-	return false
 }
 
 func normalizeScriptDocumentInput(dt *doctype.DocType, registry *doctype.Registry, fields map[string]any) map[string]any {
