@@ -72,6 +72,9 @@ func registerPasswordLoginRoute(auth *gin.RouterGroup, db *sql.DB, mailer MagicL
 			c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"code": "auth.password_sign_in_disabled", "message": "This workspace uses single sign-on. Sign in with your organization account."}})
 			return
 		}
+		if localSignInDisabled(c, targetDB) {
+			return
+		}
 
 		account, err := lookupPasswordLoginAccount(c.Request.Context(), targetDB, kdb.Resolve(c.GetString("site_db_type")), site, emailAddr)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

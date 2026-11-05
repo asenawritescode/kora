@@ -15,6 +15,16 @@ import (
 
 const passwordLoginSelect = `SELECT name, email, full_name, enabled, COALESCE\(roles, ''\), password_hash, email_verified_at FROM _kora_user`
 
+const localSignInPolicySelect = `SELECT setting_value FROM _kora_site_setting`
+
+func expectLocalSignInPolicy(m sqlmock.Sqlmock, site string, value string) {
+	rows := sqlmock.NewRows([]string{"setting_value"})
+	if value != "" {
+		rows.AddRow(value)
+	}
+	m.ExpectQuery(localSignInPolicySelect).WithArgs(site, LocalSignInSettingKey).WillReturnRows(rows)
+}
+
 func passwordLoginRouter(t *testing.T, site string, disabled bool) (*gin.Engine, sqlmock.Sqlmock) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -89,6 +99,7 @@ func TestPasswordLogin(t *testing.T) {
 		{
 			name: "valid password signs in", body: `{"email":"Amina@example.co.ke","password":"correct horse"}`, csrf: true,
 			expect: func(m sqlmock.Sqlmock, site string) {
+				expectLocalSignInPolicy(m, site, "")
 				m.ExpectQuery(passwordLoginSelect).WithArgs(site, "Amina@example.co.ke").WillReturnRows(userRow(true, string(hash), true))
 				m.ExpectExec("INSERT INTO _kora_session").WillReturnResult(sqlmock.NewResult(1, 1))
 			},
@@ -97,6 +108,7 @@ func TestPasswordLogin(t *testing.T) {
 		{
 			name: "wrong password", body: `{"email":"amina@example.co.ke","password":"wrong"}`, csrf: true,
 			expect: func(m sqlmock.Sqlmock, site string) {
+				expectLocalSignInPolicy(m, site, "")
 				m.ExpectQuery(passwordLoginSelect).WithArgs(site, "amina@example.co.ke").WillReturnRows(userRow(true, string(hash), true))
 			},
 			wantStatus: http.StatusUnauthorized, wantCode: "auth.invalid_credentials",
@@ -104,6 +116,7 @@ func TestPasswordLogin(t *testing.T) {
 		{
 			name: "unknown email gets the same answer", body: `{"email":"nobody@example.co.ke","password":"correct horse"}`, csrf: true,
 			expect: func(m sqlmock.Sqlmock, site string) {
+				expectLocalSignInPolicy(m, site, "")
 				m.ExpectQuery(passwordLoginSelect).WithArgs(site, "nobody@example.co.ke").WillReturnRows(sqlmock.NewRows([]string{"name"}))
 			},
 			wantStatus: http.StatusUnauthorized, wantCode: "auth.invalid_credentials",
@@ -111,6 +124,7 @@ func TestPasswordLogin(t *testing.T) {
 		{
 			name: "disabled account is refused", body: `{"email":"amina@example.co.ke","password":"correct horse"}`, csrf: true,
 			expect: func(m sqlmock.Sqlmock, site string) {
+				expectLocalSignInPolicy(m, site, "")
 				m.ExpectQuery(passwordLoginSelect).WithArgs(site, "amina@example.co.ke").WillReturnRows(userRow(false, string(hash), true))
 			},
 			wantStatus: http.StatusUnauthorized, wantCode: "auth.invalid_credentials",
@@ -118,6 +132,7 @@ func TestPasswordLogin(t *testing.T) {
 		{
 			name: "passwordless account never matches", body: `{"email":"amina@example.co.ke","password":"$kora$passwordless$disabled"}`, csrf: true,
 			expect: func(m sqlmock.Sqlmock, site string) {
+				expectLocalSignInPolicy(m, site, "")
 				m.ExpectQuery(passwordLoginSelect).WithArgs(site, "amina@example.co.ke").WillReturnRows(userRow(true, "$kora$passwordless$disabled", true))
 			},
 			wantStatus: http.StatusUnauthorized, wantCode: "auth.invalid_credentials",
@@ -125,6 +140,7 @@ func TestPasswordLogin(t *testing.T) {
 		{
 			name: "unverified email must confirm first", body: `{"email":"amina@example.co.ke","password":"correct horse"}`, csrf: true,
 			expect: func(m sqlmock.Sqlmock, site string) {
+				expectLocalSignInPolicy(m, site, "")
 				m.ExpectQuery(passwordLoginSelect).WithArgs(site, "amina@example.co.ke").WillReturnRows(userRow(true, string(hash), false))
 			},
 			wantStatus: http.StatusForbidden, wantCode: "auth.email_verification_required",
@@ -136,6 +152,13 @@ func TestPasswordLogin(t *testing.T) {
 		{
 			name: "single sign-on only workspace", body: `{"email":"amina@example.co.ke","password":"correct horse"}`, csrf: true, disabled: true,
 			wantStatus: http.StatusForbidden, wantCode: "auth.password_sign_in_disabled",
+		},
+		{
+			name: "tenant policy disables local sign-in", body: `{"email":"amina@example.co.ke","password":"correct horse"}`, csrf: true,
+			expect: func(m sqlmock.Sqlmock, site string) {
+				expectLocalSignInPolicy(m, site, "false")
+			},
+			wantStatus: http.StatusForbidden, wantCode: "auth.local_sign_in_disabled",
 		},
 		{
 			name: "missing password", body: `{"email":"amina@example.co.ke"}`, csrf: true,
@@ -172,6 +195,7 @@ func TestPasswordLoginRateLimitsRepeatedAttempts(t *testing.T) {
 	site := "pw-rate-limit"
 	router, mock := passwordLoginRouter(t, site, false)
 	for i := 0; i < authRateLimitMax; i++ {
+		expectLocalSignInPolicy(mock, site, "")
 		mock.ExpectQuery(passwordLoginSelect).WithArgs(site, "amina@example.co.ke").WillReturnRows(sqlmock.NewRows([]string{"name"}))
 		if response := postPasswordLogin(router, `{"email":"amina@example.co.ke","password":"guess"}`, true); response.Code != http.StatusUnauthorized {
 			t.Fatalf("attempt %d status = %d", i+1, response.Code)
