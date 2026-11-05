@@ -55,7 +55,7 @@ func (d *PostgresDialect) LoadSchema(db *sql.DB, _ string) (*LiveSchema, error) 
 	colRows, err := db.Query(`
 		SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT
 		FROM INFORMATION_SCHEMA.COLUMNS
-		WHERE TABLE_SCHEMA = 'public' AND TABLE_NAME LIKE 'tab%'
+		WHERE TABLE_SCHEMA = current_schema() AND TABLE_NAME LIKE 'tab%'
 		ORDER BY TABLE_NAME, ORDINAL_POSITION`)
 	if err != nil {
 		return nil, fmt.Errorf("reading columns: %w", err)
@@ -84,7 +84,7 @@ func (d *PostgresDialect) LoadSchema(db *sql.DB, _ string) (*LiveSchema, error) 
 	idxRows, err := db.Query(`
 		SELECT tablename, indexname, indexdef
 		FROM pg_indexes
-		WHERE schemaname = 'public' AND tablename LIKE 'tab%'
+		WHERE schemaname = current_schema() AND tablename LIKE 'tab%'
 		ORDER BY tablename, indexname`)
 	if err != nil {
 		return nil, fmt.Errorf("reading indexes: %w", err)
