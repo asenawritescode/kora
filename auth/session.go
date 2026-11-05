@@ -652,29 +652,11 @@ func (sm *SessionManager) sweepExpiredCache(now time.Time) {
 	}
 }
 
-func (sm *SessionManager) cleanupExpired() {
-	if sm.DB == nil {
-		return // console-only mode — no site database
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), dbCleanupTimeout)
-	defer cancel()
-	sm.cleanupExpiredContext(ctx)
-}
-
 func (sm *SessionManager) cleanupExpiredContext(ctx context.Context) {
 	_, err := sm.DB.ExecContext(ctx, sm.sql("DELETE FROM _kora_session WHERE expires_at < ?"), time.Now())
 	if err != nil {
 		slog.Warn("failed to cleanup expired sessions", "error", err)
 	}
-}
-
-func (sm *SessionManager) cleanupMagicLinks() {
-	if sm.DB == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), dbCleanupTimeout)
-	defer cancel()
-	sm.cleanupMagicLinksContext(ctx)
 }
 
 func (sm *SessionManager) cleanupMagicLinksContext(ctx context.Context) {
@@ -1132,25 +1114,6 @@ func publicAppBaseURL(value string) (*url.URL, error) {
 	return base, nil
 }
 
-// AuthMiddleware returns a Gin middleware that validates session cookies.
-func AuthMiddleware(sm *SessionManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Skip auth for login endpoint and health check.
-		path := c.Request.URL.Path
-		if path == "/api/ping" ||
-			path == "/workspace/auth/login" ||
-			path == "/console/login" {
-			c.Next()
-			return
-		}
-
-		if !validateSession(c, sm) {
-			return
-		}
-		c.Next()
-	}
-}
-
 // validateSession validates the session cookie/header and sets user context.
 // Returns false and writes 401 if auth fails; true if auth succeeded or was skipped.
 // Does NOT call c.Next() — callers must do that themselves.
@@ -1223,26 +1186,6 @@ func validateSession(c *gin.Context, sm *SessionManager) bool {
 
 func stringsHasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-}
-
-func requireAuthenticatedAuthUser(c *gin.Context, sm *SessionManager) (*SessionManager, *User, bool) {
-	targetSM := sm
-	if siteDB, exists := c.Get("site_db"); exists {
-		if sdb, ok := siteDB.(*sql.DB); ok && sdb != nil {
-			targetSM = sessionManagerForRequest(c, sdb)
-		}
-	}
-	if !validateSession(c, targetSM) {
-		return nil, nil, false
-	}
-	userVal, exists := c.Get("user_obj")
-	user, ok := userVal.(*User)
-	if !exists || !ok || user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
-		c.Abort()
-		return nil, nil, false
-	}
-	return targetSM, user, true
 }
 
 // RegisterAuthRoutes registers authentication endpoints.
@@ -1487,10 +1430,6 @@ func enforceAuthRateLimit(c *gin.Context, key string, limit int, window time.Dur
 		},
 	})
 	return false
-}
-
-func issueOneTimeLink(c *gin.Context, targetDB *sql.DB, site string, user *User, mailer MagicLinkMailer) (string, error) {
-	return issueOneTimeLinkWithPublicAppBaseURL(c, targetDB, site, user, mailer, "")
 }
 
 func allowMagicLinkRequest(site, emailAddr, remoteIP string, now time.Time) bool {

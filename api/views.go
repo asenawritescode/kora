@@ -1734,19 +1734,6 @@ func numberOrDefault(value any, fallback float64) float64 {
 	return fallback
 }
 
-func isEmptyNumber(value any) bool {
-	return numberOrDefault(value, 0) == 0
-}
-
-func firstPresent(row map[string]any, keys ...string) (any, bool) {
-	for _, key := range keys {
-		if val, ok := row[key]; ok && val != nil {
-			return val, true
-		}
-	}
-	return nil, false
-}
-
 func findViewComponentByID(components []doctype.ViewComponent, id string) *doctype.ViewComponent {
 	for i := range components {
 		if components[i].ID == id {
@@ -1919,19 +1906,6 @@ func currentUser(c *gin.Context) string {
 	return "system"
 }
 
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
-	return keys
-}
-
 // getString safely gets a string value from a map.
 func getString(m map[string]any, key string) string {
 	if v, ok := m[key]; ok {
@@ -1975,26 +1949,4 @@ func transactionDocumentData(dt *doctype.DocType, doc *doctype.Document) (json.R
 		return nil, fmt.Errorf("encode transaction document: %w", err)
 	}
 	return encoded, nil
-}
-
-// handleViewError maps ORM/database errors to API error responses.
-func handleViewError(c *gin.Context, dt *doctype.DocType, err error) {
-	if ve, ok := err.(*doctype.ValidationError); ok {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{
-			"type":    "ValidationError",
-			"message": ve.Error(),
-			"field":   ve.Field,
-		}})
-		return
-	}
-	if strings.Contains(err.Error(), "ValidationError") {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{
-			"type":    "ValidationError",
-			"message": err.Error(),
-		}})
-		return
-	}
-	c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{
-		"message": err.Error(),
-	}})
 }

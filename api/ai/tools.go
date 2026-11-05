@@ -93,88 +93,6 @@ func fieldNamesForDescription(dt *doctype.DocType) []string {
 	return names
 }
 
-func buildFunctions(reg *doctype.Registry) []map[string]any {
-	var funcs []map[string]any
-	for _, dt := range reg.All() {
-		if dt.IsChildTable {
-			continue
-		}
-		lower := sanitizeName(dt.Name)
-		props := make(map[string]any)
-		required := []string{}
-		for _, f := range dt.DataFields() {
-			if f.Fieldtype == "Table" || !aiReadableField(f) {
-				continue
-			}
-			s := map[string]any{"description": f.Label}
-			switch f.Fieldtype {
-			case "Int":
-				s["type"] = "integer"
-			case "Float", "Currency", "Percent":
-				s["type"] = "number"
-			case "Check":
-				s["type"] = "boolean"
-			default:
-				s["type"] = "string"
-			}
-			props[f.Fieldname] = s
-			if f.Reqd {
-				required = append(required, f.Fieldname)
-			}
-		}
-
-		funcs = append(funcs, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        lower + "_find",
-				"description": "Find " + dt.Name + " by field values. Fields: " + strings.Join(fieldNamesForDescription(dt), ", "),
-				"parameters": map[string]any{
-					"type":       "object",
-					"properties": props,
-				},
-			},
-		}, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        lower + "_list",
-				"description": "List " + dt.Name + " documents (recent first). Use after _find to browse all records.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"limit":  map[string]any{"type": "integer", "description": "Max results (default 20)"},
-						"offset": map[string]any{"type": "integer", "description": "Pagination offset"},
-					},
-				},
-			},
-		}, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        lower + "_get",
-				"description": "Get a single " + dt.Name + " by name",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"name": map[string]any{"type": "string", "description": "Document name"},
-					},
-					"required": []string{"name"},
-				},
-			},
-		}, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        lower + "_create",
-				"description": "Create a new " + dt.Name + ". Available fields: " + strings.Join(fieldNamesForDescription(dt), ", "),
-				"parameters": map[string]any{
-					"type":       "object",
-					"properties": props,
-					"required":   required,
-				},
-			},
-		})
-	}
-	return funcs
-}
-
 func BuildToolCatalog(reg *doctype.Registry) ToolCatalog {
 	var catalog []ToolDescriptor
 	for _, dt := range reg.All() {
@@ -481,10 +399,6 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-func ExecuteTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName string) string {
-	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", "", false, rolesForTool(tx), tx.Execution)
 }
 
 // ExecuteToolWithExecution is the authenticated-adapter entry point. It keeps
@@ -1059,10 +973,6 @@ func executeSingleToolWithRolesAndCallIDAndExecution(tx *orm.TxManager, reg *doc
 	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, runID, stepID, key, false, userRoles, execution)
 }
 
-func executeSingleToolWithMutationKey(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, idempotencyKey string, adapterConfirmed bool, userRoles []string) string {
-	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, runID, stepID, idempotencyKey, adapterConfirmed, userRoles, tx.Execution)
-}
-
 func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, idempotencyKey string, adapterConfirmed bool, userRoles []string, execution policy.Execution) string {
 	if !execution.Valid() && tx != nil {
 		execution = tx.Execution
@@ -1371,10 +1281,6 @@ func executeUpdateToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, dt
 		return fmt.Sprintf("Error updating %s: %v", dt.Name, err)
 	}
 	return fmt.Sprintf("Updated %s %q.", dt.Name, result.Name)
-}
-
-func executeAIRecordMutationWithKey(tx *orm.TxManager, reg *doctype.Registry, command, doctypeName, name string, fields map[string]any, owner string, roles []string, idempotencyKey string, allowDelegated bool) (*kernel.ResultData, error) {
-	return executeAIRecordMutationWithExecution(tx, reg, command, doctypeName, name, fields, owner, roles, idempotencyKey, allowDelegated, policy.Execution{})
 }
 
 func executeAIRecordMutationWithExecution(tx *orm.TxManager, reg *doctype.Registry, command, doctypeName, name string, fields map[string]any, owner string, roles []string, idempotencyKey string, allowDelegated bool, execution policy.Execution) (*kernel.ResultData, error) {

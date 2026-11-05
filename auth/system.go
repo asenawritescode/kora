@@ -60,11 +60,6 @@ type SystemGuard struct {
 	closeOnce     sync.Once
 }
 
-// LoadSystemGuard reads system_credentials.yaml, hashes the password, and returns a guard.
-func LoadSystemGuard(path string) (*SystemGuard, error) {
-	return loadSystemGuard(path, true)
-}
-
 // LoadSystemGuardPaused loads credentials without starting its cleanup worker.
 // Engine owns that worker and starts it from Engine.Run.
 func LoadSystemGuardPaused(path string) (*SystemGuard, error) {
@@ -309,13 +304,6 @@ func (g *SystemGuard) UpdatePassword(newPassword string) error {
 	g.passwordHash = string(hash)
 	g.isDefault = false
 	return nil
-}
-
-// LoadSystemGuardFromEnv creates a SystemGuard from environment variables.
-// Falls back to baked-in defaults if env vars are not set.
-// Default: admin@kora.local / kora123 (isDefault=true forces password change).
-func LoadSystemGuardFromEnv() *SystemGuard {
-	return loadSystemGuardFromEnv(true)
 }
 
 // LoadSystemGuardFromEnvPaused loads environment credentials without starting

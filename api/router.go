@@ -131,18 +131,6 @@ func (h *Handler) legacyRuntimeService(site string) SiteRuntimeService {
 	}
 }
 
-// linkedDocumentResolver binds declarative linked constraints to the current
-// site's transaction. The doctype package receives only this narrow resolver,
-// so generated constraints cannot obtain arbitrary database access.
-func (h *Handler) linkedDocumentResolver(c *gin.Context) doctype.LinkedDocumentResolver {
-	return func(target *doctype.DocType, name string) (*doctype.Document, error) {
-		if target == nil || strings.TrimSpace(name) == "" {
-			return nil, nil
-		}
-		return h.siteTx(c).GetDoc(target, name, "")
-	}
-}
-
 // NewHandler creates a new API handler.
 func NewHandler(registry *doctype.Registry, txManager *orm.TxManager) *Handler {
 	return &Handler{
@@ -772,35 +760,6 @@ func dtRegistryLookup(registry *doctype.Registry, dt *doctype.DocType, fieldName
 	return registry.Get(field.Options)
 }
 
-func parseChildRows(val any, field *doctype.Field, registry *doctype.Registry) ([]*doctype.Document, error) {
-	rows, ok := val.([]any)
-	if !ok {
-		return nil, fmt.Errorf("expected array of child rows")
-	}
-
-	childDT := registry.Get(field.Options)
-	if childDT == nil {
-		return nil, fmt.Errorf("child doctype %q not found", field.Options)
-	}
-
-	var children []*doctype.Document
-	for i, row := range rows {
-		rowMap, ok := row.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("row %d: expected object", i)
-		}
-
-		child := doctype.NewDocument(field.Options)
-		for k, v := range rowMap {
-			child.Set(k, v)
-		}
-		_ = childDT
-		children = append(children, child)
-	}
-
-	return children, nil
-}
-
 func validationErrorDetails(errors doctype.ValidationErrors) any {
 	if len(errors) == 1 {
 		return map[string]any{
@@ -823,26 +782,6 @@ func validationErrorDetails(errors doctype.ValidationErrors) any {
 	return messages
 }
 
-// RegisterRoutes registers all CRUD routes for all DocTypes in the registry on a full Engine.
-func RegisterRoutes(router *gin.Engine, registry *doctype.Registry, txManager *orm.TxManager) {
-	handler := NewHandler(registry, txManager)
-	RegisterRoutesOnGroup(router.Group("/api"), registry, txManager)
-
-	// Health check — used by Docker HEALTHCHECK and load balancers.
-	// Verifies DB connectivity for readiness probes.
-	router.GET("/api/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{"message": "pong"})
-	})
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, healthPayload(c))
-	})
-
-	// File upload endpoint.
-	router.POST("/api/upload", handler.HandleUpload)
-
-	_ = handler
-}
-
 func healthPayload(c *gin.Context) gin.H {
 	db, _ := c.Get("site_db")
 	status := "ok"
@@ -861,19 +800,6 @@ func healthPayload(c *gin.Context) gin.H {
 		// Async hook overflow count (RFC Phase 1: no silent drops).
 		"async_hook_enqueue_failed": orm.HookEnqueueFailedCount(),
 	}
-}
-
-// RegisterRoutesOnGroup registers all CRUD routes on an existing RouterGroup.
-// This allows the caller to apply middleware (e.g., auth) before the group.
-func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager) {
-	RegisterRoutesOnGroupWithAnalytics(apiGroup, registry, txManager, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-}
-
-// RegisterPublicRoutesOnGroup registers public delivery and provider callback
-// routes. Each route must enforce its own access policy; CRUD authentication is
-// registered separately.
-func RegisterPublicRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteStorages map[string]storage.Backend) {
-	RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup, registry, txManager, siteStorages, nil)
 }
 
 func RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteStorages map[string]storage.Backend, runtimeServices *SiteRuntimeServices) {
@@ -899,13 +825,6 @@ func RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, r
 	apiGroup.POST("/webhooks/mpesa/stk", handler.HandleMPesaSTKCallback)
 	apiGroup.POST("/webhooks/mpesa/stk/:token", handler.HandleMPesaSTKCallback)
 	apiGroup.POST("/webhooks/payments/:provider/:token", handler.HandlePaymentCallback)
-}
-
-// RegisterRoutesOnGroupWithAnalytics registers all CRUD routes with optional
-// analytics event propagation. siteBuses maps site name → EventBus; if nil or
-// empty, analytics event emission is a no-op.
-func RegisterRoutesOnGroupWithAnalytics(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]eventstream.Bus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry) {
-	RegisterRoutesOnGroupWithRuntimeServices(apiGroup, registry, txManager, siteBuses, realtimeProviders, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookSink, siteOutboxes, siteStorages, kernelCommands, nil)
 }
 
 // RegisterRoutesOnGroupWithRuntimeServices is the compatibility registration

@@ -511,12 +511,6 @@ func (b *channelBus) AcknowledgeWAL(eventIDs []string) error {
 	return nil
 }
 
-// drainFile reads a single WAL file line by line without acknowledging it.
-// Files are removed only after the analytics database transaction commits.
-func (b *channelBus) drainFile(path string, handler func(ChangeEvent)) (int, error) {
-	return b.drainFileLimit(path, 0, handler)
-}
-
 func (b *channelBus) drainFileLimit(path string, limit int, handler func(ChangeEvent)) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {

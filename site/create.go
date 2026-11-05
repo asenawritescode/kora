@@ -450,20 +450,12 @@ func ensureConfigVersionContext(ctx context.Context, db *sql.DB, dialect sqlDial
 	return activateConfigVersionWithFlagContext(ctx, db, dialect, versionID, activeFlag)
 }
 
-func activateConfigVersion(db *sql.DB, dialect sqlDialect.QueryDialect, versionID string) error {
-	return activateConfigVersionContext(context.Background(), db, dialect, versionID)
-}
-
 func activateConfigVersionContext(ctx context.Context, db *sql.DB, dialect sqlDialect.QueryDialect, versionID string) error {
 	activeFlag := any(true)
 	if driver, ok := dialect.(interface{ DriverName() string }); ok && driver.DriverName() == "postgres" {
 		activeFlag = 1
 	}
 	return activateConfigVersionWithFlagContext(ctx, db, dialect, versionID, activeFlag)
-}
-
-func activateConfigVersionWithFlag(db *sql.DB, dialect sqlDialect.QueryDialect, versionID string, activeFlag any) error {
-	return activateConfigVersionWithFlagContext(context.Background(), db, dialect, versionID, activeFlag)
 }
 
 func activateConfigVersionWithFlagContext(ctx context.Context, db *sql.DB, dialect sqlDialect.QueryDialect, versionID string, activeFlag any) error {

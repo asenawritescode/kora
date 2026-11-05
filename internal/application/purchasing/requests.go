@@ -303,23 +303,6 @@ func subjectMatches(reference contract.SubjectRef, document *doctype.Document) e
 	return nil
 }
 
-func transitionRoles(raw string) []string {
-	var roles []string
-	seen := make(map[string]struct{})
-	for _, candidate := range strings.Split(raw, ",") {
-		role := strings.TrimSpace(candidate)
-		if role == "" {
-			continue
-		}
-		if _, ok := seen[role]; ok {
-			continue
-		}
-		seen[role] = struct{}{}
-		roles = append(roles, role)
-	}
-	return roles
-}
-
 func requireHuman(ctx context.Context, exec policy.Execution) error {
 	if ctx == nil || !exec.Valid() || exec.Actor().PrincipalType != contract.PrincipalHuman || exec.Actor().PrincipalID == "" || exec.Actor().SubjectUserID != exec.Actor().PrincipalID || strings.TrimSpace(exec.Actor().Site) == "" {
 		return contract.NewError(contract.CodePermissionDenied, "verified tenant user execution is required for Purchase Request approval")

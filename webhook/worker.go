@@ -165,13 +165,6 @@ func (w *Worker) Stop() {
 	w.client.CloseIdleConnections()
 }
 
-// handleEvent processes a single change event and delivers to matching extensions.
-func (w *Worker) handleEvent(ctx context.Context, event eventstream.ChangeEvent) {
-	if err := w.processEvent(ctx, event); err != nil && ctx.Err() == nil {
-		slog.Error("webhook: processing change event", "event_id", event.ID, "error", err)
-	}
-}
-
 func (w *Worker) processEvent(ctx context.Context, event eventstream.ChangeEvent) error {
 	return w.processEventWithReceiptCheck(ctx, event, false)
 }

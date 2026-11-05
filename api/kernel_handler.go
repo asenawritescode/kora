@@ -271,10 +271,6 @@ func (h *Handler) runKernelResourceMutationWithKey(c *gin.Context, commandName, 
 	return h.runKernelResourceMutationWithOptions(c, commandName, doctypeName, name, data, idempotencyKey, false, expectedVersions...)
 }
 
-func (h *Handler) runKernelTrustedReadOnlyResourceMutationWithKey(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, idempotencyKey string) (*doctype.Document, *contract.Error) {
-	return h.runKernelResourceMutationWithOptions(c, commandName, doctypeName, name, data, idempotencyKey, true)
-}
-
 func (h *Handler) runKernelResourceMutationWithOptions(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, idempotencyKey string, allowReadOnlyFields bool, expectedVersions ...string) (*doctype.Document, *contract.Error) {
 	payload := map[string]any{"doctype": doctypeName}
 	if name != "" {

@@ -171,15 +171,6 @@ func ParseStoredConfigSnapshot(config string) (*ConfigSnapshot, error) {
 	return ParseSnapshot(string(filtered))
 }
 
-// MustParseConfig is like ParseConfig but panics on error (for use in tests).
-func MustParseConfig(config string) *ConfigSnapshot {
-	snapshot, err := ParseConfig(config)
-	if err != nil {
-		panic(err)
-	}
-	return snapshot
-}
-
 // UpsertSnapshotDocType inserts or replaces a doctype in a config snapshot and
 // keeps the doctypes sorted for deterministic output.
 func UpsertSnapshotDocType(snapshot *ConfigSnapshot, dt *DocType) {

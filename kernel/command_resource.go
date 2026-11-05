@@ -126,8 +126,6 @@ func ParseCommandResource(raw []byte) (*CommandResource, error) {
 	return &def, nil
 }
 
-func (c *CommandResource) validate() error { return c.validateWith(true) }
-
 // validateWith checks the definition. With needSchemas false (config YAML) the
 // versioned schema refs may be absent: the pack generator fills them.
 func (c *CommandResource) validateWith(needSchemas bool) error {

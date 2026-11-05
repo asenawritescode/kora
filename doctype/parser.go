@@ -293,28 +293,6 @@ func ParseYAML(data []byte, source string) (*DocType, error) {
 	return dt, nil
 }
 
-// ParseFileNonStrict reads a YAML file without strict key checking.
-// Used for internal operations where extra keys are expected (e.g., app.yaml).
-func ParseFileNonStrict(path string) (*DocType, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading file %s: %w", path, err)
-	}
-	return ParseYAMLNonStrict(data, path)
-}
-
-// ParseYAMLNonStrict parses a DocType from YAML data without strict key checking.
-func ParseYAMLNonStrict(data []byte, source string) (*DocType, error) {
-	dt := &DocType{}
-	if err := goyaml.Unmarshal(data, dt); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", source, err)
-	}
-	if err := dt.Validate(); err != nil {
-		return nil, fmt.Errorf("validating %s: %w", source, err)
-	}
-	return dt, nil
-}
-
 // checkFieldUnknownKeys walks the YAML tree and checks for unknown keys inside fields and constraints.
 func checkFieldUnknownKeys(data []byte) error {
 	var root yamlv3.Node

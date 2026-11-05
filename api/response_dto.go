@@ -41,10 +41,6 @@ type managedChannelClientResponse = contract.ManagedChannelClientV2
 
 type managedSiteIdentityResponse = contract.ManagedSiteIdentityV2
 
-type extensionReplayedResponse struct {
-	Status string `json:"status"`
-}
-
 type extensionRotatedSecretResponse struct {
 	Secret  string `json:"secret"`
 	Warning string `json:"warning"`
@@ -98,15 +94,6 @@ type extensionDeleteResponse struct {
 	Status string `json:"status"`
 }
 
-type extensionRotateSecretResponse struct {
-	Secret  string `json:"secret"`
-	Warning string `json:"warning"`
-}
-
-type aiApproveListResponse struct {
-	Approvals []aiApprovalListItem `json:"approvals"`
-}
-
 type channelSessionIssueResponse = contract.ChannelSessionIssueResponseV2
 
 type channelSessionRevokeResponse struct {
@@ -134,15 +121,6 @@ type deletedResponse struct {
 
 type savedResponse struct {
 	Message string `json:"message"`
-}
-
-type activatedResponse struct {
-	Message string `json:"message"`
-	Status  string `json:"status"`
-}
-
-type configImportResponse struct {
-	Name string `json:"name"`
 }
 
 type scriptStatusResponse struct {
@@ -203,11 +181,4 @@ type consoleSiteUpdateResponse struct {
 type consoleSiteDeleteResponse struct {
 	Hostname string `json:"hostname"`
 	Deleted  bool   `json:"deleted"`
-}
-
-func nowString(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
 }
