@@ -1,6 +1,7 @@
 package site
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -9,6 +10,10 @@ import (
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/kernel"
+	"github.com/asenawritescode/kora/print"
+	"github.com/asenawritescode/kora/query"
+	"gopkg.in/yaml.v3"
 )
 
 // These aliases preserve source compatibility while keeping public package
@@ -208,12 +213,16 @@ type packResourceNames struct {
 	views            map[string]string
 	scripts          map[string]string
 	reports          map[string]string
+	queries          map[string]string
+	commands         map[string]string
+	printFormats     map[string]string
 }
 
 func newPackResourceNames() packResourceNames {
 	return packResourceNames{
 		doctypes: map[string]string{}, doctypeResources: map[string]string{}, roles: map[string]string{}, permissions: map[string]string{},
 		workflows: map[string]string{}, views: map[string]string{}, scripts: map[string]string{}, reports: map[string]string{},
+		queries: map[string]string{}, commands: map[string]string{}, printFormats: map[string]string{},
 	}
 }
 
@@ -281,6 +290,24 @@ func (names packResourceNames) add(file PackFile) error {
 			name = strings.ReplaceAll(doctypeName, " ", "_") + "_" + eventName
 		}
 		return register(names.scripts, name, "script")
+	case "query":
+		definition, err := decodeQueryDefinition([]byte(file.Content))
+		if err != nil {
+			return err
+		}
+		return register(names.queries, definition.ModuleOwnerID+"/"+definition.Name, "query")
+	case "command":
+		definition, err := kernel.ParseCommandResource([]byte(file.Content))
+		if err != nil {
+			return err
+		}
+		return register(names.commands, definition.FullName(), "command")
+	case "print_format":
+		definition, err := print.Load([]byte(file.Content))
+		if err != nil {
+			return err
+		}
+		return register(names.printFormats, definition.Name, "print format")
 	case "report":
 		definition, err := analytics.ParseReportYAML([]byte(file.Content), file.Path)
 		if err != nil {
@@ -294,6 +321,18 @@ func (names packResourceNames) add(file PackFile) error {
 		}
 	}
 	return nil
+}
+
+// decodeQueryDefinition strictly decodes a query file. Semantic validation
+// needs the DocType registry and runs in parseConfigPack.
+func decodeQueryDefinition(data []byte) (*query.Definition, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	var d query.Definition
+	if err := dec.Decode(&d); err != nil {
+		return nil, fmt.Errorf("%s: %w", query.ErrInvalidDefinition, err)
+	}
+	return &d, nil
 }
 
 func validatePackFileSyntax(file PackFile) error {
@@ -322,6 +361,15 @@ func validatePackFileSyntax(file PackFile) error {
 		return err
 	case "report":
 		_, err := analytics.ParseReportYAML(data, file.Path)
+		return err
+	case "command":
+		_, err := kernel.ParseCommandResource(data)
+		return err
+	case "print_format":
+		_, err := print.Load(data)
+		return err
+	case "query":
+		_, err := decodeQueryDefinition(data)
 		return err
 	case "script":
 		if strings.TrimSpace(file.Content) == "" {
