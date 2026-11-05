@@ -25,13 +25,13 @@ func registerWorkflowTriggerConsumer(config TenantServiceConfig, loaded *knet.Lo
 	}
 	dispatcher := outbox.NewDispatcher(loaded.DB, dialect)
 	dispatcher.WorkAdmission = services.WorkAdmission
-	if err := dispatcher.RegisterForTypes("workflow-record-triggers", []string{"record.created", "record.updated"}, func(ctx context.Context, event contract.EventEnvelope) error {
+	if err := registerRecordTriggerConsumer(dispatcher, func(ctx context.Context, trigger contract.EventEnvelope) error {
 		release, err := services.WorkAdmission.Acquire(ctx)
 		if err != nil {
 			return err
 		}
 		defer release()
-		_, err = instances.StartFromRecordEvent(ctx, tenant, loaded.Name, event)
+		_, err = instances.StartFromRecordEvent(ctx, tenant, loaded.Name, trigger)
 		return err
 	}); err != nil {
 		return fmt.Errorf("register workflow trigger events: %w", err)
@@ -75,4 +75,16 @@ func RunWorkflowTriggerDispatcher(ctx context.Context, dispatcher *outbox.Dispat
 		case <-ticker.C:
 		}
 	}
+}
+
+// registerRecordTriggerConsumer delivers record change events to start as
+// record trigger envelopes.
+func registerRecordTriggerConsumer(dispatcher *outbox.Dispatcher, start func(context.Context, contract.EventEnvelope) error) error {
+	return dispatcher.RegisterForPatterns("workflow-record-triggers", workflow.RecordTriggerEventPatterns, func(ctx context.Context, event contract.EventEnvelope) error {
+		trigger, ok := workflow.RecordTriggerFromChangeEvent(event)
+		if !ok {
+			return nil
+		}
+		return start(ctx, trigger)
+	})
 }

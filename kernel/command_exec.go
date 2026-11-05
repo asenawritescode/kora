@@ -374,8 +374,10 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 	priorUser, priorRole, priorRoles, priorContext := txMgr.CurrentUser, txMgr.CurrentUserRole, txMgr.CurrentUserRoles, txMgr.Context
 	priorBusinessScope := txMgr.BusinessScope
 	priorSkipHooks := txMgr.SkipHookScripts
+	priorEventOrigin := txMgr.EventOrigin
 	txMgr.PostCommitHooks = nil
 	txMgr.Transaction = dbTx
+	txMgr.EventOrigin = eventOrigin(op)
 	txMgr.CurrentUser = op.Context.User
 	txMgr.CurrentUserRole = op.Context.UserRole
 	txMgr.CurrentUserRoles = append([]string(nil), op.Context.Roles...)
@@ -388,6 +390,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		txMgr.ScriptMutationExecutor = priorMutationExecutor
 		txMgr.PostCommitHooks = priorPostCommitHooks
 		txMgr.Transaction = priorTransaction
+		txMgr.EventOrigin = priorEventOrigin
 		txMgr.CurrentUser, txMgr.CurrentUserRole, txMgr.CurrentUserRoles, txMgr.Context = priorUser, priorRole, priorRoles, priorContext
 		txMgr.BusinessScope = priorBusinessScope
 		txMgr.SkipHookScripts = priorSkipHooks

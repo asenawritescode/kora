@@ -269,7 +269,7 @@ func TestGridHTTPRecordCreateStartsWorkflowAndDeliversEmail(t *testing.T) {
 
 	dispatcher := outbox.NewDispatcher(database, dialect)
 	var triggerErr error
-	if err := dispatcher.RegisterForTypes("workflow-record-triggers", []string{"record.created", "record.updated"}, func(eventCtx context.Context, event contract.EventEnvelope) error {
+	if err := registerRecordTriggerConsumer(dispatcher, func(eventCtx context.Context, event contract.EventEnvelope) error {
 		_, startErr := instances.StartFromRecordEvent(eventCtx, tenant, siteName, event)
 		triggerErr = startErr
 		return startErr

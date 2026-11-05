@@ -17,6 +17,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/expression"
 	"github.com/asenawritescode/kora/internal/application/purchasing"
 	purchasingsql "github.com/asenawritescode/kora/internal/application/purchasing/sqlstore"
@@ -356,7 +357,7 @@ func runPurchaseApprovalPolicyAndDomainTransition(t *testing.T, database *sql.DB
 	if err := database.QueryRow(db.Rebind(dialect, "SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND doc_name = ? AND command_name = ?"), siteName, requestName, kernel.CommandWorkflowStatusTransition).Scan(&operationCount); err != nil {
 		t.Fatal("count workflow audit:", err)
 	}
-	if err := database.QueryRow(db.Rebind(dialect, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ? AND event_type = ?"), siteName, requestName, "record.updated").Scan(&outboxCount); err != nil {
+	if err := database.QueryRow(db.Rebind(dialect, "SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ? AND event_type = ?"), siteName, requestName, outbox.EventTypeName(dt.Name, eventstream.EventUpdate)).Scan(&outboxCount); err != nil {
 		t.Fatal("count domain outbox:", err)
 	}
 	if operationCount != 1 || outboxCount != 1 {
