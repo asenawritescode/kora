@@ -565,8 +565,9 @@ func (l LineEntryLayout) Validate(inputSchema, outputSchema json.RawMessage, loo
 		return fmt.Errorf(ErrLayoutInvalid+": "+format, args...)
 	}
 	type prop struct {
-		Type  string `json:"type"`
-		Items *struct {
+		Type       string          `json:"type"`
+		Properties map[string]prop `json:"properties"`
+		Items      *struct {
 			Type       string          `json:"type"`
 			Properties map[string]prop `json:"properties"`
 		} `json:"items"`
@@ -609,7 +610,10 @@ func (l LineEntryLayout) Validate(inputSchema, outputSchema json.RawMessage, loo
 		}
 	}
 	if l.TotalOutput != "" {
-		if _, ok := out.Properties[l.TotalOutput]; !ok {
+		// Command results nest the declared `output:` map under "output".
+		_, top := out.Properties[l.TotalOutput]
+		_, nested := out.Properties["output"].Properties[l.TotalOutput]
+		if !top && !nested {
 			return bad("total_output is not in the operation output")
 		}
 	}
