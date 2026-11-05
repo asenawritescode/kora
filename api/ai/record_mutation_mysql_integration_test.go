@@ -385,7 +385,7 @@ func TestAIRecordMutationUsesExactVerifiedGrantAndPrincipal(t *testing.T) {
 	if protectedCount != 0 {
 		t.Fatalf("AI generic mutation wrote %d commands-only records, want zero", protectedCount)
 	}
-	for table, want := range map[string]int{"_kora_operation_audit": 2, "_kora_idempotency_receipt": 1, "_kora_outbox": 2} {
+	for table, want := range map[string]int{"_kora_operation_audit": 2, "_kora_idempotency_receipt": 1, "_kora_outbox": 1} {
 		var count int
 		if err := database.QueryRow("SELECT COUNT(*) FROM "+dialect.QuoteIdent(table)+" WHERE site = ?", site).Scan(&count); err != nil {
 			t.Fatalf("count %s rows: %v", table, err)

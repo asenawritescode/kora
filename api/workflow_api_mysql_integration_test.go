@@ -96,8 +96,12 @@ func TestGridHTTPRecordCreateStartsWorkflowFromDurableOutbox(t *testing.T) {
 	}
 	dispatcher := outbox.NewDispatcher(database, dialect)
 	var triggerErr error
-	if err := dispatcher.RegisterForTypes("workflow-record-triggers", []string{"record.created", "record.updated"}, func(ctx context.Context, event contract.EventEnvelope) error {
-		_, triggerErr = instances.StartFromRecordEvent(ctx, tenant, siteName, event)
+	if err := dispatcher.RegisterForPatterns("workflow-record-triggers", workflow.RecordTriggerEventPatterns, func(ctx context.Context, event contract.EventEnvelope) error {
+		trigger, ok := workflow.RecordTriggerFromChangeEvent(event)
+		if !ok {
+			return nil
+		}
+		_, triggerErr = instances.StartFromRecordEvent(ctx, tenant, siteName, trigger)
 		return triggerErr
 	}); err != nil {
 		t.Fatal("register workflow trigger consumer:", err)
