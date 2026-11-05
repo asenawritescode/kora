@@ -3,6 +3,7 @@ package kernel
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 const forEachYAML = `name: library.issue_batch
@@ -83,4 +84,31 @@ func manyBooks(n int) []any {
 		out[i] = map[string]any{"book": "B"}
 	}
 	return out
+}
+
+func TestNowTodayActorRefs(t *testing.T) {
+	now := time.Date(2026, 11, 5, 23, 59, 1, 0, time.UTC)
+	env := refEnv{input: map[string]any{"actor": "mallory"}, now: now, actor: "alice"}
+	for ref, want := range map[string]any{"$now": now.Format(time.RFC3339Nano), "$today": "2026-11-05", "$actor": "alice"} {
+		got, err := resolveEnvRef(ref, env)
+		if err != nil || got != want {
+			t.Fatalf("%s = %v, %v; want %v", ref, got, err, want)
+		}
+	}
+	again, _ := resolveEnvRef("$now", env)
+	first, _ := resolveEnvRef("$now", env)
+	if again != first {
+		t.Fatal("$now not stable")
+	}
+}
+
+func TestUnknownRefRootRejectedAtParse(t *testing.T) {
+	_, err := ParseCommandResource([]byte(strings.Replace(forEachYAML, "$input.due", "$series.loan", 1)))
+	if err == nil || !strings.Contains(err.Error(), "unknown reference root") {
+		t.Fatalf("err = %v", err)
+	}
+	ok := strings.Replace(forEachYAML, "$input.due", "$today", 1)
+	if _, err := ParseCommandResource([]byte(ok)); err != nil {
+		t.Fatal(err)
+	}
 }
