@@ -493,6 +493,9 @@ func (d *DocType) Validate() error {
 	if d.TitleField == "" {
 		d.TitleField = "name"
 	}
+	if err := d.validateNamingSeries(); err != nil {
+		return err
+	}
 
 	fieldnames := make(map[string]bool)
 	for i := range d.Fields {
@@ -1071,4 +1074,24 @@ func ValidateYAML(data []byte) ([]YAMLSyntaxError, []*ValidationError, error) {
 	}
 
 	return nil, nil, nil
+}
+
+func (d *DocType) validateNamingSeries() error {
+	if d.NamingSeries == "" {
+		return nil
+	}
+	if d.IsChildTable {
+		return fmt.Errorf("doctype %s: child tables cannot declare a naming series", d.Name)
+	}
+	series, err := ParseNamingSeries(d.NamingSeries)
+	if err != nil {
+		return fmt.Errorf("doctype %s: %w", d.Name, err)
+	}
+	for _, name := range series.Fields() {
+		field := d.GetField(name)
+		if field == nil || field.Fieldtype == "Table" {
+			return fmt.Errorf("doctype %s: naming series field %q must be a declared non-table field", d.Name, name)
+		}
+	}
+	return nil
 }

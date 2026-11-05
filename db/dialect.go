@@ -47,6 +47,9 @@ type QueryDialect interface {
 	UpsertIncrement(conflictCols []string, incrementCols []string) string
 	InsertOrIgnorePrefix() string
 	AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error)
+	// AllocateSeriesNumber atomically increments the counter for one naming
+	// series key, starting after seed when the key is new. All values are bound.
+	AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed int64) (int64, error)
 	NameGenQuery(tableName, prefix string) string
 	Placeholder(n int) string
 	NowTimestamp() string
