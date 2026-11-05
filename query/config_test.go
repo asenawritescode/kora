@@ -2,6 +2,7 @@ package query
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -120,5 +121,28 @@ func TestDecodeInvalid(t *testing.T) {
 	_, err := Decode([]json.RawMessage{[]byte(`{"name":"x"}`)}, testReg())
 	if err == nil || !strings.Contains(err.Error(), ErrInvalidDefinition) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestParseInputDefault(t *testing.T) {
+	base := "name: q\nmodule_owner_id: m\ncapability: c\noperation: o\nsource: Purchase Request\npermission: read\nscope: tenant\nfields: [name]\ninput:\n  since: {type: %s, default: %s}\n"
+	tests := []struct{ name, typ, def, wantErr string }{
+		{"today", "string", "$today", ""},
+		{"literal int", "int", "5", ""},
+		{"bool", "bool", "true", ""},
+		{"unknown reference", "string", "$input.other", "not a supported reference"},
+		{"type mismatch", "int", "abc", "does not match type"},
+		{"string for bool", "bool", "yes", "does not match type"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(fmt.Sprintf(base, tc.typ, tc.def)), testReg())
+			if tc.wantErr == "" && err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("err = %v, want %q", err, tc.wantErr)
+			}
+		})
 	}
 }

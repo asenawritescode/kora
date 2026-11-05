@@ -4,6 +4,7 @@ package query
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,6 +32,59 @@ type InputSpec struct {
 	Type      string   `yaml:"type" json:"type,omitempty"`
 	MaxLength int      `yaml:"max_length" json:"max_length,omitempty"`
 	Enum      []string `yaml:"enum" json:"enum,omitempty"`
+	// Default stands in when the caller omits the input: a literal of the
+	// input's type, or $today, $now or $actor.
+	Default any `yaml:"default" json:"default,omitempty"`
+}
+
+// checkDefault reports a default that is not a literal of the input's type or
+// a supported reference.
+func (s InputSpec) checkDefault() error {
+	var ok bool
+	switch v := s.Default.(type) {
+	case nil:
+		return nil
+	case string:
+		if strings.HasPrefix(v, "$") && v != "$today" && v != "$now" && v != "$actor" {
+			return fmt.Errorf("default %q is not a supported reference", v)
+		}
+		ok = s.Type == "string"
+	case int, int64:
+		ok = s.Type == "int" || s.Type == "number"
+	case float64:
+		ok = s.Type == "number" || s.Type == "int" && v == math.Trunc(v)
+	case bool:
+		ok = s.Type == "bool"
+	}
+	if !ok {
+		return fmt.Errorf("default %v does not match type %s", s.Default, s.Type)
+	}
+	return nil
+}
+
+// RequiredInputs lists the inputs a call must supply: those a non-optional
+// filter reads and that declare no default. It mirrors what the executor
+// rejects, so the published schema and the runtime agree.
+func (d *Definition) RequiredInputs() []string {
+	seen := map[string]bool{}
+	var walk func(Filter)
+	walk = func(f Filter) {
+		for _, c := range f.Any {
+			walk(c)
+		}
+		if name, ok := strings.CutPrefix(fmt.Sprint(f.Value), "$input."); ok && !f.Optional && f.Op != "is_null" && d.Input[name].Default == nil {
+			seen[name] = true
+		}
+	}
+	for _, f := range d.Filters {
+		walk(f)
+	}
+	out := make([]string, 0, len(seen))
+	for n := range seen {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Sort is one ordering key.
@@ -262,6 +316,9 @@ func (d *Definition) validateRest(dt *doctype.DocType, check func(string, string
 	for name, in := range d.Input {
 		if !inputTypes[in.Type] {
 			return fmt.Errorf("input %q: unsupported type %q", name, in.Type)
+		}
+		if err := in.checkDefault(); err != nil {
+			return fmt.Errorf("input %q: %w", name, err)
 		}
 	}
 	for _, f := range d.Filters {

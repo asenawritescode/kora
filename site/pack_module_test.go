@@ -84,3 +84,39 @@ func TestGeneratePackModules(t *testing.T) {
 		})
 	}
 }
+
+func TestQuerySchemaDeclaresRequiredAndDefaults(t *testing.T) {
+	filters := []query.Filter{
+		{Field: "creation", Op: "gte", Value: "$input.since"},
+		{Field: "till", Op: "eq", Value: "$input.till", Optional: true},
+		{Field: "shift", Op: "eq", Value: "$input.shift"},
+	}
+	tests := []struct {
+		name         string
+		input        map[string]query.InputSpec
+		wantRequired []string
+		wantDefault  map[string]any
+	}{
+		{"required from non-optional filters", map[string]query.InputSpec{"since": {Type: "string"}, "till": {Type: "string"}, "shift": {Type: "string"}}, []string{"shift", "since"}, nil},
+		{"default removes requirement and is published", map[string]query.InputSpec{"since": {Type: "string", Default: "$today"}, "till": {Type: "string"}, "shift": {Type: "string"}}, []string{"shift"}, map[string]any{"since": "$today"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var schema struct {
+				Required   []string                  `json:"required"`
+				Properties map[string]map[string]any `json:"properties"`
+			}
+			if err := json.Unmarshal(querySchema(query.Definition{Input: tc.input, Filters: filters}), &schema); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(schema.Required, ",") != strings.Join(tc.wantRequired, ",") {
+				t.Fatalf("required = %v, want %v", schema.Required, tc.wantRequired)
+			}
+			for name, want := range tc.wantDefault {
+				if got := schema.Properties[name]["default"]; got != want {
+					t.Fatalf("default of %s = %v, want %v", name, got, want)
+				}
+			}
+		})
+	}
+}

@@ -403,11 +403,14 @@ func (p BindingPlan) executePublishedQuery(ctx context.Context, scope contract.B
 	if limit == 0 {
 		limit = query.PageLimit
 	}
-	if limit > query.PageLimit || len(cursor) > 2048 {
-		return contract.QueryResult{}, fmt.Errorf("published query page is outside its registered bounds")
+	if limit > query.PageLimit {
+		return contract.QueryResult{}, &QueryInputError{Field: "limit", Message: fmt.Sprintf("limit must not exceed %d for this query", query.PageLimit)}
+	}
+	if len(cursor) > 2048 {
+		return contract.QueryResult{}, &QueryInputError{Field: "cursor", Message: "cursor is invalid"}
 	}
 	if err := resolved.validate(query.InputSchema, input); err != nil {
-		return contract.QueryResult{}, fmt.Errorf("published query input failed schema validation: %w", err)
+		return contract.QueryResult{}, newQueryInputError(err)
 	}
 	if actorScope != nil {
 		allowed := make(map[string]bool, len(query.AllowedFields))

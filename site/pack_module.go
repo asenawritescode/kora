@@ -111,9 +111,16 @@ func querySchema(def query.Definition) json.RawMessage {
 		if len(spec.Enum) > 0 {
 			p["enum"] = spec.Enum
 		}
+		if spec.Default != nil {
+			p["default"] = spec.Default
+		}
 		props[name] = p
 	}
-	raw, _ := json.Marshal(map[string]any{"type": "object", "properties": props, "additionalProperties": false})
+	schema := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
+	if required := def.RequiredInputs(); len(required) > 0 {
+		schema["required"] = required
+	}
+	raw, _ := json.Marshal(schema)
 	return raw
 }
 

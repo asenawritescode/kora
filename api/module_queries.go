@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -65,6 +66,15 @@ func (h *Handler) HandlePublishedModuleQuery(c *gin.Context) {
 		result, err = plan.ExecutePublishedQuery(c.Request.Context(), scope, moduleID, queryName, request.Input, request.Cursor, request.Limit)
 	} else {
 		result, err = plan.ExecutePublishedQueryForActor(c.Request.Context(), scope, moduleID, queryName, *actorScope, request.Input, request.Cursor, request.Limit)
+	}
+	var inputErr *plugin.QueryInputError
+	if errors.As(err, &inputErr) {
+		var details map[string]any
+		if inputErr.Field != "" {
+			details = map[string]any{"field": inputErr.Field}
+		}
+		writeError(c, http.StatusBadRequest, "validation.invalid_query_request", inputErr.Message, details)
+		return
 	}
 	if err != nil {
 		writeError(c, http.StatusServiceUnavailable, "module.query_failed", "Published query could not be completed", nil)

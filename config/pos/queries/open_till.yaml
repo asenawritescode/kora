@@ -8,7 +8,7 @@ scope: tenant
 input:
   shift: {type: string, max_length: 140}
 filters:
-  - {field: shift, op: eq, value: $input.shift}
+  - {field: shift, op: eq, value: $input.shift, optional: true}
   - {field: closing_count, op: is_null, value: true}
 fields: [name, shift, opening_float, expected_cash, creation]
 sort: [{field: creation, dir: desc}]

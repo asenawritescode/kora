@@ -10,7 +10,7 @@ input:
   till_session: {type: string, max_length: 140}
 filters:
   - {field: parent.status, op: eq, value: Paid}
-  - {field: parent.till_session, op: eq, value: $input.till_session}
+  - {field: parent.till_session, op: eq, value: $input.till_session, optional: true}
 group_by: [method]
 aggregates:
   - {name: payment_count, fn: count}
