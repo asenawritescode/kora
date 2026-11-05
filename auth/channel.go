@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	kdb "github.com/asenawritescode/kora/db"
 	"time"
 
 	"github.com/asenawritescode/kora/doctype"
@@ -42,7 +43,7 @@ type ChannelSessionCreateParams struct {
 	SensitiveUntil  *time.Time
 }
 
-func CreateChannelSession(db *sql.DB, params ChannelSessionCreateParams) (string, *ChannelSession, error) {
+func CreateChannelSession(db *sql.DB, dialect kdb.QueryDialect, params ChannelSessionCreateParams) (string, *ChannelSession, error) {
 	token, hash, err := generateChannelToken()
 	if err != nil {
 		return "", nil, err
@@ -68,10 +69,10 @@ func CreateChannelSession(db *sql.DB, params ChannelSessionCreateParams) (string
 	if params.SensitiveUntil != nil {
 		session.SensitiveUntil = sql.NullTime{Time: params.SensitiveUntil.UTC(), Valid: true}
 	}
-	_, err = db.Exec(`INSERT INTO _kora_channel_session
+	_, err = db.Exec(kdb.Rebind(dialect, `INSERT INTO _kora_channel_session
 		(id, site, client_name, conversation_key, provider, sender_address, token_hash, api_permissions,
 		 trusted_until, sensitive_until, revoked_at, revoked_reason, created_at, last_used_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		session.ID, session.Site, session.ClientName, session.ConversationKey, session.Provider, session.SenderAddress,
 		session.TokenHash, session.PermissionsRaw, session.TrustedUntil, nullableTime(session.SensitiveUntil),
 		nil, "", session.CreatedAt, nil,
@@ -82,19 +83,19 @@ func CreateChannelSession(db *sql.DB, params ChannelSessionCreateParams) (string
 	return token, session, nil
 }
 
-func RevokeChannelSession(db *sql.DB, id string, reason string) error {
-	_, err := db.Exec(`UPDATE _kora_channel_session
+func RevokeChannelSession(db *sql.DB, dialect kdb.QueryDialect, id string, reason string) error {
+	_, err := db.Exec(kdb.Rebind(dialect, `UPDATE _kora_channel_session
 		SET revoked_at = ?, revoked_reason = ?
-		WHERE id = ? AND revoked_at IS NULL`, time.Now().UTC(), reason, id)
+		WHERE id = ? AND revoked_at IS NULL`), time.Now().UTC(), reason, id)
 	return err
 }
 
-func AuthenticateChannelSession(db *sql.DB, token string) (*ChannelSession, error) {
+func AuthenticateChannelSession(db *sql.DB, dialect kdb.QueryDialect, token string) (*ChannelSession, error) {
 	hash := channelTokenHash(token)
-	row := db.QueryRow(`SELECT id, site, client_name, conversation_key, provider, sender_address, token_hash, api_permissions,
+	row := db.QueryRow(kdb.Rebind(dialect, `SELECT id, site, client_name, conversation_key, provider, sender_address, token_hash, api_permissions,
 		trusted_until, sensitive_until, revoked_at, revoked_reason, created_at, last_used_at
 		FROM _kora_channel_session
-		WHERE token_hash = ?`, hash)
+		WHERE token_hash = ?`), hash)
 	var session ChannelSession
 	var permsRaw string
 	if err := row.Scan(
@@ -109,7 +110,7 @@ func AuthenticateChannelSession(db *sql.DB, token string) (*ChannelSession, erro
 	}
 	session.PermissionsRaw = permsRaw
 	session.Permissions = parseExtensionPermissions(permsRaw)
-	_, _ = db.Exec(`UPDATE _kora_channel_session SET last_used_at = ? WHERE id = ?`, time.Now().UTC(), session.ID)
+	_, _ = db.Exec(kdb.Rebind(dialect, `UPDATE _kora_channel_session SET last_used_at = ? WHERE id = ?`), time.Now().UTC(), session.ID)
 	return &session, nil
 }
 

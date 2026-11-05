@@ -67,6 +67,9 @@ func RegisterApplicationRoutes(config ApplicationRouteConfig) (*auth.SessionMana
 	auth.SetCSRFSecure(config.CSRFSecure)
 
 	sessionManager := auth.NewOwnedSessionManagerPaused(config.Database)
+	if config.Transactions != nil {
+		sessionManager.SetDialect(config.Transactions.Dialect)
+	}
 	if err := auth.RegisterAuthRoutesWithPublicAppBaseURL(config.Router, sessionManager, config.Database, config.Mailer, config.PublicAppBaseURL); err != nil {
 		_ = sessionManager.Close()
 		return nil, fmt.Errorf("register authentication routes: %w", err)
