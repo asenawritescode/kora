@@ -54,6 +54,10 @@ func TestParse(t *testing.T) {
 		{"bad scope", strings.Replace(valid, "legal_entity", "global", 1), "scope"},
 		{"undeclared input", strings.Replace(valid, "$input.search", "$input.zzz", 1), "undeclared input"},
 		{"unknown source", strings.Replace(valid, "source: Purchase Request", "source: Nope", 1), "not found"},
+		{"field ref ok", strings.Replace(valid, "value: Draft", "value: $field.title", 1), ""},
+		{"field ref unknown", strings.Replace(valid, "value: Draft", "value: $field.nope", 1), `"nope" not on`},
+		{"field ref contains", strings.Replace(valid, "op: eq, value: Draft", "op: contains, value: $field.title", 1), "not allowed"},
+		{"field ref optional", strings.Replace(valid, "value: Draft}", "value: $field.title, optional: true}", 1), "cannot be optional"},
 		{"limit too big", valid + "limit: 500\n", "limit"},
 	}
 	for _, tc := range tests {
