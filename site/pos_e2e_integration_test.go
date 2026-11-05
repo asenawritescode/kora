@@ -266,6 +266,27 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	if len(totals.Rows) != 1 || fmt.Sprint(totals.Rows[0]["sale_count"]) != "1" || !strings.HasPrefix(fmt.Sprint(totals.Rows[0]["total"]), "300") {
 		t.Fatalf("today_totals = %v", totals.Rows)
 	}
+	// Z report: per-method totals read from the Sale Payment child rows (via Sale.payments).
+	// Paid: sale1 Cash 300, void-free; the return (Paid, Cash 100) is a separate sale row.
+	byMethod := runQuery("pos", "payments_by_method", map[string]any{"till_session": till})
+	if len(byMethod.Rows) != 1 || fmt.Sprint(byMethod.Rows[0]["method"]) != "Cash" || fmt.Sprint(byMethod.Rows[0]["payment_count"]) == "0" {
+		t.Fatalf("payments_by_method = %v", byMethod.Rows)
+	}
+	zbody, err := os.ReadFile(filepath.Join("..", "config", "pos", "print_formats", "z_report.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zf, err := print.Load(zbody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ztxt, err := zf.RenderText(print.Data{
+		Doc:    map[string]any{"name": till, "opening_float": 500, "expected_cash": 800, "closing_count": 790, "variance": -10, "payments_by_method": byMethod.Rows},
+		Tenant: map[string]any{"name": "Shop"}, Now: time.Now(),
+	}, print.Options{Currency: "KES", Precision: 2})
+	if err != nil || !strings.Contains(ztxt, "Cash") || !strings.Contains(ztxt, "VARIANCE") {
+		t.Fatalf("z report: %v\n%s", err, ztxt)
+	}
 	low := runQuery("inventory", "low_stock", map[string]any{"location": loc})
 	if len(low.Rows) != 1 || fmt.Sprint(low.Rows[0]["item"]) != bread {
 		t.Fatalf("low_stock = %v, want only bread (3 <= 4)", low.Rows)

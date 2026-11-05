@@ -45,3 +45,29 @@ func TestPOSSaleReceiptRenders(t *testing.T) {
 		}
 	}
 }
+
+func TestPOSZReportRenders(t *testing.T) {
+	body, err := os.ReadFile("../config/pos/print_formats/z_report.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := print.Load(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := print.Data{
+		Doc: map[string]any{"name": "TILL-1", "opening_float": 500.0, "expected_cash": 800.0, "closing_count": 790.0, "variance": -10.0,
+			"payments_by_method": []any{map[string]any{"method": "Cash", "payment_count": 2, "total": 300.0}, map[string]any{"method": "Card", "payment_count": 1, "total": 50.0}}},
+		Tenant: map[string]any{"name": "Shop"},
+		Now:    time.Unix(0, 0).UTC(),
+	}
+	txt, err := f.RenderText(data, print.Options{Currency: "KES", Precision: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"Z REPORT", "Cash", "Card", "KES 300.00", "VARIANCE"} {
+		if !strings.Contains(txt, w) {
+			t.Errorf("missing %q\n%s", w, txt)
+		}
+	}
+}
