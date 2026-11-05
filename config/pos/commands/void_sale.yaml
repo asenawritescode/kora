@@ -1,6 +1,11 @@
 name: void_sale
 namespace: pos
 version: 1
+module_owner_id: pos.core
+capability: pos.checkout
+operation: void_sale
+presentation:
+  title: Void sale
 permission: write
 input:
   record: Sale

@@ -1,6 +1,11 @@
 name: open_till
 namespace: pos
 version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: open_till
+presentation:
+  title: Open till
 permission: create
 input:
   record: Till Session

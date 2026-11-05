@@ -1,6 +1,11 @@
 name: open_shift
 namespace: pos
 version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: open_shift
+presentation:
+  title: Open shift
 permission: create
 input:
   record: Shift

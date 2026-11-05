@@ -1,6 +1,11 @@
 name: receive_stock
 namespace: inventory
 version: 1
+module_owner_id: inventory.core
+capability: inventory.movements
+operation: receive_stock
+presentation:
+  title: Receive stock
 permission: create
 input:
   record: Stock Entry

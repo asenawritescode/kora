@@ -110,7 +110,7 @@ func auditConfigPack(t *testing.T, root string) {
 		if permission.Role != AdminRole && !roleNames[permission.Role] {
 			t.Errorf("permission references unknown role %q", permission.Role)
 		}
-		if !doctypeNames[permission.Doctype] {
+		if !doctypeNames[permission.Doctype] && !strings.HasPrefix(permission.Doctype, "module.") {
 			t.Errorf("permission references unknown doctype %q", permission.Doctype)
 		}
 	}

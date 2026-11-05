@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -72,6 +73,20 @@ func runImportModules(t *testing.T, driver string, conn *sql.DB, dbName string) 
 	rev, active := moduleRevision(t, conn, dialect, site)
 	if rev < 2 || active != 4 {
 		t.Fatalf("module rev=%d active=%d, want rev>=2 and 4 active (inventory+pos x core/app)", rev, active)
+	}
+	snap, err := configstore.NewModuleStore(conn, dialect).Load(contract.TenantID(site))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, qs, ids := 0, 0, []string{}
+	for _, m := range snap.Modules {
+		ids = append(ids, string(m.ID))
+		ops += len(m.PublishedOperations)
+		qs += len(m.Queries)
+	}
+	sort.Strings(ids)
+	if strings.Join(ids, ",") != "inventory.app,inventory.core,pos.app,pos.core" || ops != 9 || qs != 7 {
+		t.Fatalf("modules %v ops=%d queries=%d, want 4 modules, 9 ops, 7 queries", ids, ops, qs)
 	}
 	versions := versionCount(t, conn)
 	if err := ImportConfig(conn, doctype.NewRegistry(), dbName, site, pos, dialect); err != nil {
