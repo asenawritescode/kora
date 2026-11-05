@@ -25,9 +25,9 @@ func TestBackfillExtensionTokenHashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	mock.ExpectQuery("SELECT site, name, access_token FROM _kora_extension WHERE access_token <> '' AND access_token_hash = ''").
+	mock.ExpectQuery("SELECT site, name, access_token FROM _kora_extension WHERE access_token <> ''").
 		WillReturnRows(sqlmock.NewRows([]string{"site", "name", "access_token"}).AddRow("site-a", "bot", "legacy-token"))
-	mock.ExpectExec("UPDATE _kora_extension SET access_token_hash = \\? WHERE site = \\? AND name = \\? AND access_token = \\?").
+	mock.ExpectExec("UPDATE _kora_extension SET access_token_hash = \\?, access_token = '' WHERE site = \\? AND name = \\? AND access_token = \\?").
 		WithArgs(HashExtensionAccessToken("legacy-token"), "site-a", "bot", "legacy-token").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -22,6 +23,7 @@ import (
 )
 
 func TestLivePostgresExtensionRoutes(t *testing.T) {
+	t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "integration-provisioning-secret")
 	dsn := os.Getenv("KORA_API_LIVE_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("set KORA_API_LIVE_POSTGRES_DSN to test extension API routes against a disposable PostgreSQL database")
@@ -115,10 +117,10 @@ func TestLivePostgresExtensionRoutes(t *testing.T) {
 		t.Fatal("decode managed channel credential response:", err)
 	}
 	var storedManagedToken string
-	if err := database.QueryRow(`SELECT access_token FROM _kora_extension WHERE site = $1 AND name = $2`, "site-a", "kora-cloud-channel").Scan(&storedManagedToken); err != nil {
+	if err := database.QueryRow(`SELECT access_token_hash FROM _kora_extension WHERE site = $1 AND name = $2`, "site-a", "kora-cloud-channel").Scan(&storedManagedToken); err != nil {
 		t.Fatal("read managed channel credential:", err)
 	}
-	if managedPayload.Data.AccessToken == "" || storedManagedToken != managedPayload.Data.AccessToken {
+	if managedPayload.Data.AccessToken == "" || storedManagedToken != auth.HashExtensionAccessToken(managedPayload.Data.AccessToken) {
 		t.Fatal("Engine did not persist the returned managed channel credential")
 	}
 	managedReplay := httptest.NewRecorder()
@@ -129,7 +131,7 @@ func TestLivePostgresExtensionRoutes(t *testing.T) {
 	if managedReplay.Code != http.StatusOK {
 		t.Fatalf("managed channel credential replay returned HTTP %d: %s", managedReplay.Code, managedReplay.Body.String())
 	}
-	if err := database.QueryRow(`SELECT access_token FROM _kora_extension WHERE site = $1 AND name = $2`, "site-a", "kora-cloud-channel").Scan(&storedManagedToken); err != nil {
+	if err := database.QueryRow(`SELECT access_token_hash FROM _kora_extension WHERE site = $1 AND name = $2`, "site-a", "kora-cloud-channel").Scan(&storedManagedToken); err != nil {
 		t.Fatal("read replayed managed channel credential:", err)
 	}
 	var replayPayload struct {
@@ -138,7 +140,7 @@ func TestLivePostgresExtensionRoutes(t *testing.T) {
 	if err := json.Unmarshal(managedReplay.Body.Bytes(), &replayPayload); err != nil {
 		t.Fatal("decode managed channel replay:", err)
 	}
-	if replayPayload.Data.AccessToken != managedPayload.Data.AccessToken || storedManagedToken != managedPayload.Data.AccessToken {
+	if replayPayload.Data.AccessToken != managedPayload.Data.AccessToken || storedManagedToken != auth.HashExtensionAccessToken(managedPayload.Data.AccessToken) {
 		t.Fatal("same idempotency key did not return the persisted credential")
 	}
 	managedSecond := httptest.NewRecorder()
@@ -149,18 +151,17 @@ func TestLivePostgresExtensionRoutes(t *testing.T) {
 	if managedSecond.Code != http.StatusOK {
 		t.Fatalf("new managed credential rotation returned HTTP %d: %s", managedSecond.Code, managedSecond.Body.String())
 	}
-	if err := database.QueryRow(`SELECT access_token FROM _kora_extension WHERE site = $1 AND name = $2`, "site-a", "kora-cloud-channel").Scan(&storedManagedToken); err != nil {
+	if err := database.QueryRow(`SELECT access_token_hash FROM _kora_extension WHERE site = $1 AND name = $2`, "site-a", "kora-cloud-channel").Scan(&storedManagedToken); err != nil {
 		t.Fatal("read rotated managed channel credential:", err)
 	}
-	if storedManagedToken == managedPayload.Data.AccessToken {
+	if storedManagedToken == auth.HashExtensionAccessToken(managedPayload.Data.AccessToken) {
 		t.Fatal("new idempotency key did not rotate the managed channel credential")
 	}
 	sessionHash := sha256.Sum256([]byte("postgres-managed-session"))
 	if _, err := database.Exec(`INSERT INTO _kora_channel_session (id, site, client_name, conversation_key, provider, sender_address, token_hash, api_permissions, trusted_until) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, "managed-session-a", "site-a", "kora-cloud-channel", "conversation-a", "whatsapp", "sender-a", hex.EncodeToString(sessionHash[:]), "[]", time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal("insert disposable managed channel session:", err)
 	}
-	fingerprint := sha256.Sum256([]byte(storedManagedToken))
-	body, _ := json.Marshal(contract.RevokeManagedChannelClientV2{CredentialFingerprint: hex.EncodeToString(fingerprint[:])})
+	body, _ := json.Marshal(contract.RevokeManagedChannelClientV2{CredentialFingerprint: storedManagedToken})
 	revokeRecorder := httptest.NewRecorder()
 	revokeContext := extensionTestContext(revokeRecorder, database, registry, "site-a", http.MethodPost, string(body), "")
 	revokeContext.Set("auth_type", "engine_provisioner")

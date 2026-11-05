@@ -2,14 +2,17 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -138,11 +141,17 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 	const description = "Managed site-scoped channel access client"
 	const emptyJSON = "[]"
 	ctx := c.Request.Context()
-	var currentToken, currentKey string
-	err := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&currentToken, &currentKey)
+	token, err := managedChannelToken(siteName, idempotencyKey)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "extension.token_generation_failed", "Failed to generate managed credential", nil)
+		return
+	}
+	tokenHash := auth.HashExtensionAccessToken(token)
+	var currentHash, currentKey string
+	err = db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token_hash, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&currentHash, &currentKey)
 	missing := err == sql.ErrNoRows
-	if err == nil && currentKey == idempotencyHash && currentToken != "" {
-		writeManagedChannelCredential(c, clientName, currentToken)
+	if err == nil && currentKey == idempotencyHash {
+		writeReplayedManagedChannelCredential(c, clientName, token, currentHash)
 		return
 	}
 	if err != nil && err != sql.ErrNoRows {
@@ -154,11 +163,6 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "extension.secret_generation_failed", "Failed to generate managed credential", nil)
 		return
 	}
-	token, err := generateAccessToken()
-	if err != nil {
-		writeError(c, http.StatusInternalServerError, "extension.token_generation_failed", "Failed to generate managed credential", nil)
-		return
-	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		internalError(c, "begin managed channel credential rotation", err)
@@ -166,13 +170,13 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 	}
 	defer tx.Rollback()
 	if missing {
-		_, err = tx.Exec(h.siteQuery(c, `INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, access_token_hash, managed_idempotency_key, subscriptions, api_permissions, installed_at, updated_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE)`), clientName, siteName, displayName, description, endpoint, secret, token, auth.HashExtensionAccessToken(token), idempotencyHash, emptyJSON, emptyJSON)
+		_, err = tx.Exec(h.siteQuery(c, `INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, access_token_hash, managed_idempotency_key, subscriptions, api_permissions, installed_at, updated_at, is_active) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE)`), clientName, siteName, displayName, description, endpoint, secret, tokenHash, idempotencyHash, emptyJSON, emptyJSON)
 		if err != nil {
 			_ = tx.Rollback()
-			var racedToken, racedKey string
-			readErr := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&racedToken, &racedKey)
-			if readErr == nil && racedKey == idempotencyHash && racedToken != "" {
-				writeManagedChannelCredential(c, clientName, racedToken)
+			var racedHash, racedKey string
+			readErr := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token_hash, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&racedHash, &racedKey)
+			if readErr == nil && racedKey == idempotencyHash {
+				writeReplayedManagedChannelCredential(c, clientName, token, racedHash)
 				return
 			}
 			if readErr == nil {
@@ -183,8 +187,8 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 			return
 		}
 	} else {
-		query := h.siteQuery(c, `UPDATE _kora_extension SET access_token = ?, access_token_hash = ?, managed_idempotency_key = ?, updated_at = CURRENT_TIMESTAMP, is_active = TRUE WHERE site = ? AND name = ? AND managed_idempotency_key = ?`)
-		result, execErr := tx.Exec(query, token, auth.HashExtensionAccessToken(token), idempotencyHash, siteName, clientName, currentKey)
+		query := h.siteQuery(c, `UPDATE _kora_extension SET access_token = '', access_token_hash = ?, managed_idempotency_key = ?, updated_at = CURRENT_TIMESTAMP, is_active = TRUE WHERE site = ? AND name = ? AND managed_idempotency_key = ?`)
+		result, execErr := tx.Exec(query, tokenHash, idempotencyHash, siteName, clientName, currentKey)
 		if execErr != nil {
 			internalError(c, "rotate managed channel credential", execErr)
 			return
@@ -196,10 +200,10 @@ func (h *Handler) HandleManagedChannelClientRotate(c *gin.Context) {
 		}
 		if changed == 0 {
 			_ = tx.Rollback()
-			var racedToken, racedKey string
-			readErr := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&racedToken, &racedKey)
-			if readErr == nil && racedKey == idempotencyHash && racedToken != "" {
-				writeManagedChannelCredential(c, clientName, racedToken)
+			var racedHash, racedKey string
+			readErr := db.QueryRowContext(ctx, h.siteQuery(c, `SELECT access_token_hash, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`), siteName, clientName).Scan(&racedHash, &racedKey)
+			if readErr == nil && racedKey == idempotencyHash {
+				writeReplayedManagedChannelCredential(c, clientName, token, racedHash)
 				return
 			}
 			writeError(c, http.StatusConflict, "extension.credential_rotation_conflict", "A different managed credential rotation won; retry with the same Idempotency-Key", nil)
@@ -338,6 +342,30 @@ func revokeManagedChannelSessions(ctx context.Context, executor interface {
 }, rebind func(string) string, siteName, clientName string) error {
 	_, err := executor.ExecContext(ctx, rebind(`UPDATE _kora_channel_session SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = ? WHERE site = ? AND client_name = ? AND revoked_at IS NULL`), "tenant_deletion", siteName, clientName)
 	return err
+}
+
+// managedChannelToken derives the managed channel credential from the
+// provisioning secret, tenant and Cloud's idempotency key. Only the verifier is
+// stored, so a replayed rotation re-derives the token instead of reading it.
+func managedChannelToken(siteName, idempotencyKey string) (string, error) {
+	key := os.Getenv("KORA_ENGINE_PROVISIONING_TOKEN")
+	if key == "" {
+		return "", errors.New("provisioning token is not configured")
+	}
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte("kora-managed-channel-token/v1\x00" + siteName + "\x00" + idempotencyKey))
+	return hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+// writeReplayedManagedChannelCredential returns the credential for a repeated
+// rotation only when it still matches the stored verifier, e.g. after the
+// provisioning secret changed the derived token no longer authenticates.
+func writeReplayedManagedChannelCredential(c *gin.Context, name, token, storedHash string) {
+	if subtle.ConstantTimeCompare([]byte(auth.HashExtensionAccessToken(token)), []byte(storedHash)) != 1 {
+		writeError(c, http.StatusConflict, "extension.credential_not_recoverable", "Managed credential can no longer be replayed; rotate with a new Idempotency-Key", nil)
+		return
+	}
+	writeManagedChannelCredential(c, name, token)
 }
 
 func writeManagedChannelCredential(c *gin.Context, name, token string) {

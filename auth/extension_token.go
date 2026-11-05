@@ -22,10 +22,10 @@ type extensionTokenRow struct {
 	site, name, token string
 }
 
-// BackfillExtensionTokenHashes writes the verifier for extension rows created
-// before access_token_hash existed. It is idempotent and safe to rerun.
+// BackfillExtensionTokenHashes replaces plaintext tokens stored before
+// access_token_hash existed with their verifier. It is idempotent.
 func BackfillExtensionTokenHashes(ctx context.Context, database *sql.DB, dialect kdb.QueryDialect) error {
-	rows, err := database.QueryContext(ctx, `SELECT site, name, access_token FROM _kora_extension WHERE access_token <> '' AND access_token_hash = ''`)
+	rows, err := database.QueryContext(ctx, `SELECT site, name, access_token FROM _kora_extension WHERE access_token <> ''`)
 	if err != nil {
 		return fmt.Errorf("list extension tokens without verifier: %w", err)
 	}
@@ -44,7 +44,7 @@ func BackfillExtensionTokenHashes(ctx context.Context, database *sql.DB, dialect
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate extension token rows: %w", err)
 	}
-	update := kdb.Rebind(dialect, `UPDATE _kora_extension SET access_token_hash = ? WHERE site = ? AND name = ? AND access_token = ?`)
+	update := kdb.Rebind(dialect, `UPDATE _kora_extension SET access_token_hash = ?, access_token = '' WHERE site = ? AND name = ? AND access_token = ?`)
 	for _, row := range pending {
 		if _, err := database.ExecContext(ctx, update, HashExtensionAccessToken(row.token), row.site, row.name, row.token); err != nil {
 			return fmt.Errorf("backfill extension token verifier for %s: %w", row.name, err)

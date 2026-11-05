@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -25,6 +26,7 @@ import (
 // TestLiveMySQLManagedCredentialIdempotency exercises credential retries and
 // first-issue concurrency against a disposable MySQL schema.
 func TestLiveMySQLManagedCredentialIdempotency(t *testing.T) {
+	t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "integration-provisioning-secret")
 	dsn := os.Getenv("KORA_API_LIVE_MYSQL_DSN")
 	if dsn == "" {
 		t.Skip("set KORA_API_LIVE_MYSQL_DSN to a disposable MySQL server")
@@ -133,10 +135,10 @@ func TestLiveMySQLManagedCredentialIdempotency(t *testing.T) {
 		}
 	}
 	var storedToken string
-	if err := database.QueryRow(`SELECT access_token FROM _kora_extension WHERE site = ? AND name = ?`, "integration-site", "kora-cloud-channel").Scan(&storedToken); err != nil {
+	if err := database.QueryRow(`SELECT access_token_hash FROM _kora_extension WHERE site = ? AND name = ?`, "integration-site", "kora-cloud-channel").Scan(&storedToken); err != nil {
 		t.Fatal("read persisted managed credential:", err)
 	}
-	if storedToken != firstToken {
+	if storedToken != auth.HashExtensionAccessToken(firstToken) {
 		t.Fatal("persisted managed credential differs from concurrent retry response")
 	}
 	replay, _ := invoke(retryKey)
@@ -184,10 +186,10 @@ func TestLiveMySQLManagedCredentialIdempotency(t *testing.T) {
 	if rotationSuccesses != 1 || rotationConflicts != 1 {
 		t.Fatalf("competing rotations: successes=%d conflicts=%d, want one each", rotationSuccesses, rotationConflicts)
 	}
-	if err := database.QueryRow(`SELECT access_token FROM _kora_extension WHERE site = ? AND name = ?`, "integration-site", "kora-cloud-channel").Scan(&storedToken); err != nil {
+	if err := database.QueryRow(`SELECT access_token_hash FROM _kora_extension WHERE site = ? AND name = ?`, "integration-site", "kora-cloud-channel").Scan(&storedToken); err != nil {
 		t.Fatal("read rotated managed credential:", err)
 	}
-	if storedToken == firstToken || storedToken != rotationWinner {
+	if storedToken == auth.HashExtensionAccessToken(firstToken) || storedToken != auth.HashExtensionAccessToken(rotationWinner) {
 		t.Fatal("persisted credential does not match the winning competing rotation")
 	}
 	sessionTokenHash := sha256.Sum256([]byte("test-session-token"))
