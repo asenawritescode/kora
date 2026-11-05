@@ -16,6 +16,8 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/extension"
+	extensionsql "github.com/asenawritescode/kora/extension/sqlstore"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
 )
@@ -35,6 +37,29 @@ func matchesEnvToken(presented, envKey string) bool {
 // It wraps AuthMiddleware + CSRFMiddleware + site context injection.
 type SiteGuard struct {
 	sessionMgr *SessionManager
+	// ExtensionTokens opens the tenant's extension credential verifier. Nil
+	// uses the SQL store.
+	ExtensionTokens ExtensionTokenOpener
+}
+
+// ExtensionTokenVerifier resolves the active extension owning a token verifier.
+type ExtensionTokenVerifier interface {
+	VerifyAccessToken(ctx context.Context, site, tokenHash string) (extension.Credential, error)
+}
+
+// ExtensionTokenOpener binds an ExtensionTokenVerifier to a tenant database.
+type ExtensionTokenOpener func(*sql.DB, kdb.QueryDialect) ExtensionTokenVerifier
+
+// OpenSQLExtensionTokens is the default ExtensionTokenOpener.
+func OpenSQLExtensionTokens(database *sql.DB, dialect kdb.QueryDialect) ExtensionTokenVerifier {
+	return extensionsql.New(database, dialect)
+}
+
+func (g *SiteGuard) extensionTokens(database *sql.DB, dialect kdb.QueryDialect) ExtensionTokenVerifier {
+	if g != nil && g.ExtensionTokens != nil {
+		return g.ExtensionTokens(database, dialect)
+	}
+	return OpenSQLExtensionTokens(database, dialect)
 }
 
 // NewSiteGuard creates a SiteGuard.
@@ -202,7 +227,8 @@ func (g *SiteGuard) authenticateExtension(c *gin.Context, token string) bool {
 	if tenantID == "" {
 		tenantID = siteName
 	}
-	execution, perms, err := AuthenticateExtensionExecution(c.Request.Context(), sqlDB, kdb.Resolve(c.GetString("site_db_type")), contract.TenantID(tenantID), siteName, token)
+	verifier := g.extensionTokens(sqlDB, kdb.Resolve(c.GetString("site_db_type")))
+	execution, perms, err := AuthenticateExtension(c.Request.Context(), verifier, contract.TenantID(tenantID), siteName, token)
 	if err != nil {
 		return false
 	}
@@ -219,7 +245,15 @@ func (g *SiteGuard) authenticateExtension(c *gin.Context, token string) bool {
 // when a long-lived adapter must observe token revocation and permission
 // changes. Credentials are never included in returned errors.
 func AuthenticateExtensionExecution(ctx context.Context, database *sql.DB, dialect kdb.QueryDialect, tenantID contract.TenantID, siteName, token string) (policy.Execution, []doctype.Permission, error) {
-	if ctx == nil || database == nil || dialect == nil {
+	if database == nil || dialect == nil {
+		return policy.Execution{}, nil, contract.NewError(contract.CodeUnauthenticated, "extension authentication is unavailable")
+	}
+	return AuthenticateExtension(ctx, OpenSQLExtensionTokens(database, dialect), tenantID, siteName, token)
+}
+
+// AuthenticateExtension is AuthenticateExtensionExecution over an injected verifier.
+func AuthenticateExtension(ctx context.Context, verifier ExtensionTokenVerifier, tenantID contract.TenantID, siteName, token string) (policy.Execution, []doctype.Permission, error) {
+	if ctx == nil || verifier == nil {
 		return policy.Execution{}, nil, contract.NewError(contract.CodeUnauthenticated, "extension authentication is unavailable")
 	}
 	parsedTenant, err := contract.ParseTenantID(string(tenantID))
@@ -227,21 +261,19 @@ func AuthenticateExtensionExecution(ctx context.Context, database *sql.DB, diale
 		return policy.Execution{}, nil, contract.NewError(contract.CodeUnauthenticated, "invalid extension credential")
 	}
 
-	var extensionName string
-	var permissionsJSON sql.NullString
-	query := kdb.Rebind(dialect, `SELECT name, api_permissions FROM _kora_extension WHERE site = ? AND access_token_hash = ? AND is_active = 1`)
-	err = database.QueryRowContext(ctx, query, siteName, HashExtensionAccessToken(token)).Scan(&extensionName, &permissionsJSON)
-	if errors.Is(err, sql.ErrNoRows) {
+	credential, err := verifier.VerifyAccessToken(ctx, siteName, HashExtensionAccessToken(token))
+	if errors.Is(err, extension.ErrNotFound) {
 		return policy.Execution{}, nil, contract.NewError(contract.CodeUnauthenticated, "invalid extension credential")
 	}
 	if err != nil {
-		return policy.Execution{}, nil, fmt.Errorf("verify extension credential: %w", err)
+		return policy.Execution{}, nil, err
 	}
+	extensionName := credential.Name
 	if strings.TrimSpace(extensionName) == "" {
 		return policy.Execution{}, nil, contract.NewError(contract.CodeUnauthenticated, "invalid extension credential")
 	}
 
-	permissions := parseExtensionPermissions(permissionsJSON.String)
+	permissions := parseExtensionPermissions(credential.APIPermissions)
 	actor := contract.ActorContext{
 		PrincipalID: "extension:" + extensionName, PrincipalType: contract.PrincipalService,
 		Site: siteName, DeviceID: extensionName, AuthenticatedAt: time.Now().UTC(),
