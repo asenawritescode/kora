@@ -3,6 +3,17 @@ package db
 // IdentityTablesMySQL returns the MySQL DDL for sign-in providers and identity links.
 func IdentityTablesMySQL() []string {
 	return []string{
+		`CREATE TABLE IF NOT EXISTS _kora_oidc_login (
+			state_hash CHAR(64) PRIMARY KEY,
+			site VARCHAR(140) NOT NULL,
+			provider_id VARCHAR(64) NOT NULL,
+			nonce VARCHAR(128) NOT NULL,
+			code_verifier VARCHAR(128) NOT NULL,
+			return_to VARCHAR(1024) NOT NULL DEFAULT '',
+			binding_hash CHAR(64) NOT NULL,
+			expires_at DATETIME(6) NOT NULL,
+			INDEX idx_oidc_login_expires (expires_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		`CREATE TABLE IF NOT EXISTS _kora_auth_provider (
 			site VARCHAR(140) NOT NULL,
 			id VARCHAR(64) NOT NULL,
@@ -31,6 +42,17 @@ func IdentityTablesMySQL() []string {
 // IdentityTablesPostgres returns the PostgreSQL DDL for sign-in providers and identity links.
 func IdentityTablesPostgres() []string {
 	return []string{
+		`CREATE TABLE IF NOT EXISTS _kora_oidc_login (
+			state_hash CHAR(64) PRIMARY KEY,
+			site VARCHAR(140) NOT NULL,
+			provider_id VARCHAR(64) NOT NULL,
+			nonce VARCHAR(128) NOT NULL,
+			code_verifier VARCHAR(128) NOT NULL,
+			return_to VARCHAR(1024) NOT NULL DEFAULT '',
+			binding_hash CHAR(64) NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_oidc_login_expires ON _kora_oidc_login (expires_at)`,
 		`CREATE TABLE IF NOT EXISTS _kora_auth_provider (
 			site VARCHAR(140) NOT NULL,
 			id VARCHAR(64) NOT NULL,
@@ -59,6 +81,16 @@ func IdentityTablesPostgres() []string {
 // IdentityTablesLibSQL returns the LibSQL DDL for sign-in providers and identity links.
 func IdentityTablesLibSQL() []string {
 	return []string{
+		`CREATE TABLE IF NOT EXISTS _kora_oidc_login (
+			state_hash TEXT PRIMARY KEY,
+			site TEXT NOT NULL,
+			provider_id TEXT NOT NULL,
+			nonce TEXT NOT NULL,
+			code_verifier TEXT NOT NULL,
+			return_to TEXT NOT NULL DEFAULT '',
+			binding_hash TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS _kora_auth_provider (
 			site TEXT NOT NULL,
 			id TEXT NOT NULL,
