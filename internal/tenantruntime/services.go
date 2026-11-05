@@ -27,6 +27,9 @@ import (
 // Services is the immutable service snapshot owned by a single tenant runtime.
 // Constructors and lifecycle ownership stay in Engine composition.
 type Services struct {
+	// KernelCommands is the tenant generation's command registry: process-wide
+	// definitions plus those carried by the tenant's active configuration.
+	KernelCommands                 *kernel.CommandRegistry
 	CommandSchemas                 kernel.CommandSchemaRegistry
 	ModuleBindings                 *plugin.BindingPlan
 	ResolveModuleBindings          func(contract.BusinessScope) (plugin.BindingPlan, error)
