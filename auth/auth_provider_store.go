@@ -35,9 +35,15 @@ type OIDCProvider struct {
 	Enabled         bool     `json:"enabled"`
 }
 
-// ClientSecretKeyFor is the secret-store key holding a provider's client secret.
+// ClientSecretKeyFor is the secret-store key holding a provider's client
+// secret; its reference form is secret://auth/oidc/<id>/client-secret.
 func ClientSecretKeyFor(providerID string) string {
-	return "auth.oidc." + providerID + ".client_secret"
+	return "auth/oidc/" + providerID + "/client-secret"
+}
+
+// secretKeyFromRef accepts either a secret-store key or a secret:// reference.
+func secretKeyFromRef(ref string) string {
+	return strings.TrimPrefix(strings.TrimSpace(ref), "secret://")
 }
 
 // Normalize trims fields, fills defaults and always requests the openid scope.
@@ -49,6 +55,7 @@ func (p OIDCProvider) Normalize() OIDCProvider {
 	if p.DisplayName == "" {
 		p.DisplayName = p.ID
 	}
+	p.ClientSecretKey = secretKeyFromRef(p.ClientSecretKey)
 	if p.ClientSecretKey == "" && p.ID != "" {
 		p.ClientSecretKey = ClientSecretKeyFor(p.ID)
 	}

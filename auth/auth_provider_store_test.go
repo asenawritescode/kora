@@ -2,6 +2,7 @@ package auth
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -18,6 +19,7 @@ func TestOIDCProviderNormalizeAndValidate(t *testing.T) {
 		{name: "plain http rejected", in: OIDCProvider{ID: "dev", Issuer: "http://idp.example.com", ClientID: "c"}, wantErr: true},
 		{name: "issuer with query rejected", in: OIDCProvider{ID: "x", Issuer: "https://idp.example.com?a=1", ClientID: "c"}, wantErr: true},
 		{name: "missing client id rejected", in: OIDCProvider{ID: "x", Issuer: "https://idp.example.com"}, wantErr: true},
+		{name: "secret reference accepted", in: OIDCProvider{ID: "kora-cloud", Issuer: "https://id.kora.cloud", ClientID: "t1", ClientSecretKey: "secret://auth/oidc/kora-cloud/client-secret"}, wantScope: []string{"openid", "email", "profile"}},
 		{name: "invalid id rejected", in: OIDCProvider{ID: "Bad ID", Issuer: "https://idp.example.com", ClientID: "c"}, wantErr: true},
 	}
 	for _, tc := range cases {
@@ -33,7 +35,7 @@ func TestOIDCProviderNormalizeAndValidate(t *testing.T) {
 			if !reflect.DeepEqual(p.Scopes, tc.wantScope) {
 				t.Fatalf("scopes = %v, want %v", p.Scopes, tc.wantScope)
 			}
-			if p.ClientSecretKey != ClientSecretKeyFor(p.ID) || p.DisplayName == "" {
+			if p.ClientSecretKey != ClientSecretKeyFor(p.ID) || p.DisplayName == "" || strings.HasPrefix(p.ClientSecretKey, "secret://") {
 				t.Fatalf("defaults not applied: %+v", p)
 			}
 		})
