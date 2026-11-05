@@ -9,12 +9,24 @@ presentation:
 permission: create
 input:
   record: Stock Entry
+require:
+  # Serializes receipts for one item so two first receipts cannot both create
+  # its Stock Balance.
+  - lock:
+      record: Item
+      name: "$input.item"
 transaction:
-  - update:
+  - as: balance
+    ensure:
       record: Stock Balance
       where:
         item: "$input.item"
         location: "$input.location"
+      values:
+        quantity: "0"
+  - update:
+      record: Stock Balance
+      name: "$steps.balance.name"
       adjust:
         quantity: { increase: "$input.quantity" }
   - create:

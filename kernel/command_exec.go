@@ -227,10 +227,11 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			return scopeErr
 		}
 		switch {
-		case step.Create != nil:
-			dt := reg.Get(step.Create.Record)
+		case step.createSpec() != nil:
+			create := step.createSpec()
+			dt := reg.Get(create.Record)
 			if dt == nil {
-				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", step.Create.Record))
+				return contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", create.Record))
 			}
 			if operationAuthority(dt) {
 				continue
@@ -478,14 +479,29 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			txMgr.BusinessScope = stepOp.Context.BusinessScope
 		}
 		lastBusinessScope = stepOp.Context.BusinessScope
+		if step.Ensure != nil {
+			existing, ensureErr := ensureExisting(txMgr, reg, step.Ensure, env, scopeForOperation(reg, stepOp, step.Ensure.Record, "write"), i)
+			if ensureErr != nil {
+				return nil, ensureErr
+			}
+			if existing != "" {
+				// Finding a record is not a write: no outcome, and the idempotency
+				// receipt is still claimed by the first step that writes.
+				if step.As != "" {
+					stepNames[step.As] = existing
+				}
+				continue
+			}
+		}
 		switch {
-		case step.Create != nil:
-			dt := reg.Get(step.Create.Record)
+		case step.createSpec() != nil:
+			create := step.createSpec()
+			dt := reg.Get(create.Record)
 			if dt == nil {
-				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("command %q: record %q not found", def.Name, step.Create.Record))
+				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("command %q: record %q not found", def.Name, create.Record))
 			}
 			doc := doctype.NewDocument(dt.Name)
-			for field, ref := range step.Create.Values {
+			for field, ref := range create.Values {
 				v, rerr := resolveEnvRef(ref, env)
 				if errors.Is(rerr, errRefAbsent) {
 					continue

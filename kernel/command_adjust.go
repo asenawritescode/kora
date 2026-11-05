@@ -138,3 +138,21 @@ func exactNumber(value any) (*big.Rat, bool) {
 	}
 	return new(big.Rat).SetString(text)
 }
+
+// ensureExisting returns the name of the record an ensure step finds, or ""
+// when none matches and the step must create it.
+func ensureExisting(txMgr *orm.TxManager, reg *doctype.Registry, step *StepEnsure, env refEnv, scope policy.RowScope, index int) (string, *contract.Error) {
+	dt := reg.Get(step.Record)
+	if dt == nil {
+		return "", contract.NewError(contract.CodeNotFound, fmt.Sprintf("step %d: record %q not found", index, step.Record))
+	}
+	filters, cerr := guardFilters(dt, &GuardMatch{Record: step.Record, Where: step.Where}, env, index)
+	if cerr != nil {
+		return "", cerr
+	}
+	name, _, err := txMgr.FirstMatchingNameLocked(dt, filters, scope)
+	if err != nil {
+		return "", contract.NewError(contract.CodeDependencyUnavailable, fmt.Sprintf("step %d: lookup failed", index))
+	}
+	return name, nil
+}
