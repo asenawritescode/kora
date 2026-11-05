@@ -1,14 +1,6 @@
 # Known Postgres integration failures. Each line: TestName  # cause.
 # These suites never ran in CI before; fix the cause, then delete the line.
 
-# Every record write now appends two outbox events (see mysql.txt).
-TestLiveRecordMutationBundleCommitsAndReplaysAcrossDialects  # outbox: 2 events per write
-TestScriptProviderCRUDUsesKernelAcrossDialects  # outbox: 2 events per write
-TestExternalOperationManifestActionUsesKernelAcrossDialects  # outbox: 2 events per write
-TestLivePostgresResourceCRUDUsesKernelAndPreservesRESTContract  # outbox: 2 events per write
-TestLiveMPesaCallbackBundleAcrossDialects  # outbox: 2 events per write
-TestAIRecordMutationAdapterUsesKernelAcrossDialects  # outbox: 2 events per write
-
 # Test setup does not build a verified execution identity or admin role.
 TestConfiguredCommandCommitsAndRollsBackAcrossDialects  # "operation requires verified execution identity"
 TestPublicFormProjectionAndReplayAcrossDialects  # "operation requires verified execution identity"
