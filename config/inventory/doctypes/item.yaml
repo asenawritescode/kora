@@ -1,0 +1,37 @@
+name: Item
+module: Inventory
+title_field: item_name
+search_fields: item_name, barcode
+sort_field: item_name
+sort_order: ASC
+
+fields:
+  - fieldname: item_name
+    fieldtype: Data
+    label: Item Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: barcode
+    fieldtype: Data
+    label: Barcode
+    unique: true
+    search_index: true
+    in_list_view: true
+  - fieldname: uom
+    fieldtype: Data
+    label: Unit of Measure
+    reqd: true
+    default: Each
+  - fieldname: price
+    fieldtype: Currency
+    label: Price
+    in_list_view: true
+  - fieldname: cost
+    fieldtype: Currency
+    label: Cost
+  - fieldname: reorder_level
+    fieldtype: Float
+    label: Reorder Level
+    default: 0

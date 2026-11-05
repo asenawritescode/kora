@@ -1,0 +1,19 @@
+name: Location
+module: Inventory
+title_field: location_name
+search_fields: location_name
+sort_field: location_name
+sort_order: ASC
+
+fields:
+  - fieldname: location_name
+    fieldtype: Data
+    label: Location Name
+    reqd: true
+    unique: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: description
+    fieldtype: Text
+    label: Description

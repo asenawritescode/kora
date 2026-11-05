@@ -1,0 +1,3 @@
+- name: Inventory Manager
+  workspace_access: true
+  description: Manages items, locations, and stock.
