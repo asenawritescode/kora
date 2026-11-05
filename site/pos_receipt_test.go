@@ -71,3 +71,50 @@ func TestPOSZReportRenders(t *testing.T) {
 		}
 	}
 }
+
+func TestPOSSaleRecordReceiptMatchesOperationReceipt(t *testing.T) {
+	load := func(file string) *print.Format {
+		body, err := os.ReadFile("../config/pos/print_formats/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := print.Load(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	op, rec := load("sale_receipt.yaml"), load("sale_record_receipt.yaml")
+	if rec.For.Record != "Sale" || rec.For.Operation != "" {
+		t.Fatalf("target = %+v", rec.For)
+	}
+	data := print.Data{
+		Doc: map[string]any{"name": "SALE-2026-00001", "total": 350.0,
+			"items":    []any{map[string]any{"item": "Tea", "quantity": 2, "amount": 200.0}, map[string]any{"item": "Bread", "quantity": 1, "amount": 150.0}},
+			"payments": []any{map[string]any{"method": "Cash", "amount": 350.0}}},
+		Tenant: map[string]any{"name": "Shop"},
+		Now:    time.Unix(0, 0).UTC(),
+	}
+	opt := print.Options{Currency: "KES", Precision: 2}
+	wantT, err := op.RenderText(data, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotT, err := rec.RenderText(data, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantH, _ := op.RenderHTML(data, opt)
+	gotH, err := rec.RenderHTML(data, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotT != wantT || gotH != wantH {
+		t.Errorf("record receipt differs from sale_receipt\n%s\n%s", gotT, wantT)
+	}
+	for _, w := range []string{"Tea", "Bread", "KES 350.00", "Cash"} {
+		if !strings.Contains(gotT, w) || !strings.Contains(gotH, w) {
+			t.Errorf("missing %q", w)
+		}
+	}
+}

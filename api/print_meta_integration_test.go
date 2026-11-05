@@ -111,6 +111,17 @@ func TestPrintFormatMetaAcrossDialects(t *testing.T) {
 			if w := get("/print-formats", []string{"Cashier"}); !strings.Contains(w.Body.String(), `"sale_receipt"`) {
 				t.Fatalf("cashier list: %s", w.Body.String())
 			}
+			for _, role := range []string{"Cashier", "Manager", "Owner"} {
+				if w := get("/print-formats?record=Sale", []string{role}); w.Code != 200 || !strings.Contains(w.Body.String(), `"sale_record_receipt"`) {
+					t.Fatalf("%s record list: %d %s", role, w.Code, w.Body.String())
+				}
+			}
+			if w := get("/print-formats/sale_record_receipt", []string{"Stranger"}); w.Code != 403 {
+				t.Fatalf("stranger record get: %d %s", w.Code, w.Body.String())
+			}
+			if w := get("/print-formats?record=Sale", []string{"Stranger"}); strings.Contains(w.Body.String(), `"sale_record_receipt"`) {
+				t.Fatalf("stranger record list leaks: %s", w.Body.String())
+			}
 			if w := get("/print-formats", []string{"Stranger"}); strings.Contains(w.Body.String(), `"sale_receipt"`) {
 				t.Fatalf("stranger list leaks: %s", w.Body.String())
 			}
