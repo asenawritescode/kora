@@ -180,6 +180,32 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 		t.Fatalf("replay: err=%+v remaining=%s", cerr, remaining(s2))
 	}
 
+	// void after a partial return is refused; a never-returned sale still voids.
+	s3 := sell(3)
+	if _, cerr := ret(s3, "", register, loc, 1, 19.99); cerr != nil {
+		t.Fatal(cerr)
+	}
+	void := func(sale string) (contract.CommandResult, *contract.Error) {
+		return exec("pos.void_sale", "", map[string]any{"data": map[string]any{
+			"shift": shift, "till_session": till, "register": register, "location": loc, "sale": sale}})
+	}
+	status := func(sale string) string { return q("SELECT status FROM "+table("Sale")+" WHERE name = ?", sale) }
+	before = counts()
+	res, cerr = void(s3)
+	refuse("void after return", contract.CodeConflict, before, res, cerr)
+	if status(s3) != "Paid" {
+		t.Fatalf("status = %s", status(s3))
+	}
+	s4 := sell(2)
+	stockBefore := num(stock())
+	if _, cerr := void(s4); cerr != nil || status(s4) != "Void" || num(stock()) != stockBefore+2 {
+		t.Fatalf("plain void: %+v status=%s stock=%s", cerr, status(s4), stock())
+	}
+	// return after void is refused (original no longer Paid).
+	before = counts()
+	res, cerr = ret(s4, "", register, loc, 1, 19.99)
+	refuse("return after void", contract.CodeConflict, before, res, cerr)
+
 	// 5. two concurrent returns of 2 against the remaining 2: exactly one commits.
 	var wg sync.WaitGroup
 	var mu sync.Mutex

@@ -8,6 +8,11 @@ require:
   - lock:
       record: Sale
       name: $input.sale
+  - not_exists:
+      record: Sale
+      where:
+        return_against: $input.sale
+    message: A sale with returns cannot be voided
   - exists:
       record: Shift
       where:
