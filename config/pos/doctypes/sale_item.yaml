@@ -14,13 +14,19 @@ fields:
     label: Quantity
     reqd: true
     in_list_view: true
+  - fieldname: currency
+    fieldtype: Data
+    label: Currency
+    default: KES
   - fieldname: unit_price
     fieldtype: Currency
+    options: currency
     label: Unit Price
     reqd: true
     in_list_view: true
   - fieldname: amount
     fieldtype: Currency
+    options: currency
     label: Amount
     computed: "quantity * unit_price"
     in_list_view: true

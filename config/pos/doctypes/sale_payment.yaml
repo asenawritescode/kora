@@ -12,8 +12,13 @@ fields:
       Mobile Money
     reqd: true
     in_list_view: true
+  - fieldname: currency
+    fieldtype: Data
+    label: Currency
+    default: KES
   - fieldname: amount
     fieldtype: Currency
+    options: currency
     label: Amount
     reqd: true
     in_list_view: true
