@@ -1013,37 +1013,11 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 		method.GET("/:name", handler.HandleMethod)
 	}
 
-	// RFC-native page manifest management endpoints.
-	pageManifests := apiGroup.Group("/system/page-manifests")
-	{
-		pageManifests.GET("", handler.HandleSystemPageManifests)
-		pageManifests.POST("", handler.HandleSystemPageManifestCreate)
-		pageManifests.GET("/:name", handler.HandleSystemPageManifest)
-		pageManifests.PUT("/:name", handler.HandleSystemPageManifestUpdate)
-		pageManifests.DELETE("/:name", handler.HandleSystemPageManifestDelete)
-	}
-
 	// RFC-native runtime page route resolution.
 	apiGroup.GET("/page-manifests", handler.HandlePageManifestByRoute)
 	apiGroup.POST("/view/action/:actionId", handler.HandleViewAction)
 
-	// System config endpoints.
-	system := apiGroup.Group("/system/config")
-	agents := apiGroup.Group("/system/agents")
-	agents.GET("/:id", handler.HandleAgentManifest)
-	agents.PUT("/:id", handler.HandleAgentManifest)
-	agents.GET("", handler.HandleAgentManifests)
-	agents.GET("/:id/effective-permissions", handler.HandleAgentEffectivePermissions)
-	agents.GET("/:id/runs", handler.HandleAgentRuns)
-	agents.POST("/:id/runs", handler.HandleAgentRuns)
-	apiGroup.GET("/system/permissions/catalog", handler.HandleAgentPermissionCatalog)
-	{
-		system.GET("/versions", handler.HandleConfigVersions)
-		system.GET("/versions/head/snapshot", handler.HandleConfigHeadSnapshot)
-		system.GET("/versions/active/snapshot", handler.HandleActiveConfigSnapshot)
-		system.GET("/versions/:id", handler.HandleConfigVersion)
-		system.GET("/diff", handler.HandleConfigDiff)
-	}
+	registerManagementRoutes(apiGroup, handler)
 
 	// System schema/navigation endpoints.
 	RegisterSystemRoutes(apiGroup, handler)
@@ -1060,8 +1034,43 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 		scripts.GET("/:name/executions", handler.HandleScriptExecutions)
 	}
 
-	// Extension management (CRUD for _kora_extension).
-	ext := apiGroup.Group("/system/extension")
+	// Analytics endpoints (no-op if siteBuses is empty).
+	RegisterAnalyticsRoutesWithQueryCache(apiGroup, registry, txManager.DB, siteBuses, realtimeProviders, txManager.Dialect, runtimeServices, analyticsCache)
+}
+
+// registerManagementRoutes mounts administrator-only page manifest, agent,
+// config history and extension management endpoints.
+func registerManagementRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
+	pageManifests := apiGroup.Group("/system/page-manifests", adminOnly())
+	{
+		pageManifests.GET("", handler.HandleSystemPageManifests)
+		pageManifests.POST("", handler.HandleSystemPageManifestCreate)
+		pageManifests.GET("/:name", handler.HandleSystemPageManifest)
+		pageManifests.PUT("/:name", handler.HandleSystemPageManifestUpdate)
+		pageManifests.DELETE("/:name", handler.HandleSystemPageManifestDelete)
+	}
+
+	agents := apiGroup.Group("/system/agents", adminOnly())
+	{
+		agents.GET("/:id", handler.HandleAgentManifest)
+		agents.PUT("/:id", handler.HandleAgentManifest)
+		agents.GET("", handler.HandleAgentManifests)
+		agents.GET("/:id/effective-permissions", handler.HandleAgentEffectivePermissions)
+		agents.GET("/:id/runs", handler.HandleAgentRuns)
+		agents.POST("/:id/runs", handler.HandleAgentRuns)
+	}
+	apiGroup.GET("/system/permissions/catalog", adminOnly(), handler.HandleAgentPermissionCatalog)
+
+	configHistory := apiGroup.Group("/system/config", adminOnly())
+	{
+		configHistory.GET("/versions", handler.HandleConfigVersions)
+		configHistory.GET("/versions/head/snapshot", handler.HandleConfigHeadSnapshot)
+		configHistory.GET("/versions/active/snapshot", handler.HandleActiveConfigSnapshot)
+		configHistory.GET("/versions/:id", handler.HandleConfigVersion)
+		configHistory.GET("/diff", handler.HandleConfigDiff)
+	}
+
+	ext := apiGroup.Group("/system/extension", adminOnly())
 	{
 		ext.GET("", handler.HandleExtensionList)
 		ext.POST("", handler.HandleExtensionCreate)
@@ -1072,9 +1081,6 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 		ext.POST("/:name/replay", handler.HandleExtensionReplay)
 		ext.POST("/:name/rotate-secret", handler.HandleExtensionRotateSecret)
 	}
-
-	// Analytics endpoints (no-op if siteBuses is empty).
-	RegisterAnalyticsRoutesWithQueryCache(apiGroup, registry, txManager.DB, siteBuses, realtimeProviders, txManager.Dialect, runtimeServices, analyticsCache)
 }
 
 // HandleConfigVersions lists all config versions.

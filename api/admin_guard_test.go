@@ -104,3 +104,35 @@ func TestSystemRoutesAllowAdministratorPermissionSave(t *testing.T) {
 		t.Fatalf("administrator was rejected: %s", w.Body.String())
 	}
 }
+
+func TestManagementRoutesRejectNonAdmin(t *testing.T) {
+	r, _ := adminGuardRouter(t, []string{"Sales User"}, registerManagementRoutes)
+	cases := []struct{ method, path string }{
+		{http.MethodGet, "/api/system/page-manifests"},
+		{http.MethodPost, "/api/system/page-manifests"},
+		{http.MethodPut, "/api/system/page-manifests/home"},
+		{http.MethodPut, "/api/system/agents/a1"},
+		{http.MethodPost, "/api/system/agents/a1/runs"},
+		{http.MethodGet, "/api/system/permissions/catalog"},
+		{http.MethodGet, "/api/system/config/versions"},
+		{http.MethodGet, "/api/system/config/versions/head/snapshot"},
+		{http.MethodGet, "/api/system/config/diff"},
+		{http.MethodGet, "/api/system/extension"},
+		{http.MethodPost, "/api/system/extension"},
+		{http.MethodPost, "/api/system/extension/hook/rotate-secret"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			if w := serve(r, tc.method, tc.path, `{}`); w.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestManagementRoutesAllowAdministrator(t *testing.T) {
+	r, _ := adminGuardRouter(t, []string{doctype.AdminRole}, registerManagementRoutes)
+	if w := serve(r, http.MethodGet, "/api/system/agents", ""); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+}
