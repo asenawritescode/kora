@@ -1293,6 +1293,7 @@ func registerAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB, mail
 			})
 		})
 	}
+	registerPasswordLoginRoute(auth, db, mailer, publicAppBaseURL)
 	if mailer != nil && strings.TrimSpace(publicAppBaseURL) != "" {
 		registerMagicLinkRoutes(auth, db, mailer, publicAppBaseURL)
 	}
