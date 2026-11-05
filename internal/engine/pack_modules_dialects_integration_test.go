@@ -90,6 +90,18 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 			assertPOSPublished(t, database, dialect, siteName)
 			if reapply != nil {
 				reapply()
+				// Re-applying must not drop module ownership (#304): the
+				// persisted Sale stays commands-only owned by pos.core, which
+				// is what denies direct record creates.
+				snap, _, err := configstore.NewStore(database, dialect).LoadActiveSnapshot(siteName)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, dt := range snap.DocTypes {
+					if dt.Name == "Sale" && (dt.ModuleOwnerID != "pos.core" || dt.ModuleOwnershipMode != string(contract.MutationCommands) || dt.ModuleAccess == "") {
+						t.Fatalf("Sale ownership lost after re-apply: %+v", dt)
+					}
+				}
 			}
 			handler := api.NewHandler(loaded.Registry, nil)
 			get := func(role string) contract.ApplicationCatalog {
@@ -397,16 +409,9 @@ func installPOSPackage(t *testing.T, database *sql.DB, dbName, siteName string, 
 			t.Fatalf("merge composed package: %v", err)
 		}
 		if expectNoChange {
-			a, _ := json.Marshal(current)
-			b, _ := json.Marshal(merged)
-			if string(a) != string(b) {
-				// Known product gap (#304): the collected tenant snapshot
-				// does not round-trip the package's module ownership fields, so
-				// the merge is not byte-identical to the tenant. Re-apply must
-				// still verify, merge and leave the published surface intact
-				// (asserted by the caller); the byte-equality check returns
-				// when the issue is fixed.
-				t.Logf("re-apply snapshot differs from tenant snapshot (known gap #304)")
+			// Canonical s-expr is the persisted form (fields sorted by name).
+			if a, b := doctype.ToSExpr(current), doctype.ToSExpr(merged); a != b {
+				t.Fatalf("re-apply snapshot differs from tenant snapshot:\n%s\n---\n%s", a, b)
 			}
 			return
 		}

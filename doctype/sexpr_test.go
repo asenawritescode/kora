@@ -493,3 +493,25 @@ func TestToSExpr_RoundTripQueriesAndPrintFormats(t *testing.T) {
 		t.Fatalf("old snapshot: %v %#v", err, old)
 	}
 }
+
+func TestToSExpr_DocTypeOwnershipRoundTrip(t *testing.T) {
+	want := &DocType{
+		Name: "Sale", ResourceName: "sale", BusinessResourceType: "sale", BusinessIdentityField: "register",
+		ModuleOwnerID: "pos.core", ModuleAccess: "published", ModuleOwnershipMode: "commands_only",
+		BusinessScopePolicy: "entity_owned", BusinessScopeField: "register", AppendOnly: true,
+		PublicAccess:   &PublicAccess{},
+		QuantityEffect: &QuantityEffect{View: "v", Action: "a"},
+	}
+	got, err := FromSExpr(ToSExpr(&ConfigSnapshot{DocTypes: []*DocType{want}}))
+	if err != nil || len(got.DocTypes) != 1 {
+		t.Fatalf("parse: %v", err)
+	}
+	g := got.DocTypes[0]
+	if g.ModuleOwnerID != want.ModuleOwnerID || g.ModuleAccess != want.ModuleAccess ||
+		g.ModuleOwnershipMode != want.ModuleOwnershipMode || g.BusinessScopePolicy != want.BusinessScopePolicy ||
+		g.BusinessScopeField != want.BusinessScopeField || g.ResourceName != want.ResourceName ||
+		g.BusinessResourceType != want.BusinessResourceType || g.BusinessIdentityField != want.BusinessIdentityField ||
+		!g.AppendOnly || g.PublicAccess == nil || g.QuantityEffect == nil || g.QuantityEffect.View != "v" {
+		t.Fatalf("ownership fields lost: %+v", g)
+	}
+}

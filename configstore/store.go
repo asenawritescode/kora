@@ -866,6 +866,11 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 	if err != nil {
 		return nil, fmt.Errorf("loading permissions for snapshot: %w", err)
 	}
+	// DB collations differ per dialect; snapshots use byte order so package
+	// merges (which sort by doctype+role) are stable.
+	sort.SliceStable(permissions, func(i, j int) bool {
+		return permissions[i].Doctype+"\x00"+permissions[i].Role < permissions[j].Doctype+"\x00"+permissions[j].Role
+	})
 	analyticsMetrics, err := s.LoadAnalyticsMetrics(site)
 	if err != nil {
 		return nil, fmt.Errorf("loading analytics metrics for snapshot: %w", err)
@@ -883,7 +888,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 	// package activation cannot silently erase them while collecting live rows.
 	var activeConfig string
 	err = s.DB.QueryRow(db.Rebind(s.Dialect, "SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1"), site).Scan(&activeConfig)
-	var reports, queries, printFormats []json.RawMessage
+	var reports, queries, printFormats, commands []json.RawMessage
 	var minKoraVersion string
 	var scheduledJobs []contract.ScheduledJobDefinition
 	var modules []contract.ModuleDescriptor
@@ -898,6 +903,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 		}
 		reports = append([]json.RawMessage(nil), activeSnapshot.Reports...)
 		queries = append([]json.RawMessage(nil), activeSnapshot.Queries...)
+		commands = append([]json.RawMessage(nil), activeSnapshot.Commands...)
 		printFormats = append([]json.RawMessage(nil), activeSnapshot.PrintFormats...)
 		minKoraVersion = activeSnapshot.MinKoraVersion
 		scheduledJobs = append([]contract.ScheduledJobDefinition(nil), activeSnapshot.ScheduledJobs...)
@@ -913,6 +919,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 		Scripts:           scripts,
 		Reports:           reports,
 		Queries:           queries,
+		Commands:          commands,
 		PrintFormats:      printFormats,
 		MinKoraVersion:    minKoraVersion,
 		ScheduledJobs:     scheduledJobs,
