@@ -187,6 +187,9 @@ func (s *DefinitionStore) PublishDefinition(ctx context.Context, tenant contract
 	if !errors.Is(err, sql.ErrNoRows) {
 		return contract.DefinitionVersionRef{}, fmt.Errorf("read workflow publish receipt: %w", err)
 	}
+	if err := admitWorkflowModuleActive(ctx, tx, s.dialect, tenant, definition.OwnerModuleID); err != nil {
+		return contract.DefinitionVersionRef{}, err
+	}
 	var oldDigest string
 	err = tx.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT digest FROM _kora_workflow_definition WHERE tenant_id = ? AND definition_id = ? AND version = ?`), string(tenant), string(definition.ID), definition.Version).Scan(&oldDigest)
 	if err == nil && oldDigest != digest {
