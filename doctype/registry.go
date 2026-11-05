@@ -22,7 +22,8 @@ type Registry struct {
 	aliases       map[string]string   // resource-safe aliases → primary doctype name
 	Permissions   *PermissionMatrix
 	Views         *ViewRegistry
-	ComputedHooks ComputedHookFunc // optional — runs script-based computed fields
+	ComputedHooks ComputedHookFunc  // optional — runs script-based computed fields
+	querySources  map[string]string // published query resource → source DocType
 }
 
 // NewRegistry creates an empty registry with a blank permission matrix.
@@ -219,4 +220,26 @@ func (r *Registry) CanUserInBusinessScope(userRoles []string, doctype, operation
 		return false, false, nil
 	}
 	return r.Permissions.CanUserInBusinessScope(userRoles, doctype, operation, scope)
+}
+
+// SetQuerySource records the DocType a published query reads so callers can
+// require read permission on it through the normal permission matrix.
+func (r *Registry) SetQuerySource(resource, source string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.querySources == nil {
+		r.querySources = map[string]string{}
+	}
+	r.querySources[resource] = source
+}
+
+// QuerySource returns the source DocType of a published query resource.
+func (r *Registry) QuerySource(resource string) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	s, ok := r.querySources[resource]
+	return s, ok
 }

@@ -63,6 +63,9 @@ func registeredConfigQueryProviders(tenant contract.TenantID, database *sql.DB, 
 				return nil, fmt.Errorf("config query %q is legal_entity scoped but %q has no business_scope_field", def.Name, def.Source)
 			}
 		}
+		if registry != nil {
+			registry.SetQuerySource("module."+def.ModuleOwnerID+".query."+published.Name, def.Source)
+		}
 		byOwner[owner][published.Name] = &configQueryExecutor{db: database, dialect: dialect, def: def, scopeField: scopeField}
 		for _, offer := range module.Provides {
 			if offer.Name == published.Capability && !slices.ContainsFunc(offers[owner], func(o contract.CapabilityOffer) bool { return o.Name == offer.Name }) {
