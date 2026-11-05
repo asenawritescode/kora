@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -108,6 +109,9 @@ func workflowExpressionValue(field doctype.Field, raw any) (expression.Value, bo
 			return expression.NumberValue(float64(value)), true
 		case int64:
 			return expression.NumberValue(float64(value)), true
+		case json.Number:
+			f, err := value.Float64()
+			return expression.NumberValue(f), err == nil
 		case float64:
 			return expression.NumberValue(value), true
 		case []byte:

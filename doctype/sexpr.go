@@ -706,6 +706,8 @@ func formatAnyValue(v interface{}) string {
 		return strconv.Itoa(val)
 	case int64:
 		return strconv.FormatInt(val, 10)
+	case json.Number:
+		return string(val)
 	case float64:
 		return formatFloat(val)
 	default:

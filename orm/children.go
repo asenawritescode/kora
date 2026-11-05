@@ -47,6 +47,10 @@ func insertChildExec(ex db.Queryer, parentDT *doctype.DocType, parentField strin
 			val = convertDefault(f.Default, f.Fieldtype)
 			doc.Set(f.Fieldname, val)
 		}
+		val, err := canonicalizeDecimal(doc, f, val)
+		if err != nil {
+			return err
+		}
 		values = append(values, val)
 	}
 
@@ -130,6 +134,10 @@ func insertChildrenBatch(ex db.Queryer, parentDT *doctype.DocType, parentField s
 				if val == nil && f.Default != "" {
 					val = convertDefault(f.Default, f.Fieldtype)
 					child.Set(f.Fieldname, val)
+				}
+				val, err := canonicalizeDecimal(child, f, val)
+				if err != nil {
+					return err
 				}
 				values = append(values, val)
 			}
@@ -233,8 +241,12 @@ func updateChildRow(ex db.Queryer, tableName string, childDT *doctype.DocType, d
 		if f.Fieldtype == "Table" {
 			continue
 		}
+		val, err := canonicalizeDecimal(doc, f, doc.Get(f.Fieldname))
+		if err != nil {
+			return err
+		}
 		setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
-		values = append(values, doc.Get(f.Fieldname))
+		values = append(values, val)
 	}
 
 	if len(setClauses) == 0 {
@@ -274,8 +286,12 @@ func persistComputedChildFields(ex db.Queryer, parentDT *doctype.DocType, parent
 		setClauses := make([]string, 0, len(computedFields)+1)
 		values := make([]any, 0, len(computedFields)+2)
 		for _, f := range computedFields {
+			val, err := canonicalizeDecimal(child, f, child.Get(f.Fieldname))
+			if err != nil {
+				return err
+			}
 			setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
-			values = append(values, child.Get(f.Fieldname))
+			values = append(values, val)
 		}
 		setClauses = append(setClauses, "modified = ?")
 		values = append(values, time.Now(), child.Name)

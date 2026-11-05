@@ -683,6 +683,9 @@ func sliceLen(val any) (int, bool) {
 
 func toFloat64(v any) (float64, bool) {
 	switch n := v.(type) {
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
 	case float64:
 		return n, true
 	case int:
@@ -704,6 +707,9 @@ func toInt(v any) (int, bool) {
 		return n, true
 	case int64:
 		return int(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return int(f), err == nil
 	case float64:
 		return int(n), true
 	case string:

@@ -181,8 +181,8 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	vm.Set("kora", api.buildObject(vm))
 
 	vm.Set("__kora_event__", map[string]any{
-		"doc":    req.Document,
-		"oldDoc": req.OldDocument,
+		"doc":    jsValue(req.Document),
+		"oldDoc": jsValue(req.OldDocument),
 	})
 	if req.Deterministic {
 		_ = vm.Set("Date", goja.Undefined())

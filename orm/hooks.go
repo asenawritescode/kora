@@ -633,6 +633,9 @@ func hookIntValue(value any) int {
 		return v
 	case int64:
 		return int(v)
+	case json.Number:
+		f, _ := v.Float64()
+		return int(f)
 	case float64:
 		return int(v)
 	default:

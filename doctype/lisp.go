@@ -1,6 +1,7 @@
 package doctype
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -37,6 +38,9 @@ func toSexp(v any) zygomys.Sexp {
 		return zygomys.SexpNull
 	}
 	switch val := v.(type) {
+	case json.Number:
+		f, _ := val.Float64()
+		return &zygomys.SexpFloat{Val: f}
 	case float64:
 		return &zygomys.SexpFloat{Val: val}
 	case float32:
@@ -273,7 +277,7 @@ func (s *LispSandbox) registerBuiltins() {
 			return &zygomys.SexpBool{Val: false}, nil
 		}
 	})
-	}
+}
 
 // sexpToString extracts a string value from a Sexp.
 func sexpToString(s zygomys.Sexp) (string, error) {
@@ -323,6 +327,9 @@ func lispToFloat64(v any) float64 {
 		return 0
 	}
 	switch n := v.(type) {
+	case json.Number:
+		f, _ := n.Float64()
+		return f
 	case float64:
 		return n
 	case float32:
