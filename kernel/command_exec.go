@@ -428,6 +428,10 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		return nil, contract.NewError(contract.CodeValidationFailed, expandErr.Error())
 	}
 	stepNames := map[string]string{}
+	if cerr := k.checkCommandGuards(dbTx, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames}); cerr != nil {
+		auditFailure(cerr.Type)
+		return nil, cerr
+	}
 
 	for _, instance := range instances {
 		i, step := instance.index, instance.step
