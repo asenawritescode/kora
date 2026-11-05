@@ -97,7 +97,7 @@ func TestLivePostgresExtensionRoutes(t *testing.T) {
 	}
 
 	createRecorder := httptest.NewRecorder()
-	create := extensionTestContext(createRecorder, database, registry, "site-a", http.MethodPost, `{"name":"demo-ext","display_name":"Demo","description":"Demo extension","endpoint_url":"https://example.test/hook","subscriptions":"[]","api_permissions":"[]"}`, "")
+	create := extensionTestContext(createRecorder, database, registry, "site-a", http.MethodPost, `{"name":"demo-ext","display_name":"Demo","description":"Demo extension","endpoint_url":"https://203.0.113.10/hook","subscriptions":"[]","api_permissions":"[]"}`, "")
 	handler.HandleExtensionCreate(create)
 	if createRecorder.Code != http.StatusCreated {
 		t.Fatalf("live PostgreSQL extension create returned HTTP %d: %s", createRecorder.Code, createRecorder.Body.String())

@@ -1,6 +1,11 @@
 package netguard
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"net"
+	"testing"
+)
 
 func TestIsPrivateHost(t *testing.T) {
 	tests := []struct {
@@ -23,5 +28,58 @@ func TestIsPrivateHost(t *testing.T) {
 		if got := IsPrivateHost(tt.host); got != tt.want {
 			t.Errorf("IsPrivateHost(%q) = %v, want %v", tt.host, got, tt.want)
 		}
+	}
+}
+
+type fakeResolver map[string][]string
+
+func (f fakeResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	ips, ok := f[host]
+	if !ok {
+		return nil, errors.New("no such host")
+	}
+	out := make([]net.IPAddr, 0, len(ips))
+	for _, ip := range ips {
+		out = append(out, net.IPAddr{IP: net.ParseIP(ip)})
+	}
+	return out, nil
+}
+
+func TestCheckURL(t *testing.T) {
+	resolver := fakeResolver{
+		"hooks.example.com":   {"93.184.216.34"},
+		"rebind.example.com":  {"93.184.216.34", "10.0.0.7"},
+		"metadata.example.io": {"169.254.169.254"},
+	}
+	tests := []struct {
+		url        string
+		wantErr    bool
+		disallowed bool
+	}{
+		{url: "https://hooks.example.com/kora", wantErr: false},
+		{url: "http://93.184.216.34:8080/hook", wantErr: false},
+		{url: "https://rebind.example.com/", wantErr: true, disallowed: true},
+		{url: "https://metadata.example.io/", wantErr: true, disallowed: true},
+		{url: "http://169.254.169.254/latest/meta-data", wantErr: true, disallowed: true},
+		{url: "http://127.0.0.1:8000/api", wantErr: true, disallowed: true},
+		{url: "http://[::1]/", wantErr: true, disallowed: true},
+		{url: "http://0.0.0.0/", wantErr: true, disallowed: true},
+		{url: "http://100.64.1.1/", wantErr: true, disallowed: true},
+		{url: "http://localhost:3000/", wantErr: true, disallowed: true},
+		{url: "https://db.internal/", wantErr: true, disallowed: true},
+		{url: "ftp://hooks.example.com/", wantErr: true},
+		{url: "/relative/path", wantErr: true},
+		{url: "https://unknown.example.com/", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			err := CheckURL(context.Background(), tt.url, resolver)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CheckURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+			if tt.disallowed && !errors.Is(err, ErrDisallowedDestination) {
+				t.Fatalf("CheckURL(%q) error = %v, want ErrDisallowedDestination", tt.url, err)
+			}
+		})
 	}
 }

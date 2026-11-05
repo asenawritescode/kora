@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/auth"
+	"github.com/asenawritescode/kora/internal/netguard"
 	"github.com/asenawritescode/kora/webhook"
 	"github.com/gin-gonic/gin"
 )
@@ -87,6 +88,10 @@ func (h *Handler) HandleExtensionCreate(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" || req.EndpointURL == "" {
 		writeError(c, http.StatusBadRequest, "validation.required_field", "name and endpoint_url are required", map[string]any{"fields": []string{"name", "endpoint_url"}})
+		return
+	}
+	if err := netguard.CheckURL(c.Request.Context(), req.EndpointURL, nil); err != nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_endpoint_url", "endpoint_url must be a public http(s) address: "+err.Error(), map[string]any{"field": "endpoint_url"})
 		return
 	}
 
