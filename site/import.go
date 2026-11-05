@@ -546,8 +546,8 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	journalPhase = configstore.ActivationCompleted
 
 	// Print changelog summary.
-	var changelogStr string
-	if err := database.QueryRowContext(ctx, sqlDialect.Rebind(dialect, "SELECT COALESCE(changelog, '') FROM _kora_config_version WHERE id = ?"), versionID).Scan(&changelogStr); err != nil {
+	changelogStr, err := readChangelog(ctx, database, dialect, versionID)
+	if err != nil {
 		fmt.Printf("Warning: config was imported, but its changelog summary could not be read: %v\n", err)
 		return nil
 	}
@@ -565,6 +565,14 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	}
 
 	return nil
+}
+
+// readChangelog returns a version's changelog as text. NULL is scanned rather
+// than COALESCEd to ” because JSON/JSONB columns reject an empty-string literal.
+func readChangelog(ctx context.Context, database *sql.DB, dialect sqlDialect.Dialect, versionID string) (string, error) {
+	var changelog sql.NullString
+	err := database.QueryRowContext(ctx, sqlDialect.Rebind(dialect, "SELECT changelog FROM _kora_config_version WHERE id = ?"), versionID).Scan(&changelog)
+	return changelog.String, err
 }
 
 // PackFile preserves the legacy site-package name for the versioned contract.
