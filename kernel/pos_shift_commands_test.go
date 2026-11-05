@@ -64,7 +64,7 @@ func TestRecordSaleCommand(t *testing.T) {
 }
 
 func TestPOSReturnAndVoidCommandsParse(t *testing.T) {
-	for name, guards := range map[string]int{"return_sale": 3, "void_sale": 3} {
+	for name, guards := range map[string]int{"return_sale": 3, "void_sale": 5} {
 		raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", name+".yaml"))
 		if err != nil {
 			t.Fatal(err)
