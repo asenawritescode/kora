@@ -16,7 +16,7 @@ import (
 )
 
 // Increment this when BootstrapSystemTables gains or changes system DDL.
-const systemBootstrapVersion = 28
+const systemBootstrapVersion = 29
 
 // isIdempotentSQLError returns true if the error is expected during
 // idempotent DDL execution (CREATE IF NOT EXISTS, ALTER TABLE ADD COLUMN,
