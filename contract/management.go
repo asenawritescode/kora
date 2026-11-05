@@ -50,41 +50,141 @@ type ManagementCapabilitiesV2 struct {
 	EngineVersion string                 `json:"engine_version,omitempty"`
 }
 
-// EngineVersionAtLeast compares stable numeric Engine versions in MAJOR.MINOR.PATCH form.
+// EngineVersionAtLeast reports running >= required using semver 2.0.0
+// section 11 precedence. An optional leading "v" and "+build" metadata are
+// accepted; build metadata is ignored in comparison.
 func EngineVersionAtLeast(running, required string) (bool, error) {
-	parse := func(value string) ([3]uint64, error) {
-		var result [3]uint64
-		value = strings.TrimPrefix(strings.TrimSpace(value), "v")
-		parts := strings.Split(value, ".")
-		if len(parts) != 3 {
-			return result, fmt.Errorf("version %q must use MAJOR.MINOR.PATCH", value)
-		}
-		for i, part := range parts {
-			if part == "" || strings.ContainsAny(part, "-+") {
-				return result, fmt.Errorf("version %q must use stable numeric MAJOR.MINOR.PATCH", value)
-			}
-			n, err := strconv.ParseUint(part, 10, 64)
-			if err != nil {
-				return result, fmt.Errorf("version %q must use stable numeric MAJOR.MINOR.PATCH", value)
-			}
-			result[i] = n
-		}
-		return result, nil
-	}
-	got, err := parse(running)
+	got, err := parseEngineVersion(running)
 	if err != nil {
 		return false, err
 	}
-	want, err := parse(required)
+	want, err := parseEngineVersion(required)
 	if err != nil {
 		return false, err
 	}
-	for i := range got {
-		if got[i] != want[i] {
-			return got[i] > want[i], nil
+	return compareEngineVersions(got, want) >= 0, nil
+}
+
+type engineVersion struct {
+	core [3]uint64
+	pre  []string
+}
+
+func parseEngineVersion(value string) (engineVersion, error) {
+	var v engineVersion
+	bad := func() (engineVersion, error) {
+		return v, fmt.Errorf("version %q must use semver MAJOR.MINOR.PATCH[-prerelease][+build]", value)
+	}
+	rest := strings.TrimPrefix(strings.TrimSpace(value), "v")
+	if i := strings.Index(rest, "+"); i >= 0 {
+		if !validIdentifiers(rest[i+1:], false) {
+			return bad()
+		}
+		rest = rest[:i]
+	}
+	if i := strings.Index(rest, "-"); i >= 0 {
+		if !validIdentifiers(rest[i+1:], true) {
+			return bad()
+		}
+		v.pre = strings.Split(rest[i+1:], ".")
+		rest = rest[:i]
+	}
+	parts := strings.Split(rest, ".")
+	if len(parts) != 3 {
+		return bad()
+	}
+	for i, part := range parts {
+		if !isDigits(part) || (len(part) > 1 && part[0] == '0') {
+			return bad()
+		}
+		n, err := strconv.ParseUint(part, 10, 64)
+		if err != nil {
+			return bad()
+		}
+		v.core[i] = n
+	}
+	return v, nil
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
 		}
 	}
-	return true, nil
+	return true
+}
+
+// validIdentifiers checks dot-separated [0-9A-Za-z-] identifiers; prerelease
+// numeric identifiers must not have leading zeros.
+func validIdentifiers(s string, prerelease bool) bool {
+	for _, id := range strings.Split(s, ".") {
+		if id == "" {
+			return false
+		}
+		for _, c := range id {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '-') {
+				return false
+			}
+		}
+		if prerelease && isDigits(id) && len(id) > 1 && id[0] == '0' {
+			return false
+		}
+	}
+	return true
+}
+
+func compareEngineVersions(a, b engineVersion) int {
+	for i := range a.core {
+		if a.core[i] != b.core[i] {
+			if a.core[i] > b.core[i] {
+				return 1
+			}
+			return -1
+		}
+	}
+	switch {
+	case len(a.pre) == 0 && len(b.pre) == 0:
+		return 0
+	case len(a.pre) == 0:
+		return 1
+	case len(b.pre) == 0:
+		return -1
+	}
+	for i := 0; i < len(a.pre) && i < len(b.pre); i++ {
+		x, y := a.pre[i], b.pre[i]
+		if x == y {
+			continue
+		}
+		xn, yn := isDigits(x), isDigits(y)
+		switch {
+		case xn && yn:
+			// Compare numerically without overflow: shorter is smaller.
+			if len(x) != len(y) {
+				return cmpInt(len(x), len(y))
+			}
+			return strings.Compare(x, y)
+		case xn:
+			return -1
+		case yn:
+			return 1
+		}
+		return strings.Compare(x, y)
+	}
+	return cmpInt(len(a.pre), len(b.pre))
+}
+
+func cmpInt(a, b int) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
 }
 
 func ValidateManagementCapabilitiesV2(value ManagementCapabilitiesV2) error {
