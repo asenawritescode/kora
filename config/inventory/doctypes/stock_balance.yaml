@@ -24,3 +24,7 @@ fields:
     read_only: true
     default: 0
     in_list_view: true
+  - fieldname: reorder_level
+    fieldtype: Float
+    label: Reorder Level
+    default: 0
