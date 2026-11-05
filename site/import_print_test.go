@@ -57,3 +57,51 @@ func TestLoadPrintFormats(t *testing.T) {
 		})
 	}
 }
+
+func posMergedSnapshot(t *testing.T) *doctype.ConfigSnapshot {
+	t.Helper()
+	dirs, err := ResolvePackTree(filepath.Join("..", "config", "pos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, names := &doctype.ConfigSnapshot{}, map[string]bool{}
+	for _, d := range dirs {
+		s, err := parsePackSnapshot(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := mergePackSnapshot(merged, s, names); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return merged
+}
+
+func TestResolvePrintOperations(t *testing.T) {
+	const sale, closeTill = "pos.core~pos.checkout~record_sale", "pos.core~pos.drawer~close_till"
+	merged := posMergedSnapshot(t)
+	if err := resolvePrintOperations(merged); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, raw := range merged.PrintFormats {
+		f, _ := print.Decode(raw)
+		got[f.Name] = f.For.Operation
+	}
+	if got["sale_receipt"] != sale || got["z_report"] != closeTill {
+		t.Fatalf("stored refs: %v", got)
+	}
+	if err := resolvePrintOperations(merged); err != nil { // exact ref stays accepted
+		t.Fatalf("idempotent: %v", err)
+	}
+	for _, op := range []string{"pos.nope", "pos.core~pos.checkout~nope", "record_sale"} {
+		bad := posMergedSnapshot(t)
+		f, _ := print.Decode(bad.PrintFormats[0])
+		f.For.Operation = op
+		f.For.Record = ""
+		bad.PrintFormats[0], _ = print.Encode(f)
+		if err := resolvePrintOperations(bad); err == nil || !strings.Contains(err.Error(), "print.operation_unpublished") {
+			t.Errorf("%s: err %v", op, err)
+		}
+	}
+}

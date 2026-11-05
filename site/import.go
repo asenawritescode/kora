@@ -51,6 +51,9 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 			return err
 		}
 	}
+	if err := resolvePrintOperations(merged); err != nil {
+		return err
+	}
 	return ImportConfigFromSnapshotForTenant(db, registry, dbName, siteName, tenantID, fmt.Sprintf("Config import from %s", configPath), merged, dialect, nil)
 }
 

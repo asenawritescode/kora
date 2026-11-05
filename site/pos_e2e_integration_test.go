@@ -18,6 +18,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 
+	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -126,6 +127,19 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	const siteName = "pos-e2e.example.test"
 	if err := ImportConfig(conn, reg, dbName, siteName, filepath.Join("..", "config", "pos"), dialect); err != nil {
 		t.Fatalf("install pos+inventory: %v", err)
+	}
+	// Stored print formats carry published operation refs, not authored names.
+	snap, _, err := configstore.NewStore(conn, dialect).LoadActiveSnapshot(siteName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := map[string]string{}
+	for _, raw := range snap.PrintFormats {
+		f, _ := print.Decode(raw)
+		refs[f.Name] = f.For.Operation
+	}
+	if refs["sale_receipt"] != "pos.core~pos.checkout~record_sale" || refs["z_report"] != "pos.core~pos.drawer~close_till" {
+		t.Fatalf("stored print operation refs: %v", refs)
 	}
 	cmds := kernel.NewCommandRegistry()
 	for _, pack := range []string{"inventory", "pos"} {
