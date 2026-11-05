@@ -350,7 +350,19 @@ func (h *Handler) writeKernelError(c *gin.Context, cerr *contract.Error) {
 	}
 	var details map[string]any
 	if len(cerr.Details) > 0 {
-		_ = json.Unmarshal(cerr.Details, &details)
+		var value any
+		if err := json.Unmarshal(cerr.Details, &value); err == nil {
+			switch typed := value.(type) {
+			case map[string]any:
+				details = typed
+			case []any:
+				// ValidationErrors are serialized as an array. Keep the standard
+				// error envelope object-shaped while retaining those field details.
+				details = map[string]any{"fields": typed}
+			default:
+				details = map[string]any{"value": typed}
+			}
+		}
 	}
 	writeError(c, status, "kernel."+string(cerr.Type), cerr.Message, details)
 }
