@@ -140,6 +140,7 @@ func mergePackSnapshot(dst, next *doctype.ConfigSnapshot, names map[string]bool)
 	dst.Views = append(dst.Views, next.Views...)
 	dst.Reports = append(dst.Reports, next.Reports...)
 	dst.Commands = append(dst.Commands, next.Commands...)
+	dst.Queries = append(dst.Queries, next.Queries...)
 	dst.WorkflowDefinitions = append(dst.WorkflowDefinitions, next.WorkflowDefinitions...)
 	return nil
 }
