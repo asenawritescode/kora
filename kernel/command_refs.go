@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // MaxCommandStepInstances bounds how many writes one command may expand to
@@ -20,6 +21,9 @@ type refEnv struct {
 	steps map[string]string
 	// computed holds values derived by the command's compute block.
 	computed map[string]any
+	// now is pinned once per execution; actor is the verified principal.
+	now   time.Time
+	actor string
 }
 
 type stepInstance struct {
@@ -52,6 +56,12 @@ func resolveEnvRef(ref string, env refEnv) (any, error) {
 			return nil, fmt.Errorf("reference %q does not name an earlier step", ref)
 		}
 		return name, nil
+	case ref == "$now":
+		return env.now.UTC().Format(time.RFC3339Nano), nil
+	case ref == "$today":
+		return env.now.UTC().Format("2006-01-02"), nil
+	case ref == "$actor":
+		return env.actor, nil
 	default:
 		return ref, nil
 	}
@@ -148,6 +158,9 @@ func (c *CommandResource) validateStepReferences() error {
 			switch {
 			case strings.HasPrefix(ref, "$item.") && step.ForEach == "":
 				return fmt.Errorf("command %q: step %d uses %q outside for_each", c.FullName(), i, ref)
+			case ref == "$now" || ref == "$today" || ref == "$actor":
+			case strings.HasPrefix(ref, "$") && !strings.HasPrefix(ref, "$input.") && !strings.HasPrefix(ref, "$item.") && !strings.HasPrefix(ref, "$computed.") && !strings.HasPrefix(ref, "$steps."):
+				return fmt.Errorf("command %q: step %d has unknown reference root in %q", c.FullName(), i, ref)
 			case strings.HasPrefix(ref, "$computed."):
 				if !c.hasComputeKey(strings.TrimPrefix(ref, "$computed.")) {
 					return fmt.Errorf("command %q: step %d reference %q must name a compute key", c.FullName(), i, ref)
