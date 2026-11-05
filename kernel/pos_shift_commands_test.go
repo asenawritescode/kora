@@ -26,3 +26,19 @@ func TestPOSShiftCommandsParse(t *testing.T) {
 		t.Fatalf("second open is not refused per register: %#v", def.Require)
 	}
 }
+
+func TestPOSTillCommandsParse(t *testing.T) {
+	for _, name := range []string{"open_till", "close_till"} {
+		raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", name+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		def, err := ParseCommandResource(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(def.Require) == 0 || len(def.Steps) != 1 {
+			t.Fatalf("%s: require=%d steps=%d", name, len(def.Require), len(def.Steps))
+		}
+	}
+}

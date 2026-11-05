@@ -34,3 +34,28 @@ func TestPOSPackageValidatesAndInstalls(t *testing.T) {
 		t.Errorf("Sale naming_series = %q", got)
 	}
 }
+
+func TestTillSessionVarianceComputed(t *testing.T) {
+	dts, err := ParseConfigTree(filepath.Join("..", "config", "pos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dt *DocType
+	for _, d := range dts {
+		if d.Name == "Till Session" {
+			dt = d
+		}
+	}
+	for _, c := range []struct {
+		count, expected float64
+		want            string
+	}{{1050, 1000, "50"}, {990, 1000, "-10"}, {1000, 1000, "0"}} {
+		doc := &Document{DocType: "Till Session", Fields: map[string]any{"closing_count": c.count, "expected_cash": c.expected}}
+		if err := ComputeFields(dt, doc); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := doc.Fields["variance"].(string); !ok || got != c.want {
+			t.Errorf("variance(%v,%v) = %#v, want %v", c.count, c.expected, doc.Fields["variance"], c.want)
+		}
+	}
+}

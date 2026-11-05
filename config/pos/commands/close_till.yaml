@@ -1,0 +1,22 @@
+name: close_till
+namespace: pos
+version: 1
+permission: write
+input:
+  record: Till Session
+require:
+  - exists:
+      record: Till Session
+      where:
+        shift: $input.shift
+    as: till
+    message: No till opened for this shift
+transaction:
+  - update:
+      record: Till Session
+      name: $steps.till.name
+      values:
+        closing_count: $input.closing_count
+        expected_cash: $input.expected_cash
+emit:
+  - pos.till.closed

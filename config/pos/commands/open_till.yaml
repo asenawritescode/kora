@@ -1,0 +1,26 @@
+name: open_till
+namespace: pos
+version: 1
+permission: create
+input:
+  record: Till Session
+require:
+  - exists:
+      record: Shift
+      where:
+        name: $input.shift
+        status: Open
+    message: Shift is not open
+  - not_exists:
+      record: Till Session
+      where:
+        shift: $input.shift
+    message: Till already opened for this shift
+transaction:
+  - create:
+      record: Till Session
+      values:
+        shift: $input.shift
+        opening_float: $input.opening_float
+emit:
+  - pos.till.opened
