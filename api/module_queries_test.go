@@ -274,3 +274,23 @@ func TestApplicationCatalogRejectsUnauthorizedLegalEntity(t *testing.T) {
 		t.Fatalf("catalog body=%s", recorder.Body.String())
 	}
 }
+
+func TestAuthorizePublishedQueryRequiresSourceDocTypeRead(t *testing.T) {
+	registry := doctype.NewRegistry()
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "totals", ScopePolicy: contract.ScopeTenantShared}
+	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "reader", PrincipalType: contract.PrincipalHuman, Site: "tenant-route", Roles: []string{"Reader"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.query.totals", Role: "Reader", Read: true})
+	registry.SetQuerySource("module.sales.orders.query.totals", "Sale")
+	authErr := authorizePublishedQuery(execution, registry, query, scope)
+	if authErr == nil {
+		t.Fatalf("query without source read allowed: %v", authErr)
+	}
+	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Sale", Role: "Reader", Read: true})
+	if authErr := authorizePublishedQuery(execution, registry, query, scope); authErr != nil {
+		t.Fatalf("query with source read denied: %v", authErr)
+	}
+}

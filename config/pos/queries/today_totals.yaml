@@ -1,0 +1,17 @@
+name: today_totals
+module_owner_id: pos
+capability: pos.sales
+operation: today_totals
+source: Sale
+permission: read
+scope: tenant
+input:
+  since: {type: string, max_length: 40}
+  register: {type: string, max_length: 140}
+filters:
+  - {field: status, op: eq, value: Paid}
+  - {field: creation, op: gte, value: $input.since}
+  - {field: register, op: eq, value: $input.register, optional: true}
+fields: [name, register, total, creation]
+sort: [{field: creation, dir: desc}]
+limit: 200
