@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -110,5 +111,27 @@ func TestUnknownRefRootRejectedAtParse(t *testing.T) {
 	ok := strings.Replace(forEachYAML, "$input.due", "$today", 1)
 	if _, err := ParseCommandResource([]byte(ok)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWalkRefAbsentVersusInvalid(t *testing.T) {
+	root := map[string]any{"a": map[string]any{"b": 1}, "s": "x", "n": nil}
+	tests := []struct {
+		path   string
+		absent bool
+		err    bool
+	}{
+		{"a.b", false, false},
+		{"n", false, false},
+		{"missing", true, true},
+		{"a.missing", true, true},
+		{"missing.deeper", true, true},
+		{"s.deeper", false, true},
+	}
+	for _, tt := range tests {
+		_, err := walkRef("$input."+tt.path, root, tt.path)
+		if (err != nil) != tt.err || errors.Is(err, errRefAbsent) != tt.absent {
+			t.Errorf("%s: err=%v absent=%v", tt.path, err, errors.Is(err, errRefAbsent))
+		}
 	}
 }
