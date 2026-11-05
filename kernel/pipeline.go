@@ -12,7 +12,6 @@ import (
 	"math"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -150,7 +149,9 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 	priorReferenceValidator, priorSnapshotValidator := txMgr.BusinessReferenceValidator, txMgr.HistoricalSnapshotValidator
 	txMgr.BusinessReferenceValidator = op.Context.BusinessReferenceValidator
 	txMgr.HistoricalSnapshotValidator = op.Context.HistoricalSnapshotValidator
+	priorEventOrigin := txMgr.EventOrigin
 	txMgr.Transaction = dbTx
+	txMgr.EventOrigin = eventOrigin(op)
 	txMgr.PostCommitHooks = nil
 	txMgr.ScriptMutationExecutor = script.MutationExecutorFunc(func(nestedCtx context.Context, request script.MutationRequest) (json.RawMessage, error) {
 		return k.executeScriptMutationInTx(nestedCtx, dbTx, txMgr, request)
@@ -159,6 +160,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		txMgr.ScriptMutationExecutor = priorMutationExecutor
 		txMgr.PostCommitHooks = priorPostCommitHooks
 		txMgr.Transaction = priorTransaction
+		txMgr.EventOrigin = priorEventOrigin
 		txMgr.BusinessReferenceValidator, txMgr.HistoricalSnapshotValidator = priorReferenceValidator, priorSnapshotValidator
 	}()
 
@@ -229,12 +231,15 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 			}
 			if operation == "create" {
 				recordDT := reg.Get(item.Doctype)
-				prefix := orm.DerivePrefix(recordDT.Name)
-				nextNumber, allocationErr := k.dialect().AllocateNameNumber(dbTx, recordDT.Name, prefix, recordDT.RawTableName())
+				name, _, allocationErr := orm.AllocateDocumentName(dbTx, k.dialect(), recordDT, orm.DocumentValues(item.Data), time.Now().UTC())
 				if allocationErr != nil {
+					var validation *doctype.ValidationError
+					if errors.As(allocationErr, &validation) {
+						return nil, contract.NewError(contract.CodeValidationFailed, validation.Message)
+					}
 					return nil, contract.NewError(contract.CodeDependencyUnavailable, "allocate bundle record name failed")
 				}
-				recordNames[item.Key] = fmt.Sprintf("%s-%04d", prefix, nextNumber)
+				recordNames[item.Key] = name
 			} else {
 				name, resolveErr := resolveBundleName(item.Name, recordNames)
 				if resolveErr != nil {
@@ -473,11 +478,6 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 			}
 		}
 		result.Related = related
-		for _, saved := range bundleSavedDocs {
-			if err := k.appendRecordChangeEvent(ctx, dbTx, op, saved.dt, saved.doc, saved.oldDoc); err != nil {
-				return nil, contract.NewError(contract.CodeDependencyUnavailable, "recording workflow trigger event failed")
-			}
-		}
 
 	case CommandRecordCreate, CommandPublicFormSubmit:
 		var p RecordCreatePayload
@@ -548,9 +548,6 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		}
 		result = &ResultData{Doctype: dt.Name, Name: doc.Name, Created: true, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
 		insertedDocs = append(insertedDocs, doc)
-		if err := k.appendRecordChangeEvent(ctx, dbTx, op, dt, doc, nil); err != nil {
-			return nil, contract.NewError(contract.CodeDependencyUnavailable, "recording workflow trigger event failed")
-		}
 
 	case CommandRecordUpdate:
 		var p RecordUpdatePayload
@@ -628,9 +625,6 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		}
 		result = &ResultData{Doctype: dt.Name, Name: doc.Name, Created: false, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
 		savedDoc, savedOldDoc = doc, oldDoc
-		if err := k.appendRecordChangeEvent(ctx, dbTx, op, dt, doc, oldDoc); err != nil {
-			return nil, contract.NewError(contract.CodeDependencyUnavailable, "recording workflow trigger event failed")
-		}
 
 	case CommandRecordDelete:
 		var p RecordUpdatePayload
@@ -777,9 +771,6 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		}
 		result = &ResultData{Doctype: dt.Name, Name: doc.Name, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
 		savedDoc, savedOldDoc = doc, oldDoc
-		if err := k.appendRecordChangeEvent(ctx, dbTx, op, dt, doc, oldDoc); err != nil {
-			return nil, contract.NewError(contract.CodeDependencyUnavailable, "recording workflow trigger event failed")
-		}
 
 	default:
 		return nil, contract.NewError(contract.CodeValidationFailed, "unknown command "+op.Command)
@@ -1121,58 +1112,10 @@ func (k *Kernel) initializeWorkflowStateOnCreate(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
-// appendRecordChangeEvent makes record-trigger workflows observe the exact
-// committed grid mutation. The event shares the record transaction, contains
-// only stable record identity and changed field names, and is delivered at
-// least once through the tenant outbox.
-func (k *Kernel) appendRecordChangeEvent(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, doc, oldDoc *doctype.Document) error {
-	if k == nil || k.Outbox == nil || tx == nil || dt == nil || doc == nil {
-		return nil
-	}
-	kind := "record.created"
-	changed := make([]string, 0)
-	if oldDoc != nil {
-		kind = "record.updated"
-		for field, value := range doc.Fields {
-			if field == "modified" || field == "modified_by" || field == "owner" {
-				continue
-			}
-			before, beforeErr := json.Marshal(oldDoc.Fields[field])
-			after, afterErr := json.Marshal(value)
-			if beforeErr != nil || afterErr != nil || string(before) != string(after) {
-				changed = append(changed, field)
-			}
-		}
-		for field := range oldDoc.Fields {
-			if _, exists := doc.Fields[field]; !exists {
-				changed = append(changed, field)
-			}
-		}
-		sort.Strings(changed)
-		if len(changed) == 0 {
-			return nil
-		}
-	}
-	data, err := json.Marshal(contract.RecordChangeEventData{
-		Table: dt.Name, RecordID: doc.Name, Revision: strconv.FormatUint(doc.Revision, 10), ChangedFields: changed,
-	})
-	if err != nil {
-		return fmt.Errorf("encode record trigger event: %w", err)
-	}
-	event := contract.EventEnvelope{
-		ID: contract.NewEventID(), Type: kind, Version: contract.CurrentVersion,
-		Source: "kora.kernel", Site: op.Context.Site, BusinessScope: op.Context.BusinessScope, AggregateType: dt.Name,
-		AggregateID: doc.Name, OccurredAt: time.Now().UTC(),
-		CorrelationID: op.Context.CorrelationID, CausationID: op.Context.CausationID, CausationDepth: op.Context.CausationDepth, Actor: op.Context.Actor,
-		Data: data,
-	}
-	if err := event.Validate(); err != nil {
-		return fmt.Errorf("validate record trigger event: %w", err)
-	}
-	if err := k.Outbox.Append(ctx, tx, event); err != nil {
-		return fmt.Errorf("append record trigger event: %w", err)
-	}
-	return nil
+// eventOrigin carries the operation's authenticated cause onto the change
+// events its writes append.
+func eventOrigin(op Operation) *orm.EventOrigin {
+	return &orm.EventOrigin{Actor: op.Context.Actor, CorrelationID: op.Context.CorrelationID, CausationID: op.Context.CausationID, CausationDepth: op.Context.CausationDepth}
 }
 
 func validationContractError(verrs doctype.ValidationErrors) *contract.Error {

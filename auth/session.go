@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/email"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
@@ -78,6 +79,7 @@ type SessionCacheSnapshot struct {
 // SessionManager manages user sessions with an in-memory TTL cache.
 type SessionManager struct {
 	DB               *sql.DB
+	dialect          kdb.Dialect
 	cacheMu          sync.RWMutex
 	cache            map[string]*sessionCacheEntry
 	cacheLRU         list.List
@@ -126,6 +128,9 @@ func sessionManagerForRequest(c *gin.Context, db *sql.DB) *SessionManager {
 			}
 		}
 		manager := newRequestSessionManager(db)
+		if dbType := strings.TrimSpace(c.GetString("site_db_type")); dbType != "" {
+			manager.SetDialect(kdb.Resolve(dbType))
+		}
 		c.Set("request_session_manager", manager)
 		return manager
 	}
@@ -164,6 +169,30 @@ func newSessionManagerWithCacheLimits(db *sql.DB, maxBytes uint64, maxEntries in
 		maxEntries = defaultSessionCacheMaxEntries
 	}
 	return &SessionManager{DB: db, cache: make(map[string]*sessionCacheEntry), cacheMaxBytes: maxBytes, cacheMaxEntries: maxEntries}
+}
+
+// SetDialect binds the SQL dialect of DB. Call it before the manager serves
+// requests; without it queries keep MySQL-style '?' placeholders.
+func (sm *SessionManager) SetDialect(dialect kdb.Dialect) *SessionManager {
+	if sm != nil {
+		sm.dialect = dialect
+	}
+	return sm
+}
+
+func (sm *SessionManager) sql(query string) string {
+	if sm == nil || sm.dialect == nil {
+		return query
+	}
+	return kdb.Rebind(sm.dialect, query)
+}
+
+// userColumn quotes _kora_session.user, a reserved word in PostgreSQL.
+func (sm *SessionManager) userColumn() string {
+	if sm == nil || sm.dialect == nil {
+		return "user"
+	}
+	return sm.dialect.QuoteIdent("user")
 }
 
 func (sm *SessionManager) CacheSnapshot() SessionCacheSnapshot {
@@ -290,8 +319,8 @@ func (sm *SessionManager) CreateSession(site string, user *User) (string, error)
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	_, err = sm.DB.ExecContext(ctx,
-		`INSERT INTO _kora_session (sid, site, user, data, expires_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		sm.sql(`INSERT INTO _kora_session (sid, site, `+sm.userColumn()+`, data, expires_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`),
 		sid, site, user.Name, string(userJSON), expiresAt, time.Now(),
 	)
 	if err != nil {
@@ -332,7 +361,7 @@ func (sm *SessionManager) GetSession(site, sid string) (*User, time.Time, error)
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	err := sm.DB.QueryRowContext(ctx,
-		"SELECT data, expires_at, created_at FROM _kora_session WHERE site = ? AND sid = ?",
+		sm.sql("SELECT data, expires_at, created_at FROM _kora_session WHERE site = ? AND sid = ?"),
 		site, sid,
 	).Scan(&userJSON, &expiresStr, &createdStr)
 
@@ -551,7 +580,7 @@ func (sm *SessionManager) DeleteSession(sid string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
-	_, err := sm.DB.ExecContext(ctx, "DELETE FROM _kora_session WHERE sid = ?", sid)
+	_, err := sm.DB.ExecContext(ctx, sm.sql("DELETE FROM _kora_session WHERE sid = ?"), sid)
 	if err != nil {
 		slog.Warn("failed to delete session", "sid", sid, "error", err)
 	}
@@ -633,7 +662,7 @@ func (sm *SessionManager) cleanupExpired() {
 }
 
 func (sm *SessionManager) cleanupExpiredContext(ctx context.Context) {
-	_, err := sm.DB.ExecContext(ctx, "DELETE FROM _kora_session WHERE expires_at < ?", time.Now())
+	_, err := sm.DB.ExecContext(ctx, sm.sql("DELETE FROM _kora_session WHERE expires_at < ?"), time.Now())
 	if err != nil {
 		slog.Warn("failed to cleanup expired sessions", "error", err)
 	}
@@ -651,8 +680,8 @@ func (sm *SessionManager) cleanupMagicLinks() {
 func (sm *SessionManager) cleanupMagicLinksContext(ctx context.Context) {
 	cutoff := time.Now().Add(-magicLinkCleanupGrace)
 	_, err := sm.DB.ExecContext(ctx,
-		`DELETE FROM _kora_magic_link
-		 WHERE expires_at < ? OR revoked_at < ? OR (used_at IS NOT NULL AND used_at < ?)`,
+		sm.sql(`DELETE FROM _kora_magic_link
+		 WHERE expires_at < ? OR revoked_at < ? OR (used_at IS NOT NULL AND used_at < ?)`),
 		time.Now(), cutoff, cutoff,
 	)
 	if err != nil {
@@ -674,7 +703,7 @@ func (sm *SessionManager) FindUserByCloudSubject(site, subject string) (*User, e
 	defer cancel()
 	var u User
 	var roles string
-	err := sm.DB.QueryRowContext(ctx, `SELECT name,email,full_name,enabled,COALESCE(roles,'') FROM _kora_user WHERE site=? AND name=?`, site, subject).Scan(&u.Name, &u.Email, &u.FullName, &u.Enabled, &roles)
+	err := sm.DB.QueryRowContext(ctx, sm.sql(`SELECT name,email,full_name,enabled,COALESCE(roles,'') FROM _kora_user WHERE site=? AND name=?`), site, subject).Scan(&u.Name, &u.Email, &u.FullName, &u.Enabled, &roles)
 	if err != nil {
 		return nil, err
 	}
@@ -703,7 +732,7 @@ func (sm *SessionManager) FindUserByEmailContext(parent context.Context, site, e
 	ctx, cancel := context.WithTimeout(parent, dbTimeout)
 	defer cancel()
 	err := sm.DB.QueryRowContext(ctx,
-		"SELECT name, email, full_name, enabled, COALESCE(roles, '') FROM _kora_user WHERE site = ? AND email = ?",
+		sm.sql("SELECT name, email, full_name, enabled, COALESCE(roles, '') FROM _kora_user WHERE site = ? AND email = ?"),
 		site, emailAddr,
 	).Scan(&name, &storedEmail, &fullName, &enabled, &rolesStr)
 	if err == sql.ErrNoRows {
@@ -740,7 +769,7 @@ func (sm *SessionManager) IsEmailVerified(site, emailAddr string) (bool, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	err := sm.DB.QueryRowContext(ctx,
-		"SELECT email_verified_at FROM _kora_user WHERE site = ? AND email = ?",
+		sm.sql("SELECT email_verified_at FROM _kora_user WHERE site = ? AND email = ?"),
 		site, emailAddr,
 	).Scan(&verified)
 	if err == sql.ErrNoRows {
@@ -759,9 +788,9 @@ func (sm *SessionManager) MarkEmailVerified(site, emailAddr string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	_, err := sm.DB.ExecContext(ctx,
-		`UPDATE _kora_user
+		sm.sql(`UPDATE _kora_user
 		 SET email_verified_at = COALESCE(email_verified_at, ?), modified = CURRENT_TIMESTAMP
-		 WHERE site = ? AND email = ?`,
+		 WHERE site = ? AND email = ?`),
 		time.Now(), site, emailAddr,
 	)
 	if err != nil {
@@ -787,10 +816,10 @@ func (sm *SessionManager) ListMagicLinks(site, emailAddr string) ([]MagicLinkRec
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	rows, err := sm.DB.QueryContext(ctx,
-		`SELECT id, email, created_at, expires_at, used_at, revoked_at
+		sm.sql(`SELECT id, email, created_at, expires_at, used_at, revoked_at
 		 FROM _kora_magic_link
 		 WHERE site = ? AND email = ? AND (revoked_at IS NULL OR revoked_at >= ?) AND expires_at >= ?
-		 ORDER BY created_at DESC`,
+		 ORDER BY created_at DESC`),
 		site, emailAddr, time.Now().Add(-magicLinkCleanupGrace), time.Now().Add(-magicLinkCleanupGrace),
 	)
 	if err != nil {
@@ -825,9 +854,9 @@ func (sm *SessionManager) RevokeMagicLink(site, emailAddr, id string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	_, err := sm.DB.ExecContext(ctx,
-		`UPDATE _kora_magic_link
+		sm.sql(`UPDATE _kora_magic_link
 		 SET revoked_at = COALESCE(revoked_at, ?)
-		 WHERE site = ? AND email = ? AND id = ?`,
+		 WHERE site = ? AND email = ? AND id = ?`),
 		time.Now(), site, emailAddr, id,
 	)
 	if err != nil {
@@ -843,9 +872,9 @@ func (sm *SessionManager) RevokeAllMagicLinks(site, emailAddr string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	_, err := sm.DB.ExecContext(ctx,
-		`UPDATE _kora_magic_link
+		sm.sql(`UPDATE _kora_magic_link
 		 SET revoked_at = COALESCE(revoked_at, ?)
-		 WHERE site = ? AND email = ? AND revoked_at IS NULL AND used_at IS NULL`,
+		 WHERE site = ? AND email = ? AND revoked_at IS NULL AND used_at IS NULL`),
 		time.Now(), site, emailAddr,
 	)
 	if err != nil {
@@ -880,7 +909,7 @@ func (sm *SessionManager) consumeMagicLink(parent context.Context, site, token s
 	var expiresAt time.Time
 	var usedAt, revokedAt sql.NullTime
 	err = tx.QueryRowContext(ctx,
-		`SELECT id, email, expires_at, used_at, revoked_at FROM _kora_magic_link WHERE site = ? AND token_hash = ?`,
+		sm.sql(`SELECT id, email, expires_at, used_at, revoked_at FROM _kora_magic_link WHERE site = ? AND token_hash = ?`),
 		site, hashMagicLinkToken(token),
 	).Scan(&id, &emailAddr, &expiresAt, &usedAt, &revokedAt)
 	if err != nil {
@@ -902,14 +931,14 @@ func (sm *SessionManager) consumeMagicLink(parent context.Context, site, token s
 	var user User
 	var roles string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT name, email, full_name, enabled, COALESCE(roles, '') FROM _kora_user WHERE site = ? AND email = ?`,
+		sm.sql(`SELECT name, email, full_name, enabled, COALESCE(roles, '') FROM _kora_user WHERE site = ? AND email = ?`),
 		site, emailAddr,
 	).Scan(&user.Name, &user.Email, &user.FullName, &user.Enabled, &roles); err != nil || !user.Enabled {
 		return nil, "", time.Time{}, ErrInvalidCredentials
 	}
 	user.Roles = splitRolesStr(roles)
 	result, err := tx.ExecContext(ctx,
-		`UPDATE _kora_magic_link SET used_at = ? WHERE id = ? AND site = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+		sm.sql(`UPDATE _kora_magic_link SET used_at = ? WHERE id = ? AND site = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?`),
 		now, id, site, now,
 	)
 	if err != nil {
@@ -919,7 +948,7 @@ func (sm *SessionManager) consumeMagicLink(parent context.Context, site, token s
 		return nil, "", time.Time{}, ErrMagicLinkUsed
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE _kora_user SET email_verified_at = COALESCE(email_verified_at, ?), modified = CURRENT_TIMESTAMP WHERE site = ? AND email = ?`,
+		sm.sql(`UPDATE _kora_user SET email_verified_at = COALESCE(email_verified_at, ?), modified = CURRENT_TIMESTAMP WHERE site = ? AND email = ?`),
 		now, site, emailAddr,
 	); err != nil {
 		return nil, "", time.Time{}, fmt.Errorf("verifying sign-in email: %w", err)
@@ -931,7 +960,7 @@ func (sm *SessionManager) consumeMagicLink(parent context.Context, site, token s
 	}
 	sessionExpires := now.Add(SessionLifetime)
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO _kora_session (sid, site, user, data, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		sm.sql(`INSERT INTO _kora_session (sid, site, `+sm.userColumn()+`, data, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`),
 		sid, site, user.Name, string(userData), sessionExpires, now,
 	); err != nil {
 		return nil, "", time.Time{}, fmt.Errorf("creating magic-link session: %w", err)
@@ -1297,6 +1326,7 @@ func registerAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB, mail
 	cloudIssuer := koraCloudIssuerFromEnv()
 	registerSignInDiscovery(auth, db, magicLinkConfigured, cloudIssuer)
 	(&OIDCLogin{PublicAppBaseURL: publicAppBaseURL, CloudIssuer: cloudIssuer}).Register(router.Group("/api/v1/auth"))
+	registerPasswordLoginRoute(auth, db, mailer, publicAppBaseURL)
 	if magicLinkConfigured {
 		registerMagicLinkRoutes(auth, db, mailer, publicAppBaseURL)
 	}
@@ -1531,10 +1561,11 @@ func issueOneTimeLinkWithPublicAppBaseURL(c *gin.Context, targetDB *sql.DB, site
 		return "", fmt.Errorf("build magic-link URL: %w", err)
 	}
 
+	manager := sessionManagerForRequest(c, targetDB)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), dbTimeout)
 	_, err = targetDB.ExecContext(ctx,
-		`INSERT INTO _kora_magic_link (id, site, email, token_hash, expires_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		manager.sql(`INSERT INTO _kora_magic_link (id, site, email, token_hash, expires_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`),
 		linkID, site, user.Email, tokenHash, expiresAt, time.Now(),
 	)
 	cancel()
@@ -1551,7 +1582,7 @@ func issueOneTimeLinkWithPublicAppBaseURL(c *gin.Context, targetDB *sql.DB, site
 	}); err != nil {
 		revokeCtx, revokeCancel := context.WithTimeout(context.Background(), dbTimeout)
 		_, revokeErr := targetDB.ExecContext(revokeCtx,
-			`UPDATE _kora_magic_link SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ? AND used_at IS NULL`,
+			manager.sql(`UPDATE _kora_magic_link SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ? AND used_at IS NULL`),
 			time.Now(), linkID,
 		)
 		revokeCancel()

@@ -18,6 +18,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	sqlDialect "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/schema"
 	flow "github.com/asenawritescode/kora/workflow"
@@ -60,6 +61,14 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 	if err != nil {
 		return fmt.Errorf("parsing reports: %w", err)
 	}
+	commandDefinitions, err := kernel.ParseCommandDir(filepath.Join(configPath, "commands"))
+	if err != nil {
+		return fmt.Errorf("parsing commands: %w", err)
+	}
+	commands, err := kernel.EncodeCommandResources(commandDefinitions)
+	if err != nil {
+		return fmt.Errorf("encoding commands: %w", err)
+	}
 	reports := make([]json.RawMessage, 0, len(reportDefinitions))
 	for _, report := range reportDefinitions {
 		data, err := json.Marshal(report)
@@ -76,6 +85,7 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 		WorkflowDefinitions: workflowDefinitions,
 		Views:               views,
 		Reports:             reports,
+		Commands:            commands,
 	}, dialect, nil)
 }
 
@@ -311,6 +321,9 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	tenant, err := contract.ParseTenantID(tenantID)
 	if err != nil {
 		return fmt.Errorf("invalid workflow tenant ID: %w", err)
+	}
+	if _, err := kernel.DecodeCommandResources(snapshot.Commands); err != nil {
+		return fmt.Errorf("invalid command definitions: %w", err)
 	}
 	workflowDefinitions := append([]contract.WorkflowDefinition(nil), snapshot.WorkflowDefinitions...)
 	store := configstore.NewStore(database, dialect)

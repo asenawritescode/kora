@@ -4,6 +4,7 @@
 package doctype
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -112,6 +113,9 @@ func evalLegacyComparison(expr string, values map[string]any) (bool, bool) {
 
 func numericConditionValue(value any) (float64, bool) {
 	switch number := value.(type) {
+	case json.Number:
+		f, err := number.Float64()
+		return f, err == nil
 	case float64:
 		return number, true
 	case int:
@@ -167,6 +171,9 @@ func isTruthy(v any) bool {
 		return false
 	}
 	switch n := v.(type) {
+	case json.Number:
+		f, _ := n.Float64()
+		return f != 0
 	case float64:
 		return n != 0
 	case int:
@@ -188,6 +195,9 @@ func normalizeExprValue(v any) any {
 		return 0.0
 	}
 	switch n := v.(type) {
+	case json.Number:
+		f, _ := n.Float64()
+		return f
 	case float64, float32, int, int64:
 		return n
 	case string:

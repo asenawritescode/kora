@@ -137,8 +137,8 @@ func TestResourceCRUDUsesKernelAndPreservesRESTContract(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, name).Scan(&events); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 0 || audits != 4 || events != 7 {
-		t.Fatalf("CRUD side effects = rows:%d audits:%d outbox:%d, want rows:0 audits:4 outbox:7 (four operation events plus three committed record-change events)", rows, audits, events)
+	if rows != 0 || audits != 4 || events != 4 {
+		t.Fatalf("CRUD side effects = rows:%d audits:%d outbox:%d, want rows:0 audits:4 outbox:4 (one change event per mutation)", rows, audits, events)
 	}
 	var receipts int
 	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.create'", site).Scan(&receipts); err != nil {
@@ -235,8 +235,8 @@ func TestResourceAdapterHonorsExactGrantAndIdempotentReplay(t *testing.T) {
 	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.create'", site).Scan(&receipts); err != nil {
 		t.Fatalf("count idempotency receipts: %v", err)
 	}
-	if records != 1 || audits != 1 || outboxEvents != 2 || receipts != 1 {
-		t.Fatalf("exact-grant create/replay effects = records:%d audits:%d outbox:%d receipts:%d, want one record, audit, receipt and two outbox events", records, audits, outboxEvents, receipts)
+	if records != 1 || audits != 1 || outboxEvents != 1 || receipts != 1 {
+		t.Fatalf("exact-grant create/replay effects = records:%d audits:%d outbox:%d receipts:%d, want one record, audit, receipt and outbox event", records, audits, outboxEvents, receipts)
 	}
 }
 
@@ -280,7 +280,7 @@ func TestAIAndHTTPAdaptersShareMutationReceipt(t *testing.T) {
 	for query, want := range map[string]int{
 		"SELECT COUNT(*) FROM `tabTestDoc` WHERE title = ?":                                                1,
 		"SELECT COUNT(*) FROM _kora_operation_audit WHERE site = ? AND status = 'completed'":               1,
-		"SELECT COUNT(*) FROM _kora_outbox WHERE site = ?":                                                 2,
+		"SELECT COUNT(*) FROM _kora_outbox WHERE site = ?":                                                 1,
 		"SELECT COUNT(*) FROM _kora_idempotency_receipt WHERE site = ? AND command_name = 'record.create'": 1,
 	} {
 		var count int
@@ -438,8 +438,8 @@ func TestScriptProviderMutationsUseKernelAndPreserveDocumentContract(t *testing.
 	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, name).Scan(&events); err != nil {
 		t.Fatal("count script outbox events:", err)
 	}
-	if rows != 0 || audits != 3 || events != 5 {
-		t.Fatalf("script CRUD side effects = rows:%d audits:%d outbox:%d; want rows:0 audits:3 outbox:5 including create/update trigger events", rows, audits, events)
+	if rows != 0 || audits != 3 || events != 3 {
+		t.Fatalf("script CRUD side effects = rows:%d audits:%d outbox:%d; want rows:0 audits:3 outbox:3, one change event per mutation", rows, audits, events)
 	}
 	var canonicalAudits int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM _kora_operation_audit
@@ -1053,8 +1053,8 @@ func TestManifestRecordActionsUseKernelAndFilterTransportFields(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, name).Scan(&outboxCount); err != nil {
 		t.Fatal(err)
 	}
-	if auditCount != 2 || outboxCount != 4 {
-		t.Fatalf("manifest action side effects = audit:%d outbox:%d; want two audit and two record-trigger events", auditCount, outboxCount)
+	if auditCount != 2 || outboxCount != 2 {
+		t.Fatalf("manifest action side effects = audit:%d outbox:%d; want two audits and two change events", auditCount, outboxCount)
 	}
 }
 
@@ -1116,7 +1116,7 @@ func TestPOSCreateTransactionPreservesSaleAndPaymentContract(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id = ?", site, saleName).Scan(&outboxCount); err != nil {
 		t.Fatal(err)
 	}
-	if saleCount != 1 || auditCount != 2 || outboxCount != 2 {
+	if saleCount != 1 || auditCount != 2 || outboxCount != 1 {
 		t.Fatalf("POS retry duplicated or lost effects: sales=%d operation_audit=%d sale_outbox=%d", saleCount, auditCount, outboxCount)
 	}
 }
@@ -1213,7 +1213,7 @@ func TestConfirmedChannelMutationUsesKernelReceiptAndPreservesResponse(t *testin
 	if replayBody.Data.Result != firstBody.Data.Result {
 		t.Fatalf("channel retry response changed: first=%q replay=%q", firstBody.Data.Result, replayBody.Data.Result)
 	}
-	for table, want := range map[string]int{"tabTestDoc": 1, "_kora_operation_audit": 1, "_kora_outbox": 2, "_kora_idempotency_receipt": 1, "_kora_channel_audit": 2} {
+	for table, want := range map[string]int{"tabTestDoc": 1, "_kora_operation_audit": 1, "_kora_outbox": 1, "_kora_idempotency_receipt": 1, "_kora_channel_audit": 2} {
 		var count int
 		query := "SELECT COUNT(*) FROM `" + table + "`"
 		if table != "tabTestDoc" && table != "_kora_channel_audit" {
@@ -1490,8 +1490,8 @@ func TestExternalOperationProviderFailureKeepsPaymentAndEventConsistent(t *testi
 	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ?", site).Scan(&totalOutbox); err != nil {
 		t.Fatal("count total outbox events:", err)
 	}
-	if operationStatus != "Failed" || paymentStatus != "Failed" || operationError == "" || eventCount != 1 || operationAudits != 2 || paymentAudits != 2 || operationEvents != 8 || totalOutbox != 10 {
-		t.Fatalf("failed provider state operation=(%q,%q) payment=%q failure_events=%d operation_audits=%d payment_audits=%d record_outbox=%d total_outbox=%d; want Failed/Failed with error, 1 event, 2/2 audits and 8/10 outbox including committed record create/update triggers", operationStatus, operationError, paymentStatus, eventCount, operationAudits, paymentAudits, operationEvents, totalOutbox)
+	if operationStatus != "Failed" || paymentStatus != "Failed" || operationError == "" || eventCount != 1 || operationAudits != 2 || paymentAudits != 2 || operationEvents != 4 || totalOutbox != 5 {
+		t.Fatalf("failed provider state operation=(%q,%q) payment=%q failure_events=%d operation_audits=%d payment_audits=%d record_outbox=%d total_outbox=%d; want Failed/Failed with error, 1 event, 2/2 audits and 4/5 outbox, one change event per mutation", operationStatus, operationError, paymentStatus, eventCount, operationAudits, paymentAudits, operationEvents, totalOutbox)
 	}
 
 	if _, err := database.Exec("CREATE TRIGGER reject_operation_failure_event BEFORE INSERT ON `tabExternal Operation Event` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'simulated event write failure'"); err != nil {
@@ -1527,8 +1527,8 @@ func TestExternalOperationProviderFailureKeepsPaymentAndEventConsistent(t *testi
 	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_outbox WHERE site = ? AND aggregate_id IN (?, (SELECT name FROM `tabPayment` WHERE external_operation = ?))", site, secondOperationName, secondOperationName).Scan(&operationEvents); err != nil {
 		t.Fatal("count operation bundle outbox after event failure:", err)
 	}
-	if eventCount != 0 || operationAudits != 2 || operationEvents != 4 {
-		t.Fatalf("event-write rollback left events=%d audits=%d record_outbox=%d; want 0/2/4 (initial operation events plus record-created events only)", eventCount, operationAudits, operationEvents)
+	if eventCount != 0 || operationAudits != 2 || operationEvents != 2 {
+		t.Fatalf("event-write rollback left events=%d audits=%d record_outbox=%d; want 0/2/2 (the initial change events only)", eventCount, operationAudits, operationEvents)
 	}
 }
 

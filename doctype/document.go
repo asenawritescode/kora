@@ -1,6 +1,9 @@
 package doctype
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Document is the generic runtime representation of any Kigae document.
 // All documents are stored as map[string]any at runtime.
@@ -49,6 +52,9 @@ func (d *Document) GetFloat(field string) float64 {
 		return 0
 	}
 	switch n := v.(type) {
+	case json.Number:
+		f, _ := n.Float64()
+		return f
 	case float64:
 		return n
 	case int64:
@@ -72,6 +78,9 @@ func (d *Document) GetInt(field string) int64 {
 	switch n := v.(type) {
 	case int64:
 		return n
+	case json.Number:
+		f, _ := n.Float64()
+		return int64(f)
 	case float64:
 		return int64(n)
 	case int:

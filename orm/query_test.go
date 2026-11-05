@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -44,9 +45,9 @@ func TestNormalizeScannedNumericFieldValue(t *testing.T) {
 		want      any
 	}{
 		{fieldType: "Int", value: []byte("42"), want: int64(42)},
-		{fieldType: "Float", value: []byte("12.5"), want: float64(12.5)},
-		{fieldType: "Currency", value: []byte("500.000000000"), want: float64(500)},
-		{fieldType: "Percent", value: []byte("7.25"), want: float64(7.25)},
+		{fieldType: "Float", value: []byte("12.5"), want: json.Number("12.5")},
+		{fieldType: "Currency", value: []byte("500.000000000"), want: json.Number("500")},
+		{fieldType: "Percent", value: []byte("7.25"), want: json.Number("7.25")},
 		{fieldType: "Data", value: []byte("00123"), want: "00123"},
 	} {
 		t.Run(test.fieldType, func(t *testing.T) {

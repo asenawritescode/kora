@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/asenawritescode/kora/auth"
+	kdb "github.com/asenawritescode/kora/db"
 	sqlDialect "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/site"
@@ -653,7 +654,7 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 			FileStorage:   result.Config.FileStorage,
 			StorageBucket: result.Config.StorageBucket,
 		},
-		DB: result.DB, Registry: result.Registry, SessionManager: h.newCreatedSessionManager(result.DB),
+		DB: result.DB, Registry: result.Registry, SessionManager: h.newCreatedSessionManager(result.DB, result.Config.DBType),
 	}
 	published := false
 	defer func() {
@@ -1045,7 +1046,7 @@ func (h *ConsoleHandler) processOnboardJob(ctx context.Context, job site.Onboard
 			FileStorage:   result.Config.FileStorage,
 			StorageBucket: result.Config.StorageBucket,
 		},
-		DB: result.DB, Registry: result.Registry, SessionManager: h.newCreatedSessionManager(result.DB),
+		DB: result.DB, Registry: result.Registry, SessionManager: h.newCreatedSessionManager(result.DB, result.Config.DBType),
 	}
 	published := false
 	defer func() {
@@ -1131,11 +1132,12 @@ func (h *ConsoleHandler) processOnboardJob(ctx context.Context, job site.Onboard
 // Engine installs tenant work admission before its runtime workers start. Keep
 // the new tenant's session sweeper paused until that installer owns startup;
 // standalone ConsoleHandler callers retain the historical self-starting path.
-func (h *ConsoleHandler) newCreatedSessionManager(database *sql.DB) *auth.SessionManager {
-	if h != nil && h.PrepareRuntime != nil {
-		return auth.NewOwnedSessionManagerPaused(database)
+func (h *ConsoleHandler) newCreatedSessionManager(database *sql.DB, dbType string) *auth.SessionManager {
+	manager := auth.NewOwnedSessionManagerPaused(database).SetDialect(kdb.Resolve(dbType))
+	if h == nil || h.PrepareRuntime == nil {
+		manager.StartCleanup()
 	}
-	return auth.NewOwnedSessionManager(database)
+	return manager
 }
 
 func (h *ConsoleHandler) prepareCreatedRuntime(ctx context.Context, loaded *net.LoadedSite, siteID string, cfg *site.SiteConfig) error {

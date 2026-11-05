@@ -12,7 +12,6 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,6 +28,7 @@ import (
 	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/natsprovider"
+	"github.com/asenawritescode/kora/numeric"
 	"github.com/asenawritescode/kora/org"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
@@ -52,6 +52,9 @@ var fallbackStorageErr error
 // Handler holds dependencies for API handlers.
 // Registry and TxManager are fallbacks; handlers read site context from the request.
 type Handler struct {
+	// ExtensionStores opens the tenant extension store. Nil uses the SQL store.
+	ExtensionStores ExtensionStoreOpener
+
 	Registry            *doctype.Registry
 	TxManager           *orm.TxManager
 	AuthProviders       *auth.ProviderRegistry
@@ -737,12 +740,9 @@ func docToMap(doc *doctype.Document, dt *doctype.DocType, registry *doctype.Regi
 			}
 		} else {
 			val := doc.Get(f.Fieldname)
-			// Round Float/Currency/Percent to 2 decimal places.
-			if f.Fieldtype == "Float" || f.Fieldtype == "Currency" || f.Fieldtype == "Percent" {
-				if s, ok := val.(string); ok && s != "" {
-					if n, err := strconv.ParseFloat(s, 64); err == nil {
-						val = math.Round(n*100) / 100
-					}
+			if numeric.IsDecimalFieldtype(f.Fieldtype) {
+				if exact, err := numeric.Normalize(val); err == nil {
+					val = exact
 				}
 			}
 			result[f.Fieldname] = val

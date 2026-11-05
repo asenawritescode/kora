@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -943,6 +944,9 @@ func (w *Worker) flushWorkflowOpenTx(tx *sql.Tx, op *workflowOpenOp) error {
 // toFloat safely converts an interface{} to float64.
 func toFloat(v any) float64 {
 	switch val := v.(type) {
+	case json.Number:
+		f, _ := val.Float64()
+		return f
 	case float64:
 		return val
 	case float32:

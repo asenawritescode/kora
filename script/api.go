@@ -1,6 +1,7 @@
 package script
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/dop251/goja"
@@ -9,12 +10,12 @@ import (
 // koraAPI is the JavaScript-accessible API injected into every script.
 // It bridges script calls to the KoraProvider sub-interfaces.
 type koraAPI struct {
-	req           ExecuteRequest
-	runner        *EmbeddedRunner
-	logs          []LogEntry
-	docProvider   DocProvider
+	req            ExecuteRequest
+	runner         *EmbeddedRunner
+	logs           []LogEntry
+	docProvider    DocProvider
 	secretProvider SecretProvider
-	httpProvider  HTTPProvider
+	httpProvider   HTTPProvider
 }
 
 // buildObject constructs the JavaScript 'kora' global object.
@@ -61,7 +62,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		if doc == nil {
 			return goja.Null()
 		}
-		return vm.ToValue(doc)
+		return vm.ToValue(jsValue(doc))
 	})
 
 	// kora.getList(doctype, {filters, orderBy, limit, offset}) → array
@@ -89,7 +90,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 			api.logMsg("warn", fmt.Sprintf("kora.getList(%q) error: %v", doctype, err))
 			return vm.ToValue([]any{})
 		}
-		return vm.ToValue(docs)
+		return vm.ToValue(jsValue(docs))
 	})
 
 	// kora.saveDoc(doctype, doc) → document
@@ -108,7 +109,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		if err := api.docProvider.SaveDoc(doctype, doc, api.req.User); err != nil {
 			panic(vm.ToValue(fmt.Sprintf("kora.saveDoc(%q) error: %v", doctype, err)))
 		}
-		return vm.ToValue(doc)
+		return vm.ToValue(jsValue(doc))
 	})
 
 	// kora.createDoc(doctype, doc) → document
@@ -250,6 +251,10 @@ func toInt(v any, defaultVal int) int {
 		return n
 	case int64:
 		return int(n)
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return int(f)
+		}
 	case float64:
 		return int(n)
 	}

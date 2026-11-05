@@ -8,6 +8,7 @@
 package doctype
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -246,6 +247,9 @@ func asFloat64(v any) float64 {
 		return 0
 	}
 	switch n := v.(type) {
+	case json.Number:
+		f, _ := n.Float64()
+		return f
 	case float64:
 		return n
 	case float32:

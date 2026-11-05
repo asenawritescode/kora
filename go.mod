@@ -20,6 +20,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.14.5
 	github.com/nats-io/nats.go v1.53.1
 	github.com/oklog/ulid/v2 v2.1.1
+	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/tursodatabase/libsql-client-go v0.0.0-20260528064733-9d5d30a29a60
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0

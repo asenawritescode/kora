@@ -99,3 +99,33 @@ func containsCapability(values []string, name string) bool {
 	}
 	return false
 }
+
+func TestSystemNavigationAdvertisesAgentsOnlyToAdministrators(t *testing.T) {
+	for _, test := range []struct {
+		roles      []string
+		wantAgents bool
+	}{{roles: []string{doctype.AdminRole}, wantAgents: true}, {roles: []string{"Sales User"}, wantAgents: false}} {
+		router, _ := adminGuardRouter(t, test.roles, func(group *gin.RouterGroup, handler *Handler) {
+			group.GET("/system/navigation", handler.HandleSystemNavigation)
+		})
+		recorder := serve(router, "GET", "/api/system/navigation", "")
+		if recorder.Code != 200 {
+			t.Fatalf("roles %v: navigation status=%d body=%s", test.roles, recorder.Code, recorder.Body.String())
+		}
+		var response struct {
+			Data NavigationResponse `json:"data"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		hasAgents := false
+		for _, capability := range response.Data.AdminCapabilities {
+			if capability == "agents" {
+				hasAgents = true
+			}
+		}
+		if hasAgents != test.wantAgents {
+			t.Fatalf("roles %v: agents capability=%v, want %v (capabilities %v)", test.roles, hasAgents, test.wantAgents, response.Data.AdminCapabilities)
+		}
+	}
+}

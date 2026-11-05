@@ -147,7 +147,7 @@ func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 		return nil, fmt.Errorf("migrating site schema: %w", err)
 	}
 	if sessionManager == nil {
-		sessionManager = auth.NewOwnedSessionManagerPaused(database)
+		sessionManager = auth.NewOwnedSessionManagerPaused(database).SetDialect(dialect)
 	}
 	runtime = &knet.LoadedSite{
 		SiteID: info.SiteID, ConfigRevision: info.ConfigRevision, DatabaseIdentity: databaseIdentity, Status: info.Status, DBType: siteCfg.DBType,
