@@ -428,6 +428,10 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		return nil, contract.NewError(contract.CodeValidationFailed, expandErr.Error())
 	}
 	stepNames := map[string]string{}
+	if cerr := k.checkCommandGuards(dbTx, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames}); cerr != nil {
+		auditFailure(cerr.Type)
+		return nil, cerr
+	}
 
 	for _, instance := range instances {
 		i, step := instance.index, instance.step
@@ -503,11 +507,19 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			if dt == nil {
 				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("command %q: record %q not found", def.Name, step.Update.Record))
 			}
-			targetName, rerr := resolveEnvStringRef(step.Update.Name, env)
-			if rerr != nil || targetName == "" {
-				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
-			}
 			scope := scopeForOperation(reg, stepOp, dt.Name, "write")
+			targetName, targetErr := resolveUpdateTarget(txMgr, dt, step.Update, env, scope, i)
+			if targetErr != nil {
+				return nil, targetErr
+			}
+			if len(step.Update.Adjust) > 0 {
+				if err := lockRecordRow(dbTx, k.dialect(), dt, targetName); err != nil {
+					if err == sql.ErrNoRows {
+						return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("record %q not found", targetName))
+					}
+					return nil, contract.NewError(contract.CodeDependencyUnavailable, "lock document failed")
+				}
+			}
 			oldDoc, err := txMgr.GetDocWithScope(dt, targetName, scope)
 			if err != nil {
 				if err == sql.ErrNoRows || strings.Contains(err.Error(), orm.ErrNotFound.Error()) {
@@ -532,6 +544,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 				}
 				doc.Set(field, v)
+			}
+			if adjustErr := applyAdjustments(dt, oldDoc, doc, step.Update.Adjust, env, i); adjustErr != nil {
+				return nil, adjustErr
 			}
 			doc.IsNew = false
 			if verrs := validateOperationDocumentWithResolvers(txMgr, dt, doc, reg, oldDoc, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
