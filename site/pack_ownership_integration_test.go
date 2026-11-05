@@ -119,6 +119,9 @@ func posOwned(t *testing.T) string {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if strings.Contains(string(raw), "\nmodule_owner_id:") {
+				continue // the shipped config already declares ownership
+			}
 			head := "module_owner_id: " + pack + ".core\nmodule_ownership_mode: " + mode + "\nmodule_access: published\n"
 			if err := os.WriteFile(p, []byte(strings.Replace(string(raw), "\n", "\n"+head, 1)), 0o600); err != nil {
 				t.Fatal(err)

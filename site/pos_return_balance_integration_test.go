@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,6 +56,8 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 			t.Fatal(err)
 		}
 		for _, d := range defs {
+			d.InputSchema = contract.SchemaRef{ID: "pos.test." + d.Name + ".in", Version: 1}
+			d.OutputSchema = contract.SchemaRef{ID: "pos.test." + d.Name + ".out", Version: 1}
 			if err := cmds.Register(d); err != nil {
 				t.Fatal(err)
 			}
@@ -62,6 +65,7 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 	}
 	k := kernel.New(dialect, outbox.NewSQLWriter(dialect))
 	k.Commands = cmds
+	k.CommandSchemas = allowAllPOSSchemas{}
 	actor := contract.ActorContext{PrincipalID: "cashier-1", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now()}
 	execution, err := policy.NewVerifiedExecution(contract.TenantID(siteName), actor)
 	if err != nil {
@@ -69,10 +73,20 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 	}
 	exec := func(command, key string, payload any) (contract.CommandResult, *contract.Error) {
 		raw, _ := json.Marshal(payload)
-		return k.Execute(ctx, conn, reg, kernel.Operation{Command: command, Payload: raw, Context: kernel.OperationContext{
+		scope := contract.BusinessScope{TenantID: contract.TenantID(siteName), Kind: contract.ScopeKindTenant}
+		oc := kernel.OperationContext{
 			Site: siteName, User: "cashier-1", Roles: []string{doctype.AdminRole}, Actor: actor, IdempotencyKey: key,
-			Execution: execution, TenantID: contract.TenantID(siteName), Source: kernel.SourceIntegration,
-		}})
+			Execution: execution, TenantID: contract.TenantID(siteName), BusinessScope: scope, Source: kernel.SourceIntegration,
+		}
+		if strings.HasPrefix(command, "pos.") {
+			// pos.core owns these DocTypes; run its commands as the module.
+			me, merr := contract.NewCommandModuleExecution(scope, "pos.core", "pos.core", 1, command, command)
+			if merr != nil {
+				t.Fatal(merr)
+			}
+			oc.ModuleExecution = &me
+		}
+		return k.Execute(ctx, conn, reg, kernel.Operation{Command: command, Payload: raw, Context: oc})
 	}
 	must := func(command, key string, payload any) map[string]any {
 		t.Helper()
