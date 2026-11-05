@@ -15,6 +15,7 @@ import (
 
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/eventstream"
+	"github.com/asenawritescode/kora/internal/netguard"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -85,6 +86,7 @@ func NewWorker(database *sql.DB, bus interface {
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
+				DialContext:     netguard.PublicDialer(10*time.Second, 30*time.Second).DialContext,
 				MaxIdleConns:    20,
 				IdleConnTimeout: 60 * time.Second,
 			},
@@ -300,7 +302,7 @@ func (w *Worker) deliver(ctx context.Context, ext Extension, event eventstream.C
 		deliveryErr = fmt.Errorf("send webhook request: %w", err)
 	} else {
 		respStatus = resp.StatusCode
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxStoredResponseBody))
 		resp.Body.Close()
 		respBody = string(bodyBytes)
 		if respStatus >= 500 || respStatus == http.StatusTooManyRequests {
@@ -433,6 +435,10 @@ func (w *Worker) acquireDBWork(ctx context.Context) (func(), error) {
 		}
 	}
 }
+
+// maxStoredResponseBody bounds how much of an endpoint's reply is kept in the
+// delivery log, which tenant administrators can read back.
+const maxStoredResponseBody = 2048
 
 // Extension represents a registered webhook extension.
 type Extension struct {
