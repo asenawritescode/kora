@@ -74,6 +74,18 @@ func (d *Definition) ParentDocType() string {
 	return parent
 }
 
+// OutputFields lists the row keys a run returns: fields, or group_by then aggregate names.
+func (d *Definition) OutputFields() []string {
+	if len(d.Fields) > 0 {
+		return d.Fields
+	}
+	out := append([]string(nil), d.GroupBy...)
+	for _, a := range d.Aggregates {
+		out = append(out, a.Name)
+	}
+	return out
+}
+
 // CatalogRef is owner~capability~operation.
 func (d *Definition) CatalogRef() string {
 	return d.ModuleOwnerID + "~" + d.Capability + "~" + d.Operation
