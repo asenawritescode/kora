@@ -21,6 +21,9 @@ const (
 
 var workflowConditionField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// workflowOwnerModuleID matches contract module IDs such as "finance.ar".
+var workflowOwnerModuleID = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9-]+)+$`)
+
 // ConditionExpression turns the editor's typed field condition into the
 // deterministic expression understood by the workflow evaluator.
 func ConditionExpression(condition *contract.ConditionSpec) (string, error) {
@@ -226,6 +229,9 @@ func ValidateDefinition(def contract.WorkflowDefinition, catalog *Catalog, schem
 		add("$", "identity_required", "definition ID and positive version are required")
 	} else if _, err := contract.ParseDefinitionID(string(def.ID)); err != nil {
 		add("id", "invalid_id", err.Error())
+	}
+	if def.OwnerModuleID != "" && !workflowOwnerModuleID.MatchString(string(def.OwnerModuleID)) {
+		add("owner_module_id", "invalid_module_owner", "workflow owner module ID is invalid")
 	}
 	if len(def.Steps) == 0 || len(def.Steps) > maxDefinitionSteps {
 		add("steps", "step_count", "definition must contain between 1 and 100 steps")
