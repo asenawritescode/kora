@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -84,14 +85,18 @@ func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageAr
 		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("validate package artifact: %w", err)
 	}
 	if !validation.Valid {
-		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package artifact failed Engine validation")
+		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package artifact failed Engine validation: %v", validation.Findings)
 	}
 	snapshot, scripts, err := site.ParseConfigPack(artifact.Manifest.PackageID, artifact.Files)
 	if err != nil {
 		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("parse package artifact: %w", err)
 	}
 	snapshot.ScheduledJobs = append(snapshot.ScheduledJobs, artifact.Manifest.ScheduledJobs...)
-	snapshot.Modules = append(snapshot.Modules, artifact.Manifest.Modules...)
+	modules, err := mergeManifestModules(snapshot.Modules, artifact.Manifest.Modules)
+	if err != nil {
+		return nil, nil, contract.MarketplacePackageManifest{}, err
+	}
+	snapshot.Modules = modules
 	// Config activation persists scripts from ScriptSnapshot.Source. ParseConfigPack
 	// returns the verified bodies separately to preserve its import API, so bind
 	// each body to its hash here before the snapshot is journaled. Without this,
@@ -240,4 +245,27 @@ func bindOwnedPackageResource(snapshot *doctype.ConfigSnapshot, owner contract.M
 		}
 	}
 	return false, nil
+}
+
+// mergeManifestModules appends manifest modules to the generated ones. A
+// manifest module with a generated ID must be canonically identical.
+func mergeManifestModules(generated, manifest []contract.ModuleDescriptor) ([]contract.ModuleDescriptor, error) {
+	byID := make(map[contract.ModuleID]contract.ModuleDescriptor, len(generated))
+	for _, m := range generated {
+		byID[m.ID] = m
+	}
+	out := append([]contract.ModuleDescriptor(nil), generated...)
+	for _, m := range manifest {
+		gen, ok := byID[m.ID]
+		if !ok {
+			out = append(out, m)
+			continue
+		}
+		a, errA := contract.CanonicalManifestJSON(gen)
+		b, errB := contract.CanonicalManifestJSON(m)
+		if errA != nil || errB != nil || !bytes.Equal(a, b) {
+			return nil, fmt.Errorf("pack.module_mismatch: manifest module %q differs from the module generated from pack.yaml", m.ID)
+		}
+	}
+	return out, nil
 }

@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/site"
 )
 
 type staticManagementPackageArtifact struct {
@@ -93,5 +95,46 @@ func TestVerifiedManagementPackageBindsScriptBodiesToSnapshot(t *testing.T) {
 	script := snapshot.Scripts[0]
 	if script.Source != "return true;" || scripts[script.ScriptHash] != script.Source {
 		t.Fatalf("script snapshot source = %q, verified body = %q", script.Source, scripts[script.ScriptHash])
+	}
+}
+
+func TestVerifiedManagementPackageGeneratesAndChecksModules(t *testing.T) {
+	files := []contract.PackFile{
+		{Path: "pack.yaml", Content: "name: retail\nversion: \"1.0.0\"\n", ContentType: "pack"},
+		{Path: "doctypes/stock.yaml", Content: "name: Stock\nmodule: Inventory\nfields:\n  - fieldname: title\n    fieldtype: Data\n", ContentType: "doctype"},
+	}
+	base := contract.MarketplacePackageManifest{
+		SchemaVersion: 1, PackageID: "retail", ReleaseID: "retail-1", Version: "1.0.0", Kind: "module",
+		Public: contract.ManifestPublic{Slug: "retail", Name: "Retail", Summary: "Retail"},
+		Engine: contract.ManifestEngine{MinVersion: "1.0.0"},
+	}
+	run := func(m contract.MarketplacePackageManifest) (*doctype.ConfigSnapshot, error) {
+		command := validManagementPackageCommand(t, m, files)
+		resolver := staticManagementPackageArtifact{artifact: ManagementPackageArtifact{Manifest: m, Files: files}, ref: command.ArtifactRef}
+		snapshot, _, _, err := verifiedManagementPackage(context.Background(), resolver, command)
+		return snapshot, err
+	}
+	generated, err := site.GeneratePackModules(contract.PackManifest{Name: "retail", Version: "1.0.0"}, &doctype.ConfigSnapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := run(base)
+	if err != nil || len(snap.Modules) != 2 {
+		t.Fatalf("no manifest modules: err=%v modules=%v", err, snap)
+	}
+	if err := contract.ValidateModuleSet(snap.Modules, nil); err != nil {
+		t.Fatalf("generated pair invalid: %v", err)
+	}
+	equal := base
+	equal.Modules = generated[:1]
+	if snap, err = run(equal); err != nil || len(snap.Modules) != 2 {
+		t.Fatalf("equal module: err=%v", err)
+	}
+	differ := base
+	other := generated[0]
+	other.Version = "9.9.9"
+	differ.Modules = []contract.ModuleDescriptor{other}
+	if _, err = run(differ); err == nil || !strings.Contains(err.Error(), "pack.module_mismatch") {
+		t.Fatalf("differing module error = %v", err)
 	}
 }

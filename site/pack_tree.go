@@ -26,6 +26,11 @@ func ParsePackFile(dir string) (contract.PackManifest, bool, error) {
 	if err != nil {
 		return contract.PackManifest{}, false, fmt.Errorf("read %s: %w", packFileName, err)
 	}
+	return parsePackManifest(body, filepath.Base(filepath.Clean(dir)))
+}
+
+// parsePackManifest decodes pack.yaml bytes; name must equal the pack name.
+func parsePackManifest(body []byte, dirName string) (contract.PackManifest, bool, error) {
 	var raw struct {
 		Name     string                     `yaml:"name"`
 		Version  string                     `yaml:"version"`
@@ -34,7 +39,7 @@ func ParsePackFile(dir string) (contract.PackManifest, bool, error) {
 	if err := yaml.NewDecoder(bytes.NewReader(body), yaml.Strict()).Decode(&raw); err != nil {
 		return contract.PackManifest{}, false, fmt.Errorf("parse %s: %w", packFileName, err)
 	}
-	if raw.Name != filepath.Base(filepath.Clean(dir)) {
+	if raw.Name != dirName {
 		return contract.PackManifest{}, false, fmt.Errorf("%s name %q must equal directory name", packFileName, raw.Name)
 	}
 	if err := contract.ValidateManifestPackRefs(raw.Requires, nil); err != nil {
