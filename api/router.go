@@ -53,6 +53,9 @@ var fallbackStorageErr error
 // Registry and TxManager are fallbacks; handlers read site context from the request.
 type Handler struct {
 	// ExtensionStores opens the tenant extension store. Nil uses the SQL store.
+	// PrintSource backs GET /print/:format_name. Nil answers print.not_configured.
+	PrintSource PrintSource
+
 	ExtensionStores ExtensionStoreOpener
 
 	Registry            *doctype.Registry
@@ -949,6 +952,8 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 	apiGroup.POST("/upload", handler.HandleUpload)
 	apiGroup.GET("/files/*path", handler.HandleFileServe)
 	apiGroup.DELETE("/files/*path", handler.HandleFileDelete)
+
+	apiGroup.GET("/print/:format_name", NewPrintHandler(handler.PrintSource))
 
 	resource := apiGroup.Group("/resource")
 	{
