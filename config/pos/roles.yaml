@@ -1,0 +1,4 @@
+- name: Cashier
+  workspace_access: true
+  description: Rings up sales and runs shifts.
+

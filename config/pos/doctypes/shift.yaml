@@ -1,0 +1,31 @@
+name: Shift
+module: POS
+title_field: register
+search_fields: register, cashier
+fields:
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+    reqd: true
+    in_list_view: true
+  - fieldname: cashier
+    fieldtype: Data
+    label: Cashier
+    reqd: true
+    in_list_view: true
+  - fieldname: started_at
+    fieldtype: Datetime
+    label: Started At
+    in_list_view: true
+  - fieldname: ended_at
+    fieldtype: Datetime
+    label: Ended At
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Open
+      Closed
+    default: Open
+    in_list_view: true

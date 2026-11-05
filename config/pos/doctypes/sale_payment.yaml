@@ -1,0 +1,22 @@
+name: Sale Payment
+module: POS
+is_child_table: true
+title_field: method
+fields:
+  - fieldname: method
+    fieldtype: Select
+    label: Method
+    options: |
+      Cash
+      Card
+      Mobile Money
+    reqd: true
+    in_list_view: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference

@@ -1,0 +1,26 @@
+name: Till Session
+module: POS
+title_field: shift
+search_fields: shift
+fields:
+  - fieldname: shift
+    fieldtype: Link
+    options: Shift
+    label: Shift
+    reqd: true
+    in_list_view: true
+  - fieldname: opening_float
+    fieldtype: Currency
+    label: Opening Float
+    reqd: true
+    in_list_view: true
+  - fieldname: closing_count
+    fieldtype: Currency
+    label: Closing Count
+  - fieldname: expected_cash
+    fieldtype: Currency
+    label: Expected Cash
+  - fieldname: variance
+    fieldtype: Currency
+    label: Variance
+    computed: "closing_count - expected_cash"
