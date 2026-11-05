@@ -31,6 +31,7 @@ type CommandResource struct {
 	CrossEntity    *CrossEntityCommand                `yaml:"cross_entity,omitempty"   json:"cross_entity,omitempty"`
 	Preconditions  []string                           `yaml:"preconditions"            json:"preconditions,omitempty"`
 	Require        []CommandGuard                     `yaml:"require,omitempty"        json:"require,omitempty"`
+	Compute        ComputeBlock                       `yaml:"compute,omitempty"        json:"compute,omitempty"`
 	Steps          []CommandStep                      `yaml:"transaction"              json:"transaction"`
 	Emits          []string                           `yaml:"emit"                     json:"emit,omitempty"`
 	BusinessEvents []contract.BusinessEventDefinition `yaml:"business_events" json:"business_events,omitempty"`
@@ -135,6 +136,9 @@ func (c *CommandResource) validate() error {
 	}
 	if c.Input.Record == "" {
 		return fmt.Errorf("command %q: input.record required in this slice", c.Name)
+	}
+	if err := c.validateCompute(); err != nil {
+		return err
 	}
 	if err := c.validateStepReferences(); err != nil {
 		return err
