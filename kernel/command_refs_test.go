@@ -1,0 +1,86 @@
+package kernel
+
+import (
+	"strings"
+	"testing"
+)
+
+const forEachYAML = `name: library.issue_batch
+version: 1
+input:
+  record: Loan
+transaction:
+  - as: batch
+    create:
+      record: Loan Batch
+      values:
+        member: $input.member
+  - for_each: $input.books
+    create:
+      record: Loan
+      values:
+        batch: $steps.batch.name
+        book: $item.book
+        due: $input.due
+`
+
+func TestForEachExpandsInputListAndResolvesReferences(t *testing.T) {
+	def, err := ParseCommandResource([]byte(forEachYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]any{"member": "MEM-1", "due": "2026-11-30", "books": []any{
+		map[string]any{"book": "B-1"}, map[string]any{"book": "B-2"},
+	}}
+	instances, err := expandCommandSteps(def.Steps, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 3 || instances[1].index != 1 || instances[2].item["book"] != "B-2" {
+		t.Fatalf("instances = %#v", instances)
+	}
+	env := refEnv{input: input, item: instances[2].item, steps: map[string]string{"batch": "LB-0001"}}
+	for ref, want := range map[string]any{"$steps.batch.name": "LB-0001", "$item.book": "B-2", "$input.due": "2026-11-30", "literal": "literal"} {
+		got, err := resolveEnvRef(ref, env)
+		if err != nil || got != want {
+			t.Fatalf("%s = %v, %v; want %v", ref, got, err, want)
+		}
+	}
+	if _, err := resolveEnvRef("$item.book", refEnv{input: input}); err == nil {
+		t.Fatal("$item resolved outside for_each")
+	}
+}
+
+func TestForEachRejectsInvalidDefinitionsAndInputs(t *testing.T) {
+	invalid := map[string]string{
+		"item outside for_each": strings.Replace(forEachYAML, "member: $input.member", "member: $item.member", 1),
+		"unknown alias":         strings.Replace(forEachYAML, "$steps.batch.name", "$steps.order.name", 1),
+		"for_each not input":    strings.Replace(forEachYAML, "for_each: $input.books", "for_each: $steps.batch.name", 1),
+		"aliased for_each":      strings.Replace(forEachYAML, "  - for_each: $input.books\n", "  - for_each: $input.books\n    as: line\n", 1),
+		"bad alias":             strings.Replace(forEachYAML, "as: batch", "as: Batch-1", 1),
+	}
+	for name, yaml := range invalid {
+		if _, err := ParseCommandResource([]byte(yaml)); err == nil {
+			t.Fatalf("%s: definition was accepted", name)
+		}
+	}
+	def, _ := ParseCommandResource([]byte(forEachYAML))
+	for name, input := range map[string]map[string]any{
+		"not a list":     {"books": "B-1"},
+		"not objects":    {"books": []any{"B-1"}},
+		"missing list":   {},
+		"too many items": {"books": manyBooks(MaxCommandStepInstances + 1)},
+	} {
+		if _, err := expandCommandSteps(def.Steps, input); err == nil {
+			t.Fatalf("%s: input was accepted", name)
+		}
+	}
+}
+
+func manyBooks(n int) []any {
+	out := make([]any, n)
+	for i := range out {
+		out[i] = map[string]any{"book": "B"}
+	}
+	return out
+}

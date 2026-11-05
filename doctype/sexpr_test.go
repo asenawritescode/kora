@@ -459,3 +459,16 @@ func buildFullTestSnapshot() *ConfigSnapshot {
 		},
 	}
 }
+
+func TestToSExpr_RoundTripCommands(t *testing.T) {
+	snapshot := &ConfigSnapshot{Commands: []json.RawMessage{
+		json.RawMessage(`{"name":"library.lend_book","version":1,"input":{"record":"Loan"},"transaction":[{"create":{"record":"Loan","values":{"book":"$input.book"}}}]}`),
+	}}
+	parsed, err := FromSExpr(ToSExpr(snapshot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Commands) != 1 || string(parsed.Commands[0]) != string(snapshot.Commands[0]) {
+		t.Fatalf("commands were not preserved: %#v", parsed.Commands)
+	}
+}

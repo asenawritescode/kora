@@ -319,13 +319,12 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 	}
 	nextNum := 1
 	if doc.Name == "" {
-		prefix := derivePrefix(dt.Name)
-		allocated, err := tx.Dialect.AllocateNameNumber(dbTx, dt.Name, prefix, dt.RawTableName())
+		name, allocated, err := AllocateDocumentName(dbTx, tx.Dialect, dt, doc.Fields, time.Now().UTC())
 		if err != nil {
 			return err
 		}
 		nextNum = int(allocated)
-		doc.Name = fmt.Sprintf("%s-%04d", prefix, nextNum)
+		doc.Name = name
 	}
 
 	// Match the precision persisted by the supported SQL dialects so the

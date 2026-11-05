@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/asenawritescode/kora/contract"
+	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/policy"
@@ -67,10 +69,45 @@ func writeChatResponse(c *gin.Context, response ChatResponse) {
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
+func siteCurrencyForChat(ctx context.Context, database *sql.DB, siteName string, dialect kdb.QueryDialect) (string, error) {
+	var currency string
+	err := database.QueryRowContext(ctx, kdb.Rebind(dialect, "SELECT setting_value FROM _kora_site_setting WHERE site = ? AND setting_key = ?"), siteName, "currency").Scan(&currency)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Match GET /api/v1/system/settings, which defines this site's default.
+		return "KES", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" {
+		return "KES", nil
+	}
+	return currency, nil
+}
+
+func financialDisplayContext(currency string) string {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" {
+		return `
+FINANCIAL DISPLAY CONTEXT:
+- The site's currency setting could not be read. Do not guess a currency or add a currency symbol/code to amounts. Ask for clarification when a currency is necessary.`
+	}
+	return fmt.Sprintf(`
+FINANCIAL DISPLAY CONTEXT:
+- The site's configured currency is %s.
+- Use %s for monetary amounts that do not explicitly identify another currency, including analytics totals.
+- Do not infer currency from locale, language, model defaults, or previous examples. Do not convert amounts unless the user asks for a conversion.`, currency, currency)
+}
+
 // HandleChat processes a chat message, calls the AI provider with function definitions,
 // executes any tool calls via the ORM, and returns the AI's response.
 func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteName, currentUser string) {
 	requestCtx := WithDialect(c.Request.Context(), tx.Dialect)
+	currency, currencyErr := siteCurrencyForChat(requestCtx, tx.DB, siteName, tx.Dialect)
+	if currencyErr != nil {
+		slog.Warn("AI chat could not read site currency", "site", siteName, "error", currencyErr)
+	}
 	var req ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -251,7 +288,7 @@ REPORTING AND ANALYTICS: For a reporting or facts question, call get_analytics_c
 AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and query analytics. Everything scoped to the current site.`
 	messages := []map[string]any{{
 		"role":    "system",
-		"content": genericSystemPrompt + contextBlurb,
+		"content": genericSystemPrompt + financialDisplayContext(currency) + contextBlurb,
 	}}
 	for _, h := range sanitizedHistory {
 		messages = append(messages, map[string]any{"role": h.Role, "content": h.Content})

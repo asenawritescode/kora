@@ -52,6 +52,9 @@ var fallbackStorageErr error
 // Handler holds dependencies for API handlers.
 // Registry and TxManager are fallbacks; handlers read site context from the request.
 type Handler struct {
+	// ExtensionStores opens the tenant extension store. Nil uses the SQL store.
+	ExtensionStores ExtensionStoreOpener
+
 	Registry            *doctype.Registry
 	TxManager           *orm.TxManager
 	AuthProviders       *auth.ProviderRegistry
@@ -1065,6 +1068,15 @@ func registerManagementRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		configHistory.GET("/versions/active/snapshot", handler.HandleActiveConfigSnapshot)
 		configHistory.GET("/versions/:id", handler.HandleConfigVersion)
 		configHistory.GET("/diff", handler.HandleConfigDiff)
+	}
+
+	signIn := apiGroup.Group("/system/auth", adminOnly())
+	{
+		signIn.GET("/providers", handler.HandleAuthProviderList)
+		signIn.PUT("/providers/:id", handler.HandleAuthProviderPut)
+		signIn.DELETE("/providers/:id", handler.HandleAuthProviderDelete)
+		signIn.GET("/policy", handler.HandleAuthPolicy)
+		signIn.PUT("/policy", handler.HandleAuthPolicyUpdate)
 	}
 
 	ext := apiGroup.Group("/system/extension", adminOnly())

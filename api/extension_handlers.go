@@ -1,18 +1,41 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/asenawritescode/kora/auth"
+	kdb "github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/extension"
+	extensionsql "github.com/asenawritescode/kora/extension/sqlstore"
 	"github.com/asenawritescode/kora/internal/netguard"
 	"github.com/asenawritescode/kora/webhook"
 	"github.com/gin-gonic/gin"
 )
+
+// ExtensionStore is the extension administration persistence these handlers use.
+type ExtensionStore interface {
+	List(ctx context.Context, site string) ([]extension.Summary, error)
+	Create(ctx context.Context, registration extension.Registration) error
+	Delete(ctx context.Context, site, name string) error
+	RotateSecret(ctx context.Context, rotation extension.SecretRotation) error
+}
+
+// ExtensionStoreOpener binds an ExtensionStore to a tenant database.
+type ExtensionStoreOpener func(*sql.DB, kdb.QueryDialect) ExtensionStore
+
+func (h *Handler) extensionStore(c *gin.Context, database *sql.DB) ExtensionStore {
+	if h.ExtensionStores != nil {
+		return h.ExtensionStores(database, h.siteDialect(c))
+	}
+	return extensionsql.New(database, h.siteDialect(c))
+}
 
 // HandleExtensionList returns all extensions for the current site.
 func (h *Handler) HandleExtensionList(c *gin.Context) {
@@ -24,46 +47,27 @@ func (h *Handler) HandleExtensionList(c *gin.Context) {
 		return
 	}
 
-	rows, err := db.Query(h.siteQuery(c,
-		`SELECT name, site, display_name, description, endpoint_url, is_active, subscriptions, api_permissions,
-		 secret_count, consecutive_failures, installed_at, last_delivery_at, last_error
-		 FROM _kora_extension WHERE site = ? ORDER BY installed_at DESC`), siteNameStr)
+	stored, err := h.extensionStore(c, db).List(c.Request.Context(), siteNameStr)
 	if err != nil {
 		internalError(c, "loading extensions", err)
 		return
 	}
-	defer rows.Close()
-
 	var extensions []extensionSummary
-	for rows.Next() {
-		var name, site, displayName, endpointURL string
-		var desc, lastErr, subsJSON, permsJSON sql.NullString
-		var isActive bool
-		var secretCount, consecutiveFailures int
-		var installedAt, lastDeliveryAt sql.NullString
-		if err := rows.Scan(&name, &site, &displayName, &desc, &endpointURL, &isActive, &subsJSON, &permsJSON,
-			&secretCount, &consecutiveFailures, &installedAt, &lastDeliveryAt, &lastErr); err != nil {
-			internalError(c, "reading extensions", err)
-			return
-		}
+	for _, e := range stored {
 		extensions = append(extensions, extensionSummary{
-			Name:                name,
-			DisplayName:         displayName,
-			Description:         desc.String,
-			EndpointURL:         endpointURL,
-			IsActive:            isActive,
-			Subscriptions:       subsJSON.String,
-			APIPermissions:      permsJSON.String,
-			SecretCount:         secretCount,
-			ConsecutiveFailures: consecutiveFailures,
-			InstalledAt:         installedAt.String,
-			LastDeliveryAt:      lastDeliveryAt.String,
-			LastError:           lastErr.String,
+			Name:                e.Name,
+			DisplayName:         e.DisplayName,
+			Description:         e.Description,
+			EndpointURL:         e.EndpointURL,
+			IsActive:            e.IsActive,
+			Subscriptions:       e.Subscriptions,
+			APIPermissions:      e.APIPermissions,
+			SecretCount:         e.SecretCount,
+			ConsecutiveFailures: e.ConsecutiveFailures,
+			InstalledAt:         e.InstalledAt,
+			LastDeliveryAt:      e.LastDeliveryAt,
+			LastError:           e.LastError,
 		})
-	}
-	if err := rows.Err(); err != nil {
-		internalError(c, "reading extensions", err)
-		return
 	}
 	c.JSON(http.StatusOK, Response{Data: extensionListResponse{Extensions: extensions}})
 }
@@ -119,11 +123,11 @@ func (h *Handler) HandleExtensionCreate(c *gin.Context) {
 		return
 	}
 
-	_, err = db.Exec(
-		h.siteQuery(c, `INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, access_token_hash, subscriptions, api_permissions, installed_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`),
-		req.Name, siteNameStr, req.DisplayName, req.Description, req.EndpointURL, secret, auth.HashExtensionAccessToken(accessToken),
-		req.Subscriptions, apiPerms)
+	err = h.extensionStore(c, db).Create(c.Request.Context(), extension.Registration{
+		Site: siteNameStr, Name: req.Name, DisplayName: req.DisplayName, Description: req.Description,
+		EndpointURL: req.EndpointURL, Secret: secret, AccessTokenHash: auth.HashExtensionAccessToken(accessToken),
+		Subscriptions: req.Subscriptions, APIPermissions: apiPerms,
+	})
 	if err != nil {
 		slog.Error("creating extension", "error", err)
 		writeError(c, http.StatusInternalServerError, "extension.create_failed", "Failed to create extension", nil)
@@ -156,31 +160,12 @@ func (h *Handler) HandleExtensionDelete(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "extension.not_found", "Not found", nil)
 		return
 	}
-	tx, err := db.BeginTx(c.Request.Context(), nil)
-	if err != nil {
-		internalError(c, "deleting extension", err)
-		return
-	}
-	defer tx.Rollback()
-	result, err := tx.Exec(h.siteQuery(c, `DELETE FROM _kora_extension WHERE site = ? AND name = ?`), siteNameStr, name)
-	if err != nil {
-		internalError(c, "deleting extension", err)
-		return
-	}
-	deleted, err := result.RowsAffected()
-	if err != nil {
-		internalError(c, "checking deleted extension", err)
-		return
-	}
-	if deleted == 0 {
+	err := h.extensionStore(c, db).Delete(c.Request.Context(), siteNameStr, name)
+	if errors.Is(err, extension.ErrNotFound) {
 		writeError(c, http.StatusNotFound, "extension.not_found", "Extension not found", nil)
 		return
 	}
-	if _, err := tx.Exec(h.siteQuery(c, `DELETE FROM _kora_webhook_delivery WHERE site = ? AND extension_name = ?`), siteNameStr, name); err != nil {
-		internalError(c, "deleting extension deliveries", err)
-		return
-	}
-	if err := tx.Commit(); err != nil {
+	if err != nil {
 		internalError(c, "deleting extension", err)
 		return
 	}
@@ -259,20 +244,15 @@ func (h *Handler) HandleExtensionRotateSecret(c *gin.Context) {
 	// Move current secret to old_secret, set 24h expiry.
 	siteName, _ := c.Get("site_name")
 	siteNameStr, _ := siteName.(string)
-	result, err := db.Exec(h.siteQuery(c, `UPDATE _kora_extension SET old_secret = secret, old_secret_expires_at = ?,
-		secret = ?, secret_count = secret_count + 1, updated_at = CURRENT_TIMESTAMP WHERE site = ? AND name = ?`),
-		time.Now().Add(24*time.Hour), secret, siteNameStr, name)
+	err = h.extensionStore(c, db).RotateSecret(c.Request.Context(), extension.SecretRotation{
+		Site: siteNameStr, Name: name, Secret: secret, PreviousExpiresAt: time.Now().Add(24 * time.Hour),
+	})
+	if errors.Is(err, extension.ErrNotFound) {
+		writeError(c, http.StatusNotFound, "extension.not_found", "Extension not found", nil)
+		return
+	}
 	if err != nil {
 		internalError(c, "rotating extension secret", err)
-		return
-	}
-	updated, err := result.RowsAffected()
-	if err != nil {
-		internalError(c, "checking rotated extension", err)
-		return
-	}
-	if updated == 0 {
-		writeError(c, http.StatusNotFound, "extension.not_found", "Extension not found", nil)
 		return
 	}
 

@@ -380,7 +380,7 @@ func (h *Handler) HandleSystemNavigation(c *gin.Context) {
 	if execution, valid := requestExecution(c); valid && userHasAdminRole(execution.Actor().Roles) {
 		adminCapabilities = []string{
 			"doctypes", "permissions", "versions",
-			"users", "scripts", "extensions", "secrets", "analytics", "views",
+			"users", "scripts", "extensions", "secrets", "analytics", "views", "agents",
 		}
 		if workflowOrchestrationAvailable {
 			adminCapabilities = append(adminCapabilities, "automations")

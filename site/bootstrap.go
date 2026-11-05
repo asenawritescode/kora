@@ -16,7 +16,7 @@ import (
 )
 
 // Increment this when BootstrapSystemTables gains or changes system DDL.
-const systemBootstrapVersion = 28
+const systemBootstrapVersion = 31
 
 // isIdempotentSQLError returns true if the error is expected during
 // idempotent DDL execution (CREATE IF NOT EXISTS, ALTER TABLE ADD COLUMN,
@@ -124,6 +124,21 @@ func BootstrapSystemTablesContext(ctx context.Context, database *sql.DB, dialect
 	}
 	for _, ddl := range conversationDDL {
 		if err := execDDL(ddl, "creating conversation table"); err != nil {
+			return err
+		}
+	}
+
+	var identityDDL []string
+	switch dialect.(type) {
+	case *db.LibSQLDialect:
+		identityDDL = db.IdentityTablesLibSQL()
+	case *db.PostgresDialect:
+		identityDDL = db.IdentityTablesPostgres()
+	default:
+		identityDDL = db.IdentityTablesMySQL()
+	}
+	for _, ddl := range identityDDL {
+		if err := execDDL(ddl, "creating identity table"); err != nil {
 			return err
 		}
 	}

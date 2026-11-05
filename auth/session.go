@@ -1322,7 +1322,12 @@ func registerAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB, mail
 			})
 		})
 	}
-	if mailer != nil && strings.TrimSpace(publicAppBaseURL) != "" {
+	magicLinkConfigured := mailer != nil && strings.TrimSpace(publicAppBaseURL) != ""
+	cloudIssuer := koraCloudIssuerFromEnv()
+	registerSignInDiscovery(auth, db, magicLinkConfigured, cloudIssuer)
+	(&OIDCLogin{PublicAppBaseURL: publicAppBaseURL, CloudIssuer: cloudIssuer}).Register(router.Group("/api/v1/auth"))
+	registerPasswordLoginRoute(auth, db, mailer, publicAppBaseURL)
+	if magicLinkConfigured {
 		registerMagicLinkRoutes(auth, db, mailer, publicAppBaseURL)
 	}
 }
@@ -1352,6 +1357,9 @@ func registerMagicLinkRoutes(auth *gin.RouterGroup, db *sql.DB, mailer MagicLink
 			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "site.not_found", "message": "Site not found."}})
 			return
 		}
+		if localSignInDisabled(c, targetDB) {
+			return
+		}
 		manager := sessionManagerForRequest(c, targetDB)
 		user, err := manager.FindUserByEmailContext(c.Request.Context(), site, emailAddr)
 		if err == nil {
@@ -1379,6 +1387,9 @@ func registerMagicLinkRoutes(auth *gin.RouterGroup, db *sql.DB, mailer MagicLink
 		}
 		if targetDB == nil || site == "" {
 			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "site.not_found", "message": "Site not found."}})
+			return
+		}
+		if localSignInDisabled(c, targetDB) {
 			return
 		}
 		manager := sessionManagerForRequest(c, targetDB)
