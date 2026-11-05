@@ -21,7 +21,7 @@ func TestInventoryPackQueries(t *testing.T) {
 		reg.Register(dt)
 	}
 	defs, err := LoadDir(filepath.Join(pack, "queries"), reg)
-	if err != nil || len(defs) != 2 {
+	if err != nil || len(defs) != 3 {
 		t.Fatalf("load %d %v", len(defs), err)
 	}
 	by := map[string]*Definition{}
@@ -35,9 +35,9 @@ func TestInventoryPackQueries(t *testing.T) {
 	conn.SetMaxOpenConns(1)
 	for _, s := range []string{
 		"CREATE TABLE `Item` (name TEXT, item_name TEXT, barcode TEXT, uom TEXT, price NUMERIC)",
-		"CREATE TABLE `Stock Balance` (name TEXT, item TEXT, location TEXT, quantity REAL)",
+		"CREATE TABLE `Stock Balance` (name TEXT, item TEXT, location TEXT, quantity REAL, reorder_level REAL)",
 		"INSERT INTO `Item` VALUES ('I1','Blue Pen','111','Each',1.5),('I2','Red Pen','222','Each',2),('I3','Notebook','333','Each',5)",
-		"INSERT INTO `Stock Balance` VALUES ('B1','I1','L1',7),('B2','I1','L2',3),('B3','I2','L1',4)",
+		"INSERT INTO `Stock Balance` VALUES ('B1','I1','L1',7,5),('B2','I1','L2',3,5),('B3','I2','L1',4,4),('B4','I3','L1',0,0),('B5','I3','L2',9,10)",
 	} {
 		if _, err := conn.Exec(s); err != nil {
 			t.Fatal(err)
@@ -54,6 +54,8 @@ func TestInventoryPackQueries(t *testing.T) {
 		{"item_search", nil, 3, "I1"},
 		{"item_stock", map[string]any{"item": "I1"}, 2, "B1"},
 		{"item_stock", map[string]any{"item": "I1", "location": "L2"}, 1, "B2"},
+		{"low_stock", nil, 3, "B2"},
+		{"low_stock", map[string]any{"location": "L1"}, 1, "B3"},
 	}
 	for _, tc := range tests {
 		p, err := Run(context.Background(), conn, db.Resolve("libsql"), by[tc.query], Request{Input: tc.in, FullRead: true})

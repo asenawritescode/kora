@@ -28,10 +28,16 @@ func TestInventoryPackageValidatesAndInstalls(t *testing.T) {
 		}
 	}
 	item := reg.Get("Item")
-	for _, f := range []string{"price", "cost", "barcode", "uom", "reorder_level"} {
+	for _, f := range []string{"price", "cost", "barcode", "uom"} {
 		if item.GetField(f) == nil {
 			t.Errorf("Item missing field %s", f)
 		}
+	}
+	if item.GetField("reorder_level") != nil {
+		t.Error("Item must not have reorder_level")
+	}
+	if reg.Get("Stock Balance").GetField("reorder_level") == nil {
+		t.Error("Stock Balance missing reorder_level")
 	}
 	for _, f := range []string{"roles.yaml", "permissions.yaml"} {
 		if _, err := os.Stat(filepath.Join(root, f)); err != nil {

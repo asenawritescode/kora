@@ -1,0 +1,16 @@
+name: low_stock
+module_owner_id: inventory
+capability: inventory.stock
+operation: low_stock
+source: Stock Balance
+permission: read
+scope: tenant
+input:
+  location: {type: string, max_length: 140}
+filters:
+  - {field: reorder_level, op: gt, value: 0}
+  - {field: quantity, op: lte, value: $field.reorder_level}
+  - {field: location, op: eq, value: $input.location, optional: true}
+fields: [name, item, location, quantity, reorder_level]
+sort: [{field: item, dir: asc}]
+offline_eligible: true
