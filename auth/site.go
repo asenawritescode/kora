@@ -79,7 +79,7 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 		authHeader := c.GetHeader("Authorization")
 		if strings.HasPrefix(authHeader, "Bearer ") {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
-			if token != "" && token == os.Getenv("KORA_ENGINE_PROVISIONING_TOKEN") && ((c.Request.Method == http.MethodPost && (path == "/api/internal/channel/managed-client/rotate" || path == "/api/internal/channel/managed-client/revoke")) || (c.Request.Method == http.MethodGet && path == "/api/internal/site/identity")) {
+			if matchesEnvToken(token, "KORA_ENGINE_PROVISIONING_TOKEN") && ((c.Request.Method == http.MethodPost && (path == "/api/internal/channel/managed-client/rotate" || path == "/api/internal/channel/managed-client/revoke")) || (c.Request.Method == http.MethodGet && path == "/api/internal/site/identity")) {
 				c.Set("auth_type", "engine_provisioner")
 				c.Set("user", "kora-cloud-provisioner")
 				c.Next()
