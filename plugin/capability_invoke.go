@@ -82,7 +82,7 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 		return CapabilityOperationResult{}, contract.NewError(contract.CodePermissionDenied, "capability lease provider owner does not match the resolved binding")
 	}
 	if err := binding.validateSchema(spec.Input, payload); err != nil {
-		return CapabilityOperationResult{}, fmt.Errorf("capability input failed its registered schema: %w", err)
+		return CapabilityOperationResult{}, contract.NewError(contract.CodeValidationFailed, "capability input failed its registered schema: "+err.Error())
 	}
 	actor := execution.Actor()
 	providerContext := contract.OperationContext{Site: string(scope.TenantID), Actor: actor.PrincipalID, Scope: scope}
