@@ -38,8 +38,39 @@ type Page struct {
 
 type builder struct {
 	d    db.Dialect
+	via  bool
 	req  Request
 	args []any
+}
+
+// col renders a column reference; child sources qualify every column with
+// the child alias c, and parent.<field> with the parent alias p.
+func (b *builder) col(name string) string {
+	if !b.via {
+		return b.d.QuoteIdent(name)
+	}
+	if pf, ok := strings.CutPrefix(name, "parent."); ok {
+		return b.d.QuoteIdent("p") + "." + b.d.QuoteIdent(pf)
+	}
+	return b.d.QuoteIdent("c") + "." + b.d.QuoteIdent(name)
+}
+
+// scopeCol renders the legal-entity column, which lives on the parent for child sources.
+func (b *builder) scopeCol() string {
+	if b.via {
+		return b.col("parent." + b.req.ScopeField)
+	}
+	return b.d.QuoteIdent(b.req.ScopeField)
+}
+
+// from renders the FROM clause: the source table, or child JOIN parent for via sources.
+func (b *builder) from(d *Definition) string {
+	if d.Via == "" {
+		return b.d.QuoteIdent(sourceTable(d))
+	}
+	parent := (&doctype.DocType{Name: d.ParentDocType()}).RawTableName()
+	_, field, _ := strings.Cut(d.Via, ".")
+	return b.d.QuoteIdent(parent+"__"+field) + " " + b.d.QuoteIdent("c") + " JOIN " + b.d.QuoteIdent(parent) + " " + b.d.QuoteIdent("p") + " ON " + b.col("parent") + " = " + b.col("parent.name")
 }
 
 func (b *builder) bind(v any) string { b.args = append(b.args, v); return "?" }
@@ -73,13 +104,13 @@ func (b *builder) leaf(f Filter) (string, bool, error) {
 		if !ok {
 			return "", false, fmt.Errorf("%s: $field needs a comparison operator", ErrInputInvalid)
 		}
-		return b.d.QuoteIdent(f.Field) + " " + op + " " + b.d.QuoteIdent(strings.TrimPrefix(s, "$field.")), true, nil
+		return b.col(f.Field) + " " + op + " " + b.col(strings.TrimPrefix(s, "$field.")), true, nil
 	}
 	v, present, err := b.value(f.Value)
 	if err != nil {
 		return "", false, err
 	}
-	col := b.d.QuoteIdent(f.Field)
+	col := b.col(f.Field)
 	if f.Op == "is_null" {
 		return col + " IS NULL", true, nil
 	}
@@ -142,13 +173,13 @@ func (b *builder) keyset(sorts []Sort) (string, error) {
 	for i, s := range sorts {
 		var and []string
 		for j := 0; j < i; j++ {
-			and = append(and, b.d.QuoteIdent(sorts[j].Field)+" = "+b.bind(b.req.Cursor[j]))
+			and = append(and, b.col(sorts[j].Field)+" = "+b.bind(b.req.Cursor[j]))
 		}
 		op := ">"
 		if s.Dir == "desc" {
 			op = "<"
 		}
-		and = append(and, b.d.QuoteIdent(s.Field)+" "+op+" "+b.bind(b.req.Cursor[i]))
+		and = append(and, b.col(s.Field)+" "+op+" "+b.bind(b.req.Cursor[i]))
 		ors = append(ors, "("+strings.Join(and, " AND ")+")")
 	}
 	return "(" + strings.Join(ors, " OR ") + ")", nil
@@ -158,7 +189,7 @@ func (b *builder) keyset(sorts []Sort) (string, error) {
 // The sort list always ends with name for a stable keyset; the last
 // len(sort) selected columns are cursor values.
 func Build(d *Definition, dialect db.Dialect, req Request) (string, []any, []Sort, error) {
-	b := &builder{d: dialect, req: req}
+	b := &builder{d: dialect, req: req, via: d.Via != ""}
 	if len(d.Aggregates) > 0 {
 		return buildAggregate(b, d)
 	}
@@ -166,10 +197,10 @@ func Build(d *Definition, dialect db.Dialect, req Request) (string, []any, []Sor
 	sorts = append(sorts, Sort{Field: "name", Dir: "asc"})
 	cols := make([]string, 0, len(d.Fields)+len(sorts))
 	for _, f := range d.Fields {
-		cols = append(cols, dialect.QuoteIdent(f))
+		cols = append(cols, b.col(f))
 	}
 	for _, s := range sorts {
-		cols = append(cols, dialect.QuoteIdent(s.Field))
+		cols = append(cols, b.col(s.Field))
 	}
 	var where []string
 	for _, f := range d.Filters {
@@ -185,7 +216,7 @@ func Build(d *Definition, dialect db.Dialect, req Request) (string, []any, []Sor
 		where = append(where, dialect.QuoteIdent(d.OwnerField)+" = "+b.bind(req.Actor))
 	}
 	if req.ScopeField != "" {
-		where = append(where, dialect.QuoteIdent(req.ScopeField)+" = "+b.bind(req.ScopeValue))
+		where = append(where, b.scopeCol()+" = "+b.bind(req.ScopeValue))
 	}
 	if req.Cursor != nil {
 		k, err := b.keyset(sorts)
@@ -196,9 +227,9 @@ func Build(d *Definition, dialect db.Dialect, req Request) (string, []any, []Sor
 	}
 	order := make([]string, len(sorts))
 	for i, s := range sorts {
-		order[i] = dialect.QuoteIdent(s.Field) + " " + strings.ToUpper(orDefault(s.Dir, "asc"))
+		order[i] = b.col(s.Field) + " " + strings.ToUpper(orDefault(s.Dir, "asc"))
 	}
-	q := "SELECT " + strings.Join(cols, ", ") + " FROM " + dialect.QuoteIdent(sourceTable(d))
+	q := "SELECT " + strings.Join(cols, ", ") + " FROM " + b.from(d)
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -267,14 +298,14 @@ func buildAggregate(b *builder, d *Definition) (string, []any, []Sort, error) {
 	q := b.d
 	var cols, group []string
 	for _, g := range d.GroupBy {
-		cols = append(cols, q.QuoteIdent(g))
-		group = append(group, q.QuoteIdent(g))
+		cols = append(cols, b.col(g))
+		group = append(group, b.col(g))
 	}
 	for _, a := range d.Aggregates {
 		if a.Fn == "count" {
 			cols = append(cols, "COUNT(*)")
 		} else {
-			cols = append(cols, "COALESCE(SUM("+q.QuoteIdent(a.Field)+"), 0)")
+			cols = append(cols, "COALESCE(SUM("+b.col(a.Field)+"), 0)")
 		}
 	}
 	var where []string
@@ -291,9 +322,9 @@ func buildAggregate(b *builder, d *Definition) (string, []any, []Sort, error) {
 		where = append(where, q.QuoteIdent(d.OwnerField)+" = "+b.bind(b.req.Actor))
 	}
 	if b.req.ScopeField != "" {
-		where = append(where, q.QuoteIdent(b.req.ScopeField)+" = "+b.bind(b.req.ScopeValue))
+		where = append(where, b.scopeCol()+" = "+b.bind(b.req.ScopeValue))
 	}
-	sql := "SELECT " + strings.Join(cols, ", ") + " FROM " + q.QuoteIdent(sourceTable(d))
+	sql := "SELECT " + strings.Join(cols, ", ") + " FROM " + b.from(d)
 	if len(where) > 0 {
 		sql += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -306,7 +337,7 @@ func buildAggregate(b *builder, d *Definition) (string, []any, []Sort, error) {
 	if len(group) > 0 {
 		order := make([]string, len(sorts))
 		for i, s := range sorts {
-			order[i] = q.QuoteIdent(s.Field) + " " + strings.ToUpper(orDefault(s.Dir, "asc"))
+			order[i] = b.col(s.Field) + " " + strings.ToUpper(orDefault(s.Dir, "asc"))
 		}
 		sql += " GROUP BY " + strings.Join(group, ", ") + " ORDER BY " + strings.Join(order, ", ")
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/query"
 )
@@ -98,5 +99,21 @@ func TestConfigQueryExecutorPagesWithCursor(t *testing.T) {
 	own.OwnerField = "title"
 	if _, err := (&configQueryExecutor{db: database, dialect: db.Resolve("libsql"), def: &own}).ExecutePublishedQuery(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, json.RawMessage(`{}`), "", 2); err == nil {
 		t.Fatal("owner-restricted query ran without actor scope")
+	}
+}
+
+func TestConfigQueryProvidersChildSourceUsesParent(t *testing.T) {
+	schemas := publishedQueryTestSchemas{{ID: "cq.input", Version: 1}: true, {ID: "cq.output", Version: 1}: true}
+	for _, scopeField := range []string{"", "entity"} {
+		reg := doctype.NewRegistry()
+		reg.Register(&doctype.DocType{Name: "Sale", BusinessScopeField: scopeField})
+		def, module := configQueryFixture()
+		def.Via, def.Scope = "Sale.payments", "legal_entity"
+		module.Queries[0].ScopePolicy = contract.ScopeEntityOwned
+		_, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), reg, []contract.ModuleDescriptor{module}, []*query.Definition{def}, schemas)
+		src, _ := reg.QuerySource("module.cq.owner.query.list")
+		if (scopeField == "") != (err != nil) || (err == nil && src != "Sale") {
+			t.Fatalf("scope %q: src=%q err=%v", scopeField, src, err)
+		}
 	}
 }
