@@ -161,7 +161,7 @@ func (g *SiteGuard) authenticateChannelSession(c *gin.Context, token string) boo
 		return false
 	}
 
-	session, err := AuthenticateChannelSession(sqlDB, token)
+	session, err := AuthenticateChannelSession(sqlDB, kdb.Resolve(c.GetString("site_db_type")), token)
 	if err != nil {
 		return false
 	}

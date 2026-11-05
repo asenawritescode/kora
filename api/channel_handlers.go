@@ -70,7 +70,7 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 	if clientName == "" {
 		clientName = c.GetString("extension_name")
 	}
-	token, session, err := auth.CreateChannelSession(h.queryDB(c), auth.ChannelSessionCreateParams{
+	token, session, err := auth.CreateChannelSession(h.queryDB(c), h.siteDialect(c), auth.ChannelSessionCreateParams{
 		Site:            siteNameStr,
 		ClientName:      clientName,
 		ConversationKey: req.ConversationKey,
@@ -417,7 +417,7 @@ func (h *Handler) HandleChannelSessionRevoke(c *gin.Context) {
 	if reason == "" {
 		reason = "revoked_by_client"
 	}
-	if err := auth.RevokeChannelSession(h.queryDB(c), req.SessionID, reason); err != nil {
+	if err := auth.RevokeChannelSession(h.queryDB(c), h.siteDialect(c), req.SessionID, reason); err != nil {
 		internalError(c, "revoke channel session", err)
 		return
 	}
