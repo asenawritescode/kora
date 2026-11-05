@@ -1,6 +1,11 @@
 name: return_sale
 namespace: pos
 version: 1
+module_owner_id: pos.core
+capability: pos.checkout
+operation: return_sale
+presentation:
+  title: Return sale
 permission: create
 input:
   record: Sale

@@ -15,6 +15,11 @@ func TestPOSRolePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	invPerms, err := ParsePermissionsFile(filepath.Join("..", "config", "inventory", "permissions.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms = append(perms, invPerms...)
 	pm := NewPermissionMatrix()
 	for _, r := range roles {
 		pm.AddRole(r)
@@ -45,6 +50,34 @@ func TestPOSRolePermissions(t *testing.T) {
 			t.Errorf("%s %s %s = %v, want %v", tc.role, tc.op, tc.dt, got, tc.want)
 		}
 	}
+	posOps := []string{"open_shift", "close_shift", "open_till", "close_till", "record_sale", "return_sale", "void_sale"}
+	invOps := []string{"receive_stock", "adjust_stock"}
+	posQ := []string{"open_till", "payments_by_method", "recent_sales", "today_totals"}
+	invQ := []string{"item_search", "item_stock", "low_stock"}
+	grant := func(role, owner, kind string, names []string, op string, want bool) {
+		for _, n := range names {
+			if got := pm.Can(role, "module."+owner+"."+kind+"."+n, op); got != want {
+				t.Errorf("%s %s module.%s.%s.%s = %v, want %v", role, op, owner, kind, n, got, want)
+			}
+		}
+	}
+	grant("Owner", "pos.core", "operation", posOps, "write", true)
+	grant("Owner", "pos.core", "query", posQ, "read", true)
+	grant("Owner", "inventory.core", "operation", invOps, "write", true)
+	grant("Owner", "inventory.core", "query", invQ, "read", true)
+	grant("Manager", "pos.core", "operation", posOps, "write", true)
+	grant("Manager", "pos.core", "query", posQ, "read", true)
+	grant("Manager", "inventory.core", "query", invQ, "read", true)
+	grant("Manager", "inventory.core", "operation", invOps, "write", false)
+	grant("Cashier", "pos.core", "operation", posOps, "write", true)
+	grant("Cashier", "pos.core", "query", []string{"open_till"}, "read", true)
+	grant("Cashier", "pos.core", "query", []string{"recent_sales", "today_totals", "payments_by_method"}, "read", false)
+	grant("Cashier", "inventory.core", "query", []string{"item_search"}, "read", true)
+	grant("Cashier", "inventory.core", "query", []string{"item_stock", "low_stock"}, "read", false)
+	grant("Cashier", "inventory.core", "operation", invOps, "write", false)
+	grant("Inventory Manager", "inventory.core", "operation", invOps, "write", true)
+	grant("Inventory Manager", "inventory.core", "query", invQ, "read", true)
+	grant("Inventory Manager", "pos.core", "operation", posOps, "write", false)
 	for _, n := range []string{"Cashier", "Manager", "Owner"} {
 		if pm.GetRole(n) == nil {
 			t.Errorf("missing role %s", n)

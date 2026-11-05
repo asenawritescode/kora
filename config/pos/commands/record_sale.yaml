@@ -1,6 +1,14 @@
 name: record_sale
 namespace: pos
 version: 1
+module_owner_id: pos.core
+capability: pos.checkout
+operation: record_sale
+offline_eligible: true
+presentation:
+  title: Record sale
+  layout: line_entry
+  line_entry: {lines_path: items, lookup_query: inventory.core~inventory.items~item_search, lookup_input: term, item_map: {item: name, unit_price: price}, quantity_field: quantity, amount_expr: "quantity * unit_price", total_output: total}
 permission: create
 input:
   record: Sale

@@ -1,6 +1,11 @@
 name: close_till
 namespace: pos
 version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: close_till
+presentation:
+  title: Close till
 permission: write
 input:
   record: Till Session

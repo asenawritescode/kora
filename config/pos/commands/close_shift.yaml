@@ -1,6 +1,11 @@
 name: close_shift
 namespace: pos
 version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: close_shift
+presentation:
+  title: Close shift
 permission: write
 input:
   record: Shift

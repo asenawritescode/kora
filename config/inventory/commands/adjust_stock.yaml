@@ -1,6 +1,11 @@
 name: adjust_stock
 namespace: inventory
 version: 1
+module_owner_id: inventory.core
+capability: inventory.movements
+operation: adjust_stock
+presentation:
+  title: Adjust stock
 permission: create
 input:
   record: Stock Entry
