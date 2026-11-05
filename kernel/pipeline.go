@@ -231,12 +231,15 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 			}
 			if operation == "create" {
 				recordDT := reg.Get(item.Doctype)
-				prefix := orm.DerivePrefix(recordDT.Name)
-				nextNumber, allocationErr := k.dialect().AllocateNameNumber(dbTx, recordDT.Name, prefix, recordDT.RawTableName())
+				name, _, allocationErr := orm.AllocateDocumentName(dbTx, k.dialect(), recordDT, orm.DocumentValues(item.Data), time.Now().UTC())
 				if allocationErr != nil {
+					var validation *doctype.ValidationError
+					if errors.As(allocationErr, &validation) {
+						return nil, contract.NewError(contract.CodeValidationFailed, validation.Message)
+					}
 					return nil, contract.NewError(contract.CodeDependencyUnavailable, "allocate bundle record name failed")
 				}
-				recordNames[item.Key] = fmt.Sprintf("%s-%04d", prefix, nextNumber)
+				recordNames[item.Key] = name
 			} else {
 				name, resolveErr := resolveBundleName(item.Name, recordNames)
 				if resolveErr != nil {
