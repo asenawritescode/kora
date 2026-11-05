@@ -2511,6 +2511,43 @@
       ],
       "type": "object"
     },
+    "LineEntryLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "amount_expr": {
+          "type": "string"
+        },
+        "item_map": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "lines_path": {
+          "type": "string"
+        },
+        "lookup_input": {
+          "type": "string"
+        },
+        "lookup_query": {
+          "type": "string"
+        },
+        "quantity_field": {
+          "type": "string"
+        },
+        "total_output": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "item_map",
+        "lines_path",
+        "lookup_input",
+        "lookup_query",
+        "quantity_field"
+      ],
+      "type": "object"
+    },
     "LookupPublishedOperation": {
       "additionalProperties": false,
       "properties": {
@@ -5602,6 +5639,13 @@
         "icon": {
           "type": "string"
         },
+        "layout": {
+          "type": "string"
+        },
+        "line_entry": {
+          "$ref": "#/$defs/LineEntryLayout",
+          "x-optional-pointer": true
+        },
         "list": {
           "type": "string"
         },
@@ -8448,6 +8492,43 @@
         "package_id",
         "release_id",
         "version"
+      ],
+      "type": "object"
+    },
+    "LineEntryLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "amount_expr": {
+          "type": "string"
+        },
+        "item_map": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "lines_path": {
+          "type": "string"
+        },
+        "lookup_input": {
+          "type": "string"
+        },
+        "lookup_query": {
+          "type": "string"
+        },
+        "quantity_field": {
+          "type": "string"
+        },
+        "total_output": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "item_map",
+        "lines_path",
+        "lookup_input",
+        "lookup_query",
+        "quantity_field"
       ],
       "type": "object"
     },
@@ -11521,6 +11602,13 @@
         },
         "icon": {
           "type": "string"
+        },
+        "layout": {
+          "type": "string"
+        },
+        "line_entry": {
+          "$ref": "#/$defs/LineEntryLayout",
+          "x-optional-pointer": true
         },
         "list": {
           "type": "string"

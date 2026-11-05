@@ -790,6 +790,9 @@ func ResolveModules(scope contract.BusinessScope, modules []contract.ModuleDescr
 	if err != nil {
 		return BindingPlan{}, fmt.Errorf("validate installed module extensions before binding: %w", err)
 	}
+	if err := validateLineEntryLayouts(modules); err != nil {
+		return BindingPlan{}, err
+	}
 	plan := BindingPlan{Revision: revision, Extensions: extensions, Queries: make(map[PublishedQueryKey]ResolvedPublishedQuery), QueryDefinitions: make(map[PublishedQueryKey]contract.PublishedQuery), Projections: make(map[PublishedProjectionKey]contract.ProjectionDefinition), ProjectionScopes: make(map[PublishedProjectionKey]contract.ResourceScopeKind)}
 	selected := map[BindingKey]string{}
 	declaredSelections := make(map[BindingKey]bool)
@@ -1175,4 +1178,48 @@ func moduleDeclaresOffer(module contract.ModuleDescriptor, offer contract.Capabi
 		}
 	}
 	return false
+}
+
+// validateLineEntryLayouts resolves each line_entry lookup query across modules.
+func validateLineEntryLayouts(modules []contract.ModuleDescriptor) error {
+	queries := map[string]contract.PublishedQuery{}
+	for _, m := range modules {
+		for _, q := range m.Queries {
+			queries[contract.PublishedOperationRef(q.OwnerModuleID, q.Capability, q.Operation)] = q
+		}
+	}
+	for _, m := range modules {
+		schemas := map[contract.SchemaRef]json.RawMessage{}
+		for _, s := range m.Schemas {
+			schemas[s.Ref] = s.Schema
+		}
+		for _, po := range m.PublishedOperations {
+			le := po.Presentation.LineEntry
+			if po.Presentation.Layout != "line_entry" || le == nil {
+				continue
+			}
+			q, ok := queries[le.LookupQuery]
+			if !ok || q.ScopePolicy != po.ScopePolicy && q.ScopePolicy != contract.ScopeEntityOwned {
+				return fmt.Errorf("%s: module %q operation %q lookup_query is missing or has a wider scope", contract.ErrLayoutInvalid, m.ID, po.Name)
+			}
+			var op *contract.OperationSpec
+			for _, offer := range m.Provides {
+				if offer.Name != po.Capability {
+					continue
+				}
+				for i := range offer.Operations {
+					if offer.Operations[i].Name == po.Operation {
+						op = &offer.Operations[i]
+					}
+				}
+			}
+			if op == nil {
+				return fmt.Errorf("%s: module %q operation %q is not declared", contract.ErrLayoutInvalid, m.ID, po.Name)
+			}
+			if err := le.Validate(schemas[op.Input], schemas[op.Output], q.AllowedFields); err != nil {
+				return fmt.Errorf("module %q operation %q: %w", m.ID, po.Name, err)
+			}
+		}
+	}
+	return nil
 }

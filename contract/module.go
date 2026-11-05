@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/asenawritescode/kora/expression"
 	"regexp"
 	"sort"
 	"strings"
@@ -536,6 +537,83 @@ type SurfacePresentation struct {
 	Icon        string `json:"icon,omitempty"`
 	Form        string `json:"form,omitempty"`
 	List        string `json:"list,omitempty"`
+	// Layout is "", "form" or "line_entry". Clients ignore unknown values as form.
+	Layout    string           `json:"layout,omitempty"`
+	LineEntry *LineEntryLayout `json:"line_entry,omitempty"`
+}
+
+// LineEntryLayout hints that an operation renders as search, add, adjust, submit.
+//
+//contract:wire:v2
+type LineEntryLayout struct {
+	LinesPath     string            `json:"lines_path"`
+	LookupQuery   string            `json:"lookup_query"`
+	LookupInput   string            `json:"lookup_input"`
+	ItemMap       map[string]string `json:"item_map"`
+	QuantityField string            `json:"quantity_field"`
+	AmountExpr    string            `json:"amount_expr,omitempty"`
+	TotalOutput   string            `json:"total_output,omitempty"`
+}
+
+// ErrLayoutInvalid is the stable code for rejected layout hints.
+const ErrLayoutInvalid = "catalog.layout_invalid"
+
+// Validate checks the hint against the operation schemas and the lookup
+// query's published fields. Cross-module query resolution is the caller's job.
+func (l LineEntryLayout) Validate(inputSchema, outputSchema json.RawMessage, lookupFields []string) error {
+	bad := func(format string, args ...any) error {
+		return fmt.Errorf(ErrLayoutInvalid+": "+format, args...)
+	}
+	type prop struct {
+		Type  string `json:"type"`
+		Items *struct {
+			Type       string          `json:"type"`
+			Properties map[string]prop `json:"properties"`
+		} `json:"items"`
+	}
+	var in, out struct {
+		Properties map[string]prop `json:"properties"`
+	}
+	if json.Unmarshal(inputSchema, &in) != nil || json.Unmarshal(outputSchema, &out) != nil {
+		return bad("operation schemas are not objects")
+	}
+	lines, ok := in.Properties[l.LinesPath]
+	if !ok || lines.Type != "array" || lines.Items == nil || lines.Items.Type != "object" {
+		return bad("lines_path must be an array of objects in the input schema")
+	}
+	lineProps := lines.Items.Properties
+	if !validModuleName(l.LookupInput) || len(l.ItemMap) == 0 || len(l.ItemMap) > 32 {
+		return bad("lookup_input and item_map are required")
+	}
+	fields := map[string]bool{}
+	for _, f := range lookupFields {
+		fields[f] = true
+	}
+	for line, field := range l.ItemMap {
+		if _, ok := lineProps[line]; !ok || !fields[field] {
+			return bad("item_map %q -> %q is not in the line schema and lookup allowed fields", line, field)
+		}
+	}
+	if q := lineProps[l.QuantityField].Type; q != "number" && q != "integer" {
+		return bad("quantity_field must be numeric")
+	}
+	if l.AmountExpr != "" {
+		parsed, err := expression.Parse(l.AmountExpr, 64, 8)
+		if err != nil {
+			return bad("amount_expr: %v", err)
+		}
+		for _, dep := range parsed.Deps {
+			if _, ok := lineProps[dep]; !ok {
+				return bad("amount_expr uses non-line field %q", dep)
+			}
+		}
+	}
+	if l.TotalOutput != "" {
+		if _, ok := out.Properties[l.TotalOutput]; !ok {
+			return bad("total_output is not in the operation output")
+		}
+	}
+	return nil
 }
 
 func PublishedOperationRef(owner ModuleID, capability CapabilityName, operation string) string {
@@ -558,6 +636,18 @@ func PublishedOperationIntentKey(scope BusinessScope, operationRef string, key I
 }
 
 func validateSurfacePresentation(p SurfacePresentation) error {
+	switch p.Layout {
+	case "", "form":
+		if p.LineEntry != nil {
+			return fmt.Errorf("%s: line_entry requires layout line_entry", ErrLayoutInvalid)
+		}
+	case "line_entry":
+		if p.LineEntry == nil || !validModuleName(p.LineEntry.LinesPath) || p.LineEntry.LookupQuery == "" || len(p.LineEntry.LookupQuery) > 256 {
+			return fmt.Errorf("%s: line_entry layout is incomplete", ErrLayoutInvalid)
+		}
+	default:
+		return fmt.Errorf("%s: unknown layout", ErrLayoutInvalid)
+	}
 	for _, value := range []struct {
 		name  string
 		value string
