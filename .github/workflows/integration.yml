@@ -14,66 +14,39 @@ jobs:
   mysql:
     name: Integration (MySQL)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     services:
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_ROOT_PASSWORD: kora123
+          # Matches the local test fixtures, some of which also dial port 3312.
+          MYSQL_ROOT_PASSWORD: kora-test-only
         ports:
           - 3306:3306
+          - 3312:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -pkora123"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pkora-test-only"
           --health-interval=5s --health-timeout=5s --health-retries=30
     env:
-      ROOT: "root:kora123@tcp(127.0.0.1:3306)"
-      OPTS: "parseTime=true&multiStatements=true"
+      MYSQL_ROOT_PASSWORD: kora-test-only
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-
       - name: Prepare embed
         run: mkdir -p workspace/dist && touch workspace/dist/index.html
-
-      # Server-level DSNs: these tests create and drop their own databases.
-      # Database-level DSNs: each suite gets its own database so packages cannot collide.
-      - name: Create one database per suite and export DSNs
-        run: |
-          set -euo pipefail
-          for v in KORA_TEST_DSN KORA_ANALYTICS_DISPOSABLE_MYSQL_DSN KORA_OUTBOX_DISPOSABLE_MYSQL_DSN \
-                   KORA_CONFIG_DISPOSABLE_MYSQL_DSN KORA_ENGINE_MODULE_COMMAND_DISPOSABLE_MYSQL_DSN \
-                   KORA_API_LIVE_MYSQL_DSN KORA_REQUEST_ISOLATION_DISPOSABLE_DSN; do
-            echo "$v=${ROOT}/?${OPTS}" >> "$GITHUB_ENV"
-          done
-          for v in KORA_AI_INVENTORY_DISPOSABLE_MYSQL_DSN KORA_AI_LIVE_MYSQL_DSN KORA_AI_MUTATION_MYSQL_DSN \
-                   KORA_ASYNC_HOOK_DISPOSABLE_MYSQL_DSN KORA_CRM_DISPOSABLE_MYSQL_DSN KORA_DBACCESS_DISPOSABLE_MYSQL_DSN \
-                   KORA_DURABLE_SCAN_DISPOSABLE_MYSQL_DSN KORA_ENGINE_HOOK_DISPOSABLE_MYSQL_DSN \
-                   KORA_ENGINE_WORKFLOW_DISPOSABLE_MYSQL_DSN KORA_MANAGEMENT_DISPOSABLE_MYSQL_DSN \
-                   KORA_MANAGEMENT_PROVISION_DISPOSABLE_MYSQL_DSN KORA_MCP_READ_MYSQL_DSN \
-                   KORA_PROCESS_DISPOSABLE_MYSQL_DSN KORA_PUBLISHED_QUERY_DISPOSABLE_MYSQL_DSN \
-                   KORA_RECON_DISPOSABLE_MYSQL_DSN KORA_SCHEDULER_DISPOSABLE_MYSQL_DSN \
-                   KORA_SITE_CONFIG_VERSION_DISPOSABLE_MYSQL_DSN KORA_SITE_DIRECTORY_LIVE_MYSQL_DSN \
-                   KORA_TODO_DISPOSABLE_MYSQL_DSN KORA_WORKFLOW_DISPOSABLE_MYSQL_DSN; do
-            db="it_$(echo "$v" | tr 'A-Z' 'a-z' | sed 's/^kora_//; s/_dsn$//')"
-            mysql -h 127.0.0.1 -uroot -pkora123 -e "CREATE DATABASE \`$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-            echo "$v=${ROOT}/${db}?${OPTS}" >> "$GITHUB_ENV"
-          done
-
       - name: Test (MySQL)
-        run: |
-          set -o pipefail
-          go test -tags integration -p 1 -count=1 -timeout 40m ./... 2>&1 | tee test.log
+        run: scripts/ci-integration.sh mysql 2>&1 | tee test.log
+        shell: bash -o pipefail {0}
       - name: Summarize failures
         if: failure()
-        run: grep -E '^(--- FAIL|FAIL|panic:)' test.log | head -100 || true
+        run: grep -E 'FAIL|panic:|_test\.go:[0-9]+:' test.log | head -150 || true
 
   postgres:
     name: Integration (Postgres)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16
@@ -87,40 +60,18 @@ jobs:
           --health-cmd="pg_isready -U kora -d kora"
           --health-interval=5s --health-timeout=5s --health-retries=30
     env:
+      PGUSER: kora
       PGPASSWORD: kora123
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-
       - name: Prepare embed
         run: mkdir -p workspace/dist && touch workspace/dist/index.html
-
-      - name: Create one database per suite and export DSNs
-        run: |
-          set -euo pipefail
-          for v in KORA_AI_INVENTORY_DISPOSABLE_POSTGRES_DSN KORA_AI_MUTATION_POSTGRES_DSN \
-                   KORA_ANALYTICS_DISPOSABLE_POSTGRES_DSN KORA_API_DISPOSABLE_POSTGRES_DSN KORA_API_LIVE_POSTGRES_DSN \
-                   KORA_ASYNC_HOOK_DISPOSABLE_POSTGRES_DSN KORA_CONFIG_DISPOSABLE_POSTGRES_DSN \
-                   KORA_CONFIG_REVISION_DISPOSABLE_POSTGRES_DSN KORA_DBACCESS_DISPOSABLE_POSTGRES_DSN \
-                   KORA_DURABLE_SCAN_DISPOSABLE_POSTGRES_DSN KORA_ENGINE_HOOK_DISPOSABLE_POSTGRES_DSN \
-                   KORA_MANAGEMENT_DISPOSABLE_POSTGRES_DSN KORA_MANAGEMENT_PROVISION_DISPOSABLE_POSTGRES_DSN \
-                   KORA_NOTIFICATIONS_DISPOSABLE_POSTGRES_DSN KORA_OUTBOX_DISPOSABLE_POSTGRES_DSN \
-                   KORA_PROCESS_DISPOSABLE_POSTGRES_DSN KORA_RECON_DISPOSABLE_POSTGRES_DSN \
-                   KORA_REQUESTS_DISPOSABLE_POSTGRES_DSN KORA_SCHEDULER_DISPOSABLE_POSTGRES_DSN \
-                   KORA_SECRET_LIVE_POSTGRES_DSN KORA_SITE_DIRECTORY_LIVE_POSTGRES_DSN \
-                   KORA_SITE_DIRECTORY_SUMMARY_POSTGRES_DSN KORA_WORKFLOW_DISPOSABLE_POSTGRES_DSN; do
-            db="it_$(echo "$v" | tr 'A-Z' 'a-z' | sed 's/^kora_//; s/_dsn$//')"
-            psql -h 127.0.0.1 -U kora -d kora -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$db\""
-            echo "$v=postgres://kora:kora123@127.0.0.1:5432/${db}?sslmode=disable" >> "$GITHUB_ENV"
-          done
-
       - name: Test (Postgres)
-        run: |
-          set -o pipefail
-          go test -tags integration -p 1 -count=1 -timeout 40m ./... 2>&1 | tee test.log
+        run: scripts/ci-integration.sh postgres 2>&1 | tee test.log
+        shell: bash -o pipefail {0}
       - name: Summarize failures
         if: failure()
-        run: grep -E '^(--- FAIL|FAIL|panic:)' test.log | head -100 || true
+        run: grep -E 'FAIL|panic:|_test\.go:[0-9]+:' test.log | head -150 || true
