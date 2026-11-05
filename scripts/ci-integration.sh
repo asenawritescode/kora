@@ -43,7 +43,7 @@ postgres_db_vars=(
 
 db_name() { echo "it_$(echo "$1" | tr 'A-Z' 'a-z' | sed 's/^kora_//; s/_dsn$//')"; }
 
-mysql_root=(mysql -h 127.0.0.1 -P 3306 -uroot -p"${MYSQL_ROOT_PASSWORD:?}")
+mysql_root=(mysql -h 127.0.0.1 -P 3306 -uroot -p"${MYSQL_ROOT_PASSWORD:-}")
 mysql_opts="parseTime=true&multiStatements=true"
 
 reset_databases() {
