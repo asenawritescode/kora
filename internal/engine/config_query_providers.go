@@ -116,7 +116,7 @@ func matchConfigQuery(def *query.Definition, q contract.PublishedQuery) error {
 		wantScope = contract.ScopeEntityOwned
 	}
 	switch {
-	case !slices.Equal(q.AllowedFields, def.Fields):
+	case !slices.Equal(q.AllowedFields, def.OutputFields()):
 		return fmt.Errorf("query.mismatch: config query %q fields differ from descriptor allowed_fields", def.Name)
 	case int(q.PageLimit) != def.Limit:
 		return fmt.Errorf("query.mismatch: config query %q limit %d differs from descriptor page_limit %d", def.Name, def.Limit, q.PageLimit)

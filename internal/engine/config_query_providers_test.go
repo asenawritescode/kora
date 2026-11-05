@@ -12,6 +12,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/query"
+	"github.com/asenawritescode/kora/site"
 )
 
 func configQueryFixture() (*query.Definition, contract.ModuleDescriptor) {
@@ -148,5 +149,34 @@ func TestRegisteredConfigQueryProvidersLenientSkips(t *testing.T) {
 				t.Fatalf("no modules: %+v err=%v", none, err)
 			}
 		})
+	}
+}
+
+func TestGeneratedPackModulesRegisterEveryQuery(t *testing.T) {
+	defs := []*query.Definition{
+		{Name: "recent", ModuleOwnerID: "shop.core", Capability: "shop.sales", Operation: "recent", Source: "Sale", Scope: "tenant", Fields: []string{"name", "total"}, Limit: 20},
+		{Name: "by_method", ModuleOwnerID: "shop.core", Capability: "shop.sales", Operation: "by_method", Source: "Sale", Scope: "tenant", GroupBy: []string{"method"}, Aggregates: []query.Aggregate{{Name: "total", Fn: "sum", Field: "amount"}}, Limit: 50},
+	}
+	snap := &doctype.ConfigSnapshot{}
+	for _, d := range defs {
+		raw, _ := json.Marshal(d)
+		snap.Queries = append(snap.Queries, raw)
+	}
+	modules, err := site.GeneratePackModules(contract.PackManifest{Name: "shop", Version: "1"}, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemas := publishedQueryTestSchemas{}
+	for _, m := range modules {
+		for _, s := range m.Schemas {
+			schemas[s.Ref] = true
+		}
+	}
+	providers, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), nil, modules, defs, schemas, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(providers) != 1 || len(providers[0].Queries) != 2 {
+		t.Fatalf("registered %+v", providers)
 	}
 }
