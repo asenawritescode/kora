@@ -1070,6 +1070,15 @@ func registerManagementRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		configHistory.GET("/diff", handler.HandleConfigDiff)
 	}
 
+	signIn := apiGroup.Group("/system/auth", adminOnly())
+	{
+		signIn.GET("/providers", handler.HandleAuthProviderList)
+		signIn.PUT("/providers/:id", handler.HandleAuthProviderPut)
+		signIn.DELETE("/providers/:id", handler.HandleAuthProviderDelete)
+		signIn.GET("/policy", handler.HandleAuthPolicy)
+		signIn.PUT("/policy", handler.HandleAuthPolicyUpdate)
+	}
+
 	ext := apiGroup.Group("/system/extension", adminOnly())
 	{
 		ext.GET("", handler.HandleExtensionList)
