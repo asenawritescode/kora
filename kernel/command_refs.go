@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -67,6 +68,9 @@ func resolveEnvRef(ref string, env refEnv) (any, error) {
 	}
 }
 
+// errRefAbsent marks a ref whose key is missing; step values skip it.
+var errRefAbsent = errors.New("reference missing")
+
 func walkRef(ref string, root map[string]any, path string) (any, error) {
 	cur := any(root)
 	for _, part := range strings.Split(path, ".") {
@@ -76,7 +80,7 @@ func walkRef(ref string, root map[string]any, path string) (any, error) {
 		}
 		cur, ok = m[part]
 		if !ok {
-			return nil, fmt.Errorf("reference %q missing in input", ref)
+			return nil, fmt.Errorf("reference %q missing in input: %w", ref, errRefAbsent)
 		}
 	}
 	return cur, nil
