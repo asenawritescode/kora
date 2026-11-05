@@ -81,7 +81,7 @@ func registerSignInDiscovery(group *gin.RouterGroup, db *sql.DB, magicLinkConfig
 			}
 			result.Providers = append(result.Providers, SignInOption{
 				ID: provider.ID, Type: "oidc", DisplayName: provider.DisplayName,
-				StartURL: "/api/auth/oidc/" + provider.ID + "/start",
+				StartURL: "/api/v1/auth/oidc/" + provider.ID + "/start",
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"data": result})

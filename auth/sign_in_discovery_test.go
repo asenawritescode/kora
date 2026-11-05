@@ -53,7 +53,7 @@ func TestSignInDiscoveryListsOnlyEnabledProviders(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.Data.MagicLink || len(body.Data.Providers) != 1 || body.Data.Providers[0].ID != "kora-cloud" || body.Data.Providers[0].StartURL != "/api/auth/oidc/kora-cloud/start" {
+	if !body.Data.MagicLink || len(body.Data.Providers) != 1 || body.Data.Providers[0].ID != "kora-cloud" || body.Data.Providers[0].StartURL != "/api/v1/auth/oidc/kora-cloud/start" {
 		t.Fatalf("discovery = %+v", body.Data)
 	}
 	if strings.Contains(response.Body.String(), "client") || strings.Contains(response.Body.String(), "issuer") {
