@@ -134,6 +134,9 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 			t.Fatal(err)
 		}
 		for _, d := range defs {
+			// The module generator seals these at install; stub them here.
+			d.InputSchema = contract.SchemaRef{ID: "pos.e2e." + d.Name + ".in", Version: 1}
+			d.OutputSchema = contract.SchemaRef{ID: "pos.e2e." + d.Name + ".out", Version: 1}
 			if err := cmds.Register(d); err != nil {
 				t.Fatal(err)
 			}
@@ -141,19 +144,32 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	}
 	k := kernel.New(dialect, outbox.NewSQLWriter(dialect))
 	k.Commands = cmds
+	k.CommandSchemas = allowAllPOSSchemas{}
 
 	actor := contract.ActorContext{PrincipalID: "Administrator", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now()}
 	execution, err := policy.NewVerifiedExecution(contract.TenantID(siteName), actor)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// POS commands run through the published-operation route: a sealed
+	// module execution for the command, as the module router builds it.
+	scope := contract.BusinessScope{TenantID: contract.TenantID(siteName), Kind: contract.ScopeKindTenant}
+	opCtx := func(command, user string, a contract.ActorContext, ex policy.Execution) kernel.OperationContext {
+		c := kernel.OperationContext{Site: siteName, User: user, UserRole: a.Roles[0], Roles: a.Roles, Actor: a,
+			Execution: ex, TenantID: contract.TenantID(siteName), BusinessScope: scope, Source: kernel.SourceIntegration}
+		if strings.HasPrefix(command, "pos.") {
+			me, merr := contract.NewCommandModuleExecution(scope, "pos.core", "pos.core", 1, command, command)
+			if merr != nil {
+				t.Fatal(merr)
+			}
+			c.ModuleExecution = &me
+		}
+		return c
+	}
 	run := func(command string, payload any) map[string]any {
 		t.Helper()
 		raw, _ := json.Marshal(payload)
-		res, cerr := k.Execute(ctx, conn, reg, kernel.Operation{Command: command, Payload: raw, Context: kernel.OperationContext{
-			Site: siteName, User: "Administrator", Roles: []string{doctype.AdminRole}, Actor: actor,
-			Execution: execution, TenantID: contract.TenantID(siteName), Source: kernel.SourceIntegration,
-		}})
+		res, cerr := k.Execute(ctx, conn, reg, kernel.Operation{Command: command, Payload: raw, Context: opCtx(command, "Administrator", actor, execution)})
 		if cerr != nil || res.Status != contract.StatusCompleted {
 			t.Fatalf("%s: status=%s err=%+v field=%s details=%s", command, res.Status, cerr, cerr.Field, cerr.Details)
 		}
@@ -361,10 +377,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 			data[k] = v
 		}
 		raw, _ := json.Marshal(map[string]any{"data": data})
-		_, cerr := k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.void_sale", Payload: raw, Context: kernel.OperationContext{
-			Site: siteName, User: "Administrator", Roles: []string{doctype.AdminRole}, Actor: actor,
-			Execution: execution, TenantID: contract.TenantID(siteName), Source: kernel.SourceIntegration,
-		}})
+		_, cerr := k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.void_sale", Payload: raw, Context: opCtx("pos.void_sale", "Administrator", actor, execution)})
 		return cerr
 	}
 	void := func(sale string) *contract.Error { return voidAt(sale, loc, nil) }
@@ -415,10 +428,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 			"register": register, "till_session": till, "location": loc, "items": one,
 			"currency": "KES", "payments": pays,
 		}})
-		res, cerr := k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.record_sale", Payload: raw, Context: kernel.OperationContext{
-			Site: siteName, User: "Administrator", Roles: []string{doctype.AdminRole}, Actor: actor,
-			Execution: execution, TenantID: contract.TenantID(siteName), Source: kernel.SourceIntegration,
-		}})
+		res, cerr := k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.record_sale", Payload: raw, Context: opCtx("pos.record_sale", "Administrator", actor, execution)})
 		return cerr, res
 	}
 	rejected := func(label string, pays []map[string]any) {
@@ -442,4 +452,68 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		t.Fatalf("confirmed cash sale: %+v", cerr)
 	}
 	rejected("used", []map[string]any{used})
+
+	// A Cashier holding only operation/query grants sells through the
+	// published-operation route and nothing else.
+	cashier := contract.ActorContext{PrincipalID: "cashier1", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: []string{"Cashier"}, AuthenticatedAt: time.Now()}
+	cexec, err := policy.NewVerifiedExecution(contract.TenantID(siteName), cashier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asCashier := func(command string, payload any) (contract.CommandResult, *contract.Error) {
+		raw, _ := json.Marshal(payload)
+		return k.Execute(ctx, conn, reg, kernel.Operation{Command: command, Payload: raw, Context: opCtx(command, "cashier1", cashier, cexec)})
+	}
+	for _, dt := range []string{"Item", "Stock Balance", "Stock Entry"} {
+		if ok, _ := reg.Permissions.UserCan([]string{"Cashier"}, dt, "read"); ok {
+			t.Fatalf("Cashier must not read %s", dt)
+		}
+	}
+	cs, cerr := asCashier("pos.open_shift", map[string]any{"data": map[string]any{"register": register}})
+	if cerr != nil || cs.Status != contract.StatusCompleted {
+		t.Fatalf("cashier open_shift: %+v", cerr)
+	}
+	var cso map[string]any
+	_ = json.Unmarshal(cs.Data, &cso)
+	cshift := fmt.Sprint(cso["steps"].([]any)[0].(map[string]any)["name"])
+	if _, cerr = asCashier("pos.open_till", map[string]any{"data": map[string]any{"shift": cshift, "opening_float": 100}}); cerr != nil {
+		t.Fatalf("cashier open_till: %+v", cerr)
+	}
+	ctill := scalar("SELECT name FROM "+table("Till Session")+" WHERE shift = ?", cshift)
+	search := runQuery("inventory", "item_search", map[string]any{})
+	if len(search.Rows) == 0 {
+		t.Fatal("item_search returned no rows")
+	}
+	if _, has := search.Rows[0]["cost"]; has {
+		t.Fatalf("item_search leaked cost: %v", search.Rows[0])
+	}
+	before, breadBefore := stock(tea), stock(bread)
+	res, cerr := asCashier("pos.record_sale", map[string]any{"data": map[string]any{
+		"register": register, "till_session": ctill, "location": loc, "items": one,
+		"currency": "KES", "payments": []map[string]any{pay("cash", 50)},
+	}})
+	if cerr != nil || res.Status != contract.StatusCompleted {
+		t.Fatalf("cashier record_sale: %+v", cerr)
+	}
+	if stock(bread) != breadBefore-1 || stock(tea) != before {
+		t.Fatalf("cashier sale stock bread=%v tea=%v", stock(bread), stock(tea))
+	}
+	// Direct writes are refused: generic record routes and the direct command route.
+	salePayload := kernel.RecordCreatePayload{Doctype: "Sale", Data: json.RawMessage(`{"register":"` + register + `"}`)}
+	if _, cerr = asCashier(kernel.CommandRecordCreate, salePayload); cerr == nil {
+		t.Fatal("cashier direct Sale create must be refused")
+	}
+	if _, cerr = asCashier(kernel.CommandRecordCreate, kernel.RecordCreatePayload{Doctype: "Till Session", Data: json.RawMessage(`{}`)}); cerr == nil {
+		t.Fatal("cashier direct Till Session create must be refused")
+	}
+	rawDirect, _ := json.Marshal(map[string]any{"data": map[string]any{"register": register}})
+	direct := opCtx("direct", "cashier1", cashier, cexec) // no module execution: the direct kernel route
+	if _, cerr = k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.open_shift", Payload: rawDirect, Context: direct}); cerr == nil {
+		t.Fatal("cashier direct-route pos.open_shift must be refused")
+	}
 }
+
+type allowAllPOSSchemas struct{}
+
+func (allowAllPOSSchemas) Registered(contract.SchemaRef) bool                 { return true }
+func (allowAllPOSSchemas) Validate(contract.SchemaRef, json.RawMessage) error { return nil }

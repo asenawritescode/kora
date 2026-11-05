@@ -1,26 +1,26 @@
 - doctype: Register
   role: Cashier
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Shift
   role: Cashier
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Till Session
   role: Cashier
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Sale
   role: Cashier
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Register
   role: Owner
@@ -37,62 +37,62 @@
 - doctype: Shift
   role: Owner
   read: true
-  write: true
-  create: true
-  delete: true
+  write: false
+  create: false
+  delete: false
 - doctype: Shift
   role: Manager
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Till Session
   role: Owner
   read: true
-  write: true
-  create: true
-  delete: true
+  write: false
+  create: false
+  delete: false
 - doctype: Till Session
   role: Manager
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Sale
   role: Owner
   read: true
-  write: true
-  create: true
-  delete: true
+  write: false
+  create: false
+  delete: false
 - doctype: Sale
   role: Manager
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Sale Item
   role: Owner
   read: true
-  write: true
-  create: true
-  delete: true
+  write: false
+  create: false
+  delete: false
 - doctype: Sale Item
   role: Manager
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Sale Payment
   role: Owner
   read: true
-  write: true
-  create: true
-  delete: true
+  write: false
+  create: false
+  delete: false
 - doctype: Sale Payment
   role: Manager
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Item
   role: Manager
@@ -103,20 +103,20 @@
 - doctype: Sale Line Balance
   role: Cashier
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Sale Line Balance
   role: Manager
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Sale Line Balance
   role: Owner
   read: true
-  write: true
-  create: true
+  write: false
+  create: false
   delete: false
 - doctype: Item
   role: Owner
