@@ -606,6 +606,10 @@ func (d *DocType) Validate() error {
 		}
 	}
 
+	if err := d.validateDecimalFields(); err != nil {
+		return err
+	}
+
 	// Validate doc_constraints.
 	for i, dc := range d.DocConstraints {
 		if dc.Type == "" {

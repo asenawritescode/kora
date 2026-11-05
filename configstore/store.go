@@ -103,7 +103,7 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 		args := make([]any, 0, len(batch)*24)
 		for j, field := range batch {
 			constraintsJSON, _ := json.Marshal(field.Constraints)
-			placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+			placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 			args = append(args,
 				fmt.Sprintf("%s.%s", dt.Name, field.Fieldname),
 				dt.Name, field.Fieldname, field.Fieldtype, field.Label, field.Options,
@@ -112,7 +112,7 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 				boolToInt(field.InListView), boolToInt(field.InStandardFilter),
 				boolToInt(field.SearchIndex), field.Description,
 				field.DependsOn, field.MandatoryDependsOn, string(constraintsJSON),
-				field.RenamedFrom, field.LinkedField, field.Computed, field.Accept, start+j,
+				field.RenamedFrom, field.LinkedField, field.Computed, field.Accept, field.Precision, start+j,
 				site,
 			)
 		}
@@ -121,7 +121,7 @@ func (s *Store) saveDocTypeExec(ex db.Queryer, dt *doctype.DocType, site string)
 			`INSERT INTO _kora_field (name, parent, fieldname, fieldtype, label, options,
 				reqd, unique_constraint, default_value, hidden, read_only, bold,
 				in_list_view, in_standard_filter, search_index, description,
-					depends_on, mandatory_depends_on, constraints_json, renamed_from, linked_field, computed, accept, idx, site)
+					depends_on, mandatory_depends_on, constraints_json, renamed_from, linked_field, computed, accept, field_precision, idx, site)
 			VALUES %s`,
 			strings.Join(placeholders, ", "),
 		)
@@ -267,7 +267,7 @@ func (s *Store) loadAllFields(site string) (map[string][]doctype.Field, error) {
 		SELECT parent, fieldname, fieldtype, label, options, reqd, unique_constraint,
 			default_value, hidden, read_only, bold, in_list_view, in_standard_filter,
 			search_index, description, depends_on, mandatory_depends_on,
-			constraints_json, renamed_from, COALESCE(linked_field,'') as linked_field, COALESCE(computed,'') as computed, COALESCE(accept,'') as accept, idx
+			constraints_json, renamed_from, COALESCE(linked_field,'') as linked_field, COALESCE(computed,'') as computed, COALESCE(accept,'') as accept, field_precision, idx
 		FROM _kora_field
 		WHERE site = ? OR site = ''
 		ORDER BY parent, idx
@@ -283,16 +283,21 @@ func (s *Store) loadAllFields(site string) (map[string][]doctype.Field, error) {
 		f := doctype.Field{}
 		var reqd, unique, hidden, readOnly, bold, inListView, inStdFilter, searchIdx, idxVal int
 		var constraintsJSON string
+		var precision sql.NullInt64
 
 		err := rows.Scan(
 			&parent, &f.Fieldname, &f.Fieldtype, &f.Label, &f.Options,
 			&reqd, &unique, &f.Default, &hidden, &readOnly, &bold,
 			&inListView, &inStdFilter, &searchIdx, &f.Description,
 			&f.DependsOn, &f.MandatoryDependsOn, &constraintsJSON,
-			&f.RenamedFrom, &f.LinkedField, &f.Computed, &f.Accept, &idxVal,
+			&f.RenamedFrom, &f.LinkedField, &f.Computed, &f.Accept, &precision, &idxVal,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning field: %w", err)
+		}
+		if precision.Valid {
+			value := int(precision.Int64)
+			f.Precision = &value
 		}
 
 		f.Reqd = reqd == 1
