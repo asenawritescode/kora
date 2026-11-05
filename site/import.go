@@ -34,51 +34,70 @@ func ImportConfig(db *sql.DB, registry *doctype.Registry, dbName, siteName, conf
 }
 
 func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteName, tenantID, configPath string, dialect sqlDialect.Dialect) error {
+	dirs, err := ResolvePackTree(configPath)
+	if err != nil {
+		return err
+	}
+	merged := &doctype.ConfigSnapshot{}
+	names := map[string]bool{}
+	for _, dir := range dirs {
+		snapshot, err := parsePackSnapshot(dir)
+		if err != nil {
+			return err
+		}
+		if err := mergePackSnapshot(merged, snapshot, names); err != nil {
+			return err
+		}
+	}
+	return ImportConfigFromSnapshotForTenant(db, registry, dbName, siteName, tenantID, fmt.Sprintf("Config import from %s", configPath), merged, dialect, nil)
+}
+
+func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 	// Step 1: Parse DocType config files.
 	doctypes, err := doctype.ParseConfigTree(configPath)
 	if err != nil {
-		return fmt.Errorf("parsing config: %w", err)
+		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
 	// Step 2: Parse roles and permissions.
 	roles, permissions, err := doctype.ParseRolesDirectory(configPath)
 	if err != nil {
-		return fmt.Errorf("parsing roles: %w", err)
+		return nil, fmt.Errorf("parsing roles: %w", err)
 	}
 
 	// Load unified Engine v2 definitions from the pack's workflows directory.
 	workflowDefinitions, err := ParseWorkflowDefinitionsDirectory(filepath.Join(configPath, "workflows"))
 	if err != nil {
-		return fmt.Errorf("parsing Engine v2 workflow definitions: %w", err)
+		return nil, fmt.Errorf("parsing Engine v2 workflow definitions: %w", err)
 	}
 
 	// Views live in the pack's dedicated views/ directory.
 	views, err := doctype.ParseViewsDirectory(configPath + "/views")
 	if err != nil {
-		return fmt.Errorf("parsing views: %w", err)
+		return nil, fmt.Errorf("parsing views: %w", err)
 	}
 	reportDefinitions, err := analytics.ParseReportsDirectory(configPath + "/reports")
 	if err != nil {
-		return fmt.Errorf("parsing reports: %w", err)
+		return nil, fmt.Errorf("parsing reports: %w", err)
 	}
 	commandDefinitions, err := kernel.ParseCommandDir(filepath.Join(configPath, "commands"))
 	if err != nil {
-		return fmt.Errorf("parsing commands: %w", err)
+		return nil, fmt.Errorf("parsing commands: %w", err)
 	}
 	commands, err := kernel.EncodeCommandResources(commandDefinitions)
 	if err != nil {
-		return fmt.Errorf("encoding commands: %w", err)
+		return nil, fmt.Errorf("encoding commands: %w", err)
 	}
 	reports := make([]json.RawMessage, 0, len(reportDefinitions))
 	for _, report := range reportDefinitions {
 		data, err := json.Marshal(report)
 		if err != nil {
-			return fmt.Errorf("encoding report %s: %w", report.Name, err)
+			return nil, fmt.Errorf("encoding report %s: %w", report.Name, err)
 		}
 		reports = append(reports, data)
 	}
 
-	return ImportConfigFromSnapshotForTenant(db, registry, dbName, siteName, tenantID, fmt.Sprintf("Config import from %s", configPath), &doctype.ConfigSnapshot{
+	return &doctype.ConfigSnapshot{
 		DocTypes:            doctypes,
 		Roles:               roles,
 		Permissions:         permissions,
@@ -86,7 +105,7 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 		Views:               views,
 		Reports:             reports,
 		Commands:            commands,
-	}, dialect, nil)
+	}, nil
 }
 
 func ParseWorkflowDefinitionsDirectory(directory string) ([]contract.WorkflowDefinition, error) {

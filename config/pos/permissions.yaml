@@ -94,3 +94,9 @@
   write: true
   create: true
   delete: false
+- doctype: Item
+  role: Manager
+  read: true
+  write: false
+  create: false
+  delete: false

@@ -1,0 +1,5 @@
+name: pos
+version: "1"
+requires:
+  - package_id: inventory
+    version: "1"
