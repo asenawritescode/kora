@@ -1,0 +1,61 @@
+item_code,item_name,category,uom,barcode,selling_price,cost_price,reorder_level
+DMW-0001,Jogoo Maize Flour 2kg,Flour,pkt,6160000100019,165.00,141.66,5
+DMW-0002,Pembe Maize Flour 2kg,Flour,pkt,6160000100026,160.00,135.71,3
+DMW-0003,Ajab Home Baking Flour 2kg,Flour,pkt,6160000100033,195.00,174.97,12
+DMW-0004,Exe Wheat Flour 1kg,Flour,pkt,6160000100040,105.00,93.85,12
+DMW-0005,Kabras Sugar 1kg,Sugar,pkt,6160000100057,175.00,157.43,12
+DMW-0006,Kabras Sugar 500g,Sugar,pkt,6160000100064,90.00,78.74,3
+DMW-0007,Mumias Sugar 2kg,Sugar,pkt,6160000100071,345.00,290.72,3
+DMW-0008,Fresh Fri Cooking Oil 1L,Cooking Oil,btl,6160000100088,330.00,287.42,12
+DMW-0009,Kimbo Cooking Fat 500g,Cooking Oil,tin,6160000100095,210.00,177.23,12
+DMW-0010,Rina Vegetable Oil 500ml,Cooking Oil,btl,6160000100101,175.00,155.59,5
+DMW-0011,Salit Cooking Oil 2L,Cooking Oil,btl,6160000100118,620.00,505.66,1
+DMW-0012,Supaloaf White Bread 400g,Bakery,loaf,6160000100125,65.00,53.48,10
+DMW-0013,Festive Brown Bread 400g,Bakery,loaf,6160000100132,70.00,63.07,5
+DMW-0014,Mandazi (pack of 5),Bakery,pack,6160000100149,50.00,45.07,5
+DMW-0015,Brookside Milk 500ml,Dairy,pkt,6160000100156,60.00,51.82,5
+DMW-0016,KCC Fresh Milk 500ml,Dairy,pkt,6160000100163,58.00,48.01,12
+DMW-0017,Mala 500ml,Dairy,pkt,6160000100170,75.00,64.56,20
+DMW-0018,Brookside Yoghurt 250ml,Dairy,cup,6160000100187,70.00,61.61,12
+DMW-0019,Eggs (tray of 30),Eggs,tray,6160000100194,480.00,395.31,5
+DMW-0020,Eggs (single),Eggs,pc,6160000100200,17.00,14.47,12
+DMW-0021,Menengai Bar Soap 800g,Soap,bar,6160000100217,150.00,120.73,12
+DMW-0022,Geisha Bathing Soap 90g,Soap,pc,6160000100224,60.00,53.96,5
+DMW-0023,Sunlight Washing Powder 500g,Soap,pkt,6160000100231,165.00,137.58,12
+DMW-0024,Omo Washing Powder 1kg,Soap,pkt,6160000100248,320.00,269.92,6
+DMW-0025,Ushindi Bar Soap 1kg,Soap,bar,6160000100255,185.00,155.06,10
+DMW-0026,Kiwi Safety Matches (10 box),Household,pack,6160000100262,50.00,42.65,5
+DMW-0027,Safety Matches single,Household,box,6160000100279,5.00,3.97,20
+DMW-0028,Kasuku Candles 6pc,Household,pack,6160000100286,120.00,95.54,3
+DMW-0029,Paraffin 1L,Household,ltr,6160000100293,160.00,131.70,12
+DMW-0030,Rosy Tissue 1 roll,Household,roll,6160000100309,35.00,29.19,6
+DMW-0031,Patco Sweets (each),Sweets,pc,6160000100316,2.00,1.61,6
+DMW-0032,Big G Chewing Gum,Sweets,pc,6160000100323,5.00,4.09,3
+DMW-0033,Tropical Mints roll,Sweets,pc,6160000100330,20.00,17.80,10
+DMW-0034,Cadbury Dairy Milk 35g,Sweets,pc,6160000100347,100.00,88.26,6
+DMW-0035,Biskuti Nice 100g,Sweets,pkt,6160000100354,40.00,35.39,10
+DMW-0036,Royco Mchuzi Mix 10g sachet,Sachets,sachet,6160000100361,10.00,8.44,20
+DMW-0037,Kimbo Sachet 50g,Sachets,sachet,6160000100378,30.00,26.89,12
+DMW-0038,Tea Leaves Ketepa 50g,Sachets,pkt,6160000100385,60.00,49.40,6
+DMW-0039,Nescafe Classic 2g sachet,Sachets,sachet,6160000100392,15.00,12.84,6
+DMW-0040,Colgate Toothpaste sachet,Sachets,sachet,6160000100408,20.00,16.41,12
+DMW-0041,Sunlight sachet 40g,Sachets,sachet,6160000100415,15.00,11.91,3
+DMW-0042,Salt Kensalt 500g,Sachets,pkt,6160000100422,30.00,23.66,6
+DMW-0043,Simba Mbili Tea 100g,Sachets,pkt,6160000100439,95.00,79.51,20
+DMW-0044,Pishori Rice 1kg,Grains,kg,6160000100446,220.00,197.66,20
+DMW-0045,Beans Nyayo 1kg,Grains,kg,6160000100453,180.00,145.13,20
+DMW-0046,Green Grams 1kg,Grains,kg,6160000100460,200.00,164.53,20
+DMW-0047,Spaghetti Santa Lucia 400g,Grains,pkt,6160000100477,110.00,87.00,6
+DMW-0048,Tomatoes (heap),Produce,heap,6160000100484,50.00,40.21,20
+DMW-0049,Onions (heap),Produce,heap,6160000100491,50.00,42.76,10
+DMW-0050,Sukuma Wiki (bunch),Produce,bunch,6160000100507,20.00,17.08,12
+DMW-0051,Bananas (each),Produce,pc,6160000100514,10.00,8.90,3
+DMW-0052,Coca-Cola 500ml,Drinks,btl,6160000100521,80.00,69.95,6
+DMW-0053,Fanta Orange 500ml,Drinks,btl,6160000100538,80.00,71.06,5
+DMW-0054,Keringet Water 500ml,Drinks,btl,6160000100545,50.00,42.39,10
+DMW-0055,Minute Maid 400ml,Drinks,btl,6160000100552,70.00,62.72,10
+DMW-0056,Airtime Safaricom 50,Airtime,voucher,6160000100569,50.00,42.36,6
+DMW-0057,Airtime Safaricom 100,Airtime,voucher,6160000100576,100.00,78.33,10
+DMW-0058,Always Pads 8s,Toiletries,pkt,6160000100583,110.00,86.42,6
+DMW-0059,Vaseline 50ml,Toiletries,jar,6160000100590,120.00,96.67,6
+DMW-0060,Razor blade Nacet,Toiletries,pc,6160000100606,10.00,8.09,10

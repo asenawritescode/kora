@@ -1,0 +1,70 @@
+item_code,item_name,category,uom,barcode,selling_price,cost_price,reorder_level
+WSK-0001,Jogoo Maize Flour Bale (12x2kg),Flour,bale,6160000300013,1900.00,1696.71,3
+WSK-0002,Pembe Maize Flour Bale (12x2kg),Flour,bale,6160000300020,1850.00,1602.37,2
+WSK-0003,Exe Wheat Flour Bale (12x2kg),Flour,bale,6160000300037,2250.00,2080.45,1
+WSK-0004,Ajab Flour Bale (24x1kg),Flour,bale,6160000300044,2350.00,2064.49,1
+WSK-0005,Kabras Sugar 50kg Bag,Sugar,bag,6160000300051,8200.00,7050.35,5
+WSK-0006,Mumias Sugar Bale (10x2kg),Sugar,bale,6160000300068,3350.00,3004.75,3
+WSK-0007,Brown Sugar 25kg Bag,Sugar,bag,6160000300075,4300.00,3786.01,5
+WSK-0008,Fresh Fri Oil 20L Jerrican,Cooking Oil,jerrican,6160000300082,5900.00,5033.87,2
+WSK-0009,Rina Oil Carton (12x1L),Cooking Oil,carton,6160000300099,3700.00,3311.26,1
+WSK-0010,Kimbo Carton (12x1kg),Cooking Oil,carton,6160000300105,4900.00,4109.53,1
+WSK-0011,Salit Oil 10L,Cooking Oil,jerrican,6160000300112,3000.00,2691.18,1
+WSK-0012,Pishori Rice 50kg Bag,Grains,bag,6160000300129,10500.00,8910.48,5
+WSK-0013,Beans Rosecoco 90kg Bag,Grains,bag,6160000300136,13500.00,11256.79,5
+WSK-0014,Maize Grain 90kg Bag,Grains,bag,6160000300143,4600.00,4162.22,2
+WSK-0015,Green Grams 50kg Bag,Grains,bag,6160000300150,9200.00,8448.48,1
+WSK-0016,Wheat Grain 90kg Bag,Grains,bag,6160000300167,5400.00,4922.48,3
+WSK-0017,Omo Carton (12x1kg),Detergents,carton,6160000300174,3600.00,3014.25,2
+WSK-0018,Sunlight Bar Soap Carton (20x1kg),Detergents,carton,6160000300181,3500.00,3037.13,3
+WSK-0019,Ushindi Carton (20x1kg),Detergents,carton,6160000300198,3400.00,2865.76,3
+WSK-0020,Jik Carton (12x750ml),Detergents,carton,6160000300204,1950.00,1760.30,5
+WSK-0021,Menengai Carton (12x800g),Detergents,carton,6160000300211,1650.00,1463.69,2
+WSK-0022,Coca-Cola Crate (24x500ml),Beverages,crate,6160000300228,1650.00,1527.17,5
+WSK-0023,Keringet Water Carton (12x1.5L),Beverages,carton,6160000300235,900.00,774.67,5
+WSK-0024,Delmonte Juice Carton (12x1L),Beverages,carton,6160000300242,2900.00,2598.02,2
+WSK-0025,Afia Carton (24x500ml),Beverages,carton,6160000300259,2050.00,1814.25,5
+WSK-0026,Brookside Milk Carton (12x500ml),Dairy,carton,6160000300266,680.00,608.27,3
+WSK-0027,Tuzo UHT Carton (12x500ml),Dairy,carton,6160000300273,780.00,722.08,3
+WSK-0028,Rosy Tissue Bale (40 rolls),Household,bale,6160000300280,1300.00,1101.05,1
+WSK-0029,Kasuku Candles Carton (20x6),Household,carton,6160000300297,2200.00,1844.42,2
+WSK-0030,Matches Kiwi Carton (100 boxes),Household,carton,6160000300303,420.00,360.34,20
+WSK-0031,Bin Bags Bale (50 packs),Household,bale,6160000300310,6500.00,5830.75,3
+WSK-0032,DAP Fertilizer 50kg,Fertilizer,bag,6160000300327,3500.00,3217.51,5
+WSK-0033,CAN Fertilizer 50kg,Fertilizer,bag,6160000300334,3200.00,2666.99,1
+WSK-0034,NPK 17:17:17 50kg,Fertilizer,bag,6160000300341,3800.00,3382.93,5
+WSK-0035,Urea 50kg,Fertilizer,bag,6160000300358,3300.00,2818.88,1
+WSK-0036,Mavuno Planting 50kg,Fertilizer,bag,6160000300365,4200.00,3771.29,1
+WSK-0037,Foliar Feed Easygro 1L,Fertilizer,btl,6160000300372,650.00,550.77,3
+WSK-0038,Dairy Meal 70kg,Animal Feeds,bag,6160000300389,3400.00,2940.68,2
+WSK-0039,Layers Mash 70kg,Animal Feeds,bag,6160000300396,3900.00,3513.77,3
+WSK-0040,Chick Mash 50kg,Animal Feeds,bag,6160000300402,3500.00,3090.92,3
+WSK-0041,Growers Mash 70kg,Animal Feeds,bag,6160000300419,3700.00,3355.15,3
+WSK-0042,Pig Finisher 70kg,Animal Feeds,bag,6160000300426,3600.00,3065.87,5
+WSK-0043,Maclick Super Mineral 2kg,Animal Feeds,pkt,6160000300433,520.00,438.41,5
+WSK-0044,Duduthrin 1L,Agrochemicals,btl,6160000300440,1250.00,1050.76,2
+WSK-0045,Roundup Herbicide 1L,Agrochemicals,btl,6160000300457,950.00,814.51,1
+WSK-0046,Ridomil Gold 1kg,Agrochemicals,pkt,6160000300464,2100.00,1761.72,5
+WSK-0047,Thunder Insecticide 100ml,Agrochemicals,btl,6160000300471,480.00,423.24,5
+WSK-0048,Tick Grease 500g,Agrochemicals,tin,6160000300488,650.00,561.63,3
+WSK-0049,Triatix Acaricide 1L,Agrochemicals,btl,6160000300495,1850.00,1625.27,2
+WSK-0050,Hybrid Maize Seed H614 10kg,Seeds,bag,6160000300501,2600.00,2362.58,5
+WSK-0051,Hybrid Maize Seed DH04 2kg,Seeds,pkt,6160000300518,650.00,579.72,3
+WSK-0052,Bean Seed KK8 2kg,Seeds,pkt,6160000300525,700.00,630.24,3
+WSK-0053,Sukuma Wiki Seed 50g,Seeds,pkt,6160000300532,150.00,132.89,5
+WSK-0054,Tomato Seed Anna F1 10g,Seeds,pkt,6160000300549,1800.00,1612.76,5
+WSK-0055,Onion Seed Red Pinoy 50g,Seeds,pkt,6160000300556,900.00,822.39,2
+WSK-0056,Knapsack Sprayer 16L,Tools,pc,6160000300563,3200.00,2938.42,5
+WSK-0057,Jembe (hoe),Tools,pc,6160000300570,550.00,479.91,5
+WSK-0058,Panga,Tools,pc,6160000300587,450.00,378.55,10
+WSK-0059,Wheelbarrow,Tools,pc,6160000300594,5800.00,5126.89,2
+WSK-0060,Gumboots pair,Tools,pair,6160000300600,950.00,856.40,2
+WSK-0061,Watering Can 10L,Tools,pc,6160000300617,650.00,579.82,1
+WSK-0062,Water Tank 1000L,Water,pc,6160000300624,14500.00,12965.94,3
+WSK-0063,Drip Kit 1/8 acre,Water,kit,6160000300631,9500.00,8550.83,2
+WSK-0064,Hosepipe 30m,Water,roll,6160000300648,2600.00,2191.37,5
+WSK-0065,Jerrican 20L Empty,Water,pc,6160000300655,350.00,310.85,20
+WSK-0066,Paraffin 20L,Fuel,jerrican,6160000300662,3150.00,2756.15,5
+WSK-0067,Diesel 20L,Fuel,jerrican,6160000300679,3400.00,3056.38,1
+WSK-0068,Charcoal Bag 35kg,Fuel,bag,6160000300686,2200.00,1930.20,3
+WSK-0069,Gas Refill 13kg,Fuel,cylinder,6160000300693,3400.00,3104.73,2

@@ -1,0 +1,20 @@
+# Fabricated demo shop for M1 testing. Not a real business.
+shop_name: Duka la Mama Wanjiku
+currency: KES
+timezone: Africa/Nairobi
+naming_series_prefix: DMW
+locations:
+  - name: Shop Floor
+registers:
+  - name: Counter 1
+    location: Shop Floor
+    opening_float: "2000.00"
+users:
+  - name: Wanjiku Demo
+    email: owner.duka@example.com
+    phone: "0700 000 101"
+    role: Owner
+  - name: Kevin Demo
+    email: cashier1.duka@example.com
+    phone: "0700 000 102"
+    role: Cashier
