@@ -25,6 +25,8 @@ func (p *fakePrint) Record(_ *gin.Context, dt, n string) (map[string]any, error)
 func (p *fakePrint) Receipt(*gin.Context, string, string) (map[string]any, map[string]any, error) {
 	return map[string]any{"reference": "R1"}, map[string]any{"title": "Doc"}, p.err
 }
+func (p *fakePrint) Formats(*gin.Context) []*print.Format        { return []*print.Format{p.f} }
+func (p *fakePrint) Authorize(*gin.Context, *print.Format) error { return p.err }
 func (p *fakePrint) Tenant(*gin.Context) (map[string]any, print.Options) {
 	return map[string]any{"name": "Shop"}, print.Options{Currency: "KES", Precision: 2}
 }
@@ -71,5 +73,35 @@ func TestPrintEndpoint(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/p/a", nil))
 	if w.Code != 404 {
 		t.Fatal(w.Code)
+	}
+}
+
+func TestPrintMetaEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec, _ := print.Load([]byte("name: a\nfor: {record: Sale}\npaper: thermal_58\ntext: x\nhtml: y\n"))
+	cases := []struct {
+		name, url string
+		err       error
+		status    int
+		body      string
+	}{
+		{"get", "/m/a", nil, 200, `"paper":"thermal_58","columns":32,"formats":["text","html","pdf"]`},
+		{"get denied", "/m/a", ErrPrintForbidden, 403, "print.forbidden"},
+		{"list", "/m?record=Sale", nil, 200, `"total":1`},
+		{"list filtered out", "/m?record=Other", nil, 200, `"total":0`},
+		{"list denied hides", "/m?record=Sale", ErrPrintForbidden, 200, `"total":0`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := &fakePrint{f: rec, err: tc.err}
+			r := gin.New()
+			r.GET("/m", NewPrintListHandler(src))
+			r.GET("/m/:format_name", NewPrintMetaHandler(src))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.url, nil))
+			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.body) {
+				t.Fatalf("got %d %q", w.Code, w.Body.String())
+			}
+		})
 	}
 }

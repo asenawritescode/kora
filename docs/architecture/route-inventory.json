@@ -65,6 +65,11 @@
     },
     {
       "method": "POST",
+      "path": "/api/auth/login",
+      "handler": "github.com/asenawritescode/kora/auth.registerPasswordLoginRoute.func1"
+    },
+    {
+      "method": "POST",
       "path": "/api/auth/logout",
       "handler": "github.com/asenawritescode/kora/auth.registerAuthRoutes.func1"
     },
@@ -72,6 +77,11 @@
       "method": "GET",
       "path": "/api/auth/me",
       "handler": "github.com/asenawritescode/kora/auth.registerAuthRoutes.func2"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/providers",
+      "handler": "github.com/asenawritescode/kora/auth.registerSignInDiscovery.func1"
     },
     {
       "method": "POST",
@@ -112,6 +122,11 @@
       "method": "GET",
       "path": "/api/files/*path",
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleFileServe-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/import",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleImport-fm"
     },
     {
       "method": "POST",
@@ -224,6 +239,31 @@
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePageManifestByRoute-fm"
     },
     {
+      "method": "POST",
+      "path": "/api/payments",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePaymentRequest-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/payments/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePaymentGet-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/print-formats",
+      "handler": "github.com/asenawritescode/kora/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintListHandler.func3"
+    },
+    {
+      "method": "GET",
+      "path": "/api/print-formats/:format_name",
+      "handler": "github.com/asenawritescode/kora/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintMetaHandler.func4"
+    },
+    {
+      "method": "GET",
+      "path": "/api/print/:format_name",
+      "handler": "github.com/asenawritescode/kora/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintHandler.func2"
+    },
+    {
       "method": "GET",
       "path": "/api/public/files/*path",
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicFileServe-fm"
@@ -307,6 +347,31 @@
       "method": "GET",
       "path": "/api/system/audit",
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemAudit-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/auth/policy",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthPolicy-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/auth/policy",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthPolicyUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/auth/providers",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthProviderList-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/system/auth/providers/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthProviderDelete-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/auth/providers/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthProviderPut-fm"
     },
     {
       "method": "GET",
@@ -744,6 +809,16 @@
       "handler": "github.com/asenawritescode/kora/api.RegisterAnalyticsRoutesWithQueryCache.func5"
     },
     {
+      "method": "GET",
+      "path": "/api/v1/auth/oidc/:provider/start",
+      "handler": "github.com/asenawritescode/kora/auth.(*OIDCLogin).Register.func2"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/oidc/callback",
+      "handler": "github.com/asenawritescode/kora/auth.(*OIDCLogin).Register.func3"
+    },
+    {
       "method": "POST",
       "path": "/api/v1/cloud/conversations",
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationCreate-fm"
@@ -782,6 +857,11 @@
       "method": "GET",
       "path": "/api/v1/files/*path",
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleFileServe-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/import",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleImport-fm"
     },
     {
       "method": "POST",
@@ -894,6 +974,31 @@
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePageManifestByRoute-fm"
     },
     {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePaymentRequest-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/payments/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePaymentGet-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/print-formats",
+      "handler": "github.com/asenawritescode/kora/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintListHandler.func3"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/print-formats/:format_name",
+      "handler": "github.com/asenawritescode/kora/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintMetaHandler.func4"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/print/:format_name",
+      "handler": "github.com/asenawritescode/kora/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintHandler.func2"
+    },
+    {
       "method": "GET",
       "path": "/api/v1/public/files/*path",
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePublicFileServe-fm"
@@ -977,6 +1082,31 @@
       "method": "GET",
       "path": "/api/v1/system/audit",
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleSystemAudit-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/auth/policy",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthPolicy-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/auth/policy",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthPolicyUpdate-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/system/auth/providers",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthProviderList-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/system/auth/providers/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthProviderDelete-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/system/auth/providers/:id",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleAuthProviderPut-fm"
     },
     {
       "method": "GET",
