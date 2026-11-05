@@ -486,6 +486,9 @@ func dbString(v any) string {
 // dbFloat safely extracts a float64 from a DB-scanned value.
 func dbFloat(v any) float64 {
 	switch val := v.(type) {
+	case json.Number:
+		f, _ := val.Float64()
+		return f
 	case float64:
 		return val
 	case int64:

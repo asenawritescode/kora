@@ -263,6 +263,8 @@ func quoteSExprAny(v any) string {
 	switch val := v.(type) {
 	case string:
 		return quoteSExprString(val)
+	case json.Number:
+		return string(val)
 	case float64:
 		return fmt.Sprintf("%v", val)
 	case bool:

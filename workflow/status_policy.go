@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -148,6 +149,11 @@ func (s statusExpressionScope) Lookup(path string) (expression.Value, bool) {
 		return expression.NumberValue(float64(typed)), true
 	case int64:
 		return expression.NumberValue(float64(typed)), true
+	case json.Number:
+		if f, err := typed.Float64(); err == nil {
+			return expression.NumberValue(f), true
+		}
+		return expression.StringValue(string(typed)), true
 	case float64:
 		return expression.NumberValue(typed), true
 	case []byte:
