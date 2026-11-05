@@ -60,6 +60,7 @@ func ExtensibilityTablesMySQL() []string {
 			secret VARCHAR(64) NOT NULL,
 			access_token VARCHAR(64) NOT NULL DEFAULT '',
 			managed_idempotency_key CHAR(64) NOT NULL DEFAULT '',
+			access_token_hash CHAR(64) NOT NULL DEFAULT '',
 			old_secret VARCHAR(64),
 			old_secret_expires_at DATETIME(6),
 			secret_count INT NOT NULL DEFAULT 1,
@@ -77,9 +78,12 @@ func ExtensibilityTablesMySQL() []string {
 			last_error TEXT,
 			INDEX idx_ext_site (site),
 			INDEX idx_ext_active (is_active),
-			INDEX idx_ext_access_token (access_token)
+			INDEX idx_ext_access_token (access_token),
+			INDEX idx_ext_access_token_hash (access_token_hash)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		`ALTER TABLE _kora_extension ADD COLUMN managed_idempotency_key CHAR(64) NOT NULL DEFAULT ''`,
+		`ALTER TABLE _kora_extension ADD COLUMN access_token_hash CHAR(64) NOT NULL DEFAULT ''`,
+		`CREATE INDEX idx_ext_access_token_hash ON _kora_extension (access_token_hash)`,
 
 		`CREATE TABLE IF NOT EXISTS _kora_channel_session (
 			id VARCHAR(64) PRIMARY KEY,
@@ -180,7 +184,7 @@ func ExtensibilityTablesPostgres() []string {
 			name VARCHAR(140) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
 			display_name VARCHAR(255) NOT NULL DEFAULT '', description TEXT,
 			endpoint_url VARCHAR(1024) NOT NULL, secret VARCHAR(64) NOT NULL,
-			access_token VARCHAR(64) NOT NULL DEFAULT '', managed_idempotency_key CHAR(64) NOT NULL DEFAULT '', old_secret VARCHAR(64), old_secret_expires_at TIMESTAMPTZ,
+			access_token VARCHAR(64) NOT NULL DEFAULT '', managed_idempotency_key CHAR(64) NOT NULL DEFAULT '', access_token_hash CHAR(64) NOT NULL DEFAULT '', old_secret VARCHAR(64), old_secret_expires_at TIMESTAMPTZ,
 			secret_count INT NOT NULL DEFAULT 1, is_active BOOLEAN NOT NULL DEFAULT TRUE,
 			subscriptions JSONB, api_permissions JSONB, retry_schedule JSONB,
 			timeout_sec INT NOT NULL DEFAULT 10, headers JSONB, delivery_stats JSONB,
@@ -191,6 +195,8 @@ func ExtensibilityTablesPostgres() []string {
 		`CREATE INDEX IF NOT EXISTS idx_ext_active ON _kora_extension (is_active)`,
 		`CREATE INDEX IF NOT EXISTS idx_ext_access_token ON _kora_extension (access_token)`,
 		`ALTER TABLE _kora_extension ADD COLUMN managed_idempotency_key CHAR(64) NOT NULL DEFAULT ''`,
+		`ALTER TABLE _kora_extension ADD COLUMN IF NOT EXISTS access_token_hash CHAR(64) NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_ext_access_token_hash ON _kora_extension (access_token_hash)`,
 		`CREATE TABLE IF NOT EXISTS _kora_channel_session (
 			id VARCHAR(64) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
 			client_name VARCHAR(140) NOT NULL DEFAULT '', conversation_key VARCHAR(255) NOT NULL DEFAULT '',
@@ -289,6 +295,7 @@ func ExtensibilityTablesLibSQL() []string {
 			secret TEXT NOT NULL,
 			access_token TEXT NOT NULL DEFAULT '',
 			managed_idempotency_key TEXT NOT NULL DEFAULT '',
+			access_token_hash TEXT NOT NULL DEFAULT '',
 			old_secret TEXT,
 			old_secret_expires_at TEXT,
 			secret_count INTEGER NOT NULL DEFAULT 1,
@@ -310,6 +317,8 @@ func ExtensibilityTablesLibSQL() []string {
 		`CREATE INDEX IF NOT EXISTS idx_ext_active ON _kora_extension (is_active)`,
 		`CREATE INDEX IF NOT EXISTS idx_ext_access_token ON _kora_extension (access_token)`,
 		`ALTER TABLE _kora_extension ADD COLUMN managed_idempotency_key TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE _kora_extension ADD COLUMN access_token_hash TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_ext_access_token_hash ON _kora_extension (access_token_hash)`,
 
 		`CREATE TABLE IF NOT EXISTS _kora_channel_session (
 			id TEXT PRIMARY KEY,

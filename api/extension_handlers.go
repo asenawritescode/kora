@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/webhook"
 	"github.com/gin-gonic/gin"
 )
@@ -114,9 +115,9 @@ func (h *Handler) HandleExtensionCreate(c *gin.Context) {
 	}
 
 	_, err = db.Exec(
-		h.siteQuery(c, `INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, subscriptions, api_permissions, installed_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`),
-		req.Name, siteNameStr, req.DisplayName, req.Description, req.EndpointURL, secret, accessToken,
+		h.siteQuery(c, `INSERT INTO _kora_extension (name, site, display_name, description, endpoint_url, secret, access_token, access_token_hash, subscriptions, api_permissions, installed_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`),
+		req.Name, siteNameStr, req.DisplayName, req.Description, req.EndpointURL, secret, auth.HashExtensionAccessToken(accessToken),
 		req.Subscriptions, apiPerms)
 	if err != nil {
 		slog.Error("creating extension", "error", err)

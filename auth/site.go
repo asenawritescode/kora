@@ -229,8 +229,8 @@ func AuthenticateExtensionExecution(ctx context.Context, database *sql.DB, diale
 
 	var extensionName string
 	var permissionsJSON sql.NullString
-	query := kdb.Rebind(dialect, `SELECT name, api_permissions FROM _kora_extension WHERE site = ? AND access_token = ? AND is_active = 1`)
-	err = database.QueryRowContext(ctx, query, siteName, token).Scan(&extensionName, &permissionsJSON)
+	query := kdb.Rebind(dialect, `SELECT name, api_permissions FROM _kora_extension WHERE site = ? AND access_token_hash = ? AND is_active = 1`)
+	err = database.QueryRowContext(ctx, query, siteName, HashExtensionAccessToken(token)).Scan(&extensionName, &permissionsJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return policy.Execution{}, nil, contract.NewError(contract.CodeUnauthenticated, "invalid extension credential")
 	}

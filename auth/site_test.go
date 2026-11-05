@@ -28,8 +28,8 @@ func TestAuthenticateExtension_LoadsPermissions(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"name", "api_permissions"}).AddRow(
 		"test-bot", `[{"doctype":"Work Order","read":true,"create":true}]`,
 	)
-	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token = \\? AND is_active = 1").
-		WithArgs("test.local", "valid-token").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = 1").
+		WithArgs("test.local", HashExtensionAccessToken("valid-token")).WillReturnRows(rows)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Set("site_db", db)
@@ -99,9 +99,9 @@ func TestAuthenticateExtensionExecutionUsesDialectAndExactOwnerGrant(t *testing.
 		dbType string
 		query  string
 	}{
-		{name: "mysql", dbType: "mysql", query: `SELECT name, api_permissions FROM _kora_extension WHERE site = ? AND access_token = ? AND is_active = 1`},
-		{name: "postgres", dbType: "postgres", query: `SELECT name, api_permissions FROM _kora_extension WHERE site = $1 AND access_token = $2 AND is_active = 1`},
-		{name: "libsql", dbType: "libsql", query: `SELECT name, api_permissions FROM _kora_extension WHERE site = ? AND access_token = ? AND is_active = 1`},
+		{name: "mysql", dbType: "mysql", query: `SELECT name, api_permissions FROM _kora_extension WHERE site = ? AND access_token_hash = ? AND is_active = 1`},
+		{name: "postgres", dbType: "postgres", query: `SELECT name, api_permissions FROM _kora_extension WHERE site = $1 AND access_token_hash = $2 AND is_active = 1`},
+		{name: "libsql", dbType: "libsql", query: `SELECT name, api_permissions FROM _kora_extension WHERE site = ? AND access_token_hash = ? AND is_active = 1`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			database, mock, err := sqlmock.New()
@@ -111,7 +111,7 @@ func TestAuthenticateExtensionExecutionUsesDialectAndExactOwnerGrant(t *testing.
 			defer database.Close()
 
 			mock.ExpectQuery(regexp.QuoteMeta(tc.query)).
-				WithArgs("tenant.example", "extension-token").
+				WithArgs("tenant.example", HashExtensionAccessToken("extension-token")).
 				WillReturnRows(sqlmock.NewRows([]string{"name", "api_permissions"}).AddRow(
 					"invoice-reader", `[{"doctype":"Invoice","read":true,"if_owner":true}]`,
 				))
@@ -146,8 +146,8 @@ func TestSiteGuardExtensionAuthenticationUsesPostgresPlaceholders(t *testing.T) 
 		t.Fatal("sqlmock.New:", err)
 	}
 	defer database.Close()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT name, api_permissions FROM _kora_extension WHERE site = $1 AND access_token = $2 AND is_active = 1`)).
-		WithArgs("tenant.example", "extension-token").
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT name, api_permissions FROM _kora_extension WHERE site = $1 AND access_token_hash = $2 AND is_active = 1`)).
+		WithArgs("tenant.example", HashExtensionAccessToken("extension-token")).
 		WillReturnRows(sqlmock.NewRows([]string{"name", "api_permissions"}).AddRow("reader", `[{"doctype":"Invoice","read":true}]`))
 
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -325,8 +325,8 @@ func TestRevalidateRealtimeIdentityRefreshesExtensionPermissions(t *testing.T) {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	defer db.Close()
-	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token = \\? AND is_active = 1").
-		WithArgs("tenant-1", "extension-token").
+	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = 1").
+		WithArgs("tenant-1", HashExtensionAccessToken("extension-token")).
 		WillReturnRows(sqlmock.NewRows([]string{"name", "api_permissions"}).AddRow("reader", `[{"doctype":"Invoice","read":true}]`))
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -387,8 +387,8 @@ func TestAuthenticateExtension_EmptyPermissions(t *testing.T) {
 	defer db.Close()
 
 	rows := sqlmock.NewRows([]string{"name", "api_permissions"}).AddRow("test-bot", "[]")
-	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token = \\? AND is_active = 1").
-		WithArgs("test.local", "token").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = 1").
+		WithArgs("test.local", HashExtensionAccessToken("token")).WillReturnRows(rows)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Set("site_db", db)
@@ -421,8 +421,8 @@ func TestAuthenticateExtension_NullPermissions(t *testing.T) {
 	defer db.Close()
 
 	rows := sqlmock.NewRows([]string{"name", "api_permissions"}).AddRow("test-bot", nil)
-	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token = \\? AND is_active = 1").
-		WithArgs("test.local", "token").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = 1").
+		WithArgs("test.local", HashExtensionAccessToken("token")).WillReturnRows(rows)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Set("site_db", db)
@@ -444,8 +444,8 @@ func TestAuthenticateExtension_InactiveExtension(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token = \\? AND is_active = 1").
-		WithArgs("test.local", "token").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = 1").
+		WithArgs("test.local", HashExtensionAccessToken("token")).WillReturnError(sql.ErrNoRows)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Set("site_db", db)
@@ -467,8 +467,8 @@ func TestAuthenticateExtension_MalformedJSON(t *testing.T) {
 	defer db.Close()
 
 	rows := sqlmock.NewRows([]string{"name", "api_permissions"}).AddRow("bad-bot", `{this is not json`)
-	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token = \\? AND is_active = 1").
-		WithArgs("test.local", "token").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = 1").
+		WithArgs("test.local", HashExtensionAccessToken("token")).WillReturnRows(rows)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Set("site_db", db)
@@ -499,8 +499,8 @@ func TestAuthenticateExtension_RejectsCrossSiteTokenReuse(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token = \\? AND is_active = 1").
-		WithArgs("site-b", "token").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = 1").
+		WithArgs("site-b", HashExtensionAccessToken("token")).WillReturnError(sql.ErrNoRows)
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Set("site_db", db)

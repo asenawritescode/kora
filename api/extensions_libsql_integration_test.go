@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -25,6 +26,7 @@ import (
 // and rotation against a disposable LibSQL server. The target must be a fresh
 // database: the test refuses to run if any user tables already exist.
 func TestLiveLibSQLManagedCredentialLifecycle(t *testing.T) {
+	t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "integration-provisioning-secret")
 	dsn := os.Getenv("KORA_API_LIVE_LIBSQL_DSN")
 	if dsn == "" {
 		t.Skip("set KORA_API_LIVE_LIBSQL_DSN to a fresh disposable LibSQL database")
@@ -124,10 +126,10 @@ func TestLiveLibSQLManagedCredentialLifecycle(t *testing.T) {
 		t.Fatalf("LibSQL new-key rotation returned HTTP %d or retained the prior token: %s", rotated.Code, rotated.Body.String())
 	}
 	var storedToken, storedKey string
-	if err := database.QueryRow(`SELECT access_token, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`, siteName, "kora-cloud-channel").Scan(&storedToken, &storedKey); err != nil {
+	if err := database.QueryRow(`SELECT access_token_hash, managed_idempotency_key FROM _kora_extension WHERE site = ? AND name = ?`, siteName, "kora-cloud-channel").Scan(&storedToken, &storedKey); err != nil {
 		t.Fatal("read persisted LibSQL managed credential:", err)
 	}
-	if storedToken != rotatedCredential.AccessToken || storedKey == "" || storedToken == firstCredential.AccessToken {
+	if storedToken != auth.HashExtensionAccessToken(rotatedCredential.AccessToken) || storedKey == "" || storedToken == auth.HashExtensionAccessToken(firstCredential.AccessToken) {
 		t.Fatal("LibSQL managed credential did not persist the latest token and idempotency receipt")
 	}
 	sessionHash := sha256.Sum256([]byte("libsql-managed-session"))

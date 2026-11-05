@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/auth"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,6 +20,7 @@ func TestHandleManagedChannelClientRevokeIsIdempotentAndFingerprintBound(t *test
 	const token = "current-managed-token"
 	fingerprint := sha256.Sum256([]byte(token))
 	body, _ := json.Marshal(map[string]string{"credential_fingerprint": hex.EncodeToString(fingerprint[:])})
+	tokenHash := auth.HashExtensionAccessToken(token)
 
 	t.Run("revokes the expected active token", func(t *testing.T) {
 		db, mock, err := sqlmock.New()
@@ -26,9 +28,9 @@ func TestHandleManagedChannelClientRevokeIsIdempotentAndFingerprintBound(t *test
 			t.Fatal(err)
 		}
 		defer db.Close()
-		mock.ExpectQuery("SELECT access_token FROM _kora_extension WHERE site = \\? AND name = \\?").WithArgs("tenant-1", "kora-cloud-channel").WillReturnRows(sqlmock.NewRows([]string{"access_token"}).AddRow(token))
+		mock.ExpectQuery("SELECT access_token_hash FROM _kora_extension WHERE site = \\? AND name = \\?").WithArgs("tenant-1", "kora-cloud-channel").WillReturnRows(sqlmock.NewRows([]string{"access_token_hash"}).AddRow(tokenHash))
 		mock.ExpectBegin()
-		mock.ExpectExec("UPDATE _kora_extension SET is_active = FALSE, managed_idempotency_key = \\?, updated_at = CURRENT_TIMESTAMP WHERE site = \\? AND name = \\? AND access_token = \\? AND is_active = TRUE").WithArgs(sqlmock.AnyArg(), "tenant-1", "kora-cloud-channel", token).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec("UPDATE _kora_extension SET is_active = FALSE, managed_idempotency_key = \\?, updated_at = CURRENT_TIMESTAMP WHERE site = \\? AND name = \\? AND access_token_hash = \\? AND is_active = TRUE").WithArgs(sqlmock.AnyArg(), "tenant-1", "kora-cloud-channel", tokenHash).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec("UPDATE _kora_channel_session SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = \\? WHERE site = \\? AND client_name = \\? AND revoked_at IS NULL").WithArgs("tenant_deletion", "tenant-1", "kora-cloud-channel").WillReturnResult(sqlmock.NewResult(0, 2))
 		mock.ExpectCommit()
 		response := invokeManagedCredentialRevoke(t, NewHandler(nil, nil), db, body, true)
@@ -46,11 +48,11 @@ func TestHandleManagedChannelClientRevokeIsIdempotentAndFingerprintBound(t *test
 			t.Fatal(err)
 		}
 		defer db.Close()
-		mock.ExpectQuery("SELECT access_token FROM _kora_extension WHERE site = \\? AND name = \\?").WithArgs("tenant-1", "kora-cloud-channel").WillReturnRows(sqlmock.NewRows([]string{"access_token"}).AddRow(token))
+		mock.ExpectQuery("SELECT access_token_hash FROM _kora_extension WHERE site = \\? AND name = \\?").WithArgs("tenant-1", "kora-cloud-channel").WillReturnRows(sqlmock.NewRows([]string{"access_token_hash"}).AddRow(tokenHash))
 		mock.ExpectBegin()
-		mock.ExpectExec("UPDATE _kora_extension SET is_active = FALSE, managed_idempotency_key = \\?, updated_at = CURRENT_TIMESTAMP WHERE site = \\? AND name = \\? AND access_token = \\? AND is_active = TRUE").WithArgs(sqlmock.AnyArg(), "tenant-1", "kora-cloud-channel", token).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("UPDATE _kora_extension SET is_active = FALSE, managed_idempotency_key = \\?, updated_at = CURRENT_TIMESTAMP WHERE site = \\? AND name = \\? AND access_token_hash = \\? AND is_active = TRUE").WithArgs(sqlmock.AnyArg(), "tenant-1", "kora-cloud-channel", tokenHash).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectRollback()
-		mock.ExpectQuery("SELECT access_token, is_active FROM _kora_extension WHERE site = \\? AND name = \\?").WithArgs("tenant-1", "kora-cloud-channel").WillReturnRows(sqlmock.NewRows([]string{"access_token", "is_active"}).AddRow(token, false))
+		mock.ExpectQuery("SELECT access_token_hash, is_active FROM _kora_extension WHERE site = \\? AND name = \\?").WithArgs("tenant-1", "kora-cloud-channel").WillReturnRows(sqlmock.NewRows([]string{"access_token_hash", "is_active"}).AddRow(tokenHash, false))
 		mock.ExpectExec("UPDATE _kora_channel_session SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = \\? WHERE site = \\? AND client_name = \\? AND revoked_at IS NULL").WithArgs("tenant_deletion", "tenant-1", "kora-cloud-channel").WillReturnResult(sqlmock.NewResult(0, 0))
 		response := invokeManagedCredentialRevoke(t, NewHandler(nil, nil), db, body, true)
 		if response.Code != http.StatusOK {
@@ -67,7 +69,7 @@ func TestHandleManagedChannelClientRevokeIsIdempotentAndFingerprintBound(t *test
 			t.Fatal(err)
 		}
 		defer db.Close()
-		mock.ExpectQuery("SELECT access_token FROM _kora_extension WHERE site = \\? AND name = \\?").WithArgs("tenant-1", "kora-cloud-channel").WillReturnRows(sqlmock.NewRows([]string{"access_token"}).AddRow("newer-managed-token"))
+		mock.ExpectQuery("SELECT access_token_hash FROM _kora_extension WHERE site = \\? AND name = \\?").WithArgs("tenant-1", "kora-cloud-channel").WillReturnRows(sqlmock.NewRows([]string{"access_token_hash"}).AddRow(auth.HashExtensionAccessToken("newer-managed-token")))
 		response := invokeManagedCredentialRevoke(t, NewHandler(nil, nil), db, body, true)
 		if response.Code != http.StatusConflict {
 			t.Fatalf("stale revocation returned %d: %s", response.Code, response.Body.String())
