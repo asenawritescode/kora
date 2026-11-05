@@ -22,3 +22,123 @@
   write: true
   create: true
   delete: false
+- doctype: Register
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Register
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Shift
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Shift
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Till Session
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Till Session
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Sale
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale Item
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Sale Item
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale Payment
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Sale Payment
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Item
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Item
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Location
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Location
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Stock Entry
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Stock Entry
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Stock Balance
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Stock Balance
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
