@@ -216,7 +216,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("register internal module command providers for tenant %s: %w", loaded.Name, moduleErr)
 	}
 	providers = append(providers, internalProviders...)
-	configQueryProviders, moduleErr := registeredConfigQueryProviders(tenantID, loaded.DB, dialect, loaded.Registry, moduleSnapshot.Modules, configQueries, config.ModuleSchemas)
+	configQueryProviders, moduleErr := registeredConfigQueryProviders(tenantID, loaded.DB, dialect, loaded.Registry, moduleSnapshot.Modules, configQueries, config.ModuleSchemas, false)
 	if moduleErr != nil {
 		return fmt.Errorf("register config query providers for tenant %s: %w", loaded.Name, moduleErr)
 	}
@@ -264,7 +264,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return plugin.BindingPlan{}, err
 		}
 		candidateProviders = append(candidateProviders, commands...)
-		configProviders, err := registeredConfigQueryProviders(tenantID, loaded.DB, dialect, loaded.Registry, modules, configQueriesForModules(configQueries, modules), candidateSchemas)
+		configProviders, err := registeredConfigQueryProviders(tenantID, loaded.DB, dialect, loaded.Registry, modules, configQueriesForModules(configQueries, modules), candidateSchemas, true)
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}

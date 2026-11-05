@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sort"
 	"time"
@@ -22,8 +23,9 @@ import (
 // registeredConfigQueryProviders binds each tenant config query to the module
 // descriptor query it executes. The descriptor stays the published contract;
 // the config definition supplies only execution. A definition without a
-// descriptor, or one that disagrees with it, fails the tenant load.
-func registeredConfigQueryProviders(tenant contract.TenantID, database *sql.DB, dialect db.Dialect, registry *doctype.Registry, modules []contract.ModuleDescriptor, defs []*query.Definition, schemas workflow.PayloadSchemaRegistry) ([]plugin.ProviderRegistration, error) {
+// descriptor, or one that disagrees with it, is an error when strict (preflight)
+// and is skipped with a warning otherwise (tenant start), so the site still starts.
+func registeredConfigQueryProviders(tenant contract.TenantID, database *sql.DB, dialect db.Dialect, registry *doctype.Registry, modules []contract.ModuleDescriptor, defs []*query.Definition, schemas workflow.PayloadSchemaRegistry, strict bool) ([]plugin.ProviderRegistration, error) {
 	byOwner := map[contract.ModuleID]map[string]plugin.PublishedQueryExecutor{}
 	offers := map[contract.ModuleID][]contract.CapabilityOffer{}
 	for _, def := range defs {
@@ -43,10 +45,19 @@ func registeredConfigQueryProviders(tenant contract.TenantID, database *sql.DB, 
 			}
 		}
 		if published == nil {
-			return nil, fmt.Errorf("query.unpublished: config query %q has no module descriptor query %s/%s", def.Name, def.ModuleOwnerID, def.Operation)
+			err := fmt.Errorf("query.unpublished: config query %q has no module descriptor query %s/%s", def.Name, def.ModuleOwnerID, def.Operation)
+			if strict {
+				return nil, err
+			}
+			slog.Warn("skipping config query", "tenant", tenant, "query", def.Name, "code", "query.unpublished", "error", err)
+			continue
 		}
 		if err := matchConfigQuery(def, *published); err != nil {
-			return nil, err
+			if strict {
+				return nil, err
+			}
+			slog.Warn("skipping config query", "tenant", tenant, "query", def.Name, "code", "query.mismatch", "error", err)
+			continue
 		}
 		if schemas == nil || !schemas.Registered(published.InputSchema) || !schemas.Registered(published.OutputSchema) {
 			return nil, fmt.Errorf("config query %q requires registered input and output schemas", def.Name)

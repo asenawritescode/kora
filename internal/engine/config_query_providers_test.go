@@ -42,7 +42,7 @@ func TestRegisteredConfigQueryProvidersMatchesDescriptor(t *testing.T) {
 			def, module := configQueryFixture()
 			tt.mutate(def, &module)
 			modules := []contract.ModuleDescriptor{module}
-			providers, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), nil, modules, []*query.Definition{def}, schemas)
+			providers, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), nil, modules, []*query.Definition{def}, schemas, true)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want %s", err, tt.wantErr)
@@ -111,11 +111,44 @@ func TestConfigQueryProvidersChildSourceUsesParent(t *testing.T) {
 		def, module := configQueryFixture()
 		def.Via, def.Scope = "Sale.payments", "legal_entity"
 		module.Queries[0].ScopePolicy = contract.ScopeEntityOwned
-		_, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), reg, []contract.ModuleDescriptor{module}, []*query.Definition{def}, schemas)
+		_, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), reg, []contract.ModuleDescriptor{module}, []*query.Definition{def}, schemas, true)
 		src, _ := reg.QuerySource("module.cq.owner.query.list")
 		if (scopeField == "") != (err != nil) || (err == nil && src != "Sale") {
 			t.Fatalf("scope %q: src=%q err=%v", scopeField, src, err)
 		}
+	}
+}
+
+func TestRegisteredConfigQueryProvidersLenientSkips(t *testing.T) {
+	schemas := publishedQueryTestSchemas{{ID: "cq.input", Version: 1}: true, {ID: "cq.output", Version: 1}: true}
+	tests := []struct {
+		name   string
+		mutate func(*query.Definition)
+		code   string
+	}{
+		{"unpublished", func(d *query.Definition) { d.Operation = "other" }, "query.unpublished"},
+		{"mismatch", func(d *query.Definition) { d.Limit = 9 }, "query.mismatch"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bad, module := configQueryFixture()
+			bad.Name = "bad"
+			tt.mutate(bad)
+			good, _ := configQueryFixture()
+			modules := []contract.ModuleDescriptor{module}
+			defs := []*query.Definition{bad, good}
+			if _, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), nil, modules, defs, schemas, true); err == nil || !strings.Contains(err.Error(), tt.code) {
+				t.Fatalf("strict err = %v, want %s", err, tt.code)
+			}
+			providers, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), nil, modules, defs, schemas, false)
+			if err != nil || len(providers) != 1 || len(providers[0].Queries) != 1 || providers[0].Queries["list"] == nil {
+				t.Fatalf("lenient providers = %+v err = %v", providers, err)
+			}
+			none, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), nil, nil, defs[:1], schemas, false)
+			if err != nil || len(none) != 0 {
+				t.Fatalf("no modules: %+v err=%v", none, err)
+			}
+		})
 	}
 }
 
@@ -139,7 +172,7 @@ func TestGeneratedPackModulesRegisterEveryQuery(t *testing.T) {
 			schemas[s.Ref] = true
 		}
 	}
-	providers, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), nil, modules, defs, schemas)
+	providers, err := registeredConfigQueryProviders("t1", nil, db.Resolve("libsql"), nil, modules, defs, schemas, true)
 	if err != nil {
 		t.Fatal(err)
 	}
