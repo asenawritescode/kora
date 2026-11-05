@@ -44,3 +44,16 @@ func TestLineEntryLayoutValidate(t *testing.T) {
 		t.Fatal("shape must be rejected")
 	}
 }
+
+func TestLineEntryTotalOutputResolvesInNestedCommandOutput(t *testing.T) {
+	in := json.RawMessage(`{"type":"object","properties":{"lines":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"qty":{"type":"integer"}}}}}}`)
+	out := json.RawMessage(`{"type":"object","properties":{"output":{"type":"object","properties":{"total":{}}}}}`)
+	l := LineEntryLayout{LinesPath: "lines", LookupQuery: "p~p.c~q", LookupInput: "s", ItemMap: map[string]string{"item": "name"}, QuantityField: "qty", TotalOutput: "total"}
+	if err := l.Validate(in, out, []string{"name"}); err != nil {
+		t.Fatal(err)
+	}
+	l.TotalOutput = "nope"
+	if err := l.Validate(in, out, []string{"name"}); err == nil {
+		t.Fatal("want error")
+	}
+}
