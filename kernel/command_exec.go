@@ -461,6 +461,11 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 				if rerr != nil {
 					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 				}
+				if tf := dt.GetField(field); tf != nil && tf.Fieldtype == "Table" {
+					if rows, ok := v.([]any); ok {
+						v = childDocuments(tf.Options, rows)
+					}
+				}
 				doc.Set(field, v)
 			}
 			if err := dt.BindBusinessScope(doc, txMgr.BusinessScope, true, nil); err != nil {
@@ -742,4 +747,20 @@ func readRowVersion(dbTx *sql.Tx, dialect db.Dialect, table, name string) (strin
 	default:
 		return "", fmt.Errorf("unsupported modified timestamp type %T", modified)
 	}
+}
+
+// childDocuments turns resolved Table rows into child documents so a command
+// create step can write a parent and its child rows together.
+func childDocuments(childDoctype string, rows []any) []*doctype.Document {
+	children := make([]*doctype.Document, 0, len(rows))
+	for _, row := range rows {
+		child := doctype.NewDocument(childDoctype)
+		if fields, ok := row.(map[string]any); ok {
+			for name, value := range fields {
+				child.Set(name, value)
+			}
+		}
+		children = append(children, child)
+	}
+	return children
 }
