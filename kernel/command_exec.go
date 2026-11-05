@@ -441,7 +441,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 	if computeErr != nil {
 		return nil, contract.NewError(contract.CodeValidationFailed, computeErr.Error())
 	}
-	if cerr := k.checkCommandGuards(dbTx, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames, computed: computed, now: pinnedNow, actor: user}); cerr != nil {
+	if cerr := k.checkCommandGuards(dbTx, opID, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames, computed: computed, now: pinnedNow, actor: user}); cerr != nil {
 		auditFailure(cerr.Type)
 		return nil, cerr
 	}

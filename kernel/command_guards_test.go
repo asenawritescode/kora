@@ -59,3 +59,40 @@ func TestCommandGuardsRejectInvalidDefinitions(t *testing.T) {
 		}
 	}
 }
+
+const paymentGuardYAML = `name: pos.take_payment
+version: 1
+input:
+  record: Order
+require:
+  - payment:
+      for_each: $input.payments
+      reference: $item.reference
+      amount: $item.amount
+      currency: $input.currency
+transaction:
+  - update:
+      record: Order
+      name: $input.order
+      values:
+        note: paid
+`
+
+func TestPaymentGuardParseAndValidation(t *testing.T) {
+	def, err := ParseCommandResource([]byte(paymentGuardYAML))
+	if err != nil || def.Require[0].Payment == nil || def.Require[0].Payment.Currency != "$input.currency" {
+		t.Fatalf("parse: %v %#v", err, def)
+	}
+	cases := map[string]string{
+		"unknown key":   strings.Replace(paymentGuardYAML, "currency: $input.currency", "currency: $input.currency\n      curency: x", 1),
+		"missing field": strings.Replace(paymentGuardYAML, "      currency: $input.currency\n", "", 1),
+		"bad for_each":  strings.Replace(paymentGuardYAML, "for_each: $input.payments", "for_each: payments", 1),
+		"item currency": strings.Replace(paymentGuardYAML, "currency: $input.currency", "currency: $item.currency", 1),
+		"literal ref":   strings.Replace(paymentGuardYAML, "reference: $item.reference", "reference: abc", 1),
+	}
+	for name, src := range cases {
+		if _, err := ParseCommandResource([]byte(src)); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}
