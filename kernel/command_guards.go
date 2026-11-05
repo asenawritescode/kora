@@ -44,6 +44,7 @@ type GuardMatch struct {
 }
 
 func (c *CommandResource) validateGuards(aliases map[string]bool) error {
+	payments := 0
 	for i, guard := range c.Require {
 		if err := c.validateGuardRefs(i, guard, aliases); err != nil {
 			return err
@@ -63,6 +64,9 @@ func (c *CommandResource) validateGuards(aliases map[string]bool) error {
 				return fmt.Errorf("command %q: require %d lock needs record and name", c.FullName(), i)
 			}
 		case guard.Payment != nil:
+			if payments++; payments > 1 {
+				return fmt.Errorf("command %q: at most one payment guard is allowed", c.FullName())
+			}
 			if err := c.validatePaymentGuard(i, guard.Payment); err != nil {
 				return err
 			}
@@ -97,7 +101,7 @@ func (k *Kernel) checkCommandGuards(dbTx *sql.Tx, opID string, txMgr *orm.TxMana
 			continue
 		}
 		if guard.Payment != nil {
-			if cerr := k.consumePaymentGuard(dbTx, op.Context.Site, opID, guard.Payment, env, i); cerr != nil {
+			if cerr := k.consumePaymentGuard(dbTx, op.Context.Site, opID, guard.Payment, cmd.Input.Record, env, i); cerr != nil {
 				return cerr
 			}
 			continue

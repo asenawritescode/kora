@@ -152,3 +152,45 @@ func TestGeneratePackCommandRejects(t *testing.T) {
 		t.Fatal("runtime decode accepted a command without schema refs")
 	}
 }
+
+func TestPackPaymentDescriptor(t *testing.T) {
+	guarded := strings.Replace(saleYAML, "transaction:", "require:\n  - payment: {for_each: $input.payments, reference: $item.reference, amount: $item.amount, currency: $input.currency}\ntransaction:", 1)
+	tests := []struct {
+		name, yaml, want, wantErr string
+		mutate                    func(*doctype.ConfigSnapshot)
+	}{
+		{name: "record_sale", yaml: guarded, want: `{"source_doctype":"Sale","lines_field":"payments","reference_field":"reference","amount_field":"amount","currency_field":"currency"}`},
+		{name: "unguarded has none", yaml: saleYAML, want: ""},
+		{name: "unknown record", yaml: guarded, wantErr: "pack.payment_binding_invalid", mutate: func(s *doctype.ConfigSnapshot) { s.DocTypes = s.DocTypes[1:] }},
+		{name: "lines not a table", yaml: strings.Replace(guarded, "$input.payments", "$input.register", 1), wantErr: "pack.payment_binding_invalid"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snap := packCommandFixture(t, tt.yaml)
+			if tt.mutate != nil {
+				tt.mutate(snap)
+			}
+			mods, err := GeneratePackModules(contract.PackManifest{Name: "shop", Version: "1"}, snap)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := contract.ValidateModuleSet(mods, func(contract.SchemaRef) bool { return true }); err != nil {
+				t.Fatal(err)
+			}
+			got := ""
+			if p := mods[0].PublishedOperations[0].Payment; p != nil {
+				b, _ := json.Marshal(p)
+				got = string(b)
+			}
+			if got != tt.want {
+				t.Fatalf("payment = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}

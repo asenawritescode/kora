@@ -89,6 +89,9 @@ func TestPaymentGuardParseAndValidation(t *testing.T) {
 		"bad for_each":  strings.Replace(paymentGuardYAML, "for_each: $input.payments", "for_each: payments", 1),
 		"item currency": strings.Replace(paymentGuardYAML, "currency: $input.currency", "currency: $item.currency", 1),
 		"literal ref":   strings.Replace(paymentGuardYAML, "reference: $item.reference", "reference: abc", 1),
+		"no record":     strings.Replace(paymentGuardYAML, "input:\n  record: Order\n", "input: {}\n", 1),
+		"nested ref":    strings.Replace(paymentGuardYAML, "amount: $item.amount", "amount: $item.a.b", 1),
+		"two guards":    strings.Replace(paymentGuardYAML, "transaction:", "  - payment: {for_each: $input.p2, reference: $item.reference, amount: $item.amount, currency: $input.currency}\ntransaction:", 1),
 	}
 	for name, src := range cases {
 		if _, err := ParseCommandResource([]byte(src)); err == nil {

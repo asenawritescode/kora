@@ -457,6 +457,44 @@ type ApplicationCatalogOperation struct {
 	Presentation    SurfacePresentation        `json:"presentation"`
 	OfflineEligible bool                       `json:"offline_eligible,omitempty"`
 	Checkout        *CheckoutOperationContract `json:"checkout,omitempty"`
+	Payment         *PaymentOperationContract  `json:"payment,omitempty"`
+}
+
+// PaymentOperationContract publishes the payment binding of a payment-guarded
+// operation: the record payment intents are made for and the input fields that
+// carry the payment lines.
+//
+//contract:wire:v2
+type PaymentOperationContract struct {
+	SourceDoctype  string `json:"source_doctype"`
+	LinesField     string `json:"lines_field"`
+	ReferenceField string `json:"reference_field"`
+	AmountField    string `json:"amount_field"`
+	CurrencyField  string `json:"currency_field"`
+}
+
+// Validate checks the binding against the operation input schema.
+func (c PaymentOperationContract) Validate(inputSchema json.RawMessage) error {
+	var in struct {
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+	}
+	if json.Unmarshal(inputSchema, &in) != nil {
+		return fmt.Errorf("payment input schema must be an object")
+	}
+	for _, f := range []string{c.SourceDoctype, c.ReferenceField, c.AmountField, c.CurrencyField} {
+		if f == "" {
+			return fmt.Errorf("payment binding is incomplete")
+		}
+	}
+	if in.Properties[c.LinesField].Type != "array" {
+		return fmt.Errorf("payment lines field %q must be an array", c.LinesField)
+	}
+	if _, ok := in.Properties[c.CurrencyField]; !ok {
+		return fmt.Errorf("payment currency field %q is not an input field", c.CurrencyField)
+	}
+	return nil
 }
 
 //contract:wire:v2
@@ -1130,6 +1168,7 @@ type PublishedOperation struct {
 	// OfflineEligible permits clients to queue this business intent for server replay.
 	OfflineEligible bool                       `json:"offline_eligible,omitempty"`
 	Checkout        *CheckoutOperationContract `json:"checkout,omitempty"`
+	Payment         *PaymentOperationContract  `json:"payment,omitempty"`
 }
 
 // ExtensionKind is a behavior explicitly allowed by an owner-declared point.
@@ -2447,6 +2486,13 @@ func (m ModuleDescriptor) Validate(registeredSchema func(SchemaRef) bool) error 
 		}
 		if err := validateSurfacePresentation(published.Presentation); err != nil {
 			return fmt.Errorf("module %q operation %q presentation: %w", m.ID, published.Name, err)
+		}
+		if published.Payment != nil {
+			if inputSchema, ok := schemaDocuments[op.Input]; ok {
+				if err := published.Payment.Validate(inputSchema); err != nil {
+					return fmt.Errorf("module %q operation %q payment: %w", m.ID, published.Name, err)
+				}
+			}
 		}
 		if published.Checkout != nil {
 			if !moduleSchemas[op.Input] || !moduleSchemas[op.Output] {

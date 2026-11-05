@@ -157,6 +157,10 @@
         "owner_module_id": {
           "type": "string"
         },
+        "payment": {
+          "$ref": "#/$defs/PaymentOperationContract",
+          "x-optional-pointer": true
+        },
         "permissions": {
           "items": {
             "type": "string"
@@ -4001,6 +4005,34 @@
       ],
       "type": "object"
     },
+    "PaymentOperationContract": {
+      "additionalProperties": false,
+      "properties": {
+        "amount_field": {
+          "type": "string"
+        },
+        "currency_field": {
+          "type": "string"
+        },
+        "lines_field": {
+          "type": "string"
+        },
+        "reference_field": {
+          "type": "string"
+        },
+        "source_doctype": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount_field",
+        "currency_field",
+        "lines_field",
+        "reference_field",
+        "source_doctype"
+      ],
+      "type": "object"
+    },
     "PendingWorkSummary": {
       "additionalProperties": false,
       "properties": {
@@ -4368,6 +4400,10 @@
         },
         "operation": {
           "type": "string"
+        },
+        "payment": {
+          "$ref": "#/$defs/PaymentOperationContract",
+          "x-optional-pointer": true
         },
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
@@ -6165,6 +6201,10 @@
         },
         "owner_module_id": {
           "type": "string"
+        },
+        "payment": {
+          "$ref": "#/$defs/PaymentOperationContract",
+          "x-optional-pointer": true
         },
         "permissions": {
           "items": {
@@ -9985,6 +10025,34 @@
       ],
       "type": "object"
     },
+    "PaymentOperationContract": {
+      "additionalProperties": false,
+      "properties": {
+        "amount_field": {
+          "type": "string"
+        },
+        "currency_field": {
+          "type": "string"
+        },
+        "lines_field": {
+          "type": "string"
+        },
+        "reference_field": {
+          "type": "string"
+        },
+        "source_doctype": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount_field",
+        "currency_field",
+        "lines_field",
+        "reference_field",
+        "source_doctype"
+      ],
+      "type": "object"
+    },
     "PendingWorkSummary": {
       "additionalProperties": false,
       "properties": {
@@ -10352,6 +10420,10 @@
         },
         "operation": {
           "type": "string"
+        },
+        "payment": {
+          "$ref": "#/$defs/PaymentOperationContract",
+          "x-optional-pointer": true
         },
         "presentation": {
           "$ref": "#/$defs/SurfacePresentation"
