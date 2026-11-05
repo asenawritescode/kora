@@ -91,6 +91,9 @@ func GeneratePackModules(manifest contract.PackManifest, snapshot *doctype.Confi
 	}
 	app := contract.ModuleDescriptor{ID: contract.ModuleID(manifest.Name + ".app"), Version: version}
 	if snapshot != nil {
+		if err := addPackOwnership(&core, snapshot); err != nil {
+			return nil, err
+		}
 		if err := addPackCommands(&core, &app, snapshot); err != nil {
 			return nil, err
 		}
