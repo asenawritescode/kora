@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/db"
 	notificationstore "github.com/asenawritescode/kora/notifications/sqlstore"
@@ -367,6 +368,9 @@ func BootstrapSystemTablesContext(ctx context.Context, database *sql.DB, dialect
 	}
 
 	if err := seedDefaultAdministratorRoleContext(ctx, database, dialect); err != nil {
+		return err
+	}
+	if err := auth.BackfillExtensionTokenHashes(ctx, database, dialect); err != nil {
 		return err
 	}
 
