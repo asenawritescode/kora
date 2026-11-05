@@ -11,6 +11,7 @@ fields:
     options: Register
     label: Register
     reqd: true
+    search_index: true
     in_list_view: true
   - fieldname: cashier
     fieldtype: Data

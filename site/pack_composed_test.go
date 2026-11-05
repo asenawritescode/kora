@@ -127,3 +127,32 @@ func TestParseConfigPackComposedMatchesTreeImport(t *testing.T) {
 		t.Fatalf("want pack.manifest_required, got %v", err)
 	}
 }
+
+func TestValidatePackComposedInventoryPOSHasNoLinkTitleFindings(t *testing.T) {
+	var files []PackFile
+	for _, c := range []string{"inventory", "pos"} {
+		files = append(files, readPackFiles(t, filepath.Join("..", "config", c), c)...)
+	}
+	v, err := ValidatePack(PackManifest{SchemaVersion: 1, Name: "composed", Version: "1.0.0"}, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range v.Findings {
+		if f.Code == "link_title_unsearchable" {
+			t.Errorf("%s: %s", f.Path, f.Message)
+		}
+	}
+	for i := range files {
+		if strings.HasSuffix(files[i].Path, "/register.yaml") {
+			files[i].Content = strings.Replace(files[i].Content, "search_index: true", "", 1)
+		}
+	}
+	v, _ = ValidatePack(PackManifest{SchemaVersion: 1, Name: "composed", Version: "1.0.0"}, files)
+	found := false
+	for _, f := range v.Findings {
+		found = found || f.Code == "link_title_unsearchable"
+	}
+	if !found {
+		t.Error("unindexed link title must still fail")
+	}
+}
