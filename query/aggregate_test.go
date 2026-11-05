@@ -47,9 +47,9 @@ func aggConn(t *testing.T, rows string) *sql.DB {
 		t.Skip(err)
 	}
 	conn.SetMaxOpenConns(1)
-	stmts := []string{"CREATE TABLE `Sale` (name TEXT, register TEXT, status TEXT, cashier TEXT, total NUMERIC)"}
+	stmts := []string{"CREATE TABLE `tabSale` (name TEXT, register TEXT, status TEXT, cashier TEXT, total NUMERIC)"}
 	if rows != "" {
-		stmts = append(stmts, "INSERT INTO `Sale` VALUES "+rows)
+		stmts = append(stmts, "INSERT INTO `tabSale` VALUES "+rows)
 	}
 	for _, s := range stmts {
 		if _, err := conn.Exec(s); err != nil {

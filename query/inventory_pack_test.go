@@ -34,10 +34,10 @@ func TestInventoryPackQueries(t *testing.T) {
 	}
 	conn.SetMaxOpenConns(1)
 	for _, s := range []string{
-		"CREATE TABLE `Item` (name TEXT, item_name TEXT, barcode TEXT, uom TEXT, price NUMERIC)",
-		"CREATE TABLE `Stock Balance` (name TEXT, item TEXT, location TEXT, quantity REAL, reorder_level REAL)",
-		"INSERT INTO `Item` VALUES ('I1','Blue Pen','111','Each',1.5),('I2','Red Pen','222','Each',2),('I3','Notebook','333','Each',5)",
-		"INSERT INTO `Stock Balance` VALUES ('B1','I1','L1',7,5),('B2','I1','L2',3,5),('B3','I2','L1',4,4),('B4','I3','L1',0,0),('B5','I3','L2',9,10)",
+		"CREATE TABLE `tabItem` (name TEXT, item_name TEXT, barcode TEXT, uom TEXT, price NUMERIC)",
+		"CREATE TABLE `tabStock Balance` (name TEXT, item TEXT, location TEXT, quantity REAL, reorder_level REAL)",
+		"INSERT INTO `tabItem` VALUES ('I1','Blue Pen','111','Each',1.5),('I2','Red Pen','222','Each',2),('I3','Notebook','333','Each',5)",
+		"INSERT INTO `tabStock Balance` VALUES ('B1','I1','L1',7,5),('B2','I1','L2',3,5),('B3','I2','L1',4,4),('B4','I3','L1',0,0),('B5','I3','L2',9,10)",
 	} {
 		if _, err := conn.Exec(s); err != nil {
 			t.Fatal(err)

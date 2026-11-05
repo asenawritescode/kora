@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/doctype"
 )
 
 // ErrTooManyGroups is the code reported when an aggregate query yields more than limit groups.
@@ -197,7 +198,7 @@ func Build(d *Definition, dialect db.Dialect, req Request) (string, []any, []Sor
 	for i, s := range sorts {
 		order[i] = dialect.QuoteIdent(s.Field) + " " + strings.ToUpper(orDefault(s.Dir, "asc"))
 	}
-	q := "SELECT " + strings.Join(cols, ", ") + " FROM " + dialect.QuoteIdent(d.Source)
+	q := "SELECT " + strings.Join(cols, ", ") + " FROM " + dialect.QuoteIdent(sourceTable(d))
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -292,7 +293,7 @@ func buildAggregate(b *builder, d *Definition) (string, []any, []Sort, error) {
 	if b.req.ScopeField != "" {
 		where = append(where, q.QuoteIdent(b.req.ScopeField)+" = "+b.bind(b.req.ScopeValue))
 	}
-	sql := "SELECT " + strings.Join(cols, ", ") + " FROM " + q.QuoteIdent(d.Source)
+	sql := "SELECT " + strings.Join(cols, ", ") + " FROM " + q.QuoteIdent(sourceTable(d))
 	if len(where) > 0 {
 		sql += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -361,4 +362,9 @@ func aggValue(d *Definition, i int, v any) any {
 		return strconv.FormatFloat(x, 'f', -1, 64)
 	}
 	return fmt.Sprint(v)
+}
+
+// sourceTable maps the Source DocType name to its physical table name.
+func sourceTable(d *Definition) string {
+	return (&doctype.DocType{Name: d.Source}).RawTableName()
 }

@@ -29,7 +29,7 @@ func TestBuild(t *testing.T) {
 		nargs   int
 		wantErr bool
 	}{
-		{"optional skipped", db.MySQL(), []Filter{opt}, Request{Actor: "u", FullRead: true}, []string{"FROM `Purchase Request` ORDER BY `modified` DESC, `name` ASC LIMIT 3"}, 0, false},
+		{"optional skipped", db.MySQL(), []Filter{opt}, Request{Actor: "u", FullRead: true}, []string{"FROM `tabPurchase Request` ORDER BY `modified` DESC, `name` ASC LIMIT 3"}, 0, false},
 		{"optional present", db.MySQL(), []Filter{opt}, Request{Input: map[string]any{"status": "Draft"}, FullRead: true}, []string{"WHERE `status` = ?"}, 1, false},
 		{"any is OR", db.MySQL(), []Filter{anyG}, Request{Input: map[string]any{"search": "x"}, FullRead: true}, []string{"(`title` LIKE ? ESCAPE '!' OR `code` = ?)"}, 2, false},
 		{"contains escapes", db.MySQL(), []Filter{anyG}, Request{Input: map[string]any{"search": "50%_!"}, FullRead: true}, []string{"LIKE"}, 2, false},
@@ -71,9 +71,9 @@ func TestRunKeysetStableUnderInsert(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mustExec("CREATE TABLE `Purchase Request` (name TEXT, title TEXT, modified TEXT, owner TEXT, total NUMERIC)")
+	mustExec("CREATE TABLE `tabPurchase Request` (name TEXT, title TEXT, modified TEXT, owner TEXT, total NUMERIC)")
 	for _, r := range [][2]string{{"A", "2"}, {"B", "3"}, {"C", "1"}} {
-		mustExec("INSERT INTO `Purchase Request` VALUES (?,?,?,?,?)", r[0], "t"+r[0], r[1], "u", "1.50")
+		mustExec("INSERT INTO `tabPurchase Request` VALUES (?,?,?,?,?)", r[0], "t"+r[0], r[1], "u", "1.50")
 	}
 	d := def(nil)
 	d.Limit = 2
@@ -82,7 +82,7 @@ func TestRunKeysetStableUnderInsert(t *testing.T) {
 	if err != nil || len(p1.Rows) != 2 || p1.Rows[0]["name"] != "B" || p1.Next == nil {
 		t.Fatalf("page1 %+v %v", p1, err)
 	}
-	mustExec("INSERT INTO `Purchase Request` VALUES ('Z','tZ','9','u','1')") // newest, sorts before cursor
+	mustExec("INSERT INTO `tabPurchase Request` VALUES ('Z','tZ','9','u','1')") // newest, sorts before cursor
 	p2, err := Run(ctx, conn, db.Resolve("libsql"), d, Request{FullRead: true, Cursor: p1.Next})
 	if err != nil || len(p2.Rows) != 1 || p2.Rows[0]["name"] != "C" || p2.Next != nil {
 		t.Fatalf("page2 %+v %v", p2, err)
@@ -95,14 +95,14 @@ func TestFieldRefFilter(t *testing.T) {
 		t.Skip(err)
 	}
 	conn.SetMaxOpenConns(1)
-	if _, err := conn.Exec("CREATE TABLE `Purchase Request` (name TEXT, title TEXT, modified TEXT, owner TEXT, qty INT, lvl INT)"); err != nil {
+	if _, err := conn.Exec("CREATE TABLE `tabPurchase Request` (name TEXT, title TEXT, modified TEXT, owner TEXT, qty INT, lvl INT)"); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range []struct {
 		n    string
 		q, l int
 	}{{"A", 1, 5}, {"B", 5, 5}, {"C", 9, 5}} {
-		if _, err := conn.Exec("INSERT INTO `Purchase Request` VALUES (?,?,?,?,?,?)", r.n, "t", r.n, "u", r.q, r.l); err != nil {
+		if _, err := conn.Exec("INSERT INTO `tabPurchase Request` VALUES (?,?,?,?,?,?)", r.n, "t", r.n, "u", r.q, r.l); err != nil {
 			t.Fatal(err)
 		}
 	}

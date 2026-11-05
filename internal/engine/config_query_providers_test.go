@@ -67,7 +67,7 @@ func TestConfigQueryExecutorPagesWithCursor(t *testing.T) {
 	}
 	defer database.Close()
 	database.SetMaxOpenConns(1)
-	if _, err := database.Exec("CREATE TABLE `Item` (name TEXT PRIMARY KEY, title TEXT); INSERT INTO `Item` VALUES ('a','A'),('b','B'),('c','C')"); err != nil {
+	if _, err := database.Exec("CREATE TABLE `tabItem` (name TEXT PRIMARY KEY, title TEXT); INSERT INTO `tabItem` VALUES ('a','A'),('b','B'),('c','C')"); err != nil {
 		t.Fatal(err)
 	}
 	def, _ := configQueryFixture()
