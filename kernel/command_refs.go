@@ -182,5 +182,26 @@ func (c *CommandResource) validateStepReferences() error {
 			aliases[step.As] = true
 		}
 	}
+	return c.validateOutputRefs(aliases)
+}
+
+// validateOutputRefs checks output refs resolve statically; aliases holds all
+// step aliases, since output is evaluated after every step ran.
+func (c *CommandResource) validateOutputRefs(aliases map[string]bool) error {
+	for key, ref := range c.Output {
+		switch {
+		case strings.HasPrefix(ref, "$item."):
+			return fmt.Errorf("command %q: output %q cannot use %q", c.FullName(), key, ref)
+		case strings.HasPrefix(ref, "$computed."):
+			if !c.hasComputeKey(strings.TrimPrefix(ref, "$computed.")) {
+				return fmt.Errorf("command %q: output %q reference %q must name a compute key", c.FullName(), key, ref)
+			}
+		case strings.HasPrefix(ref, "$steps."):
+			alias, ok := strings.CutSuffix(strings.TrimPrefix(ref, "$steps."), ".name")
+			if !ok || !aliases[alias] {
+				return fmt.Errorf("command %q: output %q reference %q must name a step alias", c.FullName(), key, ref)
+			}
+		}
+	}
 	return nil
 }

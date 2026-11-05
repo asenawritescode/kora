@@ -32,6 +32,7 @@ type CommandResource struct {
 	Preconditions  []string                           `yaml:"preconditions"            json:"preconditions,omitempty"`
 	Require        []CommandGuard                     `yaml:"require,omitempty"        json:"require,omitempty"`
 	Compute        ComputeBlock                       `yaml:"compute,omitempty"        json:"compute,omitempty"`
+	Output         map[string]string                  `yaml:"output,omitempty"         json:"output,omitempty"`
 	Steps          []CommandStep                      `yaml:"transaction"              json:"transaction"`
 	Emits          []string                           `yaml:"emit"                     json:"emit,omitempty"`
 	BusinessEvents []contract.BusinessEventDefinition `yaml:"business_events" json:"business_events,omitempty"`
