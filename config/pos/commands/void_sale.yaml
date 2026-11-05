@@ -1,0 +1,52 @@
+name: void_sale
+namespace: pos
+version: 1
+permission: write
+input:
+  record: Sale
+require:
+  - exists:
+      record: Shift
+      where:
+        name: $input.shift
+        status: Open
+    message: Sale can only be voided while its shift is open
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        shift: $input.shift
+    message: Till does not belong to this shift
+  - exists:
+      record: Sale
+      where:
+        name: $input.sale
+        till_session: $input.till_session
+        status: Paid
+    as: original
+    message: Only a paid sale from this till can be voided
+transaction:
+  - update:
+      record: Sale
+      name: $steps.original.name
+      values:
+        status: Void
+  - for_each: $input.items
+    update:
+      record: Stock Balance
+      where:
+        item: $item.item
+        location: $input.location
+      adjust:
+        quantity: { increase: $item.quantity }
+  - for_each: $input.items
+    create:
+      record: Stock Entry
+      values:
+        item: $item.item
+        location: $input.location
+        quantity: $item.quantity
+        entry_type: Receipt
+        remarks: $steps.original.name
+emit:
+  - pos.sale.voided

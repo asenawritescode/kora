@@ -62,3 +62,22 @@ func TestRecordSaleCommand(t *testing.T) {
 		t.Fatalf("receipt output = %v", def.Output)
 	}
 }
+
+func TestPOSReturnAndVoidCommandsParse(t *testing.T) {
+	for name, guards := range map[string]int{"return_sale": 1, "void_sale": 3} {
+		raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", name+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		def, err := ParseCommandResource(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(def.Require) != guards {
+			t.Fatalf("%s: guards = %d, want %d", name, len(def.Require), guards)
+		}
+		if got := def.Steps[len(def.Steps)-2].Update.Adjust["quantity"]; got.Increase != "$item.quantity" {
+			t.Fatalf("%s must restock: %+v", name, got)
+		}
+	}
+}
