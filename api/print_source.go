@@ -118,7 +118,20 @@ func (s sitePrintSource) Receipt(c *gin.Context, ref, executionID string) (map[s
 	if err := json.Unmarshal(receipt.Output, &out); err != nil {
 		return nil, nil, ErrPrintNotFound
 	}
-	return out, nil, nil
+	return unwrapCommandOutput(out), nil, nil
+}
+
+// unwrapCommandOutput returns the declared output of a command-backed
+// operation. Command receipts are stored as {command, steps, output:{...}};
+// templates and print references address the declared output, so the envelope
+// is peeled off. Flat outputs from other operation kinds pass through.
+func unwrapCommandOutput(out map[string]any) map[string]any {
+	if _, isCommand := out["command"]; isCommand {
+		if declared, ok := out["output"].(map[string]any); ok {
+			return declared
+		}
+	}
+	return out
 }
 
 // Tenant reads print.* overrides from the site secret store.

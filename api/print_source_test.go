@@ -69,7 +69,7 @@ func TestSitePrintSourceReceipt(t *testing.T) {
 	reg.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.invoices.operation.issue", Role: "Operator", Write: true})
 	ref := contract.PublishedOperationRef(owner.ID, pub.Capability, pub.Operation)
 	id := contract.OperationID(contract.NewOperationID())
-	rcpt := contract.OperationReceipt{ExecutionID: id, OperationRef: ref, BusinessScope: scope, Status: contract.ReceiptCompleted, OutputSchema: &out, Output: json.RawMessage(`{"total":42,"reference":"S-1"}`), Revision: "1"}
+	var rcpt contract.OperationReceipt
 	svc := NewSiteRuntimeServices()
 	svc.Replace(string(scope.TenantID), SiteRuntimeService{
 		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return snap, nil },
@@ -83,14 +83,21 @@ func TestSitePrintSourceReceipt(t *testing.T) {
 		name  string
 		roles []string
 		ref   string
+		out   string
 		want  error
+		// wantRef is the .reference templates and the print endpoint read.
+		wantRef string
 	}{
-		{"ok", []string{"Operator"}, ref, nil},
-		{"no grant", nil, ref, ErrPrintForbidden},
-		{"wrong ref", []string{"Operator"}, "other~x~y", ErrPrintNotFound},
+		{"flat output", []string{"Operator"}, ref, `{"total":42,"reference":"S-1"}`, nil, "S-1"},
+		{"command envelope", []string{"Operator"}, ref, `{"command":"pos.record_sale","output":{"reference":"SALE-2026-00003","total":"340"},"steps":[{"Record":"Sale","Name":"SALE-2026-00003"}]}`, nil, "SALE-2026-00003"},
+		{"command envelope without declared output", []string{"Operator"}, ref, `{"command":"pos.noop","steps":[]}`, nil, ""},
+		{"output key without command marker", []string{"Operator"}, ref, `{"output":{"reference":"X"},"reference":"S-2"}`, nil, "S-2"},
+		{"no grant", nil, ref, `{"reference":"S-1"}`, ErrPrintForbidden, ""},
+		{"wrong ref", []string{"Operator"}, "other~x~y", `{"reference":"S-1"}`, ErrPrintNotFound, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			rcpt = contract.OperationReceipt{ExecutionID: id, OperationRef: ref, BusinessScope: scope, Status: contract.ReceiptCompleted, OutputSchema: &out, Output: json.RawMessage(tc.out), Revision: "1"}
 			ex, err := policy.NewVerifiedExecution(scope.TenantID, contract.ActorContext{PrincipalID: "u", PrincipalType: contract.PrincipalHuman, Site: string(scope.TenantID), Roles: tc.roles, AuthenticatedAt: time.Now().UTC()})
 			if err != nil {
 				t.Fatal(err)
@@ -101,7 +108,7 @@ func TestSitePrintSourceReceipt(t *testing.T) {
 			c.Set("site_registry", reg)
 			c.Set("policy_execution", ex)
 			r, _, err := sitePrintSource{h: h}.Receipt(c, tc.ref, string(id))
-			if !errors.Is(err, tc.want) || (tc.want == nil && r["total"] != float64(42)) {
+			if !errors.Is(err, tc.want) || (tc.want == nil && (r["reference"] != tc.wantRef && !(tc.wantRef == "" && r["reference"] == nil))) {
 				t.Fatalf("got %v %v", r, err)
 			}
 		})
