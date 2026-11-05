@@ -52,6 +52,7 @@ type ConfigSnapshot struct {
 	Views               []*View                                `json:"views,omitempty"`
 	AnalyticsMetrics    []*AnalyticsMetricConfig               `json:"analytics_metrics,omitempty"`
 	Reports             []json.RawMessage                      `json:"reports,omitempty"`
+	Commands            []json.RawMessage                      `json:"commands,omitempty"`
 	Scripts             []*ScriptSnapshot                      `json:"scripts,omitempty"`
 	ScheduledJobs       []contract.ScheduledJobDefinition      `json:"scheduled_jobs,omitempty"`
 	Modules             []contract.ModuleDescriptor            `json:"modules,omitempty"`
