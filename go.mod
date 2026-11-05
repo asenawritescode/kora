@@ -36,6 +36,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+require github.com/go-pdf/fpdf v0.9.0
+
 require (
 	4d63.com/embedfiles v0.0.0-20190311033909-995e0740726f // indirect
 	4d63.com/tz v1.2.0 // indirect
@@ -88,7 +90,7 @@ require (
 	github.com/philhofer/fwd v1.0.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/shurcooL/go v0.0.0-20200502201357-93f07166e636 // indirect
