@@ -1,0 +1,26 @@
+name: open_shift
+namespace: pos
+version: 1
+permission: create
+input:
+  record: Shift
+require:
+  - lock:
+      record: Register
+      name: $input.register
+  - not_exists:
+      record: Shift
+      where:
+        register: $input.register
+        status: Open
+    message: Register already has an open shift
+transaction:
+  - create:
+      record: Shift
+      values:
+        register: $input.register
+        cashier: $actor
+        started_at: $now
+        status: Open
+emit:
+  - pos.shift.opened
