@@ -1,0 +1,24 @@
+# Fabricated demo shop for M1 testing. Not a real business.
+shop_name: Kilimo Wholesale & Agrovet
+currency: KES
+timezone: Africa/Nairobi
+naming_series_prefix: WSK
+locations:
+  - name: Warehouse
+registers:
+  - name: Front Desk
+    location: Warehouse
+    opening_float: "10000.00"
+users:
+  - name: Kilimo Owner Demo
+    email: owner.wholesale@example.com
+    phone: "0722 000 301"
+    role: Owner
+  - name: Otieno Manager Demo
+    email: manager.wholesale@example.com
+    phone: "0722 000 302"
+    role: Manager
+  - name: Nafula Cashier Demo
+    email: cashier1.wholesale@example.com
+    phone: "0722 000 303"
+    role: Cashier

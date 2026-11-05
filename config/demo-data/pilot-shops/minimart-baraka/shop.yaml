@@ -1,0 +1,35 @@
+# Fabricated demo shop for M1 testing. Not a real business.
+shop_name: Baraka Minimart
+currency: KES
+timezone: Africa/Nairobi
+naming_series_prefix: MMB
+locations:
+  - name: Main Store
+registers:
+  - name: Till 1
+    location: Main Store
+    opening_float: "5000.00"
+  - name: Till 2
+    location: Main Store
+    opening_float: "5000.00"
+users:
+  - name: Baraka Owner Demo
+    email: owner.minimart@example.com
+    phone: "0711 000 201"
+    role: Owner
+  - name: Achieng Manager Demo
+    email: manager.minimart@example.com
+    phone: "0711 000 202"
+    role: Manager
+  - name: Brian Cashier Demo
+    email: cashier1.minimart@example.com
+    phone: "0711 000 203"
+    role: Cashier
+  - name: Faith Cashier Demo
+    email: cashier2.minimart@example.com
+    phone: "0711 000 204"
+    role: Cashier
+  - name: Musa Cashier Demo
+    email: cashier3.minimart@example.com
+    phone: "0711 000 205"
+    role: Cashier
