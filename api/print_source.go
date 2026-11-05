@@ -25,6 +25,44 @@ func (s sitePrintSource) Format(c *gin.Context, name string) (*print.Format, err
 	return f, nil
 }
 
+// Formats returns the active tenant's print formats.
+func (s sitePrintSource) Formats(c *gin.Context) []*print.Format {
+	m := s.h.runtimeService(c, c.GetString("site_name")).PrintFormats
+	out := make([]*print.Format, 0, len(m))
+	for _, f := range m {
+		out = append(out, f)
+	}
+	return out
+}
+
+// Authorize mirrors the render route: read on the printed record type, and the
+// published-operation grant when the target operation is a published one.
+func (s sitePrintSource) Authorize(c *gin.Context, f *print.Format) error {
+	execution, ok := requestExecution(c)
+	if !ok {
+		return ErrPrintForbidden
+	}
+	registry := s.h.siteRegistry(c)
+	for _, dt := range []string{f.For.Record, f.For.Doc} {
+		if dt == "" {
+			continue
+		}
+		if _, denial := permScope(c, registry, dt, "read"); denial != nil {
+			return ErrPrintForbidden
+		}
+	}
+	if f.For.Operation != "" {
+		services := s.h.runtimeService(c, c.GetString("site_name"))
+		if _, operation, found := publishedOperationByRef(services, f.For.Operation); found {
+			scope := businessScopeFromRequest(c, execution)
+			if _, authErr := authorizePublishedOperation(execution, registry, operation.owner, operation.published, scope); authErr != nil {
+				return ErrPrintForbidden
+			}
+		}
+	}
+	return nil
+}
+
 func (s sitePrintSource) Record(c *gin.Context, dtName, name string) (map[string]any, error) {
 	registry := s.h.siteRegistry(c)
 	dt := registry.Get(dtName)
