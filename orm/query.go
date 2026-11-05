@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -124,6 +125,10 @@ type TxManager struct {
 	// as the business write (RFC §8.1). Mutation entry points are owned by the
 	// kernel; a missing outbox is therefore an explicit disabled-delivery mode.
 	Outbox outbox.Writer
+	// EventOrigin is set by the kernel for one operation. It stamps the single
+	// change event of each mutation with the authenticated origin, which
+	// record-triggered workflows require.
+	EventOrigin *EventOrigin
 	// WorkflowStatusPolicies resolves published status policies for every
 	// request-scoped kernel mutation path.
 	WorkflowStatusPolicies workflow.StatusPolicyRepository
@@ -207,9 +212,48 @@ func (tx *TxManager) queryContext() context.Context {
 	return context.Background()
 }
 
-// writeOutbox records a change event into the transactional outbox within the
-// given transaction. It is a no-op when no outbox writer is configured.
-func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op eventstream.EventOp, dt *doctype.DocType, docName, modifiedBy string, data, oldData map[string]any) error {
+// EventOrigin is the authenticated cause of a kernel mutation.
+type EventOrigin struct {
+	Actor          contract.ActorContext
+	CorrelationID  string
+	CausationID    string
+	CausationDepth uint16
+}
+
+// recordChange identifies the committed record version a change event
+// describes, so workflow triggers can consume the same event as webhooks.
+type recordChange struct {
+	Revision      uint64
+	ChangedFields []string
+}
+
+// ChangedFields lists fields whose JSON value differs between two versions of
+// a record, ignoring bookkeeping fields. The result is sorted.
+func ChangedFields(before, after map[string]any) []string {
+	changed := make([]string, 0)
+	for field, value := range after {
+		if field == "modified" || field == "modified_by" || field == "owner" {
+			continue
+		}
+		previous, previousErr := json.Marshal(before[field])
+		next, nextErr := json.Marshal(value)
+		if previousErr != nil || nextErr != nil || string(previous) != string(next) {
+			changed = append(changed, field)
+		}
+	}
+	for field := range before {
+		if _, exists := after[field]; !exists {
+			changed = append(changed, field)
+		}
+	}
+	sort.Strings(changed)
+	return changed
+}
+
+// writeOutbox records the one change event of a mutation into the
+// transactional outbox within the given transaction. It is a no-op when no
+// outbox writer is configured.
+func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op eventstream.EventOp, dt *doctype.DocType, docName, modifiedBy string, data, oldData map[string]any, record recordChange) error {
 	if tx.Outbox == nil {
 		return nil
 	}
@@ -228,7 +272,22 @@ func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op eventstream.EventOp, dt *docty
 		Data:          data,
 		OldData:       oldData,
 	}
-	return tx.Outbox.Append(ctx, dbTx, outbox.ChangeEventToEnvelope(change))
+	envelope := outbox.ChangeEventToEnvelope(change)
+	payload := map[string]any{"data": data, "old_data": oldData, "table": dt.Name, "record_id": docName}
+	if record.Revision > 0 {
+		payload["revision"] = strconv.FormatUint(record.Revision, 10)
+	}
+	if len(record.ChangedFields) > 0 {
+		payload["changed_fields"] = record.ChangedFields
+	}
+	envelope.Data = contract.MustEncodeData(payload)
+	if origin := tx.EventOrigin; origin != nil {
+		envelope.Actor = origin.Actor
+		envelope.CorrelationID = origin.CorrelationID
+		envelope.CausationID = origin.CausationID
+		envelope.CausationDepth = origin.CausationDepth
+	}
+	return tx.Outbox.Append(ctx, dbTx, envelope)
 }
 
 // PrepareInsert runs the before_insert and before_save lifecycle hooks. It is
@@ -378,7 +437,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		return fmt.Errorf("persisting derived fields: %w", err)
 	}
 
-	if err := tx.writeOutbox(dbTx, eventstream.EventInsert, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), nil); err != nil {
+	if err := tx.writeOutbox(dbTx, eventstream.EventInsert, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), nil, recordChange{Revision: doc.Revision}); err != nil {
 		return fmt.Errorf("recording insert to outbox: %w", err)
 	}
 
@@ -681,10 +740,12 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 	}
 
 	var oldOutboxData map[string]any
+	update := recordChange{Revision: doc.Revision}
 	if oldDoc != nil {
 		oldOutboxData = copyFieldsWithStatus(oldDoc.Fields, oldDoc.DocStatus)
+		update.ChangedFields = ChangedFields(oldDoc.Fields, doc.Fields)
 	}
-	if err := tx.writeOutbox(dbTx, eventstream.EventUpdate, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), oldOutboxData); err != nil {
+	if err := tx.writeOutbox(dbTx, eventstream.EventUpdate, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), oldOutboxData, update); err != nil {
 		return fmt.Errorf("recording save to outbox: %w", err)
 	}
 
@@ -1128,7 +1189,7 @@ func (tx *TxManager) DeleteInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, name
 	if oldDoc != nil {
 		oldFields = oldDoc.Fields
 	}
-	if err := tx.writeOutbox(dbTx, eventstream.EventDelete, dt, name, "", oldFields, nil); err != nil {
+	if err := tx.writeOutbox(dbTx, eventstream.EventDelete, dt, name, "", oldFields, nil, recordChange{}); err != nil {
 		return fmt.Errorf("recording delete to outbox: %w", err)
 	}
 	return nil
