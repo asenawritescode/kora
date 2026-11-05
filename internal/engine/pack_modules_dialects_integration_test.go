@@ -166,6 +166,9 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 					if o.Presentation.Layout != "line_entry" || o.Presentation.LineEntry == nil {
 						t.Errorf("record_sale presentation = %+v, want line_entry", o.Presentation)
 					}
+					if want := (contract.PaymentOperationContract{SourceDoctype: "Sale", LinesField: "payments", ReferenceField: "reference", AmountField: "amount", CurrencyField: "currency"}); o.Payment == nil || *o.Payment != want {
+						t.Errorf("record_sale payment = %+v, want %+v", o.Payment, want)
+					}
 				}
 			}
 			if !sale {

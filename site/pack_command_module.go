@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
@@ -67,6 +68,9 @@ func addPackCommands(core, app *contract.ModuleDescriptor, snapshot *doctype.Con
 			AllowedCallers: []contract.ModuleID{app.ID}, OfflineEligible: cmd.OfflineEligible}
 		if cmd.Presentation != nil {
 			po.Presentation = contract.SurfacePresentation(*cmd.Presentation)
+		}
+		if po.Payment, err = packPaymentBinding(cmd, records); err != nil {
+			return err
 		}
 		core.PublishedOperations = append(core.PublishedOperations, po)
 	}
@@ -139,4 +143,28 @@ func commandOutputSchema(cmd *kernel.CommandResource) json.RawMessage {
 		"output":  map[string]any{"type": "object", "properties": declared},
 	}})
 	return out
+}
+
+// packPaymentBinding derives the published payment descriptor of a command with
+// a payment guard from the guard and input.record. It is nil without a guard.
+func packPaymentBinding(cmd *kernel.CommandResource, records map[string]*doctype.DocType) (*contract.PaymentOperationContract, error) {
+	for _, g := range cmd.Require {
+		if g.Payment == nil {
+			continue
+		}
+		field := func(ref string) string { return ref[strings.IndexByte(ref, '.')+1:] }
+		p := &contract.PaymentOperationContract{SourceDoctype: cmd.Input.Record, LinesField: field(g.Payment.ForEach),
+			ReferenceField: field(g.Payment.Reference), AmountField: field(g.Payment.Amount), CurrencyField: field(g.Payment.Currency)}
+		dt := records[cmd.Input.Record]
+		if dt == nil {
+			return nil, fmt.Errorf("pack.payment_binding_invalid: command %q input.record %q is not in the pack", cmd.Name, cmd.Input.Record)
+		}
+		for _, f := range dt.Fields {
+			if f.Fieldname == p.LinesField && f.Fieldtype == "Table" {
+				return p, nil
+			}
+		}
+		return nil, fmt.Errorf("pack.payment_binding_invalid: command %q lines field %q is not a Table field of %q", cmd.Name, p.LinesField, cmd.Input.Record)
+	}
+	return nil, nil
 }

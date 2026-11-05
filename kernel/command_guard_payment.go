@@ -3,6 +3,7 @@ package kernel
 import (
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/shopspring/decimal"
@@ -14,6 +15,8 @@ import (
 // GuardPayment requires every payment intent in a list to be confirmed, to
 // match the stated amount and currency, and to be unused. The intent is then
 // marked consumed by the executing operation, in the command transaction.
+var paymentRefField = regexp.MustCompile(`^\$(input|item)\.[A-Za-z_][A-Za-z0-9_]*$`)
+
 type GuardPayment struct {
 	ForEach   string `yaml:"for_each" json:"for_each"`
 	Reference string `yaml:"reference" json:"reference"`
@@ -25,6 +28,9 @@ func (c *CommandResource) validatePaymentGuard(index int, p *GuardPayment) error
 	if p.ForEach == "" || p.Reference == "" || p.Amount == "" || p.Currency == "" {
 		return fmt.Errorf("command %q: require %d payment needs for_each, reference, amount and currency", c.FullName(), index)
 	}
+	if c.Input.Record == "" {
+		return fmt.Errorf("command %q: require %d payment needs input.record as the payment source", c.FullName(), index)
+	}
 	if !strings.HasPrefix(p.ForEach, "$input.") {
 		return fmt.Errorf("command %q: require %d payment for_each must reference $input", c.FullName(), index)
 	}
@@ -33,13 +39,18 @@ func (c *CommandResource) validatePaymentGuard(index int, p *GuardPayment) error
 			return fmt.Errorf("command %q: require %d payment reference and amount must use $item", c.FullName(), index)
 		}
 	}
-	if strings.HasPrefix(p.Currency, "$item.") || strings.HasPrefix(p.Currency, "$steps.") {
-		return fmt.Errorf("command %q: require %d payment currency cannot use %q", c.FullName(), index, p.Currency)
+	if !strings.HasPrefix(p.Currency, "$input.") {
+		return fmt.Errorf("command %q: require %d payment currency must reference $input", c.FullName(), index)
+	}
+	for _, ref := range []string{p.ForEach, p.Reference, p.Amount, p.Currency} {
+		if !paymentRefField.MatchString(ref) {
+			return fmt.Errorf("command %q: require %d payment reference %q must be a plain field", c.FullName(), index, ref)
+		}
 	}
 	return nil
 }
 
-func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, site, opID string, p *GuardPayment, env refEnv, index int) *contract.Error {
+func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, site, opID string, p *GuardPayment, source string, env refEnv, index int) *contract.Error {
 	invalid := func(format string, args ...any) *contract.Error {
 		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("require %d: "+format, append([]any{index}, args...)...))
 	}
@@ -73,7 +84,7 @@ func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, site, opID string, p *GuardPa
 		if err != nil {
 			return invalid("payment %q amount is not a number", ref)
 		}
-		if cerr := consumePaymentIntent(dbTx, k.dialect(), site, opID, ref, amount, currency); cerr != nil {
+		if cerr := consumePaymentIntent(dbTx, k.dialect(), site, opID, ref, source, amount, currency); cerr != nil {
 			return cerr
 		}
 	}
@@ -83,17 +94,17 @@ func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, site, opID string, p *GuardPa
 // consumePaymentIntent locks the intent row, checks it, and marks it consumed.
 // The row lock (or the conditional UPDATE where FOR UPDATE is unavailable)
 // makes concurrent consumers of one payment mutually exclusive.
-func consumePaymentIntent(dbTx *sql.Tx, dialect db.Dialect, site, opID, ref string, amount decimal.Decimal, currency string) *contract.Error {
+func consumePaymentIntent(dbTx *sql.Tx, dialect db.Dialect, site, opID, ref, source string, amount decimal.Decimal, currency string) *contract.Error {
 	reject := func(why string) *contract.Error {
 		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("payment %q %s", ref, why))
 	}
-	query := "SELECT state, amount, currency, consumed_by FROM _kora_payment_intent WHERE id = ? AND site = ?"
+	query := "SELECT state, amount, currency, source_doctype, consumed_by FROM _kora_payment_intent WHERE id = ? AND site = ?"
 	if named, ok := dialect.(interface{ DriverName() string }); !ok || named.DriverName() != "libsql" {
 		query += " FOR UPDATE"
 	}
-	var state, storedAmount, storedCurrency string
+	var state, storedAmount, storedCurrency, storedSource string
 	var consumed sql.NullString
-	if err := dbTx.QueryRow(db.Rebind(dialect, query), ref, site).Scan(&state, &storedAmount, &storedCurrency, &consumed); err != nil {
+	if err := dbTx.QueryRow(db.Rebind(dialect, query), ref, site).Scan(&state, &storedAmount, &storedCurrency, &storedSource, &consumed); err != nil {
 		if err == sql.ErrNoRows {
 			return reject("not found")
 		}
@@ -105,6 +116,8 @@ func consumePaymentIntent(dbTx *sql.Tx, dialect db.Dialect, site, opID, ref stri
 		return reject("is not confirmed")
 	case err != nil || !stored.Equal(amount):
 		return reject("amount does not match")
+	case storedSource != source:
+		return reject("source does not match")
 	case storedCurrency != currency:
 		return reject("currency does not match")
 	case consumed.Valid && consumed.String != "":
