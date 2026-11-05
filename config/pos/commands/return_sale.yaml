@@ -27,6 +27,12 @@ require:
         name: $input.register
         location: $input.location
     message: Register does not belong to this location
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        status: Open
+    message: Till is not open
 compute:
   total: {sum: $input.items, expr: "quantity * unit_price"}
 transaction:
@@ -66,6 +72,13 @@ transaction:
         quantity: $item.quantity
         entry_type: Receipt
         remarks: $steps.ret.name
+  - for_each: $input.payments
+    where: {method: Cash}
+    update:
+      record: Till Session
+      name: $input.till_session
+      adjust:
+        expected_cash: { decrease: $item.amount }
 output:
   reference: $steps.ret.name
   refund: $computed.total

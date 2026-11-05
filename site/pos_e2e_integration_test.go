@@ -306,12 +306,6 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		}
 	}
 
-	// Close the till: 500 float + 300 cash expected, 790 counted -> variance -10.
-	run("pos.close_till", map[string]any{"data": map[string]any{"shift": shiftName, "closing_count": 790, "expected_cash": 800}})
-	if got := num("SELECT variance FROM "+table("Till Session")+" WHERE name = ?", till); got != -10 {
-		t.Fatalf("variance = %v, want -10", got)
-	}
-
 	// Published queries from both packs.
 	runQuery := func(pack, name string, input map[string]any) *query.Page {
 		t.Helper()
@@ -524,6 +518,16 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	direct := opCtx("direct", "cashier1", cashier, cexec) // no module execution: the direct kernel route
 	if _, cerr = k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.open_shift", Payload: rawDirect, Context: direct}); cerr == nil {
 		t.Fatal("cashier direct-route pos.open_shift must be refused")
+	}
+
+	// Close the till: count 10 short of the server-derived expected_cash.
+	exp := num("SELECT expected_cash FROM "+table("Till Session")+" WHERE name = ?", till)
+	closed := run("pos.close_till", map[string]any{"data": map[string]any{"shift": shiftName, "closing_count": exp - 10}})
+	if got := num("SELECT variance FROM "+table("Till Session")+" WHERE name = ?", till); got != -10 {
+		t.Fatalf("variance = %v, want -10", got)
+	}
+	if o, _ := closed["output"].(map[string]any); fmt.Sprint(o["reference"]) != till {
+		t.Fatalf("close reference = %v, want %s", o["reference"], till)
 	}
 }
 

@@ -142,7 +142,7 @@ func runPOSCommandFeatures(t *testing.T, driver string, conn *sql.DB, dbName str
 	if _, cerr := exec("pos.open_till", "", map[string]any{"data": map[string]any{"shift": shift, "opening_float": 1}}); cerr == nil {
 		t.Fatal("second open_till for the same shift was accepted")
 	}
-	must("pos.close_till", "", map[string]any{"data": map[string]any{"shift": shift, "closing_count": 795, "expected_cash": 800}})
+	must("pos.close_till", "", map[string]any{"data": map[string]any{"shift": shift, "closing_count": 495, "expected_cash": 800}})
 	if got := q("SELECT variance FROM "+table("Till Session")+" WHERE shift = ?", shift); got != "-5" && !strings.HasPrefix(got, "-5.0") {
 		t.Fatalf("variance = %q, want -5", got)
 	}

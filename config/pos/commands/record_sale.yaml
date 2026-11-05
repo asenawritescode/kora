@@ -18,6 +18,12 @@ require:
       reference: $item.reference
       amount: $item.amount
       currency: $input.currency
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        status: Open
+    message: Till is not open
 compute:
   total: {sum: $input.items, expr: "quantity * unit_price"}
 transaction:
@@ -31,6 +37,13 @@ transaction:
         items: $input.items
         payments: $input.payments
         status: Paid
+  - for_each: $input.payments
+    where: {method: Cash}
+    update:
+      record: Till Session
+      name: $input.till_session
+      adjust:
+        expected_cash: { increase: $item.amount }
   - for_each: $input.items
     create:
       record: Sale Line Balance
