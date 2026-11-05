@@ -198,6 +198,11 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if moduleErr != nil {
 		return fmt.Errorf("load configured commands for tenant %s: %w", loaded.Name, moduleErr)
 	}
+	printFormats, moduleErr := tenantPrintFormats(config.ProcessContext, loaded.DB, dialect, loaded.Name)
+	if moduleErr != nil {
+		return fmt.Errorf("load print formats for tenant %s: %w", loaded.Name, moduleErr)
+	}
+	services.PrintFormats = printFormats
 	configQueries, moduleErr := tenantConfigQueries(config.ProcessContext, loaded.DB, dialect, loaded.Name, loaded.Registry)
 	if moduleErr != nil {
 		return fmt.Errorf("load configured queries for tenant %s: %w", loaded.Name, moduleErr)

@@ -21,6 +21,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/print"
 	"github.com/asenawritescode/kora/schema"
 	flow "github.com/asenawritescode/kora/workflow"
 	workflowsql "github.com/asenawritescode/kora/workflow/sqlstore"
@@ -89,6 +90,10 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encoding commands: %w", err)
 	}
+	printFormats, err := loadPrintFormats(filepath.Join(configPath, "print_formats"), doctypes)
+	if err != nil {
+		return err
+	}
 	queries, err := encodeQueriesDir(filepath.Join(configPath, "queries"), doctypes)
 	if err != nil {
 		return nil, err
@@ -110,6 +115,7 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 		Views:               views,
 		Reports:             reports,
 		Commands:            commands,
+		PrintFormats:        printFormats,
 		Queries:             queries,
 	}, nil
 }
@@ -365,6 +371,11 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	}
 	if _, err := kernel.DecodeCommandResources(snapshot.Commands); err != nil {
 		return fmt.Errorf("invalid command definitions: %w", err)
+	}
+	for _, raw := range snapshot.PrintFormats {
+		if _, err := print.Decode(raw); err != nil {
+			return fmt.Errorf("invalid print format: %w", err)
+		}
 	}
 	if _, err := query.Decode(snapshot.Queries, registryOf(snapshot.DocTypes)); err != nil {
 		return fmt.Errorf("invalid query definitions: %w", err)

@@ -2,6 +2,7 @@
 package print
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,17 +26,17 @@ const ErrRenderFailed = "print.render_failed"
 
 // Target says what a format prints: a record or an operation receipt.
 type Target struct {
-	Record    string `yaml:"record,omitempty"`
-	Operation string `yaml:"operation,omitempty"`
+	Record    string `yaml:"record,omitempty" json:"record,omitempty"`
+	Operation string `yaml:"operation,omitempty" json:"operation,omitempty"`
 }
 
 // Format is one print_formats/*.yaml document.
 type Format struct {
-	Name  string `yaml:"name"`
-	For   Target `yaml:"for"`
-	Paper string `yaml:"paper"`
-	Text  string `yaml:"text"`
-	HTML  string `yaml:"html,omitempty"`
+	Name  string `yaml:"name" json:"name"`
+	For   Target `yaml:"for" json:"for"`
+	Paper string `yaml:"paper" json:"paper"`
+	Text  string `yaml:"text" json:"text"`
+	HTML  string `yaml:"html,omitempty" json:"html,omitempty"`
 
 	tmpl *template.Template
 }
@@ -82,6 +83,16 @@ func Load(data []byte) (*Format, error) {
 	}
 	f.tmpl = t
 	return &f, nil
+}
+
+// Encode serialises a format for a config snapshot.
+func Encode(f *Format) (json.RawMessage, error) {
+	return json.Marshal(f)
+}
+
+// Decode parses a snapshot entry; JSON is valid YAML, so it reuses Load.
+func Decode(raw json.RawMessage) (*Format, error) {
+	return Load(raw)
 }
 
 func invalid(format string, a ...any) error {

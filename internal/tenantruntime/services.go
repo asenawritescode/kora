@@ -14,6 +14,7 @@ import (
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/print"
 	"github.com/asenawritescode/kora/query"
 	"github.com/asenawritescode/kora/recon"
 	"github.com/asenawritescode/kora/requests"
@@ -31,6 +32,8 @@ type Services struct {
 	// KernelCommands is the tenant generation's command registry: process-wide
 	// definitions plus those carried by the tenant's active configuration.
 	KernelCommands *kernel.CommandRegistry
+	// PrintFormats are the tenant's configured print formats keyed by name.
+	PrintFormats map[string]*print.Format
 	// ConfigQueries are the queries carried by the tenant's active configuration.
 	ConfigQueries                  []*query.Definition
 	CommandSchemas                 kernel.CommandSchemaRegistry
