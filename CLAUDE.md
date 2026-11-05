@@ -380,7 +380,7 @@ Documents are `map[string]any`. Parent document names are auto-generated: `PREFI
 ### Multi-Tenancy
 
 **MySQL**: Each site = separate database. Complete isolation.  
-**LibSQL**: All sites share the same remote database. Isolation via site-specific table naming and `_kora_config_version.site` column.
+**LibSQL**: Every LibSQL site resolves to the shared `DB_DSN` database, and business tables are not tenant-prefixed, so a LibSQL deployment serves exactly one tenant. Activation claims the database in `_kora_database_owner` and refuses any second tenant (`site.ClaimDatabaseOwner`).
 
 System console at `/console` sees all sites (SystemGuard, env var credentials). Workspace at `/workspace` is per-site (SiteGuard, per-site `_kora_user` table). Console auth uses Bearer tokens (`kora_console_token` in localStorage), separate from workspace session auth.
 
