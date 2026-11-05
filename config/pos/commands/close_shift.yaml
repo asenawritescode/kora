@@ -1,0 +1,23 @@
+name: close_shift
+namespace: pos
+version: 1
+permission: write
+input:
+  record: Shift
+require:
+  - exists:
+      record: Shift
+      where:
+        register: $input.register
+        status: Open
+    as: shift
+    message: Register has no open shift
+transaction:
+  - update:
+      record: Shift
+      name: $steps.shift.name
+      values:
+        status: Closed
+        ended_at: $now
+emit:
+  - pos.shift.closed
