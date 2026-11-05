@@ -1,8 +1,10 @@
 package query
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -85,5 +87,34 @@ func TestLoadDir(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "b.yaml"), []byte(valid), 0o644)
 	if _, err := LoadDir(dir, testReg()); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("want duplicate, got %v", err)
+	}
+}
+
+func TestEncodeDecodeRoundTrip(t *testing.T) {
+	reg := testReg()
+	d, err := Parse([]byte(valid), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raws, err := Encode([]*Definition{d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(raws, reg)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("decode: %v %d", err, len(got))
+	}
+	if !reflect.DeepEqual(got[0], d) {
+		t.Fatalf("round trip mismatch:\n%+v\n%+v", got[0], d)
+	}
+	if _, err := Decode(append(raws, raws...), reg); err == nil || !strings.Contains(err.Error(), ErrInvalidDefinition) {
+		t.Fatalf("duplicate: %v", err)
+	}
+}
+
+func TestDecodeInvalid(t *testing.T) {
+	_, err := Decode([]json.RawMessage{[]byte(`{"name":"x"}`)}, testReg())
+	if err == nil || !strings.Contains(err.Error(), ErrInvalidDefinition) {
+		t.Fatalf("got %v", err)
 	}
 }

@@ -2,6 +2,7 @@
 package query
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,43 +18,43 @@ const ErrInvalidDefinition = "query.invalid_definition"
 
 // Filter is one entry of the AND list: a leaf (Field/Op/Value) or an OR group (Any).
 type Filter struct {
-	Field    string   `yaml:"field"`
-	Op       string   `yaml:"op"`
-	Value    any      `yaml:"value"`
-	Any      []Filter `yaml:"any"`
-	Optional bool     `yaml:"optional"`
+	Field    string   `yaml:"field" json:"field,omitempty"`
+	Op       string   `yaml:"op" json:"op,omitempty"`
+	Value    any      `yaml:"value" json:"value,omitempty"`
+	Any      []Filter `yaml:"any" json:"any,omitempty"`
+	Optional bool     `yaml:"optional" json:"optional,omitempty"`
 }
 
 // InputSpec describes one call input.
 type InputSpec struct {
-	Type      string   `yaml:"type"`
-	MaxLength int      `yaml:"max_length"`
-	Enum      []string `yaml:"enum"`
+	Type      string   `yaml:"type" json:"type,omitempty"`
+	MaxLength int      `yaml:"max_length" json:"max_length,omitempty"`
+	Enum      []string `yaml:"enum" json:"enum,omitempty"`
 }
 
 // Sort is one ordering key.
 type Sort struct {
-	Field string `yaml:"field"`
-	Dir   string `yaml:"dir"`
+	Field string `yaml:"field" json:"field,omitempty"`
+	Dir   string `yaml:"dir" json:"dir,omitempty"`
 }
 
 // Definition is a query shipped in queries/*.yaml.
 type Definition struct {
-	Name            string               `yaml:"name"`
-	ModuleOwnerID   string               `yaml:"module_owner_id"`
-	Capability      string               `yaml:"capability"`
-	Operation       string               `yaml:"operation"`
-	Source          string               `yaml:"source"`
-	Permission      string               `yaml:"permission"`
-	Scope           string               `yaml:"scope"`
-	OwnerField      string               `yaml:"owner_field"`
-	Input           map[string]InputSpec `yaml:"input"`
-	Filters         []Filter             `yaml:"filters"`
-	Fields          []string             `yaml:"fields"`
-	Sort            []Sort               `yaml:"sort"`
-	Limit           int                  `yaml:"limit"`
-	OfflineEligible bool                 `yaml:"offline_eligible"`
-	Presentation    map[string]string    `yaml:"presentation"`
+	Name            string               `yaml:"name" json:"name,omitempty"`
+	ModuleOwnerID   string               `yaml:"module_owner_id" json:"module_owner_id,omitempty"`
+	Capability      string               `yaml:"capability" json:"capability,omitempty"`
+	Operation       string               `yaml:"operation" json:"operation,omitempty"`
+	Source          string               `yaml:"source" json:"source,omitempty"`
+	Permission      string               `yaml:"permission" json:"permission,omitempty"`
+	Scope           string               `yaml:"scope" json:"scope,omitempty"`
+	OwnerField      string               `yaml:"owner_field" json:"owner_field,omitempty"`
+	Input           map[string]InputSpec `yaml:"input" json:"input,omitempty"`
+	Filters         []Filter             `yaml:"filters" json:"filters,omitempty"`
+	Fields          []string             `yaml:"fields" json:"fields,omitempty"`
+	Sort            []Sort               `yaml:"sort" json:"sort,omitempty"`
+	Limit           int                  `yaml:"limit" json:"limit,omitempty"`
+	OfflineEligible bool                 `yaml:"offline_eligible" json:"offline_eligible,omitempty"`
+	Presentation    map[string]string    `yaml:"presentation" json:"presentation,omitempty"`
 }
 
 // CatalogRef is owner~capability~operation.
@@ -217,4 +218,35 @@ func (d *Definition) validateFilter(f Filter, check func(string, string) error, 
 		}
 	}
 	return nil
+}
+
+// Encode serialises definitions for the tenant config snapshot.
+func Encode(defs []*Definition) ([]json.RawMessage, error) {
+	out := make([]json.RawMessage, 0, len(defs))
+	for _, d := range defs {
+		raw, err := json.Marshal(d)
+		if err != nil {
+			return nil, fmt.Errorf("encode query %q: %w", d.Name, err)
+		}
+		out = append(out, raw)
+	}
+	return out, nil
+}
+
+// Decode parses and validates snapshot queries against reg (JSON is valid YAML).
+func Decode(raws []json.RawMessage, reg *doctype.Registry) ([]*Definition, error) {
+	defs := make([]*Definition, 0, len(raws))
+	seen := map[string]bool{}
+	for _, raw := range raws {
+		d, err := Parse(raw, reg)
+		if err != nil {
+			return nil, err
+		}
+		if seen[d.CatalogRef()] {
+			return nil, fmt.Errorf("%s: duplicate catalog ref %s", ErrInvalidDefinition, d.CatalogRef())
+		}
+		seen[d.CatalogRef()] = true
+		defs = append(defs, d)
+	}
+	return defs, nil
 }
