@@ -42,3 +42,23 @@ func TestPOSTillCommandsParse(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordSaleCommand(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", "record_sale.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := ParseCommandResource(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(def.Steps) != 3 || def.Steps[0].As != "sale" || def.Steps[1].ForEach != "$input.items" || def.Steps[2].ForEach != "$input.items" {
+		t.Fatalf("steps = %#v", def.Steps)
+	}
+	if got := def.Steps[1].Update.Adjust["quantity"]; got.Decrease != "$item.quantity" || got.Min != "0" {
+		t.Fatalf("stock must decrease without going negative: %+v", got)
+	}
+	if def.Output["reference"] != "$steps.sale.name" || def.Output["total"] != "$computed.total" {
+		t.Fatalf("receipt output = %v", def.Output)
+	}
+}
