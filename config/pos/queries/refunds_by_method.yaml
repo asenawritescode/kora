@@ -1,0 +1,18 @@
+name: refunds_by_method
+module_owner_id: pos.core
+capability: pos.sales
+operation: refunds_by_method
+source: Sale Payment
+via: Sale.payments
+permission: read
+scope: tenant
+input:
+  till_session: {type: string, max_length: 140}
+filters:
+  - {field: parent.status, op: eq, value: Return}
+  - {field: parent.till_session, op: eq, value: $input.till_session}
+group_by: [method]
+aggregates:
+  - {name: payment_count, fn: count}
+  - {name: total, fn: sum, field: amount}
+limit: 20

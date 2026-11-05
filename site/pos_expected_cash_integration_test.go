@@ -19,6 +19,8 @@ import (
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/print"
+	"github.com/asenawritescode/kora/query"
 )
 
 func TestPOSExpectedCashAcrossDialects(t *testing.T) {
@@ -204,4 +206,63 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 		t.Fatalf("refused commands wrote data: %s -> %s", before, counts())
 	}
 	want("after refusals", 700)
+
+	// Z report: run the format's published queries on this database and render it.
+	qdefs, err := query.LoadDir(filepath.Join("..", "config", "pos", "queries"), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := func(name string) []map[string]any {
+		t.Helper()
+		for _, d := range qdefs {
+			if d.Name == name {
+				pg, err := query.Run(ctx, conn, dialect, d, query.Request{FullRead: true, Input: map[string]any{"till_session": till}, Actor: "Administrator", Now: time.Now()})
+				if err != nil {
+					t.Fatalf("%s: %v", name, err)
+				}
+				return pg.Rows
+			}
+		}
+		t.Fatalf("query %s missing", name)
+		return nil
+	}
+	var rendered []string
+	for _, file := range []string{"z_report.yaml", "z_report_reprint.yaml"} {
+		body, err := os.ReadFile(filepath.Join("..", "config", "pos", "print_formats", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := print.Load(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data := print.Data{Doc: map[string]any{"name": till}, Tenant: map[string]any{"name": "Shop"}, Now: time.Unix(0, 0).UTC(), Queries: map[string][]map[string]any{}}
+		for _, col := range []string{"opening_float", "expected_cash", "closing_count", "variance"} {
+			var v float64
+			fmt.Sscan(str("SELECT "+col+" FROM "+table("Till Session")+" WHERE name = ?", till), &v)
+			data.Doc[col] = v
+		}
+		for key, spec := range f.Queries {
+			_, qn, _ := spec.Ref()
+			data.Queries[key] = rows(qn)
+		}
+		txt, err := f.RenderText(data, print.Options{Currency: "KES", Precision: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rendered = append(rendered, txt)
+	}
+	if rendered[0] != rendered[1] {
+		t.Fatal("reprint differs from operation print")
+	}
+	// Voided sale is excluded; lines are method, count, total.
+	flat := strings.Join(strings.Fields(strings.ReplaceAll(rendered[0], "-", "")), " ")
+	for _, w := range []string{"SALES Card 1 KES 200.00 Cash 1 KES 300.00 REFUNDS Cash 1 KES 100.00", "Opening float KES 500.00 Expected cash KES 700.00 Counted KES 690.00 VARIANCE KES 10.00"} {
+		if !strings.Contains(flat, w) {
+			t.Fatalf("z report missing %q:\n%s", w, rendered[0])
+		}
+	}
+	if strings.Contains(rendered[0], "KES 400.00") {
+		t.Fatalf("void leaked into totals:\n%s", rendered[0])
+	}
 }
