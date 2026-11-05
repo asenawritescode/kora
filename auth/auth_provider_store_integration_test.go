@@ -90,7 +90,7 @@ func TestLiveAuthProvidersAcrossDialects(t *testing.T) {
 
 func idempotentDDL(err error) bool {
 	message := err.Error()
-	for _, fragment := range []string{"already exists", "Duplicate", "duplicate column", "Error 1060", "Error 1061", "Error 1050"} {
+	for _, fragment := range []string{"already exists", "Duplicate", "duplicate column", "Error 1060", "Error 1061", "Error 1050", "Error 1091", "Can't DROP", "does not exist"} {
 		if strings.Contains(message, fragment) {
 			return true
 		}
