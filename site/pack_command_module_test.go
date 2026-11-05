@@ -2,6 +2,7 @@ package site
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -193,4 +194,106 @@ func TestPackPaymentDescriptor(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCommandInputSchemaTypes(t *testing.T) {
+	f := func(n, ft, o string) doctype.Field { return doctype.Field{Fieldname: n, Fieldtype: ft, Options: o} }
+	reqd := func(x doctype.Field) doctype.Field { x.Reqd = true; return x }
+	defaulted := reqd(f("currency", "Data", ""))
+	defaulted.Default = "KES"
+	computed := reqd(f("total", "Currency", ""))
+	computed.Computed = "SUM(items.amount)"
+	records := map[string]*doctype.DocType{
+		"Sale": {Name: "Sale", Fields: []doctype.Field{
+			reqd(f("register", "Link", "Register")), f("customer", "Data", ""), defaulted, computed,
+			f("kind", "Select", "\nRetail\n Wholesale \n"), f("items", "Table", "Sale Item"), f("payments", "Table", "Sale Payment")}},
+		"Sale Item":    {Name: "Sale Item", IsChildTable: true, Fields: []doctype.Field{f("quantity", "Float", "")}},
+		"Sale Payment": {Name: "Sale Payment", IsChildTable: true, Fields: []doctype.Field{f("method", "Select", "Cash\nCard\nMobile Money")}},
+	}
+	const base = `
+name: record_sale
+namespace: shop
+version: 1
+input: {record: Sale%s}
+transaction:
+  - create: {record: Sale, values: {register: $input.register, customer: $input.customer, currency: $input.currency, total: $input.total, kind: $input.kind, payments: $input.payments, where: $input.location}}
+`
+	tests := []struct {
+		name, extra string
+		want        map[string]string // JSON pointer-ish path -> JSON value
+	}{
+		{"select enum top level", "", map[string]string{"properties.kind": `{"enum":["Retail","Wholesale"],"type":"string"}`}},
+		{"table item select enum", "", map[string]string{"properties.payments.items.properties.method": `{"enum":["Cash","Card","Mobile Money"],"type":"string"}`}},
+		{"reqd without default or compute is required", "", map[string]string{"required": `["register"]`}},
+		{"typed extra input", ", extra: {location: {type: string}}", map[string]string{"properties.location": `{"type":"string"}`, "required": `["register"]`}},
+		{"required extra input", ", extra: {location: {type: string, required: true}}", map[string]string{"required": `["location","register"]`}},
+		{"integer extra input", ", extra: {location: {type: integer}}", map[string]string{"properties.location": `{"type":"integer"}`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := kernel.ParseCommandResource([]byte(strings.Replace(base, "%s", tt.extra, 1)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var schema map[string]any
+			if err := json.Unmarshal(commandInputSchema(cmd, records), &schema); err != nil {
+				t.Fatal(err)
+			}
+			for path, want := range tt.want {
+				var node any = schema
+				for _, k := range strings.Split(path, ".") {
+					node, _ = node.(map[string]any)[k]
+				}
+				got, _ := json.Marshal(node)
+				if string(got) != want {
+					t.Errorf("%s = %s, want %s", path, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestCommandExtraInputRejectsUnknownType(t *testing.T) {
+	_, err := kernel.ParseCommandResource([]byte(strings.Replace(shiftYAML, "input: {record: Shift}", "input: {record: Shift, extra: {location: {type: text}}}", 1)))
+	if err == nil || !strings.Contains(err.Error(), "input.extra.location") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestShippedPackCommandSchemaEnums checks the catalog documents of the
+// shipped config packs: a Select column publishes its options as an enum.
+func TestShippedPackCommandSchemaEnums(t *testing.T) {
+	snap, _, err := ParseConfigPack("pos", readPackFiles(t, filepath.Join("..", "config", "pos"), ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mods := snap.Modules
+	for _, d := range mods[0].Schemas {
+		if d.Ref.ID != "pos.core.record_sale.input" {
+			continue
+		}
+		var s struct {
+			Required   []string `json:"required"`
+			Properties struct {
+				Payments struct {
+					Items struct {
+						Properties struct {
+							Method struct {
+								Enum []string `json:"enum"`
+							} `json:"method"`
+						} `json:"properties"`
+					} `json:"items"`
+				} `json:"payments"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(d.Schema, &s); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(s.Properties.Payments.Items.Properties.Method.Enum, ","); got != "Cash,Card,Mobile Money" {
+			t.Errorf("method enum = %q", got)
+		}
+		t.Logf("required = %v", s.Required)
+		return
+	}
+	t.Fatal("record_sale input schema not published")
 }

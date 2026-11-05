@@ -75,6 +75,16 @@ type CrossEntityCommand struct {
 // collection-based inputs arrive with SPEC-003.
 type CommandInput struct {
 	Record string `yaml:"record" json:"record"`
+	// Extra declares operation inputs that are not fields of Record, so the
+	// published input schema can type them.
+	Extra map[string]CommandExtraInput `yaml:"extra,omitempty" json:"extra,omitempty"`
+}
+
+// CommandExtraInput types one input that is not a record field. Type is a
+// JSON Schema primitive.
+type CommandExtraInput struct {
+	Type     string `yaml:"type"               json:"type"`
+	Required bool   `yaml:"required,omitempty" json:"required,omitempty"`
 }
 
 // CommandStep is one transactional write. Values map target record fields to
@@ -165,6 +175,13 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 	}
 	if c.Input.Record == "" {
 		return fmt.Errorf("command %q: input.record required in this slice", c.Name)
+	}
+	for name, extra := range c.Input.Extra {
+		switch extra.Type {
+		case "string", "integer", "number", "boolean":
+		default:
+			return fmt.Errorf("command %q: input.extra.%s type %q must be string, integer, number or boolean", c.Name, name, extra.Type)
+		}
 	}
 	if err := c.validateCompute(); err != nil {
 		return err
