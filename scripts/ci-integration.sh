@@ -4,7 +4,7 @@
 # share one DSN variable across packages and leave tables behind.
 #
 # Usage: scripts/ci-integration.sh mysql|postgres
-# Optional: KORA_CI_SKIP is passed to `go test -skip` for known failures.
+# Tests listed in scripts/ci-integration-known-failures/<dialect>.txt are skipped.
 set -uo pipefail
 
 dialect="${1:?usage: ci-integration.sh mysql|postgres}"
@@ -71,8 +71,15 @@ case "$dialect" in
   *) echo "unknown dialect $dialect" >&2; exit 2 ;;
 esac
 
+known_failures="$(dirname "$0")/ci-integration-known-failures/${dialect}.txt"
 skip_args=()
-if [ -n "${KORA_CI_SKIP:-}" ]; then skip_args=(-skip "$KORA_CI_SKIP"); fi
+if [ -f "$known_failures" ]; then
+  names=$(sed 's/#.*//' "$known_failures" | awk 'NF {print $1}' | paste -sd'|')
+  if [ -n "$names" ]; then
+    skip_args=(-skip "^(${names})\$")
+    echo "Skipping $(echo "$names" | tr '|' '\n' | wc -l) known ${dialect} failures listed in ${known_failures}"
+  fi
+fi
 
 failed=()
 for pkg in $(go list -tags integration ./...); do
