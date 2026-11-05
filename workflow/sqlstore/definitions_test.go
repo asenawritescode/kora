@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -13,6 +14,33 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 )
+
+func TestPublishOwnerWorkflowDefinitionRejectedDuringDrain(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store, err := NewDefinitionStore(database, &db.LibSQLDialect{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := contract.WorkflowDefinition{ID: "approval", Version: 1, OwnerModuleID: "finance.ar", Entry: "end", Steps: []contract.StepDefinition{{ID: "end", Kind: contract.StepEnd, End: &contract.EndSpec{Outcome: "ok"}}}}
+	now := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT command_digest, definition_id, version FROM _kora_workflow_publish_receipt WHERE tenant_id = ? AND actor_id = ? AND idempotency_key = ?")).WithArgs("tenant-a", "user-a", "publish-1").WillReturnRows(sqlmock.NewRows([]string{"command_digest", "definition_id", "version"}))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE _kora_module_snapshot SET revision=revision WHERE tenant_id=?")).WithArgs("tenant-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	snapshot, _ := json.Marshal(contract.ModuleSnapshot{TenantID: "tenant-a", Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "finance.ar", State: string(contract.ModuleDraining)}}})
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id=?")).WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"snapshot_json"}).AddRow(string(snapshot)))
+	_, err = store.PublishDefinition(context.Background(), "tenant-a", definition, "user-a", "publish-1", now)
+	var domainErr *contract.Error
+	if !errors.As(err, &domainErr) || domainErr.Type != contract.CodePermissionDenied {
+		t.Fatalf("publish during drain error=%v, want permission denied", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestDefinitionSchemaStatementsCoverSupportedDialects(t *testing.T) {
 	for name, dialect := range map[string]db.Dialect{"mysql": &db.MySQLDialect{}, "postgres": &db.PostgresDialect{}, "libsql": &db.LibSQLDialect{}} {

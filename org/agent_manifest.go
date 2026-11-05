@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -104,6 +105,24 @@ func (s *AgentStore) GetManifest(id string) (AgentManifest, bool) {
 	m, ok := s.manifests[id]
 	return m, ok
 }
+
+// Manifests returns the configured policies in a stable order for management clients.
+func (s *AgentStore) Manifests() []AgentManifest {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]AgentManifest, 0, len(s.manifests))
+	for _, manifest := range s.manifests {
+		items = append(items, manifest)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Name == items[j].Name {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].Name < items[j].Name
+	})
+	return items
+}
+
 func (s *AgentStore) RecordRun(r AgentRun) (AgentRun, error) {
 	if r.ID == "" || r.AgentID == "" || (r.Capability == "" && (r.Doctype == "" || r.Operation == "")) {
 		return AgentRun{}, fmt.Errorf("agent run requires id, agent, and doctype operation")

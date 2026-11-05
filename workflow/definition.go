@@ -227,6 +227,9 @@ func ValidateDefinition(def contract.WorkflowDefinition, catalog *Catalog, schem
 	} else if _, err := contract.ParseDefinitionID(string(def.ID)); err != nil {
 		add("id", "invalid_id", err.Error())
 	}
+	if def.OwnerModuleID != "" && !regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9-]+)+$`).MatchString(string(def.OwnerModuleID)) {
+		add("owner_module_id", "invalid_module_owner", "workflow owner module ID is invalid")
+	}
 	if len(def.Steps) == 0 || len(def.Steps) > maxDefinitionSteps {
 		add("steps", "step_count", "definition must contain between 1 and 100 steps")
 	}

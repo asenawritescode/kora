@@ -1,0 +1,195 @@
+name: Shift
+resource_name: shift
+module: Store Operations
+is_submittable: false
+is_child_table: false
+is_single: false
+track_changes: true
+append_only: false
+title_field: reference
+search_fields: reference, status
+sort_field: started_at
+sort_order: DESC
+description: A cashier work period used to group sales and reconcile the till.
+fields:
+    - fieldname: reference
+      fieldtype: Data
+      label: Shift Reference
+      options: ""
+      reqd: true
+      unique: true
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: status
+      fieldtype: Select
+      label: Status
+      options: |-
+        Open
+        Closed
+      reqd: true
+      unique: false
+      default: Open
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: true
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: started_at
+      fieldtype: Datetime
+      label: Started At
+      options: ""
+      reqd: true
+      unique: false
+      default: now
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: ended_at
+      fieldtype: Datetime
+      label: Ended At
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: cashier
+      fieldtype: User
+      label: Cashier
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: sales_count
+      fieldtype: Int
+      label: Sales Count
+      options: ""
+      reqd: false
+      unique: false
+      default: "0"
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: total_sales
+      fieldtype: Currency
+      label: Total Sales
+      options: ""
+      reqd: false
+      unique: false
+      default: "0"
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: notes
+      fieldtype: Text
+      label: Notes
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: false
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+doc_constraints: []
+public_access: null
+quantity_effect: null

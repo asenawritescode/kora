@@ -58,6 +58,9 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 	if err := contract.ValidateScheduledJobDefinitions(manifest.ScheduledJobs); err != nil {
 		add("scheduled_jobs_invalid", "", err.Error())
 	}
+	if err := contract.ValidateScheduledJobModuleOwners(manifest.ScheduledJobs, manifest.Modules); err != nil {
+		add("scheduled_job_owner_invalid", "", err.Error())
+	}
 	if len(manifest.ScheduledJobs) > 64 {
 		add("scheduled_jobs_limit", "", "pack contains more than 64 scheduled jobs")
 	}

@@ -1,4 +1,4 @@
-type PaymentSessionKey = 'kora-pos-active-shift' | 'kora-pos-active-till-session'
+type PaymentSessionKey = 'kora-pos-active-shift' | 'kora-pos-active-till-session' | 'kora-workflow-prerequisites'
 
 export function readPaymentSession(key: PaymentSessionKey): string {
   if (typeof window === 'undefined') return ''

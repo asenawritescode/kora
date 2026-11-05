@@ -16,6 +16,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/policy"
@@ -73,6 +74,38 @@ func TestRefreshRealtimeWriteDeadline(t *testing.T) {
 	}
 	if !w.deadline.After(time.Now()) {
 		t.Fatalf("write deadline was not advanced: %v", w.deadline)
+	}
+}
+
+func TestRealtimeEntityEventsRequireExactScopeGrant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	database, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Invoice", BusinessScopePolicy: contract.ScopeEntityOwned})
+	h := NewHandler(registry, &orm.TxManager{DB: database, Dialect: db.Resolve("mysql")})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/realtime", nil)
+	c.Set("site_name", "tenant-a")
+	entityA := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	entityB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	actor := contract.ActorContext{PrincipalID: "reader", SubjectUserID: "reader", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", AuthenticatedAt: time.Now().UTC()}
+	execution, err := policy.NewVerifiedExecutionWithGrants("tenant-a", actor, []policy.Grant{{Resource: "Invoice", Operation: "read", Scope: entityA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Set("policy_execution", execution)
+	if !h.realtimeEventVisible(c, "Invoice", "INV-1", nil, eventstream.EventUpdate, entityA) {
+		t.Fatal("matching entity event was denied")
+	}
+	if h.realtimeEventVisible(c, "Invoice", "INV-1", nil, eventstream.EventUpdate, entityB) {
+		t.Fatal("cross-entity event was delivered")
+	}
+	if h.realtimeEventVisible(c, "Invoice", "INV-1", nil, eventstream.EventUpdate) {
+		t.Fatal("unscoped entity event was delivered")
 	}
 }
 
@@ -168,10 +201,10 @@ func TestReplayRealtimeReadsSiteScopedOutboxAfterCursor(t *testing.T) {
 	setRealtimeTestExecution(c, []string{"Reader"}, false)
 
 	occurredAt := time.Date(2026, 9, 12, 8, 0, 0, 0, time.UTC)
-	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
 		WithArgs("tenant-a", "evt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "created_at"}).
-			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", occurredAt))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "payload", "created_at"}).
+			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", []byte(`{}`), occurredAt))
 
 	var messages []map[string]any
 	err = h.replayRealtime(c, "evt-1", []string{"doctype:customer"}, func(payload []byte) error {
@@ -324,10 +357,10 @@ func TestReplayRealtimeRequiresCurrentReadAuthorization(t *testing.T) {
 	c.Set("site_name", "tenant-a")
 	c.Set("user_roles", []string{"Reader"})
 	setRealtimeTestExecution(c, []string{"Reader"}, false)
-	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
 		WithArgs("tenant-a", "evt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "created_at"}).
-			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", time.Now().UTC()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "payload", "created_at"}).
+			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", []byte(`{}`), time.Now().UTC()))
 
 	var delivered int
 	err = h.replayRealtime(c, "evt-1", nil, func(payload []byte) error {
@@ -373,10 +406,10 @@ func TestReplayRealtimeAcceptsExactVerifiedReadGrant(t *testing.T) {
 	c.Set("user", "forged-user")
 	c.Set("user_roles", []string{doctype.AdminRole})
 	c.Set("policy_execution", execution)
-	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
 		WithArgs("tenant-a", "evt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "created_at"}).
-			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", time.Now().UTC()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "payload", "created_at"}).
+			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", []byte(`{}`), time.Now().UTC()))
 	var delivered int
 	if err := handler.replayRealtime(c, "evt-1", nil, func(payload []byte) error {
 		var message map[string]any
@@ -419,10 +452,10 @@ func TestReplayRealtimeDoesNotDeliverAfterReadRoleRevocation(t *testing.T) {
 	// includes the role that granted read access when the stream was opened.
 	c.Set("user_roles", []string{"RevokedReader"})
 	setRealtimeTestExecution(c, []string{"RevokedReader"}, false)
-	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
+	mock.ExpectQuery("SELECT id, event_type, site, aggregate_type, aggregate_id, payload, created_at FROM _kora_outbox WHERE site = \\? AND id > \\? ORDER BY id LIMIT 501").
 		WithArgs("tenant-a", "evt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "created_at"}).
-			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", time.Now().UTC()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "site", "aggregate_type", "aggregate_id", "payload", "created_at"}).
+			AddRow("evt-2", "kora.customer.after_update", "tenant-a", "Customer", "CUS-1", []byte(`{}`), time.Now().UTC()))
 
 	var delivered int
 	err = h.replayRealtime(c, "evt-1", nil, func(payload []byte) error {

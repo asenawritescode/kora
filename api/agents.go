@@ -34,6 +34,11 @@ func (h *Handler) agentStore(c *gin.Context) *org.AgentStore {
 	}
 	return h.AgentStores[site]
 }
+
+func (h *Handler) HandleAgentManifests(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": h.agentStore(c).Manifests()})
+}
+
 func (h *Handler) HandleAgentManifest(c *gin.Context) {
 	store := h.agentStore(c)
 	id := c.Param("id")

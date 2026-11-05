@@ -190,6 +190,12 @@
       "from": "github.com/asenawritescode/kora-cloud/internal/app",
       "from_module": "cloud",
       "kind": "production",
+      "to": "github.com/asenawritescode/kora-cloud/internal/identity"
+    },
+    {
+      "from": "github.com/asenawritescode/kora-cloud/internal/app",
+      "from_module": "cloud",
+      "kind": "production",
       "to": "github.com/asenawritescode/kora-cloud/internal/messaging"
     },
     {
@@ -281,6 +287,12 @@
       "from_module": "cloud",
       "kind": "test",
       "to": "github.com/asenawritescode/kora-cloud/internal/email"
+    },
+    {
+      "from": "github.com/asenawritescode/kora-cloud/internal/app",
+      "from_module": "cloud",
+      "kind": "test",
+      "to": "github.com/asenawritescode/kora-cloud/internal/identity"
     },
     {
       "from": "github.com/asenawritescode/kora-cloud/internal/app",
@@ -599,6 +611,12 @@
       "from_module": "cloud",
       "kind": "production",
       "to": "github.com/asenawritescode/kora-cloud/internal/email"
+    },
+    {
+      "from": "github.com/asenawritescode/kora-cloud/internal/platform",
+      "from_module": "cloud",
+      "kind": "production",
+      "to": "github.com/asenawritescode/kora-cloud/internal/identity"
     },
     {
       "from": "github.com/asenawritescode/kora-cloud/internal/platform",
@@ -1120,7 +1138,19 @@
       "from": "github.com/asenawritescode/kora/api",
       "from_module": "engine",
       "kind": "test",
+      "to": "github.com/asenawritescode/kora/eventstream"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/api",
+      "from_module": "engine",
+      "kind": "test",
       "to": "github.com/asenawritescode/kora/internal/dbaccess"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/api",
+      "from_module": "engine",
+      "kind": "test",
+      "to": "github.com/asenawritescode/kora/kernel"
     },
     {
       "from": "github.com/asenawritescode/kora/api",
@@ -1263,12 +1293,6 @@
     {
       "from": "github.com/asenawritescode/kora/api/ai",
       "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/workflow"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/api/ai",
-      "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/analytics"
     },
@@ -1309,18 +1333,6 @@
       "to": "github.com/asenawritescode/kora/policy"
     },
     {
-      "from": "github.com/asenawritescode/kora/api/ai",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/workflow"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/auth",
-      "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/analytics"
-    },
-    {
       "from": "github.com/asenawritescode/kora/auth",
       "from_module": "engine",
       "kind": "production",
@@ -1367,12 +1379,6 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/doctype"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/auth",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/email"
     },
     {
       "from": "github.com/asenawritescode/kora/auth",
@@ -1403,12 +1409,6 @@
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/analytics"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/cli",
-      "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/api/ai"
     },
     {
       "from": "github.com/asenawritescode/kora/cli",
@@ -1527,12 +1527,6 @@
     {
       "from": "github.com/asenawritescode/kora/cli",
       "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/workflow/sqlstore"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/cli",
-      "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/analytics"
     },
@@ -1541,12 +1535,6 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/auth"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/cli",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/configstore"
     },
     {
       "from": "github.com/asenawritescode/kora/cli",
@@ -1601,12 +1589,6 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/site"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/cli",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/workflow/sqlstore"
     },
     {
       "from": "github.com/asenawritescode/kora/cmd/routeinventory",
@@ -1741,6 +1723,12 @@
       "to": "github.com/asenawritescode/kora/contract"
     },
     {
+      "from": "github.com/asenawritescode/kora/eventstream",
+      "from_module": "engine",
+      "kind": "production",
+      "to": "github.com/asenawritescode/kora/contract"
+    },
+    {
       "from": "github.com/asenawritescode/kora/graph",
       "from_module": "engine",
       "kind": "production",
@@ -1899,6 +1887,12 @@
     {
       "from": "github.com/asenawritescode/kora/internal/application/purchasing",
       "from_module": "engine",
+      "kind": "production",
+      "to": "github.com/asenawritescode/kora/workflow"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/internal/application/purchasing",
+      "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/contract"
     },
@@ -1919,6 +1913,12 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/requests"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/internal/application/purchasing",
+      "from_module": "engine",
+      "kind": "test",
+      "to": "github.com/asenawritescode/kora/workflow"
     },
     {
       "from": "github.com/asenawritescode/kora/internal/application/purchasing/engineadapter",
@@ -1967,6 +1967,12 @@
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/requests"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/internal/application/purchasing/engineadapter",
+      "from_module": "engine",
+      "kind": "production",
+      "to": "github.com/asenawritescode/kora/workflow/sqlstore"
     },
     {
       "from": "github.com/asenawritescode/kora/internal/application/purchasing/engineadapter",
@@ -2069,6 +2075,12 @@
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/scheduler"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/internal/application/subscriptions/engineadapter",
+      "from_module": "engine",
+      "kind": "test",
+      "to": "github.com/asenawritescode/kora/contract"
     },
     {
       "from": "github.com/asenawritescode/kora/internal/application/subscriptions/engineadapter",
@@ -2285,6 +2297,12 @@
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/outbox"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/internal/engine",
+      "from_module": "engine",
+      "kind": "production",
+      "to": "github.com/asenawritescode/kora/plugin"
     },
     {
       "from": "github.com/asenawritescode/kora/internal/engine",
@@ -2530,6 +2548,12 @@
       "from": "github.com/asenawritescode/kora/internal/tenantruntime",
       "from_module": "engine",
       "kind": "production",
+      "to": "github.com/asenawritescode/kora/email"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/internal/tenantruntime",
+      "from_module": "engine",
+      "kind": "production",
       "to": "github.com/asenawritescode/kora/eventstream"
     },
     {
@@ -2549,6 +2573,12 @@
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/outbox"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/internal/tenantruntime",
+      "from_module": "engine",
+      "kind": "production",
+      "to": "github.com/asenawritescode/kora/plugin"
     },
     {
       "from": "github.com/asenawritescode/kora/internal/tenantruntime",
@@ -2693,6 +2723,12 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/script"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/kernel",
+      "from_module": "engine",
+      "kind": "test",
+      "to": "github.com/asenawritescode/kora/workflow"
     },
     {
       "from": "github.com/asenawritescode/kora/kernel",
@@ -2949,6 +2985,12 @@
     {
       "from": "github.com/asenawritescode/kora/orm",
       "from_module": "engine",
+      "kind": "production",
+      "to": "github.com/asenawritescode/kora/workflow"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/orm",
+      "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/contract"
     },
@@ -3053,6 +3095,12 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/contract"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/policy",
+      "from_module": "engine",
+      "kind": "test",
+      "to": "github.com/asenawritescode/kora/doctype"
     },
     {
       "from": "github.com/asenawritescode/kora/recon",
@@ -3196,7 +3244,19 @@
       "from": "github.com/asenawritescode/kora/scheduler",
       "from_module": "engine",
       "kind": "production",
+      "to": "github.com/asenawritescode/kora/policy"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/scheduler",
+      "from_module": "engine",
+      "kind": "production",
       "to": "github.com/asenawritescode/kora/script"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/scheduler",
+      "from_module": "engine",
+      "kind": "test",
+      "to": "github.com/asenawritescode/kora/contract"
     },
     {
       "from": "github.com/asenawritescode/kora/scheduler",
@@ -3215,6 +3275,12 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/orm"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/scheduler",
+      "from_module": "engine",
+      "kind": "test",
+      "to": "github.com/asenawritescode/kora/policy"
     },
     {
       "from": "github.com/asenawritescode/kora/scheduler/sqlstore",
@@ -3328,12 +3394,6 @@
       "from": "github.com/asenawritescode/kora/site",
       "from_module": "engine",
       "kind": "production",
-      "to": "github.com/asenawritescode/kora/auth"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/site",
-      "from_module": "engine",
-      "kind": "production",
       "to": "github.com/asenawritescode/kora/configstore"
     },
     {
@@ -3370,6 +3430,12 @@
       "from": "github.com/asenawritescode/kora/site",
       "from_module": "engine",
       "kind": "production",
+      "to": "github.com/asenawritescode/kora/policy"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/site",
+      "from_module": "engine",
+      "kind": "production",
       "to": "github.com/asenawritescode/kora/requests/sqlstore"
     },
     {
@@ -3377,6 +3443,12 @@
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/schema"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/site",
+      "from_module": "engine",
+      "kind": "production",
+      "to": "github.com/asenawritescode/kora/workflow"
     },
     {
       "from": "github.com/asenawritescode/kora/site",
@@ -3445,12 +3517,6 @@
       "to": "github.com/asenawritescode/kora/org"
     },
     {
-      "from": "github.com/asenawritescode/kora/tests",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/workflow"
-    },
-    {
       "from": "github.com/asenawritescode/kora/webhook",
       "from_module": "engine",
       "kind": "production",
@@ -3508,12 +3574,6 @@
       "from": "github.com/asenawritescode/kora/workflow",
       "from_module": "engine",
       "kind": "production",
-      "to": "github.com/asenawritescode/kora/db"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/workflow",
-      "from_module": "engine",
-      "kind": "production",
       "to": "github.com/asenawritescode/kora/doctype"
     },
     {
@@ -3539,12 +3599,6 @@
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/requests"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/workflow",
-      "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/script"
     },
     {
       "from": "github.com/asenawritescode/kora/workflow",
@@ -3696,11 +3750,11 @@
   "modules": {
     "cloud": {
       "module_path": "github.com/asenawritescode/kora-cloud",
-      "package_count": 28
+      "package_count": 29
     },
     "engine": {
       "module_path": "github.com/asenawritescode/kora",
-      "package_count": 60
+      "package_count": 61
     },
     "engine-sdk": {
       "module_path": "github.com/asenawritescode/kora/sdk",

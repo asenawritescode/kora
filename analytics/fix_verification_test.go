@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -169,7 +170,7 @@ func TestFix1_EventsAfterInvalidation_CorrectMetrics(t *testing.T) {
 		Data: map[string]any{"status": "Active"},
 	})
 
-	oldKey := deltaKey{Doctype: "Customer", Metric: "customer_count_by_status", Dimension: "status=Active", Date: today}
+	oldKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: "Customer", Metric: "customer_count_by_status", Dimension: "status=Active", Date: today}
 	if w.deltas[oldKey] != 1.0 {
 		t.Fatalf("expected 1.0 for old metric, got %v", w.deltas[oldKey])
 	}
@@ -199,8 +200,8 @@ func TestFix1_EventsAfterInvalidation_CorrectMetrics(t *testing.T) {
 	}
 
 	// New event should generate deltas with NEW metric names
-	newStatusKey := deltaKey{Doctype: "Customer", Metric: "customer_count_by_state", Dimension: "state=Inactive", Date: today}
-	newPriorityKey := deltaKey{Doctype: "Customer", Metric: "customer_count_by_priority", Dimension: "priority=High", Date: today}
+	newStatusKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: "Customer", Metric: "customer_count_by_state", Dimension: "state=Inactive", Date: today}
+	newPriorityKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: "Customer", Metric: "customer_count_by_priority", Dimension: "priority=High", Date: today}
 
 	if w.deltas[newStatusKey] != 1.0 {
 		t.Errorf("FIX FAILED: expected 1.0 for new state metric, got %v", w.deltas[newStatusKey])
@@ -279,7 +280,7 @@ func TestFix2_FieldRename_WithInvalidation_NewMetricsGenerated(t *testing.T) {
 	t.Logf("V1 deltas before rename: %v", w.deltas)
 
 	// V1 count metric should have 5.
-	countKey := deltaKey{Doctype: "Customer", Metric: "customer_count", Dimension: "", Date: today}
+	countKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: "Customer", Metric: "customer_count", Dimension: "", Date: today}
 	if w.deltas[countKey] != 5.0 {
 		t.Fatalf("expected count=5, got %v", w.deltas[countKey])
 	}
@@ -309,13 +310,13 @@ func TestFix2_FieldRename_WithInvalidation_NewMetricsGenerated(t *testing.T) {
 	}
 
 	// New state metric should have 1 (from V2 event) — new metric name.
-	newStateKey := deltaKey{Doctype: "Customer", Metric: "customer_count_by_state", Dimension: "state=Active", Date: today}
+	newStateKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: "Customer", Metric: "customer_count_by_state", Dimension: "state=Active", Date: today}
 	if w.deltas[newStateKey] != 1.0 {
 		t.Errorf("FIX FAILED: new state metric should be 1.0, got %v", w.deltas[newStateKey])
 	}
 
 	// Old state metric should still have 5 (from V1 events, same worker instance).
-	oldStateKey := deltaKey{Doctype: "Customer", Metric: "customer_count_by_status", Dimension: "status=Active", Date: today}
+	oldStateKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: "Customer", Metric: "customer_count_by_status", Dimension: "status=Active", Date: today}
 	if w.deltas[oldStateKey] != 5.0 {
 		t.Errorf("FIX FAILED: old state metric should still be 5.0 (from V1 events), got %v", w.deltas[oldStateKey])
 	}
@@ -638,7 +639,7 @@ func TestFix_Stress_RapidConfigChanges(t *testing.T) {
 		})
 
 		// Verify count metric always exists and increments.
-		countKey := deltaKey{Doctype: cfg.name, Metric: metricName(cfg.name) + "_count", Dimension: "", Date: today}
+		countKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: cfg.name, Metric: metricName(cfg.name) + "_count", Dimension: "", Date: today}
 		if w.deltas[countKey] != float64(i+1) {
 			t.Errorf("Config %d: expected count=%d, got %v", i, i+1, w.deltas[countKey])
 		}

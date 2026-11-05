@@ -160,7 +160,7 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 		return kernel.Operation{Command: moduleCommand.FullName(), Payload: payload, Context: kernel.OperationContext{ModuleExecution: &moduleExecution}}, nil
 	}
 	registration := workflow.ActionRegistration{Key: key, Class: workflow.ActionLocal, InputSchema: inputSchema, OutputSchema: outputSchema, RequiredGrant: serviceGrant}
-	moduleLease := contract.CapabilityLease{ID: "workflow-module-lease-" + suffix[:12], TenantID: tenant, Scope: contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "engine.internal.finance.ar", Operation: moduleCommand.FullName(), BindingRevision: 1, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	moduleLease := contract.CapabilityLease{ID: "workflow-module-lease-" + suffix[:12], TenantID: tenant, Scope: contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderModuleID: "finance.ar", ProviderID: "engine.internal.finance.ar", Operation: moduleCommand.FullName(), BindingRevision: 1, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
 	if err := moduleStore.CreateCapabilityLease(ctx, moduleLease); err != nil {
 		t.Fatal("create workflow module capability lease:", err)
 	}

@@ -1,0 +1,206 @@
+name: Stock Movement
+resource_name: stock-movement
+module: Inventory
+is_submittable: false
+is_child_table: false
+is_single: false
+track_changes: false
+append_only: true
+title_field: product
+search_fields: product, movement_type, source_reference, reason
+sort_field: adjusted_at
+sort_order: DESC
+description: Append-only stock ledger. Sales post negative movements atomically with checkout.
+fields:
+    - fieldname: product
+      fieldtype: Link
+      label: Product
+      options: Product
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: movement_type
+      fieldtype: Select
+      label: Movement Type
+      options: |-
+        Sale
+        Receipt
+        Adjustment In
+        Adjustment Out
+        Recount
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: true
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: delta
+      fieldtype: Int
+      label: Quantity Change
+      options: ""
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: source_sale
+      fieldtype: Link
+      label: Sale
+      options: Sale
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: source_reference
+      fieldtype: Data
+      label: Receipt Reference
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: reason
+      fieldtype: Text
+      label: Reason
+      options: ""
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: false
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: adjusted_at
+      fieldtype: Datetime
+      label: Movement Date & Time
+      options: ""
+      reqd: true
+      unique: false
+      default: now
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: posted_by
+      fieldtype: User
+      label: Posted By
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: false
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+doc_constraints: []
+public_access: null
+quantity_effect:
+    view: Record Stock Movement
+    component: adjustment
+    action: apply
+    target_doctype: Product
+    target_quantity_field: stock_qty
+    source_record_field: product
+    delta_field: delta
+    reason_field: reason

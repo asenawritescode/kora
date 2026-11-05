@@ -541,8 +541,10 @@ func (h *Handler) HandleViewAction(c *gin.Context) {
 
 	// Find the component and action in the stored view config.
 	var targetAction *doctype.ViewAction
+	var componentBindings map[string]string
 	for i := range view.Components {
 		if view.Components[i].ID == req.Component {
+			componentBindings = view.Components[i].Bindings
 			for j := range view.Components[i].Actions {
 				if view.Components[i].Actions[j].ID == actionID {
 					targetAction = &view.Components[i].Actions[j]
@@ -564,6 +566,16 @@ func (h *Handler) HandleViewAction(c *gin.Context) {
 
 	// Resolve through the server registry based on stored config, never the client.
 	if runtime, ok := serverPageActionRegistry[targetAction.Type]; ok {
+		if targetAction.Type == "create_record" {
+			if req.Context == nil {
+				req.Context = make(map[string]any)
+			}
+			bindings := make(map[string]any, len(componentBindings))
+			for field, value := range componentBindings {
+				bindings[field] = strings.TrimPrefix(value, "literal:")
+			}
+			req.Context["_bindings"] = bindings
+		}
 		runtime(h, c, targetAction, req.Context)
 	} else {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{
@@ -589,9 +601,51 @@ func (h *Handler) executeCreateRecord(c *gin.Context, action *doctype.ViewAction
 	}
 
 	data := make(map[string]any)
+	ctx["_actor"] = currentUser(c)
+	if inputs, ok := action.Config["inputs"].([]any); ok {
+		provided, _ := ctx["_inputs"].(map[string]any)
+		for _, rawInput := range inputs {
+			input, ok := rawInput.(map[string]any)
+			if !ok {
+				continue
+			}
+			field := getString(input, "field")
+			if field == "" {
+				continue
+			}
+			if dt.GetField(field) == nil {
+				writeError(c, http.StatusBadRequest, "validation.invalid_configuration", "Configured input field does not exist on target DocType", map[string]any{"doctype": doctypeName, "field": field})
+				return
+			}
+			value, exists := provided[field]
+			if value == nil || value == "" {
+				value, exists = ctx[field]
+			}
+			if input["required"] == true && (!exists || value == nil || value == "") {
+				writeError(c, http.StatusBadRequest, "validation.required_field", "A required action input is missing", map[string]any{"field": field, "label": getString(input, "label")})
+				return
+			}
+		}
+	}
 	for k, v := range ctx {
 		if !strings.HasPrefix(k, "_") && dt.GetField(k) != nil {
 			data[k] = v
+		}
+	}
+	if configuredFields, ok := action.Config["fields"].(map[string]any); ok {
+		for field, template := range configuredFields {
+			if dt.GetField(field) == nil {
+				writeError(c, http.StatusBadRequest, "validation.invalid_configuration", "Configured create field does not exist on target DocType", map[string]any{"doctype": doctypeName, "field": field})
+				return
+			}
+			value, err := resolveCreateRecordTemplate(template, ctx, action.Config)
+			if err != nil {
+				writeError(c, http.StatusBadRequest, "validation.invalid_action_context", err.Error(), map[string]any{"field": field})
+				return
+			}
+			if value != nil {
+				data[field] = value
+			}
 		}
 	}
 	raw, err := json.Marshal(data)
@@ -606,6 +660,60 @@ func (h *Handler) executeCreateRecord(c *gin.Context, action *doctype.ViewAction
 	}
 
 	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
+}
+
+func resolveCreateRecordTemplate(raw any, ctx map[string]any, config map[string]any) (any, error) {
+	template, ok := raw.(string)
+	if !ok || !strings.HasPrefix(template, "$") {
+		return raw, nil
+	}
+	switch template {
+	case "$generated":
+		prefix := getString(config, "reference_prefix")
+		if prefix == "" {
+			prefix = "REC"
+		}
+		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()), nil
+	case "$now":
+		return time.Now().UTC().Format(time.RFC3339), nil
+	case "$actor":
+		return currentUserFromContext(ctx), nil
+	}
+	for _, scope := range []string{"binding", "context", "input"} {
+		prefix := "$" + scope + "."
+		if strings.HasPrefix(template, prefix) {
+			key := strings.TrimPrefix(template, prefix)
+			var source any
+			switch scope {
+			case "binding":
+				source = ctx["_bindings"]
+			case "context":
+				source = ctx["_prerequisites"]
+			case "input":
+				source = ctx["_inputs"]
+			}
+			values, ok := source.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("missing %s values for configured field", scope)
+			}
+			value, exists := values[key]
+			if !exists || value == nil || value == "" {
+				if scope == "input" {
+					return nil, nil
+				}
+				return nil, fmt.Errorf("missing configured %s value %q", scope, key)
+			}
+			return value, nil
+		}
+	}
+	return raw, nil
+}
+
+func currentUserFromContext(ctx map[string]any) string {
+	if actor, ok := ctx["_actor"].(string); ok {
+		return actor
+	}
+	return ""
 }
 
 func (h *Handler) executeUpdateRecord(c *gin.Context, action *doctype.ViewAction, ctx map[string]any) {
@@ -708,6 +816,10 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 			}
 		}
 	}
+	// Run the same DocType defaults used by ordinary record creation before
+	// validating a configured transaction. Required fields can have defaults
+	// even when they are not part of the action's client context.
+	doctype.ApplyDefaultValues(dt, doc)
 	stockUpdates := make([]kernel.RecordMutationBundleItem, 0)
 
 	parentField, childDT, err := resolveTransactionChildTable(reg, dt, action)
@@ -716,15 +828,19 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 		return
 	}
 
+	var children []*doctype.Document
 	if childDT != nil {
 		rawItems := ctx["cart"]
 		if rawItems == nil {
 			rawItems = ctx["items"]
 		}
-		children, err := buildTransactionChildren(rawItems, childDT, action.Config)
+		children, err = buildTransactionChildren(rawItems, childDT, action.Config)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "validation.failed", err.Error(), nil)
 			return
+		}
+		for _, child := range children {
+			doctype.ApplyDefaultValues(childDT, child)
 		}
 		if len(children) == 0 {
 			writeError(c, http.StatusBadRequest, "validation.required_field", "transaction requires at least one item", map[string]any{"field": "items"})
@@ -806,6 +922,10 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 		writeError(c, http.StatusBadRequest, "validation.failed", "Validation failed", map[string]any{"fields": validationErrorDetails(validationErrs)})
 		return
 	}
+	if statusErr := validateTransactionRelatedStatuses(tm, reg, dt, doc, action.Config); statusErr != nil {
+		writeError(c, http.StatusConflict, "validation.related_record_status", statusErr.Error(), nil)
+		return
+	}
 
 	// A provider must approve payment before the Sale exists. The script name
 	// comes from stored view configuration, never from client input.
@@ -827,6 +947,18 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 		Records: []kernel.RecordMutationBundleItem{{Key: "sale", Doctype: dt.Name, Data: saleData}},
 	}
 	bundle.Records = append(bundle.Records, stockUpdates...)
+	lineRecords, lineRecordErr := configuredTransactionLineRecords(reg, action.Config, dt, doc, childDT, children, user)
+	if lineRecordErr != nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_configuration", lineRecordErr.Error(), nil)
+		return
+	}
+	bundle.Records = append(bundle.Records, lineRecords...)
+	counterUpdates, counterErr := configuredTransactionNumericUpdates(reg, action.Config, dt, doc)
+	if counterErr != nil {
+		writeError(c, http.StatusBadRequest, "validation.invalid_configuration", counterErr.Error(), nil)
+		return
+	}
+	bundle.Records = append(bundle.Records, counterUpdates...)
 	if operationName == "" {
 		related, relatedErr := configuredTransactionRelatedRecords(reg, action.Config, ctx, user)
 		if relatedErr != nil {
@@ -861,6 +993,183 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 	doc = orm.DocumentFromMap(reg, dt.Name, result.Document)
 
 	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
+}
+
+func validateTransactionRelatedStatuses(tx *orm.TxManager, reg *doctype.Registry, parentDT *doctype.DocType, parent *doctype.Document, config map[string]any) error {
+	items, ok := config["required_related_status"].([]any)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	for index, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("related status requirement %d must be an object", index+1)
+		}
+		targetDT := reg.Get(getString(item, "doctype"))
+		recordField, statusField, expected := getString(item, "record_field"), getString(item, "status_field"), getString(item, "equals")
+		if targetDT == nil || parentDT.GetField(recordField) == nil || targetDT.GetField(statusField) == nil || expected == "" {
+			return fmt.Errorf("related status requirement %d is incomplete", index+1)
+		}
+		recordName := parent.GetString(recordField)
+		if recordName == "" {
+			return fmt.Errorf("%s is required before this transaction can be completed", parentDT.GetField(recordField).Label)
+		}
+		related, err := tx.GetDoc(targetDT, recordName, "")
+		if err != nil || related == nil {
+			return fmt.Errorf("the selected %s could not be found", targetDT.Name)
+		}
+		if !strings.EqualFold(related.GetString(statusField), expected) {
+			return fmt.Errorf("the selected %s is not %s", targetDT.Name, expected)
+		}
+	}
+	return nil
+}
+
+// configuredTransactionLineRecords creates one configured companion record per
+// transaction line. This supports generic ledgers such as stock movements
+// without embedding POS-specific rules in the transaction engine.
+func configuredTransactionLineRecords(reg *doctype.Registry, config map[string]any, parentDT *doctype.DocType, parent *doctype.Document, lineDT *doctype.DocType, lines []*doctype.Document, actor string) ([]kernel.RecordMutationBundleItem, error) {
+	raw, ok := config["line_records"].([]any)
+	if !ok || len(raw) == 0 {
+		return nil, nil
+	}
+	if lineDT == nil || len(lines) == 0 {
+		return nil, fmt.Errorf("line_records requires transaction lines")
+	}
+	items := make([]kernel.RecordMutationBundleItem, 0, len(raw)*len(lines))
+	for bindingIndex, rawBinding := range raw {
+		binding, ok := rawBinding.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("line record binding %d must be an object", bindingIndex+1)
+		}
+		targetName := getString(binding, "doctype")
+		targetDT := reg.Get(targetName)
+		fields, fieldsOK := binding["fields"].(map[string]any)
+		if targetDT == nil || !fieldsOK || len(fields) == 0 {
+			return nil, fmt.Errorf("line record binding %d requires an available doctype and fields", bindingIndex+1)
+		}
+		prefix := getString(binding, "key")
+		if prefix == "" {
+			prefix = fmt.Sprintf("line_record_%d", bindingIndex+1)
+		}
+		quantity, _ := binding["quantity"].(map[string]any)
+		for lineIndex, line := range lines {
+			data := make(map[string]any, len(fields)+1)
+			for field, source := range fields {
+				value := source
+				if expression, isExpression := source.(string); isExpression {
+					switch {
+					case expression == "$actor":
+						value = actor
+					case strings.HasPrefix(expression, "$line."):
+						name := strings.TrimPrefix(expression, "$line.")
+						if lineDT.GetField(name) == nil {
+							return nil, fmt.Errorf("line record binding references unknown line field %q", name)
+						}
+						value = line.Get(name)
+					case strings.HasPrefix(expression, "$parent."):
+						name := strings.TrimPrefix(expression, "$parent.")
+						if parentDT.GetField(name) == nil {
+							return nil, fmt.Errorf("line record binding references unknown transaction field %q", name)
+						}
+						value = parent.Get(name)
+					}
+				}
+				data[field] = value
+			}
+			if len(quantity) > 0 {
+				fieldName := getString(quantity, "field")
+				sourceName := getString(quantity, "source_field")
+				sign, signErr := strconv.ParseFloat(fmt.Sprint(quantity["sign"]), 64)
+				amount := line.GetFloat(sourceName)
+				if targetDT.GetField(fieldName) == nil || lineDT.GetField(sourceName) == nil || signErr != nil || (sign != 1 && sign != -1) || amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+					return nil, fmt.Errorf("line record binding %d has an invalid signed quantity mapping", bindingIndex+1)
+				}
+				data[fieldName] = amount * sign
+			}
+			encoded, err := json.Marshal(data)
+			if err != nil {
+				return nil, fmt.Errorf("encode line record: %w", err)
+			}
+			items = append(items, kernel.RecordMutationBundleItem{
+				Key: fmt.Sprintf("%s_%d", prefix, lineIndex+1), Doctype: targetDT.Name, Data: encoded,
+			})
+		}
+	}
+	if len(items)+1 > kernel.MaxMutationBundleRecords {
+		return nil, fmt.Errorf("transaction creates too many related records")
+	}
+	return items, nil
+}
+
+// configuredTransactionNumericUpdates applies configured signed deltas to
+// related numeric fields in the same kernel bundle as the transaction.
+func configuredTransactionNumericUpdates(reg *doctype.Registry, config map[string]any, parentDT *doctype.DocType, parent *doctype.Document) ([]kernel.RecordMutationBundleItem, error) {
+	raw, ok := config["related_numeric_updates"].([]any)
+	if !ok || len(raw) == 0 {
+		return nil, nil
+	}
+	items := make([]kernel.RecordMutationBundleItem, 0, len(raw))
+	for index, rawUpdate := range raw {
+		update, ok := rawUpdate.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("numeric update %d must be an object", index+1)
+		}
+		targetDT := reg.Get(getString(update, "doctype"))
+		recordField, fieldName := getString(update, "record_field"), getString(update, "field")
+		if targetDT == nil || parentDT.GetField(recordField) == nil || targetDT.GetField(fieldName) == nil || !targetDT.GetField(fieldName).IsNumeric() {
+			return nil, fmt.Errorf("numeric update %d has an invalid doctype or field", index+1)
+		}
+		if condition, ok := update["when"].(map[string]any); ok {
+			conditionField := getString(condition, "field")
+			if parentDT.GetField(conditionField) == nil {
+				return nil, fmt.Errorf("numeric update %d references an unknown condition field", index+1)
+			}
+			if fmt.Sprint(parent.Get(conditionField)) != fmt.Sprint(condition["equals"]) {
+				continue
+			}
+		}
+		recordName := parent.GetString(recordField)
+		if recordName == "" {
+			return nil, fmt.Errorf("numeric update %d requires transaction field %q", index+1, recordField)
+		}
+		amount := 0.0
+		if sourceName := getString(update, "source_field"); sourceName != "" {
+			if parentDT.GetField(sourceName) == nil {
+				return nil, fmt.Errorf("numeric update %d references an unknown source field", index+1)
+			}
+			amount = parent.GetFloat(sourceName)
+		} else {
+			parsed, err := strconv.ParseFloat(fmt.Sprint(update["value"]), 64)
+			if err != nil {
+				return nil, fmt.Errorf("numeric update %d has an invalid constant", index+1)
+			}
+			amount = parsed
+		}
+		sign := 1.0
+		if rawSign := update["sign"]; rawSign != nil {
+			parsed, err := strconv.ParseFloat(fmt.Sprint(rawSign), 64)
+			if err != nil || (parsed != 1 && parsed != -1) {
+				return nil, fmt.Errorf("numeric update %d sign must be 1 or -1", index+1)
+			}
+			sign = parsed
+		}
+		amount *= sign
+		if amount == 0 {
+			continue
+		}
+		if math.IsNaN(amount) || math.IsInf(amount, 0) || targetDT.GetField(fieldName).Fieldtype == "Int" && math.Trunc(amount) != amount {
+			return nil, fmt.Errorf("numeric update %d must be a nonzero valid amount", index+1)
+		}
+		encoded, err := json.Marshal(map[string]any{fieldName: amount})
+		if err != nil {
+			return nil, fmt.Errorf("encode numeric update: %w", err)
+		}
+		items = append(items, kernel.RecordMutationBundleItem{
+			Key: fmt.Sprintf("counter_%d", index+1), Operation: "adjust", Doctype: targetDT.Name, Name: recordName, Data: encoded,
+		})
+	}
+	return items, nil
 }
 
 func transactionIdempotencyKey(c *gin.Context, action *doctype.ViewAction, doc *doctype.Document) (string, error) {

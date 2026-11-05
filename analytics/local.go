@@ -27,13 +27,14 @@ func (p *LocalProvider) Publish(ctx context.Context, event contract.EventEnvelop
 	_ = ctx // the in-process bus is non-cancellable by design
 
 	change := ChangeEvent{
-		ID:        event.ID,
-		Sequence:  string(event.Sequence),
-		Site:      event.Site,
-		Doctype:   event.AggregateType,
-		DocName:   event.AggregateID,
-		Operation: envelopeOp(event.Type),
-		Timestamp: event.OccurredAt,
+		ID:            event.ID,
+		Sequence:      string(event.Sequence),
+		Site:          event.Site,
+		BusinessScope: event.BusinessScope,
+		Doctype:       event.AggregateType,
+		DocName:       event.AggregateID,
+		Operation:     envelopeOp(event.Type),
+		Timestamp:     event.OccurredAt,
 	}
 
 	// Recover Data and old_data best-effort from the envelope payload.

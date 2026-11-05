@@ -171,6 +171,38 @@ func TestServicePublishesValidatedDefinitionUsingVerifiedIdentity(t *testing.T) 
 	}
 }
 
+func TestModuleOwnedWorkflowPublicationRequiresDeclaredOwnedResource(t *testing.T) {
+	exec, err := policy.NewVerifiedExecution("stable-tenant-1", contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &testDefinitionRepository{}
+	service, err := NewService(repo, testDefinitionAuthorizer{allowed: true}, frozenTestCatalog(t), testSchemas{}, testWaits{}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.SetModuleSnapshotLookup(func(contract.TenantID) (contract.ModuleSnapshot, error) {
+		return contract.ModuleSnapshot{TenantID: "stable-tenant-1", Modules: []contract.ModuleDescriptor{{ID: "finance.ar", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: contract.ResourceRef{Namespace: "workflow", Name: "invoice-approval", Version: 1}, Access: contract.ModulePrivate, MutationMode: contract.MutationCommands, ScopeKind: contract.ScopeTenantShared}}}}}, nil
+	})
+	definition := validTestDefinition()
+	definition.ID = "invoice-approval"
+	definition.OwnerModuleID = "finance.ar"
+	if _, err := service.Publish(context.Background(), exec, definition, "publish-owned"); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.called {
+		t.Fatal("declared module-owned workflow was not published")
+	}
+	repo.called = false
+	definition.ID = "unowned-flow"
+	if _, err := service.Publish(context.Background(), exec, definition, "publish-unowned"); err == nil {
+		t.Fatal("unowned workflow module marker was accepted")
+	}
+	if repo.called {
+		t.Fatal("unowned workflow reached persistence")
+	}
+}
+
 func TestValidateCandidateUsesProposedTableAndFieldSchema(t *testing.T) {
 	service, err := NewService(&testDefinitionRepository{}, testDefinitionAuthorizer{allowed: true}, frozenTestCatalog(t), testSchemas{}, testWaits{}, time.Now)
 	if err != nil {
@@ -477,15 +509,15 @@ func TestPinnedProviderReconciliationUsesStoredProviderAndRejectsConflictingOper
 	out := contract.SchemaRef{ID: "output", Version: 1}
 	leaseScope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
 	registration := ActionRegistration{Key: ActionKey{Name: "invoice.approve", Version: 1}, Class: ActionExternal, InputSchema: in, OutputSchema: out, RequiredGrant: grant, Capability: &contract.CapabilityAction{CapabilityName: "billing.invoice", OperationName: "issue", InputSchema: in, OutputSchema: out}, ProviderID: "billing.provider-new", BindingRevision: 9, CallerModuleID: "sales.orders", PinnedDispatcher: call,
-		CapabilityLease: &contract.CapabilityLease{ID: "lease-new", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-new", Operation: "issue", BindingRevision: 9, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}}
+		CapabilityLease: &contract.CapabilityLease{ID: "lease-new", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderModuleID: "finance.billing", ProviderID: "billing.provider-new", Operation: "issue", BindingRevision: 9, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}}
 	if err := catalog.Register(registration); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalog.Freeze(); err != nil {
 		t.Fatal(err)
 	}
-	pinned := contract.PinnedDispatch{ExecutionID: "01K7EXECUTION000000000000000000", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-old", BindingRevision: 8, Operation: *registration.Capability, IdempotencyKey: "stable-key-01", InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
-	oldLease := contract.CapabilityLease{ID: "lease-old", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderID: "billing.provider-old", Operation: "issue", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active", CredentialRef: "old-credential@v1"}
+	pinned := contract.PinnedDispatch{ExecutionID: "01K7EXECUTION000000000000000000", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderModuleID: "finance.billing", ProviderID: "billing.provider-old", BindingRevision: 8, Operation: *registration.Capability, IdempotencyKey: "stable-key-01", InputHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	oldLease := contract.CapabilityLease{ID: "lease-old", TenantID: "tenant-a", Scope: leaseScope, CallerModuleID: "sales.orders", ProviderModuleID: "finance.billing", ProviderID: "billing.provider-old", Operation: "issue", BindingRevision: 8, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active", CredentialRef: "old-credential@v1"}
 	instances := &testPinnedInstanceRepository{testInstanceRepository: base, dispatch: pinned, lease: oldLease}
 	authz := &testInstanceAuthorizer{reconcile: true}
 	service, err := NewInstanceService(defs, instances, authz, catalog, testSchemas{}, testWaits{}, time.Now, nil)

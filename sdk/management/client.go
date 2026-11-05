@@ -12,7 +12,7 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
-	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -201,7 +201,7 @@ func (c *httpClient) PlanModuleChange(ctx context.Context, tenant contract.Tenan
 	var result contract.ModuleChangePlan
 	endpoint := "/api/management/v2/tenants/" + url.PathEscape(string(tenant)) + "/modules/plan"
 	err := c.do(ctx, http.MethodPost, endpoint, http.StatusOK, request, &result)
-	if err == nil && (result.ModuleID != request.ModuleID || result.TargetState != request.TargetState || result.TargetVersion != request.TargetVersion || !reflect.DeepEqual(result.ProviderSelections, request.ProviderSelections) || result.BaseRevision != request.ExpectedRevision || len(result.PlanHash) != 64) {
+	if err == nil && (result.ModuleID != request.ModuleID || result.TargetState != request.TargetState || result.TargetVersion != request.TargetVersion || !slices.Equal(result.ProviderSelections, request.ProviderSelections) || result.BaseRevision != request.ExpectedRevision || len(result.PlanHash) != 64) {
 		err = fmt.Errorf("management module plan response identity is invalid")
 	}
 	if err == nil {
