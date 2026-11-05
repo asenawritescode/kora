@@ -25,7 +25,7 @@ const (
 	oidcLoginLifetime  = 10 * time.Minute
 	oidcMetadataTTL    = time.Hour
 	oidcBindingCookie  = "kora_oidc_binding"
-	oidcCookiePath     = "/api/auth/oidc"
+	oidcCookiePath     = "/api/v1/auth/oidc"
 	oidcResponseLimit  = 1 << 20
 	defaultAfterSignIn = "/workspace"
 )
@@ -126,7 +126,7 @@ func (l *OIDCLogin) deps(c *gin.Context, fallback tenantUsersFactory) (oidcLogin
 	}, nil
 }
 
-// Register mounts the start and callback routes on the public /api/auth group.
+// Register mounts the OIDC routes on the public /api/v1/auth group.
 func (l *OIDCLogin) Register(group *gin.RouterGroup) {
 	users := func(c *gin.Context, database *sql.DB) tenantUsers {
 		return sessionManagerForRequest(c, database)
@@ -173,7 +173,7 @@ func (l *OIDCLogin) handleStart(c *gin.Context, users tenantUsersFactory) {
 	query := url.Values{
 		"response_type":         {"code"},
 		"client_id":             {provider.ClientID},
-		"redirect_uri":          {l.redirectURI(c, provider.ID)},
+		"redirect_uri":          {l.redirectURI(c)},
 		"scope":                 {strings.Join(provider.Scopes, " ")},
 		"state":                 {state},
 		"nonce":                 {nonce},
@@ -232,7 +232,9 @@ func (l *OIDCLogin) getJSON(ctx context.Context, target string, out any) error {
 	return json.NewDecoder(io.LimitReader(response.Body, oidcResponseLimit)).Decode(out)
 }
 
-func (l *OIDCLogin) redirectURI(c *gin.Context, providerID string) string {
+// redirectURI is the single callback Kora Cloud and other issuers register;
+// the provider is recovered from the stored state, not the path.
+func (l *OIDCLogin) redirectURI(c *gin.Context) string {
 	origin := strings.TrimRight(strings.TrimSpace(l.PublicAppBaseURL), "/")
 	if origin == "" {
 		scheme := "https"
@@ -241,7 +243,7 @@ func (l *OIDCLogin) redirectURI(c *gin.Context, providerID string) string {
 		}
 		origin = scheme + "://" + c.Request.Host
 	}
-	return origin + oidcCookiePath + "/" + providerID + "/callback"
+	return origin + oidcCookiePath + "/callback"
 }
 
 // safeReturnTo accepts only same-origin absolute paths.

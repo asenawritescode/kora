@@ -1295,7 +1295,7 @@ func registerAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB, mail
 	}
 	magicLinkConfigured := mailer != nil && strings.TrimSpace(publicAppBaseURL) != ""
 	registerSignInDiscovery(auth, db, magicLinkConfigured)
-	(&OIDCLogin{PublicAppBaseURL: publicAppBaseURL}).Register(auth)
+	(&OIDCLogin{PublicAppBaseURL: publicAppBaseURL}).Register(router.Group("/api/v1/auth"))
 	if magicLinkConfigured {
 		registerMagicLinkRoutes(auth, db, mailer, publicAppBaseURL)
 	}

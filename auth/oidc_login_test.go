@@ -99,7 +99,7 @@ func oidcRouter(login *OIDCLogin) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(func(c *gin.Context) { c.Set("site_name", "s1") })
-	login.Register(router.Group("/api/auth"))
+	login.Register(router.Group("/api/v1/auth"))
 	return router
 }
 
@@ -110,7 +110,7 @@ func TestOIDCStartRedirectsWithPKCEAndBindsBrowser(t *testing.T) {
 		return oidcLoginDeps{Providers: fakeProviders{"kora-cloud": OIDCProvider{ID: "kora-cloud", Issuer: issuer.URL, ClientID: "studio", Enabled: true}.Normalize()}, States: states}, nil
 	}}
 	response := httptest.NewRecorder()
-	oidcRouter(login).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/kora-cloud/start?return_to=/workspace/Sales%20Order", nil))
+	oidcRouter(login).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/kora-cloud/start?return_to=/workspace/Sales%20Order", nil))
 	if response.Code != http.StatusFound {
 		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
 	}
@@ -121,14 +121,14 @@ func TestOIDCStartRedirectsWithPKCEAndBindsBrowser(t *testing.T) {
 	q := location.Query()
 	pending := states.only(t)
 	if q.Get("client_id") != "studio" || q.Get("code_challenge_method") != "S256" || q.Get("code_challenge") != oidc.S256Challenge(pending.CodeVerifier) ||
-		q.Get("nonce") != pending.Nonce || q.Get("redirect_uri") != "https://app.kora.test/api/auth/oidc/kora-cloud/callback" || !strings.HasPrefix(q.Get("scope"), "openid") {
+		q.Get("nonce") != pending.Nonce || q.Get("redirect_uri") != "https://app.kora.test/api/v1/auth/oidc/callback" || !strings.HasPrefix(q.Get("scope"), "openid") {
 		t.Fatalf("authorize query = %v, pending = %+v", q, pending)
 	}
 	if pending.ReturnTo != "/workspace/Sales Order" || pending.ProviderID != "kora-cloud" || pending.Site != "s1" {
 		t.Fatalf("pending = %+v", pending)
 	}
 	cookie := response.Header().Get("Set-Cookie")
-	if !strings.Contains(cookie, oidcBindingCookie+"=") || !strings.Contains(cookie, "HttpOnly") || !strings.Contains(cookie, "Path=/api/auth/oidc") {
+	if !strings.Contains(cookie, oidcBindingCookie+"=") || !strings.Contains(cookie, "HttpOnly") || !strings.Contains(cookie, "Path=/api/v1/auth/oidc") {
 		t.Fatalf("binding cookie = %q", cookie)
 	}
 	binding := strings.TrimPrefix(strings.SplitN(cookie, ";", 2)[0], oidcBindingCookie+"=")
@@ -158,7 +158,7 @@ func TestOIDCStartRejectsUnavailableProviders(t *testing.T) {
 				return oidcLoginDeps{Providers: fakeProviders{"p": tc.provider.Normalize()}, States: &fakeStates{}}, nil
 			}}
 			response := httptest.NewRecorder()
-			oidcRouter(login).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/p/start", nil))
+			oidcRouter(login).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/p/start", nil))
 			if response.Code != tc.want {
 				t.Fatalf("status = %d, want %d; body = %s", response.Code, tc.want, response.Body.String())
 			}
