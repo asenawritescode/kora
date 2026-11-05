@@ -524,6 +524,10 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 		badRequestError(c, "validation.invalid_json", "Invalid request format: "+err.Error(), nil)
 		return
 	}
+	if declaresModuleOwnership(&dt) {
+		badRequestError(c, "doctype.module_ownership_immutable", "Module ownership can only be set by installing a package", map[string]any{"doctype": dt.Name})
+		return
+	}
 
 	// Validate the doctype.
 	if err := dt.Validate(); err != nil {
@@ -680,6 +684,7 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 
 	// Name must match.
 	newDT.Name = doctypeName
+	preserveModuleOwnership(&newDT, oldDT)
 
 	// Validate.
 	if err := newDT.Validate(); err != nil {
@@ -2610,7 +2615,7 @@ func (h *Handler) HandleSystemAudit(c *gin.Context) {
 func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 	system := apiGroup.Group("/system")
 	{
-		// Read endpoints.
+		// Schema and workspace reads every signed-in user needs to render forms.
 		system.GET("/doctype/:doctype", handler.HandleSystemDoctype)
 		system.GET("/doctypes", handler.HandleSystemDoctypes)
 		system.GET("/graph", handler.HandleSystemGraph)
@@ -2618,47 +2623,9 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.GET("/navigation", handler.HandleSystemNavigation)
 		system.GET("/settings", handler.HandleSiteSettings)
 		system.GET("/experience", handler.HandleSystemBranding)
-		system.GET("/audit", handler.HandleSystemAudit)
-
-		// Write endpoints.
-		system.POST("/doctype/validate", handler.HandleSystemDoctypeValidate)
-		system.POST("/doctype/dry-run", handler.HandleSystemDoctypeDryRun)
-		system.POST("/config/validate", handler.HandleConfigurationValidate)
-		system.POST("/config/dry-run", handler.HandleConfigurationDryRun)
-		system.POST("/doctype", handler.HandleSystemDoctypeCreate)
-		system.PUT("/doctype/:doctype", handler.HandleSystemDoctypeUpdate)
-		system.DELETE("/doctype/:doctype", handler.HandleSystemDoctypeDelete)
-		system.PUT("/settings", handler.HandleSiteSettingsUpdate)
-		system.PUT("/experience", handler.HandleSystemExperienceUpdate)
-
-		// Config version actions.
-		system.GET("/config/versions/:id/preview", handler.HandleConfigVersionPreview)
-		system.POST("/config/versions/:id/activate", handler.HandleConfigVersionActivate)
-		system.POST("/config/versions/:id/discard", handler.HandleConfigVersionDiscard)
-		system.GET("/config/versions/:id/rollback-preview", handler.HandleConfigVersionRollbackPreview)
-		system.POST("/config/versions/:id/rollback", handler.HandleConfigVersionRollback)
-		system.GET("/config/versions/:id/snapshot", handler.HandleConfigVersionSnapshot)
-
-		// Config import.
-		system.POST("/config/import", handler.HandleConfigImport)
-		system.POST("/config/drafts", handler.HandleConfigurationDraft)
-
-		// Realtime stream.
 		system.GET("/realtime", handler.HandleSystemRealtime)
 
-		// Roles.
-		system.GET("/roles", handler.HandleSystemRoles)
-		system.POST("/roles", handler.HandleSystemRoleCreate)
-		system.PUT("/roles/:name", handler.HandleSystemRoleUpdate)
-		system.DELETE("/roles/:name", handler.HandleSystemRoleDelete)
-
-		// Permissions.
-		system.GET("/permissions", handler.HandleSystemPermissions)
-		system.PUT("/permissions", handler.HandleSystemPermissionsSave)
-
-		// Workflows.
-
-		// Users.
+		// Users and secrets handlers enforce their own role checks.
 		system.GET("/user-directory", handler.HandleUserDirectory)
 		system.GET("/users", handler.HandleUserList)
 		system.GET("/users/:name", handler.HandleUserGet)
@@ -2668,5 +2635,37 @@ func RegisterSystemRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 		system.GET("/secrets", handler.HandleSecretList)
 		system.POST("/secrets", handler.HandleSecretSet)
 		system.DELETE("/secrets/:key", handler.HandleSecretDelete)
+	}
+
+	admin := apiGroup.Group("/system", adminOnly())
+	{
+		admin.GET("/audit", handler.HandleSystemAudit)
+
+		admin.POST("/doctype/validate", handler.HandleSystemDoctypeValidate)
+		admin.POST("/doctype/dry-run", handler.HandleSystemDoctypeDryRun)
+		admin.POST("/config/validate", handler.HandleConfigurationValidate)
+		admin.POST("/config/dry-run", handler.HandleConfigurationDryRun)
+		admin.POST("/doctype", handler.HandleSystemDoctypeCreate)
+		admin.PUT("/doctype/:doctype", handler.HandleSystemDoctypeUpdate)
+		admin.DELETE("/doctype/:doctype", handler.HandleSystemDoctypeDelete)
+		admin.PUT("/settings", handler.HandleSiteSettingsUpdate)
+		admin.PUT("/experience", handler.HandleSystemExperienceUpdate)
+
+		admin.GET("/config/versions/:id/preview", handler.HandleConfigVersionPreview)
+		admin.POST("/config/versions/:id/activate", handler.HandleConfigVersionActivate)
+		admin.POST("/config/versions/:id/discard", handler.HandleConfigVersionDiscard)
+		admin.GET("/config/versions/:id/rollback-preview", handler.HandleConfigVersionRollbackPreview)
+		admin.POST("/config/versions/:id/rollback", handler.HandleConfigVersionRollback)
+		admin.GET("/config/versions/:id/snapshot", handler.HandleConfigVersionSnapshot)
+		admin.POST("/config/import", handler.HandleConfigImport)
+		admin.POST("/config/drafts", handler.HandleConfigurationDraft)
+
+		admin.GET("/roles", handler.HandleSystemRoles)
+		admin.POST("/roles", handler.HandleSystemRoleCreate)
+		admin.PUT("/roles/:name", handler.HandleSystemRoleUpdate)
+		admin.DELETE("/roles/:name", handler.HandleSystemRoleDelete)
+
+		admin.GET("/permissions", handler.HandleSystemPermissions)
+		admin.PUT("/permissions", handler.HandleSystemPermissionsSave)
 	}
 }
