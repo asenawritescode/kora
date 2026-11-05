@@ -56,7 +56,7 @@ func TestScopedClientUsesCatalogRoutesScopeAndReceiptRecovery(t *testing.T) {
 			data = contract.QueryResult{Data: json.RawMessage(`{"items":[]}`), AsOf: time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryStale}
 		case r.Method == http.MethodPost && r.URL.Path == "/s/demo/api/v2/modules/operations/"+operationRef+"/execute":
 			var command contract.ExecutePublishedOperation
-			if err := json.NewDecoder(r.Body).Decode(&command); err != nil || command.Meta.IdempotencyKey != "intent-1" {
+			if err := json.NewDecoder(r.Body).Decode(&command); err != nil || command.Meta.IdempotencyKey != "intent-1" || r.Header.Get("Idempotency-Key") != "intent-1" {
 				t.Errorf("execute request=%+v error=%v", command, err)
 			}
 			data = contract.OperationReceipt{ExecutionID: "exec-1", OperationRef: operationRef, BusinessScope: scope, Status: contract.ReceiptAccepted, Revision: "7"}

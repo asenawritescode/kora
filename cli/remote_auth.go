@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -257,7 +258,15 @@ func getRemoteCSRF(ctx context.Context, client *http.Client, base *url.URL, site
 			return cookie.Value, nil
 		}
 	}
-	return "", errors.New("Kora did not issue a CSRF cookie; verify the site URL and engine version")
+	// The Engine's public ping route is intentionally outside the session/CSRF
+	// middleware, so it may only set the routing cookie. The protected auth
+	// endpoints use the double-submit pattern and do not need a server-side
+	// token: a fresh random value is sufficient for this non-browser client.
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		return "", fmt.Errorf("creating a CSRF token: %w", err)
+	}
+	return hex.EncodeToString(token), nil
 }
 
 func remoteUnauthenticatedJSON(ctx context.Context, client *http.Client, base *url.URL, site, method, path, csrf string, body []byte) ([]byte, []*http.Cookie, error) {

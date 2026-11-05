@@ -175,7 +175,9 @@ func (c *ScopedClient) ExecutePublishedOperation(ctx context.Context, catalog co
 		return result, fmt.Errorf("published operation is unavailable or its input schema does not match the actor catalog")
 	}
 	route := "/api/v2/modules/operations/" + url.PathEscape(operationRef) + "/execute"
-	err := c.do(ctx, http.MethodPost, route, command, http.StatusOK, &result)
+	err := c.doWithHeaders(ctx, http.MethodPost, route, command, http.StatusOK, &result, map[string]string{
+		"Idempotency-Key": string(command.Meta.IdempotencyKey),
+	})
 	if err == nil {
 		err = validateReceipt(result, c.scope, operationRef)
 	}
@@ -382,6 +384,10 @@ func (c *ScopedClient) validateCatalog(catalog contract.ApplicationCatalog) erro
 }
 
 func (c *ScopedClient) do(ctx context.Context, method, endpoint string, input any, expected int, output any) error {
+	return c.doWithHeaders(ctx, method, endpoint, input, expected, output, nil)
+}
+
+func (c *ScopedClient) doWithHeaders(ctx context.Context, method, endpoint string, input any, expected int, output any, headers map[string]string) error {
 	if c == nil || c.client == nil || c.client.base == nil {
 		return fmt.Errorf("tenant scoped client is nil")
 	}
@@ -418,6 +424,12 @@ func (c *ScopedClient) do(ctx context.Context, method, endpoint string, input an
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Accept", "application/json")
+	for name, value := range headers {
+		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\r\n") || strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("tenant request header is invalid")
+		}
+		request.Header.Set(name, value)
+	}
 	if c.scope.Kind == contract.ScopeKindLegalEntity {
 		request.Header.Set("X-Kora-Legal-Entity-ID", c.scope.LegalEntityID)
 	}
