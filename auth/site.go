@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,16 @@ import (
 	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
 )
+
+// matchesEnvToken reports whether presented equals the non-empty token held in
+// envKey, comparing in constant time so the token cannot be recovered by timing.
+func matchesEnvToken(presented, envKey string) bool {
+	expected := os.Getenv(envKey)
+	if presented == "" || expected == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) == 1
+}
 
 // SiteGuard is a unified middleware that enforces authentication, CSRF,
 // and site context resolution for workspace and API routes.
@@ -68,13 +79,13 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 		authHeader := c.GetHeader("Authorization")
 		if strings.HasPrefix(authHeader, "Bearer ") {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
-			if token != "" && token == os.Getenv("KORA_ENGINE_PROVISIONING_TOKEN") && ((c.Request.Method == http.MethodPost && (path == "/api/internal/channel/managed-client/rotate" || path == "/api/internal/channel/managed-client/revoke")) || (c.Request.Method == http.MethodGet && path == "/api/internal/site/identity")) {
+			if matchesEnvToken(token, "KORA_ENGINE_PROVISIONING_TOKEN") && ((c.Request.Method == http.MethodPost && (path == "/api/internal/channel/managed-client/rotate" || path == "/api/internal/channel/managed-client/revoke")) || (c.Request.Method == http.MethodGet && path == "/api/internal/site/identity")) {
 				c.Set("auth_type", "engine_provisioner")
 				c.Set("user", "kora-cloud-provisioner")
 				c.Next()
 				return
 			}
-			if token != "" && token == os.Getenv("KORA_ENGINE_CONFIG_TOKEN") && (path == "/api/system/config/drafts" || path == "/api/v1/system/config/drafts" || path == "/api/system/config/validate" || path == "/api/system/config/dry-run" || (c.Request.Method == http.MethodGet && (path == "/api/system/config/versions/head/snapshot" || path == "/api/v1/system/config/versions/head/snapshot" || path == "/api/system/config/versions/active/snapshot" || path == "/api/v1/system/config/versions/active/snapshot"))) {
+			if matchesEnvToken(token, "KORA_ENGINE_CONFIG_TOKEN") && (path == "/api/system/config/drafts" || path == "/api/v1/system/config/drafts" || path == "/api/system/config/validate" || path == "/api/system/config/dry-run" || (c.Request.Method == http.MethodGet && (path == "/api/system/config/versions/head/snapshot" || path == "/api/v1/system/config/versions/head/snapshot" || path == "/api/system/config/versions/active/snapshot" || path == "/api/v1/system/config/versions/active/snapshot"))) {
 				tenantID := c.GetString("site_id")
 				if tenantID == "" {
 					tenantID = c.GetString("site_name")
