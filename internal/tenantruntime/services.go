@@ -14,6 +14,7 @@ import (
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/query"
 	"github.com/asenawritescode/kora/recon"
 	"github.com/asenawritescode/kora/requests"
 	"github.com/asenawritescode/kora/scheduler"
@@ -29,7 +30,9 @@ import (
 type Services struct {
 	// KernelCommands is the tenant generation's command registry: process-wide
 	// definitions plus those carried by the tenant's active configuration.
-	KernelCommands                 *kernel.CommandRegistry
+	KernelCommands *kernel.CommandRegistry
+	// ConfigQueries are the queries carried by the tenant's active configuration.
+	ConfigQueries                  []*query.Definition
 	CommandSchemas                 kernel.CommandSchemaRegistry
 	ModuleBindings                 *plugin.BindingPlan
 	ResolveModuleBindings          func(contract.BusinessScope) (plugin.BindingPlan, error)

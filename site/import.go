@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/query"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,10 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 	if err != nil {
 		return fmt.Errorf("encoding commands: %w", err)
 	}
+	queries, err := encodeQueriesDir(filepath.Join(configPath, "queries"), doctypes)
+	if err != nil {
+		return err
+	}
 	reports := make([]json.RawMessage, 0, len(reportDefinitions))
 	for _, report := range reportDefinitions {
 		data, err := json.Marshal(report)
@@ -86,7 +91,24 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 		Views:               views,
 		Reports:             reports,
 		Commands:            commands,
+		Queries:             queries,
 	}, dialect, nil)
+}
+
+func registryOf(dts []*doctype.DocType) *doctype.Registry {
+	reg := doctype.NewRegistry()
+	for _, dt := range dts {
+		reg.Register(dt)
+	}
+	return reg
+}
+
+func encodeQueriesDir(dir string, dts []*doctype.DocType) ([]json.RawMessage, error) {
+	defs, err := query.LoadDir(dir, registryOf(dts))
+	if err != nil {
+		return nil, fmt.Errorf("parsing queries: %w", err)
+	}
+	return query.Encode(defs)
 }
 
 func ParseWorkflowDefinitionsDirectory(directory string) ([]contract.WorkflowDefinition, error) {
@@ -324,6 +346,9 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	}
 	if _, err := kernel.DecodeCommandResources(snapshot.Commands); err != nil {
 		return fmt.Errorf("invalid command definitions: %w", err)
+	}
+	if _, err := query.Decode(snapshot.Queries, registryOf(snapshot.DocTypes)); err != nil {
+		return fmt.Errorf("invalid query definitions: %w", err)
 	}
 	workflowDefinitions := append([]contract.WorkflowDefinition(nil), snapshot.WorkflowDefinitions...)
 	store := configstore.NewStore(database, dialect)
