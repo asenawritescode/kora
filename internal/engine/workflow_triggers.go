@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
@@ -25,13 +27,13 @@ func registerWorkflowTriggerConsumer(config TenantServiceConfig, loaded *knet.Lo
 	}
 	dispatcher := outbox.NewDispatcher(loaded.DB, dialect)
 	dispatcher.WorkAdmission = services.WorkAdmission
-	if err := dispatcher.RegisterForTypes("workflow-record-triggers", []string{"record.created", "record.updated"}, func(ctx context.Context, event contract.EventEnvelope) error {
+	if err := registerRecordTriggerConsumer(dispatcher, func(ctx context.Context, trigger contract.EventEnvelope) error {
 		release, err := services.WorkAdmission.Acquire(ctx)
 		if err != nil {
 			return err
 		}
 		defer release()
-		_, err = instances.StartFromRecordEvent(ctx, tenant, loaded.Name, event)
+		_, err = instances.StartFromRecordEvent(ctx, tenant, loaded.Name, trigger)
 		return err
 	}); err != nil {
 		return fmt.Errorf("register workflow trigger events: %w", err)
@@ -75,4 +77,52 @@ func RunWorkflowTriggerDispatcher(ctx context.Context, dispatcher *outbox.Dispat
 		case <-ticker.C:
 		}
 	}
+}
+
+// registerRecordTriggerConsumer delivers record change events to start as
+// record trigger envelopes. Legacy record.* types drain events written before
+// each mutation had a single change event.
+func registerRecordTriggerConsumer(dispatcher *outbox.Dispatcher, start func(context.Context, contract.EventEnvelope) error) error {
+	return dispatcher.RegisterForPatterns("workflow-record-triggers", []string{
+		"kora.%.after!_insert", "kora.%.after!_save", "record.created", "record.updated",
+	}, func(ctx context.Context, event contract.EventEnvelope) error {
+		trigger, ok := recordTriggerEvent(event)
+		if !ok {
+			return nil
+		}
+		return start(ctx, trigger)
+	})
+}
+
+// recordTriggerEvent projects a kernel change event onto the record trigger
+// contract. Writes without record identity, and updates that changed no
+// field, start no workflow.
+func recordTriggerEvent(event contract.EventEnvelope) (contract.EventEnvelope, bool) {
+	if event.Type == "record.created" || event.Type == "record.updated" {
+		return event, true
+	}
+	kind := ""
+	switch {
+	case strings.HasSuffix(event.Type, ".after_insert"):
+		kind = "record.created"
+	case strings.HasSuffix(event.Type, ".after_save"):
+		kind = "record.updated"
+	default:
+		return contract.EventEnvelope{}, false
+	}
+	var payload contract.RecordChangeEventData
+	if err := json.Unmarshal(event.Data, &payload); err != nil || payload.Table == "" || payload.RecordID == "" || payload.Revision == "" {
+		return contract.EventEnvelope{}, false
+	}
+	if kind == "record.updated" && len(payload.ChangedFields) == 0 {
+		return contract.EventEnvelope{}, false
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return contract.EventEnvelope{}, false
+	}
+	trigger := event
+	trigger.Type = kind
+	trigger.Data = data
+	return trigger, true
 }
