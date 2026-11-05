@@ -245,6 +245,9 @@ func writeSExprDocType(b *strings.Builder, dt *DocType, indent string) {
 	if dt.Description != "" {
 		props = append(props, sExprProp{"description", quoteSExprString(dt.Description)})
 	}
+	if dt.NamingSeries != "" {
+		props = append(props, sExprProp{"naming-series", quoteSExprString(dt.NamingSeries)})
+	}
 
 	// Fields sorted by name
 	subIndent := indent + "  "
@@ -1255,6 +1258,7 @@ func applyDocTypeKeywords(dt *DocType, kw map[string]string) {
 	dt.SortField = kw["sort-field"]
 	dt.SortOrder = kw["sort-order"]
 	dt.Description = kw["description"]
+	dt.NamingSeries = kw["naming-series"]
 }
 
 func parseField(node *sNode) (*Field, error) {
