@@ -898,6 +898,7 @@ func RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, r
 	// handler rejects unauthenticated callbacks.
 	apiGroup.POST("/webhooks/mpesa/stk", handler.HandleMPesaSTKCallback)
 	apiGroup.POST("/webhooks/mpesa/stk/:token", handler.HandleMPesaSTKCallback)
+	apiGroup.POST("/webhooks/payments/:provider/:token", handler.HandlePaymentCallback)
 }
 
 // RegisterRoutesOnGroupWithAnalytics registers all CRUD routes with optional

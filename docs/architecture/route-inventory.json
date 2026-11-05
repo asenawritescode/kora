@@ -1464,6 +1464,11 @@
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMPesaSTKCallback-fm"
     },
     {
+      "method": "POST",
+      "path": "/api/v1/webhooks/payments/:provider/:token",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePaymentCallback-fm"
+    },
+    {
       "method": "GET",
       "path": "/api/v2/requests",
       "handler": "github.com/asenawritescode/kora/api.(*requestHandler).list-fm"
@@ -1522,6 +1527,11 @@
       "method": "POST",
       "path": "/api/webhooks/mpesa/stk/:token",
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleMPesaSTKCallback-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhooks/payments/:provider/:token",
+      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandlePaymentCallback-fm"
     }
   ],
   "conditional_routes": [

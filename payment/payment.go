@@ -88,6 +88,15 @@ type Provider interface {
 	Request(ctx context.Context, in Intent) (Outcome, error)
 }
 
+// ErrInvalidCallbackToken reports a callback with a wrong or missing token.
+var ErrInvalidCallbackToken = errors.New("payment: invalid callback token")
+
+// CallbackProvider is implemented by providers that deliver asynchronous
+// results to the payments webhook route.
+type CallbackProvider interface {
+	ParseCallback(ctx context.Context, site, token string, body []byte) (Confirmation, error)
+}
+
 // Registry holds providers by name.
 type Registry struct {
 	mu sync.RWMutex
