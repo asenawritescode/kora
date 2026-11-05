@@ -52,6 +52,9 @@ var fallbackStorageErr error
 // Handler holds dependencies for API handlers.
 // Registry and TxManager are fallbacks; handlers read site context from the request.
 type Handler struct {
+	// ExtensionStores opens the tenant extension store. Nil uses the SQL store.
+	ExtensionStores ExtensionStoreOpener
+
 	Registry            *doctype.Registry
 	TxManager           *orm.TxManager
 	AuthProviders       *auth.ProviderRegistry
