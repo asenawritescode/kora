@@ -326,3 +326,37 @@ func TestAuthorizePublishedQueryChildSourceChecksParent(t *testing.T) {
 		})
 	}
 }
+
+// D7: a query over its own module's DocType needs only the query grant.
+func TestAuthorizePublishedQueryOwnerSourceSkipsSourceRead(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	q := contract.PublishedQuery{OwnerModuleID: "inventory.core", Name: "item_search", ScopePolicy: contract.ScopeTenantShared, AllowedFields: []string{"name", "price"}}
+	execution, err := policy.NewVerifiedExecution("tenant-a", contract.ActorContext{PrincipalID: "c", PrincipalType: contract.PrincipalHuman, Site: "tenant-route", Roles: []string{"Cashier"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		owner string
+		grant bool
+		deny  bool
+	}{
+		{"owned by query owner", "inventory.core", true, false},
+		{"unowned source", "", true, true},
+		{"other module source", "pos.core", true, true},
+		{"no query grant", "inventory.core", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := doctype.NewRegistry()
+			registry.Register(&doctype.DocType{Name: "Item", ModuleOwnerID: tt.owner})
+			if tt.grant {
+				registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.inventory.core.query.item_search", Role: "Cashier", Read: true})
+			}
+			registry.SetQuerySource("module.inventory.core.query.item_search", "Item")
+			if got := authorizePublishedQuery(execution, registry, q, scope); (got != nil) != tt.deny {
+				t.Fatalf("deny=%v err=%v", tt.deny, got)
+			}
+		})
+	}
+}
