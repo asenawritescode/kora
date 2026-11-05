@@ -73,15 +73,15 @@ func (r *Registry) Has(name string) bool {
 	return ok
 }
 
-// IsPrivateModuleResource treats every module-owned resource as private to
-// generic read surfaces. Owners publish only the fields and operations they
-// intend to expose through an explicit query contract.
+// IsPrivateModuleResource reports module-owned resources that are not
+// published. Private (or unset) access is query-only; published resources are
+// readable through the normal permission matrix.
 func (r *Registry) IsPrivateModuleResource(name string) bool {
 	if r == nil {
 		return false
 	}
 	dt := r.Get(name)
-	return dt != nil && dt.ModuleOwnerID != ""
+	return dt != nil && dt.ModuleOwnerID != "" && dt.ModuleAccess != contract.ModulePublished
 }
 
 // Unregister removes a DocType from the registry. Safe to call if the doctype
