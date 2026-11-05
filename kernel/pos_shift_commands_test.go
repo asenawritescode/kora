@@ -52,7 +52,7 @@ func TestRecordSaleCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(def.Steps) != 4 || def.Steps[0].As != "sale" || def.Steps[1].Create.Record != "Sale Line Balance" || def.Steps[2].ForEach != "$input.items" || def.Steps[3].ForEach != "$input.items" {
+	if len(def.Require) != 1 || len(def.Steps) != 4 || def.Steps[0].As != "sale" || def.Steps[1].Create.Record != "Sale Line Balance" || def.Steps[2].ForEach != "$input.items" || def.Steps[3].ForEach != "$input.items" {
 		t.Fatalf("steps = %#v", def.Steps)
 	}
 	if got := def.Steps[2].Update.Adjust["quantity"]; got.Decrease != "$item.quantity" || got.Min != "0" {

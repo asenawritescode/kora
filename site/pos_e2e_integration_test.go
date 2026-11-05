@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/payment"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/print"
 	"github.com/asenawritescode/kora/query"
@@ -59,6 +61,42 @@ func posDB(t *testing.T, driver, dsn string) (*sql.DB, string) {
 	}
 	t.Cleanup(func() { conn.Close() })
 	return conn, name
+}
+
+type fixedProvider struct {
+	name  string
+	state payment.State
+}
+
+func (f fixedProvider) Name() string { return f.name }
+func (f fixedProvider) Request(_ context.Context, in payment.Intent) (payment.Outcome, error) {
+	return payment.Outcome{State: f.state, ProviderRequestID: in.ID}, nil
+}
+
+// posPayments returns a factory that requests an intent through the payment
+// service and returns the Sale Payment row that references it.
+func posPayments(t *testing.T, conn *sql.DB, dialect kdb.Dialect, site string) func(provider string, amount float64) map[string]any {
+	t.Helper()
+	reg := payment.NewRegistry()
+	for _, p := range []payment.Provider{fixedProvider{"slow", payment.StatePending}, fixedProvider{"broken", payment.StateFailed}} {
+		if err := reg.Register(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := &payment.Service{Store: &payment.SQLStore{DB: conn, Dialect: dialect}, Providers: reg}
+	n := 0
+	return func(provider string, amount float64) map[string]any {
+		t.Helper()
+		n++
+		in, err := svc.Request(context.Background(), site, "Administrator", payment.RequestInput{
+			Provider: provider, Amount: decimal.NewFromFloat(amount), Currency: "KES", SourceDoctype: "Sale",
+			IdempotencyKey: fmt.Sprintf("pos-%d", n),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]any{"method": "Cash", "amount": amount, "currency": "KES", "reference": in.ID}
+	}
 }
 
 func TestPOSPackEndToEndAcrossDialects(t *testing.T) {
@@ -150,6 +188,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	table := func(name string) string { return dialect.QuoteIdent(reg.Get(name).RawTableName()) }
 
 	// Fixtures are plain records of the generic inventory/pos DocTypes.
+	pay := posPayments(t, conn, dialect, siteName)
 	loc := create("Location", map[string]any{"location_name": "Main"})
 	tea := create("Item", map[string]any{"item_name": "Tea", "uom": "Nos", "price": 100})
 	bread := create("Item", map[string]any{"item_name": "Bread", "uom": "Nos", "price": 50})
@@ -172,7 +211,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 			{"item": tea, "quantity": 2, "unit_price": 100, "amount": 200},
 			{"item": bread, "quantity": 2, "unit_price": 50, "amount": 100},
 		},
-		"payments": []map[string]any{{"method": "Cash", "amount": 300}},
+		"currency": "KES", "payments": []map[string]any{pay("cash", 300)},
 	}})
 	out, _ := sale["output"].(map[string]any)
 	ref, _ := out["reference"].(string)
@@ -300,7 +339,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	ret := run("pos.return_sale", map[string]any{"data": map[string]any{
 		"register": register, "till_session": till, "location": loc, "return_against": ref,
 		"items":    []map[string]any{{"item": tea, "quantity": 1, "unit_price": 100, "amount": 100}},
-		"payments": []map[string]any{{"method": "Cash", "amount": 100}},
+		"payments": []map[string]any{{"method": "Cash", "amount": 100, "reference": "refund"}},
 	}})
 	if got := stock(tea); got != 9 {
 		t.Fatalf("tea after return = %v, want 9", got)
@@ -311,7 +350,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	newSale := func() string {
 		s := run("pos.record_sale", map[string]any{"data": map[string]any{
 			"register": register, "till_session": till, "location": loc, "items": one,
-			"payments": []map[string]any{{"method": "Cash", "amount": 50}},
+			"currency": "KES", "payments": []map[string]any{pay("cash", 50)},
 		}})
 		o, _ := s["output"].(map[string]any)
 		return fmt.Sprint(o["reference"])
@@ -368,4 +407,39 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	if got := stock(bread); got != 2 {
 		t.Fatalf("bread after refused void = %v, want 2", got)
 	}
+
+	// Payment guard: only confirmed, matching, unused intents record a sale.
+	trySale := func(pays []map[string]any) (*contract.Error, contract.CommandResult) {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"data": map[string]any{
+			"register": register, "till_session": till, "location": loc, "items": one,
+			"currency": "KES", "payments": pays,
+		}})
+		res, cerr := k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.record_sale", Payload: raw, Context: kernel.OperationContext{
+			Site: siteName, User: "Administrator", Roles: []string{doctype.AdminRole}, Actor: actor,
+			Execution: execution, TenantID: contract.TenantID(siteName), Source: kernel.SourceIntegration,
+		}})
+		return cerr, res
+	}
+	rejected := func(label string, pays []map[string]any) {
+		t.Helper()
+		before := stock(bread)
+		if cerr, res := trySale(pays); cerr == nil && res.Status == contract.StatusCompleted {
+			t.Fatalf("%s payment must be rejected", label)
+		}
+		if got := stock(bread); got != before {
+			t.Fatalf("%s: stock changed %v -> %v", label, before, got)
+		}
+	}
+	rejected("pending", []map[string]any{pay("slow", 50)})
+	rejected("failed", []map[string]any{pay("broken", 50)})
+	rejected("unknown", []map[string]any{{"method": "Cash", "amount": 50, "currency": "KES", "reference": "NOPE"}})
+	wrong := pay("cash", 40)
+	wrong["amount"] = 50
+	rejected("mismatched", []map[string]any{wrong})
+	used := pay("cash", 50)
+	if cerr, res := trySale([]map[string]any{used}); cerr != nil || res.Status != contract.StatusCompleted {
+		t.Fatalf("confirmed cash sale: %+v", cerr)
+	}
+	rejected("used", []map[string]any{used})
 }

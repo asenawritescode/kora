@@ -25,3 +25,4 @@ fields:
   - fieldname: reference
     fieldtype: Data
     label: Reference
+    reqd: true

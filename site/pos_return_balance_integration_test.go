@@ -106,11 +106,12 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 	must("pos.open_till", "", map[string]any{"data": map[string]any{"shift": shift, "opening_float": 0}})
 	till := q("SELECT name FROM "+table("Till Session")+" WHERE shift = ?", shift)
 
+	pay := posPayments(t, conn, dialect, siteName)
 	sell := func(qty int) string {
 		out := must("pos.record_sale", "", map[string]any{"data": map[string]any{
 			"register": register, "till_session": till, "location": loc,
 			"items":    []map[string]any{{"item": tea, "quantity": qty, "unit_price": 19.99, "amount": 19.99 * float64(qty)}},
-			"payments": []map[string]any{{"method": "Cash", "amount": 19.99 * float64(qty)}},
+			"currency": "KES", "payments": []map[string]any{pay("cash", 19.99*float64(qty))},
 		}})
 		return fmt.Sprint(out["output"].(map[string]any)["reference"])
 	}
@@ -118,7 +119,7 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 		return exec("pos.return_sale", key, map[string]any{"data": map[string]any{
 			"register": reg, "till_session": till, "location": location, "return_against": sale,
 			"items":    []map[string]any{{"item": tea, "quantity": qty, "unit_price": price, "amount": price * float64(qty)}},
-			"payments": []map[string]any{{"method": "Cash", "amount": price * float64(qty)}},
+			"payments": []map[string]any{{"method": "Cash", "amount": price * float64(qty), "reference": "refund"}},
 		}})
 	}
 	stock := func() string { return q("SELECT quantity FROM "+table("Stock Balance")+" WHERE item = ?", tea) }
