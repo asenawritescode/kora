@@ -1,0 +1,24 @@
+- doctype: Item
+  role: Inventory Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Location
+  role: Inventory Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Stock Entry
+  role: Inventory Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Stock Balance
+  role: Inventory Manager
+  read: true
+  write: true
+  create: true
+  delete: false

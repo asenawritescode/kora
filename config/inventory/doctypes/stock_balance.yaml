@@ -1,0 +1,26 @@
+name: Stock Balance
+module: Inventory
+title_field: item
+search_fields: item, location
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: item
+    fieldtype: Link
+    options: Item
+    label: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: location
+    fieldtype: Link
+    options: Location
+    label: Location
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    read_only: true
+    default: 0
+    in_list_view: true

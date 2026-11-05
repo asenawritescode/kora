@@ -1,0 +1,37 @@
+name: Stock Entry
+module: Inventory
+title_field: item
+search_fields: item, location
+sort_field: creation
+sort_order: DESC
+
+fields:
+  - fieldname: item
+    fieldtype: Link
+    options: Item
+    label: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: location
+    fieldtype: Link
+    options: Location
+    label: Location
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    in_list_view: true
+  - fieldname: entry_type
+    fieldtype: Select
+    label: Entry Type
+    options: |
+      Receipt
+      Issue
+      Adjustment
+    reqd: true
+    in_list_view: true
+  - fieldname: remarks
+    fieldtype: Text
+    label: Remarks
