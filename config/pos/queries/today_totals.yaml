@@ -12,6 +12,8 @@ filters:
   - {field: status, op: eq, value: Paid}
   - {field: creation, op: gte, value: $input.since}
   - {field: register, op: eq, value: $input.register, optional: true}
-fields: [name, register, total, creation]
-sort: [{field: creation, dir: desc}]
-limit: 200
+group_by: [register]
+aggregates:
+  - {name: sale_count, fn: count}
+  - {name: total, fn: sum, field: total}
+limit: 50
