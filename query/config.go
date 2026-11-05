@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -38,6 +39,13 @@ type Sort struct {
 	Dir   string `yaml:"dir" json:"dir,omitempty"`
 }
 
+// Aggregate is one output column computed over the grouped rows.
+type Aggregate struct {
+	Name  string `yaml:"name" json:"name,omitempty"`
+	Fn    string `yaml:"fn" json:"fn,omitempty"`
+	Field string `yaml:"field" json:"field,omitempty"`
+}
+
 // Definition is a query shipped in queries/*.yaml.
 type Definition struct {
 	Name            string               `yaml:"name" json:"name,omitempty"`
@@ -51,6 +59,8 @@ type Definition struct {
 	Input           map[string]InputSpec `yaml:"input" json:"input,omitempty"`
 	Filters         []Filter             `yaml:"filters" json:"filters,omitempty"`
 	Fields          []string             `yaml:"fields" json:"fields,omitempty"`
+	GroupBy         []string             `yaml:"group_by" json:"group_by,omitempty"`
+	Aggregates      []Aggregate          `yaml:"aggregates" json:"aggregates,omitempty"`
 	Sort            []Sort               `yaml:"sort" json:"sort,omitempty"`
 	Limit           int                  `yaml:"limit" json:"limit,omitempty"`
 	OfflineEligible bool                 `yaml:"offline_eligible" json:"offline_eligible,omitempty"`
@@ -157,10 +167,16 @@ func (d *Definition) validate(reg *doctype.Registry) error {
 		}
 		return nil
 	}
+	if err := d.validateAggregates(dt, check); err != nil {
+		return err
+	}
 	if len(d.Fields) == 0 {
 		return fmt.Errorf("fields must not be empty")
 	}
 	for _, f := range d.Fields {
+		if len(d.Aggregates) > 0 {
+			break
+		}
 		if err := check("fields", f); err != nil {
 			return err
 		}
@@ -173,6 +189,9 @@ func (d *Definition) validate(reg *doctype.Registry) error {
 	for _, s := range d.Sort {
 		if err := check("sort", s.Field); err != nil {
 			return err
+		}
+		if len(d.Aggregates) > 0 && !contains(d.GroupBy, s.Field) {
+			return fmt.Errorf("sort: %q is not a group_by field", s.Field)
 		}
 		if s.Dir != "" && s.Dir != "asc" && s.Dir != "desc" {
 			return fmt.Errorf("sort: dir must be asc or desc, got %q", s.Dir)
@@ -187,6 +206,64 @@ func (d *Definition) validate(reg *doctype.Registry) error {
 		if err := d.validateFilter(f, check, false); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+var (
+	aggNameRe   = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	numericType = map[string]bool{"Int": true, "Float": true, "Currency": true, "Percent": true}
+)
+
+func contains(l []string, s string) bool {
+	for _, e := range l {
+		if e == s {
+			return true
+		}
+	}
+	return false
+}
+
+// validateAggregates checks group_by/aggregates and fills Fields when omitted.
+func (d *Definition) validateAggregates(dt *doctype.DocType, check func(string, string) error) error {
+	if len(d.Aggregates) == 0 {
+		if len(d.GroupBy) > 0 {
+			return fmt.Errorf("group_by requires aggregates")
+		}
+		return nil
+	}
+	if len(d.Aggregates) > 8 || len(d.GroupBy) > 3 {
+		return fmt.Errorf("aggregates allow at most 8 entries and group_by 3")
+	}
+	out := append([]string{}, d.GroupBy...)
+	for _, g := range d.GroupBy {
+		if err := check("group_by", g); err != nil {
+			return err
+		}
+	}
+	for _, a := range d.Aggregates {
+		if !aggNameRe.MatchString(a.Name) || contains(out, a.Name) {
+			return fmt.Errorf("aggregates: name %q is invalid or not unique", a.Name)
+		}
+		switch a.Fn {
+		case "count":
+			if a.Field != "" {
+				return fmt.Errorf("aggregates: count %q takes no field", a.Name)
+			}
+		case "sum":
+			f := dt.GetField(a.Field)
+			if f == nil || !numericType[f.Fieldtype] {
+				return fmt.Errorf("aggregates: sum %q needs a numeric field, got %q", a.Name, a.Field)
+			}
+		default:
+			return fmt.Errorf("aggregates: unknown fn %q", a.Fn)
+		}
+		out = append(out, a.Name)
+	}
+	if len(d.Fields) == 0 {
+		d.Fields = out
+	} else if strings.Join(d.Fields, ",") != strings.Join(out, ",") {
+		return fmt.Errorf("fields must equal group_by + aggregate names %v", out)
 	}
 	return nil
 }
