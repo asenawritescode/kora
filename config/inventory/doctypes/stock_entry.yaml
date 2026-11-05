@@ -35,3 +35,6 @@ fields:
   - fieldname: remarks
     fieldtype: Text
     label: Remarks
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason

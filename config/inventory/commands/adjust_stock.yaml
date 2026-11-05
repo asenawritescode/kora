@@ -1,0 +1,22 @@
+name: adjust_stock
+namespace: inventory
+version: 1
+permission: create
+input:
+  record: Stock Entry
+transaction:
+  - update:
+      record: Stock Balance
+      where:
+        item: "$input.item"
+        location: "$input.location"
+      adjust:
+        quantity: { decrease: "$input.quantity", min: "0" }
+  - create:
+      record: Stock Entry
+      values:
+        item: "$input.item"
+        location: "$input.location"
+        quantity: "$input.quantity"
+        entry_type: "Adjustment"
+        remarks: "$input.reason"
