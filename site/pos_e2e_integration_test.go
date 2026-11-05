@@ -167,7 +167,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	till := scalar("SELECT name FROM "+table("Till Session")+" WHERE shift = ?", shiftName)
 
 	sale := run("pos.record_sale", map[string]any{"data": map[string]any{
-		"register": register, "till_session": till, "location": loc, "customer": "Walk-in",
+		"register": register, "till_session": till, "location": loc,
 		"items": []map[string]any{
 			{"item": tea, "quantity": 2, "unit_price": 100, "amount": 200},
 			{"item": bread, "quantity": 2, "unit_price": 50, "amount": 100},
