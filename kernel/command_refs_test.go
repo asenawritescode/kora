@@ -34,7 +34,7 @@ func TestForEachExpandsInputListAndResolvesReferences(t *testing.T) {
 	input := map[string]any{"member": "MEM-1", "due": "2026-11-30", "books": []any{
 		map[string]any{"book": "B-1"}, map[string]any{"book": "B-2"},
 	}}
-	instances, err := expandCommandSteps(def.Steps, input)
+	instances, err := expandCommandSteps(def.Steps, input, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestForEachRejectsInvalidDefinitionsAndInputs(t *testing.T) {
 		"missing list":   {},
 		"too many items": {"books": manyBooks(MaxCommandStepInstances + 1)},
 	} {
-		if _, err := expandCommandSteps(def.Steps, input); err == nil {
+		if _, err := expandCommandSteps(def.Steps, input, nil); err == nil {
 			t.Fatalf("%s: input was accepted", name)
 		}
 	}
@@ -132,6 +132,59 @@ func TestWalkRefAbsentVersusInvalid(t *testing.T) {
 		_, err := walkRef("$input."+tt.path, root, tt.path)
 		if (err != nil) != tt.err || errors.Is(err, errRefAbsent) != tt.absent {
 			t.Errorf("%s: err=%v absent=%v", tt.path, err, errors.Is(err, errRefAbsent))
+		}
+	}
+}
+
+const guardRowsYAML = `
+name: sale.void
+namespace: pos
+version: 1
+input:
+  record: Sale
+require:
+  - exists:
+      record: Sale
+      where:
+        name: $input.sale
+    as: original
+transaction:
+  - as: marker
+    create:
+      record: Note
+      values:
+        text: x
+  - for_each: $steps.original.items
+    create:
+      record: Note
+      values:
+        text: $item.item
+`
+
+func TestForEachGuardRowsParseAndExpand(t *testing.T) {
+	def, err := ParseCommandResource([]byte(guardRowsYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string][]map[string]any{"original.items": {{"item": "A"}, {"item": nil}}}
+	instances, err := expandCommandSteps(def.Steps, map[string]any{"items": []any{map[string]any{"item": "ignored"}}}, rows)
+	if err != nil || len(instances) != 3 || instances[1].item["item"] != "A" || instances[2].item["item"] != nil {
+		t.Fatalf("instances = %#v, %v", instances, err)
+	}
+	if instances, err = expandCommandSteps(def.Steps, nil, nil); err != nil || len(instances) != 1 {
+		t.Fatalf("empty table: %#v, %v", instances, err)
+	}
+	if _, err = expandCommandSteps(def.Steps, nil, map[string][]map[string]any{"original.items": make([]map[string]any, MaxCommandStepInstances+1)}); err == nil {
+		t.Fatal("oversized table was accepted")
+	}
+	for name, yaml := range map[string]string{
+		"transaction alias": strings.Replace(guardRowsYAML, "$steps.original.items", "$steps.marker.items", 1),
+		"name field":        strings.Replace(guardRowsYAML, "$steps.original.items", "$steps.original.name", 1),
+		"unknown alias":     strings.Replace(guardRowsYAML, "$steps.original.items", "$steps.ghost.items", 1),
+		"outside for_each":  strings.Replace(guardRowsYAML, "text: x", "text: $steps.original.items", 1),
+	} {
+		if _, err := ParseCommandResource([]byte(yaml)); err == nil {
+			t.Fatalf("%s: definition was accepted", name)
 		}
 	}
 }
