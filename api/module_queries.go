@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/plugin"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
@@ -87,7 +88,7 @@ func authorizePublishedQueryActorScope(execution policy.Execution, roles policy.
 		return nil, authErr
 	}
 	if src, ok := roles.(interface{ QuerySource(string) (string, bool) }); ok {
-		if source, ok := src.QuerySource(resource); ok {
+		if source, ok := src.QuerySource(resource); ok && !queryOwnsSource(roles, source, query) {
 			srcDecision, srcErr := policy.Decide(execution, roles, source, "read")
 			if srcErr != nil {
 				return nil, srcErr
@@ -122,4 +123,17 @@ func authorizePublishedQueryActorScope(execution policy.Execution, roles policy.
 		return nil, contract.NewError(contract.CodePermissionDenied, "published query assignment scope requires a verified actor subject")
 	}
 	return &plugin.PublishedQueryActorScope{BusinessScope: scope, SubjectID: subject, OwnerOnly: decision.OwnerOnly, OwnerField: query.OwnerField, AssignedFields: append([]string(nil), decision.AssignedFields...)}, nil
+}
+
+// queryOwnsSource reports whether the query's source DocType is owned by the
+// query's own module: the query grant and allowed_fields are then the whole
+// read contract (decision D7 on #225). Unowned or other-module sources keep
+// the source-read check.
+func queryOwnsSource(roles policy.RolePolicy, source string, query contract.PublishedQuery) bool {
+	reg, ok := roles.(interface{ Get(string) *doctype.DocType })
+	if !ok {
+		return false
+	}
+	dt := reg.Get(source)
+	return dt != nil && dt.ModuleOwnerID != "" && dt.ModuleOwnerID == string(query.OwnerModuleID)
 }
