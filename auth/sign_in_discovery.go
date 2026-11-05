@@ -57,7 +57,7 @@ func localSignInDisabled(c *gin.Context, database *sql.DB) bool {
 // should offer: local magic links (when mail is configured and policy allows)
 // and enabled OIDC providers.
 func registerSignInDiscovery(group *gin.RouterGroup, db *sql.DB, magicLinkConfigured bool, cloudIssuer string) {
-	group.GET("/providers", func(c *gin.Context) {
+	group.GET("/providers", issueCSRFCookie, func(c *gin.Context) {
 		site := c.GetString("site_name")
 		database := requestSiteDB(c, db)
 		if database == nil || site == "" {

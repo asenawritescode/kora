@@ -99,6 +99,15 @@ func CSRFMiddleware() gin.HandlerFunc {
 	}
 }
 
+// issueCSRFCookie is a pass-through handler for unauthenticated GET routes that
+// the login page calls before any state-changing request (/api/auth/providers,
+// /api/auth/me). A browser with an empty cookie jar has no other way to obtain
+// the double-submit cookie; the POST routes still demand a matching header.
+func issueCSRFCookie(c *gin.Context) {
+	ensureCSRFCookie(c)
+	c.Next()
+}
+
 // ensureCSRFCookie sets a CSRF cookie if one doesn't exist.
 func ensureCSRFCookie(c *gin.Context) {
 	_, err := c.Cookie("kora_csrf")
