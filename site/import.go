@@ -574,6 +574,18 @@ func ParseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 	if err != nil {
 		return nil, nil, err
 	}
+	for _, f := range files {
+		if f.Path != packFileName {
+			continue
+		}
+		manifest, _, err := parsePackManifest([]byte(f.Content), packName)
+		if err != nil {
+			return nil, nil, err
+		}
+		if snapshot.Modules, err = GeneratePackModules(manifest, snapshot); err != nil {
+			return nil, nil, err
+		}
+	}
 	return snapshot, scripts, nil
 }
 
@@ -622,6 +634,9 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 	for _, f := range files {
 		f.Path = strings.TrimSpace(f.Path)
 		f.ContentType = strings.TrimSpace(f.ContentType)
+		if f.Path == packFileName {
+			continue // manifest, consumed by ParseConfigPack
+		}
 
 		// ── Path security ──────────────────────────────────────────
 		if f.Path == "" {

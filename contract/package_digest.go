@@ -194,6 +194,8 @@ func validPackageFileType(filePath, contentType string) bool {
 		return strings.HasPrefix(filePath, "reports/") && (ext == ".yaml" || ext == ".yml")
 	case "script":
 		return strings.HasPrefix(filePath, "scripts/") && ext == ".js"
+	case "pack":
+		return filePath == "pack.yaml"
 	default:
 		return false
 	}

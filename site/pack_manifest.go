@@ -328,6 +328,11 @@ func validatePackFileSyntax(file PackFile) error {
 			return fmt.Errorf("script file is empty")
 		}
 		return nil
+	case "pack":
+		if file.Path != packFileName {
+			return fmt.Errorf("content type pack requires path %s", packFileName)
+		}
+		return nil // parsed and name-checked by ParseConfigPack
 	default:
 		return fmt.Errorf("unsupported content type %q", file.ContentType)
 	}
@@ -361,6 +366,8 @@ func validPackFileType(filePath, contentType string) bool {
 		return strings.HasPrefix(filePath, "reports/") && (ext == ".yaml" || ext == ".yml")
 	case "script":
 		return strings.HasPrefix(filePath, "scripts/") && ext == ".js"
+	case "pack":
+		return filePath == packFileName
 	default:
 		return false
 	}
