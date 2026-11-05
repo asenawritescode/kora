@@ -58,6 +58,14 @@ func NewPrintHandler(src PrintSource) gin.HandlerFunc {
 				return
 			}
 			data.Receipt, data.Doc, err = src.Receipt(c, ref, id)
+			if err == nil && f.For.Doc != "" {
+				name, _ := data.Receipt["reference"].(string)
+				if name == "" {
+					writeError(c, http.StatusUnprocessableEntity, "print.render_failed", "Print render failed", nil)
+					return
+				}
+				data.Doc, err = src.Record(c, f.For.Doc, name)
+			}
 		}
 		if err != nil {
 			printError(c, err)
