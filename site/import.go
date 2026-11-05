@@ -20,6 +20,7 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/print"
 	"github.com/asenawritescode/kora/schema"
 	flow "github.com/asenawritescode/kora/workflow"
 	workflowsql "github.com/asenawritescode/kora/workflow/sqlstore"
@@ -69,6 +70,10 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 	if err != nil {
 		return fmt.Errorf("encoding commands: %w", err)
 	}
+	printFormats, err := loadPrintFormats(filepath.Join(configPath, "print_formats"), doctypes)
+	if err != nil {
+		return err
+	}
 	reports := make([]json.RawMessage, 0, len(reportDefinitions))
 	for _, report := range reportDefinitions {
 		data, err := json.Marshal(report)
@@ -86,6 +91,7 @@ func ImportConfigForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteN
 		Views:               views,
 		Reports:             reports,
 		Commands:            commands,
+		PrintFormats:        printFormats,
 	}, dialect, nil)
 }
 
@@ -324,6 +330,11 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	}
 	if _, err := kernel.DecodeCommandResources(snapshot.Commands); err != nil {
 		return fmt.Errorf("invalid command definitions: %w", err)
+	}
+	for _, raw := range snapshot.PrintFormats {
+		if _, err := print.Decode(raw); err != nil {
+			return fmt.Errorf("invalid print format: %w", err)
+		}
 	}
 	workflowDefinitions := append([]contract.WorkflowDefinition(nil), snapshot.WorkflowDefinitions...)
 	store := configstore.NewStore(database, dialect)

@@ -404,11 +404,25 @@ func conflictError(c *gin.Context, code, message string, details map[string]any)
 // checkPerm is a helper that checks permission for the current user and returns
 // whether the operation is owner-scoped. Returns true if forbidden (and writes response).
 func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation string) (policy.RowScope, bool) {
+	scope, denial := permScope(c, registry, docType, operation)
+	if denial != nil {
+		c.JSON(denial.status, ErrorResponse{Error: map[string]string{"message": denial.message}})
+		return policy.RowScope{}, true
+	}
+	return scope, false
+}
+
+// permDenial is a refused permission check, not yet written to a response.
+type permDenial struct {
+	status  int
+	message string
+}
+
+// permScope decides operation on docType without writing a response.
+func permScope(c *gin.Context, registry *doctype.Registry, docType, operation string) (policy.RowScope, *permDenial) {
 	// Resource routes accept both the canonical DocType name ("Lead") and its
 	// URL-safe alias ("lead"). The permission matrix is keyed by the canonical
-	// name, so resolve aliases before asking the policy engine. Without this,
-	// non-admin users can be denied on ordinary CRUD routes despite having a
-	// matching tenant permission.
+	// name, so resolve aliases before asking the policy engine.
 	if registry != nil {
 		if resolved := registry.Get(docType); resolved != nil {
 			docType = resolved.Name
@@ -419,15 +433,11 @@ func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation st
 	// bootstrap/admin grant.
 	execution, valid := requestExecution(c)
 	if !valid {
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{"message": "verified execution is required"}})
-		return policy.RowScope{}, true
+		return policy.RowScope{}, &permDenial{http.StatusForbidden, "verified execution is required"}
 	}
 	dt := registry.Get(docType)
 	if operation == "read" && dt != nil && dt.ModuleOwnerID != "" {
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: map[string]string{
-			"message": "module-owned records are available only through their published query contract",
-		}})
-		return policy.RowScope{}, true
+		return policy.RowScope{}, &permDenial{http.StatusForbidden, "module-owned records are available only through their published query contract"}
 	}
 	businessScope := contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}
 	if entityID := strings.TrimSpace(c.GetHeader("X-Kora-Legal-Entity-ID")); entityID != "" {
@@ -435,33 +445,18 @@ func checkPerm(c *gin.Context, registry *doctype.Registry, docType, operation st
 		businessScope.LegalEntityID = entityID
 	}
 	if err := businessScope.Validate(); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: map[string]string{"message": "invalid legal entity scope"}})
-		return policy.RowScope{}, true
+		return policy.RowScope{}, &permDenial{http.StatusBadRequest, "invalid legal entity scope"}
 	}
 
-	authType := c.GetString("auth_type")
-	if authType == "extension" || authType == "channel_session" {
-		decision, decideErr := policy.DecideForBusinessScope(execution, registry, docType, operation, businessScope, dt != nil && dt.BusinessScopePolicy == contract.ScopeEntityOwned)
-		if decideErr != nil {
-			c.JSON(http.StatusForbidden, ErrorResponse{
-				Error: map[string]string{
-					"message": fmt.Sprintf("Token does not have %s permission on %s", operation, docType),
-				},
-			})
-			return policy.RowScope{}, true
-		}
-		return requestRowScope(c, decision, businessScope), false
-	}
 	decision, decideErr := policy.DecideForBusinessScope(execution, registry, docType, operation, businessScope, dt != nil && dt.BusinessScopePolicy == contract.ScopeEntityOwned)
 	if decideErr != nil {
-		c.JSON(http.StatusForbidden, ErrorResponse{
-			Error: map[string]string{
-				"message": fmt.Sprintf("Permission denied: cannot %s on %s", operation, docType),
-			},
-		})
-		return policy.RowScope{}, true
+		authType := c.GetString("auth_type")
+		if authType == "extension" || authType == "channel_session" {
+			return policy.RowScope{}, &permDenial{http.StatusForbidden, fmt.Sprintf("Token does not have %s permission on %s", operation, docType)}
+		}
+		return policy.RowScope{}, &permDenial{http.StatusForbidden, fmt.Sprintf("Permission denied: cannot %s on %s", operation, docType)}
 	}
-	return requestRowScope(c, decision, businessScope), false
+	return requestRowScope(c, decision, businessScope), nil
 }
 
 func requestRowScope(c *gin.Context, decision policy.Decision, business contract.BusinessScope) policy.RowScope {
@@ -953,6 +948,9 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 	apiGroup.GET("/files/*path", handler.HandleFileServe)
 	apiGroup.DELETE("/files/*path", handler.HandleFileDelete)
 
+	if handler.PrintSource == nil {
+		handler.PrintSource = sitePrintSource{h: handler}
+	}
 	apiGroup.GET("/print/:format_name", NewPrintHandler(handler.PrintSource))
 
 	resource := apiGroup.Group("/resource")
