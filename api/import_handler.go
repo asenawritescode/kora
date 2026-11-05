@@ -15,7 +15,8 @@ import (
 type importSpec struct {
 	ImportID string `json:"import_id"`
 	Target   struct {
-		DocType string `json:"doctype"`
+		DocType   string   `json:"doctype"`
+		KeyFields []string `json:"key_fields"`
 	} `json:"target"`
 	Mapping map[string]string `json:"mapping"`
 	DryRun  bool              `json:"dry_run"`
@@ -67,7 +68,11 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		return
 	}
 	scope := businessScopeFromRequest(c, execution)
-	for _, op := range []string{"create", "import"} {
+	needed := []string{"create", "import"}
+	if len(spec.Target.KeyFields) > 0 {
+		needed = append(needed, "write")
+	}
+	for _, op := range needed {
 		if _, err := policy.DecideForBusinessScope(execution, reg, dt.Name, op, scope, dt.BusinessScopePolicy == contract.ScopeEntityOwned); err != nil {
 			writeError(c, http.StatusForbidden, "permission.denied", "cannot "+op+" on "+dt.Name, nil)
 			return
@@ -109,6 +114,17 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		}
 	}
 
+	mapped := map[string]bool{}
+	for _, field := range spec.Mapping {
+		mapped[field] = true
+	}
+	for _, kf := range spec.Target.KeyFields {
+		if f := dt.GetField(kf); f == nil || f.Fieldtype == "Table" || !mapped[kf] {
+			badRequestError(c, "import.mapping_invalid", "key field must be a mapped, non-Table field: "+kf, nil)
+			return
+		}
+	}
+
 	var bulk []kernel.BulkRow
 	results := map[int]importRowResult{}
 	for i, rec := range table {
@@ -130,6 +146,12 @@ func (h *Handler) HandleImport(c *gin.Context) {
 				data[field] = v
 			}
 		}
+		for _, kf := range spec.Target.KeyFields {
+			if perr == nil && data[kf] == nil {
+				perr = contract.NewError(contract.CodeValidationFailed, "import.key_missing: empty key "+kf)
+				perr.Details, _ = json.Marshal(map[string]string{"field": kf})
+			}
+		}
 		if perr != nil {
 			results[idx] = importRowResult{Row: idx, Error: perr}
 			continue
@@ -144,7 +166,7 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		h.writeKernelError(c, cerr)
 		return
 	}
-	for _, r := range k.ExecuteBulk(c.Request.Context(), sqlDB, reg, base, bulk, kernel.BulkOptions{ImportID: spec.ImportID, DryRun: spec.DryRun}) {
+	for _, r := range k.ExecuteBulk(c.Request.Context(), sqlDB, reg, base, bulk, kernel.BulkOptions{ImportID: spec.ImportID, DryRun: spec.DryRun, KeyFields: spec.Target.KeyFields}) {
 		rr := importRowResult{Row: r.Index, OK: r.Error == nil, Error: r.Error}
 		if r.Error == nil {
 			var rd kernel.ResultData
