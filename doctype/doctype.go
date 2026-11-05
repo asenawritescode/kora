@@ -295,18 +295,3 @@ func SystemColumns() []struct {
 		{"revision", "BIGINT"},
 	}
 }
-
-// ChildSystemColumns returns additional system columns for child tables.
-func ChildSystemColumns() []struct {
-	Name string
-	Type string
-} {
-	return []struct {
-		Name string
-		Type string
-	}{
-		{"parent", "VARCHAR(140)"},
-		{"parentfield", "VARCHAR(140)"},
-		{"parenttype", "VARCHAR(140)"},
-	}
-}

@@ -78,11 +78,6 @@ func (g *SiteGuard) extensionTokens(database *sql.DB, dialect kdb.QueryDialect) 
 	return OpenSQLExtensionTokens(database, dialect)
 }
 
-// NewSiteGuard creates a SiteGuard.
-func NewSiteGuard(db *sql.DB) *SiteGuard {
-	return NewSiteGuardWithSessionManager(NewSessionManager(db))
-}
-
 // NewSiteGuardWithSessionManager binds request authentication to an explicitly
 // owned session manager. The caller remains responsible for closing it.
 func NewSiteGuardWithSessionManager(manager *SessionManager) *SiteGuard {
@@ -494,10 +489,4 @@ func SiteDB(c *gin.Context) *sql.DB {
 		return nil
 	}
 	return db.(*sql.DB)
-}
-
-// SiteRegistry returns the site's DocType registry from the request context.
-func SiteRegistry(c *gin.Context) interface{} {
-	reg, _ := c.Get("site_registry")
-	return reg
 }

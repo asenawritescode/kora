@@ -1944,17 +1944,6 @@ func (h *Handler) HandleConfigImport(c *gin.Context) {
 
 // --- Helpers ---
 
-// collectDoctypes returns all non-child doctypes from the registry as a slice.
-func collectDoctypes(reg *doctype.Registry) []*doctype.DocType {
-	var result []*doctype.DocType
-	for _, dt := range reg.All() {
-		if !dt.IsChildTable {
-			result = append(result, dt)
-		}
-	}
-	return result
-}
-
 // --- Roles ---
 
 // HandleSystemRoles returns all roles.

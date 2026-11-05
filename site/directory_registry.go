@@ -292,10 +292,6 @@ func (r *SQLSiteRegistry) ReconcileConsumerCursorContext(ctx context.Context, co
 	return fmt.Errorf("consumer %q cursor is %d; expected %d: %w", consumerID, current, expected, ErrDirectoryCursorConflict)
 }
 
-func (r *SQLSiteRegistry) readConsumerFence(consumerID string) (uint64, string, bool, error) {
-	return r.readConsumerFenceContext(context.Background(), consumerID)
-}
-
 func (r *SQLSiteRegistry) readConsumerFenceContext(ctx context.Context, consumerID string) (uint64, string, bool, error) {
 	query := `SELECT directory_revision, lease_owner, lease_expires_at > CURRENT_TIMESTAMP FROM _kora_site_directory_consumers WHERE consumer_id = ?`
 	if strings.EqualFold(r.dialect, "postgres") {

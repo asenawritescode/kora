@@ -811,13 +811,6 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 	return result, nil
 }
 
-func validateOperationDocument(txMgr *orm.TxManager, dt *doctype.DocType, doc *doctype.Document, reg *doctype.Registry, oldDoc *doctype.Document) doctype.ValidationErrors {
-	resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
-		return txMgr.GetDoc(target, name, "")
-	}
-	return doctype.ValidateDocumentWithReferenceResolver(dt, doc, reg, oldDoc, resolver, nil)
-}
-
 func validateOperationDocumentWithResolvers(txMgr *orm.TxManager, dt *doctype.DocType, doc *doctype.Document, reg *doctype.Registry, oldDoc *doctype.Document, referenceResolver contract.BusinessReferenceValidator, snapshotValidator contract.HistoricalSnapshotValidator) doctype.ValidationErrors {
 	resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
 		return txMgr.GetDoc(target, name, "")

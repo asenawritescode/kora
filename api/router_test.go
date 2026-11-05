@@ -287,26 +287,6 @@ func TestRoleDeleteUsesPostgresMembershipExpressionAndBindings(t *testing.T) {
 	}
 }
 
-func expectGeneratedName(mock sqlmock.Sqlmock, maxSuffix, allocated int64) {
-	mock.ExpectQuery("SELECT COALESCE\\(MAX").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(maxSuffix))
-	mock.ExpectExec("INSERT INTO _kora_naming_series").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery("SELECT LAST_INSERT_ID\\(\\)").
-		WillReturnRows(sqlmock.NewRows([]string{"last_insert_id"}).AddRow(allocated))
-}
-
-type fakeScriptRunner struct{}
-
-func (fakeScriptRunner) Execute(context.Context, script.ExecuteRequest) (*script.ExecuteResult, error) {
-	return &script.ExecuteResult{}, nil
-}
-
-func (fakeScriptRunner) Validate(string) error { return nil }
-
-func (fakeScriptRunner) Close() error { return nil }
-
 type fakePublicStorage struct{}
 
 func (fakePublicStorage) Put(context.Context, string, io.Reader, int64, storage.FileMeta) (*storage.FileMeta, error) {

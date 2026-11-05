@@ -244,10 +244,6 @@ func (h *Handler) buildApplicationCatalog(c *gin.Context, execution policy.Execu
 	return catalog, nil
 }
 
-func catalogQueryAllowed(execution policy.Execution, roles policy.RolePolicy, query contract.PublishedQuery, scope contract.BusinessScope) bool {
-	return authorizePublishedQuery(execution, roles, query, scope) == nil
-}
-
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {

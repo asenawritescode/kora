@@ -439,10 +439,6 @@ func BootstrapPlatformRegistryContext(ctx context.Context, database *sql.DB, dia
 	return bootstrapPlatformRegistryWithLockContext(ctx, database, dialect)
 }
 
-func bootstrapPlatformRegistryUnlocked(database *sql.DB, dialect db.Dialect) error {
-	return bootstrapPlatformRegistryUnlockedContext(context.Background(), database, dialect)
-}
-
 func bootstrapPlatformRegistryUnlockedContext(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
 	// Directory changes live beside the canonical registry so a mutation and
 	// its propagation record can commit atomically. This is intentionally a

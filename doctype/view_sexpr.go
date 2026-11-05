@@ -189,38 +189,6 @@ func writeSExprViewComponent(b *strings.Builder, c *ViewComponent, indent string
 	b.WriteString(")")
 }
 
-func writeSExprAction(a *ViewAction) string {
-	var parts []string
-	parts = append(parts, fmt.Sprintf("(action %s", symbolName(a.ID)))
-	parts = append(parts, fmt.Sprintf(":trigger %s", quoteSExprString(a.Trigger)))
-	parts = append(parts, fmt.Sprintf(":type %s", quoteSExprString(a.Type)))
-	if len(a.Config) > 0 {
-		configStr, _ := json.Marshal(a.Config)
-		parts = append(parts, fmt.Sprintf(":config %s", quoteSExprString(string(configStr))))
-	}
-	return strings.Join(parts, " ") + ")"
-}
-
-func writeSExprRule(r *ViewRule) string {
-	var parts []string
-	parts = append(parts, fmt.Sprintf("(rule :target %s", quoteSExprString(r.Target)))
-	parts = append(parts, fmt.Sprintf(":field %s", quoteSExprString(r.Condition.Field)))
-	parts = append(parts, fmt.Sprintf(":op %s", quoteSExprString(r.Condition.Op)))
-	if r.Condition.Value != nil {
-		parts = append(parts, fmt.Sprintf(":value %s", quoteSExprAny(r.Condition.Value)))
-	}
-	return strings.Join(parts, " ") + ")"
-}
-
-func writeSExprFilters(filters []ViewFilter) string {
-	var parts []string
-	for _, f := range filters {
-		parts = append(parts, fmt.Sprintf("(filter :field %s :op %s :value %s)",
-			quoteSExprString(f.Field), quoteSExprString(f.Op), quoteSExprAny(f.Value)))
-	}
-	return fmt.Sprintf("(%s)", strings.Join(parts, " "))
-}
-
 func writeSExprViewPublicAccess(b *strings.Builder, pa *ViewPublicAccess, indent string) {
 	b.WriteString("\n")
 	b.WriteString(indent)
@@ -231,14 +199,6 @@ func writeSExprViewPublicAccess(b *strings.Builder, pa *ViewPublicAccess, indent
 		b.WriteString(" :allow-mutations true")
 	}
 	b.WriteString(")")
-}
-
-func writeSExprStringSlice(ss []string) string {
-	var parts []string
-	for _, s := range ss {
-		parts = append(parts, quoteSExprString(s))
-	}
-	return fmt.Sprintf("(%s)", strings.Join(parts, " "))
 }
 
 // writeSExprBindingsList writes bindings as a list of (key value) pairs,

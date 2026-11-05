@@ -372,37 +372,6 @@ func getEnvInt(key string, fallback int) int {
 	return fallback
 }
 
-// LoadSiteConfig reads a site configuration from a YAML file.
-// If db_password_encrypted is true, the password is decrypted using KORA_SECRET_KEY.
-func LoadSiteConfig(path string) (*SiteConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading site config: %w", err)
-	}
-	cfg := &SiteConfig{}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parsing site config: %w", err)
-	}
-
-	// Decrypt password if it was stored encrypted.
-	if cfg.DBPasswordEncrypted && cfg.DBPassword != "" {
-		plain, err := decryptPassword(cfg.DBPassword)
-		if err != nil {
-			return nil, fmt.Errorf("decrypting db password for site %s: %w (is KORA_SECRET_KEY set?)", cfg.Hostname, err)
-		}
-		cfg.DBPassword = plain
-	}
-
-	// If no password in config, check platform default.
-	if cfg.DBPassword == "" {
-		if p := os.Getenv("KORA_DB_PASSWORD"); p != "" {
-			cfg.DBPassword = p
-		}
-	}
-
-	return cfg, nil
-}
-
 // DiscoverSitesFromDB reads the canonical platform site directory.
 func DiscoverSitesFromDB(db *sql.DB) ([]DBSiteInfo, error) {
 	return DiscoverSitesFromDBContext(context.Background(), db)
@@ -598,25 +567,6 @@ func tuneConnectionPool(db *sql.DB, driver string, maxOpen, maxIdle int) {
 	}
 }
 
-// NewSite creates a new Site with a database connection.
-func NewSite(cfg *SiteConfig) (*Site, error) {
-	db, err := Connect(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &Site{
-		Config:   cfg,
-		DB:       db,
-		Hostname: cfg.Hostname,
-	}, nil
-}
-
-// CreateDatabase creates the site's database if it doesn't exist.
-// Connects without a database name, issues CREATE DATABASE IF NOT EXISTS.
-func CreateDatabase(input CreateSiteInput, cfg *SiteConfig) error {
-	return CreateDatabaseContext(context.Background(), input, cfg)
-}
-
 func CreateDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *SiteConfig) error {
 	if ctx == nil {
 		return fmt.Errorf("database creation requires context")
@@ -685,10 +635,6 @@ func CreateDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *Site
 		return fmt.Errorf("creating database %s: %w", cfg.DBName, err)
 	}
 	return nil
-}
-
-func createPostgresDatabase(input CreateSiteInput, cfg *SiteConfig) error {
-	return createPostgresDatabaseContext(context.Background(), input, cfg)
 }
 
 func createPostgresDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *SiteConfig) error {
@@ -930,12 +876,4 @@ func DeleteSite(input DeleteSiteInput) error {
 	}
 
 	return fmt.Errorf("unsupported db type: %s", dbType)
-}
-
-// Close closes the site's database connection.
-func (s *Site) Close() error {
-	if s.DB != nil {
-		return s.DB.Close()
-	}
-	return nil
 }

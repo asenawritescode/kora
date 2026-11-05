@@ -764,12 +764,6 @@ func formatFloat(f float64) string {
 	}
 	return strconv.FormatFloat(f, 'g', -1, 64)
 }
-func formatBool(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
-}
 
 // ---------------------------------------------------------------------------
 // Sorting helpers

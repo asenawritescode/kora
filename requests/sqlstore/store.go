@@ -292,10 +292,6 @@ func (s *Store) get(ctx context.Context, query queryer, tenant contract.TenantID
 	return record, nil
 }
 
-func (s *Store) loadAssignments(ctx context.Context, tenant contract.TenantID, id contract.RequestID) ([]requests.AssignmentRecord, error) {
-	return s.loadAssignmentsFrom(ctx, s.database, tenant, id)
-}
-
 func (s *Store) loadAssignmentsFrom(ctx context.Context, query queryer, tenant contract.TenantID, id contract.RequestID) ([]requests.AssignmentRecord, error) {
 	rows, err := query.QueryContext(ctx, db.Rebind(s.dialect, `SELECT id, request_id, stage, assignee_kind, assignee_id, original_assignee_kind, original_assignee_id, status, allowed_responses, membership_revision FROM _kora_request_assignment WHERE tenant_id = ? AND request_id = ? ORDER BY stage, id`), string(tenant), string(id))
 	if err != nil {

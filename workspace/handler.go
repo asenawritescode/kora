@@ -5,13 +5,12 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/gin-gonic/gin"
 )
 
 //go:embed templates/*.html
@@ -87,11 +86,6 @@ type PageData struct {
 	Message  string
 	User     string
 	UserRole string
-}
-
-// RegisterRoutes registers the admin UI routes on the full engine.
-func (h *Handler) RegisterRoutes(router *gin.Engine) {
-	h.RegisterRoutesOnGroup(router.Group("/workspace"))
 }
 
 // RegisterRoutesOnGroup registers admin UI routes on an existing RouterGroup.
@@ -215,10 +209,3 @@ func (h *Handler) HandleConfigView(c *gin.Context) {
 		slog.Error("rendering config view", "error", err)
 	}
 }
-
-// StaticHandler returns a handler that serves the embedded templates for HTMX partials.
-func StaticHandler() http.Handler {
-	sub, _ := fs.Sub(templateFS, "templates")
-	return http.FileServer(http.FS(sub))
-}
-

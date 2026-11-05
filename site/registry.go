@@ -435,10 +435,6 @@ func removePlatformSiteRegistrationByID(platformDB *sql.DB, platformDBType, site
 	return nil
 }
 
-func discoverSitesFromRegistry(db *sql.DB) ([]DBSiteInfo, error) {
-	return discoverSitesFromRegistryContext(context.Background(), db)
-}
-
 func discoverSitesFromRegistryContext(ctx context.Context, db *sql.DB) ([]DBSiteInfo, error) {
 	return discoverRegistrySitesContext(ctx, db, true)
 }

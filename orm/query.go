@@ -23,7 +23,6 @@ import (
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/script"
 	"github.com/asenawritescode/kora/workflow"
-	"github.com/go-sql-driver/mysql"
 )
 
 func derivePrefix(name string) string {
@@ -448,11 +447,6 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 	return nil
 }
 
-// updateComputedFields UPDATEs only computed field columns on the document.
-func (tx *TxManager) updateComputedFields(dt *doctype.DocType, doc *doctype.Document) error {
-	return tx.updateComputedFieldsExec(tx.DB, dt, doc)
-}
-
 // populateLinkedFields resolves Link values to their configured linked_field
 // values before computed fields run. Link inputs may use either the document
 // name or its title field, which keeps API payloads human-friendly.
@@ -529,11 +523,6 @@ func (tx *TxManager) populateLinkedFields(ex db.Queryer, dt *doctype.DocType, do
 		}
 	}
 	return nil
-}
-
-// updateComputedFieldsExec UPDATEs computed fields using the given executor (DB or Tx).
-func (tx *TxManager) updateComputedFieldsExec(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
-	return updateDerivedFieldsExec(ex, dt, doc, tx.Dialect)
 }
 
 // updateDerivedFieldsExec persists both linked and computed values produced by
@@ -1262,97 +1251,6 @@ func validateOrderBy(orderBy string, dt *doctype.DocType, quoteIdent func(string
 	}
 
 	return strings.Join(safeParts, ", "), nil
-}
-
-// parseDuplicateError detects MySQL error 1062 (Duplicate entry) and converts it
-// to a doctype.ValidationError. Unique constraints are enforced at the database level
-// via UNIQUE KEY indexes (uq_{fieldname}); this function maps the error back to the field.
-func parseDuplicateError(err error, dt *doctype.DocType) *doctype.ValidationError {
-	var mysqlErr *mysql.MySQLError
-	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
-		// Message format: "Duplicate entry 'value' for key 'uq_fieldname'"
-		fieldName := parseKeyFromDuplicateError(mysqlErr.Message)
-		if fieldName != "" {
-			// Find the field label for a user-friendly message.
-			label := fieldName
-			if f := dt.GetField(fieldName); f != nil {
-				label = f.Label
-			}
-			return &doctype.ValidationError{
-				Type:    "UniqueConstraint",
-				Message: fmt.Sprintf("%s must be unique.", label),
-				Field:   fieldName,
-				DocType: dt.Name,
-			}
-		}
-	}
-	return nil
-}
-
-// parseNotNullError detects MySQL NOT NULL / missing default errors (1364, 1048) and
-// converts them to a doctype.ValidationError so callers (including AI tool execution)
-// get a clear, actionable message instead of a raw MySQL error.
-func parseNotNullError(err error, dt *doctype.DocType) *doctype.ValidationError {
-	var mysqlErr *mysql.MySQLError
-	if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1364 || mysqlErr.Number == 1048) {
-		// Messages: "Field 'full_name' doesn't have a default value" or "Column 'full_name' cannot be null"
-		fieldName := parseFieldFromNotNullError(mysqlErr.Message)
-		if fieldName != "" {
-			label := fieldName
-			if f := dt.GetField(fieldName); f != nil {
-				label = f.Label
-			}
-			return &doctype.ValidationError{
-				Type:    "NotNullConstraint",
-				Message: fmt.Sprintf("%s is required.", label),
-				Field:   fieldName,
-				DocType: dt.Name,
-			}
-		}
-	}
-	return nil
-}
-
-// parseFieldFromNotNullError extracts the field name from a MySQL NOT NULL error.
-// Formats: "Field 'fieldname' doesn't have a default value" or "Column 'fieldname' cannot be null"
-func parseFieldFromNotNullError(msg string) string {
-	for _, prefix := range []string{"Field '", "Column '"} {
-		idx := strings.Index(msg, prefix)
-		if idx >= 0 {
-			start := idx + len(prefix)
-			end := strings.IndexByte(msg[start:], '\'')
-			if end >= 0 {
-				return msg[start : start+end]
-			}
-		}
-	}
-	return ""
-}
-
-// parseKeyFromDuplicateError extracts the field name from a MySQL duplicate entry error message.
-// MySQL format: "Duplicate entry 'value' for key 'uq_fieldname'"
-// Returns "" if the key name cannot be parsed.
-func parseKeyFromDuplicateError(msg string) string {
-	// Look for "key 'uq_" prefix and extract the field name.
-	const prefix = "key 'uq_"
-	idx := strings.Index(msg, prefix)
-	if idx < 0 {
-		// Also try without the uq_ prefix (some index types use different naming).
-		const altPrefix = "key '"
-		idx = strings.Index(msg, altPrefix)
-		if idx < 0 {
-			return ""
-		}
-		idx += len(altPrefix)
-	} else {
-		idx += len(prefix)
-	}
-	// Extract until the closing quote.
-	end := strings.IndexByte(msg[idx:], '\'')
-	if end < 0 {
-		return ""
-	}
-	return msg[idx : idx+end]
 }
 
 // --- Helpers ---

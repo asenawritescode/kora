@@ -18,10 +18,6 @@ import (
 // not supported by the current runtime contract.
 var platformRegistryBootstrapGate = make(chan struct{}, 1)
 
-func bootstrapPlatformRegistryWithLock(database *sql.DB, dialect db.Dialect) (err error) {
-	return bootstrapPlatformRegistryWithLockContext(context.Background(), database, dialect)
-}
-
 func bootstrapPlatformRegistryWithLockContext(parent context.Context, database *sql.DB, dialect db.Dialect) (err error) {
 	if database == nil || dialect == nil {
 		return errors.New("platform registry database and dialect are required")

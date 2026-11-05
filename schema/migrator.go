@@ -2,9 +2,9 @@
 // It compares the DocType registry against the live database schema
 // and generates/applies DDL to make them match.
 //
-// Deprecated: use GenerateDDLFromDiff from doctype/dialect_macros.go for
-// DDL generation. The schema package is retained for backward compatibility
-// with legacy config versions that lack a stored change_list.
+// Activation plans the DDL for a config snapshot by diffing it against the
+// live schema; a stored change_list from doctype/dialect_macros.go only adds
+// the explicit field and table removals the live diff cannot infer.
 package schema
 
 import (
@@ -758,15 +758,4 @@ func (d *Diff) GenerateDDLFromRegistry(registry *doctype.Registry, dialect db.Di
 // MigrateSite directly with doctype slices.
 func MigrateSiteFromRegistry(database *sql.DB, dbName string, registry *doctype.Registry, dialect db.Dialect) error {
 	return MigrateSite(database, dbName, registry.All(), registry, dialect)
-}
-
-// ApplyDDLSequential is a backward-compat wrapper that executes DDL
-// statements one at a time. Prefer ApplyDDL with ExecuteBatch.
-func ApplyDDLSequential(db *sql.DB, statements []string) error {
-	for _, stmt := range statements {
-		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("executing DDL: %w\nSQL: %s", err, stmt)
-		}
-	}
-	return nil
 }

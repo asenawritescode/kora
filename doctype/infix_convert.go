@@ -1,7 +1,6 @@
 package doctype
 
 import (
-	"regexp"
 	"strings"
 )
 
@@ -64,8 +63,6 @@ func InfixToSExpr(expr string) string {
 	return converted
 }
 
-var arithPattern = regexp.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*|\d+\.?\d*)\s*([+\-*/])\s+(.+)$`)
-
 func convertArithmetic(expr string) string {
 	// Find the last top-level operator (right-associative for -, /).
 	// Simple approach: split on operators with spaces.
@@ -119,15 +116,4 @@ func toLispOp(op string) string {
 		return "/"
 	}
 	return op
-}
-
-func isFieldRef(s string) bool {
-	// today() is a function call, not a field reference.
-	if s == "today()" {
-		return false
-	}
-	if len(s) == 0 {
-		return false
-	}
-	return (s[0] >= 'a' && s[0] <= 'z') || (s[0] >= 'A' && s[0] <= 'Z') || s[0] == '_'
 }

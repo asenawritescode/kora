@@ -211,10 +211,6 @@ func stripHTML(input string) string {
 	return replacer.Replace(input)
 }
 
-func sendSMTP(cfg *Config, from string, to []string, data []byte) error {
-	return sendSMTPContext(context.Background(), cfg, from, to, data)
-}
-
 func sendSMTPContext(ctx context.Context, cfg *Config, from string, to []string, data []byte) (resultErr error) {
 	host := strings.TrimSpace(cfg.Host)
 	port := smtpPort(cfg.Port)
