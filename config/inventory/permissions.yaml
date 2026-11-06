@@ -4,6 +4,7 @@
   write: true
   create: true
   delete: false
+  import: true
 - doctype: Location
   role: Inventory Manager
   read: true
@@ -16,6 +17,7 @@
   write: true
   create: true
   delete: false
+  import: true
 - doctype: Stock Entry
   role: Inventory Manager
   read: true

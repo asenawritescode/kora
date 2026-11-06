@@ -48,14 +48,23 @@ func TestImportIntoCrudOwnedItemWithLinkNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	locked := &doctype.DocType{Name: "Locked Sale", ModuleOwnerID: "inventory.core", ModuleOwnershipMode: string(contract.MutationCommands), Fields: []doctype.Field{{Fieldname: "ref", Fieldtype: "Data"}}}
-	grant := func(dt, role string, create bool) *doctype.Permission {
-		return &doctype.Permission{Doctype: dt, Role: role, Read: true, Write: true, Create: create, Import: true}
+	// The Item and Item Category grants are the shipped packs' (#397), not
+	// hand-written ones: Inventory Manager imports through config/inventory/permissions.yaml.
+	var shipped []*doctype.Permission
+	for _, file := range []string{"../config/inventory/permissions.yaml", "../config/pos/permissions.yaml"} {
+		perms, err := doctype.ParsePermissionsFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range perms {
+			if p.Doctype == "Item" || p.Doctype == "Item Category" {
+				shipped = append(shipped, p)
+			}
+		}
 	}
 	reg := doctype.NewRegistry()
-	reg.LoadFull([]*doctype.DocType{item, category, locked}, []*doctype.Role{{Name: "Inventory Manager"}, {Name: "Cashier"}}, []*doctype.Permission{
-		grant("Item", "Inventory Manager", true), grant("Item Category", "Inventory Manager", true),
-		grant("Locked Sale", "Inventory Manager", true), grant("Item", "Cashier", false), grant("Item Category", "Cashier", false),
-	})
+	reg.LoadFull([]*doctype.DocType{item, category, locked}, []*doctype.Role{{Name: "Inventory Manager"}, {Name: "Cashier"}, {Name: "Manager"}, {Name: "Owner"}},
+		append(shipped, &doctype.Permission{Doctype: "Locked Sale", Role: "Inventory Manager", Read: true, Write: true, Create: true, Import: true}))
 	cleanupKernelDialectRecords(t, database, dialect, site, "Item", "Item Category", "Locked Sale")
 	if err := schema.MigrateSiteFromRegistry(database, site, reg, dialect); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -122,8 +131,17 @@ func TestImportIntoCrudOwnedItemWithLinkNames(t *testing.T) {
 		return spec
 	}
 
-	if status, body := post("Cashier", itemSpec("deny", nil), catalogue); status != http.StatusForbidden {
-		t.Fatalf("role without create: %d %v", status, body)
+	catSpec := map[string]any{"import_id": "cats" + site, "target": map[string]any{"doctype": "Item Category"}, "mapping": map[string]string{"category_name": "category_name"}}
+	for _, role := range []string{"Cashier", "Manager"} {
+		if status, body := post(role, itemSpec("deny"+role, nil), catalogue); status != http.StatusForbidden {
+			t.Fatalf("%s importing items: %d %v", role, status, body)
+		}
+		if status, body := post(role, catSpec, categories); status != http.StatusForbidden {
+			t.Fatalf("%s importing categories: %d %v", role, status, body)
+		}
+	}
+	if count("tabItem") != 0 || count("tabItem Category") != 0 {
+		t.Fatal("a refused import wrote rows")
 	}
 	if status, body := post("Inventory Manager", map[string]any{"import_id": "locked", "target": map[string]any{"doctype": "Locked Sale"}, "mapping": map[string]string{"ref": "ref"}}, "ref\na\n"); status != http.StatusBadRequest || !strings.Contains(fmt.Sprint(body), "import.target_owned") {
 		t.Fatalf("commands_only target: %d %v", status, body)
@@ -133,7 +151,7 @@ func TestImportIntoCrudOwnedItemWithLinkNames(t *testing.T) {
 	if body["failed"] != float64(8) || !strings.Contains(fmt.Sprint(body["rows"]), "import.link_unresolved") || count("tabItem") != 0 {
 		t.Fatalf("unknown categories: %v items=%d", body, count("tabItem"))
 	}
-	if _, body = post("Inventory Manager", map[string]any{"import_id": "cats" + site, "target": map[string]any{"doctype": "Item Category"}, "mapping": map[string]string{"category_name": "category_name"}}, categories); body["succeeded"] != float64(5) {
+	if _, body = post("Inventory Manager", catSpec, categories); body["succeeded"] != float64(5) {
 		t.Fatalf("categories: %v", body)
 	}
 	_, body = post("Inventory Manager", itemSpec("dry", map[string]any{"dry_run": true}), catalogue)
