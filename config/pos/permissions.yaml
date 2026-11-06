@@ -148,6 +148,12 @@
   write: true
   create: true
   delete: false
+- doctype: Stock Balance
+  role: Manager
+  read: true
+  write: false
+  create: false
+  delete: false
 - doctype: Stock Entry
   role: Owner
   read: true
