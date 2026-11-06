@@ -162,6 +162,8 @@ func TestPOSPackOwnershipAndItemSearchHidesCost(t *testing.T) {
 		{"pos/doctypes/shift.yaml", "pos.core", "commands_only"},
 		{"pos/doctypes/till_session.yaml", "pos.core", "commands_only"},
 		{"inventory/doctypes/item.yaml", "inventory.core", "crud"},
+		// #406: owned like Item, so the item_categories query grant covers its source.
+		{"inventory/doctypes/item_category.yaml", "inventory.core", "crud"},
 		{"pos/doctypes/register.yaml", "", ""},
 		{"inventory/doctypes/stock_balance.yaml", "", ""},
 		{"inventory/doctypes/stock_entry.yaml", "", ""},
@@ -190,5 +192,88 @@ func TestPOSPackOwnershipAndItemSearchHidesCost(t *testing.T) {
 	}
 	if strings.Contains(string(body), "cost") {
 		t.Error("item_search must never expose cost")
+	}
+}
+
+// #406: a published query's grant covers its source only when the source is
+// owned by the query's module (D7); otherwise the role also needs a read on
+// the source. Every role granted a pack query must satisfy one of the two, so
+// no grant is silently dead (the Cashier's item_categories was).
+func TestPackQueryGrantsAreServableBySourceOwnershipOrRead(t *testing.T) {
+	cfg := filepath.Join("..", "config")
+	pm := NewPermissionMatrix()
+	for _, pack := range []string{"pos", "inventory"} {
+		roles, err := ParseRolesFile(filepath.Join(cfg, pack, "roles.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range roles {
+			pm.AddRole(r)
+		}
+		perms, err := ParsePermissionsFile(filepath.Join(cfg, pack, "permissions.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range perms {
+			pm.SetPermission(p)
+		}
+	}
+	docs := map[string]DocType{}
+	parentOf := map[string]string{}
+	for _, pack := range []string{"pos", "inventory"} {
+		files, _ := filepath.Glob(filepath.Join(cfg, pack, "doctypes", "*.yaml"))
+		for _, f := range files {
+			body, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var dt DocType
+			if err := yaml.Unmarshal(body, &dt); err != nil {
+				t.Fatalf("%s: %v", f, err)
+			}
+			docs[dt.Name] = dt
+			for _, fd := range dt.Fields {
+				if fd.Fieldtype == "Table" {
+					parentOf[fd.Options] = dt.Name
+				}
+			}
+		}
+	}
+	for _, pack := range []string{"pos", "inventory"} {
+		files, _ := filepath.Glob(filepath.Join(cfg, pack, "queries", "*.yaml"))
+		for _, f := range files {
+			body, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var q struct {
+				Name          string `yaml:"name"`
+				ModuleOwnerID string `yaml:"module_owner_id"`
+				Source        string `yaml:"source"`
+			}
+			if err := yaml.Unmarshal(body, &q); err != nil {
+				t.Fatalf("%s: %v", f, err)
+			}
+			source := q.Source
+			if p := parentOf[source]; p != "" {
+				source = p
+			}
+			resource := "module." + q.ModuleOwnerID + ".query." + q.Name
+			for _, role := range []string{"Cashier", "Manager", "Owner", "Inventory Manager"} {
+				if !pm.Can(role, resource, "read") {
+					continue
+				}
+				if docs[source].ModuleOwnerID == q.ModuleOwnerID || pm.Can(role, source, "read") {
+					continue
+				}
+				// Known gap, same class (found here, out of scope of #406 as fixing
+				// it means choosing between owning Stock Balance and widening
+				// Manager's read): Manager's item_stock/low_stock grants are dead.
+				if role == "Manager" && source == "Stock Balance" {
+					continue
+				}
+				t.Errorf("%s holds %s but %s is neither owned by %s nor readable by the role: the query would be denied", role, resource, source, q.ModuleOwnerID)
+			}
+		}
 	}
 }

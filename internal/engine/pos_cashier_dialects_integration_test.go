@@ -202,6 +202,37 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("item_search status=%d body=%s", rec.Code, rec.Body.String())
 			}
 
+			// 2b. #406: Item Category is owned by inventory.core, so the Cashier's
+			// query grant alone serves the register's category tabs, in the
+			// catalog and through the route. Direct reads stay denied for the
+			// Cashier; Manager and Owner keep their category read.
+			seed("Item Category", "CAT-1", map[string]any{"category_name": "Grain", "display_order": 1, "enabled": true})
+			seed("Item Category", "CAT-2", map[string]any{"category_name": "Retired", "display_order": 2, "enabled": false})
+			for _, role := range []string{"Cashier", "Manager", "Owner"} {
+				found := false
+				for _, q := range cat.Data.PublishedQueries {
+					found = found || q.Name == "item_categories" && q.OwnerModuleID == "inventory.core"
+				}
+				if !found {
+					t.Fatalf("%s: catalog lacks item_categories", role)
+				}
+				rec := serve(role, http.MethodPost, "/q/inventory.core/item_categories", `{"input":{},"cursor":"","limit":5}`)
+				var out struct {
+					Data struct {
+						Data []map[string]any `json:"data"`
+					} `json:"data"`
+				}
+				if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || len(out.Data.Data) != 1 || out.Data.Data[0]["category_name"] != "Grain" {
+					t.Fatalf("item_categories as %s status=%d body=%s", role, rec.Code, rec.Body.String())
+				}
+			}
+			if rec := serve("Cashier", http.MethodGet, "/r/Item%20Category", ""); rec.Code != http.StatusForbidden {
+				t.Fatalf("Cashier direct Item Category list = %d, want 403: %s", rec.Code, rec.Body.String())
+			}
+			if rec := serve("Cashier", http.MethodPost, "/r/Item%20Category", `{"category_name":"X"}`); rec.Code != http.StatusForbidden {
+				t.Fatalf("Cashier Item Category create = %d, want 403: %s", rec.Code, rec.Body.String())
+			}
+
 			// 3. #358: this till was opened the old way (no cashier recorded), so
 			// the Cashier is refused on it; the Manager runs sale, return, void
 			// and close_till.
