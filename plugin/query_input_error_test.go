@@ -47,6 +47,30 @@ func TestQueryInputErrorFromSchema(t *testing.T) {
 	}
 }
 
+// #408: an operation call names its subject, and its failures are field-level.
+func TestOperationInputErrorFromSchema(t *testing.T) {
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("mem://o.json", mustJSON(t, `{"type":"object","properties":{"register":{"type":"string"},"location":{"type":"string"}},"required":["register","location"],"additionalProperties":false}`)); err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := compiler.Compile("mem://o.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, input, field, msg string }{
+		{"missing required", `{"register":"R"}`, "location", "input location is required"},
+		{"unknown field", `{"register":"R","location":"L","x":1}`, "x", "input x is not accepted by this operation"},
+	} {
+		got := newInputError(compiled.Validate(mustJSON(t, tc.input)), "operation")
+		if got.Field != tc.field || got.Message != tc.msg {
+			t.Errorf("%s: got %+v, want %q %q", tc.name, got, tc.field, tc.msg)
+		}
+	}
+	if got := newInputError(errors.New("opaque"), "operation"); got.Message != "operation input is invalid" {
+		t.Errorf("opaque cause: %+v", got)
+	}
+}
+
 func mustJSON(t *testing.T, s string) any {
 	t.Helper()
 	v, err := jsonschema.UnmarshalJSON(strings.NewReader(s))

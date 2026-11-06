@@ -3,6 +3,7 @@ package site
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -296,4 +297,64 @@ func TestShippedPackCommandSchemaEnums(t *testing.T) {
 		return
 	}
 	t.Fatal("record_sale input schema not published")
+}
+
+// TestShippedPackCommandInputsCoverReferences (#408): in every shipped pack
+// command, each input the command cannot run without (RequiredInputs) is a
+// typed, required property of the published input schema, so a client can
+// build the call from the catalog alone. open_session is pinned exactly.
+func TestShippedPackCommandInputsCoverReferences(t *testing.T) {
+	for _, pack := range []string{"pos", "inventory"} {
+		snap, _, err := ParseConfigPack(pack, readPackFiles(t, filepath.Join("..", "config", pack), ""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmds, err := kernel.DecodeCommandResources(snap.Commands)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cmds) == 0 {
+			t.Fatalf("%s pack has no commands", pack)
+		}
+		for _, cmd := range cmds {
+			var doc *contract.ModuleSchemaDocument
+			for _, m := range snap.Modules {
+				for i, d := range m.Schemas {
+					if d.Ref == cmd.InputSchema {
+						doc = &m.Schemas[i]
+					}
+				}
+			}
+			if doc == nil {
+				t.Errorf("%s: no published input schema %v", cmd.Name, cmd.InputSchema)
+				continue
+			}
+			var s struct {
+				Required   []string                  `json:"required"`
+				Properties map[string]map[string]any `json:"properties"`
+			}
+			if err := json.Unmarshal(doc.Schema, &s); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range cmd.RequiredInputs() {
+				if !slices.Contains(s.Required, name) {
+					t.Errorf("%s: %q is used by a require/transaction selector but is not in required %v", cmd.Name, name, s.Required)
+				}
+				if s.Properties[name]["type"] == nil {
+					t.Errorf("%s: required input %q has no type in %v", cmd.Name, name, s.Properties[name])
+				}
+			}
+			if cmd.Name == "open_session" {
+				want := map[string]string{"register": "string", "location": "string", "opening_float": "number"}
+				if len(s.Properties) != len(want) || !slices.Equal(s.Required, []string{"location", "opening_float", "register"}) {
+					t.Errorf("open_session required=%v properties=%v", s.Required, s.Properties)
+				}
+				for name, typ := range want {
+					if s.Properties[name]["type"] != typ {
+						t.Errorf("open_session %s type = %v, want %s", name, s.Properties[name]["type"], typ)
+					}
+				}
+			}
+		}
+	}
 }
