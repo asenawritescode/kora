@@ -153,8 +153,10 @@ func scanPageManifest(scanner pageManifestScanner) (*doctype.PageManifest, error
 		SourceDocType: sourceDoctype,
 	}
 	if configJSON.Valid && configJSON.String != "" {
-		if err := json.Unmarshal([]byte(configJSON.String), &view.Components); err != nil {
-			return nil, fmt.Errorf("unmarshaling components for page manifest %q: %w", name, err)
+		// Views are stored either as a component array or, when they declare
+		// resources, as {resources, components}; decodeViewConfig reads both.
+		if err := decodeViewConfig(configJSON.String, view); err != nil {
+			return nil, fmt.Errorf("decoding view config for page manifest %q: %w", name, err)
 		}
 	}
 	if publicEnabled == 1 {
