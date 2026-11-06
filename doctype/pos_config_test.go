@@ -81,3 +81,25 @@ func TestSalePaymentReferenceIsOptional(t *testing.T) {
 	}
 	t.Fatal("Sale Payment missing")
 }
+
+// The shipped register must offer both tenders so Studio can show the manual
+// mobile-money option. Studio still hides it for tenants without an enabled
+// Payment Account, so cash-only tenants are unaffected.
+func TestPOSRegisterTenderOffersCashAndMobileMoney(t *testing.T) {
+	view, err := ParseViewFile(filepath.Join("..", "config", "pos", "views", "register.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tender *ViewComponent
+	for i := range view.Components {
+		if view.Components[i].Type == "tender_panel" {
+			tender = &view.Components[i]
+		}
+	}
+	if tender == nil {
+		t.Fatal("register view has no tender_panel component")
+	}
+	if got, want := tender.Bindings["methods"], "literal:Cash,Mobile Money"; got != want {
+		t.Errorf("tender methods = %q, want %q", got, want)
+	}
+}
