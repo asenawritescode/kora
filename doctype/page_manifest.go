@@ -373,10 +373,13 @@ func pageComponentsFromView(components []ViewComponent) []PageComponent {
 		if len(c.Filters) > 0 {
 			props["filters"] = append([]ViewFilter(nil), c.Filters...)
 		}
+		if len(c.Context) > 0 {
+			props["context"] = c.Context
+		}
 		out = append(out, PageComponent{
 			ID:               c.ID,
 			Component:        c.Type,
-			Version:          1,
+			Version:          max(c.Version, 1),
 			Region:           c.Region,
 			Position:         c.Position,
 			Span:             c.Span,
@@ -402,6 +405,8 @@ func viewComponentsFromPage(components []PageComponent) []ViewComponent {
 			Data:             c.Data,
 			ResourceBindings: c.ResourceBindings,
 			Bindings:         stringMapProp(c.Props, "bindings"),
+			Context:          stringMapProp(c.Props, "context"),
+			Version:          viewComponentVersion(c.Version),
 			Filters:          viewFiltersFromProps(c.Props["filters"]),
 			Actions:          viewActionsFromIDs(c.Actions),
 			DesktopColumns:   stringSliceProp(c.Props, "desktop_columns"),
@@ -604,4 +609,12 @@ func viewFiltersFromProps(value any) []ViewFilter {
 		}
 	}
 	return filters
+}
+
+// viewComponentVersion keeps v1 implicit so existing views round-trip unchanged.
+func viewComponentVersion(version int) int {
+	if version > 1 {
+		return version
+	}
+	return 0
 }
