@@ -78,7 +78,7 @@ func posMergedSnapshot(t *testing.T) *doctype.ConfigSnapshot {
 }
 
 func TestResolvePrintOperations(t *testing.T) {
-	const sale, closeTill = "pos.core~pos.checkout~record_sale", "pos.core~pos.drawer~close_till"
+	const sale, closeTill, closeSession = "pos.core~pos.checkout~record_sale", "pos.core~pos.drawer~close_till", "pos.core~pos.drawer~close_session"
 	merged := posMergedSnapshot(t)
 	if err := resolvePrintOperations(merged); err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestResolvePrintOperations(t *testing.T) {
 		f, _ := print.Decode(raw)
 		got[f.Name] = f.For.Operation
 	}
-	if got["sale_receipt"] != sale || got["z_report"] != closeTill {
+	if got["sale_receipt"] != sale || got["z_report"] != closeTill || got["z_report_close_session"] != closeSession {
 		t.Fatalf("stored refs: %v", got)
 	}
 	if err := resolvePrintOperations(merged); err != nil { // exact ref stays accepted

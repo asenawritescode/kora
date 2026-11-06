@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -98,6 +99,8 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			})
 			router.GET("/catalog", handler.HandleApplicationCatalog)
 			router.GET("/print/:format_name", api.NewSitePrintHandler(handler))
+			router.GET("/print-formats", api.NewSitePrintListHandler(handler))
+			router.GET("/print-formats/:format_name", api.NewSitePrintMetaHandler(handler))
 			router.POST("/op/:operation", handler.HandleExecutePublishedOperation)
 			router.POST("/q/:module/:query", handler.HandlePublishedModuleQuery)
 			router.GET("/r/:doctype", handler.HandleList)
@@ -174,7 +177,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("catalog lacks %s", name)
 				return nil
 			}
-			runAs := func(role, name, key, input string) {
+			runAs := func(role, name, key, input string) string {
 				t.Helper()
 				rec := tryAs(role, name, key, input)
 				var out struct {
@@ -183,8 +186,9 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || out.Data.Status != contract.ReceiptCompleted {
 					t.Fatalf("%s as %s status=%d body=%s", name, role, rec.Code, rec.Body.String())
 				}
+				return string(out.Data.ExecutionID)
 			}
-			run := func(name, key, input string) { t.Helper(); runAs("Cashier", name, key, input) }
+			run := func(name, key, input string) string { t.Helper(); return runAs("Cashier", name, key, input) }
 
 			// 1. open_shift, open_till.
 			run("open_shift", "k-shift", `{"register":"REG-1"}`)
@@ -276,8 +280,8 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if got := qty(); !strings.HasPrefix(got, "19") {
 				t.Fatalf("stock after void = %s, want 19", got)
 			}
-			// expected_cash is server-derived (#233): 500 float + 360 - 180 + 180 - 180 = 680; close_till takes only the closing count.
-			runAs("Manager", "close_till", "k-close", fmt.Sprintf(`{"shift":%q,"closing_count":680}`, shift))
+			// expected_cash is server-derived (#233): 500 float + 360 - 180 + 180 - 180 = 680; close_till takes only the closing count. The Owner closes it (#396 prints it).
+			ownerClose := runAs("Owner", "close_till", "k-close", fmt.Sprintf(`{"shift":%q,"closing_count":680}`, shift))
 
 			// 4. Refusals: 403 and nothing written.
 			sales, entries := count("Sale"), count("Stock Entry")
@@ -456,7 +460,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("closed_session returned an open till: %v", rows)
 			}
 			// 300 float + 180 sale = 480 expected; the cashier counts 475.
-			run("close_till", "k-close-sess", fmt.Sprintf(`{"shift":%q,"closing_count":475}`, rows[0]["shift"]))
+			cashierClose := run("close_till", "k-close-sess", fmt.Sprintf(`{"shift":%q,"closing_count":475}`, rows[0]["shift"]))
 			for _, tc := range []struct {
 				role, name string
 				want       int
@@ -503,7 +507,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if rec := op("Cashier", "close_session", "k-close-nobody", `{"shift":"SHF-none","closing_count":1}`); completed(rec) {
 				t.Fatalf("close_session on an unknown shift succeeded: %s", rec.Body.String())
 			}
-			run("close_session", "k-close-session", fmt.Sprintf(`{"shift":%q,"closing_count":25}`, secondShift))
+			sessionClose := run("close_session", "k-close-session", fmt.Sprintf(`{"shift":%q,"closing_count":25}`, secondShift))
 			if got := one("SELECT status FROM "+tbl("Till Session")+" WHERE name = ?", second) + "/" + one("SELECT status FROM "+tbl("Shift")+" WHERE name = ?", secondShift); got != "Closed/Closed" {
 				t.Fatalf("till/shift after close_session = %s", got)
 			}
@@ -513,6 +517,98 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if rec := op("Cashier", "close_session", "k-close-again", fmt.Sprintf(`{"shift":%q,"closing_count":1}`, secondShift)); completed(rec) {
 				t.Fatalf("second close_session succeeded: %s", rec.Body.String())
 			}
+
+			// An Owner till for the close_session print: close the shift
+			// close_till left open on REG-1, open a session there, close it
+			// counting 10 over.
+			runAs("Owner", "close_shift", "k-owner-shift", `{"register":"REG-1"}`)
+			runAs("Owner", "open_session", "k-owner-sess", `{"register":"REG-1","location":"LOC-1","opening_float":40}`)
+			ownerTill := one("SELECT name FROM "+tbl("Till Session")+" WHERE register = ? AND status = ?", "REG-1", "Open")
+			ownerShift := one("SELECT shift FROM "+tbl("Till Session")+" WHERE name = ?", ownerTill)
+			ownerSessionClose := runAs("Owner", "close_session", "k-owner-session", fmt.Sprintf(`{"shift":%q,"closing_count":50}`, ownerShift))
+
+			// 9. #396: the Z report prints for an execution of close_session as
+			// well as close_till, with the same exact figures, for the Owner; a
+			// Cashier is refused (policy).
+			opRef := func(name string) string {
+				t.Helper()
+				for _, o := range cat.Data.PublishedOperations {
+					if strings.HasSuffix(o.OperationRef, "~"+name) {
+						return o.OperationRef
+					}
+				}
+				t.Fatalf("catalog lacks %s", name)
+				return ""
+			}
+			// Text lines are compared whitespace-collapsed; html fragments are exact.
+			for _, tc := range []struct {
+				name, role, format, op, exec string
+				status                       int
+				text, html                   []string
+			}{
+				{"owner close_till own till", "Owner", "z_report", "close_till", ownerClose, 200,
+					[]string{"Z REPORT", "Till: " + till, "SALES Cash 1 360.00 REFUNDS Cash 1 180.00", "Opening float 500.00 Expected cash 680.00 Counted 680.00 VARIANCE 0.00"},
+					[]string{"<tr><td>Cash</td><td>1</td><td>360.00</td></tr>", "<tr><td>Refund Cash</td><td>1</td><td>180.00</td></tr>", "Float 500.00 &middot; Expected cash 680.00 &middot; Counted 680.00", "<strong>Variance 0.00</strong>"}},
+				{"owner close_session own till", "Owner", "z_report_close_session", "close_session", ownerSessionClose, 200,
+					[]string{"Z REPORT", "Till: " + ownerTill, "SALES REFUNDS ", "Opening float 40.00 Expected cash 40.00 Counted 50.00 VARIANCE 10.00"},
+					[]string{"Float 40.00 &middot; Expected cash 40.00 &middot; Counted 50.00", "<strong>Variance 10.00</strong>"}},
+				{"close_session execution under the close_till format", "Owner", "z_report", "close_till", sessionClose, 404, nil, nil},
+				{"close_till format with the close_session ref", "Owner", "z_report", "close_session", ownerClose, 400, nil, nil},
+				// Policy (#396): the per-method Z report is an Owner/Manager/Administrator
+				// document. A Cashier holds no payments_by_method/refunds_by_method grant,
+				// so the print is refused for both operations; they get the server
+				// variance from my_closed_session instead.
+				{"cashier close_till own till", "Cashier", "z_report", "close_till", cashierClose, 403, nil, nil},
+				{"cashier close_session own till", "Cashier", "z_report_close_session", "close_session", sessionClose, 403, nil, nil},
+				{"cashier on the owner's execution", "Cashier", "z_report", "close_till", ownerClose, 404, nil, nil},
+			} {
+				for _, as := range []string{"text", "html"} {
+					rec := serve(tc.role, http.MethodGet, "/print/"+tc.format+"?as="+as+"&operation_ref="+opRef(tc.op)+"&execution_id="+tc.exec, "")
+					if rec.Code != tc.status {
+						t.Fatalf("%s as %s: status=%d want %d body=%s", tc.name, as, rec.Code, tc.status, rec.Body.String())
+					}
+					if tc.status == 403 && !strings.Contains(rec.Body.String(), "print.forbidden") {
+						t.Fatalf("%s as %s: body=%s, want print.forbidden", tc.name, as, rec.Body.String())
+					}
+					body, want := rec.Body.String(), tc.html
+					if as == "text" {
+						body, want = strings.Join(strings.Fields(regexp.MustCompile(`-{5,}`).ReplaceAllString(body, "")), " "), tc.text
+					}
+					for _, w := range want {
+						if !strings.Contains(body, w) {
+							t.Errorf("%s as %s: missing %q in\n%s", tc.name, as, w, body)
+						}
+					}
+				}
+			}
+			// The metadata Studio's Print action reads lists only formats the actor
+			// can print: a Cashier is not offered a Z report they would be refused.
+			listed := func(role, query string) string {
+				t.Helper()
+				rec := serve(role, http.MethodGet, "/print-formats?"+query, "")
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s list %s = %d %s", role, query, rec.Code, rec.Body.String())
+				}
+				return rec.Body.String()
+			}
+			for _, tc := range []struct{ format, op string }{{"z_report", "close_till"}, {"z_report_close_session", "close_session"}} {
+				if got := listed("Owner", "operation_ref="+opRef(tc.op)); !strings.Contains(got, `"name":"`+tc.format+`"`) || strings.Count(got, `"name":`) != 1 {
+					t.Errorf("Owner list for %s = %s", tc.op, got)
+				}
+				if rec := serve("Owner", http.MethodGet, "/print-formats/"+tc.format, ""); rec.Code != http.StatusOK {
+					t.Errorf("Owner meta %s = %d %s", tc.format, rec.Code, rec.Body.String())
+				}
+				if got := listed("Cashier", "operation_ref="+opRef(tc.op)); strings.Contains(got, "z_report") {
+					t.Errorf("Cashier is offered %s: %s", tc.format, got)
+				}
+				if rec := serve("Cashier", http.MethodGet, "/print-formats/"+tc.format, ""); rec.Code != http.StatusForbidden {
+					t.Errorf("Cashier meta %s = %d %s, want 403", tc.format, rec.Code, rec.Body.String())
+				}
+			}
+			if got := listed("Cashier", ""); !strings.Contains(got, `"sale_receipt"`) || strings.Contains(got, "z_report") {
+				t.Errorf("Cashier list = %s", got)
+			}
+
 			run("open_session", "k-sess-reopen", `{"register":"REG-2","location":"LOC-1","opening_float":10}`)
 			if rows := mySession("Cashier"); len(rows) != 1 || rows[0]["name"] == second {
 				t.Fatalf("my_session after close_session + open_session = %v", rows)
