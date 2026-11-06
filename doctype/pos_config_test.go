@@ -60,3 +60,24 @@ func TestTillSessionVarianceComputed(t *testing.T) {
 		}
 	}
 }
+
+// TestSalePaymentReferenceIsOptional (#336): cash refunds have no payment
+// reference; record_sale still demands one through its payment guard.
+func TestSalePaymentReferenceIsOptional(t *testing.T) {
+	dts, err := ParseConfigTree(filepath.Join("..", "config", "pos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range dts {
+		if d.Name != "Sale Payment" {
+			continue
+		}
+		for _, f := range d.Fields {
+			if f.Fieldname == "reference" && f.Reqd {
+				t.Fatal("Sale Payment.reference must not be required")
+			}
+		}
+		return
+	}
+	t.Fatal("Sale Payment missing")
+}

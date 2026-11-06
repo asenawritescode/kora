@@ -28,4 +28,4 @@ fields:
   - fieldname: reference
     fieldtype: Data
     label: Reference
-    reqd: true
+    description: Payment intent id for a sale; a refund has none.

@@ -40,8 +40,11 @@ require:
         cashier: $actor
     unless_role: [Owner, Manager, Administrator]
     message: This till belongs to another cashier
+  - equal: [$computed.paid, $computed.total]
+    message: Refund payments must add up to the return total
 compute:
   total: {sum: $input.items, expr: "quantity * unit_price"}
+  paid: {sum: $input.payments, expr: "amount"}
 transaction:
   - for_each: $input.items
     update:
