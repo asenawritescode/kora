@@ -113,8 +113,12 @@ func TestMySQLSubscriptionBillingProgressSurvivesRestartAndConcurrentRuns(t *tes
 		t.Fatalf("restart created a duplicate obligation; count=%d", provider.creates)
 	}
 	update := "UPDATE " + quote("tabSubscription") + " SET next_billing_date=? WHERE name=?"
-	if _, err := database.Exec(update, due, subscriptionName); err != nil {
-		t.Fatal("reset period for concurrent runs:", err)
+	// The obligation key is deterministic per (tenant, subscription, billing
+	// date), so re-billing the same date is a no-op by design. Move the schedule
+	// back one month to make a second, distinct period due for the racing runs.
+	secondPeriod := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01-02")
+	if _, err := database.Exec(update, secondPeriod, subscriptionName); err != nil {
+		t.Fatal("make a second period due for concurrent runs:", err)
 	}
 	start := make(chan struct{})
 	errs := make(chan error, 2)

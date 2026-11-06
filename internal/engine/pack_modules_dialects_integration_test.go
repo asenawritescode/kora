@@ -177,6 +177,8 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 					t.Errorf("owner catalog lacks operation %s", name)
 				}
 			}
+			// 14 published queries; the Owner reads all but my_closed_session, the
+			// Cashier's own-till variant of closed_session (#384).
 			if len(ownerQueries) != 13 {
 				t.Errorf("owner queries = %d, want 13: %v", len(ownerQueries), ownerQueries)
 			}
@@ -197,7 +199,9 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 				t.Error("owner catalog lacks record_sale")
 			}
 
-			// A Cashier sees a subset: nothing outside the Owner's catalog.
+			// A Cashier sees a subset: nothing outside the Owner's catalog, except
+			// my_closed_session, which only the Cashier is granted because the Owner
+			// reads the unscoped closed_session instead.
 			cashier := get("Cashier")
 			cashierOps, cashierQueries := refs(cashier)
 			t.Logf("cashier operations=%v queries=%v", cashierOps, cashierQueries)
@@ -210,7 +214,7 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 				inOwner[ref] = true
 			}
 			for _, ref := range append(append([]string{}, cashierOps...), cashierQueries...) {
-				if !inOwner[ref] {
+				if !inOwner[ref] && ref != "pos.core/my_closed_session" {
 					t.Errorf("cashier sees %s that owner does not", ref)
 				}
 			}

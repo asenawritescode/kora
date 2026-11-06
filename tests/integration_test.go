@@ -26,7 +26,11 @@ import (
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/schema"
+	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/workflow"
+	workflowsql "github.com/asenawritescode/kora/workflow/sqlstore"
 )
 
 // getTestDB returns a MySQL connection for integration tests.
@@ -91,63 +95,17 @@ func dbDSNWithDatabase(baseDSN, dbName string) (string, error) {
 	return cfg.FormatDSN(), nil
 }
 
+// bootstrapForTest installs the same system tables a tenant gets at startup. A
+// hand-written subset drifted from the real schema (field_precision, revision
+// tables), so use the real bootstrap.
 func bootstrapForTest(t *testing.T, db *sql.DB) {
 	t.Helper()
-	for _, ddl := range (&kdb.MySQLDialect{}).SystemTableSQL() {
-		if !strings.HasPrefix(strings.TrimSpace(ddl), "CREATE TABLE IF NOT EXISTS") {
-			continue
-		}
-		if _, err := db.Exec(ddl); err != nil {
-			t.Fatalf("creating system table: %v", err)
-		}
-	}
-	if _, err := db.Exec("ALTER TABLE _kora_field ADD COLUMN accept TEXT"); err != nil {
-		t.Fatalf("adding field accept test schema column: %v", err)
-	}
-	for _, ddl := range kdb.OutboxTablesMySQL() {
-		if _, err := db.Exec(ddl); err != nil {
-			t.Fatalf("creating outbox table: %v", err)
-		}
-	}
-	for _, ddl := range kdb.KernelTablesMySQL() {
-		if _, err := db.Exec(ddl); err != nil {
-			t.Fatalf("creating kernel table: %v", err)
-		}
-	}
-	// _kora_extension — webhook extension registry (needed by extension permission tests).
-	const extensionDDL = `CREATE TABLE IF NOT EXISTS _kora_extension (
-		name VARCHAR(140) PRIMARY KEY,
-		site VARCHAR(140) NOT NULL DEFAULT '',
-		display_name VARCHAR(255) NOT NULL DEFAULT '',
-		description TEXT,
-		endpoint_url VARCHAR(1024) NOT NULL,
-		secret VARCHAR(64) NOT NULL,
-		access_token VARCHAR(64) NOT NULL DEFAULT '',
-		old_secret VARCHAR(64),
-		old_secret_expires_at DATETIME(6),
-		secret_count INT NOT NULL DEFAULT 1,
-		is_active TINYINT(1) NOT NULL DEFAULT 1,
-		subscriptions JSON,
-		api_permissions JSON,
-		retry_schedule JSON,
-		timeout_sec INT NOT NULL DEFAULT 10,
-		headers JSON,
-		delivery_stats JSON,
-		consecutive_failures INT NOT NULL DEFAULT 0,
-		installed_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-		updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-		last_delivery_at DATETIME(6),
-		last_error TEXT,
-		INDEX idx_ext_site (site),
-		INDEX idx_ext_active (is_active),
-		INDEX idx_ext_access_token (access_token)
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
-	if _, err := db.Exec(extensionDDL); err != nil {
-		t.Fatalf("creating extension table: %v", err)
+	if err := site.BootstrapSystemTables(db, &kdb.MySQLDialect{}); err != nil {
+		t.Fatalf("bootstrapping system tables: %v", err)
 	}
 }
 
-func executeKernelForTest(t *testing.T, database *sql.DB, registry *doctype.Registry, dialect kdb.Dialect, site, user, command string, payload any) kernel.ResultData {
+func executeKernelForTest(t *testing.T, database *sql.DB, registry *doctype.Registry, dialect kdb.Dialect, site, user, command string, payload any, configure ...func(*kernel.Kernel)) kernel.ResultData {
 	t.Helper()
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -157,8 +115,18 @@ func executeKernelForTest(t *testing.T, database *sql.DB, registry *doctype.Regi
 		PrincipalID: user, PrincipalType: contract.PrincipalHuman, Site: site,
 		Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now(),
 	}
-	result, commandErr := kernel.New(dialect, outbox.NewSQLWriter(dialect)).Execute(context.Background(), database, registry, kernel.Operation{
-		Context: kernel.OperationContext{Site: site, User: user, Owner: user, Roles: []string{doctype.AdminRole}, Actor: actor},
+	// Kernel operations require a verified execution identity; caller-populated
+	// actor fields alone are rejected.
+	execution, err := policy.NewVerifiedExecution(contract.TenantID(site), actor)
+	if err != nil {
+		t.Fatalf("verified execution for %s: %v", user, err)
+	}
+	engine := kernel.New(dialect, outbox.NewSQLWriter(dialect))
+	for _, apply := range configure {
+		apply(engine)
+	}
+	result, commandErr := engine.Execute(context.Background(), database, registry, kernel.Operation{
+		Context: kernel.OperationContext{Site: site, TenantID: contract.TenantID(site), User: user, Owner: user, Roles: []string{doctype.AdminRole}, Actor: actor, Execution: execution},
 		Command: command, Payload: encoded,
 	})
 	if commandErr != nil {
@@ -269,9 +237,38 @@ func TestIntegration_FullFieldworkLifecycle(t *testing.T) {
 		t.Log("known gap: min_rows on table fields is not enforced by validation yet")
 	}
 
-	// Workflow: Draft → Submitted.
+	// Workflow: Draft → Submitted. Document workflows are retired, so the
+	// transition is an Engine v2 record.update_status policy published for the
+	// Work Order table (the Fieldwork pack ships none).
+	policies, err := workflowsql.NewDefinitionStore(db, dialect)
+	if err != nil {
+		t.Fatalf("workflow definition store: %v", err)
+	}
+	if err := policies.Ensure(context.Background()); err != nil {
+		t.Fatalf("ensure workflow definition tables: %v", err)
+	}
+	statusInput, err := json.Marshal(workflow.StatusActionConfig{StateField: "status", InitialState: "Draft", StatusTransition: workflow.StatusTransition{Action: "Submit for Approval", From: "Draft", To: "Submitted", AllowedRoles: []string{doctype.AdminRole}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	submitDefinition := contract.WorkflowDefinition{
+		ID: "fieldwork-work-order-submit", Version: 1, Entry: "submit",
+		Trigger: &contract.RecordTrigger{Kind: "record.updated", Table: woDT.Name, WatchedFields: []string{"status"}},
+		Steps: []contract.StepDefinition{
+			{ID: "submit", Kind: contract.StepAction, Action: &contract.ActionSpec{Name: "record.update_status", Version: 1, InputSchema: "kora.record.update_status", Input: statusInput, Next: "finish"}},
+			{ID: "finish", Kind: contract.StepEnd, End: &contract.EndSpec{Outcome: "complete"}},
+		},
+	}
+	publisher, err := contract.ParsePrincipalID("system-fieldwork-integration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := policies.PublishImportedBatch(context.Background(), contract.TenantID(siteName), publisher, []contract.WorkflowDefinition{submitDefinition}, time.Now().UTC()); err != nil {
+		t.Fatalf("publish Work Order status workflow: %v", err)
+	}
 	transition := executeKernelForTest(t, db, registry, dialect, siteName, "Administrator", kernel.CommandWorkflowStatusTransition,
-		kernel.WorkflowStatusTransitionPayload{Doctype: woDT.Name, Name: wo.Name, Action: "Submit for Approval"})
+		kernel.WorkflowStatusTransitionPayload{Doctype: woDT.Name, Name: wo.Name, Action: "Submit for Approval"},
+		func(k *kernel.Kernel) { k.WorkflowStatusPolicies = policies })
 	doc := orm.DocumentFromMap(registry, woDT.Name, transition.Document)
 	t.Logf("Transition: Draft → %s", doc.GetString("status"))
 
@@ -324,9 +321,6 @@ func TestIntegration_ConfigVersioning(t *testing.T) {
 	// Test version storage.
 	store := configstore.NewStore(db, dialect)
 	store.SaveDocType(original[0], "")
-	if _, err := db.Exec("ALTER TABLE _kora_config_version ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 0"); err != nil {
-		t.Fatalf("add active-version flag to integration fixture: %v", err)
-	}
 
 	configJSON, _ := yaml.Marshal(original)
 	if _, err := db.Exec("INSERT INTO _kora_config_version (id, site, version, created_by, label, status, is_active, config) VALUES ('v1', 'test', 1, 'test', 'v1', 'Active', 1, ?)", string(configJSON)); err != nil {

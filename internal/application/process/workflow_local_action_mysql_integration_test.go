@@ -106,8 +106,10 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 	}
 	serviceGrant := policy.Grant{Resource: doctypeName, Operation: "create"}
 	moduleCommandGrant := policy.Grant{Resource: moduleInvoice.Name, Operation: "create"}
+	// A published module command is first authorised as module.<owner>.operation.<name>.
+	moduleOperationGrant := policy.Grant{Resource: "module.finance.ar.operation.issue", Operation: "write"}
 	servicePrincipal := "workflow-service-" + suffix[:8]
-	execution, err := policy.NewVerifiedExecutionWithGrants(tenant, contract.ActorContext{PrincipalID: servicePrincipal, PrincipalType: contract.PrincipalService, Site: siteName, AuthenticatedAt: time.Now().UTC()}, []policy.Grant{serviceGrant, moduleCommandGrant})
+	execution, err := policy.NewVerifiedExecutionWithGrants(tenant, contract.ActorContext{PrincipalID: servicePrincipal, PrincipalType: contract.PrincipalService, Site: siteName, AuthenticatedAt: time.Now().UTC()}, []policy.Grant{serviceGrant, moduleCommandGrant, moduleOperationGrant})
 	if err != nil {
 		t.Fatal("verified workflow execution:", err)
 	}
@@ -136,6 +138,18 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 	if err := moduleStore.EnsureSchema(); err != nil {
 		t.Fatal("ensure capability lease schema:", err)
 	}
+	// Transactional capability admission requires the caller and provider modules
+	// to be active installations in the tenant's module snapshot.
+	activeModules, err := json.Marshal(contract.ModuleSnapshot{TenantID: tenant, Revision: 1, Installations: []contract.ModuleInstallation{
+		{TenantID: tenant, ModuleID: "sales.orders", State: string(contract.ModuleActive), Revision: 1},
+		{TenantID: tenant, ModuleID: "finance.ar", State: string(contract.ModuleActive), Revision: 1},
+	}})
+	if err != nil {
+		t.Fatal("encode module snapshot:", err)
+	}
+	if _, err := database.ExecContext(ctx, db.Rebind(dialect, `INSERT INTO _kora_module_snapshot (tenant_id, revision, snapshot_json) VALUES (?, ?, ?)`), string(tenant), 1, string(activeModules)); err != nil {
+		t.Fatal("seed active module snapshot:", err)
+	}
 	key := workflow.ActionKey{Name: "invoice.create-follow-up", Version: 1}
 	moduleCommandKey := workflow.ActionKey{Name: "invoice.issue-through-owner-command", Version: 1}
 	inputSchema, outputSchema := contract.SchemaRef{ID: "workflow-input", Version: 1}, contract.SchemaRef{ID: "workflow-output", Version: 1}
@@ -160,7 +174,7 @@ func TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction(t *testing.T)
 		return kernel.Operation{Command: moduleCommand.FullName(), Payload: payload, Context: kernel.OperationContext{ModuleExecution: &moduleExecution}}, nil
 	}
 	registration := workflow.ActionRegistration{Key: key, Class: workflow.ActionLocal, InputSchema: inputSchema, OutputSchema: outputSchema, RequiredGrant: serviceGrant}
-	moduleLease := contract.CapabilityLease{ID: "workflow-module-lease-" + suffix[:12], TenantID: tenant, Scope: contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderID: "engine.internal.finance.ar", Operation: moduleCommand.FullName(), BindingRevision: 1, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
+	moduleLease := contract.CapabilityLease{ID: "workflow-module-lease-" + suffix[:12], TenantID: tenant, Scope: contract.BusinessScope{TenantID: tenant, Kind: contract.ScopeKindTenant}, CallerModuleID: "sales.orders", ProviderModuleID: "finance.ar", ProviderID: "engine.internal.finance.ar", Operation: moduleCommand.FullName(), BindingRevision: 1, GrantEpoch: 1, ExpiresAt: time.Now().UTC().Add(time.Hour), State: "active"}
 	if err := moduleStore.CreateCapabilityLease(ctx, moduleLease); err != nil {
 		t.Fatal("create workflow module capability lease:", err)
 	}
