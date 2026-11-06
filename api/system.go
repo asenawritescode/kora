@@ -2028,6 +2028,10 @@ func (h *Handler) HandleSystemRoleUpdate(c *gin.Context) {
 func (h *Handler) HandleSystemRoleDelete(c *gin.Context) {
 	db := h.siteTx(c).DB
 	roleName := c.Param("name")
+	if strings.EqualFold(strings.TrimSpace(roleName), doctype.AdminRole) {
+		writeError(c, http.StatusConflict, "role.protected", "The "+doctype.AdminRole+" role is built in and cannot be deleted", map[string]any{"role": doctype.AdminRole})
+		return
+	}
 	// Check if any users have this role.
 	var userCount int
 	roleMembershipQuery := "SELECT COUNT(*) FROM _kora_user WHERE FIND_IN_SET(?, REPLACE(roles, ', ', ',')) > 0"
