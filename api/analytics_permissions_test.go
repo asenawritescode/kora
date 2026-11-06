@@ -312,3 +312,78 @@ func newAnalyticsAuthorizationContext(t *testing.T, tenant, site string, roles [
 	ctx.Set("policy_execution", execution)
 	return ctx
 }
+
+// Filtering endpoints must answer with exactly one JSON document: the
+// permission probe used to filter entries must not write its own 403.
+func TestAnalyticsFilterEndpointsWriteSingleEnvelope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := doctype.NewRegistry()
+	registry.LoadFull([]*doctype.DocType{
+		{Name: "Invoice", Fields: []doctype.Field{{Fieldname: "total", Fieldtype: "Currency"}}},
+		{Name: "Payroll", Fields: []doctype.Field{{Fieldname: "total", Fieldtype: "Currency"}}},
+		{Name: "Expense", Fields: []doctype.Field{{Fieldname: "total", Fieldtype: "Currency"}}},
+	}, []*doctype.Role{{Name: "Cashier"}, {Name: "Nobody"}}, []*doctype.Permission{
+		{Doctype: "Invoice", Role: "Cashier", Read: true},
+	})
+	var active policy.Execution
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("site_name", "tenant-route")
+		c.Set("site_id", "stable-tenant")
+		c.Set("site_registry", registry)
+		c.Set("policy_execution", active)
+		c.Next()
+	})
+	RegisterAnalyticsRoutes(router.Group("/api"), registry, nil, nil, nil, nil)
+	executionFor := func(role string) policy.Execution {
+		ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", []string{role}, nil)
+		value, _ := ctx.Get("policy_execution")
+		return value.(policy.Execution)
+	}
+
+	tests := []struct {
+		name     string
+		role     string
+		target   string
+		status   int
+		wantBody bool
+	}{
+		{name: "catalog partially readable", role: "Cashier", target: "/api/analytics/catalog", status: 200, wantBody: true},
+		{name: "catalog nothing readable", role: "Nobody", target: "/api/analytics/catalog", status: 200, wantBody: true},
+		{name: "reports partially readable", role: "Cashier", target: "/api/analytics/reports", status: 200, wantBody: true},
+		{name: "reports nothing readable", role: "Nobody", target: "/api/analytics/reports", status: 200, wantBody: true},
+		{name: "metrics partially readable", role: "Cashier", target: "/api/analytics/metrics", status: 200, wantBody: true},
+		{name: "metrics nothing readable", role: "Nobody", target: "/api/analytics/metrics", status: 200, wantBody: true},
+		{name: "unreadable metric is hidden", role: "Cashier", target: "/api/analytics/metrics/payroll_count", status: 404},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			active = executionFor(tc.role)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest("GET", tc.target, nil))
+			if recorder.Code != tc.status {
+				t.Fatalf("status=%d, want %d; body=%s", recorder.Code, tc.status, recorder.Body.String())
+			}
+			if !tc.wantBody {
+				if recorder.Body.Len() != 0 {
+					t.Fatalf("hidden metric wrote a body: %s", recorder.Body.String())
+				}
+				return
+			}
+			decoder := json.NewDecoder(recorder.Body)
+			var envelope map[string]json.RawMessage
+			if err := decoder.Decode(&envelope); err != nil {
+				t.Fatalf("decode envelope: %v", err)
+			}
+			if _, hasError := envelope["error"]; hasError {
+				t.Fatalf("filtered response carries an error object: %v", envelope)
+			}
+			if _, hasData := envelope["data"]; !hasData {
+				t.Fatalf("filtered response has no data: %v", envelope)
+			}
+			if decoder.More() {
+				t.Fatalf("response holds more than one JSON document: %s", recorder.Body.String())
+			}
+		})
+	}
+}
