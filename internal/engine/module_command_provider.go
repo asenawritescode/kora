@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/plugin"
@@ -107,7 +108,7 @@ func (h *kernelCommandProviderHandle) Resolve(ctx context.Context, scope contrac
 		query += " AND " + dialect.QuoteIdent(target.BusinessScopeField) + "=?"
 		args = append(args, h.scope.LegalEntityID)
 	}
-	rows, err := h.factory.database.QueryContext(ctx, query, args...)
+	rows, err := h.factory.database.QueryContext(ctx, db.Rebind(dialect, query), args...)
 	if err != nil {
 		return contract.ResolvedBusinessRef{}, contract.NewError(contract.CodeDependencyUnavailable, "published reference lookup failed")
 	}
