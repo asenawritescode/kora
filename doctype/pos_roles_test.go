@@ -74,7 +74,7 @@ func TestPOSRolePermissions(t *testing.T) {
 	}
 	posOps := []string{"open_session", "open_shift", "close_shift", "open_till", "close_till", "record_sale", "return_sale", "void_sale"}
 	invOps := []string{"receive_stock", "adjust_stock"}
-	posQ := []string{"my_registers", "my_session", "open_till", "payments_by_method", "refunds_by_method", "recent_sales", "today_totals"}
+	posQ := []string{"closed_session", "my_registers", "my_session", "open_till", "payments_by_method", "refunds_by_method", "recent_sales", "today_totals"}
 	invQ := []string{"item_search", "item_categories", "item_stock", "low_stock"}
 	grant := func(role, owner, kind string, names []string, op string, want bool) {
 		for _, n := range names {
@@ -92,11 +92,27 @@ func TestPOSRolePermissions(t *testing.T) {
 	grant("Manager", "inventory.core", "query", invQ, "read", true)
 	grant("Manager", "inventory.core", "operation", invOps, "write", false)
 	grant("Cashier", "pos.core", "operation", posOps, "write", true)
-	grant("Cashier", "pos.core", "query", []string{"open_till", "my_session", "my_registers"}, "read", true)
+	grant("Cashier", "pos.core", "query", []string{"open_till", "my_session", "my_registers", "my_closed_session"}, "read", true)
+	grant("Cashier", "pos.core", "query", []string{"closed_session"}, "read", false)
 	// my_session is owner-scoped by cashier for every role (#326).
 	for _, role := range []string{"Cashier", "Manager", "Owner"} {
 		if owner, _ := pm.RowScopeFor([]string{role}, "module.pos.core.query.my_session", "read"); !owner {
 			t.Errorf("%s my_session grant must be if_owner", role)
+		}
+	}
+	// #384: every role sees exactly one closed-till query. Manager and Owner read
+	// any till (closed_session, not owner-scoped); a Cashier reads only their own
+	// (my_closed_session, if_owner). No role holds both, so the catalog picks.
+	for role, want := range map[string]string{"Cashier": "my_closed_session", "Manager": "closed_session", "Owner": "closed_session"} {
+		other := "my_closed_session"
+		if want == other {
+			other = "closed_session"
+		}
+		if !pm.Can(role, "module.pos.core.query."+want, "read") || pm.Can(role, "module.pos.core.query."+other, "read") {
+			t.Errorf("%s must read %s and not %s", role, want, other)
+		}
+		if owner, _ := pm.RowScopeFor([]string{role}, "module.pos.core.query."+want, "read"); owner != (role == "Cashier") {
+			t.Errorf("%s %s if_owner = %v", role, want, owner)
 		}
 	}
 	// my_registers lists the pack's registers for everyone: not owner-scoped.

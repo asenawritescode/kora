@@ -77,7 +77,7 @@ func TestParseConfigPackComposedMatchesTreeImport(t *testing.T) {
 	if err := resolvePrintOperations(want); err != nil {
 		t.Fatal(err)
 	}
-	if len(want.Modules) != 4 || len(want.Queries) != 11 || len(want.PrintFormats) != 4 {
+	if len(want.Modules) != 4 || len(want.Queries) != 13 || len(want.PrintFormats) != 4 {
 		t.Fatalf("tree: %d modules %d queries %d print formats", len(want.Modules), len(want.Queries), len(want.PrintFormats))
 	}
 
