@@ -98,3 +98,64 @@ components:
 		})
 	}
 }
+
+// The real pos pack ships its register view: composed with the inventory pack it
+// passes reference validation, installs on a fresh tenant and keeps its resources.
+func TestPOSPackRegisterViewReachesTenant(t *testing.T) {
+	database, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	dialect := db.Resolve("libsql")
+	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+		t.Fatal(err)
+	}
+	const siteName = "pos-register.example.test"
+	files := composedRetailFiles(t)
+	if validation, err := site.ValidatePack(site.PackManifest{SchemaVersion: 1, Name: "retail-pos", Version: "1.0.1"}, files); err != nil || !validation.Valid {
+		t.Fatalf("validate pack: %+v err %v", validation, err)
+	}
+	incoming, scripts, err := site.ParseConfigPack("retail-pos", files)
+	if err != nil {
+		t.Fatalf("parse package: %v", err)
+	}
+	store := configstore.NewStore(database, dialect)
+	current, err := store.CollectSnapshot(doctype.NewRegistry(), siteName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := mergeManagementPackageSnapshot(current, incoming)
+	if err != nil {
+		t.Fatalf("merge package: %v", err)
+	}
+	if findings := doctype.ValidateSnapshotReferences(target, nil); len(findings) != 0 {
+		t.Fatalf("pack findings = %+v", findings)
+	}
+	if err := site.ImportConfigFromSnapshotContext(t.Context(), database, doctype.NewRegistry(), "main", siteName, siteName, "install", target, dialect, scripts); err != nil {
+		t.Fatalf("install package: %v", err)
+	}
+	views, err := store.LoadViews(siteName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var register *doctype.View
+	for _, view := range views {
+		if view.Type == "register" {
+			register = view
+		}
+	}
+	if register == nil {
+		t.Fatalf("pos register view not listed for tenant: %+v", views)
+	}
+	types := map[string]doctype.ViewComponent{}
+	for _, component := range register.Components {
+		types[component.Type] = component
+	}
+	tender := types["tender_panel"]
+	if register.Layout != "register" || len(register.Resources) != 4 || len(register.Components) != 5 ||
+		tender.Version != 2 || tender.Bindings["submit_operation_ref"] != "pos.core~pos.checkout~record_sale" ||
+		tender.Context["till_session"] != "session.name" || tender.Context["register"] != "session.register" || tender.Context["location"] != "session.location" {
+		t.Fatalf("register view lost its shape: %+v", register)
+	}
+}
