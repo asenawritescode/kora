@@ -1,0 +1,15 @@
+name: my_closed_session
+module_owner_id: pos.core
+capability: pos.till
+operation: my_closed_session
+source: Till Session
+permission: read
+scope: tenant
+owner_field: cashier
+input:
+  name: {type: string, max_length: 140}
+filters:
+  - {field: name, op: eq, value: $input.name}
+  - {field: status, op: eq, value: Closed}
+fields: [name, shift, register, location, cashier, opening_float, expected_cash, closing_count, variance, closed_at]
+limit: 1

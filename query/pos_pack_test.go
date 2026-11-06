@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 	"time"
 
 	"github.com/asenawritescode/kora/db"
@@ -26,7 +28,7 @@ func TestPOSPackQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment"}
+	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "closed_session": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment"}
 	if len(defs) != len(want) {
 		t.Fatalf("got %d queries, want %d", len(defs), len(want))
 	}
@@ -131,6 +133,14 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 			continue // its sale input is required: TestPOSSaleLines pins the 400
 		}
 		t.Run(d.Name, func(t *testing.T) {
+			if d.Name == "closed_session" || d.Name == "my_closed_session" {
+				// #384: a closed till is read by its reference, so the name is required.
+				var ie *InputError
+				if _, err := Run(context.Background(), conn, db.Resolve("libsql"), d, Request{FullRead: true, Now: now, Input: map[string]any{}}); !errors.As(err, &ie) || ie.Field != "name" {
+					t.Fatalf("%s without name = %v, want InputError on name", d.Name, err)
+				}
+				return
+			}
 			p, err := Run(context.Background(), conn, db.Resolve("libsql"), d, Request{FullRead: true, Now: now, Input: map[string]any{}})
 			if err != nil {
 				t.Fatalf("empty input must run: %v", err)
@@ -335,5 +345,109 @@ func TestPOSSaleLines(t *testing.T) {
 	var ie *InputError
 	if !errors.As(err, &ie) || ie.Field != "sale" {
 		t.Fatalf("missing sale err = %v, want InputError on sale", err)
+	}
+}
+
+// TestPOSClosedSession (#384): closed_session (Manager/Owner, any till) and
+// my_closed_session (Cashier, own till) return one closed till by its reference
+// with the exact cash figures the close-till screen words over/short from, and
+// never an open till.
+func TestPOSClosedSession(t *testing.T) {
+	dts, err := doctype.ParseDirectory("../config/pos/doctypes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := doctype.NewRegistry()
+	for _, d := range dts {
+		reg.Register(d)
+	}
+	defs, err := LoadDir("../config/pos/queries", reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var def, mine *Definition
+	for _, d := range defs {
+		switch d.Name {
+		case "closed_session":
+			def = d
+		case "my_closed_session":
+			mine = d
+		}
+	}
+	if def == nil || mine == nil {
+		t.Fatal("closed_session or my_closed_session missing")
+	}
+	// Same contract, one owner-scoped: Studio picks whichever the catalog shows.
+	if def.OwnerField != "" || mine.OwnerField != "cashier" {
+		t.Fatalf("owner_field closed_session=%q my_closed_session=%q", def.OwnerField, mine.OwnerField)
+	}
+	for _, d := range []*Definition{def, mine} {
+		if d.Limit != 1 || len(d.RequiredInputs()) != 1 || d.RequiredInputs()[0] != "name" || !slices.Equal(d.OutputFields(), def.OutputFields()) || !reflect.DeepEqual(d.Filters, def.Filters) {
+			t.Fatalf("%s limit=%d required=%v fields=%v", d.Name, d.Limit, d.RequiredInputs(), d.OutputFields())
+		}
+	}
+	conn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Skip(err)
+	}
+	conn.SetMaxOpenConns(1)
+	for _, s := range []string{
+		"CREATE TABLE `tabTill Session` (name TEXT, shift TEXT, register TEXT, location TEXT, cashier TEXT, status TEXT, opening_float NUMERIC, expected_cash NUMERIC, closing_count NUMERIC, variance NUMERIC, closed_at TEXT, creation TEXT)",
+		"INSERT INTO `tabTill Session` VALUES " +
+			"('SHORT','SH1','R1','L1','ann','Closed',100.10,250.55,248.30,-2.25,'2026-11-06 17:00:00','2026-11-06 08:00:00')," +
+			"('OVER','SH2','R1','L1','ann','Closed',100,200,203.50,3.50,'2026-11-06 18:00:00','2026-11-06 09:00:00')," +
+			"('EXACT','SH3','R2','L1','bob','Closed',50,120.75,120.75,0,'2026-11-06 19:00:00','2026-11-06 10:00:00')," +
+			"('OPEN','SH4','R2','L1','ann','Open',10,10,NULL,NULL,NULL,'2026-11-06 11:00:00')," +
+			"('OLD','SH5','R2','L1',NULL,'Closed',10,10,9,-1,'2026-11-05 19:00:00','2026-11-05 10:00:00')",
+	} {
+		if _, err := conn.Exec(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(d *Definition, req Request, name string) []map[string]any {
+		t.Helper()
+		req.Input = map[string]any{"name": name}
+		p, err := Run(context.Background(), conn, db.Resolve("libsql"), d, req)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return p.Rows
+	}
+	// Manager and Owner read every closed till (a full read), old-style included.
+	for _, tc := range []struct {
+		name                         string
+		float, expected, count, diff string
+	}{
+		{"SHORT", "100.1", "250.55", "248.3", "-2.25"},
+		{"OVER", "100", "200", "203.5", "3.5"},
+		{"EXACT", "50", "120.75", "120.75", "0"},
+	} {
+		rows := run(def, Request{FullRead: true, Actor: "boss"}, tc.name)
+		if len(rows) != 1 {
+			t.Fatalf("%s rows = %v", tc.name, rows)
+		}
+		r := rows[0]
+		// SQLite hands NUMERIC back as float64; MySQL DECIMAL stays exact text (see the MySQL integration test).
+		if fmt.Sprint(r["opening_float"]) != tc.float || fmt.Sprint(r["expected_cash"]) != tc.expected || fmt.Sprint(r["closing_count"]) != tc.count || fmt.Sprint(r["variance"]) != tc.diff || r["closed_at"] == nil || len(r) != 10 {
+			t.Fatalf("%s row = %#v", tc.name, r)
+		}
+	}
+	if rows := run(def, Request{FullRead: true, Actor: "boss"}, "OLD"); len(rows) != 1 {
+		t.Fatalf("manager OLD = %v", rows)
+	}
+	// An open till, an unknown reference: nothing.
+	for _, name := range []string{"OPEN", "NOPE"} {
+		if rows := run(def, Request{FullRead: true, Actor: "boss"}, name); len(rows) != 0 {
+			t.Fatalf("%s must not be returned: %v", name, rows)
+		}
+	}
+	// A Cashier reads only their own closed till; old-style (no cashier) is hidden.
+	for name, want := range map[string]int{"SHORT": 1, "OVER": 1, "EXACT": 0, "OPEN": 0, "OLD": 0} {
+		if rows := run(mine, Request{FullRead: false, Actor: "ann"}, name); len(rows) != want {
+			t.Fatalf("ann %s rows = %v, want %d", name, rows, want)
+		}
+	}
+	if rows := run(mine, Request{FullRead: false, Actor: "bob"}, "SHORT"); len(rows) != 0 {
+		t.Fatalf("bob sees ann's till: %v", rows)
 	}
 }

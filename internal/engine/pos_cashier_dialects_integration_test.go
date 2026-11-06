@@ -429,6 +429,66 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if got := one("SELECT location FROM "+tbl("Sale")+" WHERE till_session = ?", session); got != "LOC-1" {
 				t.Fatalf("sale location = %q", got)
 			}
+
+			// 7. #384: closed_session reads a closed till by reference with the
+			// exact cash figures, and only the right actors see it.
+			// The catalog shows each role one of the two: Cashier my_closed_session, Manager/Owner closed_session.
+			closedQuery := func(role string) string {
+				if role == "Cashier" {
+					return "my_closed_session"
+				}
+				return "closed_session"
+			}
+			closedSession := func(role, name string) []map[string]any {
+				t.Helper()
+				rec := serve(role, http.MethodPost, "/q/pos.core/"+closedQuery(role), fmt.Sprintf(`{"input":{"name":%q}}`, name))
+				var out struct {
+					Data struct {
+						Data []map[string]any `json:"data"`
+					} `json:"data"`
+				}
+				if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+					t.Fatalf("%s %s status=%d body=%s", role, closedQuery(role), rec.Code, rec.Body.String())
+				}
+				return out.Data.Data
+			}
+			if rows := closedSession("Cashier", session); len(rows) != 0 {
+				t.Fatalf("closed_session returned an open till: %v", rows)
+			}
+			// 300 float + 180 sale = 480 expected; the cashier counts 475.
+			run("close_till", "k-close-sess", fmt.Sprintf(`{"shift":%q,"closing_count":475}`, rows[0]["shift"]))
+			for _, tc := range []struct {
+				role, name string
+				want       int
+			}{{"Cashier", session, 1}, {"Manager", session, 1}, {"Owner", session, 1}, {"Cashier", till, 0}, {"Manager", till, 1}, {"Owner", till, 1}} {
+				got := closedSession(tc.role, tc.name)
+				if len(got) != tc.want {
+					t.Fatalf("%s closed_session %s = %v, want %d row(s)", tc.role, tc.name, got, tc.want)
+				}
+				if tc.want == 1 && tc.name == session {
+					// Decimals are exact strings, variance = closing_count - expected_cash.
+					r := got[0]
+					exact := func(field, want string) bool {
+						text, isText := r[field].(string)
+						d, err := decimal.NewFromString(text)
+						return isText && err == nil && d.Equal(decimal.RequireFromString(want))
+					}
+					if r["name"] != session || r["cashier"] != "Cashier" || !exact("opening_float", "300") || !exact("expected_cash", "480") || !exact("closing_count", "475") || !exact("variance", "-5") || r["closed_at"] == nil || len(r) != 10 {
+						t.Fatalf("%s closed_session row = %#v", tc.role, r)
+					}
+				}
+			}
+			for _, role := range []string{"Cashier", "Manager", "Owner"} {
+				if rec := serve(role, http.MethodPost, "/q/pos.core/"+closedQuery(role), `{"input":{}}`); rec.Code != http.StatusBadRequest {
+					t.Fatalf("%s %s without name = %d: %s", role, closedQuery(role), rec.Code, rec.Body.String())
+				}
+			}
+			// No role holds both queries.
+			for role, other := range map[string]string{"Cashier": "closed_session", "Manager": "my_closed_session", "Owner": "my_closed_session"} {
+				if rec := serve(role, http.MethodPost, "/q/pos.core/"+other, fmt.Sprintf(`{"input":{"name":%q}}`, session)); rec.Code != http.StatusForbidden {
+					t.Fatalf("%s %s = %d, want 403: %s", role, other, rec.Code, rec.Body.String())
+				}
+			}
 		})
 	}
 }
