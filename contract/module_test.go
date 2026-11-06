@@ -685,3 +685,35 @@ func TestPublishedQueryRequestBoundsInputAndPagination(t *testing.T) {
 		t.Fatal("query limit above public bound accepted")
 	}
 }
+
+func TestApplicationCatalogRevisionZeroOnlyForModulelessTenant(t *testing.T) {
+	scope := BusinessScope{TenantID: "tenant-a", Kind: ScopeKindTenant}
+	in := SchemaRef{ID: "sales.input", Version: 1}
+	out := SchemaRef{ID: "sales.output", Version: 1}
+	empty := func(revision uint64) ApplicationCatalog {
+		return ApplicationCatalog{Revision: revision, BusinessScope: scope, Modules: []ApplicationCatalogModule{}, PublishedQueries: []ApplicationCatalogQuery{}, PublishedProjections: []ApplicationCatalogProjection{}, PublishedOperations: []ApplicationCatalogOperation{}, Schemas: []ModuleSchemaDocument{}, AllowedEntityChoices: []BusinessScope{}, Blockers: []ModuleBlocker{}}
+	}
+	withModule := empty(0)
+	withModule.Modules = []ApplicationCatalogModule{{ID: "sales.orders", Version: "1.0.0", State: string(ModuleActive)}}
+	withQuery := empty(0)
+	withQuery.Modules = withModule.Modules
+	withQuery.PublishedQueries = []ApplicationCatalogQuery{{OwnerModuleID: "sales.orders", Name: "list", Capability: "sales.read", Route: "/api/v1/modules/sales.orders/queries/list", InputSchema: in, OutputSchema: out, ScopePolicy: ScopeTenantShared, AllowedFields: []string{"id"}, PageLimit: 10}}
+	withQuery.Schemas = []ModuleSchemaDocument{{Ref: in, Schema: []byte(`{"type":"object"}`)}, {Ref: out, Schema: []byte(`{"type":"array"}`)}}
+	tests := []struct {
+		name    string
+		catalog ApplicationCatalog
+		wantErr bool
+	}{
+		{name: "module-less tenant has no snapshot revision", catalog: empty(0)},
+		{name: "module-less tenant with a revision", catalog: empty(3)},
+		{name: "installed module requires a snapshot revision", catalog: withModule, wantErr: true},
+		{name: "published surface requires a snapshot revision", catalog: withQuery, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.catalog.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
