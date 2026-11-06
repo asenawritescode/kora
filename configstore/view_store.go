@@ -41,8 +41,8 @@ func (s *Store) saveViewRowTx(tx *sql.Tx, v *doctype.View, site string, idx int)
 	// Normalize defaults before persisting.
 	v.Normalize()
 
-	// Serialize full component tree into config_json.
-	configBytes, err := json.Marshal(v.Components)
+	// Serialize the component tree (and declared resources) into config_json.
+	configBytes, err := encodeViewConfig(v)
 	if err != nil {
 		return fmt.Errorf("marshaling components for view %q: %w", v.Name, err)
 	}
@@ -178,7 +178,7 @@ func (s *Store) LoadViews(site string) ([]*doctype.View, error) {
 					return nil, fmt.Errorf("unmarshaling page manifest for view %q: %w", name, err)
 				}
 				v = manifest.ToView()
-			} else if err := json.Unmarshal([]byte(configJSON.String), &v.Components); err != nil {
+			} else if err := decodeViewConfig(configJSON.String, v); err != nil {
 				return nil, fmt.Errorf("unmarshaling components for view %q: %w", name, err)
 			}
 		}
@@ -245,7 +245,7 @@ func (s *Store) LoadView(name, site string) (*doctype.View, error) {
 				return nil, fmt.Errorf("unmarshaling page manifest: %w", err)
 			}
 			v = manifest.ToView()
-		} else if err := json.Unmarshal([]byte(configJSON.String), &v.Components); err != nil {
+		} else if err := decodeViewConfig(configJSON.String, v); err != nil {
 			return nil, fmt.Errorf("unmarshaling components: %w", err)
 		}
 	}
@@ -261,6 +261,32 @@ func (s *Store) LoadView(name, site string) (*doctype.View, error) {
 
 	v.Normalize()
 	return v, nil
+}
+
+// viewConfig is the config_json shape of a view that declares resources.
+// Views without resources keep the historic component array.
+type viewConfig struct {
+	Resources  []doctype.PageResource  `json:"resources"`
+	Components []doctype.ViewComponent `json:"components"`
+}
+
+func encodeViewConfig(v *doctype.View) ([]byte, error) {
+	if len(v.Resources) == 0 {
+		return json.Marshal(v.Components)
+	}
+	return json.Marshal(viewConfig{Resources: v.Resources, Components: v.Components})
+}
+
+func decodeViewConfig(raw string, v *doctype.View) error {
+	if !strings.HasPrefix(strings.TrimSpace(raw), "{") {
+		return json.Unmarshal([]byte(raw), &v.Components)
+	}
+	var config viewConfig
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		return err
+	}
+	v.Resources, v.Components = config.Resources, config.Components
+	return nil
 }
 
 func isPageManifestJSON(value string) bool {

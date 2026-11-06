@@ -2333,6 +2333,53 @@
       ],
       "type": "object"
     },
+    "GrantTenantMember": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "maxLength": 254,
+          "minLength": 3,
+          "type": "string",
+          "x-max-utf8-bytes": 254
+        },
+        "full_name": {
+          "minLength": 1,
+          "type": "string",
+          "x-max-utf8-bytes": 140
+        },
+        "invitation_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        },
+        "subject": {
+          "maxLength": 140,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,139}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "email",
+        "full_name",
+        "invitation_id",
+        "meta",
+        "roles",
+        "subject"
+      ],
+      "type": "object"
+    },
     "HistoricalSnapshot": {
       "additionalProperties": false,
       "properties": {
@@ -2663,6 +2710,9 @@
               "tenant.invitation.deliver",
               "tenant.invitation.reconcile",
               "tenant.module.lifecycle",
+              "tenant.member.plan",
+              "tenant.member.grant",
+              "tenant.member.revoke",
               "operation.read"
             ],
             "type": "string"
@@ -4193,6 +4243,34 @@
       ],
       "type": "object"
     },
+    "PlanTenantMember": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "maxLength": 254,
+          "minLength": 3,
+          "type": "string",
+          "x-max-utf8-bytes": 254
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "email",
+        "meta",
+        "roles"
+      ],
+      "type": "object"
+    },
     "ProjectionCheckpoint": {
       "additionalProperties": false,
       "properties": {
@@ -5318,6 +5396,31 @@
       ],
       "type": "object"
     },
+    "RevokeTenantMember": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "minLength": 1,
+          "type": "string",
+          "x-max-utf8-bytes": 1000
+        },
+        "subject": {
+          "maxLength": 140,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,139}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "reason",
+        "subject"
+      ],
+      "type": "object"
+    },
     "ScheduledJobDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -5810,6 +5913,49 @@
         "site_id",
         "status",
         "version"
+      ],
+      "type": "object"
+    },
+    "TenantMemberPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "problems": {
+          "items": {
+            "$ref": "#/$defs/TenantMemberProblem"
+          },
+          "maxItems": 8,
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "type": "object"
+    },
+    "TenantMemberProblem": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "role.unknown",
+            "role.not_assignable",
+            "member.already_exists",
+            "member.email_in_use"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
       ],
       "type": "object"
     },
@@ -8353,6 +8499,53 @@
       ],
       "type": "object"
     },
+    "GrantTenantMember": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "maxLength": 254,
+          "minLength": 3,
+          "type": "string",
+          "x-max-utf8-bytes": 254
+        },
+        "full_name": {
+          "minLength": 1,
+          "type": "string",
+          "x-max-utf8-bytes": 140
+        },
+        "invitation_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        },
+        "subject": {
+          "maxLength": 140,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,139}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "email",
+        "full_name",
+        "invitation_id",
+        "meta",
+        "roles",
+        "subject"
+      ],
+      "type": "object"
+    },
     "HistoricalSnapshot": {
       "additionalProperties": false,
       "properties": {
@@ -8683,6 +8876,9 @@
               "tenant.invitation.deliver",
               "tenant.invitation.reconcile",
               "tenant.module.lifecycle",
+              "tenant.member.plan",
+              "tenant.member.grant",
+              "tenant.member.revoke",
               "operation.read"
             ],
             "type": "string"
@@ -10213,6 +10409,34 @@
       ],
       "type": "object"
     },
+    "PlanTenantMember": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "maxLength": 254,
+          "minLength": 3,
+          "type": "string",
+          "x-max-utf8-bytes": 254
+        },
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "email",
+        "meta",
+        "roles"
+      ],
+      "type": "object"
+    },
     "ProjectionCheckpoint": {
       "additionalProperties": false,
       "properties": {
@@ -11318,6 +11542,31 @@
       ],
       "type": "object"
     },
+    "RevokeTenantMember": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/CommandMeta"
+        },
+        "reason": {
+          "minLength": 1,
+          "type": "string",
+          "x-max-utf8-bytes": 1000
+        },
+        "subject": {
+          "maxLength": 140,
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,139}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "reason",
+        "subject"
+      ],
+      "type": "object"
+    },
     "ScheduledJobDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -11813,6 +12062,49 @@
       ],
       "type": "object"
     },
+    "TenantMemberPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "problems": {
+          "items": {
+            "$ref": "#/$defs/TenantMemberProblem"
+          },
+          "maxItems": 8,
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "type": "object"
+    },
+    "TenantMemberProblem": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "role.unknown",
+            "role.not_assignable",
+            "member.already_exists",
+            "member.email_in_use"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
     "ValidationIssue": {
       "additionalProperties": false,
       "properties": {
@@ -12132,6 +12424,9 @@
       "tenant.invitation.deliver",
       "tenant.invitation.reconcile",
       "tenant.module.lifecycle",
+      "tenant.member.plan",
+      "tenant.member.grant",
+      "tenant.member.revoke",
       "operation.read"
     ],
     "ModuleAccess": [
@@ -12233,6 +12528,12 @@
     ],
     "SubjectBinding": [
       "instance_subject"
+    ],
+    "TenantMemberProblemCode": [
+      "role.unknown",
+      "role.not_assignable",
+      "member.already_exists",
+      "member.email_in_use"
     ],
     "TenantState": [
       "provisioning",

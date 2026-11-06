@@ -19,8 +19,17 @@ func TestInventoryStockCommands(t *testing.T) {
 	if recv == nil || adj == nil {
 		t.Fatalf("missing commands: %v", by)
 	}
-	if got := recv.Steps[0].Update.Adjust["quantity"]; got.Increase == "" {
+	if e := recv.Steps[0].Ensure; e == nil || e.Record != "Stock Balance" || recv.Steps[0].As == "" {
+		t.Errorf("receive must ensure a Stock Balance exists first: %+v", recv.Steps[0])
+	}
+	if len(recv.Require) != 1 || recv.Require[0].Lock == nil || recv.Require[0].Lock.Record != "Item" {
+		t.Errorf("receive must lock the Item so two first receipts cannot both create a balance: %+v", recv.Require)
+	}
+	if got := recv.Steps[1].Update.Adjust["quantity"]; got.Increase == "" {
 		t.Errorf("receive must increase balance: %+v", got)
+	}
+	if adj.Steps[0].Ensure != nil {
+		t.Errorf("adjust must not create a missing balance")
 	}
 	got := adj.Steps[0].Update.Adjust["quantity"]
 	if got.Decrease == "" || got.Min != "0" {

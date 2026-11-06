@@ -185,6 +185,39 @@ var pageComponentContracts = map[string]PageComponentContract{
 	"print_layout": componentContract("print_layout", false, nil),
 }
 
+// publishedComponent builds a version 2 contract whose resource roles accept
+// only owner-published queries; field bindings resolve against the bound
+// query's allowed fields instead of DocType fields.
+func publishedComponent(name string, resources map[string]PageResourceBindingContract, bindings map[string]PageBindingContract) PageComponentContract {
+	contract := componentContract(name, len(resources) > 0, bindings)
+	contract.Version = 2
+	contract.Resources = resources
+	return contract
+}
+
+func publishedField(role string, required bool) PageBindingContract {
+	return PageBindingContract{Kind: "field", Required: required, FieldTypes: []string{"*"}, ResourceRole: role}
+}
+
+var publishedItems = PageResourceBindingContract{Required: true, Query: publishedQueryResource}
+
+// publishedPageComponentContracts are the version 2 register contracts. A view
+// component opts in with version: 2; version 1 views keep the contracts above.
+var publishedPageComponentContracts = map[string]PageComponentContract{
+	"product_grid": publishedComponent("product_grid", map[string]PageResourceBindingContract{"items": publishedItems}, map[string]PageBindingContract{
+		"title": publishedField("items", true), "price": publishedField("items", true), "badge": publishedField("items", false),
+		"image": publishedField("items", false), "sku": publishedField("items", false), "subtitle": publishedField("items", false),
+	}),
+	"category_tabs": publishedComponent("category_tabs", map[string]PageResourceBindingContract{"items": publishedItems, "categories": {Query: publishedQueryResource}}, map[string]PageBindingContract{
+		"group_field":          publishedField("items", true),
+		"category_label_field": {Kind: "field", FieldTypes: []string{"*"}, ResourceRole: "categories", RequiredWhenResourceRole: "categories"},
+	}),
+	"cart_panel": publishedComponent("cart_panel", nil, nil),
+	"tender_panel": publishedComponent("tender_panel", nil, map[string]PageBindingContract{
+		"submit_operation_ref": {Kind: "operation", Required: true}, "methods": literalBinding(false), "quick_cash": literalBinding(false),
+	}),
+}
+
 func input(typeName string, required bool, reference string) PageValueContract {
 	return PageValueContract{Type: typeName, Required: required, Reference: reference}
 }
@@ -229,6 +262,16 @@ var pageActionContracts = map[string]PageActionContract{
 func PageComponentContractFor(name string) (PageComponentContract, bool) {
 	contract, ok := pageComponentContracts[name]
 	return contract, ok
+}
+
+// PageComponentContractForVersion returns the contract a view component
+// selects with its version; zero and one select the original contract.
+func PageComponentContractForVersion(name string, version int) (PageComponentContract, bool) {
+	if version <= 1 {
+		return PageComponentContractFor(name)
+	}
+	contract, ok := publishedPageComponentContracts[name]
+	return contract, ok && contract.Version == version
 }
 
 // PageActionContractFor returns the registered contract for an action command.

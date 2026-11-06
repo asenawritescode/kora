@@ -373,10 +373,13 @@ func pageComponentsFromView(components []ViewComponent) []PageComponent {
 		if len(c.Filters) > 0 {
 			props["filters"] = append([]ViewFilter(nil), c.Filters...)
 		}
+		if len(c.Context) > 0 {
+			props["context"] = c.Context
+		}
 		out = append(out, PageComponent{
 			ID:               c.ID,
 			Component:        c.Type,
-			Version:          1,
+			Version:          max(c.Version, 1),
 			Region:           c.Region,
 			Position:         c.Position,
 			Span:             c.Span,
@@ -402,6 +405,8 @@ func viewComponentsFromPage(components []PageComponent) []ViewComponent {
 			Data:             c.Data,
 			ResourceBindings: c.ResourceBindings,
 			Bindings:         stringMapProp(c.Props, "bindings"),
+			Context:          stringMapProp(c.Props, "context"),
+			Version:          viewComponentVersion(c.Version),
 			Filters:          viewFiltersFromProps(c.Props["filters"]),
 			Actions:          viewActionsFromIDs(c.Actions),
 			DesktopColumns:   stringSliceProp(c.Props, "desktop_columns"),
@@ -505,9 +510,11 @@ func viewActionsFromIDs(ids []string) []ViewAction {
 	return out
 }
 
+// normalizePageLayout keeps the layout types the Studio renderer knows.
+// "register" places components in the status, actions, main and side regions.
 func normalizePageLayout(layout string) string {
 	switch layout {
-	case "two_panel", "three_panel", "grid":
+	case "two_panel", "three_panel", "grid", "register":
 		return layout
 	default:
 		return "single"
@@ -604,4 +611,12 @@ func viewFiltersFromProps(value any) []ViewFilter {
 		}
 	}
 	return filters
+}
+
+// viewComponentVersion keeps v1 implicit so existing views round-trip unchanged.
+func viewComponentVersion(version int) int {
+	if version > 1 {
+		return version
+	}
+	return 0
 }

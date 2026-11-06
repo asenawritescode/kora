@@ -10,6 +10,12 @@
   write: true
   create: true
   delete: false
+- doctype: Item Category
+  role: Inventory Manager
+  read: true
+  write: true
+  create: true
+  delete: false
 - doctype: Stock Entry
   role: Inventory Manager
   read: true
@@ -35,5 +41,8 @@
   role: Inventory Manager
   read: true
 - doctype: module.inventory.core.query.low_stock
+  role: Inventory Manager
+  read: true
+- doctype: module.inventory.core.query.item_categories
   role: Inventory Manager
   read: true

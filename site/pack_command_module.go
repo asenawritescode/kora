@@ -100,7 +100,19 @@ func fieldSchema(f doctype.Field, records map[string]*doctype.DocType) map[strin
 			items["properties"] = props
 		}
 		return map[string]any{"type": "array", "items": items}
-	case "Data", "Link", "Select", "Date", "Datetime", "Text", "Small Text", "Long Text":
+	case "Select":
+		out := map[string]any{"type": "string"}
+		var enum []string
+		for _, o := range strings.Split(f.Options, "\n") {
+			if o = strings.TrimSpace(o); o != "" {
+				enum = append(enum, o)
+			}
+		}
+		if len(enum) > 0 {
+			out["enum"] = enum
+		}
+		return out
+	case "Data", "Link", "Date", "Datetime", "Text", "Small Text", "Long Text":
 		return map[string]any{"type": "string"}
 	}
 	return map[string]any{}
@@ -115,10 +127,15 @@ func commandInputSchema(cmd *kernel.CommandResource, records map[string]*doctype
 		}
 	}
 	props := map[string]any{}
+	required := map[string]bool{}
 	for _, m := range inputRef.FindAllSubmatch(raw, -1) {
 		name := string(m[1])
-		if f, ok := fields[name]; ok {
+		if extra, ok := cmd.Input.Extra[name]; ok {
+			props[name] = map[string]any{"type": extra.Type}
+			required[name] = extra.Required
+		} else if f, ok := fields[name]; ok {
 			props[name] = fieldSchema(f, records)
+			required[name] = f.Reqd && f.Default == "" && f.Computed == "" && f.LinkedField == ""
 		} else {
 			props[name] = map[string]any{}
 		}
@@ -128,7 +145,18 @@ func commandInputSchema(cmd *kernel.CommandResource, records map[string]*doctype
 			props[string(m[1])] = map[string]any{"type": "array"}
 		}
 	}
-	out, _ := json.Marshal(map[string]any{"type": "object", "properties": props, "additionalProperties": false})
+	schema := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
+	var req []string
+	for name, r := range required {
+		if r {
+			req = append(req, name)
+		}
+	}
+	if len(req) > 0 {
+		sort.Strings(req)
+		schema["required"] = req
+	}
+	out, _ := json.Marshal(schema)
 	return out
 }
 

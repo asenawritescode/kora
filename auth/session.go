@@ -590,6 +590,62 @@ func (sm *SessionManager) DeleteSession(sid string) {
 	sm.cacheMu.Unlock()
 }
 
+// SessionManagerForRequest returns the session manager pinned to the routed
+// tenant request, the one validateSession uses, so handlers revoke through the
+// same cache that serves authentication.
+func SessionManagerForRequest(c *gin.Context, db *sql.DB) *SessionManager {
+	return sessionManagerForRequest(c, db)
+}
+
+// RevokeUserSessions deletes every session of a user in a site and drops the
+// matching cache entries on this instance.
+//
+// Other instances keep a validated session in their in-memory cache for up to
+// sessionCacheTTL (30s) before re-reading _kora_session, so a revoked session
+// can stay usable there for at most that long. This is an accepted bound.
+func (sm *SessionManager) RevokeUserSessions(ctx context.Context, site, user string) error {
+	if sm == nil || sm.DB == nil {
+		return fmt.Errorf("no database connection available: %w", ErrNoDBConnection)
+	}
+	if _, err := sm.DB.ExecContext(ctx, sm.revokeUserSessionsSQL(), site, user); err != nil {
+		return fmt.Errorf("revoking user sessions: %w", err)
+	}
+	sm.PurgeUserCache(site, user)
+	return nil
+}
+
+// RevokeUserSessionsTx deletes a user's sessions inside the caller's
+// transaction, so a role or enabled change and the revocation commit together.
+// Call PurgeUserCache after a successful commit (same 30s cross-instance bound
+// as RevokeUserSessions).
+func (sm *SessionManager) RevokeUserSessionsTx(ctx context.Context, tx *sql.Tx, site, user string) error {
+	if tx == nil {
+		return fmt.Errorf("revoking user sessions requires a transaction")
+	}
+	if _, err := tx.ExecContext(ctx, sm.revokeUserSessionsSQL(), site, user); err != nil {
+		return fmt.Errorf("revoking user sessions: %w", err)
+	}
+	return nil
+}
+
+func (sm *SessionManager) revokeUserSessionsSQL() string {
+	return sm.sql("DELETE FROM _kora_session WHERE site = ? AND " + sm.userColumn() + " = ?")
+}
+
+// PurgeUserCache drops this instance's cached sessions of a user in a site.
+func (sm *SessionManager) PurgeUserCache(site, user string) {
+	if sm == nil {
+		return
+	}
+	sm.cacheMu.Lock()
+	defer sm.cacheMu.Unlock()
+	for sid, entry := range sm.cache {
+		if entry.site == site && entry.user != nil && entry.user.Name == user {
+			sm.deleteCacheEntryLocked(sid)
+		}
+	}
+}
+
 // InvalidateSession removes a session from the cache without deleting it from the database.
 // Use this when user state changes (role change, password change, disable) to force re-validation.
 func (sm *SessionManager) InvalidateSession(sid string) {

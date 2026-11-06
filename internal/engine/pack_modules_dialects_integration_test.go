@@ -177,8 +177,8 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 					t.Errorf("owner catalog lacks operation %s", name)
 				}
 			}
-			if len(ownerQueries) != 9 {
-				t.Errorf("owner queries = %d, want 9: %v", len(ownerQueries), ownerQueries)
+			if len(ownerQueries) != 10 {
+				t.Errorf("owner queries = %d, want 10: %v", len(ownerQueries), ownerQueries)
 			}
 			checkSchemas("Owner", owner)
 			sale := false

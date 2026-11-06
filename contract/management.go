@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 //contract:enum:v2
@@ -36,7 +38,10 @@ const (
 	ManagementCapabilityTenantDeleteRetry     ManagementCapability = "tenant.delete.reconcile"
 	ManagementCapabilityTenantInvitation      ManagementCapability = "tenant.invitation.deliver"
 	ManagementCapabilityTenantInvitationRetry ManagementCapability = "tenant.invitation.reconcile"
-	ManagementCapabilityModuleLifecycle ManagementCapability = "tenant.module.lifecycle"
+	ManagementCapabilityModuleLifecycle       ManagementCapability = "tenant.module.lifecycle"
+	ManagementCapabilityTenantMemberPlan      ManagementCapability = "tenant.member.plan"
+	ManagementCapabilityTenantMemberGrant     ManagementCapability = "tenant.member.grant"
+	ManagementCapabilityTenantMemberRevoke    ManagementCapability = "tenant.member.revoke"
 	ManagementCapabilityOperationRead         ManagementCapability = "operation.read"
 )
 
@@ -198,8 +203,9 @@ func ValidateManagementCapabilitiesV2(value ManagementCapabilitiesV2) error {
 		ManagementCapabilityTenantDelete: {}, ManagementCapabilityTenantDeleteRetry: {},
 		ManagementCapabilityTenantInvitation:      {},
 		ManagementCapabilityTenantInvitationRetry: {},
-		ManagementCapabilityModuleLifecycle: {},
-		ManagementCapabilityOperationRead:         {},
+		ManagementCapabilityModuleLifecycle:       {},
+		ManagementCapabilityTenantMemberPlan:      {}, ManagementCapabilityTenantMemberGrant: {}, ManagementCapabilityTenantMemberRevoke: {},
+		ManagementCapabilityOperationRead: {},
 	}
 	seen := make(map[ManagementCapability]struct{}, len(value.Capabilities))
 	for _, capability := range value.Capabilities {
@@ -295,6 +301,97 @@ type ReconcileTenantInvitationOperation struct {
 	Outcome InvitationDeliveryOutcome `json:"outcome"`
 	//contract:minLength=8
 	//contract:maxLength=1000
+	Reason string `json:"reason"`
+}
+
+// PlanTenantMember asks the Engine whether a Cloud invitation may later grant
+// this email the requested tenant roles. Tenant identity comes from the
+// authenticated management route. Planning has no durable effect.
+//
+//contract:wire:v2
+type PlanTenantMember struct {
+	Meta CommandMeta `json:"meta"`
+	//contract:minLength=3
+	//contract:maxLength=254
+	//contract:maxBytes=254
+	Email string `json:"email"`
+	// Roles holds exactly one tenant role name in M1.
+	//contract:minItems=1
+	//contract:maxItems=1
+	Roles []string `json:"roles"`
+}
+
+// TenantMemberProblemCode names one reason the Engine refuses a member plan.
+//
+//contract:enum:v2
+type TenantMemberProblemCode string
+
+const (
+	TenantMemberRoleUnknown       TenantMemberProblemCode = "role.unknown"
+	TenantMemberRoleNotAssignable TenantMemberProblemCode = "role.not_assignable"
+	TenantMemberAlreadyExists     TenantMemberProblemCode = "member.already_exists"
+	TenantMemberEmailInUse        TenantMemberProblemCode = "member.email_in_use"
+)
+
+//contract:wire:v2
+type TenantMemberProblem struct {
+	Code TenantMemberProblemCode `json:"code"`
+	//contract:minLength=1
+	//contract:maxLength=500
+	Message string `json:"message"`
+}
+
+// TenantMemberPlan is the Engine's role and membership check. Allowed is true
+// exactly when Problems is empty.
+//
+//contract:wire:v2
+type TenantMemberPlan struct {
+	Allowed bool `json:"allowed"`
+	//contract:maxItems=8
+	Problems []TenantMemberProblem `json:"problems,omitempty"`
+}
+
+// GrantTenantMember starts a durable operation that creates or re-enables the
+// tenant user keyed by the Cloud subject with the invited roles. The
+// idempotency key must equal the Cloud invitation ID, so retries of one
+// acceptance replay the same operation. The Engine rechecks the roles.
+//
+//contract:wire:v2
+type GrantTenantMember struct {
+	Meta CommandMeta `json:"meta"`
+	//contract:minLength=1
+	//contract:maxLength=160
+	InvitationID string `json:"invitation_id"`
+	// Subject is the immutable Cloud user ID and becomes the tenant user key.
+	//contract:minLength=3
+	//contract:maxLength=140
+	//contract:pattern=^[A-Za-z0-9][A-Za-z0-9._:-]{2,139}$
+	Subject PrincipalID `json:"subject"`
+	//contract:minLength=3
+	//contract:maxLength=254
+	//contract:maxBytes=254
+	Email string `json:"email"`
+	//contract:minLength=1
+	//contract:maxBytes=140
+	FullName string `json:"full_name"`
+	//contract:minItems=1
+	//contract:maxItems=1
+	Roles []string `json:"roles"`
+}
+
+// RevokeTenantMember starts a durable operation that disables the tenant user
+// keyed by the Cloud subject, clears its roles and drops its sessions. The row
+// is kept because records reference it.
+//
+//contract:wire:v2
+type RevokeTenantMember struct {
+	Meta CommandMeta `json:"meta"`
+	//contract:minLength=3
+	//contract:maxLength=140
+	//contract:pattern=^[A-Za-z0-9][A-Za-z0-9._:-]{2,139}$
+	Subject PrincipalID `json:"subject"`
+	//contract:minLength=1
+	//contract:maxBytes=1000
 	Reason string `json:"reason"`
 }
 
@@ -440,6 +537,7 @@ var (
 	managementRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$`)
 	packageDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	managementAliasLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+	memberSubjectPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{2,139}$`)
 )
 
 // ValidateProvisionTenant enforces bounded, opaque allocation references and
@@ -512,6 +610,108 @@ func ValidateReconcileTenantInvitationOperation(cmd ReconcileTenantInvitationOpe
 	}
 	if len(strings.TrimSpace(cmd.Reason)) < 8 || len(cmd.Reason) > 1000 {
 		return fmt.Errorf("invitation reconciliation reason must be 8 to 1000 bytes")
+	}
+	return nil
+}
+
+// maxTenantMemberKeyBytes matches the tenant user primary key column.
+const maxTenantMemberKeyBytes = 140
+
+func ValidatePlanTenantMember(cmd PlanTenantMember) error {
+	if err := validateManagementMeta(cmd.Meta); err != nil {
+		return err
+	}
+	if err := validateMemberEmail(cmd.Email); err != nil {
+		return err
+	}
+	return validateMemberRoles(cmd.Roles)
+}
+
+func ValidateGrantTenantMember(cmd GrantTenantMember) error {
+	if err := validateManagementMeta(cmd.Meta); err != nil {
+		return err
+	}
+	if cmd.InvitationID == "" || string(cmd.Meta.IdempotencyKey) != cmd.InvitationID {
+		return fmt.Errorf("member grant idempotency key must equal the invitation ID")
+	}
+	if err := validateMemberSubject(cmd.Subject); err != nil {
+		return err
+	}
+	if err := validateMemberEmail(cmd.Email); err != nil {
+		return err
+	}
+	if err := validateMemberLabel("member full name", cmd.FullName); err != nil {
+		return err
+	}
+	return validateMemberRoles(cmd.Roles)
+}
+
+func ValidateRevokeTenantMember(cmd RevokeTenantMember) error {
+	if err := validateManagementMeta(cmd.Meta); err != nil {
+		return err
+	}
+	if err := validateMemberSubject(cmd.Subject); err != nil {
+		return err
+	}
+	if !utf8.ValidString(cmd.Reason) || strings.TrimSpace(cmd.Reason) == "" || len(cmd.Reason) > 1000 {
+		return fmt.Errorf("member revocation reason must be 1 to 1000 bytes of UTF-8")
+	}
+	return nil
+}
+
+func ValidateTenantMemberPlan(value TenantMemberPlan) error {
+	if len(value.Problems) > 8 || value.Allowed != (len(value.Problems) == 0) {
+		return fmt.Errorf("member plan must be allowed exactly when it has no problems, with at most 8 problems")
+	}
+	for _, problem := range value.Problems {
+		switch problem.Code {
+		case TenantMemberRoleUnknown, TenantMemberRoleNotAssignable, TenantMemberAlreadyExists, TenantMemberEmailInUse:
+		default:
+			return fmt.Errorf("member plan problem code %q is unknown", problem.Code)
+		}
+		if strings.TrimSpace(problem.Message) == "" || len(problem.Message) > 500 || !utf8.ValidString(problem.Message) {
+			return fmt.Errorf("member plan problem message must be 1 to 500 bytes of UTF-8")
+		}
+	}
+	return nil
+}
+
+func validateMemberEmail(email string) error {
+	if len(email) < 3 || len(email) > 254 {
+		return fmt.Errorf("member email must be between 3 and 254 bytes")
+	}
+	parsed, err := mail.ParseAddress(email)
+	if err != nil || parsed.Address != email {
+		return fmt.Errorf("member email must be a single mailbox address")
+	}
+	return nil
+}
+
+// validateMemberSubject also keeps the subject safe as one URL path segment.
+func validateMemberSubject(subject PrincipalID) error {
+	if !memberSubjectPattern.MatchString(string(subject)) || strings.Contains(string(subject), "..") {
+		return fmt.Errorf("member subject must be an opaque Cloud user ID of 3 to %d bytes", maxTenantMemberKeyBytes)
+	}
+	return nil
+}
+
+// validateMemberRoles accepts exactly one role in M1. Role existence and
+// assignability are Engine checks, not wire rules.
+func validateMemberRoles(roles []string) error {
+	if len(roles) != 1 {
+		return fmt.Errorf("member must be given exactly one role")
+	}
+	return validateMemberLabel("member role", roles[0])
+}
+
+func validateMemberLabel(name, value string) error {
+	if value == "" || len(value) > maxTenantMemberKeyBytes || strings.TrimSpace(value) != value || !utf8.ValidString(value) {
+		return fmt.Errorf("%s must be 1 to %d bytes of UTF-8 without surrounding whitespace", name, maxTenantMemberKeyBytes)
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%s contains a control character", name)
+		}
 	}
 	return nil
 }

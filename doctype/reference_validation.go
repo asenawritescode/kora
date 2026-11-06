@@ -148,6 +148,7 @@ func ValidateSnapshotReferences(candidate *ConfigSnapshot, live *Registry) []Ref
 	}
 
 	seenRoutes := map[string]string{}
+	published := newPublishedSurfaceCatalog(candidate.Modules)
 	for _, view := range candidate.Views {
 		if view == nil {
 			continue
@@ -179,7 +180,7 @@ func ValidateSnapshotReferences(candidate *ConfigSnapshot, live *Registry) []Ref
 			}
 		}
 		if view.PageManifest == nil {
-			validateViewReferences(view, viewPath, viewDT, checkDoc, checkField, add)
+			validateViewReferences(view, viewPath, viewDT, published, checkDoc, checkField, add)
 		}
 	}
 
@@ -1051,7 +1052,7 @@ func stringMap(value any) (map[string]string, bool) {
 	}
 }
 
-func validateViewReferences(view *View, path string, viewDT *DocType, checkDoc func(string, string) *DocType, checkField func(string, *DocType, string), add func(string, string, string, string, string)) {
+func validateViewReferences(view *View, path string, viewDT *DocType, published publishedSurfaceCatalog, checkDoc func(string, string) *DocType, checkField func(string, *DocType, string), add func(string, string, string, string, string)) {
 	resourceDocs := map[string]*DocType{}
 	resourceByID := map[string]PageResource{}
 	for i, resource := range view.Resources {
@@ -1063,6 +1064,12 @@ func validateViewReferences(view *View, path string, viewDT *DocType, checkDoc f
 			add("reference.resource_id_duplicate", resourcePath+".id", "resource", resource.ID, "resource IDs must be unique")
 		}
 		resourceByID[resource.ID] = resource
+		if resource.Query == publishedQueryResource {
+			if _, exists := published.queries[publishedQueryKey(resource)]; !exists {
+				add("reference.published_query_missing", resourcePath+".params", "query", publishedQueryKey(resource), "resource names a query no installed module publishes")
+			}
+			continue
+		}
 		if resource.Query != "document.list" && resource.Query != "document.get" {
 			add("reference.query_unsupported", resourcePath+".query", "query", resource.Query, fmt.Sprintf("query type %q is not supported by reference validation", resource.Query))
 		}
@@ -1093,6 +1100,15 @@ func validateViewReferences(view *View, path string, viewDT *DocType, checkDoc f
 	walk = func(components []ViewComponent, prefix string) {
 		for i, component := range components {
 			componentPath := fmt.Sprintf("%s.components[%s]", prefix, component.ID)
+			if component.Version > 1 {
+				if contract, known := PageComponentContractForVersion(component.Type, component.Version); known {
+					validatePublishedViewComponent(component, componentPath, contract, resourceByID, published, add)
+				} else {
+					add("reference.component_missing", componentPath+".version", "component", component.Type, fmt.Sprintf("component %q has no version %d contract", component.Type, component.Version))
+				}
+				walk(component.Components, componentPath+fmt.Sprintf("[%d]", i))
+				continue
+			}
 			dt := viewDT
 			if component.SourceDocType != "" {
 				dt = checkDoc(componentPath+".source_doctype", component.SourceDocType)

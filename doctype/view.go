@@ -136,12 +136,14 @@ func (v *View) Normalize() {
 type ViewComponent struct {
 	ID               string            `json:"id" yaml:"id"`
 	Type             string            `json:"type" yaml:"type"`
+	Version          int               `json:"version,omitempty" yaml:"version,omitempty"`
 	Region           string            `json:"region" yaml:"region"`
 	Label            string            `json:"label,omitempty" yaml:"label,omitempty"`
 	SourceDocType    string            `json:"source_doctype,omitempty" yaml:"source_doctype,omitempty"`
 	Data             string            `json:"data,omitempty" yaml:"data,omitempty"`
 	ResourceBindings map[string]string `json:"resource_bindings,omitempty" yaml:"resource_bindings,omitempty"`
 	Bindings         map[string]string `json:"bindings,omitempty" yaml:"bindings,omitempty"`
+	Context          map[string]string `json:"context,omitempty" yaml:"context,omitempty"`
 	Filters          []ViewFilter      `json:"filters,omitempty" yaml:"filters,omitempty"`
 	Actions          []ViewAction      `json:"actions,omitempty" yaml:"actions,omitempty"`
 	Rules            []ViewRule        `json:"rules,omitempty" yaml:"rules,omitempty"`

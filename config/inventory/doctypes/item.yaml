@@ -34,3 +34,12 @@ fields:
   - fieldname: cost
     fieldtype: Currency
     label: Cost
+  - fieldname: category
+    fieldtype: Link
+    options: Item Category
+    label: Category
+    in_list_view: true
+    search_index: true
+  - fieldname: image
+    fieldtype: Attach Image
+    label: Image
