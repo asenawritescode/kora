@@ -91,7 +91,7 @@ func TestPOSRolePermissions(t *testing.T) {
 	}
 	posOps := []string{"open_session", "close_session", "open_shift", "close_shift", "open_till", "close_till", "record_sale", "return_sale", "void_sale"}
 	invOps := []string{"receive_stock", "adjust_stock"}
-	posQ := []string{"closed_session", "my_registers", "my_session", "open_till", "payments_by_method", "refunds_by_method", "recent_sales", "sale_lines", "today_totals"}
+	posQ := []string{"closed_session", "my_registers", "my_session", "open_till", "payments_by_method", "refunds_by_method", "recent_sales", "sale_items", "sale_payments", "sale_lines", "today_totals"}
 	invQ := []string{"item_search", "item_categories", "item_stock", "low_stock"}
 	grant := func(role, owner, kind string, names []string, op string, want bool) {
 		for _, n := range names {
@@ -109,7 +109,7 @@ func TestPOSRolePermissions(t *testing.T) {
 	grant("Manager", "inventory.core", "query", invQ, "read", true)
 	grant("Manager", "inventory.core", "operation", invOps, "write", false)
 	grant("Cashier", "pos.core", "operation", posOps, "write", true)
-	grant("Cashier", "pos.core", "query", []string{"open_till", "my_session", "my_registers", "sale_lines", "my_closed_session"}, "read", true)
+	grant("Cashier", "pos.core", "query", []string{"open_till", "my_session", "my_registers", "sale_lines", "my_closed_session", "my_sales"}, "read", true)
 	grant("Cashier", "pos.core", "query", []string{"closed_session"}, "read", false)
 	// my_session is owner-scoped by cashier for every role (#326).
 	for _, role := range []string{"Cashier", "Manager", "Owner"} {
@@ -144,7 +144,30 @@ func TestPOSRolePermissions(t *testing.T) {
 			t.Errorf("%s sale_lines grant must not be if_owner", role)
 		}
 	}
-	grant("Cashier", "pos.core", "query", []string{"recent_sales", "today_totals", "payments_by_method", "refunds_by_method"}, "read", false)
+	grant("Cashier", "pos.core", "query", []string{"recent_sales", "today_totals", "payments_by_method", "refunds_by_method", "sale_items", "sale_payments"}, "read", false)
+	// Sale detail (#91): Owner/Manager read items and payments of any sale and
+	// keep recent_sales; only the Cashier holds my_sales, if_owner. Nobody but
+	// the Cashier gets my_sales, so the catalog shows each role one sales list.
+	for _, role := range []string{"Cashier", "Manager", "Owner"} {
+		wantMy := role == "Cashier"
+		if pm.Can(role, "module.pos.core.query.my_sales", "read") != wantMy || pm.Can(role, "module.pos.core.query.recent_sales", "read") == wantMy {
+			t.Errorf("%s sales list: my_sales=%v recent_sales=%v", role, pm.Can(role, "module.pos.core.query.my_sales", "read"), pm.Can(role, "module.pos.core.query.recent_sales", "read"))
+		}
+		if owner, _ := pm.RowScopeFor([]string{role}, "module.pos.core.query.my_sales", "read"); owner != wantMy {
+			t.Errorf("%s my_sales if_owner = %v, want %v", role, owner, wantMy)
+		}
+		for _, q := range []string{"sale_items", "sale_payments"} {
+			if owner, _ := pm.RowScopeFor([]string{role}, "module.pos.core.query."+q, "read"); owner {
+				t.Errorf("%s %s must not be if_owner", role, q)
+			}
+		}
+	}
+	// Cashier holds no read on the Sale children themselves.
+	for _, dt := range []string{"Sale Item", "Sale Payment"} {
+		if pm.Can("Cashier", dt, "read") {
+			t.Errorf("Cashier must not read %s", dt)
+		}
+	}
 	grant("Cashier", "inventory.core", "query", []string{"item_search", "item_categories"}, "read", true)
 	grant("Cashier", "inventory.core", "query", []string{"item_stock", "low_stock"}, "read", false)
 	grant("Cashier", "inventory.core", "operation", invOps, "write", false)

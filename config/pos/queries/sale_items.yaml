@@ -1,0 +1,15 @@
+name: sale_items
+module_owner_id: pos.core
+capability: pos.sales
+operation: sale_items
+source: Sale Item
+via: Sale.items
+permission: read
+scope: tenant
+input:
+  sale: {type: string, max_length: 140}
+filters:
+  - {field: parent.name, op: eq, value: $input.sale}
+fields: [name, item, quantity, currency, unit_price, amount]
+sort: [{field: idx, dir: asc}]
+limit: 200

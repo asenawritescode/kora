@@ -1,0 +1,15 @@
+name: sale_payments
+module_owner_id: pos.core
+capability: pos.sales
+operation: sale_payments
+source: Sale Payment
+via: Sale.payments
+permission: read
+scope: tenant
+input:
+  sale: {type: string, max_length: 140}
+filters:
+  - {field: parent.name, op: eq, value: $input.sale}
+fields: [name, method, amount, currency, reference, payment_account, verification]
+sort: [{field: idx, dir: asc}]
+limit: 200

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -177,10 +178,16 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 					t.Errorf("owner catalog lacks operation %s", name)
 				}
 			}
-			// 15 published queries; the Owner reads all but my_closed_session, the
-			// Cashier's own-till variant of closed_session (#384).
-			if len(ownerQueries) != 14 {
-				t.Errorf("owner queries = %d, want 14: %v", len(ownerQueries), ownerQueries)
+			// 18 published queries; the Owner reads all but my_closed_session and
+			// my_sales, the Cashier's own-till and own-sales variants of
+			// closed_session (#384) and recent_sales (#91).
+			if len(ownerQueries) != 16 {
+				t.Errorf("owner queries = %d, want 16: %v", len(ownerQueries), ownerQueries)
+			}
+			for _, name := range []string{"sale_items", "sale_payments", "recent_sales"} {
+				if !slices.Contains(ownerQueries, "pos.core/"+name) {
+					t.Errorf("owner catalog lacks query %s: %v", name, ownerQueries)
+				}
 			}
 			checkSchemas("Owner", owner)
 			sale := false
@@ -200,8 +207,8 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 			}
 
 			// A Cashier sees a subset: nothing outside the Owner's catalog, except
-			// my_closed_session, which only the Cashier is granted because the Owner
-			// reads the unscoped closed_session instead.
+			// my_closed_session and my_sales, which only the Cashier is granted
+			// because the Owner reads the unscoped closed_session and recent_sales.
 			cashier := get("Cashier")
 			cashierOps, cashierQueries := refs(cashier)
 			t.Logf("cashier operations=%v queries=%v", cashierOps, cashierQueries)
@@ -214,8 +221,15 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 				inOwner[ref] = true
 			}
 			for _, ref := range append(append([]string{}, cashierOps...), cashierQueries...) {
-				if !inOwner[ref] && ref != "pos.core/my_closed_session" {
+				if !inOwner[ref] && ref != "pos.core/my_closed_session" && ref != "pos.core/my_sales" {
 					t.Errorf("cashier sees %s that owner does not", ref)
+				}
+			}
+			// #91: the Cashier lists their own sales but cannot read another
+			// sale's items or payments, and never the unscoped recent_sales.
+			for ref, want := range map[string]bool{"pos.core/my_sales": true, "pos.core/sale_items": false, "pos.core/sale_payments": false, "pos.core/recent_sales": false} {
+				if got := slices.Contains(cashierQueries, ref); got != want {
+					t.Errorf("cashier catalog %s = %v, want %v: %v", ref, got, want, cashierQueries)
 				}
 			}
 
