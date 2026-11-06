@@ -22,7 +22,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const memberTestSite = "shop.example.test"
+const grantTestSite = "shop.example.test"
 
 type memberTestEnv struct {
 	database *sql.DB
@@ -107,11 +107,11 @@ func newMemberTestEnvOn(t *testing.T, database *sql.DB, dialect db.Dialect) *mem
 	if _, err := database.Exec(`INSERT INTO _kora_role (name, site) VALUES ('Other Shop Role', 'other.example.test')`); err != nil {
 		t.Fatal(err)
 	}
-	env.executor, err = newManagementMemberExecutor(func(_ context.Context, tenant contract.TenantID) (managementMemberTenant, func(), error) {
+	env.executor, err = newManagementMemberExecutor(func(_ context.Context, tenant contract.TenantID) (managementMemberRuntime, func(), error) {
 		if tenant != "tenant-a" {
-			return managementMemberTenant{}, nil, errors.New("tenant is not active")
+			return managementMemberRuntime{}, nil, errors.New("tenant is not active")
 		}
-		return managementMemberTenant{DB: database, Dialect: dialect, Site: memberTestSite}, func() { env.released++ }, nil
+		return managementMemberRuntime{DB: database, Dialect: dialect, Site: grantTestSite}, func() { env.released++ }, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func newMemberTestEnvOn(t *testing.T, database *sql.DB, dialect db.Dialect) *mem
 
 func (e *memberTestEnv) insertUser(t *testing.T, name, email, passwordHash string, enabled bool, roles string) {
 	t.Helper()
-	if _, err := e.database.Exec(`INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, roles) VALUES (?, ?, ?, ?, 'Existing', ?, ?)`, name, memberTestSite, email, passwordHash, enabled, roles); err != nil {
+	if _, err := e.database.Exec(`INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, roles) VALUES (?, ?, ?, ?, 'Existing', ?, ?)`, name, grantTestSite, email, passwordHash, enabled, roles); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -173,14 +173,14 @@ func TestManagementMemberGrantCreatesTheInvitedRoleOnly(t *testing.T) {
 	var name, email, fullName, hash, roles string
 	var enabled bool
 	var verified sql.NullString
-	if err := env.database.QueryRow(`SELECT name, email, full_name, password_hash, enabled, email_verified_at, roles FROM _kora_user WHERE site = ? AND name = ?`, memberTestSite, "usr_member_1").
+	if err := env.database.QueryRow(`SELECT name, email, full_name, password_hash, enabled, email_verified_at, roles FROM _kora_user WHERE site = ? AND name = ?`, grantTestSite, "usr_member_1").
 		Scan(&name, &email, &fullName, &hash, &enabled, &verified, &roles); err != nil {
 		t.Fatal(err)
 	}
 	if email != "cashier@example.test" || fullName != "Amina Otieno" || hash != site.PasswordlessPasswordHash || !enabled || !verified.Valid || roles != "Cashier" {
 		t.Fatalf("row email=%q name=%q hash=%q enabled=%v verified=%v roles=%q", email, fullName, hash, enabled, verified, roles)
 	}
-	user, err := auth.NewOwnedSessionManagerPaused(env.database).FindUserByCloudSubject(memberTestSite, "usr_member_1")
+	user, err := auth.NewOwnedSessionManagerPaused(env.database).FindUserByCloudSubject(grantTestSite, "usr_member_1")
 	if err != nil || len(user.Roles) != 1 || user.Roles[0] != "Cashier" {
 		t.Fatalf("handoff lookup user=%+v err=%v", user, err)
 	}
@@ -209,7 +209,7 @@ func TestManagementMemberGrantIsIdempotentPerInvitation(t *testing.T) {
 	if result, err := env.executor.Execute(context.Background(), claim); err != nil || result.State != contract.OperationSucceeded {
 		t.Fatalf("replayed grant result=%+v err=%v", result, err)
 	}
-	if got := env.count(t, `SELECT COUNT(*) FROM _kora_user WHERE site = ? AND name = ?`, memberTestSite, "usr_member_1"); got != 1 {
+	if got := env.count(t, `SELECT COUNT(*) FROM _kora_user WHERE site = ? AND name = ?`, grantTestSite, "usr_member_1"); got != 1 {
 		t.Fatalf("%d member rows after replay", got)
 	}
 	if got := env.count(t, `SELECT COUNT(*) FROM _kora_operation_audit WHERE doc_name = ?`, "usr_member_1"); got != 1 {
@@ -298,7 +298,7 @@ func TestManagementMemberGrantReusesTheMemberRowOfTheSameSubject(t *testing.T) {
 		if roles != "Stock Clerk" || fullName != "Amina Otieno" || !enabled {
 			t.Fatalf("roles=%q full_name=%q enabled=%v", roles, fullName, enabled)
 		}
-		if got := env.count(t, `SELECT COUNT(*) FROM _kora_user WHERE site = ?`, memberTestSite); got != 1 {
+		if got := env.count(t, `SELECT COUNT(*) FROM _kora_user WHERE site = ?`, grantTestSite); got != 1 {
 			t.Fatalf("%d rows", got)
 		}
 	})
@@ -321,8 +321,8 @@ func TestManagementMemberGrantReusesTheMemberRowOfTheSameSubject(t *testing.T) {
 
 func TestManagementMemberGrantInfrastructureFailuresNeedRecovery(t *testing.T) {
 	env := newMemberTestEnv(t)
-	env.executor.resolve = func(context.Context, contract.TenantID) (managementMemberTenant, func(), error) {
-		return managementMemberTenant{}, nil, errors.New("tenant runtime is unavailable")
+	env.executor.acquire = func(context.Context, contract.TenantID) (managementMemberRuntime, func(), error) {
+		return managementMemberRuntime{}, nil, errors.New("tenant runtime is unavailable")
 	}
 	result, err := env.executor.Execute(context.Background(), memberClaim(t, memberGrant()))
 	if err != nil || result.State != contract.OperationRecoveryRequired || result.Error == nil || result.Error.Type != contract.CodeDependencyUnavailable {

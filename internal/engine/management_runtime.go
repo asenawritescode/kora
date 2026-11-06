@@ -187,7 +187,12 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 		return nil, fmt.Errorf("configure module lifecycle executor: %w", err)
 	}
 	dispatcher.moduleChange = moduleLifecycleExecutor
-	memberExecutor, err := newManagementMemberExecutor(newManagementMemberTenantResolver(tenants, coordinator))
+	memberRevokeExecutor, err := newManagementMemberRevokeExecutor(tenantMemberAcquirer(tenants))
+	if err != nil {
+		return nil, fmt.Errorf("configure member revoke executor: %w", err)
+	}
+	dispatcher.memberRevoke = memberRevokeExecutor
+	memberExecutor, err := newManagementMemberExecutor(tenantMemberAcquirer(tenants))
 	if err != nil {
 		return nil, fmt.Errorf("configure tenant member executor: %w", err)
 	}
@@ -197,6 +202,7 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 		api.ManagementStateRecovery:         true,
 		api.ManagementOperationRead:         true,
 		api.ManagementModuleLifecycle:       true,
+		api.ManagementMemberRevoke:          true,
 		api.ManagementMemberPlanCapability:  true,
 		api.ManagementMemberGrantCapability: true,
 	}

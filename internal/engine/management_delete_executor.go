@@ -126,6 +126,7 @@ type managementOperationDispatcher struct {
 	delete       management.OperationExecutor
 	invitation   management.OperationExecutor
 	moduleChange management.OperationExecutor
+	memberRevoke management.OperationExecutor
 	memberGrant  management.OperationExecutor
 }
 
@@ -144,6 +145,8 @@ func (d managementOperationDispatcher) Execute(ctx context.Context, claim manage
 		executor = d.invitation
 	case management.CommandApplyModuleChange:
 		executor = d.moduleChange
+	case management.CommandTenantMemberRevoke:
+		executor = d.memberRevoke
 	case management.CommandTenantMemberGrant:
 		executor = d.memberGrant
 	}

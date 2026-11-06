@@ -16,61 +16,21 @@ import (
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/management"
-	knet "github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/site"
 )
-
-// managementMemberTenant is the pinned tenant database a member check or grant
-// runs against. Site keys the tenant's `_kora_user` and `_kora_role` rows (the
-// tenant primary alias, as the Cloud handoff sign-in uses it), not the tenant ID.
-type managementMemberTenant struct {
-	DB        *sql.DB
-	Dialect   db.Dialect
-	Site      string
-	Admission interface {
-		Acquire(context.Context) (func(), error)
-	}
-}
-
-// managementMemberTenantResolver pins the tenant runtime and returns its
-// release function. An error means the tenant cannot take work right now.
-type managementMemberTenantResolver func(context.Context, contract.TenantID) (managementMemberTenant, func(), error)
-
-// newManagementMemberTenantResolver activates the tenant from the Engine
-// directory when needed and pins its current runtime generation.
-func newManagementMemberTenantResolver(tenants *knet.SiteRouter, coordinator managementStateCoordinator) managementMemberTenantResolver {
-	return func(ctx context.Context, tenant contract.TenantID) (managementMemberTenant, func(), error) {
-		if tenants == nil || coordinator == nil {
-			return managementMemberTenant{}, nil, errors.New("tenant runtime router is unavailable")
-		}
-		if err := coordinator.ActivateFromDirectory(ctx, string(tenant)); err != nil {
-			return managementMemberTenant{}, nil, fmt.Errorf("activate tenant: %w", err)
-		}
-		handle, err := tenants.AcquireByID(ctx, string(tenant))
-		if err != nil {
-			return managementMemberTenant{}, nil, fmt.Errorf("acquire tenant runtime: %w", err)
-		}
-		runtime := handle.Snapshot()
-		if runtime == nil || runtime.DB == nil || runtime.Activation.Tenant != tenant || runtime.Name == "" || db.Resolve(runtime.DBType) == nil {
-			handle.Release()
-			return managementMemberTenant{}, nil, errors.New("tenant runtime identity is inconsistent")
-		}
-		return managementMemberTenant{DB: runtime.DB, Dialect: db.Resolve(runtime.DBType), Site: runtime.Name, Admission: runtime.Services.WorkAdmission}, handle.Release, nil
-	}
-}
 
 // managementMemberExecutor creates tenant members for Cloud invitations and
 // answers the read-only plan for them. Cloud owns identity; the Engine is the
 // only writer of `_kora_user` and the only judge of which roles may be given.
 type managementMemberExecutor struct {
-	resolve managementMemberTenantResolver
+	acquire managementMemberAcquirer
 }
 
-func newManagementMemberExecutor(resolve managementMemberTenantResolver) (*managementMemberExecutor, error) {
-	if resolve == nil {
-		return nil, errors.New("management member executor requires a tenant resolver")
+func newManagementMemberExecutor(acquire managementMemberAcquirer) (*managementMemberExecutor, error) {
+	if acquire == nil {
+		return nil, errors.New("management member executor requires a tenant acquirer")
 	}
-	return &managementMemberExecutor{resolve: resolve}, nil
+	return &managementMemberExecutor{acquire: acquire}, nil
 }
 
 // memberQueryer is satisfied by *sql.DB (plan) and *sql.Tx (grant).
@@ -155,10 +115,10 @@ func memberEmailProblem(ctx context.Context, q memberQueryer, dialect db.Dialect
 
 // PlanMember is the read-only check behind `POST .../members/plan`.
 func (e *managementMemberExecutor) PlanMember(ctx context.Context, tenant contract.TenantID, request contract.PlanTenantMember) (contract.TenantMemberPlan, error) {
-	if e == nil || e.resolve == nil || ctx == nil || contract.ValidatePlanTenantMember(request) != nil {
+	if e == nil || e.acquire == nil || ctx == nil || contract.ValidatePlanTenantMember(request) != nil {
 		return contract.TenantMemberPlan{}, contract.NewError(contract.CodeValidationFailed, "tenant member plan request is invalid")
 	}
-	target, release, err := e.resolve(ctx, tenant)
+	target, release, err := e.acquire(ctx, tenant)
 	if err != nil {
 		return contract.TenantMemberPlan{}, contract.NewError(contract.CodeDependencyUnavailable, "tenant is not ready to plan members")
 	}
@@ -204,7 +164,7 @@ func (e *managementMemberExecutor) Execute(ctx context.Context, claim management
 	failed := func(message string) management.FinishResult {
 		return management.FinishResult{State: contract.OperationFailed, Error: contract.NewError(contract.CodeValidationFailed, message)}
 	}
-	if e == nil || e.resolve == nil || ctx == nil || claim.Owner == "" || claim.Fence == 0 {
+	if e == nil || e.acquire == nil || ctx == nil || claim.Owner == "" || claim.Fence == 0 {
 		return management.FinishResult{}, errors.New("management member executor requires a fenced claim")
 	}
 	operation := claim.Operation
@@ -215,7 +175,7 @@ func (e *managementMemberExecutor) Execute(ctx context.Context, claim management
 	if json.Unmarshal(operation.Command, &command) != nil || contract.ValidateGrantTenantMember(command) != nil {
 		return failed("stored tenant member grant command is invalid"), nil
 	}
-	target, release, err := e.resolve(ctx, operation.Tenant)
+	target, release, err := e.acquire(ctx, operation.Tenant)
 	if err != nil {
 		return management.FinishResult{State: contract.OperationRecoveryRequired, Error: contract.NewError(contract.CodeDependencyUnavailable, "tenant runtime is unavailable for the member grant")}, nil
 	}
@@ -241,7 +201,7 @@ func (e *managementMemberExecutor) Execute(ctx context.Context, claim management
 // Bumping the membership revision first takes the write lock that serializes
 // concurrent grants, so two invitations for one email cannot both pass the
 // checks. A no-op replay rolls the bump back.
-func grantTenantMember(ctx context.Context, target managementMemberTenant, operation management.Operation, command contract.GrantTenantMember) (*contract.TenantMemberProblem, error) {
+func grantTenantMember(ctx context.Context, target managementMemberRuntime, operation management.Operation, command contract.GrantTenantMember) (*contract.TenantMemberProblem, error) {
 	tx, err := target.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -292,7 +252,7 @@ func grantTenantMember(ctx context.Context, target managementMemberTenant, opera
 
 // writeMemberGrantAudit records which invitation and which Cloud service
 // principal created the member, in the same transaction as the change.
-func writeMemberGrantAudit(ctx context.Context, tx *sql.Tx, target managementMemberTenant, operation management.Operation, command contract.GrantTenantMember) error {
+func writeMemberGrantAudit(ctx context.Context, tx *sql.Tx, target managementMemberRuntime, operation management.Operation, command contract.GrantTenantMember) error {
 	correlation := command.InvitationID
 	if len(correlation) > 64 {
 		sum := sha256.Sum256([]byte(correlation))
