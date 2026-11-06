@@ -76,8 +76,10 @@ func (h *Handler) paymentService(c *gin.Context) *payment.Service {
 	if _, ok := svc.Providers.Get(manual.Name); !ok {
 		// Recording against configured accounts exists only where the tenant
 		// defines the Payment Account DocType.
-		if dt := h.siteRegistry(c).Get("Payment Account"); dt != nil {
-			_ = svc.Providers.Register(manual.Provider{Accounts: paymentAccounts{tx: h.siteTx(c), dt: dt}})
+		if reg := h.siteRegistry(c); reg != nil {
+			if dt := reg.Get("Payment Account"); dt != nil {
+				_ = svc.Providers.Register(manual.Provider{Accounts: paymentAccounts{tx: h.siteTx(c), dt: dt}})
+			}
 		}
 	}
 	return svc
