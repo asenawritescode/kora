@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -287,50 +288,8 @@ func (h *Handler) HandleUserUpdate(c *gin.Context) {
 		return
 	}
 
-	var assignments []string
-	var args []any
-	// Only tenant-scoped permissions and local access state are mutable here.
-	if req.Roles != nil {
-		rolesStr := strings.Join(req.Roles, ",")
-		assignments = append(assignments, "roles = ?")
-		args = append(args, rolesStr)
-	}
-	if req.Enabled != nil {
-		assignments = append(assignments, "enabled = ?")
-		args = append(args, *req.Enabled)
-	}
-	if len(assignments) > 0 {
-		tx, err := db.BeginTx(c.Request.Context(), nil)
-		if err != nil {
-			internalError(c, "updating user", err)
-			return
-		}
-		defer tx.Rollback()
-		assignments = append(assignments, "modified = CURRENT_TIMESTAMP")
-		args = append(args, site, name)
-		query := "UPDATE _kora_user SET " + strings.Join(assignments, ", ") + " WHERE site = ? AND name = ?"
-		result, err := tx.Exec(h.siteQuery(c, query), args...)
-		if err != nil {
-			internalError(c, "updating user", err)
-			return
-		}
-		updated, err := result.RowsAffected()
-		if err != nil {
-			internalError(c, "checking updated user", err)
-			return
-		}
-		if updated == 0 {
-			notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
-			return
-		}
-		if req.Roles != nil || req.Enabled != nil {
-			if err := configstore.BumpAuthorizationRevisionTx(tx, h.siteDialect(c), false, true); err != nil {
-				internalError(c, "updating membership revision", err)
-				return
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			internalError(c, "committing user update", err)
+	if req.Roles != nil || req.Enabled != nil {
+		if !h.applyUserAccessUpdate(c, db, site, name, req) {
 			return
 		}
 	}
@@ -343,6 +302,180 @@ func (h *Handler) HandleUserUpdate(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, Response{Data: u})
+}
+
+// applyUserAccessUpdate changes a user's roles and/or enabled flag in one
+// transaction together with the guards and the session revocation. It writes
+// the HTTP error itself and returns false on any failure.
+//
+// Ordering matters for the last-Administrator guard: the authorization
+// revision row is updated first, which takes a write lock that serializes
+// concurrent access updates, and only then is the current state read. Two
+// administrators demoting each other at the same time therefore cannot both
+// pass the check.
+//
+// Sessions of a user whose role set changed or who is disabled are deleted in
+// the same transaction, and this instance's session cache is purged after the
+// commit. Other instances keep a validated session in memory for up to the
+// session cache TTL (30s), so a revoked session can stay usable there for at
+// most that long.
+func (h *Handler) applyUserAccessUpdate(c *gin.Context, db *sql.DB, site, name string, req UserAccessUpdate) bool {
+	dialect := h.siteDialect(c)
+	ctx := c.Request.Context()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		internalError(c, "updating user", err)
+		return false
+	}
+	defer tx.Rollback()
+	if err := configstore.BumpAuthorizationRevisionTx(tx, dialect, false, true); err != nil {
+		internalError(c, "updating membership revision", err)
+		return false
+	}
+
+	var currentRoles string
+	var currentEnabled bool
+	err = tx.QueryRowContext(ctx, kdb.Rebind(dialect, "SELECT COALESCE(roles, ''), enabled FROM _kora_user WHERE site = ? AND name = ?"), site, name).Scan(&currentRoles, &currentEnabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		notFoundError(c, "user.not_found", "User not found", map[string]any{"name": name})
+		return false
+	}
+	if err != nil {
+		internalError(c, "loading user", err)
+		return false
+	}
+	oldRoles := splitRolesStr(currentRoles)
+	newRoles, newEnabled := oldRoles, currentEnabled
+	if req.Roles != nil {
+		newRoles = splitRolesStr(strings.Join(req.Roles, ","))
+	}
+	if req.Enabled != nil {
+		newEnabled = *req.Enabled
+	}
+	disabling := req.Enabled != nil && !*req.Enabled
+	rolesChanged := req.Roles != nil && !sameRoleSet(oldRoles, newRoles)
+	losesAdmin := !newEnabled || !hasRole(newRoles, doctype.AdminRole)
+
+	if actor := callerUserNames(c); actor[name] {
+		if disabling {
+			conflictError(c, "user.self_disable", "You cannot disable your own account", map[string]any{"field": "enabled"})
+			return false
+		}
+		if hasRole(oldRoles, doctype.AdminRole) && !hasRole(newRoles, doctype.AdminRole) {
+			conflictError(c, "user.self_demote", "You cannot remove your own Administrator role", map[string]any{"field": "roles"})
+			return false
+		}
+	}
+	if currentEnabled && hasRole(oldRoles, doctype.AdminRole) && losesAdmin {
+		others, err := countOtherEnabledAdministrators(ctx, tx, dialect, site, name)
+		if err != nil {
+			internalError(c, "counting administrators", err)
+			return false
+		}
+		if others == 0 {
+			field := "roles"
+			if !newEnabled {
+				field = "enabled"
+			}
+			conflictError(c, "user.last_administrator", "At least one enabled Administrator must remain", map[string]any{"field": field})
+			return false
+		}
+	}
+
+	var assignments []string
+	var args []any
+	// Only tenant-scoped permissions and local access state are mutable here.
+	if req.Roles != nil {
+		assignments = append(assignments, "roles = ?")
+		args = append(args, strings.Join(req.Roles, ","))
+	}
+	if req.Enabled != nil {
+		assignments = append(assignments, "enabled = ?")
+		args = append(args, *req.Enabled)
+	}
+	assignments = append(assignments, "modified = CURRENT_TIMESTAMP")
+	args = append(args, site, name)
+	query := "UPDATE _kora_user SET " + strings.Join(assignments, ", ") + " WHERE site = ? AND name = ?"
+	if _, err := tx.ExecContext(ctx, kdb.Rebind(dialect, query), args...); err != nil {
+		internalError(c, "updating user", err)
+		return false
+	}
+	revoke := disabling || rolesChanged
+	sessions := auth.SessionManagerForRequest(c, db)
+	if revoke {
+		if err := sessions.RevokeUserSessionsTx(ctx, tx, site, name); err != nil {
+			internalError(c, "revoking user sessions", err)
+			return false
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(c, "committing user update", err)
+		return false
+	}
+	if revoke {
+		sessions.PurgeUserCache(site, name)
+	}
+	return true
+}
+
+// countOtherEnabledAdministrators counts enabled users other than name that
+// hold the Administrator role. Roles are stored as a delimited string, so they
+// are split in Go instead of matching with dialect-specific string SQL.
+func countOtherEnabledAdministrators(ctx context.Context, tx *sql.Tx, dialect kdb.Dialect, site, name string) (int, error) {
+	rows, err := tx.QueryContext(ctx, kdb.Rebind(dialect, "SELECT COALESCE(roles, '') FROM _kora_user WHERE site = ? AND name <> ? AND enabled = ?"), site, name, kdb.BoolParam(dialect, true))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var roles string
+		if err := rows.Scan(&roles); err != nil {
+			return 0, err
+		}
+		if hasRole(splitRolesStr(roles), doctype.AdminRole) {
+			count++
+		}
+	}
+	return count, rows.Err()
+}
+
+// callerUserNames returns the identifiers the verified caller is known by.
+func callerUserNames(c *gin.Context) map[string]bool {
+	names := map[string]bool{}
+	if execution, ok := requestExecution(c); ok {
+		actor := execution.Actor()
+		for _, id := range []string{actor.PrincipalID, actor.SubjectUserID} {
+			if id != "" {
+				names[id] = true
+			}
+		}
+	}
+	return names
+}
+
+func hasRole(roles []string, role string) bool {
+	for _, r := range roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
+func sameRoleSet(a, b []string) bool {
+	set := make(map[string]struct{}, len(a))
+	for _, r := range a {
+		set[r] = struct{}{}
+	}
+	other := make(map[string]struct{}, len(b))
+	for _, r := range b {
+		other[r] = struct{}{}
+		if _, ok := set[r]; !ok {
+			return false
+		}
+	}
+	return len(set) == len(other)
 }
 
 // Helpers
