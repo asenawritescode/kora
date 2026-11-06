@@ -22,9 +22,9 @@ import (
 
 // TestPOSCashierTransactsOnlyOnOwnTill drives every till-taking POS operation
 // through the published-operation route as different actors: a Cashier may
-// only act on a till/shift they opened (open_session records them), Owner and
-// Manager may act on any, and tills opened the old way (open_shift +
-// open_till, no cashier on the Till Session) are Owner/Manager only.
+// only act on a till/shift they opened (open_session records them), Owner,
+// Manager and Administrator may act on any, and tills opened the old way (open_shift +
+// open_till, no cashier on the Till Session) are Owner/Manager/Administrator only.
 func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 	dsn := os.Getenv("KORA_POS_E2E_MYSQL_DSN")
 	if dsn == "" {
@@ -102,7 +102,7 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 	tea := create("Item", map[string]any{"item_name": "Tea", "uom": "Nos", "price": 100})
 	create("Stock Balance", map[string]any{"item": tea, "location": loc, "quantity": 500, "reorder_level": 1})
 	regOf := map[string]string{}
-	for _, n := range []string{"A", "B", "Old"} {
+	for _, n := range []string{"A", "B", "C", "Old"} {
 		regOf[n] = create("Register", map[string]any{"register_name": n, "location": loc, "enabled": 1})
 	}
 	cashierRoles, managerRoles, ownerRoles := []string{"Cashier"}, []string{"Manager"}, []string{"Owner"}
@@ -115,6 +115,7 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 	}
 	tillA, shiftA := open("alice", "A")
 	tillB, shiftB := open("bob", "B")
+	_, shiftC := open("carol", "C")
 	// The old way: no cashier is recorded on the Till Session.
 	shiftOld := fmt.Sprint(admin("pos.open_shift", map[string]any{"data": map[string]any{"register": regOf["Old"]}})["steps"].([]any)[0].(map[string]any)["name"])
 	admin("pos.open_till", map[string]any{"data": map[string]any{"shift": shiftOld, "opening_float": 100}})
@@ -139,6 +140,7 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 	}
 	alice, bob := actor{"alice", cashierRoles}, actor{"bob", cashierRoles}
 	mgr, owner := actor{"mgr", managerRoles}, actor{"owner", ownerRoles}
+	adminOnly := actor{"shopowner", posAdminRoles}
 
 	// record_sale: whose till, who acts, what happens.
 	sales := map[string]string{}
@@ -156,6 +158,8 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 		{"owner on a cashier's till", owner, tillB, true},
 		{"manager on old-style till", mgr, tillOld, true},
 		{"owner on old-style till", owner, tillOld, true},
+		{"administrator only, a cashier's till", adminOnly, tillB, true},
+		{"administrator only, old-style till", adminOnly, tillOld, true},
 	} {
 		t.Run("record_sale/"+tc.name, func(t *testing.T) {
 			out, cerr := run(tc.who.user, tc.who.roles, "pos.record_sale", saleOn(tc.till))
@@ -185,6 +189,7 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 		{"manager", mgr, sales["cashier on own till"], tillA, true},
 		{"old-style till, cashier", alice, sales["manager on old-style till"], tillOld, false},
 		{"old-style till, manager", mgr, sales["manager on old-style till"], tillOld, true},
+		{"administrator only, a cashier's till", adminOnly, sales["cashier on own till"], tillA, true},
 	} {
 		t.Run("return_sale/"+tc.name, func(t *testing.T) {
 			_, cerr := run(tc.who.user, tc.who.roles, "pos.return_sale", returnOn(tc.sale, tc.till))
@@ -213,6 +218,7 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 		{"owner", owner, tillB, true},
 		{"old-style till, cashier", alice, tillOld, false},
 		{"old-style till, owner", owner, tillOld, true},
+		{"administrator only, a cashier's till", adminOnly, tillB, true},
 	} {
 		t.Run("void_sale/"+tc.name, func(t *testing.T) {
 			sale := voidable(tc.till)
@@ -236,6 +242,7 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 		{"own till", alice, shiftA, true},
 		{"manager on a cashier's till", mgr, shiftB, true},
 		{"manager on old-style till", mgr, shiftOld, true},
+		{"administrator only, a cashier's till", adminOnly, shiftC, true},
 	} {
 		t.Run("close_till/"+tc.name, func(t *testing.T) {
 			_, cerr := run(tc.who.user, tc.who.roles, "pos.close_till", closeTill(tc.shift))
@@ -255,6 +262,7 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 		{"own shift", alice, "A", true},
 		{"manager on a cashier's shift", mgr, "B", true},
 		{"owner on a shift opened by someone else", owner, "Old", true},
+		{"administrator only, a cashier's shift", adminOnly, "C", true},
 	} {
 		t.Run("close_shift/"+tc.name, func(t *testing.T) {
 			_, cerr := run(tc.who.user, tc.who.roles, "pos.close_shift", map[string]any{"data": map[string]any{"register": regOf[tc.register]}})

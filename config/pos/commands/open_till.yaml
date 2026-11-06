@@ -1,5 +1,5 @@
-# Tills opened this way record no cashier (kora#344), so only Owner and Manager
-# can sell, return, void or close on them (kora#358). Cashiers use open_session.
+# Tills opened this way record no cashier (kora#344), so only Owner, Manager and
+# Administrator can sell, return, void or close on them (kora#358). Cashiers use open_session.
 name: open_till
 namespace: pos
 version: 1

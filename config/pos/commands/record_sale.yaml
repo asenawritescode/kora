@@ -29,7 +29,7 @@ require:
       where:
         name: $input.till_session
         cashier: $actor
-    unless_role: [Owner, Manager]
+    unless_role: [Owner, Manager, Administrator]
     message: This till belongs to another cashier
   - equal: [$computed.paid, $computed.total]
     message: Payments must add up to the sale total

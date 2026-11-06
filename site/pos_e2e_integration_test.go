@@ -553,7 +553,7 @@ type allowAllPOSSchemas struct{}
 func (allowAllPOSSchemas) Registered(contract.SchemaRef) bool                 { return true }
 func (allowAllPOSSchemas) Validate(contract.SchemaRef, json.RawMessage) error { return nil }
 
-// posAdminRoles is the test operator: the site administrator, who also holds
-// Manager so till-ownership guards (unless_role: [Owner, Manager]) are waived
-// for tills opened without a recorded cashier.
-var posAdminRoles = []string{doctype.AdminRole, "Manager"}
+// posAdminRoles is the test operator: the site administrator only. The
+// till-ownership guards (unless_role) exempt it, as the shop owner's tenant
+// user holds this role.
+var posAdminRoles = []string{doctype.AdminRole}

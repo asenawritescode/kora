@@ -36,7 +36,7 @@ require:
       where:
         name: $input.till_session
         cashier: $actor
-    unless_role: [Owner, Manager]
+    unless_role: [Owner, Manager, Administrator]
     message: This till belongs to another cashier
   - exists:
       record: Sale
