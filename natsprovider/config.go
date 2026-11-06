@@ -199,3 +199,5 @@ func (c Config) DeploymentManifest() DeploymentManifest {
 		Resources:             []string{c.StreamName, c.ConsumerName, c.DeadLetterSubject},
 	}
 }
+
+func subjectMatchesFilter(filter, subject string) bool { return false }
