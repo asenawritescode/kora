@@ -367,7 +367,7 @@ func (h *Handler) applyUserAccessUpdate(c *gin.Context, db *sql.DB, site, name s
 		}
 	}
 	if currentEnabled && hasRole(oldRoles, doctype.AdminRole) && losesAdmin {
-		others, err := countOtherEnabledAdministrators(ctx, tx, dialect, site, name)
+		others, err := CountOtherEnabledAdministrators(ctx, tx, dialect, site, name)
 		if err != nil {
 			internalError(c, "counting administrators", err)
 			return false
@@ -418,10 +418,11 @@ func (h *Handler) applyUserAccessUpdate(c *gin.Context, db *sql.DB, site, name s
 	return true
 }
 
-// countOtherEnabledAdministrators counts enabled users other than name that
+// CountOtherEnabledAdministrators counts enabled users other than name that
 // hold the Administrator role. Roles are stored as a delimited string, so they
-// are split in Go instead of matching with dialect-specific string SQL.
-func countOtherEnabledAdministrators(ctx context.Context, tx *sql.Tx, dialect kdb.Dialect, site, name string) (int, error) {
+// are split in Go instead of matching with dialect-specific string SQL. The
+// management revoke executor shares it so both paths enforce one last-admin rule.
+func CountOtherEnabledAdministrators(ctx context.Context, tx *sql.Tx, dialect kdb.Dialect, site, name string) (int, error) {
 	rows, err := tx.QueryContext(ctx, kdb.Rebind(dialect, "SELECT COALESCE(roles, '') FROM _kora_user WHERE site = ? AND name <> ? AND enabled = ?"), site, name, kdb.BoolParam(dialect, true))
 	if err != nil {
 		return 0, err

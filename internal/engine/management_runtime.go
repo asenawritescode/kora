@@ -187,11 +187,17 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 		return nil, fmt.Errorf("configure module lifecycle executor: %w", err)
 	}
 	dispatcher.moduleChange = moduleLifecycleExecutor
+	memberRevokeExecutor, err := newManagementMemberRevokeExecutor(tenantMemberAcquirer(tenants))
+	if err != nil {
+		return nil, fmt.Errorf("configure member revoke executor: %w", err)
+	}
+	dispatcher.memberRevoke = memberRevokeExecutor
 	capabilities := map[api.ManagementCapability]bool{
 		api.ManagementStateCapability: true,
 		api.ManagementStateRecovery:   true,
 		api.ManagementOperationRead:   true,
 		api.ManagementModuleLifecycle: true,
+		api.ManagementMemberRevoke:    true,
 	}
 	if packageResolver != nil {
 		packageDirectory, ok := directory.(managementPackageDirectory)

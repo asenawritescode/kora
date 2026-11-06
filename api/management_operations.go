@@ -55,6 +55,7 @@ const (
 	ManagementInvitationCapability = contract.ManagementCapabilityTenantInvitation
 	ManagementInvitationRecovery   = contract.ManagementCapabilityTenantInvitationRetry
 	ManagementModuleLifecycle      = contract.ManagementCapabilityModuleLifecycle
+	ManagementMemberRevoke         = contract.ManagementCapabilityTenantMemberRevoke
 	ManagementOperationRead        = contract.ManagementCapabilityOperationRead
 )
 
@@ -90,9 +91,10 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 	deleteRecoveryEnabled := config.Capabilities[ManagementDeleteRecovery]
 	invitationEnabled := config.Capabilities[ManagementInvitationCapability]
 	moduleLifecycleEnabled := config.Capabilities[ManagementModuleLifecycle]
+	memberRevokeEnabled := config.Capabilities[ManagementMemberRevoke]
 	invitationRecoveryEnabled := config.Capabilities[ManagementInvitationRecovery]
 	readEnabled := config.Capabilities[ManagementOperationRead]
-	if !stateEnabled && !stateRecoveryEnabled && !provisionEnabled && !provisionRecoveryEnabled && !packageEnabled && !packageRecoveryEnabled && !deleteEnabled && !deleteRecoveryEnabled && !invitationEnabled && !invitationRecoveryEnabled && !moduleLifecycleEnabled {
+	if !stateEnabled && !stateRecoveryEnabled && !provisionEnabled && !provisionRecoveryEnabled && !packageEnabled && !packageRecoveryEnabled && !deleteEnabled && !deleteRecoveryEnabled && !invitationEnabled && !invitationRecoveryEnabled && !moduleLifecycleEnabled && !memberRevokeEnabled {
 		return errors.New("management operation route requires at least one operation capability")
 	}
 	if !readEnabled {
@@ -179,6 +181,9 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 		group.POST("/tenants/:id/modules/apply", operations.applyModuleChange)
 		group.GET("/tenants/:id/modules/inspection", operations.inspectModules)
 		group.GET("/tenants/:id/executions/:execution", operations.inspectExecution)
+	}
+	if memberRevokeEnabled {
+		group.POST("/tenants/:id/members/:subject/revoke", operations.revokeTenantMember)
 	}
 	if invitationRecoveryEnabled {
 		group.POST("/operations/:id/reconcile-tenant-invitation", operations.reconcileTenantInvitation)
@@ -316,6 +321,27 @@ func (h *managementOperationHandler) requestTenantInvitation(c *gin.Context) {
 	}
 	var command contract.RequestTenantInvitation
 	if !decodeManagementBody(c, &command) || !managementKeyMatches(c, command.Meta.IdempotencyKey) {
+		return
+	}
+	operation, err := h.service.AcceptForTenant(c.Request.Context(), h.caller, tenant, command)
+	if err != nil {
+		writeManagementOperationError(c, err)
+		return
+	}
+	writeManagedOperation(c, http.StatusAccepted, operation.View())
+}
+
+func (h *managementOperationHandler) revokeTenantMember(c *gin.Context) {
+	tenant, ok := managementTenant(c)
+	if !ok {
+		return
+	}
+	var command contract.RevokeTenantMember
+	if !decodeManagementBody(c, &command) || !managementKeyMatches(c, command.Meta.IdempotencyKey) {
+		return
+	}
+	if string(command.Subject) != c.Param("subject") {
+		writeManagementError(c, http.StatusBadRequest, contract.CodeValidationFailed, "route member does not match revoke command subject")
 		return
 	}
 	operation, err := h.service.AcceptForTenant(c.Request.Context(), h.caller, tenant, command)
