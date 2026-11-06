@@ -1,11 +1,21 @@
 package cli
 
 import (
+	"fmt"
+	"log/slog"
+
+	"github.com/asenawritescode/kora/internal/envcompat"
 	"github.com/spf13/cobra"
 )
 
 // Execute runs the root command. This is the main entry point for the CLI.
+//
+// ZANA_* environment variables are promoted to their KORA_* twins first, so
+// every configuration reader below sees them.
 func Execute() error {
+	if _, err := envcompat.Apply(slog.Default()); err != nil {
+		return fmt.Errorf("apply ZANA_* environment variables: %w", err)
+	}
 	return rootCmd.Execute()
 }
 
