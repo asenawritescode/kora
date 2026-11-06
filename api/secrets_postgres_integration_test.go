@@ -56,7 +56,7 @@ func TestLivePostgresSecretRoutes(t *testing.T) {
 		ctx.Set("site_db_type", "postgres")
 		ctx.Set("site_name", "site-postgres-secret")
 		ctx.Set("user_roles", []string{doctype.AdminRole})
-		ctx.Set("policy_execution", integrationTestExecution(t, "site-postgres-secret", "admin-user", []string{doctype.AdminRole}))
+		ctx.Set("policy_execution", postgresTestExecution(t, "site-postgres-secret", "admin-user", []string{doctype.AdminRole}))
 		return ctx
 	}
 

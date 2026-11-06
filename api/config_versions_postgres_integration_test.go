@@ -15,10 +15,12 @@ import (
 
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/configstore"
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/conversation"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 )
@@ -462,6 +464,20 @@ func TestLivePostgresConversationRoutes(t *testing.T) {
 	}
 }
 
+// postgresTestExecution is the verified identity these untagged route tests run
+// as: handlers take authority from policy_execution, not from context roles.
+func postgresTestExecution(tb testing.TB, site, user string, roles []string) policy.Execution {
+	tb.Helper()
+	execution, err := policy.NewVerifiedExecution(contract.TenantID(site), contract.ActorContext{
+		PrincipalID: user, PrincipalType: contract.PrincipalHuman,
+		SubjectUserID: user, Site: site, Roles: roles, AuthenticatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		tb.Fatalf("create verified execution: %v", err)
+	}
+	return execution
+}
+
 func postgresConversationContext(recorder *httptest.ResponseRecorder, database *sql.DB, registry *doctype.Registry, method, body, id, key string) *gin.Context {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -548,7 +564,7 @@ func TestLivePostgresAnalyticsMetadataQueries(t *testing.T) {
 		c.Set("site_db_type", "postgres")
 		c.Set("user", "admin@example.test")
 		c.Set("user_roles", []string{doctype.AdminRole})
-		c.Set("policy_execution", integrationTestExecution(t, "site-pg", "admin@example.test", []string{doctype.AdminRole}))
+		c.Set("policy_execution", postgresTestExecution(t, "site-pg", "admin@example.test", []string{doctype.AdminRole}))
 		c.Next()
 	})
 	RegisterAnalyticsRoutes(analyticsRouter.Group("/api"), registry, database, nil, nil, kdb.Resolve("postgres"))

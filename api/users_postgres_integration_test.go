@@ -110,7 +110,7 @@ func userPostgresContext(t testing.TB, recorder *httptest.ResponseRecorder, data
 	ctx.Set("site_db_type", "postgres")
 	ctx.Set("user", "admin-user")
 	ctx.Set("user_roles", []string{doctype.AdminRole})
-	ctx.Set("policy_execution", integrationTestExecution(t, site, "admin-user", []string{doctype.AdminRole}))
+	ctx.Set("policy_execution", postgresTestExecution(t, site, "admin-user", []string{doctype.AdminRole}))
 	if name != "" {
 		ctx.Params = gin.Params{{Key: "name", Value: name}}
 	}
