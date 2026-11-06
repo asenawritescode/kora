@@ -165,10 +165,10 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 			owner := get("Owner")
 			ownerOps, ownerQueries := refs(owner)
 			t.Logf("owner operations=%v queries=%v", ownerOps, ownerQueries)
-			if len(ownerOps) != 9 {
-				t.Errorf("owner operations = %d, want 9: %v", len(ownerOps), ownerOps)
+			if len(ownerOps) != 10 {
+				t.Errorf("owner operations = %d, want 10: %v", len(ownerOps), ownerOps)
 			}
-			for _, name := range []string{"receive_stock", "adjust_stock", "open_shift", "close_shift", "open_till", "close_till", "record_sale", "return_sale", "void_sale"} {
+			for _, name := range []string{"receive_stock", "adjust_stock", "open_session", "open_shift", "close_shift", "open_till", "close_till", "record_sale", "return_sale", "void_sale"} {
 				found := false
 				for _, ref := range ownerOps {
 					found = found || strings.HasSuffix(ref, "~"+name)
@@ -177,8 +177,8 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 					t.Errorf("owner catalog lacks operation %s", name)
 				}
 			}
-			if len(ownerQueries) != 8 {
-				t.Errorf("owner queries = %d, want 8: %v", len(ownerQueries), ownerQueries)
+			if len(ownerQueries) != 10 {
+				t.Errorf("owner queries = %d, want 10: %v", len(ownerQueries), ownerQueries)
 			}
 			checkSchemas("Owner", owner)
 			sale := false

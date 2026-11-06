@@ -50,6 +50,7 @@ transaction:
       record: Sale
       values:
         register: $input.register
+        location: $input.location
         till_session: $input.till_session
         return_against: $steps.original.name
         items: $input.items

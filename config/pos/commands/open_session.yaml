@@ -1,0 +1,59 @@
+name: open_session
+namespace: pos
+version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: open_session
+presentation:
+  title: Open till
+permission: create
+input:
+  record: Till Session
+require:
+  - lock:
+      record: Register
+      name: $input.register
+  - exists:
+      record: Register
+      where:
+        name: $input.register
+        location: $input.location
+    message: Register does not belong to this location
+  - not_exists:
+      record: Shift
+      where:
+        register: $input.register
+        status: Open
+    message: Register already has an open shift
+  - not_exists:
+      record: Till Session
+      where:
+        cashier: $actor
+        status: Open
+    message: You already have an open till
+transaction:
+  - as: shift
+    create:
+      record: Shift
+      values:
+        register: $input.register
+        cashier: $actor
+        started_at: $now
+        status: Open
+  - as: till
+    create:
+      record: Till Session
+      values:
+        shift: $steps.shift.name
+        register: $input.register
+        location: $input.location
+        cashier: $actor
+        opening_float: $input.opening_float
+        expected_cash: $input.opening_float
+        status: Open
+output:
+  reference: $steps.till.name
+  shift: $steps.shift.name
+emit:
+  - pos.shift.opened
+  - pos.till.opened

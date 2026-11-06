@@ -266,6 +266,66 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 					t.Errorf("GET %s = %d: %s", p, rec.Code, rec.Body.String())
 				}
 			}
+
+			// 6. #326: open_session opens shift + till in one operation and
+			// my_session hands the register everything a sale needs.
+			seed("Register", "REG-2", map[string]any{"register_name": "Side", "location": "LOC-1", "enabled": true})
+			op := func(role, name, key, input string) *httptest.ResponseRecorder {
+				for _, o := range cat.Data.PublishedOperations {
+					if strings.HasSuffix(o.OperationRef, "~"+name) {
+						return serve(role, http.MethodPost, "/op/"+o.OperationRef, fmt.Sprintf(`{"meta":{"idempotency_key":%q},"input_schema":{"id":%q,"version":%d},"input":%s}`, key, o.InputSchema.ID, o.InputSchema.Version, input))
+					}
+				}
+				t.Fatalf("cashier catalog lacks %s", name)
+				return nil
+			}
+			completed := func(rec *httptest.ResponseRecorder) bool {
+				return rec.Code == http.StatusOK && strings.Contains(rec.Body.String(), `"completed"`)
+			}
+			mySession := func(role string) []map[string]any {
+				t.Helper()
+				rec := serve(role, http.MethodPost, "/q/pos.core/my_session", `{"input":{}}`)
+				var out struct {
+					Data struct {
+						Data []map[string]any `json:"data"`
+					} `json:"data"`
+				}
+				if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+					t.Fatalf("%s my_session status=%d body=%s", role, rec.Code, rec.Body.String())
+				}
+				return out.Data.Data
+			}
+			if rows := mySession("Cashier"); len(rows) != 0 {
+				t.Fatalf("my_session before open = %v", rows)
+			}
+			if rec := op("Cashier", "open_session", "k-sess-bad", `{"register":"REG-2","location":"LOC-X","opening_float":300}`); completed(rec) {
+				t.Fatalf("open_session with a foreign location succeeded: %s", rec.Body.String())
+			}
+			run("open_session", "k-sess", `{"register":"REG-2","location":"LOC-1","opening_float":300}`)
+			rows := mySession("Cashier")
+			if len(rows) != 1 || rows[0]["register"] != "REG-2" || rows[0]["location"] != "LOC-1" || rows[0]["cashier"] != "Cashier" || rows[0]["shift"] == nil || !strings.HasPrefix(fmt.Sprint(rows[0]["opening_float"]), "300") {
+				t.Fatalf("my_session = %v", rows)
+			}
+			session := fmt.Sprint(rows[0]["name"])
+			if got := one("SELECT cashier FROM "+tbl("Shift")+" WHERE name = ?", fmt.Sprint(rows[0]["shift"])); got != "Cashier" {
+				t.Fatalf("session shift cashier = %q", got)
+			}
+			if rows := mySession("Manager"); len(rows) != 0 {
+				t.Fatalf("another actor sees the cashier's session: %v", rows)
+			}
+			for _, role := range []string{"Cashier", "Manager"} {
+				if rec := op(role, "open_session", "k-sess-2-"+role, `{"register":"REG-2","location":"LOC-1","opening_float":10}`); completed(rec) {
+					t.Fatalf("%s second open_session on REG-2 succeeded: %s", role, rec.Body.String())
+				}
+			}
+			if got := one("SELECT COUNT(*) FROM "+tbl("Till Session")+" WHERE status = ?", "Open"); got != "1" {
+				t.Fatalf("open tills = %s, want 1", got)
+			}
+			body := fmt.Sprintf(`{"register":"REG-2","location":"LOC-1","till_session":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":%q}]}`, session, intent("pay-sess", 180))
+			run("record_sale", "k-sess-sale", body)
+			if got := one("SELECT location FROM "+tbl("Sale")+" WHERE till_session = ?", session); got != "LOC-1" {
+				t.Fatalf("sale location = %q", got)
+			}
 		})
 	}
 }
