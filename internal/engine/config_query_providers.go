@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
@@ -146,7 +147,12 @@ func (e *configQueryExecutor) ExecutePublishedQuery(ctx context.Context, exec co
 	return e.run(ctx, exec.Scope, plugin.PublishedQueryActorScope{}, true, input, cursor, limit)
 }
 
+// ExecutePublishedQueryForActor binds $actor to the verified subject. OwnerOnly
+// (an if_owner grant) also applies owner_field; otherwise every row is read.
 func (e *configQueryExecutor) ExecutePublishedQueryForActor(ctx context.Context, exec contract.ModuleExecution, q contract.PublishedQuery, actor plugin.PublishedQueryActorScope, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+	if e.def.OwnerField != "" && strings.TrimSpace(actor.SubjectID) == "" {
+		return contract.QueryResult{}, contract.NewError(contract.CodePermissionDenied, "actor scope is required")
+	}
 	return e.run(ctx, exec.Scope, actor, !actor.OwnerOnly, input, cursor, limit)
 }
 

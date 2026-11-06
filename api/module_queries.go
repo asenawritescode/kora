@@ -123,7 +123,10 @@ func authorizePublishedQueryActorScope(execution policy.Execution, roles policy.
 			return nil, contract.NewError(contract.CodePermissionDenied, "published query assignment field is outside its field contract")
 		}
 	}
-	if !decision.OwnerOnly && len(decision.AssignedFields) == 0 {
+	// An owner_field query always runs with the verified actor so $actor binds
+	// to the caller; only an if_owner grant (OwnerOnly) narrows its rows. A
+	// plain grant or the Administrator bypass keeps OwnerOnly false (#407).
+	if !decision.OwnerOnly && len(decision.AssignedFields) == 0 && query.OwnerField == "" {
 		return nil, nil
 	}
 	actor := execution.Actor()
