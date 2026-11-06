@@ -58,7 +58,9 @@ func testLiveCreateSiteDisplayName(t *testing.T, driver, dsn, displayName, wantS
 	if err != nil {
 		t.Fatal("open disposable platform database:", err)
 	}
-	defer platformDB.Close()
+	// Registered first so it closes after the cleanup below has dropped the
+	// tenant database (a deferred Close would run before t.Cleanup).
+	t.Cleanup(func() { _ = platformDB.Close() })
 	dialect := db.Resolve(driver)
 	if err := BootstrapPlatformRegistryContext(t.Context(), platformDB, dialect); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
@@ -79,7 +81,9 @@ func testLiveCreateSiteDisplayName(t *testing.T, driver, dsn, displayName, wantS
 		if driver == "postgres" {
 			quoted = `"` + databaseName + `" WITH (FORCE)`
 		}
-		_, _ = platformDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+quoted)
+		if _, err := platformDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+quoted); err != nil {
+			t.Logf("drop disposable tenant database %s: %v", databaseName, err)
+		}
 	})
 	input := CreateSiteInput{
 		Hostname: hostname, SiteID: tenantID, DBType: driver, DBHost: host, DBPort: port,
