@@ -19,14 +19,18 @@ type publishedOperationSurface struct {
 // (by owner/name, to their allowed fields) and operations (by operation ref).
 type publishedSurfaceCatalog struct {
 	queries    map[string][]string
+	inputs     map[string]map[string]bool
 	operations map[string]publishedOperationSurface
 }
 
 func newPublishedSurfaceCatalog(modules []contract.ModuleDescriptor) publishedSurfaceCatalog {
-	catalog := publishedSurfaceCatalog{queries: map[string][]string{}, operations: map[string]publishedOperationSurface{}}
+	catalog := publishedSurfaceCatalog{queries: map[string][]string{}, inputs: map[string]map[string]bool{}, operations: map[string]publishedOperationSurface{}}
 	for _, module := range modules {
 		for _, query := range module.Queries {
-			catalog.queries[string(query.OwnerModuleID)+"/"+query.Name] = query.AllowedFields
+			key := string(query.OwnerModuleID) + "/" + query.Name
+			catalog.queries[key] = query.AllowedFields
+			catalog.inputs[key] = map[string]bool{}
+			addSchemaProperties(catalog.inputs[key], module.Schemas, query.InputSchema)
 		}
 		for _, published := range module.PublishedOperations {
 			surface := publishedOperationSurface{lineEntry: published.Presentation.LineEntry != nil, payment: published.Payment != nil, inputs: map[string]bool{}}
@@ -82,6 +86,11 @@ type publishedComponentCheck struct {
 }
 
 func validatePublishedViewComponent(component ViewComponent, path string, definition PageComponentContract, resources map[string]PageResource, catalog publishedSurfaceCatalog, add func(string, string, string, string, string)) {
+	if _, declared := definition.Resources[lookupRole]; declared && component.ResourceBindings[lookupRole] == "" && component.Data != "" {
+		// The lookup resource may be named through the component's data binding.
+		resourceID, _, _ := strings.Cut(strings.TrimSpace(component.Data), ".")
+		component.ResourceBindings = map[string]string{lookupRole: resourceID}
+	}
 	check := publishedComponentCheck{component: component, path: path, definition: definition, resources: resources, catalog: catalog, add: add}
 	check.resourceRoles()
 	check.bindings()
@@ -95,6 +104,21 @@ func (c publishedComponentCheck) field(fieldPath, resourceID, field string) {
 	}
 	if fields, known := c.catalog.queries[publishedQueryKey(resource)]; known && !containsFold(fields, field) {
 		c.add("reference.published_field_missing", fieldPath, "field", field, fmt.Sprintf("field %q is not an allowed field of the published query bound as %q", field, resourceID))
+	}
+}
+
+// lookupRole is the resource role of an on-demand lookup query.
+const lookupRole = "lookup"
+
+// queryInput checks that name is a property of the bound query's input schema.
+func (c publishedComponentCheck) queryInput(inputPath, resourceID, name string) {
+	resource, exists := c.resources[resourceID]
+	if !exists || resource.Query != publishedQueryResource {
+		return
+	}
+	key := publishedQueryKey(resource)
+	if _, known := c.catalog.queries[key]; known && !c.catalog.inputs[key][name] {
+		c.add("reference.published_input_missing", inputPath, "query_input", name, fmt.Sprintf("%q is not an input of the published query bound as %q", name, resourceID))
 	}
 }
 
@@ -128,6 +152,8 @@ func (c publishedComponentCheck) bindings() {
 			c.add("reference.component_binding_unsupported", bindingPath, "component_binding", key, fmt.Sprintf("component %q does not declare binding %q", c.component.Type, key))
 		case binding.Kind == "field" && strings.TrimSpace(value) != "":
 			c.field(bindingPath, c.component.ResourceBindings[binding.ResourceRole], strings.TrimSpace(value))
+		case binding.Kind == "query_input" && strings.TrimSpace(value) != "":
+			c.queryInput(bindingPath, c.component.ResourceBindings[binding.ResourceRole], strings.TrimSpace(value))
 		case binding.Kind == "literal":
 			if err := validateBindingValue(binding, value, nil, nil, bindingPath); err != "" {
 				c.add("reference.component_binding_invalid", bindingPath, "component_binding", key, err)
