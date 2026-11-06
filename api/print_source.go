@@ -18,6 +18,11 @@ import (
 // applying the same rules as the resource GET route.
 type sitePrintSource struct{ h *Handler }
 
+// NewSitePrintHandler serves GET print/:format_name for the active site.
+func NewSitePrintHandler(h *Handler) gin.HandlerFunc {
+	return NewPrintHandler(sitePrintSource{h: h})
+}
+
 func (s sitePrintSource) Format(c *gin.Context, name string) (*print.Format, error) {
 	f, ok := s.h.runtimeService(c, c.GetString("site_name")).PrintFormats[name]
 	if !ok {
@@ -81,7 +86,11 @@ func (s sitePrintSource) Record(c *gin.Context, dtName, name string) (map[string
 	if err != nil {
 		return nil, err
 	}
-	return docToMap(doc, dt, registry, nil), nil
+	out := docToMap(doc, dt, registry, nil)
+	if err := s.printLinkTitles(c, out, dt); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Receipt returns the completed receipt output of an operation execution the

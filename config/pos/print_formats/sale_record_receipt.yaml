@@ -8,7 +8,7 @@ text: |
   Receipt: {{ .doc.name }}
   {{ line }}
   {{- range .doc.items }}
-  {{ left 24 .item }}{{ right 6 (num .quantity) }}{{ right 18 (money .amount) }}
+  {{ left 24 .item_title }}{{ right 6 (num .quantity) }}{{ right 18 (money .amount) }}
   {{- end }}
   {{ line }}
   {{ left 24 "TOTAL" }}{{ right 24 (money .doc.total) }}
@@ -23,7 +23,7 @@ html: |
     <p>Receipt {{ .doc.name }} &middot; {{ date .now }}</p>
     <table>
       {{- range .doc.items }}
-      <tr><td>{{ .item }}</td><td>{{ num .quantity }}</td><td>{{ money .amount }}</td></tr>
+      <tr><td>{{ .item_title }}</td><td>{{ num .quantity }}</td><td>{{ money .amount }}</td></tr>
       {{- end }}
     </table>
     <p><strong>Total {{ money .doc.total }}</strong></p>
