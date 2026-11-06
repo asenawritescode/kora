@@ -36,6 +36,12 @@ type ManagementModuleLifecyclePlanner interface {
 	Plan(context.Context, contract.TenantID, contract.PlanModuleChange) (contract.ModuleChangePlan, error)
 }
 
+// ManagementTenantMemberPlanner answers the read-only tenant member check. It
+// has no durable effect and does not create an operation.
+type ManagementTenantMemberPlanner interface {
+	PlanMember(context.Context, contract.TenantID, contract.PlanTenantMember) (contract.TenantMemberPlan, error)
+}
+
 type ManagementModuleInspector interface {
 	InspectModules(context.Context, contract.TenantID) (contract.ModuleInspection, error)
 	InspectExecution(context.Context, contract.TenantID, string) (contract.ExecutionInspection, error)
@@ -44,19 +50,21 @@ type ManagementModuleInspector interface {
 type ManagementCapability = contract.ManagementCapability
 
 const (
-	ManagementProvisionCapability  = contract.ManagementCapabilityTenantProvision
-	ManagementPackageCapability    = contract.ManagementCapabilityTenantPackageApply
-	ManagementPackageRecovery      = contract.ManagementCapabilityTenantPackageRetry
-	ManagementStateCapability      = contract.ManagementCapabilityTenantStateSet
-	ManagementStateRecovery        = contract.ManagementCapabilityTenantStateRetry
-	ManagementProvisionRecovery    = contract.ManagementCapabilityTenantProvisionRetry
-	ManagementDeleteCapability     = contract.ManagementCapabilityTenantDelete
-	ManagementDeleteRecovery       = contract.ManagementCapabilityTenantDeleteRetry
-	ManagementInvitationCapability = contract.ManagementCapabilityTenantInvitation
-	ManagementInvitationRecovery   = contract.ManagementCapabilityTenantInvitationRetry
-	ManagementModuleLifecycle      = contract.ManagementCapabilityModuleLifecycle
-	ManagementMemberRevoke         = contract.ManagementCapabilityTenantMemberRevoke
-	ManagementOperationRead        = contract.ManagementCapabilityOperationRead
+	ManagementProvisionCapability   = contract.ManagementCapabilityTenantProvision
+	ManagementPackageCapability     = contract.ManagementCapabilityTenantPackageApply
+	ManagementPackageRecovery       = contract.ManagementCapabilityTenantPackageRetry
+	ManagementStateCapability       = contract.ManagementCapabilityTenantStateSet
+	ManagementStateRecovery         = contract.ManagementCapabilityTenantStateRetry
+	ManagementProvisionRecovery     = contract.ManagementCapabilityTenantProvisionRetry
+	ManagementDeleteCapability      = contract.ManagementCapabilityTenantDelete
+	ManagementDeleteRecovery        = contract.ManagementCapabilityTenantDeleteRetry
+	ManagementInvitationCapability  = contract.ManagementCapabilityTenantInvitation
+	ManagementInvitationRecovery    = contract.ManagementCapabilityTenantInvitationRetry
+	ManagementModuleLifecycle       = contract.ManagementCapabilityModuleLifecycle
+	ManagementMemberRevoke          = contract.ManagementCapabilityTenantMemberRevoke
+	ManagementOperationRead         = contract.ManagementCapabilityOperationRead
+	ManagementMemberPlanCapability  = contract.ManagementCapabilityTenantMemberPlan
+	ManagementMemberGrantCapability = contract.ManagementCapabilityTenantMemberGrant
 )
 
 // ManagementOperationRoutes installs only the command routes whose durable
@@ -69,6 +77,7 @@ type ManagementOperationRoutes struct {
 	InvitationReconciler   ManagementInvitationReconciler
 	ModuleLifecyclePlanner ManagementModuleLifecyclePlanner
 	ModuleInspector        ManagementModuleInspector
+	MemberPlanner          ManagementTenantMemberPlanner
 }
 
 func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config ManagementOperationRoutes) error {
@@ -93,8 +102,10 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 	moduleLifecycleEnabled := config.Capabilities[ManagementModuleLifecycle]
 	memberRevokeEnabled := config.Capabilities[ManagementMemberRevoke]
 	invitationRecoveryEnabled := config.Capabilities[ManagementInvitationRecovery]
+	memberPlanEnabled := config.Capabilities[ManagementMemberPlanCapability]
+	memberGrantEnabled := config.Capabilities[ManagementMemberGrantCapability]
 	readEnabled := config.Capabilities[ManagementOperationRead]
-	if !stateEnabled && !stateRecoveryEnabled && !provisionEnabled && !provisionRecoveryEnabled && !packageEnabled && !packageRecoveryEnabled && !deleteEnabled && !deleteRecoveryEnabled && !invitationEnabled && !invitationRecoveryEnabled && !moduleLifecycleEnabled && !memberRevokeEnabled {
+	if !stateEnabled && !stateRecoveryEnabled && !provisionEnabled && !provisionRecoveryEnabled && !packageEnabled && !packageRecoveryEnabled && !deleteEnabled && !deleteRecoveryEnabled && !invitationEnabled && !invitationRecoveryEnabled && !moduleLifecycleEnabled && !memberRevokeEnabled && !memberPlanEnabled && !memberGrantEnabled {
 		return errors.New("management operation route requires at least one operation capability")
 	}
 	if !readEnabled {
@@ -120,6 +131,9 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 	}
 	if moduleLifecycleEnabled && config.ModuleInspector == nil {
 		return errors.New("module lifecycle capability requires a tenant module inspector")
+	}
+	if memberPlanEnabled && config.MemberPlanner == nil {
+		return errors.New("tenant member planning requires a planner")
 	}
 	group := router.Group("/api/management/v2")
 	group.Use(h.authenticate)
@@ -148,6 +162,7 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 		invitationReconciler:      config.InvitationReconciler,
 		moduleLifecyclePlanner:    config.ModuleLifecyclePlanner,
 		moduleInspector:           config.ModuleInspector,
+		memberPlanner:             config.MemberPlanner,
 	}
 	if provisionEnabled {
 		group.POST("/tenants", operations.provision)
@@ -185,6 +200,12 @@ func (h *ManagementInspectHandler) RegisterOperations(router gin.IRouter, config
 	if memberRevokeEnabled {
 		group.POST("/tenants/:id/members/:subject/revoke", operations.revokeTenantMember)
 	}
+	if memberPlanEnabled {
+		group.POST("/tenants/:id/members/plan", operations.planTenantMember)
+	}
+	if memberGrantEnabled {
+		group.POST("/tenants/:id/members", operations.grantTenantMember)
+	}
 	if invitationRecoveryEnabled {
 		group.POST("/operations/:id/reconcile-tenant-invitation", operations.reconcileTenantInvitation)
 	}
@@ -202,6 +223,49 @@ type managementOperationHandler struct {
 	invitationReconciler      ManagementInvitationReconciler
 	moduleLifecyclePlanner    ManagementModuleLifecyclePlanner
 	moduleInspector           ManagementModuleInspector
+	memberPlanner             ManagementTenantMemberPlanner
+}
+
+func (h *managementOperationHandler) planTenantMember(c *gin.Context) {
+	tenant, ok := managementTenant(c)
+	if !ok {
+		return
+	}
+	var request contract.PlanTenantMember
+	if !decodeManagementBody(c, &request) || !managementKeyMatches(c, request.Meta.IdempotencyKey) {
+		return
+	}
+	if err := contract.ValidatePlanTenantMember(request); err != nil {
+		writeManagementError(c, http.StatusBadRequest, contract.CodeValidationFailed, err.Error())
+		return
+	}
+	plan, err := h.memberPlanner.PlanMember(c.Request.Context(), tenant, request)
+	if err != nil {
+		writeManagementOperationError(c, err)
+		return
+	}
+	if err := contract.ValidateTenantMemberPlan(plan); err != nil {
+		writeManagementError(c, http.StatusInternalServerError, contract.CodeInternal, "tenant member plan is invalid")
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: plan})
+}
+
+func (h *managementOperationHandler) grantTenantMember(c *gin.Context) {
+	tenant, ok := managementTenant(c)
+	if !ok {
+		return
+	}
+	var command contract.GrantTenantMember
+	if !decodeManagementBody(c, &command) || !managementKeyMatches(c, command.Meta.IdempotencyKey) {
+		return
+	}
+	operation, err := h.service.AcceptForTenant(c.Request.Context(), h.caller, tenant, command)
+	if err != nil {
+		writeManagementOperationError(c, err)
+		return
+	}
+	writeManagedOperation(c, http.StatusAccepted, operation.View())
 }
 
 func (h *managementOperationHandler) inspectModules(c *gin.Context) {

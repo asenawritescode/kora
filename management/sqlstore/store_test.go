@@ -40,6 +40,39 @@ func TestAcceptPersistsOperationBeforeReturningRequested(t *testing.T) {
 	}
 }
 
+func TestAcceptRegistersTenantMemberGrantKindOnly(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		kind management.CommandKind
+		want bool
+	}{
+		{name: "tenant member grant", kind: management.CommandTenantMemberGrant, want: true},
+		{name: "unknown kind", kind: management.CommandKind("tenant_member_unknown")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, mock, store := newTestStore(t)
+			input := testAcceptCommand()
+			input.Kind = test.kind
+			input.Command = []byte(`{"subject":"usr_member_1"}`)
+			expectMissingByKey(mock, input)
+			if test.want {
+				mock.ExpectBegin()
+				mock.ExpectQuery(regexp.QuoteMeta("SELECT "+operationColumns+" FROM _kora_managed_operation WHERE tenant_id = ? AND caller_id = ? AND idempotency_key = ? FOR UPDATE")).
+					WithArgs(string(input.Tenant), string(input.Caller), string(input.IdempotencyKey)).WillReturnError(sql.ErrNoRows)
+				mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_managed_operation")).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectCommit()
+			}
+			_, err := store.Accept(context.Background(), input)
+			if test.want && err != nil {
+				t.Fatalf("Accept(%s) = %v", test.kind, err)
+			}
+			if !test.want && (err == nil || !strings.Contains(err.Error(), "not registered")) {
+				t.Fatalf("Accept(%s) = %v, want unregistered kind", test.kind, err)
+			}
+		})
+	}
+}
+
 func TestAcceptReturnsErrorWhenInitialPersistenceFails(t *testing.T) {
 	_, mock, store := newTestStore(t)
 	input := testAcceptCommand()

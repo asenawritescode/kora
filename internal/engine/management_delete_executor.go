@@ -127,6 +127,7 @@ type managementOperationDispatcher struct {
 	invitation   management.OperationExecutor
 	moduleChange management.OperationExecutor
 	memberRevoke management.OperationExecutor
+	memberGrant  management.OperationExecutor
 }
 
 func (d managementOperationDispatcher) Execute(ctx context.Context, claim management.Claim) (management.FinishResult, error) {
@@ -146,6 +147,8 @@ func (d managementOperationDispatcher) Execute(ctx context.Context, claim manage
 		executor = d.moduleChange
 	case management.CommandTenantMemberRevoke:
 		executor = d.memberRevoke
+	case management.CommandTenantMemberGrant:
+		executor = d.memberGrant
 	}
 	if executor == nil {
 		return management.FinishResult{State: contract.OperationFailed, Error: contract.NewError(contract.CodeValidationFailed, "operation kind is not enabled on this Engine deployment")}, nil

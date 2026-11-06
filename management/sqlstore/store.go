@@ -68,7 +68,7 @@ func (s *Store) Accept(ctx context.Context, input management.AcceptCommand) (man
 	if input.Now.IsZero() || len(input.Command) == 0 || len(input.Command) > 1<<20 || !json.Valid(input.Command) {
 		return management.Operation{}, fmt.Errorf("management command payload or timestamp is invalid")
 	}
-	if input.Kind != management.CommandProvisionTenant && input.Kind != management.CommandApplyPackage && input.Kind != management.CommandSetTenantState && input.Kind != management.CommandDeleteTenant && input.Kind != management.CommandTenantInvitation && input.Kind != management.CommandApplyModuleChange && input.Kind != management.CommandTenantMemberRevoke {
+	if input.Kind != management.CommandProvisionTenant && input.Kind != management.CommandApplyPackage && input.Kind != management.CommandSetTenantState && input.Kind != management.CommandDeleteTenant && input.Kind != management.CommandTenantInvitation && input.Kind != management.CommandApplyModuleChange && input.Kind != management.CommandTenantMemberRevoke && input.Kind != management.CommandTenantMemberGrant {
 		return management.Operation{}, fmt.Errorf("management command kind is not registered")
 	}
 	digest := management.CommandDigest(input.Kind, input.Command)

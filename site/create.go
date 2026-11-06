@@ -383,6 +383,11 @@ func registeredSiteIDContext(ctx context.Context, platformDB *sql.DB, platformDB
 	return id, nil
 }
 
+// PasswordlessPasswordHash marks a tenant user that signs in only through the
+// Cloud handoff or Cloud OIDC. It is not a valid bcrypt hash, so no password
+// can ever match it.
+const PasswordlessPasswordHash = "$kora$passwordless$disabled"
+
 func createPasswordlessAdminUserContext(ctx context.Context, db *sql.DB, dialect sqlDialect.QueryDialect, email, fullName, site, cloudSubject string) error {
 	query := `INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, email_verified_at, roles)
 		 VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?)`
@@ -398,7 +403,7 @@ func createPasswordlessAdminUserContext(ctx context.Context, db *sql.DB, dialect
 	// Cloud retains organization and billing authority; Engine enforces tenant permissions.
 	_, err := db.ExecContext(ctx,
 		sqlDialect.Rebind(dialect, query),
-		strings.TrimSpace(cloudSubject), site, email, "$kora$passwordless$disabled", fullName, contract.CloudOwnerEngineRole,
+		strings.TrimSpace(cloudSubject), site, email, PasswordlessPasswordHash, fullName, contract.CloudOwnerEngineRole,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting passwordless Cloud administrator: %w", err)
