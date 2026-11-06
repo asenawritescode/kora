@@ -269,6 +269,113 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 			checkTillGuard(t, cerr, tc.ok, "belongs to another cashier")
 		})
 	}
+
+	// close_session (#390) closes the till and its shift in one transaction,
+	// with the same own-till rule as close_till.
+	closeSession := func(shift string, count float64) map[string]any {
+		return map[string]any{"data": map[string]any{"shift": shift, "closing_count": count}}
+	}
+	statusOf := func(doc, name string) string {
+		t.Helper()
+		var status string
+		if err := conn.QueryRow(kdb.Rebind(dialect, "SELECT status FROM "+dialect.QuoteIdent(reg.Get(doc).RawTableName())+" WHERE name = ?"), name).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		return status
+	}
+	varianceOf := func(till string) string {
+		t.Helper()
+		var v string
+		if err := conn.QueryRow(kdb.Rebind(dialect, "SELECT variance FROM "+dialect.QuoteIdent(reg.Get("Till Session").RawTableName())+" WHERE name = ?"), till).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	session := func(user, name string) (register, till, shift string) {
+		register = create("Register", map[string]any{"register_name": name, "location": loc, "enabled": 1})
+		regOf[name] = register
+		out, cerr := run(user, cashierRoles, "pos.open_session", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 100}})
+		if cerr != nil {
+			t.Fatalf("open_session %s: %+v", name, cerr)
+		}
+		return register, output(out, "reference"), output(out, "shift")
+	}
+	// Each case's till is opened by its own cashier (one open till per cashier).
+	for i, tc := range []struct {
+		name string
+		who  actor
+		ok   bool
+	}{
+		{"another cashier", bob, false},
+		{"own till", actor{"cs-opener", cashierRoles}, true},
+		{"manager", mgr, true},
+		{"owner", owner, true},
+		{"administrator only", adminOnly, true},
+	} {
+		t.Run("close_session/"+tc.name, func(t *testing.T) {
+			opener := fmt.Sprintf("cs-%d", i)
+			if tc.name == "own till" {
+				opener = "cs-opener"
+			}
+			register, till, shift := session(opener, "S "+tc.name)
+			tillRegister[till] = register
+			if _, cerr := run(opener, cashierRoles, "pos.record_sale", saleOn(till)); cerr != nil {
+				t.Fatalf("sale: %+v", cerr)
+			}
+			out, cerr := run(tc.who.user, tc.who.roles, "pos.close_session", closeSession(shift, 390))
+			checkTillGuard(t, cerr, tc.ok, refused)
+			if !tc.ok {
+				if statusOf("Till Session", till) != "Open" || statusOf("Shift", shift) != "Open" {
+					t.Fatal("a refused close_session changed the till or the shift")
+				}
+				return
+			}
+			if got := output(out, "reference"); got != till {
+				t.Fatalf("reference = %q, want %q", got, till)
+			}
+			if statusOf("Till Session", till) != "Closed" || statusOf("Shift", shift) != "Closed" {
+				t.Fatalf("till=%s shift=%s, both must be Closed", statusOf("Till Session", till), statusOf("Shift", shift))
+			}
+			// expected cash = 100 float + 300 cash sale; counted 390.
+			if v := varianceOf(till); v != "-10" && !strings.HasPrefix(v, "-10.0") {
+				t.Fatalf("variance = %q, want -10", v)
+			}
+			if _, cerr := run(tc.who.user, tc.who.roles, "pos.close_session", closeSession(shift, 1)); cerr == nil || !strings.Contains(cerr.Message, "No open till") {
+				t.Fatalf("second close_session err = %+v, want a refusal", cerr)
+			}
+			if v := varianceOf(till); v != "-10" && !strings.HasPrefix(v, "-10.0") {
+				t.Fatalf("variance after refused second close = %q", v)
+			}
+			// The register is free again: open_session works on it.
+			if _, cerr := run(opener, cashierRoles, "pos.open_session", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 50}}); cerr != nil {
+				t.Fatalf("open_session after close_session: %+v", cerr)
+			}
+		})
+	}
+	t.Run("close_session/old-style till", func(t *testing.T) {
+		shift := fmt.Sprint(admin("pos.open_shift", map[string]any{"data": map[string]any{"register": create("Register", map[string]any{"register_name": "Old2", "location": loc, "enabled": 1})}})["steps"].([]any)[0].(map[string]any)["name"])
+		admin("pos.open_till", map[string]any{"data": map[string]any{"shift": shift, "opening_float": 100}})
+		_, cerr := run("alice", cashierRoles, "pos.close_session", closeSession(shift, 100))
+		checkTillGuard(t, cerr, false, refused)
+		if _, cerr = run("mgr", managerRoles, "pos.close_session", closeSession(shift, 100)); cerr != nil {
+			t.Fatalf("manager: %+v", cerr)
+		}
+		if statusOf("Shift", shift) != "Closed" {
+			t.Fatal("shift left open")
+		}
+	})
+	t.Run("close_session/shift already closed", func(t *testing.T) {
+		register, till, shift := session("cs-shift", "S shift closed")
+		if _, cerr := run("cs-shift", cashierRoles, "pos.close_shift", map[string]any{"data": map[string]any{"register": register}}); cerr != nil {
+			t.Fatal(cerr)
+		}
+		if _, cerr := run("cs-shift", cashierRoles, "pos.close_session", closeSession(shift, 100)); cerr == nil || !strings.Contains(cerr.Message, "already closed") {
+			t.Fatalf("err = %+v, want a refusal", cerr)
+		}
+		if statusOf("Till Session", till) != "Open" {
+			t.Fatal("a refused close_session closed the till")
+		}
+	})
 }
 
 func checkTillGuard(t *testing.T, cerr *contract.Error, ok bool, refusal string) {

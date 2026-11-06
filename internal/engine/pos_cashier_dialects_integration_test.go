@@ -489,6 +489,34 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 					t.Fatalf("%s %s = %d, want 403: %s", role, other, rec.Code, rec.Body.String())
 				}
 			}
+
+			// 8. #390: close_session closes the till and its shift in one
+			// operation. close_till above left the shift open, so close it,
+			// open a fresh session, and close that one with close_session.
+			run("close_shift", "k-close-shift", `{"register":"REG-2"}`)
+			run("open_session", "k-sess-again", `{"register":"REG-2","location":"LOC-1","opening_float":20}`)
+			rows = mySession("Cashier")
+			if len(rows) != 1 || rows[0]["name"] == session {
+				t.Fatalf("my_session after reopen = %v", rows)
+			}
+			second, secondShift := fmt.Sprint(rows[0]["name"]), fmt.Sprint(rows[0]["shift"])
+			if rec := op("Cashier", "close_session", "k-close-nobody", `{"shift":"SHF-none","closing_count":1}`); completed(rec) {
+				t.Fatalf("close_session on an unknown shift succeeded: %s", rec.Body.String())
+			}
+			run("close_session", "k-close-session", fmt.Sprintf(`{"shift":%q,"closing_count":25}`, secondShift))
+			if got := one("SELECT status FROM "+tbl("Till Session")+" WHERE name = ?", second) + "/" + one("SELECT status FROM "+tbl("Shift")+" WHERE name = ?", secondShift); got != "Closed/Closed" {
+				t.Fatalf("till/shift after close_session = %s", got)
+			}
+			if got := one("SELECT variance FROM "+tbl("Till Session")+" WHERE name = ?", second); !decimalIs(got, "5") {
+				t.Fatalf("variance = %s, want 5", got)
+			}
+			if rec := op("Cashier", "close_session", "k-close-again", fmt.Sprintf(`{"shift":%q,"closing_count":1}`, secondShift)); completed(rec) {
+				t.Fatalf("second close_session succeeded: %s", rec.Body.String())
+			}
+			run("open_session", "k-sess-reopen", `{"register":"REG-2","location":"LOC-1","opening_float":10}`)
+			if rows := mySession("Cashier"); len(rows) != 1 || rows[0]["name"] == second {
+				t.Fatalf("my_session after close_session + open_session = %v", rows)
+			}
 		})
 	}
 }

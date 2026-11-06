@@ -169,6 +169,9 @@
 - doctype: module.pos.core.operation.close_till
   role: Owner
   write: true
+- doctype: module.pos.core.operation.close_session
+  role: Owner
+  write: true
 - doctype: module.pos.core.operation.record_sale
   role: Owner
   write: true
@@ -221,6 +224,9 @@
 - doctype: module.pos.core.operation.close_till
   role: Manager
   write: true
+- doctype: module.pos.core.operation.close_session
+  role: Manager
+  write: true
 - doctype: module.pos.core.operation.record_sale
   role: Manager
   write: true
@@ -271,6 +277,9 @@
   role: Cashier
   write: true
 - doctype: module.pos.core.operation.close_till
+  role: Cashier
+  write: true
+- doctype: module.pos.core.operation.close_session
   role: Cashier
   write: true
 - doctype: module.pos.core.operation.record_sale

@@ -121,13 +121,46 @@ func TestPOSOpenSessionCommandParse(t *testing.T) {
 	}
 }
 
+// TestPOSCloseSessionCommandParse (#390): one command closes the till and its
+// shift together, taking close_till's inputs and returning the till as reference.
+func TestPOSCloseSessionCommandParse(t *testing.T) {
+	read := func(name string) *CommandResource {
+		raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", name+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		def, err := ParseCommandResource(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return def
+	}
+	def, closeTill := read("close_session"), read("close_till")
+	if def.Input.Record != closeTill.Input.Record || def.Permission != closeTill.Permission {
+		t.Fatalf("close_session input/permission = %q/%q, want close_till's %q/%q", def.Input.Record, def.Permission, closeTill.Input.Record, closeTill.Permission)
+	}
+	if len(def.Steps) != 2 || def.Steps[0].Update == nil || def.Steps[1].Update == nil {
+		t.Fatalf("steps = %#v", def.Steps)
+	}
+	till, shift := def.Steps[0].Update, def.Steps[1].Update
+	if till.Record != "Till Session" || till.Values["closing_count"] != "$input.closing_count" || till.Values["status"] != "Closed" || till.Values["closed_at"] != "$now" {
+		t.Fatalf("till update = %#v", till)
+	}
+	if shift.Record != "Shift" || shift.Name != "$input.shift" || shift.Values["status"] != "Closed" || shift.Values["ended_at"] != "$now" {
+		t.Fatalf("shift update = %#v", shift)
+	}
+	if def.Output["reference"] != "$steps.till.name" && def.Output["reference"] != closeTill.Output["reference"] {
+		t.Fatalf("output = %v", def.Output)
+	}
+}
+
 // TestPOSTillCommandsRequireOwnCashier (#358): every command that takes a
 // till or shift refuses a till/shift whose cashier is not the actor, except
 // for Owner, Manager and Administrator.
 func TestPOSTillCommandsRequireOwnCashier(t *testing.T) {
 	for name, record := range map[string]string{
 		"record_sale": "Till Session", "return_sale": "Till Session", "void_sale": "Till Session",
-		"close_till": "Till Session", "close_shift": "Shift",
+		"close_till": "Till Session", "close_shift": "Shift", "close_session": "Till Session",
 	} {
 		t.Run(name, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", name+".yaml"))
