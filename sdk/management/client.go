@@ -44,6 +44,9 @@ type Client interface {
 	ApplyModuleChange(context.Context, contract.TenantID, contract.ApplyModuleChange) (contract.ManagedOperation, error)
 	InspectModules(context.Context, contract.TenantID) (contract.ModuleInspection, error)
 	InspectExecution(context.Context, contract.TenantID, string) (contract.ExecutionInspection, error)
+	PlanTenantMember(context.Context, contract.TenantID, contract.PlanTenantMember) (contract.TenantMemberPlan, error)
+	GrantTenantMember(context.Context, contract.TenantID, contract.GrantTenantMember) (contract.ManagedOperation, error)
+	RevokeTenantMember(context.Context, contract.TenantID, contract.RevokeTenantMember) (contract.ManagedOperation, error)
 }
 
 // TokenSource supplies a scoped service credential for each request. It must
@@ -295,6 +298,58 @@ func (c *httpClient) InviteTenantAdministrator(ctx context.Context, tenant contr
 	err := c.do(ctx, http.MethodPost, "/api/management/v2/tenants/"+url.PathEscape(string(tenant))+"/invitation", http.StatusAccepted, cmd, &result)
 	if err == nil && result.Tenant != tenant {
 		err = fmt.Errorf("management operation tenant does not match invitation request")
+	}
+	return result, err
+}
+
+// PlanTenantMember asks the Engine whether the email may be invited with the
+// requested roles. A refused plan is a successful response with problems.
+func (c *httpClient) PlanTenantMember(ctx context.Context, tenant contract.TenantID, request contract.PlanTenantMember) (contract.TenantMemberPlan, error) {
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return contract.TenantMemberPlan{}, fmt.Errorf("validate tenant ID: %w", err)
+	}
+	if err := contract.ValidatePlanTenantMember(request); err != nil {
+		return contract.TenantMemberPlan{}, fmt.Errorf("validate tenant member plan: %w", err)
+	}
+	var result contract.TenantMemberPlan
+	err := c.do(ctx, http.MethodPost, "/api/management/v2/tenants/"+url.PathEscape(string(tenant))+"/members/plan", http.StatusOK, request, &result)
+	if err == nil {
+		err = contract.ValidateTenantMemberPlan(result)
+	}
+	return result, err
+}
+
+// GrantTenantMember submits the durable grant for an accepted invitation.
+// Callers poll the returned operation through Operation.
+func (c *httpClient) GrantTenantMember(ctx context.Context, tenant contract.TenantID, cmd contract.GrantTenantMember) (contract.ManagedOperation, error) {
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return contract.ManagedOperation{}, fmt.Errorf("validate tenant ID: %w", err)
+	}
+	if err := contract.ValidateGrantTenantMember(cmd); err != nil {
+		return contract.ManagedOperation{}, fmt.Errorf("validate tenant member grant: %w", err)
+	}
+	var result contract.ManagedOperation
+	err := c.do(ctx, http.MethodPost, "/api/management/v2/tenants/"+url.PathEscape(string(tenant))+"/members", http.StatusAccepted, cmd, &result)
+	if err == nil && result.Tenant != tenant {
+		err = fmt.Errorf("management operation tenant does not match member grant request")
+	}
+	return result, err
+}
+
+// RevokeTenantMember submits the durable revocation of the member keyed by
+// cmd.Subject.
+func (c *httpClient) RevokeTenantMember(ctx context.Context, tenant contract.TenantID, cmd contract.RevokeTenantMember) (contract.ManagedOperation, error) {
+	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+		return contract.ManagedOperation{}, fmt.Errorf("validate tenant ID: %w", err)
+	}
+	if err := contract.ValidateRevokeTenantMember(cmd); err != nil {
+		return contract.ManagedOperation{}, fmt.Errorf("validate tenant member revocation: %w", err)
+	}
+	var result contract.ManagedOperation
+	endpoint := "/api/management/v2/tenants/" + url.PathEscape(string(tenant)) + "/members/" + url.PathEscape(string(cmd.Subject)) + "/revoke"
+	err := c.do(ctx, http.MethodPost, endpoint, http.StatusAccepted, cmd, &result)
+	if err == nil && result.Tenant != tenant {
+		err = fmt.Errorf("management operation tenant does not match member revocation request")
 	}
 	return result, err
 }

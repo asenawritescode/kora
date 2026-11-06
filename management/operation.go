@@ -18,12 +18,14 @@ import (
 type CommandKind string
 
 const (
-	CommandProvisionTenant   CommandKind = "provision_tenant"
-	CommandApplyPackage      CommandKind = "apply_package"
-	CommandSetTenantState    CommandKind = "set_tenant_state"
-	CommandDeleteTenant      CommandKind = "delete_tenant"
-	CommandTenantInvitation  CommandKind = "tenant_invitation"
-	CommandApplyModuleChange CommandKind = "apply_module_change"
+	CommandProvisionTenant    CommandKind = "provision_tenant"
+	CommandApplyPackage       CommandKind = "apply_package"
+	CommandSetTenantState     CommandKind = "set_tenant_state"
+	CommandDeleteTenant       CommandKind = "delete_tenant"
+	CommandTenantInvitation   CommandKind = "tenant_invitation"
+	CommandApplyModuleChange  CommandKind = "apply_module_change"
+	CommandTenantMemberGrant  CommandKind = "tenant_member_grant"
+	CommandTenantMemberRevoke CommandKind = "tenant_member_revoke"
 )
 
 type Operation struct {
@@ -200,6 +202,16 @@ func (s *Service) AcceptForTenant(ctx context.Context, caller contract.Principal
 			return Operation{}, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		key, kind = value.Meta.IdempotencyKey, CommandApplyModuleChange
+	case contract.GrantTenantMember:
+		if err := contract.ValidateGrantTenantMember(value); err != nil {
+			return Operation{}, contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+		key, kind = value.Meta.IdempotencyKey, CommandTenantMemberGrant
+	case contract.RevokeTenantMember:
+		if err := contract.ValidateRevokeTenantMember(value); err != nil {
+			return Operation{}, contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+		key, kind = value.Meta.IdempotencyKey, CommandTenantMemberRevoke
 	default:
 		return Operation{}, contract.NewError(contract.CodeValidationFailed, "command is not valid for a tenant route")
 	}
