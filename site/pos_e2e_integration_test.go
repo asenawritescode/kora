@@ -138,7 +138,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		f, _ := print.Decode(raw)
 		refs[f.Name] = f.For.Operation
 	}
-	if refs["sale_receipt"] != "pos.core~pos.checkout~record_sale" || refs["z_report"] != "pos.core~pos.drawer~close_till" {
+	if refs["sale_receipt"] != "pos.core~pos.checkout~record_sale" || refs["z_report"] != "pos.core~pos.drawer~close_till" || refs["z_report_close_session"] != "pos.core~pos.drawer~close_session" {
 		t.Fatalf("stored print operation refs: %v", refs)
 	}
 	cmds := kernel.NewCommandRegistry()

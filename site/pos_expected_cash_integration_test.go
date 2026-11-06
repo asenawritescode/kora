@@ -254,7 +254,7 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 		return nil
 	}
 	var rendered []string
-	for _, file := range []string{"z_report.yaml", "z_report_reprint.yaml"} {
+	for _, file := range []string{"z_report.yaml", "z_report_close_session.yaml", "z_report_reprint.yaml"} {
 		body, err := os.ReadFile(filepath.Join("..", "config", "pos", "print_formats", file))
 		if err != nil {
 			t.Fatal(err)
@@ -279,7 +279,7 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 		}
 		rendered = append(rendered, txt)
 	}
-	if rendered[0] != rendered[1] {
+	if rendered[0] != rendered[1] || rendered[0] != rendered[2] {
 		t.Fatal("reprint differs from operation print")
 	}
 	// Voided sale is excluded; lines are method, count, total.

@@ -11,6 +11,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/plugin"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/print"
 )
 
@@ -21,6 +22,16 @@ type sitePrintSource struct{ h *Handler }
 // NewSitePrintHandler serves GET print/:format_name for the active site.
 func NewSitePrintHandler(h *Handler) gin.HandlerFunc {
 	return NewPrintHandler(sitePrintSource{h: h})
+}
+
+// NewSitePrintListHandler serves GET print-formats for the active site.
+func NewSitePrintListHandler(h *Handler) gin.HandlerFunc {
+	return NewPrintListHandler(sitePrintSource{h: h})
+}
+
+// NewSitePrintMetaHandler serves GET print-formats/:format_name for the active site.
+func NewSitePrintMetaHandler(h *Handler) gin.HandlerFunc {
+	return NewPrintMetaHandler(sitePrintSource{h: h})
 }
 
 func (s sitePrintSource) Format(c *gin.Context, name string) (*print.Format, error) {
@@ -66,7 +77,35 @@ func (s sitePrintSource) Authorize(c *gin.Context, f *print.Format) error {
 			}
 		}
 	}
+	// A format whose queries the actor cannot run would be refused at render,
+	// so it must not be offered either (no dead Print button).
+	for _, spec := range f.Queries {
+		module, name, _ := spec.Ref()
+		if s.queryDenied(c, execution, module, name) {
+			return ErrPrintForbidden
+		}
+	}
 	return nil
+}
+
+// queryDenied reports whether the actor lacks the published query's read
+// grant. Anything else (no bindings, unknown query) is left to render.
+func (s sitePrintSource) queryDenied(c *gin.Context, execution policy.Execution, module, name string) bool {
+	scope := businessScopeFromRequest(c, execution)
+	services := s.h.runtimeService(c, c.GetString("site_name"))
+	if services.ResolveModuleBindings == nil {
+		return false
+	}
+	plan, err := services.ResolveModuleBindings(scope)
+	if err != nil {
+		return false
+	}
+	query, found := plan.QueryDefinitions[plugin.PublishedQueryKey{Scope: scope, OwnerModuleID: contract.ModuleID(module), Name: name}]
+	if !found {
+		return false
+	}
+	_, authErr := authorizePublishedQueryActorScope(execution, s.h.siteRegistry(c), query, scope)
+	return authErr != nil
 }
 
 func (s sitePrintSource) Record(c *gin.Context, dtName, name string) (map[string]any, error) {

@@ -438,8 +438,8 @@ func assertPOSPublished(t *testing.T, database *sql.DB, dialect db.Dialect, site
 	if got := strings.Join(ids, ","); got != "inventory.app,inventory.core,pos.app,pos.core" {
 		t.Errorf("modules = %s", got)
 	}
-	if len(snap.PrintFormats) != 4 {
-		t.Errorf("print formats = %d, want 4", len(snap.PrintFormats))
+	if len(snap.PrintFormats) != 5 {
+		t.Errorf("print formats = %d, want 5", len(snap.PrintFormats))
 	}
 	opFormats := 0
 	for _, raw := range snap.PrintFormats {
@@ -459,8 +459,8 @@ func assertPOSPublished(t *testing.T, database *sql.DB, dialect db.Dialect, site
 			t.Errorf("print format for.operation %q is not a published ref ", f.For.Operation)
 		}
 	}
-	if opFormats != 2 {
-		t.Errorf("operation-targeted print formats = %d, want 2", opFormats)
+	if opFormats != 3 {
+		t.Errorf("operation-targeted print formats = %d, want 3", opFormats)
 	}
 	yaml, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "permissions.yaml"))
 	if err != nil {
