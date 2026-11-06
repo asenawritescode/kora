@@ -23,7 +23,7 @@ require:
         register: $input.register
         status: Open
         cashier: $actor
-    unless_role: [Owner, Manager]
+    unless_role: [Owner, Manager, Administrator]
     message: This shift belongs to another cashier
 transaction:
   - update:

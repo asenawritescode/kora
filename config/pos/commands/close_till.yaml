@@ -23,7 +23,7 @@ require:
         shift: $input.shift
         status: Open
         cashier: $actor
-    unless_role: [Owner, Manager]
+    unless_role: [Owner, Manager, Administrator]
     message: This till belongs to another cashier
 transaction:
   - update:

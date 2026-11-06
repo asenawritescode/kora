@@ -123,7 +123,7 @@ func TestPOSOpenSessionCommandParse(t *testing.T) {
 
 // TestPOSTillCommandsRequireOwnCashier (#358): every command that takes a
 // till or shift refuses a till/shift whose cashier is not the actor, except
-// for Owner and Manager.
+// for Owner, Manager and Administrator.
 func TestPOSTillCommandsRequireOwnCashier(t *testing.T) {
 	for name, record := range map[string]string{
 		"record_sale": "Till Session", "return_sale": "Till Session", "void_sale": "Till Session",
@@ -144,7 +144,7 @@ func TestPOSTillCommandsRequireOwnCashier(t *testing.T) {
 					continue
 				}
 				found++
-				if g.Exists.Record != record || len(g.UnlessRole) != 2 || g.UnlessRole[0] != "Owner" || g.UnlessRole[1] != "Manager" || g.Message == "" {
+				if g.Exists.Record != record || len(g.UnlessRole) != 3 || g.UnlessRole[0] != "Owner" || g.UnlessRole[1] != "Manager" || g.UnlessRole[2] != "Administrator" || g.Message == "" {
 					t.Fatalf("cashier guard = %+v", g)
 				}
 			}
