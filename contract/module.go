@@ -703,7 +703,13 @@ func validateSurfacePresentation(p SurfacePresentation) error {
 }
 
 func (c ApplicationCatalog) Validate() error {
-	if c.Revision == 0 || c.BusinessScope.Validate() != nil || len(c.Modules) > 500 || len(c.PublishedQueries) > 2000 || len(c.PublishedProjections) > 2000 || len(c.PublishedOperations) > 2000 || len(c.Schemas) > 4000 || len(c.AllowedEntityChoices) > 1000 || len(c.AvailableScopes) > 1001 || len(c.Blockers) > 100 {
+	// Revision 0 means the tenant has never committed a module snapshot, so a
+	// catalog that carries any installed module or published surface must still
+	// name the revision it was read from.
+	if c.Revision == 0 && (len(c.Modules) != 0 || len(c.PublishedQueries) != 0 || len(c.PublishedProjections) != 0 || len(c.PublishedOperations) != 0 || len(c.Schemas) != 0) {
+		return fmt.Errorf("application catalog identity or collection bounds are invalid")
+	}
+	if c.BusinessScope.Validate() != nil || len(c.Modules) > 500 || len(c.PublishedQueries) > 2000 || len(c.PublishedProjections) > 2000 || len(c.PublishedOperations) > 2000 || len(c.Schemas) > 4000 || len(c.AllowedEntityChoices) > 1000 || len(c.AvailableScopes) > 1001 || len(c.Blockers) > 100 {
 		return fmt.Errorf("application catalog identity or collection bounds are invalid")
 	}
 	modules := make(map[ModuleID]bool, len(c.Modules))

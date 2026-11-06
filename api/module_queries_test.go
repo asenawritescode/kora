@@ -449,3 +449,55 @@ func TestPublishedQueryCallerMistakesAre4xx(t *testing.T) {
 		})
 	}
 }
+
+func TestApplicationCatalogForTenantWithoutInstalledModules(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name         string
+		snapshot     contract.ModuleSnapshot
+		loadErr      error
+		wantStatus   int
+		wantRevision uint64
+	}{
+		{name: "no snapshot row yet is an empty catalog", snapshot: contract.ModuleSnapshot{TenantID: "fresh-tenant"}, wantStatus: 200},
+		{name: "snapshot with no installations is an empty catalog", snapshot: contract.ModuleSnapshot{TenantID: "fresh-tenant", Revision: 4}, wantStatus: 200, wantRevision: 4},
+		{name: "snapshot of another tenant stays unavailable", snapshot: contract.ModuleSnapshot{TenantID: "other-tenant", Revision: 4}, wantStatus: 503},
+		{name: "snapshot read failure stays unavailable", loadErr: errors.New("db down"), wantStatus: 503},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			execution, err := policy.NewVerifiedExecution("fresh-tenant", contract.ActorContext{PrincipalID: "owner", PrincipalType: contract.PrincipalHuman, Site: "fresh-tenant", Roles: []string{"Administrator"}, AuthenticatedAt: time.Now().UTC()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			services := NewSiteRuntimeServices()
+			services.Replace("fresh-tenant", SiteRuntimeService{
+				LoadModuleSnapshot:    func() (contract.ModuleSnapshot, error) { return tt.snapshot, tt.loadErr },
+				ResolveModuleBindings: func(contract.BusinessScope) (plugin.BindingPlan, error) { return plugin.BindingPlan{}, nil },
+			})
+			handler := NewHandler(doctype.NewRegistry(), nil)
+			handler.RuntimeServices = services
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest("GET", "/api/v2/modules/catalog", nil)
+			ctx.Set("site_name", "fresh-tenant")
+			ctx.Set("policy_execution", execution)
+			handler.HandleApplicationCatalog(ctx)
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("catalog status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if tt.wantStatus != 200 {
+				return
+			}
+			var response struct {
+				Data contract.ApplicationCatalog `json:"data"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Data.Revision != tt.wantRevision || len(response.Data.Modules) != 0 || len(response.Data.PublishedOperations) != 0 || len(response.Data.PublishedQueries) != 0 || response.Data.BusinessScope.Kind != contract.ScopeKindTenant {
+				t.Fatalf("unexpected empty catalog: %+v", response.Data)
+			}
+		})
+	}
+}

@@ -47,8 +47,10 @@ func (h *Handler) buildApplicationCatalog(c *gin.Context, execution policy.Execu
 	if services.LoadModuleSnapshot == nil || services.ResolveModuleBindings == nil {
 		return contract.ApplicationCatalog{}, fmt.Errorf("module catalog runtime is unavailable")
 	}
+	// A tenant that has never installed a module has no snapshot row yet; the
+	// store reports that as revision 0 and the catalog is validly empty.
 	snapshot, err := services.LoadModuleSnapshot()
-	if err != nil || snapshot.TenantID != execution.Tenant() || snapshot.Revision == 0 {
+	if err != nil || snapshot.TenantID != execution.Tenant() {
 		return contract.ApplicationCatalog{}, fmt.Errorf("module catalog snapshot is unavailable")
 	}
 	plan, err := services.ResolveModuleBindings(scope)
