@@ -6,5 +6,5 @@ export const ENGINE_CONTRACT_MANIFEST = {
   sourceTree: 'clean',
   artifact: 'contract/generated/engine-v2.ts',
   artifactSHA256: 'd21c6e697bff26962353ca88ed85c480d80a0554ffdd5500d39606c8513220cc',
-  schemaSHA256: '625b075c4fd886ff553a6b0adefd13d57d8d58ca1a2228ce7c410c05c1aafabd',
+  schemaSHA256: 'deea84a8224716c8e2f4ac3e7f7cb419ab7b1cdfe7839dadc7b96ba985182757',
 } as const
