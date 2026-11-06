@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -84,7 +85,10 @@ func (h *Handler) HandleImport(c *gin.Context) {
 			badRequestError(c, "import.target_invalid", "target DocType not found or is a child table", nil)
 			return
 		}
-		if dt.ModuleOwnerID != "" {
+		// A crud-mode owned DocType is writable through normal permissions (the
+		// kernel only protects commands_only ones), so importing into it is as
+		// safe as a direct create. commands_only targets need a published operation.
+		if dt.ModuleOwnerID != "" && dt.ModuleOwnershipMode == string(contract.MutationCommands) {
 			badRequestError(c, "import.target_owned", "module-owned DocTypes cannot be imported into", map[string]any{"operations": h.ownedImportOperations(c, dt)})
 			return
 		}
@@ -170,6 +174,17 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		units = assembleImportGroups(dt, childDT, table, head, child, col, spec.GroupBy, rows)
 	} else {
 		units = assembleImportRows(dt, spec.Mapping, col, rows)
+	}
+	if opTarget == nil {
+		if err := resolveImportLinks(reg, dt, table, units, h.siteLinkLookup(c, reg)); err != nil {
+			var cerr *contract.Error
+			if errors.As(err, &cerr) {
+				h.writeKernelError(c, cerr)
+				return
+			}
+			writeError(c, http.StatusInternalServerError, "internal", "cannot resolve link values", nil)
+			return
+		}
 	}
 	var bulk []kernel.BulkRow
 	results := map[int]importRowResult{}

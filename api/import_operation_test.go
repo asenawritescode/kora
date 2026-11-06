@@ -53,7 +53,10 @@ func newImportOpFixture(t testing.TB, roles ...string) *importOpFixture {
 			spec("receive", contract.EffectLocal), spec("notify", contract.EffectExternal), spec("bare", contract.EffectLocal)}}}}
 	snapshot := contract.ModuleSnapshot{TenantID: f.scope.TenantID, Revision: 3, Modules: []contract.ModuleDescriptor{module}}
 	f.reg = doctype.NewRegistry()
-	f.reg.Register(&doctype.DocType{Name: "ImpReceipt", ModuleOwnerID: "stock.receiving", Fields: []doctype.Field{{Fieldname: "sku", Fieldtype: "Data"}, {Fieldname: "qty", Fieldtype: "Int"}}})
+	f.reg.Register(&doctype.DocType{Name: "ImpReceipt", ModuleOwnerID: "stock.receiving", ModuleOwnershipMode: string(contract.MutationCommands), Fields: []doctype.Field{{Fieldname: "sku", Fieldtype: "Data"}, {Fieldname: "qty", Fieldtype: "Int"}}})
+	f.reg.Register(&doctype.DocType{Name: "ImpCrud", ModuleOwnerID: "stock.receiving", ModuleOwnershipMode: string(contract.MutationCRUD), Fields: []doctype.Field{{Fieldname: "sku", Fieldtype: "Data"}}})
+	f.reg.Permissions.SetPermission(&doctype.Permission{Doctype: "ImpCrud", Role: "Stocker", Read: true, Create: true, Import: true})
+	f.reg.Permissions.SetPermission(&doctype.Permission{Doctype: "ImpCrud", Role: "ReadOnly", Read: true, Import: true})
 	for _, op := range []string{"receive", "notify", "bare"} {
 		f.reg.Permissions.SetPermission(&doctype.Permission{Doctype: "module.stock.receiving.operation." + op, Role: "Clerk", Write: true})
 	}
@@ -130,7 +133,9 @@ func TestImportOperationTarget(t *testing.T) {
 		{"unregistered", spec(`"target":{"operation_ref":"x~y~z"},`), clerk, 400, "import.target_unsupported"},
 		{"key_fields", spec(`"target":{"operation_ref":"` + importOpRef + `","key_fields":["sku"]},`), clerk, 400, "import.unsupported"},
 		{"both targets", spec(`"target":{"operation_ref":"` + importOpRef + `","doctype":"ImpReceipt"},`), clerk, 400, "import.target_invalid"},
-		{"owned doctype lists operations", spec(`"target":{"doctype":"ImpReceipt"},`), clerk, 400, "import.target_owned"},
+		{"commands_only doctype lists operations", spec(`"target":{"doctype":"ImpReceipt"},`), clerk, 400, "import.target_owned"},
+		{"commands_only refused even with grants", spec(`"target":{"doctype":"ImpReceipt"},`), []string{"Stocker"}, 400, "import.target_owned"},
+		{"crud-owned without create is refused by permission", spec(`"target":{"doctype":"ImpCrud"},`), []string{"ReadOnly"}, 403, "permission.denied"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			status, body := f.post(t, tt.roles, tt.spec, "SKU,Qty\na,1\n")
@@ -142,7 +147,7 @@ func TestImportOperationTarget(t *testing.T) {
 			if status != tt.status || !strings.Contains(string(raw), want) {
 				t.Fatalf("got %d %s", status, raw)
 			}
-			if tt.name == "owned doctype lists operations" && !strings.Contains(string(raw), importOpRef) {
+			if tt.name == "commands_only doctype lists operations" && !strings.Contains(string(raw), importOpRef) {
 				t.Fatalf("owned details lack %s: %s", importOpRef, raw)
 			}
 		})
