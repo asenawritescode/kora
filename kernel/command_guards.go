@@ -23,14 +23,52 @@ import (
 //   - not_exists requires that no record matches.
 //   - equal requires two numeric operands (a $computed or $input reference, or a
 //     decimal literal) to be exactly equal, compared as big.Rat.
+//
+// UnlessRole, valid on exists, not_exists and equal, skips the guard when the
+// verified actor holds any listed role (exact, case-sensitive match). It cannot
+// be combined with As, since a skipped guard would leave the alias unbound.
 type CommandGuard struct {
-	Lock      *GuardLock    `yaml:"lock,omitempty" json:"lock,omitempty"`
-	Exists    *GuardMatch   `yaml:"exists,omitempty" json:"exists,omitempty"`
-	NotExists *GuardMatch   `yaml:"not_exists,omitempty" json:"not_exists,omitempty"`
-	Payment   *GuardPayment `yaml:"payment,omitempty" json:"payment,omitempty"`
-	Equal     []string      `yaml:"equal,omitempty" json:"equal,omitempty"`
-	Message   string        `yaml:"message,omitempty" json:"message,omitempty"`
-	As        string        `yaml:"as,omitempty" json:"as,omitempty"`
+	Lock       *GuardLock    `yaml:"lock,omitempty" json:"lock,omitempty"`
+	Exists     *GuardMatch   `yaml:"exists,omitempty" json:"exists,omitempty"`
+	NotExists  *GuardMatch   `yaml:"not_exists,omitempty" json:"not_exists,omitempty"`
+	Payment    *GuardPayment `yaml:"payment,omitempty" json:"payment,omitempty"`
+	Equal      []string      `yaml:"equal,omitempty" json:"equal,omitempty"`
+	Message    string        `yaml:"message,omitempty" json:"message,omitempty"`
+	As         string        `yaml:"as,omitempty" json:"as,omitempty"`
+	UnlessRole []string      `yaml:"unless_role,omitempty" json:"unless_role,omitempty"`
+}
+
+// skippedFor reports whether the guard is waived for an actor holding roles.
+func (g CommandGuard) skippedFor(roles []string) bool {
+	for _, listed := range g.UnlessRole {
+		for _, held := range roles {
+			if listed == held {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *CommandResource) validateUnlessRole(index int, guard CommandGuard) error {
+	if guard.UnlessRole == nil {
+		return nil
+	}
+	if guard.Lock != nil || guard.Payment != nil {
+		return fmt.Errorf("command %q: require %d unless_role is only valid on exists, not_exists and equal", c.FullName(), index)
+	}
+	if guard.As != "" {
+		return fmt.Errorf("command %q: require %d unless_role cannot be combined with an alias", c.FullName(), index)
+	}
+	if len(guard.UnlessRole) == 0 {
+		return fmt.Errorf("command %q: require %d unless_role needs at least one role", c.FullName(), index)
+	}
+	for _, role := range guard.UnlessRole {
+		if strings.TrimSpace(role) == "" {
+			return fmt.Errorf("command %q: require %d unless_role has an empty role name", c.FullName(), index)
+		}
+	}
+	return nil
 }
 
 // GuardLock names one record to lock, usually "$input.field".
@@ -60,6 +98,9 @@ func (c *CommandResource) validateGuards(aliases map[string]bool) error {
 		}
 		if set != 1 {
 			return fmt.Errorf("command %q: require %d must set exactly one of lock, exists, not_exists, payment or equal", c.FullName(), i)
+		}
+		if err := c.validateUnlessRole(i, guard); err != nil {
+			return err
 		}
 		switch {
 		case guard.Lock != nil:
@@ -101,6 +142,9 @@ func (c *CommandResource) validateGuards(aliases map[string]bool) error {
 
 func (k *Kernel) checkCommandGuards(dbTx *sql.Tx, opID string, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, cmd *CommandResource, env refEnv) *contract.Error {
 	for i, guard := range cmd.Require {
+		if guard.skippedFor(op.Context.Roles) {
+			continue
+		}
 		if guard.Lock != nil {
 			if cerr := k.lockGuardRecord(dbTx, reg, guard, env, i); cerr != nil {
 				return cerr
