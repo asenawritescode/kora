@@ -344,3 +344,27 @@
 - doctype: module.inventory.core.query.item_categories
   role: Cashier
   read: true
+- doctype: Payment Account
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Payment Account
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Payment Account
+  role: Cashier
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: module.pos.core.query.payments_by_account
+  role: Owner
+  read: true
+- doctype: module.pos.core.query.payments_by_account
+  role: Manager
+  read: true

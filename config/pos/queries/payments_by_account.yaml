@@ -1,0 +1,19 @@
+name: payments_by_account
+module_owner_id: pos.core
+capability: pos.sales
+operation: payments_by_account
+source: Sale Payment
+via: Sale.payments
+permission: read
+scope: tenant
+input:
+  till_session: {type: string, max_length: 140}
+filters:
+  - {field: parent.status, op: eq, value: Paid}
+  - {field: parent.till_session, op: eq, value: $input.till_session, optional: true}
+  - {field: payment_account, op: ne, value: ""}
+group_by: [payment_account, verification, method]
+aggregates:
+  - {name: payment_count, fn: count}
+  - {name: total, fn: sum, field: amount}
+limit: 50

@@ -29,3 +29,15 @@ fields:
     fieldtype: Data
     label: Reference
     description: Payment intent id for a sale; a refund has none.
+  - fieldname: payment_account
+    fieldtype: Link
+    options: Payment Account
+    label: Payment Account
+    description: Account a non-cash payment was received on; empty for cash.
+  - fieldname: verification
+    fieldtype: Select
+    label: Verification
+    options: |
+      provider_confirmed
+      manually_recorded
+    description: How a non-cash payment was confirmed; empty for cash.

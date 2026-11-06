@@ -117,6 +117,7 @@ func TestPOSManualPaymentsAcrossDialects(t *testing.T) {
 				}
 				return v
 			}
+			payTbl := dialect.QuoteIdent(loaded.Registry.Get("Sale").RawChildTableName("payments"))
 			seed := func(doc, name string, cols map[string]any) {
 				t.Helper()
 				keys, marks, args := []string{dialect.QuoteIdent("name")}, []string{"?"}, []any{name}
@@ -256,9 +257,7 @@ func TestPOSManualPaymentsAcrossDialects(t *testing.T) {
 			}
 
 			// 4. Sales: the Cashier records a mobile-money sale and a cash sale.
-			runOp("Cashier", "open_shift", "k-shift", `{"register":"REG-1"}`)
-			shift := one("SELECT name FROM " + tbl("Shift"))
-			runOp("Cashier", "open_till", "k-till", fmt.Sprintf(`{"shift":%q,"opening_float":500}`, shift))
+			runOp("Cashier", "open_session", "k-session", `{"register":"REG-1","location":"LOC-1","opening_float":500}`)
 			session := one("SELECT name FROM " + tbl("Till Session"))
 			sale := func(payments string, qty int) string {
 				return fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":%d,"unit_price":180,"amount":%d}],"payments":[%s]}`, session, qty, qty*180, payments)
@@ -270,10 +269,10 @@ func TestPOSManualPaymentsAcrossDialects(t *testing.T) {
 			if got := one("SELECT expected_cash FROM " + tbl("Till Session")); !strings.HasPrefix(got, "500") {
 				t.Fatalf("expected cash after a mobile-money sale = %s, want 500 (cash only counts)", got)
 			}
-			if got := one("SELECT payment_account FROM "+tbl("Sale Payment")+" WHERE method = ?", "Mobile Money"); got != till {
+			if got := one("SELECT payment_account FROM "+payTbl+" WHERE method = ?", "Mobile Money"); got != till {
 				t.Fatalf("stored payment_account = %q, want %q", got, till)
 			}
-			if got := one("SELECT verification FROM "+tbl("Sale Payment")+" WHERE method = ?", "Mobile Money"); got != "manually_recorded" {
+			if got := one("SELECT verification FROM "+payTbl+" WHERE method = ?", "Mobile Money"); got != "manually_recorded" {
 				t.Fatalf("stored verification = %q", got)
 			}
 			// An intent is single-use even for manual payments.

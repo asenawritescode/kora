@@ -117,3 +117,20 @@ func TestPaymentEndpoints(t *testing.T) {
 		})
 	}
 }
+
+func TestFlagSet(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   any
+		want bool
+	}{
+		{"nil", nil, false}, {"true", true, true}, {"false", false, false},
+		{"int64 one", int64(1), true}, {"int64 zero", int64(0), false}, {"float", 1.0, true},
+		{"bytes one", []byte("1"), true}, {"bytes zero", []byte("0"), false},
+		{"text true", "true", true}, {"text empty", "", false},
+	} {
+		if got := flagSet(tc.in); got != tc.want {
+			t.Errorf("%s: flagSet(%v) = %v, want %v", tc.name, tc.in, got, tc.want)
+		}
+	}
+}

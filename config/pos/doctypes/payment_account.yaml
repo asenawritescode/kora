@@ -1,0 +1,47 @@
+name: Payment Account
+module: POS
+title_field: account_name
+search_fields: account_name, number
+fields:
+  - fieldname: account_name
+    fieldtype: Data
+    label: Account Name
+    reqd: true
+    unique: true
+    search_index: true
+    in_list_view: true
+  - fieldname: account_type
+    fieldtype: Select
+    label: Account Type
+    options: |
+      Till
+      Paybill
+      Bank
+      Other
+    reqd: true
+    in_list_view: true
+  - fieldname: number
+    fieldtype: Data
+    label: Number
+    description: Till, paybill or account number customers pay to.
+    reqd: true
+    in_list_view: true
+  - fieldname: account_reference
+    fieldtype: Data
+    label: Account Reference
+    description: Optional paybill account number customers enter.
+  - fieldname: currency
+    fieldtype: Data
+    label: Currency
+    default: KES
+    reqd: true
+  - fieldname: enabled
+    fieldtype: Check
+    label: Enabled
+    default: "1"
+    in_list_view: true
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+    description: Optional; leave empty for an account used on every register.
