@@ -266,6 +266,34 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("Cashier Item Category create = %d, want 403: %s", rec.Code, rec.Body.String())
 			}
 
+			// 2c. The Manager reads stock: item_stock and low_stock are served from
+			// Stock Balance, which the Manager can read (read-only). The Cashier
+			// holds neither query and stays denied, as on the record routes.
+			for _, name := range []string{"item_stock", "low_stock"} {
+				rec := serve("Manager", http.MethodPost, "/q/inventory.core/"+name, `{"input":{},"cursor":"","limit":5}`)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s as Manager status=%d, want 200: %s", name, rec.Code, rec.Body.String())
+				}
+				if rec := serve("Cashier", http.MethodPost, "/q/inventory.core/"+name, `{"input":{},"cursor":"","limit":5}`); rec.Code != http.StatusForbidden {
+					t.Fatalf("%s as Cashier status=%d, want 403: %s", name, rec.Code, rec.Body.String())
+				}
+			}
+			if rec := serve("Manager", http.MethodGet, "/r/Stock%20Balance/SB-1", ""); rec.Code != http.StatusOK {
+				t.Fatalf("Manager Stock Balance read = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			for _, w := range []struct{ method, path, body string }{
+				{http.MethodPost, "/r/Stock%20Balance", `{"item":"ITM-1","location":"LOC-1","quantity":1}`},
+				{http.MethodPut, "/r/Stock%20Balance/SB-1", `{"quantity":999}`},
+				{http.MethodDelete, "/r/Stock%20Balance/SB-1", ""},
+			} {
+				if rec := serve("Manager", w.method, w.path, w.body); rec.Code != http.StatusForbidden {
+					t.Fatalf("Manager %s %s = %d, want 403: %s", w.method, w.path, rec.Code, rec.Body.String())
+				}
+			}
+			if got, err := decimal.NewFromString(qty()); err != nil || !got.Equal(decimal.NewFromInt(20)) {
+				t.Fatalf("Manager stock write leaked: quantity = %s (err %v), want 20", got, err)
+			}
+
 			// 3. #358: this till was opened the old way (no cashier recorded), so
 			// the Cashier is refused on it; the Manager runs sale, return, void
 			// and close_till.

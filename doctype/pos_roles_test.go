@@ -65,6 +65,11 @@ func TestPOSRolePermissions(t *testing.T) {
 		{"Manager", "Item Category", "write", false},
 		{"Cashier", "Item Category", "write", false},
 		{"Owner", "Stock Balance", "create", true},
+		// Managers must see stock (item_stock/low_stock read Stock Balance): read-only.
+		{"Manager", "Stock Balance", "read", true},
+		{"Manager", "Stock Balance", "create", false},
+		{"Manager", "Stock Balance", "write", false},
+		{"Manager", "Stock Balance", "delete", false},
 		{"Owner", "Stock Entry", "create", true},
 		// #397: the Inventory Manager maintains the catalogue, so may import it; nobody else on the till side may.
 		{"Inventory Manager", "Item", "import", true},
@@ -264,12 +269,6 @@ func TestPackQueryGrantsAreServableBySourceOwnershipOrRead(t *testing.T) {
 					continue
 				}
 				if docs[source].ModuleOwnerID == q.ModuleOwnerID || pm.Can(role, source, "read") {
-					continue
-				}
-				// Known gap, same class (found here, out of scope of #406 as fixing
-				// it means choosing between owning Stock Balance and widening
-				// Manager's read): Manager's item_stock/low_stock grants are dead.
-				if role == "Manager" && source == "Stock Balance" {
 					continue
 				}
 				t.Errorf("%s holds %s but %s is neither owned by %s nor readable by the role: the query would be denied", role, resource, source, q.ModuleOwnerID)
