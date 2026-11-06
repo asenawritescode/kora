@@ -197,3 +197,55 @@ func TestEqualGuardDefaultMessageAndBadOperand(t *testing.T) {
 		t.Fatalf("non numeric operand: %+v", cerr)
 	}
 }
+
+func TestCommandGuardUnlessRoleValidation(t *testing.T) {
+	withRole := func(extra string) string {
+		return strings.Replace(guardYAML, "    message: Member has unpaid fines\n", "    message: Member has unpaid fines\n"+extra, 1)
+	}
+	tests := []struct {
+		name string
+		yaml string
+		ok   bool
+	}{
+		{"not_exists with roles", withRole("    unless_role: [Owner, Manager]\n"), true},
+		{"exists without alias", strings.Replace(guardYAML, "    as: loan\n", "    unless_role: [Owner]\n", 1), false},
+		{"empty list", withRole("    unless_role: []\n"), false},
+		{"empty role name", withRole("    unless_role: [Owner, \"\"]\n"), false},
+		{"blank role name", withRole("    unless_role: [\" \"]\n"), false},
+		{"not a list", withRole("    unless_role: Owner\n"), false},
+		{"on lock", strings.Replace(guardYAML, "      name: $input.member\n  - exists:", "      name: $input.member\n    unless_role: [Owner]\n  - exists:", 1), false},
+		{"on payment", strings.Replace(paymentGuardYAML, "      currency: $input.currency\n", "      currency: $input.currency\n    unless_role: [Owner]\n", 1), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseCommandResource([]byte(tc.yaml))
+			if (err == nil) != tc.ok {
+				t.Fatalf("accepted = %v, err = %v", err == nil, err)
+			}
+		})
+	}
+}
+
+func TestCommandGuardSkippedForRoles(t *testing.T) {
+	guard := CommandGuard{UnlessRole: []string{"Owner", "Manager"}}
+	tests := []struct {
+		name  string
+		guard CommandGuard
+		roles []string
+		skip  bool
+	}{
+		{"listed role", guard, []string{"Manager"}, true},
+		{"one of several roles", guard, []string{"Cashier", "Owner"}, true},
+		{"unlisted role", guard, []string{"Cashier"}, false},
+		{"exact match only", guard, []string{"manager", "Manager ", "Managers"}, false},
+		{"no roles", guard, nil, false},
+		{"no unless_role", CommandGuard{}, []string{"Owner"}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.guard.skippedFor(tc.roles); got != tc.skip {
+				t.Fatalf("skippedFor(%v) = %v, want %v", tc.roles, got, tc.skip)
+			}
+		})
+	}
+}
