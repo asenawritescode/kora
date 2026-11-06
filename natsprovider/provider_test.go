@@ -651,7 +651,6 @@ func TestConsumerRetryableDeliveryDoesNotConsumeMaxDeliver(t *testing.T) {
 	p, err := New(context.Background(), Config{
 		Name: "kora-test", ServerURLs: []string{url}, StreamName: "KORA_EVENTS",
 		SubjectPrefix: "kora", ConsumerName: "kora-retry-worker", MaxDeliver: 1,
-		DeadLetterSubject: "kora.deadletter",
 	})
 	if err != nil {
 		t.Fatalf("new provider: %v", err)
@@ -777,7 +776,7 @@ func TestConsumerShutdownLeavesDeliveryPending(t *testing.T) {
 	p, err := New(context.Background(), Config{
 		Name: "kora-shutdown-test", ServerURLs: []string{url}, StreamName: "KORA_SHUTDOWN_EVENTS",
 		SubjectPrefix: "kora_shutdown", ConsumerName: "shutdown-worker", AckWait: 5 * time.Second,
-		MaxDeliver: 1, DeadLetterSubject: "kora_shutdown.deadletter",
+		MaxDeliver: 1,
 	})
 	if err != nil {
 		t.Fatal("new provider:", err)

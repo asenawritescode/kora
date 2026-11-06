@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -219,7 +220,7 @@ func (p *Provider) Bootstrap(ctx context.Context) error {
 	p.eventStreamDurable.Store(false)
 	cfg := &nats.StreamConfig{
 		Name:       p.cfg.StreamName,
-		Subjects:   []string{p.cfg.SubjectPrefix + ".>"},
+		Subjects:   p.eventStreamSubjects(),
 		Retention:  nats.LimitsPolicy,
 		Storage:    nats.FileStorage,
 		Discard:    nats.DiscardNew,
@@ -235,7 +236,7 @@ func (p *Provider) Bootstrap(ctx context.Context) error {
 		if infoErr != nil {
 			return fmt.Errorf("natsprovider: inspect existing event stream before applying limits: %w", infoErr)
 		}
-		if len(existing.Config.Subjects) != 1 || existing.Config.Subjects[0] != cfg.Subjects[0] || existing.Config.Retention != nats.LimitsPolicy {
+		if !subjectsWithin(existing.Config.Subjects, cfg.Subjects) || !slices.Contains(existing.Config.Subjects, cfg.Subjects[0]) || existing.Config.Retention != nats.LimitsPolicy {
 			return fmt.Errorf("natsprovider: existing event stream %q has incompatible subjects or retention", cfg.Name)
 		}
 		if existing.Config.MaxAge > 0 {
@@ -253,6 +254,9 @@ func (p *Provider) Bootstrap(ctx context.Context) error {
 			return fmt.Errorf("natsprovider: existing event stream %q exceeds the configured caps; migrate or drain it before lowering limits", cfg.Name)
 		}
 		updated := existing.Config
+		// Streams from earlier releases capture only "<prefix>.>"; add the
+		// dead-letter subject so dead letters are stored.
+		updated.Subjects = cfg.Subjects
 		updated.MaxBytes = cfg.MaxBytes
 		updated.MaxMsgs = cfg.MaxMsgs
 		updated.Discard = nats.DiscardNew
@@ -269,6 +273,27 @@ func (p *Provider) Bootstrap(ctx context.Context) error {
 	}
 	p.eventStreamDurable.Store(info.Config.Storage == nats.FileStorage)
 	return nil
+}
+
+// eventStreamSubjects is the event tree plus, when it lies outside that tree,
+// the dead-letter subject, so the stream stores dead letters that no consumer
+// filter on the event tree can match.
+func (p *Provider) eventStreamSubjects() []string {
+	tree := p.cfg.SubjectPrefix + ".>"
+	subjects := []string{tree}
+	if dead := p.cfg.withDefaults().DeadLetterSubject; dead != "" && !subjectMatchesFilter(tree, dead) {
+		subjects = append(subjects, dead)
+	}
+	return subjects
+}
+
+func subjectsWithin(have, allowed []string) bool {
+	for _, subject := range have {
+		if !slices.Contains(allowed, subject) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Provider) BootstrapSiteDirectory(ctx context.Context) error {

@@ -63,6 +63,7 @@ func FromEnv() Config {
 	urls := strings.FieldsFunc(os.Getenv("KORA_NATS_URLS"), func(r rune) bool {
 		return r == ',' || r == ' ' || r == '\n' || r == '\t'
 	})
+	prefix := envOrDefault("KORA_NATS_SUBJECT_PREFIX", "kora")
 	return Config{
 		Name:              envOrDefault("KORA_NATS_NAME", "kora"),
 		ServerURLs:        filterEmpty(urls),
@@ -70,9 +71,9 @@ func FromEnv() Config {
 		Password:          os.Getenv("KORA_NATS_PASSWORD"),
 		Token:             os.Getenv("KORA_NATS_TOKEN"),
 		StreamName:        envOrDefault("KORA_NATS_STREAM", "KORA_EVENTS"),
-		SubjectPrefix:     envOrDefault("KORA_NATS_SUBJECT_PREFIX", "kora"),
+		SubjectPrefix:     prefix,
 		ConsumerName:      envOrDefault("KORA_NATS_CONSUMER", "kora-worker"),
-		DeadLetterSubject: envOrDefault("KORA_NATS_DEAD_LETTER", "kora.deadletter"),
+		DeadLetterSubject: envOrDefault("KORA_NATS_DEAD_LETTER", DefaultDeadLetterSubject(prefix)),
 		MaxDeliver:        5,
 		StreamMaxBytes:    envInt64("KORA_NATS_STREAM_MAX_BYTES", DefaultEventStreamMaxBytes),
 		StreamMaxMessages: envInt("KORA_NATS_STREAM_MAX_MESSAGES", DefaultEventStreamMaxMessages),
@@ -108,7 +109,52 @@ func (c Config) Validate() error {
 	if err := validateSubjectToken(c.SubjectPrefix); err != nil {
 		return fmt.Errorf("natsprovider: invalid subject prefix: %w", err)
 	}
+	return c.validateDeadLetterSubject()
+}
+
+// DefaultDeadLetterSubject is the dead-letter subject used when none is
+// configured. It is a sibling of the "<prefix>.>" event tree, like the site
+// directory subject, so a consumer filtering the event tree never matches it.
+// Bootstrap adds it to the event stream's subjects so dead letters are stored.
+func DefaultDeadLetterSubject(prefix string) string {
+	return prefix + "_deadletter"
+}
+
+// EffectiveConsumerSubject is the filter Consumer.Run applies: ConsumerSubject,
+// or the whole event tree when unset.
+func (c Config) EffectiveConsumerSubject() string {
+	if c.ConsumerSubject != "" {
+		return c.ConsumerSubject
+	}
+	return c.SubjectPrefix + ".>"
+}
+
+// validateDeadLetterSubject refuses a dead-letter subject that the consumer
+// would receive again: the dead letter is published into the event stream, so
+// a matching filter re-consumes it, fails, and dead-letters it forever.
+func (c Config) validateDeadLetterSubject() error {
+	if strings.ContainsAny(c.DeadLetterSubject, "*> \t\r\n") || strings.HasPrefix(c.DeadLetterSubject, ".") || strings.HasSuffix(c.DeadLetterSubject, ".") || strings.Contains(c.DeadLetterSubject, "..") {
+		return fmt.Errorf("natsprovider: dead-letter subject %q (KORA_NATS_DEAD_LETTER / Config.DeadLetterSubject) must be a literal subject without wildcards or whitespace", c.DeadLetterSubject)
+	}
+	if filter := c.EffectiveConsumerSubject(); subjectMatchesFilter(filter, c.DeadLetterSubject) {
+		return fmt.Errorf("natsprovider: dead-letter subject %q (KORA_NATS_DEAD_LETTER / Config.DeadLetterSubject) matches consumer filter %q (Config.ConsumerSubject, default \"<subject prefix>.>\"): dead letters would be re-consumed in a loop; choose a dead-letter subject outside the consumer filter (the default is %q)", c.DeadLetterSubject, filter, DefaultDeadLetterSubject(c.SubjectPrefix))
+	}
 	return nil
+}
+
+// subjectMatchesFilter reports whether a literal subject matches a NATS
+// subject filter ("*" is one token, a trailing ">" is one or more tokens).
+func subjectMatchesFilter(filter, subject string) bool {
+	f, s := strings.Split(filter, "."), strings.Split(subject, ".")
+	for i, token := range f {
+		if token == ">" {
+			return i == len(f)-1 && len(s) > i
+		}
+		if i >= len(s) || (token != "*" && token != s[i]) {
+			return false
+		}
+	}
+	return len(f) == len(s)
 }
 
 func (c Config) withDefaults() Config {
@@ -117,6 +163,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.StreamMaxMessages == 0 {
 		c.StreamMaxMessages = DefaultEventStreamMaxMessages
+	}
+	if c.DeadLetterSubject == "" && c.SubjectPrefix != "" {
+		c.DeadLetterSubject = DefaultDeadLetterSubject(c.SubjectPrefix)
 	}
 	return c
 }
@@ -181,6 +230,7 @@ func filterEmpty(values []string) []string {
 
 // DeploymentManifest returns the RFC-recorded bootstrap manifest fields.
 func (c Config) DeploymentManifest() DeploymentManifest {
+	c = c.withDefaults()
 	return DeploymentManifest{
 		DeploymentID:          envOrDefault("KORA_NATS_DEPLOYMENT_ID", "local"),
 		OperatorID:            envOrDefault("KORA_NATS_OPERATOR_ID", "local-operator"),

@@ -29,6 +29,7 @@ func NewConsumer(p *Provider, cfg Config) (*Consumer, error) {
 	if p == nil {
 		return nil, fmt.Errorf("natsprovider: provider is nil")
 	}
+	cfg = cfg.withDefaults()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -63,10 +64,7 @@ func durableName(value string) string {
 func (c *Consumer) Run(ctx context.Context, handler contract.Handler) error {
 	c.runMu.Lock()
 	defer c.runMu.Unlock()
-	filterSubject := c.cfg.ConsumerSubject
-	if filterSubject == "" {
-		filterSubject = c.cfg.SubjectPrefix + ".>"
-	}
+	filterSubject := c.cfg.EffectiveConsumerSubject()
 	ackWait := c.cfg.AckWait
 	if ackWait <= 0 {
 		ackWait = 30 * time.Second

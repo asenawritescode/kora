@@ -435,6 +435,8 @@ Key environment variables for extensibility and analytics:
 - `KORA_SCRIPTS_ENABLED` — Enable the JS script engine (default: `false`)
 - `KORA_SCRIPTS_MAX_RAM` — Max RAM per script in MB (default: `64`)
 - `KORA_ANALYTICS` — Enable analytics event bus and rollup tables (default: `false`)
+- `KORA_NATS_SUBJECT_PREFIX` — Event subject tree `<prefix>.>` captured by the JetStream event stream (default: `kora`)
+- `KORA_NATS_DEAD_LETTER` — Literal dead-letter subject, stored by the event stream but outside every consumer filter (default: `<prefix>_deadletter`; was `kora.deadletter`). Startup rejects a value the consumer filter (default `<prefix>.>`) matches, which would re-consume dead letters in a loop
 - `KORA_STORAGE_BACKEND` — Attachment storage backend: `local` or `s3` (default: `local`)
 - `KORA_STORAGE_LOCAL_PATH` — Local storage root dir (default: `.`)
 - `KORA_STORAGE_S3_ENDPOINT` / `_REGION` / `_BUCKET` / `_ACCESS_KEY` / `_SECRET_KEY` — S3-compatible backend config
