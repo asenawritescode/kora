@@ -5,7 +5,6 @@ package kernel_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/disposabledb"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/policy"
@@ -31,11 +31,7 @@ func TestPublishedOperationAuthority(t *testing.T) {
 			if dsn == "" {
 				t.Skipf("set %s", tc.env)
 			}
-			conn, err := sql.Open(tc.name, dsn)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer conn.Close()
+			conn := disposabledb.Open(t, tc.name, dsn).DB
 			d := kdb.Resolve(tc.name)
 			ddl := d.SystemTableSQL()
 			if tc.name == "postgres" {

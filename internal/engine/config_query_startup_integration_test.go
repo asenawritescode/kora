@@ -4,15 +4,11 @@ package engine
 
 import (
 	"bytes"
-	"database/sql"
-	"fmt"
 	"log/slog"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
@@ -20,6 +16,7 @@ import (
 	"github.com/asenawritescode/kora/auth"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/disposabledb"
 	knet "github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/site"
 	"github.com/asenawritescode/kora/storage"
@@ -40,30 +37,8 @@ func TestTenantStartSkipsUnpublishedConfigQueries(t *testing.T) {
 			if dsn == "" {
 				t.Skipf("set %s to a disposable %s server", tc.env, tc.driver)
 			}
-			admin, err := sql.Open(tc.driver, dsn)
-			if err != nil || admin.Ping() != nil {
-				t.Fatalf("connect %s: %v", tc.driver, err)
-			}
-			name := fmt.Sprintf("kora_start_%x", time.Now().UnixNano())
-			target := dsn
-			if tc.driver == "postgres" {
-				admin.Exec(`CREATE SCHEMA "` + name + `"`)
-				t.Cleanup(func() { admin.Exec(`DROP SCHEMA "` + name + `" CASCADE`); admin.Close() })
-				u, _ := url.Parse(dsn)
-				q := u.Query()
-				q.Set("search_path", name)
-				u.RawQuery = q.Encode()
-				target = u.String()
-			} else {
-				admin.Exec("CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-				t.Cleanup(func() { admin.Exec("DROP DATABASE `" + name + "`"); admin.Close() })
-				target = strings.Replace(dsn, "/?", "/"+name+"?", 1)
-			}
-			conn, err := sql.Open(tc.driver, target)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { conn.Close() })
+			fixture := disposabledb.Open(t, tc.driver, dsn)
+			conn, name := fixture.DB, fixture.Name
 			dialect := kdb.Resolve(tc.driver)
 			if err := site.BootstrapSystemTables(conn, dialect); err != nil {
 				t.Fatal(err)

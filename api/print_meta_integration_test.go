@@ -3,16 +3,12 @@
 package api
 
 import (
-	"database/sql"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
@@ -21,6 +17,7 @@ import (
 	"github.com/asenawritescode/kora/configstore"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/disposabledb"
 	"github.com/asenawritescode/kora/print"
 	"github.com/asenawritescode/kora/site"
 )
@@ -36,33 +33,8 @@ func TestPrintFormatMetaAcrossDialects(t *testing.T) {
 			if dsn == "" {
 				t.Skipf("set %s", tc.env)
 			}
-			admin, err := sql.Open(tc.driver, dsn)
-			if err != nil || admin.Ping() != nil {
-				t.Fatalf("connect: %v", err)
-			}
-			defer admin.Close()
-			name := fmt.Sprintf("kora_pm_%x", time.Now().UnixNano())
-			target := dsn
-			if tc.driver == "postgres" {
-				admin.Exec(`CREATE SCHEMA "` + name + `"`)
-				defer admin.Exec(`DROP SCHEMA "` + name + `" CASCADE`)
-				u, _ := url.Parse(dsn)
-				q := u.Query()
-				q.Set("search_path", name)
-				u.RawQuery = q.Encode()
-				target = u.String()
-			} else {
-				if _, err := admin.Exec("CREATE DATABASE `" + name + "`"); err != nil {
-					t.Fatal(err)
-				}
-				defer admin.Exec("DROP DATABASE `" + name + "`")
-				target = strings.Replace(dsn, "/?", "/"+name+"?", 1)
-			}
-			conn, err := sql.Open(tc.driver, target)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer conn.Close()
+			fixture := disposabledb.Open(t, tc.driver, dsn)
+			conn, name := fixture.DB, fixture.Name
 			dialect := kdb.Resolve(tc.driver)
 			if err := site.BootstrapSystemTables(conn, dialect); err != nil {
 				t.Fatal(err)

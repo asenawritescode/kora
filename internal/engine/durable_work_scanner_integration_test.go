@@ -12,6 +12,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/internal/dbaccess"
+	"github.com/asenawritescode/kora/internal/disposabledb"
 	notificationsql "github.com/asenawritescode/kora/notifications/sqlstore"
 	requestsql "github.com/asenawritescode/kora/requests/sqlstore"
 	schedulersql "github.com/asenawritescode/kora/scheduler/sqlstore"
@@ -50,6 +51,10 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 					_ = os.Unsetenv(key)
 					t.Cleanup(func() { _ = os.Setenv(key, value) })
 				}
+			}
+			if tc.driver != "libsql" {
+				// The probe asserts an empty database: never share one.
+				dsn = disposabledb.Open(t, tc.driver, dsn).DSN
 			}
 			database, err := dbaccess.Open(tc.driver, dsn)
 			if err != nil {

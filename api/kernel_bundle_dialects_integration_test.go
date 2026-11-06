@@ -15,6 +15,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/disposabledb"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/outbox"
@@ -239,10 +240,10 @@ func TestLiveExpectedVersionUpdateRaceAcrossDialects(t *testing.T) {
 			writer := outbox.NewSQLWriter(dialect)
 			k := kernel.New(dialect, writer)
 			k.TxManager = &orm.TxManager{DB: database, Registry: registry, Dialect: dialect, Outbox: writer, SiteName: siteName}
-			baseContext := kernel.OperationContext{
+			baseContext := integrationOperationContext(t, kernel.OperationContext{
 				Site: siteName, User: "version-race@example.test", Roles: []string{doctype.AdminRole},
-				Actor: contract.ActorContext{PrincipalID: "version-race@example.test", PrincipalType: contract.PrincipalHuman, Site: siteName, AuthenticatedAt: time.Now()},
-			}
+				Actor: contract.ActorContext{PrincipalID: "version-race@example.test", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now()},
+			})
 			createData, _ := json.Marshal(map[string]any{"title": "initial"})
 			createPayload, _ := json.Marshal(kernel.RecordCreatePayload{Doctype: doctypeName, Data: createData})
 			created, createErr := k.Execute(t.Context(), database, registry, kernel.Operation{Context: baseContext, Command: kernel.CommandRecordCreate, Payload: createPayload})
@@ -406,6 +407,8 @@ func TestLiveWorkflowTransitionUsesKernelAcrossDialects(t *testing.T) {
 			ctx := kernelAdapterContext(t, database, registry, siteName, tc.driver)
 			ctx.Set("user_role", "Reader")
 			ctx.Set("user_roles", []string{"Reader"})
+			// Authority comes from the verified execution, not the context roles.
+			ctx.Set("policy_execution", integrationTestExecution(t, siteName, "reader@example.test", []string{"Reader"}))
 			if _, denied := handler.runKernelWorkflowTransition(ctx, doctypeName, name, "Complete", 0); denied == nil {
 				t.Fatalf("%s workflow unexpectedly accepted a role without submit permission", tc.driver)
 			}
@@ -657,56 +660,25 @@ func countDialectRows(t *testing.T, database *sql.DB, dialect kdb.Dialect, query
 	return count
 }
 
+// integrationOperationContext attaches the verified execution identity the
+// kernel requires: an actor in the context alone is rejected.
+func integrationOperationContext(t *testing.T, ctx kernel.OperationContext) kernel.OperationContext {
+	t.Helper()
+	execution, err := policy.NewVerifiedExecution(contract.TenantID(ctx.Site), ctx.Actor)
+	if err != nil {
+		t.Fatalf("verified execution for %s: %v", ctx.Actor.PrincipalID, err)
+	}
+	ctx.TenantID, ctx.Execution = contract.TenantID(ctx.Site), execution
+	return ctx
+}
+
 func openKernelDialectDatabase(t *testing.T, driver, dsn string) (*sql.DB, kdb.Dialect) {
 	t.Helper()
-	dialect := kdb.Resolve(driver)
-	if driver != "postgres" {
-		database, err := sql.Open(driver, dsn)
-		if err != nil {
-			t.Fatalf("open %s database: %v", driver, err)
-		}
-		database.SetMaxOpenConns(4)
-		t.Cleanup(func() { _ = database.Close() })
-		if err := database.Ping(); err != nil {
-			t.Fatalf("ping %s database: %v", driver, err)
-		}
-		return database, dialect
-	}
-
-	adminDB, err := sql.Open(driver, dsn)
-	if err != nil {
-		t.Fatalf("open PostgreSQL database: %v", err)
-	}
-	if err := adminDB.Ping(); err != nil {
-		_ = adminDB.Close()
-		t.Fatalf("ping PostgreSQL database: %v", err)
-	}
-	schemaName := fmt.Sprintf("kora_bundle_%x", time.Now().UnixNano())
-	if _, err := adminDB.Exec(`CREATE SCHEMA "` + schemaName + `"`); err != nil {
-		_ = adminDB.Close()
-		t.Fatalf("create isolated PostgreSQL schema: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = adminDB.Exec(`DROP SCHEMA "` + schemaName + `" CASCADE`)
-		_ = adminDB.Close()
-	})
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatalf("parse PostgreSQL DSN: %v", err)
-	}
-	query := parsed.Query()
-	query.Set("search_path", schemaName)
-	parsed.RawQuery = query.Encode()
-	database, err := sql.Open(driver, parsed.String())
-	if err != nil {
-		t.Fatalf("open isolated PostgreSQL schema: %v", err)
-	}
+	// Every test gets a database of its own: the DSN may name a shared database
+	// (or none), and these tests count rows and migrate tables.
+	database := disposabledb.Open(t, driver, dsn).DB
 	database.SetMaxOpenConns(4)
-	t.Cleanup(func() { _ = database.Close() })
-	if err := database.Ping(); err != nil {
-		t.Fatalf("ping isolated PostgreSQL schema: %v", err)
-	}
-	return database, dialect
+	return database, kdb.Resolve(driver)
 }
 
 func cleanupKernelDialectRecords(t *testing.T, database *sql.DB, dialect kdb.Dialect, site string, doctypes ...string) {
