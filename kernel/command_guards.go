@@ -19,7 +19,8 @@ import (
 //   - lock serializes concurrent commands on one record (SELECT ... FOR UPDATE),
 //     so a following not_exists check and create cannot race.
 //   - exists requires at least one matching record; As binds the first match
-//     for later steps as $steps.<as>.name.
+//     for later steps as $steps.<as>.name; $steps.<as>.<field> reads one of its
+//     scalar fields, which needs read access to the record.
 //   - not_exists requires that no record matches.
 //   - equal requires two numeric operands (a $computed or $input reference, or a
 //     decimal literal) to be exactly equal, compared as big.Rat.
@@ -263,7 +264,7 @@ func (c *CommandResource) validateGuardRefs(index int, guard CommandGuard, alias
 			return fmt.Errorf("command %q: require %d cannot use %q", c.FullName(), index, ref)
 		}
 		if strings.HasPrefix(ref, "$steps.") {
-			alias, ok := strings.CutSuffix(strings.TrimPrefix(ref, "$steps."), ".name")
+			alias, _, ok := stepFieldRef(ref)
 			if !ok || !aliases[alias] {
 				return fmt.Errorf("command %q: require %d reference %q must name an earlier require alias", c.FullName(), index, ref)
 			}

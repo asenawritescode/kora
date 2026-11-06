@@ -142,12 +142,13 @@ func newSite(t *testing.T, name string) *siteFixture {
 		},
 	}
 	roles := []*doctype.Role{{Name: "Administrator"}, {Name: "Creator"}, {Name: "OwnerEditor"}}
-	roles = append(roles, &doctype.Role{Name: "Writer"})
+	roles = append(roles, &doctype.Role{Name: "Writer"}, &doctype.Role{Name: "WriteOnly"})
 	perms := []*doctype.Permission{
 		{Doctype: "Task", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true, Submit: true},
 		{Doctype: "Task", Role: "Creator", Read: true, Create: true}, // create-only: no write
 		{Doctype: "Task", Role: "OwnerEditor", Read: true, Write: true, Create: true, IfOwner: true},
 		{Doctype: "Task", Role: "Writer", Read: true, Write: true, Create: true},
+		{Doctype: "Task", Role: "WriteOnly", Write: true, Create: true}, // cannot read
 	}
 	reg := doctype.NewRegistry()
 	reg.LoadFull([]*doctype.DocType{taskDT}, roles, perms)

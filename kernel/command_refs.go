@@ -24,6 +24,9 @@ type refEnv struct {
 	rows map[string][]map[string]any
 	// computed holds values derived by the command's compute block.
 	computed map[string]any
+	// fieldReader returns one scalar field of the record an alias names, read
+	// inside the command transaction under the actor's read scope.
+	fieldReader func(alias, field string) (any, error)
 	// now is pinned once per execution; actor is the verified principal.
 	now   time.Time
 	actor string
@@ -36,7 +39,7 @@ type stepInstance struct {
 }
 
 // resolveEnvRef returns literals unchanged and resolves $input.path,
-// $item.path and $steps.<alias>.name references.
+// $item.path, $steps.<alias>.name and $steps.<alias>.<field> references.
 func resolveEnvRef(ref string, env refEnv) (any, error) {
 	switch {
 	case strings.HasPrefix(ref, "$input."):
@@ -53,12 +56,18 @@ func resolveEnvRef(ref string, env refEnv) (any, error) {
 		}
 		return v, nil
 	case strings.HasPrefix(ref, "$steps."):
-		alias, ok := strings.CutSuffix(strings.TrimPrefix(ref, "$steps."), ".name")
+		alias, field, ok := stepFieldRef(ref)
 		name, found := env.steps[alias]
 		if !ok || !found {
 			return nil, fmt.Errorf("reference %q does not name an earlier step", ref)
 		}
-		return name, nil
+		if field == "name" {
+			return name, nil
+		}
+		if env.fieldReader == nil {
+			return nil, fmt.Errorf("reference %q cannot read record fields here", ref)
+		}
+		return env.fieldReader(alias, field)
 	case ref == "$now":
 		return env.now.UTC().Format(time.RFC3339Nano), nil
 	case ref == "$today":
@@ -146,7 +155,7 @@ func expandCommandSteps(steps []CommandStep, env refEnv, rows map[string][]map[s
 func resolveWhere(where map[string]string, env refEnv) (map[string]any, error) {
 	want := make(map[string]any, len(where))
 	for field, ref := range where {
-		v, err := resolveEnvRef(ref, refEnv{input: env.input, steps: env.steps, computed: env.computed, now: env.now, actor: env.actor})
+		v, err := resolveEnvRef(ref, refEnv{input: env.input, steps: env.steps, fieldReader: env.fieldReader, computed: env.computed, now: env.now, actor: env.actor})
 		if err != nil {
 			return nil, err
 		}
@@ -223,7 +232,7 @@ func (c *CommandResource) validateStepReferences() error {
 					return fmt.Errorf("command %q: step %d reference %q must name a compute key", c.FullName(), i, ref)
 				}
 			case strings.HasPrefix(ref, "$steps."):
-				alias, ok := strings.CutSuffix(strings.TrimPrefix(ref, "$steps."), ".name")
+				alias, _, ok := stepFieldRef(ref)
 				if !ok || !aliases[alias] {
 					return fmt.Errorf("command %q: step %d reference %q must name an earlier step's alias", c.FullName(), i, ref)
 				}
@@ -254,7 +263,7 @@ func (c *CommandResource) validateOutputRefs(aliases map[string]bool) error {
 				return fmt.Errorf("command %q: output %q reference %q must name a compute key", c.FullName(), key, ref)
 			}
 		case strings.HasPrefix(ref, "$steps."):
-			alias, ok := strings.CutSuffix(strings.TrimPrefix(ref, "$steps."), ".name")
+			alias, _, ok := stepFieldRef(ref)
 			if !ok || !aliases[alias] {
 				return fmt.Errorf("command %q: output %q reference %q must name a step alias", c.FullName(), key, ref)
 			}
@@ -267,4 +276,17 @@ func (c *CommandResource) validateOutputRefs(aliases map[string]bool) error {
 func guardRowsKey(ref string) (string, bool) {
 	key, ok := strings.CutPrefix(ref, "$steps.")
 	return key, ok
+}
+
+var stepFieldPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// stepFieldRef splits $steps.<alias>.<field>. The field is "name" or a single
+// field identifier; whether it exists on the record is checked when it is read.
+func stepFieldRef(ref string) (alias, field string, ok bool) {
+	rest, found := strings.CutPrefix(ref, "$steps.")
+	if !found {
+		return "", "", false
+	}
+	alias, field, ok = strings.Cut(rest, ".")
+	return alias, field, ok && stepFieldPattern.MatchString(field)
 }

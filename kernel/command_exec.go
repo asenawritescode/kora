@@ -210,6 +210,9 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 	operationAuthority := func(dt *doctype.DocType) bool {
 		return moduleCommandAuthorized && (dt.ModuleOwnerID == "" || contract.ModuleID(dt.ModuleOwnerID) == dyn.ModuleOwnerID)
 	}
+	if authErr := dyn.authorizeStepFieldReads(reg, op, operationAuthority); authErr != nil {
+		return authErr
+	}
 	for _, step := range dyn.Steps {
 		if alias, ok := iteratedGuardAlias(step); ok {
 			dt := dyn.guardRecord(reg, alias)
@@ -459,7 +462,8 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 	if computeErr != nil {
 		return nil, contract.NewError(contract.CodeValidationFailed, computeErr.Error())
 	}
-	if cerr := k.checkCommandGuards(dbTx, opID, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames, computed: computed, now: pinnedNow, actor: user}); cerr != nil {
+	fieldReader := k.stepFieldReader(txMgr, reg, op, cmd, stepNames)
+	if cerr := k.checkCommandGuards(dbTx, opID, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames, fieldReader: fieldReader, computed: computed, now: pinnedNow, actor: user}); cerr != nil {
 		auditFailure(cerr.Type)
 		return nil, cerr
 	}
@@ -468,14 +472,14 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		auditFailure(rowsErr.Type)
 		return nil, rowsErr
 	}
-	instances, expandErr := expandCommandSteps(cmd.Steps, refEnv{input: input, steps: stepNames, computed: computed, now: pinnedNow, actor: user}, rows)
+	instances, expandErr := expandCommandSteps(cmd.Steps, refEnv{input: input, steps: stepNames, fieldReader: fieldReader, computed: computed, now: pinnedNow, actor: user}, rows)
 	if expandErr != nil {
 		return nil, contract.NewError(contract.CodeValidationFailed, expandErr.Error())
 	}
 
 	for _, instance := range instances {
 		i, step := instance.index, instance.step
-		env := refEnv{input: input, item: instance.item, steps: stepNames, computed: computed, now: pinnedNow, actor: user}
+		env := refEnv{input: input, item: instance.item, steps: stepNames, fieldReader: fieldReader, computed: computed, now: pinnedNow, actor: user}
 		stepOp, scopeErr := operationForCommandStep(op, cmd, step)
 		if scopeErr != nil {
 			return nil, scopeErr
@@ -648,7 +652,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 
 	result := map[string]any{"command": def.Name, "steps": outcomes}
 	if len(cmd.Output) > 0 {
-		outEnv := refEnv{input: input, steps: stepNames, computed: computed, now: pinnedNow, actor: user}
+		outEnv := refEnv{input: input, steps: stepNames, fieldReader: fieldReader, computed: computed, now: pinnedNow, actor: user}
 		out := make(map[string]any, len(cmd.Output))
 		for key, ref := range cmd.Output {
 			v, rerr := resolveEnvRef(ref, outEnv)
