@@ -144,6 +144,14 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 		if err != nil || len(p.Rows) != 1 || p.Rows[0]["total"] != "10" || p.Rows[0]["sale_count"] != int64(1) {
 			t.Fatalf("today_totals default: %v %v", p, err)
 		}
+		// #334: Studio sends the published default back; it must behave like an omitted input.
+		echoed := map[string]any{"since": d.Input["since"].Default}
+		if echoed["since"] != "$today" {
+			t.Fatalf("published default = %v, want $today", echoed["since"])
+		}
+		if p, err = Run(context.Background(), conn, db.Resolve("libsql"), d, Request{FullRead: true, Now: now, Input: echoed}); err != nil || len(p.Rows) != 1 || p.Rows[0]["total"] != "10" {
+			t.Fatalf("today_totals with echoed default: %v %v", p, err)
+		}
 	}
 }
 

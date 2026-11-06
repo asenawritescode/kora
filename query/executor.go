@@ -101,6 +101,11 @@ func (b *builder) value(v any) (any, bool, error) {
 	case strings.HasPrefix(s, "$input."):
 		name := strings.TrimPrefix(s, "$input.")
 		if in, ok := b.req.Input[name]; ok && in != nil {
+			// The catalog publishes a reference default as its token, so a client
+			// echoing it back means "use the default", not that literal string.
+			if s, isStr := in.(string); isStr && s == b.inputs[name].Default && isReference(s) {
+				return b.value(s)
+			}
 			return in, true, nil
 		}
 		if def := b.inputs[name].Default; def != nil {
@@ -110,6 +115,9 @@ func (b *builder) value(v any) (any, bool, error) {
 	}
 	return nil, false, fmt.Errorf("%s: unknown value reference %q", ErrInputInvalid, s)
 }
+
+// isReference reports whether s is a server-resolved default token.
+func isReference(s string) bool { return s == "$today" || s == "$now" || s == "$actor" }
 
 var likeEscaper = strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
 

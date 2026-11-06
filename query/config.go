@@ -45,7 +45,7 @@ func (s InputSpec) checkDefault() error {
 	case nil:
 		return nil
 	case string:
-		if strings.HasPrefix(v, "$") && v != "$today" && v != "$now" && v != "$actor" {
+		if strings.HasPrefix(v, "$") && !isReference(v) {
 			return fmt.Errorf("default %q is not a supported reference", v)
 		}
 		ok = s.Type == "string"

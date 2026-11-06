@@ -145,12 +145,18 @@ func TestInputDefaultsAndRequired(t *testing.T) {
 		{"default $now", InputSpec{Type: "string", Default: "$now"}, nil, "2026-11-06 15:04:05", ""},
 		{"literal default", InputSpec{Type: "string", Default: "2020-01-01"}, nil, "2020-01-01", ""},
 		{"supplied input wins over default", InputSpec{Type: "string", Default: "$today"}, map[string]any{"since": "2026-01-01"}, "2026-01-01", ""},
+		{"published default $today sent back resolves like omitted", InputSpec{Type: "string", Default: "$today"}, map[string]any{"since": "$today"}, "2026-11-06", ""},
+		{"published default $now sent back resolves like omitted", InputSpec{Type: "string", Default: "$now"}, map[string]any{"since": "$now"}, "2026-11-06 15:04:05", ""},
+		{"published default $actor sent back resolves like omitted", InputSpec{Type: "string", Default: "$actor"}, map[string]any{"since": "$actor"}, "alice", ""},
+		{"reference token other than the declared default stays literal", InputSpec{Type: "string", Default: "$today"}, map[string]any{"since": "$now"}, "$now", ""},
+		{"token with no declared default stays literal", InputSpec{Type: "string"}, map[string]any{"since": "$today"}, "$today", ""},
+		{"literal default is not special", InputSpec{Type: "string", Default: "2020-01-01"}, map[string]any{"since": "2020-01-01"}, "2020-01-01", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			d := def([]Filter{since})
 			d.Input = map[string]InputSpec{"since": tc.spec}
-			_, args, _, err := Build(d, db.MySQL(), Request{FullRead: true, Now: now, Input: tc.input})
+			_, args, _, err := Build(d, db.MySQL(), Request{FullRead: true, Now: now, Actor: "alice", Input: tc.input})
 			if tc.wantField != "" {
 				var ie *InputError
 				if !errors.As(err, &ie) || ie.Field != tc.wantField || !strings.Contains(ie.Error(), ErrInputInvalid) {
