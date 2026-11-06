@@ -644,6 +644,59 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if rows := mySession("Cashier"); len(rows) != 1 || rows[0]["name"] == second {
 				t.Fatalf("my_session after close_session + open_session = %v", rows)
 			}
+			cashierSession := fmt.Sprint(mySession("Cashier")[0]["name"])
+
+			// 10. #407: the Administrator (the shop owner's role) runs the till
+			// gate. my_session binds $actor to the Administrator, so it sees only
+			// its own open till; the Cashier still sees only theirs.
+			admin := doctype.AdminRole
+			if rows := mySession(admin); len(rows) != 0 {
+				t.Fatalf("Administrator my_session before open = %v", rows)
+			}
+			seed("Register", "REG-3", map[string]any{"register_name": "Back", "location": "LOC-1", "enabled": true})
+			runAs(admin, "open_session", "k-admin-sess", `{"register":"REG-3","location":"LOC-1","opening_float":70}`)
+			adminRows := mySession(admin)
+			if len(adminRows) != 1 || adminRows[0]["cashier"] != admin || adminRows[0]["register"] != "REG-3" || adminRows[0]["shift"] == nil {
+				t.Fatalf("Administrator my_session = %v", adminRows)
+			}
+			adminSession := fmt.Sprint(adminRows[0]["name"])
+			if rows := mySession("Cashier"); len(rows) != 1 || rows[0]["name"] != cashierSession {
+				t.Fatalf("Cashier my_session with an Administrator till open = %v", rows)
+			}
+			runAs(admin, "close_session", "k-admin-close", fmt.Sprintf(`{"shift":%q,"closing_count":70}`, adminRows[0]["shift"]))
+			if rows := mySession(admin); len(rows) != 0 {
+				t.Fatalf("Administrator my_session after close = %v", rows)
+			}
+			// Closed tills: if_owner (Cashier) stays own-only; the plain grant
+			// (Manager/Owner closed_session) and the Administrator bypass read any
+			// till by reference, as the generic Till Session read already allows.
+			for _, tc := range []struct {
+				role, query, name string
+				status, rows      int
+			}{
+				{admin, "my_closed_session", adminSession, 200, 1},
+				{admin, "my_closed_session", session, 200, 1},
+				{admin, "closed_session", adminSession, 200, 1},
+				{"Cashier", "my_closed_session", adminSession, 200, 0},
+				{"Cashier", "my_closed_session", session, 200, 1},
+				{"Manager", "closed_session", adminSession, 200, 1},
+				{"Owner", "closed_session", adminSession, 200, 1},
+				{"Manager", "my_closed_session", adminSession, 403, 0},
+				{"Cashier", "closed_session", adminSession, 403, 0},
+			} {
+				rec := serve(tc.role, http.MethodPost, "/q/pos.core/"+tc.query, fmt.Sprintf(`{"input":{"name":%q}}`, tc.name))
+				var out struct {
+					Data struct {
+						Data []map[string]any `json:"data"`
+					} `json:"data"`
+				}
+				if rec.Code != tc.status || tc.status == 200 && (json.Unmarshal(rec.Body.Bytes(), &out) != nil || len(out.Data.Data) != tc.rows) {
+					t.Fatalf("%s %s %s = %d %s, want %d with %d row(s)", tc.role, tc.query, tc.name, rec.Code, rec.Body.String(), tc.status, tc.rows)
+				}
+				if tc.rows == 1 && out.Data.Data[0]["name"] != tc.name {
+					t.Fatalf("%s %s row = %v", tc.role, tc.query, out.Data.Data[0])
+				}
+			}
 		})
 	}
 }

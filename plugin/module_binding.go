@@ -306,7 +306,9 @@ func (p BindingPlan) ExecutePublishedQuery(ctx context.Context, scope contract.B
 }
 
 func (p BindingPlan) ExecutePublishedQueryForActor(ctx context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, actorScope PublishedQueryActorScope, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
-	if actorScope.BusinessScope != scope || strings.TrimSpace(actorScope.SubjectID) == "" || len(actorScope.AssignedFields) == 0 && (!actorScope.OwnerOnly || actorScope.OwnerField == "") {
+	// A scope without assignments names the owner field: OwnerOnly narrows to
+	// the actor's rows, otherwise it only carries the verified actor (#407).
+	if actorScope.BusinessScope != scope || strings.TrimSpace(actorScope.SubjectID) == "" || len(actorScope.AssignedFields) == 0 && actorScope.OwnerField == "" {
 		return contract.QueryResult{}, fmt.Errorf("published query actor scope is invalid")
 	}
 	return p.executePublishedQuery(ctx, scope, owner, name, &actorScope, input, cursor, limit)
@@ -412,6 +414,9 @@ func (p BindingPlan) executePublishedQuery(ctx context.Context, scope contract.B
 	if err := resolved.validate(query.InputSchema, input); err != nil {
 		return contract.QueryResult{}, newQueryInputError(err)
 	}
+	// rowScoped scopes filter rows; a verified actor alone (owner_field query
+	// under a plain grant or the Administrator bypass) reads every row.
+	rowScoped := actorScope != nil && (actorScope.OwnerOnly || len(actorScope.AssignedFields) > 0)
 	if actorScope != nil {
 		allowed := make(map[string]bool, len(query.AllowedFields))
 		for _, field := range query.AllowedFields {
@@ -425,20 +430,23 @@ func (p BindingPlan) executePublishedQuery(ctx context.Context, scope contract.B
 		if actorScope.OwnerOnly && (!allowed[actorScope.OwnerField] || query.OwnerField != actorScope.OwnerField) {
 			return contract.QueryResult{}, fmt.Errorf("published query owner field is not declared")
 		}
+		if !rowScoped && (query.OwnerField == "" || query.OwnerField != actorScope.OwnerField) {
+			return contract.QueryResult{}, fmt.Errorf("published query owner field is not declared")
+		}
 	}
 	execution, err := contract.NewModuleExecution(scope, owner, owner, resolved.Revision, query.Operation)
 	if err != nil {
 		return contract.QueryResult{}, err
 	}
 	var result contract.QueryResult
-	if actorScope == nil {
+	scoped, scopedOK := resolved.executor.(ScopedPublishedQueryExecutor)
+	if actorScope == nil || !rowScoped && !scopedOK {
 		result, err = resolved.executor.ExecutePublishedQuery(ctx, execution, query, append(json.RawMessage(nil), input...), cursor, limit)
 	} else {
-		executor, ok := resolved.executor.(ScopedPublishedQueryExecutor)
-		if !ok {
+		if !scopedOK {
 			return contract.QueryResult{}, fmt.Errorf("published query provider does not support actor row scopes")
 		}
-		result, err = executor.ExecutePublishedQueryForActor(ctx, execution, query, *actorScope, append(json.RawMessage(nil), input...), cursor, limit)
+		result, err = scoped.ExecutePublishedQueryForActor(ctx, execution, query, *actorScope, append(json.RawMessage(nil), input...), cursor, limit)
 	}
 	if err != nil {
 		return contract.QueryResult{}, err
@@ -452,7 +460,7 @@ func (p BindingPlan) executePublishedQuery(ctx context.Context, scope contract.B
 	if err := result.Validate(query, limit, scope); err != nil {
 		return contract.QueryResult{}, err
 	}
-	if actorScope != nil {
+	if rowScoped {
 		var rows []map[string]json.RawMessage
 		if err := json.Unmarshal(result.Data, &rows); err != nil {
 			return contract.QueryResult{}, fmt.Errorf("scoped published query returned invalid rows")
