@@ -10,6 +10,7 @@ RUN bun run build
 FROM golang:1.25-bookworm AS go
 WORKDIR /app
 COPY go.mod go.sum ./
+COPY sdk/go.mod sdk/go.sum ./sdk/
 RUN go mod download
 COPY . ./
 COPY --from=ui /app/ui/dist ./workspace/dist
