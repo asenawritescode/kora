@@ -462,6 +462,25 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	}
 	rejected("used", []map[string]any{used})
 
+	// Payments must add up to the sale total (50) exactly: none, short and
+	// over are refused with a caller-facing validation error, nothing written.
+	// (The exact case is the confirmed cash sale above.)
+	for label, pays := range map[string][]map[string]any{
+		"no payments": {},
+		"short":       {pay("cash", 20)},
+		"over":        {pay("cash", 60)},
+		"split short": {pay("cash", 20), pay("cash", 20)},
+	} {
+		before := stock(bread)
+		cerr, res := trySale(pays)
+		if cerr == nil || res.Status == contract.StatusCompleted || cerr.Type != contract.CodeValidationFailed || !strings.Contains(cerr.Message, "Payments must add up") {
+			t.Fatalf("%s: err=%+v res=%+v, want validation refusal", label, cerr, res)
+		}
+		if got := stock(bread); got != before {
+			t.Fatalf("%s: stock changed %v -> %v", label, before, got)
+		}
+	}
+
 	// A Cashier holding only operation/query grants sells through the
 	// published-operation route and nothing else.
 	cashier := contract.ActorContext{PrincipalID: "cashier1", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: []string{"Cashier"}, AuthenticatedAt: time.Now()}

@@ -65,3 +65,59 @@ func TestPOSPackageInstallable(t *testing.T) {
 		}
 	}
 }
+
+// TestPOSRecordSaleRefusesPaymentsThatDoNotEqualTotal drives the shipped
+// record_sale pack command through its compute block and equality guard.
+func TestPOSRecordSaleRefusesPaymentsThatDoNotEqualTotal(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", "record_sale.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := ParseCommandResource(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var guard *CommandGuard
+	for i := range cmd.Require {
+		if len(cmd.Require[i].Equal) > 0 {
+			guard = &cmd.Require[i]
+		}
+	}
+	if guard == nil {
+		t.Fatal("record_sale has no equality guard on payments")
+	}
+	line := func(qty, price float64) map[string]any {
+		return map[string]any{"item": "ITEM-1", "quantity": qty, "unit_price": price}
+	}
+	pay := func(amount float64) map[string]any {
+		return map[string]any{"method": "Cash", "amount": amount, "reference": "r"}
+	}
+	cases := []struct {
+		name     string
+		items    []any
+		payments []any
+		refused  bool
+	}{
+		{"empty payments", []any{line(1, 65)}, []any{}, true},
+		{"short", []any{line(2, 65)}, []any{pay(65)}, true},
+		{"exact", []any{line(2, 65)}, []any{pay(130)}, false},
+		{"over (2.02 paid 3.01)", []any{line(1, 2.02)}, []any{pay(3.01)}, true},
+		{"zero total, no payments", []any{}, []any{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := map[string]any{"items": tc.items, "payments": tc.payments}
+			computed, err := evalCompute(cmd.Compute, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cerr := checkEqualGuard(*guard, refEnv{input: input, computed: computed}, 0)
+			if (cerr != nil) != tc.refused {
+				t.Fatalf("error = %v, refused want %v", cerr, tc.refused)
+			}
+			if cerr != nil && cerr.Message != "Payments must add up to the sale total" {
+				t.Fatalf("message = %q", cerr.Message)
+			}
+		})
+	}
+}
