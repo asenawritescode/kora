@@ -559,3 +559,20 @@ func expectStoredByKey(mock sqlmock.Sqlmock, input management.AcceptCommand, id 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+operationColumns+" FROM _kora_managed_operation WHERE tenant_id = ? AND caller_id = ? AND idempotency_key = ?")).
 		WithArgs(string(input.Tenant), string(input.Caller), string(input.IdempotencyKey)).WillReturnRows(rows)
 }
+
+func TestAcceptRegistersMemberRevokeKind(t *testing.T) {
+	_, mock, store := newTestStore(t)
+	input := testAcceptCommand()
+	input.Kind = management.CommandTenantMemberRevoke
+	input.Command = []byte(`{"meta":{"idempotency_key":"` + string(input.IdempotencyKey) + `"},"subject":"cloud-user-1","reason":"removed from team"}`)
+	expectMissingByKey(mock, input)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+operationColumns+" FROM _kora_managed_operation WHERE tenant_id = ? AND caller_id = ? AND idempotency_key = ? FOR UPDATE")).
+		WithArgs(string(input.Tenant), string(input.Caller), string(input.IdempotencyKey)).WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_managed_operation")).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	got, err := store.Accept(context.Background(), input)
+	if err != nil || got.Kind != management.CommandTenantMemberRevoke {
+		t.Fatalf("Accept member revoke = %+v, %v", got, err)
+	}
+}
