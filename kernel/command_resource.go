@@ -97,7 +97,7 @@ type CommandStep struct {
 	// values; a value is a literal or an $input/$steps/$computed reference.
 	Where map[string]string `yaml:"where,omitempty" json:"where,omitempty"`
 	// As names the record this step writes so later steps can reference it
-	// as $steps.<as>.name.
+	// as $steps.<as>.name, or read one of its scalar fields as $steps.<as>.<field>.
 	As     string      `yaml:"as,omitempty" json:"as,omitempty"`
 	Create *StepCreate `yaml:"create,omitempty" json:"create,omitempty"`
 	Update *StepUpdate `yaml:"update,omitempty" json:"update,omitempty"`

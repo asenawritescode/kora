@@ -181,7 +181,6 @@ func TestForEachGuardRowsParseAndExpand(t *testing.T) {
 		"transaction alias": strings.Replace(guardRowsYAML, "$steps.original.items", "$steps.marker.items", 1),
 		"name field":        strings.Replace(guardRowsYAML, "$steps.original.items", "$steps.original.name", 1),
 		"unknown alias":     strings.Replace(guardRowsYAML, "$steps.original.items", "$steps.ghost.items", 1),
-		"outside for_each":  strings.Replace(guardRowsYAML, "text: x", "text: $steps.original.items", 1),
 	} {
 		if _, err := ParseCommandResource([]byte(yaml)); err == nil {
 			t.Fatalf("%s: definition was accepted", name)
@@ -228,5 +227,85 @@ func TestForEachWhereRejectedAtLoad(t *testing.T) {
 		if _, err := whereDef(t, tc.where, tc.forEach); err == nil {
 			t.Fatalf("%s: expected load error", name)
 		}
+	}
+}
+
+const stepFieldYAML = `name: till.open
+namespace: pos
+version: 1
+input:
+  record: Session
+require:
+  - exists:
+      record: Register
+      where:
+        name: $input.register
+    as: register
+transaction:
+  - as: session
+    create:
+      record: Session
+      values:
+        register: $steps.register.name
+        location: $steps.register.location
+  - create:
+      record: Audit
+      values:
+        session: $steps.session.name
+        where: $steps.session.location
+output:
+  location: $steps.register.location
+`
+
+func TestStepFieldReferencesParseAndResolve(t *testing.T) {
+	if _, err := ParseCommandResource([]byte(stepFieldYAML)); err != nil {
+		t.Fatalf("valid field references rejected: %v", err)
+	}
+	invalid := map[string]string{
+		"nested path":      strings.Replace(stepFieldYAML, "$steps.register.location\n  - create", "$steps.register.location.x\n  - create", 1),
+		"empty field":      strings.Replace(stepFieldYAML, "$steps.register.location\n  - create", "$steps.register.\n  - create", 1),
+		"bad field":        strings.Replace(stepFieldYAML, "$steps.register.location\n  - create", "$steps.register.lo-cation\n  - create", 1),
+		"unknown alias":    strings.Replace(stepFieldYAML, "$steps.register.location\n  - create", "$steps.ghost.location\n  - create", 1),
+		"later alias":      strings.Replace(stepFieldYAML, "register: $steps.register.name", "register: $steps.session.location", 1),
+		"output bad alias": strings.Replace(stepFieldYAML, "location: $steps.register.location\n", "location: $steps.ghost.location\n", 1),
+	}
+	for name, yaml := range invalid {
+		if _, err := ParseCommandResource([]byte(yaml)); err == nil {
+			t.Fatalf("%s: definition was accepted", name)
+		}
+	}
+
+	type read struct{ alias, field string }
+	var reads []read
+	env := refEnv{
+		steps: map[string]string{"register": "REG-1"},
+		fieldReader: func(alias, field string) (any, error) {
+			reads = append(reads, read{alias, field})
+			return "Nairobi", nil
+		},
+	}
+	tests := []struct {
+		name    string
+		ref     string
+		env     refEnv
+		want    any
+		wantErr bool
+		reads   int
+	}{
+		{"name needs no read", "$steps.register.name", env, "REG-1", false, 0},
+		{"field reads through the reader", "$steps.register.location", env, "Nairobi", false, 1},
+		{"unknown alias", "$steps.ghost.location", env, nil, true, 0},
+		{"no reader means no field access", "$steps.register.location", refEnv{steps: env.steps}, nil, true, 0},
+		{"nested path", "$steps.register.location.x", env, nil, true, 0},
+		{"empty field", "$steps.register.", env, nil, true, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reads = nil
+			got, err := resolveEnvRef(tc.ref, tc.env)
+			if (err != nil) != tc.wantErr || got != tc.want || len(reads) != tc.reads {
+				t.Fatalf("got %v, %v, reads %v; want %v, err=%v, reads=%d", got, err, reads, tc.want, tc.wantErr, tc.reads)
+			}
+		})
 	}
 }
