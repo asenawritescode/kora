@@ -200,6 +200,9 @@
 - doctype: module.pos.core.query.recent_sales
   role: Owner
   read: true
+- doctype: module.pos.core.query.sale_lines
+  role: Owner
+  read: true
 - doctype: module.pos.core.query.today_totals
   role: Owner
   read: true
@@ -249,6 +252,9 @@
 - doctype: module.pos.core.query.recent_sales
   role: Manager
   read: true
+- doctype: module.pos.core.query.sale_lines
+  role: Manager
+  read: true
 - doctype: module.pos.core.query.today_totals
   role: Manager
   read: true
@@ -288,6 +294,9 @@
   read: true
   if_owner: true
 - doctype: module.pos.core.query.my_registers
+  role: Cashier
+  read: true
+- doctype: module.pos.core.query.sale_lines
   role: Cashier
   read: true
 - doctype: module.inventory.core.operation.receive_stock

@@ -220,6 +220,30 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if got := qty(); !strings.HasPrefix(got, "19") {
 				t.Fatalf("stock after return = %s, want 19", got)
 			}
+			// #329: a return starts from a receipt: sale_lines shows what is left
+			// to return on the sale, for every till role, as exact decimals.
+			for _, role := range []string{"Cashier", "Manager", "Owner"} {
+				for sale, want := range map[string]int{sale1: 1, "SALE-404": 0} {
+					rec := serve(role, http.MethodPost, "/q/pos.core/sale_lines", fmt.Sprintf(`{"input":{"sale":%q}}`, sale))
+					var out struct {
+						Data struct {
+							Data []map[string]any `json:"data"`
+						} `json:"data"`
+					}
+					if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || len(out.Data.Data) != want {
+						t.Fatalf("%s sale_lines %s status=%d body=%s", role, sale, rec.Code, rec.Body.String())
+					}
+					if want == 1 {
+						r := out.Data.Data[0]
+						if r["item"] != "ITM-1" || len(r) != 5 || !decimalIs(r["unit_price"], "180") || !decimalIs(r["sold_quantity"], "2") || !decimalIs(r["remaining_quantity"], "1") {
+							t.Fatalf("%s sale_lines row = %v", role, r)
+						}
+					}
+				}
+				if rec := serve(role, http.MethodPost, "/q/pos.core/sale_lines", `{"input":{}}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "sale") {
+					t.Fatalf("%s sale_lines without sale status=%d body=%s", role, rec.Code, rec.Body.String())
+				}
+			}
 			// Invalid input (unknown top-level "currency") is a validation error
 			// naming the field, never a 200 failed receipt; stock is untouched
 			// and a replay of the same key returns the same error.
@@ -460,4 +484,11 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			}
 		})
 	}
+}
+
+// decimalIs reports whether a query cell is the exact decimal want.
+func decimalIs(v any, want string) bool {
+	d, err := decimal.NewFromString(fmt.Sprint(v))
+	w, _ := decimal.NewFromString(want)
+	return err == nil && d.Equal(w)
 }

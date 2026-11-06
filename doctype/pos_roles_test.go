@@ -74,7 +74,7 @@ func TestPOSRolePermissions(t *testing.T) {
 	}
 	posOps := []string{"open_session", "open_shift", "close_shift", "open_till", "close_till", "record_sale", "return_sale", "void_sale"}
 	invOps := []string{"receive_stock", "adjust_stock"}
-	posQ := []string{"closed_session", "my_registers", "my_session", "open_till", "payments_by_method", "refunds_by_method", "recent_sales", "today_totals"}
+	posQ := []string{"closed_session", "my_registers", "my_session", "open_till", "payments_by_method", "refunds_by_method", "recent_sales", "sale_lines", "today_totals"}
 	invQ := []string{"item_search", "item_categories", "item_stock", "low_stock"}
 	grant := func(role, owner, kind string, names []string, op string, want bool) {
 		for _, n := range names {
@@ -92,7 +92,7 @@ func TestPOSRolePermissions(t *testing.T) {
 	grant("Manager", "inventory.core", "query", invQ, "read", true)
 	grant("Manager", "inventory.core", "operation", invOps, "write", false)
 	grant("Cashier", "pos.core", "operation", posOps, "write", true)
-	grant("Cashier", "pos.core", "query", []string{"open_till", "my_session", "my_registers", "my_closed_session"}, "read", true)
+	grant("Cashier", "pos.core", "query", []string{"open_till", "my_session", "my_registers", "sale_lines", "my_closed_session"}, "read", true)
 	grant("Cashier", "pos.core", "query", []string{"closed_session"}, "read", false)
 	// my_session is owner-scoped by cashier for every role (#326).
 	for _, role := range []string{"Cashier", "Manager", "Owner"} {
@@ -119,6 +119,12 @@ func TestPOSRolePermissions(t *testing.T) {
 	for _, role := range []string{"Cashier", "Manager", "Owner"} {
 		if owner, _ := pm.RowScopeFor([]string{role}, "module.pos.core.query.my_registers", "read"); owner {
 			t.Errorf("%s my_registers grant must not be if_owner", role)
+		}
+	}
+	// sale_lines is a plain read grant for every till role: a return starts from a receipt (#329).
+	for _, role := range []string{"Cashier", "Manager", "Owner"} {
+		if owner, _ := pm.RowScopeFor([]string{role}, "module.pos.core.query.sale_lines", "read"); owner {
+			t.Errorf("%s sale_lines grant must not be if_owner", role)
 		}
 	}
 	grant("Cashier", "pos.core", "query", []string{"recent_sales", "today_totals", "payments_by_method", "refunds_by_method"}, "read", false)
