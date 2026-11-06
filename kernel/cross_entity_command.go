@@ -44,8 +44,8 @@ func operationForCommandStep(op Operation, command *CommandResource, step Comman
 		return Operation{}, contract.NewError(contract.CodePermissionDenied, "cross-entity command was not resolved from verified execution context")
 	}
 	var side string
-	if step.Create != nil {
-		side = step.Create.Scope
+	if create := step.createSpec(); create != nil {
+		side = create.Scope
 	} else if step.Update != nil {
 		side = step.Update.Scope
 	}

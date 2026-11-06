@@ -101,6 +101,37 @@ type CommandStep struct {
 	As     string      `yaml:"as,omitempty" json:"as,omitempty"`
 	Create *StepCreate `yaml:"create,omitempty" json:"create,omitempty"`
 	Update *StepUpdate `yaml:"update,omitempty" json:"update,omitempty"`
+	// Ensure makes sure one record exists: it is looked up by Where and
+	// created with Where plus Values when absent. With As, later steps
+	// address the existing or new record as $steps.<as>.name.
+	Ensure *StepEnsure `yaml:"ensure,omitempty" json:"ensure,omitempty"`
+}
+
+// StepEnsure is a create-if-absent. Where fields identify the record and seed
+// its creation; Values are extra defaults applied only on creation. Pair it
+// with a require lock on a record all writers of the same target share, since
+// two concurrent first writers would otherwise both find nothing.
+type StepEnsure struct {
+	Record string            `yaml:"record"         json:"record"`
+	Scope  string            `yaml:"business_scope" json:"business_scope,omitempty"`
+	Where  map[string]string `yaml:"where"          json:"where"`
+	Values map[string]string `yaml:"values,omitempty" json:"values,omitempty"`
+}
+
+// createSpec returns the record this step would create: the create step
+// itself, or the creation an ensure step falls back to.
+func (s CommandStep) createSpec() *StepCreate {
+	if s.Ensure == nil {
+		return s.Create
+	}
+	values := make(map[string]string, len(s.Ensure.Where)+len(s.Ensure.Values))
+	for field, ref := range s.Ensure.Values {
+		values[field] = ref
+	}
+	for field, ref := range s.Ensure.Where {
+		values[field] = ref
+	}
+	return &StepCreate{Record: s.Ensure.Record, Scope: s.Ensure.Scope, Values: values}
 }
 
 type StepCreate struct {
@@ -152,7 +183,25 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 		return fmt.Errorf("command %q: empty transaction", c.Name)
 	}
 	for i, s := range c.Steps {
+		kinds := 0
+		for _, present := range []bool{s.Create != nil, s.Update != nil, s.Ensure != nil} {
+			if present {
+				kinds++
+			}
+		}
+		if kinds > 1 {
+			return fmt.Errorf("command %q: step %d must set exactly one of create, update or ensure", c.Name, i)
+		}
 		switch {
+		case s.Ensure != nil:
+			if s.Ensure.Record == "" || len(s.Ensure.Where) == 0 {
+				return fmt.Errorf("command %q: step %d ensure requires record and where", c.Name, i)
+			}
+			for field := range s.Ensure.Values {
+				if _, dup := s.Ensure.Where[field]; dup {
+					return fmt.Errorf("command %q: step %d ensure sets %q in both where and values", c.Name, i, field)
+				}
+			}
 		case s.Create != nil:
 			if s.Create.Record == "" || len(s.Create.Values) == 0 {
 				return fmt.Errorf("command %q: step %d create requires record and values", c.Name, i)
@@ -170,7 +219,7 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 				}
 			}
 		default:
-			return fmt.Errorf("command %q: step %d has neither create nor update", c.Name, i)
+			return fmt.Errorf("command %q: step %d has none of create, update or ensure", c.Name, i)
 		}
 	}
 	if c.Input.Record == "" {
@@ -233,8 +282,8 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 }
 
 func commandStepScope(step CommandStep) string {
-	if step.Create != nil {
-		return step.Create.Scope
+	if create := step.createSpec(); create != nil {
+		return create.Scope
 	}
 	if step.Update != nil {
 		return step.Update.Scope
@@ -257,8 +306,8 @@ func (c *CommandResource) TouchedRecords() []string {
 		add(c.Input.Record)
 	}
 	for _, s := range c.Steps {
-		if s.Create != nil {
-			add(s.Create.Record)
+		if create := s.createSpec(); create != nil {
+			add(create.Record)
 		}
 		if s.Update != nil {
 			add(s.Update.Record)

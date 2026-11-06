@@ -195,8 +195,8 @@ func (c *CommandResource) validateStepReferences() error {
 			refs = append(refs, ref)
 		}
 		var values map[string]string
-		if step.Create != nil {
-			values = step.Create.Values
+		if create := step.createSpec(); create != nil {
+			values = create.Values
 		}
 		if step.Update != nil {
 			values = step.Update.Values
