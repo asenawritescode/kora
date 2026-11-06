@@ -5,11 +5,22 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+)
+
+// Environment variables that configure Cloud handoff; both are required.
+const (
+	CloudHandoffURLEnv   = "KORA_ENGINE_CLOUD_IDENTITY_URL"
+	CloudHandoffTokenEnv = "KORA_ENGINE_CLOUD_IDENTITY_TOKEN"
+
+	cloudHandoffPath             = "/api/auth/cloud/handoff"
+	cloudHandoffUnconfiguredCode = "auth.cloud_handoff_unconfigured"
 )
 
 type CloudHandoffConfig struct {
@@ -25,14 +36,29 @@ func RegisterCloudHandoffRoute(router *gin.Engine, sm *SessionManager, db *sql.D
 	if router == nil {
 		return errors.New("router is required")
 	}
-	if strings.TrimSpace(cfg.RedeemURL) == "" || strings.TrimSpace(cfg.ServiceToken) == "" {
+	hasURL, hasToken := strings.TrimSpace(cfg.RedeemURL) != "", strings.TrimSpace(cfg.ServiceToken) != ""
+	switch {
+	case hasURL != hasToken:
+		// Half configuration is an operator mistake, like a management caller
+		// without its token: refuse to start instead of silently disabling.
+		missing := CloudHandoffURLEnv
+		if hasURL {
+			missing = CloudHandoffTokenEnv
+		}
+		return fmt.Errorf("Cloud handoff requires %s and %s together; %s is missing", CloudHandoffURLEnv, CloudHandoffTokenEnv, missing)
+	case !hasURL:
+		slog.Warn("Cloud sign-in handoff is disabled: "+CloudHandoffURLEnv+" and "+CloudHandoffTokenEnv+" are not set; Cloud sign-in handoff and member invitation acceptance will not work until both are configured",
+			"missing", []string{CloudHandoffURLEnv, CloudHandoffTokenEnv}, "route", cloudHandoffPath, "code", cloudHandoffUnconfiguredCode)
+		router.POST(cloudHandoffPath, func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"code": cloudHandoffUnconfiguredCode, "message": "Cloud sign-in is not configured on this Engine."}})
+		})
 		return nil
 	}
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 8 * time.Second}
 	}
-	router.POST("/api/auth/cloud/handoff", func(c *gin.Context) {
+	router.POST(cloudHandoffPath, func(c *gin.Context) {
 		var req struct {
 			Code string `json:"code"`
 		}

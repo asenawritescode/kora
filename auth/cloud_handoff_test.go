@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -104,5 +106,91 @@ func TestCloudHandoffRejectsCloudTenantMismatchWithoutSession(t *testing.T) {
 	}
 	if recorder.Header().Get("Set-Cookie") != "" {
 		t.Fatalf("unexpected session cookie %q", recorder.Header().Get("Set-Cookie"))
+	}
+}
+
+func captureHandoffLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &buf
+}
+
+func TestCloudHandoffConfigurationVisibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const secretURL = "http://cloud.secret-host.invalid/redeem"
+	const secretToken = "super-secret-service-token"
+	tests := []struct {
+		name       string
+		cfg        CloudHandoffConfig
+		wantErr    string
+		wantStatus int
+		wantCode   string
+		wantWarn   bool
+		wantAbsent []string
+	}{
+		{name: "unset", cfg: CloudHandoffConfig{}, wantStatus: http.StatusServiceUnavailable, wantCode: "auth.cloud_handoff_unconfigured", wantWarn: true},
+		{name: "blank values", cfg: CloudHandoffConfig{RedeemURL: "  ", ServiceToken: "\t"}, wantStatus: http.StatusServiceUnavailable, wantCode: "auth.cloud_handoff_unconfigured", wantWarn: true},
+		{name: "only url", cfg: CloudHandoffConfig{RedeemURL: secretURL}, wantErr: "KORA_ENGINE_CLOUD_IDENTITY_TOKEN", wantAbsent: []string{secretURL, "secret-host"}},
+		{name: "only token", cfg: CloudHandoffConfig{ServiceToken: secretToken}, wantErr: "KORA_ENGINE_CLOUD_IDENTITY_URL", wantAbsent: []string{secretToken}},
+		{name: "fully set", cfg: CloudHandoffConfig{RedeemURL: secretURL, ServiceToken: secretToken}, wantStatus: http.StatusBadRequest, wantAbsent: []string{secretURL, secretToken}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureHandoffLogs(t)
+			router := gin.New()
+			err := RegisterCloudHandoffRoute(router, NewSessionManager(nil), nil, tt.cfg)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want mention of %s", err, tt.wantErr)
+				}
+				for _, secret := range tt.wantAbsent {
+					if strings.Contains(err.Error(), secret) {
+						t.Fatalf("error leaks configuration value %q: %v", secret, err)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/auth/cloud/handoff", strings.NewReader(`{}`)))
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", recorder.Code, tt.wantStatus, recorder.Body.String())
+			}
+			if tt.wantCode != "" {
+				var body struct {
+					Error struct {
+						Code    string `json:"code"`
+						Message string `json:"message"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if body.Error.Code != tt.wantCode || body.Error.Message == "" || strings.Contains(body.Error.Message, "KORA_ENGINE") {
+					t.Fatalf("error body = %s", recorder.Body.String())
+				}
+			}
+			output := logs.String()
+			if got := strings.Count(output, "level=WARN"); tt.wantWarn && got != 1 || !tt.wantWarn && got != 0 {
+				t.Fatalf("WARN lines = %d, want warn=%v: %s", got, tt.wantWarn, output)
+			}
+			if tt.wantWarn {
+				for _, name := range []string{"KORA_ENGINE_CLOUD_IDENTITY_URL", "KORA_ENGINE_CLOUD_IDENTITY_TOKEN"} {
+					if !strings.Contains(output, name) {
+						t.Fatalf("warning does not name %s: %s", name, output)
+					}
+				}
+			}
+			for _, secret := range tt.wantAbsent {
+				if strings.Contains(output, secret) || strings.Contains(recorder.Body.String(), secret) {
+					t.Fatalf("output leaks configuration value %q", secret)
+				}
+			}
+		})
 	}
 }
