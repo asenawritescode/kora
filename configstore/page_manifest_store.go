@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -76,10 +77,10 @@ func (s *Store) SavePageManifestTx(tx *sql.Tx, manifest *doctype.PageManifest, s
 
 func (s *Store) LoadPageManifests(site string) ([]*doctype.PageManifest, error) {
 	rows, err := s.DB.Query(
-		`SELECT name, route, type, layout, label, module, source_doctype,
+		db.Rebind(s.Dialect, `SELECT name, route, type, layout, label, module, source_doctype,
 			public_enabled, public_components, public_allow_mutations, config_json
 		 FROM _kora_view WHERE site = ? OR site = ''
-		 ORDER BY idx`,
+		 ORDER BY idx`),
 		site,
 	)
 	if err != nil {
@@ -102,9 +103,9 @@ func (s *Store) LoadPageManifests(site string) ([]*doctype.PageManifest, error) 
 
 func (s *Store) LoadPageManifest(name, site string) (*doctype.PageManifest, error) {
 	row := s.DB.QueryRow(
-		`SELECT name, route, type, layout, label, module, source_doctype,
+		db.Rebind(s.Dialect, `SELECT name, route, type, layout, label, module, source_doctype,
 			public_enabled, public_components, public_allow_mutations, config_json
-		 FROM _kora_view WHERE name = ? AND (site = ? OR site = '')`,
+		 FROM _kora_view WHERE name = ? AND (site = ? OR site = '')`),
 		name, site,
 	)
 	manifest, err := scanPageManifest(row)
@@ -153,8 +154,10 @@ func scanPageManifest(scanner pageManifestScanner) (*doctype.PageManifest, error
 		SourceDocType: sourceDoctype,
 	}
 	if configJSON.Valid && configJSON.String != "" {
-		if err := json.Unmarshal([]byte(configJSON.String), &view.Components); err != nil {
-			return nil, fmt.Errorf("unmarshaling components for page manifest %q: %w", name, err)
+		// Views are stored either as a component array or, when they declare
+		// resources, as {resources, components}; decodeViewConfig reads both.
+		if err := decodeViewConfig(configJSON.String, view); err != nil {
+			return nil, fmt.Errorf("decoding view config for page manifest %q: %w", name, err)
 		}
 	}
 	if publicEnabled == 1 {
