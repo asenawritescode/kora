@@ -69,6 +69,31 @@ func TestRunPagingAggregatesAndScopeOnRealDatabases(t *testing.T) {
 				t.Fatalf("paged names = %v", names)
 			}
 
+			// A request limit below page_limit pages the same rows with a cursor and no repeats (#335).
+			for _, limit := range []int{1, 2} {
+				var names []string
+				req := Request{FullRead: true, Limit: limit}
+				for pages := 0; pages < 6; pages++ {
+					p, err := Run(ctx, conn, d, list, req)
+					if err != nil {
+						t.Fatalf("limit %d: %v", limit, err)
+					}
+					if len(p.Rows) > limit {
+						t.Fatalf("limit %d returned %d rows", limit, len(p.Rows))
+					}
+					for _, r := range p.Rows {
+						names = append(names, r["name"].(string))
+					}
+					if p.Next == nil {
+						break
+					}
+					req.Cursor = p.Next
+				}
+				if len(names) != 5 || names[0] != "O1" || names[4] != "O5" {
+					t.Fatalf("limit %d paged names = %v", limit, names)
+				}
+			}
+
 			// Owner fence: a non-full-read actor sees only own rows.
 			own := *list
 			own.OwnerField = "owner"

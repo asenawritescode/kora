@@ -143,15 +143,15 @@ func (e *configQueryExecutor) ExecutePublishedQuery(ctx context.Context, exec co
 	if e.def.OwnerField != "" {
 		return contract.QueryResult{}, contract.NewError(contract.CodePermissionDenied, "actor scope is required")
 	}
-	return e.run(ctx, exec.Scope, plugin.PublishedQueryActorScope{}, true, input, cursor)
+	return e.run(ctx, exec.Scope, plugin.PublishedQueryActorScope{}, true, input, cursor, limit)
 }
 
 func (e *configQueryExecutor) ExecutePublishedQueryForActor(ctx context.Context, exec contract.ModuleExecution, q contract.PublishedQuery, actor plugin.PublishedQueryActorScope, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
-	return e.run(ctx, exec.Scope, actor, !actor.OwnerOnly, input, cursor)
+	return e.run(ctx, exec.Scope, actor, !actor.OwnerOnly, input, cursor, limit)
 }
 
-func (e *configQueryExecutor) run(ctx context.Context, scope contract.BusinessScope, actor plugin.PublishedQueryActorScope, full bool, input json.RawMessage, cursor string) (contract.QueryResult, error) {
-	req := query.Request{Actor: actor.SubjectID, Now: time.Now().UTC(), FullRead: full, ScopeField: e.scopeField}
+func (e *configQueryExecutor) run(ctx context.Context, scope contract.BusinessScope, actor plugin.PublishedQueryActorScope, full bool, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+	req := query.Request{Limit: int(limit), Actor: actor.SubjectID, Now: time.Now().UTC(), FullRead: full, ScopeField: e.scopeField}
 	if e.scopeField != "" {
 		req.ScopeValue = string(scope.LegalEntityID)
 	}

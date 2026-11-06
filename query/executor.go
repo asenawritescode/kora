@@ -38,6 +38,19 @@ type Request struct {
 	ScopeField string // DocType business-scope column; empty for tenant scope
 	ScopeValue any    // verified BusinessScope value
 	Cursor     []any  // sort-column values + name of the last row seen
+	Limit      int    // page size the caller asked for; 0 means the definition's limit
+}
+
+// pageSize is the rows to return: the caller's limit, bounded by the
+// definition's limit (the published page_limit).
+func (r Request) pageSize(d *Definition) (int, error) {
+	switch {
+	case r.Limit == 0:
+		return d.Limit, nil
+	case r.Limit < 0 || r.Limit > d.Limit:
+		return 0, &InputError{Field: "limit", Msg: fmt.Sprintf("limit must be between 1 and %d for this query", d.Limit)}
+	}
+	return r.Limit, nil
 }
 
 // Page is one result page. Next is nil on the last page.
@@ -217,6 +230,10 @@ func (b *builder) keyset(sorts []Sort) (string, error) {
 // len(sort) selected columns are cursor values.
 func Build(d *Definition, dialect db.Dialect, req Request) (string, []any, []Sort, error) {
 	b := &builder{d: dialect, inputs: d.Input, req: req, via: d.Via != ""}
+	size, err := req.pageSize(d)
+	if err != nil {
+		return "", nil, nil, err
+	}
 	if len(d.Aggregates) > 0 {
 		return buildAggregate(b, d)
 	}
@@ -260,7 +277,7 @@ func Build(d *Definition, dialect db.Dialect, req Request) (string, []any, []Sor
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " ORDER BY " + strings.Join(order, ", ") + fmt.Sprintf(" LIMIT %d", d.Limit+1)
+	q += " ORDER BY " + strings.Join(order, ", ") + fmt.Sprintf(" LIMIT %d", size+1)
 	return db.Rebind(dialect, q), b.args, sorts, nil
 }
 
@@ -279,7 +296,11 @@ func Run(ctx context.Context, conn *sql.DB, dialect db.Dialect, d *Definition, r
 		return nil, err
 	}
 	if len(d.Aggregates) > 0 {
-		return runAggregate(ctx, conn, d, q, args)
+		return runAggregate(ctx, conn, d, q, args, req.Limit)
+	}
+	size, err := req.pageSize(d)
+	if err != nil {
+		return nil, err
 	}
 	rs, err := conn.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -303,7 +324,7 @@ func Run(ctx context.Context, conn *sql.DB, dialect db.Dialect, d *Definition, r
 				vals[i] = string(bs)
 			}
 		}
-		if len(page.Rows) == d.Limit {
+		if len(page.Rows) == size {
 			page.Next = lastCursor
 			break
 		}
@@ -372,7 +393,9 @@ func buildAggregate(b *builder, d *Definition) (string, []any, []Sort, error) {
 	return db.Rebind(q, sql), b.args, sorts, nil
 }
 
-func runAggregate(ctx context.Context, conn *sql.DB, d *Definition, q string, args []any) (*Page, error) {
+// runAggregate cannot page, so a caller limit below the group count is
+// refused instead of truncating the answer.
+func runAggregate(ctx context.Context, conn *sql.DB, d *Definition, q string, args []any, limit int) (*Page, error) {
 	rs, err := conn.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query %s: %w", d.Name, err)
@@ -397,6 +420,9 @@ func runAggregate(ctx context.Context, conn *sql.DB, d *Definition, q string, ar
 			row[f] = aggValue(d, i, vals[i])
 		}
 		page.Rows = append(page.Rows, row)
+		if limit > 0 && len(page.Rows) > limit {
+			return nil, &InputError{Field: "limit", Msg: fmt.Sprintf("query %s has more than %d groups and cannot be paged: raise limit", d.Name, limit)}
+		}
 	}
 	return page, rs.Err()
 }
