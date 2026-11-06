@@ -1,0 +1,64 @@
+name: Sell
+route: /sell
+type: register
+layout: register
+label: Sell
+module: POS
+resources:
+  - id: items
+    query: published.query
+    params: {owner_module_id: inventory.core, query_name: item_search, input: {}}
+  - id: lookup
+    query: published.query
+    params: {owner_module_id: inventory.core, query_name: item_search, input: {}}
+  - id: categories
+    query: published.query
+    params: {owner_module_id: inventory.core, query_name: item_categories}
+  - id: session
+    query: published.query
+    params: {owner_module_id: pos.core, query_name: my_session}
+components:
+  - id: scan
+    label: Scan or search
+    type: scanner_input
+    version: 2
+    region: main
+    position: 0
+    resource_bindings: {lookup: lookup}
+    bindings: {term_input: term, title: item_name, price: price, sku: barcode}
+  - id: categories
+    label: Categories
+    type: category_tabs
+    version: 2
+    region: main
+    position: 1
+    resource_bindings: {items: items, categories: categories}
+    bindings: {group_field: category, category_label_field: category_name}
+  - id: products
+    label: Items
+    type: product_grid
+    version: 2
+    region: main
+    position: 2
+    resource_bindings: {items: items}
+    bindings: {title: item_name, subtitle: uom, price: price, sku: barcode, image: image}
+  - id: cart
+    label: Current sale
+    type: cart_panel
+    version: 2
+    region: side
+    position: 0
+  - id: tender
+    label: Payment
+    type: tender_panel
+    version: 2
+    region: side
+    position: 1
+    bindings:
+      submit_operation_ref: pos.core~pos.checkout~record_sale
+      methods: "literal:Cash"
+      quick_cash: "literal:50,100,200,500,1000"
+    context:
+      register: session.register
+      location: session.location
+      till_session: session.name
