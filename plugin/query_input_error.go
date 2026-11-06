@@ -22,15 +22,19 @@ func (e *QueryInputError) Error() string { return e.Message }
 
 // newQueryInputError names the offending input field from a schema failure
 // when the validator exposes it; any other cause gets a generic message.
-func newQueryInputError(cause error) *QueryInputError {
+func newQueryInputError(cause error) *QueryInputError { return newInputError(cause, "query") }
+
+// newInputError is newQueryInputError for any published call; subject is the
+// word the messages use for it ("query", "operation").
+func newInputError(cause error, subject string) *QueryInputError {
 	var ve *jsonschema.ValidationError
 	if !errors.As(cause, &ve) {
-		return &QueryInputError{Message: "query input is invalid"}
+		return &QueryInputError{Message: subject + " input is invalid"}
 	}
 	for len(ve.Causes) > 0 {
 		ve = ve.Causes[0]
 	}
-	field, msg := "", "query input is invalid"
+	field, msg := "", subject+" input is invalid"
 	switch k := ve.ErrorKind.(type) {
 	case *kind.Required:
 		if len(k.Missing) > 0 {
@@ -38,7 +42,7 @@ func newQueryInputError(cause error) *QueryInputError {
 		}
 	case *kind.AdditionalProperties:
 		if len(k.Properties) > 0 {
-			field, msg = boundedField(k.Properties[0]), " is not accepted by this query"
+			field, msg = boundedField(k.Properties[0]), " is not accepted by this "+subject
 		}
 	default:
 		if len(ve.InstanceLocation) > 0 {

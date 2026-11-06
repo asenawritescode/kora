@@ -425,6 +425,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 	if cerr != nil {
 		return nil, cerr
 	}
+	if cerr := cmd.missingInput(input); cerr != nil {
+		return nil, cerr
+	}
 	if cmd.ModuleOwnerID != "" {
 		if k.CommandSchemas == nil || !k.CommandSchemas.Registered(cmd.InputSchema) || !k.CommandSchemas.Registered(cmd.OutputSchema) {
 			return nil, contract.NewError(contract.CodeValidationFailed, "owner command input or output schema is not registered")

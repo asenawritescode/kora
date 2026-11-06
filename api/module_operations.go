@@ -359,7 +359,9 @@ func writeReceiptValidationError(c *gin.Context, receipt contract.OperationRecei
 		return false
 	}
 	details := map[string]any{"execution_id": receipt.ExecutionID}
-	if m := schemaFieldPattern.FindStringSubmatch(receipt.Error.Message); m != nil {
+	if receipt.Error.Field != "" {
+		details["field"] = receipt.Error.Field
+	} else if m := schemaFieldPattern.FindStringSubmatch(receipt.Error.Message); m != nil {
 		details["field"] = m[1] + m[2]
 	}
 	writeError(c, http.StatusBadRequest, string(receipt.Error.Type), receipt.Error.Message, details)
@@ -541,6 +543,12 @@ func operationErrorResponse(c *gin.Context, err error) {
 	var details map[string]any
 	if len(typed.Details) > 0 {
 		_ = json.Unmarshal(typed.Details, &details)
+	}
+	if typed.Field != "" {
+		if details == nil {
+			details = map[string]any{}
+		}
+		details["field"] = typed.Field
 	}
 	writeError(c, status, string(typed.Type), typed.Message, details)
 }
