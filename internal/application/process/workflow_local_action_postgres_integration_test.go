@@ -117,7 +117,7 @@ func TestPostgresWorkflowLocalActionCommitsDomainAndProgressAtomically(t *testin
 	if _, err := database.ExecContext(ctx, db.Rebind(dialect, `INSERT INTO _kora_workflow_instance (id,tenant_id,definition_id,definition_version,subject_kind,subject_id,subject_revision,status,current_step,revision,lease_owner,lease_fence,lease_until,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`), string(instanceID), string(tenant), "invoice-flow", 1, doctypeName, document.Name, "1", string(contract.InstanceRunning), "approve", claim.Owner, uint64(claim.Fence), time.Now().UTC().Add(2*time.Minute)); err != nil {
 		t.Fatal("insert claimed workflow:", err)
 	}
-	actx := workflow.ActionContext{Execution: execution, RequiredGrant: serviceGrant, InstanceID: instanceID, StepID: claim.StepID, ExecutionID: contract.NewOperationID(), Subject: contract.SubjectRef{Kind: doctypeName, ID: document.Name, Revision: "1"}, IdempotencyKey: contract.IdempotencyKey("workflow-local-" + suffix[:12])}
+	actx := workflow.ActionContext{Execution: execution, RequiredGrant: serviceGrant, BusinessScope: claim.BusinessScope, InstanceID: instanceID, StepID: claim.StepID, ExecutionID: contract.NewOperationID(), Subject: contract.SubjectRef{Kind: doctypeName, ID: document.Name, Revision: "1"}, IdempotencyKey: contract.IdempotencyKey("workflow-local-" + suffix[:12])}
 	if _, err := local.ExecuteLocal(ctx, claim, actx, key, workflow.ActionInput{Schema: inputSchema, Data: json.RawMessage(`{}`)}, "done"); err != nil {
 		t.Fatal("execute transaction-bound PostgreSQL action:", err)
 	}

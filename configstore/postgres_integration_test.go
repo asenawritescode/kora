@@ -43,15 +43,6 @@ func TestLivePostgresConfigStoreLifecycle(t *testing.T) {
 	if err := site.BootstrapSystemTables(database, dialect); err != nil {
 		t.Fatal("bootstrap PostgreSQL system tables:", err)
 	}
-	if _, err := database.Exec(`CREATE TABLE _kora_analytics_metric (
-		id BIGSERIAL PRIMARY KEY, site VARCHAR(140) NOT NULL,
-		name VARCHAR(140) NOT NULL, label VARCHAR(255) NOT NULL DEFAULT '',
-		type VARCHAR(50) NOT NULL, doctype VARCHAR(140) NOT NULL,
-		field_name VARCHAR(140) NOT NULL DEFAULT '', link_field VARCHAR(140) NOT NULL DEFAULT '',
-		group_by_field VARCHAR(140) NOT NULL DEFAULT '', UNIQUE (site, name)
-	)`); err != nil {
-		t.Fatal("create analytics metric fixture:", err)
-	}
 	store := configstore.NewStore(database, dialect)
 
 	dt := &doctype.DocType{
@@ -99,7 +90,6 @@ func TestLivePostgresConfigStoreLifecycle(t *testing.T) {
 		t.Fatalf("loaded permissions = %#v, want read/create access for Inventory Item", loadedPermissions)
 	}
 
-
 	view := &doctype.View{Name: "Inventory", Route: "/inventory", Type: "list", SourceDocType: dt.Name}
 	if err := store.SaveViews([]*doctype.View{view}, "tenant.example.test"); err != nil {
 		t.Fatal("save PostgreSQL views:", err)
@@ -136,7 +126,10 @@ func TestLivePostgresConfigStoreLifecycle(t *testing.T) {
 		t.Fatalf("loaded scripts = %#v, want inventory_check source", loadedScripts)
 	}
 
-	snapshot, err := store.CollectSnapshot(doctype.NewRegistry(), "tenant.example.test")
+	// Reference validation requires the view's source DocType in the registry.
+	registry := doctype.NewRegistry()
+	registry.Register(dt)
+	snapshot, err := store.CollectSnapshot(registry, "tenant.example.test")
 	if err != nil {
 		t.Fatal("collect PostgreSQL config snapshot:", err)
 	}

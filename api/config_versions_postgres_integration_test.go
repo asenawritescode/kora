@@ -509,7 +509,7 @@ func TestLivePostgresAnalyticsMetadataQueries(t *testing.T) {
 	if _, err := database.Exec(`CREATE TABLE _kora_analytics_metric (site TEXT NOT NULL, name TEXT NOT NULL, label TEXT NOT NULL, type TEXT NOT NULL, doctype TEXT NOT NULL, field_name TEXT NOT NULL, link_field TEXT NOT NULL, group_by_field TEXT NOT NULL, UNIQUE (site, name))`); err != nil {
 		t.Fatal("create analytics metric fixture:", err)
 	}
-	if _, err := database.Exec(`CREATE TABLE _kora_analytics_daily (site TEXT NOT NULL, doctype TEXT NOT NULL, metric TEXT NOT NULL, dimension TEXT NOT NULL, date DATE NOT NULL, value DOUBLE PRECISION NOT NULL)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE _kora_analytics_daily (site TEXT NOT NULL, doctype TEXT NOT NULL, metric TEXT NOT NULL, dimension TEXT NOT NULL, date DATE NOT NULL, scope_kind TEXT NOT NULL DEFAULT 'tenant', legal_entity_id TEXT NOT NULL DEFAULT '', value DOUBLE PRECISION NOT NULL)`); err != nil {
 		t.Fatal("create analytics daily fixture:", err)
 	}
 	if _, err := database.Exec(`INSERT INTO _kora_analytics_metric (site, name, label, type, doctype, field_name, link_field, group_by_field) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, "site-pg", "sales_total", "Sales Total", "sum", "Sale", "total", "", ""); err != nil {
@@ -546,6 +546,9 @@ func TestLivePostgresAnalyticsMetadataQueries(t *testing.T) {
 		c.Set("site_registry", registry)
 		c.Set("site_name", "site-pg")
 		c.Set("site_db_type", "postgres")
+		c.Set("user", "admin@example.test")
+		c.Set("user_roles", []string{doctype.AdminRole})
+		c.Set("policy_execution", integrationTestExecution(t, "site-pg", "admin@example.test", []string{doctype.AdminRole}))
 		c.Next()
 	})
 	RegisterAnalyticsRoutes(analyticsRouter.Group("/api"), registry, database, nil, nil, kdb.Resolve("postgres"))
