@@ -223,3 +223,43 @@ func TestCommandDigestIncludesKindAndCanonicalJSON(t *testing.T) {
 }
 
 func jsonValid(raw []byte) bool { return len(raw) > 0 && json.Valid(raw) }
+
+func TestServiceAcceptsTenantMemberCommandsWithTheirKinds(t *testing.T) {
+	grant := contract.GrantTenantMember{Meta: contract.CommandMeta{IdempotencyKey: "inv_01K7INVITATION"}, InvitationID: "inv_01K7INVITATION", Subject: "usr_member_1", Email: "member@example.test", FullName: "Amina Otieno", Roles: []string{"Front Desk"}}
+	invalidGrant := grant
+	invalidGrant.Roles = []string{"Front Desk", "Stock"}
+	revoke := contract.RevokeTenantMember{Meta: contract.CommandMeta{IdempotencyKey: "member-revoke-1"}, Subject: "usr_member_1", Reason: "owner removed the member from the team"}
+	tests := []struct {
+		name     string
+		command  any
+		wantKind CommandKind
+		wantKey  contract.IdempotencyKey
+	}{
+		{name: "grant", command: grant, wantKind: CommandTenantMemberGrant, wantKey: "inv_01K7INVITATION"},
+		{name: "revoke", command: revoke, wantKind: CommandTenantMemberRevoke, wantKey: "member-revoke-1"},
+		{name: "invalid grant", command: invalidGrant},
+		{name: "plan is not a durable command", command: contract.PlanTenantMember{Meta: contract.CommandMeta{IdempotencyKey: "member-plan-1"}, Email: "member@example.test", Roles: []string{"Front Desk"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &acceptStore{operation: Operation{ID: "01K7OPERATION000000000000000000", Tenant: "tenant-1", State: contract.OperationRequested}}
+			service, err := NewService(store, fixedIDs{id: "01K7OPERATION000000000000000000"}, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.AcceptForTenant(context.Background(), "cloud-service", "tenant-1", test.command)
+			if test.wantKind == "" {
+				if err == nil || store.command.Kind != "" {
+					t.Fatalf("accepted %T: %+v", test.command, store.command)
+				}
+				return
+			}
+			if err != nil || store.command.Kind != test.wantKind || store.command.IdempotencyKey != test.wantKey || store.command.Tenant != "tenant-1" {
+				t.Fatalf("accepted operation = %+v, %v", store.command, err)
+			}
+			if _, err := service.Accept(context.Background(), "cloud-service", test.command); err == nil {
+				t.Fatal("accepted tenant member command without tenant route scope")
+			}
+		})
+	}
+}
