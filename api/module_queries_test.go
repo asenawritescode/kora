@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -380,14 +381,20 @@ func TestPublishedQueryCallerMistakesAre4xx(t *testing.T) {
 		wantCode   string
 		wantField  string
 		wantMsg    string
+		wantLog    string // underlying error the 503 path must log; empty means nothing is logged
 	}{
-		{"executor input error", `{"input":{}}`, &plugin.QueryInputError{Field: "since", Message: "input since is required"}, nil, 400, "validation.invalid_query_request", "since", "input since is required"},
-		{"schema failure hides validator text", `{"input":{}}`, nil, errors.New("jsonschema secret-internal-detail"), 400, "validation.invalid_query_request", "", "query input is invalid"},
-		{"limit beyond page bound", `{"input":{},"limit":11}`, nil, nil, 400, "validation.invalid_query_request", "limit", "limit"},
-		{"provider fault stays 503", `{"input":{}}`, errors.New("dial tcp 10.0.0.1: secret-host"), nil, 503, "module.query_failed", "", "Published query could not be completed"},
+		{"executor input error", `{"input":{}}`, &plugin.QueryInputError{Field: "since", Message: "input since is required"}, nil, 400, "validation.invalid_query_request", "since", "input since is required", ""},
+		{"schema failure hides validator text", `{"input":{}}`, nil, errors.New("jsonschema secret-internal-detail"), 400, "validation.invalid_query_request", "", "query input is invalid", ""},
+		{"limit beyond page bound", `{"input":{},"limit":11}`, nil, nil, 400, "validation.invalid_query_request", "limit", "limit", ""},
+		{"provider fault stays 503", `{"input":{}}`, errors.New("dial tcp 10.0.0.1: secret-host"), nil, 503, "module.query_failed", "", "Published query could not be completed", "dial tcp 10.0.0.1: secret-host"},
+		{"contract violation by the provider is logged", `{"input":{}}`, errors.New("published query result data must be a bounded row array"), nil, 503, "module.query_failed", "", "Published query could not be completed", "bounded row array"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			var logs strings.Builder
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			defer slog.SetDefault(previous)
 			scope := contract.BusinessScope{TenantID: "tenant-inputs", Kind: contract.ScopeKindTenant}
 			inputSchema := contract.SchemaRef{ID: "sales.inputs.input", Version: 1}
 			outputSchema := contract.SchemaRef{ID: "sales.inputs.output", Version: 1}
@@ -435,6 +442,9 @@ func TestPublishedQueryCallerMistakesAre4xx(t *testing.T) {
 			}
 			if strings.Contains(recorder.Body.String(), "secret") {
 				t.Fatalf("internal detail leaked: %s", recorder.Body.String())
+			}
+			if tc.wantLog == "" && strings.Contains(logs.String(), "published query failed") || !strings.Contains(logs.String(), tc.wantLog) {
+				t.Fatalf("log = %q, want it to contain %q", logs.String(), tc.wantLog)
 			}
 		})
 	}

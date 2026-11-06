@@ -218,3 +218,69 @@ func TestConfigQueryExecutorReportsCallerInputErrors(t *testing.T) {
 		})
 	}
 }
+
+// A caller limit below page_limit must size the page itself: the binding layer
+// rejects a result with more rows than the requested limit, which surfaced as
+// 503 module.query_failed (#335).
+func TestConfigQueryExecutorHonoursLimitBelowPageLimit(t *testing.T) {
+	database, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	database.SetMaxOpenConns(1)
+	if _, err := database.Exec("CREATE TABLE `tabItem` (name TEXT PRIMARY KEY, title TEXT); INSERT INTO `tabItem` VALUES ('a','A'),('b','B'),('c','C'),('d','D'),('e','E')"); err != nil {
+		t.Fatal(err)
+	}
+	def, module := configQueryFixture()
+	def.Limit = 4
+	pq := module.Queries[0]
+	pq.PageLimit = 4
+	scope := contract.BusinessScope{TenantID: "t1", Kind: contract.ScopeKindTenant}
+	exec := &configQueryExecutor{db: database, dialect: db.Resolve("libsql"), def: def}
+	tests := []struct {
+		name      string
+		limit     uint16
+		wantPages []string
+	}{
+		{"limit 1", 1, []string{"a", "b", "c", "d", "e"}},
+		{"page_limit-1", 3, []string{"abc", "de"}},
+		{"page_limit", 4, []string{"abcd", "e"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			cursor := ""
+			for range 10 {
+				res, err := exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, pq, plugin.PublishedQueryActorScope{SubjectID: "u1"}, json.RawMessage(`{}`), cursor, tt.limit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := res.Validate(pq, tt.limit, scope); err != nil {
+					t.Fatalf("result violates the page contract for limit %d: %v", tt.limit, err)
+				}
+				var rows []map[string]any
+				if err := json.Unmarshal(res.Data, &rows); err != nil {
+					t.Fatal(err)
+				}
+				page := ""
+				for _, r := range rows {
+					page += r["name"].(string)
+				}
+				got = append(got, page)
+				if cursor = res.NextCursor; cursor == "" {
+					break
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(tt.wantPages, ",") {
+				t.Fatalf("pages = %v, want %v", got, tt.wantPages)
+			}
+		})
+	}
+	// A limit above page_limit is the caller's mistake, not a provider fault.
+	_, err = exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, pq, plugin.PublishedQueryActorScope{SubjectID: "u1"}, json.RawMessage(`{}`), "", 5)
+	var inputErr *plugin.QueryInputError
+	if !errors.As(err, &inputErr) || inputErr.Field != "limit" {
+		t.Fatalf("limit above page_limit: err = %v, want limit QueryInputError", err)
+	}
+}

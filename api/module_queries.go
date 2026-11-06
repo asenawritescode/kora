@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -77,6 +78,7 @@ func (h *Handler) HandlePublishedModuleQuery(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		slog.Error("published query failed", "module", moduleID, "query", queryName, "error", err)
 		writeError(c, http.StatusServiceUnavailable, "module.query_failed", "Published query could not be completed", nil)
 		return
 	}
