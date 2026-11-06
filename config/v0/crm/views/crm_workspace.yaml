@@ -14,8 +14,6 @@ components:
     bindings:
       status: pipeline_stage
       title: deal_name
-      summary: next_step
-      due: next_step_due_date
   - id: follow_up_queue
     type: record_table
     region: main

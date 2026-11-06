@@ -25,8 +25,11 @@ import (
 	"github.com/asenawritescode/kora/storage"
 )
 
-// A freshly imported pos pack has config queries but no published module
-// descriptors; the tenant must still start and only warn about them.
+// Importing a pack publishes its queries in the generated <pack>.core module
+// descriptor, so they are no longer unpublished right after an import. A tenant
+// whose module snapshot lacks those descriptors (here: the snapshot row is
+// removed after the import, as when a descriptor is withdrawn) still has config
+// queries without published module queries: it must start and only warn.
 func TestTenantStartSkipsUnpublishedConfigQueries(t *testing.T) {
 	for _, tc := range []struct{ driver, env string }{
 		{"mysql", "KORA_ENGINE_STARTUP_MYSQL_DSN"},
@@ -69,6 +72,9 @@ func TestTenantStartSkipsUnpublishedConfigQueries(t *testing.T) {
 			reg := doctype.NewRegistry()
 			if err := site.ImportConfig(conn, reg, name, siteName, filepath.Join("..", "..", "config", "pos"), dialect); err != nil {
 				t.Fatalf("import pos: %v", err)
+			}
+			if _, err := conn.Exec(`DELETE FROM _kora_module_snapshot`); err != nil {
+				t.Fatalf("withdraw published module descriptors: %v", err)
 			}
 			var logs bytes.Buffer
 			prev := slog.Default()

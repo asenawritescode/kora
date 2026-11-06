@@ -7,11 +7,8 @@ TestIntegration_ExtensionPermissions  # fixture lacks _kora_config_revision
 
 # Test inputs or fixtures out of date with merged product changes.
 TestWorkflowLocalActionKeepsDomainAndProgressInOneTransaction  # capability lease fixture rejected as invalid
-TestLiveManagementProvisionRouteAndWorker  # "module lifecycle executor requires tenant runtime router"
 TestLiveMySQLCreateSiteRegistersCanonicalDirectoryAndRetries  # input lacks required Cloud subject ID
 TestLiveMySQLManagedCredentialIdempotency  # fixture adds access_token_hash, now created by bootstrap (#56)
-TestAIMutationBundleConvertsLeadWithDurableApprovalAtomically  # reads missing config/v0/crm/workflows/lead.json
-TestMySQLCurrentCRMPackInstallsIntoFreshTenant  # CRM pack fails validation: component binding "due" unsupported
 
 # Possible product bug.
 TestMySQLSubscriptionBillingProgressSurvivesRestartAndConcurrentRuns  # concurrent billing runs produced 1 obligation, want 2

@@ -22,6 +22,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/management"
+	knet "github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/site"
 	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
@@ -116,7 +117,7 @@ func testLiveManagementProvisionRouteAndWorker(t *testing.T, driver, dsn string)
 	admission := &managementProvisionAdmissionStub{}
 	coordinator := &liveManagementProvisionCoordinator{}
 	const token, caller = "disposable-management-token", "cloud-control-plane"
-	runtime, err := assembleManagementOperationRuntime(ctx, token, caller, platformDB, dialect, admission, registry, coordinator, nil, nil, nil, driver, &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}, string(command.Deployment), command.DatabaseAllocationRef)
+	runtime, err := assembleManagementOperationRuntime(ctx, token, caller, platformDB, dialect, admission, registry, coordinator, knet.NewSiteRouter(nil), nil, nil, driver, &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}, string(command.Deployment), command.DatabaseAllocationRef)
 	if err != nil {
 		t.Fatal("compose management runtime:", err)
 	}
@@ -126,7 +127,7 @@ func testLiveManagementProvisionRouteAndWorker(t *testing.T, driver, dsn string)
 	if runtime.routes.Capabilities[api.ManagementDeleteCapability] || runtime.routes.Capabilities[api.ManagementDeleteRecovery] {
 		t.Fatal("tenant deletion was advertised without a trusted checkpoint verifier")
 	}
-	verifiedRuntime, err := assembleManagementOperationRuntime(ctx, token, caller, platformDB, dialect, admission, registry, coordinator, nil, nil, &managementCheckpointVerifierStub{}, driver, &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}, string(command.Deployment), command.DatabaseAllocationRef)
+	verifiedRuntime, err := assembleManagementOperationRuntime(ctx, token, caller, platformDB, dialect, admission, registry, coordinator, knet.NewSiteRouter(nil), nil, &managementCheckpointVerifierStub{}, driver, &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}, string(command.Deployment), command.DatabaseAllocationRef)
 	if err != nil {
 		t.Fatal("compose management runtime with checkpoint verifier:", err)
 	}

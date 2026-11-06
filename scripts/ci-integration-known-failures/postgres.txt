@@ -10,7 +10,6 @@ TestLivePostgresUserAccessUpdateKeepsCloudIdentityImmutable  # 403 admin require
 TestPostgresWorkflowLocalActionCommitsDomainAndProgressAtomically  # workflow service identity lacks action grant
 
 # Test inputs or fixtures out of date with merged product changes.
-TestLiveManagementProvisionRouteAndWorker  # "module lifecycle executor requires tenant runtime router"
 TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord  # input lacks required Cloud subject ID
 TestLivePostgresConfigStoreLifecycle  # fixture creates _kora_analytics_metric that already exists
 TestPostgresTransactionalConsumerReceiptAndPublication  # injected handler failure surfaces as error
