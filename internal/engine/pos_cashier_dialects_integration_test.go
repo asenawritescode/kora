@@ -640,10 +640,10 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			}{
 				{"owner close_till own till", "Owner", "z_report", "close_till", ownerClose, 200,
 					[]string{"Z REPORT", "Till: " + till, "SALES Cash 1 360.00 REFUNDS Cash 1 180.00", "Opening float 500.00 Expected cash 680.00 Counted 680.00 VARIANCE 0.00"},
-					[]string{"<tr><td>Cash</td><td>1</td><td>360.00</td></tr>", "<tr><td>Refund Cash</td><td>1</td><td>180.00</td></tr>", "Float 500.00 &middot; Expected cash 680.00 &middot; Counted 680.00", "<strong>Variance 0.00</strong>"}},
+					[]string{"<h2>SALES</h2>", "<tr><td>Cash</td><td>1</td><td>360.00</td></tr>", "<h2>REFUNDS</h2>", "<tr><td>Cash</td><td>1</td><td>180.00</td></tr>", "<h2>Totals</h2>", `<th scope="row">Opening float</th><td>500.00</td>`, `<th scope="row">Expected cash</th><td>680.00</td>`, `<th scope="row">Counted cash</th><td>680.00</td>`, "<strong>0.00</strong>"}},
 				{"owner close_session own till", "Owner", "z_report_close_session", "close_session", ownerSessionClose, 200,
 					[]string{"Z REPORT", "Till: " + ownerTill, "SALES REFUNDS ", "Opening float 40.00 Expected cash 40.00 Counted 50.00 VARIANCE 10.00"},
-					[]string{"Float 40.00 &middot; Expected cash 40.00 &middot; Counted 50.00", "<strong>Variance 10.00</strong>"}},
+					[]string{"<h2>SALES</h2>", "<h2>Totals</h2>", `<th scope="row">Opening float</th><td>40.00</td>`, `<th scope="row">Expected cash</th><td>40.00</td>`, `<th scope="row">Counted cash</th><td>50.00</td>`, "<strong>10.00</strong>"}},
 				{"close_session execution under the close_till format", "Owner", "z_report", "close_till", sessionClose, 404, nil, nil},
 				{"close_till format with the close_session ref", "Owner", "z_report", "close_session", ownerClose, 400, nil, nil},
 				// Policy (#396): the per-method Z report is an Owner/Manager/Administrator
@@ -669,6 +669,14 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 					for _, w := range want {
 						if !strings.Contains(body, w) {
 							t.Errorf("%s as %s: missing %q in\n%s", tc.name, as, w, body)
+						}
+					}
+					// A till with no refunds and no account rows prints no empty sections.
+					if as == "html" && tc.name == "owner close_session own till" {
+						for _, w := range []string{"REFUNDS", "BY ACCOUNT"} {
+							if strings.Contains(body, w) {
+								t.Errorf("%s as html: has %q in\n%s", tc.name, w, body)
+							}
 						}
 					}
 				}

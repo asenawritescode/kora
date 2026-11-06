@@ -39,22 +39,49 @@ text: |
 html: |
   <article class="z-report">
     <h1>{{ .tenant.name }} &middot; Z report</h1>
-    <p>{{ .doc.name }} &middot; {{ date .now }}</p>
-    <table>
+    <p>Till {{ .doc.name }} &middot; {{ date .now }}</p>
+    <h2>SALES</h2>
+    {{- if .queries.by_method }}
+    <table class="sales">
+      <thead><tr><th scope="col">Method</th><th scope="col">Count</th><th scope="col">Amount</th></tr></thead>
+      <tbody>
       {{- range .queries.by_method }}
       <tr><td>{{ .method }}</td><td>{{ num .payment_count }}</td><td>{{ money .total }}</td></tr>
       {{- end }}
-      {{- range .queries.refunds }}
-      <tr><td>Refund {{ .method }}</td><td>{{ num .payment_count }}</td><td>{{ money .total }}</td></tr>
-      {{- end }}
+      </tbody>
     </table>
+    {{- else }}
+    <p>No sales</p>
+    {{- end }}
+    {{- if .queries.refunds }}
+    <h2>REFUNDS</h2>
+    <table class="refunds">
+      <thead><tr><th scope="col">Method</th><th scope="col">Count</th><th scope="col">Amount</th></tr></thead>
+      <tbody>
+      {{- range .queries.refunds }}
+      <tr><td>{{ .method }}</td><td>{{ num .payment_count }}</td><td>{{ money .total }}</td></tr>
+      {{- end }}
+      </tbody>
+    </table>
+    {{- end }}
     {{- if .queries.by_account }}
+    <h2>BY ACCOUNT</h2>
     <table class="by-account">
+      <thead><tr><th scope="col">Account</th><th scope="col">Method</th><th scope="col">Count</th><th scope="col">Amount</th></tr></thead>
+      <tbody>
       {{- range .queries.by_account }}
       <tr><td>{{ .payment_account }}</td><td>{{ .method }}{{ if eq .verification "manually_recorded" }} (manually recorded){{ end }}</td><td>{{ num .payment_count }}</td><td>{{ money .total }}</td></tr>
       {{- end }}
+      </tbody>
     </table>
     {{- end }}
-    <p>Float {{ money .doc.opening_float }} &middot; Expected cash {{ money .doc.expected_cash }} &middot; Counted {{ money .doc.closing_count }}</p>
-    <p><strong>Variance {{ money .doc.variance }}</strong></p>
+    <h2>Totals</h2>
+    <table class="totals">
+      <tbody>
+        <tr><th scope="row">Opening float</th><td>{{ money .doc.opening_float }}</td></tr>
+        <tr><th scope="row">Expected cash</th><td>{{ money .doc.expected_cash }}</td></tr>
+        <tr><th scope="row">Counted cash</th><td>{{ money .doc.closing_count }}</td></tr>
+        <tr class="variance"><th scope="row">Variance</th><td><strong>{{ money .doc.variance }}</strong></td></tr>
+      </tbody>
+    </table>
   </article>
