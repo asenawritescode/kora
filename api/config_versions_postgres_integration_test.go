@@ -16,7 +16,6 @@ import (
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/conversation"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
@@ -365,105 +364,6 @@ func TestLivePostgresConfigVersionRoutes(t *testing.T) {
 	}
 }
 
-func TestLivePostgresConversationRoutes(t *testing.T) {
-	dsn := os.Getenv("KORA_API_LIVE_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set KORA_API_LIVE_POSTGRES_DSN to test conversation API routes against a disposable PostgreSQL database")
-	}
-	database, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatal("open disposable PostgreSQL database:", err)
-	}
-	defer database.Close()
-	database.SetMaxOpenConns(1)
-	if err := database.Ping(); err != nil {
-		t.Fatal("ping disposable PostgreSQL database:", err)
-	}
-
-	schemaName := fmt.Sprintf("kora_api_conversations_%d", time.Now().UnixNano())
-	if _, err := database.Exec(`CREATE SCHEMA "` + schemaName + `"`); err != nil {
-		t.Fatal("create isolated PostgreSQL schema:", err)
-	}
-	defer func() { _, _ = database.Exec(`DROP SCHEMA "` + schemaName + `" CASCADE`) }()
-	if _, err := database.Exec(`SET search_path TO "` + schemaName + `"`); err != nil {
-		t.Fatal("select isolated PostgreSQL schema:", err)
-	}
-	for _, statement := range kdb.ConversationTablesPostgres() {
-		if _, err := database.Exec(statement); err != nil {
-			t.Fatalf("create conversation fixture table: %v", err)
-		}
-	}
-
-	registry := doctype.NewRegistry()
-	handler := NewHandler(registry, &orm.TxManager{DB: database, Registry: registry, Dialect: kdb.Resolve("postgres")})
-	createRecorder := httptest.NewRecorder()
-	createContext := postgresConversationContext(createRecorder, database, registry, http.MethodPost, `{"channel":"web","external_contact_id":"tester@example.test","correlation_id":"pg-conversation-1"}`, "", "")
-	handler.HandleConversationCreate(createContext)
-	if createRecorder.Code != http.StatusCreated {
-		t.Fatalf("live PostgreSQL conversation create returned HTTP %d: %s", createRecorder.Code, createRecorder.Body.String())
-	}
-	var createResponse struct {
-		Data conversation.Conversation `json:"data"`
-	}
-	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResponse); err != nil {
-		t.Fatal("decode created conversation:", err)
-	}
-	conversationID := createResponse.Data.ID
-	if conversationID == "" {
-		t.Fatal("conversation create returned an empty id")
-	}
-	idempotentRecorder := httptest.NewRecorder()
-	idempotentContext := postgresConversationContext(idempotentRecorder, database, registry, http.MethodPost, `{"channel":"web","external_contact_id":"tester@example.test","correlation_id":"pg-conversation-1"}`, "", "")
-	handler.HandleConversationCreate(idempotentContext)
-	if idempotentRecorder.Code != http.StatusOK {
-		t.Fatalf("live PostgreSQL idempotent conversation create returned HTTP %d: %s", idempotentRecorder.Code, idempotentRecorder.Body.String())
-	}
-	var idempotentResponse struct {
-		Data conversation.Conversation `json:"data"`
-	}
-	if err := json.Unmarshal(idempotentRecorder.Body.Bytes(), &idempotentResponse); err != nil {
-		t.Fatal("decode idempotent conversation response:", err)
-	}
-	if idempotentResponse.Data.ID != conversationID {
-		t.Fatalf("idempotent create returned conversation %q, want original %q", idempotentResponse.Data.ID, conversationID)
-	}
-
-	messageRecorder := httptest.NewRecorder()
-	messageContext := postgresConversationContext(messageRecorder, database, registry, http.MethodPost, `{"text":"Track stock levels","question_key":"business"}`, conversationID, "")
-	handler.HandleConversationMessage(messageContext)
-	if messageRecorder.Code != http.StatusOK {
-		t.Fatalf("live PostgreSQL conversation message returned HTTP %d: %s", messageRecorder.Code, messageRecorder.Body.String())
-	}
-
-	confirmRecorder := httptest.NewRecorder()
-	confirmContext := postgresConversationContext(confirmRecorder, database, registry, http.MethodPost, "", conversationID, "business")
-	handler.HandleConversationConfirm(confirmContext)
-	if confirmRecorder.Code != http.StatusOK {
-		t.Fatalf("live PostgreSQL answer confirmation returned HTTP %d: %s", confirmRecorder.Code, confirmRecorder.Body.String())
-	}
-
-	getRecorder := httptest.NewRecorder()
-	getContext := postgresConversationContext(getRecorder, database, registry, http.MethodGet, "", conversationID, "")
-	handler.HandleConversationGet(getContext)
-	if getRecorder.Code != http.StatusOK {
-		t.Fatalf("live PostgreSQL conversation get returned HTTP %d: %s", getRecorder.Code, getRecorder.Body.String())
-	}
-
-	supportRecorder := httptest.NewRecorder()
-	supportContext := postgresConversationContext(supportRecorder, database, registry, http.MethodPost, `{"reason":"password=do-not-store please help","confirm":true}`, conversationID, "")
-	handler.HandleConversationSupport(supportContext)
-	if supportRecorder.Code != http.StatusCreated {
-		t.Fatalf("live PostgreSQL support ticket returned HTTP %d: %s", supportRecorder.Code, supportRecorder.Body.String())
-	}
-	var safeSummary string
-	if err := database.QueryRow(`SELECT safe_summary FROM _kora_support_ticket WHERE conversation_id = $1`, conversationID).Scan(&safeSummary); err != nil {
-		t.Fatal("read PostgreSQL support summary:", err)
-	}
-	if strings.Contains(safeSummary, "do-not-store") || !strings.Contains(safeSummary, "[redacted]") {
-		t.Fatalf("support summary did not redact secret: %q", safeSummary)
-	}
-}
-
 // postgresTestExecution is the verified identity these untagged route tests run
 // as: handlers take authority from policy_execution, not from context roles.
 func postgresTestExecution(tb testing.TB, site, user string, roles []string) policy.Execution {
@@ -478,22 +378,16 @@ func postgresTestExecution(tb testing.TB, site, user string, roles []string) pol
 	return execution
 }
 
-func postgresConversationContext(recorder *httptest.ResponseRecorder, database *sql.DB, registry *doctype.Registry, method, body, id, key string) *gin.Context {
+func postgresRouteContext(recorder *httptest.ResponseRecorder, database *sql.DB, registry *doctype.Registry, method string) *gin.Context {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(method, "/api/cloud/conversations", strings.NewReader(body))
+	ctx.Request = httptest.NewRequest(method, "/api/analytics/metrics", nil)
 	ctx.Set("site_db", database)
 	ctx.Set("site_registry", registry)
 	ctx.Set("site_name", "site-pg")
 	ctx.Set("site_db_type", "postgres")
 	ctx.Set("user", "test-user")
 	ctx.Set("user_roles", []string{"Administrator"})
-	if id != "" {
-		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: id})
-	}
-	if key != "" {
-		ctx.Params = append(ctx.Params, gin.Param{Key: "key", Value: key})
-	}
 	return ctx
 }
 
@@ -535,7 +429,7 @@ func TestLivePostgresAnalyticsMetadataQueries(t *testing.T) {
 		t.Fatal("insert analytics rollup fixture:", err)
 	}
 	registry := doctype.NewRegistry()
-	ctx := postgresConversationContext(httptest.NewRecorder(), database, registry, http.MethodGet, "", "", "")
+	ctx := postgresRouteContext(httptest.NewRecorder(), database, registry, http.MethodGet)
 	reports, err := loadSemanticReports(ctx, database, kdb.Resolve("postgres"))
 	if err != nil {
 		t.Fatalf("live PostgreSQL semantic report lookup failed: %v", err)

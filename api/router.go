@@ -861,7 +861,6 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 	handler.SiteOutboxes = siteOutboxes
 	handler.SiteStorages = siteStorages
 	handler.KernelCommands = kernelCommands
-	RegisterConversationRoutes(apiGroup, handler)
 
 	// File attachments: upload + authenticated serving (Range-aware for audio/video).
 	apiGroup.POST("/upload", handler.HandleUpload)

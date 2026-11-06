@@ -8,7 +8,6 @@ import (
 func TestPostgresSystemDDLIsNotMySQLSpecific(t *testing.T) {
 	for group, statements := range map[string][]string{
 		"extensibility": ExtensibilityTablesPostgres(),
-		"conversation":  ConversationTablesPostgres(),
 	} {
 		if len(statements) == 0 {
 			t.Fatalf("%s PostgreSQL DDL is empty", group)

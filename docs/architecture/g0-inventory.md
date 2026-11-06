@@ -53,7 +53,7 @@ discarded, staged, or committed.
   | Prefix/family | Registration owner | Notes |
   |---|---|---|
   | `/api/auth/*` | `auth/session.go` | Login/logout, provider discovery, magic links, current session. |
-  | `/api/v1/*` | `api/router.go` and route modules | Canonical authenticated API, including resources, kernel, system, AI, analytics, scripts, extensions and conversations. |
+  | `/api/v1/*` | `api/router.go` and route modules | Canonical authenticated API, including resources, kernel, system, AI, analytics, scripts and extensions. |
   | `/api/*` | `api/router.go` and route modules | Legacy compatibility surface; same handler families as canonical API. |
   | `/api/v2/requests*` | `api/requests_api.go` | Typed direct-task requests, response, reassignment, cancellation, history and read receipt. |
   | `/api/v1/public/*`, `/api/public/*` | `api/router.go` | Public resource/view/file delivery and the M-Pesa provider callback. |
