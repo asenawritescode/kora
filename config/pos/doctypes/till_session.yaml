@@ -13,6 +13,23 @@ fields:
     reqd: true
     search_index: true
     in_list_view: true
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+    read_only: true
+    search_index: true
+    in_list_view: true
+  - fieldname: location
+    fieldtype: Link
+    options: Location
+    label: Location
+    read_only: true
+  - fieldname: cashier
+    fieldtype: Data
+    label: Cashier
+    read_only: true
+    search_index: true
   - fieldname: opening_float
     fieldtype: Currency
     label: Opening Float

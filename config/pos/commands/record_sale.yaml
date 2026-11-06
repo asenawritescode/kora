@@ -32,6 +32,7 @@ transaction:
       record: Sale
       values:
         register: $input.register
+        location: $input.location
         till_session: $input.till_session
         customer: $input.customer
         items: $input.items

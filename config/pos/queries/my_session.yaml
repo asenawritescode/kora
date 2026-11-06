@@ -1,0 +1,14 @@
+name: my_session
+module_owner_id: pos.core
+capability: pos.till
+operation: my_session
+source: Till Session
+permission: read
+scope: tenant
+owner_field: cashier
+filters:
+  - {field: cashier, op: eq, value: $actor}
+  - {field: status, op: eq, value: Open}
+fields: [name, shift, register, location, cashier, opening_float, expected_cash, creation]
+sort: [{field: creation, dir: desc}]
+limit: 1

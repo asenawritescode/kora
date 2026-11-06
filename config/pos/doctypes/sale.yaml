@@ -16,6 +16,11 @@ fields:
     reqd: true
     search_index: true
     in_list_view: true
+  - fieldname: location
+    fieldtype: Link
+    options: Location
+    label: Location
+    read_only: true
   - fieldname: till_session
     fieldtype: Link
     options: Till Session
