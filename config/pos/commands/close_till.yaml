@@ -17,6 +17,14 @@ require:
         status: Open
     as: till
     message: No open till for this shift
+  - exists:
+      record: Till Session
+      where:
+        shift: $input.shift
+        status: Open
+        cashier: $actor
+    unless_role: [Owner, Manager]
+    message: This till belongs to another cashier
 transaction:
   - update:
       record: Till Session

@@ -160,7 +160,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	k.Commands = cmds
 	k.CommandSchemas = allowAllPOSSchemas{}
 
-	actor := contract.ActorContext{PrincipalID: "Administrator", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now()}
+	actor := contract.ActorContext{PrincipalID: "Administrator", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: posAdminRoles, AuthenticatedAt: time.Now()}
 	execution, err := policy.NewVerifiedExecution(contract.TenantID(siteName), actor)
 	if err != nil {
 		t.Fatal(err)
@@ -497,17 +497,14 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 			t.Fatalf("Cashier must not read %s", dt)
 		}
 	}
-	cs, cerr := asCashier("pos.open_shift", map[string]any{"data": map[string]any{"register": register}})
+	// open_session records the cashier on the till, so the cashier owns it.
+	cs, cerr := asCashier("pos.open_session", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 100}})
 	if cerr != nil || cs.Status != contract.StatusCompleted {
-		t.Fatalf("cashier open_shift: %+v", cerr)
+		t.Fatalf("cashier open_session: %+v", cerr)
 	}
 	var cso map[string]any
 	_ = json.Unmarshal(cs.Data, &cso)
-	cshift := fmt.Sprint(cso["steps"].([]any)[0].(map[string]any)["name"])
-	if _, cerr = asCashier("pos.open_till", map[string]any{"data": map[string]any{"shift": cshift, "opening_float": 100}}); cerr != nil {
-		t.Fatalf("cashier open_till: %+v", cerr)
-	}
-	ctill := scalar("SELECT name FROM "+table("Till Session")+" WHERE shift = ?", cshift)
+	ctill := fmt.Sprint(cso["output"].(map[string]any)["reference"])
 	search := runQuery("inventory", "item_search", map[string]any{})
 	if len(search.Rows) == 0 {
 		t.Fatal("item_search returned no rows")
@@ -555,3 +552,8 @@ type allowAllPOSSchemas struct{}
 
 func (allowAllPOSSchemas) Registered(contract.SchemaRef) bool                 { return true }
 func (allowAllPOSSchemas) Validate(contract.SchemaRef, json.RawMessage) error { return nil }
+
+// posAdminRoles is the test operator: the site administrator, who also holds
+// Manager so till-ownership guards (unless_role: [Owner, Manager]) are waived
+// for tills opened without a recorded cashier.
+var posAdminRoles = []string{doctype.AdminRole, "Manager"}

@@ -163,22 +163,27 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &cat); err != nil || rec.Code != http.StatusOK {
 				t.Fatalf("catalog %d %s", rec.Code, rec.Body.String())
 			}
-			run := func(name, key, input string) {
+			tryAs := func(role, name, key, input string) *httptest.ResponseRecorder {
 				t.Helper()
 				for _, o := range cat.Data.PublishedOperations {
 					if strings.HasSuffix(o.OperationRef, "~"+name) {
-						rec := serve("Cashier", http.MethodPost, "/op/"+o.OperationRef, fmt.Sprintf(`{"meta":{"idempotency_key":%q},"input_schema":{"id":%q,"version":%d},"input":%s}`, key, o.InputSchema.ID, o.InputSchema.Version, input))
-						var out struct {
-							Data contract.OperationReceipt `json:"data"`
-						}
-						if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || out.Data.Status != contract.ReceiptCompleted {
-							t.Fatalf("%s status=%d body=%s", name, rec.Code, rec.Body.String())
-						}
-						return
+						return serve(role, http.MethodPost, "/op/"+o.OperationRef, fmt.Sprintf(`{"meta":{"idempotency_key":%q},"input_schema":{"id":%q,"version":%d},"input":%s}`, key, o.InputSchema.ID, o.InputSchema.Version, input))
 					}
 				}
-				t.Fatalf("cashier catalog lacks %s", name)
+				t.Fatalf("catalog lacks %s", name)
+				return nil
 			}
+			runAs := func(role, name, key, input string) {
+				t.Helper()
+				rec := tryAs(role, name, key, input)
+				var out struct {
+					Data contract.OperationReceipt `json:"data"`
+				}
+				if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || out.Data.Status != contract.ReceiptCompleted {
+					t.Fatalf("%s as %s status=%d body=%s", name, role, rec.Code, rec.Body.String())
+				}
+			}
+			run := func(name, key, input string) { t.Helper(); runAs("Cashier", name, key, input) }
 
 			// 1. open_shift, open_till.
 			run("open_shift", "k-shift", `{"register":"REG-1"}`)
@@ -192,8 +197,18 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("item_search status=%d body=%s", rec.Code, rec.Body.String())
 			}
 
-			// 3. sale, return, void, close_till.
-			run("record_sale", "k-sale1", saleBody(till, 2, intent("pay-1", 360)))
+			// 3. #358: this till was opened the old way (no cashier recorded), so
+			// the Cashier is refused on it; the Manager runs sale, return, void
+			// and close_till.
+			for name, input := range map[string]string{
+				"record_sale": saleBody(till, 1, intent("pay-old", 180)),
+				"close_till":  fmt.Sprintf(`{"shift":%q,"closing_count":1}`, shift),
+			} {
+				if rec := tryAs("Cashier", name, "k-old-"+name, input); rec.Code != http.StatusOK && rec.Code != http.StatusConflict || strings.Contains(rec.Body.String(), `"completed"`) || !strings.Contains(rec.Body.String(), "belongs to another cashier") {
+					t.Fatalf("Cashier %s on an old-style till: status=%d body=%s", name, rec.Code, rec.Body.String())
+				}
+			}
+			runAs("Manager", "record_sale", "k-sale1", saleBody(till, 2, intent("pay-1", 360)))
 			if got := qty(); !strings.HasPrefix(got, "18") {
 				t.Fatalf("stock after sale = %s, want 18", got)
 			}
@@ -201,7 +216,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("issue entries = %s, want 1", got)
 			}
 			sale1 := one("SELECT name FROM " + tbl("Sale"))
-			run("return_sale", "k-ret", fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"return_against":%q,"items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":"refund"}]}`, till, sale1))
+			runAs("Manager", "return_sale", "k-ret", fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"return_against":%q,"items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":"refund"}]}`, till, sale1))
 			if got := qty(); !strings.HasPrefix(got, "19") {
 				t.Fatalf("stock after return = %s, want 19", got)
 			}
@@ -224,14 +239,14 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if got := qty(); !strings.HasPrefix(got, "19") || count("Sale") != salesBefore {
 				t.Fatalf("invalid return changed state: stock=%s sales=%s want %s", got, count("Sale"), salesBefore)
 			}
-			run("record_sale", "k-sale2", saleBody(till, 1, intent("pay-2", 180)))
+			runAs("Manager", "record_sale", "k-sale2", saleBody(till, 1, intent("pay-2", 180)))
 			sale2 := one("SELECT name FROM "+tbl("Sale")+" WHERE return_against IS NULL AND name <> ?", sale1)
-			run("void_sale", "k-void", fmt.Sprintf(`{"sale":%q,"shift":%q,"till_session":%q,"register":"REG-1","location":"LOC-1"}`, sale2, shift, till))
+			runAs("Manager", "void_sale", "k-void", fmt.Sprintf(`{"sale":%q,"shift":%q,"till_session":%q,"register":"REG-1","location":"LOC-1"}`, sale2, shift, till))
 			if got := qty(); !strings.HasPrefix(got, "19") {
 				t.Fatalf("stock after void = %s, want 19", got)
 			}
 			// expected_cash is server-derived (#233): 500 float + 360 - 180 + 180 - 180 = 680; close_till takes only the closing count.
-			run("close_till", "k-close", fmt.Sprintf(`{"shift":%q,"closing_count":680}`, shift))
+			runAs("Manager", "close_till", "k-close", fmt.Sprintf(`{"shift":%q,"closing_count":680}`, shift))
 
 			// 4. Refusals: 403 and nothing written.
 			sales, entries := count("Sale"), count("Stock Entry")

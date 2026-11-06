@@ -24,6 +24,13 @@ require:
         name: $input.till_session
         status: Open
     message: Till is not open
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        cashier: $actor
+    unless_role: [Owner, Manager]
+    message: This till belongs to another cashier
   - equal: [$computed.paid, $computed.total]
     message: Payments must add up to the sale total
 compute:

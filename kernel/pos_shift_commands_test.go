@@ -52,7 +52,7 @@ func TestRecordSaleCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(def.Require) != 3 || len(def.Steps) != 5 || def.Steps[0].As != "sale" || def.Steps[1].ForEach != "$input.payments" || def.Steps[2].Create.Record != "Sale Line Balance" || def.Steps[3].ForEach != "$input.items" || def.Steps[4].ForEach != "$input.items" {
+	if len(def.Require) != 4 || len(def.Steps) != 5 || def.Steps[0].As != "sale" || def.Steps[1].ForEach != "$input.payments" || def.Steps[2].Create.Record != "Sale Line Balance" || def.Steps[3].ForEach != "$input.items" || def.Steps[4].ForEach != "$input.items" {
 		t.Fatalf("steps = %#v", def.Steps)
 	}
 	if got := def.Steps[3].Update.Adjust["quantity"]; got.Decrease != "$item.quantity" || got.Min != "0" {
@@ -67,7 +67,7 @@ func TestRecordSaleCommand(t *testing.T) {
 }
 
 func TestPOSReturnAndVoidCommandsParse(t *testing.T) {
-	for name, guards := range map[string]int{"return_sale": 4, "void_sale": 6} {
+	for name, guards := range map[string]int{"return_sale": 5, "void_sale": 7} {
 		raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", name+".yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -118,5 +118,39 @@ func TestPOSOpenSessionCommandParse(t *testing.T) {
 	}
 	if !registerOpen || !cashierOpen || !locationChecked {
 		t.Fatalf("guards register=%v cashier=%v location=%v", registerOpen, cashierOpen, locationChecked)
+	}
+}
+
+// TestPOSTillCommandsRequireOwnCashier (#358): every command that takes a
+// till or shift refuses a till/shift whose cashier is not the actor, except
+// for Owner and Manager.
+func TestPOSTillCommandsRequireOwnCashier(t *testing.T) {
+	for name, record := range map[string]string{
+		"record_sale": "Till Session", "return_sale": "Till Session", "void_sale": "Till Session",
+		"close_till": "Till Session", "close_shift": "Shift",
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", name+".yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			def, err := ParseCommandResource(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := 0
+			for _, g := range def.Require {
+				if g.Exists == nil || g.Exists.Where["cashier"] != "$actor" {
+					continue
+				}
+				found++
+				if g.Exists.Record != record || len(g.UnlessRole) != 2 || g.UnlessRole[0] != "Owner" || g.UnlessRole[1] != "Manager" || g.Message == "" {
+					t.Fatalf("cashier guard = %+v", g)
+				}
+			}
+			if found != 1 {
+				t.Fatalf("cashier guards = %d, want 1", found)
+			}
+		})
 	}
 }

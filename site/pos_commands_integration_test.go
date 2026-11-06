@@ -65,7 +65,7 @@ func runPOSCommandFeatures(t *testing.T, driver string, conn *sql.DB, dbName str
 	k := kernel.New(dialect, outbox.NewSQLWriter(dialect))
 	k.Commands = cmds
 	k.CommandSchemas = allowAllPOSSchemas{}
-	actor := contract.ActorContext{PrincipalID: "cashier-1", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now()}
+	actor := contract.ActorContext{PrincipalID: "cashier-1", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: posAdminRoles, AuthenticatedAt: time.Now()}
 	execution, err := policy.NewVerifiedExecution(contract.TenantID(siteName), actor)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func runPOSCommandFeatures(t *testing.T, driver string, conn *sql.DB, dbName str
 		raw, _ := json.Marshal(payload)
 		scope := contract.BusinessScope{TenantID: contract.TenantID(siteName), Kind: contract.ScopeKindTenant}
 		oc := kernel.OperationContext{
-			Site: siteName, User: "cashier-1", Roles: []string{doctype.AdminRole}, Actor: actor, IdempotencyKey: key,
+			Site: siteName, User: "cashier-1", Roles: posAdminRoles, Actor: actor, IdempotencyKey: key,
 			Execution: execution, TenantID: contract.TenantID(siteName), BusinessScope: scope, Source: kernel.SourceIntegration,
 		}
 		if strings.HasPrefix(command, "pos.") {
