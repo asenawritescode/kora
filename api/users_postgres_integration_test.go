@@ -48,6 +48,10 @@ func TestLivePostgresUserAccessUpdateKeepsCloudIdentityImmutable(t *testing.T) {
 	)`); err != nil {
 		t.Fatal("create user fixture:", err)
 	}
+	// Access changes revoke the user's sessions in the same transaction.
+	if _, err := database.Exec(`CREATE TABLE _kora_session (id TEXT PRIMARY KEY, site TEXT NOT NULL DEFAULT '', "user" TEXT NOT NULL)`); err != nil {
+		t.Fatal("create session fixture:", err)
+	}
 	if _, err := database.Exec(`CREATE TABLE _kora_auth_revision (id INTEGER PRIMARY KEY, policy_revision BIGINT NOT NULL, membership_revision BIGINT NOT NULL)`); err != nil {
 		t.Fatal("create authorization revision fixture:", err)
 	}
@@ -61,13 +65,13 @@ func TestLivePostgresUserAccessUpdateKeepsCloudIdentityImmutable(t *testing.T) {
 	}
 
 	listRecorder := httptest.NewRecorder()
-	handler.HandleUserList(userPostgresContext(listRecorder, database, registry, "site-pg", http.MethodGet, "/api/system/users", "", ""))
+	handler.HandleUserList(userPostgresContext(t, listRecorder, database, registry, "site-pg", http.MethodGet, "/api/system/users", "", ""))
 	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), "cloud-user-1") {
 		t.Fatalf("PostgreSQL user list returned HTTP %d: %s", listRecorder.Code, listRecorder.Body.String())
 	}
 
 	updateRecorder := httptest.NewRecorder()
-	handler.HandleUserUpdate(userPostgresContext(updateRecorder, database, registry, "site-pg", http.MethodPut, "/api/system/users/cloud-user-1", `{"roles":["Owner","Inventory Clerk"],"enabled":false}`, "cloud-user-1"))
+	handler.HandleUserUpdate(userPostgresContext(t, updateRecorder, database, registry, "site-pg", http.MethodPut, "/api/system/users/cloud-user-1", `{"roles":["Owner","Inventory Clerk"],"enabled":false}`, "cloud-user-1"))
 	if updateRecorder.Code != http.StatusOK {
 		t.Fatalf("PostgreSQL access update returned HTTP %d: %s", updateRecorder.Code, updateRecorder.Body.String())
 	}
@@ -89,13 +93,13 @@ func TestLivePostgresUserAccessUpdateKeepsCloudIdentityImmutable(t *testing.T) {
 	}
 
 	identityUpdate := httptest.NewRecorder()
-	handler.HandleUserUpdate(userPostgresContext(identityUpdate, database, registry, "site-pg", http.MethodPut, "/api/system/users/cloud-user-1", `{"email":"other@example.test","password":"new-password","full_name":"Other"}`, "cloud-user-1"))
+	handler.HandleUserUpdate(userPostgresContext(t, identityUpdate, database, registry, "site-pg", http.MethodPut, "/api/system/users/cloud-user-1", `{"email":"other@example.test","password":"new-password","full_name":"Other"}`, "cloud-user-1"))
 	if identityUpdate.Code != http.StatusBadRequest {
 		t.Fatalf("Engine identity mutation returned HTTP %d, want 400: %s", identityUpdate.Code, identityUpdate.Body.String())
 	}
 }
 
-func userPostgresContext(recorder *httptest.ResponseRecorder, database *sql.DB, registry *doctype.Registry, site, method, path, body, name string) *gin.Context {
+func userPostgresContext(t testing.TB, recorder *httptest.ResponseRecorder, database *sql.DB, registry *doctype.Registry, site, method, path, body, name string) *gin.Context {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(method, path, strings.NewReader(body))
@@ -106,6 +110,7 @@ func userPostgresContext(recorder *httptest.ResponseRecorder, database *sql.DB, 
 	ctx.Set("site_db_type", "postgres")
 	ctx.Set("user", "admin-user")
 	ctx.Set("user_roles", []string{doctype.AdminRole})
+	ctx.Set("policy_execution", postgresTestExecution(t, site, "admin-user", []string{doctype.AdminRole}))
 	if name != "" {
 		ctx.Params = gin.Params{{Key: "name", Value: name}}
 	}

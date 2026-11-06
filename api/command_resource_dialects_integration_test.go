@@ -85,11 +85,11 @@ emit:
 			if err := k.Commands.Register(definition); err != nil {
 				t.Fatalf("register configured command: %v", err)
 			}
-			baseContext := kernel.OperationContext{
+			baseContext := integrationOperationContext(t, kernel.OperationContext{
 				Site: siteName, User: "migration@example.test", Roles: []string{doctype.AdminRole},
-				Actor:  contract.ActorContext{PrincipalID: "migration@example.test", PrincipalType: contract.PrincipalHuman, Site: siteName, AuthenticatedAt: time.Now()},
+				Actor:  contract.ActorContext{PrincipalID: "migration@example.test", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now()},
 				Source: kernel.SourceIntegration,
-			}
+			})
 
 			seedData, _ := json.Marshal(map[string]any{"title": "Supervisor", "serial": "SUP-1"})
 			seedPayload, _ := json.Marshal(kernel.RecordCreatePayload{Doctype: doctypeName, Data: seedData})
@@ -209,10 +209,10 @@ func TestPublicFormProjectionAndReplayAcrossDialects(t *testing.T) {
 				"doctype": doctypeName, "public_route": route,
 				"data": map[string]any{"title": "Contact us", "serial": "must-not-persist", "status": "private"},
 			})
-			operationContext := kernel.OperationContext{
+			operationContext := integrationOperationContext(t, kernel.OperationContext{
 				Site: siteName, User: "public", Source: kernel.SourceHTTP, IdempotencyKey: "public-submit-" + suffix,
 				Actor: contract.ActorContext{PrincipalID: "public-form", PrincipalType: contract.PrincipalPublic, Site: siteName, AuthenticatedAt: time.Now()},
-			}
+			})
 			operation := kernel.Operation{Context: operationContext, Command: kernel.CommandPublicFormSubmit, Payload: payload}
 			created, createErr := k.Execute(context.Background(), database, registry, operation)
 			if createErr != nil || created.Status != contract.StatusCompleted {

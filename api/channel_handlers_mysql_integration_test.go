@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -70,6 +71,12 @@ func TestLiveMySQLManagedCredentialIdempotency(t *testing.T) {
 			statement = strings.Replace(statement, "managed_idempotency_key CHAR(64) NOT NULL DEFAULT '',\n", "", 1)
 		}
 		if _, err := database.Exec(statement); err != nil {
+			// Bootstrap treats duplicate column (1060) and key (1061) as already
+			// migrated: the CREATE TABLE now carries columns the ALTERs also add.
+			var mysqlErr *mysqlDriver.MySQLError
+			if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1060 || mysqlErr.Number == 1061) {
+				continue
+			}
 			t.Fatalf("create MySQL extension fixture: %v\nSQL: %s", err, statement)
 		}
 	}

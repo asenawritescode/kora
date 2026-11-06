@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/shopspring/decimal"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/disposabledb"
 	"github.com/asenawritescode/kora/kernel"
 	"github.com/asenawritescode/kora/outbox"
 	"github.com/asenawritescode/kora/payment"
@@ -33,35 +33,8 @@ import (
 // posDB returns an isolated database (MySQL) or schema (Postgres) for one run.
 func posDB(t *testing.T, driver, dsn string) (*sql.DB, string) {
 	t.Helper()
-	admin, err := sql.Open(driver, dsn)
-	if err != nil || admin.Ping() != nil {
-		t.Fatalf("connect %s: %v", driver, err)
-	}
-	name := fmt.Sprintf("kora_pos_e2e_%x", time.Now().UnixNano())
-	target := dsn
-	if driver == "postgres" {
-		if _, err := admin.Exec(`CREATE SCHEMA "` + name + `"`); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { admin.Exec(`DROP SCHEMA "` + name + `" CASCADE`); admin.Close() })
-		u, _ := url.Parse(dsn)
-		q := u.Query()
-		q.Set("search_path", name)
-		u.RawQuery = q.Encode()
-		target = u.String()
-	} else {
-		if _, err := admin.Exec("CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { admin.Exec("DROP DATABASE `" + name + "`"); admin.Close() })
-		target = strings.Replace(dsn, "/?", "/"+name+"?", 1)
-	}
-	conn, err := sql.Open(driver, target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { conn.Close() })
-	return conn, name
+	fixture := disposabledb.Open(t, driver, dsn)
+	return fixture.DB, fixture.Name
 }
 
 type fixedProvider struct {

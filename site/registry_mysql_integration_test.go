@@ -5,9 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"testing"
 	"time"
+
+	mysqldriver "github.com/go-sql-driver/mysql"
 
 	"github.com/asenawritescode/kora/db"
 )
@@ -273,7 +277,20 @@ func TestLiveMySQLCheckpointBoundDeletionDropsOnlyTheVerifiedAllocation(t *testi
 		}
 	}()
 	registry := NewSQLSiteRegistry(database, "mysql")
-	config := &SiteConfig{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3312, DBName: databaseName, DBUser: "root", DBPassword: "kora-test-only", FileStorage: "local"}
+	// The tenant database lives on the same server the DSN reaches.
+	server, err := mysqldriver.ParseDSN(dsn)
+	if err != nil {
+		t.Fatal("parse disposable MySQL DSN:", err)
+	}
+	serverHost, serverPortText, err := net.SplitHostPort(server.Addr)
+	if err != nil {
+		t.Fatal("split disposable MySQL address:", err)
+	}
+	serverPort, err := strconv.Atoi(serverPortText)
+	if err != nil {
+		t.Fatal("parse disposable MySQL port:", err)
+	}
+	config := &SiteConfig{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: serverHost, DBPort: serverPort, DBName: databaseName, DBUser: server.User, DBPassword: server.Passwd, FileStorage: "local"}
 	if err := registry.Upsert(config); err != nil {
 		t.Fatal("create disposable site directory record:", err)
 	}
@@ -281,7 +298,7 @@ func TestLiveMySQLCheckpointBoundDeletionDropsOnlyTheVerifiedAllocation(t *testi
 	if err != nil {
 		t.Fatal("resolve disposable site:", err)
 	}
-	common := &CommonConfig{DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3312, DBUser: "root", DBPassword: "kora-test-only"}
+	common := &CommonConfig{DBType: "mysql", DBHost: serverHost, DBPort: serverPort, DBUser: server.User, DBPassword: server.Passwd}
 	if err := DeleteRegisteredSiteWithAllocation(context.Background(), database, "mysql", info.SiteID, hostname, DataPlaneReference(info), common); err != nil {
 		t.Fatalf("checkpoint-bound deletion: %v", err)
 	}

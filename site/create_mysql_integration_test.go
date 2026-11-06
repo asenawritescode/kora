@@ -56,7 +56,7 @@ func TestLiveMySQLCreateSiteRegistersCanonicalDirectoryAndRetries(t *testing.T) 
 		Hostname: hostname, SiteID: tenantID, DBType: "mysql", DBHost: host, DBPort: port,
 		DBName: databaseName, DBUser: parsed.User, DBPassword: parsed.Passwd,
 		RuntimeCellID: "deployment-test",
-		AdminEmail:    "owner@" + hostname, PlatformDBType: "mysql", PlatformDB: platformDB,
+		AdminEmail:    "owner@" + hostname, CloudSubjectID: "cloud-user-" + tenantID, PlatformDBType: "mysql", PlatformDB: platformDB,
 		ExtraDomains: []string{"workspace." + hostname},
 	}
 	result, err = CreateSiteContext(t.Context(), input)

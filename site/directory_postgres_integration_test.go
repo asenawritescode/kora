@@ -297,7 +297,7 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 		Hostname: hostname, SiteID: canonicalTenantID, DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
 		DBName: databaseName, DBUser: user, DBPassword: password,
 		RuntimeCellID: "deployment-postgres-test",
-		AdminEmail:    "owner@" + hostname, PlatformDBType: "postgres", PlatformDB: platformDB,
+		AdminEmail:    "owner@" + hostname, CloudSubjectID: "cloud-user-owner", PlatformDBType: "postgres", PlatformDB: platformDB,
 	})
 	if err != nil {
 		t.Fatal("create PostgreSQL site:", err)
@@ -312,7 +312,7 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 	_, mismatchErr := CreateSite(CreateSiteInput{
 		Hostname: hostname, SiteID: "tenant-replacement-001", DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
 		DBName: databaseName + "_must_not_be_created", DBUser: user, DBPassword: password,
-		AdminEmail: "owner@" + hostname, PlatformDBType: "postgres", PlatformDB: platformDB,
+		AdminEmail: "owner@" + hostname, CloudSubjectID: "cloud-user-owner", PlatformDBType: "postgres", PlatformDB: platformDB,
 	})
 	if mismatchErr == nil || !strings.Contains(mismatchErr.Error(), "different canonical tenant ID") {
 		t.Fatalf("replacing a stable tenant identity returned %v", mismatchErr)
@@ -325,7 +325,7 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 		Hostname: hostname, SiteID: canonicalTenantID, DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
 		DBName: databaseName, DBUser: user, DBPassword: password,
 		RuntimeCellID: "deployment-postgres-test",
-		AdminEmail:    "owner@" + hostname, PlatformDBType: "postgres", PlatformDB: platformDB,
+		AdminEmail:    "owner@" + hostname, CloudSubjectID: "cloud-user-owner", PlatformDBType: "postgres", PlatformDB: platformDB,
 	})
 	if err != nil {
 		t.Fatal("retry PostgreSQL site creation:", err)

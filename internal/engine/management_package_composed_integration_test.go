@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -150,8 +151,18 @@ func TestComposedTemplatePackageInstallsThroughExecutor(t *testing.T) {
 		ids = append(ids, string(module.ID))
 		operations += len(module.PublishedOperations)
 	}
-	if strings.Join(ids, ",") != "inventory.app,inventory.core,pos.app,pos.core" || operations != 10 {
-		t.Fatalf("installed modules = %v with %d published operations; want the four pack modules and 10", ids, operations)
+	// Every command file of the two packs is one published operation; counting
+	// the files keeps this test from drifting each time a pack gains a command.
+	wantOperations := 0
+	for _, pack := range []string{"pos", "inventory"} {
+		commands, err := filepath.Glob(filepath.Join("..", "..", "config", pack, "commands", "*.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantOperations += len(commands)
+	}
+	if strings.Join(ids, ",") != "inventory.app,inventory.core,pos.app,pos.core" || operations != wantOperations || wantOperations == 0 {
+		t.Fatalf("installed modules = %v with %d published operations; want the four pack modules and %d", ids, operations, wantOperations)
 	}
 	rebuilt := installTenantServicesForTest(t, info, database)
 	if plan := rebuilt.RuntimeServices.ModuleBindings; plan == nil || len(plan.Blockers) != 0 {

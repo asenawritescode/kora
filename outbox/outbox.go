@@ -1204,7 +1204,7 @@ func (d *Dispatcher) recordDeliveryFailure(ctx context.Context, consumer, eventI
 	if named, ok := d.Dialect.(interface{ DriverName() string }); ok && named.DriverName() == "mysql" {
 		query += `ON DUPLICATE KEY UPDATE attempts=attempts+1,quarantined=IF(attempts+1>=?,TRUE,quarantined),last_error=VALUES(last_error),updated_at=VALUES(updated_at)`
 	} else {
-		query += `ON CONFLICT (consumer_name,event_id) DO UPDATE SET attempts=attempts+1,quarantined=CASE WHEN attempts+1>=? THEN TRUE ELSE quarantined END,last_error=excluded.last_error,updated_at=excluded.updated_at`
+		query += `ON CONFLICT (consumer_name,event_id) DO UPDATE SET attempts=_kora_outbox_delivery_failure.attempts+1,quarantined=CASE WHEN _kora_outbox_delivery_failure.attempts+1>=? THEN TRUE ELSE _kora_outbox_delivery_failure.quarantined END,last_error=excluded.last_error,updated_at=excluded.updated_at`
 	}
 	_, err := d.DB.ExecContext(ctx, db.Rebind(d.Dialect, query), consumer, eventID, site, threshold <= 1, message, time.Now().UTC(), threshold)
 	if err != nil {
