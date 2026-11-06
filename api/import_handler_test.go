@@ -33,7 +33,7 @@ func importRequest(t *testing.T, h *Handler, spec, csv string) *httptest.Respons
 func TestHandleImportRejections(t *testing.T) {
 	reg := doctype.NewRegistry()
 	reg.Register(&doctype.DocType{Name: "Item", Fields: []doctype.Field{{Fieldname: "qty", Fieldtype: "Int"}}})
-	reg.Register(&doctype.DocType{Name: "Owned", ModuleOwnerID: "mod"})
+	reg.Register(&doctype.DocType{Name: "Owned", ModuleOwnerID: "mod", ModuleOwnershipMode: "commands_only"})
 	reg.Register(&doctype.DocType{Name: "Row", IsChildTable: true})
 	h := &Handler{Registry: reg}
 	tests := []struct {
