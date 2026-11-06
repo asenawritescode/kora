@@ -1,4 +1,7 @@
 name: Item Category
+module_owner_id: inventory.core
+module_ownership_mode: crud
+module_access: published
 module: Inventory
 title_field: category_name
 search_fields: category_name

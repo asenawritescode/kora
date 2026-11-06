@@ -57,7 +57,7 @@ func TestPackOwnershipImportAcrossDialects(t *testing.T) {
 				want := map[string][2]string{
 					"Sale": {"pos.core", "commands_only"}, "Sale Item": {"pos.core", "commands_only"}, "Sale Payment": {"pos.core", "commands_only"},
 					"Sale Line Balance": {"pos.core", "commands_only"}, "Shift": {"pos.core", "commands_only"}, "Till Session": {"pos.core", "commands_only"},
-					"Item": {"inventory.core", "crud"}, "Stock Balance": {"", ""}, "Stock Entry": {"", ""}, "Location": {"", ""}, "Register": {"", ""},
+					"Item": {"inventory.core", "crud"}, "Item Category": {"inventory.core", "crud"}, "Stock Balance": {"", ""}, "Stock Entry": {"", ""}, "Location": {"", ""}, "Register": {"", ""},
 				}
 				for dn, w := range want {
 					dt := reg.Get(dn)
