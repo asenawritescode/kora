@@ -28,6 +28,13 @@ func runEmbeddedServerWithStoreDir(t *testing.T, storeDir string) (*server.Serve
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
+	// Register shutdown after the caller's t.TempDir (LIFO cleanup) and wait for
+	// it: Shutdown alone returns while JetStream file-store goroutines may still
+	// write into storeDir, which races the TempDir RemoveAll.
+	t.Cleanup(func() {
+		s.Shutdown()
+		s.WaitForShutdown()
+	})
 	go s.Start()
 	if !s.ReadyForConnections(10 * time.Second) {
 		t.Fatal("server not ready")
@@ -465,7 +472,11 @@ func TestConsumerDeadLettersAfterMaxDeliver(t *testing.T) {
 		SubjectPrefix:     "kora",
 		ConsumerName:      "kora-worker",
 		DeadLetterSubject: "kora.deadletter",
-		MaxDeliver:        1,
+		// The dead-letter subject lives inside the stream's kora.> subjects. A
+		// consumer on the whole prefix would re-consume its own dead letters and
+		// dead-letter those too, writing to the store until server shutdown.
+		ConsumerSubject: "kora.events.>",
+		MaxDeliver:      1,
 	})
 	if err != nil {
 		t.Fatalf("new provider: %v", err)
@@ -481,8 +492,9 @@ func TestConsumerDeadLettersAfterMaxDeliver(t *testing.T) {
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	runDone := make(chan error, 1)
 	go func() {
-		_ = c.Run(runCtx, func(ctx context.Context, d contract.Delivery) error {
+		runDone <- c.Run(runCtx, func(ctx context.Context, d contract.Delivery) error {
 			return fmt.Errorf("boom")
 		})
 	}()
@@ -505,6 +517,11 @@ func TestConsumerDeadLettersAfterMaxDeliver(t *testing.T) {
 	}
 	_ = c.Drain(context.Background())
 	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("consumer did not stop after cancellation")
+	}
 }
 
 func TestConsumerTermFailureAfterDeadLetterLeavesSourceRedeliverable(t *testing.T) {
@@ -682,12 +699,16 @@ func TestConsumerRetryableDeliveryDoesNotConsumeMaxDeliver(t *testing.T) {
 	cancel()
 }
 
+// heartbeatAckWait is long enough that the ack-wait/2 heartbeat tolerates a
+// scheduler stall of a couple hundred milliseconds without losing the lease.
+const heartbeatAckWait = 500 * time.Millisecond
+
 func TestConsumerLeaseHeartbeatPreventsRedeliveryDuringHandler(t *testing.T) {
 	s, url := runEmbeddedServer(t)
 	defer s.Shutdown()
 	p, err := New(context.Background(), Config{
 		Name: "kora-heartbeat-test", ServerURLs: []string{url}, StreamName: "KORA_HEARTBEAT_EVENTS",
-		SubjectPrefix: "kora_heartbeat", ConsumerName: "heartbeat-worker", AckWait: 60 * time.Millisecond, MaxDeliver: 3,
+		SubjectPrefix: "kora_heartbeat", ConsumerName: "heartbeat-worker", AckWait: heartbeatAckWait, MaxDeliver: 3,
 	})
 	if err != nil {
 		t.Fatal("new provider:", err)
@@ -703,12 +724,15 @@ func TestConsumerLeaseHeartbeatPreventsRedeliveryDuringHandler(t *testing.T) {
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var calls atomic.Int32
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
 	handled := make(chan struct{}, 1)
 	runDone := make(chan error, 1)
 	go func() {
 		runDone <- consumer.Run(runCtx, func(context.Context, contract.Delivery) error {
 			if calls.Add(1) == 1 {
-				time.Sleep(240 * time.Millisecond)
+				entered <- struct{}{}
+				<-release
 				handled <- struct{}{}
 			}
 			return nil
@@ -718,6 +742,16 @@ func TestConsumerLeaseHeartbeatPreventsRedeliveryDuringHandler(t *testing.T) {
 	if err := p.Publish(context.Background(), contract.EventEnvelope{ID: eventID, Type: "work.test", Version: 1, Source: "test", Site: "tenant-a", Data: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal("publish delivery:", err)
 	}
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not receive delivery")
+	}
+	// Absence of redelivery can only be observed over time: hold the handler for
+	// several ack-wait windows. The heartbeat (ack-wait/2) must keep extending
+	// the lease; the margin tolerates scheduler stalls on loaded CI hosts.
+	time.Sleep(3 * heartbeatAckWait)
+	close(release)
 	select {
 	case <-handled:
 	case <-time.After(3 * time.Second):
@@ -853,7 +887,12 @@ func TestConsumerReturnsUnsettledAcknowledgmentErrors(t *testing.T) {
 			close(release)
 			select {
 			case err := <-runDone:
-				if err == nil || !strings.Contains(err.Error(), test.wantMessage) {
+				// The lease heartbeat races the settle call: if it ticks after the
+				// connection is closed but before the handler returns, Run
+				// reports that failed lease extension instead. Both surface the
+				// unsettled delivery, which is what this test asserts.
+				leaseErr := test.handlerErr == nil && err != nil && strings.Contains(err.Error(), "extend delivery lease")
+				if err == nil || (!strings.Contains(err.Error(), test.wantMessage) && !leaseErr) {
 					t.Fatalf("Run error = %v, want an error containing %q", err, test.wantMessage)
 				}
 			case <-time.After(3 * time.Second):
