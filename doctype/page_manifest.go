@@ -510,9 +510,11 @@ func viewActionsFromIDs(ids []string) []ViewAction {
 	return out
 }
 
+// normalizePageLayout keeps the layout types the Studio renderer knows.
+// "register" places components in the status, actions, main and side regions.
 func normalizePageLayout(layout string) string {
 	switch layout {
-	case "two_panel", "three_panel", "grid":
+	case "two_panel", "three_panel", "grid", "register":
 		return layout
 	default:
 		return "single"
