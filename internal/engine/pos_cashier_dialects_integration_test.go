@@ -105,6 +105,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			router.PUT("/r/:doctype/:name", handler.HandleUpdate)
 			router.DELETE("/r/:doctype/:name", handler.HandleDelete)
 			router.POST("/kernel/:command", handler.HandleKernelOperation)
+			router.POST("/payments", handler.HandlePaymentRequest)
 			serve := func(role, method, path, body string) *httptest.ResponseRecorder {
 				acting = role
 				rec := httptest.NewRecorder()
@@ -321,7 +322,46 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if got := one("SELECT COUNT(*) FROM "+tbl("Till Session")+" WHERE status = ?", "Open"); got != "1" {
 				t.Fatalf("open tills = %s, want 1", got)
 			}
-			body := fmt.Sprintf(`{"register":"REG-2","location":"LOC-1","till_session":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":%q}]}`, session, intent("pay-sess", 180))
+			// #319: the Cashier creates the intent itself through POST /payments,
+			// authorized by the record_sale operation grant, not by Sale create.
+			var saleRef string
+			for _, o := range cat.Data.PublishedOperations {
+				if strings.HasSuffix(o.OperationRef, "~record_sale") {
+					saleRef = o.OperationRef
+					if o.Payment == nil || o.Payment.SourceDoctype != "Sale" {
+						t.Fatalf("record_sale payment descriptor = %+v", o.Payment)
+					}
+				}
+			}
+			postIntent := func(role, key, operationRef string) *httptest.ResponseRecorder {
+				acting = role
+				ref := ""
+				if operationRef != "" {
+					ref = fmt.Sprintf(`,"operation_ref":%q`, operationRef)
+				}
+				req := httptest.NewRequest(http.MethodPost, "/payments", strings.NewReader(`{"provider":"cash","amount":"180","currency":"KES","source_doctype":"Sale"`+ref+`}`))
+				req.Header.Set("Idempotency-Key", key)
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+				return rec
+			}
+			if rec := postIntent("Cashier", "pay-noop", ""); rec.Code != http.StatusForbidden {
+				t.Fatalf("cashier intent without operation_ref = %d, want 403: %s", rec.Code, rec.Body.String())
+			}
+			if rec := postIntent("Cashier", "pay-badop", saleRef+"x"); rec.Code != http.StatusNotFound {
+				t.Fatalf("cashier intent with unknown operation = %d, want 404: %s", rec.Code, rec.Body.String())
+			}
+			rec = postIntent("Cashier", "pay-sess", saleRef)
+			var created struct {
+				Data struct {
+					ID    string `json:"id"`
+					State string `json:"state"`
+				} `json:"data"`
+			}
+			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &created) != nil || created.Data.State != "confirmed" {
+				t.Fatalf("cashier intent = %d %s", rec.Code, rec.Body.String())
+			}
+			body := fmt.Sprintf(`{"register":"REG-2","location":"LOC-1","till_session":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":%q}]}`, session, created.Data.ID)
 			run("record_sale", "k-sess-sale", body)
 			if got := one("SELECT location FROM "+tbl("Sale")+" WHERE till_session = ?", session); got != "LOC-1" {
 				t.Fatalf("sale location = %q", got)

@@ -15,6 +15,7 @@ import (
 	kdb "github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/payment"
 	"github.com/asenawritescode/kora/payment/mpesa"
+	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/secret"
 )
 
@@ -30,6 +31,10 @@ type paymentRequestBody struct {
 	Currency      string `json:"currency"`
 	Contact       string `json:"contact"`
 	SourceDoctype string `json:"source_doctype"`
+	// OperationRef names the published payment-guarded operation the intent is
+	// for. A caller holding that operation's write grant may then create the
+	// intent without create permission on the source DocType.
+	OperationRef string `json:"operation_ref"`
 }
 
 func paymentView(it payment.Intent) map[string]any {
@@ -76,6 +81,89 @@ func paymentError(c *gin.Context, err error) {
 	}
 }
 
+// holdsPaymentOperationGrant reports whether the caller holds the write grant
+// of any published operation whose payment binding is for sourceDoctype.
+func (h *Handler) holdsPaymentOperationGrant(c *gin.Context, execution policy.Execution, sourceDoctype string) bool {
+	services := h.runtimeService(c, c.GetString("site_name"))
+	if services.LoadModuleSnapshot == nil {
+		return false
+	}
+	snapshot, err := services.LoadModuleSnapshot()
+	if err != nil {
+		return false
+	}
+	scope := businessScopeFromRequest(c, execution)
+	for _, module := range snapshot.Modules {
+		for _, published := range module.PublishedOperations {
+			if published.Payment == nil || published.Payment.SourceDoctype != sourceDoctype {
+				continue
+			}
+			if _, err := authorizePublishedOperation(execution, h.siteRegistry(c), module.ID, published, scope); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// denyPaymentIntent authorizes creating an intent for sourceDoctype and writes
+// any refusal. Callers with create permission on the source DocType keep that
+// path. Otherwise the intent must name a published operation whose payment
+// binding is for the same source DocType, and the caller must hold that
+// operation's write grant.
+func (h *Handler) denyPaymentIntent(c *gin.Context, sourceDoctype, operationRef string) bool {
+	_, denial := permScope(c, h.siteRegistry(c), sourceDoctype, "create")
+	execution, valid := requestExecution(c)
+	if operationRef == "" || !valid {
+		return writePermDenial(c, denial)
+	}
+	_, op, found := publishedOperationByRef(h.runtimeService(c, c.GetString("site_name")), operationRef)
+	switch {
+	case !found:
+		notFoundError(c, "payment.operation_not_found", "Published operation not found", nil)
+		return true
+	case op.published.Payment == nil:
+		badRequestError(c, "payment.operation_not_payment_guarded", "The operation has no payment binding", nil)
+		return true
+	case op.published.Payment.SourceDoctype != sourceDoctype:
+		badRequestError(c, "payment.operation_source_mismatch", "The operation's payment binding is for a different source_doctype", nil)
+		return true
+	case denial == nil:
+		return false
+	}
+	scope := businessScopeFromRequest(c, execution)
+	if contract.ValidateResourceBusinessScope(scope, op.published.ScopePolicy) != nil {
+		writeError(c, http.StatusForbidden, "permission.denied", "Published operation scope is not permitted", nil)
+		return true
+	}
+	if _, err := authorizePublishedOperation(execution, h.siteRegistry(c), op.owner, op.published, scope); err != nil {
+		writeError(c, http.StatusForbidden, "permission.denied", "Published operation access is not granted", nil)
+		return true
+	}
+	return false
+}
+
+// denyPaymentRead authorizes reading an intent: create permission on its source
+// DocType, or the write grant of any published operation bound to it.
+func (h *Handler) denyPaymentRead(c *gin.Context, sourceDoctype string) bool {
+	_, denial := permScope(c, h.siteRegistry(c), sourceDoctype, "create")
+	if denial == nil {
+		return false
+	}
+	if execution, valid := requestExecution(c); valid && h.holdsPaymentOperationGrant(c, execution, sourceDoctype) {
+		return false
+	}
+	return writePermDenial(c, denial)
+}
+
+func writePermDenial(c *gin.Context, denial *permDenial) bool {
+	if denial == nil {
+		return false
+	}
+	c.JSON(denial.status, ErrorResponse{Error: map[string]string{"message": denial.message}})
+	return true
+}
+
 // HandlePaymentRequest serves POST /payments.
 func (h *Handler) HandlePaymentRequest(c *gin.Context) {
 	svc := h.paymentService(c)
@@ -98,7 +186,7 @@ func (h *Handler) HandlePaymentRequest(c *gin.Context) {
 		badRequestError(c, "payment.invalid", "amount and source_doctype are required", nil)
 		return
 	}
-	if _, denied := checkPerm(c, h.siteRegistry(c), body.SourceDoctype, "create"); denied {
+	if h.denyPaymentIntent(c, body.SourceDoctype, body.OperationRef) {
 		return
 	}
 	actor := ""
@@ -131,7 +219,7 @@ func (h *Handler) HandlePaymentGet(c *gin.Context) {
 		paymentError(c, err)
 		return
 	}
-	if _, denied := checkPerm(c, h.siteRegistry(c), it.SourceDoctype, "create"); denied {
+	if h.denyPaymentRead(c, it.SourceDoctype) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": paymentView(it)})
