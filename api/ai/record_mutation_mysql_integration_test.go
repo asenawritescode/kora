@@ -25,6 +25,7 @@ import (
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/schema"
 	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/workflow"
 	workflowstore "github.com/asenawritescode/kora/workflow/sqlstore"
 )
 
@@ -216,13 +217,21 @@ func TestAIMutationBundleConvertsLeadWithDurableApprovalAtomically(t *testing.T)
 	if err := schema.MigrateSiteFromRegistry(database, databaseName, registry, dialect); err != nil {
 		t.Fatalf("migrate CRM conversion tables: %v", err)
 	}
-	workflowContent, err := os.ReadFile(filepath.Join("..", "..", "config", "v0", "crm", "workflows", "lead.json"))
+	// The CRM pack no longer ships a Lead lifecycle workflow (document workflows
+	// are retired; config/v0/crm/workflows never existed on main). The fixture
+	// publishes the one Engine v2 status policy this conversion needs: Convert
+	// moves a Qualified Lead to Converted through record.update_status.
+	statusInput, err := json.Marshal(workflow.StatusActionConfig{StateField: "lifecycle_stage", InitialState: "Draft", StatusTransition: workflow.StatusTransition{Action: "Convert", From: "Qualified", To: "Converted", AllowedRoles: []string{doctype.AdminRole}}})
 	if err != nil {
-		t.Fatalf("read CRM Lead Engine v2 workflow: %v", err)
+		t.Fatalf("encode Lead conversion status policy: %v", err)
 	}
-	var definition contract.WorkflowDefinition
-	if err := json.Unmarshal(workflowContent, &definition); err != nil {
-		t.Fatalf("parse CRM Lead Engine v2 workflow: %v", err)
+	definition := contract.WorkflowDefinition{
+		ID: "crm-lead-convert", Version: 1, Entry: "convert",
+		Trigger: &contract.RecordTrigger{Kind: "record.updated", Table: lead.Name, WatchedFields: []string{"lifecycle_stage"}},
+		Steps: []contract.StepDefinition{
+			{ID: "convert", Kind: contract.StepAction, Action: &contract.ActionSpec{Name: "record.update_status", Version: 1, InputSchema: "kora.record.update_status", Input: statusInput, Next: "finish"}},
+			{ID: "finish", Kind: contract.StepEnd, End: &contract.EndSpec{Outcome: "complete"}},
+		},
 	}
 
 	ctx := WithDialect(t.Context(), dialect)
