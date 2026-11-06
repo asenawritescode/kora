@@ -3,6 +3,8 @@ package query
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/asenawritescode/kora/db"
@@ -24,7 +26,7 @@ func TestPOSPackQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment"}
+	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment"}
 	if len(defs) != len(want) {
 		t.Fatalf("got %d queries, want %d", len(defs), len(want))
 	}
@@ -125,6 +127,9 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 	// my_session has no actor here, so it matches nobody.
 	wantRows := map[string]int{"my_session": 0, "my_registers": 1, "open_till": 1, "recent_sales": 3, "today_totals": 1, "payments_by_method": 1, "refunds_by_method": 1}
 	for _, d := range defs {
+		if d.Name == "sale_lines" {
+			continue // its sale input is required: TestPOSSaleLines pins the 400
+		}
 		t.Run(d.Name, func(t *testing.T) {
 			p, err := Run(context.Background(), conn, db.Resolve("libsql"), d, Request{FullRead: true, Now: now, Input: map[string]any{}})
 			if err != nil {
@@ -262,5 +267,73 @@ func TestPOSMyRegisters(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestPOSSaleLines (#329): sale_lines lists one sale's returnable lines from
+// the Sale Line Balance rows, with what is left to return, by item.
+func TestPOSSaleLines(t *testing.T) {
+	dts, err := doctype.ParseDirectory("../config/pos/doctypes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := doctype.NewRegistry()
+	for _, d := range dts {
+		reg.Register(d)
+	}
+	defs, err := LoadDir("../config/pos/queries", reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var def *Definition
+	for _, d := range defs {
+		if d.Name == "sale_lines" {
+			def = d
+		}
+	}
+	if def == nil {
+		t.Fatal("sale_lines missing")
+	}
+	if def.OwnerField != "" || def.Limit < 1 || def.Limit > 200 {
+		t.Fatalf("sale_lines owner_field=%q limit=%d", def.OwnerField, def.Limit)
+	}
+	if got := def.RequiredInputs(); len(got) != 1 || got[0] != "sale" {
+		t.Fatalf("required inputs = %v, want [sale]", got)
+	}
+	conn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Skip(err)
+	}
+	conn.SetMaxOpenConns(1)
+	for _, s := range []string{
+		"CREATE TABLE `tabSale Line Balance` (name TEXT, sale TEXT, item TEXT, unit_price NUMERIC, sold_quantity NUMERIC, remaining_quantity NUMERIC, owner TEXT, creation TEXT)",
+		// SALE-1: ITEM-2 partly returned, ITEM-1 untouched, ITEM-3 fully returned.
+		"INSERT INTO `tabSale Line Balance` VALUES ('B3','SALE-1','ITEM-2','65.50',1.5,0.5,'ann','2026-11-06 09:00:00'),('B1','SALE-1','ITEM-3','10.25',2,0,'ann','2026-11-06 09:00:00'),('B2','SALE-1','ITEM-1','180.00',2,2,'ann','2026-11-06 09:00:00'),('B4','SALE-2','ITEM-1','180.00',1,1,'bob','2026-11-06 10:00:00')",
+	} {
+		if _, err := conn.Exec(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, full := range []bool{true, false} {
+		p, err := Run(context.Background(), conn, db.Resolve("libsql"), def, Request{FullRead: full, Actor: "carol", Input: map[string]any{"sale": "SALE-1"}})
+		if err != nil || len(p.Rows) != 3 {
+			t.Fatalf("full=%v: %v %v", full, p, err)
+		}
+		for i, want := range [][5]string{{"B2", "ITEM-1", "180", "2", "2"}, {"B3", "ITEM-2", "65.5", "1.5", "0.5"}, {"B1", "ITEM-3", "10.25", "2", "0"}} {
+			r := p.Rows[i]
+			got := [5]string{fmt.Sprint(r["name"]), fmt.Sprint(r["item"]), fmt.Sprint(r["unit_price"]), fmt.Sprint(r["sold_quantity"]), fmt.Sprint(r["remaining_quantity"])}
+			if got != want || len(r) != 5 {
+				t.Fatalf("full=%v row %d = %#v, want %v", full, i, r, want)
+			}
+		}
+	}
+	p, err := Run(context.Background(), conn, db.Resolve("libsql"), def, Request{FullRead: true, Input: map[string]any{"sale": "SALE-404"}})
+	if err != nil || len(p.Rows) != 0 {
+		t.Fatalf("unknown sale: %v %v", p, err)
+	}
+	_, err = Run(context.Background(), conn, db.Resolve("libsql"), def, Request{FullRead: true, Input: map[string]any{}})
+	var ie *InputError
+	if !errors.As(err, &ie) || ie.Field != "sale" {
+		t.Fatalf("missing sale err = %v, want InputError on sale", err)
 	}
 }

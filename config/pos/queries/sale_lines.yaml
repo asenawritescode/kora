@@ -1,0 +1,14 @@
+name: sale_lines
+module_owner_id: pos.core
+capability: pos.sales
+operation: sale_lines
+source: Sale Line Balance
+permission: read
+scope: tenant
+input:
+  sale: {type: string, max_length: 140}
+filters:
+  - {field: sale, op: eq, value: $input.sale}
+fields: [name, item, unit_price, sold_quantity, remaining_quantity]
+sort: [{field: item, dir: asc}]
+limit: 200
