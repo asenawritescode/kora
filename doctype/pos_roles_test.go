@@ -66,6 +66,18 @@ func TestPOSRolePermissions(t *testing.T) {
 		{"Cashier", "Item Category", "write", false},
 		{"Owner", "Stock Balance", "create", true},
 		{"Owner", "Stock Entry", "create", true},
+		// #397: the Inventory Manager maintains the catalogue, so may import it; nobody else on the till side may.
+		{"Inventory Manager", "Item", "import", true},
+		{"Inventory Manager", "Item Category", "import", true},
+		{"Inventory Manager", "Item", "create", true},
+		{"Inventory Manager", "Item Category", "read", true},
+		{"Inventory Manager", "Location", "import", false},
+		{"Inventory Manager", "Stock Balance", "import", false},
+		{"Inventory Manager", "Stock Entry", "import", false},
+		{"Cashier", "Item", "import", false},
+		{"Cashier", "Item Category", "import", false},
+		{"Manager", "Item", "import", false},
+		{"Manager", "Item Category", "import", false},
 	}
 	for _, tc := range tests {
 		if got := pm.Can(tc.role, tc.dt, tc.op); got != tc.want {
