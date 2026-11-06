@@ -191,8 +191,9 @@ func analyticsSourceReadable(c *gin.Context, registry *doctype.Registry, doctype
 	if doctypeName == "" || registry == nil {
 		return false
 	}
-	scope, denied := checkPerm(c, registry, doctypeName, "read")
-	return !denied && !scope.Owner && len(scope.AssignedFields) == 0
+	// A filter predicate: it must not write a denial to the response.
+	scope, denial := permScope(c, registry, doctypeName, "read")
+	return denial == nil && !scope.Owner && len(scope.AssignedFields) == 0
 }
 
 func filterReadableAnalyticsMetrics(c *gin.Context, registry *doctype.Registry, metrics []*analytics.Metric) []*analytics.Metric {
@@ -211,8 +212,8 @@ func analyticsModelSourcesReadable(c *gin.Context, registry *doctype.Registry, m
 			return false
 		}
 		resource := "module." + model.ProjectionOwner + ".projection." + model.ProjectionID
-		scope, denied := checkPerm(c, registry, resource, "read")
-		if denied || scope.Owner && model.ProjectionOwnerField == "" {
+		scope, denial := permScope(c, registry, resource, "read")
+		if denial != nil || scope.Owner && model.ProjectionOwnerField == "" {
 			return false
 		}
 		allowed := make(map[string]bool, len(model.AllowedFields))
