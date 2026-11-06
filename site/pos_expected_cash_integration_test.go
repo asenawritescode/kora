@@ -153,16 +153,39 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 		t.Fatal(cerr)
 	}
 	want("cash + card sale", 800)
-	ret := func(against string, qty int) *contract.Error {
+	// A cash refund carries no reference (there is none to supply); it must
+	// still reduce expected cash and show in refunds_by_method / the Z report.
+	retPay := func(against string, qty int, payments []map[string]any) *contract.Error {
 		_, cerr := exec("pos.return_sale", map[string]any{"data": map[string]any{
 			"register": register, "till_session": till, "location": loc, "return_against": against, "items": items(qty),
-			"payments": []map[string]any{{"method": "Cash", "amount": 100 * qty, "reference": "refund"}}}})
+			"payments": payments}})
 		return cerr
+	}
+	ret := func(against string, qty int) *contract.Error {
+		return retPay(against, qty, []map[string]any{{"method": "Cash", "amount": 100 * qty, "currency": "KES"}})
 	}
 	if cerr = ret(sale, 1); cerr != nil {
 		t.Fatal(cerr)
 	}
 	want("cash return of 100", 700)
+	for _, tc := range []struct {
+		name     string
+		payments []map[string]any
+	}{
+		{"no refund payment line", nil},
+		{"empty refund payment lines", []map[string]any{}},
+		{"refund short of the return total", []map[string]any{{"method": "Cash", "amount": 40, "currency": "KES"}}},
+		{"refund above the return total", []map[string]any{{"method": "Cash", "amount": 160, "currency": "KES"}}},
+	} {
+		if cerr = retPay(sale, 1, tc.payments); cerr == nil {
+			t.Fatalf("%s: return accepted", tc.name)
+		}
+		want(tc.name+" leaves cash", 700)
+	}
+	if cerr = ret(sale, 3); cerr == nil {
+		t.Fatal("return of more than was sold accepted")
+	}
+	want("over-return leaves cash", 700)
 	out, cerr = sell(1, pay("cash", 100))
 	if cerr != nil {
 		t.Fatal(cerr)

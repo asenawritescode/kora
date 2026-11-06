@@ -67,7 +67,7 @@ func TestRecordSaleCommand(t *testing.T) {
 }
 
 func TestPOSReturnAndVoidCommandsParse(t *testing.T) {
-	for name, guards := range map[string]int{"return_sale": 5, "void_sale": 7} {
+	for name, guards := range map[string]int{"return_sale": 6, "void_sale": 7} {
 		raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", name+".yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -152,5 +152,31 @@ func TestPOSTillCommandsRequireOwnCashier(t *testing.T) {
 				t.Fatalf("cashier guards = %d, want 1", found)
 			}
 		})
+	}
+}
+
+// TestPOSReturnSaleRefundMustEqualReturnTotal (#336): a return records a refund
+// payment line for exactly the returned total, so the till and refunds_by_method
+// see it, and the line needs no payment-intent reference.
+func TestPOSReturnSaleRefundMustEqualReturnTotal(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "config", "pos", "commands", "return_sale.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := ParseCommandResource(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var equal []string
+	for _, g := range def.Require {
+		if g.Payment != nil {
+			t.Fatal("a refund must not consume a payment intent")
+		}
+		if len(g.Equal) > 0 {
+			equal = g.Equal
+		}
+	}
+	if len(equal) != 2 || equal[0] != "$computed.paid" || equal[1] != "$computed.total" {
+		t.Fatalf("equal guard = %v, want [$computed.paid $computed.total]", equal)
 	}
 }
