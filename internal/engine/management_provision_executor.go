@@ -149,11 +149,15 @@ func (e *managementProvisionExecutor) createTenant(ctx context.Context, command 
 	if err != nil || assignment == "" {
 		return errors.New("tenant deployment cannot be represented by the legacy assignment adapter")
 	}
+	displayName, err := contract.NormalizeTenantDisplayName(command.DisplayName)
+	if err != nil {
+		return fmt.Errorf("tenant display name: %w", err)
+	}
 	input := site.CreateSiteInput{
 		Hostname: command.PrimaryAlias, SiteID: string(command.Tenant), AdminEmail: command.BootstrapAdminEmail, CloudSubjectID: command.BootstrapAdminSubject,
 		AdminFullName: "Administrator", ExtraDomains: append([]string(nil), command.Aliases...),
-		RuntimeCellID: assignment,
-		DBType:        e.common.DBType, DBHost: e.common.DBHost, DBPort: e.common.DBPort,
+		RuntimeCellID: assignment, DisplayName: displayName,
+		DBType: e.common.DBType, DBHost: e.common.DBHost, DBPort: e.common.DBPort,
 		DBUser: e.common.DBUser, DBPassword: e.common.DBPassword,
 		PlatformDBType: e.platformType, PlatformDBHost: e.common.DBHost, PlatformDBPort: e.common.DBPort,
 		PlatformDBUser: e.common.DBUser, PlatformDBPassword: e.common.DBPassword, PlatformDB: e.platformDB,

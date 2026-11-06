@@ -97,6 +97,7 @@ func testLiveManagementProvisionRouteAndWorker(t *testing.T, driver, dsn string)
 		PrimaryAlias:          fmt.Sprintf("route-%d.example.invalid", stamp),
 		Aliases:               []string{fmt.Sprintf("route-alias-%d.example.invalid", stamp)},
 		Deployment:            "deployment-live", DatabaseAllocationRef: driver + ":route-disposable-allocation",
+		DisplayName: "Dbg Duka",
 	}
 	if err := contract.ValidateProvisionTenant(command); err != nil {
 		t.Fatal("validate command:", err)
@@ -223,9 +224,14 @@ func testLiveManagementProvisionRouteAndWorker(t *testing.T, driver, dsn string)
 				err = tenantDB.QueryRowContext(ctx, db.Rebind(dialect, `SELECT COUNT(*) FROM _kora_user WHERE email = ?`), command.BootstrapAdminEmail).Scan(&admins)
 				var deliveryRows int
 				deliveryErr := tenantDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM _kora_magic_link_delivery`).Scan(&deliveryRows)
+				var appName string
+				appNameErr := tenantDB.QueryRowContext(ctx, db.Rebind(dialect, `SELECT setting_value FROM _kora_site_setting WHERE site = ? AND setting_key = ?`), command.PrimaryAlias, "branding.app_name").Scan(&appName)
 				closeErr := tenantDB.Close()
 				if err != nil {
 					t.Fatal("read bootstrap administrator:", err)
+				}
+				if appNameErr != nil || appName != command.DisplayName {
+					t.Fatalf("provisioned branding.app_name = %q, %v; want %q", appName, appNameErr, command.DisplayName)
 				}
 				if closeErr != nil {
 					t.Fatal("close tenant database:", closeErr)
