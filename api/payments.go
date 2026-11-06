@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"io"
@@ -13,7 +14,10 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/payment"
+	"github.com/asenawritescode/kora/payment/manual"
 	"github.com/asenawritescode/kora/payment/mpesa"
 	"github.com/asenawritescode/kora/policy"
 	"github.com/asenawritescode/kora/secret"
@@ -35,10 +39,19 @@ type paymentRequestBody struct {
 	// for. A caller holding that operation's write grant may then create the
 	// intent without create permission on the source DocType.
 	OperationRef string `json:"operation_ref"`
+	// PaymentAccount and Reference are for the manual provider: the account the
+	// customer paid and the confirmation code they showed.
+	PaymentAccount string `json:"payment_account"`
+	Reference      string `json:"reference"`
 }
 
 func paymentView(it payment.Intent) map[string]any {
+	account := ""
+	if it.Provider == manual.Name {
+		account, _, _ = manual.Split(it.ProviderRequestID)
+	}
 	return map[string]any{
+		"payment_account": account, "verification": manual.Verification(it.Provider),
 		"id": it.ID, "provider": it.Provider, "state": it.State, "amount": it.Amount.String(),
 		"currency": it.Currency, "contact": it.Contact, "source_doctype": it.SourceDoctype,
 		"provider_request_id": it.ProviderRequestID, "provider_reference": it.ProviderReference,
@@ -60,7 +73,56 @@ func (h *Handler) paymentService(c *gin.Context) *payment.Service {
 			_ = svc.Providers.Register(mp)
 		}
 	}
+	if _, ok := svc.Providers.Get(manual.Name); !ok {
+		// Recording against configured accounts exists only where the tenant
+		// defines the Payment Account DocType.
+		if reg := h.siteRegistry(c); reg != nil {
+			if dt := reg.Get("Payment Account"); dt != nil {
+				_ = svc.Providers.Register(manual.Provider{Accounts: paymentAccounts{tx: h.siteTx(c), dt: dt}})
+			}
+		}
+	}
 	return svc
+}
+
+// paymentAccounts reads Payment Account documents for the manual provider.
+type paymentAccounts struct {
+	tx *orm.TxManager
+	dt *doctype.DocType
+}
+
+func (p paymentAccounts) Account(_ context.Context, name string) (manual.Account, bool, error) {
+	doc, err := p.tx.GetDoc(p.dt, name, "")
+	if errors.Is(err, orm.ErrNotFound) {
+		return manual.Account{}, false, nil
+	}
+	if err != nil {
+		return manual.Account{}, false, err
+	}
+	return manual.Account{Enabled: flagSet(doc.Get("enabled")), Currency: doc.GetString("currency")}, true, nil
+}
+
+// flagSet reads a Check column as the drivers return it: a bool, a number or
+// the text "1"/"true".
+func flagSet(v any) bool {
+	switch n := v.(type) {
+	case bool:
+		return n
+	case int:
+		return n != 0
+	case int64:
+		return n != 0
+	case float64:
+		return n != 0
+	case []byte:
+		return flagSet(string(n))
+	case string:
+		switch strings.ToLower(strings.TrimSpace(n)) {
+		case "1", "true", "t", "yes":
+			return true
+		}
+	}
+	return false
 }
 
 func paymentError(c *gin.Context, err error) {
@@ -199,6 +261,7 @@ func (h *Handler) HandlePaymentRequest(c *gin.Context) {
 	it, err := svc.Request(c.Request.Context(), c.GetString("site_name"), actor, payment.RequestInput{
 		Provider: body.Provider, Amount: amount, Currency: body.Currency, Contact: body.Contact,
 		SourceDoctype: body.SourceDoctype, IdempotencyKey: key,
+		Account: body.PaymentAccount, Reference: body.Reference,
 	})
 	if err != nil {
 		paymentError(c, err)

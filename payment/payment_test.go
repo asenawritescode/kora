@@ -2,6 +2,8 @@ package payment
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"sync"
 	"testing"
@@ -179,5 +181,56 @@ func TestConfirm(t *testing.T) {
 func TestRegistryDuplicate(t *testing.T) {
 	if err := NewRegistry().Register(Cash{}); err == nil {
 		t.Fatal("duplicate must error")
+	}
+}
+
+func TestRequestManualRules(t *testing.T) {
+	ctx := context.Background()
+	reject := &fake{name: "strict", err: contract.NewError(contract.CodeValidationFailed, "rejected by provider")}
+	dup := &fake{name: "dup", out: Outcome{State: StateConfirmed, ProviderRequestID: "A:CODE", ProviderReference: "CODE"}}
+	s := newSvc(t, reject, dup)
+
+	// A provider validation refusal is returned and no intent is stored.
+	_, err := s.Request(ctx, "s", "u", in("strict", "k-reject", 5))
+	var ce *contract.Error
+	if !errors.As(err, &ce) || ce.Message != "rejected by provider" {
+		t.Fatalf("validation refusal = %v", err)
+	}
+	if _, err := s.Store.GetByKey(ctx, "s", "k-reject"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a refused request stored an intent: %v", err)
+	}
+
+	// The same provider request id is refused the second time under a new key.
+	if _, err := s.Request(ctx, "s", "u", in("dup", "k-1", 5)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Request(ctx, "s", "u", in("dup", "k-2", 5))
+	if !errors.As(err, &ce) || ce.Type != contract.CodeValidationFailed || ce.Message != "this payment reference was already recorded" {
+		t.Fatalf("duplicate provider request = %v", err)
+	}
+	// Replaying the first key is still idempotent, not a duplicate.
+	if _, err := s.Request(ctx, "s", "u", in("dup", "k-1", 5)); err != nil {
+		t.Fatalf("idempotent replay = %v", err)
+	}
+	// Another site may record the same reference.
+	if _, err := s.Request(ctx, "other", "u", in("dup", "k-3", 5)); err != nil {
+		t.Fatalf("same reference on another site = %v", err)
+	}
+}
+
+func TestPayloadHashBackwardCompatible(t *testing.T) {
+	legacy := RequestInput{Provider: "cash", Amount: decimal.NewFromInt(5), Currency: "KES", Contact: "c", SourceDoctype: "Sale"}
+	// Stored idempotency keys were hashed before reference/account existed;
+	// a request that sets neither must keep hashing the same.
+	sum := sha256.Sum256([]byte("cash|5|KES|c|Sale"))
+	if got := payloadHash(legacy); got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("legacy payload hash changed: %s", got)
+	}
+	withRef := legacy
+	withRef.Reference, withRef.Account = "QK1", "ACC-1"
+	withAccountOnly := legacy
+	withAccountOnly.Account = "ACC-1"
+	if payloadHash(withRef) == payloadHash(legacy) || payloadHash(withRef) == payloadHash(withAccountOnly) {
+		t.Fatal("reference and account must be part of the payload hash")
 	}
 }

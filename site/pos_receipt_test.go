@@ -99,6 +99,8 @@ func TestPOSZReportRenders(t *testing.T) {
 		Queries: map[string][]map[string]any{
 			"by_method": {{"method": "Cash", "payment_count": 2, "total": 300.0}, {"method": "Card", "payment_count": 1, "total": 200.0}},
 			"refunds":   {{"method": "Cash", "payment_count": 1, "total": 100.0}},
+			"by_account": {{"payment_account": "PA-0001", "verification": "manually_recorded", "method": "Mobile Money", "payment_count": 1, "total": 120.0},
+				{"payment_account": "PA-0002", "verification": "provider_confirmed", "method": "Mobile Money", "payment_count": 2, "total": 80.0}},
 		},
 		Tenant: map[string]any{"name": "Shop"},
 		Now:    time.Unix(0, 0).UTC(),
@@ -113,14 +115,14 @@ func TestPOSZReportRenders(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(f.Queries) != 2 {
+		if len(f.Queries) != 3 {
 			t.Fatalf("%s queries = %v", file, f.Queries)
 		}
 		txt, err := f.RenderText(data, print.Options{Currency: "KES", Precision: 2})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, w := range []string{"Z REPORT", "TILL-1", "KES 300.00", "KES 200.00", "REFUNDS", "KES 100.00", "KES 500.00", "KES 700.00", "KES 690.00", "VARIANCE", "-10.00"} {
+		for _, w := range []string{"Z REPORT", "TILL-1", "KES 300.00", "KES 200.00", "REFUNDS", "KES 100.00", "KES 500.00", "KES 700.00", "KES 690.00", "VARIANCE", "-10.00", "BY ACCOUNT", "PA-0001", "KES 120.00", "Mobile Money - manually recorded", "PA-0002"} {
 			if !strings.Contains(txt, w) {
 				t.Errorf("%s missing %q\n%s", file, w, txt)
 			}

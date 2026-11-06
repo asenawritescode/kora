@@ -28,7 +28,7 @@ func TestPOSPackQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "closed_session": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment"}
+	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "closed_session": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment", "payments_by_account": "Sale Payment"}
 	if len(defs) != len(want) {
 		t.Fatalf("got %d queries, want %d", len(defs), len(want))
 	}
@@ -114,12 +114,12 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	for _, s := range []string{
 		"CREATE TABLE `tabSale` (name TEXT, register TEXT, customer TEXT, status TEXT, till_session TEXT, creation TEXT, total NUMERIC)",
-		"CREATE TABLE `tabSale__payments` (name TEXT, parent TEXT, method TEXT, amount NUMERIC)",
+		"CREATE TABLE `tabSale__payments` (name TEXT, parent TEXT, method TEXT, amount NUMERIC, payment_account TEXT, verification TEXT)",
 		"CREATE TABLE `tabTill Session` (name TEXT, shift TEXT, register TEXT, location TEXT, cashier TEXT, status TEXT, opening_float NUMERIC, expected_cash NUMERIC, closing_count NUMERIC, creation TEXT)",
 		"CREATE TABLE `tabRegister` (name TEXT, register_name TEXT, location TEXT, enabled INTEGER)",
 		"INSERT INTO `tabRegister` VALUES ('R1','Front','L1',1),('R0','Old','L1',0)",
 		"INSERT INTO `tabSale` VALUES ('S1','R1','C1','Paid','TS1','2026-11-06 09:00:00',10),('S2','R1','C1','Paid','TS1','2026-11-05 09:00:00',99),('S3','R1','C1','Return','TS1','2026-11-06 10:00:00',4)",
-		"INSERT INTO `tabSale__payments` VALUES ('P1','S1','Cash',10),('P2','S2','Cash',99),('P3','S3','Cash',4)",
+		"INSERT INTO `tabSale__payments` VALUES ('P1','S1','Cash',10,NULL,NULL),('P2','S2','Cash',99,NULL,NULL),('P3','S3','Cash',4,NULL,NULL)",
 		"INSERT INTO `tabTill Session` VALUES ('TS1','SH1','R1','L1','c1','Open',5,15,NULL,'2026-11-06 08:00:00'),('TS0','SH0','R1','L1','c1','Closed',5,5,5,'2026-11-05 08:00:00')",
 	} {
 		if _, err := conn.Exec(s); err != nil {
@@ -127,7 +127,7 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 		}
 	}
 	// my_session has no actor here, so it matches nobody.
-	wantRows := map[string]int{"my_session": 0, "my_registers": 1, "open_till": 1, "recent_sales": 3, "today_totals": 1, "payments_by_method": 1, "refunds_by_method": 1}
+	wantRows := map[string]int{"my_session": 0, "my_registers": 1, "open_till": 1, "recent_sales": 3, "today_totals": 1, "payments_by_method": 1, "refunds_by_method": 1, "payments_by_account": 0}
 	for _, d := range defs {
 		if d.Name == "sale_lines" {
 			continue // its sale input is required: TestPOSSaleLines pins the 400

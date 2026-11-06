@@ -44,6 +44,13 @@ type Intent struct {
 	ConsumedBy        string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+
+	// Account and Reference are request-time inputs for providers that record
+	// a payment received elsewhere (the manual provider). They are not stored
+	// as columns; such a provider encodes what must outlive the request into
+	// ProviderRequestID and ProviderReference.
+	Account   string
+	Reference string
 }
 
 // RequestInput is the caller payload for Service.Request.
@@ -54,6 +61,10 @@ type RequestInput struct {
 	Contact        string
 	SourceDoctype  string
 	IdempotencyKey string
+	// Account names the receiving account and Reference the payer's
+	// confirmation code, for providers that record rather than collect.
+	Account   string
+	Reference string
 }
 
 // Confirmation is an asynchronous provider result.
@@ -166,8 +177,14 @@ func (s *Service) now() time.Time {
 }
 
 func payloadHash(in RequestInput) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%s|%s|%s",
-		in.Provider, in.Amount.String(), in.Currency, in.Contact, in.SourceDoctype)))
+	payload := fmt.Sprintf("%s|%s|%s|%s|%s",
+		in.Provider, in.Amount.String(), in.Currency, in.Contact, in.SourceDoctype)
+	if in.Account != "" || in.Reference != "" {
+		// Appended only when set, so keys stored before these fields existed
+		// keep hashing, and replaying, as before.
+		payload += "|" + in.Account + "|" + in.Reference
+	}
+	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -198,8 +215,14 @@ func (s *Service) Request(ctx context.Context, site, actor string, in RequestInp
 		Amount: in.Amount, Currency: in.Currency, Contact: in.Contact,
 		SourceDoctype: in.SourceDoctype, IdempotencyKey: in.IdempotencyKey,
 		PayloadHash: hash, Actor: actor, CreatedAt: now, UpdatedAt: now,
+		Account: in.Account, Reference: in.Reference,
 	}
 	out, err := p.Request(ctx, it)
+	var refused *contract.Error
+	if errors.As(err, &refused) && refused.Type == contract.CodeValidationFailed {
+		// The provider rejected the request itself: nothing is recorded.
+		return Intent{}, err
+	}
 	if err != nil {
 		out = Outcome{State: StateFailed, FailureReason: err.Error()}
 	}
@@ -208,10 +231,26 @@ func (s *Service) Request(ctx context.Context, site, actor string, in RequestInp
 	}
 	it.State, it.ProviderRequestID = out.State, out.ProviderRequestID
 	it.ProviderReference, it.FailureReason = out.ProviderReference, out.FailureReason
+	if out.State != StateFailed && it.ProviderRequestID != "" && s.requestSeen(ctx, site, it) {
+		return Intent{}, errDuplicateReference
+	}
 	if err := s.Store.Create(ctx, site, it); err != nil {
+		// A concurrent request may have won the unique (provider, request id).
+		if it.ProviderRequestID != "" && s.requestSeen(ctx, site, it) {
+			return Intent{}, errDuplicateReference
+		}
 		return Intent{}, err
 	}
 	return it, nil
+}
+
+var errDuplicateReference = contract.NewError(contract.CodeValidationFailed, "this payment reference was already recorded")
+
+// requestSeen reports whether another intent already holds the provider
+// request id of it.
+func (s *Service) requestSeen(ctx context.Context, site string, it Intent) bool {
+	prev, err := s.Store.GetByProviderRequest(ctx, site, it.Provider, it.ProviderRequestID)
+	return err == nil && prev.ID != it.ID
 }
 
 // Confirm applies an asynchronous provider result exactly once.
