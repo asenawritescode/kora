@@ -140,6 +140,9 @@ func commandInputSchema(cmd *kernel.CommandResource, records map[string]*doctype
 			props[name] = map[string]any{}
 		}
 	}
+	for _, name := range cmd.RequiredInputs() {
+		required[name] = true
+	}
 	for _, m := range forEachRef.FindAllSubmatch(raw, -1) {
 		if _, ok := props[string(m[1])]; !ok {
 			props[string(m[1])] = map[string]any{"type": "array"}

@@ -190,6 +190,39 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			}
 			run := func(name, key, input string) string { t.Helper(); return runAs("Cashier", name, key, input) }
 
+			// 0. #408: the catalog's open_session input lists every input the command
+			// needs as required and typed, and a call without one names the field
+			// instead of leaking the step index or $input syntax. Nothing is written.
+			for _, o := range cat.Data.PublishedOperations {
+				if !strings.HasSuffix(o.OperationRef, "~open_session") {
+					continue
+				}
+				for _, sc := range cat.Data.Schemas {
+					if sc.Ref != o.InputSchema {
+						continue
+					}
+					var doc struct {
+						Required   []string                  `json:"required"`
+						Properties map[string]map[string]any `json:"properties"`
+					}
+					raw, _ := json.Marshal(sc.Schema)
+					if json.Unmarshal(raw, &doc) != nil || strings.Join(doc.Required, ",") != "location,opening_float,register" ||
+						doc.Properties["register"]["type"] != "string" || doc.Properties["location"]["type"] != "string" || doc.Properties["opening_float"]["type"] != "number" {
+						t.Fatalf("open_session input schema = %s", raw)
+					}
+				}
+			}
+			for field, input := range map[string]string{"location": `{"register":"REG-1","opening_float":1000}`, "register": `{"location":"LOC-1","opening_float":1000}`} {
+				rec := tryAs("Cashier", "open_session", "k-missing-"+field, input)
+				body := rec.Body.String()
+				if rec.Code != http.StatusBadRequest || !strings.Contains(body, `"input `+field+` is required"`) || !strings.Contains(body, `"field":"`+field+`"`) || strings.Contains(body, "$input") || strings.Contains(body, "require 1") {
+					t.Fatalf("open_session without %s: status=%d body=%s", field, rec.Code, body)
+				}
+			}
+			if got := count("Shift"); got != "0" {
+				t.Fatalf("a refused open_session wrote %s shifts", got)
+			}
+
 			// 1. open_shift, open_till.
 			run("open_shift", "k-shift", `{"register":"REG-1"}`)
 			shift := one("SELECT name FROM " + tbl("Shift"))

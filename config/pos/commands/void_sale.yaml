@@ -9,6 +9,9 @@ presentation:
 permission: write
 input:
   record: Sale
+  extra:
+    sale: {type: string, required: true}
+    shift: {type: string, required: true}
 require:
   - lock:
       record: Sale
