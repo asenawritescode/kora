@@ -1,0 +1,17 @@
+name: my_sales
+module_owner_id: pos.core
+capability: pos.sales
+operation: my_sales
+source: Sale
+permission: read
+scope: tenant
+owner_field: owner
+input:
+  register: {type: string, max_length: 140}
+  name: {type: string, max_length: 140}
+filters:
+  - {field: register, op: eq, value: $input.register, optional: true}
+  - {field: name, op: eq, value: $input.name, optional: true}
+fields: [name, register, customer, total, status, creation, owner]
+sort: [{field: creation, dir: desc}]
+limit: 20

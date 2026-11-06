@@ -374,3 +374,19 @@
 - doctype: module.pos.core.query.payments_by_account
   role: Manager
   read: true
+- doctype: module.pos.core.query.sale_items
+  role: Owner
+  read: true
+- doctype: module.pos.core.query.sale_payments
+  role: Owner
+  read: true
+- doctype: module.pos.core.query.sale_items
+  role: Manager
+  read: true
+- doctype: module.pos.core.query.sale_payments
+  role: Manager
+  read: true
+- doctype: module.pos.core.query.my_sales
+  role: Cashier
+  read: true
+  if_owner: true

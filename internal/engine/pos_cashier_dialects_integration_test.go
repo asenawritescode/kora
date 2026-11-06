@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -76,9 +77,16 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			services := *loaded.RuntimeServices
 			handler := api.NewHandler(loaded.Registry, nil)
 
+			// actingUser, when set, is the verified subject while the role stays the
+			// acting role: it models a second user holding the same role (#91).
+			var actingUser string
 			exec := func(role string) policy.Execution {
+				subject := role
+				if actingUser != "" {
+					subject = actingUser
+				}
 				e, err := policy.NewVerifiedExecution(contract.TenantID(siteName), contract.ActorContext{
-					PrincipalID: role, SubjectUserID: role, PrincipalType: contract.PrincipalHuman, Site: siteName,
+					PrincipalID: subject, SubjectUserID: subject, PrincipalType: contract.PrincipalHuman, Site: siteName,
 					Roles: []string{role}, AuthenticatedAt: time.Now().UTC(),
 				})
 				if err != nil {
@@ -764,6 +772,145 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				}
 				if tc.rows == 1 && out.Data.Data[0]["name"] != tc.name {
 					t.Fatalf("%s %s row = %v", tc.role, tc.query, out.Data.Data[0])
+				}
+			}
+
+			// 11. #91: the Sale detail. Two Cashiers each ring a sale; the Manager
+			// rang sale1 earlier. Owner/Manager/Administrator read the items and
+			// payments of any sale; a Cashier is refused sale_items/sale_payments
+			// (403) and lists only their own sales through my_sales.
+			asUser := func(user string, f func()) {
+				actingUser = user
+				defer func() { actingUser = "" }()
+				f()
+			}
+			sale := func(owner string) string {
+				return one("SELECT name FROM "+tbl("Sale")+" WHERE "+dialect.QuoteIdent("owner")+" = ?", owner)
+			}
+			run("record_sale", "k-detail-a", saleBody(cashierSession, 1, intent("pay-detail-a", 180)))
+			saleA := sale("Cashier")
+			seed("Register", "REG-4", map[string]any{"register_name": "Annex", "location": "LOC-1", "enabled": true})
+			var saleB string
+			asUser("Cashier2", func() {
+				run("open_session", "k-detail-b-sess", `{"register":"REG-4","location":"LOC-1","opening_float":10}`)
+				tillB := fmt.Sprint(mySession("Cashier")[0]["name"])
+				run("record_sale", "k-detail-b", saleBody(tillB, 2, intent("pay-detail-b", 360)))
+				saleB = sale("Cashier2")
+			})
+			saleM := sale1
+			if saleA == "" || saleB == "" || saleA == saleB {
+				t.Fatalf("sales A=%q B=%q", saleA, saleB)
+			}
+			// queryRows posts a published query and returns its status and rows.
+			queryRows := func(role, user, name, input string) (int, []map[string]any, string) {
+				t.Helper()
+				actingUser = user
+				defer func() { actingUser = "" }()
+				rec := serve(role, http.MethodPost, "/q/pos.core/"+name, fmt.Sprintf(`{"input":%s}`, input))
+				var out struct {
+					Data struct {
+						Data []map[string]any `json:"data"`
+					} `json:"data"`
+				}
+				if rec.Code == http.StatusOK && json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+					t.Fatalf("%s %s body=%s", role, name, rec.Body.String())
+				}
+				return rec.Code, out.Data.Data, rec.Body.String()
+			}
+			saleInput := func(sale string) string { return fmt.Sprintf(`{"sale":%q}`, sale) }
+			// Detail reads: table-driven over who may see which sale.
+			for _, tc := range []struct {
+				role, user, query, sale string
+				status, rows            int
+			}{
+				{"Owner", "", "sale_items", saleA, 200, 1},
+				{"Owner", "", "sale_items", saleB, 200, 1},
+				{"Owner", "", "sale_items", saleM, 200, 1},
+				{"Owner", "", "sale_payments", saleA, 200, 1},
+				{"Owner", "", "sale_payments", saleB, 200, 1},
+				{"Owner", "", "sale_payments", saleM, 200, 1},
+				{"Manager", "", "sale_items", saleA, 200, 1},
+				{"Manager", "", "sale_items", saleB, 200, 1},
+				{"Manager", "", "sale_payments", saleA, 200, 1},
+				{"Manager", "", "sale_payments", saleB, 200, 1},
+				{"Manager", "", "sale_items", "SALE-404", 200, 0},
+				{doctype.AdminRole, "", "sale_items", saleA, 200, 1},
+				{doctype.AdminRole, "", "sale_payments", saleB, 200, 1},
+				{"Cashier", "", "sale_items", saleA, 403, 0},
+				{"Cashier", "", "sale_payments", saleA, 403, 0},
+				{"Cashier", "", "sale_items", saleB, 403, 0},
+				{"Cashier", "", "sale_payments", saleB, 403, 0},
+				{"Cashier", "Cashier2", "sale_items", saleB, 403, 0},
+				{"Cashier", "Cashier2", "sale_payments", saleB, 403, 0},
+			} {
+				status, rows, body := queryRows(tc.role, tc.user, tc.query, saleInput(tc.sale))
+				if status != tc.status || status == 200 && len(rows) != tc.rows {
+					t.Fatalf("%s %s %s = %d (%d rows) %s, want %d with %d row(s)", tc.role, tc.query, tc.sale, status, len(rows), body, tc.status, tc.rows)
+				}
+			}
+			// The rows carry what the detail page renders.
+			_, items, _ := queryRows("Owner", "", "sale_items", saleInput(saleB))
+			if len(items) != 1 || items[0]["item"] != "ITM-1" || !decimalIs(items[0]["quantity"], "2") || !decimalIs(items[0]["unit_price"], "180") || !decimalIs(items[0]["amount"], "360") || items[0]["currency"] != "KES" {
+				t.Fatalf("sale_items %s = %v", saleB, items)
+			}
+			_, pays, _ := queryRows("Manager", "", "sale_payments", saleInput(saleB))
+			if len(pays) != 1 || pays[0]["method"] != "Cash" || !decimalIs(pays[0]["amount"], "360") || pays[0]["currency"] != "KES" || pays[0]["reference"] == nil || pays[0]["reference"] == "" {
+				t.Fatalf("sale_payments %s = %v", saleB, pays)
+			}
+			// The sale input is required: a missing one is a 400 naming it.
+			for _, q := range []string{"sale_items", "sale_payments"} {
+				if status, _, body := queryRows("Owner", "", q, `{}`); status != http.StatusBadRequest || !strings.Contains(body, "sale") {
+					t.Fatalf("%s without sale = %d %s, want 400", q, status, body)
+				}
+			}
+			// my_sales: each Cashier sees only their own sales (the day's earlier
+			// Cashier sales are theirs too), by list and by name.
+			for _, tc := range []struct {
+				role, user, input string
+				status            int
+				owner             string   // every returned row is owned by this user
+				has, hasNot       []string // sales that must / must not be listed
+			}{
+				{"Cashier", "", `{}`, 200, "Cashier", []string{saleA}, []string{saleB, saleM}},
+				{"Cashier", "Cashier2", `{}`, 200, "Cashier2", []string{saleB}, []string{saleA, saleM}},
+				{"Cashier", "", fmt.Sprintf(`{"name":%q}`, saleA), 200, "Cashier", []string{saleA}, []string{saleB, saleM}},
+				{"Cashier", "", fmt.Sprintf(`{"name":%q}`, saleB), 200, "", nil, []string{saleA, saleB, saleM}},
+				{"Cashier", "", fmt.Sprintf(`{"name":%q}`, saleM), 200, "", nil, []string{saleA, saleB, saleM}},
+				{"Cashier", "Cashier2", fmt.Sprintf(`{"name":%q}`, saleA), 200, "", nil, []string{saleA, saleB, saleM}},
+				{"Cashier", "Cashier3", `{}`, 200, "", nil, []string{saleA, saleB, saleM}},
+				{"Owner", "", `{}`, 403, "", nil, nil},
+				{"Manager", "", `{}`, 403, "", nil, nil},
+			} {
+				status, rows, body := queryRows(tc.role, tc.user, "my_sales", tc.input)
+				if status != tc.status {
+					t.Fatalf("%s/%s my_sales %s = %d %s, want %d", tc.role, tc.user, tc.input, status, body, tc.status)
+				}
+				var got []string
+				for _, r := range rows {
+					got = append(got, fmt.Sprint(r["name"]))
+					if r["owner"] != tc.owner || r["register"] == nil || r["total"] == nil || r["status"] == nil {
+						t.Fatalf("my_sales %s/%s row = %v, want owner %q", tc.role, tc.user, r, tc.owner)
+					}
+				}
+				for _, n := range tc.has {
+					if !slices.Contains(got, n) {
+						t.Fatalf("%s/%s my_sales %s = %v, want %s listed", tc.role, tc.user, tc.input, got, n)
+					}
+				}
+				for _, n := range tc.hasNot {
+					if slices.Contains(got, n) {
+						t.Fatalf("%s/%s my_sales %s = %v leaks %s", tc.role, tc.user, tc.input, got, n)
+					}
+				}
+			}
+			// The Administrator bypass reads every sale through my_sales.
+			if _, rows, _ := queryRows(doctype.AdminRole, "", "my_sales", `{}`); len(rows) < 3 {
+				t.Fatalf("Administrator my_sales rows = %d of %s, want every sale", len(rows), count("Sale"))
+			}
+			// Neither Cashier gains the unscoped list or direct child reads.
+			for _, q := range []string{"recent_sales", "today_totals"} {
+				if status, _, body := queryRows("Cashier", "", q, `{}`); status != http.StatusForbidden {
+					t.Fatalf("Cashier %s = %d %s, want 403", q, status, body)
 				}
 			}
 		})

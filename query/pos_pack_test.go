@@ -28,7 +28,7 @@ func TestPOSPackQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "closed_session": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment", "payments_by_account": "Sale Payment"}
+	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "closed_session": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "sale_items": "Sale Item", "sale_payments": "Sale Payment", "my_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment", "payments_by_account": "Sale Payment"}
 	if len(defs) != len(want) {
 		t.Fatalf("got %d queries, want %d", len(defs), len(want))
 	}
@@ -113,12 +113,12 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 	conn.SetMaxOpenConns(1)
 	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	for _, s := range []string{
-		"CREATE TABLE `tabSale` (name TEXT, register TEXT, customer TEXT, status TEXT, till_session TEXT, creation TEXT, total NUMERIC)",
+		"CREATE TABLE `tabSale` (name TEXT, register TEXT, customer TEXT, status TEXT, till_session TEXT, creation TEXT, total NUMERIC, owner TEXT)",
 		"CREATE TABLE `tabSale__payments` (name TEXT, parent TEXT, method TEXT, amount NUMERIC, payment_account TEXT, verification TEXT)",
 		"CREATE TABLE `tabTill Session` (name TEXT, shift TEXT, register TEXT, location TEXT, cashier TEXT, status TEXT, opening_float NUMERIC, expected_cash NUMERIC, closing_count NUMERIC, creation TEXT)",
 		"CREATE TABLE `tabRegister` (name TEXT, register_name TEXT, location TEXT, enabled INTEGER)",
 		"INSERT INTO `tabRegister` VALUES ('R1','Front','L1',1),('R0','Old','L1',0)",
-		"INSERT INTO `tabSale` VALUES ('S1','R1','C1','Paid','TS1','2026-11-06 09:00:00',10),('S2','R1','C1','Paid','TS1','2026-11-05 09:00:00',99),('S3','R1','C1','Return','TS1','2026-11-06 10:00:00',4)",
+		"INSERT INTO `tabSale` VALUES ('S1','R1','C1','Paid','TS1','2026-11-06 09:00:00',10,'ann'),('S2','R1','C1','Paid','TS1','2026-11-05 09:00:00',99,'ann'),('S3','R1','C1','Return','TS1','2026-11-06 10:00:00',4,'bob')",
 		"INSERT INTO `tabSale__payments` VALUES ('P1','S1','Cash',10,NULL,NULL),('P2','S2','Cash',99,NULL,NULL),('P3','S3','Cash',4,NULL,NULL)",
 		"INSERT INTO `tabTill Session` VALUES ('TS1','SH1','R1','L1','c1','Open',5,15,NULL,'2026-11-06 08:00:00'),('TS0','SH0','R1','L1','c1','Closed',5,5,5,'2026-11-05 08:00:00')",
 	} {
@@ -127,10 +127,10 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 		}
 	}
 	// my_session has no actor here, so it matches nobody.
-	wantRows := map[string]int{"my_session": 0, "my_registers": 1, "open_till": 1, "recent_sales": 3, "today_totals": 1, "payments_by_method": 1, "refunds_by_method": 1, "payments_by_account": 0}
+	wantRows := map[string]int{"my_session": 0, "my_registers": 1, "open_till": 1, "recent_sales": 3, "my_sales": 3, "today_totals": 1, "payments_by_method": 1, "refunds_by_method": 1, "payments_by_account": 0}
 	for _, d := range defs {
-		if d.Name == "sale_lines" {
-			continue // its sale input is required: TestPOSSaleLines pins the 400
+		if d.Name == "sale_lines" || d.Name == "sale_items" || d.Name == "sale_payments" {
+			continue // the sale input is required: TestPOSSaleLines and TestPOSSaleDetailQueries pin the 400
 		}
 		t.Run(d.Name, func(t *testing.T) {
 			if d.Name == "closed_session" || d.Name == "my_closed_session" {
@@ -450,4 +450,107 @@ func TestPOSClosedSession(t *testing.T) {
 	if rows := run(mine, Request{FullRead: false, Actor: "bob"}, "SHORT"); len(rows) != 0 {
 		t.Fatalf("bob sees ann's till: %v", rows)
 	}
+}
+
+// TestPOSSaleDetailQueries pins the Sale detail reads: sale_items and
+// sale_payments return one sale's child rows (the sale input is required and
+// other sales never leak), and my_sales is the actor-scoped sales list.
+func TestPOSSaleDetailQueries(t *testing.T) {
+	dts, err := doctype.ParseDirectory("../config/pos/doctypes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := doctype.NewRegistry()
+	for _, d := range dts {
+		reg.Register(d)
+	}
+	defs, err := LoadDir("../config/pos/queries", reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]*Definition{}
+	for _, d := range defs {
+		byName[d.Name] = d
+	}
+	conn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Skip(err)
+	}
+	conn.SetMaxOpenConns(1)
+	for _, s := range []string{
+		"CREATE TABLE `tabSale` (name TEXT, register TEXT, customer TEXT, status TEXT, creation TEXT, total NUMERIC, owner TEXT)",
+		"CREATE TABLE `tabSale__items` (name TEXT, parent TEXT, idx INTEGER, item TEXT, quantity NUMERIC, currency TEXT, unit_price NUMERIC, amount NUMERIC)",
+		"CREATE TABLE `tabSale__payments` (name TEXT, parent TEXT, idx INTEGER, method TEXT, amount NUMERIC, currency TEXT, reference TEXT, payment_account TEXT, verification TEXT)",
+		"INSERT INTO `tabSale` VALUES ('S1','R1','C','Paid','2026-11-06 09:00:00',30,'ann'),('S2','R1','C','Paid','2026-11-06 10:00:00',5,'bob'),('S3','R1','C','Paid','2026-11-06 11:00:00',7,'ann')",
+		"INSERT INTO `tabSale__items` VALUES ('I2','S1',2,'ITEM-2',1,'KES',10,10),('I1','S1',1,'ITEM-1',2,'KES',10,20),('I3','S2',1,'ITEM-1',1,'KES',5,5)",
+		"INSERT INTO `tabSale__payments` VALUES ('P1','S1',1,'Cash',10,'KES',NULL,NULL,NULL),('P2','S1',2,'Mobile Money',20,'KES','ref-1','ACC1','provider_confirmed'),('P3','S2',1,'Cash',5,'KES',NULL,NULL,NULL)",
+	} {
+		if _, err := conn.Exec(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(name string, req Request) (*Page, error) {
+		return Run(context.Background(), conn, db.Resolve("libsql"), byName[name], req)
+	}
+	names := func(p *Page) []string {
+		var out []string
+		for _, r := range p.Rows {
+			out = append(out, fmt.Sprint(r["name"]))
+		}
+		return out
+	}
+	tests := []struct {
+		name, query string
+		req         Request
+		want        []string
+	}{
+		{"items of S1 in line order", "sale_items", Request{FullRead: true, Input: map[string]any{"sale": "S1"}}, []string{"I1", "I2"}},
+		{"items of S2", "sale_items", Request{FullRead: true, Input: map[string]any{"sale": "S2"}}, []string{"I3"}},
+		{"items of unknown sale", "sale_items", Request{FullRead: true, Input: map[string]any{"sale": "NOPE"}}, nil},
+		{"payments of S1 in line order", "sale_payments", Request{FullRead: true, Input: map[string]any{"sale": "S1"}}, []string{"P1", "P2"}},
+		{"payments of S2", "sale_payments", Request{FullRead: true, Input: map[string]any{"sale": "S2"}}, []string{"P3"}},
+		{"my_sales narrows to the actor", "my_sales", Request{Actor: "ann", Input: map[string]any{}}, []string{"S3", "S1"}},
+		{"my_sales other actor", "my_sales", Request{Actor: "bob", Input: map[string]any{}}, []string{"S2"}},
+		{"my_sales stranger", "my_sales", Request{Actor: "carol", Input: map[string]any{}}, nil},
+		{"my_sales by name own", "my_sales", Request{Actor: "ann", Input: map[string]any{"name": "S1"}}, []string{"S1"}},
+		{"my_sales by name of another cashier", "my_sales", Request{Actor: "ann", Input: map[string]any{"name": "S2"}}, nil},
+		{"my_sales full read sees all", "my_sales", Request{FullRead: true, Actor: "ann", Input: map[string]any{}}, []string{"S3", "S2", "S1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := run(tt.query, tt.req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := names(p); !slices.Equal(got, tt.want) {
+				t.Fatalf("rows = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	t.Run("sale input is required", func(t *testing.T) {
+		for _, q := range []string{"sale_items", "sale_payments"} {
+			if got := byName[q].RequiredInputs(); len(got) != 1 || got[0] != "sale" {
+				t.Errorf("%s required inputs = %v, want [sale]", q, got)
+			}
+			var ie *InputError
+			if _, err := run(q, Request{FullRead: true, Input: map[string]any{}}); !errors.As(err, &ie) || ie.Field != "sale" {
+				t.Errorf("%s without sale = %v, want InputError on sale", q, err)
+			}
+		}
+	})
+	t.Run("payment row carries its reconciliation columns", func(t *testing.T) {
+		p, err := run("sale_payments", Request{FullRead: true, Input: map[string]any{"sale": "S1"}})
+		if err != nil || len(p.Rows) != 2 {
+			t.Fatalf("rows = %v err = %v", p, err)
+		}
+		r := p.Rows[1]
+		if r["method"] != "Mobile Money" || r["reference"] != "ref-1" || r["payment_account"] != "ACC1" || r["verification"] != "provider_confirmed" || r["currency"] != "KES" {
+			t.Fatalf("row = %v", r)
+		}
+	})
+	t.Run("declared scope", func(t *testing.T) {
+		if byName["my_sales"].OwnerField != "owner" || byName["sale_items"].OwnerField != "" || byName["sale_payments"].OwnerField != "" {
+			t.Fatalf("owner fields: my_sales=%q sale_items=%q sale_payments=%q", byName["my_sales"].OwnerField, byName["sale_items"].OwnerField, byName["sale_payments"].OwnerField)
+		}
+	})
 }
