@@ -140,6 +140,14 @@ Runtime config comes from environment variables plus site metadata in the databa
 | `KORA_RATE_BURST` | `200` | Rate limiter burst allowance |
 | `KORA_CONSOLE_ONBOARDING_ENABLED` | `false` | Enable public console onboarding at `/onboard` |
 
+### Environment variable names (`ZANA_*` and `KORA_*`)
+
+The product is being renamed to Zana. Every variable above is also accepted with a `ZANA_` prefix, and `ZANA_*` is the preferred spelling: `ZANA_DB_HOST` is the same setting as `KORA_DB_HOST`. The mapping is by prefix only, so `KORA_CLOUD_KORA_RELOAD_URL` becomes `ZANA_CLOUD_KORA_RELOAD_URL`.
+
+- `KORA_*` variables are deprecated but keep working for one release, and support is planned to be removed in the release after next. When any are in use, startup logs one line listing their names (never their values).
+- If both spellings of a variable are set to different values, `ZANA_*` wins and startup logs one warning naming the variable (never the values).
+- An empty value counts as unset, so an empty `ZANA_X` does not blank a set `KORA_X`.
+
 ## SDK Quick Start
 
 Add Kigae to your Go project:
