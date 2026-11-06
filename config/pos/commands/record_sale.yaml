@@ -24,8 +24,11 @@ require:
         name: $input.till_session
         status: Open
     message: Till is not open
+  - equal: [$computed.paid, $computed.total]
+    message: Payments must add up to the sale total
 compute:
   total: {sum: $input.items, expr: "quantity * unit_price"}
+  paid: {sum: $input.payments, expr: "amount"}
 transaction:
   - as: sale
     create:

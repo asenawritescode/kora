@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"github.com/asenawritescode/kora/contract"
 	"strings"
 	"testing"
 )
@@ -97,5 +98,102 @@ func TestPaymentGuardParseAndValidation(t *testing.T) {
 		if _, err := ParseCommandResource([]byte(src)); err == nil {
 			t.Errorf("%s: want error", name)
 		}
+	}
+}
+
+const equalGuardYAML = `name: pos.record_sale
+version: 1
+input:
+  record: Sale
+require:
+  - equal: [$computed.paid, $computed.total]
+    message: Payments must equal the sale total
+compute:
+  total: {sum: $input.items, expr: "quantity * unit_price"}
+  paid: {sum: $input.payments, expr: "amount"}
+transaction:
+  - create:
+      record: Sale
+      values:
+        register: $input.register
+`
+
+func TestEqualGuardParseAndValidation(t *testing.T) {
+	def, err := ParseCommandResource([]byte(equalGuardYAML))
+	if err != nil || len(def.Require) != 1 || len(def.Require[0].Equal) != 2 {
+		t.Fatalf("parse: %v %#v", err, def)
+	}
+	invalid := map[string]string{
+		"one operand":     strings.Replace(equalGuardYAML, "[$computed.paid, $computed.total]", "[$computed.paid]", 1),
+		"three operands":  strings.Replace(equalGuardYAML, "[$computed.paid, $computed.total]", "[$computed.paid, $computed.total, 1]", 1),
+		"unknown compute": strings.Replace(equalGuardYAML, "$computed.paid,", "$computed.nope,", 1),
+		"item operand":    strings.Replace(equalGuardYAML, "$computed.paid,", "$item.amount,", 1),
+		"steps operand":   strings.Replace(equalGuardYAML, "$computed.paid,", "$steps.sale.name,", 1),
+		"non numeric":     strings.Replace(equalGuardYAML, "$computed.paid,", "abc,", 1),
+		"two kinds":       strings.Replace(equalGuardYAML, "  - equal:", "  - lock: {record: Sale, name: $input.sale}\n    equal:", 1),
+		"alias on equal":  strings.Replace(equalGuardYAML, "    message:", "    as: x\n    message:", 1),
+	}
+	for name, src := range invalid {
+		if _, err := ParseCommandResource([]byte(src)); err == nil {
+			t.Errorf("%s: definition was accepted", name)
+		}
+	}
+}
+
+// TestEqualGuardComparesComputedSums runs the compute block and the equality
+// guard exactly as the executor does, over the published decimal rules.
+func TestEqualGuardComparesComputedSums(t *testing.T) {
+	def, err := ParseCommandResource([]byte(equalGuardYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := func(qty, price any) map[string]any {
+		return map[string]any{"quantity": qty, "unit_price": price}
+	}
+	pay := func(amount any) map[string]any { return map[string]any{"amount": amount} }
+	cases := []struct {
+		name     string
+		items    []any
+		payments []any
+		wantErr  bool
+	}{
+		{"empty payments", []any{line(1.0, 65.0)}, []any{}, true},
+		{"short", []any{line(2.0, 65.0)}, []any{pay(65.0)}, true},
+		{"exact", []any{line(2.0, 65.0)}, []any{pay(130.0)}, false},
+		{"exact split", []any{line(2.0, 65.0)}, []any{pay(100.0), pay(30.0)}, false},
+		{"over", []any{line(1.0, 2.02)}, []any{pay(3.01)}, true},
+		{"decimal exact", []any{line(3.0, 0.1)}, []any{pay(0.3)}, false},
+		{"decimal string exact", []any{line(3.0, "0.1")}, []any{pay("0.30")}, false},
+		{"one cent short", []any{line(1.0, 19.99)}, []any{pay(19.98)}, true},
+		{"zero total no payments", []any{}, []any{}, false},
+		{"zero total with payment", []any{}, []any{pay(1.0)}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := map[string]any{"items": tc.items, "payments": tc.payments}
+			computed, err := evalCompute(def.Compute, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cerr := checkEqualGuard(def.Require[0], refEnv{input: input, computed: computed}, 0)
+			if (cerr != nil) != tc.wantErr {
+				t.Fatalf("error = %v, wantErr %v", cerr, tc.wantErr)
+			}
+			if cerr != nil && (cerr.Type != contract.CodeValidationFailed || cerr.Message != "Payments must equal the sale total") {
+				t.Fatalf("error = %+v", cerr)
+			}
+		})
+	}
+}
+
+func TestEqualGuardDefaultMessageAndBadOperand(t *testing.T) {
+	g := CommandGuard{Equal: []string{"$input.a", "$input.b"}}
+	env := refEnv{input: map[string]any{"a": "1", "b": "2"}}
+	if cerr := checkEqualGuard(g, env, 3); cerr == nil || cerr.Type != contract.CodeValidationFailed || !strings.Contains(cerr.Message, "require 3") {
+		t.Fatalf("default message: %+v", cerr)
+	}
+	env.input["b"] = "x"
+	if cerr := checkEqualGuard(g, env, 3); cerr == nil || cerr.Type != contract.CodeValidationFailed {
+		t.Fatalf("non numeric operand: %+v", cerr)
 	}
 }
