@@ -13,18 +13,15 @@ concurrency:
 jobs:
   mysql:
     name: Integration (MySQL)
-    if: ${{ false }} # temporarily disabled during M1; re-enable after the last ticket
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     services:
       mysql:
         image: mysql:8.0
         env:
-          # Matches the local test fixtures, some of which also dial port 3312.
           MYSQL_ROOT_PASSWORD: kora-test-only
         ports:
           - 3306:3306
-          - 3312:3306
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -pkora-test-only"
           --health-interval=5s --health-timeout=5s --health-retries=30
@@ -46,9 +43,8 @@ jobs:
 
   postgres:
     name: Integration (Postgres)
-    if: ${{ false }} # temporarily disabled during M1; re-enable after the last ticket
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16

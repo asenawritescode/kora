@@ -1,96 +1,87 @@
 #!/usr/bin/env bash
 # Runs the integration-tagged Go suites against one SQL dialect.
-# Every package starts with freshly created databases, because several suites
-# share one DSN variable across packages and leave tables behind.
+#
+# Isolation: every Go package gets freshly created databases of its own (one per
+# DSN variable the package's tests read), so a package never sees tables left by
+# another and a rerun starts clean. Variables are discovered from the tests
+# (KORA_*_MYSQL_DSN / KORA_*_POSTGRES_DSN), so a new suite needs no change here.
+# Tests that need a database per test create it from their DSN with
+# internal/disposabledb.
 #
 # Usage: scripts/ci-integration.sh mysql|postgres
-# Tests listed in scripts/ci-integration-known-failures/<dialect>.txt are skipped.
+# Server defaults match the CI service containers; override for a local run:
+#   KORA_IT_MYSQL_HOST/PORT, KORA_IT_POSTGRES_HOST/PORT, MYSQL_ROOT_PASSWORD,
+#   PGUSER/PGPASSWORD.
+# Every integration test must pass: there is no skip list. A test that cannot run
+# in CI is fixed, or skipped in its own source with an issue link.
 set -uo pipefail
 
 dialect="${1:?usage: ci-integration.sh mysql|postgres}"
 
-# Suites whose DSN points at the server; they create and drop their own databases.
-mysql_server_vars=(
-  KORA_TEST_DSN KORA_ANALYTICS_DISPOSABLE_MYSQL_DSN KORA_OUTBOX_DISPOSABLE_MYSQL_DSN
-  KORA_API_LIVE_MYSQL_DSN KORA_REQUEST_ISOLATION_DISPOSABLE_DSN
-)
-# Suites that expect a database of their own.
-mysql_db_vars=(
-  KORA_AUTH_IDENTITY_DISPOSABLE_MYSQL_DSN
-  KORA_AI_INVENTORY_DISPOSABLE_MYSQL_DSN KORA_AI_LIVE_MYSQL_DSN KORA_AI_MUTATION_MYSQL_DSN
-  KORA_ASYNC_HOOK_DISPOSABLE_MYSQL_DSN KORA_CONFIG_DISPOSABLE_MYSQL_DSN KORA_CRM_DISPOSABLE_MYSQL_DSN
-  KORA_DBACCESS_DISPOSABLE_MYSQL_DSN KORA_DURABLE_SCAN_DISPOSABLE_MYSQL_DSN
-  KORA_ENGINE_HOOK_DISPOSABLE_MYSQL_DSN KORA_ENGINE_MODULE_COMMAND_DISPOSABLE_MYSQL_DSN
-  KORA_ENGINE_WORKFLOW_DISPOSABLE_MYSQL_DSN KORA_MANAGEMENT_DISPOSABLE_MYSQL_DSN
-  KORA_MANAGEMENT_PROVISION_DISPOSABLE_MYSQL_DSN KORA_MCP_READ_MYSQL_DSN
-  KORA_PROCESS_DISPOSABLE_MYSQL_DSN KORA_PUBLISHED_QUERY_DISPOSABLE_MYSQL_DSN KORA_QUERY_TEST_MYSQL_DSN
-  KORA_RECON_DISPOSABLE_MYSQL_DSN KORA_SCHEDULER_DISPOSABLE_MYSQL_DSN
-  KORA_SITE_CONFIG_VERSION_DISPOSABLE_MYSQL_DSN KORA_SITE_DIRECTORY_LIVE_MYSQL_DSN
-  KORA_TODO_DISPOSABLE_MYSQL_DSN KORA_WORKFLOW_DISPOSABLE_MYSQL_DSN
-)
-postgres_db_vars=(
-  KORA_AUTH_IDENTITY_DISPOSABLE_POSTGRES_DSN
-  KORA_AI_INVENTORY_DISPOSABLE_POSTGRES_DSN KORA_AI_MUTATION_POSTGRES_DSN
-  KORA_ANALYTICS_DISPOSABLE_POSTGRES_DSN KORA_API_DISPOSABLE_POSTGRES_DSN KORA_API_LIVE_POSTGRES_DSN
-  KORA_ASYNC_HOOK_DISPOSABLE_POSTGRES_DSN KORA_CONFIG_DISPOSABLE_POSTGRES_DSN
-  KORA_CONFIG_REVISION_DISPOSABLE_POSTGRES_DSN KORA_DBACCESS_DISPOSABLE_POSTGRES_DSN
-  KORA_DURABLE_SCAN_DISPOSABLE_POSTGRES_DSN KORA_ENGINE_HOOK_DISPOSABLE_POSTGRES_DSN
-  KORA_MANAGEMENT_DISPOSABLE_POSTGRES_DSN KORA_MANAGEMENT_PROVISION_DISPOSABLE_POSTGRES_DSN
-  KORA_NOTIFICATIONS_DISPOSABLE_POSTGRES_DSN KORA_OUTBOX_DISPOSABLE_POSTGRES_DSN
-  KORA_PROCESS_DISPOSABLE_POSTGRES_DSN KORA_RECON_DISPOSABLE_POSTGRES_DSN
-  KORA_REQUESTS_DISPOSABLE_POSTGRES_DSN KORA_SCHEDULER_DISPOSABLE_POSTGRES_DSN
-  KORA_SECRET_LIVE_POSTGRES_DSN KORA_SITE_DIRECTORY_LIVE_POSTGRES_DSN
-  KORA_SITE_DIRECTORY_SUMMARY_POSTGRES_DSN KORA_WORKFLOW_DISPOSABLE_POSTGRES_DSN
-  KORA_AUTH_DISPOSABLE_POSTGRES_DSN KORA_QUERY_TEST_POSTGRES_DSN
-)
+mysql_host="${KORA_IT_MYSQL_HOST:-127.0.0.1}"
+mysql_port="${KORA_IT_MYSQL_PORT:-3306}"
+pg_host="${KORA_IT_POSTGRES_HOST:-127.0.0.1}"
+pg_port="${KORA_IT_POSTGRES_PORT:-5432}"
+mysql_opts="parseTime=true&multiStatements=true"
+mysql_root=(mysql -h "$mysql_host" -P "$mysql_port" -uroot -p"${MYSQL_ROOT_PASSWORD:-}")
 
 db_name() { echo "it_$(echo "$1" | tr 'A-Z' 'a-z' | sed 's/^kora_//; s/_dsn$//')"; }
+mysql_dsn() { echo "root:${MYSQL_ROOT_PASSWORD}@tcp(${mysql_host}:${mysql_port})/$1?${mysql_opts}"; }
+postgres_dsn() { echo "postgres://${PGUSER}:${PGPASSWORD}@${pg_host}:${pg_port}/$1?sslmode=disable"; }
 
-mysql_root=(mysql -h 127.0.0.1 -P 3306 -uroot -p"${MYSQL_ROOT_PASSWORD:-}")
-mysql_opts="parseTime=true&multiStatements=true"
+# DSN variables read by the tests of one package directory.
+package_vars() {
+  local pattern
+  case "$dialect" in
+    mysql) pattern='"(KORA_TEST_DSN|KORA_REQUEST_ISOLATION_DISPOSABLE_DSN|KORA_[A-Z0-9_]+_MYSQL_DSN)"' ;;
+    postgres) pattern='"KORA_[A-Z0-9_]+_POSTGRES_DSN"' ;;
+  esac
+  grep -hoE "$pattern" "$1"/*_test.go 2>/dev/null | tr -d '"' | sort -u
+}
 
-reset_databases() {
+recreate_database() {
   case "$dialect" in
     mysql)
-      for v in "${mysql_db_vars[@]}"; do
-        db=$(db_name "$v")
-        "${mysql_root[@]}" -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" 2>/dev/null
-      done ;;
+      "${mysql_root[@]}" -e "DROP DATABASE IF EXISTS \`$1\`; CREATE DATABASE \`$1\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" ;;
     postgres)
-      for v in "${postgres_db_vars[@]}"; do
-        db=$(db_name "$v")
-        psql -h 127.0.0.1 -U "$PGUSER" -d postgres -q -v ON_ERROR_STOP=1 \
-          -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)" -c "CREATE DATABASE \"$db\""
-      done ;;
+      psql -h "$pg_host" -p "$pg_port" -U "$PGUSER" -d postgres -q -v ON_ERROR_STOP=1 \
+        -c "DROP DATABASE IF EXISTS \"$1\" WITH (FORCE)" -c "CREATE DATABASE \"$1\"" ;;
   esac
 }
 
+# Exports the DSN variables for one package and recreates their databases.
+prepare_package() {
+  local v db
+  for v in $(package_vars "$1"); do
+    db=$(db_name "$v")
+    if ! recreate_database "$db" >/dev/null; then
+      echo "cannot create database $db for $v" >&2
+      return 1
+    fi
+    case "$dialect" in
+      mysql) export "$v=$(mysql_dsn "$db")" ;;
+      postgres) export "$v=$(postgres_dsn "$db")" ;;
+    esac
+  done
+}
+
 case "$dialect" in
-  mysql)
-    for v in "${mysql_server_vars[@]}"; do export "$v=root:${MYSQL_ROOT_PASSWORD}@tcp(127.0.0.1:3306)/?${mysql_opts}"; done
-    for v in "${mysql_db_vars[@]}"; do export "$v=root:${MYSQL_ROOT_PASSWORD}@tcp(127.0.0.1:3306)/$(db_name "$v")?${mysql_opts}"; done ;;
-  postgres)
-    for v in "${postgres_db_vars[@]}"; do export "$v=postgres://${PGUSER}:${PGPASSWORD}@127.0.0.1:5432/$(db_name "$v")?sslmode=disable"; done ;;
+  mysql) : "${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}" ;;
+  postgres) : "${PGUSER:?set PGUSER}" "${PGPASSWORD:?set PGPASSWORD}" ;;
   *) echo "unknown dialect $dialect" >&2; exit 2 ;;
 esac
 
-known_failures="$(dirname "$0")/ci-integration-known-failures/${dialect}.txt"
-skip_args=()
-if [ -f "$known_failures" ]; then
-  names=$(sed 's/#.*//' "$known_failures" | awk 'NF {print $1}' | paste -sd'|')
-  if [ -n "$names" ]; then
-    skip_args=(-skip "^(${names})\$")
-    echo "Skipping $(echo "$names" | tr '|' '\n' | wc -l) known ${dialect} failures listed in ${known_failures}"
-  fi
-fi
-
 failed=()
-for pkg in $(go list -tags integration ./...); do
-  reset_databases
-  if ! go test -tags integration -count=1 -timeout 20m "${skip_args[@]}" "$pkg"; then
+while read -r pkg dir <&3; do
+  if ! prepare_package "$dir"; then
+    failed+=("$pkg (database setup)")
+    continue
+  fi
+  # stdin is the package list on fd 3, but keep tools from reading fd 0 as well.
+  if ! go test -tags integration -count=1 -timeout 20m "$pkg" </dev/null; then
     failed+=("$pkg")
   fi
-done
+done 3< <(go list -tags integration -f '{{.ImportPath}} {{.Dir}}' ./...)
 
 if [ "${#failed[@]}" -gt 0 ]; then
   printf 'Failed packages:\n'; printf '  %s\n' "${failed[@]}"
