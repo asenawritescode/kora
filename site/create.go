@@ -48,6 +48,11 @@ type CreateSiteInput struct {
 	AdminFullName  string // defaults to "Administrator"
 	CloudSubjectID string
 
+	// DisplayName optionally seeds the tenant's branding.app_name (the name
+	// shown on sign-in, in the sidebar and as the page title). Empty keeps the
+	// hostname-derived label. It never affects the hostname or database name.
+	DisplayName string
+
 	// Platform defaults for DB (filled by caller from env/StartupConfig).
 	PlatformDBHost     string
 	PlatformDBPort     int
@@ -209,6 +214,11 @@ func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteR
 		return nil, fmt.Errorf("invalid tenant deployment assignment: %w", err)
 	}
 	input.RuntimeCellID = runtimeCellID
+	displayName, err := contract.NormalizeTenantDisplayName(input.DisplayName)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tenant display name: %w", err)
+	}
+	input.DisplayName = displayName
 
 	// CLI setup commonly supplies only PlatformDBDSN. Open a short-lived
 	// platform connection for durable site discovery when no shared handle was
@@ -347,6 +357,15 @@ func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteR
 		return nil, fmt.Errorf("creating initial site config version: %w", err)
 	}
 
+	// Step 5b: Seed the workspace display name. A retry keeps whatever value
+	// is already stored so a later administrator rename is never reverted.
+	if err := seedTenantDisplayNameContext(ctx, db, dialect, input.Hostname, input.DisplayName); err != nil {
+		if isOwnedDB {
+			_ = db.Close()
+		}
+		return nil, fmt.Errorf("seeding tenant display name: %w", err)
+	}
+
 	// Step 6: Publish the tenant only after its database and bootstrap are ready.
 	if _, err := NewSQLSiteRegistry(input.PlatformDB, input.PlatformDBType).SetStatusContext(ctx, siteID, "active"); err != nil {
 		if isOwnedDB {
@@ -407,6 +426,31 @@ func createPasswordlessAdminUserContext(ctx context.Context, db *sql.DB, dialect
 	)
 	if err != nil {
 		return fmt.Errorf("inserting passwordless Cloud administrator: %w", err)
+	}
+	return nil
+}
+
+// seedTenantDisplayNameContext stores branding.app_name only when no value
+// exists yet. An empty name leaves the hostname-derived label in place.
+func seedTenantDisplayNameContext(ctx context.Context, db *sql.DB, dialect sqlDialect.QueryDialect, site, displayName string) error {
+	if displayName == "" {
+		return nil
+	}
+	query := `INSERT INTO _kora_site_setting (site, setting_key, setting_value) VALUES (?, ?, ?)`
+	driver, _ := dialect.(interface{ DriverName() string })
+	if driver == nil {
+		return errors.New("tenant display name seeding requires a known SQL dialect")
+	}
+	switch driver.DriverName() {
+	case "mysql":
+		query += ` ON DUPLICATE KEY UPDATE setting_value = setting_value`
+	case "postgres", "libsql":
+		query += ` ON CONFLICT (site, setting_key) DO NOTHING`
+	default:
+		return fmt.Errorf("tenant display name seeding does not support dialect %q", driver.DriverName())
+	}
+	if _, err := db.ExecContext(ctx, sqlDialect.Rebind(dialect, query), site, "branding.app_name", displayName); err != nil {
+		return fmt.Errorf("inserting branding.app_name: %w", err)
 	}
 	return nil
 }

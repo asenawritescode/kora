@@ -4423,6 +4423,10 @@
         "deployment_id": {
           "type": "string"
         },
+        "display_name": {
+          "maxLength": 120,
+          "type": "string"
+        },
         "meta": {
           "$ref": "#/$defs/CommandMeta"
         },
@@ -10587,6 +10591,10 @@
           "type": "string"
         },
         "deployment_id": {
+          "type": "string"
+        },
+        "display_name": {
+          "maxLength": 120,
           "type": "string"
         },
         "meta": {

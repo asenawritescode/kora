@@ -266,6 +266,49 @@ type ProvisionTenant struct {
 	//contract:maxLength=64
 	//contract:pattern=^[a-f0-9]{64}$
 	PackageDigest string `json:"package_digest,omitempty"`
+	// DisplayName is the optional human workspace name the customer typed (for
+	// example "Dbg Duka"). It seeds the tenant's branding.app_name, shown on
+	// sign-in, in the sidebar and as the page title. It is a presentation seed
+	// only: it is not part of tenant identity, never affects aliases, database
+	// names or the hostname slug, and a provisioning retry does not overwrite a
+	// name the tenant administrator later changed. Absent keeps the
+	// hostname-derived label. The Engine trims surrounding whitespace; control
+	// and bidirectional-override characters are rejected.
+	//contract:maxLength=120
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// MaxTenantDisplayNameLength caps ProvisionTenant.DisplayName in Unicode
+// characters after trimming.
+const MaxTenantDisplayNameLength = 120
+
+// NormalizeTenantDisplayName trims surrounding whitespace and validates a
+// provisioning display name. An empty input means "not supplied" and returns
+// an empty name; a value that is only whitespace is rejected.
+func NormalizeTenantDisplayName(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	if !utf8.ValidString(value) {
+		return "", fmt.Errorf("display name must be valid UTF-8")
+	}
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", fmt.Errorf("display name must not be blank")
+	}
+	if utf8.RuneCountInString(trimmed) > MaxTenantDisplayNameLength {
+		return "", fmt.Errorf("display name must be %d characters or fewer", MaxTenantDisplayNameLength)
+	}
+	for _, r := range trimmed {
+		if unicode.IsControl(r) || isBidiControl(r) {
+			return "", fmt.Errorf("display name must not contain control characters")
+		}
+	}
+	return trimmed, nil
+}
+
+func isBidiControl(r rune) bool {
+	return r == '\u061c' || r == '\u200e' || r == '\u200f' || (r >= '\u202a' && r <= '\u202e') || (r >= '\u2066' && r <= '\u2069')
 }
 
 // RequestTenantInvitation starts a durable Engine-owned sign-in-link
@@ -583,6 +626,9 @@ func ValidateProvisionTenant(cmd ProvisionTenant) error {
 	}
 	if cmd.PackageDigest != "" && !packageDigestPattern.MatchString(cmd.PackageDigest) {
 		return fmt.Errorf("package digest must be lowercase SHA-256 hex")
+	}
+	if _, err := NormalizeTenantDisplayName(cmd.DisplayName); err != nil {
+		return err
 	}
 	return nil
 }
