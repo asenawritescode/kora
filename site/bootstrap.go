@@ -113,21 +113,6 @@ func BootstrapSystemTablesContext(ctx context.Context, database *sql.DB, dialect
 			return err
 		}
 	}
-	var conversationDDL []string
-	switch dialect.(type) {
-	case *db.LibSQLDialect:
-		conversationDDL = db.ConversationTablesLibSQL()
-	case *db.PostgresDialect:
-		conversationDDL = db.ConversationTablesPostgres()
-	default:
-		conversationDDL = db.ConversationTablesMySQL()
-	}
-	for _, ddl := range conversationDDL {
-		if err := execDDL(ddl, "creating conversation table"); err != nil {
-			return err
-		}
-	}
-
 	var identityDDL []string
 	switch dialect.(type) {
 	case *db.LibSQLDialect:

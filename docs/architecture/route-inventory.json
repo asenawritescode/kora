@@ -84,36 +84,6 @@
       "handler": "github.com/asenawritescode/kora/auth.registerSignInDiscovery.func1"
     },
     {
-      "method": "POST",
-      "path": "/api/cloud/conversations",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationCreate-fm"
-    },
-    {
-      "method": "GET",
-      "path": "/api/cloud/conversations/:id",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationGet-fm"
-    },
-    {
-      "method": "POST",
-      "path": "/api/cloud/conversations/:id/answers/:key/confirm",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationConfirm-fm"
-    },
-    {
-      "method": "POST",
-      "path": "/api/cloud/conversations/:id/messages",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationMessage-fm"
-    },
-    {
-      "method": "GET",
-      "path": "/api/cloud/conversations/:id/progress",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationProgress-fm"
-    },
-    {
-      "method": "POST",
-      "path": "/api/cloud/conversations/:id/support-ticket",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationSupport-fm"
-    },
-    {
       "method": "DELETE",
       "path": "/api/files/*path",
       "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleFileDelete-fm"
@@ -817,36 +787,6 @@
       "method": "GET",
       "path": "/api/v1/auth/oidc/callback",
       "handler": "github.com/asenawritescode/kora/auth.(*OIDCLogin).Register.func3"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/cloud/conversations",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationCreate-fm"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/cloud/conversations/:id",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationGet-fm"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/cloud/conversations/:id/answers/:key/confirm",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationConfirm-fm"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/cloud/conversations/:id/messages",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationMessage-fm"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/cloud/conversations/:id/progress",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationProgress-fm"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/cloud/conversations/:id/support-ticket",
-      "handler": "github.com/asenawritescode/kora/api.(*Handler).HandleConversationSupport-fm"
     },
     {
       "method": "DELETE",

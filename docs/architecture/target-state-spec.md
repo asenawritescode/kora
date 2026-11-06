@@ -83,7 +83,7 @@ No table row asserts that the current issue still exists unchanged. Existing fix
 | `analytics` | Authorized reporting projections, retention, rebuild state | Canonical business events or business transaction success |
 | `outbox`, `eventstream`, `natsprovider` | Durable publication, receipts, subscriptions, event transport | Approval policy or document field authorization |
 | new `notifications` | Delivery attempts and notification preferences | Request completion or approval eligibility |
-| `conversation`, application part of `api/ai` | Conversation/run state and authorized tool execution | Blanket authority to mutate records |
+| application part of `api/ai` | Conversation/run state and authorized tool execution | Blanket authority to mutate records |
 | `webhook`, existing provider adapters | External delivery and reconciliation | Claiming exactly-once external effects |
 | `internal/engine`, `internal/tenantruntime`, `internal/dbaccess` | Process/resource lifecycle and limits | Business rules and wire schemas |
 | `api`, `mcp`, `workspace`, SDKs | Decode/validate transport, invoke use cases, encode responses | SQL, policy duplication, lifecycle ownership |
@@ -160,7 +160,7 @@ kora/
     sqlstore/                     # extraction staged to avoid import cycle
   auth/ configstore/ doctype/ db/ kernel/ orm/
   outbox/ eventstream/ natsprovider/ scheduler/ script/
-  site/ storage/ secret/ email/ webhook/ conversation/
+  site/ storage/ secret/ email/ webhook/
   api/                            # existing routes retained during migration
     requests.go workflow.go
   net/                            # routing only after runtime extraction

@@ -970,12 +970,6 @@
       "from": "github.com/asenawritescode/kora/api",
       "from_module": "engine",
       "kind": "production",
-      "to": "github.com/asenawritescode/kora/conversation"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/api",
-      "from_module": "engine",
-      "kind": "production",
       "to": "github.com/asenawritescode/kora/db"
     },
     {
@@ -1139,12 +1133,6 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/contract"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/api",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/conversation"
     },
     {
       "from": "github.com/asenawritescode/kora/api",
