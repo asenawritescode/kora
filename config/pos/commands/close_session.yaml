@@ -1,0 +1,52 @@
+name: close_session
+namespace: pos
+version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: close_session
+presentation:
+  title: Close till and shift
+permission: write
+input:
+  record: Till Session
+require:
+  - exists:
+      record: Till Session
+      where:
+        shift: $input.shift
+        status: Open
+    as: till
+    message: No open till for this shift
+  - exists:
+      record: Till Session
+      where:
+        shift: $input.shift
+        status: Open
+        cashier: $actor
+    unless_role: [Owner, Manager, Administrator]
+    message: This till belongs to another cashier
+  - exists:
+      record: Shift
+      where:
+        name: $input.shift
+        status: Open
+    message: This shift is already closed
+transaction:
+  - update:
+      record: Till Session
+      name: $steps.till.name
+      values:
+        closing_count: $input.closing_count
+        status: Closed
+        closed_at: $now
+  - update:
+      record: Shift
+      name: $input.shift
+      values:
+        status: Closed
+        ended_at: $now
+output:
+  reference: $steps.till.name
+emit:
+  - pos.till.closed
+  - pos.shift.closed
