@@ -9,9 +9,14 @@ import (
 )
 
 func TestLiveMySQLTenantPoolUsesConfiguredBounds(t *testing.T) {
-	if os.Getenv("DB_DSN") == "" {
-		t.Skip("DB_DSN is required for the live MySQL pool test")
+	dsn := os.Getenv("KORA_POOL_MYSQL_DSN")
+	if dsn == "" {
+		dsn = os.Getenv("DB_DSN")
 	}
+	if dsn == "" {
+		t.Skip("set KORA_POOL_MYSQL_DSN (or DB_DSN) to a disposable MySQL database for the live pool test")
+	}
+	t.Setenv("DB_DSN", dsn)
 	t.Setenv("KORA_DB_TYPE", "mysql")
 	t.Setenv("KORA_DB_MAX_OPEN", "2")
 	t.Setenv("KORA_DB_MAX_IDLE", "0")
