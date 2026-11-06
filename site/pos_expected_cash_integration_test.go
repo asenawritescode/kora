@@ -67,7 +67,7 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 	k := kernel.New(dialect, outbox.NewSQLWriter(dialect))
 	k.Commands = cmds
 	k.CommandSchemas = allowAllPOSSchemas{}
-	actor := contract.ActorContext{PrincipalID: "Administrator", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: []string{doctype.AdminRole}, AuthenticatedAt: time.Now()}
+	actor := contract.ActorContext{PrincipalID: "Administrator", PrincipalType: contract.PrincipalHuman, Site: siteName, Roles: posAdminRoles, AuthenticatedAt: time.Now()}
 	execution, err := policy.NewVerifiedExecution(contract.TenantID(siteName), actor)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 	exec := func(command string, payload any) (map[string]any, *contract.Error) {
 		raw, _ := json.Marshal(payload)
 		oc := kernel.OperationContext{
-			Site: siteName, User: "Administrator", UserRole: doctype.AdminRole, Roles: []string{doctype.AdminRole}, Actor: actor,
+			Site: siteName, User: "Administrator", UserRole: doctype.AdminRole, Roles: posAdminRoles, Actor: actor,
 			Execution: execution, TenantID: contract.TenantID(siteName), BusinessScope: scope, Source: kernel.SourceIntegration,
 		}
 		if strings.HasPrefix(command, "pos.") {

@@ -33,6 +33,13 @@ require:
         name: $input.till_session
         status: Open
     message: Till is not open
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        cashier: $actor
+    unless_role: [Owner, Manager]
+    message: This till belongs to another cashier
 compute:
   total: {sum: $input.items, expr: "quantity * unit_price"}
 transaction:

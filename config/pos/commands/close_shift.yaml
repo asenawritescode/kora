@@ -17,6 +17,14 @@ require:
         status: Open
     as: shift
     message: Register has no open shift
+  - exists:
+      record: Shift
+      where:
+        register: $input.register
+        status: Open
+        cashier: $actor
+    unless_role: [Owner, Manager]
+    message: This shift belongs to another cashier
 transaction:
   - update:
       record: Shift

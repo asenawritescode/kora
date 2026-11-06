@@ -32,6 +32,13 @@ require:
         status: Open
     message: Till does not belong to this shift
   - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        cashier: $actor
+    unless_role: [Owner, Manager]
+    message: This till belongs to another cashier
+  - exists:
       record: Sale
       where:
         name: $input.sale
