@@ -105,6 +105,16 @@ capabilities and submission/polling routes for configured Engine-owned
 operations, including active/suspended state transitions;
 the caller value must be a stable Engine principal ID. That state executor
 revision-fences the directory update and converges the local tenant runtime.
+Cloud sign-in handoff (including accepting a member invitation) needs both
+`KORA_ENGINE_CLOUD_IDENTITY_URL` (Cloud's private
+`/internal/identity/handoff/redeem` endpoint, for local development
+`http://127.0.0.1:8081/internal/identity/handoff/redeem`) and
+`KORA_ENGINE_CLOUD_IDENTITY_TOKEN` (the Cloud engine provisioning token). With
+neither set, the Engine logs one startup WARN naming both variables and
+`POST /api/auth/cloud/handoff` answers `503` with code
+`auth.cloud_handoff_unconfigured`; with only one set, startup fails. Values are
+never logged. The local `restart_server.sh` forwards both from `.env.local`.
+
 For deployment ingress, set `KORA_ENGINE_LOCAL_DEPLOYMENT_ID` and
 `KORA_ENGINE_DEPLOYMENT_URLS` as comma-separated
 `deployment-id=https://direct-engine-origin` pairs. Origins must point directly
