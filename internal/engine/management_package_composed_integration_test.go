@@ -150,8 +150,8 @@ func TestComposedTemplatePackageInstallsThroughExecutor(t *testing.T) {
 		ids = append(ids, string(module.ID))
 		operations += len(module.PublishedOperations)
 	}
-	if strings.Join(ids, ",") != "inventory.app,inventory.core,pos.app,pos.core" || operations != 9 {
-		t.Fatalf("installed modules = %v with %d published operations; want the four pack modules and 9", ids, operations)
+	if strings.Join(ids, ",") != "inventory.app,inventory.core,pos.app,pos.core" || operations != 10 {
+		t.Fatalf("installed modules = %v with %d published operations; want the four pack modules and 10", ids, operations)
 	}
 	rebuilt := installTenantServicesForTest(t, info, database)
 	if plan := rebuilt.RuntimeServices.ModuleBindings; plan == nil || len(plan.Blockers) != 0 {
