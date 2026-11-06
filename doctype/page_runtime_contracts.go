@@ -213,6 +213,15 @@ var publishedPageComponentContracts = map[string]PageComponentContract{
 		"category_label_field": {Kind: "field", FieldTypes: []string{"*"}, ResourceRole: "categories", RequiredWhenResourceRole: "categories"},
 	}),
 	"cart_panel": publishedComponent("cart_panel", nil, nil),
+	"scanner_input": func() PageComponentContract {
+		contract := publishedComponent("scanner_input", map[string]PageResourceBindingContract{lookupRole: publishedItems}, map[string]PageBindingContract{
+			"term_input": {Kind: "query_input", Required: true, ResourceRole: lookupRole},
+			"title":      publishedField(lookupRole, true), "price": publishedField(lookupRole, true), "sku": publishedField(lookupRole, false),
+		})
+		// The lookup runs on demand when a code is scanned, so no initial rows are loaded.
+		contract.RequiresData = false
+		return contract
+	}(),
 	"tender_panel": publishedComponent("tender_panel", nil, map[string]PageBindingContract{
 		"submit_operation_ref": {Kind: "operation", Required: true}, "methods": literalBinding(false), "quick_cash": literalBinding(false),
 	}),
