@@ -9,6 +9,53 @@ import (
 	"github.com/asenawritescode/kora/print"
 )
 
+// TestPOSReceiptsShowItemNames (#337): both receipt formats print the item's
+// title (the "<link field>_title" print data), never the raw item record id.
+func TestPOSReceiptsShowItemNames(t *testing.T) {
+	for _, file := range []string{"sale_receipt.yaml", "sale_record_receipt.yaml"} {
+		t.Run(file, func(t *testing.T) {
+			body, err := os.ReadFile("../config/pos/print_formats/" + file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f, err := print.Load(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data := print.Data{
+				Doc: map[string]any{"name": "SALE-2026-00001", "total": 425.0,
+					"items": []any{
+						map[string]any{"item": "ITEM-0001", "item_title": "Maize Flour 2kg", "quantity": 2, "amount": 360.0},
+						map[string]any{"item": "ITEM-0004", "item_title": "Bread 400g", "quantity": 1, "amount": 65.0}},
+					"payments": []any{map[string]any{"method": "Cash", "amount": 425.0}}},
+				Tenant: map[string]any{"name": "Shop"},
+				Now:    time.Unix(0, 0).UTC(),
+			}
+			opt := print.Options{Currency: "KES", Precision: 2}
+			txt, err := f.RenderText(data, opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h, err := f.RenderHTML(data, opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, out := range []string{txt, h} {
+				for _, w := range []string{"Maize Flour 2kg", "Bread 400g"} {
+					if !strings.Contains(out, w) {
+						t.Errorf("missing %q\n%s", w, out)
+					}
+				}
+				for _, id := range []string{"ITEM-0001", "ITEM-0004"} {
+					if strings.Contains(out, id) {
+						t.Errorf("record id %q printed\n%s", id, out)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestPOSSaleReceiptRenders(t *testing.T) {
 	body, err := os.ReadFile("../config/pos/print_formats/sale_receipt.yaml")
 	if err != nil {
@@ -20,7 +67,7 @@ func TestPOSSaleReceiptRenders(t *testing.T) {
 	}
 	data := print.Data{
 		Doc: map[string]any{"name": "SALE-2026-00001", "total": 350.0,
-			"items":    []any{map[string]any{"item": "Tea", "quantity": 2, "amount": 200.0}, map[string]any{"item": "Bread", "quantity": 1, "amount": 150.0}},
+			"items":    []any{map[string]any{"item": "T", "item_title": "Tea", "quantity": 2, "amount": 200.0}, map[string]any{"item": "B", "item_title": "Bread", "quantity": 1, "amount": 150.0}},
 			"payments": []any{map[string]any{"method": "Cash", "amount": 350.0}}},
 		Tenant: map[string]any{"name": "Shop"},
 		Now:    time.Unix(0, 0).UTC(),
@@ -103,7 +150,7 @@ func TestPOSSaleRecordReceiptMatchesOperationReceipt(t *testing.T) {
 	}
 	data := print.Data{
 		Doc: map[string]any{"name": "SALE-2026-00001", "total": 350.0,
-			"items":    []any{map[string]any{"item": "Tea", "quantity": 2, "amount": 200.0}, map[string]any{"item": "Bread", "quantity": 1, "amount": 150.0}},
+			"items":    []any{map[string]any{"item": "T", "item_title": "Tea", "quantity": 2, "amount": 200.0}, map[string]any{"item": "B", "item_title": "Bread", "quantity": 1, "amount": 150.0}},
 			"payments": []any{map[string]any{"method": "Cash", "amount": 350.0}}},
 		Tenant: map[string]any{"name": "Shop"},
 		Now:    time.Unix(0, 0).UTC(),

@@ -97,6 +97,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				c.Set("policy_execution", exec(acting))
 			})
 			router.GET("/catalog", handler.HandleApplicationCatalog)
+			router.GET("/print/:format_name", api.NewSitePrintHandler(handler))
 			router.POST("/op/:operation", handler.HandleExecutePublishedOperation)
 			router.POST("/q/:module/:query", handler.HandlePublishedModuleQuery)
 			router.GET("/r/:doctype", handler.HandleList)
@@ -216,6 +217,12 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("issue entries = %s, want 1", got)
 			}
 			sale1 := one("SELECT name FROM " + tbl("Sale"))
+			// #337: a Cashier (who cannot read Item) prints the sale and gets the
+			// item name, not the record id.
+			rec = serve("Cashier", http.MethodGet, "/print/sale_record_receipt?as=text&record=Sale&name="+sale1, "")
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Maize") || strings.Contains(rec.Body.String(), "ITM-1") {
+				t.Fatalf("receipt print status=%d body=%s", rec.Code, rec.Body.String())
+			}
 			runAs("Manager", "return_sale", "k-ret", fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"return_against":%q,"items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":"refund"}]}`, till, sale1))
 			if got := qty(); !strings.HasPrefix(got, "19") {
 				t.Fatalf("stock after return = %s, want 19", got)
