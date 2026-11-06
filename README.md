@@ -129,6 +129,8 @@ Runtime config comes from environment variables plus site metadata in the databa
 | `KORA_OUTBOX` | `true` | Enable transactional kernel events; set `false` only if reports and event-driven integrations are intentionally disabled |
 | `KORA_NATS_STREAM_MAX_BYTES` | `1073741824` | Maximum bytes retained by the JetStream event stream (1 GiB default; requires NATS) |
 | `KORA_NATS_STREAM_MAX_MESSAGES` | `1000000` | Maximum messages retained by the JetStream event stream (requires NATS) |
+| `KORA_NATS_SUBJECT_PREFIX` | `kora` | Event subject tree `<prefix>.>` captured by the event stream (requires NATS) |
+| `KORA_NATS_DEAD_LETTER` | `<prefix>_deadletter` | Literal subject where exhausted deliveries are stored. The event stream captures it, but it must lie outside every consumer filter (the default consumer filter is `<prefix>.>`); startup rejects a subject the consumer filter matches. Before this default, it was `kora.deadletter` (requires NATS) |
 | `KORA_DB_PORT` | `3306` | Database port (MySQL) |
 | `KORA_RELOAD_TOKEN` | — | Bearer token for `/_kora/admin/reload-site` endpoint |
 | `KORA_SCRIPTS_HTTP_ALLOWLIST` | — | Comma-separated domains allowed for script HTTP requests |

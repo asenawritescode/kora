@@ -168,6 +168,20 @@ Back up and restore that directory using the operator's NATS recovery procedure.
 NATS remains optional; self-hosted Engine operation without a broker is
 unchanged.
 
+Dead letters are published into the event stream under
+`KORA_NATS_DEAD_LETTER` (default `<prefix>_deadletter`). The subject lies
+outside the `<prefix>.>` event tree, so no consumer filter on that tree
+re-consumes it, and bootstrap adds it to the stream's subjects (an existing
+stream that captures only `<prefix>.>` is updated in place). Configuration
+validation rejects a dead-letter subject that the consumer filter matches.
+Dead letters stored under the previous default `kora.deadletter` stay in the
+stream (no data migration is performed). Inspect them with the `nats` CLI and,
+once handled, remove them with
+`nats stream purge <stream> --subject kora.deadletter`.
+Operators who set `KORA_NATS_DEAD_LETTER=kora.deadletter` explicitly must unset
+it or choose a subject outside `<prefix>.>`. Dead letters share the stream's
+byte and message caps.
+
 Bootstrap upgrades a same-name stream only after checking its subject,
 retention mode, and current backlog; it preserves settings such as replica
 count. If the retained backlog already exceeds a requested cap, or the stream
