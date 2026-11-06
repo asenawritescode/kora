@@ -24,7 +24,7 @@ func TestPOSPackQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "recent_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment"}
+	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment"}
 	if len(defs) != len(want) {
 		t.Fatalf("got %d queries, want %d", len(defs), len(want))
 	}
@@ -112,6 +112,8 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 		"CREATE TABLE `tabSale` (name TEXT, register TEXT, customer TEXT, status TEXT, till_session TEXT, creation TEXT, total NUMERIC)",
 		"CREATE TABLE `tabSale__payments` (name TEXT, parent TEXT, method TEXT, amount NUMERIC)",
 		"CREATE TABLE `tabTill Session` (name TEXT, shift TEXT, register TEXT, location TEXT, cashier TEXT, status TEXT, opening_float NUMERIC, expected_cash NUMERIC, closing_count NUMERIC, creation TEXT)",
+		"CREATE TABLE `tabRegister` (name TEXT, register_name TEXT, location TEXT, enabled INTEGER)",
+		"INSERT INTO `tabRegister` VALUES ('R1','Front','L1',1),('R0','Old','L1',0)",
 		"INSERT INTO `tabSale` VALUES ('S1','R1','C1','Paid','TS1','2026-11-06 09:00:00',10),('S2','R1','C1','Paid','TS1','2026-11-05 09:00:00',99),('S3','R1','C1','Return','TS1','2026-11-06 10:00:00',4)",
 		"INSERT INTO `tabSale__payments` VALUES ('P1','S1','Cash',10),('P2','S2','Cash',99),('P3','S3','Cash',4)",
 		"INSERT INTO `tabTill Session` VALUES ('TS1','SH1','R1','L1','c1','Open',5,15,NULL,'2026-11-06 08:00:00'),('TS0','SH0','R1','L1','c1','Closed',5,5,5,'2026-11-05 08:00:00')",
@@ -121,7 +123,7 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 		}
 	}
 	// my_session has no actor here, so it matches nobody.
-	wantRows := map[string]int{"my_session": 0, "open_till": 1, "recent_sales": 3, "today_totals": 1, "payments_by_method": 1, "refunds_by_method": 1}
+	wantRows := map[string]int{"my_session": 0, "my_registers": 1, "open_till": 1, "recent_sales": 3, "today_totals": 1, "payments_by_method": 1, "refunds_by_method": 1}
 	for _, d := range defs {
 		t.Run(d.Name, func(t *testing.T) {
 			p, err := Run(context.Background(), conn, db.Resolve("libsql"), d, Request{FullRead: true, Now: now, Input: map[string]any{}})
@@ -196,6 +198,61 @@ func TestPOSMySession(t *testing.T) {
 		p, err = Run(context.Background(), conn, db.Resolve("libsql"), def, Request{FullRead: full, Actor: "carol", Input: map[string]any{}})
 		if err != nil || len(p.Rows) != 0 {
 			t.Fatalf("full=%v carol sees %v %v", full, p, err)
+		}
+	}
+}
+
+// TestPOSMyRegisters (#374): my_registers lists the enabled registers with the
+// location a till is opened at, ordered by name, for any actor.
+func TestPOSMyRegisters(t *testing.T) {
+	dts, err := doctype.ParseDirectory("../config/pos/doctypes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := doctype.NewRegistry()
+	for _, d := range dts {
+		reg.Register(d)
+	}
+	defs, err := LoadDir("../config/pos/queries", reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var def *Definition
+	for _, d := range defs {
+		if d.Name == "my_registers" {
+			def = d
+		}
+	}
+	if def == nil {
+		t.Fatal("my_registers missing")
+	}
+	if def.OwnerField != "" || def.Limit < 1 || def.Limit > 100 {
+		t.Fatalf("my_registers owner_field=%q limit=%d", def.OwnerField, def.Limit)
+	}
+	conn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Skip(err)
+	}
+	conn.SetMaxOpenConns(1)
+	for _, s := range []string{
+		"CREATE TABLE `tabRegister` (name TEXT, register_name TEXT, location TEXT, enabled INTEGER, owner TEXT, creation TEXT)",
+		"INSERT INTO `tabRegister` VALUES ('REG-2','Side','LOC-1',1,'x','2026-11-06 08:00:00'),('REG-1','Front','LOC-1',1,'x','2026-11-06 09:00:00'),('REG-3','Old','LOC-2',0,'x','2026-11-06 07:00:00'),('REG-4','Back','LOC-2',1,'y','2026-11-06 10:00:00')",
+	} {
+		if _, err := conn.Exec(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, full := range []bool{true, false} {
+		for _, actor := range []string{"ann", "bob"} {
+			p, err := Run(context.Background(), conn, db.Resolve("libsql"), def, Request{FullRead: full, Actor: actor, Input: map[string]any{}})
+			if err != nil || len(p.Rows) != 3 {
+				t.Fatalf("full=%v %s: %v %v", full, actor, p, err)
+			}
+			for i, want := range [][3]string{{"REG-4", "Back", "LOC-2"}, {"REG-1", "Front", "LOC-1"}, {"REG-2", "Side", "LOC-1"}} {
+				if r := p.Rows[i]; r["name"] != want[0] || r["register_name"] != want[1] || r["location"] != want[2] || len(r) != 3 {
+					t.Fatalf("full=%v %s row %d = %v, want %v", full, actor, i, r, want)
+				}
+			}
 		}
 	}
 }

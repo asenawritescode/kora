@@ -1,0 +1,12 @@
+name: my_registers
+module_owner_id: pos.core
+capability: pos.till
+operation: my_registers
+source: Register
+permission: read
+scope: tenant
+filters:
+  - {field: enabled, op: eq, value: 1}
+fields: [name, register_name, location]
+sort: [{field: register_name, dir: asc}]
+limit: 50

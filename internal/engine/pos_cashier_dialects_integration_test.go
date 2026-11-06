@@ -314,6 +314,23 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if rows := mySession("Cashier"); len(rows) != 0 {
 				t.Fatalf("my_session before open = %v", rows)
 			}
+			// #374: my_registers lists the enabled registers for every till role,
+			// ordered by name, without any generic Register read route.
+			seed("Register", "REG-OFF", map[string]any{"register_name": "Aaa retired", "location": "LOC-1", "enabled": false})
+			for _, role := range []string{"Cashier", "Manager", "Owner"} {
+				rec := serve(role, http.MethodPost, "/q/pos.core/my_registers", `{"input":{}}`)
+				var out struct {
+					Data struct {
+						Data []map[string]any `json:"data"`
+					} `json:"data"`
+				}
+				if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || len(out.Data.Data) != 2 {
+					t.Fatalf("%s my_registers status=%d body=%s", role, rec.Code, rec.Body.String())
+				}
+				if r := out.Data.Data; r[0]["name"] != "REG-1" || r[0]["register_name"] != "Front" || r[0]["location"] != "LOC-1" || r[1]["name"] != "REG-2" || r[1]["register_name"] != "Side" || len(r[0]) != 3 {
+					t.Fatalf("%s my_registers rows = %v", role, r)
+				}
+			}
 			if rec := op("Cashier", "open_session", "k-sess-bad", `{"register":"REG-2","location":"LOC-X","opening_float":300}`); completed(rec) {
 				t.Fatalf("open_session with a foreign location succeeded: %s", rec.Body.String())
 			}

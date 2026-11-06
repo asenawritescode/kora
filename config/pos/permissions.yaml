@@ -185,6 +185,9 @@
   role: Owner
   read: true
   if_owner: true
+- doctype: module.pos.core.query.my_registers
+  role: Owner
+  read: true
 - doctype: module.pos.core.query.payments_by_method
   role: Owner
   read: true
@@ -228,6 +231,9 @@
   role: Manager
   read: true
   if_owner: true
+- doctype: module.pos.core.query.my_registers
+  role: Manager
+  read: true
 - doctype: module.pos.core.query.payments_by_method
   role: Manager
   read: true
@@ -271,6 +277,9 @@
   role: Cashier
   read: true
   if_owner: true
+- doctype: module.pos.core.query.my_registers
+  role: Cashier
+  read: true
 - doctype: module.inventory.core.operation.receive_stock
   role: Owner
   write: true

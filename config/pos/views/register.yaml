@@ -17,6 +17,9 @@ resources:
   - id: session
     query: published.query
     params: {owner_module_id: pos.core, query_name: my_session}
+  - id: registers
+    query: published.query
+    params: {owner_module_id: pos.core, query_name: my_registers}
 components:
   - id: scan
     label: Scan or search
