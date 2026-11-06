@@ -1,0 +1,26 @@
+name: Item Category
+module: Inventory
+title_field: category_name
+search_fields: category_name
+sort_field: display_order
+sort_order: ASC
+
+fields:
+  - fieldname: category_name
+    fieldtype: Data
+    label: Category Name
+    reqd: true
+    unique: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: display_order
+    fieldtype: Int
+    label: Display Order
+    default: "0"
+    in_list_view: true
+  - fieldname: enabled
+    fieldtype: Check
+    label: Enabled
+    default: "1"
+    in_list_view: true
