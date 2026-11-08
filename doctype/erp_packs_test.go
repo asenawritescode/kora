@@ -246,3 +246,26 @@ func TestERPLinkTargetsHaveSearchableTitles(t *testing.T) {
 		}
 	}
 }
+
+// Opening the register in a real workspace failed with "Unknown resource
+// categories for role categories" when the category tabs used view-level
+// resources and resource_bindings (copied from retail-pos). The retail-shop
+// setup, which groups the product grid by its own field, is the one that renders.
+func TestERPRegisterViewsKeepToTheCategorySetupThatRenders(t *testing.T) {
+	for _, pack := range erpPackLayers {
+		views, err := ParseViewsDirectory(filepath.Join("..", "config", pack, "views"))
+		if err != nil {
+			t.Fatalf("%s views: %v", pack, err)
+		}
+		for _, view := range views {
+			if len(view.Resources) > 0 {
+				t.Errorf("%s view %q declares view-level resources; the register must group by the product's own field", pack, view.Name)
+			}
+			for _, c := range view.Components {
+				if len(c.ResourceBindings) > 0 {
+					t.Errorf("%s view %q component %q uses resource_bindings, which did not render in a live workspace", pack, view.Name, c.ID)
+				}
+			}
+		}
+	}
+}

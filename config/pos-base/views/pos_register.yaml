@@ -5,18 +5,6 @@ layout: two_panel
 label: Register
 module: Selling
 source_doctype: Product
-resources:
-  - id: categories
-    query: document.list
-    params:
-      doctype: Product Category
-      limit: 100
-      fields: [name, category_name]
-      order_by: display_order ASC
-      filters:
-        - field: is_active
-          op: =
-          value: 1
 components:
   - id: categories
     type: category_tabs
@@ -24,13 +12,8 @@ components:
     position: 0
     label: Categories
     source_doctype: Product
-    data: primary.data
-    resource_bindings:
-      products: primary
-      categories: categories
     bindings:
       group_field: category
-      category_label_field: category_name
   - id: products
     type: product_grid
     region: main
