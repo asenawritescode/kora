@@ -46,6 +46,7 @@ var posBaseMoneyRecords = map[string]string{
 	"Sale":          "total",
 	"Payment":       "amount",
 	"Cash Movement": "amount",
+	"Expense":       "amount",
 }
 
 func TestPOSBaseMoneyRecordsCarryCurrencyAndFrozenRate(t *testing.T) {

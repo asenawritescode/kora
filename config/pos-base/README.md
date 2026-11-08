@@ -17,6 +17,10 @@ feeds, journals and accounts (nothing posted to them), stock ledgers (see
 | Products | Product Category, Product, Product Price (child) |
 | Selling | Register, Customer, Sale, Sale Item (child), Payment |
 | Cash control | Till Session, Till Count (child), Cash Movement |
+| Money out | Expense |
+
+Reports (all in base currency): Sales (by day, currency, status), Payments
+received (by currency, method), Expenses (by category, day).
 
 Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 (sells, takes payments, works a till). Cashiers cannot change currencies or rates.
@@ -26,7 +30,7 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 - One **base currency** (the Currency record with *Base currency* ticked, rate 1).
   Totals, reports and the books are in the base currency. Product prices
   (`selling_price`, `cost_price`) are in the base currency.
-- Every money record (Sale, Payment, Cash Movement) has `currency` and
+- Every money record (Sale, Payment, Cash Movement, Expense) has `currency` and
   `exchange_rate`. **Leave `currency` empty for the base currency.**
 - `exchange_rate` is base currency per one unit of that currency. It is **frozen
   on the record**: changing a rate on the Currency record later never moves a past

@@ -1,0 +1,31 @@
+name: expenses_overview
+label: Expenses
+route: /reports/expenses
+queries:
+  - id: expenses_by_category
+    model: expense
+    measures: [count, base_amount_sum]
+    dimensions: [category]
+  - id: expenses_by_day
+    model: expense
+    measures: [count, base_amount_sum]
+    dimensions: [expense_date]
+visuals:
+  - id: expenses_trend
+    type: line
+    source: expenses_by_day
+    x_field: expense_date
+    series:
+      - field: base_amount_sum
+        label: Spent in base currency
+        type: line
+        format: currency
+  - id: expenses_by_category
+    type: bar
+    source: expenses_by_category
+    x_field: category
+    series:
+      - field: base_amount_sum
+        label: Spent in base currency
+        type: bar
+        format: currency

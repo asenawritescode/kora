@@ -133,3 +133,14 @@
   write: true
   create: true
   delete: false
+- doctype: Expense
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+  report: true
+- doctype: Expense
+  role: Cashier
+  read: true
+  create: true
