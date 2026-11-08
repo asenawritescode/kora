@@ -42,17 +42,41 @@ type DocType struct {
 	validSortColumns   map[string]bool
 }
 
-// QuantityEffect binds a record form to a configured transactional view action.
-// Clients may use the same binding to project the signed effect before sync.
+// QuantityEffect says what saving a record does to a number on another record,
+// for example "a Stock Adjustment adds its delta to Product.stock_qty".
+//
+// Without LinesField the change is the record's own signed DeltaField. With
+// LinesField it is the sum of DeltaField over the rows of that table, per
+// SourceRecordField. Direction "increase" (the default) adds the amounts and
+// "decrease" subtracts them. The kernel applies the change in the same
+// transaction as the save, so both happen or neither does.
+//
+// View, Component and Action are optional. They bind the same effect to a
+// configured view action so clients can project it before sync.
 type QuantityEffect struct {
 	View                string `yaml:"view" json:"view"`
 	Component           string `yaml:"component" json:"component"`
 	Action              string `yaml:"action" json:"action"`
 	TargetDocType       string `yaml:"target_doctype" json:"target_doctype"`
 	TargetQuantityField string `yaml:"target_quantity_field" json:"target_quantity_field"`
+	LinesField          string `yaml:"lines_field" json:"lines_field,omitempty"`
 	SourceRecordField   string `yaml:"source_record_field" json:"source_record_field"`
 	DeltaField          string `yaml:"delta_field" json:"delta_field"`
 	ReasonField         string `yaml:"reason_field" json:"reason_field"`
+	Direction           string `yaml:"direction" json:"direction,omitempty"`
+}
+
+// Complete reports whether the effect names everything the kernel needs to apply it.
+func (q *QuantityEffect) Complete() bool {
+	return q != nil && q.TargetDocType != "" && q.TargetQuantityField != "" && q.SourceRecordField != "" && q.DeltaField != ""
+}
+
+// Sign is +1 for "increase" (the default) and -1 for "decrease".
+func (q *QuantityEffect) Sign() float64 {
+	if q != nil && q.Direction == "decrease" {
+		return -1
+	}
+	return 1
 }
 
 // PublicAccess defines the explicit unauthenticated read surface for a DocType.

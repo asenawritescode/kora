@@ -869,6 +869,8 @@ func ValidateAll(doctypes []*DocType) []CrossFileError {
 		dtMap[dt.Name] = dt
 	}
 
+	errs = append(errs, validateQuantityEffects(doctypes, dtMap)...)
+
 	childTables := make(map[string]string) // child doctype name → parent doctype
 
 	for _, dt := range doctypes {
@@ -1076,4 +1078,53 @@ func (d *DocType) validateNamingSeries() error {
 		}
 	}
 	return nil
+}
+
+// validateQuantityEffects checks every record-level quantity effect against the
+// record types it names, so a typo cannot leave stock silently unchanged.
+func validateQuantityEffects(doctypes []*DocType, dtMap map[string]*DocType) []CrossFileError {
+	var errs []CrossFileError
+	bad := func(dt *DocType, field, message string) {
+		errs = append(errs, CrossFileError{Code: "InvalidQuantityEffect", DocType: dt.Name, Field: field, Message: message})
+	}
+	for _, dt := range doctypes {
+		q := dt.QuantityEffect
+		if q == nil {
+			continue
+		}
+		if dt.IsSubmittable {
+			bad(dt, "quantity_effect", "quantity_effect applies when the record is created, so it cannot be used on a submittable record (stock would change on save, not on submit)")
+		}
+		if q.Direction != "" && q.Direction != "increase" && q.Direction != "decrease" {
+			bad(dt, "direction", fmt.Sprintf("quantity_effect direction %q must be increase or decrease", q.Direction))
+		}
+		target := dtMap[q.TargetDocType]
+		if target == nil {
+			bad(dt, "target_doctype", fmt.Sprintf("quantity_effect target_doctype %q does not exist", q.TargetDocType))
+			continue
+		}
+		if f := target.GetField(q.TargetQuantityField); f == nil || !(f.Fieldtype == "Int" || f.Fieldtype == "Float" || f.Fieldtype == "Currency") {
+			bad(dt, "target_quantity_field", fmt.Sprintf("quantity_effect target_quantity_field %q must be a number field on %s", q.TargetQuantityField, target.Name))
+		}
+		source := dt
+		if q.LinesField != "" {
+			lines := dt.GetField(q.LinesField)
+			if lines == nil || lines.Fieldtype != "Table" {
+				bad(dt, "lines_field", fmt.Sprintf("quantity_effect lines_field %q must be a Table field", q.LinesField))
+				continue
+			}
+			source = dtMap[lines.Options]
+			if source == nil {
+				bad(dt, "lines_field", fmt.Sprintf("quantity_effect lines table %q has no record type %q", q.LinesField, lines.Options))
+				continue
+			}
+		}
+		if f := source.GetField(q.SourceRecordField); f == nil || f.Fieldtype != "Link" || f.Options != target.Name {
+			bad(dt, "source_record_field", fmt.Sprintf("quantity_effect source_record_field %q must be a Link to %s on %s", q.SourceRecordField, target.Name, source.Name))
+		}
+		if f := source.GetField(q.DeltaField); f == nil || !(f.Fieldtype == "Int" || f.Fieldtype == "Float" || f.Fieldtype == "Currency") {
+			bad(dt, "delta_field", fmt.Sprintf("quantity_effect delta_field %q must be a number field on %s", q.DeltaField, source.Name))
+		}
+	}
+	return errs
 }

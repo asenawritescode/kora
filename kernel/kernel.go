@@ -169,6 +169,16 @@ type OperationContext struct {
 	// verified source scope inside Kernel.Execute; adapters cannot populate it.
 	crossEntityOperation *contract.CrossEntityOperation
 	crossEntityTarget    contract.BusinessScope
+	// effectItems names the bundle items the kernel itself added to apply a
+	// record's quantity effect. They are authorized by the permission to create
+	// the source record, not by write permission on the target. Only
+	// prepareQuantityEffect sets this; adapters and payloads cannot.
+	effectItems map[string]struct{}
+}
+
+func (c OperationContext) isEffectItem(key string) bool {
+	_, ok := c.effectItems[key]
+	return ok
 }
 
 // Operation is a fully specified invocation handed to Kernel.Execute.
@@ -239,6 +249,9 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 	}
 	if !op.Deadline.IsZero() && !time.Now().Before(op.Deadline) {
 		return k.rejected(opID, op, contract.NewError(contract.CodeDeadlineExceeded, "operation deadline exceeded"))
+	}
+	if err := prepareQuantityEffect(reg, &op); err != nil {
+		return k.rejected(opID, op, err)
 	}
 	def, ok := LookupCommand(op.Command)
 	var dyn *CommandResource
@@ -388,6 +401,9 @@ func (k *Kernel) ExecuteInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 	}
 	if !op.Deadline.IsZero() && !time.Now().Before(op.Deadline) {
 		return contract.CommandResult{}, nil, contract.NewError(contract.CodeDeadlineExceeded, "operation deadline exceeded")
+	}
+	if err := prepareQuantityEffect(reg, &op); err != nil {
+		return contract.CommandResult{}, nil, err
 	}
 	def, ok := LookupCommand(op.Command)
 	var dyn *CommandResource

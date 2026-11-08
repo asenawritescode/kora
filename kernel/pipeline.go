@@ -263,8 +263,10 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 			if operation != "create" {
 				permission = "write"
 			}
-			if _, permissionErr := decideOperationResource(op, reg, recordDT, permission); permissionErr != nil {
-				return nil, permissionErr
+			if !op.Context.isEffectItem(item.Key) {
+				if _, permissionErr := decideOperationResource(op, reg, recordDT, permission); permissionErr != nil {
+					return nil, permissionErr
+				}
 			}
 			if item.TransitionAction != "" {
 				if operation != "update" {

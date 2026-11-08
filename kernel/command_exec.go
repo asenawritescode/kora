@@ -178,8 +178,10 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 			if permission != "create" {
 				permission = "write"
 			}
-			if _, err := decideOperationResource(op, reg, dt, permission); err != nil {
-				return err
+			if !op.Context.isEffectItem(record.Key) {
+				if _, err := decideOperationResource(op, reg, dt, permission); err != nil {
+					return err
+				}
 			}
 		}
 		root := reg.Get(payload.Doctype)
