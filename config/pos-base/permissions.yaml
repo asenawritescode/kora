@@ -10,12 +10,6 @@
   write: true
   create: true
   delete: false
-- doctype: Product Category
-  role: Manager
-  read: true
-  write: true
-  create: true
-  delete: false
 - doctype: Product
   role: Manager
   read: true
@@ -79,9 +73,6 @@
   role: Cashier
   read: true
 - doctype: Register
-  role: Cashier
-  read: true
-- doctype: Product Category
   role: Cashier
   read: true
 - doctype: Product

@@ -37,15 +37,3 @@ records:
     register_name: Main till
     location: Front counter
     status: Active
-  - doctype: Product Category
-    category_name: Drinks
-    display_order: 1
-    is_active: true
-  - doctype: Product Category
-    category_name: Groceries
-    display_order: 2
-    is_active: true
-  - doctype: Product Category
-    category_name: Household
-    display_order: 3
-    is_active: true

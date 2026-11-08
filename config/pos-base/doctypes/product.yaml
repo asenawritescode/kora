@@ -26,9 +26,15 @@ fields:
     label: Barcode
     search_index: true
   - fieldname: category
-    fieldtype: Link
-    options: Product Category
+    fieldtype: Select
     label: Category
+    options: |
+      Groceries
+      Drinks
+      Household
+      Personal care
+      Stationery
+      Other
     in_standard_filter: true
     in_list_view: true
   - fieldname: unit
