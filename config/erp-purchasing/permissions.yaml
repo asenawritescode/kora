@@ -1,5 +1,5 @@
 - doctype: Supplier
-  role: Manager
+  role: Purchasing Manager
   read: true
   write: true
   create: true
@@ -11,7 +11,7 @@
   create: true
   delete: false
 - doctype: Purchase Order Item
-  role: Manager
+  role: Purchasing Manager
   read: true
   write: true
   create: true
@@ -23,7 +23,7 @@
   create: true
   delete: false
 - doctype: Goods Receipt Item
-  role: Manager
+  role: Purchasing Manager
   read: true
   write: true
   create: true
@@ -35,7 +35,7 @@
   create: true
   delete: false
 - doctype: Purchase Order
-  role: Manager
+  role: Purchasing Manager
   read: true
   write: true
   create: true
@@ -50,7 +50,7 @@
   delete: false
   submit: true
 - doctype: Goods Receipt
-  role: Manager
+  role: Purchasing Manager
   read: true
   write: false
   create: true
@@ -63,7 +63,7 @@
   create: true
   delete: false
 - doctype: Supplier Bill
-  role: Manager
+  role: Purchasing Manager
   read: true
   write: true
   create: true
@@ -74,7 +74,7 @@
   role: Buyer
   read: true
 - doctype: Supplier Payment
-  role: Manager
+  role: Purchasing Manager
   read: true
   write: true
   create: true

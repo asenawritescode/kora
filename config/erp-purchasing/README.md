@@ -9,8 +9,8 @@ Supplier Payment.
 **Goods Receipt raises stock.** Saving a receipt adds each line's quantity to that
 product's stock in the same step (needs the Engine's `quantity_effect`). A receipt
 is a fact that goods arrived, so it cannot be edited afterwards; correct it with a
-Stock Adjustment (`erp-inventory`). Roles: Buyer (orders, receives), Manager (everything, shared
-with pos-base).
+Stock Adjustment (`erp-inventory`). Roles: Buyer (orders, receives) and Purchasing Manager (everything here). The
+workspace administrator can do all of it.
 
 Same money convention as `pos-base`: every money record has `currency` (empty =
 base currency) and a frozen `exchange_rate`, and a computed base amount. Rates

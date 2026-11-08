@@ -3,6 +3,7 @@ package doctype
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -205,5 +206,43 @@ func TestERPJournalEntryInForeignCurrencyKeepsBooksInBase(t *testing.T) {
 	credit, _ := toFloat64(doc.Get("base_total_credit"))
 	if debit != 12950.0 || credit != 12950.0 {
 		t.Fatalf("base debit/credit = %v / %v, want 12950 / 12950", doc.Get("base_total_debit"), doc.Get("base_total_credit"))
+	}
+}
+
+// The marketplace refuses a release when a Link points at a record whose title
+// cannot be searched (the picker would find nothing). The title field must be
+// visible, listed in search_fields, and have search_index: true; unique alone
+// does not count. This mirrors site/pack_manifest.go.
+func TestERPLinkTargetsHaveSearchableTitles(t *testing.T) {
+	all := loadERPLayers(t)
+	byName := map[string]*DocType{}
+	for _, dt := range all {
+		byName[dt.Name] = dt
+	}
+	checked := map[string]bool{}
+	for _, dt := range all {
+		for _, f := range dt.Fields {
+			if f.Fieldtype != "Link" || checked[f.Options] {
+				continue
+			}
+			checked[f.Options] = true
+			target := byName[f.Options]
+			if target == nil || target.TitleField == "" {
+				continue
+			}
+			title := target.GetField(target.TitleField)
+			listed := false
+			for _, s := range strings.Split(target.SearchFields, ",") {
+				if strings.TrimSpace(s) == target.TitleField {
+					listed = true
+				}
+			}
+			if !listed {
+				t.Errorf("%s (linked from %s.%s): title field %q must be in search_fields", target.Name, dt.Name, f.Fieldname, target.TitleField)
+			}
+			if title == nil || title.Hidden || !title.SearchIndex {
+				t.Errorf("%s (linked from %s.%s): title field %q must be indexed (search_index: true)", target.Name, dt.Name, f.Fieldname, target.TitleField)
+			}
+		}
 	}
 }

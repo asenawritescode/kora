@@ -14,6 +14,7 @@ fields:
     reqd: true
     unique: true
     in_list_view: true
+    search_index: true
   - fieldname: order_date
     fieldtype: Date
     label: Order date

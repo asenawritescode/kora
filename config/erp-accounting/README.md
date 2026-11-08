@@ -1,8 +1,8 @@
 # erp-accounting
 
 Layer on top of `pos-base` (needs its `Currency`; install both). The books:
-Account, Accounting Period, Journal Entry (+ Journal Line). Roles: Accountant,
-Manager (shared with pos-base).
+Account, Accounting Period, Journal Entry (+ Journal Line). Role: Accountant
+(the workspace administrator can do all of it).
 
 - Debits must equal credits. An unbalanced entry is rejected (tested).
 - Lines are in the entry currency; the entry carries a frozen `exchange_rate` and
