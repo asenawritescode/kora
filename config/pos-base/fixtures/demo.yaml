@@ -1,0 +1,51 @@
+pack: pos-base
+seed_mode: demo
+records:
+  - doctype: Currency
+    code: KES
+    currency_name: Kenyan shilling
+    symbol: KSh
+    is_base: true
+    rate_to_base: 1
+    enabled: true
+  - doctype: Currency
+    code: USD
+    currency_name: US dollar
+    symbol: $
+    rate_to_base: 129
+    enabled: true
+  - doctype: Currency
+    code: EUR
+    currency_name: Euro
+    symbol: €
+    rate_to_base: 140
+    enabled: true
+  - doctype: Currency
+    code: UGX
+    currency_name: Ugandan shilling
+    symbol: USh
+    rate_to_base: 0.035
+    enabled: true
+  - doctype: Currency
+    code: TZS
+    currency_name: Tanzanian shilling
+    symbol: TSh
+    rate_to_base: 0.05
+    enabled: true
+  - doctype: Register
+    reference: REG-001
+    register_name: Main till
+    location: Front counter
+    status: Active
+  - doctype: Product Category
+    category_name: Drinks
+    display_order: 1
+    is_active: true
+  - doctype: Product Category
+    category_name: Groceries
+    display_order: 2
+    is_active: true
+  - doctype: Product Category
+    category_name: Household
+    display_order: 3
+    is_active: true

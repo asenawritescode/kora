@@ -1,0 +1,135 @@
+- doctype: Currency
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Register
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Product Category
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Product
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Product Price
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Customer
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Till Session
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Till Count
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  report: true
+- doctype: Cash Movement
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  report: true
+- doctype: Sale Item
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Payment
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+  report: true
+- doctype: Currency
+  role: Cashier
+  read: true
+- doctype: Register
+  role: Cashier
+  read: true
+- doctype: Product Category
+  role: Cashier
+  read: true
+- doctype: Product
+  role: Cashier
+  read: true
+- doctype: Product Price
+  role: Cashier
+  read: true
+- doctype: Customer
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Sale
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+- doctype: Sale Item
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Payment
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Till Session
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Till Count
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Cash Movement
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false

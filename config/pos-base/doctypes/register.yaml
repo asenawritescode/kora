@@ -1,0 +1,30 @@
+name: Register
+module: Selling
+title_field: register_name
+search_fields: register_name, reference, status
+description: A till point where sales are rung up.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Register code
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: register_name
+    fieldtype: Data
+    label: Register name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true
