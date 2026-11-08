@@ -23,6 +23,13 @@ import (
 // the pack as shipped and not a copy of it.
 func newPOSBaseHandler(t *testing.T) (*Handler, *sql.DB, *doctype.Registry, string) {
 	t.Helper()
+	return newPackLayersHandler(t, "pos-base")
+}
+
+// newPackLayersHandler loads several packs together, the way a workspace gets
+// them. Views come from every layer.
+func newPackLayersHandler(t *testing.T, packs ...string) (*Handler, *sql.DB, *doctype.Registry, string) {
+	t.Helper()
 	database, site := newResourceIntegrationDB(t)
 	dialect := kdb.Resolve("mysql")
 	for _, ddl := range dialect.SystemTableSQL() {
@@ -51,14 +58,20 @@ func newPOSBaseHandler(t *testing.T) (*Handler, *sql.DB, *doctype.Registry, stri
 		t.Fatalf("seed config revision: %v", err)
 	}
 
-	pack := filepath.Join("..", "config", "pos-base")
-	docTypes, err := doctype.ParseConfigTree(pack)
-	if err != nil {
-		t.Fatalf("parse pos-base: %v", err)
-	}
-	views, err := doctype.ParseViewsDirectory(filepath.Join(pack, "views"))
-	if err != nil {
-		t.Fatalf("parse pos-base views: %v", err)
+	var docTypes []*doctype.DocType
+	var views []*doctype.View
+	for _, name := range packs {
+		pack := filepath.Join("..", "config", name)
+		parsed, err := doctype.ParseConfigTree(pack)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		docTypes = append(docTypes, parsed...)
+		packViews, err := doctype.ParseViewsDirectory(filepath.Join(pack, "views"))
+		if err != nil {
+			t.Fatalf("parse %s views: %v", name, err)
+		}
+		views = append(views, packViews...)
 	}
 	permissions := make([]*doctype.Permission, 0, len(docTypes))
 	for _, recordType := range docTypes {
@@ -218,5 +231,65 @@ func TestPOSBaseRejectsASaleWithAnImpossibleRate(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("rejected sale left %d rows behind", count)
+	}
+}
+
+// A purchase order in another currency: lines add up, and the base total is the
+// total times the rate frozen on the order. Also proves the whole layer stack
+// creates its tables on MySQL.
+func TestERPPurchasingOrderInAnotherCurrencyAddsUpInBaseCurrency(t *testing.T) {
+	_, db, reg, site := newPackLayersHandler(t, "pos-base", "erp-purchasing")
+	tm := &orm.TxManager{DB: db, Registry: reg, Dialect: kdb.Resolve("mysql"), Outbox: outbox.NewSQLWriter(kdb.Resolve("mysql")), SiteName: site}
+
+	if _, err := db.Exec("INSERT INTO `tabSupplier` (name, supplier_name, status) VALUES ('SUP-1','Dar Traders','Active')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO `tabProduct` (name, reference, product_name, selling_price, stock_qty, status) VALUES ('PROD-001','P-1','Soda',100,0,'Active')"); err != nil {
+		t.Fatal(err)
+	}
+	orderType := reg.Get("Purchase Order")
+	itemType := reg.Get("Purchase Order Item")
+	doc := doctype.NewDocument("")
+	doc.Set("reference", "PO-1")
+	doc.Set("order_date", "2026-11-08")
+	doc.Set("supplier", "SUP-1")
+	doc.Set("currency", "USD")
+	doc.Set("exchange_rate", 129.5)
+	var lines []*doctype.Document
+	for _, qty := range []float64{10, 5} {
+		line := doctype.NewDocument("")
+		line.Set("product", "PROD-001")
+		line.Set("quantity", qty)
+		line.Set("unit_cost", 2.0)
+		lines = append(lines, line)
+	}
+	doc.SetTable("items", lines)
+	doctype.ApplyDefaultValues(orderType, doc)
+	for _, line := range lines {
+		doctype.ApplyDefaultValues(itemType, line)
+		if err := doctype.ComputeFields(itemType, line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := doctype.ComputeFields(orderType, doc); err != nil {
+		t.Fatal(err)
+	}
+	dbTx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tm.InsertInTx(dbTx, orderType, doc, "admin@example.test", "admin@example.test"); err != nil {
+		_ = dbTx.Rollback()
+		t.Fatalf("insert purchase order: %v", err)
+	}
+	if err := dbTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var total, baseTotal float64
+	if err := db.QueryRow("SELECT total, base_total FROM `tabPurchase Order` WHERE reference = 'PO-1'").Scan(&total, &baseTotal); err != nil {
+		t.Fatal(err)
+	}
+	if total != 30 || baseTotal != 3885 {
+		t.Fatalf("purchase order total=%v base_total=%v, want 30 and 3885", total, baseTotal)
 	}
 }

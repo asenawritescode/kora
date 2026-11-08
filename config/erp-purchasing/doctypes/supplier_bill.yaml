@@ -1,0 +1,90 @@
+name: Supplier Bill
+module: Payables
+is_submittable: true
+search_fields: reference, supplier_reference, supplier, status
+title_field: reference
+sort_field: modified
+sort_order: DESC
+description: What you owe a supplier for a delivery or service. The amount is in the currency on the bill.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: supplier_reference
+    fieldtype: Data
+    label: Supplier's invoice number
+  - fieldname: supplier
+    fieldtype: Link
+    label: Supplier
+    options: Supplier
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: bill_date
+    fieldtype: Date
+    label: Bill date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due date
+    in_list_view: true
+  - fieldname: purchase_order
+    fieldtype: Link
+    label: Purchase order
+    options: Purchase Order
+  - fieldname: goods_receipt
+    fieldtype: Link
+    label: Goods receipt
+    options: Goods Receipt
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Open
+      Partly Paid
+      Paid
+      Cancelled
+    default: "Draft"
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: currency
+    fieldtype: Link
+    label: Currency
+    options: Currency
+    description: Leave empty for the base currency.
+    in_standard_filter: true
+  - fieldname: exchange_rate
+    fieldtype: Float
+    label: Exchange rate
+    description: Base currency per one unit of this currency, frozen when the record is made. 1 for the base currency.
+    default: "1"
+    linked_field: "currency.rate_to_base"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The exchange rate must be more than zero."
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The amount must be more than zero."
+  - fieldname: base_amount
+    fieldtype: Currency
+    label: Amount in base currency
+    computed: "(round (* (round amount 9) (round exchange_rate 9)) 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

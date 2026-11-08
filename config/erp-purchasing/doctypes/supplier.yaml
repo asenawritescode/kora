@@ -1,0 +1,49 @@
+name: Supplier
+module: Purchasing
+search_fields: supplier_name, phone, email
+title_field: supplier_name
+sort_field: modified
+sort_order: DESC
+description: A business or person you buy from.
+
+fields:
+  - fieldname: supplier_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+    in_list_view: true
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+  - fieldname: preferred_currency
+    fieldtype: Link
+    label: Preferred currency
+    options: Currency
+  - fieldname: payment_terms
+    fieldtype: Select
+    label: Payment terms
+    options: |
+      Immediate
+      Net 7
+      Net 14
+      Net 30
+      Net 60
+    default: "Immediate"
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: "Active"
+    in_list_view: true
+    in_standard_filter: true

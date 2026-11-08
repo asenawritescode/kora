@@ -1,0 +1,80 @@
+name: Purchase Order
+module: Purchasing
+is_submittable: true
+search_fields: reference, supplier, status
+title_field: reference
+sort_field: modified
+sort_order: DESC
+description: An order placed with a supplier, in the supplier's currency. Base total uses the rate frozen on the order.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: order_date
+    fieldtype: Date
+    label: Order date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: supplier
+    fieldtype: Link
+    label: Supplier
+    options: Supplier
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: expected_on
+    fieldtype: Date
+    label: Expected on
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Ordered
+      Partly Received
+      Received
+      Cancelled
+    default: "Draft"
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: currency
+    fieldtype: Link
+    label: Currency
+    options: Currency
+    description: Leave empty for the base currency.
+    in_standard_filter: true
+  - fieldname: exchange_rate
+    fieldtype: Float
+    label: Exchange rate
+    description: Base currency per one unit of this currency, frozen when the record is made. 1 for the base currency.
+    default: "1"
+    linked_field: "currency.rate_to_base"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The exchange rate must be more than zero."
+  - fieldname: items
+    fieldtype: Table
+    label: Items
+    options: Purchase Order Item
+    reqd: true
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    computed: "SUM(items.line_total)"
+    read_only: true
+    in_list_view: true
+  - fieldname: base_total
+    fieldtype: Currency
+    label: Total in base currency
+    computed: "(round (* (round total 9) (round exchange_rate 9)) 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
