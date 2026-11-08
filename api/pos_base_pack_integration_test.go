@@ -30,6 +30,13 @@ func newPOSBaseHandler(t *testing.T) (*Handler, *sql.DB, *doctype.Registry, stri
 // them. Views come from every layer.
 func newPackLayersHandler(t *testing.T, packs ...string) (*Handler, *sql.DB, *doctype.Registry, string) {
 	t.Helper()
+	return newPackLayersHandlerWithRoles(t, nil, nil, packs...)
+}
+
+// newPackLayersHandlerWithRoles also registers extra roles and permissions, so
+// a test can act as someone who is not an administrator.
+func newPackLayersHandlerWithRoles(t *testing.T, extraRoles []*doctype.Role, extraPermissions []*doctype.Permission, packs ...string) (*Handler, *sql.DB, *doctype.Registry, string) {
+	t.Helper()
 	database, site := newResourceIntegrationDB(t)
 	dialect := kdb.Resolve("mysql")
 	for _, ddl := range dialect.SystemTableSQL() {
@@ -80,7 +87,7 @@ func newPackLayersHandler(t *testing.T, packs ...string) (*Handler, *sql.DB, *do
 		})
 	}
 	reg := doctype.NewRegistry()
-	reg.LoadFull(docTypes, []*doctype.Role{{Name: doctype.AdminRole}}, permissions)
+	reg.LoadFull(docTypes, append([]*doctype.Role{{Name: doctype.AdminRole}}, extraRoles...), append(permissions, extraPermissions...))
 	for _, view := range views {
 		reg.Views.Register(view)
 	}

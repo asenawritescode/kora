@@ -53,6 +53,8 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
   change to the register runtime.
 - **API callers must send `exchange_rate` with a non-base `currency`.** An empty
   rate counts as 1.
+- Product stock is read-only. Set opening stock with a Stock Adjustment from
+  `erp-inventory`; a sale takes stock out through the register.
 - Amounts keep two decimals. Currencies without minor units, or with three
   (such as JPY or KWD), are not modelled. Exchange rates keep nine decimals.
 - The register is tied to register code `REG-001` and cash, as in `retail-shop`.
@@ -61,8 +63,7 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 
 ## Not here yet
 
-Stock ledger and adjustments (needs the stock-effect-on-the-record change),
-purchasing, returns and refunds, approvals, automatic posting to accounts.
+A stock movement ledger (adjustments are in `erp-inventory`), purchasing, returns and refunds, approvals, automatic posting to accounts.
 
 ## Checks
 

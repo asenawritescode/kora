@@ -4,12 +4,9 @@ title_field: reason
 search_fields: product, reason
 sort_field: creation
 sort_order: DESC
-description: Signed stock change with a recorded reason.
+description: Signed stock change with a recorded reason. Saving it changes the product stock in the same step, from any screen or the API.
 append_only: true
 quantity_effect:
-  view: Stock adjustment action
-  component: adjustment
-  action: apply
   target_doctype: Product
   target_quantity_field: stock_qty
   source_record_field: product
