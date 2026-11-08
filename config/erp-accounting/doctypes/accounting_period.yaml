@@ -1,0 +1,40 @@
+name: Accounting Period
+module: Accounting
+title_field: period_name
+search_fields: period_name, status
+sort_field: start_date
+sort_order: DESC
+description: A stretch of time the books are opened and closed for, such as a month.
+
+fields:
+  - fieldname: period_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: start_date
+    fieldtype: Date
+    label: Starts
+    reqd: true
+    in_list_view: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: Ends
+    reqd: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Open
+      Closed
+    default: Open
+    in_list_view: true
+    in_standard_filter: true
+doc_constraints:
+  - type: cross_field
+    lhs: end_date
+    operator: ">="
+    rhs: start_date
+    message: "The period cannot end before it starts."

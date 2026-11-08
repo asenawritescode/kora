@@ -1,0 +1,113 @@
+name: Journal Entry
+module: Accounting
+is_submittable: true
+title_field: reference
+search_fields: reference, memo, status
+sort_field: posting_date
+sort_order: DESC
+description: >-
+  A balanced set of debits and credits. Lines are in the entry currency; the
+  books are kept in the base currency using the rate frozen on the entry.
+  Debits must equal credits.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: posting_date
+    fieldtype: Date
+    label: Posting date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: period
+    fieldtype: Link
+    options: Accounting Period
+    label: Accounting period
+    in_standard_filter: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Posted
+      Reversed
+    default: Draft
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: memo
+    fieldtype: Text
+    label: Memo
+  - fieldname: source_type
+    fieldtype: Data
+    label: Source record type
+    description: The kind of record this came from, such as Sale or Supplier Bill. Empty for a manual entry.
+  - fieldname: source_reference
+    fieldtype: Data
+    label: Source record
+  - fieldname: currency
+    fieldtype: Link
+    options: Currency
+    label: Currency
+    description: Leave empty for the base currency.
+    in_standard_filter: true
+  - fieldname: exchange_rate
+    fieldtype: Float
+    label: Exchange rate
+    description: Base currency per one unit of the entry currency, frozen when the entry is made. 1 for the base currency.
+    default: "1"
+    linked_field: "currency.rate_to_base"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The exchange rate must be more than zero."
+  - fieldname: lines
+    fieldtype: Table
+    options: Journal Line
+    label: Lines
+    reqd: true
+    constraints:
+      - type: min_rows
+        value: 2
+        message: "A journal entry needs at least one debit line and one credit line."
+  - fieldname: total_debit
+    fieldtype: Currency
+    label: Total debit
+    computed: "ROUND(SUM(lines.debit), 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: total_credit
+    fieldtype: Currency
+    label: Total credit
+    computed: "ROUND(SUM(lines.credit), 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: difference
+    fieldtype: Currency
+    label: Difference
+    computed: "(round (- (round total_debit 9) (round total_credit 9)) 2)"
+    read_only: true
+  - fieldname: base_total_debit
+    fieldtype: Currency
+    label: Debit in base currency
+    computed: "(round (* (round total_debit 9) (round exchange_rate 9)) 2)"
+    read_only: true
+  - fieldname: base_total_credit
+    fieldtype: Currency
+    label: Credit in base currency
+    computed: "(round (* (round total_credit 9) (round exchange_rate 9)) 2)"
+    read_only: true
+doc_constraints:
+  - type: cross_field
+    lhs: total_debit
+    operator: ">="
+    rhs: total_credit
+    message: "Debits and credits must be equal."
+  - type: cross_field
+    lhs: total_debit
+    operator: "<="
+    rhs: total_credit
+    message: "Debits and credits must be equal."

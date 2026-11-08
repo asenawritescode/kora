@@ -10,7 +10,7 @@ import (
 // alone (the repo-wide pack audit) and here together, the way a workspace gets
 // them, so a link to a record in another layer cannot dangle.
 
-var erpPackLayers = []string{"pos-base", "erp-purchasing"}
+var erpPackLayers = []string{"pos-base", "erp-purchasing", "erp-accounting"}
 
 func loadERPLayers(t *testing.T) []*DocType {
 	t.Helper()
@@ -127,5 +127,83 @@ func TestERPCalculatedFieldsWorkWithTextNumbers(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func journalEntryFor(t *testing.T, debit, credit float64) (*DocType, *Document, *Registry) {
+	t.Helper()
+	byName := map[string]*DocType{}
+	all := loadERPLayers(t)
+	for _, dt := range all {
+		byName[dt.Name] = dt
+	}
+	reg := NewRegistry()
+	reg.LoadFull(all, []*Role{{Name: AdminRole}}, nil)
+	entry, line := byName["Journal Entry"], byName["Journal Line"]
+	doc := NewDocument("")
+	doc.Set("reference", "JE-1")
+	doc.Set("posting_date", "2026-11-08")
+	var rows []*Document
+	for _, amounts := range [][2]float64{{debit, 0}, {0, credit}} {
+		row := NewDocument("")
+		row.Set("account", "ACC-1")
+		row.Set("debit", amounts[0])
+		row.Set("credit", amounts[1])
+		ApplyDefaultValues(line, row)
+		rows = append(rows, row)
+	}
+	doc.SetTable("lines", rows)
+	ApplyDefaultValues(entry, doc)
+	if err := ComputeFields(entry, doc); err != nil {
+		t.Fatal(err)
+	}
+	return entry, doc, reg
+}
+
+func TestERPJournalEntryMustBalance(t *testing.T) {
+	cases := []struct {
+		name          string
+		debit, credit float64
+		wantRejected  bool
+	}{
+		{"balanced", 150.50, 150.50, false},
+		{"debit too high", 150.50, 100, true},
+		{"credit too high", 100, 150.50, true},
+		{"cents add up", 0.1 + 0.2, 0.3, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entry, doc, reg := journalEntryFor(t, tc.debit, tc.credit)
+			problems := ValidateDocument(entry, doc, reg, nil)
+			var balance int
+			for _, p := range problems {
+				if p.Message == "Debits and credits must be equal." {
+					balance++
+				}
+			}
+			if tc.wantRejected && balance == 0 {
+				t.Fatalf("unbalanced entry (debit %v, credit %v) was not rejected; difference=%v", tc.debit, tc.credit, doc.Get("difference"))
+			}
+			if !tc.wantRejected && balance > 0 {
+				t.Fatalf("balanced entry was rejected: %v", problems)
+			}
+		})
+	}
+}
+
+func TestERPJournalEntryInForeignCurrencyKeepsBooksInBase(t *testing.T) {
+	_, doc, _ := journalEntryFor(t, 100, 100)
+	doc.Set("exchange_rate", 129.5)
+	byName := map[string]*DocType{}
+	for _, dt := range loadERPLayers(t) {
+		byName[dt.Name] = dt
+	}
+	if err := ComputeFields(byName["Journal Entry"], doc); err != nil {
+		t.Fatal(err)
+	}
+	debit, _ := toFloat64(doc.Get("base_total_debit"))
+	credit, _ := toFloat64(doc.Get("base_total_credit"))
+	if debit != 12950.0 || credit != 12950.0 {
+		t.Fatalf("base debit/credit = %v / %v, want 12950 / 12950", doc.Get("base_total_debit"), doc.Get("base_total_credit"))
 	}
 }

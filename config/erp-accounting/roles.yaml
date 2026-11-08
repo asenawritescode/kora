@@ -1,0 +1,6 @@
+- name: Manager
+  workspace_access: true
+  description: Runs the shop. Sets prices, currencies and rates, and approves cash movements.
+- name: Accountant
+  workspace_access: true
+  description: Keeps the books (accounts, periods and journal entries).
