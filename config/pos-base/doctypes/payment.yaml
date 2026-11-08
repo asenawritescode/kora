@@ -23,9 +23,9 @@ fields:
     in_list_view: true
     in_standard_filter: true
   - fieldname: register
-    fieldtype: Link
-    options: Register
-    label: Register
+    fieldtype: Data
+    label: Register code
+    description: The code of the register that took the sale, for example REG-001.
   - fieldname: till_session
     fieldtype: Link
     options: Till Session

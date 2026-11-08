@@ -1,5 +1,5 @@
 - doctype: Stock Adjustment
-  role: Manager
+  role: Stock Manager
   read: true
   create: true
   write: false

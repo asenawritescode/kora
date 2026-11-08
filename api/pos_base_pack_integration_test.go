@@ -104,7 +104,8 @@ func newPackLayersHandlerWithRoles(t *testing.T, extraRoles []*doctype.Role, ext
 func seedPOSBaseShop(t *testing.T, db *sql.DB) {
 	t.Helper()
 	statements := []string{
-		"INSERT INTO `tabRegister` (name, reference, register_name, status) VALUES ('REG-001','REG-001','Main till','Active')",
+		// No Register record is inserted on purpose: a register created in the
+		// UI gets a generated name, so the sale must work with only the code.
 		"INSERT INTO `tabProduct` (name, reference, product_name, selling_price, stock_qty, status) VALUES ('PROD-001','P-1','Soda',100,1000,'Active')",
 		"INSERT INTO `tabCurrency` (name, code, currency_name, is_base, rate_to_base, enabled) VALUES ('KES','KES','Base money',1,1,1)",
 		"INSERT INTO `tabCurrency` (name, code, currency_name, is_base, rate_to_base, enabled) VALUES ('USD','USD','Dollar',0,129.5,1)",

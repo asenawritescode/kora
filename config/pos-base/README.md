@@ -57,7 +57,9 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
   `erp-inventory`; a sale takes stock out through the register.
 - Amounts keep two decimals. Currencies without minor units, or with three
   (such as JPY or KWD), are not modelled. Exchange rates keep nine decimals.
-- The register is tied to register code `REG-001` and cash, as in `retail-shop`.
+- The register screen is tied to register code `REG-001` and cash, as in `retail-shop`.
+  Sale and Payment keep the register as a code (text), not a link, because a
+  Register record's own name is generated and can never be `REG-001`.
 - The Engine's `Date` field default `today` breaks table creation on MySQL, so
   dates are filled in by the register action or typed.
 
