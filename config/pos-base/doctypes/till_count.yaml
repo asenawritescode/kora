@@ -26,5 +26,5 @@ fields:
   - fieldname: variance
     fieldtype: Currency
     label: Difference
-    computed: "counted_amount - expected_amount"
+    computed: "(round (- (round counted_amount 9) (round expected_amount 9)) 2)"
     read_only: true

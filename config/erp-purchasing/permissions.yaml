@@ -1,0 +1,88 @@
+- doctype: Supplier
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Supplier
+  role: Buyer
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Purchase Order Item
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Purchase Order Item
+  role: Buyer
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Goods Receipt Item
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Goods Receipt Item
+  role: Buyer
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Purchase Order
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  report: true
+- doctype: Purchase Order
+  role: Buyer
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+- doctype: Goods Receipt
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  report: true
+- doctype: Goods Receipt
+  role: Buyer
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+- doctype: Supplier Bill
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  report: true
+- doctype: Supplier Bill
+  role: Buyer
+  read: true
+- doctype: Supplier Payment
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  report: true
+- doctype: Supplier Payment
+  role: Buyer
+  read: true

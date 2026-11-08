@@ -1,0 +1,83 @@
+name: Goods Receipt
+module: Purchasing
+is_submittable: true
+search_fields: reference, supplier, status
+title_field: reference
+sort_field: modified
+sort_order: DESC
+description: Goods that arrived from a supplier. Recording a receipt does not change stock yet; that needs the stock-effect change in the Engine.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: received_on
+    fieldtype: Date
+    label: Received on
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: supplier
+    fieldtype: Link
+    label: Supplier
+    options: Supplier
+    reqd: true
+    in_list_view: true
+  - fieldname: purchase_order
+    fieldtype: Link
+    label: Purchase order
+    options: Purchase Order
+    in_standard_filter: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Received
+      Cancelled
+    default: "Draft"
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: currency
+    fieldtype: Link
+    label: Currency
+    options: Currency
+    description: Leave empty for the base currency.
+    in_standard_filter: true
+  - fieldname: exchange_rate
+    fieldtype: Float
+    label: Exchange rate
+    description: Base currency per one unit of this currency, frozen when the record is made. 1 for the base currency.
+    default: "1"
+    linked_field: "currency.rate_to_base"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The exchange rate must be more than zero."
+  - fieldname: items
+    fieldtype: Table
+    label: Items
+    options: Goods Receipt Item
+    reqd: true
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    computed: "SUM(items.line_total)"
+    read_only: true
+    in_list_view: true
+  - fieldname: base_total
+    fieldtype: Currency
+    label: Total in base currency
+    computed: "(round (* (round total 9) (round exchange_rate 9)) 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: received_by
+    fieldtype: User
+    label: Received by
+    read_only: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

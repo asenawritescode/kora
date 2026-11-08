@@ -1,0 +1,36 @@
+name: Goods Receipt Item
+module: Purchasing
+is_child_table: true
+title_field: product
+sort_field: modified
+sort_order: DESC
+description: One line of a delivery.
+
+fields:
+  - fieldname: product
+    fieldtype: Link
+    label: Product
+    options: Product
+    reqd: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity received
+    reqd: true
+    default: "1"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."
+  - fieldname: unit_cost
+    fieldtype: Currency
+    label: Unit cost
+    description: In the receipt currency.
+    constraints:
+      - type: min
+        value: 0
+        message: "The cost cannot be negative."
+  - fieldname: line_total
+    fieldtype: Currency
+    label: Line total
+    computed: "(round (* (round quantity 9) (round unit_cost 9)) 2)"
+    read_only: true

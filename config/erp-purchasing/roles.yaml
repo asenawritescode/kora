@@ -1,0 +1,6 @@
+- name: Manager
+  workspace_access: true
+  description: Runs the shop. Sets prices, currencies and rates, and approves cash movements.
+- name: Buyer
+  workspace_access: true
+  description: Orders from suppliers and records deliveries.
