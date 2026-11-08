@@ -1,0 +1,73 @@
+name: Cash Movement
+module: Cash control
+is_submittable: true
+title_field: reference
+search_fields: reference, movement_type, reason
+sort_field: modified
+sort_order: DESC
+description: Cash put into or taken out of a drawer outside of a sale.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till session
+    reqd: true
+    in_list_view: true
+  - fieldname: movement_type
+    fieldtype: Select
+    label: Type
+    options: |
+      Cash in
+      Cash out
+      Safe drop
+      Float top-up
+    reqd: true
+    in_list_view: true
+  - fieldname: currency
+    fieldtype: Link
+    options: Currency
+    label: Currency
+    description: Leave empty for the base currency.
+    in_list_view: true
+  - fieldname: exchange_rate
+    fieldtype: Float
+    label: Exchange rate
+    description: Base currency per one unit of this currency, frozen when the movement is recorded. 1 for the base currency.
+    default: "1"
+    linked_field: "currency.rate_to_base"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The exchange rate must be more than zero."
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The amount must be more than zero."
+  - fieldname: base_amount
+    fieldtype: Currency
+    label: Amount in base currency
+    computed: "(round (* (round amount 9) (round exchange_rate 9)) 2)"
+    read_only: true
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+    reqd: true
+  - fieldname: created_by
+    fieldtype: User
+    label: Recorded by
+    read_only: true
+  - fieldname: approved_by
+    fieldtype: User
+    label: Approved by

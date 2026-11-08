@@ -1,0 +1,20 @@
+name: Product Price
+module: Products
+is_child_table: true
+title_field: currency
+description: A price for one product in one currency.
+
+fields:
+  - fieldname: currency
+    fieldtype: Link
+    options: Currency
+    label: Currency
+    reqd: true
+  - fieldname: price
+    fieldtype: Currency
+    label: Price
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The price cannot be negative."

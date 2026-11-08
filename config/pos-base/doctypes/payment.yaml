@@ -1,0 +1,94 @@
+name: Payment
+module: Selling
+title_field: reference
+search_fields: reference, status, method
+sort_field: modified
+sort_order: DESC
+description: >-
+  Money received for a sale, in the currency the customer handed over. A sale
+  can have several payments in different currencies. Base amount is the same
+  money in the base currency, using the exchange rate frozen on the payment.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: sale
+    fieldtype: Link
+    options: Sale
+    label: Sale
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till session
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Received
+      Pending
+      Failed
+      Voided
+    default: Received
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: method
+    fieldtype: Select
+    label: Method
+    options: |
+      Cash
+      Card
+      Bank Transfer
+      Other
+    default: Cash
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: currency
+    fieldtype: Link
+    options: Currency
+    label: Currency
+    description: Leave empty for the base currency.
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: exchange_rate
+    fieldtype: Float
+    label: Exchange rate
+    description: Base currency per one unit of the payment currency, frozen when the payment is taken. 1 for the base currency.
+    default: "1"
+    linked_field: "currency.rate_to_base"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The exchange rate must be more than zero."
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The amount cannot be negative."
+  - fieldname: base_amount
+    fieldtype: Currency
+    label: Amount in base currency
+    computed: "(round (* (round amount 9) (round exchange_rate 9)) 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: received_by
+    fieldtype: User
+    label: Received by
+    read_only: true
+  - fieldname: note
+    fieldtype: Text
+    label: Note
+    description: For example the card slip number or bank transfer reference.

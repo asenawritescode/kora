@@ -1,0 +1,30 @@
+name: Till Count
+module: Cash control
+is_child_table: true
+title_field: currency
+description: The cash of one currency in a till session.
+
+fields:
+  - fieldname: currency
+    fieldtype: Link
+    options: Currency
+    label: Currency
+    reqd: true
+  - fieldname: opening_amount
+    fieldtype: Currency
+    label: Opening cash
+    default: "0"
+  - fieldname: expected_amount
+    fieldtype: Currency
+    label: Expected cash
+    description: What the drawer should hold at close.
+    default: "0"
+  - fieldname: counted_amount
+    fieldtype: Currency
+    label: Counted cash
+    default: "0"
+  - fieldname: variance
+    fieldtype: Currency
+    label: Difference
+    computed: "counted_amount - expected_amount"
+    read_only: true

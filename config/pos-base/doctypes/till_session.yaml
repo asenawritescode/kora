@@ -1,0 +1,55 @@
+name: Till Session
+module: Cash control
+title_field: reference
+search_fields: reference, status
+sort_field: modified
+sort_order: DESC
+description: >-
+  One cashier's turn at a register, from opening the drawer to counting it at
+  close. Cash is counted in every currency the drawer holds.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Open
+      Closed
+    default: Open
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: opened_by
+    fieldtype: User
+    label: Opened by
+    read_only: true
+  - fieldname: opened_at
+    fieldtype: Datetime
+    label: Opened at
+    default: now
+    in_list_view: true
+  - fieldname: closed_by
+    fieldtype: User
+    label: Closed by
+  - fieldname: closed_at
+    fieldtype: Datetime
+    label: Closed at
+  - fieldname: counts
+    fieldtype: Table
+    options: Till Count
+    label: Cash by currency
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

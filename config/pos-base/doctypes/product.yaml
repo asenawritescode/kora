@@ -1,0 +1,75 @@
+name: Product
+module: Products
+title_field: product_name
+search_fields: product_name, reference, barcode, status
+sort_field: modified
+sort_order: DESC
+description: >-
+  Something you sell. The selling price is in the base currency. Add rows to
+  Other currency prices when you price the same product in another currency.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Product code
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: product_name
+    fieldtype: Data
+    label: Product name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: barcode
+    fieldtype: Data
+    label: Barcode
+    search_index: true
+  - fieldname: category
+    fieldtype: Link
+    options: Product Category
+    label: Category
+    in_standard_filter: true
+    in_list_view: true
+  - fieldname: unit
+    fieldtype: Data
+    label: Unit
+    description: For example piece, kg or litre.
+    default: piece
+  - fieldname: selling_price
+    fieldtype: Currency
+    label: Selling price (base currency)
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The price cannot be negative."
+  - fieldname: cost_price
+    fieldtype: Currency
+    label: Cost price (base currency)
+    constraints:
+      - type: min
+        value: 0
+        message: "The cost cannot be negative."
+  - fieldname: prices
+    fieldtype: Table
+    options: Product Price
+    label: Other currency prices
+  - fieldname: stock_qty
+    fieldtype: Float
+    label: Stock quantity
+    default: "0"
+    in_list_view: true
+  - fieldname: reorder_level
+    fieldtype: Float
+    label: Reorder level
+    description: Shown as low stock when the quantity falls to this number.
+  - fieldname: status
+    fieldtype: Select
+    label: Availability
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true
