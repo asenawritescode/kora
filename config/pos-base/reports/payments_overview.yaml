@@ -1,0 +1,31 @@
+name: payments_overview
+label: Payments received
+route: /reports/payments
+queries:
+  - id: payments_by_currency
+    model: payment
+    measures: [count, amount_sum, base_amount_sum]
+    dimensions: [currency]
+  - id: payments_by_method
+    model: payment
+    measures: [count, base_amount_sum]
+    dimensions: [method]
+visuals:
+  - id: payments_by_currency
+    type: bar
+    source: payments_by_currency
+    x_field: currency
+    series:
+      - field: base_amount_sum
+        label: Received in base currency
+        type: bar
+        format: currency
+  - id: payments_by_method
+    type: bar
+    source: payments_by_method
+    x_field: method
+    series:
+      - field: base_amount_sum
+        label: Received in base currency
+        type: bar
+        format: currency
