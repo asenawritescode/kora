@@ -59,7 +59,9 @@ fields:
   - fieldname: stock_qty
     fieldtype: Float
     label: Stock quantity
+    description: Changed by sales, goods receipts and stock adjustments, not typed in.
     default: "0"
+    read_only: true
     in_list_view: true
   - fieldname: reorder_level
     fieldtype: Float

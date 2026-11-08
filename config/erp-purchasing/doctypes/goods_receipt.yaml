@@ -1,11 +1,18 @@
 name: Goods Receipt
 module: Purchasing
-is_submittable: true
-search_fields: reference, supplier, status
+append_only: true
+quantity_effect:
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  lines_field: items
+  source_record_field: product
+  delta_field: quantity
+  direction: increase
+search_fields: reference, supplier
 title_field: reference
 sort_field: modified
 sort_order: DESC
-description: Goods that arrived from a supplier. Recording a receipt does not change stock yet; that needs the stock-effect change in the Engine.
+description: Goods that arrived from a supplier. Saving a receipt adds the received quantities to each product's stock in the same step. It cannot be edited afterwards; correct a mistake with a Stock Adjustment.
 
 fields:
   - fieldname: reference
@@ -30,16 +37,6 @@ fields:
     fieldtype: Link
     label: Purchase order
     options: Purchase Order
-    in_standard_filter: true
-  - fieldname: status
-    fieldtype: Select
-    label: Status
-    options: |
-      Draft
-      Received
-      Cancelled
-    default: "Draft"
-    in_list_view: true
     in_standard_filter: true
   - fieldname: currency
     fieldtype: Link

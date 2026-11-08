@@ -1,0 +1,7 @@
+- doctype: Stock Adjustment
+  role: Manager
+  read: true
+  create: true
+  write: false
+  delete: false
+  report: true
