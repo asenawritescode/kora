@@ -1,0 +1,31 @@
+name: Journal Line
+module: Accounting
+is_child_table: true
+title_field: account
+description: One side of a journal entry, in the currency of the entry.
+
+fields:
+  - fieldname: account
+    fieldtype: Link
+    options: Account
+    label: Account
+    reqd: true
+  - fieldname: description
+    fieldtype: Data
+    label: Description
+  - fieldname: debit
+    fieldtype: Currency
+    label: Debit
+    default: "0"
+    constraints:
+      - type: min
+        value: 0
+        message: "A debit cannot be negative."
+  - fieldname: credit
+    fieldtype: Currency
+    label: Credit
+    default: "0"
+    constraints:
+      - type: min
+        value: 0
+        message: "A credit cannot be negative."

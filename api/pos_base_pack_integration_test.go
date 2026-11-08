@@ -293,3 +293,14 @@ func TestERPPurchasingOrderInAnotherCurrencyAddsUpInBaseCurrency(t *testing.T) {
 		t.Fatalf("purchase order total=%v base_total=%v, want 30 and 3885", total, baseTotal)
 	}
 }
+
+// Every ERP layer together must create its tables on MySQL.
+func TestERPAllLayersCreateTablesOnMySQL(t *testing.T) {
+	_, db, _, _ := newPackLayersHandler(t, "pos-base", "erp-purchasing", "erp-accounting")
+	for _, table := range []string{"tabAccount", "tabAccounting Period", "tabJournal Entry", "tabJournal Entry__lines", "tabSupplier Bill", "tabSale", "tabCurrency"} {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM `" + table + "`").Scan(&count); err != nil {
+			t.Errorf("table %s was not created: %v", table, err)
+		}
+	}
+}

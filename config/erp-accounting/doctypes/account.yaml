@@ -1,0 +1,56 @@
+name: Account
+module: Accounting
+title_field: account_name
+search_fields: code, account_name, account_type
+sort_field: code
+sort_order: ASC
+description: A place in the books where money is counted, for example Cash, Sales or Rent.
+
+fields:
+  - fieldname: code
+    fieldtype: Data
+    label: Code
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: account_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    in_list_view: true
+  - fieldname: account_type
+    fieldtype: Select
+    label: Type
+    options: |
+      Asset
+      Liability
+      Equity
+      Income
+      Expense
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: parent_account
+    fieldtype: Link
+    options: Account
+    label: Group
+  - fieldname: allow_posting
+    fieldtype: Check
+    label: Entries can be posted here
+    description: Untick for group accounts that only hold other accounts.
+    default: "1"
+    in_list_view: true
+  - fieldname: currency
+    fieldtype: Link
+    options: Currency
+    label: Currency
+    description: Set only for an account kept in one foreign currency, such as a dollar bank account. Empty means the base currency.
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true

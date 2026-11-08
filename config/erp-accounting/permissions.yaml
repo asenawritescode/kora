@@ -1,0 +1,39 @@
+- doctype: Account
+  role: Accountant
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Account
+  role: Manager
+  read: true
+- doctype: Accounting Period
+  role: Accountant
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Accounting Period
+  role: Manager
+  read: true
+- doctype: Journal Line
+  role: Accountant
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Journal Line
+  role: Manager
+  read: true
+- doctype: Journal Entry
+  role: Accountant
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  report: true
+- doctype: Journal Entry
+  role: Manager
+  read: true
+  report: true
