@@ -14,7 +14,7 @@ feeds, journals and accounts (nothing posted to them), stock ledgers (see
 | Area | Records |
 |---|---|
 | Setup | Currency |
-| Products | Product Category, Product, Product Price (child) |
+| Products | Product (category is a fixed list), Product Price (child) |
 | Selling | Register, Customer, Sale, Sale Item (child), Payment |
 | Cash control | Till Session, Till Count (child), Cash Movement |
 | Money out | Expense |

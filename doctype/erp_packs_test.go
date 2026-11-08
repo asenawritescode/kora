@@ -269,3 +269,32 @@ func TestERPRegisterViewsKeepToTheCategorySetupThatRenders(t *testing.T) {
 		}
 	}
 }
+
+// When a package is installed, the Engine checks each view as a page. A
+// component that groups by a Link must bind that record type as a resource, and
+// every resource a component names must exist. A finding like that stopped a
+// workspace from being set up ("tenant configuration revision no longer
+// matches package request" was only the last symptom). Other findings that the
+// proven retail-shop view also has are not treated as blocking here.
+func TestERPViewsHaveNoBlockingPageFindings(t *testing.T) {
+	all := loadERPLayers(t)
+	reg := NewRegistry()
+	reg.LoadFull(all, []*Role{{Name: AdminRole}}, nil)
+	for _, pack := range erpPackLayers {
+		views, err := ParseViewsDirectory(filepath.Join("..", "config", pack, "views"))
+		if err != nil {
+			t.Fatalf("%s views: %v", pack, err)
+		}
+		for _, view := range views {
+			manifest := PageManifestFromView(view)
+			if err := manifest.Validate(); err != nil {
+				t.Errorf("%s view %q does not make a valid page: %v", pack, view.Name, err)
+			}
+			for _, finding := range ValidatePageManifestReferences(manifest, reg) {
+				if strings.HasPrefix(finding.Code, "reference.component_resource") || finding.Code == "reference.resource_missing" {
+					t.Errorf("%s view %q: %s %s: %s", pack, view.Name, finding.Code, finding.Path, finding.Message)
+				}
+			}
+		}
+	}
+}
