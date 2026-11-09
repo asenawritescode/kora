@@ -1855,18 +1855,6 @@
       "to": "github.com/asenawritescode/kora/doctype"
     },
     {
-      "from": "github.com/asenawritescode/kora/effect",
-      "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/contract"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/effect",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/contract"
-    },
-    {
       "from": "github.com/asenawritescode/kora/eventstream",
       "from_module": "engine",
       "kind": "production",
@@ -3211,18 +3199,6 @@
       "to": "github.com/asenawritescode/kora/notifications"
     },
     {
-      "from": "github.com/asenawritescode/kora/org",
-      "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/contract"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/org",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/contract"
-    },
-    {
       "from": "github.com/asenawritescode/kora/orm",
       "from_module": "engine",
       "kind": "production",
@@ -3418,12 +3394,6 @@
       "from": "github.com/asenawritescode/kora/plugin",
       "from_module": "engine",
       "kind": "production",
-      "to": "github.com/asenawritescode/kora/component"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/plugin",
-      "from_module": "engine",
-      "kind": "production",
       "to": "github.com/asenawritescode/kora/contract"
     },
     {
@@ -3436,12 +3406,6 @@
       "from": "github.com/asenawritescode/kora/plugin",
       "from_module": "engine",
       "kind": "production",
-      "to": "github.com/asenawritescode/kora/effect"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/plugin",
-      "from_module": "engine",
-      "kind": "production",
       "to": "github.com/asenawritescode/kora/policy"
     },
     {
@@ -3449,12 +3413,6 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/analytics"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/plugin",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/component"
     },
     {
       "from": "github.com/asenawritescode/kora/plugin",
@@ -3551,18 +3509,6 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/plugin"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/reconcile",
-      "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/contract"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/reconcile",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/contract"
     },
     {
       "from": "github.com/asenawritescode/kora/requests",
@@ -4000,12 +3946,6 @@
       "from": "github.com/asenawritescode/kora/tests",
       "from_module": "engine",
       "kind": "test",
-      "to": "github.com/asenawritescode/kora/contract"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/tests",
-      "from_module": "engine",
-      "kind": "test",
       "to": "github.com/asenawritescode/kora/doctype"
     },
     {
@@ -4013,12 +3953,6 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/kernel"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/tests",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/org"
     },
     {
       "from": "github.com/asenawritescode/kora/webhook",
@@ -4252,7 +4186,7 @@
     },
     "engine": {
       "module_path": "github.com/asenawritescode/kora",
-      "package_count": 70
+      "package_count": 66
     },
     "engine-sdk": {
       "module_path": "github.com/asenawritescode/kora/sdk",
