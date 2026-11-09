@@ -85,8 +85,17 @@ func executeCreateViewDraft(tx *orm.TxManager, reg *doctype.Registry, viewJSON s
 	)
 }
 
+// viewUpdate is a new definition for an existing view.
+type viewUpdate struct {
+	Name     string
+	ViewJSON string
+	Owner    string
+	Site     string
+}
+
 // executeUpdateViewDraft updates an existing view as a Draft config version.
-func executeUpdateViewDraft(tx *orm.TxManager, reg *doctype.Registry, name, viewJSON, owner, siteName string) string {
+func executeUpdateViewDraft(tx *orm.TxManager, reg *doctype.Registry, upd viewUpdate) string {
+	name, viewJSON, owner, siteName := upd.Name, upd.ViewJSON, upd.Owner, upd.Site
 	if name == "" || viewJSON == "" {
 		return "Error: both name and view configuration are required."
 	}
