@@ -97,7 +97,7 @@ func (r *extensionReadExecutor) execute(ctx context.Context, tool ai.ToolDescrip
 		Context: queryCtx, SiteName: r.siteName, Execution: execution,
 		CurrentUser: owner, CurrentUserRoles: append([]string(nil), actor.Roles...),
 	}
-	result := ai.ExecuteToolWithExecution(tx, r.registry, tool.Name, args, owner, r.siteName, execution)
+	result := ai.ExecuteTool(tx, r.registry, ai.ToolRequest{Name: tool.Name, Args: args, Owner: owner, Site: r.siteName, Execution: execution}) //nolint:contextcheck // the context travels in tx.Context
 	if strings.HasPrefix(result, "Error") {
 		return "", errors.New("MCP read operation failed")
 	}

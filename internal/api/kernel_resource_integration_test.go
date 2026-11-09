@@ -259,7 +259,10 @@ func TestAIAndHTTPAdaptersShareMutationReceipt(t *testing.T) {
 		DB: database, Registry: registry, Dialect: kdb.Resolve("mysql"),
 		SiteName: site, Outbox: outbox.NewSQLWriter(kdb.Resolve("mysql")), Execution: execution,
 	}
-	aiResult := aiadapter.ExecuteConfirmedToolWithExecution(manager, registry, "testdoc_create", map[string]any{"title": title}, execution.Actor().PrincipalID, site, clientKey, execution)
+	aiResult := aiadapter.ExecuteTool(manager, registry, aiadapter.ToolRequest{
+		Name: "testdoc_create", Args: map[string]any{"title": title}, Owner: execution.Actor().PrincipalID, Site: site,
+		Confirmed: true, IdempotencyKey: clientKey, Execution: execution,
+	})
 	if !strings.HasPrefix(aiResult, "Created TestDoc \"") {
 		t.Fatalf("AI create failed: %s", aiResult)
 	}

@@ -402,28 +402,47 @@ func defaultString(value, fallback string) string {
 	return value
 }
 
-// ExecuteToolWithExecution is the authenticated-adapter entry point. It keeps
-// the existing tool catalog and confirmation policy while binding resulting
-// kernel commands to the verified principal supplied by the authentication
-// boundary.
-func ExecuteToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName string, execution policy.Execution) string {
-	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", "", false, execution)
+// ToolRequest is one tool call made by an authenticated adapter.
+type ToolRequest struct {
+	Name  string
+	Args  map[string]any
+	Owner string
+	Site  string
+	// Confirmed marks a call whose tool catalog and explicit confirmation the
+	// adapter already enforced at its boundary. Kernel authorization still
+	// runs. A confirmed call must carry the client's Idempotency-Key in
+	// IdempotencyKey so retried mutations replay safely; IdempotencyKey is
+	// ignored when Confirmed is false.
+	Confirmed      bool
+	IdempotencyKey string
+	// Execution is the verified principal the resulting kernel commands are
+	// bound to. A zero value falls back to the transaction manager's own.
+	Execution policy.Execution
 }
 
-// ExecuteConfirmedToolWithIdempotencyKey is for authenticated adapters that
-// already enforced the tool catalog and explicit confirmation at their
-// boundary. Kernel authorization still runs; the adapter must pass the
-// client's Idempotency-Key to make retried mutations replay-safe.
-func ExecuteConfirmedToolWithIdempotencyKey(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, idempotencyKey string) string {
-	return ExecuteConfirmedToolWithExecution(tx, reg, toolName, args, owner, siteName, idempotencyKey, tx.Execution)
+// ExecuteTool is the authenticated-adapter entry point. It keeps the existing
+// tool catalog and confirmation policy while binding resulting kernel commands
+// to the verified principal supplied by the authentication boundary.
+func ExecuteTool(tx *orm.TxManager, reg *doctype.Registry, req ToolRequest) string {
+	key := ""
+	if req.Confirmed {
+		key = channelToolMutationIdempotencyKey(req.Site, req.IdempotencyKey)
+	}
+	return executeSingleToolWithMutationKeyAndExecution(tx, reg, req.Name, req.Args, req.Owner, req.Site, "", "", key, req.Confirmed, req.Execution)
 }
 
-// ExecuteConfirmedToolWithExecution is for authenticated delegated adapters.
-// The confirmation boundary and its idempotency key are retained while the
-// resulting kernel command is bound to the verified delegated grant.
-func ExecuteConfirmedToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, idempotencyKey string, execution policy.Execution) string {
-	key := channelToolMutationIdempotencyKey(siteName, idempotencyKey)
-	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", key, true, execution)
+// holdForApproval records a durable pending approval for target unless one is
+// already granted. It reports the refusal to return to the model when the tool
+// must not run yet.
+func holdForApproval(tx *orm.TxManager, target ApprovalTarget, owner, stepID string) (string, bool) {
+	if ok, _ := HasGrantedApproval(tx.Context, tx.DB, target); ok {
+		return "", false
+	}
+	_ = EnsureApprovalPending(tx.Context, tx.DB, ApprovalRequest{Target: target, ActorID: owner, ActorType: "agent"})
+	if stepID != "" && target.OperationID != "" {
+		_ = MarkRunPendingApproval(tx.Context, tx.DB, target.OperationID, stepID, "pending_approval")
+	}
+	return "Approval required for " + target.ToolName + ". A durable approval has been recorded and the tool was not executed.", true
 }
 
 func classifyToolSafety(name string) string {
@@ -963,6 +982,7 @@ func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctyp
 	if err := requireRecentAuthForTool(tx.Context, toolName); err != nil {
 		return err.Error()
 	}
+	approval := ApprovalTarget{Site: siteName, OperationID: runID, ToolName: toolName, Args: args}
 	// --- System tools (no doctype prefix) ---
 	switch toolName {
 	case "mutate_records":
@@ -985,27 +1005,19 @@ func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctyp
 		return executeAnalyticsInsights(tx, reg, doctypeName, siteName, execution)
 	case "create_doctype_draft":
 		yamlStr, _ := args["yaml"].(string)
-		if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
-			_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
-			if stepID != "" && runID != "" {
-				_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
-			}
-			return "Approval required for create_doctype_draft. A durable approval has been recorded and the tool was not executed."
+		if msg, held := holdForApproval(tx, approval, owner, stepID); held {
+			return msg
 		}
 		result := executeCreateDoctypeDraft(tx, reg, yamlStr, owner, siteName)
-		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
+		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, approval, owner)
 		return result
 	case "update_doctype_draft":
 		yamlStr, _ := args["yaml"].(string)
-		if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
-			_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
-			if stepID != "" && runID != "" {
-				_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
-			}
-			return "Approval required for update_doctype_draft. A durable approval has been recorded and the tool was not executed."
+		if msg, held := holdForApproval(tx, approval, owner, stepID); held {
+			return msg
 		}
 		result := executeUpdateDoctypeDraft(tx, reg, yamlStr, owner, siteName)
-		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
+		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, approval, owner)
 		return result
 	case "script_create":
 		if !executionHasRole(execution, doctype.AdminRole) {
@@ -1030,28 +1042,20 @@ func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctyp
 		return executeValidateView(viewJSON, reg)
 	case "create_view":
 		viewJSON := argsToJSON(args, "view")
-		if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
-			_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
-			if stepID != "" && runID != "" {
-				_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
-			}
-			return "Approval required for create_view. A durable approval has been recorded and the tool was not executed."
+		if msg, held := holdForApproval(tx, approval, owner, stepID); held {
+			return msg
 		}
 		result := executeCreateViewDraft(tx, reg, viewJSON, owner, siteName)
-		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
+		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, approval, owner)
 		return result
 	case "update_view":
 		name, _ := args["name"].(string)
 		viewJSON := argsToJSON(args, "view")
-		if ok, _ := HasGrantedApproval(tx.Context, tx.DB, siteName, runID, toolName, args); !ok {
-			_ = EnsureApprovalPending(tx.Context, tx.DB, siteName, runID, owner, "agent", toolName, 0, args)
-			if stepID != "" && runID != "" {
-				_ = MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "pending_approval")
-			}
-			return "Approval required for update_view. A durable approval has been recorded and the tool was not executed."
+		if msg, held := holdForApproval(tx, approval, owner, stepID); held {
+			return msg
 		}
 		result := executeUpdateViewDraft(tx, reg, name, viewJSON, owner, siteName)
-		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, siteName, runID, toolName, args, owner)
+		_, _ = GrantApprovalForOperation(tx.Context, tx.DB, approval, owner)
 		return result
 	}
 

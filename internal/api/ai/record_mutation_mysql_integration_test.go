@@ -128,8 +128,9 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 
 	channelArgs := map[string]any{"title": "Channel"}
 	const channelKey = "external-channel-retry-0001"
-	channelCreate := ExecuteConfirmedToolWithExecution(tx, registry, "task_create", channelArgs, "alice@example.test", site, channelKey, execution)
-	channelReplay := ExecuteConfirmedToolWithExecution(tx, registry, "task_create", channelArgs, "alice@example.test", site, channelKey, execution)
+	channelRequest := ToolRequest{Name: "task_create", Args: channelArgs, Owner: "alice@example.test", Site: site, Confirmed: true, IdempotencyKey: channelKey, Execution: execution}
+	channelCreate := ExecuteTool(tx, registry, channelRequest)
+	channelReplay := ExecuteTool(tx, registry, channelRequest)
 	if !strings.HasPrefix(channelCreate, "Created Task \"") || channelReplay != channelCreate {
 		t.Fatalf("channel create/replay outputs differ: first=%q replay=%q", channelCreate, channelReplay)
 	}
@@ -288,10 +289,11 @@ func TestAIMutationBundleConvertsLeadWithDurableApprovalAtomically(t *testing.T)
 		map[string]any{"key": "lead", "doctype": "Lead", "operation": "update", "name": createdLead.Name, "expected_revision": float64(storedLead.Revision), "transition_action": "Convert", "data": map[string]any{"company": "$records.company.name", "contact": "$records.contact.name", "converted_deal": "$records.deal.name"}},
 	}}
 	const runID = "crm-conversion-run"
-	if err := EnsureApprovalPending(ctx, database, site, runID, "sales@example.test", "agent", "mutate_records", 0, args); err != nil {
+	approval := ApprovalTarget{Site: site, OperationID: runID, ToolName: "mutate_records", Args: args}
+	if err = EnsureApprovalPending(ctx, database, ApprovalRequest{Target: approval, ActorID: "sales@example.test", ActorType: "agent"}); err != nil {
 		t.Fatalf("persist conversion approval: %v", err)
 	}
-	if _, err := GrantApprovalForOperation(ctx, database, site, runID, "mutate_records", args, "sales@example.test"); err != nil {
+	if _, err = GrantApprovalForOperation(ctx, database, approval, "sales@example.test"); err != nil {
 		t.Fatalf("grant conversion approval: %v", err)
 	}
 	const bundleKey = "crm-conversion-bundle-once"
