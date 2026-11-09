@@ -756,32 +756,6 @@ func (s *Scheduler) LoadScheduledScripts() error {
 	return nil
 }
 
-func (s *Scheduler) runScheduledScript(rec script.ScriptRecord) error {
-	if s.ScriptRunner == nil {
-		return fmt.Errorf("script runner not configured")
-	}
-	req := script.ExecuteRequest{
-		Script: rec.Script, ScriptType: rec.ScriptType, ScriptName: rec.Name,
-		User: "scheduler", UserRoles: []string{doctype.AdminRole}, Site: s.SiteName,
-		Document: map[string]any{},
-	}
-	ctx := context.Background()
-	_, err := s.ScriptRunner.Execute(ctx, req)
-	if err != nil {
-		slog.Error("scheduled script failed", "name", rec.Name, "error", err)
-	}
-	status := "success"
-	errMsg := ""
-	if err != nil {
-		status = "error"
-		errMsg = err.Error()
-	}
-	if s.ScriptStore != nil {
-		_ = s.ScriptStore.LogExecution(s.SiteName, rec, "", "", "", "scheduler", 0, status, errMsg)
-	}
-	return err
-}
-
 func (s *Scheduler) runDoctypeAlert(ctx context.Context, job *JobConfig) error {
 	doctypeName, _ := job.Config["doctype"].(string)
 	if doctypeName == "" {

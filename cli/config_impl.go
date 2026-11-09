@@ -44,10 +44,6 @@ var configExportCmd = &cobra.Command{
 	},
 }
 
-func runConfigExport(siteName, path string) error {
-	return runConfigExportContext(context.Background(), siteName, path)
-}
-
 func runConfigExportContext(ctx context.Context, siteName, path string) error {
 	if siteName == "" || path == "" {
 		return fmt.Errorf("--site and --path are required")
@@ -173,6 +169,8 @@ func marshalPageManifestYAML(manifest *doctype.PageManifest) ([]byte, error) {
 	return yaml.Marshal(document)
 }
 
+// runConfigImport imports a config pack with a background context. It is the entry point used by the
+// integration tests; the CLI commands call runConfigImportContext directly.
 func runConfigImport(siteName, path, dbName string) (returnErr error) {
 	return runConfigImportContext(context.Background(), siteName, path, dbName)
 }
@@ -297,10 +295,6 @@ func runConfigImportForSiteContext(ctx context.Context, siteName, path string, s
 	return nil
 }
 
-func resolveConfigImportSiteConfig(siteName, dbName string, commonCfg *site.CommonConfig) *site.SiteConfig {
-	return resolveConfigImportSiteConfigContext(context.Background(), siteName, dbName, commonCfg)
-}
-
 func resolveConfigImportSiteConfigContext(ctx context.Context, siteName, dbName string, commonCfg *site.CommonConfig) *site.SiteConfig {
 	if info, ok := lookupRegisteredSiteContext(ctx, siteName, commonCfg); ok {
 		cfg := site.ReconstructSiteConfigFromDBInfo(info, commonCfg)
@@ -315,10 +309,6 @@ func resolveConfigImportSiteConfigContext(ctx context.Context, siteName, dbName 
 		cfg.DBName = dbName
 	}
 	return cfg
-}
-
-func lookupRegisteredSite(siteName string, commonCfg *site.CommonConfig) (site.DBSiteInfo, bool) {
-	return lookupRegisteredSiteContext(context.Background(), siteName, commonCfg)
 }
 
 func lookupRegisteredSiteContext(ctx context.Context, siteName string, commonCfg *site.CommonConfig) (site.DBSiteInfo, bool) {
@@ -366,10 +356,6 @@ func lookupRegisteredSiteContext(ctx context.Context, siteName string, commonCfg
 		}
 	}
 	return site.DBSiteInfo{}, false
-}
-
-func openSiteDiscoveryDB(commonCfg *site.CommonConfig) (*sql.DB, error) {
-	return openSiteDiscoveryDBContext(context.Background(), commonCfg)
 }
 
 func openSiteDiscoveryDBContext(ctx context.Context, commonCfg *site.CommonConfig) (*sql.DB, error) {
@@ -457,10 +443,6 @@ func init() {
 	configCmd.AddCommand(rollbackCmd)
 }
 
-func runConfigVersions(siteName string) error {
-	return runConfigVersionsContext(context.Background(), siteName)
-}
-
 func runConfigVersionsContext(ctx context.Context, siteName string) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -518,10 +500,6 @@ func min19(s string) int {
 	return len(s)
 }
 
-func runConfigDiff(siteName, fromID, toID string) error {
-	return runConfigDiffContext(context.Background(), siteName, fromID, toID)
-}
-
 func runConfigDiffContext(ctx context.Context, siteName, fromID, toID string) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -571,10 +549,6 @@ func runConfigDiffContext(ctx context.Context, siteName, fromID, toID string) er
 		fmt.Printf("  %s %s\n", flag, c.Message)
 	}
 	return nil
-}
-
-func runConfigRollback(siteName string, toVersion int) error {
-	return runConfigRollbackContext(context.Background(), siteName, toVersion)
 }
 
 func runConfigRollbackContext(ctx context.Context, siteName string, toVersion int) error {

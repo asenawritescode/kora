@@ -468,34 +468,3 @@ func parseRebuildDate(value any) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("unsupported SQL date value %T", value)
 	}
 }
-
-func MarkRebuildRunning(db *sql.DB, dialect kdb.Dialect, site, id string) error {
-	return updateRebuildJob(db, dialect, site, id,
-		`status = ?, error = NULL, updated_at = ?`, "running", time.Now().UTC())
-}
-
-func MarkRebuildCompleted(db *sql.DB, dialect kdb.Dialect, site, id string, metrics int) error {
-	now := time.Now().UTC()
-	return updateRebuildJob(db, dialect, site, id,
-		`status = ?, metrics = ?, completed_at = ?, updated_at = ?`, "completed", metrics, now, now)
-}
-
-func MarkRebuildFailed(db *sql.DB, dialect kdb.Dialect, site, id string, cause error) error {
-	now := time.Now().UTC()
-	message := "rebuild failed"
-	if cause != nil {
-		message = cause.Error()
-	}
-	return updateRebuildJob(db, dialect, site, id,
-		`status = ?, error = ?, completed_at = ?, updated_at = ?`, "failed", message, now, now)
-}
-
-func updateRebuildJob(db *sql.DB, dialect kdb.Dialect, site, id, set string, args ...any) error {
-	if db == nil {
-		return fmt.Errorf("analytics rebuild job requires database")
-	}
-	table := dialect.QuoteIdent("_kora_analytics_rebuild_job")
-	args = append(args, site, id)
-	_, err := db.Exec(kdb.Rebind(dialect, fmt.Sprintf(`UPDATE %s SET %s WHERE site = ? AND id = ?`, table, set)), args...)
-	return err
-}
