@@ -495,7 +495,9 @@ func dbFloat(v any) float64 {
 		return float64(val)
 	case []byte:
 		var f float64
-		fmt.Sscanf(string(val), "%f", &f)
+		if _, err := fmt.Sscanf(string(val), "%f", &f); err != nil {
+			return 0
+		}
 		return f
 	default:
 		return 0

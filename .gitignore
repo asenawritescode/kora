@@ -51,7 +51,8 @@ libtest_local.db
 sites/
 
 # Runtime and tool output - never commit
-data/analytics/
+**/data/analytics/
+*.jsonl
 __pycache__/
 *.pyc
 _kora_provisioning_jobs.json
