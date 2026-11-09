@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -581,12 +580,13 @@ func (sr *SiteRouter) isHostAllowedForSite(host string, config SiteRouterConfig)
 }
 
 // RegisterPathSiteRoutes adds a NoRoute handler that intercepts /s/:site/*
-// requests, injects site context, rewrites the path, and serves directly.
+// requests, injects site context, rewrites the path, and re-dispatches API calls.
 // This allows multi-site access without DNS or /etc/hosts.
 //
-//	localhost:8000/s/airtime/workspace → airtime site
 //	localhost:8000/s/fieldwork/api/...  → fieldwork site
-func RegisterPathSiteRoutes(router *gin.Engine, sr *SiteRouter, spaFS fs.FS) {
+//
+// The Engine serves no UI files; anything else under /s/:site returns 404.
+func RegisterPathSiteRoutes(router *gin.Engine, sr *SiteRouter) {
 	router.NoRoute(func(c *gin.Context) {
 		slog.Debug("path-based site route", "path", c.Request.URL.Path, "method", c.Request.Method)
 		path := c.Request.URL.Path
@@ -643,7 +643,7 @@ func RegisterPathSiteRoutes(router *gin.Engine, sr *SiteRouter, spaFS fs.FS) {
 		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), pathRoutedSiteContextKey{}, pathRoutedRuntime{site: site, snapshot: snapshot}))
 		injectSiteRuntimeContext(c, snapshot)
 
-		// Handle API and workspace paths.
+		// Handle API paths.
 		if strings.HasPrefix(rest, "/api/") || rest == "/api" {
 			// API requests: rewrite path and let Gin re-dispatch.
 			// We need to re-enter the router for API routes to match.
@@ -668,63 +668,8 @@ func RegisterPathSiteRoutes(router *gin.Engine, sr *SiteRouter, spaFS fs.FS) {
 			return
 		}
 
-		if rest == "/workspace" || strings.HasPrefix(rest, "/workspace/") || rest == "/" {
-			// Serve SPA directly at the /s/:site/workspace URL.
-			// Set a site cookie so API calls know which site to use.
-			SetSecureCookie(c, "kora_site", snapshot.Name, 86400, "/", false)
-			// Serve index.html from the SPA FS.
-			if spaFS != nil {
-				serveSPAFromFS(c, spaFS, "/index.html")
-			} else {
-				c.String(http.StatusNotFound, "SPA not available")
-			}
-			return
-		}
-
-		// Anything else under the site (assets, etc): serve from SPA FS or 404.
-		if spaFS != nil {
-			serveSPAFromFS(c, spaFS, rest)
-			return
-		}
-
 		c.JSON(404, gin.H{"error": "not_found"})
 	})
-}
-
-// serveSPAFromFS serves a file from the SPA's embedded filesystem.
-// Falls back to index.html for client-side routing.
-func serveSPAFromFS(c *gin.Context, spaFS fs.FS, reqPath string) {
-	servePath := reqPath
-	if servePath == "" || servePath == "/" {
-		servePath = "/index.html"
-	}
-
-	cleanPath := strings.TrimPrefix(servePath, "/")
-	f, err := spaFS.Open(cleanPath)
-	if err != nil {
-		servePath = "/index.html"
-		cleanPath = "index.html"
-	} else {
-		f.Close()
-	}
-
-	data, err := fs.ReadFile(spaFS, cleanPath)
-	if err != nil {
-		c.String(http.StatusNotFound, "Not found")
-		return
-	}
-
-	// Set content type.
-	ct := "text/html; charset=utf-8"
-	if strings.HasSuffix(cleanPath, ".js") {
-		ct = "text/javascript; charset=utf-8"
-	} else if strings.HasSuffix(cleanPath, ".css") {
-		ct = "text/css; charset=utf-8"
-	} else if strings.HasSuffix(cleanPath, ".svg") {
-		ct = "image/svg+xml"
-	}
-	c.Header("Content-Type", ct)
-	c.String(http.StatusOK, "%s", string(data))
 }
 
 func stripPort(host string) string {

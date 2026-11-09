@@ -461,7 +461,7 @@ func TestSiteRouter_PathBasedRouting(t *testing.T) {
 	r := gin.New()
 
 	// Register path-based site routes (no-route handler).
-	RegisterPathSiteRoutes(r, sr, nil)
+	RegisterPathSiteRoutes(r, sr)
 
 	tests := []struct {
 		name   string
@@ -503,7 +503,7 @@ func TestSiteRouter_PathBasedRoutingAcceptsCanonicalSiteID(t *testing.T) {
 		}
 		c.String(http.StatusOK, siteID.(string))
 	})
-	RegisterPathSiteRoutes(r, sr, nil)
+	RegisterPathSiteRoutes(r, sr)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/s/site_engine_0123456789abcdef/api/v1/ping", nil)
@@ -521,7 +521,7 @@ func TestSiteRouter_PathBasedRouting_UnknownSite(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterPathSiteRoutes(r, sr, nil)
+	RegisterPathSiteRoutes(r, sr)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/s/nonexistent/workspace", nil)

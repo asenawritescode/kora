@@ -35,7 +35,7 @@ func TestFallbackPathSiteRoutingStillDispatchesAPI(t *testing.T) {
 	router.Use(siteRouter.Middleware())
 
 	// This matches the non-SPA fallback branch in runServe.
-	knet.RegisterPathSiteRoutes(router, siteRouter, nil)
+	knet.RegisterPathSiteRoutes(router, siteRouter)
 
 	router.GET("/api/test-site", func(c *gin.Context) {
 		if _, ok := c.Get("site_db"); !ok {
