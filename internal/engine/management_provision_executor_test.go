@@ -43,7 +43,7 @@ func TestManagementProvisionExecutorCreatesCanonicalTenantAndActivates(t *testin
 	directory := &managementProvisionDirectoryStub{err: sql.ErrNoRows}
 	coordinator := &managementStateCoordinatorStub{}
 	createCalls := 0
-	executor, err := newManagementProvisionExecutor("mysql:shared-1", "deployment-1", new(sql.DB), "mysql", common, admission, directory, coordinator, func(_ context.Context, input site.CreateSiteInput) (*site.CreateSiteResult, error) {
+	executor, err := newManagementProvisionExecutor(managementProvisionOptions{allocationRef: "mysql:shared-1", deploymentID: "deployment-1", platformDB: new(sql.DB), platformType: "mysql", common: common, admission: admission, directory: directory, coordinator: coordinator, createSite: func(_ context.Context, input site.CreateSiteInput) (*site.CreateSiteResult, error) {
 		createCalls++
 		if input.SiteID != string(command.Tenant) || input.Hostname != command.PrimaryAlias || input.AdminEmail != command.BootstrapAdminEmail {
 			t.Fatalf("CreateSite identity/bootstrap = %q/%q/%q", input.SiteID, input.Hostname, input.AdminEmail)
@@ -61,7 +61,7 @@ func TestManagementProvisionExecutorCreatesCanonicalTenantAndActivates(t *testin
 			config.StorageBucket = site.BucketNameForSite(input.Hostname)
 		}
 		return &site.CreateSiteResult{SiteID: string(command.Tenant), Config: config}, nil
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,15 +79,15 @@ func TestManagementProvisionExecutorReplaysActiveTenantWithoutRecreating(t *test
 	common := &site.CommonConfig{DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBUser: "engine"}
 	admission := &managementProvisionAdmissionStub{}
 	coordinator := &managementStateCoordinatorStub{}
-	executor, err := newManagementProvisionExecutor("mysql:shared-1", "deployment-1", new(sql.DB), "mysql", common, admission, nil, coordinator, nil)
+	_, err := newManagementProvisionExecutor(managementProvisionOptions{allocationRef: "mysql:shared-1", deploymentID: "deployment-1", platformDB: new(sql.DB), platformType: "mysql", common: common, admission: admission, coordinator: coordinator})
 	if err == nil {
 		t.Fatal("constructor accepted missing dependencies")
 	}
 	directory := &managementProvisionDirectoryStub{}
-	executor, err = newManagementProvisionExecutor("mysql:shared-1", "deployment-1", new(sql.DB), "mysql", common, admission, directory, coordinator, func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) {
+	executor, err := newManagementProvisionExecutor(managementProvisionOptions{allocationRef: "mysql:shared-1", deploymentID: "deployment-1", platformDB: new(sql.DB), platformType: "mysql", common: common, admission: admission, directory: directory, coordinator: coordinator, createSite: func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) {
 		t.Fatal("active idempotent replay recreated tenant data")
 		return nil, nil
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,10 +118,10 @@ func TestManagementProvisionExecutorRetainsLegacyDefaultAndRejectsExplicitMisrou
 			admission := &managementProvisionAdmissionStub{}
 			coordinator := &managementStateCoordinatorStub{}
 			directory := &managementProvisionDirectoryStub{}
-			executor, err := newManagementProvisionExecutor("mysql:shared-1", "deployment-1", new(sql.DB), "mysql", common, admission, directory, coordinator, func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) {
+			executor, err := newManagementProvisionExecutor(managementProvisionOptions{allocationRef: "mysql:shared-1", deploymentID: "deployment-1", platformDB: new(sql.DB), platformType: "mysql", common: common, admission: admission, directory: directory, coordinator: coordinator, createSite: func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) {
 				t.Fatal("active replay recreated tenant data")
 				return nil, nil
-			})
+			}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -161,10 +161,10 @@ func TestManagementProvisionExecutorRejectsUnassignedAndPackagedCommandsBeforeSi
 			admission := &managementProvisionAdmissionStub{}
 			coordinator := &managementStateCoordinatorStub{}
 			directory := &managementProvisionDirectoryStub{err: sql.ErrNoRows}
-			executor, err := newManagementProvisionExecutor("mysql:shared-1", "deployment-1", new(sql.DB), "mysql", &site.CommonConfig{DBType: "mysql"}, admission, directory, coordinator, func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) {
+			executor, err := newManagementProvisionExecutor(managementProvisionOptions{allocationRef: "mysql:shared-1", deploymentID: "deployment-1", platformDB: new(sql.DB), platformType: "mysql", common: &site.CommonConfig{DBType: "mysql"}, admission: admission, directory: directory, coordinator: coordinator, createSite: func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) {
 				t.Fatal("invalid command reached tenant creation")
 				return nil, nil
-			})
+			}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -180,12 +180,7 @@ func TestManagementProvisionExecutorRejectsUnassignedAndPackagedCommandsBeforeSi
 }
 
 func TestManagementProvisionExecutorRejectsUnresolvedLibSQLAllocation(t *testing.T) {
-	_, err := newManagementProvisionExecutor(
-		"libsql:shared-1", "deployment-1", new(sql.DB), "libsql",
-		&site.CommonConfig{DBType: "libsql"}, &managementProvisionAdmissionStub{},
-		&managementProvisionDirectoryStub{err: sql.ErrNoRows}, &managementStateCoordinatorStub{},
-		func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) { return nil, nil },
-	)
+	_, err := newManagementProvisionExecutor(managementProvisionOptions{allocationRef: "libsql:shared-1", deploymentID: "deployment-1", platformDB: new(sql.DB), platformType: "libsql", common: &site.CommonConfig{DBType: "libsql"}, admission: &managementProvisionAdmissionStub{}, directory: &managementProvisionDirectoryStub{err: sql.ErrNoRows}, coordinator: &managementStateCoordinatorStub{}, createSite: func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) { return nil, nil }})
 	if err == nil || !strings.Contains(err.Error(), "matching MySQL or PostgreSQL") {
 		t.Fatalf("unresolved LibSQL allocation error = %v", err)
 	}
@@ -195,9 +190,9 @@ func TestManagementProvisionExecutorMakesUncertainCreateRecoverable(t *testing.T
 	command := validProvisionCommand()
 	admission := &managementProvisionAdmissionStub{}
 	coordinator := &managementStateCoordinatorStub{}
-	executor, err := newManagementProvisionExecutor("mysql:shared-1", "deployment-1", new(sql.DB), "mysql", &site.CommonConfig{DBType: "mysql"}, admission, &managementProvisionDirectoryStub{err: sql.ErrNoRows}, coordinator, func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) {
+	executor, err := newManagementProvisionExecutor(managementProvisionOptions{allocationRef: "mysql:shared-1", deploymentID: "deployment-1", platformDB: new(sql.DB), platformType: "mysql", common: &site.CommonConfig{DBType: "mysql"}, admission: admission, directory: &managementProvisionDirectoryStub{err: sql.ErrNoRows}, coordinator: coordinator, createSite: func(context.Context, site.CreateSiteInput) (*site.CreateSiteResult, error) {
 		return nil, errors.New("database connection interrupted after create")
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

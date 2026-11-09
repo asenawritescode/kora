@@ -178,16 +178,17 @@ func AssembleHTTPProcess(config HTTPProcessAssemblyConfig) (*HTTPProcessAssembly
 		if !ok {
 			return nil, errors.New("management state operations require the Engine SQL tenant directory")
 		}
-		managementRuntime, err := assembleManagementOperationRuntime(
-			config.ProcessContext, platformRoutes.ManagementToken, platformRoutes.ManagementCallerID,
-			platformRoutes.PlatformDB, db.Resolve(config.Application.Common.DBType),
-			platformRoutes.PlatformWorkAdmission, stateDirectory, config.Resources.TenantCoordinator,
-			config.Application.Tenants, platformRoutes.ManagementPackageResolver,
-			platformRoutes.ManagementCheckpointVerifier, config.Application.Common.DBType, config.Application.Common,
-			platformRoutes.DeploymentID, platformRoutes.ManagementDatabaseAllocationRef,
-		)
-		if err != nil {
-			return nil, err
+		managementRuntime, runtimeErr := assembleManagementOperationRuntime(config.ProcessContext, managementRuntimeOptions{
+			token: platformRoutes.ManagementToken, caller: platformRoutes.ManagementCallerID,
+			database: platformRoutes.PlatformDB, dialect: db.Resolve(config.Application.Common.DBType),
+			admission: platformRoutes.PlatformWorkAdmission, directory: stateDirectory, coordinator: config.Resources.TenantCoordinator,
+			tenants: config.Application.Tenants, packageResolver: platformRoutes.ManagementPackageResolver,
+			verifier: platformRoutes.ManagementCheckpointVerifier, platformDBType: config.Application.Common.DBType,
+			common: config.Application.Common, deploymentID: platformRoutes.DeploymentID,
+			databaseAllocationRef: platformRoutes.ManagementDatabaseAllocationRef,
+		})
+		if runtimeErr != nil {
+			return nil, runtimeErr
 		}
 		platformRoutes.ManagementOperations = &managementRuntime.routes
 		if err := managementRuntime.start(config.ProcessContext, config.Resources); err != nil {

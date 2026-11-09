@@ -23,7 +23,7 @@ func TestManagementProvisionExecutorPassesNormalizedDisplayName(t *testing.T) {
 			command.DisplayName = test.displayName
 			common := &site.CommonConfig{DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBUser: "engine"}
 			var got *string
-			executor, err := newManagementProvisionExecutor("mysql:shared-1", "deployment-1", new(sql.DB), "mysql", common, &managementProvisionAdmissionStub{}, &managementProvisionDirectoryStub{err: sql.ErrNoRows}, &managementStateCoordinatorStub{}, func(_ context.Context, input site.CreateSiteInput) (*site.CreateSiteResult, error) {
+			executor, err := newManagementProvisionExecutor(managementProvisionOptions{allocationRef: "mysql:shared-1", deploymentID: "deployment-1", platformDB: new(sql.DB), platformType: "mysql", common: common, admission: &managementProvisionAdmissionStub{}, directory: &managementProvisionDirectoryStub{err: sql.ErrNoRows}, coordinator: &managementStateCoordinatorStub{}, createSite: func(_ context.Context, input site.CreateSiteInput) (*site.CreateSiteResult, error) {
 				value := input.DisplayName
 				got = &value
 				config := input.ResolvedTenantConfig()
@@ -33,7 +33,7 @@ func TestManagementProvisionExecutorPassesNormalizedDisplayName(t *testing.T) {
 					config.StorageBucket = site.BucketNameForSite(input.Hostname)
 				}
 				return &site.CreateSiteResult{SiteID: string(command.Tenant), Config: config}, nil
-			})
+			}})
 			if err != nil {
 				t.Fatal(err)
 			}

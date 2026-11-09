@@ -32,30 +32,44 @@ type managementProvisionExecutor struct {
 	createSite    managementCreateSite
 }
 
-func newManagementProvisionExecutor(allocationRef, deploymentID string, platformDB *sql.DB, platformType string, common *site.CommonConfig, admission managementWorkAdmission, directory managementProvisionDirectory, coordinator managementStateCoordinator, createSite managementCreateSite) (*managementProvisionExecutor, error) {
-	deployment, err := contract.ParseDeploymentID(deploymentID)
-	if err != nil || allocationRef == "" || len(allocationRef) > 160 || platformDB == nil || platformType == "" || common == nil || common.DBType == "" || admission == nil || directory == nil || coordinator == nil || createSite == nil {
+// managementProvisionOptions are the dependencies of the tenant provisioning
+// executor; every field is required.
+type managementProvisionOptions struct {
+	allocationRef string
+	deploymentID  string
+	platformDB    *sql.DB
+	platformType  string
+	common        *site.CommonConfig
+	admission     managementWorkAdmission
+	directory     managementProvisionDirectory
+	coordinator   managementStateCoordinator
+	createSite    managementCreateSite
+}
+
+func newManagementProvisionExecutor(opts managementProvisionOptions) (*managementProvisionExecutor, error) {
+	deployment, err := contract.ParseDeploymentID(opts.deploymentID)
+	if err != nil || opts.allocationRef == "" || len(opts.allocationRef) > 160 || opts.platformDB == nil || opts.platformType == "" || opts.common == nil || opts.common.DBType == "" || opts.admission == nil || opts.directory == nil || opts.coordinator == nil || opts.createSite == nil {
 		return nil, errors.New("management provisioning requires a deployment, allowlisted allocation, platform database, tenant database config, admission, directory, coordinator, and creator")
 	}
-	if !strings.EqualFold(platformType, common.DBType) || (strings.ToLower(common.DBType) != "mysql" && strings.ToLower(common.DBType) != "postgres") {
+	if !strings.EqualFold(opts.platformType, opts.common.DBType) || (strings.ToLower(opts.common.DBType) != "mysql" && strings.ToLower(opts.common.DBType) != "postgres") {
 		return nil, errors.New("static management database allocation currently requires matching MySQL or PostgreSQL platform and tenant databases")
 	}
-	if err := site.ValidateTenantDatabaseName(common.DBType, "management_probe"); err != nil {
+	if err := site.ValidateTenantDatabaseName(opts.common.DBType, "management_probe"); err != nil {
 		return nil, fmt.Errorf("management provisioning database allocation uses an unsupported tenant dialect: %w", err)
 	}
-	if err := site.ValidateTenantDatabaseName(platformType, "management_probe"); err != nil {
+	if err := site.ValidateTenantDatabaseName(opts.platformType, "management_probe"); err != nil {
 		return nil, fmt.Errorf("management provisioning platform database uses an unsupported dialect: %w", err)
 	}
 	return &managementProvisionExecutor{
-		allocationRef: allocationRef,
+		allocationRef: opts.allocationRef,
 		deployment:    deployment,
-		platformDB:    platformDB,
-		platformType:  platformType,
-		common:        common,
-		admission:     admission,
-		directory:     directory,
-		coordinator:   coordinator,
-		createSite:    createSite,
+		platformDB:    opts.platformDB,
+		platformType:  opts.platformType,
+		common:        opts.common,
+		admission:     opts.admission,
+		directory:     opts.directory,
+		coordinator:   opts.coordinator,
+		createSite:    opts.createSite,
 	}, nil
 }
 

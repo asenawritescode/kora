@@ -118,7 +118,7 @@ func testLiveManagementProvisionRouteAndWorker(t *testing.T, driver, dsn string)
 	admission := &managementProvisionAdmissionStub{}
 	coordinator := &liveManagementProvisionCoordinator{}
 	const token, caller = "disposable-management-token", "cloud-control-plane"
-	runtime, err := assembleManagementOperationRuntime(ctx, token, caller, platformDB, dialect, admission, registry, coordinator, knet.NewSiteRouter(nil), nil, nil, driver, &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}, string(command.Deployment), command.DatabaseAllocationRef)
+	runtime, err := assembleManagementOperationRuntime(ctx, managementRuntimeOptions{token: token, caller: caller, database: platformDB, dialect: dialect, admission: admission, directory: registry, coordinator: coordinator, tenants: knet.NewSiteRouter(nil), platformDBType: driver, common: &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}, deploymentID: string(command.Deployment), databaseAllocationRef: command.DatabaseAllocationRef})
 	if err != nil {
 		t.Fatal("compose management runtime:", err)
 	}
@@ -128,7 +128,7 @@ func testLiveManagementProvisionRouteAndWorker(t *testing.T, driver, dsn string)
 	if runtime.routes.Capabilities[api.ManagementDeleteCapability] || runtime.routes.Capabilities[api.ManagementDeleteRecovery] {
 		t.Fatal("tenant deletion was advertised without a trusted checkpoint verifier")
 	}
-	verifiedRuntime, err := assembleManagementOperationRuntime(ctx, token, caller, platformDB, dialect, admission, registry, coordinator, knet.NewSiteRouter(nil), nil, &managementCheckpointVerifierStub{}, driver, &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}, string(command.Deployment), command.DatabaseAllocationRef)
+	verifiedRuntime, err := assembleManagementOperationRuntime(ctx, managementRuntimeOptions{token: token, caller: caller, database: platformDB, dialect: dialect, admission: admission, directory: registry, coordinator: coordinator, tenants: knet.NewSiteRouter(nil), verifier: &managementCheckpointVerifierStub{}, platformDBType: driver, common: &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}, deploymentID: string(command.Deployment), databaseAllocationRef: command.DatabaseAllocationRef})
 	if err != nil {
 		t.Fatal("compose management runtime with checkpoint verifier:", err)
 	}
@@ -306,7 +306,7 @@ func testLiveManagementProvisionReplay(t *testing.T, driver, dsn string) {
 	coordinator := &liveManagementProvisionCoordinator{}
 	common := &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}
 	admission := &managementProvisionAdmissionStub{}
-	executor, err := newManagementProvisionExecutor(command.DatabaseAllocationRef, string(command.Deployment), platformDB, driver, common, admission, registry, coordinator, site.CreateSite)
+	executor, err := newManagementProvisionExecutor(managementProvisionOptions{allocationRef: command.DatabaseAllocationRef, deploymentID: string(command.Deployment), platformDB: platformDB, platformType: driver, common: common, admission: admission, directory: registry, coordinator: coordinator, createSite: site.CreateSite})
 	if err != nil {
 		t.Fatal("configure live provisioning executor:", err)
 	}

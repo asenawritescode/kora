@@ -462,12 +462,38 @@ func TestManagementRuntimeAdvertisesTenantMemberCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = platform.Close() })
-	runtime, err := assembleManagementOperationRuntime(context.Background(), "token", "cloud-control-plane", platform, db.Resolve("libsql"), memberAdmissionStub{},
-		&managementStateDirectoryStub{}, &managementStateCoordinatorStub{}, knet.NewSiteRouter(nil), nil, nil, "libsql", &site.CommonConfig{DBType: "libsql"}, "deployment-a", "")
+	runtime, err := assembleManagementOperationRuntime(context.Background(), managementRuntimeOptions{token: "token", caller: "cloud-control-plane", database: platform, dialect: db.Resolve("libsql"), admission: memberAdmissionStub{}, directory: &managementStateDirectoryStub{}, coordinator: &managementStateCoordinatorStub{}, tenants: knet.NewSiteRouter(nil), platformDBType: "libsql", common: &site.CommonConfig{DBType: "libsql"}, deploymentID: "deployment-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !runtime.routes.Capabilities[api.ManagementMemberPlanCapability] || !runtime.routes.Capabilities[api.ManagementMemberGrantCapability] || runtime.routes.MemberPlanner == nil {
 		t.Fatalf("member capabilities were not composed: %+v", runtime.routes.Capabilities)
+	}
+}
+
+func TestAssembleManagementOperationRuntimeOptionDefaults(t *testing.T) {
+	database := new(sql.DB)
+	complete := managementRuntimeOptions{token: "token", caller: "cloud-control-plane", database: database, dialect: db.Resolve("libsql"), admission: memberAdmissionStub{}}
+	tests := []struct {
+		name        string
+		mutate      func(*managementRuntimeOptions)
+		wantRuntime bool
+		wantErr     bool
+	}{
+		{name: "no caller leaves the runtime in inspection-only mode", mutate: func(o *managementRuntimeOptions) { *o = managementRuntimeOptions{} }},
+		{name: "no token", mutate: func(o *managementRuntimeOptions) { o.token = "" }, wantErr: true},
+		{name: "no database", mutate: func(o *managementRuntimeOptions) { o.database = nil }, wantErr: true},
+		{name: "no dialect", mutate: func(o *managementRuntimeOptions) { o.dialect = nil }, wantErr: true},
+		{name: "no admission", mutate: func(o *managementRuntimeOptions) { o.admission = nil }, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := complete
+			tt.mutate(&opts)
+			runtime, err := assembleManagementOperationRuntime(context.Background(), opts)
+			if (err != nil) != tt.wantErr || (runtime != nil) != tt.wantRuntime {
+				t.Fatalf("assembleManagementOperationRuntime = (%v, %v), want runtime=%t error=%t", runtime, err, tt.wantRuntime, tt.wantErr)
+			}
+		})
 	}
 }

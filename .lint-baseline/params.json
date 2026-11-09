@@ -80,8 +80,6 @@
   "internal/engine::(*configQueryExecutor).ExecutePublishedQuery": 6,
   "internal/engine::(*configQueryExecutor).ExecutePublishedQueryForActor": 7,
   "internal/engine::admittedManagementStore.RetryInvitationOperation": 6,
-  "internal/engine::assembleManagementOperationRuntime": 15,
-  "internal/engine::newManagementProvisionExecutor": 9,
   "internal/kernel::(*Kernel).ExecuteBulk": 6,
   "internal/kernel::(*Kernel).LookupReceiptByIntent": 6,
   "internal/kernel::(*Kernel).buildAuditRow": 7,
