@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "transaction": "08bcb60a43331026b3ce68d69b0c035e",
+  "transaction": "77a27e8ff5896cac12078fbaadeae429",
   "files": [
     {
       "path": "doctypes/product.yaml",
@@ -8,23 +8,43 @@
     },
     {
       "path": "doctypes/sale.yaml",
-      "sha256": "a42590e570e6be323ee14e592367ccbd4498fa8afe6e0bfb0b5ea879bb253777"
+      "sha256": "4a34d8c2aadadd1c362e32ccb69718fe32c29b15a054aff59a25688c2f800bda"
     },
     {
       "path": "doctypes/sale_item.yaml",
-      "sha256": "8ab9bd5254e75da3b9ae4cf763a9d09df0eacf8ae3d94d920fb1c666009b0110"
+      "sha256": "9bf8ef552f64916eedfc53b5692f55d463e2d4ff598a4e44f704323380382fe6"
+    },
+    {
+      "path": "doctypes/shift.yaml",
+      "sha256": "d7129920d590526832fe3dc24a845d4bac8d1b7d8180a3ea8a00d9685c575d3b"
+    },
+    {
+      "path": "doctypes/stock_movement.yaml",
+      "sha256": "2676b284184f68d49afbc0bb68d9ac02d8a5fd2bdc474c768c6d4f42b19ffced"
+    },
+    {
+      "path": "doctypes/till_session.yaml",
+      "sha256": "fee629f2cd9f5ad8787341b035b5600e85d0d64f160ac3d5a6efbdc6cd09bc20"
     },
     {
       "path": "pages/point_of_sale.yaml",
-      "sha256": "0d6b8daf9ffb9dcdc55db64b32fcf7afced4e32bf27de0ca28747df2e7d58eaa"
+      "sha256": "833b0f15a88a1612e78c1a079096c82f6623156a73ba57a50bf052610583ffee"
     },
     {
       "path": "permissions.yaml",
-      "sha256": "412b54d300e2f6a0a02144233adfd176e0910311f74e9f25f691770afbc61903"
+      "sha256": "d13592cf36168b7182884d4b9fc4f1371eae750581bebe35bdb8c0a1d11445c7"
     },
     {
       "path": "roles.yaml",
       "sha256": "8c0ca56f0fe826a44797e4a976d510aafc588d27ee4cb04bb74e622b5632632b"
+    },
+    {
+      "path": "views/record_stock_movement.yaml",
+      "sha256": "e093ce94b98b7196aff5ac2fa85348e68be0c7645e95f1ed5a030555a40bdbb1"
+    },
+    {
+      "path": "views/stock_movements.yaml",
+      "sha256": "bdba1c920126800d06f99f6a1a63f19a39c1df6fcffec88338eb1e58d63bcc44"
     }
   ]
 }

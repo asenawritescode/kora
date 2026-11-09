@@ -6,7 +6,7 @@ is_child_table: false
 is_single: false
 track_changes: false
 append_only: false
-title_field: reference
+title_field: sale_datetime
 search_fields: reference, customer_name, sale_datetime
 sort_field: modified
 sort_order: DESC
@@ -43,7 +43,7 @@ fields:
         Other
       reqd: true
       unique: false
-      default: ""
+      default: Cash
       hidden: false
       read_only: false
       bold: false
@@ -75,7 +75,7 @@ fields:
       in_list_view: true
       in_standard_filter: true
       search_index: false
-      description: "Payment state captured for this sale."
+      description: Payment state captured for this sale.
       depends_on: ""
       mandatory_depends_on: ""
       constraints: []
@@ -97,7 +97,7 @@ fields:
       in_list_view: true
       in_standard_filter: false
       search_index: true
-      description: "Customer name recorded at checkout, when provided."
+      description: Customer name recorded at checkout, when provided.
       depends_on: ""
       mandatory_depends_on: ""
       constraints: []
@@ -170,7 +170,7 @@ fields:
       in_list_view: true
       in_standard_filter: false
       search_index: true
-      description: "Unique receipt reference generated at checkout."
+      description: Unique receipt reference generated at checkout.
       depends_on: ""
       mandatory_depends_on: ""
       constraints: []
@@ -192,7 +192,73 @@ fields:
       in_list_view: false
       in_standard_filter: false
       search_index: false
-      description: "Workspace user who completed the sale."
+      description: Workspace user who completed the sale.
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: register
+      fieldtype: Data
+      label: Register
+      options: ""
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: false
+      in_standard_filter: false
+      search_index: false
+      description: POS register used for this sale.
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: shift
+      fieldtype: Link
+      label: Shift
+      options: Shift
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: false
+      in_standard_filter: true
+      search_index: true
+      description: Shift active when this sale was completed.
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: till_session
+      fieldtype: Link
+      label: Till Session
+      options: Till Session
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: false
+      in_standard_filter: true
+      search_index: true
+      description: Till session used to reconcile this sale.
       depends_on: ""
       mandatory_depends_on: ""
       constraints: []

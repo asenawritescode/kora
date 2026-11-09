@@ -1076,6 +1076,9 @@ func TestPOSCreateTransactionPreservesSaleAndPaymentContract(t *testing.T) {
 	if saleName == "" || sale["reference"] == "" || sale["total"] != float64(250) {
 		t.Fatalf("POS sale response lost generated reference or calculated total: %#v", sale)
 	}
+	if sale["payment_status"] != "Paid" {
+		t.Fatalf("POS transaction did not apply the required DocType default: payment_status=%v", sale["payment_status"])
+	}
 	if _, leaked := sale["items"]; leaked {
 		t.Fatalf("POS transaction response changed legacy child-row projection: %#v", sale)
 	}
@@ -1942,6 +1945,7 @@ func registerPOSIntegrationTypes(t *testing.T, db *sql.DB, site string, reg *doc
 	}})
 	reg.Register(&doctype.DocType{Name: "Sale", Fields: []doctype.Field{
 		{Fieldname: "reference", Fieldtype: "Data", Reqd: true},
+		{Fieldname: "payment_status", Fieldtype: "Data", Reqd: true, Default: "Paid"},
 		{Fieldname: "items", Fieldtype: "Table", Options: "Sale Item"},
 		{Fieldname: "subtotal", Fieldtype: "Currency"},
 		{Fieldname: "total", Fieldtype: "Currency"},

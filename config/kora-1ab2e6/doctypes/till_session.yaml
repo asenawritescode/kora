@@ -1,0 +1,327 @@
+name: Till Session
+resource_name: till-session
+module: Store Operations
+is_submittable: false
+is_child_table: false
+is_single: false
+track_changes: true
+append_only: false
+title_field: reference
+search_fields: reference, register, shift, status
+sort_field: opened_at
+sort_order: DESC
+description: Cash drawer activity and reconciliation for one register and shift.
+fields:
+    - fieldname: reference
+      fieldtype: Data
+      label: Session Reference
+      options: ""
+      reqd: true
+      unique: true
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: register
+      fieldtype: Data
+      label: Register
+      options: ""
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: shift
+      fieldtype: Link
+      label: Shift
+      options: Shift
+      reqd: true
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: true
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: status
+      fieldtype: Select
+      label: Status
+      options: |-
+        Open
+        Closed
+      reqd: true
+      unique: false
+      default: Open
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: true
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: opened_at
+      fieldtype: Datetime
+      label: Opened At
+      options: ""
+      reqd: true
+      unique: false
+      default: now
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: closed_at
+      fieldtype: Datetime
+      label: Closed At
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: opening_cash
+      fieldtype: Currency
+      label: Opening Cash
+      options: ""
+      reqd: true
+      unique: false
+      default: "0"
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: false
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: cash_sales
+      fieldtype: Currency
+      label: Cash Sales
+      options: ""
+      reqd: false
+      unique: false
+      default: "0"
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: cash_refunds
+      fieldtype: Currency
+      label: Cash Refunds
+      options: ""
+      reqd: false
+      unique: false
+      default: "0"
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: false
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: sales_count
+      fieldtype: Int
+      label: Sales Count
+      options: ""
+      reqd: false
+      unique: false
+      default: "0"
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: expected_cash
+      fieldtype: Currency
+      label: Expected Cash
+      options: ""
+      reqd: false
+      unique: false
+      default: "0"
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: counted_cash
+      fieldtype: Currency
+      label: Counted Cash
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: false
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+    - fieldname: variance
+      fieldtype: Currency
+      label: Cash Variance
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: true
+      bold: false
+      in_list_view: true
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: counted_cash - expected_cash
+      dependency_scope: ""
+      accept: ""
+    - fieldname: notes
+      fieldtype: Text
+      label: Notes
+      options: ""
+      reqd: false
+      unique: false
+      default: ""
+      hidden: false
+      read_only: false
+      bold: false
+      in_list_view: false
+      in_standard_filter: false
+      search_index: false
+      description: ""
+      depends_on: ""
+      mandatory_depends_on: ""
+      constraints: []
+      renamed_from: ""
+      linked_field: ""
+      computed: ""
+      dependency_scope: ""
+      accept: ""
+doc_constraints: []
+public_access: null
+quantity_effect: null

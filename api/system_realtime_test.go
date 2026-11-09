@@ -16,6 +16,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/eventstream"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/policy"
@@ -73,6 +74,38 @@ func TestRefreshRealtimeWriteDeadline(t *testing.T) {
 	}
 	if !w.deadline.After(time.Now()) {
 		t.Fatalf("write deadline was not advanced: %v", w.deadline)
+	}
+}
+
+func TestRealtimeEntityEventsRequireExactScopeGrant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	database, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	registry := doctype.NewRegistry()
+	registry.Register(&doctype.DocType{Name: "Invoice", BusinessScopePolicy: contract.ScopeEntityOwned})
+	h := NewHandler(registry, &orm.TxManager{DB: database, Dialect: db.Resolve("mysql")})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/realtime", nil)
+	c.Set("site_name", "tenant-a")
+	entityA := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
+	entityB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
+	actor := contract.ActorContext{PrincipalID: "reader", SubjectUserID: "reader", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", AuthenticatedAt: time.Now().UTC()}
+	execution, err := policy.NewVerifiedExecutionWithGrants("tenant-a", actor, []policy.Grant{{Resource: "Invoice", Operation: "read", Scope: entityA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Set("policy_execution", execution)
+	if !h.realtimeEventVisible(c, "Invoice", "INV-1", nil, eventstream.EventUpdate, entityA) {
+		t.Fatal("matching entity event was denied")
+	}
+	if h.realtimeEventVisible(c, "Invoice", "INV-1", nil, eventstream.EventUpdate, entityB) {
+		t.Fatal("cross-entity event was delivered")
+	}
+	if h.realtimeEventVisible(c, "Invoice", "INV-1", nil, eventstream.EventUpdate) {
+		t.Fatal("unscoped entity event was delivered")
 	}
 }
 

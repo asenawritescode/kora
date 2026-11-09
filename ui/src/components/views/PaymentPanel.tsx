@@ -3,7 +3,7 @@ import type { ViewComponentProps } from './registry'
 import { Button } from '@/components/ui/button'
 import { useCartStore } from '@/lib/cart-store'
 import { readPaymentSession, writePaymentSession } from '@/lib/payment-session'
-import { Banknote, CreditCard, Smartphone, Loader2, Unlock } from 'lucide-react'
+import { Banknote, CreditCard, Smartphone, Loader2 } from 'lucide-react'
 
 const PAYMENT_ICONS: Record<string, ReactNode> = {
   cash: <Banknote className="h-5 w-5" />,
@@ -19,6 +19,11 @@ function actionResultRecord(result: unknown): Record<string, unknown> {
   return data && typeof data === 'object' ? data as Record<string, unknown> : {}
 }
 
+function setupLabel(field: string, actions: NonNullable<ViewComponentProps['config']['actions']>) {
+  const action = actions.find((candidate) => String(candidate.config?.context_field || '') === field)
+  return String(action?.config?.label || action?.config?.target_doctype || field.replaceAll('_', ' '))
+}
+
 export default function PaymentPanel(props: ViewComponentProps) {
   const { config, onAction } = props
   const [processing, setProcessing] = useState(false)
@@ -27,21 +32,27 @@ export default function PaymentPanel(props: ViewComponentProps) {
   const [operationId, setOperationId] = useState('')
   const [paymentStatus, setPaymentStatus] = useState('')
   const [phoneError, setPhoneError] = useState('')
-  const [openingCash, setOpeningCash] = useState('0')
-  const [activeShift, setActiveShift] = useState(() => readPaymentSession('kora-pos-active-shift'))
-  const [activeTillSession, setActiveTillSession] = useState(() => readPaymentSession('kora-pos-active-till-session'))
+  const setupActions = (config.actions || []).filter((action) => action.type === 'create_record' && action.config?.context_field)
+  const transactionAction = config.actions?.find((action) => action.type === 'create_transaction')
+  const [prerequisiteRecords, setPrerequisiteRecords] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(readPaymentSession('kora-workflow-prerequisites') || '{}') } catch { return {} }
+  })
+  const [prerequisiteInputs, setPrerequisiteInputs] = useState<Record<string, string>>({})
+  const [creatingPrerequisites, setCreatingPrerequisites] = useState(false)
   const [sessionStorageUnavailable, setSessionStorageUnavailable] = useState(false)
   const { items, total, clearCart } = useCartStore()
   const cartTotal = total()
 
   const methods = (config.bindings?.methods || '')
     .split(',').map((s) => s.trim()).filter(Boolean)
-  const register = config.bindings?.register || ''
   const supportsOnlineMobilePayment = Boolean(config.actions?.some((item) => item.type === 'initiate_external_operation'))
-  const hasOpenShiftAction = Boolean(config.actions?.some((item) => item.id === 'open_shift'))
-  const hasOpenTillAction = Boolean(config.actions?.some((item) => item.id === 'open_till_session'))
-  const requiresTill = hasOpenShiftAction || hasOpenTillAction
-  const tillReady = !requiresTill || (hasOpenTillAction ? Boolean(activeTillSession) : Boolean(activeShift))
+  const requiredRecordFields = ((transactionAction?.config?.required_related_status || []) as Array<Record<string, unknown>>)
+    .map((entry) => String(entry.record_field || '')).filter(Boolean)
+  const setupFields = setupActions.map((action) => String(action.config?.context_field || '')).filter(Boolean)
+  const prerequisiteFields = [...new Set([...requiredRecordFields, ...setupFields])]
+  const valueForRecord = (field: string) => prerequisiteRecords[field] || config.bindings?.[field] || ''
+  const missingPrerequisites = prerequisiteFields.filter((field) => !valueForRecord(field))
+  const prerequisitesReady = missingPrerequisites.length === 0
 
   const transactionContext = (method: string) => ({
     reference: `POS-${Date.now()}`,
@@ -50,9 +61,7 @@ export default function PaymentPanel(props: ViewComponentProps) {
     invoice_date: config.bindings?.invoice_date || new Date().toISOString().slice(0, 10),
     due_date: config.bindings?.due_date || new Date().toISOString().slice(0, 10),
     customer_name: config.bindings?.customer_name || '',
-    register,
-    ...(activeShift ? { shift: activeShift } : {}),
-    ...(activeTillSession ? { till_session: activeTillSession } : {}),
+    ...Object.fromEntries(prerequisiteFields.map((field) => [field, valueForRecord(field)])),
     ...(isMobilePayment(method) ? { customer_phone: phoneNumber.trim() } : {}),
     payment_status: 'Paid',
     payment_method: normalizePaymentMethod(method),
@@ -60,55 +69,39 @@ export default function PaymentPanel(props: ViewComponentProps) {
     total: cartTotal,
   })
 
-  const openShiftAndTill = async () => {
-    setProcessing(true)
+  const createPrerequisites = async () => {
+    setCreatingPrerequisites(true)
     try {
-      let shiftName = activeShift
-      if (!shiftName) {
-        const action = config.actions?.find((item) => item.id === 'open_shift')
-        if (action) {
-          const reference = `SHIFT-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}`
-          const result = await onAction(action.id, {
-            reference,
-            status: 'Open',
-            started_at: new Date().toISOString(),
-          })
-          const created = actionResultRecord(result)
-          shiftName = (typeof created.name === 'string' && created.name)
-            || (typeof created.reference === 'string' && created.reference)
-            || reference
-          if (shiftName) {
-            setActiveShift(shiftName)
-            if (!writePaymentSession('kora-pos-active-shift', shiftName)) setSessionStorageUnavailable(true)
+      const next = { ...prerequisiteRecords }
+      for (const action of setupActions) {
+        const cfg = action.config || {}
+        const field = String(cfg.context_field || '')
+        if (!field || next[field] || valueForRecord(field)) continue
+        const inputValues: Record<string, unknown> = {}
+        const inputs = Array.isArray(cfg.inputs) ? cfg.inputs as Array<Record<string, unknown>> : []
+        for (const input of inputs) {
+          const name = String(input.field || input.name || '')
+          if (name) {
+            const rawValue = prerequisiteInputs[name] ?? String(input.default ?? '')
+            const fieldtype = String(input.fieldtype || input.type || '').toLowerCase()
+            inputValues[name] = ['int', 'integer', 'float', 'currency', 'number'].includes(fieldtype) && rawValue !== '' ? Number(rawValue) : rawValue
           }
         }
+        const result = await onAction(action.id, {
+          ...inputValues,
+          _bindings: Object.fromEntries(Object.entries(config.bindings || {}).map(([key, value]) => [key, String(value || '').replace(/^literal:/, '')])),
+          _prerequisites: next,
+          _inputs: inputValues,
+        })
+        const created = actionResultRecord(result)
+        const recordName = String(created.name || created.reference || '')
+        if (!recordName) throw new Error(`The configured ${String(cfg.label || cfg.target_doctype || 'record')} action returned no record identifier.`)
+        next[field] = recordName
       }
-
-      if (!activeTillSession) {
-        const action = config.actions?.find((item) => item.id === 'open_till_session')
-        if (action) {
-          if (!shiftName) return
-          const reference = `TS-${Date.now()}`
-          const result = await onAction(action.id, {
-            reference,
-            register,
-            shift: shiftName,
-            opening_cash: Number(openingCash || 0),
-            expected_cash: Number(openingCash || 0),
-            status: 'Open',
-          })
-          const created = actionResultRecord(result)
-          const tillName = (typeof created.name === 'string' && created.name)
-            || (typeof created.reference === 'string' && created.reference)
-            || reference
-          if (tillName) {
-            setActiveTillSession(tillName)
-            if (!writePaymentSession('kora-pos-active-till-session', tillName)) setSessionStorageUnavailable(true)
-          }
-        }
-      }
+      setPrerequisiteRecords(next)
+      if (!writePaymentSession('kora-workflow-prerequisites', JSON.stringify(next))) setSessionStorageUnavailable(true)
     } finally {
-      setProcessing(false)
+      setCreatingPrerequisites(false)
     }
   }
 
@@ -122,7 +115,7 @@ export default function PaymentPanel(props: ViewComponentProps) {
 
   const handlePayment = async (method: string) => {
     if (items.length === 0) return
-    if (!tillReady) return
+    if (!prerequisitesReady) return
     if (isMobilePayment(method) && supportsOnlineMobilePayment) {
       setSelectedMethod(method)
       setPhoneError('')
@@ -180,44 +173,37 @@ export default function PaymentPanel(props: ViewComponentProps) {
     <div className="space-y-3 rounded-lg border p-4">
       {sessionStorageUnavailable && (
         <p role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-          Shift details are available for this session but could not be saved for a page reload.
+          Workflow context is available for this session but could not be saved for a page reload.
         </p>
       )}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Payment</h3>
         <span className="text-lg font-bold">{cartTotal.toLocaleString()}</span>
       </div>
-      {requiresTill && (
+      {prerequisiteFields.length > 0 && (
         <div className="rounded-md border bg-muted/20 p-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Shift</p>
-              <p className="text-sm font-medium">{activeTillSession ? `Till open · ${activeTillSession}` : activeShift ? `Shift open · ${activeShift}` : 'Open a shift before taking payment'}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Workflow setup</p>
+              <div className="space-y-1">{prerequisiteFields.map((field) => <p key={field} className="text-sm font-medium">{setupLabel(field, setupActions)} · {valueForRecord(field) || 'Required'}</p>)}</div>
             </div>
-            {!tillReady && <Unlock className="h-4 w-4 text-muted-foreground" />}
+            {!prerequisitesReady && <span className="text-xs text-muted-foreground">Required</span>}
           </div>
-          {!tillReady && (
-            <div className="mt-3 flex gap-2">
-              <input
-                type="number"
-                min="0"
-                inputMode="decimal"
-                value={openingCash}
-                onChange={(event) => setOpeningCash(event.target.value)}
-                className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                placeholder="Opening cash"
-              />
-              <Button size="sm" disabled={processing} onClick={openShiftAndTill}>
-                {processing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Open shift
-              </Button>
-            </div>
-          )}
+          {setupActions.map((action) => {
+            if (valueForRecord(String(action.config?.context_field || ''))) return null
+            const inputs = Array.isArray(action.config?.inputs) ? action.config.inputs as Array<Record<string, unknown>> : []
+            return inputs.map((input) => {
+              const field = String(input.field || input.name || '')
+              if (!field) return null
+              return <label key={`${action.id}:${field}`} className="mt-2 block text-xs text-muted-foreground">{String(input.label || field)}{input.required ? ' *' : ''}<input type={String(input.fieldtype || input.type || '').toLowerCase().includes('number') || String(input.fieldtype || input.type || '').toLowerCase().includes('currency') || String(input.fieldtype || input.type || '').toLowerCase() === 'int' ? 'number' : 'text'} min={input.min == null ? undefined : Number(input.min)} step={input.step == null ? undefined : Number(input.step)} value={prerequisiteInputs[field] ?? String(input.default ?? '')} onChange={(event) => setPrerequisiteInputs((current) => ({ ...current, [field]: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm" /></label>
+            })
+          })}
+          {!prerequisitesReady && <Button size="sm" className="mt-3" disabled={processing || creatingPrerequisites} onClick={createPrerequisites}>{creatingPrerequisites ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}{setupActions.find((action) => missingPrerequisites.includes(String(action.config?.context_field || '')))?.config?.button_label || 'Complete setup'}</Button>}
         </div>
       )}
       <div className="grid grid-cols-3 gap-2">
         {methods.map((method) => (
-          <Button key={method} variant="outline" className="flex h-auto flex-col items-center gap-1 py-3" disabled={items.length === 0 || processing || !tillReady} onClick={() => handlePayment(method)}>
+          <Button key={method} variant="outline" className="flex h-auto flex-col items-center gap-1 py-3" disabled={items.length === 0 || processing || !prerequisitesReady} onClick={() => handlePayment(method)}>
             {processing ? <Loader2 className="h-5 w-5 animate-spin" /> : PAYMENT_ICONS[method] || <Banknote className="h-5 w-5" />}
             <span className="text-xs capitalize">{method.replace('_', ' ')}</span>
           </Button>

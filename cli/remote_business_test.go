@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -194,6 +196,126 @@ func TestCLIMachineExitMappingAndCredentialRedaction(t *testing.T) {
 	}
 	if got := safeRemoteMessage(errors.New("token secret-token rejected"), "secret-token"); strings.Contains(got, "secret-token") {
 		t.Fatalf("credential was not redacted: %s", got)
+	}
+}
+
+func TestRemoteOperationLostResponseReturnsUnknownWithoutResubmission(t *testing.T) {
+	t.Setenv("KORA_REMOTE_TEST_TOKEN", "actor-token")
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	catalog := cliTestCatalog(scope)
+	executeCalls, lookupCalls := 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/s/demo/api/v2/modules/catalog":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": catalog})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/modules/operations/") && strings.HasSuffix(r.URL.Path, "/execute"):
+			executeCalls++
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":{"code":"transport.lost","message":"response lost"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/s/demo/api/v2/module-executions/lookup":
+			lookupCalls++
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"code":"execution.not_found","message":"receipt not visible"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	configPath := filepath.Join(t.TempDir(), "remote.json")
+	if err := saveRemoteProfiles(configPath, remoteProfileFile{Current: "work", Profiles: map[string]remoteProfile{"work": {URL: server.URL, Site: "demo", TokenEnv: "KORA_REMOTE_TEST_TOKEN", TenantID: "tenant-a"}}}); err != nil {
+		t.Fatal(err)
+	}
+	operationRef := contract.PublishedOperationRef("sales.orders", "sales.invoice", "issue")
+	_, err := runCLICommand(t, newRemoteOperationCommand(&remoteOptions{Config: configPath, Timeout: time.Second}), "execute", operationRef, "--input", `{"amount":5}`, "--idempotency-key", "intent-lost")
+	var exit *CLIExitError
+	if !errors.As(err, &exit) || exit.Code != ExitUnknown || executeCalls != 1 || lookupCalls != 1 {
+		t.Fatalf("lost response err=%v execute=%d lookup=%d", err, executeCalls, lookupCalls)
+	}
+}
+
+func TestRemoteOperationCancellationStopsRequestAndReturnsRecoverableUnknown(t *testing.T) {
+	t.Setenv("KORA_REMOTE_TEST_TOKEN", "actor-token")
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	catalog := cliTestCatalog(scope)
+	started := make(chan struct{}, 1)
+	var executeCalls, lookupCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/s/demo/api/v2/modules/catalog":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": catalog})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/modules/operations/") && strings.HasSuffix(r.URL.Path, "/execute"):
+			executeCalls.Add(1)
+			started <- struct{}{}
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":{"code":"transport.lost","message":"request interrupted"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/s/demo/api/v2/module-executions/lookup":
+			lookupCalls.Add(1)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"code":"execution.not_found","message":"receipt not visible"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	configPath := filepath.Join(t.TempDir(), "remote.json")
+	if err := saveRemoteProfiles(configPath, remoteProfileFile{Current: "work", Profiles: map[string]remoteProfile{"work": {URL: server.URL, Site: "demo", TokenEnv: "KORA_REMOTE_TEST_TOKEN", TenantID: "tenant-a"}}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	operation := newRemoteOperationCommand(&remoteOptions{Config: configPath, Timeout: 5 * time.Second})
+	operation.SetArgs([]string{"execute", contract.PublishedOperationRef("sales.orders", "sales.invoice", "issue"), "--input", `{"amount":5}`, "--idempotency-key", "intent-cancel"})
+	operation.SetContext(ctx)
+	done := make(chan error, 1)
+	go func() { done <- operation.ExecuteContext(ctx) }()
+	select {
+	case <-started:
+		cancel()
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("operation request did not start before timeout")
+	}
+	err := <-done
+	var exit *CLIExitError
+	if !errors.As(err, &exit) || exit.Code != ExitUnknown || executeCalls.Load() != 1 || lookupCalls.Load() != 1 {
+		t.Fatalf("cancelled operation err=%v execute=%d lookup=%d", err, executeCalls.Load(), lookupCalls.Load())
+	}
+}
+
+func TestAdminApplyReportsStalePlanConflict(t *testing.T) {
+	const token = "management-stale-token"
+	t.Setenv("KORA_MANAGEMENT_TEST_TOKEN", token)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/management/v2/tenants/tenant-a/modules/apply" {
+			t.Fatalf("unexpected management request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			t.Errorf("management bearer=%q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":{"code":"module.plan_stale","message":"module configuration changed after planning"}}`))
+	}))
+	defer server.Close()
+	plan := contract.ModuleChangePlan{ModuleID: "sales.orders", TargetState: contract.ModuleDraining, PlanHash: strings.Repeat("a", 64), BaseRevision: 7, DependencyBlockers: []contract.ModuleBlocker{}, OpenWorkBlockers: []contract.ModuleBlocker{}}
+	planBytes, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planPath := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(planPath, planBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "admin.json")
+	if err := saveRemoteProfiles(configPath, remoteProfileFile{Current: "operator", Profiles: map[string]remoteProfile{"operator": {URL: server.URL, TokenEnv: "KORA_MANAGEMENT_TEST_TOKEN"}}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = runCLICommand(t, newAdminModulesCommand(&adminOptions{Config: configPath, Timeout: time.Second}), "apply", "tenant-a", "--plan-file", planPath, "--idempotency-key", "apply-stale")
+	var exit *CLIExitError
+	if !errors.As(err, &exit) || exit.Code != ExitConflict {
+		t.Fatalf("stale plan error=%v", err)
 	}
 }
 

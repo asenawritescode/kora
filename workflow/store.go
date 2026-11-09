@@ -71,14 +71,7 @@ type HistoryRepository interface {
 	ListRecentInstances(context.Context, contract.TenantID, uint16) ([]contract.WorkflowInstance, error)
 }
 
-type HistoryEntry struct {
-	Sequence  uint64    `json:"sequence"`
-	StepID    string    `json:"step_id"`
-	Kind      string    `json:"kind"`
-	Status    string    `json:"status"`
-	Detail    string    `json:"detail,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-}
+type HistoryEntry = contract.WorkflowHistoryEntry
 
 // PreviewRun is durable, side-effect-free workflow test history. Sample record
 // values are intentionally excluded to avoid retaining customer data.

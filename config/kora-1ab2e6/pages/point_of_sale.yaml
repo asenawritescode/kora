@@ -18,8 +18,6 @@ spec:
             decrement_stock: true
             fields:
                 sale_datetime: $now
-            reference_field: reference
-            reference_prefix: POS
             idempotency_prefix: pos-sale
             line_defaults:
                 quantity: 1
@@ -27,7 +25,60 @@ spec:
                 product: product
                 quantity: quantity
                 unit_price: rate
+            line_records:
+                - doctype: Stock Movement
+                  fields:
+                    adjusted_at: $parent.sale_datetime
+                    movement_type: Sale
+                    posted_by: $actor
+                    product: $line.product
+                    reason: POS sale
+                    source_reference: $parent.reference
+                    source_sale: $records.sale.name
+                  key: stock_movement
+                  quantity:
+                    field: delta
+                    sign: -1
+                    source_field: quantity
             line_source: cart
+            reference_field: reference
+            reference_prefix: POS
+            related_numeric_updates:
+                - doctype: Shift
+                  field: sales_count
+                  record_field: shift
+                  value: 1
+                - doctype: Shift
+                  field: total_sales
+                  record_field: shift
+                  source_field: total_amount
+                - doctype: Till Session
+                  field: sales_count
+                  record_field: till_session
+                  value: 1
+                - doctype: Till Session
+                  field: cash_sales
+                  record_field: till_session
+                  source_field: total_amount
+                  when:
+                    equals: Cash
+                    field: payment_method
+                - doctype: Till Session
+                  field: expected_cash
+                  record_field: till_session
+                  source_field: total_amount
+                  when:
+                    equals: Cash
+                    field: payment_method
+            required_related_status:
+                - doctype: Shift
+                  record_field: shift
+                  status_field: status
+                  equals: Open
+                - doctype: Till Session
+                  record_field: till_session
+                  status_field: status
+                  equals: Open
             related_quantity_updates:
                 source_quantity_field: quantity
                 source_record_field: product
@@ -43,6 +94,16 @@ spec:
                 total_field: total_amount
           invalidate:
             - primary
+        - command: create_record
+          id: open_shift
+          input:
+            target_doctype: Shift
+          invalidate: []
+        - command: create_record
+          id: open_till_session
+          input:
+            target_doctype: Till Session
+          invalidate: []
     capabilities: []
     layout:
         children:
@@ -88,6 +149,8 @@ spec:
               version: 1
             - actions:
                 - complete_sale
+                - open_shift
+                - open_till_session
               component: payment_panel
               id: payment
               position: 0
@@ -98,8 +161,6 @@ spec:
                         decrement_stock: true
                         fields:
                             sale_datetime: $now
-                        reference_field: reference
-                        reference_prefix: POS
                         idempotency_prefix: pos-sale
                         line_defaults:
                             quantity: 1
@@ -107,7 +168,60 @@ spec:
                             product: product
                             quantity: quantity
                             unit_price: rate
+                        line_records:
+                            - doctype: Stock Movement
+                              fields:
+                                adjusted_at: $parent.sale_datetime
+                                movement_type: Sale
+                                posted_by: $actor
+                                product: $line.product
+                                reason: POS sale
+                                source_reference: $parent.reference
+                                source_sale: $records.sale.name
+                              key: stock_movement
+                              quantity:
+                                field: delta
+                                sign: -1
+                                source_field: quantity
                         line_source: cart
+                        reference_field: reference
+                        reference_prefix: POS
+                        related_numeric_updates:
+                            - doctype: Shift
+                              field: sales_count
+                              record_field: shift
+                              value: 1
+                            - doctype: Shift
+                              field: total_sales
+                              record_field: shift
+                              source_field: total_amount
+                            - doctype: Till Session
+                              field: sales_count
+                              record_field: till_session
+                              value: 1
+                            - doctype: Till Session
+                              field: cash_sales
+                              record_field: till_session
+                              source_field: total_amount
+                              when:
+                                equals: Cash
+                                field: payment_method
+                            - doctype: Till Session
+                              field: expected_cash
+                              record_field: till_session
+                              source_field: total_amount
+                              when:
+                                equals: Cash
+                                field: payment_method
+                        required_related_status:
+                            - doctype: Shift
+                              record_field: shift
+                              status_field: status
+                              equals: Open
+                            - doctype: Till Session
+                              record_field: till_session
+                              status_field: status
+                              equals: Open
                         related_quantity_updates:
                             source_quantity_field: quantity
                             source_record_field: product
@@ -124,9 +238,46 @@ spec:
                       id: complete_sale
                       trigger: on_click
                       type: create_transaction
+                    - config:
+                        target_doctype: Shift
+                        context_field: shift
+                        label: Shift
+                        reference_prefix: SHIFT
+                        fields:
+                            reference: $generated
+                            status: Open
+                            started_at: $now
+                            cashier: $actor
+                      id: open_shift
+                      trigger: on_click
+                      type: create_record
+                    - config:
+                        target_doctype: Till Session
+                        context_field: till_session
+                        label: Till Session
+                        reference_prefix: TILL
+                        depends_on: shift
+                        inputs:
+                            - field: opening_cash
+                              label: Opening Cash
+                              fieldtype: Currency
+                              default: 0
+                              required: true
+                        fields:
+                            reference: $generated
+                            register: $binding.register
+                            shift: $context.shift
+                            opened_at: $now
+                            opening_cash: $input.opening_cash
+                            expected_cash: $input.opening_cash
+                            status: Open
+                      id: open_till_session
+                      trigger: on_click
+                      type: create_record
                 bindings:
                     methods: literal:cash
-                source_doctype: ""
+                    register: literal:Main Counter
+                source_doctype: Sale
                 title: Take payment
               region: side
               version: 1
