@@ -1909,30 +1909,6 @@
       "to": "github.com/asenawritescode/kora/extension"
     },
     {
-      "from": "github.com/asenawritescode/kora/graph",
-      "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/contract"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/graph",
-      "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/doctype"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/graph",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/contract"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/graph",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/doctype"
-    },
-    {
       "from": "github.com/asenawritescode/kora/ingress",
       "from_module": "engine",
       "kind": "production",
@@ -3555,12 +3531,6 @@
     {
       "from": "github.com/asenawritescode/kora/recon",
       "from_module": "engine",
-      "kind": "production",
-      "to": "github.com/asenawritescode/kora/graph"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/recon",
-      "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/contract"
     },
@@ -3569,12 +3539,6 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/db"
-    },
-    {
-      "from": "github.com/asenawritescode/kora/recon",
-      "from_module": "engine",
-      "kind": "test",
-      "to": "github.com/asenawritescode/kora/graph"
     },
     {
       "from": "github.com/asenawritescode/kora/recon",
@@ -4288,7 +4252,7 @@
     },
     "engine": {
       "module_path": "github.com/asenawritescode/kora",
-      "package_count": 71
+      "package_count": 70
     },
     "engine-sdk": {
       "module_path": "github.com/asenawritescode/kora/sdk",
