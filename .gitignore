@@ -2,8 +2,6 @@
 node_modules/
 
 # Build output
-ui/dist/
-workspace/dist/
 kora
 *.test
 /tmp/

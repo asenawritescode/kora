@@ -32,8 +32,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-      - name: Prepare embed
-        run: mkdir -p workspace/dist && touch workspace/dist/index.html
       - name: Test (MySQL)
         run: scripts/ci-integration.sh mysql 2>&1 | tee test.log
         shell: bash -o pipefail {0}
@@ -65,8 +63,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-      - name: Prepare embed
-        run: mkdir -p workspace/dist && touch workspace/dist/index.html
       - name: Test (Postgres)
         run: scripts/ci-integration.sh postgres 2>&1 | tee test.log
         shell: bash -o pipefail {0}

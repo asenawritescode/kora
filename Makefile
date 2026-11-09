@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-go dev setup serve test lint clean release prepare-go-embed sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
+.PHONY: build build-go dev setup serve test lint clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
 
 # Defaults
 SITE ?= airtime.local
@@ -11,18 +11,7 @@ ADMIN_PASS ?=
 TAG ?= v0.1.0
 
 ## Build
-build: build-ui build-go          ## Build UI + Go binary
-
-build-ui-analyze: build-ui          ## Build UI and analyze bundle sizes
-	@echo "=== Bundle chunks ==="
-	@ls -lhS ui/dist/assets/*.js | awk '{print $$5, $$9}'
-	@echo "=== Total ==="
-	@du -sh ui/dist/
-
-build-ui:                          ## Build React SPA
-	cd ui && bun install --frozen-lockfile
-	cd ui && bun run build
-	rsync -a --delete ui/dist/ workspace/dist/
+build: build-go                    ## Build the Go binary (the UI is the separate kora-ui repo)
 
 VERSION ?= $(shell cat VERSION 2>/dev/null || echo "dev")
 LDFLAGS += -X github.com/asenawritescode/kora/cli.Version=$(VERSION)
@@ -48,7 +37,7 @@ setup: build                       ## Build + setup a site (SITE=airtime.local C
 serve: build                       ## Build + start the server
 	./kora serve --port $(PORT)
 
-restart:                           ## Rebuild UI + Go, kill old server, start fresh
+restart:                           ## Rebuild Go, kill old server, start fresh
 	@fuser -k $(PORT)/tcp 2>/dev/null || true
 	$(MAKE) build
 	./kora serve --port $(PORT)
@@ -58,7 +47,6 @@ check-contracts:                      ## Verify generated schemas, fixture copie
 	go run ./cmd/contractgen -check
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_sync_contract_consumers.py
 	python3 scripts/check-contract-fixture-manifest.py --local-only
-	cd ui && KORA_ENGINE_CONTRACT_PATH=../contract/generated/engine-v2.ts bun run check:contracts
 
 sync-contracts:                         ## Regenerate and copy Engine contracts to first-party consumers
 	go run ./cmd/contractgen -write
@@ -78,21 +66,15 @@ check-selfhost-backup:                  ## Test self-host backup and restore hel
 check-selfhost-restore-live:            ## Run the opt-in disposable MySQL backup/restore drill
 	python3 scripts/selfhost-restore-drill.py --run
 
-prepare-go-embed:                  ## Create the SPA embed root required by Go builds
-	mkdir -p workspace/dist
-	touch workspace/dist/index.html
-
-test: prepare-go-embed             ## Run Go and SDK tests
+test:                              ## Run Go and SDK tests
 	go test ./... -v -count=1
 	cd sdk && go test ./... -count=1
 
 lint:                              ## Run linters
 	golangci-lint run --timeout=3m
-	cd ui && bunx tsc -b --noEmit
 
 fmt:                               ## Format code
 	go fmt ./...
-	cd ui && bunx prettier --write 'src/**/*.{ts,tsx}'
 
 ## Release
 release:                           ## Full release: test → lint → changelog → bump → tag → push (TAG=v0.2.0)
@@ -101,7 +83,7 @@ release:                           ## Full release: test → lint → changelog 
 
 ## Cleanup
 clean:                             ## Remove build artifacts
-	rm -rf kora workspace/dist ui/dist ui/node_modules
+	rm -rf kora
 
 ## Help
 help:                              ## Show this help
