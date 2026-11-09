@@ -414,8 +414,11 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if config.ScriptRunner != nil {
 		if err := registerTenantWorkerStart(config, func() error {
 			if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-				RunDurableLifecycleHookWorker(ctx, config.ScriptRunner, services.ScriptStore, loaded.DB, loaded.Registry,
-					services.Outbox, loaded.SiteID, loaded.Name, loaded.DBType, services.SecretStore, config.HTTPAllowlist, workAdmission)
+				RunDurableLifecycleHookWorker(ctx, LifecycleHookWorker{
+					Runner: config.ScriptRunner, Store: services.ScriptStore, DB: loaded.DB, Registry: loaded.Registry,
+					Outbox: services.Outbox, TenantID: loaded.SiteID, Site: loaded.Name, DBType: loaded.DBType,
+					Secrets: services.SecretStore, HTTPAllowlist: config.HTTPAllowlist, Admission: workAdmission,
+				})
 			}) {
 				return fmt.Errorf("tenant runtime is stopping")
 			}

@@ -79,8 +79,10 @@ func TestProcessOneDurableLifecycleHookCommitsFencedReceipt(t *testing.T) {
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Task"})
 	runner := &durableLifecycleHookRunner{}
-	worked, err := processOneDurableLifecycleHook(context.Background(), runner, store, database, registry, kdb.Resolve("mysql"), nil,
-		"tenant-a", "tenant-a", "worker-1", nil, nil, nil)
+	worked, err := processOneDurableLifecycleHook(context.Background(), &lifecycleHookPass{
+		LifecycleHookWorker: LifecycleHookWorker{Runner: runner, Store: store, DB: database, Registry: registry, Site: "tenant-a"},
+		dialect:             kdb.Resolve("mysql"), tenant: "tenant-a", owner: "worker-1",
+	})
 	if err != nil || !worked {
 		t.Fatalf("process durable lifecycle invocation = (%t, %v), want (true, nil)", worked, err)
 	}

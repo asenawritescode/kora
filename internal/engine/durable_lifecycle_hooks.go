@@ -40,28 +40,47 @@ func boundedWorkflowScriptError(err error) string {
 	return message
 }
 
+// hookWorkAdmission gates the database work of a lifecycle hook pass.
+type hookWorkAdmission interface {
+	Acquire(context.Context) (func(), error)
+}
+
+// LifecycleHookWorker holds the dependencies of one tenant's durable lifecycle
+// hook worker. An omitted Outbox, Secrets, HTTPAllowlist or Admission is
+// treated as absent.
+type LifecycleHookWorker struct {
+	Runner        script.Runner
+	Store         *script.Store
+	DB            *sql.DB
+	Registry      *doctype.Registry
+	Outbox        outbox.Writer
+	TenantID      string
+	Site          string
+	DBType        string
+	Secrets       *secret.Store
+	HTTPAllowlist []string
+	Admission     hookWorkAdmission
+}
+
 // RunDurableLifecycleHookWorker is owned by one tenant runtime generation.
 // Its SQL rows are the recovery authority; process cancellation only stops
 // new claims and causes an in-flight transaction to roll back.
-func RunDurableLifecycleHookWorker(ctx context.Context, runner script.Runner, store *script.Store, db *sql.DB, registry *doctype.Registry, outboxWriter outbox.Writer, tenantID, site, dbType string, secrets *secret.Store, httpAllowlist []string, admission interface {
-	Acquire(context.Context) (func(), error)
-}) {
-	if ctx == nil || runner == nil || store == nil || db == nil || registry == nil || tenantID == "" || site == "" {
+func RunDurableLifecycleHookWorker(ctx context.Context, w LifecycleHookWorker) {
+	if ctx == nil || w.Runner == nil || w.Store == nil || w.DB == nil || w.Registry == nil || w.TenantID == "" || w.Site == "" {
 		return
 	}
-	tenant, err := contract.ParseTenantID(tenantID)
+	tenant, err := contract.ParseTenantID(w.TenantID)
 	if err != nil {
-		slog.Error("durable lifecycle hook worker has invalid tenant", "site", site, "error", err)
+		slog.Error("durable lifecycle hook worker has invalid tenant", "site", w.Site, "error", err)
 		return
 	}
-	dialect := kdb.Resolve(dbType)
-	owner := "doc-hook-" + contract.NewOperationID()
+	pass := &lifecycleHookPass{LifecycleHookWorker: w, dialect: kdb.Resolve(w.DBType), tenant: tenant, owner: "doc-hook-" + contract.NewOperationID()}
 	ticker := time.NewTicker(durableLifecycleHookPoll)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
-		worked, workErr := processOneDurableLifecycleHook(ctx, runner, store, db, registry, dialect, outboxWriter, tenant, site, owner, secrets, httpAllowlist, admission)
+		worked, workErr := processOneDurableLifecycleHook(ctx, pass)
 		if workErr != nil && ctx.Err() == nil {
-			slog.Warn("durable lifecycle hook worker pass failed", "site", site, "error", workErr)
+			slog.Warn("durable lifecycle hook worker pass failed", "site", w.Site, "error", workErr)
 		}
 		if worked {
 			continue
@@ -74,15 +93,22 @@ func RunDurableLifecycleHookWorker(ctx context.Context, runner script.Runner, st
 	}
 }
 
-func processOneDurableLifecycleHook(ctx context.Context, runner script.Runner, store *script.Store, database *sql.DB, registry *doctype.Registry, dialect kdb.Dialect, outboxWriter outbox.Writer, tenant contract.TenantID, site, owner string, secrets *secret.Store, httpAllowlist []string, admission interface {
-	Acquire(context.Context) (func(), error)
-}) (bool, error) {
-	release, err := acquireAsyncHookWork(ctx, admission)
+// lifecycleHookPass is one claim attempt of a tenant's durable lifecycle hook
+// worker: the worker's dependencies plus the values resolved once per worker.
+type lifecycleHookPass struct {
+	LifecycleHookWorker
+	dialect kdb.Dialect
+	tenant  contract.TenantID
+	owner   string
+}
+
+func processOneDurableLifecycleHook(ctx context.Context, w *lifecycleHookPass) (bool, error) {
+	release, err := acquireAsyncHookWork(ctx, w.Admission)
 	if err != nil {
 		return false, err
 	}
 	defer release()
-	claims, err := store.ClaimAsyncHooks(ctx, tenant, owner, 1, durableLifecycleHookLease)
+	claims, err := w.Store.ClaimAsyncHooks(ctx, w.tenant, w.owner, 1, durableLifecycleHookLease)
 	if err != nil {
 		return false, err
 	}
@@ -91,27 +117,27 @@ func processOneDurableLifecycleHook(ctx context.Context, runner script.Runner, s
 	}
 	claim := claims[0]
 	invocation := claim.Invocation
-	if invocation.Site != site || invocation.Actor.Site != site || invocation.TenantID != tenant || !invocation.Actor.Authenticated() || invocation.SourceOperation == "" || invocation.ConfigRevision == 0 || invocation.Sequence == 0 || invocation.Doctype == "" || invocation.Record.Name == "" || invocation.Record.ScriptType != script.TypeDocEvent || invocation.Record.Script == "" || invocation.Record.TimeoutMs <= 0 || invocation.Record.TimeoutMs > int(script.MaxAsyncHookTimeout/time.Millisecond) || !script.IsAfterEvent(invocation.Event) {
-		return true, finishDurableLifecycleHook(ctx, store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook failed identity, revision, or source validation"})
+	if invocation.Site != w.Site || invocation.Actor.Site != w.Site || invocation.TenantID != w.tenant || !invocation.Actor.Authenticated() || invocation.SourceOperation == "" || invocation.ConfigRevision == 0 || invocation.Sequence == 0 || invocation.Doctype == "" || invocation.Record.Name == "" || invocation.Record.ScriptType != script.TypeDocEvent || invocation.Record.Script == "" || invocation.Record.TimeoutMs <= 0 || invocation.Record.TimeoutMs > int(script.MaxAsyncHookTimeout/time.Millisecond) || !script.IsAfterEvent(invocation.Event) {
+		return true, finishDurableLifecycleHook(ctx, w.Store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook failed identity, revision, or source validation"})
 	}
-	dt := registry.Get(invocation.Doctype)
+	dt := w.Registry.Get(invocation.Doctype)
 	if dt == nil {
-		return true, finishDurableLifecycleHook(ctx, store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook doctype is no longer registered"})
+		return true, finishDurableLifecycleHook(ctx, w.Store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook doctype is no longer registered"})
 	}
 	var document, oldDocument map[string]any
 	if err := json.Unmarshal(invocation.Document, &document); err != nil || document == nil {
-		return true, finishDurableLifecycleHook(ctx, store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook document snapshot is invalid"})
+		return true, finishDurableLifecycleHook(ctx, w.Store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook document snapshot is invalid"})
 	}
 	if len(invocation.OldDocument) > 0 {
 		if err := json.Unmarshal(invocation.OldDocument, &oldDocument); err != nil || oldDocument == nil {
-			return true, finishDurableLifecycleHook(ctx, store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook previous document snapshot is invalid"})
+			return true, finishDurableLifecycleHook(ctx, w.Store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook previous document snapshot is invalid"})
 		}
 	}
-	execution, err := policy.NewVerifiedExecutionWithGrants(tenant, invocation.Actor, invocation.Grants)
+	execution, err := policy.NewVerifiedExecutionWithGrants(w.tenant, invocation.Actor, invocation.Grants)
 	if err != nil {
-		return true, finishDurableLifecycleHook(ctx, store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook execution identity is invalid"})
+		return true, finishDurableLifecycleHook(ctx, w.Store, claim, script.AsyncHookOutcome{Error: "persisted lifecycle hook execution identity is invalid"})
 	}
-	execTx, err := store.BeginAsyncHook(ctx, claim)
+	execTx, err := w.Store.BeginAsyncHook(ctx, claim)
 	if err != nil {
 		return true, err
 	}
@@ -135,19 +161,19 @@ func processOneDurableLifecycleHook(ctx context.Context, runner script.Runner, s
 		user = actor.PrincipalID
 	}
 	tm := &orm.TxManager{
-		DB: database, Transaction: execTx, Registry: registry, Dialect: dialect,
-		Context: callCtx, SiteName: site, CurrentUser: user, CurrentUserRoles: actor.Roles,
-		Execution: execution, ScriptRunner: runner, ScriptStore: store,
-		ScriptProvider: nil, AsyncHookInvocations: store, AsyncHookTenantID: tenant,
+		DB: w.DB, Transaction: execTx, Registry: w.Registry, Dialect: w.dialect,
+		Context: callCtx, SiteName: w.Site, CurrentUser: user, CurrentUserRoles: actor.Roles,
+		Execution: execution, ScriptRunner: w.Runner, ScriptStore: w.Store,
+		ScriptProvider: nil, AsyncHookInvocations: w.Store, AsyncHookTenantID: w.tenant,
 		AsyncHookSourceOperation: contract.OperationID(contract.NewOperationID()), AsyncHookConfigRevision: invocation.ConfigRevision,
 		SkipHookScripts: []string{invocation.Record.Name}, SuppressAsyncHookEvents: true,
 	}
-	tm.Outbox = outboxWriter
-	operationKernel := kernel.New(dialect, tm.Outbox)
+	tm.Outbox = w.Outbox
+	operationKernel := kernel.New(w.dialect, tm.Outbox)
 	tm.ScriptMutationExecutor = script.MutationExecutorFunc(func(nestedCtx context.Context, request script.MutationRequest) (json.RawMessage, error) {
 		return operationKernel.ExecuteScriptMutationInTx(nestedCtx, execTx, tm, request)
 	})
-	provider := api.NewScriptProvider(tm, registry, site, secrets, httpAllowlist)
+	provider := api.NewScriptProvider(tm, w.Registry, w.Site, w.Secrets, w.HTTPAllowlist)
 	if closer, ok := provider.(interface{ Close() }); ok {
 		defer closer.Close()
 	}
@@ -157,17 +183,17 @@ func processOneDurableLifecycleHook(ctx context.Context, runner script.Runner, s
 	if scoped, ok := provider.(script.MutationScopedProvider); ok {
 		provider = scoped.WithMutationExecutor(tm.ScriptMutationExecutor)
 	}
-	journal := &durableLifecycleHookJournal{store: store, claim: claim}
+	journal := &durableLifecycleHookJournal{store: w.Store, claim: claim}
 	if scoped, ok := provider.(script.ExternalEffectScopedProvider); ok {
 		provider = scoped.WithExternalEffectJournal(journal)
 	}
 	record := invocation.Record
 	started := time.Now()
-	result, runErr := executeDurableLifecycleHookSafely(runner, callCtx, script.ExecuteRequest{
+	result, runErr := executeDurableLifecycleHookSafely(w.Runner, callCtx, script.ExecuteRequest{
 		Script: record.Script, ScriptType: record.ScriptType, ScriptName: record.Name,
 		DocType: invocation.Doctype, Event: invocation.Event, Document: document,
 		OldDocument: oldDocument, User: user, UserRoles: append([]string(nil), actor.Roles...),
-		Site: site, Timeout: timeout, Provider: provider,
+		Site: w.Site, Timeout: timeout, Provider: provider,
 	})
 	duration := time.Since(started)
 	if result != nil && result.Duration > 0 {
@@ -180,23 +206,23 @@ func processOneDurableLifecycleHook(ctx context.Context, runner script.Runner, s
 		if journal.Started() {
 			outcome.Retry, outcome.Uncertain = false, true
 		}
-		finishErr := finishDurableLifecycleHook(ctx, store, claim, outcome)
-		logDurableLifecycleHook(store, site, invocation, user, duration, "error", outcome.Error)
+		finishErr := finishDurableLifecycleHook(ctx, w.Store, claim, outcome)
+		w.logExecution(invocation, user, duration, "error", outcome.Error)
 		return true, finishErr
 	}
-	if err := store.SucceedAsyncHookTx(callCtx, execTx, claim); err != nil {
+	if err := w.Store.SucceedAsyncHookTx(callCtx, execTx, claim); err != nil {
 		_ = execTx.Rollback()
 		committed = true
 		outcome := script.AsyncHookOutcome{Error: "async lifecycle hook lost its worker fence before commit", Retry: true}
 		if journal.Started() {
 			outcome.Retry, outcome.Uncertain = false, true
 		}
-		return true, finishDurableLifecycleHook(ctx, store, claim, outcome)
+		return true, finishDurableLifecycleHook(ctx, w.Store, claim, outcome)
 	}
 	if err := execTx.Commit(); err != nil {
 		committed = true // a commit error can be ambiguous; never issue an unsafe retry here.
 		if journal.Started() {
-			finishErr := finishDurableLifecycleHook(ctx, store, claim, script.AsyncHookOutcome{Error: "commit result is unknown after external effect", Uncertain: true})
+			finishErr := finishDurableLifecycleHook(ctx, w.Store, claim, script.AsyncHookOutcome{Error: "commit result is unknown after external effect", Uncertain: true})
 			return true, errors.Join(fmt.Errorf("commit local async hook effects: %w", err), finishErr)
 		}
 		return true, fmt.Errorf("commit local async hook effects; receipt state must be reconciled: %w", err)
@@ -206,7 +232,7 @@ func processOneDurableLifecycleHook(ctx context.Context, runner script.Runner, s
 		afterCommit()
 	}
 	tm.PostCommitHooks = nil
-	logDurableLifecycleHook(store, site, invocation, user, duration, "success", "")
+	w.logExecution(invocation, user, duration, "success", "")
 	return true, nil
 }
 
@@ -268,12 +294,12 @@ func finishDurableLifecycleHook(ctx context.Context, store script.AsyncHookInvoc
 	return store.FinishAsyncHook(finishCtx, claim, outcome)
 }
 
-func logDurableLifecycleHook(store *script.Store, site string, invocation script.AsyncHookInvocation, user string, duration time.Duration, status, message string) {
-	if store == nil {
+func (w *lifecycleHookPass) logExecution(invocation script.AsyncHookInvocation, user string, duration time.Duration, status, message string) {
+	if w.Store == nil {
 		return
 	}
-	if err := store.LogExecution(site, invocation.Record, invocation.Doctype, lifecycleHookDocumentName(invocation.Document), invocation.Event, user, int(duration.Milliseconds()), status, message); err != nil {
-		slog.Warn("durable lifecycle hook execution log failed", "site", site, "script", invocation.Record.Name, "error", err)
+	if err := w.Store.LogExecution(w.Site, invocation.Record, invocation.Doctype, lifecycleHookDocumentName(invocation.Document), invocation.Event, user, int(duration.Milliseconds()), status, message); err != nil {
+		slog.Warn("durable lifecycle hook execution log failed", "site", w.Site, "script", invocation.Record.Name, "error", err)
 	}
 }
 

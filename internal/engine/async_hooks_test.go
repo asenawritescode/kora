@@ -107,8 +107,35 @@ func testAsyncHookSink(count int, queuedBytes, eventBytes uint64) *asyncHookQueu
 }
 
 func TestStartAsyncHookWorkerRejectsUnboundedConfiguration(t *testing.T) {
-	if worker, err := StartAsyncHookWorker(0, nil, nil, "", nil); !errors.Is(err, ErrAsyncHookQueueSize) || worker != nil {
+	if worker, err := StartAsyncHookWorker(AsyncHookOptions{}); !errors.Is(err, ErrAsyncHookQueueSize) || worker != nil {
 		t.Fatalf("StartAsyncHookWorker = (%v, %v), want queue-size error", worker, err)
+	}
+}
+
+func TestNewAsyncHookWorkerLimitDefaults(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    AsyncHookOptions
+		want    AsyncHookQueueSnapshot
+		wantErr bool
+	}{
+		{name: "zero limits use defaults", opts: AsyncHookOptions{QueueSize: 3},
+			want: AsyncHookQueueSnapshot{MaxQueuedBytes: DefaultAsyncHookMaxQueuedBytes, MaxEventBytes: DefaultAsyncHookMaxEventBytes, MaxQueuedItems: 3}},
+		{name: "explicit limits are kept", opts: AsyncHookOptions{QueueSize: 2, MaxQueuedBytes: 4096, MaxEventBytes: 1024},
+			want: AsyncHookQueueSnapshot{MaxQueuedBytes: 4096, MaxEventBytes: 1024, MaxQueuedItems: 2}},
+		{name: "event limit above queue limit", opts: AsyncHookOptions{QueueSize: 2, MaxQueuedBytes: 1024, MaxEventBytes: 2048}, wantErr: true},
+		{name: "event limit above default queue limit", opts: AsyncHookOptions{QueueSize: 2, MaxEventBytes: DefaultAsyncHookMaxQueuedBytes + 1}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			worker, err := NewAsyncHookWorker(tt.opts)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("NewAsyncHookWorker error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if err == nil && worker.QueueSnapshot() != tt.want {
+				t.Fatalf("QueueSnapshot = %+v, want %+v", worker.QueueSnapshot(), tt.want)
+			}
+		})
 	}
 }
 
@@ -168,7 +195,9 @@ func TestAsyncLifecycleHookCanKeepProviderDisabled(t *testing.T) {
 	}
 	runtime.Registry.Register(&doctype.DocType{Name: "Task"})
 	router := knet.NewSiteRouter([]*knet.LoadedSite{runtime})
-	worker, err := NewAsyncHookWorkerWithLimits(2, 1<<20, 1<<20, runner, router, "mysql", nil)
+	worker, err := NewAsyncHookWorker(AsyncHookOptions{
+		QueueSize: 2, MaxQueuedBytes: 1 << 20, MaxEventBytes: 1 << 20, Runner: runner, Sites: router, DBType: "mysql",
+	})
 	if err != nil {
 		t.Fatal("create async hook worker:", err)
 	}

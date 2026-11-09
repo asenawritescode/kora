@@ -1534,9 +1534,9 @@
    "cyclomatic": 40
   },
   "internal/engine::AssembleHTTPProcess": {
-   "cognitive": 60,
-   "cyclomatic": 48,
-   "statements": 101
+   "cognitive": 58,
+   "cyclomatic": 46,
+   "statements": 95
   },
   "internal/engine::AssembleTenantRuntime": {
    "cognitive": 26,
