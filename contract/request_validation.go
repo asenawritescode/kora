@@ -72,7 +72,7 @@ func ValidateAssignee(assignee Assignee) error {
 	if assignee.Kind != AssigneeUser && assignee.Kind != AssigneeRole && assignee.Kind != AssigneeGroup {
 		return fmt.Errorf("assignee kind is invalid")
 	}
-	if err := validateOpaqueID(assignee.ID); err != nil {
+	if err := opaqueID(assignee.ID).validate(); err != nil {
 		return fmt.Errorf("assignee ID: %w", err)
 	}
 	return nil

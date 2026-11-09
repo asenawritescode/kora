@@ -129,7 +129,7 @@ func PackDigest(canonicalManifest []byte, files []PackFile) (string, error) {
 	seen := map[string]bool{}
 	total := 0
 	for _, file := range files {
-		clean, err := normalizePackagePath(file.Path)
+		clean, err := packagePath(file.Path).normalize()
 		if err != nil {
 			return "", fmt.Errorf("pack file %q: %w", file.Path, err)
 		}
@@ -166,7 +166,12 @@ func PackDigest(canonicalManifest []byte, files []PackFile) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func normalizePackagePath(value string) (string, error) {
+// packagePath is a file path inside a package artifact as authored.
+type packagePath string
+
+// normalize returns the cleaned path, rejecting absolute, empty, non-portable and traversing paths.
+func (p packagePath) normalize() (string, error) {
+	value := string(p)
 	if value == "" || strings.ContainsRune(value, '\\') || strings.ContainsRune(value, 0) || strings.HasPrefix(value, "/") {
 		return "", fmt.Errorf("absolute, empty, or non-portable path rejected")
 	}
@@ -219,18 +224,21 @@ func validPackageFileType(filePath, contentType string) bool {
 func PackFileComponent(filePath string) string {
 	parts := strings.Split(filePath, "/")
 	for i := 0; i+2 < len(parts); i++ {
-		if parts[i] == "components" && isPackNamespace(parts[i+1]) {
+		if parts[i] == "components" && packNamespace(parts[i+1]).valid() {
 			return parts[i+1]
 		}
 	}
 	return ""
 }
 
-func isPackNamespace(s string) bool {
-	if len(s) != 16 {
+// packNamespace is the 16-hex-digit namespace directory of a component inside a pack.
+type packNamespace string
+
+func (n packNamespace) valid() bool {
+	if len(n) != 16 {
 		return false
 	}
-	for _, c := range s {
+	for _, c := range n {
 		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
 			return false
 		}

@@ -1,4 +1,4 @@
-.PHONY: build build-go dev setup serve test lint lint-complexity complexity-ratchet complexity-baseline deadcode-ratchet deadcode-baseline lint-all clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
+.PHONY: build build-go dev setup serve test lint lint-complexity complexity-ratchet complexity-baseline deadcode-ratchet deadcode-baseline primitive-funcs-ratchet primitive-funcs-baseline lint-all clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
 
 # Defaults
 SITE ?= airtime.local
@@ -88,7 +88,15 @@ deadcode-ratchet:                  ## Fail if a function became unreachable from
 deadcode-baseline:                 ## Shrink the dead-code baseline after deleting code (never adds)
 	python3 scripts/deadcode-ratchet.py --update
 
-lint-all: lint complexity-ratchet deadcode-ratchet  ## Everything CI's Lint job runs
+PRIMITIVE_FUNCS = python3 scripts/list-ratchet.py --name primitive-funcs --cmd "go run ./cmd/free-funcs" --baseline .lint-baseline/primitive-funcs.txt
+
+primitive-funcs-ratchet:           ## Fail on a new validate/is/normalize function over a bare primitive (make it a method of a type)
+	$(PRIMITIVE_FUNCS) --hint "Name the thing: type memberEmail string with a validate method, not validateMemberEmail(string)."
+
+primitive-funcs-baseline:          ## Shrink the primitive-function baseline after converting some (never adds)
+	$(PRIMITIVE_FUNCS) --update
+
+lint-all: lint complexity-ratchet deadcode-ratchet primitive-funcs-ratchet  ## Everything CI's Lint job runs
 
 fmt:                               ## Format code
 	go fmt ./...

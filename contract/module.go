@@ -7,12 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/expression"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/asenawritescode/kora/internal/expression"
 )
 
 // ModuleID identifies a durable business ownership boundary. It is independent
