@@ -55,7 +55,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			}
 			info := site.DBSiteInfo{SiteID: siteName, Name: siteName, DBType: tc.driver, DBName: dbName, Status: "active"}
 			common := &site.CommonConfig{DBType: tc.driver}
-			loaded, err := loadTenantRuntime(context.Background(), info, common, nil, "test", tenantRuntimeDependencies{
+			loaded, err := loadTenantRuntime(context.Background(), tenantRuntimeRequest{info: info, common: common, binaryVersion: "test"}, tenantRuntimeDependencies{
 				connect:   func(context.Context, *site.Config) (*sql.DB, error) { return database, nil },
 				bootstrap: func(context.Context, *sql.DB, db.Dialect) error { return nil },
 			})

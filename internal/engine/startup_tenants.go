@@ -70,11 +70,10 @@ func loadStartupTenantSet(ctx context.Context, config StartupTenantConfig, depen
 	if len(config.Sites) > 0 && (dependencies.loadRuntime == nil || dependencies.admission == nil) {
 		return StartupTenants{}, errors.New("Engine tenant activation dependencies are required")
 	}
-	concurrency := int(config.Concurrency)
-	if concurrency == 0 {
-		concurrency = defaultStartupTenantConcurrency
+	if config.Concurrency == 0 {
+		config.Concurrency = defaultStartupTenantConcurrency
 	}
-	results := loadStartupTenants(ctx, config.Sites, config.Common, config.BinaryVersion, concurrency, config.SharedPlatformDSN, config.ResolveStorage, dependencies)
+	results := loadStartupTenants(ctx, config, dependencies)
 	runtimes, domains, primaryDB, err := collectLoadedStartupTenants(results)
 	if err != nil {
 		return StartupTenants{}, err
@@ -130,30 +129,30 @@ func collectLoadedStartupTenants(results []startupTenantResult) ([]*knet.LoadedS
 	return loadedSites, domains, firstDB, nil
 }
 
-func loadStartupTenants(parent context.Context, sites []site.DBSiteInfo, common *site.CommonConfig, binaryVersion string, concurrency int, sharedPlatformDSN string, resolveStorage func(*site.Config) (storage.Backend, error), dependencies startupTenantDependencies) []startupTenantResult {
+func loadStartupTenants(parent context.Context, config StartupTenantConfig, dependencies startupTenantDependencies) []startupTenantResult {
 	tracer := otel.Tracer("kora/engine/startup")
 	ctx, startupSpan := tracer.Start(parent, "engine.load_sites",
-		trace.WithAttributes(attribute.Int("kora.site.count", len(sites))))
+		trace.WithAttributes(attribute.Int("kora.site.count", len(config.Sites))))
 	defer startupSpan.End()
 
-	results := make([]startupTenantResult, len(sites))
-	if len(sites) == 0 {
+	results := make([]startupTenantResult, len(config.Sites))
+	if len(config.Sites) == 0 {
 		return results
 	}
-	siteKeys := make([]string, len(sites))
-	loadLocks := make(map[string]*sync.Mutex, len(sites))
-	for index, info := range sites {
-		cfg := site.ReconstructSiteConfigFromDBInfo(info, common)
+	siteKeys := make([]string, len(config.Sites))
+	loadLocks := make(map[string]*sync.Mutex, len(config.Sites))
+	for index, info := range config.Sites {
+		cfg := site.ReconstructSiteConfigFromDBInfo(info, config.Common)
 		key := cfg.DSN()
-		if sharedPlatformDSN != "" && (cfg.DBType == "libsql" || cfg.DBUser == "") {
-			key = sharedPlatformDSN
+		if config.SharedPlatformDSN != "" && (cfg.DBType == "libsql" || cfg.DBUser == "") {
+			key = config.SharedPlatformDSN
 		}
 		siteKeys[index] = key
 		if loadLocks[key] == nil {
 			loadLocks[key] = &sync.Mutex{}
 		}
 	}
-	workerCount := concurrency
+	workerCount := int(config.Concurrency)
 	if workerCount <= 0 {
 		workerCount = defaultStartupTenantConcurrency
 	}
@@ -176,7 +175,7 @@ func loadStartupTenants(parent context.Context, sites []site.DBSiteInfo, common 
 				lock := loadLocks[siteKeys[index]]
 				lock.Lock()
 				started := time.Now()
-				result := loadStartupTenant(ctx, sites[index], common, binaryVersion, resolveStorage, dependencies)
+				result := loadStartupTenant(ctx, config.Sites[index], config, dependencies)
 				result.duration = time.Since(started)
 				if result.site != nil && result.site.DB != nil {
 					result.poolStats = result.site.DB.Stats()
@@ -189,7 +188,7 @@ func loadStartupTenants(parent context.Context, sites []site.DBSiteInfo, common 
 			}
 		}()
 	}
-	for index := range sites {
+	for index := range config.Sites {
 		jobs <- index
 	}
 	close(jobs)
@@ -203,7 +202,7 @@ func loadStartupTenants(parent context.Context, sites []site.DBSiteInfo, common 
 	return results
 }
 
-func loadStartupTenant(ctx context.Context, info site.DBSiteInfo, common *site.CommonConfig, binaryVersion string, resolveStorage func(*site.Config) (storage.Backend, error), dependencies startupTenantDependencies) (result startupTenantResult) {
+func loadStartupTenant(ctx context.Context, info site.DBSiteInfo, config StartupTenantConfig, dependencies startupTenantDependencies) (result startupTenantResult) {
 	result.name = info.Name
 	var backend storage.Backend
 	var runtime *knet.LoadedSite
@@ -235,10 +234,10 @@ func loadStartupTenant(ctx context.Context, info site.DBSiteInfo, common *site.C
 		return phaseSpan
 	}
 
-	siteCfg := site.ReconstructSiteConfigFromDBInfo(info, common)
+	siteCfg := site.ReconstructSiteConfigFromDBInfo(info, config.Common)
 	phaseSpan := phase("engine.site.resolve_storage")
 	var err error
-	backend, err = resolveStorage(siteCfg)
+	backend, err = config.ResolveStorage(siteCfg)
 	endPhase(phaseSpan, err)
 	if err != nil {
 		return startupTenantResult{name: info.Name, err: fmt.Errorf("configuring storage for %s: %w", info.Name, err)}
@@ -248,7 +247,7 @@ func loadStartupTenant(ctx context.Context, info site.DBSiteInfo, common *site.C
 		return startupTenantResult{name: info.Name, storage: backend, err: fmt.Errorf("allocating work admission for %s: %w", info.Name, err)}
 	}
 	phaseSpan = phase("engine.site.activate_runtime")
-	runtime, err = dependencies.loadRuntime(ctx, info, common, binaryVersion)
+	runtime, err = dependencies.loadRuntime(ctx, info, config.Common, config.BinaryVersion)
 	endPhase(phaseSpan, err)
 	if err != nil {
 		return startupTenantResult{name: info.Name, storage: backend, err: fmt.Errorf("loading tenant runtime for %s: %w", info.Name, err)}

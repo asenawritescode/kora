@@ -1,10 +1,17 @@
 package engine
 
 import (
+	"context"
+	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	knet "github.com/asenawritescode/kora/internal/net"
 )
 
 func TestSelfHostedWorkflowConfigIsDomainNeutral(t *testing.T) {
@@ -32,5 +39,32 @@ func TestTenantWorkflowSchemasRecognizesEmailOption(t *testing.T) {
 	schemas := tenantWorkflowSchemas{registry: registry}
 	if fieldType, ok := schemas.RecordFieldType("Contact", "email"); !ok || fieldType != "Email" {
 		t.Fatalf("email field type = %q, found=%t", fieldType, ok)
+	}
+}
+
+func TestConfigureTenantWorkflowRequiresItsDependencies(t *testing.T) {
+	loaded := &knet.LoadedSite{DB: new(sql.DB)}
+	admission, err := dbaccess.NewAdmission(1, 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete := tenantWorkflowDeps{dialect: &db.MySQLDialect{}, admission: admission, domainKernel: kernel.New(&db.MySQLDialect{}, nil)}
+	tests := []struct {
+		name   string
+		loaded *knet.LoadedSite
+		deps   func(tenantWorkflowDeps) tenantWorkflowDeps
+	}{
+		{"no runtime", nil, func(d tenantWorkflowDeps) tenantWorkflowDeps { return d }},
+		{"no dialect", loaded, func(d tenantWorkflowDeps) tenantWorkflowDeps { d.dialect = nil; return d }},
+		{"no admission", loaded, func(d tenantWorkflowDeps) tenantWorkflowDeps { d.admission = nil; return d }},
+		{"no domain kernel", loaded, func(d tenantWorkflowDeps) tenantWorkflowDeps { d.domainKernel = nil; return d }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			worker, definitions, instances, err := configureTenantWorkflow(context.Background(), nil, tt.loaded, tt.deps(complete))
+			if err == nil || worker != nil || definitions != nil || instances != nil {
+				t.Fatalf("configureTenantWorkflow = (%v, %v, %v, %v), want an error and no services", worker, definitions, instances, err)
+			}
+		})
 	}
 }

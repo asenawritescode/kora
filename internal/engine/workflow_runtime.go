@@ -152,26 +152,34 @@ func (s tenantWorkflowSchemas) RecordFieldOptions(table, field string) (string, 
 	return definition.Options, true
 }
 
-func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loaded *knet.LoadedSite, dialect db.Dialect, requestsService *requests.Service, admission *dbaccess.Admission, domainKernel *kernel.Kernel) (*workflow.ExecutionWorker, *workflow.Service, *workflow.InstanceService, error) {
-	if loaded == nil || loaded.DB == nil || dialect == nil || admission == nil {
+// tenantWorkflowDeps are the tenant services the workflow runtime is built on.
+type tenantWorkflowDeps struct {
+	dialect      db.Dialect
+	requests     *requests.Service
+	admission    *dbaccess.Admission
+	domainKernel *kernel.Kernel
+}
+
+func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loaded *knet.LoadedSite, deps tenantWorkflowDeps) (*workflow.ExecutionWorker, *workflow.Service, *workflow.InstanceService, error) {
+	if loaded == nil || loaded.DB == nil || deps.dialect == nil || deps.admission == nil {
 		return nil, nil, nil, fmt.Errorf("tenant workflow requires runtime, database, dialect and active-work admission")
 	}
-	if domainKernel == nil {
+	if deps.domainKernel == nil {
 		return nil, nil, nil, fmt.Errorf("tenant workflow requires the tenant-scoped domain kernel")
 	}
-	definitionStore, err := workflowsql.NewDefinitionStore(loaded.DB, dialect)
+	definitionStore, err := workflowsql.NewDefinitionStore(loaded.DB, deps.dialect)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	domainKernel.WorkflowStatusPolicies = definitionStore
-	instanceStore, err := workflowsql.NewInstanceStore(loaded.DB, dialect)
+	deps.domainKernel.WorkflowStatusPolicies = definitionStore
+	instanceStore, err := workflowsql.NewInstanceStore(loaded.DB, deps.dialect)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if loaded.RuntimeServices != nil {
 		loaded.RuntimeServices.WorkflowOpenWorkInspector = instanceStore
 	}
-	executionStore, err := workflowsql.NewExecutionStore(loaded.DB, dialect)
+	executionStore, err := workflowsql.NewExecutionStore(loaded.DB, deps.dialect)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -180,7 +188,7 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 		return nil, nil, nil, fmt.Errorf("workflow stable tenant ID: %w", err)
 	}
 	ensureCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	err = withTenantWorkAdmission(ensureCtx, admission, "ensure durable workflow schema", func() error { return definitionStore.Ensure(ensureCtx) })
+	err = withTenantWorkAdmission(ensureCtx, deps.admission, "ensure durable workflow schema", func() error { return definitionStore.Ensure(ensureCtx) })
 	cancel()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("ensure durable workflow schema: %w", err)
@@ -194,14 +202,14 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	workflowSchemas := tenantWorkflowSchemas{base: cfg.Schemas, registry: loaded.Registry, mailer: cfg.Mailer != nil, bus: cfg.EventBus != nil}
 	registrations := append([]workflow.ActionRegistration(nil), cfg.Registrations...)
 	registrations = append(registrations, statusWorkflowRegistration())
-	registrations = append(registrations, notificationWorkflowRegistration(cfg.Mailer, loaded.DB, loaded.Registry, dialect, cfg.EventBus))
+	registrations = append(registrations, notificationWorkflowRegistration(cfg.Mailer, loaded.DB, loaded.Registry, deps.dialect, cfg.EventBus))
 	localBuilders := make(map[workflow.ActionKey]process.WorkflowOperationBuilder, len(cfg.LocalBuilders)+1)
 	for key, builder := range cfg.LocalBuilders {
 		localBuilders[key] = builder
 	}
 	localBuilders[workflow.ActionKey{Name: "record.update_status", Version: 1}] = statusWorkflowOperation
 	if cfg.Mailer != nil {
-		registrations = append(registrations, emailWorkflowRegistration(cfg.Mailer, loaded.DB, loaded.Registry, dialect))
+		registrations = append(registrations, emailWorkflowRegistration(cfg.Mailer, loaded.DB, loaded.Registry, deps.dialect))
 	}
 	serviceGrants := append([]policy.Grant(nil), cfg.ServiceGrants...)
 	for _, grant := range serviceGrants {
@@ -252,12 +260,12 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 			return nil, nil, nil, fmt.Errorf("pinned workflow capability %s@%d has no durable lease manager", registration.Key.Name, registration.Key.Version)
 		}
 		leaseCtx, cancelLease := context.WithTimeout(ctx, 5*time.Second)
-		err := withTenantWorkAdmission(leaseCtx, admission, "ensure pinned workflow capability lease", func() error {
+		leaseErr := withTenantWorkAdmission(leaseCtx, deps.admission, "ensure pinned workflow capability lease", func() error {
 			return cfg.CapabilityLeases.EnsureCapabilityLease(leaseCtx, *lease)
 		})
 		cancelLease()
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("ensure workflow capability lease for %s@%d: %w", registration.Key.Name, registration.Key.Version, err)
+		if leaseErr != nil {
+			return nil, nil, nil, fmt.Errorf("ensure workflow capability lease for %s@%d: %w", registration.Key.Name, registration.Key.Version, leaseErr)
 		}
 	}
 	localRegistrations := make([]workflow.ActionRegistration, 0, len(registrations))
@@ -271,17 +279,17 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 			return nil, nil, nil, fmt.Errorf("external workflow registration has an invalid adapter")
 		}
 	}
-	transaction, err := process.NewTenantTransactionOpener(tenant, loaded.DB, admission)
+	transaction, err := process.NewTenantTransactionOpener(tenant, loaded.DB, deps.admission)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct workflow tenant transaction opener: %w", err)
 	}
 	var localExecutor workflow.LocalActionExecutor
 	if len(localRegistrations) > 0 {
 		var localLeaseAdmission process.WorkflowCapabilityLeaseAdmission
-		if admission, ok := cfg.CapabilityLeases.(process.WorkflowCapabilityLeaseAdmission); ok {
-			localLeaseAdmission = admission
+		if leaseAdmission, ok := cfg.CapabilityLeases.(process.WorkflowCapabilityLeaseAdmission); ok {
+			localLeaseAdmission = leaseAdmission
 		}
-		localExecutor, err = process.NewWorkflowLocalActionExecutor(domainKernel, loaded.Registry, transaction, executionStore, workflowSchemas, localRegistrations, localBuilders, localLeaseAdmission)
+		localExecutor, err = process.NewWorkflowLocalActionExecutor(deps.domainKernel, loaded.Registry, transaction, executionStore, workflowSchemas, localRegistrations, localBuilders, localLeaseAdmission)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("construct workflow local domain executor: %w", err)
 		}
@@ -303,7 +311,7 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	definitionAuthorizer := cfg.Definitions
 	instanceAuthorizer := cfg.Instances
 	if definitionAuthorizer == nil || instanceAuthorizer == nil {
-		authorizationStore, storeErr := workflowsql.NewAuthorizationStore(loaded.DB, dialect, loaded.Registry)
+		authorizationStore, storeErr := workflowsql.NewAuthorizationStore(loaded.DB, deps.dialect, loaded.Registry)
 		if storeErr != nil {
 			return nil, nil, nil, fmt.Errorf("construct tenant workflow authorization store: %w", storeErr)
 		}
@@ -323,7 +331,7 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 		return nil, nil, nil, fmt.Errorf("construct workflow definition service: %w", err)
 	}
 	definitionService.SetModuleSnapshotLookup(func(tenant contract.TenantID) (contract.ModuleSnapshot, error) {
-		return configstore.NewModuleStore(loaded.DB, dialect).Load(tenant)
+		return configstore.NewModuleStore(loaded.DB, deps.dialect).Load(tenant)
 	})
 	instanceService, err := workflow.NewInstanceService(definitionStore, instanceStore, instanceAuthorizer, catalog, workflowSchemas, cfg.Waits, nil, nil)
 	if err != nil {
@@ -333,7 +341,7 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	if cfg.Conditions != nil {
 		conditionScope = cfg.Conditions(loaded)
 	} else {
-		conditionScope, err = newTenantWorkflowConditionScope(loaded, dialect)
+		conditionScope, err = newTenantWorkflowConditionScope(loaded, deps.dialect)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("construct tenant workflow condition scope: %w", err)
 		}
@@ -341,7 +349,7 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	if conditionScope == nil {
 		return nil, nil, nil, fmt.Errorf("tenant workflow authorized condition scope is unavailable")
 	}
-	human := workflow.HumanWaitRuntime{Requests: requestsService, Store: executionStore}
+	human := workflow.HumanWaitRuntime{Requests: deps.requests, Store: executionStore}
 	claimHandler, err := workflow.NewDefinitionClaimHandler(executionStore, instanceStore, definitionStore, catalog, workflowSchemas, identity, conditionScope, cfg.Evaluator, cfg.CapabilityLeases, human)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct tenant workflow claim handler: %w", err)
@@ -359,7 +367,7 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	if poll == 0 {
 		poll = 500 * time.Millisecond
 	}
-	worker, err := workflow.NewExecutionWorker(executionStore, claimHandler, workflow.ExecutionWorkerConfig{Tenant: tenant, Owner: contract.NewID(), Concurrency: concurrency, Batch: batch, Lease: lease, PollInterval: poll, WorkAdmission: admission}, func(err error) {
+	worker, err := workflow.NewExecutionWorker(executionStore, claimHandler, workflow.ExecutionWorkerConfig{Tenant: tenant, Owner: contract.NewID(), Concurrency: concurrency, Batch: batch, Lease: lease, PollInterval: poll, WorkAdmission: deps.admission}, func(err error) {
 		slog.Warn("durable workflow execution pass failed", "tenant_id", tenant, "error", err)
 	})
 	if err != nil {
