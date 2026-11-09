@@ -55,7 +55,7 @@ KORA_DB_TYPE=mysql KORA_DB_HOST=127.0.0.1 KORA_DB_USER=root KORA_DB_PASSWORD=kor
 
 | Command | What it does |
 |---------|-------------|
-| `make build` | Build UI (bun) + Go binary |
+| `make build` | Build the Go binary |
 | `make serve` | Build + start server |
 | `make test` | Run Go tests (18 packages) |
 | `make lint` | Run linters (Go + TypeScript) |
@@ -67,7 +67,7 @@ KORA_DB_TYPE=mysql KORA_DB_HOST=127.0.0.1 KORA_DB_USER=root KORA_DB_PASSWORD=kor
 - **AI Chat Assistant** — floating, page-aware chat with durable transcripts, tracked runs, and catalog-backed tool execution at `/api/v1/ai/chat`. A site or enabled shared provider key is required. Marked experimental in the capability registry.
 - **AI Doctype Generator** — AI-assisted draft creation for DocType YAML.
 - **Config-Driven Admin** — forms, lists, filters, workflows, and page manifests are rendered from configuration, but the runtime remains DocType-centric rather than fully generic-resource-based.
-- **Multi-Site** — path-based (`/s/:site/workspace`) by default, with host-based routing only for configured domains. Sites created from the console are persisted in the database.
+- **Multi-Site** — path-based (`/s/:site/api/...`) by default, with host-based routing only for configured domains. Sites created from the console are persisted in the database.
 - **Multi-Database** — MySQL is the primary self-host backend. PostgreSQL and remote LibSQL have dialect and package-level integration coverage with remaining gaps; MariaDB is not separately validated. See the [database support matrix](docs/architecture/database-support-matrix.md).
 - **Console UI** — `/console` for system admin: create/edit sites, view health, manage all sites.
 - **Self-Service Onboarding** — public site creation at `/onboard` when `KORA_CONSOLE_ONBOARDING_ENABLED=true`. Users create their own sites with admin accounts. Rate-limited (3/hr/IP).
@@ -189,9 +189,9 @@ await client.insert("Customer", { name: "Acme Corp" })
 ## Multi-Site
 
 ```
-http://host/s/airtime/workspace     → Airtime workspace (path-based, no DNS needed)
-http://host/s/fieldwork/workspace   → Fieldwork workspace
-http://host/console                 → System console
+http://host/s/airtime/api/v1/...     → Airtime API (path-based, no DNS needed)
+http://host/s/fieldwork/api/v1/...   → Fieldwork API
+http://host/console                  → System console API
 ```
 
 Sites created via console are persisted in `_kora_site_registry` for startup discovery, and still keep tenant-local config history in `_kora_config_version`. They survive container redeploys and can be hot-added immediately after onboarding.
@@ -229,9 +229,9 @@ Ten admin views — all config-driven, all mobile-responsive:
 | **HTTP** | Gin, net/http |
 | **Database** | MySQL 8.0, MariaDB, LibSQL (remote HTTP) |
 | **AI / LLM** | OpenAI, DeepSeek V4, Anthropic Claude |
-| **Frontend** | React 19, TanStack Router/Query/Table/Form, shadcn/ui, Tailwind CSS v4 |
+| **Frontend** | Separate repository (kora-ui / Studio): React 19, TanStack Router/Query/Table/Form, Tailwind CSS v4 |
 | **State** | Zustand, TanStack Query |
-| **Delivery** | Single binary — everything via `go:embed`, ~30MB, pure Go, no CGO |
+| **Delivery** | Single API-only binary, ~30MB, pure Go, no CGO. The UI is deployed separately |
 
 ## Docker
 

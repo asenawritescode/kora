@@ -1610,7 +1610,7 @@ These are planned source changes; this documentation pass does not implement or 
 | Studio `src/lib/api/approvals.ts`, `src/routes/workspace/admin/approvals.tsx` | Retain AI grant semantics and explicit label; remove caller-controlled actor fields when server migration allows |
 | Studio `src/lib/api/workflows.ts`, admin/automations route | Use one Automations destination for record-triggered flows and lifecycle policy editing |
 | Studio `src/lib/realtime.ts`, runtime-config/basepath | Authorized invalidation/refetch; tenant switch closes stream and drops prior tenant cache |
-| Engine `ui/src/` corresponding clients/routes | Consume the same generated contracts and shared feature behavior until embedded UI retirement gate |
+| Engine `ui/src/` corresponding clients/routes | Retired 2026-11-09: the embedded UI was removed from the Engine repository; Studio is the only UI consumer |
 | SDK `src/types.ts`, `src/validation.ts`, `src/client.ts`, `src/client.test.ts` | Add generated fixed DTOs, runtime validation, typed methods; retain schema-bound generic record APIs |
 | SDK `package.json` | Correct stale repository metadata, pin generator/artifact revision and release compatibility |
 | all `contract-fixtures/` | Consume identical fixture manifest and digest from Engine contract release |

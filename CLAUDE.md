@@ -17,13 +17,13 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 - All SQL goes through the dialect (`db/`). Changes must pass Integration (MySQL) and Integration (Postgres).
 - Integration CI is temporarily disabled (`if: ${{ false }}` in `.github/workflows/integration.yml`). Until it is re-enabled, verify every DB-touching change locally against disposable `mysql:8.0` and `postgres:16` containers (DSN env vars as in the workflow), running the affected integration tests or `scripts/ci-integration.sh mysql|postgres`. State the result in the PR.
 - Do not trust unit tests with fake tables for SQL changes. They once hid a real table-prefix bug; run against a real database.
-- UI changes: embed screenshots in the PR via the `pr-assets` branch.
+- This repository contains no UI code. UI changes belong in the standalone UI repository (kora-ui, local clone `~/projects/kora-studio-mvp`); embed screenshots in those PRs via its `pr-assets` branch.
 
 **Git and CI**
 - Work in a worktree off a fresh `git fetch`; never edit the main checkout. The user's own clones (`~/projects/kora`, `~/projects/kora-studio-mvp`, etc.) hold uncommitted work: use worktrees only.
 - Push only to the `kora-upstream` remote. In the local clone, `origin` points at a different repo (kora-ui); never push there.
 - Never force-push. Never delete branches you did not create.
-- Never merge on a red or pending Go or UI check. A green Go check is required even when the failure looks unrelated.
+- Never merge on a red or pending Go check, even when the failure looks unrelated.
 - kora-ui merges also require the `contracts` check (lint ratchet: no new `any`, `react-refresh/only-export-components`, set-state-in-effect).
 - Never run the contract sync script with default paths; it writes into the user's real sibling clones. Point `KORA_PROJECTS_ROOT` at a scratch directory. After 3 failed fix rounds, comment the blocker on the ticket, label it `blocked`, close the PR.
 - PR title `<ticket-id>: <title>`, body ≤10 lines with `Closes #N`.
@@ -37,12 +37,12 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 
 ```bash
 make dev                # MySQL + build + setup + serve (one command)
-make build              # Build UI + Go binary
+make build              # Build the Go binary
 make serve              # Start server on :8000
 make restart            # Kill old server + rebuild all + start fresh
 make setup              # Setup a site (SITE=airtime.local CONFIG=config/v0/airtime/)
 make test               # Run Go tests (18 packages)
-make lint               # Run linters (golangci-lint + TypeScript)
+make lint               # Run linters (golangci-lint)
 make fmt                # Format code
 make release TAG=v0.2.0 # Tag and push a release
 make help               # Show all commands
@@ -57,14 +57,12 @@ go run . serve --port 8000                   # Dev run
 go run . migrate --all                       # Apply all pending migrations
 go run . config import --site X --path Y     # Re-import YAML config to DB
 
-# AI & Secrets (also configurable via UI at /workspace/admin/secrets)
+# AI & Secrets (also configurable in Studio: Settings → Secrets)
 ./kora secret set --site X --key deepseek_api_key --value sk-...   # Set AI provider key (CLI)
 ./kora mcp --site X                           # Start MCP server (stdio) for Claude Desktop
 
-# Frontend (React SPA in ui/)
-cd ui && bun install                         # Install deps
-cd ui && bun run build                       # Build SPA → dist/
-cd ui && bun run dev                         # Dev server (proxies /api → :8000)
+# Frontend: not in this repository. Studio (the React UI) lives in kora-ui; see "Repository Layout".
+# To run it against a local Engine: cd ~/projects/kora-studio-mvp && bun install && bun run dev  (proxies /api → :8000)
 
 # Docker
 docker compose up -d mysql                   # MySQL 8.0 (root:kora123)
@@ -84,7 +82,7 @@ Kigae is currently a **DocType-centric config-driven application engine**. The c
 4. Per site: reconstruct config from persisted site registry data + platform defaults → connect → bootstrap `_kora_*` tables → load config from DB → build Registry → run schema migration
 5. Build `SiteRouter` (domain → site map)
 6. Wire middleware: Recovery → RequestID → SecurityHeaders → CORS → SiteRouter → RateLimiter
-7. Register auth routes (public), API routes (/api — SiteGuard), SPA (/workspace — NoRoute), console (/console — SystemGuard)
+7. Register auth routes (public), API routes (/api — SiteGuard), path-based tenant routes (/s/:site/api — NoRoute re-dispatch), console API (/console — SystemGuard). The Engine serves no UI files.
 8. Start scheduler, listen, graceful shutdown on SIGTERM
 
 **Site config is reconstructed from env vars + the durable site registry** — no `site_config.yaml` files. Sites survive container redeploys because metadata persists in `_kora_site_registry`, while tenant config history remains in `_kora_config_version`. Application behavior itself is still DocType/config-pack driven, not a fully generic resource model, and Cloud does not own the tenant business truth stored there.
@@ -94,7 +92,7 @@ Kigae is currently a **DocType-centric config-driven application engine**. The c
 ```
 Request  → Recovery → RequestID → SecurityHeaders → CORS → SiteRouter → RateLimiter
          → API routes: SiteGuard (Auth + CSRF) → Permission check → Validation → ORM
-         → /workspace: NoRoute handler serves SPA directly
+         → /s/:site/api/...: NoRoute handler injects the site and re-dispatches to the API routes
          → /console: SystemGuard (system_credentials.yaml, separate from site auth)
          → /api/auth: public (no guard)
 ```
@@ -103,12 +101,12 @@ Request  → Recovery → RequestID → SecurityHeaders → CORS → SiteRouter 
 
 Three methods coexist:
 - **Host-based**: `Host` header → site (production, needs DNS)
-- **Path-based**: `/s/:site/workspace` → site (dev, no config needed)
+- **Path-based**: `/s/:site/api/...` → site (dev, no config needed; the standalone UI uses this form)
 - **Default**: localhost/IP → first loaded site
 
 The `SiteRouter` middleware sets `site_name`, `site_db`, `site_registry` in Gin context. **All auth is site-scoped** — login, session creation, session validation, and logout all read `site_db` from context. A session from one site doesn't work on another.
 
-The `kora_site` cookie (set by path-based routing at `/s/:site/workspace`) resolves the site for subsequent API calls. Path-based routing skips host validation entirely — the site is identified by the URL path prefix, not the Host header.
+Path-based routing (`net.RegisterPathSiteRoutes`) resolves the site from the `/s/:site` prefix, adds a `kora_site` cookie to the re-dispatched request, and serves nothing but API routes. Path-based routing skips host validation entirely — the site is identified by the URL path prefix, not the Host header.
 
 ### API Envelope
 
@@ -133,37 +131,22 @@ Fields map to DB columns. Key field types: Data, Int, Float, Currency, Select, L
 - `renamed_from: "old_fieldname"` — non-breaking column rename via `ALTER TABLE RENAME COLUMN` during migration
 - `constraints` — field constraints (min, max, regex, one_of, etc.) editable via visual form builder or YAML
 
-### Frontend (`ui/`)
+### Repository Layout
 
-React 19 + TanStack Router/Query/Table/Form + shadcn/ui + Tailwind CSS v4 + Zustand. The UI is route-driven today, with config-driven DocType/admin surfaces and an embedded page-manifest runtime. It is not yet the RFC's standalone manifest-first semantic renderer.
+This repository is the **Engine only**: a single Go binary (API, kernel, workflow, AI/MCP, scheduler, CLI) plus the config packs under `config/`. It no longer contains or embeds any UI, and there is no Bun/Node toolchain here.
 
-Key patterns:
-- `router.tsx`: Auto-detects basepath for multi-site (`/s/:site` prefix). **Admin routes must be registered before `$doctype`** to avoid the catch-all route capturing literal paths. Admin pages are under `ui/src/routes/workspace/admin/`.
-- `lib/basepath.ts`: `sitePath()` helper — all navigation uses this to preserve site prefix
-- `lib/computed-fields.ts`: Expression evaluator for `computed` fields
-- `lib/expression-eval.ts`: Parses `SUM()`, `ROUND()`, arithmetic
-- `components/tables/DataTable.tsx`: Shared table component — desktop table + mobile stacked cards via `hidden md:` / `md:hidden`
-- Forms served via `NoRoute` handler in `workspace/spa.go` (not middleware — Gin's radix tree conflicts)
-- **Mobile**: Tables use stacked card layout. Permissions uses role drill-down accordion. Workflow editor uses collapsible card sections. No horizontal scroll anywhere.
+| Repository | Local clone | What it is |
+|---|---|---|
+| `kora` (this repo) | `~/projects/kora` | Engine: Go module `github.com/asenawritescode/kora`, nested Go module `sdk/`, `config/` packs, `contract/` source of truth for the wire contract |
+| `kora-ui` | `~/projects/kora-studio-mvp` | Studio, the React 19 workspace and admin UI (TanStack Router/Query/Table/Form, Tailwind v4, Zustand, Vite + Bun). Serves itself and proxies `/api` to the Engine |
+| `kora-cloud` | `~/projects/kora-cloud` | Control plane: marketplace, signup, provisioning, customer portal (`web/`) |
+| `kora-mobile-app` | `~/projects/kora-mobile` | Android client (Kotlin, Jetpack Compose), offline-first |
+| `kora-website` | `~/projects/kora-website` | Public marketing site |
+| `kora-ts-extension-sdk` | `~/projects/kora-ts-sdk` | TypeScript SDK and extension tooling |
 
-### Administrator Tab (SPA)
+The Engine's wire contract is generated here (`go run ./cmd/contractgen -write`, output in `contract/generated/` and `contract/schema/`) and copied into the consumer repositories with `scripts/sync-contract-consumers.py`. Fixtures are in `contract-fixtures/` and catalogued in `docs/architecture/contract-fixture-manifest.json`.
 
-The workspace sidebar has an Administrator section with ten views. Some are config-driven today, but the overall runtime still depends on React route/component code:
-
-| Page | Route | Purpose |
-|------|-------|---------|
-| DocTypes | `/workspace/admin/doctypes` | CRUD doctypes via visual form builder + live YAML panel |
-| Permissions | `/workspace/admin/permissions` | Role × DocType permission matrix, inline editing |
-| Automations | `/workspace/admin/automations` | Build record-triggered flows and manage status transitions |
-| Versions | `/workspace/admin/versions` | Config version history with Activate/Discard/Rollback |
-| Scripts | `/workspace/admin/scripts` | JS script editor, test runner, console log viewer |
-| Extensions | `/workspace/admin/extensions` | Webhook endpoints, custom API methods, event hooks |
-| Users | `/workspace/admin/users` | User CRUD, role assignment, enable/disable, password reset |
-| Secrets | `/workspace/admin/secrets` | AI provider keys (OpenAI, DeepSeek, Anthropic) via dropdown UI |
-| Analytics | `/workspace/admin/analytics` | Auto-generated metrics, time-series charts, daily/monthly rollups |
-| API Docs | `/api/swagger-ui` | Auto-generated OpenAPI 3.0 spec with interactive Swagger UI |
-
-The doctype editor uses a split-pane layout: visual form builder on the left, live YAML preview on the right (with syntax highlighting). YAML is editable and can be applied back to the form via `js-yaml` client-side parsing.
+Studio-specific behaviour (routes, admin pages, chat widget, component library) is documented in the kora-ui repository, not here. The Engine-side surfaces Studio calls are the REST API (`/api/v1`), the v2 request/module/offline routes (`/api/v2`), and the OpenAPI document at `/api/swagger-ui`.
 
 ### Config Versioning
 
@@ -194,9 +177,8 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 | `net/` | SiteRouter with host validation, security headers, CORS, rate limiter, TLS (autocert), ULID request IDs |
 | `cli/` | Cobra CLI: serve, setup, migrate, config (import/export/versions/diff/rollback), new-site, mcp, secret |
 | `configstore/` | Read/write config to/from DB (_kora_doctype, _kora_field, etc.) |
-| `workspace/` | SPA serving (go:embed dist/*), NoRoute handler, static file server, console SPA |
 | `scheduler/` | Cron-style background jobs |
-| `secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys (settable via UI at `/workspace/admin/secrets`) |
+| `secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys (settable in Studio: Settings → Secrets) |
 | `storage/` | Pluggable attachment blob storage — local filesystem + S3-compatible (MinIO/AWS/R2/Garage) backends with AWS SigV4 signing, presigned URLs, range reads |
 | `analytics/` | EventBus + Worker + Query Engine — real-time CDC, daily/monthly rollup tables, time-series/funnel/duration queries, auto-generated metrics |
 | `mcp/` | Model Context Protocol server — auto-generates tools from doctype registry for Claude Desktop |
@@ -204,13 +186,12 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 | `script/` | JS script runtime — sandboxed execution engine for extensions |
 | `webhook/` | Webhook dispatcher — outgoing and incoming webhook management |
 | `sdk/` | Go SDK client library for external integrations |
-| `ui/` | React SPA (Vite + TanStack + shadcn) with floating AI Chat Widget, embedded manifest runtime, and route-based rendering today |
 
 ### RFC Alignment Notes
 
 - Kernel and contract surfaces are real and should be treated as the current base layer.
 - Workflow runtime and reconciliation primitives exist, but they are smaller than the RFC target.
-- The current frontend is React-based, with an embedded manifest runtime, not Franken UI-based.
+- The frontend is the standalone React-based Studio (kora-ui), not part of this repository.
 - Docs should distinguish implemented behavior from aspirational RFC sections.
 - New PostgreSQL/MySQL feature-parity work is intentionally excluded from follow-up implementation tickets unless explicitly reintroduced later. This does not waive verification: changes to existing dual-dialect code must still pass on both MySQL and Postgres (see Agent Rules).
 
@@ -237,7 +218,7 @@ The backend is resolved per site from the `file_storage` column in `_kora_site_r
 
 The canonical chat flow is `GET/POST /api/v1/ai/chat`. GET restores the durable transcript for the signed-in user and current page context; POST accepts only the new turn and context. The backend owns conversation history, creates a tracked run for each turn, and records messages, steps, tool execution, usage, and audit evidence. The shared UI API client must be used so path-routed `/s/:site` workspaces send chat to the active tenant.
 
-Run cancellation, resume, and approval records live under `/api/v1/ai/runs` and `/api/v1/ai/approvals`. The old `/api/chat` and `/api/v1/chat` endpoints are retired. Site provider keys are configured at `/workspace/admin/secrets`; shared provider keys can be enabled by the system administrator. `ai.chat` remains experimental while authorization and durable-effect risks are still open.
+Run cancellation, resume, and approval records live under `/api/v1/ai/runs` and `/api/v1/ai/approvals`. The old `/api/chat` and `/api/v1/chat` endpoints are retired. Site provider keys are configured in Studio (Settings → Secrets); shared provider keys can be enabled by the system administrator. `ai.chat` remains experimental while authorization and durable-effect risks are still open.
 
 #### Tool Catalog (`api/ai/tools.go`)
 
@@ -309,9 +290,7 @@ Database errors are parsed via `db.Dialect.ParseError()` — dialect-neutral:
 
 #### Frontend Chat Widget
 
-- `ui/src/components/chat/ChatWidget.tsx` — floating Intercom-style panel (bottom-right)
-- `ui/src/components/chat/useChat.ts` — React hook, restores the context-scoped transcript and sends new turns through `POST /api/v1/ai/chat` using the shared API client
-- Embedded in `RootLayout.tsx` — available on every page
+Implemented in Studio (kora-ui): `src/components/chat/ChatWidget.tsx` (floating panel) and `useChat.ts`, which restores the context-scoped transcript and sends new turns through `POST /api/v1/ai/chat` using the shared API client. The Engine contract is the chat endpoint above.
 
 #### MCP Server (`mcp/server.go`)
 
@@ -327,7 +306,7 @@ JavaScript runtime based on Go's JavaScript engine. Scripts run in a sandboxed e
 
 - **Script types**: Event hooks, custom API methods, scheduled scripts, and computed fields. Automations are defined and run by the Engine v2 workflow system; scripts are not workflow steps.
 - **Sandboxing**: Memory limits, CPU limits, timeout enforcement, no filesystem or network access
-- **Admin UI**: Script editor at `/workspace/admin/scripts` with syntax highlighting, test runner, and console log viewer
+- **Admin UI**: the script editor, test runner and console log viewer are in Studio (Settings → Scripts)
 
 #### Event Hooks
 
@@ -413,7 +392,7 @@ Documents are `map[string]any`. Parent document names are auto-generated: `PREFI
 **MySQL**: Each site = separate database. Complete isolation.  
 **LibSQL**: Every LibSQL site resolves to the shared `DB_DSN` database, and business tables are not tenant-prefixed, so a LibSQL deployment serves exactly one tenant. Activation claims the database in `_kora_database_owner` and refuses any second tenant (`site.ClaimDatabaseOwner`).
 
-System console at `/console` sees all sites (SystemGuard, env var credentials). Workspace at `/workspace` is per-site (SiteGuard, per-site `_kora_user` table). Console auth uses Bearer tokens (`kora_console_token` in localStorage), separate from workspace session auth.
+System console API at `/console` sees all sites (SystemGuard, env var credentials). Workspace API access is per-site (SiteGuard, per-site `_kora_user` table). Console auth uses Bearer tokens, separate from workspace session auth.
 
 ### SQL Dialect (`db/` package)
 
@@ -452,7 +431,6 @@ Key environment variables for extensibility and analytics:
 
 On every PR and push to `main`:
 - **Go**: `golangci-lint run ./...` → `go test ./...` → `go build`
-- **UI**: `bun install` → `tsc --noEmit` → `bun run build`
 
 On tag push (`v*`): builds binaries for linux/darwin (amd64/arm64), categorizes commits into Features/Fixes/Security/Improvements/Docs, creates a GitHub Release with download links and SHA256 checksums.
 
@@ -486,13 +464,13 @@ After push, GitHub Actions:
 ### Branch Rules (set in GitHub Settings → Rules → Rulesets)
 
 - Require PR before merging to `main`
-- Require status checks (`Go`, `UI`) to pass
+- Require status checks (`Go`) to pass
 - Block force pushes
 - Require linear history (rebase/squash, no merge commits)
 
 ### Docker Release (Manual — not in CI yet)
 
-Images are built and pushed manually to Docker Hub. GitHub Actions CI (above) handles Go/UI checks only — Docker publishing is done locally for now.
+Images are built and pushed manually to Docker Hub. GitHub Actions CI (above) handles Go checks only — Docker publishing is done locally for now.
 
 ```bash
 # 1. Build with version injected via ldflags
@@ -520,7 +498,7 @@ docker push smitdockerhub/kora:latest
 
 **Image:** `smitdockerhub/kora` — supports both MySQL and LibSQL, pure Go (no CGO), ~30MB, version injected at build time.
 
-**Dockerfile** (`/Dockerfile`): Multi-stage — Bun for UI, Go for binary (CGO_ENABLED=0, ldflags for version), Alpine runtime. `build-arg VERSION` sets the version string returned by `/api/v1/ping`.
+**Dockerfile** (`/Dockerfile`): Multi-stage — Go build (CGO_ENABLED=0, ldflags for version), then Alpine runtime. The image contains the Engine only; the UI is deployed separately. `build-arg VERSION` sets the version string returned by `/api/v1/ping`.
 
 ## Contributing
 

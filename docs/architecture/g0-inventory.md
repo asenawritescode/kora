@@ -1,5 +1,7 @@
 # G0 source and contract inventory
 
+> **Update 2026-11-09:** the embedded UI described in this inventory has been removed. `ui/`, the `workspace/` package (SPA router, HTMX templates), the `workspace/dist` embed, the root Bun project and the Docker Bun stage no longer exist; the Engine is API-only and Studio is the standalone kora-ui repository. Statements below about those pieces are historical.
+
 This is a source-tree inventory, not a production deployment export. It reflects
 the four working trees inspected on 2026-10-14. The import graph is generated
 separately by `scripts/architecture-import-graph.py` and includes the nested Go
