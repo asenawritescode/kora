@@ -179,7 +179,7 @@ func TestReportQueryRouteDeniesScopedSourceBeforeRollupQuery(t *testing.T) {
 		c.Set("policy_execution", execution)
 		c.Next()
 	})
-	RegisterAnalyticsRoutes(engine.Group("/api"), registry, database, nil, nil, kdb.Resolve("mysql"))
+	RegisterAnalyticsRoutes(engine.Group("/api"), registry, database, kdb.Resolve("mysql"), AnalyticsOptions{})
 	request := httptest.NewRequest(http.MethodPost, "/api/analytics/reports/crm_pipeline_performance/query", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -257,7 +257,7 @@ func TestAnalyticsInsightsRouteChecksSourcePermissionBeforeDatabase(t *testing.T
 		}
 		c.Next()
 	})
-	RegisterAnalyticsRoutes(router.Group("/api"), registry, nil, nil, nil, nil)
+	RegisterAnalyticsRoutes(router.Group("/api"), registry, nil, nil, AnalyticsOptions{})
 	request := func(execution policy.Execution, method, target, body string) int {
 		active = execution
 		recorder := httptest.NewRecorder()
@@ -334,7 +334,7 @@ func TestAnalyticsFilterEndpointsWriteSingleEnvelope(t *testing.T) {
 		c.Set("policy_execution", active)
 		c.Next()
 	})
-	RegisterAnalyticsRoutes(router.Group("/api"), registry, nil, nil, nil, nil)
+	RegisterAnalyticsRoutes(router.Group("/api"), registry, nil, nil, AnalyticsOptions{})
 	executionFor := func(role string) policy.Execution {
 		ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", []string{role}, nil)
 		value, _ := ctx.Get("policy_execution")

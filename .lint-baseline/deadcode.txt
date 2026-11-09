@@ -86,8 +86,6 @@ internal/api/ai/tool_contract.go::ToContractDescriptor
 internal/api/ai/tools.go::ExecuteConfirmedToolWithIdempotencyKey
 internal/api/ai/tools.go::executeToolCallsForAI
 internal/api/ai/tools.go::executeUpdateToolWithKey
-internal/api/analytics.go::RegisterAnalyticsRoutes
-internal/api/analytics.go::RegisterAnalyticsRoutesWithRuntimeServices
 internal/api/console.go::ConsoleHandler.HandleCreateSite
 internal/api/console.go::ConsoleHandler.HandleOnboard
 internal/api/console.go::ConsoleHandler.HandleOnboardJobs

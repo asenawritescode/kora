@@ -831,40 +831,83 @@ func RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, r
 	apiGroup.POST("/webhooks/payments/:provider/:token", handler.HandlePaymentCallback)
 }
 
-// RegisterRoutesOnGroupWithRuntimeServices is the compatibility registration
-// form of RegisterRoutesOnGroupWithAnalytics. Engine production composition
-// uses tenant middleware's pinned service snapshot and the explicit cache
-// owner below; external callers may continue to pass this fallback registry.
-func RegisterRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]eventstream.Bus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry, runtimeServices *SiteRuntimeServices) {
-	RegisterRoutesOnGroupWithAnalyticsCache(apiGroup, registry, txManager, siteBuses, realtimeProviders, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookSink, siteOutboxes, siteStorages, kernelCommands, runtimeServices, nil)
+// RouteOptions carries the optional dependencies of RegisterRoutesOnGroup. The
+// zero value registers the routes with no per-site registries, no script
+// runner and the process-default analytics cache.
+type RouteOptions struct {
+	// Per-site registries, keyed by site name.
+
+	// EventBuses maps a site to its analytics and realtime event bus.
+	EventBuses map[string]eventstream.Bus
+	// RealtimeProviders maps a site to its realtime provider.
+	RealtimeProviders map[string]*natsprovider.Provider
+	// ScriptStores maps a site to its script store.
+	ScriptStores map[string]*script.Store
+	// SecretStores maps a site to its encrypted secret store.
+	SecretStores map[string]*secret.Store
+	// WebhookWorkers maps a site to its outgoing webhook worker.
+	WebhookWorkers map[string]*webhook.Worker
+	// Outboxes maps a site to its transactional outbox writer.
+	Outboxes map[string]outbox.Writer
+	// Storages maps a site to its attachment storage backend.
+	Storages map[string]storage.Backend
+
+	// Shared services.
+
+	// ScriptRunner executes extension scripts; nil disables script hooks.
+	ScriptRunner script.Runner
+	// HTTPAllowlist lists the domains scripts may call.
+	HTTPAllowlist []string
+	// AsyncHookSink receives hooks that run after the request completes.
+	AsyncHookSink orm.AsyncHookSink
+	// KernelCommands is the config-defined kernel command registry.
+	KernelCommands *kernel.CommandRegistry
+
+	// Owners of process-level state.
+
+	// RuntimeServices is the pinned per-site service snapshot used for work
+	// admission. Engine composition leaves it nil and relies on tenant
+	// middleware.
+	RuntimeServices *SiteRuntimeServices
+	// AnalyticsCache is the process-owned analytics query cache; nil selects
+	// the process default.
+	AnalyticsCache *AnalyticsQueryCache
+	// RealtimeConnections owns hijacked WebSocket connections so the Engine can
+	// close them before retiring tenant runtime generations.
+	RealtimeConnections *RealtimeConnectionOwner
 }
 
-// RegisterRoutesOnGroupWithAnalyticsCache is the Engine composition form that
-// supplies process-level analytics cache ownership separately from tenant
-// runtime services.
-func RegisterRoutesOnGroupWithAnalyticsCache(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]eventstream.Bus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry, runtimeServices *SiteRuntimeServices, analyticsCache *AnalyticsQueryCache) {
-	RegisterRoutesOnGroupWithRealtimeOwner(apiGroup, registry, txManager, siteBuses, realtimeProviders, scriptRunner, siteScriptStores, siteSecretStores, httpAllowlist, siteWebhookWorkers, asyncHookSink, siteOutboxes, siteStorages, kernelCommands, runtimeServices, analyticsCache, nil)
+// analyticsOptions derives the analytics registration options. An unset
+// AnalyticsCache selects the process default, not the cache owned by
+// RuntimeServices.
+func (o RouteOptions) analyticsOptions() AnalyticsOptions {
+	cache := o.AnalyticsCache
+	if cache == nil {
+		cache = DefaultAnalyticsQueryCache()
+	}
+	return AnalyticsOptions{EventBuses: o.EventBuses, RuntimeServices: o.RuntimeServices, Cache: cache}
 }
 
-// RegisterRoutesOnGroupWithRealtimeOwner installs the production routes with
-// an explicit owner for hijacked WebSocket connections. The Engine closes
-// these before retiring tenant runtime generations.
-func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, siteBuses map[string]eventstream.Bus, realtimeProviders map[string]*natsprovider.Provider, scriptRunner script.Runner, siteScriptStores map[string]*script.Store, siteSecretStores map[string]*secret.Store, httpAllowlist []string, siteWebhookWorkers map[string]*webhook.Worker, asyncHookSink orm.AsyncHookSink, siteOutboxes map[string]outbox.Writer, siteStorages map[string]storage.Backend, kernelCommands *kernel.CommandRegistry, runtimeServices *SiteRuntimeServices, analyticsCache *AnalyticsQueryCache, realtimeConnections *RealtimeConnectionOwner) {
+// RegisterRoutesOnGroup installs the production API routes on apiGroup. The
+// Engine composes it with tenant middleware's pinned service snapshot and an
+// explicit cache owner; registry is the fallback used when a request carries
+// no site registry.
+func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, opts RouteOptions) {
 	handler := NewHandler(registry, txManager)
-	handler.RealtimeConnections = realtimeConnections
-	apiGroup.Use(WorkAdmissionMiddleware(runtimeServices))
-	handler.RuntimeServices = runtimeServices
-	handler.SiteEventBuses = siteBuses
-	handler.SiteRealtimeProviders = realtimeProviders
-	handler.ScriptRunner = scriptRunner
-	handler.SiteScriptStores = siteScriptStores
-	handler.SiteSecretStores = siteSecretStores
-	handler.ScriptHTTPAllowlist = httpAllowlist
-	handler.SiteWebhookWorkers = siteWebhookWorkers
-	handler.AsyncHookSink = asyncHookSink
-	handler.SiteOutboxes = siteOutboxes
-	handler.SiteStorages = siteStorages
-	handler.KernelCommands = kernelCommands
+	handler.RealtimeConnections = opts.RealtimeConnections
+	apiGroup.Use(WorkAdmissionMiddleware(opts.RuntimeServices))
+	handler.RuntimeServices = opts.RuntimeServices
+	handler.SiteEventBuses = opts.EventBuses
+	handler.SiteRealtimeProviders = opts.RealtimeProviders
+	handler.ScriptRunner = opts.ScriptRunner
+	handler.SiteScriptStores = opts.ScriptStores
+	handler.SiteSecretStores = opts.SecretStores
+	handler.ScriptHTTPAllowlist = opts.HTTPAllowlist
+	handler.SiteWebhookWorkers = opts.WebhookWorkers
+	handler.AsyncHookSink = opts.AsyncHookSink
+	handler.SiteOutboxes = opts.Outboxes
+	handler.SiteStorages = opts.Storages
+	handler.KernelCommands = opts.KernelCommands
 
 	// File attachments: upload + authenticated serving (Range-aware for audio/video).
 	apiGroup.POST("/upload", handler.HandleUpload)
@@ -966,7 +1009,7 @@ func RegisterRoutesOnGroupWithRealtimeOwner(apiGroup *gin.RouterGroup, registry 
 	}
 
 	// Analytics endpoints (no-op if siteBuses is empty).
-	RegisterAnalyticsRoutesWithQueryCache(apiGroup, registry, txManager.DB, siteBuses, realtimeProviders, txManager.Dialect, runtimeServices, analyticsCache)
+	RegisterAnalyticsRoutes(apiGroup, registry, txManager.DB, txManager.Dialect, opts.analyticsOptions())
 }
 
 // registerManagementRoutes mounts administrator-only page manifest, agent,

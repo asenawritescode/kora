@@ -461,7 +461,7 @@ func TestLivePostgresAnalyticsMetadataQueries(t *testing.T) {
 		c.Set("policy_execution", postgresTestExecution(t, "site-pg", "admin@example.test", []string{doctype.AdminRole}))
 		c.Next()
 	})
-	RegisterAnalyticsRoutes(analyticsRouter.Group("/api"), registry, database, nil, nil, kdb.Resolve("postgres"))
+	RegisterAnalyticsRoutes(analyticsRouter.Group("/api"), registry, database, kdb.Resolve("postgres"), AnalyticsOptions{})
 	createMetric := httptest.NewRecorder()
 	createMetricRequest := httptest.NewRequest(http.MethodPost, "/api/analytics/metrics", strings.NewReader(`{"name":"units_sold","label":"Units Sold","type":"sum","doctype":"Sale","field":"quantity"}`))
 	createMetricRequest.Header.Set("Content-Type", "application/json")

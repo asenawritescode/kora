@@ -106,8 +106,8 @@ func RegisterApplicationRoutes(config ApplicationRouteConfig) (*auth.SessionMana
 	publicLegacyGroup := config.Router.Group("/api")
 	publicLegacyGroup.Use(knet.CompressMiddleware())
 
-	api.RegisterRoutesOnGroupWithRealtimeOwner(apiGroup, config.Registry, config.Transactions, nil, nil, config.ScriptRunner, nil, nil, config.HTTPAllowlist, nil, config.AsyncHookSink, nil, nil, config.KernelCommands, nil, config.AnalyticsCache, config.RealtimeConnections)
-	api.RegisterRoutesOnGroupWithRealtimeOwner(legacyAPIGroup, config.Registry, config.Transactions, nil, nil, config.ScriptRunner, nil, nil, config.HTTPAllowlist, nil, config.AsyncHookSink, nil, nil, config.KernelCommands, nil, config.AnalyticsCache, config.RealtimeConnections)
+	api.RegisterRoutesOnGroup(apiGroup, config.Registry, config.Transactions, apiRouteOptions(config))
+	api.RegisterRoutesOnGroup(legacyAPIGroup, config.Registry, config.Transactions, apiRouteOptions(config))
 	api.RegisterRequestRoutes(requestGroup, nil)
 	api.RegisterWorkflowRoutes(requestGroup, nil)
 	catalogHandler := api.NewHandler(config.Registry, config.Transactions)
@@ -143,4 +143,16 @@ func RegisterConsoleRoutes(router *gin.Engine, handler *api.ConsoleHandler) erro
 	router.PUT("/api/console/sites/:name", handler.RequireConsoleAuth, handler.RequirePlatformWork, handler.HandleUpdateSite)
 	router.DELETE("/api/console/sites/:name", handler.RequireConsoleAuth, handler.RequirePlatformWork, handler.HandleDeleteSite)
 	return nil
+}
+
+// apiRouteOptions maps the Engine composition config to the API route options.
+func apiRouteOptions(config ApplicationRouteConfig) api.RouteOptions {
+	return api.RouteOptions{
+		ScriptRunner:        config.ScriptRunner,
+		HTTPAllowlist:       config.HTTPAllowlist,
+		AsyncHookSink:       config.AsyncHookSink,
+		KernelCommands:      config.KernelCommands,
+		AnalyticsCache:      config.AnalyticsCache,
+		RealtimeConnections: config.RealtimeConnections,
+	}
 }

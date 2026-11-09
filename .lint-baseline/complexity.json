@@ -695,15 +695,15 @@
    "cognitive": 41,
    "cyclomatic": 22
   },
-  "internal/api::RegisterAnalyticsRoutesWithQueryCache": {
-   "cognitive": 153,
-   "cyclomatic": 82,
-   "lines": 386
+  "internal/api::RegisterAnalyticsRoutes": {
+   "cognitive": 151,
+   "cyclomatic": 80,
+   "lines": 385
   },
   "internal/api::RegisterOperations": {
    "statements": 78
   },
-  "internal/api::RegisterRoutesOnGroupWithRealtimeOwner": {
+  "internal/api::RegisterRoutesOnGroup": {
    "statements": 79
   },
   "internal/api::RegisterSystemRoutes": {

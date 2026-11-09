@@ -93,7 +93,7 @@ func render() ([]byte, error) {
 	auth.RegisterAuthRoutes(router, nil, nil, nil)
 	tx := &orm.TxManager{}
 	for _, prefix := range []string{"/api/v1", "/api"} {
-		api.RegisterRoutesOnGroupWithRuntimeServices(router.Group(prefix), nil, tx, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		api.RegisterRoutesOnGroup(router.Group(prefix), nil, tx, api.RouteOptions{})
 		api.RegisterPublicRoutesOnGroupWithRuntimeServices(router.Group(prefix), nil, tx, nil, nil)
 	}
 	api.RegisterRequestRoutes(router.Group("/api/v2"), nil)

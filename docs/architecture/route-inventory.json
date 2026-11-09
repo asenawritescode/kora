@@ -6,62 +6,62 @@
     {
       "method": "GET",
       "path": "/api/analytics/catalog",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func1"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func1"
     },
     {
       "method": "GET",
       "path": "/api/analytics/insights/:doctype",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func12"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func12"
     },
     {
       "method": "GET",
       "path": "/api/analytics/metrics",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func9"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func9"
     },
     {
       "method": "POST",
       "path": "/api/analytics/metrics",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func8"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func8"
     },
     {
       "method": "GET",
       "path": "/api/analytics/metrics/:name",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func10"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func10"
     },
     {
       "method": "POST",
       "path": "/api/analytics/metrics/:name/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func11"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func11"
     },
     {
       "method": "POST",
       "path": "/api/analytics/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func4"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func4"
     },
     {
       "method": "POST",
       "path": "/api/analytics/rebuild",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func6"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func6"
     },
     {
       "method": "GET",
       "path": "/api/analytics/rebuild/:id",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func7"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func7"
     },
     {
       "method": "GET",
       "path": "/api/analytics/reports",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func2"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func2"
     },
     {
       "method": "POST",
       "path": "/api/analytics/reports/:name/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func3"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func3"
     },
     {
       "method": "GET",
       "path": "/api/analytics/status",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func5"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func5"
     },
     {
       "method": "POST",
@@ -221,17 +221,17 @@
     {
       "method": "GET",
       "path": "/api/print-formats",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintListHandler.func3"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroup.NewPrintListHandler.func3"
     },
     {
       "method": "GET",
       "path": "/api/print-formats/:format_name",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintMetaHandler.func4"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroup.NewPrintMetaHandler.func4"
     },
     {
       "method": "GET",
       "path": "/api/print/:format_name",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintHandler.func2"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroup.NewPrintHandler.func2"
     },
     {
       "method": "GET",
@@ -721,62 +721,62 @@
     {
       "method": "GET",
       "path": "/api/v1/analytics/catalog",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func1"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func1"
     },
     {
       "method": "GET",
       "path": "/api/v1/analytics/insights/:doctype",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func12"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func12"
     },
     {
       "method": "GET",
       "path": "/api/v1/analytics/metrics",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func9"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func9"
     },
     {
       "method": "POST",
       "path": "/api/v1/analytics/metrics",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func8"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func8"
     },
     {
       "method": "GET",
       "path": "/api/v1/analytics/metrics/:name",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func10"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func10"
     },
     {
       "method": "POST",
       "path": "/api/v1/analytics/metrics/:name/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func11"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func11"
     },
     {
       "method": "POST",
       "path": "/api/v1/analytics/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func4"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func4"
     },
     {
       "method": "POST",
       "path": "/api/v1/analytics/rebuild",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func6"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func6"
     },
     {
       "method": "GET",
       "path": "/api/v1/analytics/rebuild/:id",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func7"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func7"
     },
     {
       "method": "GET",
       "path": "/api/v1/analytics/reports",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func2"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func2"
     },
     {
       "method": "POST",
       "path": "/api/v1/analytics/reports/:name/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func3"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func3"
     },
     {
       "method": "GET",
       "path": "/api/v1/analytics/status",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutesWithQueryCache.func5"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func5"
     },
     {
       "method": "GET",
@@ -926,17 +926,17 @@
     {
       "method": "GET",
       "path": "/api/v1/print-formats",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintListHandler.func3"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroup.NewPrintListHandler.func3"
     },
     {
       "method": "GET",
       "path": "/api/v1/print-formats/:format_name",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintMetaHandler.func4"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroup.NewPrintMetaHandler.func4"
     },
     {
       "method": "GET",
       "path": "/api/v1/print/:format_name",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroupWithRealtimeOwner.NewPrintHandler.func2"
+      "handler": "github.com/asenawritescode/kora/internal/api.RegisterRoutesOnGroup.NewPrintHandler.func2"
     },
     {
       "method": "GET",
