@@ -77,11 +77,11 @@ func TestAIRecordMutationAdapterUsesKernelAcrossDialects(t *testing.T) {
 			execution := testAIExecution(t, site, "alice@example.test", []string{doctype.AdminRole})
 			tx.Execution = execution
 
-			first, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "AI adapter"}, "alice@example.test", []string{doctype.AdminRole}, "ai-cross-dialect-"+suffix, false, execution)
+			first, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "AI adapter"}, []string{doctype.AdminRole}, "ai-cross-dialect-"+suffix, false, execution)
 			if err != nil {
 				t.Fatalf("AI create on %s: %v", tc.name, err)
 			}
-			replay, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "AI adapter"}, "alice@example.test", []string{doctype.AdminRole}, "ai-cross-dialect-"+suffix, false, execution)
+			replay, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "AI adapter"}, []string{doctype.AdminRole}, "ai-cross-dialect-"+suffix, false, execution)
 			if err != nil {
 				t.Fatalf("AI create replay on %s: %v", tc.name, err)
 			}

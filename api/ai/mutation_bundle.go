@@ -227,7 +227,7 @@ func positiveBundleRevision(value any) (uint64, bool) {
 	}
 }
 
-func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, args map[string]any, owner, site, runID, stepID, idempotencyKey string, execution policy.Execution) string {
+func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, args map[string]any, site, runID, stepID, idempotencyKey string, execution policy.Execution) string {
 	if tx == nil || tx.DB == nil || !execution.Valid() {
 		return "Permission denied: verified execution and tenant database are required"
 	}

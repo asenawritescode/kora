@@ -14,6 +14,8 @@ import (
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/policy"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // analyticsToolDef returns the function definition for get_analytics_insights.
@@ -615,5 +617,5 @@ func formatAnalyticsLabel(metric, doctype string) string {
 	prefix := strings.ToLower(strings.ReplaceAll(doctype, " ", "_")) + "_"
 	name := strings.TrimPrefix(metric, prefix)
 	name = strings.ReplaceAll(name, "_", " ")
-	return strings.Title(name)
+	return cases.Title(language.English, cases.NoLower).String(name)
 }

@@ -11,6 +11,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var experienceHexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
@@ -168,7 +170,7 @@ func experienceSiteLabel(siteName string) string {
 	if part == "" {
 		return "Workspace"
 	}
-	return strings.Title(part) + " Workspace"
+	return titleWord(part) + " Workspace"
 }
 
 func experienceShortName(siteName string) string {
@@ -180,5 +182,11 @@ func experienceShortName(siteName string) string {
 	if part == "" {
 		return "Workspace"
 	}
-	return strings.Title(part)
+	return titleWord(part)
+}
+
+// titleWord upper-cases the first letter of each word and leaves the rest as written, matching the
+// behaviour of the deprecated strings.Title. A Caser is stateful, so each call builds its own.
+func titleWord(s string) string {
+	return cases.Title(language.English, cases.NoLower).String(s)
 }

@@ -235,7 +235,9 @@ func (p *scriptProvider) authorizeRead(dt *doctype.DocType) (policy.RowScope, er
 }
 
 // SaveDoc updates an existing document.
-func (p *scriptProvider) SaveDoc(doctypeName string, doc map[string]any, modifiedBy string) error {
+// The modifiedBy argument is required by script.KoraProvider but ignored: the acting user is the
+// verified execution identity.
+func (p *scriptProvider) SaveDoc(doctypeName string, doc map[string]any, _ string) error {
 	dt := p.registry.Get(doctypeName)
 	if dt == nil {
 		return fmt.Errorf("doctype %q not found", doctypeName)
@@ -249,12 +251,14 @@ func (p *scriptProvider) SaveDoc(doctypeName string, doc map[string]any, modifie
 	if err != nil {
 		return err
 	}
-	_, err = p.executeRecordMutation(kernel.CommandRecordUpdate, dt.Name, name, data, modifiedBy, "")
+	_, err = p.executeRecordMutation(kernel.CommandRecordUpdate, dt.Name, name, data)
 	return err
 }
 
 // CreateDoc creates a new document.
-func (p *scriptProvider) CreateDoc(doctypeName string, doc map[string]any, owner, modifiedBy string) (map[string]any, error) {
+// The owner and modifiedBy arguments are required by script.KoraProvider but ignored: a created
+// document is owned by, and attributed to, the verified execution identity.
+func (p *scriptProvider) CreateDoc(doctypeName string, doc map[string]any, _, _ string) (map[string]any, error) {
 	dt := p.registry.Get(doctypeName)
 	if dt == nil {
 		return nil, fmt.Errorf("doctype %q not found", doctypeName)
@@ -264,7 +268,7 @@ func (p *scriptProvider) CreateDoc(doctypeName string, doc map[string]any, owner
 	if err != nil {
 		return nil, err
 	}
-	result, err := p.executeRecordMutation(kernel.CommandRecordCreate, dt.Name, "", data, modifiedBy, owner)
+	result, err := p.executeRecordMutation(kernel.CommandRecordCreate, dt.Name, "", data)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +289,7 @@ func (p *scriptProvider) DeleteDoc(doctypeName, name string) error {
 	if dt == nil {
 		return fmt.Errorf("doctype %q not found", doctypeName)
 	}
-	_, err := p.executeRecordMutation(kernel.CommandRecordDelete, dt.Name, name, nil, p.tx.CurrentUser, "")
+	_, err := p.executeRecordMutation(kernel.CommandRecordDelete, dt.Name, name, nil)
 	return err
 }
 
@@ -322,7 +326,11 @@ func (p *scriptProvider) Close() {
 	}
 }
 
-func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string, fields json.RawMessage, actorUser, owner string) (map[string]any, error) {
+// executeRecordMutation runs one record command through the kernel as the verified execution
+// identity. Acting user and document owner are never caller input: the user is the verified
+// actor and a created document is owned by that user, so internal callers cannot assign another
+// principal.
+func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string, fields json.RawMessage) (map[string]any, error) {
 	if p.tx == nil || p.tx.DB == nil || p.registry == nil {
 		return nil, fmt.Errorf("script provider is not bound to a site database")
 	}
@@ -335,9 +343,9 @@ func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string
 		return nil, contract.NewError(contract.CodePermissionDenied, "script provider tenant does not match verified execution")
 	}
 	roles := verifiedActor.Roles
-	actorUser = verifiedActor.SubjectUserID
-	if actorUser == "" {
-		actorUser = verifiedActor.PrincipalID
+	user := verifiedActor.SubjectUserID
+	if user == "" {
+		user = verifiedActor.PrincipalID
 	}
 	userRole := ""
 	if len(roles) > 0 {
@@ -354,11 +362,7 @@ func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string
 	}
 
 	actor := verifiedActor
-	user := actorUser
-	// Document ownership is execution identity, never an adapter argument.
-	// The script API currently passes the verified invocation user here for
-	// compatibility, but internal callers cannot assign another principal by
-	// choosing CreateDoc's owner parameter.
+	owner := ""
 	if command == kernel.CommandRecordCreate {
 		owner = user
 	}

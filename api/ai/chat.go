@@ -612,7 +612,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if verified, ok := c.Get("policy_execution"); ok {
 				execution, _ = verified.(policy.Execution)
 			}
-			toolResults := executeToolCallsForAIWithExecution(auditCtx, tx, reg, toolCalls, currentUser, siteName, runID, stepID, conversationID, nil, execution)
+			toolResults := executeToolCallsForAIWithExecution(auditCtx, tx, reg, toolCalls, currentUser, siteName, runID, stepID, conversationID, execution)
 			for i, tr := range toolResults {
 				raw := tr["content"].(string)
 				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])

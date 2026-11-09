@@ -230,7 +230,7 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 				}
 				if createdAt, ok := c.Get("session_created_at"); ok {
 					if ts, ok := createdAt.(time.Time); ok && !ts.IsZero() {
-						tm.Context = context.WithValue(tm.Context, "session_created_at", ts)
+						tm.Context = auth.ContextWithSessionCreatedAt(tm.Context, ts)
 					}
 				}
 				if siteNameStr, ok := siteName.(string); ok {
@@ -1645,8 +1645,7 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: map[string]string{"code": "auth.unauthenticated", "message": "Verified script execution identity required"}})
 		return
 	}
-	var ss *secret.Store
-	ss = h.runtimeService(c, siteNameStr).SecretStore
+	ss := h.runtimeService(c, siteNameStr).SecretStore
 	provider := NewScriptProvider(tx, h.siteRegistry(c), siteNameStr, ss, h.ScriptHTTPAllowlist)
 
 	execReq := script.ExecuteRequest{
