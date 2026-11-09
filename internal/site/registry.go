@@ -32,14 +32,10 @@ type DBSiteInfo struct {
 }
 
 func ensurePlatformSiteRegistration(platformDB *sql.DB, platformDBType string, cfg *Config) error {
-	return ensurePlatformSiteRegistrationStatus(platformDB, platformDBType, cfg, "active")
+	return ensurePlatformSiteRegistrationStatus(context.Background(), platformDB, platformDBType, cfg, "active")
 }
 
-func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType string, cfg *Config, status string, requestedIDs ...string) error {
-	return ensurePlatformSiteRegistrationStatusContext(context.Background(), platformDB, platformDBType, cfg, status, requestedIDs...)
-}
-
-func ensurePlatformSiteRegistrationStatusContext(ctx context.Context, platformDB *sql.DB, platformDBType string, cfg *Config, status string, requestedIDs ...string) error {
+func ensurePlatformSiteRegistrationStatus(ctx context.Context, platformDB *sql.DB, platformDBType string, cfg *Config, status string, requestedIDs ...string) error {
 	return ensurePlatformSiteRegistrationAssignmentContext(ctx, platformDB, platformDBType, cfg, status, "", requestedIDs...)
 }
 
@@ -363,7 +359,7 @@ func removePlatformSiteRegistration(platformDB *sql.DB, platformDBType, hostname
 	if platformDB == nil || hostname == "" {
 		return nil
 	}
-	siteID, lookupErr := registeredSiteID(platformDB, platformDBType, hostname)
+	siteID, lookupErr := registeredSiteID(context.Background(), platformDB, platformDBType, hostname)
 	if lookupErr != nil && lookupErr != sql.ErrNoRows {
 		return fmt.Errorf("read canonical id before removing site: %w", lookupErr)
 	}
@@ -436,26 +432,18 @@ func removePlatformSiteRegistrationByID(platformDB *sql.DB, platformDBType, site
 }
 
 func discoverSitesFromRegistryContext(ctx context.Context, db *sql.DB) ([]DBSiteInfo, error) {
-	return discoverRegistrySitesContext(ctx, db, true)
+	return discoverRegistrySites(ctx, db, true)
 }
 
 func discoverAllSitesFromRegistry(db *sql.DB) ([]DBSiteInfo, error) {
-	return discoverRegistrySites(db, false)
+	return discoverRegistrySites(context.Background(), db, false)
 }
 
-func discoverRegistrySites(db *sql.DB, activeOnly bool) ([]DBSiteInfo, error) {
-	return discoverRegistrySitesContext(context.Background(), db, activeOnly)
+func discoverRegistrySites(ctx context.Context, db *sql.DB, activeOnly bool) ([]DBSiteInfo, error) {
+	return discoverRegistrySitesForCell(ctx, db, activeOnly, "", "")
 }
 
-func discoverRegistrySitesForCell(db *sql.DB, activeOnly bool, cellID, dialect string) ([]DBSiteInfo, error) {
-	return discoverRegistrySitesForCellContext(context.Background(), db, activeOnly, cellID, dialect)
-}
-
-func discoverRegistrySitesContext(ctx context.Context, db *sql.DB, activeOnly bool) ([]DBSiteInfo, error) {
-	return discoverRegistrySitesForCellContext(ctx, db, activeOnly, "", "")
-}
-
-func discoverRegistrySitesForCellContext(ctx context.Context, db *sql.DB, activeOnly bool, cellID, dialect string) ([]DBSiteInfo, error) {
+func discoverRegistrySitesForCell(ctx context.Context, db *sql.DB, activeOnly bool, cellID, dialect string) ([]DBSiteInfo, error) {
 	if ctx == nil || db == nil {
 		return nil, fmt.Errorf("discover site registry requires context and database")
 	}

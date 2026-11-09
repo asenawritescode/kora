@@ -138,7 +138,7 @@ func TestGridHTTPRecordCreateStartsWorkflowAndDeliversEmail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapSystemTablesContext(ctx, database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(ctx, database, dialect); err != nil {
 		t.Fatal("bootstrap Engine system tables:", err)
 	}
 	for _, statement := range append(append([]string{}, db.OutboxTablesMySQL()...), db.KernelTablesMySQL()...) {

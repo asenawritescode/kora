@@ -138,7 +138,7 @@ func retryOneSiteDeletionWithAllocation(registry *SQLSiteRegistry, siteID string
 	}
 	var tenantDB *sql.DB
 	if strings.EqualFold(cfg.DBType, "libsql") {
-		tenantDB, err = Connect(cfg)
+		tenantDB, err = Connect(context.Background(), cfg)
 		if err != nil {
 			return fmt.Errorf("connect to tenant for cleanup: %w", err)
 		}

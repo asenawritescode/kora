@@ -3,6 +3,7 @@
 package site
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -75,7 +76,7 @@ func TestMySQLTodoPackInstallsWithoutLegacyWorkflowConfig(t *testing.T) {
 			t.Fatal("ping disposable tenant schema:", err)
 		}
 		dialect := db.Resolve("mysql")
-		if err := BootstrapSystemTables(tenantDB, dialect); err != nil {
+		if err := BootstrapSystemTables(context.Background(), tenantDB, dialect); err != nil {
 			t.Fatal("bootstrap Engine system tables:", err)
 		}
 		if err := ImportConfigFromPack(tenantDB, doctype.NewRegistry(), databaseName, name+".example.test", "todo", files, dialect); err != nil {

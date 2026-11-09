@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"testing"
@@ -119,7 +120,7 @@ func TestBackfillRollsBackDeletesAndEarlierMetricsOnWriteFailure(t *testing.T) {
 
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Task", IsSubmittable: true})
-	count, err := Backfill(database, db.Resolve("mysql"), "tenant", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "")
+	count, err := Backfill(context.Background(), database, db.Resolve("mysql"), "tenant", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "")
 	if err == nil {
 		t.Fatal("expected rebuild write failure")
 	}

@@ -97,7 +97,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 			if _, err := database.Exec(`INSERT INTO _kora_system_bootstrap (id, version) VALUES (1, 21)`); err != nil {
 				t.Fatal("seed prior bootstrap version:", err)
 			}
-			if err := site.BootstrapSystemTablesContext(ctx, database, dialect); err != nil {
+			if err := site.BootstrapSystemTables(ctx, database, dialect); err != nil {
 				t.Fatal("bootstrap isolated tenant database:", err)
 			}
 			initialRevision, err := configstore.CurrentConfigRevision(ctx, database, dialect)

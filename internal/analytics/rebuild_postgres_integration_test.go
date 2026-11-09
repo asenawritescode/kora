@@ -66,7 +66,7 @@ func TestPostgresRebuildCutoffSerializesWithFlush(t *testing.T) {
 	database.SetMaxOpenConns(4)
 	t.Cleanup(func() { _ = database.Close() })
 	dialect := db.Resolve("postgres")
-	if err := BootstrapTables(database, dialect); err != nil {
+	if err = BootstrapTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap analytics schema:", err)
 	}
 	projectionDefinition := contract.ProjectionDefinition{ID: "task_snapshot", OwnerModuleID: "analytics.task", ScopePolicy: contract.ScopeTenantShared, FactKey: "id", AllowedFields: []string{"id"}, Sources: []contract.ProjectionSource{{OwnerModuleID: "task.domain", QueryName: "tasks", OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}}}, OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}, RebuildStrategy: "consistent_snapshot"}
@@ -94,7 +94,7 @@ func TestPostgresRebuildCutoffSerializesWithFlush(t *testing.T) {
 		}
 	}
 	registry := testRegistry(buildTestDocType("Customer", false, field("name", "Data", "Name", true)))
-	if _, err := Backfill(database, dialect, "tenant-a", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ""); err != nil {
+	if _, err = Backfill(context.Background(), database, dialect, "tenant-a", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ""); err != nil {
 		t.Fatal("rebuild PostgreSQL analytics snapshot:", err)
 	}
 	worker := NewWorker(newFakeBus(), database, dialect, registry, "tenant-a", LoadConfig())
@@ -185,7 +185,7 @@ func TestPostgresRebuildCutoffSerializesWithFlush(t *testing.T) {
 	if err := database.QueryRow(`SELECT value FROM _kora_analytics_monthly WHERE site = $1 AND doctype = $2 AND metric = $3 AND dimension = '' AND month = $4`, "tenant-a", "Customer", "customer_count", "2026-10-01").Scan(&monthlyBefore); err != nil {
 		t.Fatal("read PostgreSQL monthly rollup before failed rebuild:", err)
 	}
-	if _, err := Backfill(database, dialect, "tenant-a", brokenRegistry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ""); err == nil {
+	if _, err := Backfill(context.Background(), database, dialect, "tenant-a", brokenRegistry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ""); err == nil {
 		t.Fatal("expected PostgreSQL rebuild failure for missing source column")
 	}
 	if err := database.QueryRow(`SELECT value FROM _kora_analytics_daily WHERE site = $1 AND doctype = $2 AND metric = $3 AND dimension = '' AND date = $4`, "tenant-a", "Customer", "customer_count", "2026-10-14").Scan(&rollup); err != nil {

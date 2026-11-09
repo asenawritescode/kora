@@ -46,7 +46,7 @@ func TestAIRecordMutationAdapterUsesKernelAcrossDialects(t *testing.T) {
 				t.Fatalf("ping %s database: %v", tc.name, err)
 			}
 			dialect := kdb.Resolve(tc.name)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err = ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap %s system tables: %v", tc.name, err)
 			}
 

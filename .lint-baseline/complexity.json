@@ -147,10 +147,6 @@
   "contract::validateLocalSchemaReferences": {
    "cognitive": 31
   },
-  "internal/analytics::(*SemanticRequest).Validate": {
-   "cognitive": 67,
-   "cyclomatic": 43
-  },
   "internal/analytics::(*CloudRelay).Start": {
    "cognitive": 20
   },
@@ -196,6 +192,10 @@
    "cognitive": 80,
    "cyclomatic": 58
   },
+  "internal/analytics::(*SemanticRequest).Validate": {
+   "cognitive": 67,
+   "cyclomatic": 43
+  },
   "internal/analytics::(*Worker).flush": {
    "cognitive": 51,
    "cyclomatic": 45
@@ -230,12 +230,12 @@
   "internal/analytics::AcknowledgeWAL": {
    "statements": 65
   },
-  "internal/analytics::BackfillContext": {
+  "internal/analytics::Backfill": {
    "cognitive": 59,
    "cyclomatic": 39,
    "statements": 78
   },
-  "internal/analytics::BootstrapTablesContext": {
+  "internal/analytics::BootstrapTables": {
    "cognitive": 21,
    "cyclomatic": 17
   },
@@ -1452,8 +1452,8 @@
    "cyclomatic": 26
   },
   "internal/engine::(*DurableWorkScanner).probeTenant": {
-   "cognitive": 54,
-   "cyclomatic": 31
+   "cognitive": 24,
+   "cyclomatic": 20
   },
   "internal/engine::(*DurableWorkScanner).run": {
    "cognitive": 20
@@ -1689,9 +1689,6 @@
    "cognitive": 85,
    "cyclomatic": 48,
    "statements": 55
-  },
-  "internal/engine::probeTenant": {
-   "lines": 92
   },
   "internal/engine::processOneDurableLifecycleHook": {
    "cognitive": 35,
@@ -2571,16 +2568,16 @@
    "cognitive": 43,
    "cyclomatic": 31
   },
-  "internal/site::BootstrapSystemTablesContext": {
-   "cognitive": 96,
-   "cyclomatic": 86,
-   "statements": 212
+  "internal/site::BootstrapSystemTables": {
+   "cognitive": 91,
+   "cyclomatic": 82,
+   "statements": 202
   },
   "internal/site::CreateDatabaseContext": {
    "cognitive": 18,
    "cyclomatic": 18
   },
-  "internal/site::CreateSiteContext": {
+  "internal/site::CreateSite": {
    "cognitive": 60,
    "cyclomatic": 41,
    "statements": 92
@@ -2640,7 +2637,7 @@
    "cyclomatic": 53,
    "statements": 105
   },
-  "internal/site::acquirePlatformRegistryBootstrapLockContext": {
+  "internal/site::acquirePlatformRegistryBootstrapLock": {
    "cognitive": 27,
    "cyclomatic": 19,
    "statements": 67
@@ -2669,7 +2666,7 @@
    "cognitive": 20,
    "cyclomatic": 18
   },
-  "internal/site::discoverRegistrySitesForCellContext": {
+  "internal/site::discoverRegistrySitesForCell": {
    "cognitive": 36,
    "cyclomatic": 22,
    "statements": 42

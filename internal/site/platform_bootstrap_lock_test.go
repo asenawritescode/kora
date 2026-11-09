@@ -24,7 +24,7 @@ func TestPlatformBootstrapAdvisoryLockIsReleasedAndRestoresSingleConnectionPool(
 		WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"GET_LOCK"}).AddRow(1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT RELEASE_LOCK(?)`)).
 		WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"RELEASE_LOCK"}).AddRow(1))
-	release, err := acquirePlatformRegistryBootstrapLock(database, db.Resolve("mysql"))
+	release, err := acquirePlatformRegistryBootstrapLock(context.Background(), database, db.Resolve("mysql"))
 	if err != nil {
 		t.Fatal("acquire MySQL platform bootstrap lock:", err)
 	}

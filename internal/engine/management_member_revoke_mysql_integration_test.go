@@ -54,7 +54,7 @@ func newMySQLMemberFixture(t *testing.T) (*sql.DB, *auth.SessionManager, *manage
 	t.Cleanup(func() { database.Close() })
 	database.SetMaxOpenConns(8)
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap system tables:", err)
 	}
 	sessions := auth.NewOwnedSessionManager(database).SetDialect(dialect)

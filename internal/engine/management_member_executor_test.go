@@ -53,7 +53,7 @@ func memberTemplateDB(t *testing.T) []byte {
 			return
 		}
 		defer database.Close()
-		memberTemplateErr = site.BootstrapSystemTables(database, db.Resolve("libsql"))
+		memberTemplateErr = site.BootstrapSystemTables(context.Background(), database, db.Resolve("libsql"))
 	})
 	if memberTemplateErr != nil {
 		t.Fatal(memberTemplateErr)

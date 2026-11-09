@@ -76,7 +76,7 @@ func runAnalyticsBackfill(cmd *cobra.Command, args []string) error {
 	}
 	var target site.DBSiteInfo
 	err = runCLIWork(ctx, platformAdmission, func() error {
-		id, resolveErr := site.ResolveSiteAliasContext(ctx, platformDB, startup.DBType, backfillSite)
+		id, resolveErr := site.ResolveSiteAlias(ctx, platformDB, startup.DBType, backfillSite)
 		if resolveErr != nil {
 			return resolveErr
 		}
@@ -96,7 +96,7 @@ func runAnalyticsBackfill(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	database, err := site.ConnectContext(ctx, siteCfg)
+	database, err := site.Connect(ctx, siteCfg)
 	if err != nil {
 		release()
 		return fmt.Errorf("connecting to site DB: %w", err)
@@ -124,7 +124,7 @@ func runAnalyticsBackfill(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid --from date %q: expected YYYY-MM-DD", backfillFrom)
 		}
 	}
-	metrics, err := analytics.BackfillContext(ctx, database, dialect, target.Name, registry, from, backfillDoctype)
+	metrics, err := analytics.Backfill(ctx, database, dialect, target.Name, registry, from, backfillDoctype)
 	if err != nil {
 		return fmt.Errorf("analytics rebuild failed: %w", err)
 	}
@@ -143,7 +143,7 @@ func runAnalyticsStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	database, err := site.ConnectContext(ctx, siteCfg)
+	database, err := site.Connect(ctx, siteCfg)
 	if err != nil {
 		release()
 		return fmt.Errorf("connecting to site DB: %w", err)

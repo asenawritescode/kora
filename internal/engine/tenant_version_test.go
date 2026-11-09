@@ -19,7 +19,7 @@ func TestActiveConfigMinKoraVersionRebindsPostgresAndReadsValue(t *testing.T) {
 		WithArgs("tenant.example.test").
 		WillReturnRows(sqlmock.NewRows([]string{"min_kora_version"}).AddRow("2.4.0"))
 
-	got, err := ActiveConfigMinKoraVersion(database, &kdb.PostgresDialect{}, "tenant.example.test")
+	got, err := ActiveConfigMinKoraVersion(context.Background(), database, &kdb.PostgresDialect{}, "tenant.example.test")
 	if err != nil {
 		t.Fatalf("ActiveConfigMinKoraVersion: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestActiveConfigMinKoraVersionContextHonorsCancellationBeforeSQL(t *testing
 	defer database.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := ActiveConfigMinKoraVersionContext(ctx, database, &kdb.PostgresDialect{}, "tenant.example.test"); !errors.Is(err, context.Canceled) {
+	if _, err := ActiveConfigMinKoraVersion(ctx, database, &kdb.PostgresDialect{}, "tenant.example.test"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled lookup error = %v, want context.Canceled", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -55,12 +55,12 @@ func TestActiveConfigMinKoraVersionAllowsNoActiveVersionButReturnsDatabaseErrors
 	defer database.Close()
 	query := `SELECT COALESCE\(min_kora_version, ''\) FROM _kora_config_version WHERE site = \$1 AND status = 'Active' ORDER BY version DESC LIMIT 1`
 	mock.ExpectQuery(query).WithArgs("tenant.example.test").WillReturnRows(sqlmock.NewRows([]string{"min_kora_version"}))
-	if got, err := ActiveConfigMinKoraVersion(database, &kdb.PostgresDialect{}, "tenant.example.test"); err != nil || got != "" {
+	if got, err := ActiveConfigMinKoraVersion(context.Background(), database, &kdb.PostgresDialect{}, "tenant.example.test"); err != nil || got != "" {
 		t.Fatalf("missing active version = (%q, %v), want empty version and no error", got, err)
 	}
 	expectedErr := errors.New("synthetic database failure")
 	mock.ExpectQuery(query).WithArgs("tenant.example.test").WillReturnError(expectedErr)
-	if _, err := ActiveConfigMinKoraVersion(database, &kdb.PostgresDialect{}, "tenant.example.test"); !errors.Is(err, expectedErr) {
+	if _, err := ActiveConfigMinKoraVersion(context.Background(), database, &kdb.PostgresDialect{}, "tenant.example.test"); !errors.Is(err, expectedErr) {
 		t.Fatalf("database failure = %v, want propagated error", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

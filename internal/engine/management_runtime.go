@@ -230,7 +230,7 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 		}
 		provisionExecutor, err := newManagementProvisionExecutor(
 			databaseAllocationRef, deploymentID, database, platformDBType, common,
-			admission, provisionDirectory, coordinator, site.CreateSiteContext,
+			admission, provisionDirectory, coordinator, site.CreateSite,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("configure management provision executor: %w", err)

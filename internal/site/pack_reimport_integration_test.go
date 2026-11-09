@@ -3,13 +3,15 @@
 package site
 
 import (
+	"context"
 	"path/filepath"
 	"reflect"
 	"testing"
 
+	"os"
+
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
-	"os"
 )
 
 // Importing the same pack twice must be idempotent: the second import sees the
@@ -26,7 +28,7 @@ func TestPackReimportIsIdempotentAcrossDialects(t *testing.T) {
 			}
 			conn, name := posDB(t, tc.driver, dsn)
 			dialect := kdb.Resolve(tc.driver)
-			if err := BootstrapSystemTables(conn, dialect); err != nil {
+			if err := BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 				t.Fatal(err)
 			}
 			path := filepath.Join("..", "..", "config", "pos") // pulls in inventory via requires

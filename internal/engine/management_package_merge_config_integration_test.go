@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func TestMergedPackageKeepsCommandsQueriesAndPrintFormatsAcrossDialects(t *testi
 			conn, info, cleanup := openManagementPackageTestDatabase(t, tc.driver, dsn)
 			defer cleanup()
 			dialect := db.Resolve(tc.driver)
-			if err := site.BootstrapSystemTables(conn, dialect); err != nil {
+			if err := site.BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 				t.Fatal(err)
 			}
 			pkg := configSnapshot(t, nil, nil, nil)

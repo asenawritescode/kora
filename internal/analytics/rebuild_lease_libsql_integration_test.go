@@ -47,7 +47,7 @@ func TestLibSQLRebuildLeaseFencesExpiredOwner(t *testing.T) {
 		t.Skipf("disposable LibSQL endpoint unavailable: %v", err)
 	}
 	dialect := db.Resolve("libsql")
-	if err := BootstrapTables(database, dialect); err != nil {
+	if err = BootstrapTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap LibSQL analytics schema:", err)
 	}
 	suffix := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)

@@ -417,7 +417,7 @@ func (e *managementPackageExecutor) complete(ctx context.Context, original site.
 		return err
 	}
 	defer release()
-	database, err := site.ConnectContext(ctx, config)
+	database, err := site.Connect(ctx, config)
 	if err != nil {
 		return err
 	}

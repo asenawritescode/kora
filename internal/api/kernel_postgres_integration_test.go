@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -59,7 +60,7 @@ func TestLivePostgresResourceCRUDUsesKernelAndPreservesRESTContract(t *testing.T
 		t.Fatal("ping isolated PostgreSQL schema:", err)
 	}
 	dialect := kdb.Resolve("postgres")
-	if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+	if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap isolated PostgreSQL system tables:", err)
 	}
 

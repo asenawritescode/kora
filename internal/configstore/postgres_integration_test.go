@@ -1,6 +1,7 @@
 package configstore_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -40,7 +41,7 @@ func TestLivePostgresConfigStoreLifecycle(t *testing.T) {
 		t.Fatal("select isolated PostgreSQL schema:", err)
 	}
 	dialect := kdb.Resolve("postgres")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap PostgreSQL system tables:", err)
 	}
 	store := configstore.NewStore(database, dialect)

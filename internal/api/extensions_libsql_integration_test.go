@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -62,7 +63,7 @@ func TestLiveLibSQLManagedCredentialLifecycle(t *testing.T) {
 	if _, err := database.Exec(legacyExtensionDDL); err != nil {
 		t.Fatalf("create legacy LibSQL extension fixture: %v", err)
 	}
-	if err := ksite.BootstrapSystemTables(database, db.Resolve("libsql")); err != nil {
+	if err = ksite.BootstrapSystemTables(context.Background(), database, db.Resolve("libsql")); err != nil {
 		t.Fatal("upgrade legacy LibSQL system tables:", err)
 	}
 	var migrated bool

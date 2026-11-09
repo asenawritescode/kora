@@ -52,7 +52,7 @@ func TestCharacterizeAddModuleToProvisionedTenant(t *testing.T) {
 	h := &addModuleHarness{t: t, ctx: ctx, database: database, info: info, dialect: dialect, tenant: tenant, ops: ops}
 	h.check(err)
 	h.check(opsErr)
-	h.check(site.BootstrapSystemTablesContext(ctx, database, dialect))
+	h.check(site.BootstrapSystemTables(ctx, database, dialect))
 	h.check(ops.EnsureSchema(ctx))
 
 	// Inventory-only template, pos module alone (it requires inventory), and a

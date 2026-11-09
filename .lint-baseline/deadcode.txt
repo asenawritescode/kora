@@ -63,7 +63,6 @@ contract/version.go::DetectVersionConflict
 contract/version.go::NewConflictRecord
 contract/version.go::VersionMismatchError.Error
 contract/version.go::itoa64
-internal/analytics/backfill.go::Backfill
 internal/analytics/backfill.go::backfillMetric
 internal/analytics/bus.go::NewChannelBus
 internal/analytics/bus.go::NewChannelBusWithMaxEventBytes
@@ -138,7 +137,6 @@ internal/auth/session.go::NewSessionManager
 internal/auth/session.go::TenantMagicLinkURL
 internal/auth/session.go::newSessionManager
 internal/auth/site.go::SiteGuard.Close
-internal/cli/config_impl.go::runConfigImport
 internal/db/dialect.go::MySQL
 internal/dbaccess/admission.go::NewAdmission
 internal/disposabledb/disposabledb.go::Open
@@ -193,7 +191,6 @@ internal/engine/management_invitation_executor.go::recordInvitationOutcome
 internal/engine/management_invitation_executor.go::retryInvitationDelivery
 internal/engine/management_invitation_executor.go::revokeInvitationForReconciliation
 internal/engine/scheduler.go::StartScheduler
-internal/engine/tenant_loader.go::ActiveConfigMinKoraVersion
 internal/expression/expression.go::ExprError.Error
 internal/management/operation.go::Digest
 internal/natsprovider/consumer.go::Consumer.Drain
@@ -244,9 +241,6 @@ internal/script/provider.go::NoopProvider.GetDoc
 internal/script/provider.go::NoopProvider.GetList
 internal/script/provider.go::NoopProvider.GetSecret
 internal/script/provider.go::NoopProvider.SaveDoc
-internal/site/bootstrap.go::seedDefaultAdministratorRole
-internal/site/create.go::ensureConfigVersion
-internal/site/create.go::registeredSiteID
 internal/site/deletion_recovery.go::DeleteRegisteredSite
 internal/site/directory.go::BelongsToRuntimeCell
 internal/site/import.go::ImportConfig
@@ -281,7 +275,6 @@ internal/site/pack_manifest.go::PackDigest
 internal/site/pack_manifest.go::ParsePackDigest
 internal/site/pack_tree.go::ParsePackFile
 internal/site/pack_tree.go::ResolvePackTree
-internal/site/platform_bootstrap_lock.go::acquirePlatformRegistryBootstrapLock
 internal/site/registry.go::removePlatformSiteRegistration
 internal/site/site.go::DiscoverAllSitesFromDBContext
 internal/site/site.go::LoadCommonConfig

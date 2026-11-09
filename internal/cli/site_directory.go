@@ -57,7 +57,7 @@ var siteDirectoryMigrateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		bootstrapErr := site.BootstrapPlatformRegistry(database, kdb.Resolve(startup.DBType))
+		bootstrapErr := site.BootstrapPlatformRegistry(context.Background(), database, kdb.Resolve(startup.DBType))
 		releaseBootstrap()
 		if bootstrapErr != nil {
 			return fmt.Errorf("migrate site directory: %w", bootstrapErr)
@@ -176,7 +176,7 @@ func runSiteDirectoryProbe(ctx context.Context) (siteDirectoryProbeReport, error
 	var dbSites []site.DBSiteInfo
 	err = runCLIWork(ctx, platformAdmission, func() error {
 		var discoverErr error
-		dbSites, discoverErr = site.DiscoverSitesFromDBContext(ctx, platformDB)
+		dbSites, discoverErr = site.DiscoverSitesFromDB(ctx, platformDB)
 		return discoverErr
 	})
 	if err != nil {
@@ -208,7 +208,7 @@ func runSiteDirectoryProbe(ctx context.Context) (siteDirectoryProbeReport, error
 				} else {
 					begin := time.Now()
 					connectErr := runCLIWork(ctx, tenantAdmission, func() error {
-						database, err := site.ConnectContext(ctx, config)
+						database, err := site.Connect(ctx, config)
 						if err != nil {
 							return err
 						}

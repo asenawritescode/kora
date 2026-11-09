@@ -31,7 +31,7 @@ func TestLiveMySQLSiteRegistryUpsertAdvancesRevisionOnce(t *testing.T) {
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	hostname := fmt.Sprintf("revision-test-%d.example.invalid", time.Now().UnixNano())
@@ -77,7 +77,7 @@ func TestLiveMySQLAliasOwnershipConflictRollsBackRegistryUpdate(t *testing.T) {
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
+	if err := BootstrapPlatformRegistry(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	stamp := time.Now().UnixNano()
@@ -126,7 +126,7 @@ func TestLiveMySQLSiteStateTransitionIsRevisionFencedAndIdempotent(t *testing.T)
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	hostname := fmt.Sprintf("state-test-%d.example.invalid", time.Now().UnixNano())
@@ -184,7 +184,7 @@ func TestLiveMySQLDeletionFenceBindsCheckpointToCurrentAllocation(t *testing.T) 
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
+	if err := BootstrapPlatformRegistry(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	registry := NewSQLSiteRegistry(database, "mysql")
@@ -260,7 +260,7 @@ func TestLiveMySQLCheckpointBoundDeletionDropsOnlyTheVerifiedAllocation(t *testi
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	hostname := fmt.Sprintf("verified-delete-%d.example.invalid", time.Now().UnixNano())
@@ -327,7 +327,7 @@ func TestLiveMySQLDirectoryConsumerLeaseFencesDuplicateOwner(t *testing.T) {
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	registry := NewSQLSiteRegistry(database, "mysql")

@@ -39,7 +39,7 @@ func TestComposedTemplatePackageInstallsThroughExecutor(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 	defer cancel()
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapSystemTablesContext(ctx, database, dialect); err != nil {
+	if err := site.BootstrapSystemTables(ctx, database, dialect); err != nil {
 		t.Fatal("bootstrap tenant database:", err)
 	}
 	loaded := installTenantServicesForTest(t, info, database)

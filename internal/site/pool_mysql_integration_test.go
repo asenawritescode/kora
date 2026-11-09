@@ -23,7 +23,7 @@ func TestLiveMySQLTenantPoolUsesConfiguredBounds(t *testing.T) {
 	t.Setenv("KORA_DB_USER", "")
 	common := CommonConfigFromEnv()
 	cfg := ReconstructSiteConfig("pool-budget-check", common, nil)
-	database, err := Connect(cfg)
+	database, err := Connect(context.Background(), cfg)
 	if err != nil {
 		t.Fatal("connect to the configured read-only test database:", err)
 	}

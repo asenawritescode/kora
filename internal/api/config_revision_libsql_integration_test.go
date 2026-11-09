@@ -41,7 +41,7 @@ func TestLibSQLPackageActivationRevisionCAS(t *testing.T) {
 		t.Fatal("refusing to mutate LibSQL database that already has Kora config revision state")
 	}
 	dialect := db.Resolve("libsql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap disposable LibSQL database:", err)
 	}
 	store := configstore.NewStore(database, dialect)

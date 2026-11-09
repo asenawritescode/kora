@@ -372,6 +372,7 @@ type SubjectAuthorization struct {
 	UserFields map[string]string
 }
 
+// CancellationAuthorizer decides whether the verified actor may cancel a workflow instance.
 type CancellationAuthorizer interface {
 	CanCancelWorkflow(context.Context, policy.Execution, contract.WorkflowInstance) (bool, error)
 }

@@ -13,7 +13,7 @@ import (
 func TestCreateSiteContextStopsBeforeProvisioningWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := CreateSiteContext(ctx, CreateSiteInput{Hostname: "cancelled.example.invalid"}); !errors.Is(err, context.Canceled) {
+	if _, err := CreateSite(ctx, CreateSiteInput{Hostname: "cancelled.example.invalid"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("CreateSiteContext error = %v, want context cancellation", err)
 	}
 }
@@ -21,13 +21,13 @@ func TestCreateSiteContextStopsBeforeProvisioningWhenCancelled(t *testing.T) {
 func TestBootstrapSystemTablesContextStopsBeforeDatabaseAccessWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := BootstrapSystemTablesContext(ctx, nil, nil); !errors.Is(err, context.Canceled) {
+	if err := BootstrapSystemTables(ctx, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("BootstrapSystemTablesContext error = %v, want context cancellation", err)
 	}
 }
 
 func TestCreateSiteRequiresDurableDirectoryBeforeProvisioning(t *testing.T) {
-	_, err := CreateSite(CreateSiteInput{
+	_, err := CreateSite(context.Background(), CreateSiteInput{
 		Hostname: "no-directory.example.invalid", DBType: "mysql", DBHost: "127.0.0.1", DBPort: 1,
 		DBName: "must_not_be_created", AdminEmail: "admin@example.invalid", CloudSubjectID: "cloud-user-test",
 	})
@@ -37,7 +37,7 @@ func TestCreateSiteRequiresDurableDirectoryBeforeProvisioning(t *testing.T) {
 }
 
 func TestCreateSiteRejectsInvalidCanonicalTenantBeforeDatabaseAccess(t *testing.T) {
-	_, err := CreateSite(CreateSiteInput{Hostname: "tenant.example.invalid", SiteID: " bad-id ", CloudSubjectID: "cloud-user-test"})
+	_, err := CreateSite(context.Background(), CreateSiteInput{Hostname: "tenant.example.invalid", SiteID: " bad-id ", CloudSubjectID: "cloud-user-test"})
 	if err == nil || !strings.Contains(err.Error(), "invalid canonical tenant ID") {
 		t.Fatalf("CreateSite invalid canonical tenant ID error = %v", err)
 	}
@@ -49,7 +49,7 @@ func TestCreateSiteRejectsUnsafeDatabaseNameBeforeDirectoryAccess(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer platformDB.Close()
-	_, err = CreateSite(CreateSiteInput{
+	_, err = CreateSite(context.Background(), CreateSiteInput{
 		Hostname: "tenant.example.invalid", DBType: "mysql", DBName: "tenant` CREATE USER root",
 		AdminEmail: "admin@example.invalid", CloudSubjectID: "cloud-user-test", PlatformDBType: "mysql", PlatformDB: platformDB,
 	})
@@ -69,7 +69,7 @@ func TestCreateSiteDirectoryWriteFailurePrecedesTenantProvisioning(t *testing.T)
 	defer platformDB.Close()
 	mock.ExpectExec(regexp.QuoteMeta(`CREATE TABLE IF NOT EXISTS "_kora_site_directory_outbox" ("id" TEXT PRIMARY KEY, "directory_revision" INTEGER NOT NULL DEFAULT 0, "site_id" TEXT NOT NULL, "config_revision" INTEGER NOT NULL, "payload" TEXT NOT NULL, "created_at" TEXT NOT NULL DEFAULT (datetime('now')))`)).
 		WillReturnError(errors.New("platform directory unavailable"))
-	_, err = CreateSite(CreateSiteInput{
+	_, err = CreateSite(context.Background(), CreateSiteInput{
 		Hostname: "registry-down.example.invalid", DBType: "mysql", DBHost: "127.0.0.1", DBPort: 1,
 		DBName: "must_not_be_created", AdminEmail: "admin@example.invalid", CloudSubjectID: "cloud-user-test",
 		PlatformDBType: "libsql", PlatformDB: platformDB,

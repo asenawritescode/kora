@@ -59,12 +59,12 @@ func TestLiveMySQLDeleteRegisteredSiteUsesCanonicalIdentity(t *testing.T) {
 		t.Fatal("open disposable platform registry")
 	}
 	defer platformDB.Close()
-	if err := BootstrapPlatformRegistry(platformDB, db.Resolve("mysql")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), platformDB, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap disposable platform registry:", err)
 	}
 	hostname := "canonical-delete-" + suffix + ".example.invalid"
 	registry := NewSQLSiteRegistry(platformDB, "mysql")
-	if err := registry.Upsert(&Config{Hostname: hostname, DBType: "mysql", DBName: tenantSchema}); err != nil {
+	if err = registry.Upsert(&Config{Hostname: hostname, DBType: "mysql", DBName: tenantSchema}); err != nil {
 		t.Fatal("register disposable site:", err)
 	}
 	descriptor, err := registry.ResolveAlias(hostname)

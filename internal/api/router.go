@@ -313,8 +313,12 @@ func siteDialectFromContext(c *gin.Context, fallback kdb.Dialect) kdb.Dialect {
 	return kdb.Resolve("")
 }
 
-// DefaultLimit and APIMaxLimit control pagination (set from common config at startup).
+// DefaultLimit is the page size used when a list request names none. It is set
+// from common config at startup.
 var DefaultLimit = 50
+
+// MaxLimit is the largest page size a list request may ask for. It is set from
+// common config at startup.
 var MaxLimit = 500
 
 // SetAPILimits sets pagination limits from config.

@@ -62,7 +62,7 @@ func testLiveCreateSiteDisplayName(t *testing.T, driver, dsn, displayName, wantS
 	// tenant database (a deferred Close would run before t.Cleanup).
 	t.Cleanup(func() { _ = platformDB.Close() })
 	dialect := db.Resolve(driver)
-	if err := BootstrapPlatformRegistryContext(t.Context(), platformDB, dialect); err != nil {
+	if err = BootstrapPlatformRegistry(t.Context(), platformDB, dialect); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	stamp := time.Now().UnixNano()
@@ -90,7 +90,7 @@ func testLiveCreateSiteDisplayName(t *testing.T, driver, dsn, displayName, wantS
 		DBName: databaseName, DBUser: user, DBPassword: password, DisplayName: displayName,
 		AdminEmail: "owner@" + hostname, CloudSubjectID: "cloud-user-" + tenantID, PlatformDBType: driver, PlatformDB: platformDB,
 	}
-	result, err = CreateSiteContext(t.Context(), input)
+	result, err = CreateSite(t.Context(), input)
 	if err != nil {
 		t.Fatal("create tenant:", err)
 	}
@@ -119,7 +119,7 @@ func testLiveCreateSiteDisplayName(t *testing.T, driver, dsn, displayName, wantS
 		t.Fatal("close tenant before retry:", err)
 	}
 	result.DB = nil
-	result, err = CreateSiteContext(t.Context(), input)
+	result, err = CreateSite(t.Context(), input)
 	if err != nil {
 		t.Fatal("retry tenant creation:", err)
 	}

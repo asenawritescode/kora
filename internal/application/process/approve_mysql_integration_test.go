@@ -119,7 +119,7 @@ func TestApproveAndApplyCommitsDecisionAndDomainTransitionAtomically(t *testing.
 		t.Fatal("ping disposable MySQL:", err)
 	}
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap Engine tables:", err)
 	}
 	requestDDL, err := requestsql.SchemaStatements(dialect)

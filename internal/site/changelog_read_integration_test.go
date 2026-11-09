@@ -22,7 +22,7 @@ func TestReadChangelogJSONColumns(t *testing.T) {
 			}
 			conn, _ := posDB(t, tc.driver, dsn)
 			d := kdb.Resolve(tc.driver)
-			if err := BootstrapSystemTables(conn, d); err != nil {
+			if err := BootstrapSystemTables(context.Background(), conn, d); err != nil {
 				t.Fatal(err)
 			}
 			for ver, row := range []struct{ id, want string }{{"v-null", ""}, {"v-json", `{"changes":[]}`}} {

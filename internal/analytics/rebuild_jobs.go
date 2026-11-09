@@ -344,7 +344,7 @@ func (r *RebuildRunner) process(ctx context.Context, job *RebuildJob) {
 			}
 		}
 	}()
-	count, err := BackfillContext(workCtx, r.db, r.dialect, r.site, r.registry, job.From, job.DocType)
+	count, err := Backfill(workCtx, r.db, r.dialect, r.site, r.registry, job.From, job.DocType)
 	close(stopHeartbeat)
 	heartbeatErr := <-heartbeatDone
 	cancelWork()

@@ -4,6 +4,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func TestTenantStartSkipsUnpublishedConfigQueries(t *testing.T) {
 			fixture := disposabledb.Open(t, tc.driver, dsn)
 			conn, name := fixture.DB, fixture.Name
 			dialect := kdb.Resolve(tc.driver)
-			if err := site.BootstrapSystemTables(conn, dialect); err != nil {
+			if err := site.BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 				t.Fatal(err)
 			}
 			const siteName = "start-e2e.example.test"

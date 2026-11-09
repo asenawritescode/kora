@@ -42,12 +42,12 @@ func runMigrate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		db, err := site.ConnectContext(ctx, cfg)
+		db, err := site.Connect(ctx, cfg)
 		if err != nil {
 			release()
 			return fmt.Errorf("connecting to platform db: %w", err)
 		}
-		dbSites, err = site.DiscoverSitesFromDBContext(ctx, db)
+		dbSites, err = site.DiscoverSitesFromDB(ctx, db)
 		closeErr := db.Close()
 		release()
 		if err != nil {
@@ -68,14 +68,14 @@ func runMigrate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		db, err := site.ConnectContext(ctx, siteCfg)
+		db, err := site.Connect(ctx, siteCfg)
 		if err != nil {
 			release()
 			return fmt.Errorf("connecting to %s: %w", info.Name, err)
 		}
 
 		// Bootstrap system tables.
-		if err := site.BootstrapSystemTables(db, kdb.Resolve(siteCfg.DBType)); err != nil {
+		if err = site.BootstrapSystemTables(context.Background(), db, kdb.Resolve(siteCfg.DBType)); err != nil {
 			db.Close()
 			release()
 			return fmt.Errorf("bootstrapping %s: %w", info.Name, err)

@@ -25,7 +25,7 @@ func TestPasswordLoginLookupAcrossDialects(t *testing.T) {
 		t.Run(dialectName, func(t *testing.T) {
 			database := openDisposablePasswordLoginDatabase(t, dialectName)
 			dialect := kdb.Resolve(dialectName)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatal("bootstrap system tables:", err)
 			}
 			hash, err := bcrypt.GenerateFromPassword([]byte("correct horse"), bcrypt.MinCost)

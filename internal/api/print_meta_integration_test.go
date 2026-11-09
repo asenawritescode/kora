@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -36,7 +37,7 @@ func TestPrintFormatMetaAcrossDialects(t *testing.T) {
 			fixture := disposabledb.Open(t, tc.driver, dsn)
 			conn, name := fixture.DB, fixture.Name
 			dialect := kdb.Resolve(tc.driver)
-			if err := site.BootstrapSystemTables(conn, dialect); err != nil {
+			if err := site.BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 				t.Fatal(err)
 			}
 			reg := doctype.NewRegistry()

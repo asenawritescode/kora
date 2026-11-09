@@ -33,7 +33,7 @@ func TestComposedPackInstallMatchesImportAcrossDialects(t *testing.T) {
 			var revs, actives [2]int
 			for i, mode := range []string{"import", "install"} {
 				conn, name := posDB(t, tc.driver, dsn)
-				if err := BootstrapSystemTables(conn, dialect); err != nil {
+				if err = BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 					t.Fatal(err)
 				}
 				site := "m287.example"

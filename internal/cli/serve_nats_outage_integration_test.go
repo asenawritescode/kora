@@ -90,12 +90,12 @@ func TestLiveEngineProcessResilienceToNATSAndPlatformDatabaseOutages(t *testing.
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	if err := site.BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
+	if err = site.BootstrapPlatformRegistry(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap disposable platform registry:", err)
 	}
 	registry := site.NewSQLSiteRegistry(database, "mysql")
 	hostname := fmt.Sprintf("engine-nats-outage-%d.example.invalid", time.Now().UnixNano())
-	if err := registry.Upsert(&site.Config{
+	if err = registry.Upsert(&site.Config{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "postgres", DBHost: "127.0.0.1",
 		DBPort: mustPort(t, tenantPort), DBName: "kora_tenant", DBUser: "postgres", DBPassword: "acceptance-only",
 	}); err != nil {
@@ -199,7 +199,7 @@ func TestLiveEngineProcessResilienceToNATSAndPlatformDatabaseOutages(t *testing.
 	// Exercise the directory consumer's complete runtime lifecycle while the
 	// real Engine process is serving: hot-add a site, then tombstone it.
 	hotAddedHost := fmt.Sprintf("hot-added-%d.example.invalid", time.Now().UnixNano())
-	if err := registry.Upsert(&site.Config{
+	if err = registry.Upsert(&site.Config{
 		Hostname: hotAddedHost, DomainsList: []string{hotAddedHost}, DBType: "postgres", DBHost: "127.0.0.1",
 		DBPort: mustPort(t, tenantPort), DBName: "kora_tenant", DBUser: "postgres", DBPassword: "acceptance-only",
 	}); err != nil {

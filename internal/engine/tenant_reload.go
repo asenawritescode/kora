@@ -96,7 +96,7 @@ func (c *TenantReloadController) Reload(ctx context.Context, name string) (strin
 	var infos []site.DBSiteInfo
 	err := c.withDirectoryWork(ctx, "discover tenant records", func() error {
 		var readErr error
-		infos, readErr = site.DiscoverSitesFromDBContext(ctx, c.PlatformDB)
+		infos, readErr = site.DiscoverSitesFromDB(ctx, c.PlatformDB)
 		return readErr
 	})
 	if err != nil {

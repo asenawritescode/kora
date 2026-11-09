@@ -4,6 +4,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -35,7 +36,7 @@ func TestImportIntoCrudOwnedItemWithLinkNames(t *testing.T) {
 		t.Skip("set KORA_API_LIVE_MYSQL_DSN")
 	}
 	database, dialect := openKernelDialectDatabase(t, "mysql", dsn)
-	if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+	if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	site := fmt.Sprintf("crud-import-%x", time.Now().UnixNano())

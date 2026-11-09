@@ -40,7 +40,7 @@ func TestResolveSiteAliasRejectsAmbiguousAlias(t *testing.T) {
 	query := `SELECT site_id FROM _kora_site_alias WHERE alias = ? ORDER BY site_id LIMIT 2`
 	mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs("shared.example.test").
 		WillReturnRows(sqlmock.NewRows([]string{"site_id"}).AddRow("site-1").AddRow("site-2"))
-	_, err = ResolveSiteAlias(db, "mysql", " SHARED.EXAMPLE.TEST. ")
+	_, err = ResolveSiteAlias(context.Background(), db, "mysql", " SHARED.EXAMPLE.TEST. ")
 	if err == nil || !regexp.MustCompile("multiple canonical sites").MatchString(err.Error()) {
 		t.Fatalf("ResolveSiteAlias error = %v, want ambiguous alias error", err)
 	}
@@ -57,7 +57,7 @@ func TestResolveSiteAliasFailsClosedWhenProjectionIsDirty(t *testing.T) {
 	defer database.Close()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT initialized FROM _kora_site_alias_meta WHERE id = 1`)).
 		WillReturnRows(sqlmock.NewRows([]string{"initialized"}).AddRow(0))
-	if _, err := ResolveSiteAlias(database, "mysql", "tenant.example.test"); !errors.Is(err, ErrSiteAliasIndexUnavailable) {
+	if _, err := ResolveSiteAlias(context.Background(), database, "mysql", "tenant.example.test"); !errors.Is(err, ErrSiteAliasIndexUnavailable) {
 		t.Fatalf("ResolveSiteAlias error = %v, want ErrSiteAliasIndexUnavailable", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

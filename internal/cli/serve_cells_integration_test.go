@@ -79,7 +79,7 @@ func runLiveEnginePlacementMoveAndRecover(t *testing.T, deploymentNames bool) {
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	if err := site.BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
+	if err = site.BootstrapPlatformRegistry(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap disposable platform registry:", err)
 	}
 	tenantDBName := "kora_placement_tenant_" + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -98,7 +98,7 @@ func runLiveEnginePlacementMoveAndRecover(t *testing.T, deploymentNames bool) {
 	}()
 	registry := site.NewSQLSiteRegistry(database, "mysql")
 	hostname := "deployment-move-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".example.invalid"
-	if err := registry.Upsert(&site.Config{
+	if err = registry.Upsert(&site.Config{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1",
 		DBPort: mustPort(t, platformPort), DBName: tenantDBName, DBUser: "root", DBPassword: "acceptance-only",
 	}); err != nil {

@@ -78,7 +78,7 @@ func TestForEachWhereAcrossDialects(t *testing.T) {
 func runWhere(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	dialect := kdb.Resolve(driver)
 	const siteName = "where.example.test"
-	if err := BootstrapSystemTables(conn, dialect); err != nil {
+	if err := BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 		t.Fatal(err)
 	}
 	reg := doctype.NewRegistry()

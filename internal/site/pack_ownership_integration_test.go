@@ -3,6 +3,7 @@
 package site
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -32,7 +33,7 @@ func TestPackOwnershipImportAcrossDialects(t *testing.T) {
 			}
 			conn, name := posDB(t, tc.driver, dsn)
 			dialect := kdb.Resolve(tc.driver)
-			if err := BootstrapSystemTables(conn, dialect); err != nil {
+			if err := BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 				t.Fatal(err)
 			}
 			const siteName = "own-251.example.test"

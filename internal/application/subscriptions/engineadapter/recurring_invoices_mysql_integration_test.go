@@ -55,7 +55,7 @@ func TestMySQLSubscriptionBillingProgressSurvivesRestartAndConcurrentRuns(t *tes
 		t.Fatal("open fresh fixture database:", err)
 	}
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap fresh billing fixture:", err)
 	}
 	suffix := contract.NewID()[:12]

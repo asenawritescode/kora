@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/configstore"
 	"github.com/asenawritescode/kora/internal/db"
@@ -347,6 +348,56 @@ func activeScanDescriptor(descriptor site.Descriptor, cellID string) bool {
 	return site.BelongsToDeployment(descriptor.RuntimeCellID, cellID)
 }
 
+// probeTenantDatabase registers the active scheduled jobs for a cold tenant and
+// reports whether the tenant has work that is already due.
+func probeTenantDatabase(ctx context.Context, config *site.Config, info site.DBSiteInfo) (bool, error) {
+	database, err := site.Connect(ctx, config)
+	if err != nil {
+		return false, err
+	}
+	defer database.Close()
+	dialect := db.Resolve(config.DBType)
+	activeConfig, _, err := configstore.NewStore(database, dialect).LoadActiveSnapshotContext(ctx, info.Name)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("load active scheduled job definitions: %w", err)
+	}
+	if activeConfig != nil && len(activeConfig.ScheduledJobs) > 0 {
+		err = registerScheduledJobs(ctx, database, dialect, info.SiteID, activeConfig.ScheduledJobs)
+		if err != nil {
+			return false, err
+		}
+	}
+	return hasDueTenantWork(ctx, database, dialect)
+}
+
+// registerScheduledJobs records each scheduled job definition with its next run time.
+func registerScheduledJobs(ctx context.Context, database *sql.DB, dialect db.Dialect, siteID string, definitions []contract.ScheduledJobDefinition) error {
+	jobStore, err := schedulersql.New(database, dialect)
+	if err != nil {
+		return err
+	}
+	err = jobStore.Ensure(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, definition := range definitions {
+		var jobConfig map[string]any
+		if len(definition.Config) > 0 {
+			err = json.Unmarshal(definition.Config, &jobConfig)
+			if err != nil {
+				return fmt.Errorf("decode scheduled job %q config: %w", definition.Name, err)
+			}
+		}
+		job := &scheduler.JobConfig{Name: definition.Name, OwnerModuleID: definition.OwnerModuleID, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig}
+		err = jobStore.RegisterDefinition(ctx, siteID, job, scheduler.JobDefinitionDigest(job), scheduler.NextRunAfter(job.Schedule, now), now)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.Descriptor) (bool, error) {
 	var info site.DBSiteInfo
 	err := s.withWork(ctx, func() error {
@@ -393,39 +444,7 @@ func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.De
 	}
 	var due bool
 	due, err = withTenantProbeAdmission(ctx, admission, func() (bool, error) {
-		database, err := site.ConnectContext(ctx, config)
-		if err != nil {
-			return false, err
-		}
-		defer database.Close()
-		dialect := db.Resolve(config.DBType)
-		activeConfig, _, err := configstore.NewStore(database, dialect).LoadActiveSnapshotContext(ctx, info.Name)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return false, fmt.Errorf("load active scheduled job definitions: %w", err)
-		}
-		if activeConfig != nil && len(activeConfig.ScheduledJobs) > 0 {
-			jobStore, err := schedulersql.New(database, dialect)
-			if err != nil {
-				return false, err
-			}
-			if err := jobStore.Ensure(ctx); err != nil {
-				return false, err
-			}
-			now := time.Now().UTC()
-			for _, definition := range activeConfig.ScheduledJobs {
-				var jobConfig map[string]any
-				if len(definition.Config) > 0 {
-					if err := json.Unmarshal(definition.Config, &jobConfig); err != nil {
-						return false, fmt.Errorf("decode scheduled job %q config: %w", definition.Name, err)
-					}
-				}
-				job := &scheduler.JobConfig{Name: definition.Name, OwnerModuleID: definition.OwnerModuleID, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig}
-				if err := jobStore.RegisterDefinition(ctx, info.SiteID, job, scheduler.JobDefinitionDigest(job), scheduler.NextRunAfter(job.Schedule, now), now); err != nil {
-					return false, err
-				}
-			}
-		}
-		return hasDueTenantWork(ctx, database, dialect)
+		return probeTenantDatabase(ctx, config, info)
 	})
 	if err != nil || due {
 		return due, err

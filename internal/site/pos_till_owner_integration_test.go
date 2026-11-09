@@ -33,7 +33,7 @@ func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
 	conn, dbName := posDB(t, "mysql", dsn)
 	ctx := context.Background()
 	dialect := kdb.Resolve("mysql")
-	if err := BootstrapSystemTables(conn, dialect); err != nil {
+	if err := BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 		t.Fatal(err)
 	}
 	reg := doctype.NewRegistry()

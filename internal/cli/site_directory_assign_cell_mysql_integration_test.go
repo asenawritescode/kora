@@ -59,12 +59,12 @@ func TestLiveMySQLSiteDirectoryAssignCellWorkflow(t *testing.T) {
 		t.Fatal("open disposable assignment schema:", err)
 	}
 	defer database.Close()
-	if err := site.BootstrapPlatformRegistry(database, kdb.Resolve("mysql")); err != nil {
+	if err = site.BootstrapPlatformRegistry(context.Background(), database, kdb.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap disposable site directory:", err)
 	}
 	registry := site.NewSQLSiteRegistry(database, "mysql")
 	hostname := fmt.Sprintf("cell-assignment-%d.example.invalid", time.Now().UnixNano())
-	if err := registry.Upsert(&site.Config{
+	if err = registry.Upsert(&site.Config{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql",
 		DBHost: "127.0.0.1", DBPort: 3306, DBName: "unused_tenant_database",
 	}); err != nil {

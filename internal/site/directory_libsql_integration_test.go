@@ -29,7 +29,7 @@ func TestLiveLibSQLSiteDirectoryLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := BootstrapPlatformRegistry(database, kdb.Resolve("libsql")); err != nil {
+		if err = BootstrapPlatformRegistry(context.Background(), database, kdb.Resolve("libsql")); err != nil {
 			t.Fatalf("bootstrap attempt %d: %v", attempt+1, err)
 		}
 	}
@@ -61,7 +61,7 @@ func TestLiveLibSQLSiteDirectoryLifecycle(t *testing.T) {
 	if count, err := newConsumer().ProcessBatch(context.Background()); err != nil || count != 0 {
 		t.Fatalf("initialize consumer from snapshot = %d, %v", count, err)
 	}
-	if err := registry.Upsert(&Config{Hostname: hostname, DomainsList: []string{hostname, "alias." + hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "unused", DBUser: "unused"}); err != nil {
+	if err = registry.Upsert(&Config{Hostname: hostname, DomainsList: []string{hostname, "alias." + hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "unused", DBUser: "unused"}); err != nil {
 		t.Fatal("upsert:", err)
 	}
 	info, err := registry.ResolveAlias("alias." + hostname)
@@ -126,7 +126,7 @@ func TestLiveLibSQLProvisioningRegistrationBackfillsOnlyUnassignedRows(t *testin
 	if err := database.PingContext(t.Context()); err != nil {
 		t.Fatal("ping disposable LibSQL database:", err)
 	}
-	if err := BootstrapPlatformRegistryContext(t.Context(), database, kdb.Resolve("libsql")); err != nil {
+	if err = BootstrapPlatformRegistry(t.Context(), database, kdb.Resolve("libsql")); err != nil {
 		t.Fatal("bootstrap LibSQL platform registry:", err)
 	}
 

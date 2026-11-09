@@ -24,7 +24,7 @@ import (
 func installPackTenant(t *testing.T, driver string, database *sql.DB, dbName string) *knet.LoadedSite {
 	t.Helper()
 	dialect := db.Resolve(driver)
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err := site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal(err)
 	}
 	siteName := fmt.Sprintf("pack-install-%d.example.test", time.Now().UnixNano())
@@ -34,8 +34,8 @@ func installPackTenant(t *testing.T, driver string, database *sql.DB, dbName str
 	info := site.DBSiteInfo{SiteID: siteName, Name: siteName, DBType: driver, DBName: dbName, Status: "active"}
 	common := &site.CommonConfig{DBType: driver}
 	loaded, err := loadTenantRuntime(context.Background(), info, common, nil, "test", tenantRuntimeDependencies{
-		connect:   func(*site.Config) (*sql.DB, error) { return database, nil },
-		bootstrap: func(*sql.DB, db.Dialect) error { return nil },
+		connect:   func(context.Context, *site.Config) (*sql.DB, error) { return database, nil },
+		bootstrap: func(context.Context, *sql.DB, db.Dialect) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("load tenant runtime: %v", err)
