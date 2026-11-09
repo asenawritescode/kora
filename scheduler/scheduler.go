@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -936,9 +937,13 @@ func (c *cronSchedule) nextRunAfter(after time.Time) time.Time {
 
 	// For specific hour:minute, compute next match.
 	if c.hour != "*" && c.minute != "*" {
-		var hour, minute int
-		fmt.Sscanf(c.hour, "%d", &hour)
-		fmt.Sscanf(c.minute, "%d", &minute)
+		hour, hourErr := strconv.Atoi(c.hour)
+		minute, minuteErr := strconv.Atoi(c.minute)
+		if hourErr != nil || minuteErr != nil {
+			// ValidateSchedule rejects these before a job is stored; fall back to the same hourly
+			// default as parseCron rather than firing at an arbitrary 00:00.
+			return now.Truncate(time.Hour).Add(time.Hour)
+		}
 
 		today := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
 		if today.Before(now) || today.Equal(now) {

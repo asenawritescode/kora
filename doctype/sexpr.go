@@ -2067,7 +2067,10 @@ func parseViewPublicAccess(node *sNode) *ViewPublicAccess {
 			val := nodeStr(node.Children[i+1])
 			switch c.Atom {
 			case "components":
-				json.Unmarshal([]byte(val), &pa.Components)
+				// A malformed list leaves Components empty, which disables public access (fail closed).
+				if err := json.Unmarshal([]byte(val), &pa.Components); err != nil {
+					pa.Components = nil
+				}
 			case "allow-mutations":
 				pa.AllowMutations = val == "true"
 			}

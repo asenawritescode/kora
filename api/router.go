@@ -618,7 +618,7 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 	}
 	h.invalidateAnalyticsForDoctype(c, doctypeName)
 	if w := h.siteAnalyticsWorker(c); w != nil {
-		w.Flush()
+		_ = w.Flush() // best-effort: the response is already committed
 	}
 }
 
@@ -670,7 +670,7 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 	}
 	h.invalidateAnalyticsForDoctype(c, doctypeName)
 	if w := h.siteAnalyticsWorker(c); w != nil {
-		w.Flush()
+		_ = w.Flush() // best-effort: the response is already committed
 	}
 }
 
@@ -693,7 +693,7 @@ func (h *Handler) HandleDelete(c *gin.Context) {
 	}
 	h.invalidateAnalyticsForDoctype(c, doctypeName)
 	if w := h.siteAnalyticsWorker(c); w != nil {
-		w.Flush()
+		_ = w.Flush() // best-effort: the response is already committed
 	}
 }
 

@@ -408,7 +408,7 @@ func syncConfigExportDir(path string) error {
 	if err != nil {
 		return err
 	}
-	defer directory.Close()
+	defer directory.Close() //nolint:errcheck // read-only directory handle
 	if err := directory.Sync(); err != nil {
 		return err
 	}

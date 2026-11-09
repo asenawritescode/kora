@@ -355,7 +355,7 @@ func SendCloudProductEvent(client *http.Client, cfg CloudRelayConfig, event Clou
 		return
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body) // drain so the connection can be reused
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		slog.Warn("cloud telemetry relay non-2xx response", "site_id", event.SiteID, "kind", event.Kind, "status", resp.StatusCode)
 	}

@@ -360,7 +360,11 @@ func (h *ConsoleHandler) HandleChangePassword(c *gin.Context) {
 		return
 	}
 
-	h.SystemGuard.UpdatePassword(req.NewPassword)
+	if err := h.SystemGuard.UpdatePassword(req.NewPassword); err != nil {
+		slog.Error("console password change failed", "error", err)
+		writeError(c, http.StatusInternalServerError, "internal.password_update_failed", "Password could not be changed", nil)
+		return
+	}
 	c.JSON(http.StatusOK, Response{Data: consoleMessageResponse{Message: "Password changed"}})
 }
 

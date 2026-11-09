@@ -531,7 +531,9 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 		var dts []string
 		for rows.Next() {
 			var d string
-			rows.Scan(&d)
+			if err := rows.Scan(&d); err != nil {
+				continue
+			}
 			if doctypeName != "all" {
 				dts = append(dts, d)
 				continue
@@ -570,7 +572,9 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 	var entries []entry
 	for rows.Next() {
 		var e entry
-		rows.Scan(&e.M, &e.D, &e.V)
+		if err := rows.Scan(&e.M, &e.D, &e.V); err != nil {
+			continue
+		}
 		entries = append(entries, e)
 	}
 	if len(entries) == 0 {

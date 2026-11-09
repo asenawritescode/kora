@@ -733,7 +733,9 @@ func resolveDateValue(v any) (time.Time, error) {
 	}
 	if strings.HasPrefix(s, "today+") {
 		var days int
-		fmt.Sscanf(s, "today+%d", &days)
+		if _, err := fmt.Sscanf(s, "today+%d", &days); err != nil {
+			return time.Time{}, fmt.Errorf("invalid relative date %q: expected today+<days>", s)
+		}
 		now := time.Now()
 		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, days), nil
 	}

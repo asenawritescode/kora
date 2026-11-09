@@ -533,7 +533,7 @@ func (b *channelBus) drainFileLimit(path string, limit int, handler func(ChangeE
 		}
 		return 0, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only WAL file
 
 	count := 0
 	var recordErr error
