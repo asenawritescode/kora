@@ -29,7 +29,7 @@ func TestIncomingModuleSchemasRegisterOfflineProviderForEmptyRuntime(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	providers, err := registeredSQLPublishedQueryProviders(t.Context(), "tenant-new", database, db.Resolve("libsql"), modules, schemas, nil)
+	providers, err := registeredSQLPublishedQueryProviders(t.Context(), moduleProviderSource{tenant: "tenant-new", db: database, dialect: db.Resolve("libsql"), modules: modules, schemas: schemas})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestRegisteredSQLPublishedQueryProviders_WiresOnlyUnconfiguredQueryOnlyCapa
 	module := contract.ModuleDescriptor{ID: query.OwnerModuleID, Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}, Queries: []contract.PublishedQuery{query}}
 	schemas := publishedQueryTestSchemas{in: true, out: true}
 
-	providers, err := registeredSQLPublishedQueryProviders(context.Background(), "tenant-a", database, db.Resolve("libsql"), []contract.ModuleDescriptor{module}, schemas, nil)
+	providers, err := registeredSQLPublishedQueryProviders(context.Background(), moduleProviderSource{tenant: "tenant-a", db: database, dialect: db.Resolve("libsql"), modules: []contract.ModuleDescriptor{module}, schemas: schemas})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestRegisteredSQLPublishedQueryProviders_WiresOnlyUnconfiguredQueryOnlyCapa
 	}
 
 	configured := []plugin.ProviderRegistration{{TenantID: "tenant-a", ProviderID: "external.sales", OwnerModuleID: module.ID, Kind: plugin.ProviderExternal, Offers: []contract.CapabilityOffer{offer}, Queries: map[string]plugin.PublishedQueryExecutor{query.Name: providers[0].Queries[query.Name]}, ValidateSchema: providers[0].ValidateSchema}}
-	providers, err = registeredSQLPublishedQueryProviders(context.Background(), "tenant-a", database, db.Resolve("libsql"), []contract.ModuleDescriptor{module}, schemas, configured)
+	providers, err = registeredSQLPublishedQueryProviders(context.Background(), moduleProviderSource{tenant: "tenant-a", db: database, dialect: db.Resolve("libsql"), modules: []contract.ModuleDescriptor{module}, schemas: schemas, configured: configured})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestRegisteredSQLPublishedQueryProviders_WiresOnlyUnconfiguredQueryOnlyCapa
 
 	mixed := module
 	mixed.Provides = []contract.CapabilityOffer{{Name: offer.Name, Contract: out, Operations: append(append([]contract.OperationSpec(nil), offer.Operations...), contract.OperationSpec{Name: "mutate", Input: in, Output: out, Effect: contract.EffectLocal})}}
-	providers, err = registeredSQLPublishedQueryProviders(context.Background(), "tenant-a", database, db.Resolve("libsql"), []contract.ModuleDescriptor{mixed}, schemas, nil)
+	providers, err = registeredSQLPublishedQueryProviders(context.Background(), moduleProviderSource{tenant: "tenant-a", db: database, dialect: db.Resolve("libsql"), modules: []contract.ModuleDescriptor{mixed}, schemas: schemas})
 	if err != nil {
 		t.Fatal(err)
 	}

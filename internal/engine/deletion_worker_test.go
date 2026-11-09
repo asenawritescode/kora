@@ -20,11 +20,11 @@ func TestPendingDeletionWorkerWaitsUntilStartAndJoins(t *testing.T) {
 	defer database.Close()
 
 	called := make(chan struct{}, 1)
-	worker, err := startPendingDeletionWorker(context.Background(), database, "mysql", nil, func(ctx context.Context, _ *sql.DB, _ string, _ *site.CommonConfig) error {
+	worker, err := startPendingDeletionWorker(context.Background(), pendingDeletionRecovery{platformDB: database, dbType: "mysql", retry: func(ctx context.Context, _ *sql.DB, _ string, _ *site.CommonConfig) error {
 		called <- struct{}{}
 		<-ctx.Done()
 		return nil
-	}, time.Hour)
+	}, interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,10 +71,10 @@ func TestPendingDeletionWorkerRetriesAdmissionRejection(t *testing.T) {
 
 	admission := &deletionAdmission{err: dbaccess.ErrExhausted, called: make(chan struct{}, 1)}
 	called := make(chan struct{}, 1)
-	worker, err := startPendingDeletionWorker(context.Background(), database, "mysql", nil, func(context.Context, *sql.DB, string, *site.CommonConfig) error {
+	worker, err := startPendingDeletionWorker(context.Background(), pendingDeletionRecovery{platformDB: database, dbType: "mysql", retry: func(context.Context, *sql.DB, string, *site.CommonConfig) error {
 		called <- struct{}{}
 		return nil
-	}, time.Hour, admission)
+	}, interval: time.Hour, admission: admission})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,10 +105,10 @@ func TestPendingDeletionWorkerCanStopBeforeReadiness(t *testing.T) {
 	defer database.Close()
 
 	called := make(chan struct{}, 1)
-	worker, err := startPendingDeletionWorker(context.Background(), database, "mysql", nil, func(context.Context, *sql.DB, string, *site.CommonConfig) error {
+	worker, err := startPendingDeletionWorker(context.Background(), pendingDeletionRecovery{platformDB: database, dbType: "mysql", retry: func(context.Context, *sql.DB, string, *site.CommonConfig) error {
 		called <- struct{}{}
 		return nil
-	}, time.Hour)
+	}, interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,10 +131,10 @@ func TestPendingDeletionWorkerCountsRetryFailures(t *testing.T) {
 	}
 	defer database.Close()
 	called := make(chan struct{}, 1)
-	worker, err := startPendingDeletionWorker(context.Background(), database, "mysql", nil, func(context.Context, *sql.DB, string, *site.CommonConfig) error {
+	worker, err := startPendingDeletionWorker(context.Background(), pendingDeletionRecovery{platformDB: database, dbType: "mysql", retry: func(context.Context, *sql.DB, string, *site.CommonConfig) error {
 		called <- struct{}{}
 		return errors.New("transient delete failure")
-	}, time.Hour)
+	}, interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,5 +153,32 @@ func TestPendingDeletionWorkerCountsRetryFailures(t *testing.T) {
 	}
 	if err := worker.Shutdown(context.Background()); err != nil {
 		t.Fatal("shutdown:", err)
+	}
+}
+
+func TestStartPendingDeletionWorkerRequiresItsInputs(t *testing.T) {
+	database, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	retry := func(context.Context, *sql.DB, string, *site.CommonConfig) error { return nil }
+	tests := []struct {
+		name   string
+		parent context.Context
+		rec    pendingDeletionRecovery
+	}{
+		{"no context", nil, pendingDeletionRecovery{platformDB: database, retry: retry, interval: time.Hour}},
+		{"no platform database", context.Background(), pendingDeletionRecovery{retry: retry, interval: time.Hour}},
+		{"no retry function", context.Background(), pendingDeletionRecovery{platformDB: database, interval: time.Hour}},
+		{"no interval", context.Background(), pendingDeletionRecovery{platformDB: database, retry: retry}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			worker, err := startPendingDeletionWorker(tt.parent, tt.rec) //nolint:staticcheck // a nil context is the rejected input under test
+			if err == nil || worker != nil {
+				t.Fatalf("startPendingDeletionWorker = (%v, %v), want an error and no worker", worker, err)
+			}
+		})
 	}
 }

@@ -109,7 +109,7 @@ func (e *managementInvitationExecutor) ReconcileInvitation(ctx context.Context, 
 		return contract.NewError(contract.CodeConflict, "tenant invitation receipt changed during reconciliation")
 	}
 	if command.Outcome == contract.InvitationNotDelivered {
-		if err := revokeInvitationForReconciliation(ctx, tx, dialect, tenant, emailAddress, linkID, now); err != nil {
+		if err := revokeInvitationForReconciliation(ctx, tx, dialect, invitationRevocation{tenant: tenant, email: emailAddress, linkID: linkID, now: now}); err != nil {
 			return err
 		}
 	}
@@ -119,9 +119,17 @@ func (e *managementInvitationExecutor) ReconcileInvitation(ctx context.Context, 
 	return nil
 }
 
-func revokeInvitationForReconciliation(ctx context.Context, tx *sql.Tx, dialect db.Dialect, tenant, emailAddress, linkID string, now time.Time) error {
+// invitationRevocation names the magic link a reconciliation revokes.
+type invitationRevocation struct {
+	tenant string
+	email  string
+	linkID string
+	now    time.Time
+}
+
+func revokeInvitationForReconciliation(ctx context.Context, tx *sql.Tx, dialect db.Dialect, rev invitationRevocation) error {
 	var usedAt, revokedAt sql.NullTime
-	if err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT used_at, revoked_at FROM _kora_magic_link WHERE id = ? AND site = ? AND email = ?`), linkID, tenant, emailAddress).Scan(&usedAt, &revokedAt); err != nil {
+	if err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT used_at, revoked_at FROM _kora_magic_link WHERE id = ? AND site = ? AND email = ?`), rev.linkID, rev.tenant, rev.email).Scan(&usedAt, &revokedAt); err != nil {
 		return contract.NewError(contract.CodeConflict, "uncertain invitation token is missing or does not match its receipt")
 	}
 	if usedAt.Valid {
@@ -130,7 +138,7 @@ func revokeInvitationForReconciliation(ctx context.Context, tx *sql.Tx, dialect 
 	if revokedAt.Valid {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_magic_link SET revoked_at = ? WHERE id = ? AND site = ? AND email = ? AND used_at IS NULL AND revoked_at IS NULL`), now, linkID, tenant, emailAddress); err != nil {
+	if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_magic_link SET revoked_at = ? WHERE id = ? AND site = ? AND email = ? AND used_at IS NULL AND revoked_at IS NULL`), rev.now, rev.linkID, rev.tenant, rev.email); err != nil {
 		return contract.NewError(contract.CodeDependencyUnavailable, "uncertain invitation token could not be revoked")
 	}
 	return nil
@@ -243,11 +251,12 @@ func (e *managementInvitationExecutor) Execute(ctx context.Context, claim manage
 		return failed(contract.CodeValidationFailed, "tenant canonical host cannot be used for a secure invitation link")
 	}
 	linkID := fmt.Sprintf("ml-%s-%d", claim.Operation.ID, claim.Fence)
+	ledger := invitationLedger{database: runtime.DB, dialect: dialect, claim: claim}
 	var prepareErr error
 	if retryApproved {
-		prepareErr = retryInvitationDelivery(ctx, runtime.DB, dialect, claim, command.Email, linkID, auth.MagicLinkTokenHash(token))
+		prepareErr = retryInvitationDelivery(ctx, ledger, invitationLink{email: command.Email, id: linkID, tokenHash: auth.MagicLinkTokenHash(token)})
 	} else {
-		prepareErr = beginInvitationDelivery(ctx, runtime.DB, dialect, claim, command.Email, linkID, auth.MagicLinkTokenHash(token))
+		prepareErr = beginInvitationDelivery(ctx, ledger, invitationLink{email: command.Email, id: linkID, tokenHash: auth.MagicLinkTokenHash(token)})
 	}
 	if prepareErr != nil {
 		if accepted, result, lookupErr := invitationReceipt(ctx, runtime.DB, dialect, claim, command); lookupErr == nil && accepted {
@@ -257,12 +266,12 @@ func (e *managementInvitationExecutor) Execute(ctx context.Context, claim manage
 	}
 	subject, textBody, htmlBody := email.MagicLinkTemplate("Kora", loginURL, 15)
 	if err := e.mailer.SendContext(ctx, &email.Message{To: []string{user.Email}, Subject: subject, TextBody: textBody, HTMLBody: htmlBody}); err != nil {
-		if err := recordInvitationOutcome(ctx, runtime.DB, dialect, claim, "unknown", true); err != nil {
+		if err := recordInvitationOutcome(ctx, ledger, "unknown", true); err != nil {
 			return recovery("tenant invitation delivery outcome is uncertain and its receipt needs recovery")
 		}
 		return recovery("tenant invitation delivery outcome is uncertain; inspect the provider before issuing another link")
 	}
-	if err := recordInvitationOutcome(ctx, runtime.DB, dialect, claim, "accepted", false); err != nil {
+	if err := recordInvitationOutcome(ctx, ledger, "accepted", false); err != nil {
 		return recovery("email provider accepted the invitation but its durable receipt needs recovery")
 	}
 	return management.FinishResult{State: contract.OperationSucceeded}, nil
@@ -328,8 +337,23 @@ func fenceUncertainInvitation(ctx context.Context, database *sql.DB, dialect db.
 	return tx.Commit()
 }
 
-func beginInvitationDelivery(ctx context.Context, database *sql.DB, dialect db.Dialect, claim management.Claim, emailAddress, linkID, tokenHash string) error {
-	tx, err := database.BeginTx(ctx, nil)
+// invitationLedger addresses the magic-link delivery receipt of one claimed
+// operation.
+type invitationLedger struct {
+	database *sql.DB
+	dialect  db.Dialect
+	claim    management.Claim
+}
+
+// invitationLink is the magic link issued for one invitation attempt.
+type invitationLink struct {
+	email     string
+	id        string
+	tokenHash string
+}
+
+func beginInvitationDelivery(ctx context.Context, ledger invitationLedger, link invitationLink) error {
+	tx, err := ledger.database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -340,12 +364,12 @@ func beginInvitationDelivery(ctx context.Context, database *sql.DB, dialect db.D
 		}
 	}()
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `INSERT INTO _kora_magic_link (id, site, email, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`),
-		linkID, string(claim.Operation.Tenant), emailAddress, tokenHash, now.Add(15*time.Minute), now); err != nil {
+	if _, err := tx.ExecContext(ctx, db.Rebind(ledger.dialect, `INSERT INTO _kora_magic_link (id, site, email, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`),
+		link.id, string(ledger.claim.Operation.Tenant), link.email, link.tokenHash, now.Add(15*time.Minute), now); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `INSERT INTO _kora_magic_link_delivery (operation_id, tenant_id, email, magic_link_id, status, worker_fence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-		string(claim.Operation.ID), string(claim.Operation.Tenant), emailAddress, linkID, "sending", int64(claim.Fence), now, now); err != nil {
+	if _, err := tx.ExecContext(ctx, db.Rebind(ledger.dialect, `INSERT INTO _kora_magic_link_delivery (operation_id, tenant_id, email, magic_link_id, status, worker_fence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+		string(ledger.claim.Operation.ID), string(ledger.claim.Operation.Tenant), link.email, link.id, "sending", int64(ledger.claim.Fence), now, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -355,8 +379,8 @@ func beginInvitationDelivery(ctx context.Context, database *sql.DB, dialect db.D
 	return nil
 }
 
-func recordInvitationOutcome(ctx context.Context, database *sql.DB, dialect db.Dialect, claim management.Claim, status string, revoke bool) error {
-	tx, err := database.BeginTx(ctx, nil)
+func recordInvitationOutcome(ctx context.Context, ledger invitationLedger, status string, revoke bool) error {
+	tx, err := ledger.database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -369,11 +393,11 @@ func recordInvitationOutcome(ctx context.Context, database *sql.DB, dialect db.D
 	now := time.Now().UTC()
 	var linkID string
 	if revoke {
-		if err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT magic_link_id FROM _kora_magic_link_delivery WHERE operation_id = ? AND status = 'sending' AND worker_fence = ?`), string(claim.Operation.ID), int64(claim.Fence)).Scan(&linkID); err != nil {
-			return err
+		if scanErr := tx.QueryRowContext(ctx, db.Rebind(ledger.dialect, `SELECT magic_link_id FROM _kora_magic_link_delivery WHERE operation_id = ? AND status = 'sending' AND worker_fence = ?`), string(ledger.claim.Operation.ID), int64(ledger.claim.Fence)).Scan(&linkID); scanErr != nil {
+			return scanErr
 		}
 	}
-	result, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_magic_link_delivery SET status = ?, updated_at = ? WHERE operation_id = ? AND status = 'sending' AND worker_fence = ?`), status, now, string(claim.Operation.ID), int64(claim.Fence))
+	result, err := tx.ExecContext(ctx, db.Rebind(ledger.dialect, `UPDATE _kora_magic_link_delivery SET status = ?, updated_at = ? WHERE operation_id = ? AND status = 'sending' AND worker_fence = ?`), status, now, string(ledger.claim.Operation.ID), int64(ledger.claim.Fence))
 	if err != nil {
 		return err
 	}
@@ -385,7 +409,7 @@ func recordInvitationOutcome(ctx context.Context, database *sql.DB, dialect db.D
 		return fmt.Errorf("tenant invitation claim fence is no longer current")
 	}
 	if revoke {
-		if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_magic_link SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ? AND used_at IS NULL`), now, linkID); err != nil {
+		if _, err := tx.ExecContext(ctx, db.Rebind(ledger.dialect, `UPDATE _kora_magic_link SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ? AND used_at IS NULL`), now, linkID); err != nil {
 			return err
 		}
 	}
@@ -396,24 +420,24 @@ func recordInvitationOutcome(ctx context.Context, database *sql.DB, dialect db.D
 	return nil
 }
 
-func retryInvitationDelivery(ctx context.Context, database *sql.DB, dialect db.Dialect, claim management.Claim, emailAddress, linkID, tokenHash string) error {
-	tx, err := database.BeginTx(ctx, nil)
+func retryInvitationDelivery(ctx context.Context, ledger invitationLedger, link invitationLink) error {
+	tx, err := ledger.database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	var tenant, storedEmail, status string
-	if err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT tenant_id, email, status FROM _kora_magic_link_delivery WHERE operation_id = ?`), string(claim.Operation.ID)).Scan(&tenant, &storedEmail, &status); err != nil {
-		return err
+	if scanErr := tx.QueryRowContext(ctx, db.Rebind(ledger.dialect, `SELECT tenant_id, email, status FROM _kora_magic_link_delivery WHERE operation_id = ?`), string(ledger.claim.Operation.ID)).Scan(&tenant, &storedEmail, &status); scanErr != nil {
+		return scanErr
 	}
-	if tenant != string(claim.Operation.Tenant) || storedEmail != emailAddress || status != "retryable" {
+	if tenant != string(ledger.claim.Operation.Tenant) || storedEmail != link.email || status != "retryable" {
 		return fmt.Errorf("invitation is not in an operator-approved retry state")
 	}
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `INSERT INTO _kora_magic_link (id, site, email, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`), linkID, tenant, emailAddress, tokenHash, now.Add(15*time.Minute), now); err != nil {
-		return err
+	if _, insertErr := tx.ExecContext(ctx, db.Rebind(ledger.dialect, `INSERT INTO _kora_magic_link (id, site, email, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`), link.id, tenant, link.email, link.tokenHash, now.Add(15*time.Minute), now); insertErr != nil {
+		return insertErr
 	}
-	result, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_magic_link_delivery SET magic_link_id = ?, status = 'sending', worker_fence = ?, updated_at = ? WHERE operation_id = ? AND tenant_id = ? AND email = ? AND status = 'retryable'`), linkID, int64(claim.Fence), now, string(claim.Operation.ID), tenant, emailAddress)
+	result, err := tx.ExecContext(ctx, db.Rebind(ledger.dialect, `UPDATE _kora_magic_link_delivery SET magic_link_id = ?, status = 'sending', worker_fence = ?, updated_at = ? WHERE operation_id = ? AND tenant_id = ? AND email = ? AND status = 'retryable'`), link.id, int64(ledger.claim.Fence), now, string(ledger.claim.Operation.ID), tenant, link.email)
 	if err != nil {
 		return err
 	}

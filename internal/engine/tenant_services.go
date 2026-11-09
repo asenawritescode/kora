@@ -212,17 +212,23 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	config.KernelCommands = tenantCommands
 	services.KernelCommands = tenantCommands
 	domainKernel.Commands = tenantCommands
-	internalProviders, moduleErr := registeredKernelCommandProviders(tenantID, loaded.DB, loaded.Registry, moduleSnapshot.Modules, config.KernelCommands, domainKernel, config.ModuleSchemas, providers)
+	internalProviders, moduleErr := registeredKernelCommandProviders(moduleProviderSource{
+		tenant: tenantID, db: loaded.DB, registry: loaded.Registry, modules: moduleSnapshot.Modules, schemas: config.ModuleSchemas, configured: providers,
+	}, config.KernelCommands, domainKernel)
 	if moduleErr != nil {
 		return fmt.Errorf("register internal module command providers for tenant %s: %w", loaded.Name, moduleErr)
 	}
 	providers = append(providers, internalProviders...)
-	configQueryProviders, moduleErr := registeredConfigQueryProviders(tenantID, loaded.DB, dialect, loaded.Registry, moduleSnapshot.Modules, configQueries, config.ModuleSchemas, false)
+	configQueryProviders, moduleErr := registeredConfigQueryProviders(moduleProviderSource{
+		tenant: tenantID, db: loaded.DB, dialect: dialect, registry: loaded.Registry, modules: moduleSnapshot.Modules, schemas: config.ModuleSchemas,
+	}, configQueries, false)
 	if moduleErr != nil {
 		return fmt.Errorf("register config query providers for tenant %s: %w", loaded.Name, moduleErr)
 	}
 	providers = append(providers, configQueryProviders...)
-	publishedQueryProviders, moduleErr := registeredSQLPublishedQueryProviders(config.ProcessContext, tenantID, loaded.DB, dialect, moduleSnapshot.Modules, config.ModuleSchemas, providers)
+	publishedQueryProviders, moduleErr := registeredSQLPublishedQueryProviders(config.ProcessContext, moduleProviderSource{
+		tenant: tenantID, db: loaded.DB, dialect: dialect, modules: moduleSnapshot.Modules, schemas: config.ModuleSchemas, configured: providers,
+	})
 	if moduleErr != nil {
 		return fmt.Errorf("register durable published query providers for tenant %s: %w", loaded.Name, moduleErr)
 	}
@@ -267,17 +273,23 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		candidateKernel := kernel.New(dialect, outbox.NewSQLWriter(dialect))
 		candidateKernel.CommandSchemas = candidateSchemas
 		candidateProviders := append([]plugin.ProviderRegistration(nil), configuredProviders...)
-		commands, err := registeredKernelCommandProviders(tenantID, loaded.DB, candidateRegistry, modules, candidateCommands, candidateKernel, candidateSchemas, candidateProviders)
+		commands, err := registeredKernelCommandProviders(moduleProviderSource{
+			tenant: tenantID, db: loaded.DB, registry: candidateRegistry, modules: modules, schemas: candidateSchemas, configured: candidateProviders,
+		}, candidateCommands, candidateKernel)
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}
 		candidateProviders = append(candidateProviders, commands...)
-		configProviders, err := registeredConfigQueryProviders(tenantID, loaded.DB, dialect, candidateRegistry, modules, configQueriesForModules(candidateQueries, modules), candidateSchemas, true)
+		configProviders, err := registeredConfigQueryProviders(moduleProviderSource{
+			tenant: tenantID, db: loaded.DB, dialect: dialect, registry: candidateRegistry, modules: modules, schemas: candidateSchemas,
+		}, configQueriesForModules(candidateQueries, modules), true)
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}
 		candidateProviders = append(candidateProviders, configProviders...)
-		queries, err := registeredSQLPublishedQueryProviders(config.ProcessContext, tenantID, loaded.DB, dialect, modules, candidateSchemas, candidateProviders)
+		queries, err := registeredSQLPublishedQueryProviders(config.ProcessContext, moduleProviderSource{
+			tenant: tenantID, db: loaded.DB, dialect: dialect, modules: modules, schemas: candidateSchemas, configured: candidateProviders,
+		})
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}

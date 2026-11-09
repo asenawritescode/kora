@@ -92,8 +92,17 @@ func memberRoleProblem(ctx context.Context, q memberQueryer, dialect db.Dialect,
 // A plan has no Cloud subject yet, so a disabled Cloud member is assumed to be
 // the invitee. A grant only gets here when no row holds its subject, so every
 // holder of the email is another user.
-func memberEmailProblem(ctx context.Context, q memberQueryer, dialect db.Dialect, tenantSite, email string, planning bool) (*contract.TenantMemberProblem, error) {
-	rows, err := q.QueryContext(ctx, db.Rebind(dialect, `SELECT name, site, email, enabled, password_hash FROM _kora_user WHERE site = ? AND LOWER(email) = LOWER(?)`), tenantSite, email)
+// memberEmailCheck is the email lookup memberEmailProblem judges: planning
+// is true for a read-only plan and false when a grant is applied.
+type memberEmailCheck struct {
+	dialect  db.Dialect
+	site     string
+	email    string
+	planning bool
+}
+
+func memberEmailProblem(ctx context.Context, q memberQueryer, check memberEmailCheck) (*contract.TenantMemberProblem, error) {
+	rows, err := q.QueryContext(ctx, db.Rebind(check.dialect, `SELECT name, site, email, enabled, password_hash FROM _kora_user WHERE site = ? AND LOWER(email) = LOWER(?)`), check.site, check.email)
 	if err != nil {
 		return nil, fmt.Errorf("read tenant users by email: %w", err)
 	}
@@ -103,8 +112,8 @@ func memberEmailProblem(ctx context.Context, q memberQueryer, dialect db.Dialect
 	}
 	for _, holder := range holders {
 		switch {
-		case planning && holder.passwordless && !holder.enabled:
-		case planning && holder.passwordless:
+		case check.planning && holder.passwordless && !holder.enabled:
+		case check.planning && holder.passwordless:
 			return &contract.TenantMemberProblem{Code: contract.TenantMemberAlreadyExists, Message: "this email already belongs to a member of this tenant"}, nil
 		default:
 			return &contract.TenantMemberProblem{Code: contract.TenantMemberEmailInUse, Message: "this email already belongs to another user of this tenant"}, nil
@@ -130,7 +139,7 @@ func (e *managementMemberExecutor) PlanMember(ctx context.Context, tenant contra
 				return memberRoleProblem(ctx, target.DB, target.Dialect, target.Site, request.Roles[0])
 			},
 			func() (*contract.TenantMemberProblem, error) {
-				return memberEmailProblem(ctx, target.DB, target.Dialect, target.Site, request.Email, true)
+				return memberEmailProblem(ctx, target.DB, memberEmailCheck{dialect: target.Dialect, site: target.Site, email: request.Email, planning: true})
 			},
 		} {
 			problem, err := check()
@@ -235,8 +244,8 @@ func grantTenantMember(ctx context.Context, target managementMemberRuntime, oper
 		_, err = tx.ExecContext(ctx, db.Rebind(target.Dialect, `UPDATE _kora_user SET enabled = ?, roles = ?, full_name = ?, email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP) WHERE site = ? AND name = ?`),
 			true, role, command.FullName, target.Site, string(command.Subject))
 	} else {
-		if problem, err := memberEmailProblem(ctx, tx, target.Dialect, target.Site, command.Email, false); problem != nil || err != nil {
-			return problem, err
+		if problem, emailErr := memberEmailProblem(ctx, tx, memberEmailCheck{dialect: target.Dialect, site: target.Site, email: command.Email}); problem != nil || emailErr != nil {
+			return problem, emailErr
 		}
 		_, err = tx.ExecContext(ctx, db.Rebind(target.Dialect, `INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled, email_verified_at, roles) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`),
 			string(command.Subject), target.Site, command.Email, site.PasswordlessPasswordHash, command.FullName, true, role)

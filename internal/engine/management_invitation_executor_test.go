@@ -52,7 +52,7 @@ func TestInvitationDeliveryJournalCommitsIntentBeforeSMTP(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_magic_link (id, site, email, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)")).WithArgs("ml-operation-invite-1", "tenant-123456789", "owner@example.test", "token-hash", sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_magic_link_delivery (operation_id, tenant_id, email, magic_link_id, status, worker_fence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")).WithArgs("operation-invite-1", "tenant-123456789", "owner@example.test", "ml-operation-invite-1", "sending", int64(1), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	if err := beginInvitationDelivery(context.Background(), database, dialect, invitationClaim(1), "owner@example.test", "ml-operation-invite-1", "token-hash"); err != nil {
+	if err := beginInvitationDelivery(context.Background(), invitationLedger{database: database, dialect: dialect, claim: invitationClaim(1)}, invitationLink{email: "owner@example.test", id: "ml-operation-invite-1", tokenHash: "token-hash"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -138,7 +138,7 @@ func TestRetryInvitationDeliveryCreatesFreshSingleUseLink(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO _kora_magic_link (id, site, email, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)")).WithArgs("ml-operation-invite-1-3", string(claim.Operation.Tenant), "owner@example.test", "new-token-hash", sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE _kora_magic_link_delivery SET magic_link_id = ?, status = 'sending', worker_fence = ?, updated_at = ? WHERE operation_id = ? AND tenant_id = ? AND email = ? AND status = 'retryable'")).WithArgs("ml-operation-invite-1-3", int64(3), sqlmock.AnyArg(), "operation-invite-1", string(claim.Operation.Tenant), "owner@example.test").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	if err := retryInvitationDelivery(context.Background(), database, db.Resolve("mysql"), claim, "owner@example.test", "ml-operation-invite-1-3", "new-token-hash"); err != nil {
+	if err := retryInvitationDelivery(context.Background(), invitationLedger{database: database, dialect: db.Resolve("mysql"), claim: claim}, invitationLink{email: "owner@example.test", id: "ml-operation-invite-1-3", tokenHash: "new-token-hash"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -160,7 +160,7 @@ func TestNotDeliveredReconciliationCannotReuseAUsedInvitationToken(t *testing.T)
 	usedAt := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT used_at, revoked_at FROM _kora_magic_link WHERE id = ? AND site = ? AND email = ?")).WithArgs("link-1", "tenant-123456789", "owner@example.test").WillReturnRows(sqlmock.NewRows([]string{"used_at", "revoked_at"}).AddRow(usedAt, nil))
 	mock.ExpectRollback()
-	err = revokeInvitationForReconciliation(context.Background(), tx, db.Resolve("mysql"), "tenant-123456789", "owner@example.test", "link-1", time.Now())
+	err = revokeInvitationForReconciliation(context.Background(), tx, db.Resolve("mysql"), invitationRevocation{tenant: "tenant-123456789", email: "owner@example.test", linkID: "link-1", now: time.Now()})
 	if err == nil || !strings.Contains(err.Error(), "already been used") {
 		t.Fatalf("used invitation token error=%v", err)
 	}
