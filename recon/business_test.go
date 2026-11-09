@@ -106,7 +106,7 @@ func TestExecuteBusinessReconciliationPagesOwnerQueriesAndPinsWatermarks(t *test
 		if request.Scope != scope || request.Limit == 0 {
 			t.Fatalf("invalid owner query request: %+v", request)
 		}
-		data := `[]`
+		var data string
 		next := ""
 		if request.Name == "billable" {
 			if request.Cursor == "" {

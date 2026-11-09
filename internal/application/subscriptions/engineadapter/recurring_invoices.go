@@ -32,8 +32,8 @@ const JobType scheduler.JobType = "subscription_invoice"
 
 const (
 	BillingCapabilityName     contract.CapabilityName = "billing.invoice"
-	BillingCreateOperation                            = "create_obligation@1"
-	BillingReconcileOperation                         = "reconcile_obligation@1"
+	BillingCreateOperation    string                  = "create_obligation@1"
+	BillingReconcileOperation string                  = "reconcile_obligation@1"
 )
 
 type recurringInvoiceGenerator struct {

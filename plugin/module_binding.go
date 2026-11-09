@@ -320,7 +320,7 @@ func (p BindingPlan) ExecutePublishedQueryForActor(ctx context.Context, scope co
 func (p BindingPlan) ReplayPublishedQueryForActor(ctx context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, actorScope PublishedQueryActorScope, input json.RawMessage, snapshotToken, afterCursor, throughCursor, replayCursor string, limit uint16) (contract.QueryReplayPage, error) {
 	key := PublishedQueryKey{Scope: scope, OwnerModuleID: owner, Name: name}
 	resolved, ok := p.Queries[key]
-	if !ok || resolved.replay == nil || resolved.validate == nil || resolved.Definition.OfflineEligible == false || actorScope.BusinessScope != scope || strings.TrimSpace(actorScope.SubjectID) == "" {
+	if !ok || resolved.replay == nil || resolved.validate == nil || !resolved.Definition.OfflineEligible || actorScope.BusinessScope != scope || strings.TrimSpace(actorScope.SubjectID) == "" {
 		return contract.QueryReplayPage{}, fmt.Errorf("published query is not eligible for offline actor replay")
 	}
 	query := resolved.Definition

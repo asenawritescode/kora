@@ -27,7 +27,7 @@ var tenantDatabaseNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // ValidateTenantDatabaseName bounds identifiers before they are interpolated
 // into backend-specific CREATE DATABASE statements or DSNs.
 func ValidateTenantDatabaseName(driver, name string) error {
-	maxBytes := 128
+	var maxBytes int
 	switch strings.ToLower(strings.TrimSpace(driver)) {
 	case "", "mysql", "mariadb":
 		maxBytes = 64

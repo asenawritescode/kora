@@ -988,11 +988,11 @@ func valueMatchesFieldType(value any, fieldType string) bool {
 	}
 	switch strings.ToLower(strings.TrimSpace(fieldType)) {
 	case "int", "integer", "float", "currency", "percent":
-		switch value.(type) {
+		switch typed := value.(type) {
 		case int, int32, int64, float32, float64, json.Number:
 			return true
 		case string:
-			_, err := strconv.ParseFloat(strings.TrimSpace(value.(string)), 64)
+			_, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
 			return err == nil
 		default:
 			return false

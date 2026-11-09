@@ -3,7 +3,6 @@ package print
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"text/template"
@@ -107,7 +106,7 @@ func Decode(raw json.RawMessage) (*Format, error) {
 }
 
 func invalid(format string, a ...any) error {
-	return fmt.Errorf("%s: %w", ErrTemplateInvalid, errors.New(fmt.Sprintf(format, a...)))
+	return fmt.Errorf("%s: %w", ErrTemplateInvalid, fmt.Errorf(format, a...))
 }
 
 // allowedBuiltins are the text/template builtins kept; call, html, js,

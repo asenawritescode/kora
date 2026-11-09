@@ -40,7 +40,6 @@ func TestERPLayersComposeWithoutDanglingLinks(t *testing.T) {
 }
 
 func TestERPLayersShareOneRoleDefinition(t *testing.T) {
-	type role struct{ description string }
 	seen := map[string]Role{}
 	for _, pack := range erpPackLayers {
 		roles, _, err := ParseRolesDirectory(filepath.Join("..", "config", pack, "doctypes"))

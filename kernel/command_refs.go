@@ -20,8 +20,6 @@ type refEnv struct {
 	input map[string]any
 	item  map[string]any
 	steps map[string]string
-	// rows holds stored child rows of guarded records, keyed alias.field.
-	rows map[string][]map[string]any
 	// computed holds values derived by the command's compute block.
 	computed map[string]any
 	// fieldReader returns one scalar field of the record an alias names, read
