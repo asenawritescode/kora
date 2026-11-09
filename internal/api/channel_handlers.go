@@ -516,7 +516,7 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 		status = "error"
 		errorMessage = result
 	}
-	if err := h.insertChannelAudit(c, req.ToolName, ternary(readOnly, "query", "mutate"), status, summarizeArgs(req.Args), summarizeText(result), errorMessage); err != nil {
+	if err := h.insertChannelAudit(c, channelAuditEntry{Tool: req.ToolName, Kind: ternary(readOnly, "query", "mutate"), Status: status, Request: summarizeArgs(req.Args), Response: summarizeText(result), Error: errorMessage}); err != nil {
 		internalError(c, "insert channel audit", err)
 		return
 	}
@@ -527,7 +527,19 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 	c.JSON(http.StatusOK, Response{Data: channelToolResponse{Result: result}})
 }
 
-func (h *Handler) insertChannelAudit(c *gin.Context, toolName, operationKind, status, requestSummary, responseSummary, errorMessage string) error {
+// channelAuditEntry is one row of the channel tool audit log.
+type channelAuditEntry struct {
+	// Tool is the tool that ran and Kind is query or mutate.
+	Tool, Kind string
+	// Status is success or error.
+	Status string
+	// Request and Response summarize the arguments and the result.
+	Request, Response string
+	// Error is the failure message, if any.
+	Error string
+}
+
+func (h *Handler) insertChannelAudit(c *gin.Context, entry channelAuditEntry) error {
 	db := h.queryDB(c)
 	if db == nil {
 		return sql.ErrConnDone
@@ -538,7 +550,7 @@ func (h *Handler) insertChannelAudit(c *gin.Context, toolName, operationKind, st
 		(id, site, channel_session_id, conversation_key, provider, sender_address, tool_name, operation_kind, status, request_summary, response_summary, error_message, created_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		auth.NewAuditID(), siteNameStr, c.GetString("channel_session_id"), c.GetString("channel_conversation_key"),
-		"twilio_whatsapp", c.GetString("channel_sender_address"), toolName, operationKind, status, requestSummary, responseSummary, errorMessage, time.Now().UTC(),
+		"twilio_whatsapp", c.GetString("channel_sender_address"), entry.Tool, entry.Kind, entry.Status, entry.Request, entry.Response, entry.Error, time.Now().UTC(),
 	)
 	return err
 }

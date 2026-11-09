@@ -98,13 +98,13 @@ func TestRealtimeEntityEventsRequireExactScopeGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Set("policy_execution", execution)
-	if !h.realtimeEventVisible(c, "Invoice", "INV-1", nil, eventstream.EventUpdate, entityA) {
+	if !h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Op: eventstream.EventUpdate, Scope: &entityA}) {
 		t.Fatal("matching entity event was denied")
 	}
-	if h.realtimeEventVisible(c, "Invoice", "INV-1", nil, eventstream.EventUpdate, entityB) {
+	if h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Op: eventstream.EventUpdate, Scope: &entityB}) {
 		t.Fatal("cross-entity event was delivered")
 	}
-	if h.realtimeEventVisible(c, "Invoice", "INV-1", nil, eventstream.EventUpdate) {
+	if h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Op: eventstream.EventUpdate}) {
 		t.Fatal("unscoped entity event was delivered")
 	}
 }
@@ -245,7 +245,7 @@ func TestRealtimeReadAuthorizationAndFieldProjection(t *testing.T) {
 	c.Set("user", "a@example.test")
 	setRealtimeTestExecution(c, []string{"Viewer"}, false)
 	data := map[string]any{"owner": "a@example.test", "amount": 12, "secret": "private"}
-	if !h.realtimeEventVisible(c, "Invoice", "INV-1", data, analytics.EventUpdate) {
+	if !h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: data, Op: analytics.EventUpdate}) {
 		t.Fatal("read role was denied")
 	}
 	projected := visibleRealtimeFields(reg.Get("Invoice"), data)
@@ -254,19 +254,19 @@ func TestRealtimeReadAuthorizationAndFieldProjection(t *testing.T) {
 	}
 	c.Set("user_roles", []string{"Unknown"})
 	setRealtimeTestExecution(c, []string{"Unknown"}, false)
-	if h.realtimeEventVisible(c, "Invoice", "INV-1", data, analytics.EventUpdate) {
+	if h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: data, Op: analytics.EventUpdate}) {
 		t.Fatal("event without read permission was allowed")
 	}
 	c.Set("user_roles", []string{})
 	setRealtimeTestExecution(c, nil, false)
-	if h.realtimeEventVisible(c, "Invoice", "INV-1", data, analytics.EventUpdate) {
+	if h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: data, Op: analytics.EventUpdate}) {
 		t.Fatal("event without an authenticated read role was allowed")
 	}
 	c.Set("user_roles", []string{"Viewer"})
 	c.Set("user", "")
 	setRealtimeTestExecution(c, []string{"Viewer"}, false)
 	reg.Permissions.SetPermission(&doctype.Permission{Doctype: "Invoice", Role: "Viewer", Read: true, IfOwner: true})
-	if h.realtimeEventVisible(c, "Invoice", "INV-1", data, analytics.EventUpdate) {
+	if h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: data, Op: analytics.EventUpdate}) {
 		t.Fatal("owner-scoped event was allowed without an actor identity")
 	}
 }
@@ -282,7 +282,7 @@ func TestRealtimeAndPermissionProjectionRequireVerifiedExecution(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
 	c.Set("user_roles", []string{doctype.AdminRole})
 	c.Set("user", "caller@example.test")
-	if h.realtimeEventVisible(c, "Invoice", "INV-1", map[string]any{}, analytics.EventUpdate) {
+	if h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: map[string]any{}, Op: analytics.EventUpdate}) {
 		t.Fatal("unverified caller-supplied roles authorized realtime delivery")
 	}
 	for operation, allowed := range getUserPermissions(reg, c, "Invoice") {
@@ -307,10 +307,10 @@ func TestRealtimeNotificationsUseVerifiedRecipientIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Set("policy_execution", execution)
-	if h.realtimeEventVisible(c, "", "", map[string]any{"recipient": "bob@example.test"}, analytics.EventNotification) {
+	if h.realtimeEventVisible(c, realtimeEvent{DocType: "", Name: "", Data: map[string]any{"recipient": "bob@example.test"}, Op: analytics.EventNotification}) {
 		t.Fatal("notification recipient from legacy Gin user field bypassed verified identity")
 	}
-	if !h.realtimeEventVisible(c, "", "", map[string]any{"recipient": "alice@example.test"}, analytics.EventNotification) {
+	if !h.realtimeEventVisible(c, realtimeEvent{DocType: "", Name: "", Data: map[string]any{"recipient": "alice@example.test"}, Op: analytics.EventNotification}) {
 		t.Fatal("verified actor could not receive its own notification")
 	}
 }
@@ -325,16 +325,16 @@ func TestRealtimeExtensionReadPermissionStillHonorsOwnerRestriction(t *testing.T
 	c.Set("auth_type", "extension")
 	c.Set("extension_permissions", []doctype.Permission{{Doctype: "Invoice", Read: true, IfOwner: true}})
 	setRealtimeTestExecution(c, nil, true)
-	if h.realtimeEventVisible(c, "Invoice", "INV-1", map[string]any{"owner": "other@example.test"}, analytics.EventUpdate) {
+	if h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: map[string]any{"owner": "other@example.test"}, Op: analytics.EventUpdate}) {
 		t.Fatal("extension received an event outside its owner restriction")
 	}
 	c.Set("user", "owner@example.test")
-	if h.realtimeEventVisible(c, "Invoice", "INV-1", map[string]any{"owner": "owner@example.test"}, analytics.EventUpdate) {
+	if h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: map[string]any{"owner": "owner@example.test"}, Op: analytics.EventUpdate}) {
 		t.Fatal("owner-scoped extension event was trusted without checking the current record")
 	}
 	c.Set("extension_permissions", []doctype.Permission{{Doctype: "Invoice", Read: true}})
 	setRealtimeTestExecution(c, nil, true)
-	if !h.realtimeEventVisible(c, "Invoice", "INV-1", map[string]any{"owner": "other@example.test"}, analytics.EventUpdate) {
+	if !h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: map[string]any{"owner": "other@example.test"}, Op: analytics.EventUpdate}) {
 		t.Fatal("extension without owner restriction was incorrectly narrowed")
 	}
 }
@@ -619,7 +619,7 @@ func TestRealtimeOwnerScopeMatchesLocalAndNATSAuthorization(t *testing.T) {
 			// The event snapshot says Alice owned this document; the current row
 			// belongs to Bob, so only Bob may receive the delayed event.
 			data := map[string]any{"owner": "alice@example.test", "amount": 125}
-			localAllowed := h.realtimeEventVisible(c, "Invoice", "INV-1", data, analytics.EventUpdate)
+			localAllowed := h.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: data, Op: analytics.EventUpdate})
 			raw := []byte(`{"type":"change","doctype":"Invoice","doc_name":"INV-1","operation":"update","payload":{"owner":"alice@example.test","amount":125}}`)
 			_, natsAllowed := h.authorizeRealtimeEnvelope(c, raw)
 			if localAllowed != tc.wantAllow || natsAllowed != tc.wantAllow {
@@ -662,7 +662,7 @@ func TestRealtimeAssignmentScopeUsesCurrentRecordForLocalAndReplay(t *testing.T)
 		c.Set("site_name", "tenant-a")
 		c.Set("user", tc.user)
 		setRealtimeTestExecution(c, []string{"Assignee"}, false)
-		local := handler.realtimeEventVisible(c, "Task", "TASK-1", map[string]any{"assigned_to": "old-user"}, analytics.EventUpdate)
+		local := handler.realtimeEventVisible(c, realtimeEvent{DocType: "Task", Name: "TASK-1", Data: map[string]any{"assigned_to": "old-user"}, Op: analytics.EventUpdate})
 		raw := []byte(`{"type":"change","doctype":"Task","doc_name":"TASK-1","operation":"update","payload":{"assigned_to":"old-user","title":"old value"}}`)
 		_, replay := handler.authorizeRealtimeEnvelope(c, raw)
 		if local != tc.allow || replay != tc.allow {
@@ -704,7 +704,7 @@ func TestRealtimeExactOwnerGrantMatchesLocalAndNATSAuthorization(t *testing.T) {
 	// Historical event ownership and caller-populated identity must not change
 	// current-record owner filtering on either local or NATS delivery.
 	data := map[string]any{"owner": "forged-user@example.test", "amount": 125}
-	localAllowed := handler.realtimeEventVisible(c, "Invoice", "INV-1", data, analytics.EventUpdate)
+	localAllowed := handler.realtimeEventVisible(c, realtimeEvent{DocType: "Invoice", Name: "INV-1", Data: data, Op: analytics.EventUpdate})
 	raw := []byte(`{"type":"change","doctype":"Invoice","doc_name":"INV-1","operation":"update","payload":{"owner":"forged-user@example.test","amount":125}}`)
 	_, natsAllowed := handler.authorizeRealtimeEnvelope(c, raw)
 	if !localAllowed || !natsAllowed {

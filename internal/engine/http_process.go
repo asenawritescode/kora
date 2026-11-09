@@ -155,9 +155,11 @@ func AssembleHTTPProcess(config HTTPProcessAssemblyConfig) (*HTTPProcessAssembly
 	}
 	if config.Console != nil && config.Console.SystemGuard != nil {
 		console := config.Console
-		handler := api.NewConsoleHandler(console.SystemGuard, config.Application.Tenants,
-			console.DBType, console.DBHost, console.DBUser, console.DBPassword, console.DBPort,
-			console.PlatformDB, console.AllowOnboarding)
+		handler := api.NewConsoleHandler(console.SystemGuard, config.Application.Tenants, api.ConsoleOptions{
+			DBType: console.DBType, DBHost: console.DBHost, DBPort: console.DBPort,
+			DBUser: console.DBUser, DBPassword: console.DBPassword,
+			PlatformDB: console.PlatformDB, AllowOnboarding: console.AllowOnboarding,
+		})
 		handler.PlatformWorkAdmission = console.PlatformWorkAdmission
 		handler.TenantSiteAdmission = tenantSiteProvisioningAdmission(config.PlatformDBDriver, config.PlatformDBDSN)
 		handler.ResolveStorage = console.ResolveStorage

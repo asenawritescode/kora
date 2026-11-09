@@ -1337,13 +1337,13 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	// plan has been journaled and validated.
 	tx, err := db.Begin()
 	if err != nil {
-		err = rollbackConfigOperationTx(nil, db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationValidated, string(planJSON), "replan-from-live-schema", err)
+		err = rollbackConfigOperationTx(nil, db, h.siteDialect(c), validatedActivation(siteName, versionID, planJSON), err)
 		internalError(c, "beginning activation transaction", err)
 		return
 	}
 	defer tx.Rollback() // no-op after successful commit
 	recordActivationFailure := func(cause error) error {
-		return rollbackConfigOperationTx(tx, db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationValidated, string(planJSON), "replan-from-live-schema", cause)
+		return rollbackConfigOperationTx(tx, db, h.siteDialect(c), validatedActivation(siteName, versionID, planJSON), cause)
 	}
 
 	// Step 1: Save all config to DB within the transaction and rebuild the registry.
@@ -2150,9 +2150,7 @@ func (h *Handler) HandleSystemRealtime(c *gin.Context) {
 	} else {
 		releaseReplay = func() {}
 	}
-	provider := services.Realtime
-	bus := services.EventBus
-	scopes := realtimeScopes(c)
+	stream := realtimeStream{Provider: services.Realtime, Bus: services.EventBus, Site: siteName, Scopes: realtimeScopes(c), ReleaseReplay: releaseReplay}
 	slog.Info("realtime request received",
 		"site", siteName,
 		"method", c.Request.Method,
@@ -2164,18 +2162,33 @@ func (h *Handler) HandleSystemRealtime(c *gin.Context) {
 		"user_agent", c.Request.UserAgent(),
 	)
 	if isWebSocketUpgrade(c.Request) {
-		h.handleSystemRealtimeWebSocket(c, provider, bus, siteName, scopes, releaseReplay)
+		h.handleSystemRealtimeWebSocket(c, stream)
 		return
 	}
-	h.handleSystemRealtimeSSE(c, provider, bus, siteName, scopes, releaseReplay)
+	h.handleSystemRealtimeSSE(c, stream)
 }
 
-func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natsprovider.Provider, bus eventstream.Bus, siteName string, scopes []string, releaseReplay func()) {
+// realtimeStream is the per-connection state shared by the WebSocket and SSE
+// realtime transports.
+type realtimeStream struct {
+	// Provider delivers events through NATS; nil selects the local bus.
+	Provider *natsprovider.Provider
+	// Bus is the in-process event bus used when Provider is nil.
+	Bus eventstream.Bus
+	// Site is the tenant the stream belongs to.
+	Site string
+	// Scopes are the realtime scopes the client subscribed to.
+	Scopes []string
+	// ReleaseReplay frees the tenant work slot taken for cursor replay.
+	ReleaseReplay func()
+}
+
+func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, s realtimeStream) {
 	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
-		releaseReplay()
+		s.ReleaseReplay()
 		internalError(c, "realtime websocket upgrade failed", err)
 		return
 	}
@@ -2192,14 +2205,14 @@ func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natspr
 	send := func(msg []byte) error {
 		return conn.Write(c.Request.Context(), websocket.MessageText, msg)
 	}
-	if err := h.replayRealtime(c, realtimeCursor(c), scopes, send); err != nil {
-		slog.Warn("realtime replay failed", "site", siteName, "error", err)
+	if err := h.replayRealtime(c, realtimeCursor(c), s.Scopes, send); err != nil {
+		slog.Warn("realtime replay failed", "site", s.Site, "error", err)
 	}
-	releaseReplay()
-	h.streamRealtime(c, send, provider, bus, siteName, scopes)
+	s.ReleaseReplay()
+	h.streamRealtime(c, send, s)
 }
 
-func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider.Provider, bus eventstream.Bus, siteName string, scopes []string, releaseReplay func()) {
+func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, s realtimeStream) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -2207,7 +2220,7 @@ func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		releaseReplay()
+		s.ReleaseReplay()
 		writeError(c, http.StatusInternalServerError, "server.streaming_unsupported", "streaming unsupported", nil)
 		return
 	}
@@ -2249,11 +2262,11 @@ func (h *Handler) handleSystemRealtimeSSE(c *gin.Context, provider *natsprovider
 		}
 		return writeEvent(eventType, envelope)
 	}
-	if err := h.replayRealtime(c, realtimeCursor(c), scopes, send); err != nil {
-		slog.Warn("realtime replay failed", "site", siteName, "error", err)
+	if err := h.replayRealtime(c, realtimeCursor(c), s.Scopes, send); err != nil {
+		slog.Warn("realtime replay failed", "site", s.Site, "error", err)
 	}
-	releaseReplay()
-	h.streamRealtime(c, send, provider, bus, siteName, scopes)
+	s.ReleaseReplay()
+	h.streamRealtime(c, send, s)
 }
 
 func refreshRealtimeWriteDeadline(w http.ResponseWriter) error {
@@ -2375,7 +2388,7 @@ func (h *Handler) replayRealtime(c *gin.Context, after string, scopes []string, 
 			BusinessScope contract.BusinessScope `json:"business_scope"`
 		}
 		_ = json.Unmarshal(entry.payload, &envelope)
-		if !h.realtimeEventVisible(c, entry.aggregateType, entry.aggregateID, nil, eventstream.EventOp(realtimeOperation(entry.eventType)), envelope.BusinessScope) {
+		if !h.realtimeEventVisible(c, realtimeEvent{DocType: entry.aggregateType, Name: entry.aggregateID, Op: eventstream.EventOp(realtimeOperation(entry.eventType)), Scope: &envelope.BusinessScope}) {
 			continue
 		}
 		if replayed >= replayLimit {
@@ -2414,21 +2427,21 @@ func realtimeOperation(eventType string) string {
 	return "update"
 }
 
-func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provider *natsprovider.Provider, bus eventstream.Bus, siteName string, scopes []string) {
-	if provider == nil {
+func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, s realtimeStream) {
+	if s.Provider == nil {
 		var ch <-chan eventstream.ChangeEvent
 		var remove func()
-		if multi, ok := bus.(*analytics.MultiBus); ok {
+		if multi, ok := s.Bus.(*analytics.MultiBus); ok {
 			listener := multi.NewListenerQueue(true)
 			if err := multi.AddRealtimeListener(listener); err != nil {
-				slog.Warn("realtime local subscription rejected", "site", siteName, "error", err)
+				slog.Warn("realtime local subscription rejected", "site", s.Site, "error", err)
 				return
 			}
 			ch = listener
 			remove = func() { multi.RemoveListener(listener) }
-		} else if bus != nil {
+		} else if s.Bus != nil {
 			var err error
-			ch, err = bus.Subscribe()
+			ch, err = s.Bus.Subscribe()
 			if err != nil {
 				ch = nil
 			}
@@ -2436,7 +2449,7 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 		if remove != nil {
 			defer remove()
 		}
-		_ = send([]byte(`{"type":"connected","transport":"local","site":"` + siteName + `"}`))
+		_ = send([]byte(`{"type":"connected","transport":"local","site":"` + s.Site + `"}`))
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -2447,10 +2460,10 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 				if !ok {
 					return
 				}
-				if !matchesRealtimeScope(scopes, "doctype:"+event.Doctype, event.Doctype) {
+				if !matchesRealtimeScope(s.Scopes, "doctype:"+event.Doctype, event.Doctype) {
 					continue
 				}
-				if !h.realtimeEventVisible(c, event.Doctype, event.DocName, event.Data, event.Operation) {
+				if !h.realtimeEventVisible(c, realtimeEvent{DocType: event.Doctype, Name: event.DocName, Data: event.Data, Op: event.Operation}) {
 					continue
 				}
 				data := event.Data
@@ -2471,7 +2484,7 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 				valid, err := auth.RevalidateRealtimeIdentity(c)
 				if !valid {
 					if err != nil {
-						slog.Warn("realtime authorization refresh failed", "site", siteName, "error", err)
+						slog.Warn("realtime authorization refresh failed", "site", s.Site, "error", err)
 					}
 					_ = send([]byte(`{"type":"authorization_ended"}`))
 					return
@@ -2483,15 +2496,15 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 		}
 	}
 
-	subject := provider.Config().SubjectPrefix + ".realtime." + siteName + ".>"
-	ch, drain, err := provider.Subscribe(c.Request.Context(), subject)
+	subject := s.Provider.Config().SubjectPrefix + ".realtime." + s.Site + ".>"
+	ch, drain, err := s.Provider.Subscribe(c.Request.Context(), subject)
 	if err != nil {
 		_ = send([]byte(`{"type":"connected","transport":"local"}`))
 		return
 	}
 	defer drain()
 
-	_ = send([]byte(`{"type":"connected","transport":"nats","site":"` + siteName + `"}`))
+	_ = send([]byte(`{"type":"connected","transport":"nats","site":"` + s.Site + `"}`))
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -2502,7 +2515,7 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 			if !ok {
 				return
 			}
-			if !realtimePayloadMatchesScopes(msg.Data, scopes) {
+			if !realtimePayloadMatchesScopes(msg.Data, s.Scopes) {
 				continue
 			}
 			visible, allowed := h.authorizeRealtimeEnvelope(c, msg.Data)
@@ -2516,7 +2529,7 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, provid
 			valid, err := auth.RevalidateRealtimeIdentity(c)
 			if !valid {
 				if err != nil {
-					slog.Warn("realtime authorization refresh failed", "site", siteName, "error", err)
+					slog.Warn("realtime authorization refresh failed", "site", s.Site, "error", err)
 				}
 				_ = send([]byte(`{"type":"authorization_ended"}`))
 				return
