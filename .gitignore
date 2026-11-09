@@ -51,3 +51,11 @@ docs/architecture/*
 mysql_data/
 libtest_local.db
 sites/
+
+# Runtime and tool output - never commit
+data/analytics/
+__pycache__/
+*.pyc
+_kora_provisioning_jobs.json
+artifacts/
+.gradle/
