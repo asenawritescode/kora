@@ -199,3 +199,8 @@ jobs:
       # (.lint-baseline/primitive-funcs.txt only ever shrinks).
       - name: Primitive-function ratchet
         run: make primitive-funcs-ratchet
+
+      # Functions take at most 5 parameters (ctx included, receiver not); more inputs go in one options struct
+      # (.lint-baseline/params.json only ever shrinks).
+      - name: Parameter-count ratchet
+        run: make params-ratchet
