@@ -6,15 +6,21 @@ search_fields: reference, reason
 sort_field: creation
 sort_order: DESC
 description: >-
-  A signed change to a product's stock with a reason. Saving it changes the
-  product's stock in the same step, from any screen or the API. It cannot be
-  edited afterwards; fix a mistake with another adjustment.
+  A change to a product's stock with a reason. Type how many; the reason decides
+  whether stock goes up or down. Saving it changes the product's stock in the
+  same step, from any screen or the API. It cannot be edited afterwards; fix a
+  mistake with another adjustment.
 quantity_effect:
   target_doctype: Product
   target_quantity_field: stock_qty
   source_record_field: product
   delta_field: delta
   reason_field: reason
+  reason_directions:
+    Opening balance: increase
+    Found: increase
+    Damaged: decrease
+    Lost or stolen: decrease
 
 fields:
   - fieldname: reference
@@ -32,8 +38,8 @@ fields:
     in_standard_filter: true
   - fieldname: delta
     fieldtype: Float
-    label: Quantity change
-    description: Positive to add stock, negative to remove it. Stock cannot go below zero.
+    label: Quantity
+    description: How many. The reason decides the direction. Opening balance and Found add stock; Damaged and Lost or stolen remove it. For Count correction and Other, type a minus sign to remove stock. Stock cannot go below zero.
     reqd: true
     in_list_view: true
   - fieldname: reason

@@ -201,3 +201,70 @@ func TestAClientBundleCannotClaimTheEffectExemption(t *testing.T) {
 		t.Fatalf("a client-supplied bundle was granted the engine-applied exemption")
 	}
 }
+
+// The reason chosen on the record decides whether an adjustment adds or removes
+// stock. The person types a plain amount; the record keeps the signed number.
+func reasonRegistry() *doctype.Registry {
+	product := &doctype.DocType{Name: "Product", Fields: []doctype.Field{{Fieldname: "stock_qty", Fieldtype: "Float"}}}
+	adjustment := &doctype.DocType{Name: "Stock Adjustment", AppendOnly: true,
+		QuantityEffect: &doctype.QuantityEffect{
+			TargetDocType: "Product", TargetQuantityField: "stock_qty", SourceRecordField: "product", DeltaField: "delta", ReasonField: "reason",
+			ReasonDirections: map[string]string{"Damaged": "decrease", "Lost or stolen": "decrease", "Found": "increase", "Opening balance": "increase"},
+		},
+		Fields: []doctype.Field{
+			{Fieldname: "product", Fieldtype: "Link", Options: "Product"},
+			{Fieldname: "delta", Fieldtype: "Float"},
+			{Fieldname: "reason", Fieldtype: "Select", Options: "Opening balance\nCount correction\nDamaged\nLost or stolen\nFound\nOther"},
+		}}
+	reg := doctype.NewRegistry()
+	reg.LoadFull([]*doctype.DocType{product, adjustment}, []*doctype.Role{{Name: doctype.AdminRole}}, nil)
+	return reg
+}
+
+func TestReasonDecidesWhetherAnAdjustmentAddsOrRemoves(t *testing.T) {
+	cases := []struct {
+		reason string
+		typed  float64
+		stock  float64 // change applied to the product
+		stored float64 // number kept on the adjustment record
+	}{
+		{"Damaged", 5, -5, -5},
+		{"Lost or stolen", 2, -2, -2},
+		{"Found", 3, 3, 3},
+		{"Opening balance", 50, 50, 50},
+		{"Damaged", -5, -5, -5},          // a minus sign does not turn a loss into a gain
+		{"Found", -3, 3, 3},              // nor does it turn a find into a loss
+		{"Count correction", -4, -4, -4}, // no fixed direction: as typed
+		{"Count correction", 4, 4, 4},
+		{"Other", -1, -1, -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.reason, func(t *testing.T) {
+			op := createOp(t, "Stock Adjustment", map[string]any{"product": "P1", "delta": tc.typed, "reason": tc.reason})
+			if err := prepareQuantityEffect(reasonRegistry(), &op); err != nil {
+				t.Fatal(err)
+			}
+			bundle := bundleOf(t, op)
+			if got := amountOf(t, bundle.Records[1], "stock_qty"); got != tc.stock {
+				t.Fatalf("stock change = %v, want %v", got, tc.stock)
+			}
+			var stored map[string]any
+			if err := json.Unmarshal(bundle.Records[0].Data, &stored); err != nil {
+				t.Fatal(err)
+			}
+			if stored["delta"] != tc.stored {
+				t.Fatalf("number kept on the record = %v, want %v", stored["delta"], tc.stored)
+			}
+		})
+	}
+}
+
+func TestReasonWithoutDirectionsKeepsTheTypedSign(t *testing.T) {
+	op := createOp(t, "Stock Adjustment", map[string]any{"product": "P1", "delta": -5.0, "reason": "Damaged"})
+	if err := prepareQuantityEffect(effectRegistry(), &op); err != nil {
+		t.Fatal(err)
+	}
+	if got := amountOf(t, bundleOf(t, op).Records[1], "stock_qty"); got != -5 {
+		t.Fatalf("stock change = %v, want -5", got)
+	}
+}
