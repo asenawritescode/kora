@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/policy"
-	"github.com/asenawritescode/kora/workflow"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/workflow"
 )
 
 func TestBuiltinWorkflowActionSchemas(t *testing.T) {

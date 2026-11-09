@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/plugin"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/plugin"
 	_ "github.com/mattn/go-sqlite3"
 )
 

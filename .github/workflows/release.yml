@@ -30,9 +30,9 @@ jobs:
           # Inject version
           echo "$VERSION" > VERSION
 
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/kora-linux-amd64 .
-          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/kora-darwin-amd64 .
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/kora-darwin-arm64 .
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X github.com/asenawritescode/kora/internal/cli.Version=${VERSION}" -o dist/kora-linux-amd64 ./cmd/kora
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X github.com/asenawritescode/kora/internal/cli.Version=${VERSION}" -o dist/kora-darwin-amd64 ./cmd/kora
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X github.com/asenawritescode/kora/internal/cli.Version=${VERSION}" -o dist/kora-darwin-arm64 ./cmd/kora
 
           cd dist
           sha256sum kora-linux-amd64 > kora-linux-amd64.sha256

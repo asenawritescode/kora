@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	kdb "github.com/asenawritescode/kora/db"
+	kdb "github.com/asenawritescode/kora/internal/db"
 )
 
 func TestActiveConfigMinKoraVersionRebindsPostgresAndReadsValue(t *testing.T) {

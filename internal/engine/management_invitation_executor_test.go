@@ -9,8 +9,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/management"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/management"
 )
 
 func TestManagementInvitationMagicLinkUsesConfiguredWorkspaceBase(t *testing.T) {

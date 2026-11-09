@@ -6,16 +6,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
-	kdb "github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/eventstream"
+	"github.com/asenawritescode/kora/internal/analytics"
+	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/eventstream"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/notifications"
+	notificationsql "github.com/asenawritescode/kora/internal/notifications/sqlstore"
+	"github.com/asenawritescode/kora/internal/outbox"
+	requestsql "github.com/asenawritescode/kora/internal/requests/sqlstore"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/notifications"
-	notificationsql "github.com/asenawritescode/kora/notifications/sqlstore"
-	"github.com/asenawritescode/kora/outbox"
-	requestsql "github.com/asenawritescode/kora/requests/sqlstore"
 )
 
 type requestNotificationPlanner struct {

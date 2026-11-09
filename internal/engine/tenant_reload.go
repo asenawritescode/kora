@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
 	"github.com/gin-gonic/gin"
 )
 

@@ -6,7 +6,7 @@ COPY sdk/go.mod sdk/go.sum ./sdk/
 RUN go mod download
 COPY . ./
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/asenawritescode/kora/cli.Version=${VERSION}" -o kora .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/asenawritescode/kora/internal/cli.Version=${VERSION}" -o kora ./cmd/kora
 
 # Stage 2: Runtime (Alpine for small static binary)
 FROM alpine:3.21

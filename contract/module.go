@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/asenawritescode/kora/expression"
+	"github.com/asenawritescode/kora/internal/expression"
 	"regexp"
 	"sort"
 	"strings"

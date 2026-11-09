@@ -17,13 +17,13 @@ func TestExportedContractRoundTrips(t *testing.T) {
 		{
 			name: "actor_context",
 			in: ActorContext{
-				PrincipalID:      "usr-1",
-				PrincipalType:    PrincipalHuman,
-				Site:             "acme.example.com",
-				Roles:            []string{"Accounts User"},
-				AuthenticatedAt:  now,
-				AuthSessionID:    "sess-1",
-				DelegationID:     "del-1",
+				PrincipalID:     "usr-1",
+				PrincipalType:   PrincipalHuman,
+				Site:            "acme.example.com",
+				Roles:           []string{"Accounts User"},
+				AuthenticatedAt: now,
+				AuthSessionID:   "sess-1",
+				DelegationID:    "del-1",
 			},
 			out: &ActorContext{},
 		},
@@ -62,19 +62,19 @@ func TestExportedContractRoundTrips(t *testing.T) {
 		{
 			name: "command_result",
 			in: CommandResult{
-				OperationID: "op-123",
+				OperationID:   "op-123",
 				CorrelationID: "req-123",
-				Status:      StatusCompleted,
-				Data:        MustEncodeData(map[string]any{"ok": true}),
-				Error:       &Error{Type: CodeInternal, Message: "boom"},
-				Replayed:    true,
+				Status:        StatusCompleted,
+				Data:          MustEncodeData(map[string]any{"ok": true}),
+				Error:         &Error{Type: CodeInternal, Message: "boom"},
+				Replayed:      true,
 			},
 			out: &CommandResult{},
 		},
 		{
 			name: "task_receipt",
 			in: TaskReceipt{
-				OperationID: "op-123",
+				OperationID:   "op-123",
 				CorrelationID: "req-123",
 				Status:        StatusAccepted,
 				AcceptedAt:    now,
@@ -147,7 +147,7 @@ func TestExportedContractRoundTrips(t *testing.T) {
 		{
 			name: "sync_cursor",
 			in: SyncCursor{
-				Token:   "token-1",
+				Token:    "token-1",
 				BranchID: "branch-1",
 				DeviceID: "dev-1",
 				Version:  3,
@@ -216,9 +216,9 @@ func TestExportedContractRoundTrips(t *testing.T) {
 			in: ToolCatalog{
 				Version: "1",
 				Tools: []ToolDescriptor{{
-					ID:      "tool-1",
-					Source:  "registry",
-					Name:    "document.create",
+					ID:        "tool-1",
+					Source:    "registry",
+					Name:      "document.create",
 					Operation: "create",
 				}},
 			},

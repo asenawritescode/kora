@@ -10,7 +10,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
-	knet "github.com/asenawritescode/kora/net"
+	knet "github.com/asenawritescode/kora/internal/net"
 )
 
 func TestManagementModuleInspectorReturnsEmptyTenantSnapshot(t *testing.T) {

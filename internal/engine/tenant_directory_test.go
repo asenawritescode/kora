@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 type tenantDirectoryStub struct {

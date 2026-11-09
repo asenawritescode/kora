@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/asenawritescode/kora/scheduler"
+	"github.com/asenawritescode/kora/internal/scheduler"
 )
 
 func TestStartSchedulerRequiresDependenciesWhenJobsConfigured(t *testing.T) {

@@ -4,6 +4,7 @@ import "time"
 
 // ToolSafetyLevel classifies the risk of a tool. Adapters render this into their
 // own presentation (e.g., confirmation dialogs), but the value originates here.
+//
 //contract:enum
 type ToolSafetyLevel string
 
@@ -17,11 +18,13 @@ const (
 
 // ToolArgumentVersion labels the frozen argument schema for a tool. It is bumped
 // whenever a tool's arguments change in a breaking way (RFC §10.4.2).
+//
 //contract:enum
 type ToolArgumentVersion string
 
 // FieldHint is the canonical, serialized description of a doctype field exposed
 // through a tool projection. It is intentionally free of doctype package types.
+//
 //contract:wire
 type FieldHint struct {
 	Name           string   `json:"name"`
@@ -44,6 +47,7 @@ type FieldHint struct {
 }
 
 // SystemFieldHint describes a system column exposed through a tool projection.
+//
 //contract:wire
 type SystemFieldHint struct {
 	Name      string `json:"name"`
@@ -86,6 +90,7 @@ type ToolCatalog struct {
 
 // UsageClass classifies a token/usage record per the FinOps FOCUS-normalized
 // attribution model referenced in RFC §18.
+//
 //contract:enum
 type UsageClass string
 
@@ -122,6 +127,7 @@ type UsageEvent struct {
 // ApprovalState is the durable state of a confirmation-required operation
 // (RFC §10.4.2 / validation gate 4). Confirmation cannot be satisfied by prompt
 // text or client-only headers.
+//
 //contract:enum
 type ApprovalState string
 
@@ -136,6 +142,7 @@ const (
 // Approval is the durable record of a required confirmation or recent-auth
 // check, including the full argument/target fingerprint so that a pending
 // approval is invalidated when its targets change.
+//
 //contract:wire
 type Approval struct {
 	ID                string        `json:"id"`
@@ -156,6 +163,7 @@ type Approval struct {
 
 // Cursor is an opaque, resumable position for a durable stream: an AI run
 // checkpoint, a conversation delivery cursor, or an offline sync cursor.
+//
 //contract:wire
 type Cursor struct {
 	Token   string    `json:"token"`

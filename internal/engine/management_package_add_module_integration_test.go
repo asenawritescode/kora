@@ -19,15 +19,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/management"
-	"github.com/asenawritescode/kora/management/sqlstore"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/schema"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/configstore"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/management"
+	"github.com/asenawritescode/kora/internal/management/sqlstore"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/schema"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 // TestCharacterizeAddModuleToProvisionedTenant pins what happens TODAY when a

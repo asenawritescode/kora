@@ -14,7 +14,7 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 - No hard-coding: verticals (POS, inventory) are config packages on generic core features. No vertical names in Engine or client code.
 
 **Code and verification**
-- All SQL goes through the dialect (`db/`). Changes must pass Integration (MySQL) and Integration (Postgres).
+- All SQL goes through the dialect (`internal/db/`). Changes must pass Integration (MySQL) and Integration (Postgres).
 - Integration CI is temporarily disabled (`if: ${{ false }}` in `.github/workflows/integration.yml`). Until it is re-enabled, verify every DB-touching change locally against disposable `mysql:8.0` and `postgres:16` containers (DSN env vars as in the workflow), running the affected integration tests or `scripts/ci-integration.sh mysql|postgres`. State the result in the PR.
 - Do not trust unit tests with fake tables for SQL changes. They once hid a real table-prefix bug; run against a real database.
 - This repository contains no UI code. UI changes belong in the standalone UI repository (kora-ui, local clone `~/projects/kora-studio-mvp`); embed screenshots in those PRs via its `pr-assets` branch.
@@ -52,10 +52,10 @@ make help               # Show all commands
 
 ```bash
 # Backend (Go)
-go build -o kora .                           # Build binary
-go run . serve --port 8000                   # Dev run
-go run . migrate --all                       # Apply all pending migrations
-go run . config import --site X --path Y     # Re-import YAML config to DB
+go build -o kora ./cmd/kora                  # Build binary
+go run ./cmd/kora serve --port 8000          # Dev run
+go run ./cmd/kora migrate --all              # Apply all pending migrations
+go run ./cmd/kora config import --site X --path Y  # Re-import YAML config to DB
 
 # AI & Secrets (also configurable in Studio: Settings → Secrets)
 ./kora secret set --site X --key deepseek_api_key --value sk-...   # Set AI provider key (CLI)
@@ -74,7 +74,7 @@ For restructuring work, follow [the target-state specification](docs/architectur
 
 Kigae is currently a **DocType-centric config-driven application engine**. The codebase has kernel, contract, workflow, AI/MCP, and reconciliation capabilities, while the generic resource/runtime architecture is still evolving.
 
-### Startup Flow (`cli/serve.go`)
+### Startup Flow (`internal/cli/serve.go`)
 
 1. Load config from environment variables (`CommonConfigFromEnv` — no YAML files)
 2. Connect to platform DB (MySQL or remote LibSQL via `DB_DSN`)
@@ -133,7 +133,7 @@ Fields map to DB columns. Key field types: Data, Int, Float, Currency, Select, L
 
 ### Repository Layout
 
-This repository is the **Engine only**: a single Go binary (API, kernel, workflow, AI/MCP, scheduler, CLI) plus the config packs under `config/`. It no longer contains or embeds any UI, and there is no Bun/Node toolchain here.
+This repository is the **Engine only**: a single Go binary built from `cmd/kora` (API, kernel, workflow, AI/MCP, scheduler, CLI) plus the config packs under `config/`. It no longer contains or embeds any UI, and there is no Bun/Node toolchain here.
 
 | Repository | Local clone | What it is |
 |---|---|---|
@@ -168,23 +168,23 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 
 | Package | Purpose |
 |---|---|
-| `doctype/` | DocType, Field, Constraint, Document, Registry, PermissionMatrix, Workflow, expression engine. Current resource model is DocType-first. |
-| `orm/` | Generic CRUD (Insert, Save, GetDoc, GetList, Delete), filter parsing, DB-level unique enforcement, batched child INSERTs, diff-based Save, ULID name generation, NOT NULL error parsing |
-| `db/` | SQL Dialect abstraction — MySQL/LibSQL DDL, DML, error parsing, schema introspection |
-| `schema/` | Diff registry vs live schema → DDL via dialect; column rename via `renamed_from` |
-| `api/` | REST handlers, envelope, CRUD, unified automations and status transitions, system endpoints, YAML validation, AI Chat, User management (`users.go`), Secrets management (`secrets.go`), OpenAPI spec generation. Kernel entrypoints exist but are not the only RFC target surface. |
-| `auth/` | Session auth (bcrypt), in-memory session cache (30s TTL), CSRF (double-submit cookie), SystemGuard, SiteGuard |
-| `net/` | SiteRouter with host validation, security headers, CORS, rate limiter, TLS (autocert), ULID request IDs |
-| `cli/` | Cobra CLI: serve, setup, migrate, config (import/export/versions/diff/rollback), new-site, mcp, secret |
-| `configstore/` | Read/write config to/from DB (_kora_doctype, _kora_field, etc.) |
-| `scheduler/` | Cron-style background jobs |
-| `secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys (settable in Studio: Settings → Secrets) |
-| `storage/` | Pluggable attachment blob storage — local filesystem + S3-compatible (MinIO/AWS/R2/Garage) backends with AWS SigV4 signing, presigned URLs, range reads |
-| `analytics/` | EventBus + Worker + Query Engine — real-time CDC, daily/monthly rollup tables, time-series/funnel/duration queries, auto-generated metrics |
-| `mcp/` | Model Context Protocol server — auto-generates tools from doctype registry for Claude Desktop |
-| `api/ai/` | AI Chat handlers, AI config, tool execution loop, token accounting |
-| `script/` | JS script runtime — sandboxed execution engine for extensions |
-| `webhook/` | Webhook dispatcher — outgoing and incoming webhook management |
+| `internal/doctype/` | DocType, Field, Constraint, Document, Registry, PermissionMatrix, Workflow, expression engine. Current resource model is DocType-first. |
+| `internal/orm/` | Generic CRUD (Insert, Save, GetDoc, GetList, Delete), filter parsing, DB-level unique enforcement, batched child INSERTs, diff-based Save, ULID name generation, NOT NULL error parsing |
+| `internal/db/` | SQL Dialect abstraction — MySQL/LibSQL DDL, DML, error parsing, schema introspection |
+| `internal/schema/` | Diff registry vs live schema → DDL via dialect; column rename via `renamed_from` |
+| `internal/api/` | REST handlers, envelope, CRUD, unified automations and status transitions, system endpoints, YAML validation, AI Chat, User management (`users.go`), Secrets management (`secrets.go`), OpenAPI spec generation. Kernel entrypoints exist but are not the only RFC target surface. |
+| `internal/auth/` | Session auth (bcrypt), in-memory session cache (30s TTL), CSRF (double-submit cookie), SystemGuard, SiteGuard |
+| `internal/net/` | SiteRouter with host validation, security headers, CORS, rate limiter, TLS (autocert), ULID request IDs |
+| `internal/cli/` | Cobra CLI: serve, setup, migrate, config (import/export/versions/diff/rollback), new-site, mcp, secret |
+| `internal/configstore/` | Read/write config to/from DB (_kora_doctype, _kora_field, etc.) |
+| `internal/scheduler/` | Cron-style background jobs |
+| `internal/secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys (settable in Studio: Settings → Secrets) |
+| `internal/storage/` | Pluggable attachment blob storage — local filesystem + S3-compatible (MinIO/AWS/R2/Garage) backends with AWS SigV4 signing, presigned URLs, range reads |
+| `internal/analytics/` | EventBus + Worker + Query Engine — real-time CDC, daily/monthly rollup tables, time-series/funnel/duration queries, auto-generated metrics |
+| `internal/mcp/` | Model Context Protocol server — auto-generates tools from doctype registry for Claude Desktop |
+| `internal/api/ai/` | AI Chat handlers, AI config, tool execution loop, token accounting |
+| `internal/script/` | JS script runtime — sandboxed execution engine for extensions |
+| `internal/webhook/` | Webhook dispatcher — outgoing and incoming webhook management |
 | `sdk/` | Go SDK client library for external integrations |
 
 ### RFC Alignment Notes
@@ -220,7 +220,7 @@ The canonical chat flow is `GET/POST /api/v1/ai/chat`. GET restores the durable 
 
 Run cancellation, resume, and approval records live under `/api/v1/ai/runs` and `/api/v1/ai/approvals`. The old `/api/chat` and `/api/v1/chat` endpoints are retired. Site provider keys are configured in Studio (Settings → Secrets); shared provider keys can be enabled by the system administrator. `ai.chat` remains experimental while authorization and durable-effect risks are still open.
 
-#### Tool Catalog (`api/ai/tools.go`)
+#### Tool Catalog (`internal/api/ai/tools.go`)
 
 `BuildToolCatalog()` is the canonical source for chat tools. Each non-child DocType contributes typed `_find`, `_list`, `_get`, `_create`, and `_update` tools. The system catalog also includes analytics, DocType draft, script, and view tools. Create/update and administrative mutations require confirmation and recent authentication where configured. Record mutations use the kernel command path; reads and domain-specific system tools retain their owning service contracts.
 
@@ -248,7 +248,7 @@ while round < MaxRounds:
 - Textified tool call detection (scans for `<｜｜DSML｜｜tool_calls>` in content — retries with `tool_choice: "required"`)
 - Narrate-then-act detection (GPT-4o false finish — re-prompts with tool_choice escalation)
 
-#### AI Configuration (`api/ai_config.go`)
+#### AI Configuration (`internal/api/ai_config.go`)
 
 `AIConfig` struct with per-model defaults + site-level overrides from `_kora_secret` (keys prefixed `ai.`):
 
@@ -292,7 +292,7 @@ Database errors are parsed via `db.Dialect.ParseError()` — dialect-neutral:
 
 Implemented in Studio (kora-ui): `src/components/chat/ChatWidget.tsx` (floating panel) and `useChat.ts`, which restores the context-scoped transcript and sends new turns through `POST /api/v1/ai/chat` using the shared API client. The Engine contract is the chat endpoint above.
 
-#### MCP Server (`mcp/server.go`)
+#### MCP Server (`internal/mcp/server.go`)
 
 Separate from chat API. Auto-generates MCP tools from the doctype registry for use with Claude Desktop, Cursor, etc. over stdio transport. The server is experimental and, for tenant tool projection, currently behaves as a validation/execution bridge rather than a standalone agent runtime.
 
@@ -300,7 +300,7 @@ Separate from chat API. Auto-generates MCP tools from the doctype registry for u
 
 Kigae provides a comprehensive extensibility system for customizing application behavior without modifying core code.
 
-#### Script Engine (`script/`)
+#### Script Engine (`internal/script/`)
 
 JavaScript runtime based on Go's JavaScript engine. Scripts run in a sandboxed environment with configurable RAM limits (`KORA_SCRIPTS_MAX_RAM`) and HTTP/domain allowlists. Disabled by default — enable with `KORA_SCRIPTS_ENABLED=true`.
 
@@ -337,7 +337,7 @@ Record-triggered automations are configured in the Automations workspace. Their 
 
 Cron-style scheduled jobs written in JavaScript. Configured via the Extensions admin panel with standard cron expressions. Each scheduled script has its own sandboxed runtime.
 
-#### Webhook Extensions (`webhook/`)
+#### Webhook Extensions (`internal/webhook/`)
 
 - **Outgoing webhooks**: Trigger HTTP calls to external services on document events (create, update, delete, submit, cancel). Configure payload templates, headers, and retry policies.
 - **Incoming webhooks**: External services can push data to Kigae via signed webhook endpoints. Each endpoint validates a secret token before processing.
@@ -386,7 +386,7 @@ Go code follows these quality standards:
 - **Table-driven tests** — new code uses table-driven test patterns
 - **Interface hygiene** — small interfaces (1-3 methods), defined at consumption point
 - **No `utils`, `helpers`, `common` packages** — packages are organized by domain capability
-- **Module layout** follows https://go.dev/doc/modules/layout for a server project: logic in `internal/`, commands in `cmd/`, and as few exported packages as possible. Exported packages are the contract with other repositories (`contract`, the nested `sdk` module); anything else Cloud or tooling needs should be exposed through them rather than by importing implementation packages. The migration of the existing top-level packages into `internal/` is tracked as a separate, cross-repository change.
+- **Module layout** follows https://go.dev/doc/modules/layout for a server project: logic in `internal/`, commands in `cmd/`, and as few exported packages as possible. Exported packages are the contract with other repositories (`contract`, the nested `sdk` module); anything else Cloud or tooling needs should be exposed through them rather than by importing implementation packages. The layout is: `cmd/kora` (the server and CLI binary), `cmd/contractgen` and `cmd/routeinventory` (developer tools), `internal/` (all implementation packages), `contract/` (the public wire contract) and `sdk/` (the public Go client module). Other repositories must not import `internal/...` (Go enforces this); anything they need is added to `contract` or `sdk`. Cloud tests that used to import `site`, `db`, `auth`, `api`, `doctype` or `management` need to run the Engine binary or use the SDK instead.
 - **Error wrapping** — all errors use `%w` for proper error chains
 
 ### ORM Document Model
@@ -402,7 +402,7 @@ Documents are `map[string]any`. Parent document names are auto-generated: `PREFI
 
 System console API at `/console` sees all sites (SystemGuard, env var credentials). Workspace API access is per-site (SiteGuard, per-site `_kora_user` table). Console auth uses Bearer tokens, separate from workspace session auth.
 
-### SQL Dialect (`db/` package)
+### SQL Dialect (`internal/db/` package)
 
 All SQL must go through the Dialect; never hardcode database-specific syntax.
 
@@ -416,7 +416,7 @@ Dialect is resolved once at startup via `db.Resolve(common.DBType)` and threaded
 
 ### Config is DB-Sourced
 
-No YAML files for site config. `CommonConfigFromEnv()` builds all config from `KORA_*` environment variables. Sites are discovered from `_kora_site_registry` (see Startup Flow). YAML doctype files are used only for bulk import/export (`cli/config_impl.go`).
+No YAML files for site config. `CommonConfigFromEnv()` builds all config from `KORA_*` environment variables. Sites are discovered from `_kora_site_registry` (see Startup Flow). YAML doctype files are used only for bulk import/export (`internal/cli/config_impl.go`).
 
 Key environment variables for extensibility and analytics:
 - `KORA_SCRIPTS_ENABLED` — Enable the JS script engine (default: `false`)

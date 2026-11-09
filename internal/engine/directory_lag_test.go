@@ -8,7 +8,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 type rejectedDirectoryAdmission struct{ called chan struct{} }

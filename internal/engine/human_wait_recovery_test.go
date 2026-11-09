@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	knet "github.com/asenawritescode/kora/net"
+	knet "github.com/asenawritescode/kora/internal/net"
 )
 
 func TestStartHumanWaitRecoveryWorkerRegistersOnTenantGeneration(t *testing.T) {

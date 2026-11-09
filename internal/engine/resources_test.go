@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/script"
-	"github.com/asenawritescode/kora/site"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/script"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 type testScriptRunner struct {

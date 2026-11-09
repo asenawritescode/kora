@@ -1,0 +1,674 @@
+package site
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	sqlDialect "github.com/asenawritescode/kora/internal/db"
+)
+
+func TestConnectionIdentityIsOpaqueAndTracksPoolCompatibility(t *testing.T) {
+	base := &SiteConfig{DBType: "mysql", DBHost: "db.internal", DBPort: 3306, DBName: "tenant", DBUser: "app", DBPassword: "secret", DBMaxOpenConns: 8, DBMaxIdleConns: 2}
+	identity := ConnectionIdentity(base)
+	if identity == "" || strings.Contains(identity, "secret") || strings.Contains(identity, "db.internal") {
+		t.Fatalf("identity must be opaque: %q", identity)
+	}
+	copyConfig := *base
+	if got := ConnectionIdentity(&copyConfig); got != identity {
+		t.Fatalf("identical target identity = %q, want %q", got, identity)
+	}
+	copyConfig.DBPassword = "different"
+	if ConnectionIdentity(&copyConfig) == identity {
+		t.Fatal("credential change must not reuse existing target identity")
+	}
+	copyConfig = *base
+	copyConfig.DBMaxOpenConns++
+	if ConnectionIdentity(&copyConfig) == identity {
+		t.Fatal("pool limit change must not reuse existing target identity")
+	}
+}
+
+func TestDSN_MySQL(t *testing.T) {
+	cfg := &SiteConfig{
+		DBType:     "mysql",
+		DBHost:     "db.example.com",
+		DBPort:     3306,
+		DBName:     "test_site",
+		DBUser:     "user",
+		DBPassword: "pass",
+	}
+	dsn := cfg.DSN()
+	expected := "user:pass@tcp(db.example.com:3306)/test_site?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci"
+	if dsn != expected {
+		t.Errorf("DSN() = %q, want %q", dsn, expected)
+	}
+}
+
+func TestSiteBootstrapWritesRebindForPostgres(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	dialect := sqlDialect.Resolve("postgres")
+
+	mock.ExpectExec("INSERT INTO _kora_user").
+		WithArgs("cloud-user-pg", "site-pg", "owner@example.com", "$kora$passwordless$disabled", "Owner", "Administrator").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	if err := createPasswordlessAdminUserContext(context.Background(), database, dialect, "owner@example.com", "Owner", "site-pg", "cloud-user-pg"); err != nil {
+		t.Fatalf("create PostgreSQL admin user: %v", err)
+	}
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).
+		WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`INSERT INTO _kora_config_version`).
+		WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).
+		WithArgs(1, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).
+		WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(1))
+	if err := ensureConfigVersion(database, dialect, "site-pg", []string{"site-pg"}); err != nil {
+		t.Fatalf("create PostgreSQL config version: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureConfigVersionReportsPersistenceFailures(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(sqlmock.Sqlmock)
+	}{
+		{
+			name: "version lookup",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnError(errors.New("lookup failed"))
+			},
+		},
+		{
+			name: "version insert",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+				mock.ExpectExec(`INSERT INTO _kora_config_version`).WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).WillReturnError(errors.New("insert failed"))
+			},
+		},
+		{
+			name: "activation update",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+				mock.ExpectExec(`INSERT INTO _kora_config_version`).WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).WithArgs(1, sqlmock.AnyArg()).WillReturnError(errors.New("activation failed"))
+			},
+		},
+		{
+			name: "activation affected no row",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+				mock.ExpectExec(`INSERT INTO _kora_config_version`).WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).WithArgs(1, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(0))
+			},
+		},
+		{
+			name: "activation verification",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+				mock.ExpectExec(`INSERT INTO _kora_config_version`).WithArgs(sqlmock.AnyArg(), "site-pg", `{"domains": ["site-pg"]}`).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).WithArgs(1, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).WithArgs(sqlmock.AnyArg()).WillReturnError(errors.New("verification read failed"))
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			test.setup(mock)
+			if err := ensureConfigVersion(database, sqlDialect.Resolve("postgres"), "site-pg", []string{"site-pg"}); err == nil {
+				t.Fatal("ensureConfigVersion returned nil after injected persistence failure")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestEnsureConfigVersionRecoversInterruptedActivation(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM _kora_config_version WHERE site = \$1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id FROM _kora_config_version WHERE site = \$1 AND status = 'Active' ORDER BY version DESC LIMIT 1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("version-1"))
+	mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).WithArgs(1, "version-1").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).WithArgs("version-1").WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(1))
+	if err := ensureConfigVersion(database, sqlDialect.Resolve("postgres"), "site-pg", []string{"site-pg"}); err != nil {
+		t.Fatalf("recover config version activation: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDSN_Postgres(t *testing.T) {
+	cfg := &SiteConfig{
+		DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432,
+		DBName: "tenant", DBUser: "postgres", DBPassword: "acceptance-only",
+	}
+	if got, want := cfg.DSN(), "postgres://postgres:acceptance-only@127.0.0.1:5432/tenant?sslmode=disable"; got != want {
+		t.Fatalf("DSN() = %q, want %q", got, want)
+	}
+}
+
+func TestCreateSiteDefaultsPostgresPort(t *testing.T) {
+	input := CreateSiteInput{Hostname: "new-site.example.invalid", DBType: "postgres"}
+	input.applyDefaults()
+	if input.DBPort != 5432 {
+		t.Fatalf("default PostgreSQL port = %d, want 5432", input.DBPort)
+	}
+}
+
+func TestValidateTenantDatabaseNameBoundsAndRejectsDSNMetacharacters(t *testing.T) {
+	tests := []struct {
+		name   string
+		driver string
+		value  string
+		valid  bool
+	}{
+		{name: "mysql normal", driver: "mysql", value: "tenant_example-com", valid: true},
+		{name: "postgres maximum", driver: "postgres", value: strings.Repeat("a", 63), valid: true},
+		{name: "mysql too long", driver: "mysql", value: strings.Repeat("a", 65)},
+		{name: "postgres too long", driver: "postgres", value: strings.Repeat("a", 64)},
+		{name: "dsn query injection", driver: "mysql", value: "tenant?parseTime=false"},
+		{name: "identifier quote injection", driver: "mysql", value: "tenant` CREATE USER root"},
+		{name: "path separator", driver: "postgres", value: "tenant/other"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateTenantDatabaseName(test.driver, test.value)
+			if test.valid && err != nil {
+				t.Fatalf("ValidateTenantDatabaseName(%q) error = %v", test.value, err)
+			}
+			if !test.valid && err == nil {
+				t.Fatalf("ValidateTenantDatabaseName(%q) unexpectedly succeeded", test.value)
+			}
+		})
+	}
+}
+
+func TestCreateAdminUserAllowsPasswordlessBootstrap(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("INSERT INTO _kora_user").
+		WithArgs("cloud-user-live", "live-demo", "owner@example.com", "$kora$passwordless$disabled", "Owner", "Administrator").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := createPasswordlessAdminUserContext(context.Background(), db, sqlDialect.Resolve("mysql"), "owner@example.com", "Owner", "live-demo", "cloud-user-live"); err != nil {
+		t.Fatalf("createAdminUser: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDSN_LibSQL(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *SiteConfig
+		want string
+	}{
+		{
+			name: "remote url",
+			cfg: &SiteConfig{
+				DBType: "libsql",
+				DBHost: "libsql://test-db.turso.io",
+			},
+			want: "libsql://test-db.turso.io",
+		},
+		{
+			name: "http with credentials",
+			cfg: &SiteConfig{
+				DBType:     "libsql",
+				DBHost:     "https://db.turso.io",
+				DBUser:     "token",
+				DBPassword: "secret",
+			},
+			want: "http://token:secret@db.turso.io",
+		},
+		{
+			name: "no prefix",
+			cfg: &SiteConfig{
+				DBType: "libsql",
+				DBHost: "some-host",
+			},
+			want: "some-host",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cfg.DSN()
+			if got != tt.want {
+				t.Errorf("DSN() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReconstructSiteConfig_DBName(t *testing.T) {
+	common := &CommonConfig{
+		DBType:     "mysql",
+		DBHost:     "127.0.0.1",
+		DBPort:     3306,
+		DBUser:     "root",
+		DBPassword: "",
+	}
+
+	cfg := ReconstructSiteConfig("airtime.local", common, nil)
+	expectedDBName := "airtime_local"
+	if cfg.DBName != expectedDBName {
+		t.Errorf("DBName = %q, want %q", cfg.DBName, expectedDBName)
+	}
+	if cfg.Hostname != "airtime.local" {
+		t.Errorf("Hostname = %q, want %q", cfg.Hostname, "airtime.local")
+	}
+	if len(cfg.Apps) == 0 || cfg.Apps[0] != "core" {
+		t.Error("should have 'core' app by default")
+	}
+}
+
+func TestReconstructSiteConfig_Domains(t *testing.T) {
+	common := &CommonConfig{
+		DBType: "mysql",
+		DBHost: "127.0.0.1",
+		DBPort: 3306,
+	}
+
+	// Test with provided domains.
+	providedDomains := []string{"app.example.com", "app-admin.example.com"}
+	cfg := ReconstructSiteConfig("app.example.com", common, providedDomains)
+	if len(cfg.DomainsList) != 2 {
+		t.Fatalf("DomainsList length = %d, want 2", len(cfg.DomainsList))
+	}
+	if cfg.DomainsList[0] != "app.example.com" {
+		t.Errorf("DomainsList[0] = %q, want %q", cfg.DomainsList[0], "app.example.com")
+	}
+
+	// Test fallback to [hostname].
+	cfg2 := ReconstructSiteConfig("single.example.com", common, nil)
+	domains := cfg2.Domains()
+	if len(domains) != 1 {
+		t.Fatalf("Domains length = %d, want 1", len(domains))
+	}
+	if domains[0] != "single.example.com" {
+		t.Errorf("Domains[0] = %q, want %q", domains[0], "single.example.com")
+	}
+}
+
+func TestSiteConfig_Domains(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *SiteConfig
+		want []string
+	}{
+		{
+			name: "uses domains list when set",
+			cfg:  &SiteConfig{Hostname: "example.com", DomainsList: []string{"a.com", "b.com"}},
+			want: []string{"a.com", "b.com"},
+		},
+		{
+			name: "falls back to hostname",
+			cfg:  &SiteConfig{Hostname: "example.com"},
+			want: []string{"example.com"},
+		},
+		{
+			name: "falls back to localhost",
+			cfg:  &SiteConfig{},
+			want: []string{"localhost"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cfg.Domains()
+			if len(got) != len(tt.want) {
+				t.Fatalf("len = %d, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("Domains[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestCommonConfigFromEnv_Defaults(t *testing.T) {
+	// Clear relevant env vars.
+	for _, key := range []string{
+		"KORA_DB_TYPE", "KORA_DB_HOST", "KORA_DB_PORT",
+		"KORA_HTTP_PORT", "KORA_LOG_LEVEL", "KORA_LOG_FORMAT",
+		"KORA_APP_NAME", "KORA_VERSION", "KORA_ADMIN_ROLE",
+		"KORA_TRUSTED_PROXIES",
+	} {
+		os.Unsetenv(key)
+	}
+
+	cfg := CommonConfigFromEnv()
+	if cfg.DBType != "mysql" {
+		t.Errorf("DBType = %q, want %q", cfg.DBType, "mysql")
+	}
+	if cfg.DBHost != "127.0.0.1" {
+		t.Errorf("DBHost = %q, want %q", cfg.DBHost, "127.0.0.1")
+	}
+	if cfg.HTTPPort != 8000 {
+		t.Errorf("HTTPPort = %d, want %d", cfg.HTTPPort, 8000)
+	}
+	if cfg.LogLevel != "info" {
+		t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, "info")
+	}
+	if cfg.LogFormat != "json" {
+		t.Errorf("LogFormat = %q, want %q", cfg.LogFormat, "json")
+	}
+	if cfg.AppName != "Kigae" {
+		t.Errorf("AppName = %q, want %q", cfg.AppName, "Kigae")
+	}
+	if cfg.Version != "0.3.0" {
+		t.Errorf("Version = %q, want %q", cfg.Version, "0.3.0")
+	}
+	if cfg.AdminRole != "Administrator" {
+		t.Errorf("AdminRole = %q, want %q", cfg.AdminRole, "Administrator")
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("TrustedProxies = %#v, want none by default", cfg.TrustedProxies)
+	}
+}
+
+func TestCommonConfigFromEnv_Overrides(t *testing.T) {
+	// Set env vars.
+	os.Setenv("KORA_DB_TYPE", "libsql")
+	os.Setenv("KORA_DB_HOST", "db.remote.turso.io")
+	os.Setenv("KORA_DB_PORT", "8080")
+	os.Setenv("KORA_HTTP_PORT", "9000")
+	os.Setenv("KORA_LOG_LEVEL", "debug")
+	os.Setenv("KORA_APP_NAME", "MyApp")
+	os.Setenv("KORA_ADMIN_ROLE", "SuperAdmin")
+	os.Setenv("KORA_VERSION", "1.0.0")
+
+	defer func() {
+		os.Unsetenv("KORA_DB_TYPE")
+		os.Unsetenv("KORA_DB_HOST")
+		os.Unsetenv("KORA_DB_PORT")
+		os.Unsetenv("KORA_HTTP_PORT")
+		os.Unsetenv("KORA_LOG_LEVEL")
+		os.Unsetenv("KORA_APP_NAME")
+		os.Unsetenv("KORA_ADMIN_ROLE")
+		os.Unsetenv("KORA_VERSION")
+	}()
+
+	cfg := CommonConfigFromEnv()
+	if cfg.DBType != "libsql" {
+		t.Errorf("DBType = %q, want %q", cfg.DBType, "libsql")
+	}
+	if cfg.DBHost != "db.remote.turso.io" {
+		t.Errorf("DBHost = %q, want %q", cfg.DBHost, "db.remote.turso.io")
+	}
+	if cfg.HTTPPort != 9000 {
+		t.Errorf("HTTPPort = %d, want %d", cfg.HTTPPort, 9000)
+	}
+	if cfg.LogLevel != "debug" {
+		t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, "debug")
+	}
+	if cfg.AppName != "MyApp" {
+		t.Errorf("AppName = %q, want %q", cfg.AppName, "MyApp")
+	}
+	if cfg.AdminRole != "SuperAdmin" {
+		t.Errorf("AdminRole = %q, want %q", cfg.AdminRole, "SuperAdmin")
+	}
+	if cfg.Version != "1.0.0" {
+		t.Errorf("Version = %q, want %q", cfg.Version, "1.0.0")
+	}
+}
+
+func TestTrustedProxiesConfigSupportsEnvironmentOverride(t *testing.T) {
+	t.Setenv("KORA_TRUSTED_PROXIES", " 10.0.0.0/8, 192.0.2.7 ")
+
+	cfg := CommonConfigFromEnv()
+	want := []string{"10.0.0.0/8", "192.0.2.7"}
+	if len(cfg.TrustedProxies) != len(want) {
+		t.Fatalf("trusted proxies = %#v, want %#v", cfg.TrustedProxies, want)
+	}
+	for i := range want {
+		if cfg.TrustedProxies[i] != want[i] {
+			t.Errorf("trusted proxies[%d] = %q, want %q", i, cfg.TrustedProxies[i], want[i])
+		}
+	}
+}
+
+func TestCommonConfigLoadsTrustedProxiesFromYAML(t *testing.T) {
+	t.Setenv("KORA_TRUSTED_PROXIES", "")
+	path := filepath.Join(t.TempDir(), "common_site_config.yaml")
+	if err := os.WriteFile(path, []byte("trusted_proxies:\n  - 10.0.0.0/8\n  - 192.0.2.7\n"), 0o600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+	cfg, err := LoadCommonConfig(path)
+	if err != nil {
+		t.Fatalf("load common config: %v", err)
+	}
+	want := []string{"10.0.0.0/8", "192.0.2.7"}
+	if len(cfg.TrustedProxies) != len(want) {
+		t.Fatalf("trusted proxies = %#v, want %#v", cfg.TrustedProxies, want)
+	}
+	for i := range want {
+		if cfg.TrustedProxies[i] != want[i] {
+			t.Errorf("trusted proxies[%d] = %q, want %q", i, cfg.TrustedProxies[i], want[i])
+		}
+	}
+}
+
+func TestStartupConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *StartupConfig
+		wantErr bool
+	}{
+		{
+			name: "no dsn — valid",
+			cfg: &StartupConfig{
+				DBDSN:  "",
+				DBType: "",
+			},
+			wantErr: false,
+		},
+		{
+			name: "dsn with mysql type — valid",
+			cfg: &StartupConfig{
+				DBDSN:  "user:pass@tcp(localhost)/db",
+				DBType: "mysql",
+			},
+			wantErr: false,
+		},
+		{
+			name: "dsn with libsql type — valid",
+			cfg: &StartupConfig{
+				DBDSN:  "libsql://db.turso.io",
+				DBType: "libsql",
+			},
+			wantErr: false,
+		},
+		{
+			name: "dsn without type — error",
+			cfg: &StartupConfig{
+				DBDSN:  "user:pass@tcp(localhost)/db",
+				DBType: "",
+			},
+			wantErr: true,
+		},
+		{
+			name: "postgres dsn — supported",
+			cfg: &StartupConfig{
+				DBDSN:  "postgres://user:pass@localhost/db",
+				DBType: "postgres",
+			},
+			wantErr: false,
+		},
+		{
+			name: "dsn with invalid type — error",
+			cfg: &StartupConfig{
+				DBDSN:  "user:pass@tcp(localhost)/db",
+				DBType: "sqlite",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestApplyEnvOverrides(t *testing.T) {
+	os.Setenv("KORA_DB_HOST", "env-host.example.com")
+	os.Setenv("KORA_DB_USER", "envuser")
+	os.Setenv("KORA_DB_PASSWORD", "envpass")
+	os.Setenv("KORA_HTTP_PORT", "9999")
+	os.Setenv("KORA_SESSION_HOURS", "48")
+
+	defer func() {
+		os.Unsetenv("KORA_DB_HOST")
+		os.Unsetenv("KORA_DB_USER")
+		os.Unsetenv("KORA_DB_PASSWORD")
+		os.Unsetenv("KORA_HTTP_PORT")
+		os.Unsetenv("KORA_SESSION_HOURS")
+	}()
+
+	cfg := &CommonConfig{
+		DBHost:               "default-host",
+		DBUser:               "defaultuser",
+		DBPassword:           "defaultpass",
+		HTTPPort:             8000,
+		SessionLifetimeHours: 24,
+	}
+
+	cfg.ApplyEnvOverrides()
+
+	if cfg.DBHost != "env-host.example.com" {
+		t.Errorf("DBHost = %q, want %q", cfg.DBHost, "env-host.example.com")
+	}
+	if cfg.DBUser != "envuser" {
+		t.Errorf("DBUser = %q, want %q", cfg.DBUser, "envuser")
+	}
+	if cfg.DBPassword != "envpass" {
+		t.Errorf("DBPassword = %q, want %q", cfg.DBPassword, "envpass")
+	}
+	if cfg.HTTPPort != 9999 {
+		t.Errorf("HTTPPort = %d, want %d", cfg.HTTPPort, 9999)
+	}
+	if cfg.SessionLifetimeHours != 48 {
+		t.Errorf("SessionLifetimeHours = %d, want %d", cfg.SessionLifetimeHours, 48)
+	}
+}
+
+func TestLoadStartupConfig_Defaults(t *testing.T) {
+	for _, key := range []string{
+		"DB_DSN", "KORA_DB_TYPE", "CONSOLE_EMAIL", "CONSOLE_PASSWORD",
+		"KORA_HTTP_PORT", "KORA_CONFIG_DIR", "KORA_LOG_LEVEL", "KORA_LOG_FORMAT",
+	} {
+		os.Unsetenv(key)
+	}
+
+	cfg := LoadStartupConfig()
+	if cfg.DBType != "" {
+		t.Errorf("DBType = %q, want empty", cfg.DBType)
+	}
+	if cfg.DBDSN != "" {
+		t.Errorf("DBDSN = %q, want empty", cfg.DBDSN)
+	}
+	if cfg.ConsoleEmail != "admin@kora.local" {
+		t.Errorf("ConsoleEmail = %q, want %q", cfg.ConsoleEmail, "admin@kora.local")
+	}
+	if cfg.ConsolePassword != "kora123" {
+		t.Errorf("ConsolePassword = %q, want %q", cfg.ConsolePassword, "kora123")
+	}
+	if cfg.HTTPPort != 8000 {
+		t.Errorf("HTTPPort = %d, want %d", cfg.HTTPPort, 8000)
+	}
+	if cfg.ConfigDir != "." {
+		t.Errorf("ConfigDir = %q, want %q", cfg.ConfigDir, ".")
+	}
+	if cfg.LogLevel != "info" {
+		t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, "info")
+	}
+	if cfg.LogFormat != "json" {
+		t.Errorf("LogFormat = %q, want %q", cfg.LogFormat, "json")
+	}
+}
+
+func TestLoadStartupConfig_EnvOverrides(t *testing.T) {
+	os.Setenv("DB_DSN", "user:pass@tcp(localhost:3306)/test")
+	os.Setenv("KORA_DB_TYPE", "mysql")
+	os.Setenv("CONSOLE_EMAIL", "super@admin.com")
+	os.Setenv("CONSOLE_PASSWORD", "supersecret")
+	os.Setenv("KORA_HTTP_PORT", "9999")
+	os.Setenv("KORA_CONFIG_DIR", "/etc/kora")
+	os.Setenv("KORA_LOG_LEVEL", "debug")
+	os.Setenv("KORA_LOG_FORMAT", "text")
+
+	defer func() {
+		os.Unsetenv("DB_DSN")
+		os.Unsetenv("KORA_DB_TYPE")
+		os.Unsetenv("CONSOLE_EMAIL")
+		os.Unsetenv("CONSOLE_PASSWORD")
+		os.Unsetenv("KORA_HTTP_PORT")
+		os.Unsetenv("KORA_CONFIG_DIR")
+		os.Unsetenv("KORA_LOG_LEVEL")
+		os.Unsetenv("KORA_LOG_FORMAT")
+	}()
+
+	cfg := LoadStartupConfig()
+	if cfg.DBType != "mysql" {
+		t.Errorf("DBType = %q, want %q", cfg.DBType, "mysql")
+	}
+	if cfg.DBDSN != "user:pass@tcp(localhost:3306)/test" {
+		t.Errorf("DBDSN = %q, want %q", cfg.DBDSN, "user:pass@tcp(localhost:3306)/test")
+	}
+	if cfg.ConsoleEmail != "super@admin.com" {
+		t.Errorf("ConsoleEmail = %q, want %q", cfg.ConsoleEmail, "super@admin.com")
+	}
+	if cfg.ConsolePassword != "supersecret" {
+		t.Errorf("ConsolePassword = %q, want %q", cfg.ConsolePassword, "supersecret")
+	}
+	if cfg.HTTPPort != 9999 {
+		t.Errorf("HTTPPort = %d, want %d", cfg.HTTPPort, 9999)
+	}
+	if cfg.ConfigDir != "/etc/kora" {
+		t.Errorf("ConfigDir = %q, want %q", cfg.ConfigDir, "/etc/kora")
+	}
+	if cfg.LogLevel != "debug" {
+		t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, "debug")
+	}
+	if cfg.LogFormat != "text" {
+		t.Errorf("LogFormat = %q, want %q", cfg.LogFormat, "text")
+	}
+}

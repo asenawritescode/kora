@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 type staticManagementPackageArtifact struct {

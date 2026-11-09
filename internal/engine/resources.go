@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asenawritescode/kora/analytics"
-	"github.com/asenawritescode/kora/auth"
-	"github.com/asenawritescode/kora/db"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/scheduler"
-	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/auth"
+	"github.com/asenawritescode/kora/internal/db"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/scheduler"
+	"github.com/asenawritescode/kora/internal/script"
 )
 
 // ShutdownOwner is the process resource boundary owned by Engine. Shutdown

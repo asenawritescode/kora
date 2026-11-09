@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	kdb "github.com/asenawritescode/kora/db"
+	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 // PlatformSiteDirectory is the validated platform directory snapshot Engine

@@ -6,15 +6,15 @@ package engineadapter
 import (
 	"database/sql"
 
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/internal/application/process"
 	"github.com/asenawritescode/kora/internal/application/purchasing"
 	purchasingsql "github.com/asenawritescode/kora/internal/application/purchasing/sqlstore"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/engine"
-	"github.com/asenawritescode/kora/policy"
-	"github.com/asenawritescode/kora/requests"
-	workflowstore "github.com/asenawritescode/kora/workflow/sqlstore"
+	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/requests"
+	workflowstore "github.com/asenawritescode/kora/internal/workflow/sqlstore"
 )
 
 // Configure registers the purchasing request policy and its local workflow

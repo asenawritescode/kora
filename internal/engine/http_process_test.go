@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 func TestAssembleHTTPProcessRegistersResourcesBeforeLateRouteFailure(t *testing.T) {

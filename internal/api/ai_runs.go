@@ -1,0 +1,158 @@
+package api
+
+import (
+	"database/sql"
+	"net/http"
+	"time"
+
+	"github.com/asenawritescode/kora/internal/api/ai"
+	"github.com/gin-gonic/gin"
+)
+
+type aiCancelRequest struct {
+	Reason string `json:"reason"`
+}
+
+type aiResumeRequest struct {
+	ResumeToken string `json:"resume_token"`
+}
+
+type aiApprovalListItem struct {
+	ID                 string    `json:"id"`
+	OperationID        string    `json:"operation_id"`
+	ActorPrincipalID   string    `json:"actor_principal_id"`
+	ActorPrincipalType string    `json:"actor_principal_type"`
+	ToolName           string    `json:"tool_name"`
+	State              string    `json:"state"`
+	TargetFingerprint  string    `json:"target_fingerprint"`
+	ArgumentHash       string    `json:"argument_hash"`
+	RecordVersion      int       `json:"record_version"`
+	RequestedAt        time.Time `json:"requested_at"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	GrantedAt          time.Time `json:"granted_at"`
+	GrantedBy          string    `json:"granted_by"`
+	AuthSessionID      string    `json:"auth_session_id"`
+}
+
+// HandleAICancel marks a durable AI run as cancelled.
+func (h *Handler) HandleAICancel(c *gin.Context) {
+	tx := h.siteTx(c)
+	runID := c.Param("id")
+	var req aiCancelRequest
+	_ = c.ShouldBindJSON(&req)
+	ctx := ai.WithDialect(c.Request.Context(), tx.Dialect)
+	if err := ai.CancelRun(ctx, tx.DB, runID, req.Reason); err != nil {
+		writeError(c, http.StatusNotFound, "ai_run.not_found", err.Error(), nil)
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: aiCancelResponse{RunID: runID, Status: "cancelled"}})
+}
+
+// HandleAIResume transitions a durable AI run back into planning if it is not terminal.
+func (h *Handler) HandleAIResume(c *gin.Context) {
+	tx := h.siteTx(c)
+	runID := c.Param("id")
+	var req aiResumeRequest
+	_ = c.ShouldBindJSON(&req)
+	ctx := ai.WithDialect(c.Request.Context(), tx.Dialect)
+	rec, err := ai.ResumeRun(ctx, tx.DB, runID, req.ResumeToken)
+	if err != nil {
+		writeError(c, http.StatusNotFound, "ai_run.not_found", err.Error(), nil)
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: aiResumeResponse{
+		RunID:       rec.ID,
+		Status:      rec.Status,
+		ResumeToken: rec.ResumeToken,
+	}})
+}
+
+// HandleAIGrantApproval transitions a durable approval row from pending_approval to granted.
+func (h *Handler) HandleAIGrantApproval(c *gin.Context) {
+	grantedBy, verified := requestUserID(c)
+	if !verified {
+		writeError(c, http.StatusUnauthorized, "auth.execution_required", "Verified execution identity is required.", nil)
+		return
+	}
+	tx := h.siteTx(c)
+	approvalID := c.Param("id")
+	ctx := ai.WithDialect(c.Request.Context(), tx.Dialect)
+	rec, err := ai.GrantApprovalForOwner(ctx, tx.DB, c.GetString("site_name"), approvalID, grantedBy)
+	if err != nil {
+		writeError(c, http.StatusNotFound, "ai_run.not_found", err.Error(), nil)
+		return
+	}
+	run, err := ai.MarkRunPlanning(ctx, tx.DB, rec.OperationID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: aiGrantApprovalResponse{
+		ApprovalID: rec.ID,
+		State:      rec.State,
+		GrantedBy:  rec.GrantedBy,
+		RunID:      run.ID,
+		RunStatus:  run.Status,
+	}})
+}
+
+// HandleAIListApprovals returns approval rows for the current site.
+func (h *Handler) HandleAIListApprovals(c *gin.Context) {
+	ownerID, verified := requestUserID(c)
+	if !verified {
+		writeError(c, http.StatusUnauthorized, "auth.execution_required", "Verified execution identity is required.", nil)
+		return
+	}
+	tx := h.siteTx(c)
+	if err := ai.EnsureAIRunTables(c.Request.Context(), tx.DB, tx.Dialect); err != nil {
+		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
+		return
+	}
+	state := c.Query("state")
+	if state == "" {
+		state = "pending_approval"
+	}
+	rows, err := tx.DB.QueryContext(c.Request.Context(), h.siteQuery(c, `
+SELECT id, operation_id, actor_principal_id, actor_principal_type, tool_name, state, target_fingerprint, argument_hash, record_version, requested_at, expires_at, granted_at, granted_by, auth_session_id
+FROM _kora_ai_approval
+WHERE site = ? AND actor_principal_id = ? AND state = ?
+ORDER BY requested_at DESC`), c.GetString("site_name"), ownerID, state)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
+		return
+	}
+	defer rows.Close()
+	items := make([]aiApprovalListItem, 0)
+	for rows.Next() {
+		var item aiApprovalListItem
+		var expiresAt, grantedAt sql.NullTime
+		if err := rows.Scan(&item.ID, &item.OperationID, &item.ActorPrincipalID, &item.ActorPrincipalType, &item.ToolName, &item.State, &item.TargetFingerprint, &item.ArgumentHash, &item.RecordVersion, &item.RequestedAt, &expiresAt, &grantedAt, &item.GrantedBy, &item.AuthSessionID); err != nil {
+			writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
+			return
+		}
+		if expiresAt.Valid {
+			item.ExpiresAt = expiresAt.Time
+		}
+		if grantedAt.Valid {
+			item.GrantedAt = grantedAt.Time
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: items})
+}
+
+// HandleAIRetentionCleanup removes expired AI conversations, runs, messages, and steps.
+func (h *Handler) HandleAIRetentionCleanup(c *gin.Context) {
+	tx := h.siteTx(c)
+	ctx := ai.WithDialect(c.Request.Context(), tx.Dialect)
+	removed, err := ai.CleanupExpired(ctx, tx.DB, time.Now().UTC())
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "ai_run.failed", err.Error(), nil)
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: aiRetentionCleanupResponse{Removed: removed}})
+}

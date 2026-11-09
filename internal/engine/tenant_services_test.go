@@ -9,13 +9,13 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/eventstream"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
-	"github.com/asenawritescode/kora/storage"
-	"github.com/asenawritescode/kora/webhook"
+	"github.com/asenawritescode/kora/internal/auth"
+	"github.com/asenawritescode/kora/internal/eventstream"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/storage"
+	"github.com/asenawritescode/kora/internal/webhook"
 )
 
 type tenantExtensionSchemas struct{ registered bool }

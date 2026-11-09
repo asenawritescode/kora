@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/asenawritescode/kora/analytics"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 func TestAnalyticsTenantWALDirIsStableAcrossRouteRenames(t *testing.T) {

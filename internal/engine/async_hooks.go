@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asenawritescode/kora/api"
-	kdb "github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/api"
+	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/orm"
-	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/internal/doctype"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/script"
 )
 
 var (

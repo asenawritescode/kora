@@ -13,14 +13,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/asenawritescode/kora/analytics"
-	"github.com/asenawritescode/kora/configstore"
-	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/configstore"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/scheduler"
+	schedulersql "github.com/asenawritescode/kora/internal/scheduler/sqlstore"
+	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
-	"github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/scheduler"
-	schedulersql "github.com/asenawritescode/kora/scheduler/sqlstore"
-	"github.com/asenawritescode/kora/site"
 )
 
 type durableScanDirectory interface {

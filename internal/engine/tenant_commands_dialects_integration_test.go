@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asenawritescode/kora/configstore"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/kernel"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/configstore"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/site"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 )

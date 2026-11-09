@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 const pendingDeletionRetryInterval = 30 * time.Second

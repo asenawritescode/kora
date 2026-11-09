@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/plugin"
+	"github.com/asenawritescode/kora/internal/configstore"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/plugin"
 )
 
 func (e *managementModuleLifecycleExecutor) InspectModules(ctx context.Context, tenant contract.TenantID) (contract.ModuleInspection, error) {

@@ -13,13 +13,13 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 
-	"github.com/asenawritescode/kora/auth"
-	kdb "github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/auth"
+	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/disposabledb"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
-	"github.com/asenawritescode/kora/storage"
+	"github.com/asenawritescode/kora/internal/doctype"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/storage"
 )
 
 // Importing a pack publishes its queries in the generated <pack>.core module

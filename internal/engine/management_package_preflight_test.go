@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/plugin"
+	"github.com/asenawritescode/kora/internal/plugin"
 )
 
 func TestBindingPreflightFailedDetail(t *testing.T) {

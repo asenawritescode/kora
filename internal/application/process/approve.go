@@ -14,11 +14,11 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	"github.com/asenawritescode/kora/kernel"
-	"github.com/asenawritescode/kora/policy"
-	"github.com/asenawritescode/kora/requests"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/requests"
 )
 
 // TenantTransaction opens one tenant transaction and returns its release

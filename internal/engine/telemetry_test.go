@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 func TestTelemetryStartupFailureRollsBackAcquiredProvidersInReverseOrder(t *testing.T) {

@@ -13,6 +13,7 @@ type OfflineStore interface {
 }
 
 // OfflineReceipt is the acknowledgement returned by the central intake.
+//
 //contract:wire
 type OfflineReceipt struct {
 	OperationID string                 `json:"operation_id"`
@@ -30,6 +31,7 @@ type OfflineSyncService struct {
 
 // OfflinePullPage is a repeatable page of operations and the cursor that
 // should be used to continue from the last returned item.
+//
 //contract:wire
 type OfflinePullPage struct {
 	Operations []OfflineOperation `json:"operations"`

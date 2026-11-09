@@ -14,10 +14,10 @@ TAG ?= v0.1.0
 build: build-go                    ## Build the Go binary (the UI is the separate kora-ui repo)
 
 VERSION ?= $(shell cat VERSION 2>/dev/null || echo "dev")
-LDFLAGS += -X github.com/asenawritescode/kora/cli.Version=$(VERSION)
+LDFLAGS += -X github.com/asenawritescode/kora/internal/cli.Version=$(VERSION)
 
 build-go:                          ## Build Go binary
-	go build -ldflags="-s -w $(LDFLAGS)" -o kora .
+	go build -ldflags="-s -w $(LDFLAGS)" -o kora ./cmd/kora
 
 ## Development
 dev:                               ## Full dev setup: MySQL + build + setup + serve

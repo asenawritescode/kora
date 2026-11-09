@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 // SiteDirectoryWakeups provides best-effort wakeups for the durable SQL

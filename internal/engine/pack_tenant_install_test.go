@@ -10,12 +10,12 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/kernel"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
-	"github.com/asenawritescode/kora/storage"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/storage"
 )
 
 // installPackTenant imports pos+inventory into a fresh tenant DB and installs

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asenawritescode/kora/api"
-	"github.com/asenawritescode/kora/doctype"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/orm"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/api"
+	"github.com/asenawritescode/kora/internal/doctype"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/site"
 	"github.com/gin-gonic/gin"
 )
 

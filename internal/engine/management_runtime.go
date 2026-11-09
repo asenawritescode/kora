@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/asenawritescode/kora/api"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/management"
-	"github.com/asenawritescode/kora/management/sqlstore"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/api"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/management"
+	"github.com/asenawritescode/kora/internal/management/sqlstore"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 type managementWorkAdmission interface {

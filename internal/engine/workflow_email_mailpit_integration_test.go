@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/email"
-	"github.com/asenawritescode/kora/workflow"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/email"
+	"github.com/asenawritescode/kora/internal/workflow"
 	"github.com/go-sql-driver/mysql"
 )
 

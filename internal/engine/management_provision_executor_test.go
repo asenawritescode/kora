@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/management"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/management"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 type managementProvisionAdmissionStub struct {

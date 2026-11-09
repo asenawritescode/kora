@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/kernel"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
 )
 
 // TestInventoryPackageIsDeclarative proves the reference package is consumed

@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/email"
-	"github.com/asenawritescode/kora/eventstream"
-	"github.com/asenawritescode/kora/kernel"
-	"github.com/asenawritescode/kora/policy"
-	"github.com/asenawritescode/kora/workflow"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/email"
+	"github.com/asenawritescode/kora/internal/eventstream"
+	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/workflow"
 )
 
 var errUnrecognizedWorkflowSchema = errors.New("workflow schema is not a built-in schema")

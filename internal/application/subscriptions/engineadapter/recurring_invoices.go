@@ -16,14 +16,14 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	kdb "github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
+	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/engine"
-	"github.com/asenawritescode/kora/kernel"
-	"github.com/asenawritescode/kora/orm"
-	"github.com/asenawritescode/kora/plugin"
-	"github.com/asenawritescode/kora/policy"
-	"github.com/asenawritescode/kora/scheduler"
+	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/plugin"
+	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/scheduler"
 )
 
 const recurringInvoiceCatchUpLimit = 24

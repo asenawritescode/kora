@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/internal/application/purchasing"
-	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/orm"
 )
 
 type Store struct {

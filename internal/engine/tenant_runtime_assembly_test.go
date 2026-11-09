@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
-	"github.com/asenawritescode/kora/storage"
+	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/db"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/storage"
 )
 
 type assemblyTestDirectory struct {

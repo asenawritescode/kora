@@ -13,14 +13,14 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/kernel"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
-	"github.com/asenawritescode/kora/storage"
+	"github.com/asenawritescode/kora/internal/configstore"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/storage"
 )
 
 // composedPackFiles reads a pack tree and namespaces its files the way Cloud's

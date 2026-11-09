@@ -8,8 +8,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/site"
-	"github.com/asenawritescode/kora/storage"
+	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/storage"
 )
 
 func TestAssembleProcessStartupRollsBackPlatformAcquisitionFailures(t *testing.T) {

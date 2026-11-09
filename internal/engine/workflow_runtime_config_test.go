@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/doctype"
 )
 
 func TestSelfHostedWorkflowConfigIsDomainNeutral(t *testing.T) {

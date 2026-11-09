@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/asenawritescode/kora/api"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/api"
+	"github.com/asenawritescode/kora/internal/site"
 	"github.com/gin-gonic/gin"
 )
 

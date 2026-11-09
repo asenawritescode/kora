@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
+	knet "github.com/asenawritescode/kora/internal/net"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
-	knet "github.com/asenawritescode/kora/net"
 )
 
 // DrainRetiredTenantRuntime retries a timed drain without closing resources

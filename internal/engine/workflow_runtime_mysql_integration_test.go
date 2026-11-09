@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
+	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	"github.com/asenawritescode/kora/kernel"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/outbox"
-	requestsql "github.com/asenawritescode/kora/requests/sqlstore"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/outbox"
+	requestsql "github.com/asenawritescode/kora/internal/requests/sqlstore"
+	"github.com/asenawritescode/kora/internal/site"
 	"github.com/go-sql-driver/mysql"
 )
 

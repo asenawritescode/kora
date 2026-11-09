@@ -7,7 +7,7 @@ import (
 	"io"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/workflow"
+	"github.com/asenawritescode/kora/internal/workflow"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 

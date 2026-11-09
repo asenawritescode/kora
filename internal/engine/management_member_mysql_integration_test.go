@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/site"
 	_ "github.com/go-sql-driver/mysql"
 )
 

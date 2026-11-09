@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/kernel"
-	"github.com/asenawritescode/kora/plugin"
-	"github.com/asenawritescode/kora/workflow"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/plugin"
+	"github.com/asenawritescode/kora/internal/workflow"
 )
 
 func registeredKernelCommandProviders(tenant contract.TenantID, database *sql.DB, registry *doctype.Registry, modules []contract.ModuleDescriptor, commands *kernel.CommandRegistry, commandKernel *kernel.Kernel, schemas workflow.PayloadSchemaRegistry, configured []plugin.ProviderRegistration) ([]plugin.ProviderRegistration, error) {

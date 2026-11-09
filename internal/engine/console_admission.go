@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/asenawritescode/kora/api"
+	"github.com/asenawritescode/kora/internal/api"
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 func tenantSiteProvisioningAdmission(platformDriver, platformDSN string) func(context.Context, *site.SiteConfig) (func(), error) {

@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/kernel"
-	"github.com/asenawritescode/kora/plugin"
-	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/internal/configstore"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/plugin"
+	"github.com/asenawritescode/kora/internal/policy"
 )
 
 type moduleBindingResolver func(contract.BusinessScope) (plugin.BindingPlan, error)

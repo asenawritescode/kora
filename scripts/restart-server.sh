@@ -38,7 +38,7 @@ if [ -n "${KORA_ENGINE_MANAGEMENT_CALLER_ID:-}" ]; then
 fi
 
 engine_bin="/tmp/kora-engine-restart-$$"
-go build -o "$engine_bin" .
+go build -o "$engine_bin" ./cmd/kora
 
 old_pids=$(pgrep -f 'kora.*serve --port 8000$' || true)
 if [ -n "$old_pids" ]; then

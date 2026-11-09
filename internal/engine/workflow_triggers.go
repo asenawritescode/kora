@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	kdb "github.com/asenawritescode/kora/db"
+	kdb "github.com/asenawritescode/kora/internal/db"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/outbox"
-	"github.com/asenawritescode/kora/workflow"
+	"github.com/asenawritescode/kora/internal/workflow"
 )
 
 func registerWorkflowTriggerConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, instances *workflow.InstanceService, dialect kdb.Dialect) error {
