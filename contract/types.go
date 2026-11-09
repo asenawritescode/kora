@@ -78,74 +78,74 @@ type CommandMeta struct {
 }
 
 func ParseTenantID(raw string) (TenantID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return TenantID(raw), nil
 }
 
 func ParsePrincipalID(raw string) (PrincipalID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return PrincipalID(raw), nil
 }
 func ParseRequestID(raw string) (RequestID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return RequestID(raw), nil
 }
 func ParseAssignmentID(raw string) (AssignmentID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return AssignmentID(raw), nil
 }
 func ParseDecisionID(raw string) (DecisionID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return DecisionID(raw), nil
 }
 func ParseInstanceID(raw string) (InstanceID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return InstanceID(raw), nil
 }
 func ParseDefinitionID(raw string) (DefinitionID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return DefinitionID(raw), nil
 }
 func ParseStepID(raw string) (StepID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return StepID(raw), nil
 }
 func ParseOperationID(raw string) (OperationID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return OperationID(raw), nil
 }
 func ParseDeploymentID(raw string) (DeploymentID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return DeploymentID(raw), nil
 }
 func ParseDBServerID(raw string) (DBServerID, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return DBServerID(raw), nil
 }
 func ParseIdempotencyKey(raw string) (IdempotencyKey, error) {
-	if err := validateOpaqueID(raw); err != nil {
+	if err := opaqueID(raw).validate(); err != nil {
 		return "", err
 	}
 	return IdempotencyKey(raw), nil
@@ -176,11 +176,15 @@ func ValidatePageRequest(page PageRequest) error {
 	return nil
 }
 
-func validateOpaqueID(raw string) error {
-	if raw == "" || len(raw) > 160 || strings.TrimSpace(raw) != raw {
+// opaqueID is the shared shape of every identifier the contract treats as an opaque string.
+type opaqueID string
+
+// validate requires 1 to 160 bytes with no surrounding whitespace and no control characters.
+func (id opaqueID) validate() error {
+	if id == "" || len(id) > 160 || strings.TrimSpace(string(id)) != string(id) {
 		return fmt.Errorf("identifier must be 1 to 160 bytes without surrounding whitespace")
 	}
-	for _, r := range raw {
+	for _, r := range id {
 		if unicode.IsControl(r) {
 			return fmt.Errorf("identifier contains a control character")
 		}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/mail"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -53,143 +52,6 @@ type ManagementCapabilitiesV2 struct {
 	Version       uint16                 `json:"version"`
 	Capabilities  []ManagementCapability `json:"capabilities"`
 	EngineVersion string                 `json:"engine_version,omitempty"`
-}
-
-// EngineVersionAtLeast reports running >= required using semver 2.0.0
-// section 11 precedence. An optional leading "v" and "+build" metadata are
-// accepted; build metadata is ignored in comparison.
-func EngineVersionAtLeast(running, required string) (bool, error) {
-	got, err := parseEngineVersion(running)
-	if err != nil {
-		return false, err
-	}
-	want, err := parseEngineVersion(required)
-	if err != nil {
-		return false, err
-	}
-	return compareEngineVersions(got, want) >= 0, nil
-}
-
-type engineVersion struct {
-	core [3]uint64
-	pre  []string
-}
-
-func parseEngineVersion(value string) (engineVersion, error) {
-	var v engineVersion
-	bad := func() (engineVersion, error) {
-		return v, fmt.Errorf("version %q must use semver MAJOR.MINOR.PATCH[-prerelease][+build]", value)
-	}
-	rest := strings.TrimPrefix(strings.TrimSpace(value), "v")
-	if i := strings.Index(rest, "+"); i >= 0 {
-		if !validIdentifiers(rest[i+1:], false) {
-			return bad()
-		}
-		rest = rest[:i]
-	}
-	if i := strings.Index(rest, "-"); i >= 0 {
-		if !validIdentifiers(rest[i+1:], true) {
-			return bad()
-		}
-		v.pre = strings.Split(rest[i+1:], ".")
-		rest = rest[:i]
-	}
-	parts := strings.Split(rest, ".")
-	if len(parts) != 3 {
-		return bad()
-	}
-	for i, part := range parts {
-		if !isDigits(part) || (len(part) > 1 && part[0] == '0') {
-			return bad()
-		}
-		n, err := strconv.ParseUint(part, 10, 64)
-		if err != nil {
-			return bad()
-		}
-		v.core[i] = n
-	}
-	return v, nil
-}
-
-func isDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// validIdentifiers checks dot-separated [0-9A-Za-z-] identifiers; prerelease
-// numeric identifiers must not have leading zeros.
-func validIdentifiers(s string, prerelease bool) bool {
-	for _, id := range strings.Split(s, ".") {
-		if id == "" {
-			return false
-		}
-		for _, c := range id {
-			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '-') {
-				return false
-			}
-		}
-		if prerelease && isDigits(id) && len(id) > 1 && id[0] == '0' {
-			return false
-		}
-	}
-	return true
-}
-
-func compareEngineVersions(a, b engineVersion) int {
-	for i := range a.core {
-		if a.core[i] != b.core[i] {
-			if a.core[i] > b.core[i] {
-				return 1
-			}
-			return -1
-		}
-	}
-	switch {
-	case len(a.pre) == 0 && len(b.pre) == 0:
-		return 0
-	case len(a.pre) == 0:
-		return 1
-	case len(b.pre) == 0:
-		return -1
-	}
-	for i := 0; i < len(a.pre) && i < len(b.pre); i++ {
-		x, y := a.pre[i], b.pre[i]
-		if x == y {
-			continue
-		}
-		xn, yn := isDigits(x), isDigits(y)
-		switch {
-		case xn && yn:
-			// Compare numerically without overflow: shorter is smaller.
-			if len(x) != len(y) {
-				return cmpInt(len(x), len(y))
-			}
-			return strings.Compare(x, y)
-		case xn:
-			return -1
-		case yn:
-			return 1
-		}
-		return strings.Compare(x, y)
-	}
-	return cmpInt(len(a.pre), len(b.pre))
-}
-
-func cmpInt(a, b int) int {
-	if a < b {
-		return -1
-	}
-	if a > b {
-		return 1
-	}
-	return 0
 }
 
 func ValidateManagementCapabilitiesV2(value ManagementCapabilitiesV2) error {
@@ -586,7 +448,7 @@ var (
 // ValidateProvisionTenant enforces bounded, opaque allocation references and
 // DNS aliases. It intentionally cannot express a DSN, filesystem path, or URL.
 func ValidateProvisionTenant(cmd ProvisionTenant) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if _, err := ParseTenantID(string(cmd.Tenant)); err != nil {
@@ -605,7 +467,7 @@ func ValidateProvisionTenant(cmd ProvisionTenant) error {
 	if err != nil || parsedEmail.Address != cmd.BootstrapAdminEmail {
 		return fmt.Errorf("bootstrap administrator email must be a single mailbox address")
 	}
-	if err := validateManagementAlias(cmd.PrimaryAlias); err != nil {
+	if err := tenantAlias(cmd.PrimaryAlias).validate(); err != nil {
 		return fmt.Errorf("primary tenant alias: %w", err)
 	}
 	if len(cmd.DatabaseAllocationRef) < 3 || !managementRefPattern.MatchString(cmd.DatabaseAllocationRef) || strings.Contains(cmd.DatabaseAllocationRef, "..") {
@@ -616,7 +478,7 @@ func ValidateProvisionTenant(cmd ProvisionTenant) error {
 	}
 	seen := map[string]struct{}{cmd.PrimaryAlias: struct{}{}}
 	for _, alias := range cmd.Aliases {
-		if err := validateManagementAlias(alias); err != nil {
+		if err := tenantAlias(alias).validate(); err != nil {
 			return err
 		}
 		if _, exists := seen[alias]; exists {
@@ -634,7 +496,7 @@ func ValidateProvisionTenant(cmd ProvisionTenant) error {
 }
 
 func ValidateRequestTenantInvitation(cmd RequestTenantInvitation) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if len(cmd.Email) < 3 || len(cmd.Email) > 254 {
@@ -648,7 +510,7 @@ func ValidateRequestTenantInvitation(cmd RequestTenantInvitation) error {
 }
 
 func ValidateReconcileTenantInvitationOperation(cmd ReconcileTenantInvitationOperation) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if cmd.Outcome != InvitationDelivered && cmd.Outcome != InvitationNotDelivered {
@@ -664,39 +526,39 @@ func ValidateReconcileTenantInvitationOperation(cmd ReconcileTenantInvitationOpe
 const maxTenantMemberKeyBytes = 140
 
 func ValidatePlanTenantMember(cmd PlanTenantMember) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
-	if err := validateMemberEmail(cmd.Email); err != nil {
+	if err := memberEmail(cmd.Email).validate(); err != nil {
 		return err
 	}
-	return validateMemberRoles(cmd.Roles)
+	return memberRoles(cmd.Roles).validate()
 }
 
 func ValidateGrantTenantMember(cmd GrantTenantMember) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if cmd.InvitationID == "" || string(cmd.Meta.IdempotencyKey) != cmd.InvitationID {
 		return fmt.Errorf("member grant idempotency key must equal the invitation ID")
 	}
-	if err := validateMemberSubject(cmd.Subject); err != nil {
+	if err := memberSubject(cmd.Subject).validate(); err != nil {
 		return err
 	}
-	if err := validateMemberEmail(cmd.Email); err != nil {
+	if err := memberEmail(cmd.Email).validate(); err != nil {
 		return err
 	}
-	if err := validateMemberLabel("member full name", cmd.FullName); err != nil {
+	if err := (memberLabel{name: "member full name", value: cmd.FullName}).validate(); err != nil {
 		return err
 	}
-	return validateMemberRoles(cmd.Roles)
+	return memberRoles(cmd.Roles).validate()
 }
 
 func ValidateRevokeTenantMember(cmd RevokeTenantMember) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
-	if err := validateMemberSubject(cmd.Subject); err != nil {
+	if err := memberSubject(cmd.Subject).validate(); err != nil {
 		return err
 	}
 	if !utf8.ValidString(cmd.Reason) || strings.TrimSpace(cmd.Reason) == "" || len(cmd.Reason) > 1000 {
@@ -722,48 +584,8 @@ func ValidateTenantMemberPlan(value TenantMemberPlan) error {
 	return nil
 }
 
-func validateMemberEmail(email string) error {
-	if len(email) < 3 || len(email) > 254 {
-		return fmt.Errorf("member email must be between 3 and 254 bytes")
-	}
-	parsed, err := mail.ParseAddress(email)
-	if err != nil || parsed.Address != email {
-		return fmt.Errorf("member email must be a single mailbox address")
-	}
-	return nil
-}
-
-// validateMemberSubject also keeps the subject safe as one URL path segment.
-func validateMemberSubject(subject PrincipalID) error {
-	if !memberSubjectPattern.MatchString(string(subject)) || strings.Contains(string(subject), "..") {
-		return fmt.Errorf("member subject must be an opaque Cloud user ID of 3 to %d bytes", maxTenantMemberKeyBytes)
-	}
-	return nil
-}
-
-// validateMemberRoles accepts exactly one role in M1. Role existence and
-// assignability are Engine checks, not wire rules.
-func validateMemberRoles(roles []string) error {
-	if len(roles) != 1 {
-		return fmt.Errorf("member must be given exactly one role")
-	}
-	return validateMemberLabel("member role", roles[0])
-}
-
-func validateMemberLabel(name, value string) error {
-	if value == "" || len(value) > maxTenantMemberKeyBytes || strings.TrimSpace(value) != value || !utf8.ValidString(value) {
-		return fmt.Errorf("%s must be 1 to %d bytes of UTF-8 without surrounding whitespace", name, maxTenantMemberKeyBytes)
-	}
-	for _, r := range value {
-		if unicode.IsControl(r) {
-			return fmt.Errorf("%s contains a control character", name)
-		}
-	}
-	return nil
-}
-
 func ValidateApplyPackage(cmd ApplyPackage) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if _, err := ParseTenantID(string(cmd.Tenant)); err != nil {
@@ -808,7 +630,7 @@ func ValidateApplyPackage(cmd ApplyPackage) error {
 }
 
 func ValidateSetTenantState(cmd SetTenantState) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if cmd.State != TenantActive && cmd.State != TenantSuspended {
@@ -824,7 +646,7 @@ func ValidateSetTenantState(cmd SetTenantState) error {
 }
 
 func ValidateReconcileTenantStateOperation(cmd ReconcileTenantStateOperation) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if err := validateTextBytes("reason", cmd.Reason); err != nil {
@@ -837,7 +659,7 @@ func ValidateReconcileTenantStateOperation(cmd ReconcileTenantStateOperation) er
 }
 
 func ValidateReconcileTenantProvisionOperation(cmd ReconcileTenantProvisionOperation) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if err := validateTextBytes("reason", cmd.Reason); err != nil {
@@ -850,7 +672,7 @@ func ValidateReconcileTenantProvisionOperation(cmd ReconcileTenantProvisionOpera
 }
 
 func ValidateReconcileTenantPackageOperation(cmd ReconcileTenantPackageOperation) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if err := validateTextBytes("reason", cmd.Reason); err != nil {
@@ -863,7 +685,7 @@ func ValidateReconcileTenantPackageOperation(cmd ReconcileTenantPackageOperation
 }
 
 func ValidateReconcileTenantDeleteOperation(cmd ReconcileTenantDeleteOperation) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if err := validateTextBytes("reason", cmd.Reason); err != nil {
@@ -876,7 +698,7 @@ func ValidateReconcileTenantDeleteOperation(cmd ReconcileTenantDeleteOperation) 
 }
 
 func ValidateDeleteTenant(cmd DeleteTenant) error {
-	if err := validateManagementMeta(cmd.Meta); err != nil {
+	if err := cmd.Meta.validate(); err != nil {
 		return err
 	}
 	if len(cmd.RecoveryCheckpointRef) < 3 || !managementRefPattern.MatchString(cmd.RecoveryCheckpointRef) || strings.Contains(cmd.RecoveryCheckpointRef, "..") {
@@ -914,7 +736,7 @@ func ValidateTenantDescriptorV2(value TenantDescriptorV2) error {
 	}
 	seen := make(map[string]struct{}, len(value.Aliases))
 	for _, alias := range value.Aliases {
-		if err := validateManagementAlias(alias); err != nil {
+		if err := tenantAlias(alias).validate(); err != nil {
 			return err
 		}
 		if _, exists := seen[alias]; exists {
@@ -931,7 +753,7 @@ func ValidateTenantDescriptorV2(value TenantDescriptorV2) error {
 // ValidateTenantAlias checks one canonical DNS alias used for management
 // lookups. Callers may normalize case and a terminal dot before validation.
 func ValidateTenantAlias(alias string) error {
-	return validateManagementAlias(alias)
+	return tenantAlias(alias).validate()
 }
 
 func ValidateManagedOperation(value ManagedOperation) error {
@@ -954,18 +776,22 @@ func ValidateManagedOperation(value ManagedOperation) error {
 	return nil
 }
 
-func validateManagementMeta(meta CommandMeta) error {
-	if _, err := ParseIdempotencyKey(string(meta.IdempotencyKey)); err != nil {
+// validate requires a well-formed idempotency key.
+func (m CommandMeta) validate() error {
+	if _, err := ParseIdempotencyKey(string(m.IdempotencyKey)); err != nil {
 		return fmt.Errorf("idempotency key: %w", err)
 	}
 	return nil
 }
 
-func validateManagementAlias(alias string) error {
-	if alias == "" || len(alias) > 253 || strings.HasSuffix(alias, ".") {
+// tenantAlias is a DNS host name a tenant answers on.
+type tenantAlias string
+
+func (a tenantAlias) validate() error {
+	if a == "" || len(a) > 253 || strings.HasSuffix(string(a), ".") {
 		return fmt.Errorf("tenant alias is not a valid DNS name")
 	}
-	for _, label := range strings.Split(alias, ".") {
+	for _, label := range strings.Split(string(a), ".") {
 		if !managementAliasLabel.MatchString(label) {
 			return fmt.Errorf("tenant alias is not a valid DNS name")
 		}

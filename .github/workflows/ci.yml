@@ -194,3 +194,8 @@ jobs:
       # (.lint-baseline/deadcode.txt only ever shrinks).
       - name: Dead code ratchet
         run: python3 scripts/deadcode-ratchet.py
+
+      # Free functions that validate or test a bare primitive are methods of a missing type
+      # (.lint-baseline/primitive-funcs.txt only ever shrinks).
+      - name: Primitive-function ratchet
+        run: make primitive-funcs-ratchet

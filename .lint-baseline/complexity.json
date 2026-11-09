@@ -134,10 +134,6 @@
    "cognitive": 27,
    "cyclomatic": 19
   },
-  "contract::compareEngineVersions": {
-   "cognitive": 18,
-   "cyclomatic": 16
-  },
   "contract::topologicalModuleOrder": {
    "cognitive": 20
   },
