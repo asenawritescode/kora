@@ -147,22 +147,43 @@ type managementOperationRuntime struct {
 	config management.WorkerConfig
 }
 
-func assembleManagementOperationRuntime(ctx context.Context, token, caller string, database *sql.DB, dialect db.Dialect, admission managementWorkAdmission, directory managementStateDirectory, coordinator managementStateCoordinator, tenants *knet.SiteRouter, packageResolver ManagementPackageArtifactResolver, verifier CheckpointVerifier, platformDBType string, common *site.CommonConfig, deploymentID, databaseAllocationRef string) (*managementOperationRuntime, error) {
-	if caller == "" {
+// managementRuntimeOptions are the platform services the management
+// operation runtime is composed from. Without caller the runtime stays in
+// inspection-only mode; packageResolver, verifier and databaseAllocationRef
+// each enable one optional capability when set.
+type managementRuntimeOptions struct {
+	token                 string
+	caller                string
+	database              *sql.DB
+	dialect               db.Dialect
+	admission             managementWorkAdmission
+	directory             managementStateDirectory
+	coordinator           managementStateCoordinator
+	tenants               *knet.SiteRouter
+	packageResolver       ManagementPackageArtifactResolver
+	verifier              CheckpointVerifier
+	platformDBType        string
+	common                *site.CommonConfig
+	deploymentID          string
+	databaseAllocationRef string
+}
+
+func assembleManagementOperationRuntime(ctx context.Context, opts managementRuntimeOptions) (*managementOperationRuntime, error) {
+	if opts.caller == "" {
 		return nil, nil // inspection-only compatibility mode remains available.
 	}
-	if token == "" || database == nil || dialect == nil || admission == nil {
+	if opts.token == "" || opts.database == nil || opts.dialect == nil || opts.admission == nil {
 		return nil, fmt.Errorf("management mutations require a bearer token, platform database, dialect, and bounded work admission")
 	}
-	principal, err := contract.ParsePrincipalID(caller)
+	principal, err := contract.ParsePrincipalID(opts.caller)
 	if err != nil {
 		return nil, fmt.Errorf("invalid configured management caller identity")
 	}
-	store, err := sqlstore.New(database, dialect)
+	store, err := sqlstore.New(opts.database, opts.dialect)
 	if err != nil {
 		return nil, fmt.Errorf("configure management operation store: %w", err)
 	}
-	release, err := admission.Acquire(ctx)
+	release, err := opts.admission.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("admit management operation schema setup: %w", err)
 	}
@@ -171,28 +192,28 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 	if err != nil {
 		return nil, fmt.Errorf("initialize management operation schema: %w", err)
 	}
-	operationStore := admittedManagementStore{store: store, admission: admission}
+	operationStore := admittedManagementStore{store: store, admission: opts.admission}
 	service, err := management.NewService(operationStore, managementOperationIDs{}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("configure management operation service: %w", err)
 	}
-	executorDirectory := admittedManagementStateDirectory{directory: directory, admission: admission}
-	executor, err := newManagementStateExecutor(executorDirectory, coordinator)
+	executorDirectory := admittedManagementStateDirectory{directory: opts.directory, admission: opts.admission}
+	executor, err := newManagementStateExecutor(executorDirectory, opts.coordinator)
 	if err != nil {
 		return nil, fmt.Errorf("configure management state executor: %w", err)
 	}
 	dispatcher := managementOperationDispatcher{state: executor}
-	moduleLifecycleExecutor, err := newManagementModuleLifecycleExecutor(tenants)
+	moduleLifecycleExecutor, err := newManagementModuleLifecycleExecutor(opts.tenants)
 	if err != nil {
 		return nil, fmt.Errorf("configure module lifecycle executor: %w", err)
 	}
 	dispatcher.moduleChange = moduleLifecycleExecutor
-	memberRevokeExecutor, err := newManagementMemberRevokeExecutor(tenantMemberAcquirer(tenants))
+	memberRevokeExecutor, err := newManagementMemberRevokeExecutor(tenantMemberAcquirer(opts.tenants))
 	if err != nil {
 		return nil, fmt.Errorf("configure member revoke executor: %w", err)
 	}
 	dispatcher.memberRevoke = memberRevokeExecutor
-	memberExecutor, err := newManagementMemberExecutor(tenantMemberAcquirer(tenants))
+	memberExecutor, err := newManagementMemberExecutor(tenantMemberAcquirer(opts.tenants))
 	if err != nil {
 		return nil, fmt.Errorf("configure tenant member executor: %w", err)
 	}
@@ -206,52 +227,52 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 		api.ManagementMemberPlanCapability:  true,
 		api.ManagementMemberGrantCapability: true,
 	}
-	if packageResolver != nil {
-		packageDirectory, ok := directory.(managementPackageDirectory)
+	if opts.packageResolver != nil {
+		packageDirectory, ok := opts.directory.(managementPackageDirectory)
 		if !ok {
 			return nil, fmt.Errorf("management package application requires the Engine SQL tenant directory")
 		}
-		packageCoordinator, ok := coordinator.(managementPackageCoordinator)
+		packageCoordinator, ok := opts.coordinator.(managementPackageCoordinator)
 		if !ok {
 			return nil, fmt.Errorf("management package application requires the tenant runtime coordinator")
 		}
-		packageExecutor, err := newManagementPackageExecutor(packageDirectory, admission, packageCoordinator, tenants, packageResolver)
-		if err != nil {
-			return nil, fmt.Errorf("configure management package executor: %w", err)
+		packageExecutor, packageErr := newManagementPackageExecutor(packageDirectory, opts.admission, packageCoordinator, opts.tenants, opts.packageResolver)
+		if packageErr != nil {
+			return nil, fmt.Errorf("configure management package executor: %w", packageErr)
 		}
 		dispatcher.packageApply = packageExecutor
 		capabilities[api.ManagementPackageCapability] = true
 		capabilities[api.ManagementPackageRecovery] = true
 	}
-	if databaseAllocationRef != "" {
-		provisionDirectory, ok := directory.(managementProvisionDirectory)
+	if opts.databaseAllocationRef != "" {
+		provisionDirectory, ok := opts.directory.(managementProvisionDirectory)
 		if !ok {
 			return nil, fmt.Errorf("management tenant provisioning requires the Engine SQL directory")
 		}
-		provisionExecutor, err := newManagementProvisionExecutor(
-			databaseAllocationRef, deploymentID, database, platformDBType, common,
-			admission, provisionDirectory, coordinator, site.CreateSite,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("configure management provision executor: %w", err)
+		provisionExecutor, provisionErr := newManagementProvisionExecutor(managementProvisionOptions{
+			allocationRef: opts.databaseAllocationRef, deploymentID: opts.deploymentID, platformDB: opts.database, platformType: opts.platformDBType,
+			common: opts.common, admission: opts.admission, directory: provisionDirectory, coordinator: opts.coordinator, createSite: site.CreateSite,
+		})
+		if provisionErr != nil {
+			return nil, fmt.Errorf("configure management provision executor: %w", provisionErr)
 		}
 		dispatcher.provision = provisionExecutor
 		capabilities[api.ManagementProvisionCapability] = true
 		capabilities[api.ManagementProvisionRecovery] = true
 	}
-	if verifier != nil {
-		allocationDirectory, ok := directory.(managementTenantAllocationDirectory)
+	if opts.verifier != nil {
+		allocationDirectory, ok := opts.directory.(managementTenantAllocationDirectory)
 		if !ok {
 			return nil, fmt.Errorf("management tenant deletion requires the Engine allocation directory")
 		}
-		if database == nil || platformDBType == "" || common == nil {
+		if opts.database == nil || opts.platformDBType == "" || opts.common == nil {
 			return nil, fmt.Errorf("management tenant deletion requires the platform database and database configuration")
 		}
-		deleteExecutor, err := newManagementDeleteExecutor(allocationDirectory, verifier, coordinator, admission, func(ctx context.Context, info site.DBSiteInfo) error {
-			return site.DeleteRegisteredSiteWithAllocation(ctx, database, platformDBType, info.SiteID, info.Name, site.DataPlaneReference(info), common)
+		deleteExecutor, deleteErr := newManagementDeleteExecutor(allocationDirectory, opts.verifier, opts.coordinator, opts.admission, func(ctx context.Context, info site.DBSiteInfo) error {
+			return site.DeleteRegisteredSiteWithAllocation(ctx, opts.database, opts.platformDBType, info.SiteID, info.Name, site.DataPlaneReference(info), opts.common)
 		})
-		if err != nil {
-			return nil, fmt.Errorf("configure management delete executor: %w", err)
+		if deleteErr != nil {
+			return nil, fmt.Errorf("configure management delete executor: %w", deleteErr)
 		}
 		dispatcher.delete = deleteExecutor
 	}
@@ -278,7 +299,7 @@ func assembleManagementOperationRuntime(ctx context.Context, token, caller strin
 			MemberPlanner:          memberExecutor,
 		},
 		worker: worker,
-		config: management.WorkerConfig{Owner: owner, Deployment: contract.DeploymentID(deploymentID), Concurrency: 2, Lease: 30 * time.Second, Poll: 250 * time.Millisecond},
+		config: management.WorkerConfig{Owner: owner, Deployment: contract.DeploymentID(opts.deploymentID), Concurrency: 2, Lease: 30 * time.Second, Poll: 250 * time.Millisecond},
 	}, nil
 }
 
