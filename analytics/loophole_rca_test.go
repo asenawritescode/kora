@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 )
 
@@ -197,8 +198,8 @@ func TestRCA_Loophole2_FieldRenameOrphansRollupData(t *testing.T) {
 		Data: map[string]any{"status": "Inactive"},
 	})
 
-	oldKey := deltaKey{Doctype: "Customer", Metric: "customer_count_by_status", Dimension: "status=Active", Date: today}
-	oldInactiveKey := deltaKey{Doctype: "Customer", Metric: "customer_count_by_status", Dimension: "status=Inactive", Date: today}
+	oldKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: "Customer", Metric: "customer_count_by_status", Dimension: "status=Active", Date: today}
+	oldInactiveKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: "Customer", Metric: "customer_count_by_status", Dimension: "status=Inactive", Date: today}
 
 	t.Logf("After V1 events: status=Active delta = %v", w.deltas[oldKey])
 	t.Logf("After V1 events: status=Inactive delta = %v", w.deltas[oldInactiveKey])
@@ -237,7 +238,7 @@ func TestRCA_Loophole2_FieldRenameOrphansRollupData(t *testing.T) {
 		Data: map[string]any{"state": "Active"},
 	})
 
-	newKey := deltaKey{Doctype: "Customer", Metric: "customer_count_by_state", Dimension: "state=Active", Date: today}
+	newKey := deltaKey{BusinessScope: contract.BusinessScope{TenantID: contract.TenantID("test.local"), Kind: contract.ScopeKindTenant}, Doctype: "Customer", Metric: "customer_count_by_state", Dimension: "state=Active", Date: today}
 	t.Logf("After V2 event: state=Active delta = %v", w2.deltas[newKey])
 
 	// The total count should be 3 Active (2 from V1 + 1 from V2), but the data
@@ -356,7 +357,7 @@ func TestRCA_Loophole4_FieldTypeChange_MetricMismatch(t *testing.T) {
 		t.Log("CONFIRMED LOOPHOLE 4B: project_sum_budget appears in V2 but has zero historical data.")
 		t.Log("     Any dashboard showing this metric will show zero until new writes accumulate.")
 		t.Log("RCA: GenerateMetrics generates different metrics per field type. No backfill")
-	t.Log("     is triggered automatically when a metric first appears for an existing doctype.")
+		t.Log("     is triggered automatically when a metric first appears for an existing doctype.")
 	}
 }
 
@@ -629,9 +630,9 @@ func TestRCA_Loophole8_DocTypeDelete_LeavesGarbage(t *testing.T) {
 
 func TestRCA_Summary(t *testing.T) {
 	loopholes := []struct {
-		id      int
-		name    string
-		status  string
+		id     int
+		name   string
+		status string
 	}{
 		{1, "Worker cache never invalidates", "CONFIRMED"},
 		{2, "Field rename orphans rollup data", "CONFIRMED"},

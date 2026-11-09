@@ -1,0 +1,25 @@
+name: Stock Movements
+route: /stock-movements
+type: workspace
+layout: single
+label: Stock Movements
+module: Inventory
+components:
+    - id: movements
+      type: record_table
+      region: main
+      label: Stock Movement History
+      source_doctype: Stock Movement
+      desktop_columns:
+        - name
+        - product
+        - movement_type
+        - delta
+        - source_reference
+        - adjusted_at
+      mobile_columns:
+        - name
+        - product
+        - delta
+        - adjusted_at
+      position: 0

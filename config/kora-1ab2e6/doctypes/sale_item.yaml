@@ -76,7 +76,7 @@ fields:
       in_list_view: true
       in_standard_filter: false
       search_index: false
-      description: "Autofilled from the product selling price; you can adjust it for this sale."
+      description: Autofilled from the product selling price; you can adjust it for this sale.
       depends_on: ""
       mandatory_depends_on: ""
       constraints:
@@ -105,7 +105,7 @@ fields:
       in_list_view: true
       in_standard_filter: false
       search_index: false
-      description: "Calculated from quantity and unit price."
+      description: Calculated from quantity and unit price.
       depends_on: ""
       mandatory_depends_on: ""
       constraints:

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCanonicalResourceSegment(t *testing.T) {
@@ -145,6 +146,26 @@ func TestRemoteRecordsCreateCommand(t *testing.T) {
 	data, ok := payload["data"].(map[string]any)
 	if !ok || data["title"] != "Inspect generator" {
 		t.Fatalf("body = %#v", gotBody)
+	}
+}
+
+func TestRemoteRecordsProtectedCRUDReturnsEngineDenial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/s/acme/api/v1/kernel/record.create" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"error":{"code":"module.resource_commands_only","message":"use the owner-published operation"}}`)
+	}))
+	defer server.Close()
+	t.Setenv("TEST_KORA_TOKEN", "operator-token")
+	opts := &remoteOptions{URL: server.URL, Site: "acme", TokenEnv: "TEST_KORA_TOKEN", Timeout: time.Second}
+	cmd := newRemoteWriteCommand(opts, "create <doctype>", "Create a record", false)
+	cmd.SetArgs([]string{"Protected Invoice", "--data", `{"title":"must be denied"}`, "--idempotency-key", "protected-1"})
+	cmd.SetOut(io.Discard)
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "use the owner-published operation") {
+		t.Fatalf("protected generic CRUD error = %v", err)
 	}
 }
 

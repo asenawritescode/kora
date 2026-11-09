@@ -253,6 +253,7 @@ var pageActionContracts = map[string]PageActionContract{
 		"line_source": input("string", false, ""), "movement_date": input("string", false, ""), "reference_field": input("string", false, "target_field"),
 		"reference_prefix": input("string", false, ""), "idempotency_prefix": input("string", false, ""), "fields": input("object", false, "target_fields"), "line_defaults": input("object", false, "child_fields"),
 		"line_fields": input("object", false, "child_fields"), "totals": input("object", false, "transaction_totals"), "related_quantity_updates": input("object", false, "quantity_updates"),
+		"line_records": input("array", false, "line_records"), "related_numeric_updates": input("array", false, "numeric_updates"), "required_related_status": input("array", false, "related_status"),
 		"decrement_stock": input("boolean", false, ""), "requires_operation_status": input("string", false, ""), "allowed_context_values": input("object", false, ""), "payment_script": input("string", false, "script"),
 	}},
 	"create_quantity_effect": {Name: "create_quantity_effect", Execution: "server", Inputs: map[string]PageValueContract{

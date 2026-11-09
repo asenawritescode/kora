@@ -37,3 +37,42 @@
   import: false
   report: false
   if_owner: false
+- doctype: Shift
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: false
+  cancel: false
+  amend: false
+  export: false
+  import: false
+  report: false
+  if_owner: false
+- doctype: Stock Movement
+  role: Cashier
+  read: true
+  write: false
+  create: true
+  delete: false
+  submit: false
+  cancel: false
+  amend: false
+  export: false
+  import: false
+  report: false
+  if_owner: false
+- doctype: Till Session
+  role: Cashier
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: false
+  cancel: false
+  amend: false
+  export: false
+  import: false
+  report: false
+  if_owner: false
