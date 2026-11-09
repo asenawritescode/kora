@@ -238,7 +238,7 @@ func TestRenewAndReleaseRequireCurrentLeaseFence(t *testing.T) {
 	defer database.Close()
 	store, _ := NewExecutionStore(database, &db.MySQLDialect{})
 	claim := workflow.Claim{Tenant: "tenant-a", BusinessScope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, InstanceID: "01K7INSTANCE00000000000000000", StepID: "approve", Attempt: 1, Owner: "worker-a", Fence: 3, Revision: "4"}
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE _kora_workflow_instance SET lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND), updated_at = CURRENT_TIMESTAMP(6) WHERE tenant_id = ? AND id = ? AND current_step = ? AND status = 'running' AND lease_owner = ? AND lease_fence = ? AND revision = ? AND lease_until > CURRENT_TIMESTAMP(6)")).WithArgs(int64(time.Second.Microseconds()), "tenant-a", string(claim.InstanceID), "approve", "worker-a", uint64(3), uint64(4)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE _kora_workflow_instance SET lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND), updated_at = CURRENT_TIMESTAMP(6) WHERE tenant_id = ? AND id = ? AND current_step = ? AND status = 'running' AND lease_owner = ? AND lease_fence = ? AND revision = ? AND lease_until > CURRENT_TIMESTAMP(6)")).WithArgs(time.Second.Microseconds(), "tenant-a", string(claim.InstanceID), "approve", "worker-a", uint64(3), uint64(4)).WillReturnResult(sqlmock.NewResult(0, 0))
 	if _, err := store.Renew(context.Background(), claim, time.Second); err == nil {
 		t.Fatal("expired claim renewed")
 	}

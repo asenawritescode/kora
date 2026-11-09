@@ -462,7 +462,7 @@ func (p *Provider) Diagnostics(ctx context.Context) (Diagnostics, error) {
 	if info.Config.MaxBytes > 0 {
 		d.StreamMaxBytes = uint64(info.Config.MaxBytes)
 	}
-	d.ConsumerCount = int(info.State.Consumers)
+	d.ConsumerCount = info.State.Consumers
 	return d, nil
 }
 

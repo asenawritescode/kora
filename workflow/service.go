@@ -424,7 +424,7 @@ func (s *InstanceService) Start(ctx context.Context, exec policy.Execution, cmd 
 		return contract.WorkflowInstance{}, contract.NewError(contract.CodePermissionDenied, "workflow business scope is invalid")
 	}
 	if scope.Kind == contract.ScopeKindLegalEntity {
-		if _, ok := exec.GrantForScope(string(cmd.Subject.Kind), "read", scope); !ok {
+		if _, ok := exec.GrantForScope(cmd.Subject.Kind, "read", scope); !ok {
 			return contract.WorkflowInstance{}, contract.NewError(contract.CodePermissionDenied, "workflow subject is not authorized in the requested legal entity")
 		}
 	}

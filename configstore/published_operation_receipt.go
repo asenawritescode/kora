@@ -61,14 +61,14 @@ func (s *ModuleStore) BeginPublishedOperationAttempt(ctx context.Context, actor 
 	if !isCanonicalHex(attempt.IntentHash, 32) || !isCanonicalHex(attempt.InputHash, 32) {
 		return PublishedOperationAttempt{}, false, fmt.Errorf("published operation intent and input hashes must be canonical SHA-256 values")
 	}
-	if attempt.Receipt.Status != contract.ReceiptRunning || (attempt.Dispatch == nil) != (attempt.Lease == nil) || attempt.Dispatch == nil || attempt.Dispatch.Validate() != nil || attempt.Lease.Validate() != nil || attempt.Dispatch.ExecutionID != string(attempt.Receipt.ExecutionID) || attempt.Dispatch.Scope != attempt.Receipt.BusinessScope || attempt.Dispatch.InputHash != attempt.InputHash || attempt.Dispatch.ProviderModuleID == "" || attempt.Dispatch.ProviderModuleID != attempt.Lease.ProviderModuleID || attempt.Dispatch.ProviderID != attempt.Lease.ProviderID || attempt.Dispatch.CallerModuleID != attempt.Lease.CallerModuleID || attempt.Dispatch.BindingRevision != attempt.Lease.BindingRevision || attempt.Dispatch.Operation.OperationName != attempt.Lease.Operation || attempt.Dispatch.IdempotencyKey != contract.IdempotencyKey("published:"+attempt.IntentHash) || contract.PublishedOperationRef(contract.ModuleID(attempt.Dispatch.ProviderModuleID), attempt.Dispatch.Operation.CapabilityName, attempt.Dispatch.Operation.OperationName) != attempt.Receipt.OperationRef || attempt.Lease.Scope != attempt.Dispatch.Scope || attempt.Lease.TenantID != attempt.Dispatch.Scope.TenantID || attempt.Lease.State != "active" {
+	if attempt.Receipt.Status != contract.ReceiptRunning || (attempt.Dispatch == nil) != (attempt.Lease == nil) || attempt.Dispatch == nil || attempt.Dispatch.Validate() != nil || attempt.Lease.Validate() != nil || attempt.Dispatch.ExecutionID != string(attempt.Receipt.ExecutionID) || attempt.Dispatch.Scope != attempt.Receipt.BusinessScope || attempt.Dispatch.InputHash != attempt.InputHash || attempt.Dispatch.ProviderModuleID == "" || attempt.Dispatch.ProviderModuleID != attempt.Lease.ProviderModuleID || attempt.Dispatch.ProviderID != attempt.Lease.ProviderID || attempt.Dispatch.CallerModuleID != attempt.Lease.CallerModuleID || attempt.Dispatch.BindingRevision != attempt.Lease.BindingRevision || attempt.Dispatch.Operation.OperationName != attempt.Lease.Operation || attempt.Dispatch.IdempotencyKey != contract.IdempotencyKey("published:"+attempt.IntentHash) || contract.PublishedOperationRef(attempt.Dispatch.ProviderModuleID, attempt.Dispatch.Operation.CapabilityName, attempt.Dispatch.Operation.OperationName) != attempt.Receipt.OperationRef || attempt.Lease.Scope != attempt.Dispatch.Scope || attempt.Lease.TenantID != attempt.Dispatch.Scope.TenantID || attempt.Lease.State != "active" {
 		return PublishedOperationAttempt{}, false, fmt.Errorf("published operation provider pin is invalid")
 	}
 	scopeJSON, _ := json.Marshal(attempt.Receipt.BusinessScope)
 	dispatchJSON, _ := json.Marshal(attempt.Dispatch)
 	leaseJSON, _ := json.Marshal(attempt.Lease)
 	receiptJSON, _ := json.Marshal(attempt.Receipt)
-	_, err := s.DB.ExecContext(ctx, db.Rebind(s.Dialect, `INSERT INTO _kora_published_operation_receipt (tenant_id,execution_id,actor_type,actor_id,intent_hash,input_hash,state,dispatch_state,operation_ref,scope_json,dispatch_json,lease_json,receipt_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`), string(attempt.Receipt.BusinessScope.TenantID), string(attempt.Receipt.ExecutionID), string(actor.PrincipalType), string(actor.PrincipalID), attempt.IntentHash, attempt.InputHash, string(attempt.Receipt.Status), "claimed", attempt.Receipt.OperationRef, string(scopeJSON), string(dispatchJSON), string(leaseJSON), string(receiptJSON))
+	_, err := s.DB.ExecContext(ctx, db.Rebind(s.Dialect, `INSERT INTO _kora_published_operation_receipt (tenant_id,execution_id,actor_type,actor_id,intent_hash,input_hash,state,dispatch_state,operation_ref,scope_json,dispatch_json,lease_json,receipt_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`), string(attempt.Receipt.BusinessScope.TenantID), string(attempt.Receipt.ExecutionID), string(actor.PrincipalType), actor.PrincipalID, attempt.IntentHash, attempt.InputHash, string(attempt.Receipt.Status), "claimed", attempt.Receipt.OperationRef, string(scopeJSON), string(dispatchJSON), string(leaseJSON), string(receiptJSON))
 	if err == nil {
 		return attempt, true, nil
 	}
@@ -91,7 +91,7 @@ func (s *ModuleStore) LoadPublishedOperationAttempt(ctx context.Context, tenant 
 	}
 	var operationRef, scopeJSON, inputHash, state, dispatchState, dispatchJSON, leaseJSON, receiptJSON string
 	var executionID string
-	err := s.DB.QueryRowContext(ctx, db.Rebind(s.Dialect, `SELECT execution_id,operation_ref,scope_json,input_hash,state,dispatch_state,dispatch_json,lease_json,receipt_json FROM _kora_published_operation_receipt WHERE tenant_id=? AND intent_hash=? AND actor_type=? AND actor_id=?`), string(tenant), intentHash, string(actor.PrincipalType), string(actor.PrincipalID)).Scan(&executionID, &operationRef, &scopeJSON, &inputHash, &state, &dispatchState, &dispatchJSON, &leaseJSON, &receiptJSON)
+	err := s.DB.QueryRowContext(ctx, db.Rebind(s.Dialect, `SELECT execution_id,operation_ref,scope_json,input_hash,state,dispatch_state,dispatch_json,lease_json,receipt_json FROM _kora_published_operation_receipt WHERE tenant_id=? AND intent_hash=? AND actor_type=? AND actor_id=?`), string(tenant), intentHash, string(actor.PrincipalType), actor.PrincipalID).Scan(&executionID, &operationRef, &scopeJSON, &inputHash, &state, &dispatchState, &dispatchJSON, &leaseJSON, &receiptJSON)
 	if err == sql.ErrNoRows {
 		return PublishedOperationAttempt{}, false, nil
 	}
@@ -122,7 +122,7 @@ func (s *ModuleStore) LoadPublishedOperationAttempt(ctx context.Context, tenant 
 		}
 		attempt.Lease = &lease
 	}
-	if !isCanonicalHex(attempt.IntentHash, 32) || !isCanonicalHex(attempt.InputHash, 32) || (attempt.Dispatch == nil) != (attempt.Lease == nil) || attempt.Dispatch == nil || attempt.Dispatch.InputHash != attempt.InputHash || attempt.Dispatch.Scope != scope || attempt.Dispatch.ExecutionID != executionID || attempt.Dispatch.ProviderModuleID == "" || attempt.Dispatch.ProviderModuleID != attempt.Lease.ProviderModuleID || attempt.Dispatch.ProviderID != attempt.Lease.ProviderID || attempt.Dispatch.CallerModuleID != attempt.Lease.CallerModuleID || attempt.Dispatch.BindingRevision != attempt.Lease.BindingRevision || attempt.Dispatch.Operation.OperationName != attempt.Lease.Operation || attempt.Dispatch.IdempotencyKey != contract.IdempotencyKey("published:"+attempt.IntentHash) || contract.PublishedOperationRef(contract.ModuleID(attempt.Dispatch.ProviderModuleID), attempt.Dispatch.Operation.CapabilityName, attempt.Dispatch.Operation.OperationName) != attempt.Receipt.OperationRef || attempt.Lease.Scope != scope || attempt.Lease.TenantID != scope.TenantID {
+	if !isCanonicalHex(attempt.IntentHash, 32) || !isCanonicalHex(attempt.InputHash, 32) || (attempt.Dispatch == nil) != (attempt.Lease == nil) || attempt.Dispatch == nil || attempt.Dispatch.InputHash != attempt.InputHash || attempt.Dispatch.Scope != scope || attempt.Dispatch.ExecutionID != executionID || attempt.Dispatch.ProviderModuleID == "" || attempt.Dispatch.ProviderModuleID != attempt.Lease.ProviderModuleID || attempt.Dispatch.ProviderID != attempt.Lease.ProviderID || attempt.Dispatch.CallerModuleID != attempt.Lease.CallerModuleID || attempt.Dispatch.BindingRevision != attempt.Lease.BindingRevision || attempt.Dispatch.Operation.OperationName != attempt.Lease.Operation || attempt.Dispatch.IdempotencyKey != contract.IdempotencyKey("published:"+attempt.IntentHash) || contract.PublishedOperationRef(attempt.Dispatch.ProviderModuleID, attempt.Dispatch.Operation.CapabilityName, attempt.Dispatch.Operation.OperationName) != attempt.Receipt.OperationRef || attempt.Lease.Scope != scope || attempt.Lease.TenantID != scope.TenantID {
 		return PublishedOperationAttempt{}, false, contract.NewError(contract.CodeInternal, "stored provider pin and lease do not match the operation intent")
 	}
 	if state != string(attempt.Receipt.Status) {
@@ -137,7 +137,7 @@ func (s *ModuleStore) ClaimPublishedOperationDispatch(ctx context.Context, actor
 	if ctx == nil || s == nil || s.DB == nil || !actor.Authenticated() || attempt.Receipt.Status != contract.ReceiptRunning || attempt.Dispatch == nil || attempt.Lease == nil {
 		return false, fmt.Errorf("published operation dispatch claim is invalid")
 	}
-	result, err := s.DB.ExecContext(ctx, db.Rebind(s.Dialect, `UPDATE _kora_published_operation_receipt SET dispatch_state='dispatched' WHERE tenant_id=? AND execution_id=? AND actor_type=? AND actor_id=? AND intent_hash=? AND state='running' AND dispatch_state='claimed'`), string(attempt.Receipt.BusinessScope.TenantID), string(attempt.Receipt.ExecutionID), string(actor.PrincipalType), string(actor.PrincipalID), attempt.IntentHash)
+	result, err := s.DB.ExecContext(ctx, db.Rebind(s.Dialect, `UPDATE _kora_published_operation_receipt SET dispatch_state='dispatched' WHERE tenant_id=? AND execution_id=? AND actor_type=? AND actor_id=? AND intent_hash=? AND state='running' AND dispatch_state='claimed'`), string(attempt.Receipt.BusinessScope.TenantID), string(attempt.Receipt.ExecutionID), string(actor.PrincipalType), actor.PrincipalID, attempt.IntentHash)
 	if err != nil {
 		return false, err
 	}
@@ -158,7 +158,7 @@ func (s *ModuleStore) CompletePublishedOperationAttempt(ctx context.Context, act
 	}
 	receiptJSON, _ := json.Marshal(attempt.Receipt)
 	scopeJSON, _ := json.Marshal(attempt.Receipt.BusinessScope)
-	result, err := s.DB.ExecContext(ctx, db.Rebind(s.Dialect, `UPDATE _kora_published_operation_receipt SET state=?,receipt_json=? WHERE tenant_id=? AND execution_id=? AND actor_type=? AND actor_id=? AND intent_hash=? AND operation_ref=? AND scope_json=? AND input_hash=? AND state IN ('running','outcome_unknown')`), string(attempt.Receipt.Status), string(receiptJSON), string(attempt.Receipt.BusinessScope.TenantID), string(attempt.Receipt.ExecutionID), string(actor.PrincipalType), string(actor.PrincipalID), attempt.IntentHash, attempt.Receipt.OperationRef, string(scopeJSON), attempt.InputHash)
+	result, err := s.DB.ExecContext(ctx, db.Rebind(s.Dialect, `UPDATE _kora_published_operation_receipt SET state=?,receipt_json=? WHERE tenant_id=? AND execution_id=? AND actor_type=? AND actor_id=? AND intent_hash=? AND operation_ref=? AND scope_json=? AND input_hash=? AND state IN ('running','outcome_unknown')`), string(attempt.Receipt.Status), string(receiptJSON), string(attempt.Receipt.BusinessScope.TenantID), string(attempt.Receipt.ExecutionID), string(actor.PrincipalType), actor.PrincipalID, attempt.IntentHash, attempt.Receipt.OperationRef, string(scopeJSON), attempt.InputHash)
 	if err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func (s *ModuleStore) LoadPublishedOperationReceipt(ctx context.Context, tenant 
 		return contract.OperationReceipt{}, false, fmt.Errorf("published operation receipt lookup identity is invalid")
 	}
 	var storedOperationRef, scopeJSON, raw string
-	err := s.DB.QueryRowContext(ctx, db.Rebind(s.Dialect, `SELECT operation_ref,scope_json,receipt_json FROM _kora_published_operation_receipt WHERE tenant_id=? AND execution_id=? AND actor_type=? AND actor_id=?`), string(tenant), string(id), string(actor.PrincipalType), string(actor.PrincipalID)).Scan(&storedOperationRef, &scopeJSON, &raw)
+	err := s.DB.QueryRowContext(ctx, db.Rebind(s.Dialect, `SELECT operation_ref,scope_json,receipt_json FROM _kora_published_operation_receipt WHERE tenant_id=? AND execution_id=? AND actor_type=? AND actor_id=?`), string(tenant), string(id), string(actor.PrincipalType), actor.PrincipalID).Scan(&storedOperationRef, &scopeJSON, &raw)
 	if err == sql.ErrNoRows {
 		return contract.OperationReceipt{}, false, nil
 	}

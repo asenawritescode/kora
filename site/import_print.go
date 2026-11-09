@@ -98,7 +98,7 @@ func resolvePrintOperations(snapshot *doctype.ConfigSnapshot) error {
 		if cmd.ModuleOwnerID == "" {
 			continue
 		}
-		ref := contract.PublishedOperationRef(contract.ModuleID(cmd.ModuleOwnerID), cmd.Capability, cmd.Operation)
+		ref := contract.PublishedOperationRef(cmd.ModuleOwnerID, cmd.Capability, cmd.Operation)
 		if published[ref] {
 			byName[cmd.Namespace+"."+cmd.Name] = ref
 		}

@@ -19,6 +19,29 @@ linters:
     - goconst
 
 linters-settings:
+  errcheck:
+    # Calls whose error is conventionally ignored. Everything else must be handled or discarded with an
+    # explicit `_ =` and a reason. Closing a file that was written to is NOT excluded: that error is
+    # the last chance to learn the data did not reach disk.
+    exclude-functions:
+      - (*database/sql.Rows).Close          # read side; rows.Err() reports real failures
+      - (*database/sql.Stmt).Close
+      - (*database/sql.Conn).Close
+      - (*database/sql.Tx).Rollback         # deferred after Commit; sql.ErrTxDone is expected
+      - (*database/sql.DB).Close            # process/command shutdown
+      - (io.Closer).Close                   # read-side closers such as response bodies
+      - (net.Conn).Close
+      - (io.ReadCloser).Close
+      - crypto/rand.Read                    # cannot fail since Go 1.24; it aborts the process instead
+      - fmt.Fprint
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - (*github.com/dop251/goja.Object).Set  # setting a property on a fresh, extensible object
+      - (*github.com/dop251/goja.Runtime).Set
+      - os.Remove                           # best-effort temp-file cleanup
+      - (net/http.Flusher).Flush
+      - (*github.com/nats-io/nats.go.Subscription).Unsubscribe
+      - (*github.com/spf13/cobra.Command).MarkFlagRequired  # fails only for a misspelled flag name
   gocyclo:
     min-complexity: 15
   gocognit:

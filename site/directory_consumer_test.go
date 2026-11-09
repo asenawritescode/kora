@@ -13,7 +13,7 @@ import (
 
 func expectConsumerBatch(mock sqlmock.Sqlmock, consumerID, ownerID string, cursor uint64, changes ...*sqlmock.Rows) {
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT IGNORE INTO _kora_site_directory_consumers (consumer_id, directory_revision) VALUES (?, ?)`)).
-		WithArgs(consumerID, uint64(cursor)).WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs(consumerID, cursor).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT directory_revision FROM _kora_site_directory_consumers WHERE consumer_id = ?`)).
 		WithArgs(consumerID).WillReturnRows(sqlmock.NewRows([]string{"directory_revision"}).AddRow(cursor))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_directory_consumers SET lease_owner = ?, lease_expires_at = TIMESTAMPADD(SECOND, ?, CURRENT_TIMESTAMP(6)), updated_at = CURRENT_TIMESTAMP(6) WHERE consumer_id = ? AND (lease_owner = ? OR lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= CURRENT_TIMESTAMP(6))`)).
