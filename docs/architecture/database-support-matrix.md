@@ -16,8 +16,8 @@ These commands exercise deterministic unit and SQL-generation coverage without
 external credentials:
 
 ```sh
-go test ./db ./configstore ./site ./analytics ./requests/... ./workflow/... ./outbox -count=1
-go test -race ./internal/dbaccess ./analytics ./requests/... ./workflow/... -count=1
+go test ./internal/db ./internal/configstore ./internal/site ./internal/analytics ./internal/requests/... ./internal/workflow/... ./internal/outbox -count=1
+go test -race ./internal/dbaccess ./internal/analytics ./internal/requests/... ./internal/workflow/... -count=1
 go vet ./...
 ```
 
