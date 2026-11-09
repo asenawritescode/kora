@@ -55,9 +55,9 @@ def main() -> int:
         verify(contract["schema"], contract["schema_sha256"])
         verify(contract["typescript"], contract["typescript_sha256"])
         checked += 2
-        for copy_key in ("embedded_ui_copy", "studio_copy", "sdk_copy"):
+        for copy_key in ("studio_copy", "sdk_copy"):
             if copy_key in contract:
-                if args.local_only and copy_key != "embedded_ui_copy":
+                if args.local_only:  # consumer copies live in other repositories
                     continue
                 hash_key = f"{copy_key}_sha256"
                 verify(contract[copy_key], contract[hash_key])

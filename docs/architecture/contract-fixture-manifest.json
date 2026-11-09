@@ -55,8 +55,6 @@
       "schema_sha256": "7f443c7388b23e014aee44b6b6aecc83724bf0cac26873ef1444d5ac00da7a0c",
       "typescript": "kora/contract/generated/engine-v2.ts",
       "typescript_sha256": "9fcb6c6f909579d1dcf6b69dd38665b94a848a5f098cba37f818e5489feda87b",
-      "embedded_ui_copy": "kora/ui/src/generated/engine-v2.ts",
-      "embedded_ui_copy_sha256": "9fcb6c6f909579d1dcf6b69dd38665b94a848a5f098cba37f818e5489feda87b",
       "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
       "studio_copy_sha256": "9fcb6c6f909579d1dcf6b69dd38665b94a848a5f098cba37f818e5489feda87b",
       "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
