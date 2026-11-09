@@ -176,7 +176,10 @@ jobs:
         with:
           go-version: "1.25"
 
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.64.8
-          args: --new-from-rev=origin/${{ github.base_ref }}
+      # Build the linter with the repository's Go version: a prebuilt binary compiled with an older Go
+      # refuses to load a module that targets a newer one.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+
+      - name: Lint (findings on changed lines)
+        run: golangci-lint run --new-from-rev=origin/${{ github.base_ref }}
