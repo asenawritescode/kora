@@ -1,4 +1,4 @@
-.PHONY: build build-go dev setup serve test lint lint-complexity clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
+.PHONY: build build-go dev setup serve test lint lint-complexity complexity-ratchet complexity-baseline deadcode-ratchet deadcode-baseline lint-all clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
 
 # Defaults
 SITE ?= airtime.local
@@ -70,11 +70,25 @@ test:                              ## Run Go and SDK tests
 	go test ./... -v -count=1
 	cd sdk && go test ./... -count=1
 
-lint:                              ## Run the enforced linters (correctness; new findings fail CI)
+lint:                              ## Static analysis (govet+shadow, errcheck, staticcheck, gosec, errorlint, revive, ...)
 	golangci-lint run
 
-lint-complexity:                   ## Report complexity and duplication hotspots (informational)
+lint-complexity:                   ## Report every complexity/duplication hotspot (informational)
 	golangci-lint run --config .golangci-complexity.yml
+
+complexity-ratchet:                ## Fail if a function became newly over the limits or got worse
+	python3 scripts/complexity-ratchet.py
+
+complexity-baseline:               ## Lower the complexity baseline after refactoring (never raises it)
+	python3 scripts/complexity-ratchet.py --update
+
+deadcode-ratchet:                  ## Fail if a function became unreachable from the binary
+	python3 scripts/deadcode-ratchet.py
+
+deadcode-baseline:                 ## Shrink the dead-code baseline after deleting code (never adds)
+	python3 scripts/deadcode-ratchet.py --update
+
+lint-all: lint complexity-ratchet deadcode-ratchet  ## Everything CI's Lint job runs
 
 fmt:                               ## Format code
 	go fmt ./...

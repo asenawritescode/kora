@@ -1,24 +1,73 @@
-# Enforced lint policy. CI runs this with --new-from-rev on pull requests, so new code must be clean
-# while the existing backlog is burned down package by package. Complexity and duplication metrics
-# live in .golangci-complexity.yml (make lint-complexity) and are tracked, not gated.
+# Enforced lint policy. CI runs it with --new-from-rev on pull requests, so every line a PR adds or
+# changes must be clean while the existing backlog is burned down package by package. Function
+# complexity and dead code are gated separately by baseline ratchets (scripts/complexity-ratchet.py,
+# scripts/deadcode-ratchet.py); the remaining metrics in .golangci-complexity.yml are informational.
 run:
-  timeout: 8m
+  timeout: 15m
   tests: true
   build-tags:
     - integration
 
 linters:
+  disable-all: true
   enable:
-    - govet
+    # correctness
+    - govet            # includes the shadow analyzer: a shadowed err once discarded WAL write failures
     - errcheck
     - staticcheck
     - gosimple
     - unused
     - ineffassign
+    - wastedassign
     - unconvert
+    - unparam          # parameters that are never used or always overwritten
+    - nilerr           # returning nil after checking err != nil
+    - errorlint        # errors.Is/As and %w instead of == and string matching
+    - durationcheck
+    - copyloopvar
+    - exhaustive       # every enum switch handles every value or has a default
+    - gocritic
+    # resources, I/O and context
+    - bodyclose
+    - noctx
+    - contextcheck
+    - rowserrcheck
+    - sqlclosecheck
+    # security
+    - gosec
+    # style that protects readers of the public API
+    - revive
     - misspell
 
 linters-settings:
+  govet:
+    enable:
+      - shadow
+  gocritic:
+    enabled-tags:
+      - diagnostic
+  exhaustive:
+    default-signifies-exhaustive: true
+  gosec:
+    excludes:
+      - G104   # unhandled errors: errcheck owns this
+      - G115   # integer conversion overflow: too noisy without value-range analysis
+      - G304   # file path from variable: this is a CLI and a server reading configured paths
+  revive:
+    rules:
+      - name: exported            # exported identifiers need a doc comment
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: indent-error-flow
+      - name: unexported-return
+      - name: var-naming
+      - name: receiver-naming
+      - name: increment-decrement
+      - name: range
+      - name: time-naming
   errcheck:
     # Calls whose error is conventionally ignored. Everything else must be handled or discarded with an
     # explicit `_ =` and a reason. Closing a file that was written to is NOT excluded: that error is
@@ -47,3 +96,13 @@ issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    # Tests may be terse: no doc comments, plain contexts, ignored setup results, shadowed err.
+    - path: _test\.go
+      linters:
+        - revive
+        - gosec
+        - contextcheck
+        - noctx
+        - exhaustive
+        - unparam
