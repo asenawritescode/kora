@@ -1,0 +1,38 @@
+# Maintainability metrics, not a merge gate: golangci-lint run --config .golangci-complexity.yml
+# (make lint-complexity). Use it to find the worst functions in a package before refactoring.
+run:
+  timeout: 8m
+  tests: false
+  build-tags:
+    - integration
+
+linters:
+  disable-all: true
+  enable:
+    - gocyclo
+    - gocognit
+    - nestif
+    - funlen
+    - dupl
+    - goconst
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  gocognit:
+    min-complexity: 15
+  funlen:
+    lines: 80
+    statements: 40
+  nestif:
+    min-complexity: 3
+  dupl:
+    threshold: 80
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

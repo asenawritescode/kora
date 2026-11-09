@@ -335,7 +335,7 @@ func (c *budgetConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return c.Conn.Begin()
+	return c.Conn.Begin() //nolint:staticcheck // transparent wrapper: must mirror the legacy optional driver interfaces
 }
 
 func (c *budgetConn) Ping(ctx context.Context) error {
@@ -349,14 +349,14 @@ func (c *budgetConn) Ping(ctx context.Context) error {
 // equivalents below. Omitting them makes database/sql fall back to prepared
 // statements for drivers that expose only the legacy interfaces.
 func (c *budgetConn) Exec(query string, args []driver.Value) (driver.Result, error) {
-	if execer, ok := c.Conn.(driver.Execer); ok {
+	if execer, ok := c.Conn.(driver.Execer); ok { //nolint:staticcheck // transparent wrapper: must mirror the legacy optional driver interfaces
 		return execer.Exec(query, args)
 	}
 	return nil, driver.ErrSkip
 }
 
 func (c *budgetConn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	if queryer, ok := c.Conn.(driver.Queryer); ok {
+	if queryer, ok := c.Conn.(driver.Queryer); ok { //nolint:staticcheck // transparent wrapper: must mirror the legacy optional driver interfaces
 		return queryer.Query(query, args)
 	}
 	return nil, driver.ErrSkip
@@ -393,7 +393,7 @@ func (c *budgetConn) ExecContext(ctx context.Context, query string, args []drive
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if execer, ok := c.Conn.(driver.Execer); ok {
+	if execer, ok := c.Conn.(driver.Execer); ok { //nolint:staticcheck // transparent wrapper: must mirror the legacy optional driver interfaces
 		values, err := legacyValues(args)
 		if err != nil {
 			return nil, err
@@ -416,7 +416,7 @@ func (c *budgetConn) QueryContext(ctx context.Context, query string, args []driv
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if queryer, ok := c.Conn.(driver.Queryer); ok {
+	if queryer, ok := c.Conn.(driver.Queryer); ok { //nolint:staticcheck // transparent wrapper: must mirror the legacy optional driver interfaces
 		values, err := legacyValues(args)
 		if err != nil {
 			return nil, err
@@ -457,11 +457,9 @@ func legacyValues(args []driver.NamedValue) ([]driver.Value, error) {
 		if arg.Name != "" {
 			return nil, driver.ErrSkip
 		}
-		value, ok := arg.Value.(driver.Value)
-		if !ok {
-			return nil, fmt.Errorf("driver argument %d was not normalized before legacy execution", index+1)
-		}
-		values[index] = value
+		// arg.Value is already a driver.Value. A NULL parameter is a nil value and is valid; the
+		// previous type assertion rejected it as "not normalized".
+		values[index] = arg.Value
 	}
 	return values, nil
 }
