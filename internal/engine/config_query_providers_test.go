@@ -284,3 +284,23 @@ func TestConfigQueryExecutorHonoursLimitBelowPageLimit(t *testing.T) {
 		t.Fatalf("limit above page_limit: err = %v, want limit QueryInputError", err)
 	}
 }
+
+func TestConfigQueryRunRejectsMalformedInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		call  configQueryCall
+		field string
+	}{
+		{"input is not an object", configQueryCall{input: json.RawMessage(`[]`), full: true}, ""},
+		{"cursor is not decodable", configQueryCall{input: json.RawMessage(`{}`), cursor: "!!", full: true}, "cursor"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := (&configQueryExecutor{def: &query.Definition{}}).run(context.Background(), tt.call)
+			var inputErr *plugin.QueryInputError
+			if !errors.As(err, &inputErr) || inputErr.Field != tt.field {
+				t.Fatalf("run error = %v, want QueryInputError on field %q", err, tt.field)
+			}
+		})
+	}
+}

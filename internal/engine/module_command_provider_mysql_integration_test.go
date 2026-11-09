@@ -404,16 +404,16 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		return resolved, resolveErr
 	}
 	staleMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("public-stale-" + suffix[:12]), ExpectedRevision: "0"}
-	_, staleErr := executePublishedOperation(ctx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, execution, scope, owner.ID, owner.PublishedOperations[0], inputSchema, staleMeta, payload)
+	_, staleErr := executePublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: resolvePublicPlan, commandKernel: commandKernel, commandRegistry: commands, registry: registry}, publishedOperationTarget{execution: execution, scope: scope, owner: owner.ID, published: owner.PublishedOperations[0]}, publishedOperationInvocation{inputSchema: inputSchema, meta: staleMeta, input: payload})
 	var staleContractErr *contract.Error
 	if !errors.As(staleErr, &staleContractErr) || staleContractErr.Type != contract.CodeStaleSubject {
 		t.Fatalf("public operation with stale catalog revision = %v, want typed stale revision conflict", staleErr)
 	}
-	publicReceipt, publicErr := executePublishedOperation(ctx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, execution, scope, owner.ID, owner.PublishedOperations[0], inputSchema, publicMeta, payload)
+	publicReceipt, publicErr := executePublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: resolvePublicPlan, commandKernel: commandKernel, commandRegistry: commands, registry: registry}, publishedOperationTarget{execution: execution, scope: scope, owner: owner.ID, published: owner.PublishedOperations[0]}, publishedOperationInvocation{inputSchema: inputSchema, meta: publicMeta, input: payload})
 	if publicErr != nil || publicReceipt.Status != contract.ReceiptCompleted {
 		t.Fatalf("public registered operation = (%+v,%v)", publicReceipt, publicErr)
 	}
-	publicReplay, publicErr := executePublishedOperation(ctx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, execution, scope, owner.ID, owner.PublishedOperations[0], inputSchema, publicMeta, payload)
+	publicReplay, publicErr := executePublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: resolvePublicPlan, commandKernel: commandKernel, commandRegistry: commands, registry: registry}, publishedOperationTarget{execution: execution, scope: scope, owner: owner.ID, published: owner.PublishedOperations[0]}, publishedOperationInvocation{inputSchema: inputSchema, meta: publicMeta, input: payload})
 	if publicErr != nil || publicReplay.ExecutionID != publicReceipt.ExecutionID {
 		t.Fatalf("public registered operation retry = (%+v,%v), want original %s", publicReplay, publicErr, publicReceipt.ExecutionID)
 	}
@@ -430,7 +430,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	runtimeServices.Replace(string(tenant), api.SiteRuntimeService{
 		LoadModuleSnapshot: func() (contract.ModuleSnapshot, error) { return moduleSnapshot, nil },
 		ExecutePublishedOperation: func(requestCtx context.Context, actor policy.Execution, businessScope contract.BusinessScope, moduleOwner contract.ModuleID, publishedOperation contract.PublishedOperation, schemaRef contract.SchemaRef, meta contract.CommandMeta, inputJSON []byte) (contract.OperationReceipt, error) {
-			return executePublishedOperation(requestCtx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, actor, businessScope, moduleOwner, publishedOperation, schemaRef, meta, inputJSON)
+			return executePublishedOperation(requestCtx, publishedOperationRuntime{store: reloadedStore, resolve: resolvePublicPlan, commandKernel: commandKernel, commandRegistry: commands, registry: registry}, publishedOperationTarget{execution: actor, scope: businessScope, owner: moduleOwner, published: publishedOperation}, publishedOperationInvocation{inputSchema: schemaRef, meta: meta, input: inputJSON})
 		},
 	})
 	handler := api.NewHandler(registry, nil)
@@ -469,7 +469,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	if afterHTTPRecords != beforeHTTPRecords || afterHTTPEvents != beforeHTTPEvents || afterHTTPAudits != beforeHTTPAudits {
 		t.Fatalf("offline idempotent HTTP retry changed committed command effects from (%d,%d,%d) to (%d,%d,%d)", beforeHTTPRecords, beforeHTTPEvents, beforeHTTPAudits, afterHTTPRecords, afterHTTPEvents, afterHTTPAudits)
 	}
-	publicLookup, foundPublic, lookupErr := lookupPublishedOperation(ctx, reloadedStore, commandKernel, commands, resolvePublicPlan, execution, scope, owner.ID, owner.PublishedOperations[0], publicMeta.IdempotencyKey)
+	publicLookup, foundPublic, lookupErr := lookupPublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: resolvePublicPlan, commandKernel: commandKernel, commandRegistry: commands}, publishedOperationTarget{execution: execution, scope: scope, owner: owner.ID, published: owner.PublishedOperations[0]}, publicMeta.IdempotencyKey)
 	if lookupErr != nil || !foundPublic || publicLookup.ExecutionID != publicReceipt.ExecutionID {
 		t.Fatalf("public operation lookup = (%+v,%v,%v), want original %s", publicLookup, foundPublic, lookupErr, publicReceipt.ExecutionID)
 	}
@@ -501,7 +501,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		t.Fatal("revoke public operation lease:", err)
 	}
 	newMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("after-revoke-" + suffix[:12])}
-	_, revokeErr = executePublishedOperation(ctx, reloadedStore, resolvePublicPlan, commandKernel, commands, registry, execution, scope, owner.ID, owner.PublishedOperations[0], inputSchema, newMeta, payload)
+	_, revokeErr = executePublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: resolvePublicPlan, commandKernel: commandKernel, commandRegistry: commands, registry: registry}, publishedOperationTarget{execution: execution, scope: scope, owner: owner.ID, published: owner.PublishedOperations[0]}, publishedOperationInvocation{inputSchema: inputSchema, meta: newMeta, input: payload})
 	var revokeContractErr *contract.Error
 	if !errors.As(revokeErr, &revokeContractErr) || revokeContractErr.Type != contract.CodePermissionDenied {
 		t.Fatalf("new public operation after grant revocation = %v, want permission denied", revokeErr)
@@ -557,15 +557,15 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	}
 	externalMeta := contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("external-settle-" + suffix[:12])}
 	externalInputJSON := json.RawMessage(`{"invoice_id":"INV-EXT-1"}`)
-	unknown, err := executePublishedOperation(ctx, reloadedStore, externalResolver, commandKernel, commands, registry, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalInput, externalMeta, externalInputJSON)
+	unknown, err := executePublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: externalResolver, commandKernel: commandKernel, commandRegistry: commands, registry: registry}, publishedOperationTarget{execution: externalExecution, scope: externalScope, owner: externalOwner.ID, published: externalOwner.PublishedOperations[0]}, publishedOperationInvocation{inputSchema: externalInput, meta: externalMeta, input: externalInputJSON})
 	if err != nil || unknown.Status != contract.ReceiptOutcomeUnknown || externalHandle.calls != 1 {
 		t.Fatalf("lost external response = (%+v,%v), provider calls=%d", unknown, err, externalHandle.calls)
 	}
-	recovered, err := executePublishedOperation(ctx, reloadedStore, externalResolver, commandKernel, commands, registry, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalInput, externalMeta, externalInputJSON)
+	recovered, err := executePublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: externalResolver, commandKernel: commandKernel, commandRegistry: commands, registry: registry}, publishedOperationTarget{execution: externalExecution, scope: externalScope, owner: externalOwner.ID, published: externalOwner.PublishedOperations[0]}, publishedOperationInvocation{inputSchema: externalInput, meta: externalMeta, input: externalInputJSON})
 	if err != nil || recovered.Status != contract.ReceiptCompleted || recovered.ExecutionID != unknown.ExecutionID || externalHandle.calls != 1 || externalHandle.reconciliations != 1 {
 		t.Fatalf("external retry recovery = (%+v,%v), calls=%d reconciliations=%d", recovered, err, externalHandle.calls, externalHandle.reconciliations)
 	}
-	recoveredByKey, found, err := lookupPublishedOperation(ctx, reloadedStore, commandKernel, commands, externalResolver, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalMeta.IdempotencyKey)
+	recoveredByKey, found, err := lookupPublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: externalResolver, commandKernel: commandKernel, commandRegistry: commands}, publishedOperationTarget{execution: externalExecution, scope: externalScope, owner: externalOwner.ID, published: externalOwner.PublishedOperations[0]}, externalMeta.IdempotencyKey)
 	if err != nil || !found || recoveredByKey.Status != contract.ReceiptCompleted || recoveredByKey.ExecutionID != unknown.ExecutionID {
 		t.Fatalf("external recovery lookup=(%+v,%v,%v)", recoveredByKey, found, err)
 	}
@@ -578,7 +578,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	firstResult := make(chan contract.OperationReceipt, 1)
 	firstErr := make(chan error, 1)
 	go func() {
-		receipt, callErr := executePublishedOperation(ctx, reloadedStore, externalResolver, commandKernel, commands, registry, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalInput, concurrentMeta, externalInputJSON)
+		receipt, callErr := executePublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: externalResolver, commandKernel: commandKernel, commandRegistry: commands, registry: registry}, publishedOperationTarget{execution: externalExecution, scope: externalScope, owner: externalOwner.ID, published: externalOwner.PublishedOperations[0]}, publishedOperationInvocation{inputSchema: externalInput, meta: concurrentMeta, input: externalInputJSON})
 		firstResult <- receipt
 		firstErr <- callErr
 	}()
@@ -587,7 +587,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	case <-time.After(5 * time.Second):
 		t.Fatal("first external intent did not reach provider")
 	}
-	duplicate, duplicateErr := executePublishedOperation(ctx, reloadedStore, externalResolver, commandKernel, commands, registry, externalExecution, externalScope, externalOwner.ID, externalOwner.PublishedOperations[0], externalInput, concurrentMeta, externalInputJSON)
+	duplicate, duplicateErr := executePublishedOperation(ctx, publishedOperationRuntime{store: reloadedStore, resolve: externalResolver, commandKernel: commandKernel, commandRegistry: commands, registry: registry}, publishedOperationTarget{execution: externalExecution, scope: externalScope, owner: externalOwner.ID, published: externalOwner.PublishedOperations[0]}, publishedOperationInvocation{inputSchema: externalInput, meta: concurrentMeta, input: externalInputJSON})
 	if duplicateErr != nil || duplicate.Status != contract.ReceiptRunning {
 		t.Fatalf("concurrent duplicate = (%+v,%v), want running receipt", duplicate, duplicateErr)
 	}

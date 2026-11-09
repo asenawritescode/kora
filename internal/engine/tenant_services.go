@@ -333,10 +333,16 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return moduleStore.Load(tenantID)
 	}
 	services.ExecutePublishedOperation = func(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, owner contract.ModuleID, published contract.PublishedOperation, inputSchema contract.SchemaRef, meta contract.CommandMeta, input []byte) (contract.OperationReceipt, error) {
-		return executePublishedOperation(ctx, moduleStore, resolveModuleBindings, domainKernel, config.KernelCommands, loaded.Registry, execution, scope, owner, published, inputSchema, meta, input)
+		return executePublishedOperation(ctx, publishedOperationRuntime{
+			store: moduleStore, resolve: resolveModuleBindings, commandKernel: domainKernel,
+			commandRegistry: config.KernelCommands, registry: loaded.Registry,
+		}, publishedOperationTarget{execution: execution, scope: scope, owner: owner, published: published},
+			publishedOperationInvocation{inputSchema: inputSchema, meta: meta, input: input})
 	}
 	services.LookupPublishedOperation = func(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, owner contract.ModuleID, published contract.PublishedOperation, key contract.IdempotencyKey) (contract.OperationReceipt, bool, error) {
-		return lookupPublishedOperation(ctx, moduleStore, domainKernel, config.KernelCommands, resolveModuleBindings, execution, scope, owner, published, key)
+		return lookupPublishedOperation(ctx, publishedOperationRuntime{
+			store: moduleStore, resolve: resolveModuleBindings, commandKernel: domainKernel, commandRegistry: config.KernelCommands,
+		}, publishedOperationTarget{execution: execution, scope: scope, owner: owner, published: published}, key)
 	}
 	services.LookupPublishedOperationByID = func(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, id contract.OperationID) (contract.OperationReceipt, bool, error) {
 		return moduleStore.LoadPublishedOperationReceipt(ctx, scope.TenantID, id, execution.Actor(), scope)
