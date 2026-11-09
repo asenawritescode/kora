@@ -626,185 +626,283 @@ func enumValues(files []string, fset *token.FileSet, root string) ([]string, err
 	return vals, nil
 }
 
+// typeSchema maps a Go type expression from the contract package to its JSON Schema. It only
+// dispatches on the kind of AST node; each kind is handled by its own function below.
 func typeSchema(expr ast.Expr, owner string, defs map[string]ast.Expr, enums map[string][]string) (schema, error) {
 	switch t := expr.(type) {
 	case *ast.Ident:
-		switch t.Name {
-		case "string":
-			return schema{"type": "string"}, nil
-		case "bool":
-			return schema{"type": "boolean"}, nil
-		case "byte":
-			return schema{"type": "integer", "minimum": 0, "maximum": 255}, nil
-		case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64":
-			return schema{"type": "integer"}, nil
-		case "float32", "float64":
-			return schema{"type": "number"}, nil
-		case "Time":
-			return schema{"type": "string", "format": "date-time"}, nil
-		}
-		if values, ok := enums[t.Name]; ok {
-			return schema{"type": "string", "enum": values}, nil
-		}
-		if expr, ok := defs[t.Name]; ok {
-			if _, isStruct := expr.(*ast.StructType); isStruct {
-				return schema{"$ref": "#/$defs/" + t.Name}, nil
-			}
-			// Defined scalar contract types (for example Revision or an opaque
-			// ID) have no standalone JSON object definition; inline their base
-			// scalar schema instead of emitting a dangling $ref.
-			return typeSchema(expr, owner, defs, enums)
-		}
-		return nil, fmt.Errorf("unsupported identifier %q", t.Name)
+		return identSchema(t, owner, defs, enums)
 	case *ast.SelectorExpr:
-		if x, ok := t.X.(*ast.Ident); ok && x.Name == "time" && t.Sel.Name == "Time" {
-			return schema{"type": "string", "format": "date-time"}, nil
-		}
-		return nil, fmt.Errorf("unsupported selector")
+		return selectorSchema(t)
 	case *ast.StarExpr:
-		s, e := typeSchema(t.X, owner, defs, enums)
-		if e != nil {
-			return nil, e
-		}
-		s["x-optional-pointer"] = true
-		return s, nil
+		return pointerSchema(t, owner, defs, enums)
 	case *ast.ArrayType:
-		if t.Len != nil {
-			return nil, fmt.Errorf("arrays are unsupported")
-		}
-		items, e := typeSchema(t.Elt, owner, defs, enums)
-		if e != nil {
-			return nil, e
-		}
-		return schema{"type": "array", "items": items}, nil
+		return arraySchema(t, owner, defs, enums)
 	case *ast.MapType:
-		v, e := typeSchema(t.Value, owner, defs, enums)
-		if e != nil {
-			return nil, e
-		}
-		k, ok := t.Key.(*ast.Ident)
-		if !ok {
-			return nil, fmt.Errorf("map keys must be a string or registered string enum")
-		}
-		if k.Name == "string" {
-			return schema{"type": "object", "additionalProperties": v}, nil
-		}
-		if values, ok := enums[k.Name]; ok {
-			return schema{"type": "object", "propertyNames": schema{"type": "string", "enum": values}, "additionalProperties": v}, nil
-		}
-		return nil, fmt.Errorf("map key type %s is not a registered string enum", k.Name)
+		return mapSchema(t, owner, defs, enums)
 	case *ast.StructType:
-		properties := map[string]any{}
-		required := []string{}
-		for _, field := range t.Fields.List {
-			if len(field.Names) == 0 {
-				return nil, fmt.Errorf("anonymous fields are unsupported")
-			}
-			tag := ""
-			if field.Tag != nil {
-				u, e := strconv.Unquote(field.Tag.Value)
-				if e != nil {
-					return nil, e
-				}
-				tag = reflectJSONName(u)
-			}
-			for _, name := range field.Names {
-				if !name.IsExported() {
-					continue
-				}
-				jsonName, omit, skip := parseJSONTag(tag, name.Name)
-				if skip {
-					continue
-				}
-				var s schema
-				var e error
-				if isRawJSON(field.Type) {
-					if !hasDirective(field, "contract:json") {
-						return nil, fmt.Errorf("field %s: json.RawMessage requires //contract:json", name.Name)
-					}
-					s = schema{"x-open-json-value": true}
-				} else if isRawJSONList(field.Type) {
-					if !hasDirective(field, "contract:json") {
-						return nil, fmt.Errorf("field %s: []json.RawMessage requires //contract:json", name.Name)
-					}
-					s = schema{"type": "array", "items": schema{"x-open-json-value": true}}
-				} else {
-					s, e = typeSchema(field.Type, owner, defs, enums)
-				}
-				if e != nil {
-					return nil, fmt.Errorf("field %s: %w", name.Name, e)
-				}
-				if minimum, ok, err := numericDirective(field, "contract:min="); err != nil {
-					return nil, fmt.Errorf("field %s minimum rule: %w", name.Name, err)
-				} else if ok {
-					s["minimum"] = minimum
-				}
-				if maximum, ok, err := numericDirective(field, "contract:max="); err != nil {
-					return nil, fmt.Errorf("field %s maximum rule: %w", name.Name, err)
-				} else if ok {
-					s["maximum"] = maximum
-				}
-				if constant, ok, err := numericDirective(field, "contract:const="); err != nil {
-					return nil, fmt.Errorf("field %s constant rule: %w", name.Name, err)
-				} else if ok {
-					if constant != float64(int64(constant)) {
-						return nil, fmt.Errorf("field %s constant must be an integer", name.Name)
-					}
-					s["const"] = int64(constant)
-				}
-				for _, bound := range []struct {
-					directive string
-					keyword   string
-				}{
-					{"contract:minLength=", "minLength"},
-					{"contract:maxLength=", "maxLength"},
-					{"contract:minItems=", "minItems"},
-					{"contract:maxItems=", "maxItems"},
-					{"contract:maxBytes=", "x-max-utf8-bytes"},
-					{"contract:maxJSONBytes=", "x-max-json-bytes"},
-				} {
-					value, found, err := numericDirective(field, bound.directive)
-					if err != nil {
-						return nil, fmt.Errorf("field %s %s rule: %w", name.Name, bound.keyword, err)
-					}
-					if found {
-						if value < 0 || value != float64(int64(value)) {
-							return nil, fmt.Errorf("field %s %s must be a non-negative integer", name.Name, bound.keyword)
-						}
-						s[bound.keyword] = int64(value)
-					}
-				}
-				if pattern, found := stringDirective(field, "contract:pattern="); found {
-					if _, err := regexp.Compile(pattern); err != nil {
-						return nil, fmt.Errorf("field %s pattern rule: %w", name.Name, err)
-					}
-					s["pattern"] = pattern
-				}
-				if itemPattern, found := stringDirective(field, "contract:itemPattern="); found {
-					if _, err := regexp.Compile(itemPattern); err != nil {
-						return nil, fmt.Errorf("field %s item pattern rule: %w", name.Name, err)
-					}
-					items, ok := s["items"].(schema)
-					if !ok || items["type"] != "string" {
-						return nil, fmt.Errorf("field %s item pattern requires an array of strings", name.Name)
-					}
-					items["pattern"] = itemPattern
-				}
-				properties[jsonName] = s
-				if !omit {
-					required = append(required, jsonName)
-				}
-			}
-		}
-		sort.Strings(required)
-		out := schema{"type": "object", "properties": properties, "additionalProperties": false}
-		if len(required) > 0 {
-			out["required"] = required
-		}
-		return out, nil
+		return structSchema(t, owner, defs, enums)
 	default:
 		return nil, fmt.Errorf("unsupported Go type %T", expr)
 	}
+}
+
+// builtinSchema returns the schema of a predeclared scalar type or the contract's Time alias.
+func builtinSchema(name string) (schema, bool) {
+	switch name {
+	case "string":
+		return schema{"type": "string"}, true
+	case "bool":
+		return schema{"type": "boolean"}, true
+	case "byte":
+		return schema{"type": "integer", "minimum": 0, "maximum": 255}, true
+	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64":
+		return schema{"type": "integer"}, true
+	case "float32", "float64":
+		return schema{"type": "number"}, true
+	case "Time":
+		return schema{"type": "string", "format": "date-time"}, true
+	}
+	return nil, false
+}
+
+func identSchema(t *ast.Ident, owner string, defs map[string]ast.Expr, enums map[string][]string) (schema, error) {
+	if s, ok := builtinSchema(t.Name); ok {
+		return s, nil
+	}
+	if values, ok := enums[t.Name]; ok {
+		return schema{"type": "string", "enum": values}, nil
+	}
+	if expr, ok := defs[t.Name]; ok {
+		if _, isStruct := expr.(*ast.StructType); isStruct {
+			return schema{"$ref": "#/$defs/" + t.Name}, nil
+		}
+		// Defined scalar contract types (for example Revision or an opaque
+		// ID) have no standalone JSON object definition; inline their base
+		// scalar schema instead of emitting a dangling $ref.
+		return typeSchema(expr, owner, defs, enums)
+	}
+	return nil, fmt.Errorf("unsupported identifier %q", t.Name)
+}
+
+func selectorSchema(t *ast.SelectorExpr) (schema, error) {
+	if x, ok := t.X.(*ast.Ident); ok && x.Name == "time" && t.Sel.Name == "Time" {
+		return schema{"type": "string", "format": "date-time"}, nil
+	}
+	return nil, fmt.Errorf("unsupported selector")
+}
+
+func pointerSchema(t *ast.StarExpr, owner string, defs map[string]ast.Expr, enums map[string][]string) (schema, error) {
+	s, err := typeSchema(t.X, owner, defs, enums)
+	if err != nil {
+		return nil, err
+	}
+	s["x-optional-pointer"] = true
+	return s, nil
+}
+
+func arraySchema(t *ast.ArrayType, owner string, defs map[string]ast.Expr, enums map[string][]string) (schema, error) {
+	if t.Len != nil {
+		return nil, fmt.Errorf("arrays are unsupported")
+	}
+	items, err := typeSchema(t.Elt, owner, defs, enums)
+	if err != nil {
+		return nil, err
+	}
+	return schema{"type": "array", "items": items}, nil
+}
+
+func mapSchema(t *ast.MapType, owner string, defs map[string]ast.Expr, enums map[string][]string) (schema, error) {
+	value, err := typeSchema(t.Value, owner, defs, enums)
+	if err != nil {
+		return nil, err
+	}
+	key, ok := t.Key.(*ast.Ident)
+	if !ok {
+		return nil, fmt.Errorf("map keys must be a string or registered string enum")
+	}
+	if key.Name == "string" {
+		return schema{"type": "object", "additionalProperties": value}, nil
+	}
+	if values, ok := enums[key.Name]; ok {
+		return schema{"type": "object", "propertyNames": schema{"type": "string", "enum": values}, "additionalProperties": value}, nil
+	}
+	return nil, fmt.Errorf("map key type %s is not a registered string enum", key.Name)
+}
+
+// structSchema builds a closed object schema from an exported struct's fields.
+func structSchema(t *ast.StructType, owner string, defs map[string]ast.Expr, enums map[string][]string) (schema, error) {
+	properties := map[string]any{}
+	required := []string{}
+	for _, field := range t.Fields.List {
+		if len(field.Names) == 0 {
+			return nil, fmt.Errorf("anonymous fields are unsupported")
+		}
+		tag, err := fieldJSONTag(field)
+		if err != nil {
+			return nil, err
+		}
+		if required, err = addFieldProperties(properties, required, field, tag, owner, defs, enums); err != nil {
+			return nil, err
+		}
+	}
+	sort.Strings(required)
+	out := schema{"type": "object", "properties": properties, "additionalProperties": false}
+	if len(required) > 0 {
+		out["required"] = required
+	}
+	return out, nil
+}
+
+// addFieldProperties adds every exported, non-skipped name declared by one struct field to the object's
+// properties and returns the updated list of required property names.
+func addFieldProperties(properties map[string]any, required []string, field *ast.Field, tag, owner string, defs map[string]ast.Expr, enums map[string][]string) ([]string, error) {
+	for _, name := range field.Names {
+		if !name.IsExported() {
+			continue
+		}
+		jsonName, omit, skip := parseJSONTag(tag, name.Name)
+		if skip {
+			continue
+		}
+		s, err := fieldSchema(field, name.Name, owner, defs, enums)
+		if err != nil {
+			return nil, err
+		}
+		properties[jsonName] = s
+		if !omit {
+			required = append(required, jsonName)
+		}
+	}
+	return required, nil
+}
+
+// fieldJSONTag returns the json struct tag of a field, or "" when it has none.
+func fieldJSONTag(field *ast.Field) (string, error) {
+	if field.Tag == nil {
+		return "", nil
+	}
+	unquoted, err := strconv.Unquote(field.Tag.Value)
+	if err != nil {
+		return "", err
+	}
+	return reflectJSONName(unquoted), nil
+}
+
+// fieldSchema is the schema of one struct field: its type plus the //contract: directive rules.
+func fieldSchema(field *ast.Field, name, owner string, defs map[string]ast.Expr, enums map[string][]string) (schema, error) {
+	s, err := fieldTypeSchema(field, name, owner, defs, enums)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyValueRules(s, field, name); err != nil {
+		return nil, err
+	}
+	if err := applyBoundRules(s, field, name); err != nil {
+		return nil, err
+	}
+	if err := applyPatternRules(s, field, name); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// fieldTypeSchema resolves a field's type. Raw JSON values are open by design and must say so with
+// //contract:json, so an unvalidated payload can never appear in the contract by accident.
+func fieldTypeSchema(field *ast.Field, name, owner string, defs map[string]ast.Expr, enums map[string][]string) (schema, error) {
+	switch {
+	case isRawJSON(field.Type):
+		if !hasDirective(field, "contract:json") {
+			return nil, fmt.Errorf("field %s: json.RawMessage requires //contract:json", name)
+		}
+		return schema{"x-open-json-value": true}, nil
+	case isRawJSONList(field.Type):
+		if !hasDirective(field, "contract:json") {
+			return nil, fmt.Errorf("field %s: []json.RawMessage requires //contract:json", name)
+		}
+		return schema{"type": "array", "items": schema{"x-open-json-value": true}}, nil
+	}
+	s, err := typeSchema(field.Type, owner, defs, enums)
+	if err != nil {
+		return nil, fmt.Errorf("field %s: %w", name, err)
+	}
+	return s, nil
+}
+
+// applyValueRules applies //contract:min, //contract:max and //contract:const.
+func applyValueRules(s schema, field *ast.Field, name string) error {
+	for _, rule := range []struct{ directive, keyword string }{
+		{"contract:min=", "minimum"},
+		{"contract:max=", "maximum"},
+	} {
+		value, found, err := numericDirective(field, rule.directive)
+		if err != nil {
+			return fmt.Errorf("field %s %s rule: %w", name, rule.keyword, err)
+		}
+		if found {
+			s[rule.keyword] = value
+		}
+	}
+	constant, found, err := numericDirective(field, "contract:const=")
+	if err != nil {
+		return fmt.Errorf("field %s constant rule: %w", name, err)
+	}
+	if found {
+		if constant != float64(int64(constant)) {
+			return fmt.Errorf("field %s constant must be an integer", name)
+		}
+		s["const"] = int64(constant)
+	}
+	return nil
+}
+
+// applyBoundRules applies the non-negative integer length/size directives.
+func applyBoundRules(s schema, field *ast.Field, name string) error {
+	for _, bound := range []struct {
+		directive string
+		keyword   string
+	}{
+		{"contract:minLength=", "minLength"},
+		{"contract:maxLength=", "maxLength"},
+		{"contract:minItems=", "minItems"},
+		{"contract:maxItems=", "maxItems"},
+		{"contract:maxBytes=", "x-max-utf8-bytes"},
+		{"contract:maxJSONBytes=", "x-max-json-bytes"},
+	} {
+		value, found, err := numericDirective(field, bound.directive)
+		if err != nil {
+			return fmt.Errorf("field %s %s rule: %w", name, bound.keyword, err)
+		}
+		if !found {
+			continue
+		}
+		if value < 0 || value != float64(int64(value)) {
+			return fmt.Errorf("field %s %s must be a non-negative integer", name, bound.keyword)
+		}
+		s[bound.keyword] = int64(value)
+	}
+	return nil
+}
+
+// applyPatternRules applies //contract:pattern and //contract:itemPattern.
+func applyPatternRules(s schema, field *ast.Field, name string) error {
+	if pattern, found := stringDirective(field, "contract:pattern="); found {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("field %s pattern rule: %w", name, err)
+		}
+		s["pattern"] = pattern
+	}
+	if itemPattern, found := stringDirective(field, "contract:itemPattern="); found {
+		if _, err := regexp.Compile(itemPattern); err != nil {
+			return fmt.Errorf("field %s item pattern rule: %w", name, err)
+		}
+		items, ok := s["items"].(schema)
+		if !ok || items["type"] != "string" {
+			return fmt.Errorf("field %s item pattern requires an array of strings", name)
+		}
+		items["pattern"] = itemPattern
+	}
+	return nil
 }
 
 // Keep the JSON struct-tag parser local to the generator's supported subset.
