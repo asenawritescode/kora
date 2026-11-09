@@ -109,7 +109,7 @@ func withAnalyticsWALMigrationAdmission(
 
 func migrateAnalyticsWALDirectories(baseDir string, owners []analyticsWALNamespaceOwner) error {
 	baseDir = filepath.Clean(strings.TrimSpace(baseDir))
-	entries, err := os.ReadDir(baseDir)
+	_, err := os.ReadDir(baseDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -181,7 +181,7 @@ func migrateAnalyticsWALDirectories(baseDir string, owners []analyticsWALNamespa
 		}
 	}
 
-	entries, err = os.ReadDir(baseDir)
+	entries, err := os.ReadDir(baseDir)
 	if err != nil {
 		return fmt.Errorf("verify analytics WAL namespace migration in %q: %w", baseDir, err)
 	}

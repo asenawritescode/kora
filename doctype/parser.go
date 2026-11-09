@@ -871,8 +871,6 @@ func ValidateAll(doctypes []*DocType) []CrossFileError {
 
 	errs = append(errs, validateQuantityEffects(doctypes, dtMap)...)
 
-	childTables := make(map[string]string) // child doctype name → parent doctype
-
 	for _, dt := range doctypes {
 		for _, f := range dt.Fields {
 			// Check Link fields reference existing doctypes.
@@ -887,7 +885,7 @@ func ValidateAll(doctypes []*DocType) []CrossFileError {
 					})
 				}
 			}
-			// Check Table fields reference existing doctypes and track child tables.
+			// Check Table fields reference existing doctypes.
 			if f.Fieldtype == "Table" && f.Options != "" {
 				if _, ok := dtMap[f.Options]; !ok {
 					errs = append(errs, CrossFileError{
@@ -897,19 +895,7 @@ func ValidateAll(doctypes []*DocType) []CrossFileError {
 						Field:   f.Fieldname,
 						Related: f.Options,
 					})
-				} else {
-					childTables[f.Options] = dt.Name
 				}
-			}
-		}
-
-		// Check for orphan child tables (is_child_table but no parent).
-		if dt.IsChildTable {
-			if _, ok := childTables[dt.Name]; !ok {
-				// Only warn if the child table has no parent at all.
-				// It might be referenced by name rather than doctype name
-				// (options stores the name column value, not the doctype name).
-				// Skip this check for now — it's too noisy.
 			}
 		}
 	}
@@ -1036,12 +1022,6 @@ func ValidateYAML(data []byte) ([]YAMLSyntaxError, []*ValidationError, error) {
 			u.Detail = fmt.Sprintf("did you mean %q?", suggestion)
 		}
 		syntaxErrs[i] = u
-	}
-
-	// Check field-level unknown keys (this enriches syntaxErrs with field-level errors).
-	if checkFieldUnknownKeys(data) != nil {
-		// The function returns an error but we also want to collect field-level syntax errors.
-		// We already have top-level ones in syntaxErrs.
 	}
 
 	if len(syntaxErrs) > 0 {

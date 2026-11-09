@@ -193,8 +193,7 @@ func TestLiveEngineProcessResilienceToNATSAndPlatformDatabaseOutages(t *testing.
 		t.Fatalf("retired Engine password bootstrap returned HTTP %d, want 404", retired.StatusCode)
 	}
 
-	latest, err := registry.CurrentDirectoryRevision()
-	if err != nil {
+	if _, err := registry.CurrentDirectoryRevision(); err != nil {
 		t.Fatal("read current directory revision:", err)
 	}
 	// Exercise the directory consumer's complete runtime lifecycle while the
@@ -210,7 +209,7 @@ func TestLiveEngineProcessResilienceToNATSAndPlatformDatabaseOutages(t *testing.
 	if err != nil {
 		t.Fatal("resolve hot-added site:", err)
 	}
-	latest, err = registry.CurrentDirectoryRevision()
+	latest, err := registry.CurrentDirectoryRevision()
 	if err != nil {
 		t.Fatal("read hot-add directory revision:", err)
 	}

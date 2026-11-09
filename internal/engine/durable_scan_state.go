@@ -28,7 +28,7 @@ func (s *durableScanStateStore) Ensure(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("durable scan schema requires context")
 	}
-	statement := `CREATE TABLE IF NOT EXISTS _kora_durable_scan_cursor (scan_key VARCHAR(255) PRIMARY KEY, after_site_id VARCHAR(255) NOT NULL DEFAULT '', last_completed_at TIMESTAMP NULL, updated_at TIMESTAMP NOT NULL)`
+	var statement string
 	switch s.dialect.DriverName() {
 	case "mysql":
 		statement = `CREATE TABLE IF NOT EXISTS _kora_durable_scan_cursor (scan_key VARCHAR(255) PRIMARY KEY, after_site_id VARCHAR(255) NOT NULL DEFAULT '', last_completed_at DATETIME(6) NULL, updated_at DATETIME(6) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
