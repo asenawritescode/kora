@@ -16,7 +16,6 @@ from datetime import date
 ENGINE = Path(__file__).resolve().parents[1]
 PROJECTS = Path(os.environ.get("KORA_PROJECTS_ROOT", ENGINE.parent)).resolve()
 CONSUMERS = {
-    "kora/ui/src/generated/engine-v2.ts": ENGINE / "ui/src/generated/engine-v2.ts",
     "kora-studio-mvp/src/generated/engine-v2.ts": PROJECTS / "kora-studio-mvp/src/generated/engine-v2.ts",
     "kora-ts-sdk/src/generated/engine-v2.ts": PROJECTS / "kora-ts-sdk/src/generated/engine-v2.ts",
 }
@@ -25,7 +24,6 @@ ANDROID_SCHEMA = ANDROID / "app/src/main/assets/contracts/engine-v2.json"
 ANDROID_MANIFEST = ANDROID / "app/src/main/java/com/kora/mobile/generated/EngineContractManifest.kt"
 CLOUD_MANIFEST = PROJECTS / "kora-cloud/contract-fixtures/engine-v2-manifest.json"
 MANIFESTS = (
-    ENGINE / "ui/src/generated/manifest.ts",
     PROJECTS / "kora-studio-mvp/src/generated/engine-v2.manifest.ts",
     PROJECTS / "kora-ts-sdk/src/generated/manifest.ts",
 )
@@ -134,7 +132,6 @@ def expected_files(update_snapshot_date: bool) -> dict[Path, bytes]:
                 destination = PROJECTS / local_repository / relative
             files[destination] = contents
     consumer_fields = {
-        "embedded_ui_copy": "kora/ui/src/generated/engine-v2.ts",
         "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
         "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
     }
