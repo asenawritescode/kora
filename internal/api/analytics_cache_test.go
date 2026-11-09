@@ -112,8 +112,8 @@ func TestAnalyticsRouteGroupsReuseOneProcessCache(t *testing.T) {
 	cache := NewAnalyticsQueryCache()
 	services := NewSiteRuntimeServicesWithAnalyticsQueryCache(cache)
 	router := gin.New()
-	RegisterAnalyticsRoutesWithRuntimeServices(router.Group("/canonical"), nil, nil, nil, nil, nil, services)
-	RegisterAnalyticsRoutesWithRuntimeServices(router.Group("/legacy"), nil, nil, nil, nil, nil, services)
+	RegisterAnalyticsRoutes(router.Group("/canonical"), nil, nil, nil, AnalyticsOptions{RuntimeServices: services})
+	RegisterAnalyticsRoutes(router.Group("/legacy"), nil, nil, nil, AnalyticsOptions{RuntimeServices: services})
 	if cache.cache == nil {
 		t.Fatal("Engine-owned cache has no query cache")
 	}
@@ -171,7 +171,7 @@ func TestAnalyticsRebuildRequiresVerifiedAnalyticsWritePermission(t *testing.T) 
 		}
 		c.Next()
 	})
-	RegisterAnalyticsRoutes(router.Group("/api"), registry, nil, nil, nil, nil)
+	RegisterAnalyticsRoutes(router.Group("/api"), registry, nil, nil, AnalyticsOptions{})
 	request := func(execution policy.Execution, roles []string) *httptest.ResponseRecorder {
 		activeExecution = execution
 		recorder := httptest.NewRecorder()
@@ -189,5 +189,28 @@ func TestAnalyticsRebuildRequiresVerifiedAnalyticsWritePermission(t *testing.T) 
 	}
 	if got := request(execution, []string{"Guest"}).Code; got == 403 {
 		t.Fatal("verified Administrator execution was denied based on transport role labels")
+	}
+}
+
+func TestAnalyticsOptionsQueryCache(t *testing.T) {
+	explicit := NewAnalyticsQueryCache()
+	owned := NewAnalyticsQueryCache()
+	services := NewSiteRuntimeServicesWithAnalyticsQueryCache(owned)
+	tests := []struct {
+		name string
+		opts AnalyticsOptions
+		want *analyticsQueryCache
+	}{
+		{"zero value uses the process default", AnalyticsOptions{}, DefaultAnalyticsQueryCache().cache},
+		{"explicit cache wins", AnalyticsOptions{Cache: explicit, RuntimeServices: services}, explicit.cache},
+		{"runtime services supply the cache", AnalyticsOptions{RuntimeServices: services}, owned.cache},
+		{"cache without a query cache falls back to the default", AnalyticsOptions{Cache: &AnalyticsQueryCache{}}, DefaultAnalyticsQueryCache().cache},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.opts.queryCache(); got != tt.want {
+				t.Fatalf("queryCache() = %p, want %p", got, tt.want)
+			}
+		})
 	}
 }

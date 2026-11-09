@@ -16,34 +16,44 @@ import (
 	"github.com/asenawritescode/kora/internal/analytics"
 	db "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
-	"github.com/asenawritescode/kora/internal/natsprovider"
 	"github.com/asenawritescode/kora/internal/policy"
 )
+
+// AnalyticsOptions carries the optional dependencies of RegisterAnalyticsRoutes.
+// The zero value serves analytics with no event buses and the
+// process-default query cache.
+type AnalyticsOptions struct {
+	// EventBuses maps a site name to its event bus.
+	EventBuses map[string]analytics.EventBus
+	// RuntimeServices supplies per-site runtime services (event bus, rebuild
+	// worker) and the query cache when Cache is nil.
+	RuntimeServices *SiteRuntimeServices
+	// Cache is the process-owned semantic query cache. When nil, the cache
+	// owned by RuntimeServices is used, else the process default.
+	Cache *AnalyticsQueryCache
+}
+
+// queryCache resolves the semantic query cache: Cache, else the cache owned by
+// RuntimeServices, else the process default.
+func (o AnalyticsOptions) queryCache() *analyticsQueryCache {
+	owner := o.Cache
+	if owner == nil && o.RuntimeServices != nil {
+		owner = o.RuntimeServices.analyticsCacheOwner()
+	}
+	if owner == nil || owner.cache == nil {
+		owner = DefaultAnalyticsQueryCache()
+	}
+	return owner.cache
+}
 
 // RegisterAnalyticsRoutes registers analytics API endpoints.
 // siteDB is the fallback DB; per-request DB is resolved from gin context.
 // registry is used to auto-generate metrics from DocType metadata.
-// siteBuses maps site name → EventBus.
-func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, dialect db.Dialect) {
-	RegisterAnalyticsRoutesWithRuntimeServices(apiGroup, registry, siteDB, siteBuses, realtimeProviders, dialect, nil)
-}
-
-func RegisterAnalyticsRoutesWithRuntimeServices(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, dialect db.Dialect, runtimeServices *SiteRuntimeServices) {
-	cache := DefaultAnalyticsQueryCache()
-	if runtimeServices != nil {
-		cache = runtimeServices.analyticsCacheOwner()
-	}
-	RegisterAnalyticsRoutesWithQueryCache(apiGroup, registry, siteDB, siteBuses, realtimeProviders, dialect, runtimeServices, cache)
-}
-
-// RegisterAnalyticsRoutesWithQueryCache installs analytics routes using the
-// process-owned cache supplied by Engine composition.
-func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, siteBuses map[string]analytics.EventBus, realtimeProviders map[string]*natsprovider.Provider, dialect db.Dialect, runtimeServices *SiteRuntimeServices, processCache *AnalyticsQueryCache) {
+func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect, opts AnalyticsOptions) {
+	siteBuses := opts.EventBuses
+	runtimeServices := opts.RuntimeServices
 	ag := apiGroup.Group("/analytics")
-	if processCache == nil || processCache.cache == nil {
-		processCache = DefaultAnalyticsQueryCache()
-	}
-	queryCache := processCache.cache
+	queryCache := opts.queryCache()
 	ag.GET("/catalog", func(c *gin.Context) {
 		siteRegistry := analyticsRegistry(c, registry)
 		docTypes := make([]*doctype.DocType, 0, len(siteRegistry.Names()))
