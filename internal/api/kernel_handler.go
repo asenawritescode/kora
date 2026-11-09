@@ -245,49 +245,61 @@ func (h *Handler) buildKernelOperation(c *gin.Context, commandName string, req k
 	}, sqlDB, reg, nil
 }
 
-func (h *Handler) executeResourceMutation(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, status int) {
-	h.executeResourceMutationWithKey(c, commandName, doctypeName, name, data, status, "")
+// resourceMutation describes one record command run through the kernel on
+// behalf of a REST or view handler. The zero value of every optional field
+// means "not set".
+type resourceMutation struct {
+	// Command is the kernel command, such as kernel.CommandRecordCreate.
+	Command string
+	// DocType is the target record type.
+	DocType string
+	// Name identifies the record; it is empty for create.
+	Name string
+	// Data is the JSON record payload; nil for delete.
+	Data json.RawMessage
+	// IdempotencyKey makes a retried command replay its first result.
+	IdempotencyKey string
+	// ExpectedVersion is the record version token the update must match.
+	ExpectedVersion string
+	// AllowReadOnlyFields lets the command write read-only fields.
+	AllowReadOnlyFields bool
 }
 
-func (h *Handler) executeResourceMutationWithKey(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, status int, idempotencyKey string, expectedVersions ...string) {
-	doc, cerr := h.runKernelResourceMutationWithKey(c, commandName, doctypeName, name, data, idempotencyKey, expectedVersions...)
+// payload encodes the kernel payload; an unset Name or Data is left out.
+func (m resourceMutation) payload() (json.RawMessage, error) {
+	payload := map[string]any{"doctype": m.DocType}
+	if m.Name != "" {
+		payload["name"] = m.Name
+	}
+	if m.Data != nil {
+		payload["data"] = m.Data
+	}
+	return json.Marshal(payload)
+}
+
+// executeResourceMutation runs m and writes the REST response with status.
+func (h *Handler) executeResourceMutation(c *gin.Context, m resourceMutation, status int) {
+	doc, cerr := h.runKernelResourceMutation(c, m)
 	if cerr != nil {
 		h.writeKernelError(c, cerr)
 		return
 	}
-	if commandName == kernel.CommandRecordDelete {
-		c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "deleted"}, Meta: &Meta{DocType: doctypeName}})
+	if m.Command == kernel.CommandRecordDelete {
+		c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "deleted"}, Meta: &Meta{DocType: m.DocType}})
 		return
 	}
-	dt := h.siteRegistry(c).Get(doctypeName)
-	c.JSON(status, Response{Data: docToMap(doc, dt, h.siteRegistry(c), nil), Meta: &Meta{DocType: doctypeName}})
+	dt := h.siteRegistry(c).Get(m.DocType)
+	c.JSON(status, Response{Data: docToMap(doc, dt, h.siteRegistry(c), nil), Meta: &Meta{DocType: m.DocType}})
 }
 
-func (h *Handler) runKernelResourceMutation(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage) (*doctype.Document, *contract.Error) {
-	return h.runKernelResourceMutationWithKey(c, commandName, doctypeName, name, data, "")
-}
-
-func (h *Handler) runKernelResourceMutationWithKey(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, idempotencyKey string, expectedVersions ...string) (*doctype.Document, *contract.Error) {
-	return h.runKernelResourceMutationWithOptions(c, commandName, doctypeName, name, data, idempotencyKey, false, expectedVersions...)
-}
-
-func (h *Handler) runKernelResourceMutationWithOptions(c *gin.Context, commandName, doctypeName, name string, data json.RawMessage, idempotencyKey string, allowReadOnlyFields bool, expectedVersions ...string) (*doctype.Document, *contract.Error) {
-	payload := map[string]any{"doctype": doctypeName}
-	if name != "" {
-		payload["name"] = name
-	}
-	if data != nil {
-		payload["data"] = data
-	}
-	rawPayload, err := json.Marshal(payload)
+// runKernelResourceMutation runs m through the kernel and returns the
+// persisted document; delete returns a nil document.
+func (h *Handler) runKernelResourceMutation(c *gin.Context, m resourceMutation) (*doctype.Document, *contract.Error) {
+	rawPayload, err := m.payload()
 	if err != nil {
 		return nil, contract.NewError(contract.CodeInternal, "encoding resource mutation failed")
 	}
-	expectedVersion := ""
-	if len(expectedVersions) > 0 {
-		expectedVersion = expectedVersions[0]
-	}
-	result, cerr := h.executeKernelOperationWithReadOnlyFields(c, commandName, kernelRequest{Payload: rawPayload, IdempotencyKey: idempotencyKey, ExpectedVersion: expectedVersion}, allowReadOnlyFields)
+	result, cerr := h.executeKernelOperationWithReadOnlyFields(c, m.Command, kernelRequest{Payload: rawPayload, IdempotencyKey: m.IdempotencyKey, ExpectedVersion: m.ExpectedVersion}, m.AllowReadOnlyFields)
 	if cerr != nil {
 		return nil, cerr
 	}
@@ -295,14 +307,14 @@ func (h *Handler) runKernelResourceMutationWithOptions(c *gin.Context, commandNa
 		c.Header("X-Kora-Replay", "true")
 	}
 
-	if commandName == kernel.CommandRecordDelete {
+	if m.Command == kernel.CommandRecordDelete {
 		return nil, nil
 	}
 	var operation kernel.ResultData
 	if err := json.Unmarshal(result.Data, &operation); err != nil {
 		return nil, contract.NewError(contract.CodeInternal, "decoding kernel result failed")
 	}
-	doc := orm.DocumentFromMap(h.siteRegistry(c), doctypeName, operation.Document)
+	doc := orm.DocumentFromMap(h.siteRegistry(c), m.DocType, operation.Document)
 	if doc == nil {
 		return nil, contract.NewError(contract.CodeInternal, "kernel did not return the resource document")
 	}

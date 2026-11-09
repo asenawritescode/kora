@@ -616,7 +616,7 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 		badRequestError(c, "validation.invalid_idempotency_key", "Idempotency-Key must be at most 256 bytes", nil)
 		return
 	}
-	h.executeResourceMutationWithKey(c, kernel.CommandRecordCreate, doctypeName, "", data, http.StatusCreated, idempotencyKey)
+	h.executeResourceMutation(c, resourceMutation{Command: kernel.CommandRecordCreate, DocType: doctypeName, Data: data, IdempotencyKey: idempotencyKey}, http.StatusCreated)
 	if c.Writer.Status() != http.StatusCreated {
 		return
 	}
@@ -668,7 +668,7 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 		badRequestError(c, "validation.invalid_idempotency_key", "Idempotency-Key must be at most 256 bytes", nil)
 		return
 	}
-	h.executeResourceMutationWithKey(c, kernel.CommandRecordUpdate, doctypeName, name, data, http.StatusOK, idempotencyKey, expectedVersion)
+	h.executeResourceMutation(c, resourceMutation{Command: kernel.CommandRecordUpdate, DocType: doctypeName, Name: name, Data: data, IdempotencyKey: idempotencyKey, ExpectedVersion: expectedVersion}, http.StatusOK)
 	if c.Writer.Status() != http.StatusOK {
 		return
 	}
@@ -691,7 +691,7 @@ func (h *Handler) HandleDelete(c *gin.Context) {
 		return
 	}
 
-	h.executeResourceMutation(c, kernel.CommandRecordDelete, doctypeName, name, nil, http.StatusOK)
+	h.executeResourceMutation(c, resourceMutation{Command: kernel.CommandRecordDelete, DocType: doctypeName, Name: name}, http.StatusOK)
 	if c.Writer.Status() != http.StatusOK {
 		return
 	}

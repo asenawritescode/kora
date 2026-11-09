@@ -653,7 +653,7 @@ func (h *Handler) executeCreateRecord(c *gin.Context, action *doctype.ViewAction
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid action data", nil)
 		return
 	}
-	doc, cerr := h.runKernelResourceMutation(c, kernel.CommandRecordCreate, doctypeName, "", raw)
+	doc, cerr := h.runKernelResourceMutation(c, resourceMutation{Command: kernel.CommandRecordCreate, DocType: doctypeName, Data: raw})
 	if cerr != nil {
 		h.writeKernelError(c, cerr)
 		return
@@ -744,7 +744,7 @@ func (h *Handler) executeUpdateRecord(c *gin.Context, action *doctype.ViewAction
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid action data", nil)
 		return
 	}
-	existing, cerr := h.runKernelResourceMutation(c, kernel.CommandRecordUpdate, doctypeName, name, raw)
+	existing, cerr := h.runKernelResourceMutation(c, resourceMutation{Command: kernel.CommandRecordUpdate, DocType: doctypeName, Name: name, Data: raw})
 	if cerr != nil {
 		h.writeKernelError(c, cerr)
 		return
@@ -1456,7 +1456,7 @@ func (h *Handler) executeInitiateExternalOperation(c *gin.Context, action *docty
 				eventOperation := *doc
 				eventOperation.Name = "$records.operation.name"
 				eventKey := "external-operation-init:" + doc.GetString("idempotency_key")
-				eventData, encodeErr := externalOperationEventData(eventDT, &eventOperation, "Outbound", "Initiate", "Initiating", "Pending", ctx, nil, "Processed", "", eventKey, time.Time{})
+				eventData, encodeErr := externalOperationEventData(eventDT, &eventOperation, externalOperationEvent{Direction: "Outbound", Type: "Initiate", PreviousStatus: "Initiating", NewStatus: "Pending", Request: ctx, ProcessingStatus: "Processed", Key: eventKey})
 				if encodeErr != nil {
 					writeError(c, http.StatusInternalServerError, "internal.error", "Encoding operation initiation event failed", nil)
 					return
@@ -1484,7 +1484,7 @@ func (h *Handler) executeInitiateExternalOperation(c *gin.Context, action *docty
 			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid operation data", nil)
 			return
 		}
-		created, cerr := h.runKernelResourceMutationWithKey(c, kernel.CommandRecordCreate, dt.Name, "", operationData, "external-operation:"+doc.GetString("idempotency_key"))
+		created, cerr := h.runKernelResourceMutation(c, resourceMutation{Command: kernel.CommandRecordCreate, DocType: dt.Name, Data: operationData, IdempotencyKey: "external-operation:" + doc.GetString("idempotency_key")})
 		if cerr != nil {
 			h.writeKernelError(c, cerr)
 			return
@@ -1564,33 +1564,55 @@ func (h *Handler) executeValidateExternalOperation(c *gin.Context, action *docty
 			return
 		}
 		// The audit event is best-effort once the operation has been saved; failures are logged inside.
-		_ = h.recordExternalOperationEvent(c, doc, "Outbound", "Status Check", previousStatus, doc.GetString("status"), ctx, doc.Get("response_payload"), "Processed", "")
+		_ = h.recordExternalOperationEvent(c, doc, externalOperationEvent{Direction: "Outbound", Type: "Status Check", PreviousStatus: previousStatus, NewStatus: doc.GetString("status"), Request: ctx, Response: doc.Get("response_payload"), ProcessingStatus: "Processed"})
 		if scriptErr != nil {
 			writeError(c, http.StatusBadRequest, "operation.failed", scriptErr.Error(), nil)
 			return
 		}
 	}
 	if getString(action.Config, "script") == "" {
-		_ = h.recordExternalOperationEvent(c, doc, "Internal", "Status Check", doc.GetString("status"), doc.GetString("status"), ctx, nil, "Processed", "")
+		_ = h.recordExternalOperationEvent(c, doc, externalOperationEvent{Direction: "Internal", Type: "Status Check", PreviousStatus: doc.GetString("status"), NewStatus: doc.GetString("status"), Request: ctx, ProcessingStatus: "Processed"})
 	}
 	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
 }
 
-func (h *Handler) recordExternalOperationEvent(c *gin.Context, operation *doctype.Document, direction, eventType, previousStatus, newStatus string, requestPayload, responsePayload any, processingStatus, errorMessage string) *contract.Error {
+// externalOperationEvent is one audit event of an external operation: what was
+// sent and received and how the operation's status moved.
+type externalOperationEvent struct {
+	// Direction is Inbound, Outbound or Internal.
+	Direction string
+	// Type names the step, such as Initiate, Callback or Status Check.
+	Type string
+	// PreviousStatus and NewStatus are the operation status before and after.
+	PreviousStatus, NewStatus string
+	// Request and Response are the payloads exchanged with the provider.
+	Request, Response any
+	// ProcessingStatus is how this event was handled, such as Processed.
+	ProcessingStatus string
+	// Error is the failure message, if any.
+	Error string
+	// Key is the event's idempotency key.
+	Key string
+	// OccurredAt stamps received_at and processed_at; zero leaves them unset.
+	OccurredAt time.Time
+}
+
+func (h *Handler) recordExternalOperationEvent(c *gin.Context, operation *doctype.Document, event externalOperationEvent) *contract.Error {
 	reg := h.siteRegistry(c)
 	dt := reg.Get("External Operation Event")
 	if dt == nil || operation == nil || operation.Name == "" {
 		return nil
 	}
-	eventKey := fmt.Sprintf("%s:%s:%d", operation.Name, strings.ToLower(strings.ReplaceAll(eventType, " ", "-")), time.Now().UnixNano())
-	data, err := externalOperationEventData(dt, operation, direction, eventType, previousStatus, newStatus, requestPayload, responsePayload, processingStatus, errorMessage, eventKey, time.Now().UTC())
+	event.Key = fmt.Sprintf("%s:%s:%d", operation.Name, strings.ToLower(strings.ReplaceAll(event.Type, " ", "-")), time.Now().UnixNano())
+	event.OccurredAt = time.Now().UTC()
+	data, err := externalOperationEventData(dt, operation, event)
 	if err != nil {
-		slog.Warn("external operation event could not be encoded", "operation", operation.Name, "event", eventType, "error", err)
+		slog.Warn("external operation event could not be encoded", "operation", operation.Name, "event", event.Type, "error", err)
 		return contract.NewError(contract.CodeInternal, "encoding operation event failed")
 	}
-	if _, err := h.runKernelResourceMutationWithKey(c, kernel.CommandRecordCreate, dt.Name, "", data, "operation-event:"+eventKey); err != nil {
-		slog.Warn("external operation event could not be recorded", "operation", operation.Name, "event", eventType, "error", err)
-		return err
+	if _, cerr := h.runKernelResourceMutation(c, resourceMutation{Command: kernel.CommandRecordCreate, DocType: dt.Name, Data: data, IdempotencyKey: "operation-event:" + event.Key}); cerr != nil {
+		slog.Warn("external operation event could not be recorded", "operation", operation.Name, "event", event.Type, "error", cerr)
+		return cerr
 	}
 	return nil
 }
@@ -1635,7 +1657,7 @@ func (h *Handler) commitExternalOperationFailure(c *gin.Context, operationDT *do
 	eventDT := h.siteRegistry(c).Get("External Operation Event")
 	if eventDT != nil {
 		eventKey := fmt.Sprintf("external-operation-failed:%x", sha256.Sum256([]byte(siteName(c)+"\x00"+operation.Name)))
-		eventData, encodeErr := externalOperationEventData(eventDT, operation, "Outbound", "Initiate", "Initiating", "Failed", requestPayload, nil, "Failed", failureMessage, eventKey, time.Now().UTC())
+		eventData, encodeErr := externalOperationEventData(eventDT, operation, externalOperationEvent{Direction: "Outbound", Type: "Initiate", PreviousStatus: "Initiating", NewStatus: "Failed", Request: requestPayload, ProcessingStatus: "Failed", Error: failureMessage, Key: eventKey, OccurredAt: time.Now().UTC()})
 		if encodeErr != nil {
 			return contract.NewError(contract.CodeInternal, "encoding operation failure event")
 		}
@@ -1683,8 +1705,10 @@ func (h *Handler) commitExternalOperationSuccess(c *gin.Context, operationDT *do
 	}
 	if eventDT := h.siteRegistry(c).Get("External Operation Event"); eventDT != nil {
 		eventKey := "external-operation-result:" + operation.Name
-		eventData, encodeErr := externalOperationEventData(eventDT, operation, "Outbound", "Initiate", previousStatus,
-			operation.GetString("status"), requestPayload, operation.Get("response_payload"), "Processed", "", eventKey, time.Now().UTC())
+		eventData, encodeErr := externalOperationEventData(eventDT, operation, externalOperationEvent{
+			Direction: "Outbound", Type: "Initiate", PreviousStatus: previousStatus, NewStatus: operation.GetString("status"),
+			Request: requestPayload, Response: operation.Get("response_payload"), ProcessingStatus: "Processed", Key: eventKey, OccurredAt: time.Now().UTC(),
+		})
 		if encodeErr != nil {
 			return contract.NewError(contract.CodeInternal, "encoding completed external operation event failed")
 		}
@@ -1696,23 +1720,23 @@ func (h *Handler) commitExternalOperationSuccess(c *gin.Context, operationDT *do
 	return nil
 }
 
-func externalOperationEventData(dt *doctype.DocType, operation *doctype.Document, direction, eventType, previousStatus, newStatus string, requestPayload, responsePayload any, processingStatus, errorMessage, eventKey string, occurredAt time.Time) (json.RawMessage, error) {
+func externalOperationEventData(dt *doctype.DocType, operation *doctype.Document, ev externalOperationEvent) (json.RawMessage, error) {
 	event := doctype.NewDocument("")
 	event.Set("operation", operation.Name)
-	event.Set("direction", direction)
-	event.Set("event_type", eventType)
+	event.Set("direction", ev.Direction)
+	event.Set("event_type", ev.Type)
 	event.Set("provider", operation.Get("provider"))
 	event.Set("provider_reference", operation.Get("provider_reference"))
-	event.Set("previous_status", previousStatus)
-	event.Set("new_status", newStatus)
-	event.Set("request_payload", requestPayload)
-	event.Set("response_payload", responsePayload)
-	event.Set("processing_status", processingStatus)
-	event.Set("error_message", errorMessage)
-	event.Set("idempotency_key", eventKey)
-	if !occurredAt.IsZero() {
-		event.Set("received_at", occurredAt)
-		event.Set("processed_at", occurredAt)
+	event.Set("previous_status", ev.PreviousStatus)
+	event.Set("new_status", ev.NewStatus)
+	event.Set("request_payload", ev.Request)
+	event.Set("response_payload", ev.Response)
+	event.Set("processing_status", ev.ProcessingStatus)
+	event.Set("error_message", ev.Error)
+	event.Set("idempotency_key", ev.Key)
+	if !ev.OccurredAt.IsZero() {
+		event.Set("received_at", ev.OccurredAt)
+		event.Set("processed_at", ev.OccurredAt)
 	}
 	return transactionDocumentData(dt, event)
 }
@@ -1726,7 +1750,7 @@ func (h *Handler) saveExternalOperation(c *gin.Context, dt *doctype.DocType, doc
 	if stage != "" {
 		idempotencyKey = "external-operation-state:" + doc.Name + ":" + stage
 	}
-	_, cerr := h.runKernelResourceMutationWithKey(c, kernel.CommandRecordUpdate, dt.Name, doc.Name, data, idempotencyKey)
+	_, cerr := h.runKernelResourceMutation(c, resourceMutation{Command: kernel.CommandRecordUpdate, DocType: dt.Name, Name: doc.Name, Data: data, IdempotencyKey: idempotencyKey})
 	return cerr
 }
 
