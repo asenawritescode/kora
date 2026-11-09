@@ -1,4 +1,4 @@
-// Command contractgen produces a deterministic JSON Schema snapshot for the
+// Command contract-gen produces a deterministic JSON Schema snapshot for the
 // stable wire types in contract. Unsupported Go fields fail generation rather
 // than being weakened to an unconstrained JSON value.
 package main
@@ -73,10 +73,10 @@ func main() {
 	for path, expected := range artifacts {
 		current, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
-			fatal("generated artifact missing; run go run ./cmd/contractgen -write")
+			fatal("generated artifact missing; run go run ./cmd/contract-gen -write")
 		}
 		if !bytes.Equal(current, expected) {
-			fatal("generated contract drift in " + path + "; run go run ./cmd/contractgen -write")
+			fatal("generated contract drift in " + path + "; run go run ./cmd/contract-gen -write")
 		}
 	}
 }
@@ -205,7 +205,7 @@ func addV2SemanticRules(data []byte) ([]byte, error) {
 	return append(encoded, '\n'), nil
 }
 
-func fatal(message string) { fmt.Fprintln(os.Stderr, "contractgen:", message); os.Exit(1) }
+func fatal(message string) { fmt.Fprintln(os.Stderr, "contract-gen:", message); os.Exit(1) }
 
 func generate(dir string) ([]byte, error) {
 	return generateVersion(dir, 1)

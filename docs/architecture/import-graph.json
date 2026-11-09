@@ -853,19 +853,19 @@
       "to": "github.com/asenawritescode/kora/internal/cli"
     },
     {
-      "from": "github.com/asenawritescode/kora/cmd/routeinventory",
+      "from": "github.com/asenawritescode/kora/cmd/route-inventory",
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/internal/api"
     },
     {
-      "from": "github.com/asenawritescode/kora/cmd/routeinventory",
+      "from": "github.com/asenawritescode/kora/cmd/route-inventory",
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/internal/auth"
     },
     {
-      "from": "github.com/asenawritescode/kora/cmd/routeinventory",
+      "from": "github.com/asenawritescode/kora/cmd/route-inventory",
       "from_module": "engine",
       "kind": "production",
       "to": "github.com/asenawritescode/kora/internal/orm"

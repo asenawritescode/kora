@@ -1,4 +1,4 @@
-// Command routeinventory records the routes registered by the Engine's public
+// Command route-inventory records the routes registered by the Engine's public
 // API composition. It uses the same route registration functions as the
 // running server and keeps CLI-conditional routes explicit in the artifact.
 package main
@@ -74,7 +74,7 @@ func main() {
 		fatal(err)
 	}
 	if !bytes.Equal(have, want) {
-		fatal(fmt.Errorf("route inventory is stale: run go run ./cmd/routeinventory -write"))
+		fatal(fmt.Errorf("route inventory is stale: run go run ./cmd/route-inventory -write"))
 	}
 	fmt.Printf("route inventory is current: %s\n", path)
 }
@@ -124,7 +124,7 @@ func render() ([]byte, error) {
 
 	result := inventory{
 		Format:           1,
-		Generator:        "cmd/routeinventory",
+		Generator:        "cmd/route-inventory",
 		RouteComposition: "cli/serve.go API/auth/public/request registration functions; DocType and host routing are data/runtime dependent",
 		RegisteredRoutes: registered,
 		Conditional: []conditionalRoute{

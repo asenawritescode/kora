@@ -1,6 +1,6 @@
 # Functions unreachable from the kora binary and cmd/ tools (deadcode ./...).
 # This list may only shrink; see scripts/deadcode-ratchet.py.
-cmd/contractgen/main.go::generate
+cmd/contract-gen/main.go::generate
 contract/capability.go::BaselineCapabilities
 contract/capability.go::NewRuntime
 contract/capability.go::Runtime.Blocked

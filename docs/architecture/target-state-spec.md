@@ -99,7 +99,7 @@ The tree lists responsibility destinations, not a requirement to move every exis
 ```text
 kora/
   main.go                         # CLI entry only
-  cmd/contractgen/main.go         # deterministic contract generation/check
+  cmd/contract-gen/main.go         # deterministic contract generation/check
   cli/                            # flags, commands, presentation of errors
   internal/
     engine/
@@ -224,7 +224,7 @@ Solid arrows show conceptual dependency direction; the dotted edge is an interfa
 
 Go is the authoritative typed wire model. Generate JSON Schema, OpenAPI, TypeScript definitions and runtime validators deterministically from it using one pinned generator. Schema annotations carry enum sets, tagged-union constraints, size bounds, string patterns (`contract:pattern=`), array item patterns (`contract:itemPattern=`), fixed numeric values (`contract:const=`), and required/null rules not expressible through Go field types alone. Generated output is committed and CI rejects drift. Do not maintain a handwritten second schema as another authority.
 
-Create `cmd/contractgen/main.go` with command `go run ./cmd/contractgen -check` for drift detection and `go run ./cmd/contractgen -write` for regeneration. Reuse the existing `api/openapi.go` registration rather than maintaining two endpoint inventories: move the versioned endpoint descriptors into `contract/http_registry.go` and have the HTTP router/OpenAPI generator reference those descriptors. Keep Go field types and `json` tags authoritative; define enum membership, union constraints and size bounds beside those types in `contract/schema_rules.go`, with generator tests covering each rule. That rule registry contains validation metadata only, not copied DTO field lists.
+Create `cmd/contract-gen/main.go` with command `go run ./cmd/contract-gen -check` for drift detection and `go run ./cmd/contract-gen -write` for regeneration. Reuse the existing `api/openapi.go` registration rather than maintaining two endpoint inventories: move the versioned endpoint descriptors into `contract/http_registry.go` and have the HTTP router/OpenAPI generator reference those descriptors. Keep Go field types and `json` tags authoritative; define enum membership, union constraints and size bounds beside those types in `contract/schema_rules.go`, with generator tests covering each rule. That rule registry contains validation metadata only, not copied DTO field lists.
 
 Generate Engine schema/OpenAPI and a versioned TypeScript artifact bundle with a manifest of schema version, Engine commit and content digests. SDK vendors the released generated bundle into `src/generated/` and re-exports it; Studio and Cloud web pin the SDK contract exports. The generator has a deliberately limited supported type set (scalars, tagged unions, structs, slices, optional pointers and registered schema-bound JSON); unsupported types fail generation. Do not silently emit `any`. Go consumer compatibility is checked against the same fixtures. G0 implements the generation seam; G8 consumes the released bundle.
 

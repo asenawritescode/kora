@@ -50,7 +50,7 @@ This repository is the **Engine**: a single, API-only Go binary. It serves no UI
 | `kora-website` | Public marketing site |
 | `kora-ts-extension-sdk` | TypeScript SDK and extension tooling |
 
-The wire contract is generated here with `go run ./cmd/contractgen -write` and copied to the clients with `scripts/sync-contract-consumers.py` (set `KORA_PROJECTS_ROOT` to a scratch directory unless you intend to update your real sibling clones).
+The wire contract is generated here with `go run ./cmd/contract-gen -write` and copied to the clients with `scripts/sync-contract-consumers.py` (set `KORA_PROJECTS_ROOT` to a scratch directory unless you intend to update your real sibling clones).
 
 ### Request Flow
 
@@ -106,8 +106,8 @@ Laid out as a Go server project (https://go.dev/doc/modules/layout): one command
 kora/
 ├── cmd/
 │   ├── kora/               # The server and CLI binary (main.go only runs internal/cli)
-│   ├── contractgen/        # Generates contract/generated and contract/schema
-│   └── routeinventory/     # Generates docs/architecture/route-inventory.json
+│   ├── contract-gen/       # Generates contract/generated and contract/schema
+│   └── route-inventory/    # Generates docs/architecture/route-inventory.json
 ├── contract/               # Public wire contract (DTOs, validators) shared with every client
 ├── sdk/                    # Public Go client library (separate Go module)
 ├── internal/
@@ -148,7 +148,7 @@ See `docs/architecture/` for the full package inventory.
 | Add a new field property | `internal/doctype/doctype.go` — add to `Field` struct (yaml/json tags make it a known key automatically); `internal/configstore/store.go` — add to `_kora_field` INSERT/SELECT + `internal/db/dialect_*.go` ALTER column; regenerate the contract if it is part of the wire types |
 | Change how data is stored | `internal/configstore/store.go` — DB schema and queries; `internal/doctype/` — struct definitions |
 | Add a new constraint type | `internal/doctype/validation.go` — add validation logic; then the constraint editor in kora-ui |
-| Change the wire contract | `contract/*.go`, then `go run ./cmd/contractgen -write` and `scripts/sync-contract-consumers.py` |
+| Change the wire contract | `contract/*.go`, then `go run ./cmd/contract-gen -write` and `scripts/sync-contract-consumers.py` |
 | Change anything visual | The kora-ui repository (Studio), not this one |
 
 ## Testing

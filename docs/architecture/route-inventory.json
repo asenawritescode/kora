@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "generator": "cmd/routeinventory",
+  "generator": "cmd/route-inventory",
   "route_composition": "cli/serve.go API/auth/public/request registration functions; DocType and host routing are data/runtime dependent",
   "registered_routes": [
     {
