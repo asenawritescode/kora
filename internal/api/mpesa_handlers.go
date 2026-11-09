@@ -130,7 +130,7 @@ func (h *Handler) HandleMPesaSTKCallback(c *gin.Context) {
 	eventDT := reg.Get("External Operation Event")
 	if eventDT != nil {
 		eventKey := "mpesa-callback:" + callback.CheckoutRequestID
-		eventData, encodeErr := externalOperationEventData(eventDT, operation, "Inbound", "Callback", previousStatus, newStatus, envelope, nil, "Processed", "", eventKey, time.Now().UTC())
+		eventData, encodeErr := externalOperationEventData(eventDT, operation, externalOperationEvent{Direction: "Inbound", Type: "Callback", PreviousStatus: previousStatus, NewStatus: newStatus, Request: envelope, ProcessingStatus: "Processed", Key: eventKey, OccurredAt: time.Now().UTC()})
 		if encodeErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare callback event"})
 			return
@@ -167,7 +167,7 @@ func (h *Handler) recordTerminalMPesaCallback(c *gin.Context, operation *doctype
 		status, processingStatus, message = "duplicate", "Duplicate", "terminal operation already processed"
 	}
 	terminalStatus := operation.GetString("status")
-	err := h.recordExternalOperationEvent(c, operation, "Inbound", "Callback", terminalStatus, terminalStatus, envelope, nil, processingStatus, message)
+	err := h.recordExternalOperationEvent(c, operation, externalOperationEvent{Direction: "Inbound", Type: "Callback", PreviousStatus: terminalStatus, NewStatus: terminalStatus, Request: envelope, ProcessingStatus: processingStatus, Error: message})
 	return status, err
 }
 
