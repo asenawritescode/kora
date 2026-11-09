@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	kdb "github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/plugin"
-	"github.com/asenawritescode/kora/scheduler"
+	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/plugin"
+	"github.com/asenawritescode/kora/internal/scheduler"
 )
 
 type rejectingTenantWorkAdmission struct {

@@ -8,12 +8,12 @@ import (
 	"strconv"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/expression"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/orm"
-	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/expression"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/policy"
 )
 
 // tenantWorkflowConditionScope reads one pinned subject through the normal

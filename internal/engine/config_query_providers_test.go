@@ -9,11 +9,11 @@ import (
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/plugin"
-	"github.com/asenawritescode/kora/query"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/plugin"
+	"github.com/asenawritescode/kora/internal/query"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 func configQueryFixture() (*query.Definition, contract.ModuleDescriptor) {

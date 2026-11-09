@@ -6,8 +6,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/asenawritescode/kora/site"
-	"github.com/asenawritescode/kora/storage"
+	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/storage"
 )
 
 type startupStorageBackend struct {

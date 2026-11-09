@@ -7,15 +7,15 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/asenawritescode/kora/configstore"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/internal/configstore"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/management"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/outbox"
+	"github.com/asenawritescode/kora/internal/recon"
+	schedsql "github.com/asenawritescode/kora/internal/scheduler/sqlstore"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
-	"github.com/asenawritescode/kora/management"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/outbox"
-	"github.com/asenawritescode/kora/recon"
-	schedsql "github.com/asenawritescode/kora/scheduler/sqlstore"
 )
 
 type managementModuleLifecycleExecutor struct {

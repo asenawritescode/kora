@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/asenawritescode/kora/site"
-	"github.com/asenawritescode/kora/storage"
+	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/storage"
 )
 
 // NewStorageResolver creates tenant storage backends and initializes their

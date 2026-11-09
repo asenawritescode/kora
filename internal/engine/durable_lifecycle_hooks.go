@@ -11,16 +11,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asenawritescode/kora/api"
 	"github.com/asenawritescode/kora/contract"
-	kdb "github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/kernel"
-	"github.com/asenawritescode/kora/orm"
-	"github.com/asenawritescode/kora/outbox"
-	"github.com/asenawritescode/kora/policy"
-	"github.com/asenawritescode/kora/script"
-	"github.com/asenawritescode/kora/secret"
+	"github.com/asenawritescode/kora/internal/api"
+	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/outbox"
+	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/script"
+	"github.com/asenawritescode/kora/internal/secret"
 )
 
 const (

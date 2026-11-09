@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/email"
-	"github.com/asenawritescode/kora/orm"
-	"github.com/asenawritescode/kora/scheduler"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/email"
+	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/scheduler"
 )
 
 // SchedulerOptions describes explicitly supplied scheduler definitions and

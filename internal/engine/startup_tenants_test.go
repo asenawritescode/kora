@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/asenawritescode/kora/analytics"
-	"github.com/asenawritescode/kora/auth"
+	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
-	"github.com/asenawritescode/kora/storage"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/storage"
 )
 
 func TestStartupSiteCollectionClosesFanoutBusWhenSiblingLoadFails(t *testing.T) {

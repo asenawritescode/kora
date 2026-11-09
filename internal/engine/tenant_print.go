@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/asenawritescode/kora/configstore"
-	kdb "github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/print"
+	"github.com/asenawritescode/kora/internal/configstore"
+	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/print"
 )
 
 // tenantPrintFormats decodes the print formats carried by a tenant's active

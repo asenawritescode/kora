@@ -14,9 +14,9 @@ import (
 	"runtime"
 	"sort"
 
-	"github.com/asenawritescode/kora/api"
-	"github.com/asenawritescode/kora/auth"
-	"github.com/asenawritescode/kora/orm"
+	"github.com/asenawritescode/kora/internal/api"
+	"github.com/asenawritescode/kora/internal/auth"
+	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/gin-gonic/gin"
 )
 

@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/asenawritescode/kora/api"
-	knet "github.com/asenawritescode/kora/net"
+	"github.com/asenawritescode/kora/internal/api"
+	knet "github.com/asenawritescode/kora/internal/net"
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 )

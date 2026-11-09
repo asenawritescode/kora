@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/internal/db"
 )
 
 var ErrDurableScanCursorMoved = errors.New("durable work scan cursor moved concurrently")

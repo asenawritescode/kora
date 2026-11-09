@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/disposabledb"
-	notificationsql "github.com/asenawritescode/kora/notifications/sqlstore"
-	requestsql "github.com/asenawritescode/kora/requests/sqlstore"
-	schedulersql "github.com/asenawritescode/kora/scheduler/sqlstore"
-	"github.com/asenawritescode/kora/script"
-	workflowsql "github.com/asenawritescode/kora/workflow/sqlstore"
+	notificationsql "github.com/asenawritescode/kora/internal/notifications/sqlstore"
+	requestsql "github.com/asenawritescode/kora/internal/requests/sqlstore"
+	schedulersql "github.com/asenawritescode/kora/internal/scheduler/sqlstore"
+	"github.com/asenawritescode/kora/internal/script"
+	workflowsql "github.com/asenawritescode/kora/internal/workflow/sqlstore"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
 

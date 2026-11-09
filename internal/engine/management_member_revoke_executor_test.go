@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/management"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/auth"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/management"
+	"github.com/asenawritescode/kora/internal/site"
 	_ "github.com/mattn/go-sqlite3"
 )
 

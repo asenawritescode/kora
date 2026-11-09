@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	knet "github.com/asenawritescode/kora/net"
+	knet "github.com/asenawritescode/kora/internal/net"
 )
 
 func TestBuildHTTPServerRequiresHandlerAndAddress(t *testing.T) {

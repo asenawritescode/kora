@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/schema"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/schema"
+	"github.com/asenawritescode/kora/internal/site"
 	"github.com/go-sql-driver/mysql"
 )
 

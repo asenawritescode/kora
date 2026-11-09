@@ -6,7 +6,7 @@ import (
 	"github.com/asenawritescode/kora/internal/application/process"
 	"github.com/asenawritescode/kora/internal/application/purchasing"
 	"github.com/asenawritescode/kora/internal/engine"
-	"github.com/asenawritescode/kora/policy"
+	"github.com/asenawritescode/kora/internal/policy"
 )
 
 func TestConfigureRegistersOnlyPurchasingOwnedEngineBindings(t *testing.T) {

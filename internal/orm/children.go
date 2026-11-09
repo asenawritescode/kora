@@ -1,0 +1,311 @@
+package orm
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/oklog/ulid/v2"
+)
+
+// insertChildrenBatch inserts multiple child rows in a single multi-row INSERT statement.
+// Chunked at 100 rows to stay safely within MySQL's max_allowed_packet.
+func insertChildrenBatch(ex db.Queryer, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, children []*doctype.Document, parentName string, dialect db.QueryDialect) error {
+	if len(children) == 0 {
+		return nil
+	}
+
+	childTableName := quoteTableName(dialect, parentDT.RawChildTableName(parentField))
+	prefix := derivePrefix(childDT.Name)
+
+	// Build column list once (same for all rows).
+	var columns []string
+	columns = append(columns, "name", "owner", "creation", "modified", "modified_by", "doc_status", "idx")
+	columns = append(columns, "parent", "parentfield", "parenttype")
+	for _, f := range childDT.DataFields() {
+		if f.Fieldtype == "Table" {
+			continue
+		}
+		columns = append(columns, f.Fieldname)
+	}
+
+	// Build list of update columns (non-key, non-parent) for upsert clause.
+	var updateCols []string
+	for _, col := range columns {
+		if col != "name" && col != "parent" && col != "parentfield" && col != "parenttype" {
+			updateCols = append(updateCols, col)
+		}
+	}
+
+	// Insert in chunks of 100.
+	const chunkSize = 100
+	for start := 0; start < len(children); start += chunkSize {
+		end := min(start+chunkSize, len(children))
+		chunk := children[start:end]
+
+		var placeholders []string
+		var values []any
+		now := time.Now()
+
+		for i, child := range chunk {
+			idx := start + i
+			if child.Name == "" {
+				child.Name = fmt.Sprintf("%s-%s", prefix, ulid.Make().String())
+			}
+
+			placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?"+strings.Repeat(", ?", len(columns)-10)+")")
+
+			values = append(values,
+				child.Name, "", now, now, "", 0, idx, // name, owner, creation, modified, modified_by, doc_status, idx
+				parentName, parentField, parentDT.Name, // parent, parentfield, parenttype
+			)
+
+			for _, f := range childDT.DataFields() {
+				if f.Fieldtype == "Table" {
+					continue
+				}
+				val := child.Get(f.Fieldname)
+				if val == nil && f.Default != "" {
+					val = convertDefault(f.Default, f.Fieldtype)
+					child.Set(f.Fieldname, val)
+				}
+				val, err := canonicalizeDecimal(child, f, val)
+				if err != nil {
+					return err
+				}
+				values = append(values, val)
+			}
+		}
+
+		query := fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES %s %s",
+			childTableName,
+			strings.Join(columns, ", "),
+			strings.Join(placeholders, ", "),
+			dialect.UpsertClause([]string{"name"}, updateCols),
+		)
+
+		if _, err := ex.Exec(db.Rebind(dialect, query), values...); err != nil {
+			return fmt.Errorf("batch inserting child rows [%d-%d]: %w", start, end, err)
+		}
+	}
+
+	return nil
+}
+
+// reconcileChildren performs three-way reconciliation for child table rows.
+// It compares old and new child rows and only issues necessary DB operations:
+//   - DELETE rows present in old but missing in new
+//   - INSERT rows present in new but missing in old
+//   - UPDATE rows present in both with changed data
+func reconcileChildren(ex db.Queryer, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, oldChildren, newChildren []*doctype.Document, parentName string, dialect db.QueryDialect) error {
+	childTableName := quoteTableName(dialect, parentDT.RawChildTableName(parentField))
+
+	oldByName := make(map[string]*doctype.Document)
+	for _, c := range oldChildren {
+		oldByName[c.Name] = c
+	}
+	newByName := make(map[string]*doctype.Document)
+	var unnamedNewChildren []*doctype.Document
+	for _, c := range newChildren {
+		if c.Name == "" {
+			unnamedNewChildren = append(unnamedNewChildren, c)
+			continue
+		}
+		newByName[c.Name] = c
+	}
+
+	// DELETE rows that were removed (in old but not in new).
+	var toDelete []string
+	for name := range oldByName {
+		if _, ok := newByName[name]; !ok {
+			toDelete = append(toDelete, name)
+		}
+	}
+	if len(toDelete) > 0 {
+		placeholders := make([]string, len(toDelete))
+		args := make([]any, len(toDelete))
+		for i, name := range toDelete {
+			placeholders[i] = "?"
+			args[i] = name
+		}
+		query := fmt.Sprintf("DELETE FROM %s WHERE name IN (%s)",
+			childTableName, strings.Join(placeholders, ", "))
+		if _, err := ex.Exec(db.Rebind(dialect, query), args...); err != nil {
+			return fmt.Errorf("deleting removed child rows: %w", err)
+		}
+	}
+
+	// INSERT new rows (in new but not in old).
+	toInsert := append([]*doctype.Document(nil), unnamedNewChildren...)
+	for name, child := range newByName {
+		if _, ok := oldByName[name]; !ok {
+			toInsert = append(toInsert, child)
+		}
+	}
+	if len(toInsert) > 0 {
+		if err := insertChildrenBatch(ex, parentDT, parentField, childDT, toInsert, parentName, dialect); err != nil {
+			return fmt.Errorf("inserting new child rows: %w", err)
+		}
+	}
+
+	// UPDATE rows that exist in both but have changed.
+	for name, newChild := range newByName {
+		oldChild, ok := oldByName[name]
+		if !ok {
+			continue
+		}
+		if documentsEqual(oldChild, newChild, childDT) {
+			continue
+		}
+		if err := updateChildRow(ex, childTableName, childDT, newChild, dialect); err != nil {
+			return fmt.Errorf("updating child row %s: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+// updateChildRow issues an UPDATE for a single child row, setting all data columns.
+func updateChildRow(ex db.Queryer, tableName string, childDT *doctype.DocType, doc *doctype.Document, dialect db.QueryDialect) error {
+	var setClauses []string
+	var values []any
+
+	for _, f := range childDT.DataFields() {
+		if f.Fieldtype == "Table" {
+			continue
+		}
+		val, err := canonicalizeDecimal(doc, f, doc.Get(f.Fieldname))
+		if err != nil {
+			return err
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
+		values = append(values, val)
+	}
+
+	if len(setClauses) == 0 {
+		return nil
+	}
+
+	setClauses = append(setClauses, "modified = ?")
+	values = append(values, time.Now())
+
+	values = append(values, doc.Name)
+	query := fmt.Sprintf("UPDATE %s SET %s WHERE name = ?",
+		tableName, strings.Join(setClauses, ", "))
+
+	_, err := ex.Exec(db.Rebind(dialect, query), values...)
+	return err
+}
+
+// persistComputedChildFields writes computed child values back to the parent-owned
+// child table after ComputeFields has populated them in memory.
+func persistComputedChildFields(ex db.Queryer, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, children []*doctype.Document, dialect db.QueryDialect) error {
+	var computedFields []doctype.Field
+	for _, f := range childDT.DataFields() {
+		if f.Fieldtype != "Table" && f.Computed != "" {
+			computedFields = append(computedFields, f)
+		}
+	}
+	if len(computedFields) == 0 {
+		return nil
+	}
+
+	tableName := quoteTableName(dialect, parentDT.RawChildTableName(parentField))
+	for _, child := range children {
+		if child == nil || child.Name == "" {
+			continue
+		}
+
+		setClauses := make([]string, 0, len(computedFields)+1)
+		values := make([]any, 0, len(computedFields)+2)
+		for _, f := range computedFields {
+			val, err := canonicalizeDecimal(child, f, child.Get(f.Fieldname))
+			if err != nil {
+				return err
+			}
+			setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
+			values = append(values, val)
+		}
+		setClauses = append(setClauses, "modified = ?")
+		values = append(values, time.Now(), child.Name)
+
+		query := fmt.Sprintf("UPDATE %s SET %s WHERE name = ?", tableName, strings.Join(setClauses, ", "))
+		if _, err := ex.Exec(db.Rebind(dialect, query), values...); err != nil {
+			return fmt.Errorf("updating computed child row %s: %w", child.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// documentsEqual compares two documents' data fields for equality (ignoring system columns).
+func documentsEqual(a, b *doctype.Document, dt *doctype.DocType) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	for _, f := range dt.DataFields() {
+		if f.Fieldtype == "Table" {
+			continue
+		}
+		if a.Get(f.Fieldname) != b.Get(f.Fieldname) {
+			return false
+		}
+	}
+	return true
+}
+
+// getChildRows fetches child rows for a parent from the given child table.
+func (tx *TxManager) getChildRows(tableName string, childDT *doctype.DocType, parentName string) ([]*doctype.Document, error) {
+	dataFields := childDT.DataFields()
+
+	var cols []string
+	for _, f := range dataFields {
+		if f.Fieldtype == "Table" {
+			continue
+		}
+		cols = append(cols, f.Fieldname)
+	}
+	cols = append(cols, "name", "idx", "parent", "parentfield", "parenttype")
+
+	rows, err := tx.queryer().QueryContext(tx.queryContext(), db.Rebind(tx.Dialect,
+		fmt.Sprintf("SELECT %s FROM %s WHERE parent = ? ORDER BY idx", strings.Join(cols, ", "), tableName)),
+		parentName,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var children []*doctype.Document
+	for rows.Next() {
+		scanTargets := make([]any, len(cols))
+		for i := range cols {
+			var v any
+			scanTargets[i] = &v
+		}
+
+		if err := rows.Scan(scanTargets...); err != nil {
+			return nil, err
+		}
+
+		child := doctype.NewDocument(childDT.Name)
+		child.IsNew = false
+
+		for i, col := range cols {
+			val := *(scanTargets[i].(*any))
+			switch col {
+			case "name":
+				child.Name = stringVal(val)
+			default:
+				child.Fields[col] = normalizeScannedFieldValue(childDT.GetField(col), val)
+			}
+		}
+
+		children = append(children, child)
+	}
+
+	return children, rows.Err()
+}

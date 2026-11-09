@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/kernel"
-	"github.com/asenawritescode/kora/print"
-	"github.com/asenawritescode/kora/query"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/print"
+	"github.com/asenawritescode/kora/internal/query"
 )
 
 func mergeManagementPackageConstraints(existing []contract.InstalledPackage, incoming contract.InstalledPackage) ([]contract.InstalledPackage, error) {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/asenawritescode/kora/natsprovider"
-	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/internal/natsprovider"
+	"github.com/asenawritescode/kora/internal/script"
 )
 
 // SharedRuntimeConfig contains process-wide execution providers. NATS is

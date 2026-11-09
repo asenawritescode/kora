@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/asenawritescode/kora/configstore"
-	kdb "github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/query"
+	"github.com/asenawritescode/kora/internal/configstore"
+	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/query"
 )
 
 // tenantConfigQueries returns the queries carried by a tenant's active

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/internal/outbox"
 )
 
 func TestRecordOutboxPublishErrorCountsOnlyFencedLeaseLoss(t *testing.T) {

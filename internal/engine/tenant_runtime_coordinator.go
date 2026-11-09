@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
 )
 
 type TenantRuntimeInstaller func(site.DBSiteInfo, *knet.LoadedSite) error

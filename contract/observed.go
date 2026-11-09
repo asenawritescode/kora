@@ -8,6 +8,7 @@ package contract
 import "time"
 
 // ObservationStatus is the runtime-reported health of a component.
+//
 //contract:enum
 type ObservationStatus string
 
@@ -20,6 +21,7 @@ const (
 
 // ComponentObservation is the observed state of one resource. Detail is a
 // bounded, redacted human-readable string — never a payload or secret.
+//
 //contract:wire
 type ComponentObservation struct {
 	Ref        ResourceRef       `json:"ref"`
@@ -32,6 +34,7 @@ type ComponentObservation struct {
 // ObservationReport is an authenticated, runtime-authored batch of component
 // observations. Signature covers the canonical report body (excluding the
 // Signature field); verification happens at the ingestion boundary.
+//
 //contract:wire
 type ObservationReport struct {
 	RuntimeID  string                 `json:"runtime_id"`

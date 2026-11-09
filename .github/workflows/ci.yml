@@ -159,7 +159,7 @@ jobs:
         run: cd sdk && go vet ./...
 
       - name: Build
-        run: go build -o /dev/null .
+        run: go build -o /dev/null ./cmd/kora
 
   lint:
     name: Lint

@@ -11,11 +11,11 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/asenawritescode/kora/analytics"
-	"github.com/asenawritescode/kora/db"
+	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 type durableScannerDirectory struct {

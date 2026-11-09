@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/kernel"
-	"github.com/asenawritescode/kora/print"
-	"github.com/asenawritescode/kora/query"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/print"
+	"github.com/asenawritescode/kora/internal/query"
 )
 
 // Fixtures bypass package file-type validation (#285) and feed the snapshot merge directly.

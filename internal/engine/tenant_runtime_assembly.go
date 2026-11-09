@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 // TenantRuntimeAssemblyConfig contains the typed dependencies needed to

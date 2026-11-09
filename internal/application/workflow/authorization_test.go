@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/doctype"
-	"github.com/asenawritescode/kora/policy"
-	processworkflow "github.com/asenawritescode/kora/workflow"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/policy"
+	processworkflow "github.com/asenawritescode/kora/internal/workflow"
 )
 
 type authorizationTestStore struct {

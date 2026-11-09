@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/dbaccess"
-	"github.com/asenawritescode/kora/natsprovider"
-	"github.com/asenawritescode/kora/notifications"
-	"github.com/asenawritescode/kora/outbox"
+	"github.com/asenawritescode/kora/internal/natsprovider"
+	"github.com/asenawritescode/kora/internal/notifications"
+	"github.com/asenawritescode/kora/internal/outbox"
 )
 
 // AnalyticsSiteWALDir returns the legacy route-name-keyed WAL partition. New

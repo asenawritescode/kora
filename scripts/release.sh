@@ -33,7 +33,7 @@ echo "  → Running lint..."
 golangci-lint run --timeout=2m 2>&1 | tail -3 || echo "  ⚠️  Lint warnings (non-blocking)"
 
 echo "  → Building..."
-go build -o /tmp/kora-check .
+go build -o /tmp/kora-check ./cmd/kora
 
 echo "  ✓ Pre-tag checks passed"
 

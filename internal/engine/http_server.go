@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	knet "github.com/asenawritescode/kora/net"
+	knet "github.com/asenawritescode/kora/internal/net"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 

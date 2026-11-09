@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/eventstream"
-	"github.com/asenawritescode/kora/notifications"
+	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/eventstream"
+	"github.com/asenawritescode/kora/internal/notifications"
 )
 
 func TestInboxNotificationSenderPublishesRecipientScopedInvalidationOnly(t *testing.T) {

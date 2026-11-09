@@ -90,7 +90,7 @@ This starts MySQL, builds the Go binary, sets up the `airtime.local` site with s
 ### The Dev Loop
 
 ```bash
-go build -o kora .        # Rebuild the Go binary
+go build -o kora ./cmd/kora  # Rebuild the Go binary
 ./kora serve --port 8000  # Restart the server
 make restart              # Same, and kills the old server first
 make test                 # Go and SDK tests
@@ -100,45 +100,54 @@ To see changes in a browser, run Studio from the kora-ui repository against this
 
 ### Project Structure
 
+Laid out as a Go server project (https://go.dev/doc/modules/layout): one command, all logic in `internal/`, and only the wire contract and client SDK exported.
+
 ```
 kora/
-├── api/            # REST handlers: CRUD, system endpoints, AI chat, OpenAPI
-├── auth/           # Session auth, CSRF tokens, SiteGuard, SystemGuard
-├── cli/            # Cobra CLI commands (serve, setup, migrate, config, mcp, secret)
-├── cmd/            # Developer tools (contractgen, routeinventory)
-├── config/         # Config packs (YAML DocTypes, views, workflows) for POS, ERP, CRM...
-├── configstore/    # Persist config to _kora_* tables, versioning, roles/permissions
-├── contract/       # Wire-contract source of truth; generated/ and schema/ are build outputs
-├── contract-fixtures/ # Shared JSON fixtures decoded by every client
-├── db/             # SQL dialect abstraction (MySQL, LibSQL, PostgreSQL)
-├── doctype/        # Core types: DocType, Field, Registry, permissions, expression engine
-├── internal/       # Engine composition (internal/engine) and application services
-├── kernel/         # Command pipeline: authorization, validation, idempotency, audit, outbox
-├── mcp/            # Model Context Protocol server
-├── net/            # SiteRouter (multi-site, path-based API routing), TLS, CORS, rate limits
-├── orm/            # Generic CRUD on map[string]any documents
-├── schema/         # Registry vs live schema diff → DDL, migration safety tiers
-├── scheduler/      # Cron-style background jobs
-├── script/         # Sandboxed JS runtime for extensions
-├── sdk/            # Go SDK (separate Go module)
-├── site/           # Site registry, provisioning, bootstrap, config import
-├── workflow/       # Workflow runtime
-├── docs/           # Architecture and operations documentation
-├── scripts/        # Release, contract-sync and verification scripts
-└── skills/         # Claude Code skill definitions
+├── cmd/
+│   ├── kora/               # The server and CLI binary (main.go only runs internal/cli)
+│   ├── contractgen/        # Generates contract/generated and contract/schema
+│   └── routeinventory/     # Generates docs/architecture/route-inventory.json
+├── contract/               # Public wire contract (DTOs, validators) shared with every client
+├── sdk/                    # Public Go client library (separate Go module)
+├── internal/
+│   ├── api/                # REST handlers: CRUD, system endpoints, AI chat, OpenAPI
+│   ├── auth/               # Session auth, CSRF tokens, SiteGuard, SystemGuard
+│   ├── cli/                # Cobra commands (serve, setup, migrate, config, mcp, secret)
+│   ├── configstore/        # Persist config to _kora_* tables, versioning, roles/permissions
+│   ├── db/                 # SQL dialect abstraction (MySQL, LibSQL, PostgreSQL)
+│   ├── doctype/            # DocType, Field, Registry, permissions, expression engine
+│   ├── engine/             # Process composition: startup, tenant runtime, workers
+│   ├── kernel/             # Command pipeline: authorization, validation, idempotency, audit, outbox
+│   ├── mcp/                # Model Context Protocol server
+│   ├── net/                # SiteRouter (multi-site, path-based API routing), TLS, CORS, rate limits
+│   ├── orm/                # Generic CRUD on map[string]any documents
+│   ├── schema/             # Registry vs live schema diff -> DDL, migration safety tiers
+│   ├── scheduler/          # Cron-style background jobs
+│   ├── script/             # Sandboxed JS runtime for extensions
+│   ├── site/               # Site registry, provisioning, bootstrap, config import
+│   ├── workflow/           # Workflow runtime
+│   └── ...                 # analytics, outbox, requests, storage, webhook, and more
+├── config/                 # Config packs (YAML DocTypes, views, workflows) for POS, ERP, CRM...
+├── contract-fixtures/      # Shared JSON fixtures decoded by every client
+├── deploy/                 # Self-host and deployment assets
+├── docs/                   # Architecture and operations documentation
+├── scripts/                # Release, contract-sync, lint-ratchet and verification scripts
+├── skills/                 # Claude Code skill definitions
+└── tests/                  # Cross-package integration and contract tests
 ```
 
-(There are more packages than listed, for example `analytics/`, `storage/`, `webhook/`, `outbox/`, `payment/`, `query/`, `print/`. See `docs/architecture/` for the full inventory.)
+See `docs/architecture/` for the full package inventory.
 
 ### Where to Make Changes
 
 | You want to... | Change this |
 |---------------|-------------|
-| Add a new API endpoint | `api/system.go` — add handler, register in `RegisterSystemRoutes` (in `api/router.go`) |
-| Add a new field type | `doctype/parser.go` — `validateFieldType`; `db/dialect_*.go` — `ColumnType`; `api/schema.go` — `FieldToJSONSchema`; then the renderer in kora-ui |
-| Add a new field property | `doctype/doctype.go` — add to `Field` struct (yaml/json tags make it a known key automatically); `configstore/store.go` — add to `_kora_field` INSERT/SELECT + `db/dialect_*.go` ALTER column; regenerate the contract if it is part of the wire types |
-| Change how data is stored | `configstore/store.go` — DB schema and queries; `doctype/` — struct definitions |
-| Add a new constraint type | `doctype/validation.go` — add validation logic; then the constraint editor in kora-ui |
+| Add a new API endpoint | `internal/api/system.go` — add handler, register in `RegisterSystemRoutes` (in `internal/api/router.go`) |
+| Add a new field type | `internal/doctype/parser.go` — `validateFieldType`; `internal/db/dialect_*.go` — `ColumnType`; `internal/api/schema.go` — `FieldToJSONSchema`; then the renderer in kora-ui |
+| Add a new field property | `internal/doctype/doctype.go` — add to `Field` struct (yaml/json tags make it a known key automatically); `internal/configstore/store.go` — add to `_kora_field` INSERT/SELECT + `internal/db/dialect_*.go` ALTER column; regenerate the contract if it is part of the wire types |
+| Change how data is stored | `internal/configstore/store.go` — DB schema and queries; `internal/doctype/` — struct definitions |
+| Add a new constraint type | `internal/doctype/validation.go` — add validation logic; then the constraint editor in kora-ui |
 | Change the wire contract | `contract/*.go`, then `go run ./cmd/contractgen -write` and `scripts/sync-contract-consumers.py` |
 | Change anything visual | The kora-ui repository (Studio), not this one |
 
@@ -150,7 +159,7 @@ make test                           # Go tests plus the nested sdk/ module
 make check-contracts                # Generated contract and fixture checks
 ```
 
-Set `KORA_UI_ROOT` to a kora-ui checkout to also run the Engine/Studio parity tests in `doctype/reference_validation_test.go`; they are skipped otherwise.
+Set `KORA_UI_ROOT` to a kora-ui checkout to also run the Engine/Studio parity tests in `internal/doctype/reference_validation_test.go`; they are skipped otherwise.
 
 ## Pull Requests
 

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/asenawritescode/kora/natsprovider"
-	"github.com/asenawritescode/kora/script"
+	"github.com/asenawritescode/kora/internal/natsprovider"
+	"github.com/asenawritescode/kora/internal/script"
 )
 
 type sharedRuntimeTestRunner struct{ closed int }

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asenawritescode/kora/api"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/api"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 func TestTenantSiteProvisioningAdmissionReusesSharedEndpointPermit(t *testing.T) {

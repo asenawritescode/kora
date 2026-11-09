@@ -8,9 +8,9 @@ import (
 	"sort"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/db"
-	"github.com/asenawritescode/kora/plugin"
-	"github.com/asenawritescode/kora/workflow"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/plugin"
+	"github.com/asenawritescode/kora/internal/workflow"
 )
 
 // registeredSQLPublishedQueryProviders wires the Engine-owned durable fact

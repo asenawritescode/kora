@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	knet "github.com/asenawritescode/kora/net"
+	knet "github.com/asenawritescode/kora/internal/net"
 )
 
 var ErrServerRequired = errors.New("engine HTTP server is required")

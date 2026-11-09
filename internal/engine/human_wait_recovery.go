@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	kdb "github.com/asenawritescode/kora/db"
-	knet "github.com/asenawritescode/kora/net"
-	requestsql "github.com/asenawritescode/kora/requests/sqlstore"
-	"github.com/asenawritescode/kora/workflow"
-	workflowsql "github.com/asenawritescode/kora/workflow/sqlstore"
+	kdb "github.com/asenawritescode/kora/internal/db"
+	knet "github.com/asenawritescode/kora/internal/net"
+	requestsql "github.com/asenawritescode/kora/internal/requests/sqlstore"
+	"github.com/asenawritescode/kora/internal/workflow"
+	workflowsql "github.com/asenawritescode/kora/internal/workflow/sqlstore"
 )
 
 // StartHumanWaitRecoveryWorker starts the tenant-owned sweeper that expires

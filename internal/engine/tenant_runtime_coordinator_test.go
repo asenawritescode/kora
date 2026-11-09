@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
-	knet "github.com/asenawritescode/kora/net"
-	"github.com/asenawritescode/kora/site"
 )
 
 func TestTenantCoordinatorBoundsActivationWaiters(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/asenawritescode/kora/analytics"
-	"github.com/asenawritescode/kora/site"
+	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 const analyticsWALMigrationPageSize uint16 = 500
