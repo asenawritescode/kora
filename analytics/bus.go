@@ -467,25 +467,8 @@ func (b *channelBus) AcknowledgeWAL(eventIDs []string) error {
 			changed = true
 			continue
 		}
-		tmp, err := os.CreateTemp(b.walDir, ".wal-ack-*")
-		if err != nil {
-			return fmt.Errorf("create WAL acknowledgment file: %w", err)
-		}
-		tmpName := tmp.Name()
-		if _, err := tmp.WriteString(remaining.String()); err == nil {
-			err = tmp.Sync()
-		}
-		closeErr := tmp.Close()
-		if err == nil {
-			err = closeErr
-		}
-		if err != nil {
-			_ = os.Remove(tmpName)
-			return fmt.Errorf("write WAL acknowledgment file: %w", err)
-		}
-		if err := os.Rename(tmpName, path); err != nil {
-			_ = os.Remove(tmpName)
-			return fmt.Errorf("replace acknowledged WAL %s: %w", path, err)
+		if err := replaceFileAtomically(b.walDir, path, remaining.String()); err != nil {
+			return fmt.Errorf("rewrite acknowledged WAL %s: %w", path, err)
 		}
 		b.walSyncPending = true
 		changed = true
@@ -507,6 +490,37 @@ func (b *channelBus) AcknowledgeWAL(eventIDs []string) error {
 	b.replayedWAL = nil
 	if err := b.refreshWALBacklogLocked(); err != nil {
 		slog.Warn("analytics: could not refresh WAL backlog age after acknowledgment", "error", err)
+	}
+	return nil
+}
+
+// replaceFileAtomically writes content to a temporary file in dir, fsyncs it, and renames it over
+// path, so a crash leaves either the old or the new file and never a partial one. Every step's
+// error is returned: a failed write or fsync must not be followed by the rename.
+func replaceFileAtomically(dir, path, content string) (err error) {
+	tmp, err := os.CreateTemp(dir, ".wal-ack-*")
+	if err != nil {
+		return fmt.Errorf("create temporary file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err = tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temporary file: %w", err)
+	}
+	if err = tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync temporary file: %w", err)
+	}
+	if err = tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary file: %w", err)
+	}
+	if err = os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("rename temporary file: %w", err)
 	}
 	return nil
 }
