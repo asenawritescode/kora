@@ -15,7 +15,7 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 
 **Code and verification**
 - All SQL goes through the dialect (`internal/db/`). Changes must pass Integration (MySQL) and Integration (Postgres).
-- Integration CI is temporarily disabled (`if: ${{ false }}` in `.github/workflows/integration.yml`). Until it is re-enabled, verify every DB-touching change locally against disposable `mysql:8.0` and `postgres:16` containers (DSN env vars as in the workflow), running the affected integration tests or `scripts/ci-integration.sh mysql|postgres`. State the result in the PR.
+- Integration (MySQL) and Integration (Postgres) run in CI on every PR and must pass before merge. Locally, run the integration tests of the packages you changed against disposable `mysql:8.0` and `postgres:16` containers (DSN env vars as in the workflow); `scripts/ci-integration.sh mysql|postgres` runs the full suite. Always set `KORA_TEST_DSN` explicitly: unset, the tests default to 127.0.0.1:3306, which is the developer's own MySQL. State what you ran in the PR.
 - Do not trust unit tests with fake tables for SQL changes. They once hid a real table-prefix bug; run against a real database.
 - This repository contains no UI code. UI changes belong in the standalone UI repository (kora-ui, local clone `~/projects/kora-studio-mvp`); embed screenshots in those PRs via its `pr-assets` branch.
 
