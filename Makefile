@@ -1,4 +1,4 @@
-.PHONY: build build-go dev setup serve test lint lint-complexity complexity-ratchet complexity-baseline deadcode-ratchet deadcode-baseline primitive-funcs-ratchet primitive-funcs-baseline lint-all clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
+.PHONY: build build-go dev setup serve test lint lint-complexity complexity-ratchet complexity-baseline deadcode-ratchet deadcode-baseline primitive-funcs-ratchet primitive-funcs-baseline params-ratchet params-baseline lint-all clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
 
 # Defaults
 SITE ?= airtime.local
@@ -96,7 +96,13 @@ primitive-funcs-ratchet:           ## Fail on a new validate/is/normalize functi
 primitive-funcs-baseline:          ## Shrink the primitive-function baseline after converting some (never adds)
 	$(PRIMITIVE_FUNCS) --update
 
-lint-all: lint complexity-ratchet deadcode-ratchet primitive-funcs-ratchet  ## Everything CI's Lint job runs
+params-ratchet:                    ## Fail if a function takes more than 5 parameters, or a listed one takes more (use an options struct)
+	python3 scripts/params-ratchet.py
+
+params-baseline:                   ## Lower the parameter-count baseline after fixing some (never adds)
+	python3 scripts/params-ratchet.py --update
+
+lint-all: lint complexity-ratchet deadcode-ratchet primitive-funcs-ratchet params-ratchet  ## Everything CI's Lint job runs
 
 fmt:                               ## Format code
 	go fmt ./...
