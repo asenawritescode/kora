@@ -11,9 +11,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// realtimeEvent identifies one change event whose visibility to the requesting
+// user is checked.
+type realtimeEvent struct {
+	// DocType and Name identify the changed record.
+	DocType, Name string
+	// Data is the event's record snapshot; only notifications read it.
+	Data map[string]any
+	// Op is the change operation.
+	Op eventstream.EventOp
+	// Scope is the business scope the event was published under; nil when the
+	// event carries none and the request scope applies.
+	Scope *contract.BusinessScope
+}
+
 // realtimeEventVisible applies the same DocType read and owner rules as resource
 // reads. Events without a document identity are denied except notifications.
-func (h *Handler) realtimeEventVisible(c *gin.Context, doctypeName, docName string, data map[string]any, op eventstream.EventOp, eventScopes ...contract.BusinessScope) bool {
+func (h *Handler) realtimeEventVisible(c *gin.Context, ev realtimeEvent) bool {
 	execution, ok := requestExecution(c)
 	if !ok {
 		return false
@@ -22,27 +36,27 @@ func (h *Handler) realtimeEventVisible(c *gin.Context, doctypeName, docName stri
 	if !hasUser {
 		return false
 	}
-	if op == eventstream.EventNotification {
-		return realtimeNotificationMatchesRecipient(data, user)
+	if ev.Op == eventstream.EventNotification {
+		return realtimeNotificationMatchesRecipient(ev.Data, user)
 	}
 	reg := h.siteRegistry(c)
-	if reg == nil || reg.Get(doctypeName) == nil || docName == "" {
+	if reg == nil || reg.Get(ev.DocType) == nil || ev.Name == "" {
 		return false
 	}
 	businessScope := businessScopeFromRequest(c, execution)
-	if len(eventScopes) > 0 {
-		if eventScopes[0].Validate() != nil && reg.Get(doctypeName).BusinessScopePolicy == contract.ScopeEntityOwned {
+	if ev.Scope != nil {
+		if ev.Scope.Validate() != nil && reg.Get(ev.DocType).BusinessScopePolicy == contract.ScopeEntityOwned {
 			return false
 		}
 	}
-	if len(eventScopes) > 0 && eventScopes[0].Validate() == nil {
-		businessScope = eventScopes[0]
+	if ev.Scope != nil && ev.Scope.Validate() == nil {
+		businessScope = *ev.Scope
 		requestedScope := businessScopeFromRequest(c, execution)
-		if reg.Get(doctypeName).BusinessScopePolicy == contract.ScopeEntityOwned && requestedScope.Kind == contract.ScopeKindLegalEntity && requestedScope != businessScope {
+		if reg.Get(ev.DocType).BusinessScopePolicy == contract.ScopeEntityOwned && requestedScope.Kind == contract.ScopeKindLegalEntity && requestedScope != businessScope {
 			return false
 		}
 	}
-	decision, err := policy.DecideForBusinessScope(execution, reg, doctypeName, "read", businessScope, reg.Get(doctypeName).BusinessScopePolicy == contract.ScopeEntityOwned)
+	decision, err := policy.DecideForBusinessScope(execution, reg, ev.DocType, "read", businessScope, reg.Get(ev.DocType).BusinessScopePolicy == contract.ScopeEntityOwned)
 	if err != nil {
 		return false
 	}
@@ -56,7 +70,7 @@ func (h *Handler) realtimeEventVisible(c *gin.Context, doctypeName, docName stri
 		// delivery). Check the live record using the same owner-filtered read
 		// query as resource access instead of trusting the event snapshot.
 		scope := policy.RowScope{UserID: user, Owner: decision.OwnerOnly, AssignedFields: decision.AssignedFields, Business: businessScope}
-		if _, err := tx.GetDocWithScope(reg.Get(doctypeName), docName, scope); err != nil {
+		if _, err := tx.GetDocWithScope(reg.Get(ev.DocType), ev.Name, scope); err != nil {
 			return false
 		}
 	}
@@ -121,7 +135,7 @@ func (h *Handler) authorizeRealtimeEnvelope(c *gin.Context, raw []byte) ([]byte,
 		encoded, _ := json.Marshal(encodedScope)
 		_ = json.Unmarshal(encoded, &eventScope)
 	}
-	if !h.realtimeEventVisible(c, doctypeName, docName, data, operation, eventScope) {
+	if !h.realtimeEventVisible(c, realtimeEvent{DocType: doctypeName, Name: docName, Data: data, Op: operation, Scope: &eventScope}) {
 		return nil, false
 	}
 	if operation == eventstream.EventNotification {

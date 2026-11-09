@@ -185,20 +185,37 @@ func (h *ConsoleHandler) withTenantSiteAdmissionRetry(ctx context.Context, confi
 	}
 }
 
+// ConsoleOptions carries the platform database and onboarding settings of the
+// console API. The zero value is a console with no platform database and
+// self-service onboarding off.
+type ConsoleOptions struct {
+	// DBType, DBHost, DBPort, DBUser and DBPassword locate the platform database
+	// that new tenant databases are created on.
+	DBType     string
+	DBHost     string
+	DBPort     int
+	DBUser     string
+	DBPassword string
+	// PlatformDB is the open platform database connection.
+	PlatformDB *sql.DB
+	// AllowOnboarding enables self-service tenant onboarding.
+	AllowOnboarding bool
+}
+
 // NewConsoleHandler creates a console API handler.
-func NewConsoleHandler(guard *auth.SystemGuard, sr *net.SiteRouter, dbType, dbHost, dbUser, dbPassword string, dbPort int, platformDB *sql.DB, allowOnboarding bool) *ConsoleHandler {
+func NewConsoleHandler(guard *auth.SystemGuard, sr *net.SiteRouter, opts ConsoleOptions) *ConsoleHandler {
 	return &ConsoleHandler{
 		SystemGuard:        guard,
 		SiteRouter:         sr,
-		ProvisioningStore:  site.NewOnboardingStore(platformDB, dbType),
-		AllowOnboarding:    allowOnboarding,
+		ProvisioningStore:  site.NewOnboardingStore(opts.PlatformDB, opts.DBType),
+		AllowOnboarding:    opts.AllowOnboarding,
 		queuedJobs:         make(map[string]bool),
-		PlatformDBType:     dbType,
-		PlatformDBHost:     dbHost,
-		PlatformDBPort:     dbPort,
-		PlatformDBUser:     dbUser,
-		PlatformDBPassword: dbPassword,
-		PlatformDB:         platformDB,
+		PlatformDBType:     opts.DBType,
+		PlatformDBHost:     opts.DBHost,
+		PlatformDBPort:     opts.DBPort,
+		PlatformDBUser:     opts.DBUser,
+		PlatformDBPassword: opts.DBPassword,
+		PlatformDB:         opts.PlatformDB,
 		SiteStorages:       nil,
 	}
 }

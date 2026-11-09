@@ -85,7 +85,7 @@ func TestLivePostgresExtensionRoutes(t *testing.T) {
 		t.Fatalf("unexpected managed site identity: %+v", identityPayload.Data)
 	}
 	auditContext := extensionTestContext(httptest.NewRecorder(), database, registry, "site-a", http.MethodPost, "", "")
-	if err := handler.insertChannelAudit(auditContext, "read_catalog", "query", "success", "{}", "3 rows", ""); err != nil {
+	if err := handler.insertChannelAudit(auditContext, channelAuditEntry{Tool: "read_catalog", Kind: "query", Status: "success", Request: "{}", Response: "3 rows"}); err != nil {
 		t.Fatalf("live PostgreSQL channel audit insert failed: %v", err)
 	}
 	var auditCount int

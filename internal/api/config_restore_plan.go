@@ -22,13 +22,32 @@ type restoreJournalData struct {
 	ResultVersionID     string `json:"result_version_id,omitempty"`
 }
 
-func rollbackConfigOperationTx(tx *sql.Tx, database *sql.DB, dialect db.Dialect, site, operationID, kind, phase, ddlPlan, recoveryPlan string, cause error) error {
+// configOperation identifies a journaled config activation or restore and the
+// state recorded for recovery if it fails.
+type configOperation struct {
+	// Site is the tenant; ID is the operation's journal key.
+	Site, ID string
+	// Kind is the operation kind, such as activate.
+	Kind string
+	// Phase is the last journaled phase.
+	Phase string
+	// DDLPlan and RecoveryPlan are the journaled schema plan and how to resume it.
+	DDLPlan, RecoveryPlan string
+}
+
+// validatedActivation is the journal state of an activation whose DDL plan has
+// been validated and can be replanned against the live schema on retry.
+func validatedActivation(site, versionID string, ddlPlan []byte) configOperation {
+	return configOperation{Site: site, ID: versionID, Kind: "activate", Phase: configstore.ActivationValidated, DDLPlan: string(ddlPlan), RecoveryPlan: "replan-from-live-schema"}
+}
+
+func rollbackConfigOperationTx(tx *sql.Tx, database *sql.DB, dialect db.Dialect, op configOperation, cause error) error {
 	if tx != nil {
 		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
 			cause = errors.Join(cause, fmt.Errorf("rollback config operation transaction: %w", err))
 		}
 	}
-	if err := configstore.UpdateActivationOperation(database, dialect, site, operationID, kind, phase, ddlPlan, recoveryPlan, cause.Error()); err != nil {
+	if err := configstore.UpdateActivationOperation(database, dialect, op.Site, op.ID, op.Kind, op.Phase, op.DDLPlan, op.RecoveryPlan, cause.Error()); err != nil {
 		return fmt.Errorf("%w; recording config operation failure: %v", cause, err)
 	}
 	return cause
