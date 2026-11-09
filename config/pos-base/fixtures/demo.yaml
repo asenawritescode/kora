@@ -2,13 +2,6 @@ pack: pos-base
 seed_mode: demo
 records:
   - doctype: Currency
-    code: KES
-    currency_name: Kenyan shilling
-    symbol: KSh
-    is_base: true
-    rate_to_base: 1
-    enabled: true
-  - doctype: Currency
     code: USD
     currency_name: US dollar
     symbol: $

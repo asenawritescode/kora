@@ -148,7 +148,12 @@ func TestPOSBaseViewsAndDoctypesNameNoCurrency(t *testing.T) {
 	}
 }
 
-func TestPOSBaseDemoFixtureHasExactlyOneBaseCurrency(t *testing.T) {
+// The base currency is chosen once, in site Settings. The pack must not carry
+// a second copy of that choice that could disagree with it.
+func TestPOSBaseHasNoSecondBaseCurrencySetting(t *testing.T) {
+	if loadPOSBase(t)["Currency"].GetField("is_base") != nil {
+		t.Errorf("Currency must not have a base flag: the base currency is the site setting")
+	}
 	data, err := os.ReadFile(filepath.Join(posBasePath, "fixtures", "demo.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -157,22 +162,16 @@ func TestPOSBaseDemoFixtureHasExactlyOneBaseCurrency(t *testing.T) {
 	if err := yaml.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	bases := 0
 	for _, record := range fixture.Records {
 		if record["doctype"] != "Currency" {
 			continue
 		}
-		rate, _ := record["rate_to_base"].(int)
-		rateFloat, _ := record["rate_to_base"].(float64)
-		if record["is_base"] == true {
-			bases++
-			if rate != 1 && rateFloat != 1 {
-				t.Errorf("the base currency must have rate 1")
-			}
+		if _, has := record["is_base"]; has {
+			t.Errorf("demo currency %v sets is_base", record["code"])
 		}
-	}
-	if bases != 1 {
-		t.Errorf("demo data must contain exactly one base currency, found %d", bases)
+		if rate, _ := record["rate_to_base"].(int); rate == 1 {
+			t.Errorf("demo currency %v has rate 1; the base currency is not listed here", record["code"])
+		}
 	}
 }
 
