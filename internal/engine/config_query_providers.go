@@ -144,7 +144,7 @@ func (e *configQueryExecutor) ExecutePublishedQuery(ctx context.Context, exec co
 	if e.def.OwnerField != "" {
 		return contract.QueryResult{}, contract.NewError(contract.CodePermissionDenied, "actor scope is required")
 	}
-	return e.run(ctx, exec.Scope, plugin.PublishedQueryActorScope{}, true, input, cursor, limit)
+	return e.run(ctx, configQueryCall{scope: exec.Scope, full: true, input: input, cursor: cursor, limit: limit})
 }
 
 // ExecutePublishedQueryForActor binds $actor to the verified subject. OwnerOnly
@@ -153,19 +153,29 @@ func (e *configQueryExecutor) ExecutePublishedQueryForActor(ctx context.Context,
 	if e.def.OwnerField != "" && strings.TrimSpace(actor.SubjectID) == "" {
 		return contract.QueryResult{}, contract.NewError(contract.CodePermissionDenied, "actor scope is required")
 	}
-	return e.run(ctx, exec.Scope, actor, !actor.OwnerOnly, input, cursor, limit)
+	return e.run(ctx, configQueryCall{scope: exec.Scope, actor: actor, full: !actor.OwnerOnly, input: input, cursor: cursor, limit: limit})
 }
 
-func (e *configQueryExecutor) run(ctx context.Context, scope contract.BusinessScope, actor plugin.PublishedQueryActorScope, full bool, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
-	req := query.Request{Limit: int(limit), Actor: actor.SubjectID, Now: time.Now().UTC(), FullRead: full, ScopeField: e.scopeField}
+// configQueryCall is the verified request of one config query execution.
+type configQueryCall struct {
+	scope  contract.BusinessScope
+	actor  plugin.PublishedQueryActorScope
+	full   bool
+	input  json.RawMessage
+	cursor string
+	limit  uint16
+}
+
+func (e *configQueryExecutor) run(ctx context.Context, call configQueryCall) (contract.QueryResult, error) {
+	req := query.Request{Limit: int(call.limit), Actor: call.actor.SubjectID, Now: time.Now().UTC(), FullRead: call.full, ScopeField: e.scopeField}
 	if e.scopeField != "" {
-		req.ScopeValue = scope.LegalEntityID
+		req.ScopeValue = call.scope.LegalEntityID
 	}
-	if err := json.Unmarshal(input, &req.Input); err != nil {
+	if err := json.Unmarshal(call.input, &req.Input); err != nil {
 		return contract.QueryResult{}, &plugin.QueryInputError{Message: "query input must be an object"}
 	}
-	if cursor != "" {
-		raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if call.cursor != "" {
+		raw, err := base64.RawURLEncoding.DecodeString(call.cursor)
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
 		if err != nil || dec.Decode(&req.Cursor) != nil {
