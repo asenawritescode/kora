@@ -587,6 +587,13 @@
    "cognitive": 20,
    "cyclomatic": 22
   },
+  "internal/api::(importGrouping).assemble": {
+   "cognitive": 39,
+   "cyclomatic": 24
+  },
+  "internal/api::(projectionAccess).actorScope": {
+   "cyclomatic": 16
+  },
   "internal/api::BuildSystemGraph": {
    "cognitive": 22
   },
@@ -733,13 +740,8 @@
   "internal/api::applyUserAccessUpdate": {
    "statements": 72
   },
-  "internal/api::assembleImportGroups": {
-   "cognitive": 39,
-   "cyclomatic": 24,
+  "internal/api::assemble": {
    "statements": 53
-  },
-  "internal/api::authorizePublishedProjectionActorScope": {
-   "cyclomatic": 16
   },
   "internal/api::authorizePublishedQueryActorScope": {
    "cognitive": 23,

@@ -145,12 +145,12 @@ func TestPublishedProjectionAuthorizationRequiresExactScopeAndNoRowScope(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !authorizePublishedProjection(execution, registry, definition, scope, contract.ScopeEntityOwned, "read") {
+	if !(projectionAccess{Execution: execution, Roles: registry, Definition: definition, Scope: scope, ScopePolicy: contract.ScopeEntityOwned}).allows("read") {
 		t.Fatal("exact projection scope grant was denied")
 	}
 	other := scope
 	other.LegalEntityID = "entity-b"
-	if authorizePublishedProjection(execution, registry, definition, other, contract.ScopeEntityOwned, "read") {
+	if (projectionAccess{Execution: execution, Roles: registry, Definition: definition, Scope: other, ScopePolicy: contract.ScopeEntityOwned}).allows("read") {
 		t.Fatal("projection scope grant crossed legal entity boundary")
 	}
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.finance.ar.projection.ar_balance", Role: "Reader", Read: true, IfOwner: true, Scope: scope})
@@ -158,7 +158,7 @@ func TestPublishedProjectionAuthorizationRequiresExactScopeAndNoRowScope(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if authorizePublishedProjection(roleExecution, registry, definition, scope, contract.ScopeEntityOwned, "read") {
+	if (projectionAccess{Execution: roleExecution, Roles: registry, Definition: definition, Scope: scope, ScopePolicy: contract.ScopeEntityOwned}).allows("read") {
 		t.Fatal("owner-scoped permission authorized aggregate projection access")
 	}
 }
@@ -172,7 +172,7 @@ func TestPublishedProjectionActorScopeFiltersRawRows(t *testing.T) {
 	if err != nil {
 		t.Fatal("verified actor:", err)
 	}
-	actorScope, authErr := authorizePublishedProjectionActorScope(execution, registry, definition, scope, contract.ScopeEntityOwned, "read")
+	actorScope, authErr := projectionAccess{Execution: execution, Roles: registry, Definition: definition, Scope: scope, ScopePolicy: contract.ScopeEntityOwned}.actorScope("read")
 	if authErr != nil || actorScope == nil || len(actorScope.AssignedFields) != 1 || actorScope.AssignedFields[0] != "assigned_to" {
 		t.Fatalf("authorized projection actor scope = %#v, %v", actorScope, authErr)
 	}

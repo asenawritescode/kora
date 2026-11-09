@@ -148,7 +148,7 @@ func (h *Handler) buildApplicationCatalog(c *gin.Context, execution policy.Execu
 			if !exists || definition.ID != projection.ID || definition.OwnerModuleID != owner || projectionScope != projection.ScopePolicy || projection.ScopePolicy == contract.ScopeEntityOwned && scope.Kind != contract.ScopeKindLegalEntity {
 				continue
 			}
-			if !authorizePublishedProjection(execution, h.siteRegistry(c), projection, scope, projectionScope, "read") {
+			if !(projectionAccess{Execution: execution, Roles: h.siteRegistry(c), Definition: projection, Scope: scope, ScopePolicy: projectionScope}).allows("read") {
 				continue
 			}
 			catalog.PublishedProjections = append(catalog.PublishedProjections, contract.ApplicationCatalogProjection{OwnerModuleID: owner, ID: projection.ID, Route: "/api/v1/modules/" + string(owner) + "/projections/" + projection.ID, OutputSchema: projection.OutputSchema, ScopePolicy: projectionScope, AllowedFields: append([]string(nil), projection.AllowedFields...)})

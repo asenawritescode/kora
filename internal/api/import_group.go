@@ -50,13 +50,28 @@ func groupMapping(reg *doctype.Registry, dt *doctype.DocType, mapping map[string
 	return head, child, table, nil
 }
 
-// assembleImportGroups turns CSV rows into one unit per run of consecutive
-// rows sharing the group_by value. dt types the header fields; childDT the
+// importGrouping describes how consecutive CSV rows are assembled into one
+// header record with child rows.
+type importGrouping struct {
+	// DT types the header fields; ChildDT types the child rows.
+	DT, ChildDT *doctype.DocType
+	// Table is the parent's Table field that holds the child rows.
+	Table string
+	// Head and Child map CSV columns to header and child field names.
+	Head, Child map[string]string
+	// Col maps a CSV column name to its index in a row.
+	Col map[string]int
+	// GroupCol is the CSV column whose value identifies a group.
+	GroupCol string
+}
+
+// assemble turns CSV rows into one unit per run of consecutive
+// rows sharing the group_by value. DT types the header fields; ChildDT the
 // child rows. A repeated value after another is import.group_not_contiguous,
 // a conflicting header cell import.group_inconsistent.
-func assembleImportGroups(dt, childDT *doctype.DocType, table string, head, child map[string]string, col map[string]int, groupCol string, rows [][]string) []importUnit {
+func (spec importGrouping) assemble(rows [][]string) []importUnit {
 	cell := func(rec []string, name string) string {
-		if ci := col[name]; ci < len(rec) {
+		if ci := spec.Col[name]; ci < len(rec) {
 			return rec[ci]
 		}
 		return ""
@@ -68,22 +83,22 @@ func assembleImportGroups(dt, childDT *doctype.DocType, table string, head, chil
 	var kids []map[string]any
 	flush := func() {
 		if cur != nil && cur.Err == nil && len(kids) > 0 {
-			cur.Data[table] = kids
+			cur.Data[spec.Table] = kids
 		}
 		kids = nil
 	}
 	for i, rec := range rows {
 		idx := i + 1
-		g := strings.TrimSpace(cell(rec, groupCol))
+		g := strings.TrimSpace(cell(rec, spec.GroupCol))
 		if cur == nil || g != curVal || g == "" {
 			flush()
 			units = append(units, importUnit{First: idx, Last: idx, Data: map[string]any{}})
 			cur, curVal = &units[len(units)-1], g
 			switch {
 			case g == "":
-				cur.Err = importUnitError("import.key_missing: empty group value "+groupCol, idx, groupCol)
+				cur.Err = importUnitError("import.key_missing: empty group value "+spec.GroupCol, idx, spec.GroupCol)
 			case seen[g]:
-				cur.Err = importUnitError("import.group_not_contiguous: "+g+" repeats after another group", idx, groupCol)
+				cur.Err = importUnitError("import.group_not_contiguous: "+g+" repeats after another group", idx, spec.GroupCol)
 			}
 			seen[g] = true
 		}
@@ -91,8 +106,8 @@ func assembleImportGroups(dt, childDT *doctype.DocType, table string, head, chil
 		if cur.Err != nil {
 			continue
 		}
-		for csvCol, field := range head {
-			v, e := parseImportValue(dt.GetField(field), cell(rec, csvCol))
+		for csvCol, field := range spec.Head {
+			v, e := parseImportValue(spec.DT.GetField(field), cell(rec, csvCol))
 			if e != nil {
 				cur.Err = importUnitError(e.Error(), idx, field)
 				break
@@ -109,10 +124,10 @@ func assembleImportGroups(dt, childDT *doctype.DocType, table string, head, chil
 			continue
 		}
 		row := map[string]any{}
-		for csvCol, field := range child {
-			v, e := parseImportValue(childDT.GetField(field), cell(rec, csvCol))
+		for csvCol, field := range spec.Child {
+			v, e := parseImportValue(spec.ChildDT.GetField(field), cell(rec, csvCol))
 			if e != nil {
-				cur.Err = importUnitError(e.Error(), idx, table+"."+field)
+				cur.Err = importUnitError(e.Error(), idx, spec.Table+"."+field)
 				break
 			}
 			if v != nil {

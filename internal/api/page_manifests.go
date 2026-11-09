@@ -27,8 +27,19 @@ type pageManifestListEntry struct {
 	TaskOutcome   string `json:"task_outcome,omitempty"`
 }
 
-func savePageManifestDraft(store *configstore.Store, manifest *doctype.PageManifest, site, actor, label string, snapshot *doctype.ConfigSnapshot) (string, int, error) {
-	if store == nil || snapshot == nil {
+// draftVersion describes the Draft config version saved together with a
+// changed definition.
+type draftVersion struct {
+	// Site is the tenant and Actor the user making the change.
+	Site, Actor string
+	// Label describes the change in the version history.
+	Label string
+	// Snapshot is the full config snapshot stored with the version.
+	Snapshot *doctype.ConfigSnapshot
+}
+
+func savePageManifestDraft(store *configstore.Store, manifest *doctype.PageManifest, draft draftVersion) (string, int, error) {
+	if store == nil || draft.Snapshot == nil {
 		return "", 0, fmt.Errorf("page manifest store and snapshot are required")
 	}
 	tx, err := store.DB.Begin()
@@ -36,10 +47,11 @@ func savePageManifestDraft(store *configstore.Store, manifest *doctype.PageManif
 		return "", 0, fmt.Errorf("beginning page manifest draft transaction: %w", err)
 	}
 	defer tx.Rollback()
-	if err := store.SavePageManifestTx(tx, manifest, site, 0); err != nil {
+	err = store.SavePageManifestTx(tx, manifest, draft.Site, 0)
+	if err != nil {
 		return "", 0, err
 	}
-	versionID, versionNum, err := store.CreateConfigVersionTx(tx, site, actor, label, "Draft", snapshot, "")
+	versionID, versionNum, err := store.CreateConfigVersionTx(tx, draft.Site, draft.Actor, draft.Label, "Draft", draft.Snapshot, "")
 	if err != nil {
 		return "", 0, err
 	}
@@ -211,7 +223,7 @@ func (h *Handler) HandleSystemPageManifestCreate(c *gin.Context) {
 		return
 	}
 	upsertView(snapshot, manifest.ToView())
-	versionID, versionNum, err := savePageManifestDraft(store, &manifest, site, currentUser(c), "Created page manifest "+manifest.Metadata.Name, snapshot)
+	versionID, versionNum, err := savePageManifestDraft(store, &manifest, draftVersion{Site: site, Actor: currentUser(c), Label: "Created page manifest " + manifest.Metadata.Name, Snapshot: snapshot})
 	if err != nil {
 		internalError(c, "saving page manifest draft", err)
 		return
@@ -275,7 +287,7 @@ func (h *Handler) HandleSystemPageManifestUpdate(c *gin.Context) {
 		return
 	}
 	upsertView(snapshot, manifest.ToView())
-	versionID, versionNum, err := savePageManifestDraft(store, &manifest, site, currentUser(c), "Updated page manifest "+manifest.Metadata.Name, snapshot)
+	versionID, versionNum, err := savePageManifestDraft(store, &manifest, draftVersion{Site: site, Actor: currentUser(c), Label: "Updated page manifest " + manifest.Metadata.Name, Snapshot: snapshot})
 	if err != nil {
 		internalError(c, "saving page manifest draft", err)
 		return
