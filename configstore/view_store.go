@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/asenawritescode/kora/db"
@@ -187,7 +188,7 @@ func (s *Store) LoadViews(site string) ([]*doctype.View, error) {
 		if publicEnabled == 1 {
 			pa := &doctype.ViewPublicAccess{Enabled: true}
 			if publicComponents.Valid && publicComponents.String != "" {
-				json.Unmarshal([]byte(publicComponents.String), &pa.Components)
+				decodePublicComponents(publicComponents.String, pa)
 			}
 			pa.AllowMutations = publicAllowMutations == 1
 			v.PublicAccess = pa
@@ -253,7 +254,7 @@ func (s *Store) LoadView(name, site string) (*doctype.View, error) {
 	if publicEnabled == 1 {
 		pa := &doctype.ViewPublicAccess{Enabled: true}
 		if publicComponents.Valid && publicComponents.String != "" {
-			json.Unmarshal([]byte(publicComponents.String), &pa.Components)
+			decodePublicComponents(publicComponents.String, pa)
 		}
 		pa.AllowMutations = publicAllowMutations == 1
 		v.PublicAccess = pa
@@ -311,4 +312,13 @@ func (s *Store) DeleteView(name, site string) error {
 		return fmt.Errorf("commit view deletion: %w", err)
 	}
 	return nil
+}
+
+// decodePublicComponents loads a stored public-component list. Corrupt JSON leaves the list empty,
+// which fails ViewPublicAccess.Validate, so a damaged row can never widen what a view exposes.
+func decodePublicComponents(raw string, pa *doctype.ViewPublicAccess) {
+	if err := json.Unmarshal([]byte(raw), &pa.Components); err != nil {
+		slog.Warn("stored view public components are not valid JSON; public access left empty", "error", err)
+		pa.Components = nil
+	}
 }

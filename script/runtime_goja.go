@@ -78,10 +78,10 @@ func (r *EmbeddedRunner) newRuntime() *goja.Runtime {
 	return vm
 }
 
-// freezePrototypes prevents scripts from modifying built-in prototypes.
-func (r *EmbeddedRunner) freezePrototypes(vm *goja.Runtime) {
-	// Object.freeze(Object.prototype), Object.freeze(Array.prototype), etc.
-	vm.RunString(`
+// freezePrototypesProgram freezes the built-in prototypes and disables __proto__ so scripts cannot
+// pollute them. It is compiled once at startup, so a syntax error fails fast instead of silently
+// leaving runtimes unhardened.
+var freezePrototypesProgram = goja.MustCompile("freeze-prototypes.js", `
 		(function() {
 			var frozen = [Object.prototype, Array.prototype, String.prototype,
 				Number.prototype, Boolean.prototype, Function.prototype,
@@ -97,7 +97,14 @@ func (r *EmbeddedRunner) freezePrototypes(vm *goja.Runtime) {
 				});
 			} catch(e) {}
 		})();
-	`)
+	`, false)
+
+// freezePrototypes prevents scripts from modifying built-in prototypes. Failing to harden a runtime
+// is an invariant violation, so it fails closed rather than running scripts in an open sandbox.
+func (r *EmbeddedRunner) freezePrototypes(vm *goja.Runtime) {
+	if _, err := vm.RunProgram(freezePrototypesProgram); err != nil {
+		panic(fmt.Errorf("script sandbox hardening failed: %w", err))
+	}
 }
 
 // Execute runs a script using a runtime from the pool.

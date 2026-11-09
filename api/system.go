@@ -2188,7 +2188,7 @@ func (h *Handler) handleSystemRealtimeWebSocket(c *gin.Context, provider *natspr
 			_ = conn.CloseNow()
 		})()
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "closed")
+	defer conn.Close(websocket.StatusNormalClosure, "closed") //nolint:errcheck // peer may already be gone
 	send := func(msg []byte) error {
 		return conn.Write(c.Request.Context(), websocket.MessageText, msg)
 	}

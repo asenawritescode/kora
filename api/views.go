@@ -1563,14 +1563,15 @@ func (h *Handler) executeValidateExternalOperation(c *gin.Context, action *docty
 			h.writeKernelError(c, err)
 			return
 		}
-		h.recordExternalOperationEvent(c, doc, "Outbound", "Status Check", previousStatus, doc.GetString("status"), ctx, doc.Get("response_payload"), "Processed", "")
+		// The audit event is best-effort once the operation has been saved; failures are logged inside.
+		_ = h.recordExternalOperationEvent(c, doc, "Outbound", "Status Check", previousStatus, doc.GetString("status"), ctx, doc.Get("response_payload"), "Processed", "")
 		if scriptErr != nil {
 			writeError(c, http.StatusBadRequest, "operation.failed", scriptErr.Error(), nil)
 			return
 		}
 	}
 	if getString(action.Config, "script") == "" {
-		h.recordExternalOperationEvent(c, doc, "Internal", "Status Check", doc.GetString("status"), doc.GetString("status"), ctx, nil, "Processed", "")
+		_ = h.recordExternalOperationEvent(c, doc, "Internal", "Status Check", doc.GetString("status"), doc.GetString("status"), ctx, nil, "Processed", "")
 	}
 	c.JSON(http.StatusOK, Response{Data: documentToMap(doc, dt)})
 }

@@ -265,7 +265,7 @@ func sendSMTPContext(ctx context.Context, cfg *Config, from string, to []string,
 		}
 		return fmt.Errorf("creating smtp client: %w", err)
 	}
-	defer client.Close()
+	defer client.Close() //nolint:errcheck // QUIT is sent explicitly; this only releases the socket
 
 	if err := client.Hello("localhost"); err != nil {
 		return fmt.Errorf("smtp hello: %w", err)

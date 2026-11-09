@@ -121,17 +121,17 @@ func stageLocalFile(dir, pattern string, write func(*os.File) error) (string, er
 	}
 	name := f.Name()
 	if err := f.Chmod(0644); err != nil {
-		f.Close()
+		_ = f.Close() // the earlier error is what matters
 		os.Remove(name)
 		return "", err
 	}
 	if err := write(f); err != nil {
-		f.Close()
+		_ = f.Close() // the earlier error is what matters
 		os.Remove(name)
 		return "", err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close() // the earlier error is what matters
 		os.Remove(name)
 		return "", err
 	}
@@ -363,7 +363,7 @@ func syncDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer dir.Close() //nolint:errcheck // read-only directory handle
 	return dir.Sync()
 }
 
@@ -434,7 +434,7 @@ func (b *localBackend) Open(_ context.Context, key string, offset, length int64)
 	}
 	if offset > 0 {
 		if _, err := f.Seek(offset, io.SeekStart); err != nil {
-			f.Close()
+			_ = f.Close() // the Seek error is what matters
 			unlock()
 			return nil, err
 		}

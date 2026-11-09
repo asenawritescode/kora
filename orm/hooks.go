@@ -340,7 +340,8 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 				if result != nil {
 					durationMs = int(result.Duration.Milliseconds())
 				}
-				tx.ScriptStore.LogExecution(tx.SiteName, rec, dt.Name, doc.Name, event, tx.CurrentUser, durationMs, status, errMsg)
+				// Logging must not mask the rejection that aborts the operation.
+				_ = tx.ScriptStore.LogExecution(tx.SiteName, rec, dt.Name, doc.Name, event, tx.CurrentUser, durationMs, status, errMsg)
 				return fmt.Errorf("script %q (%s): %w", rec.Name, event, execErr)
 			}
 			// After hooks are best-effort — log and continue.

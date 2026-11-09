@@ -342,7 +342,10 @@ func (w *Worker) loadMatchingExtensions(ctx context.Context, doctype, eventName 
 		}
 		// Parse subscriptions JSON.
 		var subs []Subscription
-		json.Unmarshal([]byte(subsJSON), &subs)
+		if err := json.Unmarshal([]byte(subsJSON), &subs); err != nil {
+			slog.Warn("webhook: extension subscriptions are not valid JSON; skipping extension", "extension", ext.Name, "error", err)
+			continue
+		}
 		for _, sub := range subs {
 			if sub.Event == eventName {
 				if sub.Filter.DocType == "" || sub.Filter.DocType == doctype {

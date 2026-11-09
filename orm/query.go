@@ -1339,7 +1339,9 @@ func convertDefault(def string, fieldtype string) any {
 	switch fieldtype {
 	case "Int":
 		var n int64
-		fmt.Sscanf(def, "%d", &n)
+		if _, err := fmt.Sscanf(def, "%d", &n); err != nil {
+			return nil
+		}
 		return n
 	case "Float", "Currency", "Percent":
 		if number, err := numeric.Normalize(def); err == nil {
