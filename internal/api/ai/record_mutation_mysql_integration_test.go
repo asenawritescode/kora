@@ -93,7 +93,7 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 			t.Fatal("encode AI tool arguments:", err)
 		}
 		calls := []any{map[string]any{"id": callID, "function": map[string]any{"name": toolName, "arguments": string(argBytes)}}}
-		results := executeToolCallsForAI(tx.Context, tx, registry, calls, "alice@example.test", site, runID, stepID, "conversation-1")
+		results := executeToolCallsForAI(tx.Context, tx, registry, toolCallBatch{Calls: calls, Owner: "alice@example.test", Site: site, RunID: runID, StepID: stepID, ConversationID: "conversation-1"})
 		if len(results) != 1 {
 			t.Fatalf("tool %s returned %d responses, want one", toolName, len(results))
 		}
@@ -170,7 +170,7 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 		t.Fatalf("AI audit attribution source=%q actor=%q", source, actor)
 	}
 	guestExecution := testAIExecution(t, site, "guest@example.test", []string{"Guest"})
-	if _, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, task.Name, "", map[string]any{"title": "Denied"}, []string{"Guest"}, "ai:run-1:step-3:call-denied", false, guestExecution); err == nil {
+	if _, err := executeAIRecordMutation(tx, registry, recordMutation{Command: kernel.CommandRecordCreate, Doctype: task.Name, Fields: map[string]any{"title": "Denied"}, IdempotencyKey: "ai:run-1:step-3:call-denied", Execution: guestExecution}); err == nil {
 		t.Fatal("AI create without create permission succeeded")
 	}
 	var total int
@@ -268,7 +268,7 @@ func TestAIMutationBundleConvertsLeadWithDurableApprovalAtomically(t *testing.T)
 	}
 	execution := testAIExecution(t, site, "sales@example.test", []string{doctype.AdminRole})
 	tx := &orm.TxManager{DB: database, Registry: registry, Dialect: dialect, SiteName: site, Context: auth.ContextWithSessionCreatedAt(ctx, time.Now().UTC()), Execution: execution, Outbox: outbox.NewSQLWriter(dialect), WorkflowStatusPolicies: definitions}
-	createdLead, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, lead.Name, "", map[string]any{"lead_name": "Northwind expansion"}, nil, "initial-lead", false, execution)
+	createdLead, err := executeAIRecordMutation(tx, registry, recordMutation{Command: kernel.CommandRecordCreate, Doctype: lead.Name, Fields: map[string]any{"lead_name": "Northwind expansion"}, IdempotencyKey: "initial-lead", Execution: execution})
 	if err != nil {
 		t.Fatalf("create Lead fixture: %v", err)
 	}
@@ -297,8 +297,8 @@ func TestAIMutationBundleConvertsLeadWithDurableApprovalAtomically(t *testing.T)
 		t.Fatalf("grant conversion approval: %v", err)
 	}
 	const bundleKey = "crm-conversion-bundle-once"
-	first := executeAIMutationBundle(tx, registry, args, site, runID, "", bundleKey, execution)
-	replay := executeAIMutationBundle(tx, registry, args, site, runID, "", bundleKey, execution)
+	first := executeAIMutationBundle(tx, registry, toolInvocation{Args: args, Site: site, RunID: runID, IdempotencyKey: bundleKey, Execution: execution})
+	replay := executeAIMutationBundle(tx, registry, toolInvocation{Args: args, Site: site, RunID: runID, IdempotencyKey: bundleKey, Execution: execution})
 	if !strings.Contains(first, "Applied the approved atomic operation") || replay != first {
 		t.Fatalf("conversion execution/replay = %q / %q", first, replay)
 	}
@@ -369,11 +369,11 @@ func TestAIRecordMutationUsesExactVerifiedGrantAndPrincipal(t *testing.T) {
 	}
 	tx := &orm.TxManager{DB: database, Registry: registry, Dialect: dialect, SiteName: site, Outbox: outbox.NewSQLWriter(dialect)}
 	const key = "ai-exact-grant-create-1"
-	first, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "verified service create"}, []string{doctype.AdminRole}, key, false, execution)
+	first, err := executeAIRecordMutation(tx, registry, recordMutation{Command: kernel.CommandRecordCreate, Doctype: dt.Name, Fields: map[string]any{"title": "verified service create"}, IdempotencyKey: key, Execution: execution})
 	if err != nil {
 		t.Fatal("AI create with exact verified grant:", err)
 	}
-	replay, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, dt.Name, "", map[string]any{"title": "verified service create"}, []string{doctype.AdminRole}, key, false, execution)
+	replay, err := executeAIRecordMutation(tx, registry, recordMutation{Command: kernel.CommandRecordCreate, Doctype: dt.Name, Fields: map[string]any{"title": "verified service create"}, IdempotencyKey: key, Execution: execution})
 	if err != nil {
 		t.Fatal("AI exact-grant replay:", err)
 	}
@@ -387,7 +387,7 @@ func TestAIRecordMutationUsesExactVerifiedGrantAndPrincipal(t *testing.T) {
 	if owner != "service:ai-writer" {
 		t.Fatalf("AI adapter used caller owner %q, want verified principal owner", owner)
 	}
-	if _, err := executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, protected.Name, "", map[string]any{"title": "must use the owner command"}, nil, "ai-protected-generic-create", false, execution); err == nil {
+	if _, err := executeAIRecordMutation(tx, registry, recordMutation{Command: kernel.CommandRecordCreate, Doctype: protected.Name, Fields: map[string]any{"title": "must use the owner command"}, IdempotencyKey: "ai-protected-generic-create", Execution: execution}); err == nil {
 		t.Fatal("AI generic record adapter mutated a commands-only module resource")
 	}
 	var protectedCount int

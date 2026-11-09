@@ -356,13 +356,13 @@
    "cyclomatic": 18,
    "statements": 41
   },
-  "internal/api/ai::executeSingleToolWithMutationKeyAndExecution": {
+  "internal/api/ai::executeSingleTool": {
    "cognitive": 65,
    "cyclomatic": 64,
    "statements": 162
   },
-  "internal/api/ai::executeToolCallsForAIWithExecution": {
-   "lines": 114
+  "internal/api/ai::executeToolCallsForAI": {
+   "lines": 113
   },
   "internal/api/ai::executeUpdateDoctypeDraft": {
    "cognitive": 16

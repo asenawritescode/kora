@@ -11,7 +11,6 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/orm"
-	"github.com/asenawritescode/kora/internal/policy"
 )
 
 const maxAIMutationBundleRecords = 10
@@ -231,38 +230,38 @@ func bundleApprovalTarget(site, runID string, args map[string]any) ApprovalTarge
 	return ApprovalTarget{Site: site, OperationID: runID, ToolName: "mutate_records", Args: args}
 }
 
-func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, args map[string]any, site, runID, stepID, idempotencyKey string, execution policy.Execution) string {
-	if tx == nil || tx.DB == nil || !execution.Valid() {
+func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocation) string {
+	if tx == nil || tx.DB == nil || !inv.Execution.Valid() {
 		return "Permission denied: verified execution and tenant database are required"
 	}
-	if strings.TrimSpace(runID) == "" {
+	if strings.TrimSpace(inv.RunID) == "" {
 		return "Error: atomic multi-record writes require a durable AI run so user approval can be recorded."
 	}
-	payload, err := buildAIMutationBundle(reg, args)
+	payload, err := buildAIMutationBundle(reg, inv.Args)
 	if err != nil {
 		return "Error preparing related record changes: " + err.Error()
 	}
-	approved, err := HasGrantedApproval(tx.Context, tx.DB, bundleApprovalTarget(site, runID, args))
+	approved, err := HasGrantedApproval(tx.Context, tx.DB, bundleApprovalTarget(inv.Site, inv.RunID, inv.Args))
 	if err != nil {
 		return "Error checking approval for related record changes; no changes were made."
 	}
 	if !approved {
-		actor := execution.Actor()
+		actor := inv.Execution.Actor()
 		principal := actor.SubjectUserID
 		if principal == "" {
 			principal = actor.PrincipalID
 		}
-		if err = EnsureApprovalPending(tx.Context, tx.DB, ApprovalRequest{Target: bundleApprovalTarget(site, runID, args), ActorID: principal, ActorType: "agent"}); err != nil {
+		if err = EnsureApprovalPending(tx.Context, tx.DB, ApprovalRequest{Target: bundleApprovalTarget(inv.Site, inv.RunID, inv.Args), ActorID: principal, ActorType: "agent"}); err != nil {
 			return "Error recording approval for related record changes; no changes were made."
 		}
-		if stepID != "" {
-			if err := MarkRunPendingApproval(tx.Context, tx.DB, runID, stepID, "mutate_records_pending_approval"); err != nil {
+		if inv.StepID != "" {
+			if err = MarkRunPendingApproval(tx.Context, tx.DB, inv.RunID, inv.StepID, "mutate_records_pending_approval"); err != nil {
 				return "Error recording approval state for related record changes; no changes were made."
 			}
 		}
 		return "Approval required for mutate_records. Review the full related-record change and approve it before execution; no records were changed."
 	}
-	actor := execution.Actor()
+	actor := inv.Execution.Actor()
 	user := actor.SubjectUserID
 	if user == "" {
 		user = actor.PrincipalID
@@ -275,7 +274,7 @@ func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, args map[
 	if err != nil {
 		return "Error encoding related record changes: " + err.Error()
 	}
-	tx.Execution = execution
+	tx.Execution = inv.Execution
 	engine := kernel.New(tx.Dialect, tx.Outbox)
 	engine.TxManager = tx
 	ctx := tx.Context
@@ -283,7 +282,7 @@ func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, args map[
 		ctx = context.Background()
 	}
 	result, cerr := engine.Execute(ctx, tx.DB, reg, kernel.Operation{
-		Context: kernel.OperationContext{Site: site, TenantID: execution.Tenant(), Execution: execution, BusinessScope: tx.BusinessScope, BusinessReferenceValidator: tx.BusinessReferenceValidator, Actor: actor, User: user, UserRole: role, Roles: actor.Roles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
+		Context: kernel.OperationContext{Site: inv.Site, TenantID: inv.Execution.Tenant(), Execution: inv.Execution, BusinessScope: tx.BusinessScope, BusinessReferenceValidator: tx.BusinessReferenceValidator, Actor: actor, User: user, UserRole: role, Roles: actor.Roles, Source: kernel.SourceAI, IdempotencyKey: inv.IdempotencyKey},
 		Command: kernel.CommandRecordMutateBundle, Payload: raw,
 	})
 	if cerr != nil {
