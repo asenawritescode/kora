@@ -200,7 +200,7 @@ func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteNa
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to persist AI run."}})
 		return
 	}
-	if err := AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "user", req.Message, "message", ""); err != nil {
+	if err := AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "user", Content: req.Message, Kind: "message"}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to save your message."}})
 		return
 	}
@@ -313,7 +313,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 		})
 		return
 	}
-	reservation, err := ReserveBudget(requestCtx, tx.DB, siteName, model, estimatePromptTokens(messages, functions)+cfg.MaxTokensPerCall, cfg.TokenBudget, "chat request")
+	reservation, err := ReserveBudget(requestCtx, tx.DB, BudgetRequest{Site: siteName, Model: model, RequestedTokens: estimatePromptTokens(messages, functions) + cfg.MaxTokensPerCall, Budget: cfg.TokenBudget, Note: "chat request"})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": gin.H{"message": err.Error()},
@@ -334,7 +334,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 
 	for round := 0; round < cfg.MaxRounds; round++ {
 		stepID := ulid.Make().String()
-		_ = UpsertStep(requestCtx, tx.DB, stepID, siteName, runID, conversationID, fmt.Sprintf("round-%d", round+1), "planning", "", "", "", "", "")
+		_ = UpsertStep(requestCtx, tx.DB, StepRecord{ID: stepID, Site: siteName, RunID: runID, ConversationID: conversationID, StepKey: fmt.Sprintf("round-%d", round+1), Status: "planning"})
 		_ = UpsertTask(requestCtx, tx.DB, TaskRecord{
 			ID:             stepID,
 			Site:           siteName,
@@ -379,7 +379,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 		})
 		if err != nil {
 			slog.Error("AI provider call failed", "error", err, "round", round)
-			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "failed", err.Error(), "", "", "", err.Error())
+			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "failed", Summary: err.Error(), ErrorMessage: err.Error()})
 			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "failed", err.Error())
 			_ = UpsertRun(requestCtx, tx.DB, RunRecord{
 				ID:             runID,
@@ -419,8 +419,8 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if lastContent := findLastAssistantContent(messages); lastContent != "" {
 				fallbackReply = lastContent
 			}
-			_ = AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", fallbackReply, "summary", stepID)
-			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "partial", fallbackReply, "", "", "", err.Error())
+			_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: fallbackReply, Kind: "summary", StepID: stepID})
+			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "partial", Summary: fallbackReply, ErrorMessage: err.Error()})
 			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "partial", err.Error())
 			_ = UpsertRun(requestCtx, tx.DB, RunRecord{
 				ID:             runID,
@@ -532,10 +532,10 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if content == "" {
 				content = "I processed your request."
 			}
-			_ = AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", content, "summary", stepID)
-			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "completed", content, "", "", content, "")
+			_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: content, Kind: "summary", StepID: stepID})
+			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "completed", Summary: content, OutputJSON: content})
 			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "done", content)
-			_ = QueueFollowUpTasks(requestCtx, tx.DB, siteName, runID, conversationID, deriveFollowUpTasks(content, toolResultsFromMessages(messages)))
+			_ = QueueFollowUpTasks(requestCtx, tx.DB, RunScope{Site: siteName, RunID: runID, ConversationID: conversationID}, deriveFollowUpTasks(content, toolResultsFromMessages(messages)))
 			_ = UpsertRun(requestCtx, tx.DB, RunRecord{
 				ID:             runID,
 				Site:           siteName,
@@ -671,8 +671,8 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if content == "" {
 				content = "I ran out of space processing your request. Could you try a more specific query?"
 			}
-			_ = AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", content, "summary", stepID)
-			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "failed", content, "", "", content, "length")
+			_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: content, Kind: "summary", StepID: stepID})
+			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "failed", Summary: content, OutputJSON: content, ErrorMessage: "length"})
 			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "failed", "length")
 			_ = UpsertRun(requestCtx, tx.DB, RunRecord{
 				ID:             runID,
@@ -694,7 +694,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 				Reply: "I can't respond to that request due to content policies.",
 				RunID: runID,
 			})
-			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "failed", "content_filter", "", "", "", "content_filter")
+			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "failed", Summary: "content_filter", ErrorMessage: "content_filter"})
 			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "failed", "content_filter")
 			_ = UpsertRun(requestCtx, tx.DB, RunRecord{
 				ID:             runID,
@@ -712,10 +712,10 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 		default:
 			// Unknown finish_reason. If there's content, return it.
 			if content != "" {
-				_ = AppendConversationMessage(requestCtx, tx.DB, siteName, conversationID, runID, "assistant", content, "summary", stepID)
-				_ = UpdateStepStatus(requestCtx, tx.DB, stepID, "completed", content, "", "", content, "")
+				_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: content, Kind: "summary", StepID: stepID})
+				_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "completed", Summary: content, OutputJSON: content})
 				_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "done", content)
-				_ = QueueFollowUpTasks(requestCtx, tx.DB, siteName, runID, conversationID, deriveFollowUpTasks(content, toolResultsFromMessages(messages)))
+				_ = QueueFollowUpTasks(requestCtx, tx.DB, RunScope{Site: siteName, RunID: runID, ConversationID: conversationID}, deriveFollowUpTasks(content, toolResultsFromMessages(messages)))
 				_ = UpsertRun(requestCtx, tx.DB, RunRecord{
 					ID:             runID,
 					Site:           siteName,

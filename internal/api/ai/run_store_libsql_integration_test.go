@@ -74,10 +74,10 @@ func TestLiveLibSQLAIRunStoreLifecycle(t *testing.T) {
 	if !statusInventory.TablePresent || len(statusInventory.Statuses) != 1 || statusInventory.Statuses[0] != (RunStatusCount{Status: "planning", Rows: 1}) {
 		t.Fatalf("site-scoped LibSQL AI run status inventory = %#v", statusInventory)
 	}
-	if err := AppendMessage(ctx, database, conversation.Site, conversation.ID, run.ID, "user", "hello", "message", "", 1); err != nil {
+	if err = AppendMessage(ctx, database, MessageRecord{Site: conversation.Site, ConversationID: conversation.ID, RunID: run.ID, Role: "user", Content: "hello", Kind: "message", Sequence: 1}); err != nil {
 		t.Fatal("append LibSQL AI message:", err)
 	}
-	if err := UpsertStep(ctx, database, "step-libsql", conversation.Site, run.ID, conversation.ID, "plan", "planning", "start", "", "{}", "{}", ""); err != nil {
+	if err = UpsertStep(ctx, database, StepRecord{ID: "step-libsql", Site: conversation.Site, RunID: run.ID, ConversationID: conversation.ID, StepKey: "plan", Status: "planning", Summary: "start", InputJSON: "{}", OutputJSON: "{}"}); err != nil {
 		t.Fatal("upsert LibSQL AI step:", err)
 	}
 	if err := UpsertTask(ctx, database, TaskRecord{ID: "task-libsql", Site: conversation.Site, RunID: run.ID, ConversationID: conversation.ID, Title: "Task", Status: "queued"}); err != nil {
@@ -89,7 +89,7 @@ func TestLiveLibSQLAIRunStoreLifecycle(t *testing.T) {
 	if err := RecordAudit(ctx, database, AuditEvent{ID: "audit-libsql", Site: conversation.Site, RunID: run.ID, Kind: "tool_call", Status: "completed"}); err != nil {
 		t.Fatal("record LibSQL AI audit:", err)
 	}
-	reservation, err := ReserveBudget(ctx, database, conversation.Site, "model", 10, 100, "integration test")
+	reservation, err := ReserveBudget(ctx, database, BudgetRequest{Site: conversation.Site, Model: "model", RequestedTokens: 10, Budget: 100, Note: "integration test"})
 	if err != nil {
 		t.Fatal("reserve LibSQL AI budget:", err)
 	}
