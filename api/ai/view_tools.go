@@ -11,7 +11,7 @@ import (
 )
 
 // executeListViews returns all views for the current site.
-func executeListViews(reg *doctype.Registry, siteName string, tx *orm.TxManager) string {
+func executeListViews(reg *doctype.Registry) string {
 	views := reg.Views.All()
 	if len(views) == 0 {
 		return "No views configured."

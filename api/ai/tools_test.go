@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/db"
 	"github.com/asenawritescode/kora/doctype"
@@ -74,7 +75,7 @@ func TestPrivateModuleRecordsAreNotExposedThroughAITools(t *testing.T) {
 	}
 	defer database.Close()
 	tx := &orm.TxManager{DB: database, Dialect: db.Resolve("mysql"), Context: context.Background()}
-	got := executeSingleToolWithRolesAndCallIDAndExecution(tx, reg, "private_invoice_get", map[string]any{"name": "INV-1"}, "owner", "tenant-a", "run", "step", "call", nil, testAIExecution(t, "tenant-a", "owner", []string{"Administrator"}))
+	got := executeSingleToolWithExecution(tx, reg, "private_invoice_get", map[string]any{"name": "INV-1"}, "owner", "tenant-a", "run", "step", "call", testAIExecution(t, "tenant-a", "owner", []string{"Administrator"}))
 	if !strings.Contains(got, "published query contract") {
 		t.Fatalf("private module record bypass was not denied: %q", got)
 	}
@@ -183,7 +184,7 @@ func TestMutationBundleRecordsApprovalBeforeAnyBusinessWrite(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	tx := &orm.TxManager{DB: database, Dialect: db.Resolve("mysql"), SiteName: "site-a", Context: context.Background()}
-	result := executeAIMutationBundle(tx, reg, args, "alice", "site-a", "run-1", "", "bundle-key", testAIExecution(t, "site-a", "alice", []string{doctype.AdminRole}))
+	result := executeAIMutationBundle(tx, reg, args, "site-a", "run-1", "", "bundle-key", testAIExecution(t, "site-a", "alice", []string{doctype.AdminRole}))
 	if !strings.Contains(result, "Approval required") || !strings.Contains(result, "no records were changed") {
 		t.Fatalf("unapproved bundle result = %q", result)
 	}
@@ -254,7 +255,7 @@ func TestExecuteSingleToolDeniesDocTypeOperationWithoutRolePermission(t *testing
 	reg := doctype.NewRegistry()
 	reg.Register(&doctype.DocType{Name: "PurchaseRequest"})
 	tx := &orm.TxManager{Context: context.Background()}
-	result := executeSingleToolWithRolesAndCallID(tx, reg, "purchaserequest_list", map[string]any{}, "agent", "site", "run", "step", "", []string{"Guest"})
+	result := executeSingleToolWithExecution(tx, reg, "purchaserequest_list", map[string]any{}, "agent", "site", "run", "step", "", tx.Execution)
 	if !strings.Contains(result, "Permission denied") {
 		t.Fatalf("expected permission denial, got %q", result)
 	}
@@ -286,7 +287,7 @@ func TestAIAssigneeReadsUseVerifiedUserScope(t *testing.T) {
 		WithArgs("TASK-1", "alice").
 		WillReturnRows(sqlmock.NewRows([]string{"title", "assigned_to", "name", "owner", "creation", "modified", "modified_by", "doc_status", "revision"}).
 			AddRow("Call customer", "alice", "TASK-1", "creator", nil, nil, nil, 0, 1))
-	got := executeSingleToolWithRolesAndCallIDAndExecution(tx, registry, "task_get", map[string]any{"name": "TASK-1"}, "forged-user", "tenant-a", "run-1", "step-1", "call-1", nil, alice)
+	got := executeSingleToolWithExecution(tx, registry, "task_get", map[string]any{"name": "TASK-1"}, "forged-user", "tenant-a", "run-1", "step-1", "call-1", alice)
 	if strings.Contains(got, "Permission denied") || !strings.Contains(got, "Call customer") {
 		t.Fatalf("assigned AI get = %q, want the currently assigned Task", got)
 	}
@@ -297,7 +298,7 @@ func TestAIAssigneeReadsUseVerifiedUserScope(t *testing.T) {
 		WithArgs("alice", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{"title", "assigned_to", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).
 			AddRow("Call customer", "alice", "TASK-1", "creator", nil, nil, nil, 0))
-	got = executeSingleToolWithRolesAndCallIDAndExecution(tx, registry, "task_list", map[string]any{}, "forged-user", "tenant-a", "run-1", "step-2", "call-2", nil, alice)
+	got = executeSingleToolWithExecution(tx, registry, "task_list", map[string]any{}, "forged-user", "tenant-a", "run-1", "step-2", "call-2", alice)
 	if strings.Contains(got, "Permission denied") || !strings.Contains(got, "TASK-1") {
 		t.Fatalf("assigned AI list = %q, want the assigned Task only", got)
 	}
@@ -324,7 +325,7 @@ func TestAIRecordMutationUsesVerifiedExecutionIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	tx := &orm.TxManager{DB: database, Dialect: db.Resolve("mysql"), SiteName: "site-a"}
-	_, err = executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, "Task", "", map[string]any{"title": "x"}, "forged-owner", []string{doctype.AdminRole}, "", false, execution)
+	_, err = executeAIRecordMutationWithExecution(tx, registry, kernel.CommandRecordCreate, "Task", "", map[string]any{"title": "x"}, []string{doctype.AdminRole}, "", false, execution)
 	if err == nil || err.Error() != "not permitted" {
 		t.Fatalf("result error = %v, want the existing AI permission guard to deny before mutation", err)
 	}
@@ -377,7 +378,7 @@ func TestExecuteUpdateToolRejectsInvalidArgumentsBeforeMutation(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := executeUpdateToolWithKey(nil, reg, dt, test.args, "alice@example.test", []string{doctype.AdminRole}, "", false)
+			got := executeUpdateToolWithKey(nil, reg, dt, test.args, []string{doctype.AdminRole}, "", false)
 			if !strings.Contains(got, test.want) {
 				t.Fatalf("update result = %q, want it to contain %q", got, test.want)
 			}
@@ -395,21 +396,6 @@ func TestAIToolMutationIdempotencyKeyIsStableAndScoped(t *testing.T) {
 	}
 	if got := aiToolMutationIdempotencyKey("site-a", "run-1", "", "call-1"); got != "" {
 		t.Fatalf("incomplete invocation identity must not enable accidental cross-call deduplication: %q", got)
-	}
-}
-
-func TestRolesForToolUsesAuthenticatedTxRoles(t *testing.T) {
-	tx := &orm.TxManager{CurrentUserRole: "Cashier", CurrentUserRoles: []string{"Cashier", "POS Manager"}}
-	got := rolesForTool(tx)
-	if len(got) != 2 || got[0] != "Cashier" || got[1] != "POS Manager" {
-		t.Fatalf("rolesForTool = %#v, want both resolved roles", got)
-	}
-	got[0] = "mutated"
-	if tx.CurrentUserRoles[0] != "Cashier" {
-		t.Fatal("rolesForTool exposed the mutable request role slice")
-	}
-	if got := rolesForTool(&orm.TxManager{CurrentUserRole: "Cashier"}); len(got) != 1 || got[0] != "Cashier" {
-		t.Fatalf("primary-role fallback = %#v, want Cashier", got)
 	}
 }
 
@@ -600,12 +586,12 @@ func TestBuildValidatedReadArgumentsBoundEveryQueryDimension(t *testing.T) {
 }
 
 func TestRequireRecentAuthForTool(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "session_created_at", time.Now().Add(-5*time.Minute))
+	ctx := auth.ContextWithSessionCreatedAt(context.Background(), time.Now().Add(-5*time.Minute))
 	if err := requireRecentAuthForTool(ctx, "create_doctype_draft"); err != nil {
 		t.Fatalf("expected recent auth to pass, got %v", err)
 	}
 
-	oldCtx := context.WithValue(context.Background(), "session_created_at", time.Now().Add(-15*time.Minute))
+	oldCtx := auth.ContextWithSessionCreatedAt(context.Background(), time.Now().Add(-15*time.Minute))
 	if err := requireRecentAuthForTool(oldCtx, "create_doctype_draft"); err == nil {
 		t.Fatal("expected stale auth to be rejected")
 	}
@@ -623,7 +609,7 @@ func TestExecuteSingleToolScriptCreateRequiresAdministrator(t *testing.T) {
 	defer db.Close()
 
 	tx := &orm.TxManager{DB: db, SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", nil)}
-	tx.Context = context.WithValue(context.Background(), "session_created_at", time.Now())
+	tx.Context = auth.ContextWithSessionCreatedAt(context.Background(), time.Now())
 	got := executeSingleTool(tx, doctype.NewRegistry(), "script_create", map[string]any{
 		"name":        "hello_script",
 		"script_type": "validate",
@@ -645,7 +631,7 @@ func TestExecuteSingleToolScriptCreateRejectsStaleAuth(t *testing.T) {
 	defer db.Close()
 
 	tx := &orm.TxManager{DB: db, SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", nil)}
-	tx.Context = context.WithValue(context.Background(), "session_created_at", time.Now().Add(-20*time.Minute))
+	tx.Context = auth.ContextWithSessionCreatedAt(context.Background(), time.Now().Add(-20*time.Minute))
 	got := executeSingleTool(tx, doctype.NewRegistry(), "script_create", map[string]any{
 		"name":        "hello_script",
 		"script_type": "validate",
@@ -683,7 +669,7 @@ func TestAdministratorMayAuthorScriptDraftWhenStoreIsUnavailable(t *testing.T) {
 		SiteName:  "site-a",
 		Execution: testAIExecution(t, "site-a", "admin@example.test", []string{doctype.AdminRole}),
 	}
-	tx.Context = context.WithValue(context.Background(), "session_created_at", time.Now())
+	tx.Context = auth.ContextWithSessionCreatedAt(context.Background(), time.Now())
 	got := executeSingleTool(tx, doctype.NewRegistry(), "script_create", map[string]any{
 		"name": "notify_overdue", "script_type": "scheduled", "script": "return true;", "schedule": "0 9 * * *",
 	}, "admin@example.test", "site-a", "run-1", "step-1")
@@ -711,7 +697,7 @@ func TestExecuteSingleToolUpdateDoctypeDraftRequiresApproval(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	tx := &orm.TxManager{DB: database, SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", nil)}
-	tx.Context = context.WithValue(context.Background(), "session_created_at", time.Now())
+	tx.Context = auth.ContextWithSessionCreatedAt(context.Background(), time.Now())
 	got := executeSingleTool(tx, doctype.NewRegistry(), "update_doctype_draft", map[string]any{
 		"yaml": "name: Task\nfields:\n  - fieldname: title\n    fieldtype: Data\n",
 	}, "alice", "site-a", "run-1", "")
@@ -731,7 +717,7 @@ func TestExecuteSingleToolUpdateDoctypeDraftRejectsStaleAuth(t *testing.T) {
 	defer database.Close()
 
 	tx := &orm.TxManager{DB: database, SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", nil)}
-	tx.Context = context.WithValue(context.Background(), "session_created_at", time.Now().Add(-20*time.Minute))
+	tx.Context = auth.ContextWithSessionCreatedAt(context.Background(), time.Now().Add(-20*time.Minute))
 	got := executeSingleTool(tx, doctype.NewRegistry(), "update_doctype_draft", map[string]any{
 		"yaml": "name: Task\nfields:\n  - fieldname: title\n    fieldtype: Data\n",
 	}, "alice", "site-a", "run-1", "step-1")
@@ -785,7 +771,7 @@ func TestExecuteSingleToolUpdateDoctypeDraftExecutesAfterApproval(t *testing.T) 
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	tx := &orm.TxManager{DB: database, Dialect: db.Resolve("mysql"), SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", []string{doctype.AdminRole})}
-	tx.Context = context.WithValue(context.Background(), "session_created_at", time.Now())
+	tx.Context = auth.ContextWithSessionCreatedAt(context.Background(), time.Now())
 	got := executeSingleTool(tx, reg, "update_doctype_draft", map[string]any{
 		"yaml": "name: Task\nmodule: Core\ntitle_field: title\nfields:\n  - fieldname: title\n    fieldtype: Data\n    label: Title\n    reqd: true\n",
 	}, "alice", "site-a", "run-1", "")
@@ -833,7 +819,7 @@ func TestExecuteToolCallsForAIRecordsAuditRows(t *testing.T) {
 				"arguments": "{}",
 			},
 		},
-	}, "alice", "site-a", "run-1", "step-1", "conv-1", nil)
+	}, "alice", "site-a", "run-1", "step-1", "conv-1")
 
 	if len(results) != 1 {
 		t.Fatalf("expected one tool result, got %d", len(results))
@@ -854,7 +840,7 @@ func TestExecuteToolCallsForAIGuardedToolUsesSharedExecutor(t *testing.T) {
 	defer db.Close()
 
 	ctx := enrichAuditContext(
-		context.WithValue(context.Background(), "session_created_at", time.Now()),
+		auth.ContextWithSessionCreatedAt(context.Background(), time.Now()),
 		"user-1",
 		"sid-1",
 		"corr-1",
@@ -881,7 +867,7 @@ func TestExecuteToolCallsForAIGuardedToolUsesSharedExecutor(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	tx := &orm.TxManager{DB: db, SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", nil)}
-	tx.Context = context.WithValue(context.Background(), "session_created_at", time.Now())
+	tx.Context = auth.ContextWithSessionCreatedAt(context.Background(), time.Now())
 	results := executeToolCallsForAI(ctx, tx, doctype.NewRegistry(), []any{
 		map[string]any{
 			"id": "tool-call-guarded-1",
@@ -890,7 +876,7 @@ func TestExecuteToolCallsForAIGuardedToolUsesSharedExecutor(t *testing.T) {
 				"arguments": `{"name":"hello_script","script_type":"validate","script":"return true;"}`,
 			},
 		},
-	}, "alice", "site-a", "run-1", "step-1", "conv-1", nil)
+	}, "alice", "site-a", "run-1", "step-1", "conv-1")
 
 	if len(results) != 1 {
 		t.Fatalf("expected one tool result, got %d", len(results))
@@ -925,4 +911,9 @@ func allowsChannel(values []string, channel string) bool {
 		}
 	}
 	return false
+}
+
+// executeSingleTool runs one tool call under the transaction manager's own verified execution.
+func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID string) string {
+	return executeSingleToolWithExecution(tx, reg, toolName, args, owner, siteName, runID, stepID, "", tx.Execution)
 }

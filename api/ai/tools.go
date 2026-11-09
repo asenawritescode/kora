@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asenawritescode/kora/auth"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/doctype"
 	"github.com/asenawritescode/kora/kernel"
@@ -406,7 +407,7 @@ func defaultString(value, fallback string) string {
 // kernel commands to the verified principal supplied by the authentication
 // boundary.
 func ExecuteToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName string, execution policy.Execution) string {
-	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", "", false, rolesForTool(tx), execution)
+	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", "", false, execution)
 }
 
 // ExecuteConfirmedToolWithIdempotencyKey is for authenticated adapters that
@@ -422,28 +423,7 @@ func ExecuteConfirmedToolWithIdempotencyKey(tx *orm.TxManager, reg *doctype.Regi
 // resulting kernel command is bound to the verified delegated grant.
 func ExecuteConfirmedToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, idempotencyKey string, execution policy.Execution) string {
 	key := channelToolMutationIdempotencyKey(siteName, idempotencyKey)
-	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", key, true, rolesForTool(tx), execution)
-}
-
-func rolesForTool(tx *orm.TxManager) []string {
-	if tx == nil {
-		return nil
-	}
-	if len(tx.CurrentUserRoles) > 0 {
-		return append([]string(nil), tx.CurrentUserRoles...)
-	}
-	if role := strings.TrimSpace(tx.CurrentUserRole); role != "" {
-		return []string{role}
-	}
-	return nil
-}
-
-func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID string) string {
-	return executeSingleToolWithRoles(tx, reg, toolName, args, owner, siteName, runID, stepID, rolesForTool(tx))
-}
-
-func executeSingleToolWithRoles(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID string, userRoles []string) string {
-	return executeSingleToolWithRolesAndCallID(tx, reg, toolName, args, owner, siteName, runID, stepID, "", userRoles)
+	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, "", "", key, true, execution)
 }
 
 func classifyToolSafety(name string) string {
@@ -837,25 +817,24 @@ fields:
 // ---------------------------------------------------------------------------
 
 // executeToolCallsForAI runs tool calls and returns results in OpenAI tool message format.
-func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner, siteName, runID, stepID, conversationID string, userRoles []string) []map[string]any {
-	return executeToolCallsForAIWithExecution(ctx, tx, reg, toolCalls, owner, siteName, runID, stepID, conversationID, userRoles, tx.Execution)
+func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner, siteName, runID, stepID, conversationID string) []map[string]any {
+	return executeToolCallsForAIWithExecution(ctx, tx, reg, toolCalls, owner, siteName, runID, stepID, conversationID, tx.Execution)
 }
 
-func executeToolCallsForAIWithExecution(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner, siteName, runID, stepID, conversationID string, userRoles []string, execution policy.Execution) []map[string]any {
+// executeToolCallsForAIWithExecution runs the model's tool calls. The acting user and roles are taken
+// from the verified execution identity only; a caller cannot supply them.
+func executeToolCallsForAIWithExecution(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, toolCalls []any, owner, siteName, runID, stepID, conversationID string, execution policy.Execution) []map[string]any {
 	if !execution.Valid() && tx != nil {
 		execution = tx.Execution
 	}
 	if execution.Valid() {
 		actor := execution.Actor()
-		userRoles = actor.Roles
 		if actor.SubjectUserID != "" {
 			owner = actor.SubjectUserID
 		} else {
 			owner = actor.PrincipalID
 		}
 		tx.Execution = execution
-	} else {
-		userRoles = nil
 	}
 	ctx = WithDialect(ctx, tx.Dialect)
 	tx.Context = WithDialect(tx.Context, tx.Dialect)
@@ -934,7 +913,7 @@ func executeToolCallsForAIWithExecution(ctx context.Context, tx *orm.TxManager, 
 			continue
 		}
 
-		result := executeSingleToolWithRolesAndCallIDAndExecution(tx, reg, name, args, owner, siteName, runID, stepID, id, userRoles, execution)
+		result := executeSingleToolWithExecution(tx, reg, name, args, owner, siteName, runID, stepID, id, execution)
 		status := "completed"
 		if isToolError(result) {
 			status = "failed"
@@ -964,16 +943,12 @@ func executeToolCallsForAIWithExecution(ctx context.Context, tx *orm.TxManager, 
 // executeSingleToolWithRolesAndCallID is the production AI tool path. DocType
 // tools use the same role permission matrix as human requests and derive a
 // mutation receipt key from the persisted run/step/tool-call identity.
-func executeSingleToolWithRolesAndCallID(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, toolCallID string, userRoles []string) string {
-	return executeSingleToolWithRolesAndCallIDAndExecution(tx, reg, toolName, args, owner, siteName, runID, stepID, toolCallID, userRoles, tx.Execution)
-}
-
-func executeSingleToolWithRolesAndCallIDAndExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, toolCallID string, userRoles []string, execution policy.Execution) string {
+func executeSingleToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, toolCallID string, execution policy.Execution) string {
 	key := aiToolMutationIdempotencyKey(siteName, runID, stepID, toolCallID)
-	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, runID, stepID, key, false, userRoles, execution)
+	return executeSingleToolWithMutationKeyAndExecution(tx, reg, toolName, args, owner, siteName, runID, stepID, key, false, execution)
 }
 
-func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, idempotencyKey string, adapterConfirmed bool, userRoles []string, execution policy.Execution) string {
+func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctype.Registry, toolName string, args map[string]any, owner, siteName, runID, stepID, idempotencyKey string, adapterConfirmed bool, execution policy.Execution) string {
 	if !execution.Valid() && tx != nil {
 		execution = tx.Execution
 	}
@@ -981,7 +956,7 @@ func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctyp
 		return "Permission denied: verified execution is required"
 	}
 	actor := execution.Actor()
-	userRoles = actor.Roles
+	userRoles := actor.Roles
 	if tx != nil {
 		tx.Execution = execution
 	}
@@ -991,7 +966,7 @@ func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctyp
 	// --- System tools (no doctype prefix) ---
 	switch toolName {
 	case "mutate_records":
-		return executeAIMutationBundle(tx, reg, args, owner, siteName, runID, stepID, idempotencyKey, execution)
+		return executeAIMutationBundle(tx, reg, args, siteName, runID, stepID, idempotencyKey, execution)
 	case "list_doctypes":
 		return executeListDoctypes(reg)
 	case "validate_doctype_yaml":
@@ -1046,7 +1021,7 @@ func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctyp
 	case "script_executions":
 		return executeScriptExecutions(tx, args, siteName)
 	case "list_views":
-		return executeListViews(reg, siteName, tx)
+		return executeListViews(reg)
 	case "get_view":
 		name, _ := args["name"].(string)
 		return executeGetView(reg, name)
@@ -1193,13 +1168,13 @@ func executeSingleToolWithMutationKeyAndExecution(tx *orm.TxManager, reg *doctyp
 			return fmt.Sprintf("Error: unknown fields: %s. Valid fields: %s",
 				strings.Join(unknown, ", "), availableFieldNames(dt))
 		}
-		result, err := executeAIRecordMutationWithExecution(tx, reg, kernel.CommandRecordCreate, dt.Name, "", args, owner, userRoles, idempotencyKey, adapterConfirmed, execution)
+		result, err := executeAIRecordMutationWithExecution(tx, reg, kernel.CommandRecordCreate, dt.Name, "", args, userRoles, idempotencyKey, adapterConfirmed, execution)
 		if err != nil {
 			return fmt.Sprintf("Error creating %s: %v", dt.Name, err)
 		}
 		return fmt.Sprintf("Created %s %q.", dt.Name, result.Name)
 	case "update":
-		return executeUpdateToolWithExecution(tx, reg, dt, args, owner, userRoles, idempotencyKey, adapterConfirmed, execution)
+		return executeUpdateToolWithExecution(tx, reg, dt, args, userRoles, idempotencyKey, adapterConfirmed, execution)
 	default:
 		return fmt.Sprintf("Unknown operation: %s", operation)
 	}
@@ -1215,7 +1190,7 @@ func requireRecentAuthForTool(ctx context.Context, toolName string) error {
 	if ctx == nil {
 		return fmt.Errorf("recent authentication required for %s", toolName)
 	}
-	sessionAt, ok := ctx.Value("session_created_at").(time.Time)
+	sessionAt, ok := auth.SessionCreatedAt(ctx)
 	if !ok || sessionAt.IsZero() {
 		return fmt.Errorf("recent authentication required for %s", toolName)
 	}
@@ -1246,11 +1221,11 @@ func toolDescriptorForName(toolName string) *ToolDescriptor {
 	return nil
 }
 
-func executeUpdateToolWithKey(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, args map[string]any, owner string, userRoles []string, idempotencyKey string, adapterConfirmed bool) string {
-	return executeUpdateToolWithExecution(tx, reg, dt, args, owner, userRoles, idempotencyKey, adapterConfirmed, policy.Execution{})
+func executeUpdateToolWithKey(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, args map[string]any, userRoles []string, idempotencyKey string, adapterConfirmed bool) string {
+	return executeUpdateToolWithExecution(tx, reg, dt, args, userRoles, idempotencyKey, adapterConfirmed, policy.Execution{})
 }
 
-func executeUpdateToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, args map[string]any, owner string, userRoles []string, idempotencyKey string, adapterConfirmed bool, execution policy.Execution) string {
+func executeUpdateToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, args map[string]any, userRoles []string, idempotencyKey string, adapterConfirmed bool, execution policy.Execution) string {
 	name, _ := args["name"].(string)
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -1276,14 +1251,14 @@ func executeUpdateToolWithExecution(tx *orm.TxManager, reg *doctype.Registry, dt
 	if len(changes) == 0 {
 		return fmt.Sprintf("Error updating %s: provide at least one writable field.", dt.Name)
 	}
-	result, err := executeAIRecordMutationWithExecution(tx, reg, kernel.CommandRecordUpdate, dt.Name, name, changes, owner, userRoles, idempotencyKey, adapterConfirmed, execution)
+	result, err := executeAIRecordMutationWithExecution(tx, reg, kernel.CommandRecordUpdate, dt.Name, name, changes, userRoles, idempotencyKey, adapterConfirmed, execution)
 	if err != nil {
 		return fmt.Sprintf("Error updating %s: %v", dt.Name, err)
 	}
 	return fmt.Sprintf("Updated %s %q.", dt.Name, result.Name)
 }
 
-func executeAIRecordMutationWithExecution(tx *orm.TxManager, reg *doctype.Registry, command, doctypeName, name string, fields map[string]any, owner string, roles []string, idempotencyKey string, allowDelegated bool, execution policy.Execution) (*kernel.ResultData, error) {
+func executeAIRecordMutationWithExecution(tx *orm.TxManager, reg *doctype.Registry, command, doctypeName, name string, fields map[string]any, roles []string, idempotencyKey string, allowDelegated bool, execution policy.Execution) (*kernel.ResultData, error) {
 	if tx == nil || !execution.Valid() {
 		return nil, contract.NewError(contract.CodeUnauthenticated, "AI record mutation requires verified execution identity")
 	}

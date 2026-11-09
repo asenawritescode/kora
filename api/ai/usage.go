@@ -41,28 +41,38 @@ func auditContextFields(ctx context.Context) (userID, sessionID, correlationID, 
 	if ctx == nil {
 		return "", "", "", ""
 	}
-	userID, _ = ctx.Value("user").(string)
-	sessionID, _ = ctx.Value("session_sid").(string)
-	correlationID, _ = ctx.Value("correlation_id").(string)
-	idempotencyKey, _ = ctx.Value("idempotency_key").(string)
+	userID, _ = ctx.Value(auditUserKey).(string)
+	sessionID, _ = ctx.Value(auditSessionKey).(string)
+	correlationID, _ = ctx.Value(auditCorrelationKey).(string)
+	idempotencyKey, _ = ctx.Value(auditIdempotencyKey).(string)
 	return
 }
+
+// auditContextKey is the private key type for audit identifiers carried on a request context.
+type auditContextKey string
+
+const (
+	auditUserKey        auditContextKey = "user"
+	auditSessionKey     auditContextKey = "session_sid"
+	auditCorrelationKey auditContextKey = "correlation_id"
+	auditIdempotencyKey auditContextKey = "idempotency_key"
+)
 
 func enrichAuditContext(ctx context.Context, userID, sessionID, correlationID, idempotencyKey string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if userID != "" {
-		ctx = context.WithValue(ctx, "user", userID)
+		ctx = context.WithValue(ctx, auditUserKey, userID)
 	}
 	if sessionID != "" {
-		ctx = context.WithValue(ctx, "session_sid", sessionID)
+		ctx = context.WithValue(ctx, auditSessionKey, sessionID)
 	}
 	if correlationID != "" {
-		ctx = context.WithValue(ctx, "correlation_id", correlationID)
+		ctx = context.WithValue(ctx, auditCorrelationKey, correlationID)
 	}
 	if idempotencyKey != "" {
-		ctx = context.WithValue(ctx, "idempotency_key", idempotencyKey)
+		ctx = context.WithValue(ctx, auditIdempotencyKey, idempotencyKey)
 	}
 	return ctx
 }

@@ -281,7 +281,7 @@ func (h *Handler) HandleOfflinePullV2(c *gin.Context) {
 	}
 	changes := make([]contract.OfflineChange, 0, len(page.Changes))
 	for _, change := range page.Changes {
-		changes = append(changes, contract.OfflineChange{FactKey: change.FactKey, Deleted: change.Deleted, Data: change.Data})
+		changes = append(changes, contract.OfflineChange(change))
 	}
 	c.JSON(http.StatusOK, Response{Data: contract.OfflinePullResponse{Source: request.Source, InputHash: request.InputHash, BusinessScope: request.BusinessScope, SubjectID: subject, SchemaRevision: query.OutputSchema, CatalogRevision: snapshot.Revision, SnapshotToken: request.SnapshotToken, ReplayPosition: request.ReplayPosition, ThroughCursor: page.ThroughCursor, NextPageCursor: page.NextCursor, Changes: changes, HasMore: page.NextCursor != ""}})
 }
