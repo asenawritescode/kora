@@ -84,10 +84,10 @@ func (b *webhookListenerProbe) RemoveListener(chan eventstream.ChangeEvent) {}
 func TestTenantServiceInstallerReusesStartupStorage(t *testing.T) {
 	existing := &testStorageBackend{}
 	var resolverCalls atomic.Int32
-	got, err := resolveTenantStorage(existing, func(*site.SiteConfig) (storage.Backend, error) {
+	got, err := resolveTenantStorage(existing, func(*site.Config) (storage.Backend, error) {
 		resolverCalls.Add(1)
 		return nil, errors.New("must not resolve storage twice")
-	}, &site.SiteConfig{})
+	}, &site.Config{})
 	if err != nil {
 		t.Fatalf("resolve existing storage: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestTenantServiceInstallerPublishesCandidateBundleBeforeFailure(t *testing.
 	resolveErr := errors.New("storage unavailable")
 	install, err := NewTenantServiceInstaller(TenantServiceConfig{
 		Common: &site.CommonConfig{DBType: "mysql"},
-		ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) {
+		ResolveStorage: func(*site.Config) (storage.Backend, error) {
 			return nil, resolveErr
 		},
 	})

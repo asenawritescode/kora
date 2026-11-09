@@ -19,9 +19,9 @@ import (
 )
 
 type managementDirectoryStub struct {
-	descriptor      site.SiteDescriptor
+	descriptor      site.Descriptor
 	descriptorErr   error
-	aliasDescriptor site.SiteDescriptor
+	aliasDescriptor site.Descriptor
 	aliasErr        error
 	revision        uint64
 	revisionErr     error
@@ -42,10 +42,10 @@ func (s *managementAdmissionStub) Acquire(context.Context) (func(), error) {
 	return func() { s.released++ }, nil
 }
 
-func (s managementDirectoryStub) GetDescriptorByIDContext(context.Context, string) (site.SiteDescriptor, error) {
+func (s managementDirectoryStub) GetDescriptorByIDContext(context.Context, string) (site.Descriptor, error) {
 	return s.descriptor, s.descriptorErr
 }
-func (s managementDirectoryStub) ResolveDescriptorByAliasContext(context.Context, string) (site.SiteDescriptor, error) {
+func (s managementDirectoryStub) ResolveDescriptorByAliasContext(context.Context, string) (site.Descriptor, error) {
 	return s.aliasDescriptor, s.aliasErr
 }
 func (s managementDirectoryStub) CurrentDirectoryRevisionContext(context.Context) (uint64, error) {
@@ -68,7 +68,7 @@ func managementInspectRouter(t *testing.T, directory ManagementDirectory) *gin.E
 }
 
 func TestManagementInspectRequiresDedicatedBearerAndReturnsV2Projection(t *testing.T) {
-	directory := managementDirectoryStub{descriptor: site.SiteDescriptor{
+	directory := managementDirectoryStub{descriptor: site.Descriptor{
 		Version: 1, SiteID: "tenant-a", Aliases: []string{"tenant.example.test"}, Status: "active", ConfigRevision: 7, DataPlaneRef: "sha256:abcdef0123456789",
 	}, revision: 12}
 	router := managementInspectRouter(t, directory)
@@ -104,11 +104,11 @@ func TestManagementInspectRequiresDedicatedBearerAndReturnsV2Projection(t *testi
 func TestManagementDirectoryResolveReturnsValidatedAssignmentAndRevision(t *testing.T) {
 	read := 0
 	directory := managementDirectoryStub{
-		descriptor: site.SiteDescriptor{
+		descriptor: site.Descriptor{
 			Version: 1, SiteID: "tenant-a", Aliases: []string{"tenant.example.test"},
 			Status: "active", ConfigRevision: 7, RuntimeCellID: "deployment-b",
 		},
-		aliasDescriptor: site.SiteDescriptor{
+		aliasDescriptor: site.Descriptor{
 			Version: 1, SiteID: "tenant-a", Aliases: []string{"tenant.example.test"},
 			Status: "active", ConfigRevision: 7, RuntimeCellID: "deployment-b",
 		},
@@ -151,7 +151,7 @@ func TestManagementDirectoryResolveReturnsValidatedAssignmentAndRevision(t *test
 func TestManagementDirectoryResolveFailsClosedWhenPlacementChangesDuringRead(t *testing.T) {
 	read := 0
 	directory := managementDirectoryStub{
-		descriptor: site.SiteDescriptor{SiteID: "tenant-a", Aliases: []string{"tenant.example.test"}, Status: "active", RuntimeCellID: "deployment-b"},
+		descriptor: site.Descriptor{SiteID: "tenant-a", Aliases: []string{"tenant.example.test"}, Status: "active", RuntimeCellID: "deployment-b"},
 		revisionFn: func() uint64 {
 			read++
 			if read == 1 {
@@ -191,7 +191,7 @@ func TestManagementInspectMapsDirectoryErrorsSafely(t *testing.T) {
 	}{
 		{name: "missing", stub: managementDirectoryStub{descriptorErr: sql.ErrNoRows}, want: http.StatusNotFound},
 		{name: "directory unavailable", stub: managementDirectoryStub{descriptorErr: errors.New("sensitive database detail")}, want: http.StatusServiceUnavailable},
-		{name: "revision unavailable", stub: managementDirectoryStub{descriptor: site.SiteDescriptor{SiteID: "tenant-a", Status: "active"}, revisionErr: errors.New("sensitive database detail")}, want: http.StatusServiceUnavailable},
+		{name: "revision unavailable", stub: managementDirectoryStub{descriptor: site.Descriptor{SiteID: "tenant-a", Status: "active"}, revisionErr: errors.New("sensitive database detail")}, want: http.StatusServiceUnavailable},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -247,7 +247,7 @@ func TestManagementInspectAdmissionRejectsBeforeDirectoryRead(t *testing.T) {
 func TestManagementInspectAdmitsEachDirectoryQuery(t *testing.T) {
 	admission := &managementAdmissionStub{}
 	handler, err := NewManagementInspectHandler(managementDirectoryStub{
-		descriptor: site.SiteDescriptor{SiteID: "tenant-a", Status: "active"}, revision: 1,
+		descriptor: site.Descriptor{SiteID: "tenant-a", Status: "active"}, revision: 1,
 	}, "separate-management-secret", "deployment-a", admission)
 	if err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestManagementInspectAdmitsEachDirectoryQuery(t *testing.T) {
 
 func TestManagementInspectReturnsTenantLocalConfigRevisionSeparately(t *testing.T) {
 	handler, err := NewManagementInspectHandler(managementDirectoryStub{
-		descriptor: site.SiteDescriptor{SiteID: "tenant-a", Status: "active", ConfigRevision: 7}, revision: 12,
+		descriptor: site.Descriptor{SiteID: "tenant-a", Status: "active", ConfigRevision: 7}, revision: 12,
 	}, "separate-management-secret", "deployment-a")
 	if err != nil {
 		t.Fatal("create inspect handler:", err)
@@ -286,7 +286,7 @@ func TestManagementInspectReturnsTenantLocalConfigRevisionSeparately(t *testing.
 }
 
 func TestManagementInspectResolvesAliasToCredentialFreeDescriptor(t *testing.T) {
-	directory := managementDirectoryStub{aliasDescriptor: site.SiteDescriptor{
+	directory := managementDirectoryStub{aliasDescriptor: site.Descriptor{
 		Version: 1, SiteID: "tenant-a", Aliases: []string{"tenant.example.test"}, Status: "active", ConfigRevision: 7,
 	}, revision: 12}
 	router := managementInspectRouter(t, directory)

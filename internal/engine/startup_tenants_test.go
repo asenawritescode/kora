@@ -132,11 +132,11 @@ func TestStartupTenantAcquisitionFailuresCloseStorage(t *testing.T) {
 			_, err := loadStartupTenantSet(context.Background(), StartupTenantConfig{
 				Sites: []site.DBSiteInfo{{Name: "tenant.example"}}, Common: &site.CommonConfig{},
 				BinaryVersion: "test", Concurrency: 1,
-				ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) {
+				ResolveStorage: func(*site.Config) (storage.Backend, error) {
 					return backend, test.resolveErr
 				},
 			}, startupTenantDependencies{
-				admission: func(*site.SiteConfig) (*dbaccess.Admission, error) { return nil, test.admitErr },
+				admission: func(*site.Config) (*dbaccess.Admission, error) { return nil, test.admitErr },
 				loadRuntime: func(context.Context, site.DBSiteInfo, *site.CommonConfig, string) (*knet.LoadedSite, error) {
 					return nil, test.loadErr
 				},

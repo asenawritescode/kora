@@ -13,7 +13,7 @@ import (
 )
 
 type managementStateDirectory interface {
-	SetStatusAtRevision(context.Context, string, string, uint64) (site.SiteDescriptor, error)
+	SetStatusAtRevision(context.Context, string, string, uint64) (site.Descriptor, error)
 }
 
 type managementStateCoordinator interface {

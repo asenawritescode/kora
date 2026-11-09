@@ -241,7 +241,7 @@ func TestRecordCreateUsesOperationScopedComputedScriptHook(t *testing.T) {
 		t.Fatalf("migrate computed DocType: %v", err)
 	}
 	store := &script.Store{DB: s.DB, Dialect: s.Dialect}
-	if err := store.Insert(script.ScriptRecord{
+	if err := store.Insert(script.Record{
 		Name: "site-name", Site: s.Name, ScriptType: script.TypeDocEvent,
 		DocType: dt.Name, Event: script.EventComputed, IsActive: true, Script: "return site",
 	}); err != nil {
@@ -280,7 +280,7 @@ func TestConfiguredCommandUsesRecordLifecyclePipeline(t *testing.T) {
 		}
 	}
 	store := &script.Store{DB: s.DB, Dialect: s.Dialect}
-	for _, record := range []script.ScriptRecord{
+	for _, record := range []script.Record{
 		{Name: "task-before-insert", Site: s.Name, ScriptType: script.TypeDocEvent, DocType: "Task", Event: script.EventBeforeInsert, IsActive: true, Script: "return document"},
 		{Name: "task-after-insert", Site: s.Name, ScriptType: script.TypeDocEvent, DocType: "Task", Event: script.EventAfterInsert, IsActive: true, Script: "return document"},
 		{Name: "task-before-save", Site: s.Name, ScriptType: script.TypeDocEvent, DocType: "Task", Event: script.EventBeforeSave, IsActive: true, Script: "return document"},

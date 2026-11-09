@@ -14,7 +14,7 @@ func TestHandleAuthProvidersUsesRegistry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	h := NewHandler(nil, nil)
-	h.AuthProviders.Register(auth.AuthProvider{
+	h.AuthProviders.Register(auth.Provider{
 		Name:        "saml",
 		Label:       "SAML 2.0",
 		Status:      "planned",

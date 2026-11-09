@@ -37,7 +37,7 @@ type AsyncHookRequest struct {
 	Event     script.Event
 	Doc       map[string]any // serializable current document (may include child rows)
 	OldDoc    map[string]any // serializable previous document (nil for inserts)
-	Rec       script.ScriptRecord
+	Rec       script.Record
 	User      string
 	UserRole  string
 	UserRoles []string
@@ -206,7 +206,7 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 	if err != nil {
 		return fmt.Errorf("resolve registered module lifecycle hooks: %w", err)
 	}
-	matching := make([]script.ScriptRecord, 0, len(scripts))
+	matching := make([]script.Record, 0, len(scripts))
 	for _, record := range scripts {
 		if record.Event == event {
 			matching = append(matching, record)
@@ -381,7 +381,7 @@ func (tx *TxManager) LoadLifecycleHooksTx(ctx context.Context, dbTx *sql.Tx, dt 
 		return fmt.Errorf("loading lifecycle scripts in command transaction: %w", err)
 	}
 	if tx.HookScriptsByDoctype == nil {
-		tx.HookScriptsByDoctype = make(map[string][]script.ScriptRecord)
+		tx.HookScriptsByDoctype = make(map[string][]script.Record)
 	}
 	tx.HookScriptsByDoctype[dt.Name] = scripts
 	return nil
@@ -424,7 +424,7 @@ func (tx *TxManager) extensionForHandler(dt *doctype.DocType, event script.Event
 // current activation snapshot explicitly registers them at an owner point.
 // Registered extensions follow the precomputed owner order; ordinary scripts
 // keep the existing ScriptStore order ahead of extension handlers.
-func (tx *TxManager) selectLifecycleScripts(dt *doctype.DocType, event script.Event, records []script.ScriptRecord) ([]script.ScriptRecord, error) {
+func (tx *TxManager) selectLifecycleScripts(dt *doctype.DocType, event script.Event, records []script.Record) ([]script.Record, error) {
 	if tx == nil || dt == nil {
 		return nil, fmt.Errorf("module lifecycle hook selection requires a document type")
 	}
@@ -434,7 +434,7 @@ func (tx *TxManager) selectLifecycleScripts(dt *doctype.DocType, event script.Ev
 			ownedNames[resource.Ref.Name] = true
 		}
 	}
-	active := make(map[string]script.ScriptRecord, len(records))
+	active := make(map[string]script.Record, len(records))
 	for _, record := range records {
 		if record.Event != event || record.DocType != "" && record.DocType != dt.Name {
 			continue
@@ -444,7 +444,7 @@ func (tx *TxManager) selectLifecycleScripts(dt *doctype.DocType, event script.Ev
 		}
 		active[record.Name] = record
 	}
-	var ordinary []script.ScriptRecord
+	var ordinary []script.Record
 	for _, record := range records {
 		if record.Event != event || record.DocType != "" && record.DocType != dt.Name || ownedNames[record.Name] {
 			continue
@@ -452,7 +452,7 @@ func (tx *TxManager) selectLifecycleScripts(dt *doctype.DocType, event script.Ev
 		ordinary = append(ordinary, record)
 	}
 	registered := tx.lifecycleExtensions(dt, event)
-	result := append([]script.ScriptRecord(nil), ordinary...)
+	result := append([]script.Record(nil), ordinary...)
 	for _, extension := range registered {
 		name := extension.Registration.HandlerRef.Name
 		record, ok := active[name]
@@ -464,14 +464,14 @@ func (tx *TxManager) selectLifecycleScripts(dt *doctype.DocType, event script.Ev
 	return result, nil
 }
 
-func (tx *TxManager) activeHookScripts(doctypeName string) ([]script.ScriptRecord, error) {
+func (tx *TxManager) activeHookScripts(doctypeName string) ([]script.Record, error) {
 	if tx.HookScriptsByDoctype == nil {
-		tx.HookScriptsByDoctype = make(map[string][]script.ScriptRecord)
+		tx.HookScriptsByDoctype = make(map[string][]script.Record)
 	}
 	if scripts, loaded := tx.HookScriptsByDoctype[doctypeName]; loaded {
 		return scripts, nil
 	}
-	var scripts []script.ScriptRecord
+	var scripts []script.Record
 	var err error
 	if tx.Transaction != nil {
 		ctx := tx.Context

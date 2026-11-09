@@ -24,7 +24,7 @@ type TenantRuntimeAssemblyConfig struct {
 	DirectoryWorkAdmission interface {
 		Acquire(context.Context) (func(), error)
 	}
-	TenantActivationWorkAdmission func(context.Context, *site.SiteConfig) (func(), error)
+	TenantActivationWorkAdmission func(context.Context, *site.Config) (func(), error)
 	CellID                        string
 	RetirementLimit               uint16
 	MaxResidentTenants            uint32
@@ -129,7 +129,7 @@ func AssembleTenantRuntime(config TenantRuntimeAssemblyConfig) (*TenantRuntimeAs
 		ParentContext: config.Services.ProcessContext, PlatformDB: config.Resources.PlatformDB,
 		PlatformDialect: config.Resources.PlatformDialect, Directory: config.Directory,
 		Tenants: tenants, Coordinator: coordinator, WorkAdmission: config.DirectoryWorkAdmission,
-		TenantWorkAdmission: func(config *site.SiteConfig) (interface {
+		TenantWorkAdmission: func(config *site.Config) (interface {
 			Acquire(context.Context) (func(), error)
 		}, error) {
 			return site.ConnectionAdmission(config)

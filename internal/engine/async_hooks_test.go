@@ -184,14 +184,14 @@ func TestAsyncLifecycleHookCanKeepProviderDisabled(t *testing.T) {
 	}
 	if err := worker.Sink().Enqueue(context.Background(), orm.AsyncHookRequest{
 		Site: runtime.Name, Doctype: "Task", Doc: map[string]any{"name": "TASK-1"},
-		Rec:       script.ScriptRecord{Name: "notify", ScriptType: script.TypeDocEvent, Script: "return 1", TimeoutMs: 650},
+		Rec:       script.Record{Name: "notify", ScriptType: script.TypeDocEvent, Script: "return 1", TimeoutMs: 650},
 		Execution: execution, UserRoles: []string{"Reader", "Auditor"}, DisableProvider: true,
 	}); err != nil {
 		t.Fatal("enqueue async workflow action:", err)
 	}
 	if err := worker.Sink().Enqueue(context.Background(), orm.AsyncHookRequest{
 		Site: runtime.Name, Doctype: "Task", Doc: map[string]any{"name": "TASK-2"},
-		Rec: script.ScriptRecord{Name: "lifecycle", ScriptType: script.TypeDocEvent, Script: "return 1"},
+		Rec: script.Record{Name: "lifecycle", ScriptType: script.TypeDocEvent, Script: "return 1"},
 	}); err != nil {
 		t.Fatal("enqueue lifecycle hook:", err)
 	}

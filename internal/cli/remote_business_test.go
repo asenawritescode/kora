@@ -184,7 +184,7 @@ func TestAdminManagementProfileIsSeparateAndAppliesExactPlan(t *testing.T) {
 
 func TestCLIMachineExitMappingAndCredentialRedaction(t *testing.T) {
 	unknown := contract.OperationReceipt{Status: contract.ReceiptOutcomeUnknown}
-	var exit *CLIExitError
+	var exit *ExitError
 	if err := receiptExit(unknown); !errors.As(err, &exit) || exit.Code != ExitUnknown {
 		t.Fatalf("unknown receipt exit = %#v", err)
 	}
@@ -228,7 +228,7 @@ func TestRemoteOperationLostResponseReturnsUnknownWithoutResubmission(t *testing
 	}
 	operationRef := contract.PublishedOperationRef("sales.orders", "sales.invoice", "issue")
 	_, err := runCLICommand(t, newRemoteOperationCommand(&remoteOptions{Config: configPath, Timeout: time.Second}), "execute", operationRef, "--input", `{"amount":5}`, "--idempotency-key", "intent-lost")
-	var exit *CLIExitError
+	var exit *ExitError
 	if !errors.As(err, &exit) || exit.Code != ExitUnknown || executeCalls != 1 || lookupCalls != 1 {
 		t.Fatalf("lost response err=%v execute=%d lookup=%d", err, executeCalls, lookupCalls)
 	}
@@ -278,7 +278,7 @@ func TestRemoteOperationCancellationStopsRequestAndReturnsRecoverableUnknown(t *
 		t.Fatal("operation request did not start before timeout")
 	}
 	err := <-done
-	var exit *CLIExitError
+	var exit *ExitError
 	if !errors.As(err, &exit) || exit.Code != ExitUnknown || executeCalls.Load() != 1 || lookupCalls.Load() != 1 {
 		t.Fatalf("cancelled operation err=%v execute=%d lookup=%d", err, executeCalls.Load(), lookupCalls.Load())
 	}
@@ -313,7 +313,7 @@ func TestAdminApplyReportsStalePlanConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = runCLICommand(t, newAdminModulesCommand(&adminOptions{Config: configPath, Timeout: time.Second}), "apply", "tenant-a", "--plan-file", planPath, "--idempotency-key", "apply-stale")
-	var exit *CLIExitError
+	var exit *ExitError
 	if !errors.As(err, &exit) || exit.Code != ExitConflict {
 		t.Fatalf("stale plan error=%v", err)
 	}
@@ -348,7 +348,7 @@ func TestAdminModulePlanSurfacesLifecycleBlockersWithConflictExit(t *testing.T) 
 		t.Fatal(err)
 	}
 	output, err := runCLICommand(t, newAdminModulesCommand(&adminOptions{Config: configPath, Timeout: time.Second}), "plan", "tenant-a", "sales.orders", "--target-state", "draining", "--expected-revision", "7")
-	var exit *CLIExitError
+	var exit *ExitError
 	if !errors.As(err, &exit) || exit.Code != ExitConflict || !strings.Contains(output, "workflow.outcome_unknown") {
 		t.Fatalf("blocked plan output/exit = %s / %v", output, err)
 	}
@@ -463,7 +463,7 @@ func TestRemoteWorkflowCommandsUseTypedScopedRoutesAndStableKeys(t *testing.T) {
 	if _, err := runCLICommand(t, workflow, "start", "--definition", "sales.approval", "--version", "2", "--subject", `{"kind":"sales.order","id":"order-1","revision":"3"}`, "--idempotency-key", "start-1"); err == nil {
 		t.Fatal("waiting workflow should return accepted/pending exit code")
 	} else {
-		var exit *CLIExitError
+		var exit *ExitError
 		if !errors.As(err, &exit) || exit.Code != ExitAccepted {
 			t.Fatalf("workflow start exit=%v", err)
 		}

@@ -49,7 +49,7 @@ type TenantServiceConfig struct {
 	Common                  *site.CommonConfig
 	Analytics               *analytics.Config
 	CloudRelay              *analytics.CloudRelayConfig
-	AnalyticsQueueAdmission *analytics.AnalyticsQueueAdmission
+	AnalyticsQueueAdmission *analytics.QueueAdmission
 	NATS                    *natsprovider.Provider
 	ScriptRunner            script.Runner
 	HTTPAllowlist           []string
@@ -70,7 +70,7 @@ type TenantServiceConfig struct {
 	SchedulerHandlerFactory           ScheduledJobHandlerFactory
 	SchedulerExecutionResolverFactory ScheduledJobExecutionResolverFactory
 	Mailer                            *email.Sender
-	ResolveStorage                    func(*site.SiteConfig) (storage.Backend, error)
+	ResolveStorage                    func(*site.Config) (storage.Backend, error)
 	RegisterWorkerStart               func(func() error) error
 }
 
@@ -440,7 +440,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	baseBus := analytics.NewChannelBusWithLimits(config.Analytics.ChannelSize, config.Analytics.MaxEventBytes, config.Analytics.MaxQueuedBytes, AnalyticsTenantWALDir(config.Analytics.WALDir, loaded.SiteID))
 	if config.AnalyticsQueueAdmission != nil {
 		queueAware, ok := baseBus.(interface {
-			SetQueueAdmission(*analytics.AnalyticsQueueAdmission) error
+			SetQueueAdmission(*analytics.QueueAdmission) error
 		})
 		if !ok {
 			_ = baseBus.Close()
@@ -911,7 +911,7 @@ func registerTenantWorkerStart(config TenantServiceConfig, start func() error) e
 	return start()
 }
 
-func resolveTenantStorage(existing storage.Backend, resolver func(*site.SiteConfig) (storage.Backend, error), config *site.SiteConfig) (storage.Backend, error) {
+func resolveTenantStorage(existing storage.Backend, resolver func(*site.Config) (storage.Backend, error), config *site.Config) (storage.Backend, error) {
 	if existing != nil {
 		return existing, nil
 	}

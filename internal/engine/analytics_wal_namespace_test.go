@@ -73,7 +73,7 @@ func TestMigrateAnalyticsWALNamespacesResolvesDirectoryNameToStableTenantID(t *t
 	}
 	directory := &scannerActivationDirectory{
 		tenantDirectoryStub: &tenantDirectoryStub{byID: site.DBSiteInfo{SiteID: tenantID, Name: "renamed.example"}},
-		page:                []site.SiteDescriptor{{SiteID: tenantID, Aliases: []string{"old-alias.example"}, Status: "active"}},
+		page:                []site.Descriptor{{SiteID: tenantID, Aliases: []string{"old-alias.example"}, Status: "active"}},
 	}
 	if err := migrateAnalyticsWALNamespaces(context.Background(), base, directory, "", nil); err != nil {
 		t.Fatalf("migrate tenant WAL namespace from authoritative directory identity: %v", err)

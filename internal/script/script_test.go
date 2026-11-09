@@ -124,7 +124,7 @@ func TestStoreRequiresExplicitDatabaseDialect(t *testing.T) {
 }
 
 func TestScriptRecord(t *testing.T) {
-	r := ScriptRecord{
+	r := Record{
 		Name:       "test",
 		Site:       "test.local",
 		ScriptType: TypeDocEvent,
@@ -144,7 +144,7 @@ func TestScriptRecord(t *testing.T) {
 
 func TestScriptUpdateRequest(t *testing.T) {
 	active := true
-	req := ScriptUpdateRequest{
+	req := UpdateRequest{
 		IsActive: &active,
 	}
 	if req.IsActive == nil || !*req.IsActive {

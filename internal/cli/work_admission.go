@@ -42,7 +42,7 @@ func acquireCLIWork(ctx context.Context, driver, dsn string, maintenance bool) (
 	return release, nil
 }
 
-func acquireSiteCLIWork(ctx context.Context, config *site.SiteConfig, maintenance bool) (func(), error) {
+func acquireSiteCLIWork(ctx context.Context, config *site.Config, maintenance bool) (func(), error) {
 	admission, err := site.ConnectionAdmission(config)
 	if err != nil {
 		return nil, fmt.Errorf("resolve tenant CLI database work admission: %w", err)
@@ -61,7 +61,7 @@ func acquireSiteCLIWork(ctx context.Context, config *site.SiteConfig, maintenanc
 	return release, nil
 }
 
-func acquireSiteCreationWork(ctx context.Context, tenantConfig *site.SiteConfig, platformDriver, platformDSN string) (func(), error) {
+func acquireSiteCreationWork(ctx context.Context, tenantConfig *site.Config, platformDriver, platformDSN string) (func(), error) {
 	if ctx == nil || tenantConfig == nil {
 		return nil, fmt.Errorf("site creation admission requires context and tenant configuration")
 	}

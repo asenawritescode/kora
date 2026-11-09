@@ -57,13 +57,13 @@ func TestExternalOperationProviderScriptsUseScriptStoreAcrossDialects(t *testing
 				t.Cleanup(func() { _, _ = database.Exec("DROP TABLE IF EXISTS " + dialect.QuoteIdent("tabSale__items")) })
 			}
 			store := &script.Store{DB: database, Dialect: dialect}
-			if err := store.Insert(script.ScriptRecord{
+			if err := store.Insert(script.Record{
 				Name: "provider-fails", Site: siteName, ScriptType: script.TypeAPIMethod,
 				DocType: "External Operation", Event: script.EventPayment, MethodPath: "provider.test", IsActive: true,
 			}); err != nil {
 				t.Fatalf("insert provider script on %s: %v", tc.driver, err)
 			}
-			for _, rec := range []script.ScriptRecord{
+			for _, rec := range []script.Record{
 				{Name: "hook-portability", Site: siteName, ScriptType: script.TypeDocEvent, DocType: "Unrelated DocType", Event: script.EventValidate, IsActive: true},
 			} {
 				if err := store.Insert(rec); err != nil {
@@ -110,7 +110,7 @@ func TestExternalOperationProviderScriptsUseScriptStoreAcrossDialects(t *testing
 				t.Fatalf("load script executions on %s: rows=%#v err=%v", tc.driver, executions, err)
 			}
 			priority := 2
-			if err := store.Update(siteName, "provider-fails", script.ScriptUpdateRequest{Priority: &priority}, "migration-test"); err != nil {
+			if err := store.Update(siteName, "provider-fails", script.UpdateRequest{Priority: &priority}, "migration-test"); err != nil {
 				t.Fatalf("update provider script on %s: %v", tc.driver, err)
 			}
 			updated, err := store.LoadByName(siteName, "provider-fails")
@@ -124,7 +124,7 @@ func TestExternalOperationProviderScriptsUseScriptStoreAcrossDialects(t *testing
 			if err != nil || deleted != nil {
 				t.Fatalf("load deleted script on %s: script=%#v err=%v", tc.driver, deleted, err)
 			}
-			if err := store.Insert(script.ScriptRecord{
+			if err := store.Insert(script.Record{
 				Name: "provider-succeeds", Site: siteName, ScriptType: script.TypeAPIMethod,
 				DocType: "External Operation", Event: script.EventPayment, MethodPath: "provider.success", IsActive: true,
 			}); err != nil {

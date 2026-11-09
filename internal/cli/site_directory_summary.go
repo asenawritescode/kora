@@ -39,7 +39,7 @@ type directoryAssignmentSummary struct {
 }
 
 type directoryAssignmentPager interface {
-	GetDirectoryDescriptorPageContext(context.Context, string, string, uint16) ([]site.SiteDescriptor, error)
+	GetDirectoryDescriptorPageContext(context.Context, string, string, uint16) ([]site.Descriptor, error)
 	CurrentDirectoryRevisionContext(context.Context) (uint64, error)
 }
 
@@ -107,7 +107,7 @@ func summarizeDirectoryAssignments(ctx context.Context, registry directoryAssign
 	var total uint64
 	after := ""
 	for {
-		var page []site.SiteDescriptor
+		var page []site.Descriptor
 		err := runCLIWork(ctx, admission, func() error {
 			var err error
 			page, err = registry.GetDirectoryDescriptorPageContext(ctx, "", after, pageSize)

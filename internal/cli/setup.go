@@ -107,7 +107,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runSetupSiteCreation(ctx context.Context, tenantConfig *site.SiteConfig, platformDriver, platformDSN string, createSite func() (*site.CreateSiteResult, error)) (*site.CreateSiteResult, error) {
+func runSetupSiteCreation(ctx context.Context, tenantConfig *site.Config, platformDriver, platformDSN string, createSite func() (*site.CreateSiteResult, error)) (*site.CreateSiteResult, error) {
 	if ctx == nil || tenantConfig == nil || createSite == nil {
 		return nil, fmt.Errorf("setup site creation requires context, tenant configuration, and operation")
 	}

@@ -73,7 +73,7 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 		"task-after-insert":  script.EventAfterInsert,
 		"task-after-save":    script.EventAfterSave,
 	} {
-		if err := scriptStore.Insert(script.ScriptRecord{
+		if err := scriptStore.Insert(script.Record{
 			Name: name, Site: site, ScriptType: script.TypeDocEvent,
 			DocType: "Task", Event: event, IsActive: true, Script: "return document",
 		}); err != nil {

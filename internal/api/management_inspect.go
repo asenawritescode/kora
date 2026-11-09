@@ -31,8 +31,8 @@ func writeManagementError(c *gin.Context, status int, code contract.Code, messag
 // ManagementDirectory is the credential-free subset of Engine's platform
 // directory needed by the management inspection API.
 type ManagementDirectory interface {
-	GetDescriptorByIDContext(context.Context, string) (site.SiteDescriptor, error)
-	ResolveDescriptorByAliasContext(context.Context, string) (site.SiteDescriptor, error)
+	GetDescriptorByIDContext(context.Context, string) (site.Descriptor, error)
+	ResolveDescriptorByAliasContext(context.Context, string) (site.Descriptor, error)
 	CurrentDirectoryRevisionContext(context.Context) (uint64, error)
 }
 
@@ -115,7 +115,7 @@ func (h *ManagementInspectHandler) resolveDeploymentEntry(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		var descriptor site.SiteDescriptor
+		var descriptor site.Descriptor
 		if tenant != "" {
 			descriptor, err = h.directory.GetDescriptorByIDContext(c.Request.Context(), string(tenant))
 		} else {
@@ -236,7 +236,7 @@ func (h *ManagementInspectHandler) inspect(c *gin.Context) {
 		writeManagementError(c, http.StatusBadRequest, contract.CodeValidationFailed, "invalid tenant ID")
 		return
 	}
-	var descriptor site.SiteDescriptor
+	var descriptor site.Descriptor
 	err = h.withWork(c.Request.Context(), func() error {
 		var readErr error
 		descriptor, readErr = h.directory.GetDescriptorByIDContext(c.Request.Context(), string(tenant))
@@ -255,7 +255,7 @@ func (h *ManagementInspectHandler) resolveAlias(c *gin.Context) {
 		writeManagementError(c, http.StatusBadRequest, contract.CodeValidationFailed, "valid tenant alias is required")
 		return
 	}
-	var descriptor site.SiteDescriptor
+	var descriptor site.Descriptor
 	err := h.withWork(c.Request.Context(), func() error {
 		var readErr error
 		descriptor, readErr = h.directory.ResolveDescriptorByAliasContext(c.Request.Context(), alias)
@@ -273,7 +273,7 @@ func (h *ManagementInspectHandler) resolveAlias(c *gin.Context) {
 	h.writeDescriptor(c, tenant, descriptor)
 }
 
-func (h *ManagementInspectHandler) writeDescriptor(c *gin.Context, tenant contract.TenantID, descriptor site.SiteDescriptor) {
+func (h *ManagementInspectHandler) writeDescriptor(c *gin.Context, tenant contract.TenantID, descriptor site.Descriptor) {
 	var directoryRevision uint64
 	err := h.withWork(c.Request.Context(), func() error {
 		var readErr error

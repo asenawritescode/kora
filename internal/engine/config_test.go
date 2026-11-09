@@ -46,7 +46,7 @@ func TestNewRollsBackEarlierStagesWhenSharedRuntimeFails(t *testing.T) {
 	}
 	config := Config{
 		Common:         &site.CommonConfig{},
-		ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return nil, nil },
+		ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil },
 	}
 	engine, err := newEngine(context.Background(), config, deps)
 	if engine != nil || !errors.Is(err, wantErr) {
@@ -78,7 +78,7 @@ func TestNewRejectsInvalidSharedSessionCacheBudgetBeforeAcquisition(t *testing.T
 		},
 	}
 	_, err := newEngine(context.Background(), Config{
-		Common: &site.CommonConfig{}, ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return nil, nil },
+		Common: &site.CommonConfig{}, ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil },
 		SessionCacheBudgetBytes: auth.MaxSessionCacheBudgetBytes + 1,
 	}, deps)
 	if err == nil {
@@ -111,7 +111,7 @@ func TestNewRejectsUnsafePublicAppBaseURLBeforeAcquisition(t *testing.T) {
 		},
 	}
 	_, err := newEngine(context.Background(), Config{
-		Common: &site.CommonConfig{}, ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return nil, nil },
+		Common: &site.CommonConfig{}, ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil },
 		PublicAppBaseURL: "http://app.example.test",
 	}, deps)
 	if err == nil {
@@ -174,7 +174,7 @@ func TestNewUsesPlatformDatabaseForApplicationFallbacks(t *testing.T) {
 		},
 	}
 	_, err = newEngine(context.Background(), Config{
-		Common: &site.CommonConfig{}, ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return nil, nil },
+		Common: &site.CommonConfig{}, ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil },
 		ManagementCheckpointVerifier: checkpointVerifier,
 	}, deps)
 	if !errors.Is(err, wantErr) {
@@ -245,7 +245,7 @@ func TestNewRollsBackResourcesAtLaterAssemblyFailures(t *testing.T) {
 			config := Config{
 				Common: &site.CommonConfig{}, Listener: HTTPServerConfig{TLS: knet.TLSConfig{Mode: "auto"}},
 				ReloadToken:    "test-reload-token",
-				ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return nil, nil },
+				ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil },
 			}
 			engine, err := newEngine(context.Background(), config, deps)
 			if engine != nil || !errors.Is(err, wantErr) {
@@ -298,9 +298,9 @@ func TestEngineRunStartsRegisteredWorkersBeforeReadiness(t *testing.T) {
 	}
 	config := Config{
 		Common:         &site.CommonConfig{},
-		ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return nil, nil },
+		ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil },
 		SystemGuard:    auth.LoadSystemGuardFromEnvPaused(),
-		OnReady:        func(EngineMetrics) { close(ready) },
+		OnReady:        func(Metrics) { close(ready) },
 	}
 	engine, err := newEngine(context.Background(), config, deps)
 	if err != nil {

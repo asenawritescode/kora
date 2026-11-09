@@ -41,7 +41,7 @@ func TestAssembleTenantRuntimeLeavesFailedActivationWithRollbackOwner(t *testing
 		Runtimes: []*knet.LoadedSite{runtime}, Directory: directory, DirectoryRevision: 4,
 		DirectoryConsumerID: "engine:test", RetirementLimit: 4,
 		Common: &site.CommonConfig{}, Resources: resources,
-		Services: TenantServiceConfig{ProcessContext: context.Background(), ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) {
+		Services: TenantServiceConfig{ProcessContext: context.Background(), ResolveStorage: func(*site.Config) (storage.Backend, error) {
 			return nil, nil
 		}},
 	})
@@ -65,7 +65,7 @@ func TestTenantRuntimeAssemblyDerivesActivationAdmissionFromResolvedTenant(t *te
 		t.Fatal("create platform DB mock:", err)
 	}
 	defer platformDB.Close()
-	var admitted *site.SiteConfig
+	var admitted *site.Config
 	assembly, err := AssembleTenantRuntime(TenantRuntimeAssemblyConfig{
 		Directory: &assemblyTestDirectory{tenantDirectoryStub: &tenantDirectoryStub{
 			descriptors: []contract.SiteDescriptor{{SiteID: "tenant-activate", Status: "active"}},
@@ -74,11 +74,11 @@ func TestTenantRuntimeAssemblyDerivesActivationAdmissionFromResolvedTenant(t *te
 		DirectoryConsumerID: "engine:admission", RetirementLimit: 1,
 		Common:    &site.CommonConfig{DBHost: "platform-db", DBPort: 3306, DBUser: "default"},
 		Resources: &ProcessResources{PlatformDB: platformDB, PlatformDialect: db.Resolve("mysql")},
-		TenantActivationWorkAdmission: func(_ context.Context, config *site.SiteConfig) (func(), error) {
+		TenantActivationWorkAdmission: func(_ context.Context, config *site.Config) (func(), error) {
 			admitted = config
 			return func() {}, nil
 		},
-		Services: TenantServiceConfig{ProcessContext: context.Background(), Analytics: &analytics.Config{WALDir: t.TempDir()}, ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return nil, nil }},
+		Services: TenantServiceConfig{ProcessContext: context.Background(), Analytics: &analytics.Config{WALDir: t.TempDir()}, ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil }},
 	})
 	if err != nil {
 		t.Fatal(err)

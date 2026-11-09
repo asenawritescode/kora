@@ -98,7 +98,7 @@ func runLiveEnginePlacementMoveAndRecover(t *testing.T, deploymentNames bool) {
 	}()
 	registry := site.NewSQLSiteRegistry(database, "mysql")
 	hostname := "deployment-move-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".example.invalid"
-	if err := registry.Upsert(&site.SiteConfig{
+	if err := registry.Upsert(&site.Config{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1",
 		DBPort: mustPort(t, platformPort), DBName: tenantDBName, DBUser: "root", DBPassword: "acceptance-only",
 	}); err != nil {

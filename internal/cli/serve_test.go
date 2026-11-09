@@ -209,7 +209,7 @@ func TestAsyncHookWorkerPinsTenantRuntimeUntilExecutionFinishes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := worker.Sink().Enqueue(context.Background(), orm.AsyncHookRequest{Site: runtime.Name, Doctype: "Thing", Rec: script.ScriptRecord{Name: "after_save"}}); err != nil {
+	if err := worker.Sink().Enqueue(context.Background(), orm.AsyncHookRequest{Site: runtime.Name, Doctype: "Thing", Rec: script.Record{Name: "after_save"}}); err != nil {
 		t.Fatal(err)
 	}
 	select {

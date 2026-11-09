@@ -19,24 +19,24 @@ import (
 )
 
 type durableScannerDirectory struct {
-	page      []site.SiteDescriptor
+	page      []site.Descriptor
 	info      site.DBSiteInfo
 	pageCalls *atomic.Int32
 }
 
 type scannerActivationDirectory struct {
 	*tenantDirectoryStub
-	page []site.SiteDescriptor
+	page []site.Descriptor
 }
 
-func (d *scannerActivationDirectory) GetDirectoryDescriptorPageContext(ctx context.Context, _ string, _ string, limit uint16) ([]site.SiteDescriptor, error) {
+func (d *scannerActivationDirectory) GetDirectoryDescriptorPageContext(ctx context.Context, _ string, _ string, limit uint16) ([]site.Descriptor, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if len(d.page) > int(limit) {
 		return nil, errors.New("page exceeded requested limit")
 	}
-	return append([]site.SiteDescriptor(nil), d.page...), nil
+	return append([]site.Descriptor(nil), d.page...), nil
 }
 
 func TestDurableWorkScannerRetriesColdActivationAfterResidentCapacityFrees(t *testing.T) {
@@ -65,11 +65,11 @@ func TestDurableWorkScannerRetriesColdActivationAfterResidentCapacityFrees(t *te
 		t.Fatal(err)
 	}
 	baseDirectory := &tenantDirectoryStub{
-		descriptor: site.SiteDescriptor{SiteID: coldID, Aliases: []string{"cold-work.example"}, Status: "active", ConfigRevision: 1},
+		descriptor: site.Descriptor{SiteID: coldID, Aliases: []string{"cold-work.example"}, Status: "active", ConfigRevision: 1},
 		byID:       site.DBSiteInfo{SiteID: coldID, Name: "cold-work.example", Status: "active", ConfigRevision: 1},
 		revision:   9,
 	}
-	directory := &scannerActivationDirectory{tenantDirectoryStub: baseDirectory, page: []site.SiteDescriptor{{SiteID: coldID, Status: "active"}}}
+	directory := &scannerActivationDirectory{tenantDirectoryStub: baseDirectory, page: []site.Descriptor{{SiteID: coldID, Status: "active"}}}
 	var loads atomic.Int32
 	coordinator, err := newTenantRuntimeCoordinator(TenantRuntimeCoordinatorConfig{
 		Tenants: router, Directory: directory, Common: &site.CommonConfig{}, MaxResidentTenants: 1,
@@ -136,7 +136,7 @@ func TestDurableWorkScannerWakesColdTenantForAnalyticsWAL(t *testing.T) {
 		common:    &site.CommonConfig{}, analytics: &analytics.Config{WALDir: base},
 	}
 	scanner.beginColdWALScan("")
-	due, err := scanner.probeTenant(context.Background(), site.SiteDescriptor{SiteID: "wal-tenant", Status: "active"})
+	due, err := scanner.probeTenant(context.Background(), site.Descriptor{SiteID: "wal-tenant", Status: "active"})
 	if err != nil || !due {
 		t.Fatalf("cold tenant with retained analytics WAL = (%t, %v), want (true, nil)", due, err)
 	}
@@ -158,7 +158,7 @@ func TestDurableWorkScannerRechecksAssignmentAfterReadingCurrentTenant(t *testin
 		cellID: "deployment-a",
 		common: &site.CommonConfig{},
 	}
-	due, err := scanner.probeTenant(context.Background(), site.SiteDescriptor{
+	due, err := scanner.probeTenant(context.Background(), site.Descriptor{
 		SiteID: "tenant-moved", RuntimeCellID: "deployment-a", Status: "active",
 	})
 	if err != nil || due {
@@ -226,7 +226,7 @@ func TestAnalyticsWALHasPendingIncludesCurrentAndRotatedRecords(t *testing.T) {
 	}
 }
 
-func (d durableScannerDirectory) GetDirectoryDescriptorPageContext(ctx context.Context, _ string, _ string, limit uint16) ([]site.SiteDescriptor, error) {
+func (d durableScannerDirectory) GetDirectoryDescriptorPageContext(ctx context.Context, _ string, _ string, limit uint16) ([]site.Descriptor, error) {
 	if d.pageCalls != nil {
 		d.pageCalls.Add(1)
 	}
@@ -236,7 +236,7 @@ func (d durableScannerDirectory) GetDirectoryDescriptorPageContext(ctx context.C
 	if len(d.page) > int(limit) {
 		return nil, errors.New("page exceeded requested limit")
 	}
-	return append([]site.SiteDescriptor(nil), d.page...), nil
+	return append([]site.Descriptor(nil), d.page...), nil
 }
 
 type scannerWorkAdmission struct {
@@ -276,7 +276,7 @@ func TestDurableWorkScannerAdmitsEachPlatformOperation(t *testing.T) {
 	update := `UPDATE _kora_durable_scan_cursor SET after_site_id=?,last_completed_at=STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'),updated_at=STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW') WHERE scan_key=? AND after_site_id=?`
 	mock.ExpectExec(regexp.QuoteMeta(update)).WithArgs("", scanKey, "").WillReturnResult(sqlmock.NewResult(0, 1))
 	var pageCalls atomic.Int32
-	directory := &durableScannerDirectory{page: []site.SiteDescriptor{{SiteID: "tenant-a", Status: "active"}}, pageCalls: &pageCalls}
+	directory := &durableScannerDirectory{page: []site.Descriptor{{SiteID: "tenant-a", Status: "active"}}, pageCalls: &pageCalls}
 	loaded := &knet.LoadedSite{SiteID: "tenant-a", Name: "tenant-a.example"}
 	router := knet.NewSiteRouter([]*knet.LoadedSite{loaded})
 	admission := &scannerWorkAdmission{}
@@ -319,7 +319,7 @@ func TestDurableWorkScannerAdmissionRejectionStopsPlatformOperation(t *testing.T
 					WithArgs(scanKey).WillReturnRows(sqlmock.NewRows([]string{"after_site_id", "last_completed_at"}).AddRow("", nil))
 			}
 			var pageCalls atomic.Int32
-			directory := &durableScannerDirectory{page: []site.SiteDescriptor{{SiteID: "tenant-a", Status: "active"}}, pageCalls: &pageCalls}
+			directory := &durableScannerDirectory{page: []site.Descriptor{{SiteID: "tenant-a", Status: "active"}}, pageCalls: &pageCalls}
 			loaded := &knet.LoadedSite{SiteID: "tenant-a", Name: "tenant-a.example"}
 			router := knet.NewSiteRouter([]*knet.LoadedSite{loaded})
 			admission := &scannerWorkAdmission{reject: rejectAt}
@@ -383,7 +383,7 @@ func TestDurableWorkScannerAdmissionRejectsTenantDescriptorLookup(t *testing.T) 
 		directory: durableScannerDirectory{info: site.DBSiteInfo{SiteID: "tenant-a", Name: "tenant-a.example", Status: "active"}},
 		common:    &site.CommonConfig{}, workAdmission: admission,
 	}
-	if _, err := scanner.probeTenant(context.Background(), site.SiteDescriptor{SiteID: "tenant-a", Status: "active"}); !errors.Is(err, dbaccess.ErrExhausted) {
+	if _, err := scanner.probeTenant(context.Background(), site.Descriptor{SiteID: "tenant-a", Status: "active"}); !errors.Is(err, dbaccess.ErrExhausted) {
 		t.Fatalf("probeTenant error = %v, want descriptor lookup admission rejection", err)
 	}
 	if admission.calls.Load() != 1 || admission.active.Load() != 0 {
@@ -444,7 +444,7 @@ func TestDurableWorkScannerAdvancesBoundedKeysetPage(t *testing.T) {
 	router := knet.NewSiteRouter([]*knet.LoadedSite{loaded})
 	scanner, err := NewDurableWorkScanner(DurableWorkScannerConfig{
 		ParentContext: context.Background(), PlatformDB: database, PlatformDialect: db.Resolve("libsql"),
-		Directory: durableScannerDirectory{page: []site.SiteDescriptor{{SiteID: "tenant-a", Status: "active"}}},
+		Directory: durableScannerDirectory{page: []site.Descriptor{{SiteID: "tenant-a", Status: "active"}}},
 		Tenants:   router, Coordinator: testTenantCoordinator(t, router, nil), Common: &site.CommonConfig{},
 		DirectoryConsumerID: "engine:test", PageSize: 2,
 	})
@@ -485,15 +485,15 @@ func TestDurableScanStateRejectsCursorMovedByAnotherScanner(t *testing.T) {
 func TestActiveScanDescriptorHonorsCellAndStatus(t *testing.T) {
 	cases := []struct {
 		name       string
-		descriptor site.SiteDescriptor
+		descriptor site.Descriptor
 		cell       string
 		want       bool
 	}{
-		{name: "active default", descriptor: site.SiteDescriptor{SiteID: "a", Status: "active"}, want: true},
-		{name: "degraded assigned", descriptor: site.SiteDescriptor{SiteID: "b", Status: "degraded", RuntimeCellID: "west"}, cell: "west", want: true},
-		{name: "other cell", descriptor: site.SiteDescriptor{SiteID: "c", Status: "active", RuntimeCellID: "east"}, cell: "west"},
-		{name: "paused", descriptor: site.SiteDescriptor{SiteID: "d", Status: "paused"}},
-		{name: "missing identity", descriptor: site.SiteDescriptor{Status: "active"}},
+		{name: "active default", descriptor: site.Descriptor{SiteID: "a", Status: "active"}, want: true},
+		{name: "degraded assigned", descriptor: site.Descriptor{SiteID: "b", Status: "degraded", RuntimeCellID: "west"}, cell: "west", want: true},
+		{name: "other cell", descriptor: site.Descriptor{SiteID: "c", Status: "active", RuntimeCellID: "east"}, cell: "west"},
+		{name: "paused", descriptor: site.Descriptor{SiteID: "d", Status: "paused"}},
+		{name: "missing identity", descriptor: site.Descriptor{Status: "active"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

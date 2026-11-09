@@ -45,8 +45,8 @@ func TestLivePostgresSiteDirectoryLifecycle(t *testing.T) {
 		t.Fatal("read startup feed boundary:", err)
 	}
 	consumerID := fmt.Sprintf("integration:postgres-lifecycle:%d", time.Now().UnixNano())
-	var applied []SiteDirectoryChange
-	consumer := &DirectoryConsumer{Registry: registry, ID: consumerID, InitialCursor: startCursor, Apply: func(_ context.Context, change SiteDirectoryChange) error {
+	var applied []DirectoryChange
+	consumer := &DirectoryConsumer{Registry: registry, ID: consumerID, InitialCursor: startCursor, Apply: func(_ context.Context, change DirectoryChange) error {
 		applied = append(applied, change)
 		return nil
 	}}
@@ -56,15 +56,15 @@ func TestLivePostgresSiteDirectoryLifecycle(t *testing.T) {
 	// A second Engine replica has an independent stable consumer identity and
 	// therefore its own durable cursor. Both replicas must converge from the
 	// same snapshot boundary without advancing or masking one another.
-	var replicaApplied []SiteDirectoryChange
-	replica := &DirectoryConsumer{Registry: registry, ID: consumerID + ":replica-b", InitialCursor: startCursor, Apply: func(_ context.Context, change SiteDirectoryChange) error {
+	var replicaApplied []DirectoryChange
+	replica := &DirectoryConsumer{Registry: registry, ID: consumerID + ":replica-b", InitialCursor: startCursor, Apply: func(_ context.Context, change DirectoryChange) error {
 		replicaApplied = append(replicaApplied, change)
 		return nil
 	}}
 	if count, err := replica.ProcessBatch(context.Background()); err != nil || count != 0 {
 		t.Fatalf("initialize second replica from snapshot = %d, %v", count, err)
 	}
-	config := &SiteConfig{Hostname: hostname, DomainsList: []string{hostname, "alias." + hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "unused", DBUser: "unused"}
+	config := &Config{Hostname: hostname, DomainsList: []string{hostname, "alias." + hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "unused", DBUser: "unused"}
 	if err := registry.Upsert(config); err != nil {
 		t.Fatal("upsert:", err)
 	}
@@ -78,7 +78,7 @@ func TestLivePostgresSiteDirectoryLifecycle(t *testing.T) {
 	if count, err := consumer.ProcessBatch(context.Background()); err != nil || count != 1 {
 		t.Fatalf("initial consumer batch = %d, %v", count, err)
 	}
-	duplicate := &DirectoryConsumer{Registry: registry, ID: consumerID, OwnerID: "integration:duplicate-process", Apply: func(context.Context, SiteDirectoryChange) error {
+	duplicate := &DirectoryConsumer{Registry: registry, ID: consumerID, OwnerID: "integration:duplicate-process", Apply: func(context.Context, DirectoryChange) error {
 		t.Fatal("duplicate consumer identity applied a revision while another owner held the lease")
 		return nil
 	}}
@@ -101,7 +101,7 @@ func TestLivePostgresSiteDirectoryLifecycle(t *testing.T) {
 	}
 	// A new consumer object with the same identity models a process restart.
 	consumer.releaseLease()
-	restarted := &DirectoryConsumer{Registry: registry, ID: consumerID, Apply: func(_ context.Context, change SiteDirectoryChange) error {
+	restarted := &DirectoryConsumer{Registry: registry, ID: consumerID, Apply: func(_ context.Context, change DirectoryChange) error {
 		applied = append(applied, change)
 		return nil
 	}}
@@ -140,7 +140,7 @@ func TestLivePostgresSiteDirectoryLifecycle(t *testing.T) {
 	resynced := uint64(0)
 	stale := &DirectoryConsumer{
 		Registry: registry, ID: "integration:stale:" + hostname, InitialCursor: startCursor,
-		Apply:  func(context.Context, SiteDirectoryChange) error { return nil },
+		Apply:  func(context.Context, DirectoryChange) error { return nil },
 		Resync: func(_ context.Context, revision uint64) error { resynced = revision; return nil },
 	}
 	if count, err := stale.ProcessBatch(context.Background()); err != nil || count != 0 {
@@ -370,7 +370,7 @@ func TestLivePostgresProvisioningRegistrationBackfillsOnlyUnassignedRows(t *test
 	hostname := fmt.Sprintf("provisioning-assignment-%d.example.invalid", stamp)
 	tenantID := fmt.Sprintf("tenant-provisioning-assignment-%d", stamp)
 	t.Cleanup(func() { _ = removePlatformSiteRegistration(database, "postgres", hostname) })
-	config := &SiteConfig{Hostname: hostname, DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432, DBName: "tenant_db", DomainsList: []string{hostname}}
+	config := &Config{Hostname: hostname, DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432, DBName: "tenant_db", DomainsList: []string{hostname}}
 	register := func(status, assignment string) error {
 		return ensurePlatformSiteRegistrationAssignmentContext(t.Context(), database, "postgres", config, status, assignment, tenantID)
 	}
@@ -418,11 +418,11 @@ func TestLivePostgresConsumerLeaseFencesExpiredOwner(t *testing.T) {
 	if _, err := registry.LoadConsumerCursor(id, startCursor); err != nil {
 		t.Fatal("initialize consumer cursor:", err)
 	}
-	oldOwner := &DirectoryConsumer{Registry: registry, ID: id, OwnerID: "replica-old", InitialCursor: startCursor, Apply: func(context.Context, SiteDirectoryChange) error {
+	oldOwner := &DirectoryConsumer{Registry: registry, ID: id, OwnerID: "replica-old", InitialCursor: startCursor, Apply: func(context.Context, DirectoryChange) error {
 		t.Fatal("expired owner applied a change after losing its lease")
 		return nil
 	}}
-	newOwner := &DirectoryConsumer{Registry: registry, ID: id, OwnerID: "replica-new", InitialCursor: startCursor, Apply: func(context.Context, SiteDirectoryChange) error { return nil }}
+	newOwner := &DirectoryConsumer{Registry: registry, ID: id, OwnerID: "replica-new", InitialCursor: startCursor, Apply: func(context.Context, DirectoryChange) error { return nil }}
 	if count, err := oldOwner.ProcessBatch(context.Background()); err != nil || count != 0 {
 		t.Fatalf("initial owner claim = %d, %v", count, err)
 	}

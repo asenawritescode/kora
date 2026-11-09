@@ -24,14 +24,14 @@ const (
 	ExitUnknown     = 40
 )
 
-// CLIExitError carries a stable machine-readable process exit status.
-type CLIExitError struct {
+// ExitError carries a stable machine-readable process exit status.
+type ExitError struct {
 	Code int
 	Err  error
 }
 
-func (e *CLIExitError) Error() string { return e.Err.Error() }
-func (e *CLIExitError) Unwrap() error { return e.Err }
+func (e *ExitError) Error() string { return e.Err.Error() }
+func (e *ExitError) Unwrap() error { return e.Err }
 
 func newRemoteCatalogCommand(opts *remoteOptions) *cobra.Command {
 	return &cobra.Command{Use: "catalog", Short: "Read the actor-filtered published module catalog", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -550,7 +550,7 @@ func receiptExit(receipt contract.OperationReceipt) error {
 	}
 }
 
-func cliOutcomeError(code int, err error) error { return &CLIExitError{Code: code, Err: err} }
+func cliOutcomeError(code int, err error) error { return &ExitError{Code: code, Err: err} }
 
 func classifyTenantError(err error, token string) error {
 	var remote *tenantsdk.RemoteError

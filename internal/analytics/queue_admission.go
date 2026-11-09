@@ -12,10 +12,10 @@ const MaxAnalyticsProcessListeners = 65536
 
 var ErrAnalyticsQueueBudgetInvalid = errors.New("analytics process queue admission budget must be between 1 byte and 4 GiB")
 
-// AnalyticsQueueAdmission bounds conservative queued-payload bytes across
+// QueueAdmission bounds conservative queued-payload bytes across
 // tenant wake-up channels and MultiBus listeners owned by one Engine process.
 // Reservations use the configured maximum event size, not an estimate.
-type AnalyticsQueueAdmission struct {
+type QueueAdmission struct {
 	mu                sync.Mutex
 	maxBytes          uint64
 	used              uint64
@@ -25,7 +25,7 @@ type AnalyticsQueueAdmission struct {
 	rejectedListeners uint64
 }
 
-type AnalyticsQueueAdmissionSnapshot struct {
+type QueueSnapshot struct {
 	UsedBytes         uint64
 	MaxBytes          uint64
 	RejectedItems     uint64
@@ -34,24 +34,24 @@ type AnalyticsQueueAdmissionSnapshot struct {
 	RejectedListeners uint64
 }
 
-func NewAnalyticsQueueAdmission(maxBytes uint64) (*AnalyticsQueueAdmission, error) {
+func NewAnalyticsQueueAdmission(maxBytes uint64) (*QueueAdmission, error) {
 	return NewAnalyticsQueueAdmissionWithLimits(maxBytes, DefaultAnalyticsProcessMaxListeners)
 }
 
-func NewAnalyticsQueueAdmissionWithLimits(maxBytes uint64, maxListeners int) (*AnalyticsQueueAdmission, error) {
+func NewAnalyticsQueueAdmissionWithLimits(maxBytes uint64, maxListeners int) (*QueueAdmission, error) {
 	if maxBytes == 0 || maxBytes > MaxAnalyticsQueueAdmissionBytes {
 		return nil, ErrAnalyticsQueueBudgetInvalid
 	}
 	if maxListeners <= 0 || maxListeners > MaxAnalyticsProcessListeners {
 		return nil, ErrAnalyticsListenerBudgetInvalid
 	}
-	return &AnalyticsQueueAdmission{maxBytes: maxBytes, maxListeners: maxListeners}, nil
+	return &QueueAdmission{maxBytes: maxBytes, maxListeners: maxListeners}, nil
 }
 
 var ErrAnalyticsListenerBudgetInvalid = errors.New("analytics process listener limit must be between 1 and 65536")
 
 // TryAcquireListener reserves one process-wide subscription slot.
-func (a *AnalyticsQueueAdmission) TryAcquireListener() bool {
+func (a *QueueAdmission) TryAcquireListener() bool {
 	if a == nil {
 		return true
 	}
@@ -66,7 +66,7 @@ func (a *AnalyticsQueueAdmission) TryAcquireListener() bool {
 }
 
 // ReleaseListener releases one process-wide subscription slot.
-func (a *AnalyticsQueueAdmission) ReleaseListener() {
+func (a *QueueAdmission) ReleaseListener() {
 	if a == nil {
 		return
 	}
@@ -77,7 +77,7 @@ func (a *AnalyticsQueueAdmission) ReleaseListener() {
 	a.mu.Unlock()
 }
 
-func (a *AnalyticsQueueAdmission) TryAcquire(bytes uint64) bool {
+func (a *QueueAdmission) TryAcquire(bytes uint64) bool {
 	if a == nil || bytes == 0 {
 		return true
 	}
@@ -91,7 +91,7 @@ func (a *AnalyticsQueueAdmission) TryAcquire(bytes uint64) bool {
 	return true
 }
 
-func (a *AnalyticsQueueAdmission) Release(bytes uint64) {
+func (a *QueueAdmission) Release(bytes uint64) {
 	if a == nil || bytes == 0 {
 		return
 	}
@@ -104,13 +104,13 @@ func (a *AnalyticsQueueAdmission) Release(bytes uint64) {
 	a.mu.Unlock()
 }
 
-func (a *AnalyticsQueueAdmission) Snapshot() AnalyticsQueueAdmissionSnapshot {
+func (a *QueueAdmission) Snapshot() QueueSnapshot {
 	if a == nil {
-		return AnalyticsQueueAdmissionSnapshot{}
+		return QueueSnapshot{}
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return AnalyticsQueueAdmissionSnapshot{
+	return QueueSnapshot{
 		UsedBytes: a.used, MaxBytes: a.maxBytes, RejectedItems: a.rejected,
 		Listeners: a.listeners, MaxListeners: a.maxListeners, RejectedListeners: a.rejectedListeners,
 	}

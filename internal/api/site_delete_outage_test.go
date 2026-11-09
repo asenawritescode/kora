@@ -95,7 +95,7 @@ func TestHandleUpdateSiteDoesNotApplyChangesWhenDirectoryUnavailable(t *testing.
 	resolvedStorage := false
 	handler := &ConsoleHandler{
 		SiteRouter: router,
-		ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) {
+		ResolveStorage: func(*site.Config) (storage.Backend, error) {
 			resolvedStorage = true
 			return nil, nil
 		},

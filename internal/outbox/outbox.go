@@ -590,21 +590,21 @@ func validateReceiptInput(c *Consumer, ctx context.Context, eventID, site string
 	return nil
 }
 
-// OutboxMetrics is an operational snapshot of outbox health (RFC §8.1).
-type OutboxMetrics struct {
+// Metrics is an operational snapshot of outbox health (RFC §8.1).
+type Metrics struct {
 	Pending   int `json:"pending"`
 	Failed    int `json:"failed"`
 	Published int `json:"published"`
 }
 
 // Metrics returns outbox health counters for operator visibility.
-func (p *Publisher) Metrics(ctx context.Context) (OutboxMetrics, error) {
+func (p *Publisher) Metrics(ctx context.Context) (Metrics, error) {
 	release, err := p.acquireWork(ctx)
 	if err != nil {
-		return OutboxMetrics{}, fmt.Errorf("outbox: admit metrics query: %w", err)
+		return Metrics{}, fmt.Errorf("outbox: admit metrics query: %w", err)
 	}
 	defer release()
-	var m OutboxMetrics
+	var m Metrics
 	err = p.DB.QueryRowContext(ctx, db.Rebind(p.Dialect,
 		`SELECT
 		  COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0),

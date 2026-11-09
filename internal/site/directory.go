@@ -12,13 +12,13 @@ import (
 	"github.com/asenawritescode/kora/contract"
 )
 
-type SiteDescriptor = contract.SiteDescriptor
+type Descriptor = contract.SiteDescriptor
 
 // DeploymentEntryV2FromDescriptor projects the existing single assignment
 // source into the versioned deployment contract. Empty legacy assignments are
 // the default deployment; a non-empty runtime_cell_id maps to the same ID
 // until the controlled deployment-assignment cutover.
-func DeploymentEntryV2FromDescriptor(descriptor SiteDescriptor, directoryRevision uint64) (contract.SiteDirectoryEntryV2, error) {
+func DeploymentEntryV2FromDescriptor(descriptor Descriptor, directoryRevision uint64) (contract.SiteDirectoryEntryV2, error) {
 	cellID := strings.TrimSpace(descriptor.RuntimeCellID)
 	if cellID == "" {
 		cellID = "default"
@@ -47,7 +47,7 @@ func DeploymentEntryV2FromDescriptor(descriptor SiteDescriptor, directoryRevisio
 // placement metadata before publishing a tenant snapshot. It validates the
 // complete credential-free directory and keeps v1 assignment compatibility in
 // one conversion path.
-func ValidateDeploymentDirectoryV2(descriptors []SiteDescriptor, directoryRevision uint64) error {
+func ValidateDeploymentDirectoryV2(descriptors []Descriptor, directoryRevision uint64) error {
 	seen := make(map[string]struct{}, len(descriptors))
 	for _, descriptor := range descriptors {
 		if _, duplicate := seen[descriptor.SiteID]; duplicate {
@@ -64,7 +64,7 @@ func ValidateDeploymentDirectoryV2(descriptors []SiteDescriptor, directoryRevisi
 
 // DescriptorFromDBSiteInfo makes a safe wire representation of a registered
 // site. It never copies database credentials or storage connection details.
-func DescriptorFromDBSiteInfo(info DBSiteInfo) SiteDescriptor {
+func DescriptorFromDBSiteInfo(info DBSiteInfo) Descriptor {
 	aliases := make([]string, 0, len(info.Domains)+1)
 	seen := make(map[string]struct{}, len(info.Domains)+1)
 	for _, alias := range append(append([]string(nil), info.Domains...), info.Name) {
@@ -82,7 +82,7 @@ func DescriptorFromDBSiteInfo(info DBSiteInfo) SiteDescriptor {
 	if status == "" {
 		status = "active"
 	}
-	return SiteDescriptor{Version: contract.SiteDirectoryVersion, SiteID: info.SiteID, Aliases: aliases, Status: status, ConfigRevision: info.ConfigRevision, RuntimeCellID: strings.TrimSpace(info.RuntimeCellID), DataPlaneRef: DataPlaneReference(info)}
+	return Descriptor{Version: contract.SiteDirectoryVersion, SiteID: info.SiteID, Aliases: aliases, Status: status, ConfigRevision: info.ConfigRevision, RuntimeCellID: strings.TrimSpace(info.RuntimeCellID), DataPlaneRef: DataPlaneReference(info)}
 }
 
 // DataPlaneReference is a stable, credential-free identifier for the tenant's
@@ -121,10 +121,10 @@ func NormalizeSiteAlias(alias string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(alias)), ".")
 }
 
-// SiteBelongsToDeployment preserves single-Engine behavior when the process
+// BelongsToDeployment preserves single-Engine behavior when the process
 // has no explicit placement. With a configured deployment, a blank legacy
 // assignment belongs only to "default"; invalid IDs fail closed.
-func SiteBelongsToDeployment(siteDeploymentID, processDeploymentID string) bool {
+func BelongsToDeployment(siteDeploymentID, processDeploymentID string) bool {
 	processDeploymentID = strings.TrimSpace(processDeploymentID)
 	if processDeploymentID == "" {
 		return true
@@ -141,9 +141,9 @@ func SiteBelongsToDeployment(siteDeploymentID, processDeploymentID string) bool 
 	return err == nil && siteDeploymentID != "" && siteDeploymentID == processDeploymentID
 }
 
-// SiteBelongsToRuntimeCell is the legacy adapter for deployment ownership.
-func SiteBelongsToRuntimeCell(siteCellID, processCellID string) bool {
-	return SiteBelongsToDeployment(siteCellID, processCellID)
+// BelongsToRuntimeCell is the legacy adapter for deployment ownership.
+func BelongsToRuntimeCell(siteCellID, processCellID string) bool {
+	return BelongsToDeployment(siteCellID, processCellID)
 }
 
 func newCanonicalSiteID() (string, error) {

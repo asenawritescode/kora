@@ -44,8 +44,8 @@ func ValidateTenantDatabaseName(driver, name string) error {
 	return nil
 }
 
-// SiteConfig holds the configuration for a single site/tenant.
-type SiteConfig struct {
+// Config holds the configuration for a single site/tenant.
+type Config struct {
 	// Database connection settings.
 	DBType     string `yaml:"db_type"` // "mysql", "postgres", or "libsql"
 	DBHost     string `yaml:"db_host"`
@@ -87,7 +87,7 @@ type SiteConfig struct {
 }
 
 // Domains returns all domains for this site. Falls back to [Hostname] if not configured.
-func (s *SiteConfig) Domains() []string {
+func (s *Config) Domains() []string {
 	if len(s.DomainsList) > 0 {
 		return s.DomainsList
 	}
@@ -161,13 +161,13 @@ type CommonConfig struct {
 
 // Site represents a running site with its database connection and config.
 type Site struct {
-	Config   *SiteConfig
+	Config   *Config
 	DB       *sql.DB
 	Hostname string
 }
 
 // DSN returns the connection string for this site, based on its DBType.
-func (s *SiteConfig) DSN() string {
+func (s *Config) DSN() string {
 	dbType := s.DBType
 	if dbType == "" {
 		dbType = "mysql"
@@ -391,7 +391,7 @@ func DiscoverAllSitesFromDBContext(ctx context.Context, db *sql.DB) ([]DBSiteInf
 }
 
 // ReconstructSiteConfig builds a SiteConfig from platform defaults and persisted domains.
-func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []string) *SiteConfig {
+func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []string) *Config {
 	if common == nil {
 		common = &CommonConfig{}
 	}
@@ -402,7 +402,7 @@ func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []stri
 	if dbPort == 0 {
 		dbPort = 3306
 	}
-	return &SiteConfig{
+	return &Config{
 		DBType:         common.DBType,
 		DBHost:         common.DBHost,
 		DBPort:         dbPort,
@@ -419,7 +419,7 @@ func ReconstructSiteConfig(hostname string, common *CommonConfig, domains []stri
 
 // ReconstructSiteConfigFromDBInfo builds a SiteConfig from discovered site metadata
 // and fills any missing values from platform defaults.
-func ReconstructSiteConfigFromDBInfo(info DBSiteInfo, common *CommonConfig) *SiteConfig {
+func ReconstructSiteConfigFromDBInfo(info DBSiteInfo, common *CommonConfig) *Config {
 	cfg := ReconstructSiteConfig(info.Name, common, info.Domains)
 	if info.DBType != "" {
 		cfg.DBType = info.DBType
@@ -451,13 +451,13 @@ func ReconstructSiteConfigFromDBInfo(info DBSiteInfo, common *CommonConfig) *Sit
 }
 
 // Connect opens a database connection for the site.
-func Connect(cfg *SiteConfig) (*sql.DB, error) {
+func Connect(cfg *Config) (*sql.DB, error) {
 	return ConnectContext(context.Background(), cfg)
 }
 
 // ConnectContext opens a tenant database through the shared process connection
 // budget and bounds the initial ping by the caller's activation/probe context.
-func ConnectContext(ctx context.Context, cfg *SiteConfig) (*sql.DB, error) {
+func ConnectContext(ctx context.Context, cfg *Config) (*sql.DB, error) {
 	if ctx == nil || cfg == nil {
 		return nil, fmt.Errorf("database connection requires context and site config")
 	}
@@ -476,14 +476,14 @@ func ConnectContext(ctx context.Context, cfg *SiteConfig) (*sql.DB, error) {
 
 // ConnectionAdmission returns the endpoint-shared work limiter corresponding
 // to Connect's resolved driver and DSN.
-func ConnectionAdmission(cfg *SiteConfig) (*dbaccess.Admission, error) {
+func ConnectionAdmission(cfg *Config) (*dbaccess.Admission, error) {
 	driver, dsn := databaseTarget(cfg)
 	return dbaccess.AdmissionFor(driver, dsn)
 }
 
 // ConnectionServerKey identifies the physical endpoint selected by a site
 // configuration without exposing its DSN or credentials to callers.
-func ConnectionServerKey(cfg *SiteConfig) string {
+func ConnectionServerKey(cfg *Config) string {
 	if cfg == nil {
 		return ""
 	}
@@ -491,7 +491,7 @@ func ConnectionServerKey(cfg *SiteConfig) string {
 	return dbaccess.ServerKey(driver, dsn)
 }
 
-func databaseTarget(cfg *SiteConfig) (string, string) {
+func databaseTarget(cfg *Config) (string, string) {
 	dsn := cfg.DSN()
 	// DB_DSN env var overrides per-site DSN only for LibSQL (shared-DB mode)
 	// or when the site config has no explicit DB credentials.
@@ -516,7 +516,7 @@ func databaseTarget(cfg *SiteConfig) (string, string) {
 // fully resolved database target and pool limits. It is suitable for deciding
 // whether a runtime reload may reuse an existing tenant pool; the DSN and its
 // credentials are never returned or logged.
-func ConnectionIdentity(cfg *SiteConfig) string {
+func ConnectionIdentity(cfg *Config) string {
 	if cfg == nil {
 		return ""
 	}
@@ -567,7 +567,7 @@ func tuneConnectionPool(db *sql.DB, driver string, maxOpen, maxIdle int) {
 	}
 }
 
-func CreateDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *SiteConfig) error {
+func CreateDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *Config) error {
 	if ctx == nil {
 		return fmt.Errorf("database creation requires context")
 	}
@@ -637,7 +637,7 @@ func CreateDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *Site
 	return nil
 }
 
-func createPostgresDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *SiteConfig) error {
+func createPostgresDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *Config) error {
 	databaseName := cfg.DBName
 	if strings.TrimSpace(databaseName) == "" || len(databaseName) > 63 {
 		return fmt.Errorf("invalid PostgreSQL database name length")
@@ -717,7 +717,7 @@ func postgresAdminDSN(tenantDSN string, host string, port int, user, password st
 	if port == 0 {
 		port = 5432
 	}
-	return (&SiteConfig{DBType: "postgres", DBHost: host, DBPort: port, DBName: "postgres", DBUser: user, DBPassword: password}).DSN(), nil
+	return (&Config{DBType: "postgres", DBHost: host, DBPort: port, DBName: "postgres", DBUser: user, DBPassword: password}).DSN(), nil
 }
 
 func mysqlBaseDSN(dsn string) (string, error) {

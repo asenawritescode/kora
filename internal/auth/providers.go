@@ -7,10 +7,10 @@ import (
 	"github.com/asenawritescode/kora/contract"
 )
 
-// AuthProvider is the public discovery projection for a sign-in provider. It is
+// Provider is the public discovery projection for a sign-in provider. It is
 // deliberately secret-free: no secret reference, token, or credential ever
 // crosses this struct's JSON boundary.
-type AuthProvider struct {
+type Provider struct {
 	Name        string `json:"name"`
 	Label       string `json:"label"`
 	Status      string `json:"status"`
@@ -34,7 +34,7 @@ type ProviderConfig struct {
 // providers map holds only safe discovery projections; configs holds the full
 // internal configuration (including secret references) for provider flows.
 type ProviderRegistry struct {
-	providers map[string]AuthProvider
+	providers map[string]Provider
 	configs   map[string]ProviderConfig
 }
 
@@ -61,14 +61,14 @@ func DefaultProviderConfigs() []ProviderConfig {
 // returns an error rather than silently accepting an invalid capability.
 func NewProviderRegistryFromConfig(configs []ProviderConfig) (*ProviderRegistry, error) {
 	r := &ProviderRegistry{
-		providers: make(map[string]AuthProvider),
+		providers: make(map[string]Provider),
 		configs:   make(map[string]ProviderConfig),
 	}
 	for _, c := range configs {
 		if !validStatus(c.Status) {
 			return nil, fmt.Errorf("auth: provider %q has invalid status %q", c.Name, c.Status)
 		}
-		r.providers[c.Name] = AuthProvider{
+		r.providers[c.Name] = Provider{
 			Name:        c.Name,
 			Label:       c.Label,
 			Status:      c.Status,
@@ -81,16 +81,16 @@ func NewProviderRegistryFromConfig(configs []ProviderConfig) (*ProviderRegistry,
 
 // Register adds a discovery projection. It is retained for callers that manage
 // providers directly (no secret refs are involved).
-func (r *ProviderRegistry) Register(provider AuthProvider) {
+func (r *ProviderRegistry) Register(provider Provider) {
 	if r.providers == nil {
-		r.providers = make(map[string]AuthProvider)
+		r.providers = make(map[string]Provider)
 	}
 	r.providers[provider.Name] = provider
 }
 
 // List returns the secret-free discovery projection, sorted by name.
-func (r *ProviderRegistry) List() []AuthProvider {
-	out := make([]AuthProvider, 0, len(r.providers))
+func (r *ProviderRegistry) List() []Provider {
+	out := make([]Provider, 0, len(r.providers))
 	for _, p := range r.providers {
 		out = append(out, p)
 	}

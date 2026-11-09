@@ -33,7 +33,7 @@ type ResourceMetricSources struct {
 	RealtimeStreams         *RealtimeStreamAdmission
 	SessionCache            *auth.SessionCacheBudget
 	Uploads                 *UploadAdmission
-	AnalyticsQueueAdmission *analytics.AnalyticsQueueAdmission
+	AnalyticsQueueAdmission *analytics.QueueAdmission
 	TenantActivation        interface {
 		AdmissionSnapshot() ActivationAdmissionSnapshot
 	}

@@ -190,7 +190,7 @@ type TxManager struct {
 	// HookScriptsByDoctype is a command-scoped snapshot of active lifecycle
 	// scripts. Kernel.Execute resets it for each command so each DocType is read
 	// once, rather than querying the script table once per lifecycle event.
-	HookScriptsByDoctype map[string][]script.ScriptRecord
+	HookScriptsByDoctype map[string][]script.Record
 }
 
 type contextQueryer interface {

@@ -32,7 +32,7 @@ type ConsoleAssemblyConfig struct {
 	DBPort          int
 	PlatformDB      *sql.DB
 	AllowOnboarding bool
-	ResolveStorage  func(*site.SiteConfig) (storage.Backend, error)
+	ResolveStorage  func(*site.Config) (storage.Backend, error)
 }
 
 // HTTPProcessAssemblyConfig is the typed input to Engine's HTTP and process

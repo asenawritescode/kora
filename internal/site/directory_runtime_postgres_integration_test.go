@@ -37,7 +37,7 @@ func TestLivePostgresDirectoryRevisionReplacesRoutedRuntime(t *testing.T) {
 
 	name := fmt.Sprintf("runtime-revision-%d.example.invalid", time.Now().UnixNano())
 	registry := NewSQLSiteRegistry(database, "postgres")
-	if err := registry.Upsert(&SiteConfig{Hostname: name, DomainsList: []string{name, "alias." + name}, DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432, DBName: "unused"}); err != nil {
+	if err := registry.Upsert(&Config{Hostname: name, DomainsList: []string{name, "alias." + name}, DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432, DBName: "unused"}); err != nil {
 		t.Fatal("create directory entry:", err)
 	}
 	defer func() {
@@ -59,7 +59,7 @@ func TestLivePostgresDirectoryRevisionReplacesRoutedRuntime(t *testing.T) {
 	}
 	router := knet.NewSiteRouter([]*knet.LoadedSite{initialRuntime})
 	consumer := &DirectoryConsumer{Registry: registry, ID: "integration:runtime-revision:" + name, InitialCursor: startCursor}
-	consumer.Apply = func(_ context.Context, change SiteDirectoryChange) error {
+	consumer.Apply = func(_ context.Context, change DirectoryChange) error {
 		current := router.SiteByID(change.Descriptor.SiteID)
 		if current == nil || current.ConfigRevision >= change.Descriptor.ConfigRevision {
 			return nil

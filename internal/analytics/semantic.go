@@ -322,7 +322,7 @@ type VisualSeries struct {
 	Format string `json:"format,omitempty" yaml:"format,omitempty"`
 }
 
-type AnalyticsQueryRequest struct {
+type SemanticRequest struct {
 	Queries []ModelQuery `json:"queries"`
 	Time    QueryTime    `json:"time"`
 	Limit   int          `json:"limit,omitempty"`
@@ -510,7 +510,7 @@ func (r *RollupDefinition) Validate(measures, dimensions map[string]bool, modelT
 	return nil
 }
 
-func (q *AnalyticsQueryRequest) Validate(catalog *SemanticCatalog) error {
+func (q *SemanticRequest) Validate(catalog *SemanticCatalog) error {
 	if catalog == nil {
 		return fmt.Errorf("analytics catalog is required")
 	}

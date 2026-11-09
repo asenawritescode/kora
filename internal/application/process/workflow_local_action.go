@@ -91,7 +91,7 @@ func (e *WorkflowLocalActionExecutor) ExecuteLocal(ctx context.Context, claim wo
 	if !ok || input.Schema != binding.input || action.RequiredGrant != binding.grant || !action.RequiredGrant.Valid() {
 		return workflow.ActionResult{}, &workflow.LocalActionFailure{Kind: workflow.LocalActionNotAppliedPermanent, Cause: contract.NewError(contract.CodeValidationFailed, "local workflow action is not registered for this schema")}
 	}
-	if !workflow.WorkflowGrantAllows(action.Execution, binding.grant, action.BusinessScope) {
+	if !workflow.GrantAllows(action.Execution, binding.grant, action.BusinessScope) {
 		return workflow.ActionResult{}, &workflow.LocalActionFailure{Kind: workflow.LocalActionNotAppliedPermanent, Cause: contract.NewError(contract.CodePermissionDenied, "workflow service identity lacks the registered action grant")}
 	}
 	if err := e.schemas.Validate(binding.input, input.Data); err != nil {

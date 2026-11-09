@@ -16,7 +16,7 @@ type DirectoryChangeFeed interface {
 	VerifyConsumerLease(consumerID, ownerID string) error
 	RenewConsumerLease(consumerID, ownerID string, duration time.Duration) error
 	ReleaseConsumerLease(consumerID, ownerID string) error
-	ChangesAfter(cursor uint64, limit int) ([]SiteDirectoryChange, error)
+	ChangesAfter(cursor uint64, limit int) ([]DirectoryChange, error)
 	CurrentDirectoryRevision() (uint64, error)
 	AdvanceConsumerCursor(consumerID, ownerID string, expected, next uint64) error
 	ReconcileConsumerCursor(consumerID, ownerID string, expected, snapshotRevision uint64) error
@@ -30,7 +30,7 @@ type ContextDirectoryChangeFeed interface {
 	VerifyConsumerLeaseContext(context.Context, string, string) error
 	RenewConsumerLeaseContext(context.Context, string, string, time.Duration) error
 	ReleaseConsumerLeaseContext(context.Context, string, string) error
-	ChangesAfterContext(context.Context, uint64, int) ([]SiteDirectoryChange, error)
+	ChangesAfterContext(context.Context, uint64, int) ([]DirectoryChange, error)
 	CurrentDirectoryRevisionContext(context.Context) (uint64, error)
 	AdvanceConsumerCursorContext(context.Context, string, string, uint64, uint64) error
 	ReconcileConsumerCursorContext(context.Context, string, string, uint64, uint64) error
@@ -53,7 +53,7 @@ type DirectoryConsumer struct {
 	// InitialCursor is captured before Engine reads its eager startup snapshot.
 	// It is used only if this consumer identity has no persisted cursor yet.
 	InitialCursor uint64
-	Apply         func(context.Context, SiteDirectoryChange) error
+	Apply         func(context.Context, DirectoryChange) error
 	// Resync applies an authoritative registry snapshot representing the
 	// supplied directory revision. It is required to recover after compaction.
 	Resync        func(context.Context, uint64) error
@@ -115,7 +115,7 @@ func (c *DirectoryConsumer) ProcessBatch(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	cursor := c.cursor
-	var changes []SiteDirectoryChange
+	var changes []DirectoryChange
 	err := c.withWork(ctx, func() error {
 		var readErr error
 		changes, readErr = c.changesAfter(ctx, cursor, pageSize)
@@ -232,7 +232,7 @@ func (c *DirectoryConsumer) renewConsumerLease(ctx context.Context, id, owner st
 	}
 	return c.Registry.RenewConsumerLease(id, owner, ttl)
 }
-func (c *DirectoryConsumer) changesAfter(ctx context.Context, cursor uint64, limit int) ([]SiteDirectoryChange, error) {
+func (c *DirectoryConsumer) changesAfter(ctx context.Context, cursor uint64, limit int) ([]DirectoryChange, error) {
 	if feed := c.contextFeed(); feed != nil {
 		return feed.ChangesAfterContext(ctx, cursor, limit)
 	}

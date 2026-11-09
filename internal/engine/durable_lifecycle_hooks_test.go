@@ -55,7 +55,7 @@ func TestProcessOneDurableLifecycleHookCommitsFencedReceipt(t *testing.T) {
 	invocation := script.AsyncHookInvocation{
 		TenantID: "tenant-a", Site: "tenant-a", SourceOperation: contract.OperationID(contract.NewOperationID()),
 		ConfigRevision: 8, Sequence: 1, Doctype: "Task", Event: script.EventAfterSave,
-		Record: script.ScriptRecord{Name: "task-after-save", Site: "tenant-a", ScriptType: script.TypeDocEvent,
+		Record: script.Record{Name: "task-after-save", Site: "tenant-a", ScriptType: script.TypeDocEvent,
 			DocType: "Task", Event: script.EventAfterSave, IsActive: true, TimeoutMs: 5000, Script: "return true"},
 		Document: json.RawMessage(`{"name":"TASK-1","title":"New"}`),
 		Actor:    actor,

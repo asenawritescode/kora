@@ -105,10 +105,10 @@ func TestRequirePlatformWorkCanReleaseBeforeTenantAdmission(t *testing.T) {
 }
 
 func TestWithTenantSiteAdmissionGatesCreateAndReleasesPermit(t *testing.T) {
-	config := &site.SiteConfig{DBType: "mysql", DBHost: "tenant.invalid", DBPort: 3306, DBName: "tenant"}
+	config := &site.Config{DBType: "mysql", DBHost: "tenant.invalid", DBPort: 3306, DBName: "tenant"}
 	var admitted, released atomic.Int32
 	called := false
-	handler := &ConsoleHandler{TenantSiteAdmission: func(context.Context, *site.SiteConfig) (func(), error) {
+	handler := &ConsoleHandler{TenantSiteAdmission: func(context.Context, *site.Config) (func(), error) {
 		admitted.Add(1)
 		return func() { released.Add(1) }, nil
 	}}
@@ -123,7 +123,7 @@ func TestWithTenantSiteAdmissionGatesCreateAndReleasesPermit(t *testing.T) {
 	}
 
 	called = false
-	handler.TenantSiteAdmission = func(context.Context, *site.SiteConfig) (func(), error) {
+	handler.TenantSiteAdmission = func(context.Context, *site.Config) (func(), error) {
 		return nil, errors.New("tenant capacity exhausted")
 	}
 	if err := handler.withTenantSiteAdmission(context.Background(), config, func() error {
@@ -136,7 +136,7 @@ func TestWithTenantSiteAdmissionGatesCreateAndReleasesPermit(t *testing.T) {
 
 func TestHandleCreateSiteReturnsRetryableCapacityResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	handler := &ConsoleHandler{TenantSiteAdmission: func(context.Context, *site.SiteConfig) (func(), error) {
+	handler := &ConsoleHandler{TenantSiteAdmission: func(context.Context, *site.Config) (func(), error) {
 		return nil, ErrTenantProvisioningCapacity
 	}}
 	router := gin.New()
@@ -151,9 +151,9 @@ func TestHandleCreateSiteReturnsRetryableCapacityResponse(t *testing.T) {
 }
 
 func TestOnboardingRetriesTemporaryTenantCapacityExhaustion(t *testing.T) {
-	config := &site.SiteConfig{DBType: "mysql", DBHost: "tenant.invalid", DBPort: 3306, DBName: "tenant"}
+	config := &site.Config{DBType: "mysql", DBHost: "tenant.invalid", DBPort: 3306, DBName: "tenant"}
 	var attempts, created, released atomic.Int32
-	handler := &ConsoleHandler{TenantSiteAdmission: func(context.Context, *site.SiteConfig) (func(), error) {
+	handler := &ConsoleHandler{TenantSiteAdmission: func(context.Context, *site.Config) (func(), error) {
 		if attempts.Add(1) == 1 {
 			return nil, ErrTenantProvisioningCapacity
 		}

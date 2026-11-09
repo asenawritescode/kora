@@ -15,7 +15,7 @@ import (
 func main() {
 	if err := cli.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		var outcome *cli.CLIExitError
+		var outcome *cli.ExitError
 		if errors.As(err, &outcome) {
 			os.Exit(outcome.Code)
 		}

@@ -55,7 +55,7 @@ func analyticsPermissionScope(c *gin.Context, registry *doctype.Registry) string
 	return hex.EncodeToString(digest[:])
 }
 
-func analyticsRequestUsesPublishedProjection(catalog *analytics.SemanticCatalog, request analytics.AnalyticsQueryRequest) bool {
+func analyticsRequestUsesPublishedProjection(catalog *analytics.SemanticCatalog, request analytics.SemanticRequest) bool {
 	if catalog == nil {
 		return false
 	}
@@ -104,10 +104,10 @@ func checkRelatedReportPermissions(c *gin.Context, registry *doctype.Registry, r
 	for _, model := range modelsByName {
 		models = append(models, model)
 	}
-	return checkRelatedModelPermissions(c, registry, models, analytics.AnalyticsQueryRequest{Queries: queries})
+	return checkRelatedModelPermissions(c, registry, models, analytics.SemanticRequest{Queries: queries})
 }
 
-func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, models []analytics.SemanticModel, request analytics.AnalyticsQueryRequest) bool {
+func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, models []analytics.SemanticModel, request analytics.SemanticRequest) bool {
 	queried := make(map[string]bool, len(request.Queries))
 	for _, query := range request.Queries {
 		queried[query.Model] = true

@@ -337,12 +337,12 @@ func (c *TenantRuntimeCoordinator) ActivateFromDirectory(ctx context.Context, si
 }
 
 type contextualTenantDirectory interface {
-	GetDescriptorByIDContext(context.Context, string) (site.SiteDescriptor, error)
+	GetDescriptorByIDContext(context.Context, string) (site.Descriptor, error)
 	GetByIDContext(context.Context, string) (site.DBSiteInfo, error)
 	CurrentDirectoryRevisionContext(context.Context) (uint64, error)
 }
 
-func tenantDescriptorByID(ctx context.Context, directory TenantRuntimeDirectory, siteID string) (site.SiteDescriptor, error) {
+func tenantDescriptorByID(ctx context.Context, directory TenantRuntimeDirectory, siteID string) (site.Descriptor, error) {
 	if contextual, ok := directory.(contextualTenantDirectory); ok {
 		return contextual.GetDescriptorByIDContext(ctx, siteID)
 	}

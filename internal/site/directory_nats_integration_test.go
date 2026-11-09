@@ -66,7 +66,7 @@ func TestLivePostgresNATSSiteDirectoryRecovery(t *testing.T) {
 	}
 	defer cancelWake()
 
-	if err := registry.Upsert(&SiteConfig{
+	if err := registry.Upsert(&Config{
 		Hostname: hostname, DomainsList: []string{hostname, "alias." + hostname},
 		DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432, DBName: "unused",
 	}); err != nil {
@@ -85,7 +85,7 @@ func TestLivePostgresNATSSiteDirectoryRecovery(t *testing.T) {
 	newRelay := func(p *natsprovider.Provider) *DirectoryConsumer {
 		return &DirectoryConsumer{
 			Registry: registry, ID: "integration:nats-relay:" + id, InitialCursor: startCursor,
-			Apply: func(ctx context.Context, change SiteDirectoryChange) error {
+			Apply: func(ctx context.Context, change DirectoryChange) error {
 				return p.PublishSiteDirectoryRevision(ctx, change.Cursor)
 			},
 			Resync: func(ctx context.Context, revision uint64) error {
@@ -115,8 +115,8 @@ func TestLivePostgresNATSSiteDirectoryRecovery(t *testing.T) {
 	}
 	waitWakeup(wakeups, wakeup)
 
-	var applied []SiteDirectoryChange
-	consumer := &DirectoryConsumer{Registry: registry, ID: consumerID, InitialCursor: startCursor, Apply: func(_ context.Context, change SiteDirectoryChange) error {
+	var applied []DirectoryChange
+	consumer := &DirectoryConsumer{Registry: registry, ID: consumerID, InitialCursor: startCursor, Apply: func(_ context.Context, change DirectoryChange) error {
 		applied = append(applied, change)
 		return nil
 	}}

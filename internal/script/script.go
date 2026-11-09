@@ -145,8 +145,8 @@ func (s *Store) rebind(query string) string {
 	return db.Rebind(s.dialect(), query)
 }
 
-// ScriptRecord mirrors a _kora_script row.
-type ScriptRecord struct {
+// Record mirrors a _kora_script row.
+type Record struct {
 	Name         string     `json:"name"`
 	Site         string     `json:"site"`
 	ScriptType   Type       `json:"script_type"`
@@ -206,7 +206,7 @@ func (t *scriptTimestamp) parse(value string) error {
 }
 
 // LoadActiveScripts returns all active scripts for a site, filtered by optional doctype+event.
-func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]ScriptRecord, error) {
+func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]Record, error) {
 	return s.loadActiveScripts(context.Background(), s.DB, site, doctype, event)
 }
 
@@ -214,7 +214,7 @@ func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]S
 // transaction. Kernel operations use this so their selected script snapshot
 // shares the same database view as the record mutation and any durable
 // invocation rows written before commit.
-func (s *Store) LoadActiveScriptsTx(ctx context.Context, tx *sql.Tx, site string, doctype string, event Event) ([]ScriptRecord, error) {
+func (s *Store) LoadActiveScriptsTx(ctx context.Context, tx *sql.Tx, site string, doctype string, event Event) ([]Record, error) {
 	if ctx == nil || tx == nil {
 		return nil, fmt.Errorf("script: transaction-bound load requires context and transaction")
 	}
@@ -225,7 +225,7 @@ type activeScriptQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func (s *Store) loadActiveScripts(ctx context.Context, queryer activeScriptQueryer, site string, doctype string, event Event) ([]ScriptRecord, error) {
+func (s *Store) loadActiveScripts(ctx context.Context, queryer activeScriptQueryer, site string, doctype string, event Event) ([]Record, error) {
 	query := `SELECT name, site, script_type, doctype, event, method_path, schedule,
 		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 		created_by, updated_by, creation, modified
@@ -249,9 +249,9 @@ func (s *Store) loadActiveScripts(ctx context.Context, queryer activeScriptQuery
 	}
 	defer rows.Close()
 
-	var scripts []ScriptRecord
+	var scripts []Record
 	for rows.Next() {
-		var r ScriptRecord
+		var r Record
 		var compiledAt, compileError, createdBy, updatedBy sql.NullString
 		var createdAt, updatedAt scriptTimestamp
 		if err := rows.Scan(&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,
@@ -275,7 +275,7 @@ func (s *Store) loadActiveScripts(ctx context.Context, queryer activeScriptQuery
 }
 
 // LoadMethodScript returns the active api_method script for a given method path, or nil.
-func (s *Store) LoadMethodScript(site string, methodPath string) (*ScriptRecord, error) {
+func (s *Store) LoadMethodScript(site string, methodPath string) (*Record, error) {
 	query := `SELECT name, site, script_type, doctype, event, method_path, schedule,
 		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 		created_by, updated_by, creation, modified
@@ -283,7 +283,7 @@ func (s *Store) LoadMethodScript(site string, methodPath string) (*ScriptRecord,
 		WHERE site = ? AND is_active = ? AND script_type = ? AND method_path = ?
 		LIMIT 1`
 
-	var r ScriptRecord
+	var r Record
 	var compiledAt, compileError, createdBy, updatedBy sql.NullString
 	var createdAt, updatedAt scriptTimestamp
 	err := s.DB.QueryRow(s.rebind(query), site, true, string(TypeAPIMethod), methodPath).Scan(
@@ -311,7 +311,7 @@ func (s *Store) LoadMethodScript(site string, methodPath string) (*ScriptRecord,
 }
 
 // LogExecution records a script execution in _kora_script_execution.
-func (s *Store) LogExecution(site string, rec ScriptRecord, docType, docName string, event Event, triggerUser string, durationMs int, status string, errMsg string) error {
+func (s *Store) LogExecution(site string, rec Record, docType, docName string, event Event, triggerUser string, durationMs int, status string, errMsg string) error {
 	id, err := newULID()
 	if err != nil {
 		return err
@@ -352,7 +352,7 @@ func IsAfterEvent(e Event) bool {
 }
 
 // LoadAllForSite returns all scripts for a site.
-func (s *Store) LoadAllForSite(site string) ([]ScriptRecord, error) {
+func (s *Store) LoadAllForSite(site string) ([]Record, error) {
 	rows, err := s.DB.Query(s.rebind(
 		`SELECT name, site, script_type, doctype, event, method_path, schedule,
 			 priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
@@ -366,8 +366,8 @@ func (s *Store) LoadAllForSite(site string) ([]ScriptRecord, error) {
 }
 
 // LoadByName returns a single script by site and name.
-func (s *Store) LoadByName(site, name string) (*ScriptRecord, error) {
-	var r ScriptRecord
+func (s *Store) LoadByName(site, name string) (*Record, error) {
+	var r Record
 	var compiledAt, compileError, createdBy, updatedBy sql.NullString
 	var createdAt, updatedAt scriptTimestamp
 	err := s.DB.QueryRow(s.rebind(
@@ -397,7 +397,7 @@ func (s *Store) LoadByName(site, name string) (*ScriptRecord, error) {
 }
 
 // Insert creates a new script record.
-func (s *Store) Insert(r ScriptRecord) error {
+func (s *Store) Insert(r Record) error {
 	query := fmt.Sprintf(`INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, schedule,
 		 priority, is_active, run_as, timeout_ms, script, created_by, updated_by, creation, modified)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, %[1]s, %[1]s)`, s.dialect().NowTimestamp())
@@ -417,8 +417,8 @@ func (s *Store) Insert(r ScriptRecord) error {
 	return tx.Commit()
 }
 
-// ScriptUpdateRequest carries the fields that can be updated on a script.
-type ScriptUpdateRequest struct {
+// UpdateRequest carries the fields that can be updated on a script.
+type UpdateRequest struct {
 	ScriptType *string `json:"script_type,omitempty"`
 	DocType    *string `json:"doctype,omitempty"`
 	Event      *string `json:"event,omitempty"`
@@ -432,7 +432,7 @@ type ScriptUpdateRequest struct {
 }
 
 // Update modifies an existing script record. Only non-nil fields are applied.
-func (s *Store) Update(site, name string, req ScriptUpdateRequest, updatedBy string) error {
+func (s *Store) Update(site, name string, req UpdateRequest, updatedBy string) error {
 	var sets []string
 	var args []any
 
@@ -562,10 +562,10 @@ func (s *Store) LoadExecutions(site, name string, limit int) ([]map[string]any, 
 	return results, rows.Err()
 }
 
-func scanScripts(rows *sql.Rows) ([]ScriptRecord, error) {
-	var scripts []ScriptRecord
+func scanScripts(rows *sql.Rows) ([]Record, error) {
+	var scripts []Record
 	for rows.Next() {
-		var r ScriptRecord
+		var r Record
 		var compiledAt, compileError, createdBy, updatedBy sql.NullString
 		var createdAt, updatedAt scriptTimestamp
 		if err := rows.Scan(&r.Name, &r.Site, &r.ScriptType, &r.DocType, &r.Event,

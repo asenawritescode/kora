@@ -22,7 +22,7 @@ func TestAssembleProcessStartupRollsBackPlatformAcquisitionFailures(t *testing.T
 			config := ProcessStartupConfig{
 				Telemetry: TelemetryConfig{ServiceVersion: "test"},
 				DBDriver:  "mysql", DBDSN: "mysql://platform", DBDialect: "mysql",
-				Common: &site.CommonConfig{}, ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return nil, nil },
+				Common: &site.CommonConfig{}, ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil },
 			}
 			deps := processStartupDependencies{
 				initializeTelemetry: func(context.Context, TelemetryConfig) (func(context.Context) error, error) {
@@ -90,7 +90,7 @@ func TestAssembleProcessStartupUsesCredentialFreeLazyTenantSnapshot(t *testing.T
 	config := ProcessStartupConfig{
 		Telemetry: TelemetryConfig{ServiceVersion: "test"},
 		DBDriver:  "mysql", DBDSN: "mysql://platform", DBDialect: "mysql",
-		Common: &site.CommonConfig{}, ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return nil, nil },
+		Common: &site.CommonConfig{}, ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil },
 	}
 	deps := processStartupDependencies{
 		initializeTelemetry: func(context.Context, TelemetryConfig) (func(context.Context) error, error) {

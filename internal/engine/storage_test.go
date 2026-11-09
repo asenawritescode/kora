@@ -65,7 +65,7 @@ func TestStorageResolverAppliesTenantStorageAndBucket(t *testing.T) {
 		got = config
 		return backend, nil
 	})
-	_, err := resolver(&site.SiteConfig{Hostname: "Acme.Example", FileStorage: "s3"})
+	_, err := resolver(&site.Config{Hostname: "Acme.Example", FileStorage: "s3"})
 	if err != nil {
 		t.Fatal("resolve storage:", err)
 	}
@@ -84,7 +84,7 @@ func TestStorageResolverKeepsConfiguredS3Precedence(t *testing.T) {
 		got = config
 		return backend, nil
 	})
-	if _, err := resolver(&site.SiteConfig{Hostname: "Acme.Example", FileStorage: "local"}); err != nil {
+	if _, err := resolver(&site.Config{Hostname: "Acme.Example", FileStorage: "local"}); err != nil {
 		t.Fatal("resolve storage:", err)
 	}
 	if got.Backend != "s3" || got.S3Bucket != "shared-bucket" {
@@ -98,7 +98,7 @@ func TestStorageResolverClosesBackendReturnedWithCreateError(t *testing.T) {
 	resolver := newStorageResolver(storage.Config{}, func(storage.Config) (storage.Backend, error) {
 		return backend, createErr
 	})
-	_, err := resolver(&site.SiteConfig{Hostname: "tenant.example"})
+	_, err := resolver(&site.Config{Hostname: "tenant.example"})
 	if !errors.Is(err, createErr) {
 		t.Fatalf("resolve error = %v, want backend construction error", err)
 	}

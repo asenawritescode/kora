@@ -59,7 +59,7 @@ type ProcessResources struct {
 	RealtimeStreams         *RealtimeStreamAdmission
 	SessionCacheBudget      *auth.SessionCacheBudget
 	UploadAdmission         *UploadAdmission
-	AnalyticsQueueAdmission *analytics.AnalyticsQueueAdmission
+	AnalyticsQueueAdmission *analytics.QueueAdmission
 }
 
 // RegisterWorkerStart defers worker execution until Engine.Run begins. If the

@@ -34,7 +34,7 @@ func installPackTenant(t *testing.T, driver string, database *sql.DB, dbName str
 	info := site.DBSiteInfo{SiteID: siteName, Name: siteName, DBType: driver, DBName: dbName, Status: "active"}
 	common := &site.CommonConfig{DBType: driver}
 	loaded, err := loadTenantRuntime(context.Background(), info, common, nil, "test", tenantRuntimeDependencies{
-		connect:   func(*site.SiteConfig) (*sql.DB, error) { return database, nil },
+		connect:   func(*site.Config) (*sql.DB, error) { return database, nil },
 		bootstrap: func(*sql.DB, db.Dialect) error { return nil },
 	})
 	if err != nil {
@@ -43,7 +43,7 @@ func installPackTenant(t *testing.T, driver string, database *sql.DB, dbName str
 	install, err := NewTenantServiceInstaller(TenantServiceConfig{
 		Common:         common,
 		KernelCommands: kernel.NewCommandRegistry(),
-		ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) {
+		ResolveStorage: func(*site.Config) (storage.Backend, error) {
 			return storage.New(storage.Config{Backend: "local", LocalPath: t.TempDir()})
 		},
 	})

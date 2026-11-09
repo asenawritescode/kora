@@ -189,7 +189,7 @@ func runConfigImportContext(ctx context.Context, siteName, path, dbName string) 
 	return runConfigImportForSiteContext(ctx, siteName, path, siteCfg, tenantID)
 }
 
-func runConfigImportForSiteContext(ctx context.Context, siteName, path string, siteCfg *site.SiteConfig, tenantID string) (returnErr error) {
+func runConfigImportForSiteContext(ctx context.Context, siteName, path string, siteCfg *site.Config, tenantID string) (returnErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -295,7 +295,7 @@ func runConfigImportForSiteContext(ctx context.Context, siteName, path string, s
 	return nil
 }
 
-func resolveConfigImportSiteConfigContext(ctx context.Context, siteName, dbName string, commonCfg *site.CommonConfig) *site.SiteConfig {
+func resolveConfigImportSiteConfigContext(ctx context.Context, siteName, dbName string, commonCfg *site.CommonConfig) *site.Config {
 	if info, ok := lookupRegisteredSiteContext(ctx, siteName, commonCfg); ok {
 		cfg := site.ReconstructSiteConfigFromDBInfo(info, commonCfg)
 		if dbName != "" {

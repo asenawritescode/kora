@@ -313,17 +313,17 @@ func siteDialectFromContext(c *gin.Context, fallback kdb.Dialect) kdb.Dialect {
 	return kdb.Resolve("")
 }
 
-// APIDefaultLimit and APIMaxLimit control pagination (set from common config at startup).
-var APIDefaultLimit = 50
-var APIMaxLimit = 500
+// DefaultLimit and APIMaxLimit control pagination (set from common config at startup).
+var DefaultLimit = 50
+var MaxLimit = 500
 
 // SetAPILimits sets pagination limits from config.
 func SetAPILimits(def, max int) {
 	if def > 0 {
-		APIDefaultLimit = def
+		DefaultLimit = def
 	}
 	if max > 0 {
-		APIMaxLimit = max
+		MaxLimit = max
 	}
 }
 
@@ -483,7 +483,7 @@ func (h *Handler) HandleList(c *gin.Context) {
 	}
 
 	// Parse query parameters.
-	limitRaw := c.DefaultQuery("limit", strconv.Itoa(APIDefaultLimit))
+	limitRaw := c.DefaultQuery("limit", strconv.Itoa(DefaultLimit))
 	limit, limitErr := strconv.Atoi(limitRaw)
 	offsetRaw := c.DefaultQuery("offset", "0")
 	offset, offsetErr := strconv.Atoi(offsetRaw)
@@ -500,10 +500,10 @@ func (h *Handler) HandleList(c *gin.Context) {
 	}
 
 	if limit < 1 {
-		limit = APIDefaultLimit
+		limit = DefaultLimit
 	}
-	if limit > APIMaxLimit {
-		limit = APIMaxLimit
+	if limit > MaxLimit {
+		limit = MaxLimit
 	}
 
 	// Parse fields filter.

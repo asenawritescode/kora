@@ -130,7 +130,7 @@ func TestLiveMySQLProvisioningRegistrationBackfillsOnlyUnassignedRows(t *testing
 	hostname := fmt.Sprintf("provisioning-assignment-%d.example.invalid", stamp)
 	tenantID := fmt.Sprintf("tenant-provisioning-assignment-%d", stamp)
 	t.Cleanup(func() { _ = removePlatformSiteRegistration(platformDB, "mysql", hostname) })
-	config := &SiteConfig{Hostname: hostname, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "tenant_db", DBUser: parsed.User, DomainsList: []string{hostname}}
+	config := &Config{Hostname: hostname, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "tenant_db", DBUser: parsed.User, DomainsList: []string{hostname}}
 	register := func(status, assignment string) error {
 		return ensurePlatformSiteRegistrationAssignmentContext(t.Context(), platformDB, "mysql", config, status, assignment, tenantID)
 	}

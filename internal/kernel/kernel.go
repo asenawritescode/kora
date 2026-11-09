@@ -320,7 +320,7 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 	txMgr.CurrentUserRole = op.Context.UserRole
 	txMgr.CurrentUserRoles = append([]string(nil), op.Context.Roles...)
 	txMgr.SkipHookScripts = append([]string(nil), op.Context.SkipHookScripts...)
-	txMgr.HookScriptsByDoctype = make(map[string][]script.ScriptRecord)
+	txMgr.HookScriptsByDoctype = make(map[string][]script.Record)
 	txMgr.AsyncHookTenantID = op.Context.TenantID
 	txMgr.AsyncHookSourceOperation = contract.OperationID(opID)
 	txMgr.AsyncHookConfigRevision = op.Context.ConfigRevision
@@ -445,7 +445,7 @@ func (k *Kernel) ExecuteInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 	}
 	baseAsyncConfigRevision := txMgr.AsyncHookConfigRevision
 	txMgr.SkipHookScripts = append([]string(nil), op.Context.SkipHookScripts...)
-	txMgr.HookScriptsByDoctype = make(map[string][]script.ScriptRecord)
+	txMgr.HookScriptsByDoctype = make(map[string][]script.Record)
 	txMgr.AsyncHookTenantID = op.Context.TenantID
 	txMgr.AsyncHookSourceOperation = contract.OperationID(opID)
 	txMgr.AsyncHookConfigRevision = op.Context.ConfigRevision

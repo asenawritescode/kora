@@ -20,7 +20,7 @@ type MultiBus struct {
 	oldestQueuedAt                  map[chan ChangeEvent]time.Time
 	queuedReservations              map[chan ChangeEvent][]uint64
 	pendingSourceEvents             map[string]int
-	queueAdmission                  *AnalyticsQueueAdmission
+	queueAdmission                  *QueueAdmission
 	maxListeners                    int
 	listenerMaxBytes                int
 	listenersClose                  bool
@@ -223,7 +223,7 @@ func (mb *MultiBus) ListenerQueueBudget() ListenerQueueSnapshot {
 
 // SetQueueAdmission attaches the process-shared subscriber byte budget before
 // fanout starts or listeners are registered.
-func (mb *MultiBus) SetQueueAdmission(admission *AnalyticsQueueAdmission) error {
+func (mb *MultiBus) SetQueueAdmission(admission *QueueAdmission) error {
 	if mb == nil || admission == nil {
 		return fmt.Errorf("multi bus and listener queue admission are required")
 	}

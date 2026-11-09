@@ -35,7 +35,7 @@ func TestReportValidationRejectsUnknownVisualQuery(t *testing.T) {
 }
 
 func TestAnalyticsQueryValidationRequiresValidTimeRange(t *testing.T) {
-	err := (&AnalyticsQueryRequest{Queries: []ModelQuery{{Model: "example", Measures: []string{"count"}}}, Time: QueryTime{From: "2026-02-01", To: "2026-01-01", Granularity: "month"}}).Validate(&SemanticCatalog{Models: []SemanticModel{{Name: "example", SourceDoctype: "Example", TimeDimension: "creation", Dimensions: []SemanticDimension{{Name: "creation", Field: "creation", Type: "time"}}, Measures: []SemanticMeasure{{Name: "count", Aggregation: "count"}}}}})
+	err := (&SemanticRequest{Queries: []ModelQuery{{Model: "example", Measures: []string{"count"}}}, Time: QueryTime{From: "2026-02-01", To: "2026-01-01", Granularity: "month"}}).Validate(&SemanticCatalog{Models: []SemanticModel{{Name: "example", SourceDoctype: "Example", TimeDimension: "creation", Dimensions: []SemanticDimension{{Name: "creation", Field: "creation", Type: "time"}}, Measures: []SemanticMeasure{{Name: "count", Aggregation: "count"}}}}})
 	if err == nil {
 		t.Fatal("expected invalid date range to fail")
 	}

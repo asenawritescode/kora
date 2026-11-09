@@ -62,7 +62,7 @@ type ConsoleHandler struct {
 	PlatformWorkAdmission interface {
 		Acquire(context.Context) (func(), error)
 	}
-	TenantSiteAdmission func(context.Context, *site.SiteConfig) (func(), error)
+	TenantSiteAdmission func(context.Context, *site.Config) (func(), error)
 	SiteRouter          *net.SiteRouter
 	ProvisioningStore   *site.OnboardingStore
 	AllowOnboarding     bool
@@ -74,7 +74,7 @@ type ConsoleHandler struct {
 	// DiscardRuntime releases any sidecars installed by PrepareRuntime when the
 	// router rejects the new site.
 	DiscardRuntime func(*net.LoadedSite)
-	ResolveStorage func(*site.SiteConfig) (storage.Backend, error)
+	ResolveStorage func(*site.Config) (storage.Backend, error)
 	// ReloadRuntime publishes the durable directory config through the tenant
 	// runtime coordinator before this handler reports the update as active.
 	ReloadRuntime      func(context.Context, string) error
@@ -149,7 +149,7 @@ func (h *ConsoleHandler) acquirePlatformWork(ctx context.Context) (func(), error
 	return h.PlatformWorkAdmission.Acquire(ctx)
 }
 
-func (h *ConsoleHandler) withTenantSiteAdmission(ctx context.Context, config *site.SiteConfig, create func() error) error {
+func (h *ConsoleHandler) withTenantSiteAdmission(ctx context.Context, config *site.Config, create func() error) error {
 	if h == nil || ctx == nil || config == nil || create == nil || h.TenantSiteAdmission == nil {
 		return errors.New("site provisioning requires tenant work admission")
 	}
@@ -161,7 +161,7 @@ func (h *ConsoleHandler) withTenantSiteAdmission(ctx context.Context, config *si
 	return create()
 }
 
-func (h *ConsoleHandler) withTenantSiteAdmissionRetry(ctx context.Context, config *site.SiteConfig, create func() error) error {
+func (h *ConsoleHandler) withTenantSiteAdmissionRetry(ctx context.Context, config *site.Config, create func() error) error {
 	if ctx == nil {
 		return errors.New("site provisioning retry requires context")
 	}
@@ -1144,7 +1144,7 @@ func (h *ConsoleHandler) newCreatedSessionManager(database *sql.DB, dbType strin
 	return manager
 }
 
-func (h *ConsoleHandler) prepareCreatedRuntime(ctx context.Context, loaded *net.LoadedSite, siteID string, cfg *site.SiteConfig) error {
+func (h *ConsoleHandler) prepareCreatedRuntime(ctx context.Context, loaded *net.LoadedSite, siteID string, cfg *site.Config) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1188,7 +1188,7 @@ func (h *ConsoleHandler) persistOnboardingAdmitted(ctx context.Context, job site
 	return h.persistOnboarding(job, stage)
 }
 
-func (h *ConsoleHandler) createdSiteInfo(ctx context.Context, siteID string, cfg *site.SiteConfig) (site.DBSiteInfo, error) {
+func (h *ConsoleHandler) createdSiteInfo(ctx context.Context, siteID string, cfg *site.Config) (site.DBSiteInfo, error) {
 	if h.PlatformDB != nil {
 		return site.NewSQLSiteRegistry(h.PlatformDB, h.PlatformDBType).GetByIDContext(ctx, siteID)
 	}
@@ -1265,7 +1265,7 @@ func (h *ConsoleHandler) HandleUpdateSite(c *gin.Context) {
 	runtimeHandle.Release()
 
 	if h.ResolveStorage != nil {
-		resolvedStorage, err := h.ResolveStorage(&site.SiteConfig{
+		resolvedStorage, err := h.ResolveStorage(&site.Config{
 			Hostname:      siteName,
 			DomainsList:   newCfg.Domains,
 			FileStorage:   newCfg.FileStorage,
@@ -1427,7 +1427,7 @@ func (h *ConsoleHandler) HandleDeleteSite(c *gin.Context) {
 	if dbPassword == "" {
 		dbPassword = h.PlatformDBPassword
 	}
-	dbConfig := &site.SiteConfig{DBType: dbType, DBHost: dbHost, DBPort: dbPort, DBName: dbName, DBUser: dbUser, DBPassword: dbPassword}
+	dbConfig := &site.Config{DBType: dbType, DBHost: dbHost, DBPort: dbPort, DBName: dbName, DBUser: dbUser, DBPassword: dbPassword}
 
 	slog.Info("deleting site via console", "hostname", siteName)
 

@@ -33,7 +33,7 @@ func LoadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 }
 
 type tenantRuntimeDependencies struct {
-	connect    func(*site.SiteConfig) (*sql.DB, error)
+	connect    func(*site.Config) (*sql.DB, error)
 	bootstrap  func(*sql.DB, kdb.Dialect) error
 	claimOwner func(context.Context, *sql.DB, kdb.Dialect, string) error
 }

@@ -454,7 +454,7 @@ func runServe() error {
 			WriteTimeout: time.Duration(common.WriteTimeout) * time.Second,
 			IdleTimeout:  time.Duration(common.IdleTimeout) * time.Second,
 		},
-		OnReady: func(metrics engine.EngineMetrics) {
+		OnReady: func(metrics engine.Metrics) {
 			slog.Info("engine startup ready", "duration_ms", metrics.StartupDuration.Milliseconds(),
 				"sites_discovered", metrics.DiscoveredTenants, "sites_loaded", metrics.LoadedTenants,
 				"db_open_connections", metrics.OpenConnections, "db_in_use_connections", metrics.InUseConnections,

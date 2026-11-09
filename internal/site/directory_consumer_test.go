@@ -57,7 +57,7 @@ func TestDirectoryConsumerAppliesBeforeAdvancingCursor(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_directory_consumers SET directory_revision = ?, updated_at = CURRENT_TIMESTAMP WHERE consumer_id = ? AND lease_owner = ? AND lease_expires_at > CURRENT_TIMESTAMP AND directory_revision = ?`)).
 		WithArgs(uint64(1), "engine:test", "owner:test", uint64(0)).WillReturnResult(sqlmock.NewResult(0, 1))
 	admission := &trackingDirectoryAdmission{}
-	consumer := &DirectoryConsumer{Registry: NewSQLSiteRegistry(database, "mysql"), WorkAdmission: admission, ID: "engine:test", OwnerID: "owner:test", Apply: func(_ context.Context, change SiteDirectoryChange) error {
+	consumer := &DirectoryConsumer{Registry: NewSQLSiteRegistry(database, "mysql"), WorkAdmission: admission, ID: "engine:test", OwnerID: "owner:test", Apply: func(_ context.Context, change DirectoryChange) error {
 		if admission.active.Load() != 0 {
 			t.Fatal("tenant apply callback ran while platform work admission was held")
 		}
@@ -92,7 +92,7 @@ func TestDirectoryConsumerAdmissionRejectionSkipsRegistryAndApply(t *testing.T) 
 	consumer := &DirectoryConsumer{
 		Registry: NewSQLSiteRegistry(database, "mysql"), ID: "engine:reject", OwnerID: "owner:reject",
 		WorkAdmission: rejectingDirectoryAdmission{called: called},
-		Apply:         func(context.Context, SiteDirectoryChange) error { applyCalled = true; return nil },
+		Apply:         func(context.Context, DirectoryChange) error { applyCalled = true; return nil },
 	}
 	if _, err := consumer.ProcessBatch(context.Background()); err == nil {
 		t.Fatal("ProcessBatch succeeded without directory admission")
@@ -141,7 +141,7 @@ func TestDirectoryConsumerDoesNotAdvanceOnApplyFailure(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"directory_revision", "id", "payload", "created_at"}).
 		AddRow(1, "change-1", `{"version":1,"site_id":"site-1","aliases":["one.example"],"status":"active","config_revision":1}`, time.Now().UTC())
 	expectConsumerBatch(mock, "engine:test", "owner:test", 0, rows)
-	consumer := &DirectoryConsumer{Registry: NewSQLSiteRegistry(database, "mysql"), ID: "engine:test", OwnerID: "owner:test", Apply: func(context.Context, SiteDirectoryChange) error {
+	consumer := &DirectoryConsumer{Registry: NewSQLSiteRegistry(database, "mysql"), ID: "engine:test", OwnerID: "owner:test", Apply: func(context.Context, DirectoryChange) error {
 		return errors.New("runtime unavailable")
 	}}
 	count, err := consumer.ProcessBatch(context.Background())
@@ -172,7 +172,7 @@ func TestDirectoryConsumerRetriesAfterApplyOutageWithoutSkippingChange(t *testin
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE _kora_site_directory_consumers SET directory_revision = ?, updated_at = CURRENT_TIMESTAMP WHERE consumer_id = ? AND lease_owner = ? AND lease_expires_at > CURRENT_TIMESTAMP AND directory_revision = ?`)).
 		WithArgs(uint64(1), "engine:retry", "owner:retry", uint64(0)).WillReturnResult(sqlmock.NewResult(0, 1))
 	applyCalls := 0
-	consumer := &DirectoryConsumer{Registry: NewSQLSiteRegistry(database, "mysql"), ID: "engine:retry", OwnerID: "owner:retry", Apply: func(context.Context, SiteDirectoryChange) error {
+	consumer := &DirectoryConsumer{Registry: NewSQLSiteRegistry(database, "mysql"), ID: "engine:retry", OwnerID: "owner:retry", Apply: func(context.Context, DirectoryChange) error {
 		applyCalls++
 		if applyCalls == 1 {
 			return errors.New("temporary runtime outage")
@@ -210,7 +210,7 @@ func TestDirectoryConsumerRestartDoesNotReapplyDurablyAppliedChange(t *testing.T
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT directory_revision FROM _kora_site_directory_meta WHERE id = 1`)).
 		WillReturnRows(sqlmock.NewRows([]string{"directory_revision"}).AddRow(1))
 	applyCalls := 0
-	consumer := &DirectoryConsumer{Registry: NewSQLSiteRegistry(database, "mysql"), ID: "engine:restart", OwnerID: "owner:restart", Apply: func(context.Context, SiteDirectoryChange) error {
+	consumer := &DirectoryConsumer{Registry: NewSQLSiteRegistry(database, "mysql"), ID: "engine:restart", OwnerID: "owner:restart", Apply: func(context.Context, DirectoryChange) error {
 		applyCalls++
 		return nil
 	}}
@@ -247,7 +247,7 @@ func TestDirectoryConsumerResyncsAfterCompactedHistoryGap(t *testing.T) {
 	resynced := uint64(0)
 	consumer := &DirectoryConsumer{
 		Registry: NewSQLSiteRegistry(database, "mysql"), ID: "engine:test", OwnerID: "owner:test",
-		Apply:  func(context.Context, SiteDirectoryChange) error { return nil },
+		Apply:  func(context.Context, DirectoryChange) error { return nil },
 		Resync: func(_ context.Context, revision uint64) error { resynced = revision; return nil },
 	}
 	count, err := consumer.ProcessBatch(context.Background())
@@ -272,7 +272,7 @@ func TestDirectoryConsumerStopsAtGapWhenSnapshotResyncFails(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"directory_revision"}).AddRow(3))
 	consumer := &DirectoryConsumer{
 		Registry: NewSQLSiteRegistry(database, "mysql"), ID: "engine:test", OwnerID: "owner:test",
-		Apply:  func(context.Context, SiteDirectoryChange) error { return nil },
+		Apply:  func(context.Context, DirectoryChange) error { return nil },
 		Resync: func(context.Context, uint64) error { return errors.New("snapshot unavailable") },
 	}
 	count, err := consumer.ProcessBatch(context.Background())

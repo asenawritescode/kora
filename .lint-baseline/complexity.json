@@ -147,7 +147,7 @@
   "contract::validateLocalSchemaReferences": {
    "cognitive": 31
   },
-  "internal/analytics::(*AnalyticsQueryRequest).Validate": {
+  "internal/analytics::(*SemanticRequest).Validate": {
    "cognitive": 67,
    "cyclomatic": 43
   },

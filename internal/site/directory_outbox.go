@@ -16,10 +16,10 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// SiteDirectoryChange is a credential-free, versioned directory projection.
+// DirectoryChange is a credential-free, versioned directory projection.
 // Cursor is DB-allocated for global ordering across Engine processes;
 // consumers still compare per-site ConfigRevision because replay is expected.
-type SiteDirectoryChange struct {
+type DirectoryChange struct {
 	Cursor     uint64                  `json:"cursor"`
 	ID         string                  `json:"id"`
 	Descriptor contract.SiteDescriptor `json:"descriptor"`
@@ -82,11 +82,11 @@ func newDirectoryChangeID() (string, error) {
 // ChangesAfter returns a bounded, replayable feed. The numeric cursor is exclusive;
 // callers persist the last fully-applied cursor and periodically reconcile a full
 // snapshot to recover from retention or consumer mistakes.
-func (r *SQLSiteRegistry) ChangesAfter(cursor uint64, limit int) ([]SiteDirectoryChange, error) {
+func (r *SQLSiteRegistry) ChangesAfter(cursor uint64, limit int) ([]DirectoryChange, error) {
 	return r.ChangesAfterContext(context.Background(), cursor, limit)
 }
 
-func (r *SQLSiteRegistry) ChangesAfterContext(ctx context.Context, cursor uint64, limit int) ([]SiteDirectoryChange, error) {
+func (r *SQLSiteRegistry) ChangesAfterContext(ctx context.Context, cursor uint64, limit int) ([]DirectoryChange, error) {
 	if r == nil || r.database == nil {
 		return nil, errors.New("site registry unavailable")
 	}
@@ -102,9 +102,9 @@ func (r *SQLSiteRegistry) ChangesAfterContext(ctx context.Context, cursor uint64
 		return nil, err
 	}
 	defer rows.Close()
-	changes := make([]SiteDirectoryChange, 0)
+	changes := make([]DirectoryChange, 0)
 	for rows.Next() {
-		var change SiteDirectoryChange
+		var change DirectoryChange
 		var payload []byte
 		var createdAt any
 		if err := rows.Scan(&change.Cursor, &change.ID, &payload, &createdAt); err != nil {

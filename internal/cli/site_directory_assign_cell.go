@@ -52,8 +52,8 @@ type siteCellAssignmentReport struct {
 }
 
 type siteCellAssignmentRegistry interface {
-	GetDescriptorByIDContext(ctx context.Context, siteID string) (site.SiteDescriptor, error)
-	SetRuntimeCellIDAtRevisionContext(ctx context.Context, siteID, cellID string, expectedRevision uint64) (site.SiteDescriptor, error)
+	GetDescriptorByIDContext(ctx context.Context, siteID string) (site.Descriptor, error)
+	SetRuntimeCellIDAtRevisionContext(ctx context.Context, siteID, cellID string, expectedRevision uint64) (site.Descriptor, error)
 }
 
 func runSiteDirectoryAssignCell(cmd *cobra.Command, args []string) error {

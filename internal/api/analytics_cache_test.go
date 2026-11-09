@@ -133,7 +133,7 @@ func TestAnalyticsQueryCacheKeyIncludesTenantConfigAndPermissionScope(t *testing
 	ctx.Set("policy_execution", routerTestExecution([]string{"Reader"}, nil))
 	scope := analyticsPermissionScope(ctx, registry)
 	cache := newAnalyticsQueryCache(time.Minute, 4)
-	request := analytics.AnalyticsQueryRequest{}
+	request := analytics.SemanticRequest{}
 	base := cache.key("tenant-a", 4, scope, request)
 	if base == cache.key("tenant-b", 4, scope, request) || base == cache.key("tenant-a", 5, scope, request) {
 		t.Fatal("cache key omitted tenant or config revision")
