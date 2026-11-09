@@ -64,8 +64,8 @@ func TestDirectTaskProjectorRejectsWorkflowAndBusinessRequests(t *testing.T) {
 func TestDirectTaskProjectorHidesOtherAssignmentsResponsesAndHistory(t *testing.T) {
 	projector := DirectTaskProjector{}
 	exec := projectionExecution(t, "user-a")
-	responseA := contract.ResponseKind(contract.ResponseComplete)
-	responseB := contract.ResponseKind(contract.ResponseReturn)
+	responseA := contract.ResponseComplete
+	responseB := contract.ResponseReturn
 	actorB := contract.PrincipalID("user-b")
 	record := RequestRecord{ID: "01K7REQUEST00000000000000000", Kind: contract.RequestTask, Status: contract.RequestPending, Requester: "requester",
 		Assignments: []AssignmentRecord{

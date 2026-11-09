@@ -81,7 +81,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		}
 		return failed(contract.CodeValidationFailed, "package artifact failed immutable digest or Engine validation"), nil
 	}
-	packageConstraint := contract.InstalledPackage{PackageID: artifactManifest.PackageID, ReleaseID: artifactManifest.ReleaseID, Version: artifactManifest.Version, Digest: string(command.Digest), Requires: artifactManifest.Requires, Conflicts: artifactManifest.Conflicts}
+	packageConstraint := contract.InstalledPackage{PackageID: artifactManifest.PackageID, ReleaseID: artifactManifest.ReleaseID, Version: artifactManifest.Version, Digest: command.Digest, Requires: artifactManifest.Requires, Conflicts: artifactManifest.Conflicts}
 
 	info, err := e.tenantInfo(ctx, string(operation.Tenant))
 	if err != nil {
@@ -130,7 +130,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		handle.Release()
 		return packageRecoveryRequired("module ownership store initialization needs recovery"), nil
 	}
-	tenantID := contract.TenantID(operation.Tenant)
+	tenantID := operation.Tenant
 	moduleSnapshot, moduleLoadErr := moduleStore.Load(tenantID)
 	if moduleLoadErr != nil {
 		releaseTenantWork()

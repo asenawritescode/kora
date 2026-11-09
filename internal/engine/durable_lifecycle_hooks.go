@@ -55,7 +55,7 @@ func RunDurableLifecycleHookWorker(ctx context.Context, runner script.Runner, st
 		return
 	}
 	dialect := kdb.Resolve(dbType)
-	owner := "doc-hook-" + string(contract.NewOperationID())
+	owner := "doc-hook-" + contract.NewOperationID()
 	ticker := time.NewTicker(durableLifecycleHookPoll)
 	defer ticker.Stop()
 	for ctx.Err() == nil {

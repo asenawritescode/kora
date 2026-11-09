@@ -108,7 +108,7 @@ func (h *Handler) HandleKernelOperation(c *gin.Context) {
 	if result.Replayed {
 		c.Header("X-Kora-Replay", "true")
 	}
-	c.JSON(http.StatusOK, Response{Data: json.RawMessage(result.Data), Meta: &Meta{DocType: commandName}})
+	c.JSON(http.StatusOK, Response{Data: result.Data, Meta: &Meta{DocType: commandName}})
 }
 
 func (h *Handler) executeKernelOperation(c *gin.Context, commandName string, req kernelRequest) (contract.CommandResult, *contract.Error) {

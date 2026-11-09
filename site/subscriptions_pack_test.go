@@ -96,7 +96,7 @@ func TestSubscriptionsPackBindsAndCompilesBillingHooks(t *testing.T) {
 	runner := script.NewEmbeddedRunner(script.EmbeddedConfig{PoolSize: 1})
 	defer runner.Close()
 	for _, record := range snapshot.Scripts {
-		key := record.DocType + "/" + string(record.Event)
+		key := record.DocType + "/" + record.Event
 		if _, exists := want[key]; !exists {
 			t.Errorf("unexpected or unbound subscription script: %+v", record)
 			continue
@@ -177,7 +177,7 @@ func TestSubscriptionPackScriptsCopyTermsPrepareInvoicesAndAllocatePayments(t *t
 	}
 	sources := map[string]string{}
 	for _, record := range snapshot.Scripts {
-		sources[record.DocType+"/"+string(record.Event)] = sourceByHash[record.ScriptHash]
+		sources[record.DocType+"/"+record.Event] = sourceByHash[record.ScriptHash]
 	}
 	runner := script.NewEmbeddedRunner(script.EmbeddedConfig{PoolSize: 1})
 	defer runner.Close()

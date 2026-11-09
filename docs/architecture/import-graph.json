@@ -1312,6 +1312,12 @@
       "from": "github.com/asenawritescode/kora/api/ai",
       "from_module": "engine",
       "kind": "production",
+      "to": "github.com/asenawritescode/kora/auth"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/api/ai",
+      "from_module": "engine",
+      "kind": "production",
       "to": "github.com/asenawritescode/kora/configstore"
     },
     {
@@ -1367,6 +1373,12 @@
       "from_module": "engine",
       "kind": "test",
       "to": "github.com/asenawritescode/kora/analytics"
+    },
+    {
+      "from": "github.com/asenawritescode/kora/api/ai",
+      "from_module": "engine",
+      "kind": "test",
+      "to": "github.com/asenawritescode/kora/auth"
     },
     {
       "from": "github.com/asenawritescode/kora/api/ai",

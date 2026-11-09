@@ -42,7 +42,7 @@ func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageAr
 	if err := contract.ValidateApplyPackage(command); err != nil {
 		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("invalid package application command: %w", err)
 	}
-	artifact, err := resolver.ResolvePackage(ctx, command.ArtifactRef, string(command.Digest), command.OptionalReleaseIDs)
+	artifact, err := resolver.ResolvePackage(ctx, command.ArtifactRef, command.Digest, command.OptionalReleaseIDs)
 	if err != nil {
 		return nil, nil, contract.MarketplacePackageManifest{}, managementPackageResolutionError{cause: fmt.Errorf("resolve immutable package artifact: %w", err)}
 	}
@@ -64,7 +64,7 @@ func verifiedManagementPackage(ctx context.Context, resolver ManagementPackageAr
 	if err != nil {
 		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("verify package artifact digest: %w", err)
 	}
-	if digest != string(command.Digest) {
+	if digest != command.Digest {
 		return nil, nil, contract.MarketplacePackageManifest{}, fmt.Errorf("package artifact digest does not match the accepted operation")
 	}
 	manifest := contract.PackManifest{

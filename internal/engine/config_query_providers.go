@@ -159,7 +159,7 @@ func (e *configQueryExecutor) ExecutePublishedQueryForActor(ctx context.Context,
 func (e *configQueryExecutor) run(ctx context.Context, scope contract.BusinessScope, actor plugin.PublishedQueryActorScope, full bool, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
 	req := query.Request{Limit: int(limit), Actor: actor.SubjectID, Now: time.Now().UTC(), FullRead: full, ScopeField: e.scopeField}
 	if e.scopeField != "" {
-		req.ScopeValue = string(scope.LegalEntityID)
+		req.ScopeValue = scope.LegalEntityID
 	}
 	if err := json.Unmarshal(input, &req.Input); err != nil {
 		return contract.QueryResult{}, &plugin.QueryInputError{Message: "query input must be an object"}

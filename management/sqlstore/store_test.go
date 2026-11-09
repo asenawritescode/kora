@@ -475,7 +475,7 @@ func TestClaimRenewAndFinishAreFenced(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(claimQuery)).WithArgs(uint16(2)).WillReturnRows(rows)
 	claimUpdate := "UPDATE _kora_managed_operation SET state = 'running',lease_owner = ?,lease_fence = lease_fence + 1,lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND),updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND lease_fence = ? AND state IN ('requested','running') AND (lease_until IS NULL OR lease_until <= CURRENT_TIMESTAMP(6))"
-	mock.ExpectExec(regexp.QuoteMeta(claimUpdate)).WithArgs("worker-a", int64(time.Minute.Microseconds()), string(input.ID), uint64(4)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(claimUpdate)).WithArgs("worker-a", time.Minute.Microseconds(), string(input.ID), uint64(4)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	claims, err := store.ClaimDue(context.Background(), "worker-a", 2, time.Minute)
@@ -484,7 +484,7 @@ func TestClaimRenewAndFinishAreFenced(t *testing.T) {
 	}
 	claim := claims[0]
 	renewQuery := "UPDATE _kora_managed_operation SET lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND),updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND state = 'running' AND lease_owner = ? AND lease_fence = ? AND lease_until > CURRENT_TIMESTAMP(6)"
-	mock.ExpectExec(regexp.QuoteMeta(renewQuery)).WithArgs(int64(time.Minute.Microseconds()), string(input.ID), "worker-a", uint64(5)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(renewQuery)).WithArgs(time.Minute.Microseconds(), string(input.ID), "worker-a", uint64(5)).WillReturnResult(sqlmock.NewResult(0, 1))
 	claim, err = store.Renew(context.Background(), claim, time.Minute)
 	if err != nil {
 		t.Fatal("Renew:", err)
@@ -524,7 +524,7 @@ func TestReleaseAndRenewRejectStaleClaims(t *testing.T) {
 	_, mock, store := newTestStore(t)
 	claim := management.Claim{Operation: management.Operation{ID: "01K7OPERATION000000000000000000"}, Owner: "worker-a", Fence: 7}
 	renewQuery := "UPDATE _kora_managed_operation SET lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND),updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND state = 'running' AND lease_owner = ? AND lease_fence = ? AND lease_until > CURRENT_TIMESTAMP(6)"
-	mock.ExpectExec(regexp.QuoteMeta(renewQuery)).WithArgs(int64(time.Minute.Microseconds()), string(claim.Operation.ID), claim.Owner, claim.Fence).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(renewQuery)).WithArgs(time.Minute.Microseconds(), string(claim.Operation.ID), claim.Owner, claim.Fence).WillReturnResult(sqlmock.NewResult(0, 0))
 	if _, err := store.Renew(context.Background(), claim, time.Minute); !hasCode(err, contract.CodeConflict) {
 		t.Fatalf("stale Renew = %v, want conflict", err)
 	}
@@ -543,8 +543,8 @@ func TestLeaseExpressionsAndArgumentsMatchSupportedDialects(t *testing.T) {
 		driver, expression string
 		argument           any
 	}{
-		{driver: "mysql", expression: "DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND)", argument: int64(time.Second.Microseconds())},
-		{driver: "postgres", expression: "CURRENT_TIMESTAMP + (? * INTERVAL '1 microsecond')", argument: int64(time.Second.Microseconds())},
+		{driver: "mysql", expression: "DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL ? MICROSECOND)", argument: time.Second.Microseconds()},
+		{driver: "postgres", expression: "CURRENT_TIMESTAMP + (? * INTERVAL '1 microsecond')", argument: time.Second.Microseconds()},
 		{driver: "libsql", expression: "datetime('now', '+' || ? || ' seconds')", argument: "1.000000"},
 	} {
 		dialect := db.Resolve(test.driver)

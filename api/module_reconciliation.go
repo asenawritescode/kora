@@ -136,7 +136,7 @@ func (h *Handler) HandleBusinessReconciliationRun(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid business reconciliation run request", nil)
 		return
 	}
-	execution, scope, actor, services, plan, registration, rule, sourceScope, targetScope, err := h.resolveBusinessReconciliationRule(c, contract.ModuleID(request.OwnerModuleID), request.RuleID)
+	execution, scope, actor, services, plan, registration, rule, sourceScope, targetScope, err := h.resolveBusinessReconciliationRule(c, request.OwnerModuleID, request.RuleID)
 	if err != nil {
 		writeError(c, http.StatusForbidden, "permission.denied", "Business reconciliation rule is unavailable or not granted", nil)
 		return

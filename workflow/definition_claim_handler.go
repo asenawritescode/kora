@@ -346,7 +346,7 @@ func (h *DefinitionClaimHandler) handleCondition(ctx context.Context, claim Clai
 	if !execution.Valid() || execution.Tenant() != claim.Tenant || execution.Actor().PrincipalType != contract.PrincipalService {
 		return h.failCondition(ctx, claim, "workflow condition identity is invalid")
 	}
-	readGrant, allowed := workflowReadGrant(execution, string(instance.Subject.Kind), instance.BusinessScope)
+	readGrant, allowed := workflowReadGrant(execution, instance.Subject.Kind, instance.BusinessScope)
 	if !allowed || readGrant.OwnerOnly {
 		// A workflow service has no authenticated human subject against which an
 		// owner-only grant can be evaluated. Do not treat the workflow starter or
