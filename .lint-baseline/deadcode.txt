@@ -83,7 +83,6 @@ internal/api/ai/run_store.go::ListRunTasks
 internal/api/ai/run_store.go::RefreshRunSummary
 internal/api/ai/tool_contract.go::ToContractCatalog
 internal/api/ai/tool_contract.go::ToContractDescriptor
-internal/api/ai/tools.go::ExecuteConfirmedToolWithIdempotencyKey
 internal/api/ai/tools.go::executeToolCallsForAI
 internal/api/ai/tools.go::executeUpdateToolWithKey
 internal/api/console.go::ConsoleHandler.HandleCreateSite

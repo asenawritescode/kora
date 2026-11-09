@@ -509,7 +509,10 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 		writeError(c, http.StatusUnauthorized, "auth.execution_required", "Verified tenant execution identity is required.", nil)
 		return
 	}
-	result := ai.ExecuteConfirmedToolWithExecution(h.siteTx(c), h.siteRegistry(c), req.ToolName, req.Args, owner, siteNameStr, strings.TrimSpace(c.GetHeader("Idempotency-Key")), execution)
+	result := ai.ExecuteTool(h.siteTx(c), h.siteRegistry(c), ai.ToolRequest{
+		Name: req.ToolName, Args: req.Args, Owner: owner, Site: siteNameStr, Confirmed: true,
+		IdempotencyKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")), Execution: execution,
+	})
 	status := "success"
 	var errorMessage string
 	if strings.HasPrefix(result, "Error:") || strings.HasPrefix(result, "Unknown tool:") {

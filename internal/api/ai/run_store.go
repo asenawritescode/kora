@@ -813,32 +813,55 @@ func approvalFingerprint(toolName string, args map[string]any) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func EnsureApprovalPending(ctx context.Context, db *sql.DB, site, operationID, actorID, actorType, toolName string, recordVersion int, args map[string]any) error {
+// ApprovalTarget identifies one tool call, by its arguments, within an
+// operation (an AI run) of a tenant.
+type ApprovalTarget struct {
+	Site        string
+	OperationID string
+	ToolName    string
+	Args        map[string]any
+}
+
+func (t ApprovalTarget) fingerprint() string {
+	return approvalFingerprint(t.ToolName, t.Args)
+}
+
+// ApprovalRequest asks for a durable approval of Target on behalf of an actor.
+type ApprovalRequest struct {
+	Target        ApprovalTarget
+	ActorID       string
+	ActorType     string
+	RecordVersion int
+}
+
+// EnsureApprovalPending records req as awaiting approval.
+func EnsureApprovalPending(ctx context.Context, db *sql.DB, req ApprovalRequest) error {
 	return UpsertApproval(ctx, db, ApprovalRecord{
-		Site:               site,
-		OperationID:        operationID,
-		ActorPrincipalID:   actorID,
-		ActorPrincipalType: actorType,
-		ToolName:           toolName,
+		Site:               req.Target.Site,
+		OperationID:        req.Target.OperationID,
+		ActorPrincipalID:   req.ActorID,
+		ActorPrincipalType: req.ActorType,
+		ToolName:           req.Target.ToolName,
 		State:              "pending_approval",
-		TargetFingerprint:  approvalFingerprint(toolName, args),
-		ArgumentHash:       approvalFingerprint(toolName, args),
-		RecordVersion:      recordVersion,
+		TargetFingerprint:  req.Target.fingerprint(),
+		ArgumentHash:       req.Target.fingerprint(),
+		RecordVersion:      req.RecordVersion,
 		RequestedAt:        time.Now().UTC(),
 	})
 }
 
-func HasGrantedApproval(ctx context.Context, db *sql.DB, site, operationID, toolName string, args map[string]any) (bool, error) {
+// HasGrantedApproval reports whether target has a granted approval.
+func HasGrantedApproval(ctx context.Context, db *sql.DB, target ApprovalTarget) (bool, error) {
 	if db == nil {
 		return false, nil
 	}
-	fp := approvalFingerprint(toolName, args)
+	fp := target.fingerprint()
 	var count int
 	err := (aiSQL{db}).QueryRowContext(ctx, `
 SELECT COUNT(1)
 FROM _kora_ai_approval
 WHERE site = ? AND operation_id = ? AND tool_name = ? AND state = 'granted' AND target_fingerprint = ?`,
-		site, operationID, toolName, fp).Scan(&count)
+		target.Site, target.OperationID, target.ToolName, fp).Scan(&count)
 	return count > 0, err
 }
 
@@ -896,18 +919,19 @@ WHERE id = ? AND site = ? AND actor_principal_id = ? AND state = 'pending_approv
 	return rec, nil
 }
 
-func GrantApprovalForOperation(ctx context.Context, db *sql.DB, site, operationID, toolName string, args map[string]any, grantedBy string) (ApprovalRecord, error) {
+// GrantApprovalForOperation grants the newest pending approval for target.
+func GrantApprovalForOperation(ctx context.Context, db *sql.DB, target ApprovalTarget, grantedBy string) (ApprovalRecord, error) {
 	if db == nil {
 		return ApprovalRecord{}, fmt.Errorf("approval store unavailable")
 	}
-	fp := approvalFingerprint(toolName, args)
+	fp := target.fingerprint()
 	var approvalID string
 	err := (aiSQL{db}).QueryRowContext(ctx, `
 SELECT id
 FROM _kora_ai_approval
 WHERE site = ? AND operation_id = ? AND tool_name = ? AND state = 'pending_approval' AND target_fingerprint = ?
 ORDER BY requested_at DESC
-LIMIT 1`, site, operationID, toolName, fp).Scan(&approvalID)
+LIMIT 1`, target.Site, target.OperationID, target.ToolName, fp).Scan(&approvalID)
 	if err != nil {
 		return ApprovalRecord{}, err
 	}

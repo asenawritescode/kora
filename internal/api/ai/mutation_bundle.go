@@ -227,6 +227,10 @@ func positiveBundleRevision(value any) (uint64, bool) {
 	}
 }
 
+func bundleApprovalTarget(site, runID string, args map[string]any) ApprovalTarget {
+	return ApprovalTarget{Site: site, OperationID: runID, ToolName: "mutate_records", Args: args}
+}
+
 func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, args map[string]any, site, runID, stepID, idempotencyKey string, execution policy.Execution) string {
 	if tx == nil || tx.DB == nil || !execution.Valid() {
 		return "Permission denied: verified execution and tenant database are required"
@@ -238,7 +242,7 @@ func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, args map[
 	if err != nil {
 		return "Error preparing related record changes: " + err.Error()
 	}
-	approved, err := HasGrantedApproval(tx.Context, tx.DB, site, runID, "mutate_records", args)
+	approved, err := HasGrantedApproval(tx.Context, tx.DB, bundleApprovalTarget(site, runID, args))
 	if err != nil {
 		return "Error checking approval for related record changes; no changes were made."
 	}
@@ -248,7 +252,7 @@ func executeAIMutationBundle(tx *orm.TxManager, reg *doctype.Registry, args map[
 		if principal == "" {
 			principal = actor.PrincipalID
 		}
-		if err := EnsureApprovalPending(tx.Context, tx.DB, site, runID, principal, "agent", "mutate_records", 0, args); err != nil {
+		if err = EnsureApprovalPending(tx.Context, tx.DB, ApprovalRequest{Target: bundleApprovalTarget(site, runID, args), ActorID: principal, ActorType: "agent"}); err != nil {
 			return "Error recording approval for related record changes; no changes were made."
 		}
 		if stepID != "" {

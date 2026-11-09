@@ -597,7 +597,7 @@ func TestAIMutationLoad(t *testing.T) {
 				key := fmt.Sprintf("ai-load-%02d-%02d", workerID, mutationIndex)
 				args := map[string]any{"title": key}
 				started := time.Now()
-				result := koraai.ExecuteConfirmedToolWithIdempotencyKey(tx, registry, "TestDoc_create", args, user, site, key)
+				result := koraai.ExecuteTool(tx, registry, koraai.ToolRequest{Name: "TestDoc_create", Args: args, Owner: user, Site: site, Confirmed: true, IdempotencyKey: key})
 				latencies <- time.Since(started)
 				if !strings.HasPrefix(result, `Created TestDoc "`) {
 					errors <- fmt.Errorf("AI create %s returned %q", key, result)
