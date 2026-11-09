@@ -234,7 +234,7 @@ func AssembleHTTPProcess(config HTTPProcessAssemblyConfig) (*HTTPProcessAssembly
 		if err != nil {
 			return fmt.Errorf("resolve platform database work admission: %w", err)
 		}
-		deletionWorker, err := startPendingDeletionWorker(config.ProcessContext, platformDB, config.Application.Common.DBType, config.Application.Common, site.RetryPendingSiteDeletions, pendingDeletionRetryInterval, admission)
+		deletionWorker, err := startPendingDeletionWorker(config.ProcessContext, pendingDeletionRecovery{platformDB: platformDB, dbType: config.Application.Common.DBType, common: config.Application.Common, retry: site.RetryPendingSiteDeletions, interval: pendingDeletionRetryInterval, admission: admission})
 		if err != nil {
 			return fmt.Errorf("start pending tenant deletion recovery worker: %w", err)
 		}

@@ -50,30 +50,37 @@ type deletionWorkAdmission interface {
 
 // StartPendingDeletionWorker starts the Engine-owned deletion recovery worker.
 func StartPendingDeletionWorker(parent context.Context, platformDB *sql.DB, dbType string, common *site.CommonConfig) (*PendingDeletionWorker, error) {
-	return startPendingDeletionWorker(parent, platformDB, dbType, common, site.RetryPendingSiteDeletions, pendingDeletionRetryInterval, nil)
+	return startPendingDeletionWorker(parent, pendingDeletionRecovery{platformDB: platformDB, dbType: dbType, common: common, retry: site.RetryPendingSiteDeletions, interval: pendingDeletionRetryInterval})
 }
 
-func startPendingDeletionWorker(parent context.Context, platformDB *sql.DB, dbType string, common *site.CommonConfig, retry func(context.Context, *sql.DB, string, *site.CommonConfig) error, interval time.Duration, admissions ...deletionWorkAdmission) (*PendingDeletionWorker, error) {
+// pendingDeletionRecovery is what one pending-deletion recovery worker needs.
+// An omitted common or admission is absent; retry and interval are required.
+type pendingDeletionRecovery struct {
+	platformDB *sql.DB
+	dbType     string
+	common     *site.CommonConfig
+	retry      func(context.Context, *sql.DB, string, *site.CommonConfig) error
+	interval   time.Duration
+	admission  deletionWorkAdmission
+}
+
+func startPendingDeletionWorker(parent context.Context, rec pendingDeletionRecovery) (*PendingDeletionWorker, error) {
 	if parent == nil {
 		return nil, errors.New("pending deletion worker context is required")
 	}
-	if platformDB == nil {
+	if rec.platformDB == nil {
 		return nil, errors.New("pending deletion worker platform database is required")
 	}
-	if retry == nil || interval <= 0 {
+	if rec.retry == nil || rec.interval <= 0 {
 		return nil, errors.New("pending deletion worker retry function and positive interval are required")
 	}
 	ctx, cancel := context.WithCancel(parent)
 	worker := &PendingDeletionWorker{startCh: make(chan struct{}), cancel: cancel, done: make(chan struct{})}
-	var admission deletionWorkAdmission
-	if len(admissions) > 0 {
-		admission = admissions[0]
-	}
-	go worker.run(ctx, platformDB, dbType, common, retry, interval, admission)
+	go worker.run(ctx, rec)
 	return worker, nil
 }
 
-func (w *PendingDeletionWorker) run(ctx context.Context, platformDB *sql.DB, dbType string, common *site.CommonConfig, retry func(context.Context, *sql.DB, string, *site.CommonConfig) error, interval time.Duration, admission deletionWorkAdmission) {
+func (w *PendingDeletionWorker) run(ctx context.Context, rec pendingDeletionRecovery) {
 	defer close(w.done)
 	select {
 	case <-ctx.Done():
@@ -81,8 +88,8 @@ func (w *PendingDeletionWorker) run(ctx context.Context, platformDB *sql.DB, dbT
 	case <-w.startCh:
 	}
 	for {
-		w.retry(ctx, platformDB, dbType, common, retry, admission)
-		timer := time.NewTimer(interval)
+		w.retry(ctx, rec)
+		timer := time.NewTimer(rec.interval)
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
@@ -97,11 +104,11 @@ func (w *PendingDeletionWorker) run(ctx context.Context, platformDB *sql.DB, dbT
 	}
 }
 
-func (w *PendingDeletionWorker) retry(ctx context.Context, platformDB *sql.DB, dbType string, common *site.CommonConfig, retry func(context.Context, *sql.DB, string, *site.CommonConfig) error, admission deletionWorkAdmission) {
+func (w *PendingDeletionWorker) retry(ctx context.Context, rec pendingDeletionRecovery) {
 	retryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if admission != nil {
-		release, err := admission.Acquire(retryCtx)
+	if rec.admission != nil {
+		release, err := rec.admission.Acquire(retryCtx)
 		if err != nil {
 			if ctx.Err() == nil {
 				w.rejected.Add(1)
@@ -112,7 +119,7 @@ func (w *PendingDeletionWorker) retry(ctx context.Context, platformDB *sql.DB, d
 		defer release()
 	}
 	w.attempts.Add(1)
-	if err := retry(retryCtx, platformDB, dbType, common); err != nil {
+	if err := rec.retry(retryCtx, rec.platformDB, rec.dbType, rec.common); err != nil {
 		w.failures.Add(1)
 		if ctx.Err() == nil {
 			slog.Warn("pending site deletion cleanup will retry", "error", err)

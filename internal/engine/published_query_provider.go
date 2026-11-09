@@ -2,15 +2,12 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/plugin"
-	"github.com/asenawritescode/kora/internal/workflow"
 )
 
 // registeredSQLPublishedQueryProviders wires the Engine-owned durable fact
@@ -18,15 +15,15 @@ import (
 // configured provider. Capability contracts that mix query and effectful
 // operations remain explicit provider integrations; Engine never guesses how
 // their non-query operations should execute.
-func registeredSQLPublishedQueryProviders(ctx context.Context, tenant contract.TenantID, database *sql.DB, dialect db.Dialect, modules []contract.ModuleDescriptor, schemas workflow.PayloadSchemaRegistry, configured []plugin.ProviderRegistration) ([]plugin.ProviderRegistration, error) {
-	if ctx == nil || database == nil || dialect == nil {
+func registeredSQLPublishedQueryProviders(ctx context.Context, src moduleProviderSource) ([]plugin.ProviderRegistration, error) {
+	if ctx == nil || src.db == nil || src.dialect == nil {
 		return nil, fmt.Errorf("durable published query providers require tenant persistence")
 	}
-	provider, err := plugin.NewSQLPublishedQueryProvider(database, dialect)
+	provider, err := plugin.NewSQLPublishedQueryProvider(src.db, src.dialect)
 	if err != nil {
 		return nil, err
 	}
-	ordered := append([]contract.ModuleDescriptor(nil), modules...)
+	ordered := append([]contract.ModuleDescriptor(nil), src.modules...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
 	var registrations []plugin.ProviderRegistration
 	needsSchema := false
@@ -35,7 +32,7 @@ func registeredSQLPublishedQueryProviders(ctx context.Context, tenant contract.T
 		offers := make([]contract.CapabilityOffer, 0)
 		seenOffers := map[contract.CapabilityName]bool{}
 		for _, query := range module.Queries {
-			if !query.OfflineEligible || configuredPublishedQuery(configured, module.ID, query.Name) {
+			if !query.OfflineEligible || configuredPublishedQuery(src.configured, module.ID, query.Name) {
 				continue
 			}
 			var declared *contract.CapabilityOffer
@@ -57,7 +54,7 @@ func registeredSQLPublishedQueryProviders(ctx context.Context, tenant contract.T
 			if declared == nil {
 				continue
 			}
-			if schemas == nil || !schemas.Registered(query.InputSchema) || !schemas.Registered(query.OutputSchema) {
+			if src.schemas == nil || !src.schemas.Registered(query.InputSchema) || !src.schemas.Registered(query.OutputSchema) {
 				return nil, fmt.Errorf("module %q offline query %q requires registered input and output schemas", module.ID, query.Name)
 			}
 			queries[query.Name] = provider
@@ -71,13 +68,13 @@ func registeredSQLPublishedQueryProviders(ctx context.Context, tenant contract.T
 		}
 		needsSchema = true
 		registrations = append(registrations, plugin.ProviderRegistration{
-			TenantID: tenant, ProviderID: "engine.published-facts." + string(module.ID), OwnerModuleID: module.ID, Kind: plugin.ProviderInternal,
+			TenantID: src.tenant, ProviderID: "engine.published-facts." + string(module.ID), OwnerModuleID: module.ID, Kind: plugin.ProviderInternal,
 			Offers: offers, Queries: queries,
 			ValidateSchema: func(ref contract.SchemaRef, raw []byte) error {
-				if !schemas.Registered(ref) {
+				if !src.schemas.Registered(ref) {
 					return fmt.Errorf("schema %s@%d is not registered", ref.ID, ref.Version)
 				}
-				return schemas.Validate(ref, json.RawMessage(raw))
+				return src.schemas.Validate(ref, json.RawMessage(raw))
 			},
 		})
 	}

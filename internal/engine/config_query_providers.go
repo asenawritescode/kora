@@ -16,10 +16,8 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
-	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/plugin"
 	"github.com/asenawritescode/kora/internal/query"
-	"github.com/asenawritescode/kora/internal/workflow"
 )
 
 // registeredConfigQueryProviders binds each tenant config query to the module
@@ -27,18 +25,18 @@ import (
 // the config definition supplies only execution. A definition without a
 // descriptor, or one that disagrees with it, is an error when strict (preflight)
 // and is skipped with a warning otherwise (tenant start), so the site still starts.
-func registeredConfigQueryProviders(tenant contract.TenantID, database *sql.DB, dialect db.Dialect, registry *doctype.Registry, modules []contract.ModuleDescriptor, defs []*query.Definition, schemas workflow.PayloadSchemaRegistry, strict bool) ([]plugin.ProviderRegistration, error) {
+func registeredConfigQueryProviders(src moduleProviderSource, defs []*query.Definition, strict bool) ([]plugin.ProviderRegistration, error) {
 	byOwner := map[contract.ModuleID]map[string]plugin.PublishedQueryExecutor{}
 	offers := map[contract.ModuleID][]contract.CapabilityOffer{}
 	for _, def := range defs {
 		owner := contract.ModuleID(def.ModuleOwnerID)
 		var module *contract.ModuleDescriptor
 		var published *contract.PublishedQuery
-		for i := range modules {
-			if modules[i].ID != owner {
+		for i := range src.modules {
+			if src.modules[i].ID != owner {
 				continue
 			}
-			module = &modules[i]
+			module = &src.modules[i]
 			for j := range module.Queries {
 				q := &module.Queries[j]
 				if q.Name == def.Operation && string(q.Capability) == def.Capability {
@@ -51,17 +49,17 @@ func registeredConfigQueryProviders(tenant contract.TenantID, database *sql.DB, 
 			if strict {
 				return nil, err
 			}
-			slog.Warn("skipping config query", "tenant", tenant, "query", def.Name, "code", "query.unpublished", "error", err)
+			slog.Warn("skipping config query", "tenant", src.tenant, "query", def.Name, "code", "query.unpublished", "error", err)
 			continue
 		}
 		if err := matchConfigQuery(def, *published); err != nil {
 			if strict {
 				return nil, err
 			}
-			slog.Warn("skipping config query", "tenant", tenant, "query", def.Name, "code", "query.mismatch", "error", err)
+			slog.Warn("skipping config query", "tenant", src.tenant, "query", def.Name, "code", "query.mismatch", "error", err)
 			continue
 		}
-		if schemas == nil || !schemas.Registered(published.InputSchema) || !schemas.Registered(published.OutputSchema) {
+		if src.schemas == nil || !src.schemas.Registered(published.InputSchema) || !src.schemas.Registered(published.OutputSchema) {
 			return nil, fmt.Errorf("config query %q requires registered input and output schemas", def.Name)
 		}
 		if byOwner[owner] == nil {
@@ -73,17 +71,17 @@ func registeredConfigQueryProviders(tenant contract.TenantID, database *sql.DB, 
 			permSource = p
 		}
 		if def.Scope == "legal_entity" {
-			if dt := registry.Get(permSource); dt != nil {
+			if dt := src.registry.Get(permSource); dt != nil {
 				scopeField = dt.BusinessScopeField
 			}
 			if scopeField == "" {
 				return nil, fmt.Errorf("config query %q is legal_entity scoped but %q has no business_scope_field", def.Name, permSource)
 			}
 		}
-		if registry != nil {
-			registry.SetQuerySource("module."+def.ModuleOwnerID+".query."+published.Name, permSource)
+		if src.registry != nil {
+			src.registry.SetQuerySource("module."+def.ModuleOwnerID+".query."+published.Name, permSource)
 		}
-		byOwner[owner][published.Name] = &configQueryExecutor{db: database, dialect: dialect, def: def, scopeField: scopeField}
+		byOwner[owner][published.Name] = &configQueryExecutor{db: src.db, dialect: src.dialect, def: def, scopeField: scopeField}
 		for _, offer := range module.Provides {
 			if offer.Name == published.Capability && !slices.ContainsFunc(offers[owner], func(o contract.CapabilityOffer) bool { return o.Name == offer.Name }) {
 				offers[owner] = append(offers[owner], offer)
@@ -99,13 +97,13 @@ func registeredConfigQueryProviders(tenant contract.TenantID, database *sql.DB, 
 	for _, o := range owners {
 		owner := contract.ModuleID(o)
 		out = append(out, plugin.ProviderRegistration{
-			TenantID: tenant, ProviderID: "engine.config-queries." + o, OwnerModuleID: owner, Kind: plugin.ProviderInternal,
+			TenantID: src.tenant, ProviderID: "engine.config-queries." + o, OwnerModuleID: owner, Kind: plugin.ProviderInternal,
 			Offers: offers[owner], Queries: byOwner[owner],
 			ValidateSchema: func(ref contract.SchemaRef, raw []byte) error {
-				if !schemas.Registered(ref) {
+				if !src.schemas.Registered(ref) {
 					return fmt.Errorf("schema %s@%d is not registered", ref.ID, ref.Version)
 				}
-				return schemas.Validate(ref, json.RawMessage(raw))
+				return src.schemas.Validate(ref, json.RawMessage(raw))
 			},
 		})
 	}

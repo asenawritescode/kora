@@ -53,7 +53,7 @@ func actorScopeFixture(t *testing.T) (*doctype.Registry, *api.Handler, map[strin
 	module.Provides = []contract.CapabilityOffer{offer}
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Till Session", ModuleOwnerID: "pos.core"})
-	providers, err := registeredConfigQueryProviders("pos-t", database, db.Resolve("libsql"), registry, []contract.ModuleDescriptor{module}, defs, publishedQueryTestSchemas{in: true, out: true}, true)
+	providers, err := registeredConfigQueryProviders(moduleProviderSource{tenant: "pos-t", db: database, dialect: db.Resolve("libsql"), registry: registry, modules: []contract.ModuleDescriptor{module}, schemas: publishedQueryTestSchemas{in: true, out: true}}, defs, true)
 	if err != nil || len(providers) != 1 {
 		t.Fatalf("providers = %+v err = %v", providers, err)
 	}

@@ -18,14 +18,14 @@ import (
 // CommandRegistry to the capability provider seam. The registry remains the
 // source of command definitions; the capability metadata on each definition
 // links one local operation to that command.
-func newKernelCommandProviderFactory(database *sql.DB, registry *doctype.Registry, commandRegistry *kernel.CommandRegistry, commandKernel *kernel.Kernel, tenant contract.TenantID, owner contract.ModuleID, capability contract.CapabilityName, validateSchema func(contract.SchemaRef, []byte) error) (plugin.ProviderFactory, error) {
-	if database == nil || registry == nil || commandRegistry == nil || commandKernel == nil || owner == "" || capability == "" || validateSchema == nil {
+func newKernelCommandProviderFactory(f kernelCommandProviderFactory) (plugin.ProviderFactory, error) {
+	if f.database == nil || f.registry == nil || f.commands == nil || f.engine == nil || f.owner == "" || f.capability == "" || f.validateSchema == nil {
 		return nil, fmt.Errorf("kernel command provider dependencies are required")
 	}
-	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
+	if _, err := contract.ParseTenantID(string(f.tenant)); err != nil {
 		return nil, fmt.Errorf("kernel command provider tenant: %w", err)
 	}
-	return &kernelCommandProviderFactory{database: database, registry: registry, commands: commandRegistry, engine: commandKernel, tenant: tenant, owner: owner, capability: capability, validateSchema: validateSchema}, nil
+	return &f, nil
 }
 
 type kernelCommandProviderFactory struct {

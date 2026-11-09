@@ -251,7 +251,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		if err := e.reconcileRuntime(ctx, info); err != nil {
 			return packageRecoveryRequired("tenant runtime convergence needs recovery"), nil
 		}
-		if err := e.complete(ctx, info, string(operation.ID), claim.Fence, expectedRevision, command.Digest); err != nil {
+		if completeErr := e.complete(ctx, info, packageCompletion{operation: string(operation.ID), fence: claim.Fence, expectedRevision: expectedRevision, digest: command.Digest}); completeErr != nil {
 			return packageRecoveryRequired("package activation completion record needs recovery"), nil
 		}
 		return management.FinishResult{State: contract.OperationSucceeded, ObservedRevision: contract.Revision(observed)}, nil
@@ -335,7 +335,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 	if err := e.reconcileRuntime(ctx, info); err != nil {
 		return packageRecoveryRequired("tenant runtime convergence needs recovery"), nil
 	}
-	if err := e.complete(ctx, info, string(operation.ID), claim.Fence, expectedRevision, command.Digest); err != nil {
+	if err := e.complete(ctx, info, packageCompletion{operation: string(operation.ID), fence: claim.Fence, expectedRevision: expectedRevision, digest: command.Digest}); err != nil {
 		return packageRecoveryRequired("package activation completion record needs recovery"), nil
 	}
 	if versionID == "" {
@@ -393,7 +393,16 @@ func (e *managementPackageExecutor) reconcileRuntime(ctx context.Context, origin
 	return fmt.Errorf("tenant status %q cannot be reconciled after package activation", current.Status)
 }
 
-func (e *managementPackageExecutor) complete(ctx context.Context, original site.DBSiteInfo, operation string, fence, expectedRevision uint64, digest string) error {
+// packageCompletion is the fenced record that marks one package activation
+// operation complete.
+type packageCompletion struct {
+	operation        string
+	fence            uint64
+	expectedRevision uint64
+	digest           string
+}
+
+func (e *managementPackageExecutor) complete(ctx context.Context, original site.DBSiteInfo, done packageCompletion) error {
 	info, err := e.tenantInfo(ctx, original.SiteID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -422,7 +431,7 @@ func (e *managementPackageExecutor) complete(ctx context.Context, original site.
 		return err
 	}
 	defer database.Close()
-	return configstore.CompleteManagementActivation(ctx, database, db.Resolve(info.DBType), info.Name, operation, fence, expectedRevision, digest)
+	return configstore.CompleteManagementActivation(ctx, database, db.Resolve(info.DBType), info.Name, done.operation, done.fence, done.expectedRevision, done.digest)
 }
 
 // Bounds for the activation preflight failure detail: enough for an operator

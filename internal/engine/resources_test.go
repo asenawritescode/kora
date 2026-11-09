@@ -68,11 +68,11 @@ func TestProcessResourcesRetainDependenciesWhenWorkerJoinTimesOut(t *testing.T) 
 	}
 	defer database.Close()
 	entered, release := make(chan struct{}), make(chan struct{})
-	worker, err := startPendingDeletionWorker(context.Background(), database, "mysql", nil, func(context.Context, *sql.DB, string, *site.CommonConfig) error {
+	worker, err := startPendingDeletionWorker(context.Background(), pendingDeletionRecovery{platformDB: database, dbType: "mysql", retry: func(context.Context, *sql.DB, string, *site.CommonConfig) error {
 		close(entered)
 		<-release
 		return nil
-	}, time.Hour)
+	}, interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,11 +104,11 @@ func TestProcessResourcesJoinsWorkersBeforeClosingScriptRunner(t *testing.T) {
 	}
 	defer database.Close()
 	entered := make(chan struct{})
-	worker, err := startPendingDeletionWorker(context.Background(), database, "mysql", nil, func(ctx context.Context, _ *sql.DB, _ string, _ *site.CommonConfig) error {
+	worker, err := startPendingDeletionWorker(context.Background(), pendingDeletionRecovery{platformDB: database, dbType: "mysql", retry: func(ctx context.Context, _ *sql.DB, _ string, _ *site.CommonConfig) error {
 		close(entered)
 		<-ctx.Done()
 		return nil
-	}, time.Hour)
+	}, interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}

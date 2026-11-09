@@ -196,7 +196,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 	offer := contract.CapabilityOffer{Name: "billing.invoice", Contract: outputSchema, Operations: []contract.OperationSpec{operation}}
 	owner := contract.ModuleDescriptor{ID: "finance.ar", Version: "1.0.0", Provides: []contract.CapabilityOffer{offer}, PublishedOperations: []contract.PublishedOperation{{Name: "issue", Capability: offer.Name, Operation: operation.Name, ScopePolicy: contract.ScopeEntityOwned, OfflineEligible: true, AllowedCallers: []contract.ModuleID{"sales.orders"}}}}
 	caller := contract.ModuleDescriptor{ID: "sales.orders", Version: "1.0.0", Requires: []contract.CapabilityRequirement{{Name: offer.Name, Contract: offer.Contract, Required: true}}}
-	providers, err := registeredKernelCommandProviders(tenant, database, registry, []contract.ModuleDescriptor{caller, owner}, commands, commandKernel, schemas, nil)
+	providers, err := registeredKernelCommandProviders(moduleProviderSource{tenant: tenant, db: database, registry: registry, modules: []contract.ModuleDescriptor{caller, owner}, schemas: schemas}, commands, commandKernel)
 	if err != nil {
 		t.Fatal("register internal owner command provider:", err)
 	}
