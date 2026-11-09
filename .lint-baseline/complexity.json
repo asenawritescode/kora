@@ -33,11 +33,6 @@
    "cyclomatic": 21,
    "statements": 49
   },
-  "cmd/contractgen::typeSchema": {
-   "cognitive": 146,
-   "cyclomatic": 58,
-   "statements": 112
-  },
   "cmd/contractgen::visitType": {
    "cognitive": 34,
    "cyclomatic": 25,
