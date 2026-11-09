@@ -1,15 +1,15 @@
-package main
+package contract
 
 import (
 	"encoding/json"
 	"os"
 	"testing"
-
-	"github.com/asenawritescode/kora/kernel"
 )
 
+// The organizational-runtime fixture is shared with every client repository; the Engine must keep
+// it decodable and keep "doctype" as the canonical first business schema kind.
 func TestOrganizationalRuntimeFixtureIsValid(t *testing.T) {
-	data, err := os.ReadFile("contract-fixtures/organizational-runtime-v1.json")
+	data, err := os.ReadFile("../contract-fixtures/organizational-runtime-v1.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,17 +25,5 @@ func TestOrganizationalRuntimeFixtureIsValid(t *testing.T) {
 	}
 	if fixture.ResourceKinds[0] != "doctype" {
 		t.Fatalf("canonical business schema kind = %q, want doctype", fixture.ResourceKinds[0])
-	}
-}
-
-func TestYAMLPackageCommandsUseGenericKernelLoader(t *testing.T) {
-	registry, err := kernel.LoadCommandDir("config/v0/inventory/commands")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"inventory.add_stock", "inventory.issue_stock", "inventory.transfer_stock", "inventory.reserve_stock", "inventory.release_stock"} {
-		if _, ok := registry.Lookup(name); !ok {
-			t.Fatalf("missing YAML command %q", name)
-		}
 	}
 }

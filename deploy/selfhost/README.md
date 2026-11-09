@@ -113,7 +113,7 @@ Cloud sign-in handoff (including accepting a member invitation) needs both
 neither set, the Engine logs one startup WARN naming both variables and
 `POST /api/auth/cloud/handoff` answers `503` with code
 `auth.cloud_handoff_unconfigured`; with only one set, startup fails. Values are
-never logged. The local `restart_server.sh` forwards both from `.env.local`.
+never logged. The local `scripts/restart-server.sh` forwards both from `.env.local`.
 
 For deployment ingress, set `KORA_ENGINE_LOCAL_DEPLOYMENT_ID` and
 `KORA_ENGINE_DEPLOYMENT_URLS` as comma-separated

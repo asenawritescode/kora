@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Read simple KEY=VALUE lines without `source`, since DB_DSN query strings
 # contain ampersands and must not be interpreted as shell syntax.
