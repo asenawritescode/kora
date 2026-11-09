@@ -116,7 +116,7 @@ func (h *Handler) HandleSystemViewCreate(c *gin.Context) {
 	if rejectInvalidSnapshotReferences(c, snapshot, reg) {
 		return
 	}
-	versionID, versionNum, err := saveViewDraft(store, &view, site, currentUser(c), "Created view "+view.Name, snapshot)
+	versionID, versionNum, err := saveViewDraft(store, &view, draftVersion{Site: site, Actor: currentUser(c), Label: "Created view " + view.Name, Snapshot: snapshot})
 	if err != nil {
 		internalError(c, "creating config version", err)
 		return
@@ -165,7 +165,7 @@ func (h *Handler) HandleSystemViewUpdate(c *gin.Context) {
 	if rejectInvalidSnapshotReferences(c, snapshot, reg) {
 		return
 	}
-	versionID, versionNum, err := saveViewDraft(store, &view, site, currentUser(c), "Updated view "+view.Name, snapshot)
+	versionID, versionNum, err := saveViewDraft(store, &view, draftVersion{Site: site, Actor: currentUser(c), Label: "Updated view " + view.Name, Snapshot: snapshot})
 	if err != nil {
 		internalError(c, "creating config version", err)
 		return
@@ -179,16 +179,17 @@ func (h *Handler) HandleSystemViewUpdate(c *gin.Context) {
 	}})
 }
 
-func saveViewDraft(store *configstore.Store, view *doctype.View, site, user, label string, snapshot *doctype.ConfigSnapshot) (string, int, error) {
+func saveViewDraft(store *configstore.Store, view *doctype.View, draft draftVersion) (string, int, error) {
 	tx, err := store.DB.Begin()
 	if err != nil {
 		return "", 0, fmt.Errorf("begin view draft transaction: %w", err)
 	}
 	defer tx.Rollback()
-	if err := store.SaveViewTx(tx, view, site); err != nil {
+	err = store.SaveViewTx(tx, view, draft.Site)
+	if err != nil {
 		return "", 0, err
 	}
-	versionID, versionNum, err := store.CreateConfigVersionTx(tx, site, user, label, "Draft", snapshot, "")
+	versionID, versionNum, err := store.CreateConfigVersionTx(tx, draft.Site, draft.Actor, draft.Label, "Draft", draft.Snapshot, "")
 	if err != nil {
 		return "", 0, err
 	}
@@ -947,7 +948,7 @@ func (h *Handler) executeCreateTransaction(c *gin.Context, action *doctype.ViewA
 		Records: []kernel.RecordMutationBundleItem{{Key: "sale", Doctype: dt.Name, Data: saleData}},
 	}
 	bundle.Records = append(bundle.Records, stockUpdates...)
-	lineRecords, lineRecordErr := configuredTransactionLineRecords(reg, action.Config, dt, doc, childDT, children, user)
+	lineRecords, lineRecordErr := configuredTransactionLineRecords(action.Config, transactionLines{Registry: reg, ParentDT: dt, Parent: doc, LineDT: childDT, Lines: children, Actor: user})
 	if lineRecordErr != nil {
 		writeError(c, http.StatusBadRequest, "validation.invalid_configuration", lineRecordErr.Error(), nil)
 		return
@@ -1025,25 +1026,40 @@ func validateTransactionRelatedStatuses(tx *orm.TxManager, reg *doctype.Registry
 	return nil
 }
 
+// transactionLines is the saved transaction a configured line record is
+// created for.
+type transactionLines struct {
+	// Registry resolves the configured target record types.
+	Registry *doctype.Registry
+	// ParentDT and Parent are the transaction header type and document.
+	ParentDT *doctype.DocType
+	Parent   *doctype.Document
+	// LineDT and Lines are the line type and its rows.
+	LineDT *doctype.DocType
+	Lines  []*doctype.Document
+	// Actor is the user the records are created for.
+	Actor string
+}
+
 // configuredTransactionLineRecords creates one configured companion record per
 // transaction line. This supports generic ledgers such as stock movements
 // without embedding POS-specific rules in the transaction engine.
-func configuredTransactionLineRecords(reg *doctype.Registry, config map[string]any, parentDT *doctype.DocType, parent *doctype.Document, lineDT *doctype.DocType, lines []*doctype.Document, actor string) ([]kernel.RecordMutationBundleItem, error) {
+func configuredTransactionLineRecords(config map[string]any, src transactionLines) ([]kernel.RecordMutationBundleItem, error) {
 	raw, ok := config["line_records"].([]any)
 	if !ok || len(raw) == 0 {
 		return nil, nil
 	}
-	if lineDT == nil || len(lines) == 0 {
+	if src.LineDT == nil || len(src.Lines) == 0 {
 		return nil, fmt.Errorf("line_records requires transaction lines")
 	}
-	items := make([]kernel.RecordMutationBundleItem, 0, len(raw)*len(lines))
+	items := make([]kernel.RecordMutationBundleItem, 0, len(raw)*len(src.Lines))
 	for bindingIndex, rawBinding := range raw {
 		binding, ok := rawBinding.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("line record binding %d must be an object", bindingIndex+1)
 		}
 		targetName := getString(binding, "doctype")
-		targetDT := reg.Get(targetName)
+		targetDT := src.Registry.Get(targetName)
 		fields, fieldsOK := binding["fields"].(map[string]any)
 		if targetDT == nil || !fieldsOK || len(fields) == 0 {
 			return nil, fmt.Errorf("line record binding %d requires an available doctype and fields", bindingIndex+1)
@@ -1053,26 +1069,26 @@ func configuredTransactionLineRecords(reg *doctype.Registry, config map[string]a
 			prefix = fmt.Sprintf("line_record_%d", bindingIndex+1)
 		}
 		quantity, _ := binding["quantity"].(map[string]any)
-		for lineIndex, line := range lines {
+		for lineIndex, line := range src.Lines {
 			data := make(map[string]any, len(fields)+1)
 			for field, source := range fields {
 				value := source
 				if expression, isExpression := source.(string); isExpression {
 					switch {
 					case expression == "$actor":
-						value = actor
+						value = src.Actor
 					case strings.HasPrefix(expression, "$line."):
 						name := strings.TrimPrefix(expression, "$line.")
-						if lineDT.GetField(name) == nil {
+						if src.LineDT.GetField(name) == nil {
 							return nil, fmt.Errorf("line record binding references unknown line field %q", name)
 						}
 						value = line.Get(name)
 					case strings.HasPrefix(expression, "$parent."):
 						name := strings.TrimPrefix(expression, "$parent.")
-						if parentDT.GetField(name) == nil {
+						if src.ParentDT.GetField(name) == nil {
 							return nil, fmt.Errorf("line record binding references unknown transaction field %q", name)
 						}
-						value = parent.Get(name)
+						value = src.Parent.Get(name)
 					}
 				}
 				data[field] = value
@@ -1082,7 +1098,7 @@ func configuredTransactionLineRecords(reg *doctype.Registry, config map[string]a
 				sourceName := getString(quantity, "source_field")
 				sign, signErr := strconv.ParseFloat(fmt.Sprint(quantity["sign"]), 64)
 				amount := line.GetFloat(sourceName)
-				if targetDT.GetField(fieldName) == nil || lineDT.GetField(sourceName) == nil || signErr != nil || (sign != 1 && sign != -1) || amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+				if targetDT.GetField(fieldName) == nil || src.LineDT.GetField(sourceName) == nil || signErr != nil || (sign != 1 && sign != -1) || amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
 					return nil, fmt.Errorf("line record binding %d has an invalid signed quantity mapping", bindingIndex+1)
 				}
 				data[fieldName] = amount * sign

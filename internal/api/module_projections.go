@@ -44,7 +44,7 @@ func (h *Handler) HandlePublishedModuleProjection(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "module.projection_not_found", "Published projection not found", nil)
 		return
 	}
-	actorScope, authErr := authorizePublishedProjectionActorScope(execution, h.siteRegistry(c), definition, scope, scopePolicy, "read")
+	actorScope, authErr := projectionAccess{Execution: execution, Roles: h.siteRegistry(c), Definition: definition, Scope: scope, ScopePolicy: scopePolicy}.actorScope("read")
 	if authErr != nil {
 		writeError(c, http.StatusForbidden, "permission.denied", "Published projection access is not granted", nil)
 		return
@@ -91,7 +91,7 @@ func (h *Handler) HandleRebuildPublishedModuleProjection(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "module.projection_not_found", "Published projection not found", nil)
 		return
 	}
-	if !authorizePublishedProjection(execution, h.siteRegistry(c), definition, scope, scopePolicy, "write") {
+	if !(projectionAccess{Execution: execution, Roles: h.siteRegistry(c), Definition: definition, Scope: scope, ScopePolicy: scopePolicy}).allows("write") {
 		writeError(c, http.StatusForbidden, "permission.denied", "Published projection rebuild is not granted", nil)
 		return
 	}
@@ -126,17 +126,34 @@ func publishedProjectionDefinition(plan plugin.BindingPlan, scope contract.Busin
 	return definition, scopePolicy, true
 }
 
-func authorizePublishedProjection(execution policy.Execution, roles policy.RolePolicy, definition contract.ProjectionDefinition, scope contract.BusinessScope, scopePolicy contract.ResourceScopeKind, operation string) bool {
-	actorScope, err := authorizePublishedProjectionActorScope(execution, roles, definition, scope, scopePolicy, operation)
+// projectionAccess is a request to use one published projection: who asks,
+// under which roles and business scope.
+type projectionAccess struct {
+	// Execution is the verified caller and Roles the role policy to check it against.
+	Execution policy.Execution
+	Roles     policy.RolePolicy
+	// Definition is the published projection being accessed.
+	Definition contract.ProjectionDefinition
+	// Scope is the request's business scope and ScopePolicy the projection's
+	// declared scope policy.
+	Scope       contract.BusinessScope
+	ScopePolicy contract.ResourceScopeKind
+}
+
+// allows reports whether operation is granted without row-level scoping.
+func (a projectionAccess) allows(operation string) bool {
+	actorScope, err := a.actorScope(operation)
 	return err == nil && actorScope == nil
 }
 
-func authorizePublishedProjectionActorScope(execution policy.Execution, roles policy.RolePolicy, definition contract.ProjectionDefinition, scope contract.BusinessScope, scopePolicy contract.ResourceScopeKind, operation string) (*analytics.ProjectionActorScope, *contract.Error) {
-	if !execution.Valid() || definition.OwnerModuleID == "" || definition.ID == "" || contract.ValidateResourceBusinessScope(scope, scopePolicy) != nil {
+// actorScope authorizes operation and returns the row scope to apply to a
+// read, or nil when the grant covers every row.
+func (a projectionAccess) actorScope(operation string) (*analytics.ProjectionActorScope, *contract.Error) {
+	if !a.Execution.Valid() || a.Definition.OwnerModuleID == "" || a.Definition.ID == "" || contract.ValidateResourceBusinessScope(a.Scope, a.ScopePolicy) != nil {
 		return nil, contract.NewError(contract.CodePermissionDenied, "published projection scope is invalid")
 	}
-	resource := "module." + string(definition.OwnerModuleID) + ".projection." + definition.ID
-	decision, err := policy.DecideForBusinessScope(execution, roles, resource, operation, scope, scopePolicy == contract.ScopeEntityOwned)
+	resource := "module." + string(a.Definition.OwnerModuleID) + ".projection." + a.Definition.ID
+	decision, err := policy.DecideForBusinessScope(a.Execution, a.Roles, resource, operation, a.Scope, a.ScopePolicy == contract.ScopeEntityOwned)
 	if err != nil {
 		return nil, err
 	}
@@ -146,18 +163,18 @@ func authorizePublishedProjectionActorScope(execution policy.Execution, roles po
 	if operation != "read" {
 		return nil, contract.NewError(contract.CodePermissionDenied, "row-scoped grants cannot rebuild shared projections")
 	}
-	if decision.OwnerOnly && definition.OwnerField == "" {
+	if decision.OwnerOnly && a.Definition.OwnerField == "" {
 		return nil, contract.NewError(contract.CodePermissionDenied, "published projection does not declare an owner field")
 	}
-	subject := strings.TrimSpace(execution.Actor().SubjectUserID)
+	subject := strings.TrimSpace(a.Execution.Actor().SubjectUserID)
 	if subject == "" {
-		subject = strings.TrimSpace(execution.Actor().PrincipalID)
+		subject = strings.TrimSpace(a.Execution.Actor().PrincipalID)
 	}
 	if subject == "" {
 		return nil, contract.NewError(contract.CodePermissionDenied, "published projection row scope requires a verified subject")
 	}
-	allowed := make(map[string]bool, len(definition.AllowedFields))
-	for _, field := range definition.AllowedFields {
+	allowed := make(map[string]bool, len(a.Definition.AllowedFields))
+	for _, field := range a.Definition.AllowedFields {
 		allowed[field] = true
 	}
 	for _, field := range decision.AssignedFields {
@@ -165,7 +182,7 @@ func authorizePublishedProjectionActorScope(execution policy.Execution, roles po
 			return nil, contract.NewError(contract.CodePermissionDenied, "projection assignment field is outside the published field contract")
 		}
 	}
-	return &analytics.ProjectionActorScope{SubjectID: subject, OwnerOnly: decision.OwnerOnly, OwnerField: definition.OwnerField, AssignedFields: append([]string(nil), decision.AssignedFields...)}, nil
+	return &analytics.ProjectionActorScope{SubjectID: subject, OwnerOnly: decision.OwnerOnly, OwnerField: a.Definition.OwnerField, AssignedFields: append([]string(nil), decision.AssignedFields...)}, nil
 }
 
 func filterPublishedProjectionRows(data json.RawMessage, scope analytics.ProjectionActorScope) (json.RawMessage, error) {

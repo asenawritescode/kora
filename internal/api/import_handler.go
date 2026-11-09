@@ -171,7 +171,7 @@ func (h *Handler) HandleImport(c *gin.Context) {
 		if table != "" {
 			childDT = reg.Get(dt.GetField(table).Options)
 		}
-		units = assembleImportGroups(dt, childDT, table, head, child, col, spec.GroupBy, rows)
+		units = importGrouping{DT: dt, ChildDT: childDT, Table: table, Head: head, Child: child, Col: col, GroupCol: spec.GroupBy}.assemble(rows)
 	} else {
 		units = assembleImportRows(dt, spec.Mapping, col, rows)
 	}

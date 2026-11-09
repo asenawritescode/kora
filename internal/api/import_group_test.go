@@ -44,7 +44,7 @@ func TestAssembleImportGroups(t *testing.T) {
 			for _, l := range strings.Split(tt.csv, "\n") {
 				rows = append(rows, strings.Split(l, ","))
 			}
-			us := assembleImportGroups(sale, line, table, head, child, col, "Sale No", rows)
+			us := importGrouping{DT: sale, ChildDT: line, Table: table, Head: head, Child: child, Col: col, GroupCol: "Sale No"}.assemble(rows)
 			if len(us) != len(tt.first) {
 				t.Fatalf("units=%d want %d", len(us), len(tt.first))
 			}
