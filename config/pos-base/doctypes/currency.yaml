@@ -5,9 +5,9 @@ search_fields: code, currency_name
 sort_field: code
 sort_order: ASC
 description: >-
-  A currency the shop can sell, take payment or spend in. Exactly one record is
-  the base currency (the one the books are kept in). Rates are typed in by a
-  person; nothing here reads a rate feed.
+  A currency other than the shop's own that it can sell, take payment or spend
+  in. The shop's own (base) currency is chosen once, in Settings, and is not
+  listed here. Rates are typed in by a person; nothing here reads a rate feed.
 
 fields:
   - fieldname: code
@@ -30,16 +30,10 @@ fields:
   - fieldname: symbol
     fieldtype: Data
     label: Symbol
-  - fieldname: is_base
-    fieldtype: Check
-    label: Base currency
-    description: Tick for the one currency your books are kept in.
-    default: "0"
-    in_list_view: true
   - fieldname: rate_to_base
     fieldtype: Float
     label: Rate to base
-    description: How much of the base currency one unit of this currency is worth today. Type it in by hand. The base currency is always 1.
+    description: How much of the shop's own currency (set in Settings) one unit of this currency is worth today. Type it in by hand.
     reqd: true
     default: "1"
     in_list_view: true

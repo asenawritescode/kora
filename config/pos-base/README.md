@@ -27,8 +27,9 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 
 ## How multiple currencies work
 
-- One **base currency** (the Currency record with *Base currency* ticked, rate 1).
-  Totals, reports and the books are in the base currency. Product prices
+- One **base currency**, chosen once in **Settings** (the site currency). It is not
+  listed as a Currency record; the Currency records are the other currencies you
+  deal in, each with its rate to the base. Totals, reports and the books are in the base currency. Product prices
   (`selling_price`, `cost_price`) are in the base currency.
 - Every money record (Sale, Payment, Cash Movement, Expense) has `currency` and
   `exchange_rate`. **Leave `currency` empty for the base currency.**

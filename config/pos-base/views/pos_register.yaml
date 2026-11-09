@@ -57,6 +57,7 @@ components:
           fields:
             entry_source: POS
             sale_date: "$today"
+            status: Paid
           related_quantity_updates:
             target_doctype: Product
             target_quantity_field: stock_qty

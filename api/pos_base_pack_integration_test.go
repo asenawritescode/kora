@@ -107,9 +107,9 @@ func seedPOSBaseShop(t *testing.T, db *sql.DB) {
 		// No Register record is inserted on purpose: a register created in the
 		// UI gets a generated name, so the sale must work with only the code.
 		"INSERT INTO `tabProduct` (name, reference, product_name, selling_price, stock_qty, status) VALUES ('PROD-001','P-1','Soda',100,1000,'Active')",
-		"INSERT INTO `tabCurrency` (name, code, currency_name, is_base, rate_to_base, enabled) VALUES ('KES','KES','Base money',1,1,1)",
-		"INSERT INTO `tabCurrency` (name, code, currency_name, is_base, rate_to_base, enabled) VALUES ('USD','USD','Dollar',0,129.5,1)",
-		"INSERT INTO `tabCurrency` (name, code, currency_name, is_base, rate_to_base, enabled) VALUES ('UGX','UGX','Small rate money',0,0.0345,1)",
+		"INSERT INTO `tabCurrency` (name, code, currency_name, rate_to_base, enabled) VALUES ('KES','KES','Base money',1,1)",
+		"INSERT INTO `tabCurrency` (name, code, currency_name, rate_to_base, enabled) VALUES ('USD','USD','Dollar',129.5,1)",
+		"INSERT INTO `tabCurrency` (name, code, currency_name, rate_to_base, enabled) VALUES ('UGX','UGX','Small rate money',0.0345,1)",
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {
@@ -123,7 +123,7 @@ func posBasePanelCheckout(reference string, total float64, extra map[string]any)
 	checkout := map[string]any{
 		"reference": reference, "cart": []any{map[string]any{"product": "PROD-001", "rate": 100.0, "quantity": total / 100}},
 		"customer": "", "customer_name": "", "invoice_date": "2026-11-08", "due_date": "2026-11-08",
-		"register": "REG-001", "payment_status": "Paid", "payment_method": "Cash", "status": "Paid", "total": total,
+		"register": "REG-001", "payment_status": "Paid", "payment_method": "Cash", "total": total,
 	}
 	for key, value := range extra {
 		checkout[key] = value
@@ -144,11 +144,16 @@ func TestPOSBaseRegisterSaleInBaseCurrencyRecordsSaleAndPaymentAndStock(t *testi
 
 	var total, baseTotal, rate float64
 	var currency sql.NullString
-	if err := db.QueryRow("SELECT total, base_total, exchange_rate, currency FROM `tabSale` WHERE name = ?", saleName).Scan(&total, &baseTotal, &rate, &currency); err != nil {
+	var saleStatus string
+	if err := db.QueryRow("SELECT total, base_total, exchange_rate, currency, status FROM `tabSale` WHERE name = ?", saleName).Scan(&total, &baseTotal, &rate, &currency, &saleStatus); err != nil {
 		t.Fatal(err)
 	}
 	if total != 300 || baseTotal != 300 || rate != 1 || currency.String != "" {
 		t.Fatalf("base-currency sale: total=%v base_total=%v rate=%v currency=%q, want 300/300/1/empty", total, baseTotal, rate, currency.String)
+	}
+	// A sale paid at the register must not be left as a draft.
+	if saleStatus != "Paid" {
+		t.Fatalf("register sale status = %q, want Paid", saleStatus)
 	}
 
 	var amount, baseAmount float64
