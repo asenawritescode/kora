@@ -15,11 +15,6 @@
    "cyclomatic": 24,
    "statements": 75
   },
-  "cmd/contractgen::generateVersion": {
-   "cognitive": 121,
-   "cyclomatic": 44,
-   "statements": 103
-  },
   "cmd/contractgen::main": {
    "cognitive": 20
   },

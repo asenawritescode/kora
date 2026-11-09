@@ -211,80 +211,144 @@ func generate(dir string) ([]byte, error) {
 	return generateVersion(dir, 1)
 }
 
+// contractSources is everything generateVersion learns from parsing the contract package.
+type contractSources struct {
+	files        []string
+	fset         *token.FileSet
+	defs         map[string]ast.Expr
+	wireRoots    []string
+	enumRoots    []string
+	taggedUnions map[string]taggedUnionSpec
+}
+
+// generateVersion renders the JSON Schema document for one contract version: parse the package, resolve
+// enums, collect the wire types reachable from the roots, and describe each of them.
 func generateVersion(dir string, version int) ([]byte, error) {
 	if version != 1 && version != 2 {
 		return nil, fmt.Errorf("unsupported contract version %d", version)
 	}
+	src, err := loadContractSources(dir, version)
+	if err != nil {
+		return nil, err
+	}
+	enums, err := resolveEnums(src)
+	if err != nil {
+		return nil, err
+	}
+	wireTypes, err := collectWireTypes(src)
+	if err != nil {
+		return nil, err
+	}
+	defsJSON, err := describeWireTypes(src, wireTypes, enums)
+	if err != nil {
+		return nil, err
+	}
+	props := map[string]any{}
+	for _, name := range src.wireRoots {
+		if v, ok := defsJSON[name]; ok {
+			props[name] = v
+		}
+	}
+	doc := schema{"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": fmt.Sprintf("https://kora.dev/schema/engine-v%d.json", version), "title": fmt.Sprintf("Kora Engine v%d wire contracts", version), "type": "object", "properties": props, "additionalProperties": false, "$defs": defsJSON, "x-enums": enums}
+	return json.MarshalIndent(doc, "", "  ")
+}
+
+// loadContractSources parses every non-test Go file in dir and records its type definitions, the
+// wire/enum roots marked for this version, and any tagged unions.
+func loadContractSources(dir string, version int) (*contractSources, error) {
 	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		return nil, err
 	}
-	fset := token.NewFileSet()
-	defs := map[string]ast.Expr{}
-	wireRoots := []string{}
-	enumRoots := []string{}
-	taggedUnions := map[string]taggedUnionSpec{}
+	src := &contractSources{files: files, fset: token.NewFileSet(), defs: map[string]ast.Expr{}, taggedUnions: map[string]taggedUnionSpec{}}
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {
 			continue
 		}
-		parsed, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+		parsed, err := parser.ParseFile(src.fset, file, nil, parser.ParseComments)
 		if err != nil {
 			return nil, err
 		}
 		for _, decl := range parsed.Decls {
-			g, ok := decl.(*ast.GenDecl)
-			if !ok {
-				continue
-			}
-			for _, spec := range g.Specs {
-				switch x := spec.(type) {
-				case *ast.TypeSpec:
-					if x.Assign.IsValid() {
-						continue
-					}
-					defs[x.Name.Name] = x.Type
-					doc := ""
-					if g.Doc != nil {
-						doc += rawComments(g.Doc)
-					}
-					if x.Doc != nil {
-						doc += rawComments(x.Doc)
-					}
-					if hasVersionMarker(doc, "wire", version) {
-						wireRoots = append(wireRoots, x.Name.Name)
-					}
-					if hasVersionMarker(doc, "enum", version) {
-						enumRoots = append(enumRoots, x.Name.Name)
-					}
-					if hasVersionMarker(doc, "taggedUnion", version) {
-						discriminator := commentDirective(doc, "contract:discriminator=")
-						variants := strings.Split(commentDirective(doc, "contract:variants="), ",")
-						if discriminator == "" || len(variants) < 2 {
-							return nil, fmt.Errorf("tagged union %s requires discriminator and at least two variants", x.Name.Name)
-						}
-						for i := range variants {
-							variants[i] = strings.TrimSpace(variants[i])
-							if variants[i] == "" {
-								return nil, fmt.Errorf("tagged union %s has an empty variant", x.Name.Name)
-							}
-						}
-						taggedUnions[x.Name.Name] = taggedUnionSpec{Discriminator: discriminator, Variants: variants}
-					}
-				case *ast.ValueSpec:
-					for i, name := range x.Names {
-						if i < len(x.Values) {
-							defs[name.Name] = x.Values[i]
-						}
-					}
+			if g, ok := decl.(*ast.GenDecl); ok {
+				if err := src.addGenDecl(g, version); err != nil {
+					return nil, err
 				}
 			}
 		}
 	}
+	return src, nil
+}
+
+func (src *contractSources) addGenDecl(g *ast.GenDecl, version int) error {
+	for _, spec := range g.Specs {
+		switch x := spec.(type) {
+		case *ast.TypeSpec:
+			if err := src.addTypeSpec(g, x, version); err != nil {
+				return err
+			}
+		case *ast.ValueSpec:
+			for i, name := range x.Names {
+				if i < len(x.Values) {
+					src.defs[name.Name] = x.Values[i]
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (src *contractSources) addTypeSpec(g *ast.GenDecl, x *ast.TypeSpec, version int) error {
+	if x.Assign.IsValid() {
+		return nil
+	}
+	name := x.Name.Name
+	src.defs[name] = x.Type
+	doc := ""
+	if g.Doc != nil {
+		doc += rawComments(g.Doc)
+	}
+	if x.Doc != nil {
+		doc += rawComments(x.Doc)
+	}
+	if hasVersionMarker(doc, "wire", version) {
+		src.wireRoots = append(src.wireRoots, name)
+	}
+	if hasVersionMarker(doc, "enum", version) {
+		src.enumRoots = append(src.enumRoots, name)
+	}
+	if hasVersionMarker(doc, "taggedUnion", version) {
+		union, err := parseTaggedUnionSpec(name, doc)
+		if err != nil {
+			return err
+		}
+		src.taggedUnions[name] = union
+	}
+	return nil
+}
+
+// parseTaggedUnionSpec reads the //contract:discriminator and //contract:variants directives.
+func parseTaggedUnionSpec(name, doc string) (taggedUnionSpec, error) {
+	discriminator := commentDirective(doc, "contract:discriminator=")
+	variants := strings.Split(commentDirective(doc, "contract:variants="), ",")
+	if discriminator == "" || len(variants) < 2 {
+		return taggedUnionSpec{}, fmt.Errorf("tagged union %s requires discriminator and at least two variants", name)
+	}
+	for i := range variants {
+		variants[i] = strings.TrimSpace(variants[i])
+		if variants[i] == "" {
+			return taggedUnionSpec{}, fmt.Errorf("tagged union %s has an empty variant", name)
+		}
+	}
+	return taggedUnionSpec{Discriminator: discriminator, Variants: variants}, nil
+}
+
+// resolveEnums finds the constant values of every enum root that has any.
+func resolveEnums(src *contractSources) (map[string][]string, error) {
 	enums := map[string][]string{}
-	sort.Strings(enumRoots)
-	for _, root := range enumRoots {
-		values, err := enumValues(files, fset, root)
+	sort.Strings(src.enumRoots)
+	for _, root := range src.enumRoots {
+		values, err := enumValues(src.files, src.fset, root)
 		if err != nil {
 			return nil, err
 		}
@@ -292,70 +356,83 @@ func generateVersion(dir string, version int) ([]byte, error) {
 			enums[root] = values
 		}
 	}
-	wireTypes := map[string]bool{}
-	var include func(string) error
-	include = func(name string) error {
-		if wireTypes[name] {
-			return nil
-		}
-		expr, ok := defs[name]
-		if !ok {
-			return fmt.Errorf("wire type %s is undefined", name)
-		}
-		wireTypes[name] = true
-		st, ok := expr.(*ast.StructType)
-		if !ok {
-			return nil
-		}
-		for _, field := range st.Fields.List {
-			if isRawJSON(field.Type) {
-				if !hasDirective(field, "contract:json") {
-					return fmt.Errorf("%s.%s: json.RawMessage requires //contract:json", name, fieldName(field))
-				}
-				continue
-			}
-			if err := visitType(field.Type, defs, include); err != nil {
-				return fmt.Errorf("%s: %w", name, err)
-			}
-		}
-		return nil
-	}
-	sort.Strings(wireRoots)
-	for _, root := range wireRoots {
-		if err := include(root); err != nil {
+	return enums, nil
+}
+
+// collectWireTypes returns the set of type names reachable from the wire roots.
+func collectWireTypes(src *contractSources) (map[string]bool, error) {
+	collector := &wireCollector{defs: src.defs, types: map[string]bool{}}
+	sort.Strings(src.wireRoots)
+	for _, root := range src.wireRoots {
+		if err := collector.include(root); err != nil {
 			return nil, err
 		}
 	}
-	defsJSON := map[string]any{}
-	allNames := make([]string, 0, len(wireTypes))
-	for n := range wireTypes {
-		allNames = append(allNames, n)
+	return collector.types, nil
+}
+
+// wireCollector walks the type graph from the wire roots, recording every struct it can reach.
+type wireCollector struct {
+	defs  map[string]ast.Expr
+	types map[string]bool
+}
+
+func (c *wireCollector) include(name string) error {
+	if c.types[name] {
+		return nil
 	}
-	sort.Strings(allNames)
-	for _, name := range allNames {
-		if _, ok := defs[name].(*ast.StructType); !ok {
+	expr, ok := c.defs[name]
+	if !ok {
+		return fmt.Errorf("wire type %s is undefined", name)
+	}
+	c.types[name] = true
+	st, ok := expr.(*ast.StructType)
+	if !ok {
+		return nil
+	}
+	return c.includeFields(name, st)
+}
+
+func (c *wireCollector) includeFields(name string, st *ast.StructType) error {
+	for _, field := range st.Fields.List {
+		if isRawJSON(field.Type) {
+			if !hasDirective(field, "contract:json") {
+				return fmt.Errorf("%s.%s: json.RawMessage requires //contract:json", name, fieldName(field))
+			}
 			continue
 		}
-		s, err := typeSchema(defs[name], name, defs, enums)
+		if err := visitType(field.Type, c.defs, c.include); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// describeWireTypes builds the schema of every wire struct, in name order.
+func describeWireTypes(src *contractSources, wireTypes map[string]bool, enums map[string][]string) (map[string]any, error) {
+	names := make([]string, 0, len(wireTypes))
+	for n := range wireTypes {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	defsJSON := map[string]any{}
+	for _, name := range names {
+		if _, ok := src.defs[name].(*ast.StructType); !ok {
+			continue
+		}
+		s, err := typeSchema(src.defs[name], name, src.defs, enums)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
-		if union, ok := taggedUnions[name]; ok {
-			s, err = taggedUnionSchema(defs[name], name, union, defs, enums)
+		if union, ok := src.taggedUnions[name]; ok {
+			s, err = taggedUnionSchema(src.defs[name], name, union, src.defs, enums)
 			if err != nil {
 				return nil, fmt.Errorf("%s tagged union: %w", name, err)
 			}
 		}
 		defsJSON[name] = s
 	}
-	props := map[string]any{}
-	for _, n := range wireRoots {
-		if v, ok := defsJSON[n]; ok {
-			props[n] = v
-		}
-	}
-	doc := schema{"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": fmt.Sprintf("https://kora.dev/schema/engine-v%d.json", version), "title": fmt.Sprintf("Kora Engine v%d wire contracts", version), "type": "object", "properties": props, "additionalProperties": false, "$defs": defsJSON, "x-enums": enums}
-	return json.MarshalIndent(doc, "", "  ")
+	return defsJSON, nil
 }
 
 func hasVersionMarker(doc, name string, version int) bool {
