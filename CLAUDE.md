@@ -145,7 +145,7 @@ This repository is the **Engine only**: a single Go binary built from `cmd/kora`
 | `kora-website` | `~/projects/kora-website` | Public marketing site |
 | `kora-ts-extension-sdk` | `~/projects/kora-ts-sdk` | TypeScript SDK and extension tooling |
 
-The Engine's wire contract is generated here (`go run ./cmd/contract-gen -write`, output in `contract/generated/` and `contract/schema/`) and copied into the consumer repositories with `scripts/sync-contract-consumers.py`. Fixtures are in `contract-fixtures/` and catalogued in `docs/architecture/contract-fixture-manifest.json`.
+The Engine's wire contract is generated here (`go run ./contract/gen -write`, output in `contract/generated/` and `contract/schema/`) and copied into the consumer repositories with `scripts/sync-contract-consumers.py`. Fixtures are in `contract-fixtures/` and catalogued in `docs/architecture/contract-fixture-manifest.json`.
 
 Studio-specific behaviour (routes, admin pages, chat widget, component library) is documented in the kora-ui repository, not here. The Engine-side surfaces Studio calls are the REST API (`/api/v1`), the v2 request/module/offline routes (`/api/v2`), and the OpenAPI document at `/api/swagger-ui`.
 
@@ -387,7 +387,7 @@ Go code follows these quality standards:
 - **Table-driven tests** — new code uses table-driven test patterns
 - **Interface hygiene** — small interfaces (1-3 methods), defined at consumption point
 - **No `utils`, `helpers`, `common` packages** — packages are organized by domain capability
-- **Module layout** follows https://go.dev/doc/modules/layout for a server project: logic in `internal/`, commands in `cmd/`, and as few exported packages as possible. Exported packages are the contract with other repositories (`contract`, the nested `sdk` module); anything else Cloud or tooling needs should be exposed through them rather than by importing implementation packages. The layout is: `cmd/kora` (the server and CLI binary), `cmd/contract-gen` and `cmd/route-inventory` (developer tools), `internal/` (all implementation packages), `contract/` (the public wire contract) and `sdk/` (the public Go client module). Other repositories must not import `internal/...` (Go enforces this); anything they need is added to `contract` or `sdk`. Cloud tests that used to import `site`, `db`, `auth`, `api`, `doctype` or `management` need to run the Engine binary or use the SDK instead.
+- **Module layout** follows https://go.dev/doc/modules/layout for a server project: logic in `internal/`, commands in `cmd/`, and as few exported packages as possible. Exported packages are the contract with other repositories (`contract`, the nested `sdk` module); anything else Cloud or tooling needs should be exposed through them rather than by importing implementation packages. The layout is: `cmd/kora` (the server and CLI binary), `contract/gen` and `cmd/route-inventory` (developer tools), `internal/` (all implementation packages), `contract/` (the public wire contract) and `sdk/` (the public Go client module). Other repositories must not import `internal/...` (Go enforces this); anything they need is added to `contract` or `sdk`. Cloud tests that used to import `site`, `db`, `auth`, `api`, `doctype` or `management` need to run the Engine binary or use the SDK instead.
 - **Error wrapping** — all errors use `%w` for proper error chains
 
 ### ORM Document Model

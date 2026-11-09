@@ -1,25 +1,25 @@
 {
  "comment": "Functions over the limits in .golangci-complexity.yml. This file may only shrink; see scripts/complexity-ratchet.py.",
  "functions": {
-  "cmd/contract-gen::addV2SemanticRules": {
+  "contract/gen::addV2SemanticRules": {
    "cognitive": 32,
    "cyclomatic": 23,
    "statements": 82
   },
-  "cmd/contract-gen::generateTypeScript": {
+  "contract/gen::generateTypeScript": {
    "cognitive": 46,
    "cyclomatic": 24,
    "statements": 75
   },
-  "cmd/contract-gen::main": {
+  "contract/gen::main": {
    "cognitive": 20
   },
-  "cmd/contract-gen::schemaType": {
+  "contract/gen::schemaType": {
    "cognitive": 51,
    "cyclomatic": 25,
    "statements": 67
   },
-  "cmd/contract-gen::taggedUnionSchema": {
+  "contract/gen::taggedUnionSchema": {
    "cognitive": 37,
    "cyclomatic": 21,
    "statements": 49
