@@ -46,6 +46,7 @@ func prepareQuantityEffect(reg *doctype.Registry, op *Operation) *contract.Error
 	}
 
 	totals := map[string]float64{}
+	normalised := false
 	add := func(row map[string]any, whole bool) *contract.Error {
 		product, _ := row[effect.SourceRecordField].(string)
 		amount, ok := quantityNumber(row[effect.DeltaField])
@@ -57,6 +58,15 @@ func prepareQuantityEffect(reg *doctype.Registry, op *Operation) *contract.Error
 				return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s needs a nonzero number in %s", dt.Name, effect.DeltaField))
 			}
 			return nil
+		}
+		// The chosen reason can decide the direction. The person types a plain
+		// amount; the signed number is stored on the record so its history is true.
+		if reason, _ := row[effect.ReasonField].(string); !whole {
+			// lines never use reason_directions
+		} else if sign := effect.ReasonSign(reason); sign != 0 {
+			amount = sign * math.Abs(amount)
+			row[effect.DeltaField] = amount
+			normalised = true
 		}
 		totals[product] += amount * effect.Sign()
 		return nil
@@ -78,6 +88,13 @@ func prepareQuantityEffect(reg *doctype.Registry, op *Operation) *contract.Error
 		}
 	}
 
+	if normalised {
+		signed, err := json.Marshal(data)
+		if err != nil {
+			return contract.NewError(contract.CodeInternal, "encoding quantity effect failed")
+		}
+		create.Data = signed
+	}
 	products := make([]string, 0, len(totals))
 	for product, total := range totals {
 		if total != 0 {

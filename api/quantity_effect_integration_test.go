@@ -91,6 +91,55 @@ func TestStockAdjustmentCanTakeStockOut(t *testing.T) {
 	}
 }
 
+// The reason chosen decides the direction: "Damaged" with a plain 4 removes 4,
+// and the adjustment keeps the signed number so its history reads true.
+func TestAdjustmentReasonDecidesWhetherStockGoesUpOrDown(t *testing.T) {
+	h, db, reg, site := effectHarness(t)
+	for i, tc := range []struct {
+		reason string
+		typed  int
+		stock  float64
+		stored float64
+	}{
+		{"Damaged", 4, 6, -4},
+		{"Lost or stolen", 1, 9, -1},
+		{"Found", 7, 17, 7},
+		{"Count correction", -2, 8, -2},
+	} {
+		ref := "ADJ-R" + string(rune('A'+i))
+		if code, body := post(t, h, db, reg, site, "Stock%20Adjustment", map[string]any{"reference": ref, "product": "SODA", "delta": tc.typed, "reason": tc.reason}, "", admin); code != http.StatusCreated {
+			t.Fatalf("%s: status = %d: %s", tc.reason, code, body)
+		}
+		if got := stockOf(t, db, "SODA"); got != tc.stock {
+			t.Fatalf("after %s %d: stock = %v, want %v", tc.reason, tc.typed, got, tc.stock)
+		}
+		var stored float64
+		if err := db.QueryRow("SELECT delta FROM `tabStock Adjustment` WHERE reference = ?", ref).Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		if stored != tc.stored {
+			t.Fatalf("%s: stored change = %v, want %v", tc.reason, stored, tc.stored)
+		}
+		// reset to 10 for the next case
+		if _, err := db.Exec("UPDATE `tabProduct` SET stock_qty = 10 WHERE name = 'SODA'"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestDamagedMoreThanInStockIsRefused(t *testing.T) {
+	h, db, reg, site := effectHarness(t)
+	if code, _ := post(t, h, db, reg, site, "Stock%20Adjustment", map[string]any{"reference": "ADJ-X", "product": "SODA", "delta": 11, "reason": "Damaged"}, "", admin); code == http.StatusCreated {
+		t.Fatal("removing more than is in stock must be refused")
+	}
+	if got := stockOf(t, db, "SODA"); got != 10 {
+		t.Fatalf("stock = %v, want 10", got)
+	}
+	if n := countOf(t, db, "tabStock Adjustment"); n != 0 {
+		t.Fatalf("a refused adjustment saved %d rows", n)
+	}
+}
+
 func TestAdjustmentBelowZeroIsRefusedAndNothingIsSaved(t *testing.T) {
 	h, db, reg, site := effectHarness(t)
 	code, body := post(t, h, db, reg, site, "Stock%20Adjustment", map[string]any{"reference": "ADJ-3", "product": "SODA", "delta": -11, "reason": "Lost or stolen"}, "", admin)

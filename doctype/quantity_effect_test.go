@@ -133,3 +133,31 @@ quantity_effect:
 		t.Fatalf("effect did not parse as expected: %#v", q)
 	}
 }
+
+func TestQuantityEffectReasonDirectionsAreChecked(t *testing.T) {
+	build := func(directions map[string]string, lines string, reasonType string) []CrossFileError {
+		product := &DocType{Name: "Product", Fields: []Field{{Fieldname: "stock_qty", Fieldtype: "Float"}}}
+		fields := []Field{
+			{Fieldname: "product", Fieldtype: "Link", Options: "Product"},
+			{Fieldname: "delta", Fieldtype: "Float"},
+			{Fieldname: "reason", Fieldtype: reasonType, Options: "Damaged\nFound"},
+		}
+		adj := &DocType{Name: "Adj", Fields: fields, QuantityEffect: &QuantityEffect{
+			TargetDocType: "Product", TargetQuantityField: "stock_qty", SourceRecordField: "product", DeltaField: "delta",
+			ReasonField: "reason", ReasonDirections: directions, LinesField: lines,
+		}}
+		return ValidateAll([]*DocType{product, adj})
+	}
+	if errs := build(map[string]string{"Damaged": "decrease", "Found": "increase"}, "", "Select"); len(errs) != 0 {
+		t.Fatalf("valid config rejected: %v", errs)
+	}
+	for name, errs := range map[string][]CrossFileError{
+		"unknown direction":    build(map[string]string{"Damaged": "sideways"}, "", "Select"),
+		"reason not an option": build(map[string]string{"Stolen": "decrease"}, "", "Select"),
+		"reason is not Select": build(map[string]string{"Damaged": "decrease"}, "", "Data"),
+	} {
+		if len(errs) == 0 {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}

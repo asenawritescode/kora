@@ -1098,6 +1098,23 @@ func validateQuantityEffects(doctypes []*DocType, dtMap map[string]*DocType) []C
 		if q.Direction != "" && q.Direction != "increase" && q.Direction != "decrease" {
 			bad(dt, "direction", fmt.Sprintf("quantity_effect direction %q must be increase or decrease", q.Direction))
 		}
+		if len(q.ReasonDirections) > 0 {
+			if q.LinesField != "" {
+				bad(dt, "reason_directions", "quantity_effect reason_directions cannot be used together with lines_field")
+			}
+			reason := dt.GetField(q.ReasonField)
+			if reason == nil || reason.Fieldtype != "Select" {
+				bad(dt, "reason_field", "quantity_effect reason_directions needs reason_field to name a Select field on this record")
+			}
+			for value, direction := range q.ReasonDirections {
+				if direction != "increase" && direction != "decrease" {
+					bad(dt, "reason_directions", fmt.Sprintf("quantity_effect reason %q has direction %q; use increase or decrease", value, direction))
+				}
+				if reason != nil && reason.Fieldtype == "Select" && !selectHasOption(reason, value) {
+					bad(dt, "reason_directions", fmt.Sprintf("quantity_effect reason %q is not one of the options of %s", value, q.ReasonField))
+				}
+			}
+		}
 		target := dtMap[q.TargetDocType]
 		if target == nil {
 			bad(dt, "target_doctype", fmt.Sprintf("quantity_effect target_doctype %q does not exist", q.TargetDocType))
@@ -1127,4 +1144,13 @@ func validateQuantityEffects(doctypes []*DocType, dtMap map[string]*DocType) []C
 		}
 	}
 	return errs
+}
+
+func selectHasOption(field *Field, value string) bool {
+	for _, option := range strings.Split(field.Options, "\n") {
+		if strings.TrimSpace(option) == value {
+			return true
+		}
+	}
+	return false
 }

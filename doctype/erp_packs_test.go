@@ -298,3 +298,27 @@ func TestERPViewsHaveNoBlockingPageFindings(t *testing.T) {
 		}
 	}
 }
+
+// The reason on a stock adjustment decides whether stock goes up or down, so a
+// shopkeeper never has to type a minus sign for a loss.
+func TestStockAdjustmentReasonsDecideDirection(t *testing.T) {
+	doctypes, err := ParseConfigTree("../config/erp-inventory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var adjustment *DocType
+	for _, dt := range doctypes {
+		if dt.Name == "Stock Adjustment" {
+			adjustment = dt
+		}
+	}
+	if adjustment == nil || adjustment.QuantityEffect == nil {
+		t.Fatal("Stock Adjustment with a quantity_effect is missing")
+	}
+	want := map[string]float64{"Opening balance": 1, "Found": 1, "Damaged": -1, "Lost or stolen": -1, "Count correction": 0, "Other": 0}
+	for reason, sign := range want {
+		if got := adjustment.QuantityEffect.ReasonSign(reason); got != sign {
+			t.Errorf("reason %q sign = %v, want %v", reason, got, sign)
+		}
+	}
+}

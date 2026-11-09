@@ -1,7 +1,11 @@
 // Package doctype defines the core types for Kigae's config-driven data model.
 package doctype
 
-import "github.com/asenawritescode/kora/contract"
+import (
+	"strings"
+
+	"github.com/asenawritescode/kora/contract"
+)
 
 // DocType represents a data entity definition. It defines the fields,
 // constraints, relationships, and UI hints for a document type.
@@ -64,11 +68,32 @@ type QuantityEffect struct {
 	DeltaField          string `yaml:"delta_field" json:"delta_field"`
 	ReasonField         string `yaml:"reason_field" json:"reason_field"`
 	Direction           string `yaml:"direction" json:"direction,omitempty"`
+	// ReasonDirections lets the reason chosen on the record decide whether the
+	// quantity adds or removes: each key is a value of ReasonField, each value is
+	// "increase" or "decrease". The person types a plain amount; the kernel signs
+	// it and stores the signed number back on the record. A reason that is not
+	// listed keeps the sign as typed. Not used with LinesField.
+	ReasonDirections map[string]string `yaml:"reason_directions" json:"reason_directions,omitempty"`
 }
 
 // Complete reports whether the effect names everything the kernel needs to apply it.
 func (q *QuantityEffect) Complete() bool {
 	return q != nil && q.TargetDocType != "" && q.TargetQuantityField != "" && q.SourceRecordField != "" && q.DeltaField != ""
+}
+
+// ReasonSign is the sign the chosen reason gives the amount: +1, -1, or 0 when
+// the reason does not decide it (the amount keeps the sign it was typed with).
+func (q *QuantityEffect) ReasonSign(reason string) float64 {
+	if q == nil {
+		return 0
+	}
+	switch q.ReasonDirections[strings.TrimSpace(reason)] {
+	case "increase":
+		return 1
+	case "decrease":
+		return -1
+	}
+	return 0
 }
 
 // Sign is +1 for "increase" (the default) and -1 for "decrease".
