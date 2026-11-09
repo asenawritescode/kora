@@ -64,7 +64,7 @@ func TestLiveMySQLDeleteRegisteredSiteUsesCanonicalIdentity(t *testing.T) {
 	}
 	hostname := "canonical-delete-" + suffix + ".example.invalid"
 	registry := NewSQLSiteRegistry(platformDB, "mysql")
-	if err := registry.Upsert(&SiteConfig{Hostname: hostname, DBType: "mysql", DBName: tenantSchema}); err != nil {
+	if err := registry.Upsert(&Config{Hostname: hostname, DBType: "mysql", DBName: tenantSchema}); err != nil {
 		t.Fatal("register disposable site:", err)
 	}
 	descriptor, err := registry.ResolveAlias(hostname)

@@ -25,7 +25,7 @@ type tenantDirectoryStub struct {
 	infosByID       map[string]site.DBSiteInfo
 }
 
-func (d *tenantDirectoryStub) GetDescriptorByID(siteID string) (site.SiteDescriptor, error) {
+func (d *tenantDirectoryStub) GetDescriptorByID(siteID string) (site.Descriptor, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if descriptor, ok := d.descriptorsByID[siteID]; ok {
@@ -53,7 +53,7 @@ func (d *tenantDirectoryStub) GetByIDContext(ctx context.Context, siteID string)
 	}
 	return d.GetByID(siteID)
 }
-func (d *tenantDirectoryStub) GetDirectoryDescriptorPageContext(ctx context.Context, _ string, _ string, _ uint16) ([]site.SiteDescriptor, error) {
+func (d *tenantDirectoryStub) GetDirectoryDescriptorPageContext(ctx context.Context, _ string, _ string, _ uint16) ([]site.Descriptor, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func TestNewTenantDirectoryConsumerKeepsStableIdentityAndAdvancesDirectoryRevisi
 	if consumer.Apply == nil || consumer.Resync == nil {
 		t.Fatal("directory consumer is missing apply or resync policy")
 	}
-	err = consumer.Apply(context.Background(), site.SiteDirectoryChange{
+	err = consumer.Apply(context.Background(), site.DirectoryChange{
 		Cursor:     7,
 		Descriptor: contract.SiteDescriptor{SiteID: tenantID, Aliases: []string{"directory.example"}, Status: "active", ConfigRevision: 5},
 	})
@@ -178,7 +178,7 @@ func TestTenantDirectoryRejectsInvalidDeploymentAssignmentBeforePublishing(t *te
 	if len(ingress.replaced) != 0 || router.SnapshotByID(invalid.SiteID) != nil {
 		t.Fatal("invalid resync published directory state")
 	}
-	if err := consumer.Apply(context.Background(), site.SiteDirectoryChange{Cursor: 10, Descriptor: invalid}); err == nil {
+	if err := consumer.Apply(context.Background(), site.DirectoryChange{Cursor: 10, Descriptor: invalid}); err == nil {
 		t.Fatal("change feed accepted an invalid deployment assignment")
 	}
 	if len(ingress.replaced) != 0 || router.SnapshotByID(invalid.SiteID) != nil {
@@ -251,7 +251,7 @@ func TestTenantDirectoryActivationUsesCoordinator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := consumer.Apply(context.Background(), site.SiteDirectoryChange{
+	if err := consumer.Apply(context.Background(), site.DirectoryChange{
 		Cursor: 9, Descriptor: directory.descriptor,
 	}); err != nil {
 		t.Fatalf("apply activation event: %v", err)
@@ -302,7 +302,7 @@ func TestTenantDirectoryAssignmentEventRegistersColdTenantForLazyActivation(t *t
 	if err != nil {
 		t.Fatal("create tenant directory consumer:", err)
 	}
-	if err := consumer.Apply(context.Background(), site.SiteDirectoryChange{
+	if err := consumer.Apply(context.Background(), site.DirectoryChange{
 		Cursor: 2, Descriptor: descriptor,
 	}); err != nil {
 		t.Fatal("apply local assignment event:", err)

@@ -120,7 +120,7 @@ func TestBeforeHookPanicRejectsMutationAndLogsFailure(t *testing.T) {
 		ScriptStore:  &script.Store{DB: database, Dialect: kdb.Resolve("mysql")},
 		SiteName:     "test-site",
 		CurrentUser:  "alice@example.test",
-		HookScriptsByDoctype: map[string][]script.ScriptRecord{
+		HookScriptsByDoctype: map[string][]script.Record{
 			"Task": {{Name: "validate-task", ScriptType: script.TypeDocEvent, Event: script.EventValidate}},
 		},
 	}
@@ -151,7 +151,7 @@ func TestBeforeHookReceivesCanceledCommandContext(t *testing.T) {
 		ScriptStore:  &script.Store{DB: database, Dialect: kdb.Resolve("mysql")},
 		SiteName:     "test-site",
 		CurrentUser:  "alice@example.test",
-		HookScriptsByDoctype: map[string][]script.ScriptRecord{
+		HookScriptsByDoctype: map[string][]script.Record{
 			"Task": {{Name: "validate-task", ScriptType: script.TypeDocEvent, Event: script.EventValidate}},
 		},
 	}
@@ -204,7 +204,7 @@ func TestOwnerModuleValidationExtensionsAreOrderedBoundedAndEffectFree(t *testin
 	tx := &TxManager{
 		ScriptRunner: runner, ScriptStore: &script.Store{DB: database, Dialect: kdb.Resolve("mysql")}, ModuleDescriptors: modules,
 		ModuleExtensions: ordered, ModuleExtensionSchemas: moduleExtensionSchemas{},
-		HookScriptsByDoctype: map[string][]script.ScriptRecord{"Invoice": {
+		HookScriptsByDoctype: map[string][]script.Record{"Invoice": {
 			{Name: handlerB.Name, ScriptType: script.TypeDocEvent, DocType: "Invoice", Event: script.EventValidate, IsActive: true, TimeoutMs: 500, Script: "return {result: {valid: true}}"},
 			{Name: handlerA.Name, ScriptType: script.TypeDocEvent, DocType: "Invoice", Event: script.EventValidate, IsActive: true, TimeoutMs: 500, Script: "return {result: {valid: true}}"},
 		}},
@@ -266,7 +266,7 @@ func TestAsyncAfterHookCarriesRecursionGuard(t *testing.T) {
 		ScriptStore:   &script.Store{},
 		AsyncHookSink: sink,
 		SiteName:      "test-site",
-		HookScriptsByDoctype: map[string][]script.ScriptRecord{
+		HookScriptsByDoctype: map[string][]script.Record{
 			"Task": {{Name: hookName, Event: script.EventAfterSave}},
 		},
 		SkipHookScripts: []string{"another-hook"},
@@ -303,7 +303,7 @@ func TestAsyncAfterHookCarriesVerifiedExecution(t *testing.T) {
 	tx := &TxManager{
 		Registry: doctype.NewRegistry(), ScriptRunner: hookTestRunner{}, ScriptStore: &script.Store{},
 		AsyncHookSink: sink, SiteName: "test-site", CurrentUser: "alice@example.test", Execution: execution,
-		HookScriptsByDoctype: map[string][]script.ScriptRecord{
+		HookScriptsByDoctype: map[string][]script.Record{
 			"Task": {{Name: "task-after-save", Event: script.EventAfterSave}},
 		},
 	}

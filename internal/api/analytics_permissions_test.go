@@ -23,7 +23,7 @@ func TestRelatedAnalyticsQueryRequiresSourceRead(t *testing.T) {
 	registry.Register(&doctype.DocType{Name: "Invoice"})
 	registry.Permissions.AddRole(&doctype.Role{Name: "Reader"})
 	models := []analytics.SemanticModel{{Name: "invoices", SourceDoctype: "Invoice"}}
-	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "invoices"}}}
+	request := analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: "invoices"}}}
 
 	ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", []string{"Reader"}, nil)
 	if checkRelatedModelPermissions(ctx, registry, models, request) {
@@ -66,7 +66,7 @@ func TestPublishedProjectionAnalyticsPropagatesActorRowScope(t *testing.T) {
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.finance.ar.projection.ar_balance", Role: "Reader", Read: true, IfAssigned: []string{"assigned_to"}, Scope: scope})
 	ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", []string{"Reader"}, nil)
 	ctx.Request.Header.Set("X-Kora-Legal-Entity-ID", "entity-a")
-	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: model.Name, Measures: []string{"count"}}}}
+	request := analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: model.Name, Measures: []string{"count"}}}}
 	if !checkRelatedModelPermissions(ctx, registry, []analytics.SemanticModel{model}, request) {
 		t.Fatalf("assigned actor query permission was denied: status=%d", ctx.Writer.Status())
 	}
@@ -85,7 +85,7 @@ func TestRelatedAnalyticsQueryAcceptsExactVerifiedSourceGrant(t *testing.T) {
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Invoice"})
 	models := []analytics.SemanticModel{{Name: "invoices", SourceDoctype: "Invoice"}}
-	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "invoices"}}}
+	request := analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: "invoices"}}}
 	ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", nil, []policy.Grant{{Resource: "Invoice", Operation: "read"}})
 	ctx.Set("auth_type", "extension")
 	if !checkRelatedModelPermissions(ctx, registry, models, request) {
@@ -98,7 +98,7 @@ func TestEntityOwnedAnalyticsRequiresExactEntityGrant(t *testing.T) {
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Invoice", BusinessScopePolicy: contract.ScopeEntityOwned, BusinessScopeField: "legal_entity_id"})
 	models := []analytics.SemanticModel{{Name: "invoices", SourceDoctype: "Invoice"}}
-	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "invoices"}}}
+	request := analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: "invoices"}}}
 	scope := contract.BusinessScope{TenantID: "stable-tenant", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Invoice", Role: "Reader", Read: true, Scope: scope})
 	ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-route", []string{"Reader"}, nil)

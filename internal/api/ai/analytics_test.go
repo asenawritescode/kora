@@ -36,7 +36,7 @@ func TestRelatedAnalyticsPermissionsCoverAllSources(t *testing.T) {
 	registry := reportAnalyticsRegistry()
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Sale", Role: "Cashier", Read: true})
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Sale Item", Role: "Cashier", Read: true})
-	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "sales_items"}}}
+	request := analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: "sales_items"}}}
 	reports := []analytics.ReportDefinition{reportAnalyticsDefinition()}
 	cashier := analyticsTestExecution(t, "tenant-a", []string{"Cashier"}, nil)
 	if err := checkRelatedAnalyticsPermissions(registry, reports, request, cashier); err == nil {
@@ -54,7 +54,7 @@ func TestRelatedAnalyticsPermissionsCoverAllSources(t *testing.T) {
 
 func TestRelatedAnalyticsPermissionsRequireExecutionAndHonorExactGrants(t *testing.T) {
 	registry := reportAnalyticsRegistry()
-	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "sales_items"}}}
+	request := analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: "sales_items"}}}
 	reports := []analytics.ReportDefinition{reportAnalyticsDefinition()}
 	if err := checkRelatedAnalyticsPermissions(registry, reports, request, policy.Execution{}); err == nil {
 		t.Fatal("missing execution was authorized")
@@ -74,7 +74,7 @@ func TestRelatedAnalyticsPermissionsCheckOrdinaryModelSource(t *testing.T) {
 	registry := reportAnalyticsRegistry()
 	model := analytics.SemanticModel{Name: "sales", SourceDoctype: "Sale", Measures: []analytics.SemanticMeasure{{Name: "count", Aggregation: "count"}}}
 	report := analytics.ReportDefinition{Name: "sales_report", Label: "Sales", Models: []analytics.SemanticModel{model}, Queries: []analytics.ReportQuery{{ID: "sales", Model: model.Name, Measures: []string{"count"}}}}
-	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "sales"}}}
+	request := analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: "sales"}}}
 	reader := analyticsTestExecution(t, "tenant-a", []string{"Cashier"}, nil)
 	if err := checkRelatedAnalyticsPermissions(registry, []analytics.ReportDefinition{report}, request, reader); err == nil {
 		t.Fatal("ordinary model bypassed its source DocType read permission")
@@ -95,7 +95,7 @@ func TestRelatedAnalyticsPermissionsCheckGeneratedModelWithoutReport(t *testing.
 	if model.Name == "" {
 		t.Fatal("generated semantic model has no name")
 	}
-	request := analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: model.Name}}}
+	request := analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: model.Name}}}
 	reader := analyticsTestExecution(t, "tenant-a", []string{"Cashier"}, nil)
 	if err := checkRelatedAnalyticsPermissions(registry, nil, request, reader); err == nil {
 		t.Fatal("generated catalog model bypassed its source DocType read permission")
@@ -104,7 +104,7 @@ func TestRelatedAnalyticsPermissionsCheckGeneratedModelWithoutReport(t *testing.
 	if err := checkRelatedAnalyticsPermissions(registry, nil, request, reader); err != nil {
 		t.Fatalf("generated model with readable source was denied: %v", err)
 	}
-	if err := checkRelatedAnalyticsPermissions(registry, nil, analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "missing"}}}, reader); err == nil {
+	if err := checkRelatedAnalyticsPermissions(registry, nil, analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: "missing"}}}, reader); err == nil {
 		t.Fatal("unknown analytics model was authorized")
 	}
 }
@@ -173,7 +173,7 @@ func TestAnalyticsQueryCarriesProjectionActorScope(t *testing.T) {
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.finance.ar.projection.ar_balance", Role: "Reader", Read: true, IfAssigned: []string{"assigned_to"}, Scope: scope})
 	definition := analytics.ReportDefinition{Name: "ar_report", Label: "AR report", Models: []analytics.SemanticModel{{Name: "ar_balance", ProjectionOwner: "finance.ar", ProjectionID: "ar_balance", ProjectionOwnerField: "owner_id", PublishedQuery: "sales.orders/balances", ProjectionScopePolicy: contract.ScopeEntityOwned, AllowedFields: []string{"assigned_to", "owner_id", "amount"}, Measures: []analytics.SemanticMeasure{{Name: "count", Aggregation: "count"}}}}, Queries: []analytics.ReportQuery{{ID: "balance", Model: "ar_balance", Measures: []string{"count"}}}}
 	execution := analyticsTestExecution(t, "tenant-a", []string{"Reader"}, nil)
-	scopes, err := authorizeRelatedAnalytics(registry, []analytics.ReportDefinition{definition}, analytics.AnalyticsQueryRequest{Queries: []analytics.ModelQuery{{Model: "ar_balance", Measures: []string{"count"}}}}, execution, scope)
+	scopes, err := authorizeRelatedAnalytics(registry, []analytics.ReportDefinition{definition}, analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: "ar_balance", Measures: []string{"count"}}}}, execution, scope)
 	if err != nil || scopes["ar_balance"].SubjectID != "analytics-test" || len(scopes["ar_balance"].AssignedFields) != 1 || scopes["ar_balance"].AssignedFields[0] != "assigned_to" {
 		t.Fatalf("analytics actor scopes = %#v, error=%v", scopes, err)
 	}

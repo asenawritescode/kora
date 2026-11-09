@@ -372,7 +372,7 @@ type SubjectAuthorization struct {
 	UserFields map[string]string
 }
 
-type WorkflowCancellationAuthorizer interface {
+type CancellationAuthorizer interface {
 	CanCancelWorkflow(context.Context, policy.Execution, contract.WorkflowInstance) (bool, error)
 }
 
@@ -639,7 +639,7 @@ func (s *InstanceService) Cancel(ctx context.Context, exec policy.Execution, id 
 	if err != nil {
 		return contract.WorkflowInstance{}, err
 	}
-	authorizer, ok := s.authorizer.(WorkflowCancellationAuthorizer)
+	authorizer, ok := s.authorizer.(CancellationAuthorizer)
 	if !ok {
 		return contract.WorkflowInstance{}, contract.NewError(contract.CodePermissionDenied, "workflow cancellation is not authorized")
 	}

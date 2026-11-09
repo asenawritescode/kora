@@ -77,9 +77,9 @@ type CreateSiteInput struct {
 // ResolvedTenantConfig returns the tenant database configuration that
 // CreateSite will use after applying its defaults. Callers that need to admit
 // work before provisioning can use this to reserve the same physical endpoint.
-func (in CreateSiteInput) ResolvedTenantConfig() *SiteConfig {
+func (in CreateSiteInput) ResolvedTenantConfig() *Config {
 	in.applyDefaults()
-	return &SiteConfig{
+	return &Config{
 		DBType: in.DBType, DBHost: in.DBHost, DBPort: in.DBPort, DBName: in.DBName,
 		DBUser: in.DBUser, DBPassword: in.DBPassword,
 		Hostname: in.Hostname,
@@ -176,7 +176,7 @@ func mysqlHostPort(addr string) (string, int) {
 // CreateSiteResult holds the result of a successful site creation.
 type CreateSiteResult struct {
 	SiteID   string
-	Config   *SiteConfig
+	Config   *Config
 	DB       *sql.DB
 	Registry *doctype.Registry
 }
@@ -225,7 +225,7 @@ func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteR
 	// provided, so sites created outside the console are loaded after restart.
 	var discoveredPlatformDB *sql.DB
 	if input.PlatformDB == nil && input.PlatformDBDSN != "" {
-		cfg := &SiteConfig{
+		cfg := &Config{
 			DBType:     input.PlatformDBType,
 			DBHost:     input.PlatformDBHost,
 			DBPort:     input.PlatformDBPort,
@@ -262,7 +262,7 @@ func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteR
 	domains := []string{input.Hostname}
 	domains = append(domains, input.ExtraDomains...)
 
-	siteCfg := &SiteConfig{
+	siteCfg := &Config{
 		DBType:        input.DBType,
 		DBHost:        input.DBHost,
 		DBPort:        input.DBPort,

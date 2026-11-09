@@ -36,7 +36,7 @@ type channelBus struct {
 	capacity       int
 	maxEventBytes  int
 	maxQueuedBytes int
-	queueAdmission *AnalyticsQueueAdmission
+	queueAdmission *QueueAdmission
 
 	dropped                  atomic.Int64 // count of events that failed WAL write (disk full, etc.)
 	payloadRejected          atomic.Int64
@@ -803,7 +803,7 @@ func (b *channelBus) Subscribe() (<-chan ChangeEvent, error) {
 
 // SetQueueAdmission applies the Engine's process-wide analytics queued-payload
 // budget. It must be configured before the bus has accepted any publication.
-func (b *channelBus) SetQueueAdmission(admission *AnalyticsQueueAdmission) error {
+func (b *channelBus) SetQueueAdmission(admission *QueueAdmission) error {
 	if b == nil || admission == nil {
 		return fmt.Errorf("analytics bus and process queue admission are required")
 	}

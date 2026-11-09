@@ -22,7 +22,7 @@ func TestScriptInsertAndConfigRevisionCommitTogether(t *testing.T) {
 	mock.ExpectExec(`UPDATE _kora_config_revision SET revision = revision \+ 1 WHERE id = 1 AND revision < 9223372036854775807`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	if err := store.Insert(ScriptRecord{
+	if err := store.Insert(Record{
 		Name: "order_hook", Site: "tenant-a", ScriptType: TypeDocEvent, DocType: "Order", Event: EventBeforeSave,
 		IsActive: true, TimeoutMs: 1000, Script: "return document", CreatedBy: "operator-a", UpdatedBy: "operator-a",
 	}); err != nil {

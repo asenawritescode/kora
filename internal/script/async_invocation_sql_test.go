@@ -47,7 +47,7 @@ func TestAppendAsyncHookInvocationUsesSourceTransaction(t *testing.T) {
 	invocation := AsyncHookInvocation{
 		TenantID: "tenant-a", Site: "tenant-a", SourceOperation: contract.OperationID(contract.NewOperationID()), ConfigRevision: 9, Sequence: 1,
 		Doctype: "Invoice", Event: EventAfterSave,
-		Record:   ScriptRecord{Name: "after-save", Site: "tenant-a", ScriptType: TypeDocEvent, DocType: "Invoice", Event: EventAfterSave, IsActive: true, TimeoutMs: 1000, Script: "return true"},
+		Record:   Record{Name: "after-save", Site: "tenant-a", ScriptType: TypeDocEvent, DocType: "Invoice", Event: EventAfterSave, IsActive: true, TimeoutMs: 1000, Script: "return true"},
 		Document: []byte(`{"name":"INV-0001","total":12}`),
 		Actor:    contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a", AuthenticatedAt: time.Now().UTC()},
 	}
@@ -78,7 +78,7 @@ func TestAppendAsyncHookInvocationRejectsInvalidGrant(t *testing.T) {
 	invocation := AsyncHookInvocation{
 		TenantID: "tenant-a", Site: "tenant-a", SourceOperation: contract.OperationID(contract.NewOperationID()), Sequence: 1,
 		Doctype: "Invoice", Event: EventAfterSave,
-		Record:   ScriptRecord{Name: "after-save", Site: "tenant-a", ScriptType: TypeDocEvent, TimeoutMs: 1000, Script: "return true"},
+		Record:   Record{Name: "after-save", Site: "tenant-a", ScriptType: TypeDocEvent, TimeoutMs: 1000, Script: "return true"},
 		Document: []byte(`{"name":"INV-0001"}`),
 		Actor:    contract.ActorContext{PrincipalID: "user-1", PrincipalType: contract.PrincipalHuman, Site: "tenant-a"},
 		Grants:   []policy.Grant{{Resource: "Invoice", Operation: "*"}},

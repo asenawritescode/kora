@@ -10,12 +10,12 @@ import (
 	"github.com/asenawritescode/kora/internal/site"
 )
 
-func tenantSiteProvisioningAdmission(platformDriver, platformDSN string) func(context.Context, *site.SiteConfig) (func(), error) {
+func tenantSiteProvisioningAdmission(platformDriver, platformDSN string) func(context.Context, *site.Config) (func(), error) {
 	platformKey := ""
 	if platformDSN != "" {
 		platformKey = dbaccess.ServerKey(platformDriver, platformDSN)
 	}
-	return func(ctx context.Context, tenant *site.SiteConfig) (func(), error) {
+	return func(ctx context.Context, tenant *site.Config) (func(), error) {
 		if ctx == nil || tenant == nil {
 			return nil, fmt.Errorf("tenant site provisioning admission requires context and configuration")
 		}

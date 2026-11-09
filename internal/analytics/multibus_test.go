@@ -207,14 +207,14 @@ func TestMultiBusSharesProcessWideListenerQueueByteBudget(t *testing.T) {
 	_, secondInner, secondListener := newBus()
 	event := ChangeEvent{Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
 	firstInner.ch <- event
-	waitForListenerBudget(t, budget, func(snapshot AnalyticsQueueAdmissionSnapshot) bool { return snapshot.UsedBytes == DefaultMaxEventBytes })
+	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == DefaultMaxEventBytes })
 	secondInner.ch <- event
-	waitForListenerBudget(t, budget, func(snapshot AnalyticsQueueAdmissionSnapshot) bool { return snapshot.RejectedItems == 1 })
+	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.RejectedItems == 1 })
 	if len(secondListener) != 0 {
 		t.Fatal("second tenant received an event after the process-wide byte budget was exhausted")
 	}
 	<-firstListener
-	waitForListenerBudget(t, budget, func(snapshot AnalyticsQueueAdmissionSnapshot) bool { return snapshot.UsedBytes == 0 })
+	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == 0 })
 	secondInner.ch <- event
 	select {
 	case <-secondListener:
@@ -259,9 +259,9 @@ func TestMultiBusProcessBudgetClosesRealtimeListenerAndReleasesBytes(t *testing.
 	second, realtimeSource, realtime := newBus(true)
 	event := ChangeEvent{Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
 	source.ch <- event
-	waitForListenerBudget(t, budget, func(snapshot AnalyticsQueueAdmissionSnapshot) bool { return snapshot.UsedBytes == DefaultMaxEventBytes })
+	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == DefaultMaxEventBytes })
 	realtimeSource.ch <- event
-	waitForListenerBudget(t, budget, func(snapshot AnalyticsQueueAdmissionSnapshot) bool {
+	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool {
 		return snapshot.RejectedItems == 1 && second.ListenerCount() == 0
 	})
 	if _, ok := <-realtime; ok {
@@ -271,7 +271,7 @@ func TestMultiBusProcessBudgetClosesRealtimeListenerAndReleasesBytes(t *testing.
 		t.Fatalf("unrelated tenant queue length = %d, want 1", got)
 	}
 	<-queued
-	waitForListenerBudget(t, budget, func(snapshot AnalyticsQueueAdmissionSnapshot) bool { return snapshot.UsedBytes == 0 })
+	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == 0 })
 }
 
 func TestChannelBusWakeupQueuesShareProcessWideByteBudget(t *testing.T) {
@@ -282,7 +282,7 @@ func TestChannelBusWakeupQueuesShareProcessWideByteBudget(t *testing.T) {
 	newBus := func(name string) (*MultiBus, EventBus) {
 		inner := NewChannelBusWithLimits(2, DefaultMaxEventBytes, 2*DefaultMaxEventBytes, filepath.Join(t.TempDir(), name))
 		queueAware := inner.(interface {
-			SetQueueAdmission(*AnalyticsQueueAdmission) error
+			SetQueueAdmission(*QueueAdmission) error
 		})
 		if err := queueAware.SetQueueAdmission(budget); err != nil {
 			t.Fatal(err)
@@ -320,7 +320,7 @@ func TestChannelBusWakeupQueuesShareProcessWideByteBudget(t *testing.T) {
 	if err := second.Start(); err != nil {
 		t.Fatal("start second tenant fanout:", err)
 	}
-	waitForListenerBudget(t, budget, func(snapshot AnalyticsQueueAdmissionSnapshot) bool { return snapshot.UsedBytes == 0 })
+	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == 0 })
 	var replayed int
 	count, err := secondInner.(interface {
 		DrainWAL(func(ChangeEvent)) (int, error)
@@ -337,7 +337,7 @@ func TestMultiBusPublishFansOutOnceWhenSourceWakeupsAreConsumed(t *testing.T) {
 	}
 	inner := NewChannelBusWithLimits(4, DefaultMaxEventBytes, 4*DefaultMaxEventBytes, filepath.Join(t.TempDir(), "wal"))
 	if err := inner.(interface {
-		SetQueueAdmission(*AnalyticsQueueAdmission) error
+		SetQueueAdmission(*QueueAdmission) error
 	}).SetQueueAdmission(budget); err != nil {
 		t.Fatal("configure source queue admission:", err)
 	}
@@ -378,7 +378,7 @@ func TestMultiBusPublishFansOutOnceWhenSourceWakeupsAreConsumed(t *testing.T) {
 			t.Fatalf("delivered event ID = %q, want %q", got.ID, event.ID)
 		}
 	}
-	waitForListenerBudget(t, budget, func(snapshot AnalyticsQueueAdmissionSnapshot) bool { return snapshot.UsedBytes == 0 })
+	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == 0 })
 }
 
 func TestMultiBusCloseBeforeStartReleasesAllQueueReservations(t *testing.T) {
@@ -388,7 +388,7 @@ func TestMultiBusCloseBeforeStartReleasesAllQueueReservations(t *testing.T) {
 	}
 	inner := NewChannelBusWithLimits(2, DefaultMaxEventBytes, 2*DefaultMaxEventBytes, filepath.Join(t.TempDir(), "wal"))
 	if err := inner.(interface {
-		SetQueueAdmission(*AnalyticsQueueAdmission) error
+		SetQueueAdmission(*QueueAdmission) error
 	}).SetQueueAdmission(budget); err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestMultiBusCloseBeforeStartReleasesAllQueueReservations(t *testing.T) {
 	}
 }
 
-func waitForListenerBudget(t *testing.T, budget *AnalyticsQueueAdmission, predicate func(AnalyticsQueueAdmissionSnapshot) bool) {
+func waitForListenerBudget(t *testing.T, budget *QueueAdmission, predicate func(QueueSnapshot) bool) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {

@@ -50,7 +50,7 @@ func (r *directoryFeedRegistry) ReleaseConsumerLease(id, owner string) error {
 	}
 	return nil
 }
-func (*directoryFeedRegistry) ChangesAfter(uint64, int) ([]site.SiteDirectoryChange, error) {
+func (*directoryFeedRegistry) ChangesAfter(uint64, int) ([]site.DirectoryChange, error) {
 	return nil, nil
 }
 func (*directoryFeedRegistry) CurrentDirectoryRevision() (uint64, error) { return 0, nil }
@@ -82,7 +82,7 @@ func (*directoryWakeupStub) PublishSiteDirectoryRevision(context.Context, uint64
 
 func TestDirectoryFeedShutdownJoinsPollingAndWakeupWorkers(t *testing.T) {
 	registry := newDirectoryFeedRegistry()
-	consumer := &site.DirectoryConsumer{Registry: registry, ID: "engine:test", Apply: func(context.Context, site.SiteDirectoryChange) error { return nil }}
+	consumer := &site.DirectoryConsumer{Registry: registry, ID: "engine:test", Apply: func(context.Context, site.DirectoryChange) error { return nil }}
 	wakeups := &directoryWakeupStub{ready: make(chan uint64), closed: make(chan struct{})}
 	worker, err := StartDirectoryFeed(context.Background(), consumer, wakeups)
 	if err != nil {
@@ -133,7 +133,7 @@ func TestProcessResourcesRetainsProviderUntilDirectoryFeedJoins(t *testing.T) {
 		started:               make(chan struct{}),
 		release:               make(chan struct{}),
 	}
-	consumer := &site.DirectoryConsumer{Registry: registry, ID: "engine:blocked", Apply: func(context.Context, site.SiteDirectoryChange) error { return nil }}
+	consumer := &site.DirectoryConsumer{Registry: registry, ID: "engine:blocked", Apply: func(context.Context, site.DirectoryChange) error { return nil }}
 	worker, err := StartDirectoryFeed(context.Background(), consumer, nil)
 	if err != nil {
 		t.Fatalf("StartDirectoryFeed: %v", err)
@@ -164,7 +164,7 @@ func TestProcessResourcesRetainsProviderUntilDirectoryFeedJoins(t *testing.T) {
 
 func TestDirectoryFeedFallsBackToSQLPollingWhenWakeupSubscriptionFails(t *testing.T) {
 	registry := newDirectoryFeedRegistry()
-	consumer := &site.DirectoryConsumer{Registry: registry, ID: "engine:test", Apply: func(context.Context, site.SiteDirectoryChange) error { return nil }}
+	consumer := &site.DirectoryConsumer{Registry: registry, ID: "engine:test", Apply: func(context.Context, site.DirectoryChange) error { return nil }}
 	wakeups := &directoryWakeupStub{err: errors.New("broker unavailable")}
 	worker, err := StartDirectoryFeed(context.Background(), consumer, wakeups)
 	if err != nil {

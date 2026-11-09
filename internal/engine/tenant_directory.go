@@ -17,7 +17,7 @@ import (
 // to activate local tenant runtimes from durable platform state.
 type TenantDirectory interface {
 	site.DirectoryChangeFeed
-	GetDescriptorByID(string) (site.SiteDescriptor, error)
+	GetDescriptorByID(string) (site.Descriptor, error)
 	GetByID(string) (site.DBSiteInfo, error)
 	GetDirectoryDescriptors() ([]contract.SiteDescriptor, error)
 	GetDirectorySnapshotForCell(string) ([]site.DBSiteInfo, error)
@@ -29,7 +29,7 @@ type TenantRuntimeDirectory interface {
 	TenantDirectory
 	CurrentDirectoryRevision() (uint64, error)
 	GetByIDContext(context.Context, string) (site.DBSiteInfo, error)
-	GetDirectoryDescriptorPageContext(context.Context, string, string, uint16) ([]site.SiteDescriptor, error)
+	GetDirectoryDescriptorPageContext(context.Context, string, string, uint16) ([]site.Descriptor, error)
 }
 
 // TenantIngressDirectory is the credential-free placement projection consumed
@@ -76,7 +76,7 @@ func NewTenantDirectoryConsumer(config TenantDirectoryConfig) (*site.DirectoryCo
 	if contextRegistry, ok := config.Directory.(site.ContextDirectoryChangeFeed); ok {
 		consumer.ContextRegistry = contextRegistry
 	}
-	consumer.Apply = func(ctx context.Context, change site.SiteDirectoryChange) error {
+	consumer.Apply = func(ctx context.Context, change site.DirectoryChange) error {
 		applyIngress := func(descriptor contract.SiteDescriptor) error {
 			if ingress == nil {
 				return nil
@@ -99,10 +99,10 @@ func NewTenantDirectoryConsumer(config TenantDirectoryConfig) (*site.DirectoryCo
 			current.DirectoryRevision = directoryRevision
 			descriptor = current
 		}
-		if err := site.ValidateDeploymentDirectoryV2([]site.SiteDescriptor{descriptor}, directoryRevision); err != nil {
+		if err := site.ValidateDeploymentDirectoryV2([]site.Descriptor{descriptor}, directoryRevision); err != nil {
 			return fmt.Errorf("validating deployment assignment for tenant directory change %s: %w", descriptor.SiteID, err)
 		}
-		localAssignment := descriptor.Status != "deleted" && site.SiteBelongsToDeployment(descriptor.RuntimeCellID, config.CellID)
+		localAssignment := descriptor.Status != "deleted" && site.BelongsToDeployment(descriptor.RuntimeCellID, config.CellID)
 		if deploymentID := strings.TrimSpace(descriptor.RuntimeCellID); deploymentID != "" && deploymentID != "default" {
 			slog.Info("applying nondefault tenant deployment assignment",
 				"site_id", descriptor.SiteID, "deployment_id", deploymentID,
@@ -197,7 +197,7 @@ func NewTenantDirectoryConsumer(config TenantDirectoryConfig) (*site.DirectoryCo
 		}
 		localDescriptors := make([]contract.SiteDescriptor, 0, len(descriptors))
 		for _, descriptor := range descriptors {
-			if site.SiteBelongsToDeployment(descriptor.RuntimeCellID, config.CellID) {
+			if site.BelongsToDeployment(descriptor.RuntimeCellID, config.CellID) {
 				localDescriptors = append(localDescriptors, descriptor)
 			}
 		}
@@ -210,7 +210,7 @@ func NewTenantDirectoryConsumer(config TenantDirectoryConfig) (*site.DirectoryCo
 				return fmt.Errorf("replace ingress directory snapshot: %w", err)
 			}
 			for _, descriptor := range descriptors {
-				ready := site.SiteBelongsToDeployment(descriptor.RuntimeCellID, config.CellID) && (descriptor.Status == "active" || descriptor.Status == "degraded")
+				ready := site.BelongsToDeployment(descriptor.RuntimeCellID, config.CellID) && (descriptor.Status == "active" || descriptor.Status == "degraded")
 				ingress.MarkLocalReady(descriptor.SiteID, ready)
 			}
 		}

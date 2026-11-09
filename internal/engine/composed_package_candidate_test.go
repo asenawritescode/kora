@@ -75,7 +75,7 @@ func installTenantServicesForTest(t *testing.T, info site.DBSiteInfo, database *
 	t.Helper()
 	common := &site.CommonConfig{DBType: info.DBType}
 	loaded, err := loadTenantRuntime(context.Background(), info, common, nil, "test", tenantRuntimeDependencies{
-		connect:   func(*site.SiteConfig) (*sql.DB, error) { return database, nil },
+		connect:   func(*site.Config) (*sql.DB, error) { return database, nil },
 		bootstrap: func(*sql.DB, db.Dialect) error { return nil },
 	})
 	if err != nil {
@@ -84,7 +84,7 @@ func installTenantServicesForTest(t *testing.T, info site.DBSiteInfo, database *
 	install, err := NewTenantServiceInstaller(TenantServiceConfig{
 		Common:         common,
 		KernelCommands: kernel.NewCommandRegistry(),
-		ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) {
+		ResolveStorage: func(*site.Config) (storage.Backend, error) {
 			return storage.New(storage.Config{Backend: "local", LocalPath: t.TempDir()})
 		},
 	})

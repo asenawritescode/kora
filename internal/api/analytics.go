@@ -88,7 +88,7 @@ func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *
 	})
 
 	ag.POST("/reports/:name/query", func(c *gin.Context) {
-		var request analytics.AnalyticsQueryRequest
+		var request analytics.SemanticRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid analytics query", nil)
 			return
@@ -162,7 +162,7 @@ func RegisterAnalyticsRoutesWithQueryCache(apiGroup *gin.RouterGroup, registry *
 	})
 
 	ag.POST("/query", func(c *gin.Context) {
-		var request analytics.AnalyticsQueryRequest
+		var request analytics.SemanticRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid analytics query", nil)
 			return

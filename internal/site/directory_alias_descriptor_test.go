@@ -81,7 +81,7 @@ func TestDeploymentEntryV2UsesLegacyAssignmentAsSingleSource(t *testing.T) {
 		{name: "existing cell assignment", cell: "cell-west", want: "cell-west"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			entry, err := DeploymentEntryV2FromDescriptor(SiteDescriptor{
+			entry, err := DeploymentEntryV2FromDescriptor(Descriptor{
 				SiteID: "tenant-a", Aliases: []string{"shop.example.test"}, Status: "active",
 				ConfigRevision: 9, RuntimeCellID: test.cell, DataPlaneRef: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 			}, 9007199254740993)
@@ -96,7 +96,7 @@ func TestDeploymentEntryV2UsesLegacyAssignmentAsSingleSource(t *testing.T) {
 }
 
 func TestDeploymentEntryV2FailsClosedOnInvalidLegacyAssignment(t *testing.T) {
-	_, err := DeploymentEntryV2FromDescriptor(SiteDescriptor{
+	_, err := DeploymentEntryV2FromDescriptor(Descriptor{
 		SiteID: "tenant-a", Aliases: []string{"shop.example.test"}, Status: "active", RuntimeCellID: "cell/unsafe",
 	}, 1)
 	if err == nil {
@@ -105,17 +105,17 @@ func TestDeploymentEntryV2FailsClosedOnInvalidLegacyAssignment(t *testing.T) {
 }
 
 func TestValidateDeploymentDirectoryV2RejectsInvalidAndDuplicateAssignments(t *testing.T) {
-	valid := SiteDescriptor{SiteID: "tenant-a", Aliases: []string{"shop.example.test"}, Status: "active", RuntimeCellID: "cell-west"}
-	if err := ValidateDeploymentDirectoryV2([]SiteDescriptor{valid}, 7); err != nil {
+	valid := Descriptor{SiteID: "tenant-a", Aliases: []string{"shop.example.test"}, Status: "active", RuntimeCellID: "cell-west"}
+	if err := ValidateDeploymentDirectoryV2([]Descriptor{valid}, 7); err != nil {
 		t.Fatalf("valid deployment directory rejected: %v", err)
 	}
 
 	invalid := valid
 	invalid.RuntimeCellID = "cell/west"
-	if err := ValidateDeploymentDirectoryV2([]SiteDescriptor{invalid}, 7); err == nil {
+	if err := ValidateDeploymentDirectoryV2([]Descriptor{invalid}, 7); err == nil {
 		t.Fatal("invalid assignment was accepted by directory validation")
 	}
-	if err := ValidateDeploymentDirectoryV2([]SiteDescriptor{valid, valid}, 7); err == nil {
+	if err := ValidateDeploymentDirectoryV2([]Descriptor{valid, valid}, 7); err == nil {
 		t.Fatal("duplicate tenant assignment was accepted by directory validation")
 	}
 }

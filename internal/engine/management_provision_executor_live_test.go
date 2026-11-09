@@ -217,7 +217,7 @@ func testLiveManagementProvisionRouteAndWorker(t *testing.T, driver, dsn string)
 					t.Fatalf("posts/activations = %d/%d, want 2/1", posts.Load(), coordinator.activated.Load())
 				}
 				var admins int
-				tenantDB, err := site.ConnectContext(ctx, &site.SiteConfig{DBType: info.DBType, DBHost: info.DBHost, DBPort: info.DBPort, DBName: info.DBName, DBUser: info.DBUser, DBPassword: info.DBPassword})
+				tenantDB, err := site.ConnectContext(ctx, &site.Config{DBType: info.DBType, DBHost: info.DBHost, DBPort: info.DBPort, DBName: info.DBName, DBUser: info.DBUser, DBPassword: info.DBPassword})
 				if err != nil {
 					t.Fatal("connect provisioned tenant:", err)
 				}
@@ -326,7 +326,7 @@ func testLiveManagementProvisionReplay(t *testing.T, driver, dsn string) {
 	if info.Status != "active" || info.Name != command.PrimaryAlias || !sameAliases(info.Domains, append([]string{command.PrimaryAlias}, command.Aliases...)) {
 		t.Fatalf("provisioned directory entry = %+v", info)
 	}
-	tenantDB, err := site.ConnectContext(ctx, &site.SiteConfig{
+	tenantDB, err := site.ConnectContext(ctx, &site.Config{
 		DBType: info.DBType, DBHost: info.DBHost, DBPort: info.DBPort, DBName: info.DBName,
 		DBUser: info.DBUser, DBPassword: info.DBPassword,
 	})

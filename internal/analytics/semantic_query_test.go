@@ -60,7 +60,7 @@ func TestPublishedProjectionAnalyticsUsesScopedSnapshotAndReportsFreshness(t *te
 	model.AllowedFields = []string{"amount", "id", "period", "assigned_to"}
 	catalog := &SemanticCatalog{Models: []SemanticModel{model}}
 	engine := &QueryEngine{DB: database, SiteName: "tenant-a", Dialect: kdb.Resolve("mysql"), BusinessScope: scope, ProjectionActorScopes: map[string]ProjectionActorScope{model.Name: {SubjectID: "alice", AssignedFields: []string{"assigned_to"}}}}
-	response, err := engine.ResolveSemanticQuery(catalog, AnalyticsQueryRequest{
+	response, err := engine.ResolveSemanticQuery(catalog, SemanticRequest{
 		Queries: []ModelQuery{{Model: model.Name, Dimensions: []string{"period"}, Measures: []string{"amount_sum", "count"}}},
 		Time:    QueryTime{From: "2026-10-01", To: "2026-10-31", Granularity: "month"}, Limit: 10,
 	})

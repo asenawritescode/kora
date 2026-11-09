@@ -35,7 +35,7 @@ import (
 // HandleAuthProviders returns enabled authentication providers.
 // Public endpoint — no auth required.
 func (h *Handler) HandleAuthProviders(c *gin.Context) {
-	providers := []auth.AuthProvider(nil)
+	providers := []auth.Provider(nil)
 	if h.AuthProviders != nil {
 		providers = h.AuthProviders.List()
 	} else {

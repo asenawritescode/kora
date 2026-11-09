@@ -84,7 +84,7 @@ func TestRelatedSemanticQueryUsesParentDateAndStatusForChildMeasures(t *testing.
 		t.Fatalf("validate catalog: %v", err)
 	}
 	engine := &QueryEngine{DB: database, SiteName: "demo", Dialect: kdb.Resolve("mysql")}
-	response, err := engine.ResolveSemanticQuery(catalog, AnalyticsQueryRequest{
+	response, err := engine.ResolveSemanticQuery(catalog, SemanticRequest{
 		Queries: []ModelQuery{{Model: "sales_items", Measures: []string{"quantity_sold", "sales_total"}, Dimensions: []string{"product"}}},
 		Time:    QueryTime{From: "2026-10-01", To: "2026-10-31", Granularity: "month"},
 	}, salesItemsTestRegistry())

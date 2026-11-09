@@ -160,7 +160,7 @@ func TestOwnerValidationExtensionRejectionRollsBackKernelCommand(t *testing.T) {
 	}
 	store := &script.Store{DB: site.DB, Dialect: site.Dialect}
 	handler := contract.ResourceRef{Namespace: "module", Name: "vat-validation", Version: 1}
-	if err := store.Insert(script.ScriptRecord{Name: handler.Name, Site: site.Name, ScriptType: script.TypeDocEvent,
+	if err := store.Insert(script.Record{Name: handler.Name, Site: site.Name, ScriptType: script.TypeDocEvent,
 		DocType: "Task", Event: script.EventValidate, IsActive: true, TimeoutMs: 500, Script: "return {result: {valid: false}}"}); err != nil {
 		t.Fatal("insert extension handler:", err)
 	}

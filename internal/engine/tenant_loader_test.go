@@ -40,7 +40,7 @@ func TestLoadTenantRuntimeJoinsOwnedDBCloseFailure(t *testing.T) {
 	closeErr := errors.New("tenant DB close failed")
 	mock.ExpectClose().WillReturnError(closeErr)
 	_, err = loadTenantRuntime(context.Background(), site.DBSiteInfo{Name: "tenant.example", DBType: "mysql", DBName: "tenant_test"}, nil, nil, "test-version", tenantRuntimeDependencies{
-		connect: func(*site.SiteConfig) (*sql.DB, error) { return database, nil },
+		connect: func(*site.Config) (*sql.DB, error) { return database, nil },
 		bootstrap: func(*sql.DB, kdb.Dialect) error {
 			return bootstrapErr
 		},
@@ -65,7 +65,7 @@ func TestLoadTenantRuntimeNeverClosesBorrowedDBOnFailedReplacement(t *testing.T)
 		DB: database, SessionManager: &auth.SessionManager{}, DatabaseIdentity: site.ConnectionIdentity(config),
 	}
 	_, err = loadTenantRuntime(context.Background(), info, nil, reusable, "test-version", tenantRuntimeDependencies{
-		connect: func(*site.SiteConfig) (*sql.DB, error) {
+		connect: func(*site.Config) (*sql.DB, error) {
 			t.Fatal("compatible replacement unexpectedly opened a new DB")
 			return nil, nil
 		},
@@ -100,7 +100,7 @@ func TestLoadTenantRuntimeRefusesSecondTenantOnSharedLibSQL(t *testing.T) {
 			}
 			claimed := ""
 			_, err = loadTenantRuntime(context.Background(), site.DBSiteInfo{SiteID: "tenant-b", Name: "b.example", DBType: tt.dbType, DBHost: "libsql://shared.example", DBName: "tenant_b"}, nil, nil, "test-version", tenantRuntimeDependencies{
-				connect:   func(*site.SiteConfig) (*sql.DB, error) { return database, nil },
+				connect:   func(*site.Config) (*sql.DB, error) { return database, nil },
 				bootstrap: func(*sql.DB, kdb.Dialect) error { return nil },
 				claimOwner: func(_ context.Context, _ *sql.DB, _ kdb.Dialect, tenantID string) error {
 					claimed = tenantID

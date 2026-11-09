@@ -89,7 +89,7 @@ func newAnalyticsQueryCacheWithBudget(ttl time.Duration, maxSize int, maxBytes, 
 	return &analyticsQueryCache{items: make(map[string]*list.Element), ttl: ttl, maxSize: maxSize, maxBytes: maxBytes, maxEntry: maxEntry}
 }
 
-func (cache *analyticsQueryCache) key(tenant string, configRevision uint64, permissionScope string, request analytics.AnalyticsQueryRequest) string {
+func (cache *analyticsQueryCache) key(tenant string, configRevision uint64, permissionScope string, request analytics.SemanticRequest) string {
 	data, _ := json.Marshal(request)
 	return tenant + "\x00" + strconv.FormatUint(configRevision, 10) + "\x00" + permissionScope + "\x00" + string(data)
 }

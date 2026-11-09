@@ -334,7 +334,7 @@ func executeAnalyticsQuery(reg *doctype.Registry, tx *orm.TxManager, siteName st
 	if parsed.Limit == 0 {
 		parsed.Limit = analytics.MaxSemanticResultRows
 	}
-	request := analytics.AnalyticsQueryRequest{
+	request := analytics.SemanticRequest{
 		Queries: parsed.Queries, Time: analytics.QueryTime{From: parsed.From, To: parsed.To, Granularity: parsed.Granularity}, Limit: parsed.Limit,
 	}
 	reports := loadAnalyticsReports(tx, siteName)
@@ -413,12 +413,12 @@ func executeAnalyticsReport(reg *doctype.Registry, tx *orm.TxManager, siteName s
 	return executeAnalyticsQuery(reg, tx, siteName, queryArgs, execution)
 }
 
-func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.AnalyticsQueryRequest, execution policy.Execution, scopes ...contract.BusinessScope) error {
+func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.SemanticRequest, execution policy.Execution, scopes ...contract.BusinessScope) error {
 	_, err := authorizeRelatedAnalytics(reg, reports, request, execution, scopes...)
 	return err
 }
 
-func authorizeRelatedAnalytics(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.AnalyticsQueryRequest, execution policy.Execution, scopes ...contract.BusinessScope) (map[string]analytics.ProjectionActorScope, error) {
+func authorizeRelatedAnalytics(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.SemanticRequest, execution policy.Execution, scopes ...contract.BusinessScope) (map[string]analytics.ProjectionActorScope, error) {
 	if reg == nil || reg.Permissions == nil || !execution.Valid() {
 		return nil, fmt.Errorf("verified execution is required to query related report records")
 	}

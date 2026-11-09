@@ -32,7 +32,7 @@ type CheckpointVerifier interface {
 
 type managementTenantAllocationDirectory interface {
 	GetByIDContext(context.Context, string) (site.DBSiteInfo, error)
-	SetDeletingAtAllocation(context.Context, string, uint64, string) (site.SiteDescriptor, error)
+	SetDeletingAtAllocation(context.Context, string, uint64, string) (site.Descriptor, error)
 }
 
 type managementTenantDelete func(context.Context, site.DBSiteInfo) error

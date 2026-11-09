@@ -41,7 +41,7 @@ func TestLiveLibSQLSiteDirectoryLifecycle(t *testing.T) {
 		t.Fatal("read startup feed boundary:", err)
 	}
 	consumerID := fmt.Sprintf("integration:libsql-lifecycle:%d", time.Now().UnixNano())
-	var applied []SiteDirectoryChange
+	var applied []DirectoryChange
 	var currentConsumer *DirectoryConsumer
 	defer func() {
 		if currentConsumer != nil {
@@ -52,7 +52,7 @@ func TestLiveLibSQLSiteDirectoryLifecycle(t *testing.T) {
 		if currentConsumer != nil {
 			currentConsumer.releaseLease()
 		}
-		currentConsumer = &DirectoryConsumer{Registry: registry, ID: consumerID, InitialCursor: startCursor, Apply: func(_ context.Context, change SiteDirectoryChange) error {
+		currentConsumer = &DirectoryConsumer{Registry: registry, ID: consumerID, InitialCursor: startCursor, Apply: func(_ context.Context, change DirectoryChange) error {
 			applied = append(applied, change)
 			return nil
 		}}
@@ -61,7 +61,7 @@ func TestLiveLibSQLSiteDirectoryLifecycle(t *testing.T) {
 	if count, err := newConsumer().ProcessBatch(context.Background()); err != nil || count != 0 {
 		t.Fatalf("initialize consumer from snapshot = %d, %v", count, err)
 	}
-	if err := registry.Upsert(&SiteConfig{Hostname: hostname, DomainsList: []string{hostname, "alias." + hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "unused", DBUser: "unused"}); err != nil {
+	if err := registry.Upsert(&Config{Hostname: hostname, DomainsList: []string{hostname, "alias." + hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "unused", DBUser: "unused"}); err != nil {
 		t.Fatal("upsert:", err)
 	}
 	info, err := registry.ResolveAlias("alias." + hostname)
@@ -101,7 +101,7 @@ func TestLiveLibSQLSiteDirectoryLifecycle(t *testing.T) {
 	resynced := uint64(0)
 	stale := &DirectoryConsumer{
 		Registry: registry, ID: "integration:stale:" + hostname, InitialCursor: startCursor,
-		Apply:  func(context.Context, SiteDirectoryChange) error { return nil },
+		Apply:  func(context.Context, DirectoryChange) error { return nil },
 		Resync: func(_ context.Context, revision uint64) error { resynced = revision; return nil },
 	}
 	if count, err := stale.ProcessBatch(context.Background()); err != nil || count != 0 {
@@ -134,7 +134,7 @@ func TestLiveLibSQLProvisioningRegistrationBackfillsOnlyUnassignedRows(t *testin
 	hostname := fmt.Sprintf("provisioning-assignment-%d.example.invalid", stamp)
 	tenantID := fmt.Sprintf("tenant-provisioning-assignment-%d", stamp)
 	t.Cleanup(func() { _ = removePlatformSiteRegistration(database, "libsql", hostname) })
-	config := &SiteConfig{Hostname: hostname, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "tenant_db", DomainsList: []string{hostname}}
+	config := &Config{Hostname: hostname, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "tenant_db", DomainsList: []string{hostname}}
 	register := func(status, assignment string) error {
 		return ensurePlatformSiteRegistrationAssignmentContext(t.Context(), database, "libsql", config, status, assignment, tenantID)
 	}

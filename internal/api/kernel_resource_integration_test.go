@@ -502,7 +502,7 @@ func TestScriptHookSnapshotRefreshesForEachCommand(t *testing.T) {
 	tx.ScriptRunner, tx.ScriptStore = runner, store
 	provider := NewScriptProvider(&tx, reg, site, nil, nil)
 	tx.ScriptProvider = provider
-	if err := store.Insert(script.ScriptRecord{
+	if err := store.Insert(script.Record{
 		Name: "counter-hook", Site: site, ScriptType: script.TypeDocEvent,
 		DocType: "TestDoc", Event: script.EventValidate, IsActive: true,
 	}); err != nil {
@@ -517,7 +517,7 @@ func TestScriptHookSnapshotRefreshesForEachCommand(t *testing.T) {
 		t.Fatalf("active hook executions=%d, want 2", runner.companionCalls)
 	}
 	disabled := false
-	if err := store.Update(site, "counter-hook", script.ScriptUpdateRequest{IsActive: &disabled}, "admin@example.test"); err != nil {
+	if err := store.Update(site, "counter-hook", script.UpdateRequest{IsActive: &disabled}, "admin@example.test"); err != nil {
 		t.Fatalf("disable lifecycle script: %v", err)
 	}
 	if _, err := provider.CreateDoc("TestDoc", map[string]any{"title": "after disable"}, "owner@example.test", "script@example.test"); err != nil {
@@ -547,7 +547,7 @@ func TestScriptHookProviderSkipsOnlyTheActiveLifecycleScript(t *testing.T) {
 	provider := NewScriptProvider(&tx, reg, site, nil, nil)
 	tx.ScriptProvider = provider
 	for _, name := range []string{"outer-hook", "companion-hook"} {
-		if err := store.Insert(script.ScriptRecord{
+		if err := store.Insert(script.Record{
 			Name: name, Site: site, ScriptType: script.TypeDocEvent, DocType: "TestDoc",
 			Event: script.EventValidate, IsActive: true, Script: "// exercised by the test runner",
 		}); err != nil {
@@ -596,7 +596,7 @@ func TestScriptHookNestedMutationRollsBackWithParent(t *testing.T) {
 	tx.ScriptRunner, tx.ScriptStore = runner, store
 	provider := NewScriptProvider(&tx, reg, site, nil, nil)
 	tx.ScriptProvider = provider
-	for _, record := range []script.ScriptRecord{
+	for _, record := range []script.Record{
 		{Name: "outer-hook", Priority: 1, Site: site, ScriptType: script.TypeDocEvent, DocType: "TestDoc", Event: script.EventValidate, IsActive: true},
 		{Name: "reject-hook", Priority: 2, Site: site, ScriptType: script.TypeDocEvent, DocType: "TestDoc", Event: script.EventValidate, IsActive: true},
 	} {
@@ -1348,7 +1348,7 @@ func TestExternalOperationProviderSuccessCommitsPaymentAndEventTogether(t *testi
 		}
 	}
 	store := &script.Store{DB: database, Dialect: kdb.Resolve("mysql")}
-	if err := store.Insert(script.ScriptRecord{
+	if err := store.Insert(script.Record{
 		Name: "successful-payment-initiation", Site: site, ScriptType: script.TypeAPIMethod,
 		DocType: "External Operation", Event: script.EventPayment, IsActive: true,
 	}); err != nil {
@@ -1446,7 +1446,7 @@ func TestExternalOperationProviderFailureKeepsPaymentAndEventConsistent(t *testi
 		}
 	}
 	store := &script.Store{DB: database, Dialect: kdb.Resolve("mysql")}
-	if err := store.Insert(script.ScriptRecord{
+	if err := store.Insert(script.Record{
 		Name: "fail-payment-initiation", Site: site, ScriptType: script.TypeAPIMethod,
 		DocType: "External Operation", Event: script.EventPayment, IsActive: true,
 	}); err != nil {

@@ -125,13 +125,13 @@ type admittedManagementStateDirectory struct {
 	admission managementWorkAdmission
 }
 
-func (d admittedManagementStateDirectory) SetStatusAtRevision(ctx context.Context, tenant, status string, revision uint64) (site.SiteDescriptor, error) {
+func (d admittedManagementStateDirectory) SetStatusAtRevision(ctx context.Context, tenant, status string, revision uint64) (site.Descriptor, error) {
 	if d.admission == nil {
-		return site.SiteDescriptor{}, fmt.Errorf("management database admission is unavailable")
+		return site.Descriptor{}, fmt.Errorf("management database admission is unavailable")
 	}
 	release, err := d.admission.Acquire(ctx)
 	if err != nil {
-		return site.SiteDescriptor{}, err
+		return site.Descriptor{}, err
 	}
 	defer release()
 	return d.directory.SetStatusAtRevision(ctx, tenant, status, revision)

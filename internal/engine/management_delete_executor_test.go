@@ -23,13 +23,13 @@ func (s *managementDeleteDirectoryStub) GetByIDContext(context.Context, string) 
 	return s.info, s.err
 }
 
-func (s *managementDeleteDirectoryStub) SetDeletingAtAllocation(_ context.Context, tenant string, revision uint64, allocation string) (site.SiteDescriptor, error) {
+func (s *managementDeleteDirectoryStub) SetDeletingAtAllocation(_ context.Context, tenant string, revision uint64, allocation string) (site.Descriptor, error) {
 	s.deleting = true
 	s.deleteRev = revision
 	s.deleteData = allocation
 	s.info.Status = "deleting"
 	s.info.ConfigRevision++
-	return site.SiteDescriptor{SiteID: tenant, Status: "deleting"}, nil
+	return site.Descriptor{SiteID: tenant, Status: "deleting"}, nil
 }
 
 type managementCheckpointVerifierStub struct {

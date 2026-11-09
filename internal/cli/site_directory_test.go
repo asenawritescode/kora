@@ -22,12 +22,12 @@ func TestSiteProbePercentileUsesNearestRank(t *testing.T) {
 }
 
 type directoryPagerStub struct {
-	pages   map[string][]site.SiteDescriptor
+	pages   map[string][]site.Descriptor
 	cursors []string
 	err     error
 }
 
-func (s *directoryPagerStub) GetDirectoryDescriptorPageContext(_ context.Context, _ string, after string, limit uint16) ([]site.SiteDescriptor, error) {
+func (s *directoryPagerStub) GetDirectoryDescriptorPageContext(_ context.Context, _ string, after string, limit uint16) ([]site.Descriptor, error) {
 	s.cursors = append(s.cursors, after)
 	if s.err != nil {
 		return nil, s.err
@@ -53,12 +53,12 @@ func (s *cliAdmissionStub) Acquire(context.Context) (func(), error) {
 }
 
 func TestWriteDirectoryDescriptorPagesBoundsQueriesAndMemory(t *testing.T) {
-	firstPage := make([]site.SiteDescriptor, 500)
+	firstPage := make([]site.Descriptor, 500)
 	for i := range firstPage {
 		firstPage[i].SiteID = fmt.Sprintf("site-%03d", i)
 	}
-	secondPage := []site.SiteDescriptor{{SiteID: "site-final"}}
-	registry := &directoryPagerStub{pages: map[string][]site.SiteDescriptor{"": firstPage, "site-499": secondPage}}
+	secondPage := []site.Descriptor{{SiteID: "site-final"}}
+	registry := &directoryPagerStub{pages: map[string][]site.Descriptor{"": firstPage, "site-499": secondPage}}
 	admission := &cliAdmissionStub{}
 	var output bytes.Buffer
 	if err := writeDirectoryDescriptorPages(context.Background(), &output, registry, admission); err != nil {
@@ -70,7 +70,7 @@ func TestWriteDirectoryDescriptorPagesBoundsQueriesAndMemory(t *testing.T) {
 	if len(registry.cursors) != 2 || registry.cursors[0] != "" || registry.cursors[1] != "site-499" {
 		t.Fatalf("page cursors = %q, want [empty site-499]", registry.cursors)
 	}
-	var descriptors []site.SiteDescriptor
+	var descriptors []site.Descriptor
 	if err := json.Unmarshal(output.Bytes(), &descriptors); err != nil {
 		t.Fatalf("streamed directory JSON is invalid: %v", err)
 	}

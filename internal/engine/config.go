@@ -42,7 +42,7 @@ type Config struct {
 	TenantActivationWaiters uint16
 	TenantActivationWait    time.Duration
 	RetirementLimit         uint16
-	ResolveStorage          func(*site.SiteConfig) (storage.Backend, error)
+	ResolveStorage          func(*site.Config) (storage.Backend, error)
 	CellURLs                map[string]string
 	DirectoryConsumerID     string
 	NATSConfig              *natsprovider.Config
@@ -78,7 +78,7 @@ type Config struct {
 	ManagementPackageResolver         ManagementPackageArtifactResolver
 	ManagementCheckpointVerifier      CheckpointVerifier
 	Listener                          HTTPServerConfig
-	OnReady                           func(EngineMetrics)
+	OnReady                           func(Metrics)
 	DirectoryLagMetricsEnabled        bool
 	AsyncHookQueueSize                int
 	AsyncHookMaxQueuedBytes           uint64
@@ -92,9 +92,9 @@ type Config struct {
 	AnalyticsMaxSubscribers           int
 }
 
-// EngineMetrics is a low-cardinality startup snapshot provided to the host
+// Metrics is a low-cardinality startup snapshot provided to the host
 // application after the HTTP listener begins accepting requests.
-type EngineMetrics struct {
+type Metrics struct {
 	DiscoveredTenants int
 	LoadedTenants     int
 	OpenConnections   int
@@ -276,7 +276,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 		DirectoryDescriptors: startup.Platform.Descriptors,
 		DirectoryRevision:    startup.Platform.StartCursor, DirectoryConsumerID: startup.DirectoryConsumerID,
 		CellID: startup.Platform.CellID, DirectoryWorkAdmission: directoryWorkAdmission, RetirementLimit: config.RetirementLimit,
-		TenantActivationWorkAdmission: func(ctx context.Context, tenantConfig *site.SiteConfig) (func(), error) {
+		TenantActivationWorkAdmission: func(ctx context.Context, tenantConfig *site.Config) (func(), error) {
 			admission, admissionErr := site.ConnectionAdmission(tenantConfig)
 			if admissionErr != nil {
 				return nil, admissionErr
@@ -419,8 +419,8 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 	return engine, nil
 }
 
-func collectEngineMetrics(startup *ProcessStartupAssembly, resources *ProcessResources) EngineMetrics {
-	var metrics EngineMetrics
+func collectEngineMetrics(startup *ProcessStartupAssembly, resources *ProcessResources) Metrics {
+	var metrics Metrics
 	if startup == nil {
 		return metrics
 	}

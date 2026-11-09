@@ -19,7 +19,7 @@ func TestSetupConfigImportUsesJournaledImporterAdmission(t *testing.T) {
 	t.Setenv("KORA_DB_ENGINE_REPLICAS", "1")
 	t.Setenv("DB_DSN", "")
 
-	config := &site.SiteConfig{
+	config := &site.Config{
 		DBType: "mysql", DBHost: "setup-admission.invalid", DBPort: 3306,
 		DBName: "kora_setup_test", DBUser: "test",
 	}

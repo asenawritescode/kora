@@ -149,7 +149,7 @@ func TestGenerateDefaultReportsUsesCatalogFields(t *testing.T) {
 }
 
 func TestAnalyticsQueryValidatesAgainstCatalog(t *testing.T) {
-	request := AnalyticsQueryRequest{
+	request := SemanticRequest{
 		Queries: []ModelQuery{{
 			Model:      "cake_orders",
 			Measures:   []string{"sales"},
@@ -164,7 +164,7 @@ func TestAnalyticsQueryValidatesAgainstCatalog(t *testing.T) {
 }
 
 func TestAnalyticsQueryRejectsUnknownMeasureAndLimit(t *testing.T) {
-	request := AnalyticsQueryRequest{
+	request := SemanticRequest{
 		Queries: []ModelQuery{{Model: "cake_orders", Measures: []string{"profit"}}},
 		Limit:   10001,
 	}
@@ -175,30 +175,30 @@ func TestAnalyticsQueryRejectsUnknownMeasureAndLimit(t *testing.T) {
 }
 
 func TestAnalyticsQueryEnforcesAdvertisedBudgetsAndStrictDates(t *testing.T) {
-	base := AnalyticsQueryRequest{
+	base := SemanticRequest{
 		Queries: []ModelQuery{{Model: "cake_orders", Measures: []string{"sales"}}},
 		Time:    QueryTime{From: "2026-01-01", To: "2026-12-31", Granularity: "month"},
 	}
 	cases := []struct {
 		name   string
-		change func(*AnalyticsQueryRequest)
+		change func(*SemanticRequest)
 	}{
-		{name: "query count", change: func(q *AnalyticsQueryRequest) { q.Queries = make([]ModelQuery, MaxSemanticQueries+1) }},
-		{name: "result rows", change: func(q *AnalyticsQueryRequest) { q.Limit = MaxSemanticResultRows + 1 }},
-		{name: "invalid date", change: func(q *AnalyticsQueryRequest) { q.Time.From = "2026-02-30" }},
-		{name: "excessive date range", change: func(q *AnalyticsQueryRequest) { q.Time = QueryTime{From: "2000-01-01", To: "2026-01-01"} }},
-		{name: "multiple dimensions", change: func(q *AnalyticsQueryRequest) { q.Queries[0].Dimensions = []string{"order_date", "flavour"} }},
-		{name: "filter count", change: func(q *AnalyticsQueryRequest) {
+		{name: "query count", change: func(q *SemanticRequest) { q.Queries = make([]ModelQuery, MaxSemanticQueries+1) }},
+		{name: "result rows", change: func(q *SemanticRequest) { q.Limit = MaxSemanticResultRows + 1 }},
+		{name: "invalid date", change: func(q *SemanticRequest) { q.Time.From = "2026-02-30" }},
+		{name: "excessive date range", change: func(q *SemanticRequest) { q.Time = QueryTime{From: "2000-01-01", To: "2026-01-01"} }},
+		{name: "multiple dimensions", change: func(q *SemanticRequest) { q.Queries[0].Dimensions = []string{"order_date", "flavour"} }},
+		{name: "filter count", change: func(q *SemanticRequest) {
 			for range MaxSemanticFilters + 1 {
 				q.Queries[0].Filters = append(q.Queries[0].Filters, SemanticFilter{Field: "flavour", Operator: "=", Values: []string{"vanilla"}})
 			}
 		}},
-		{name: "filter value count", change: func(q *AnalyticsQueryRequest) {
+		{name: "filter value count", change: func(q *SemanticRequest) {
 			q.Queries[0].Dimensions = []string{"flavour"}
 			values := make([]string, MaxSemanticFilterValues+1)
 			q.Queries[0].Filters = []SemanticFilter{{Field: "flavour", Operator: "in", Values: values}}
 		}},
-		{name: "filter value bytes", change: func(q *AnalyticsQueryRequest) {
+		{name: "filter value bytes", change: func(q *SemanticRequest) {
 			q.Queries[0].Dimensions = []string{"flavour"}
 			q.Queries[0].Filters = []SemanticFilter{{Field: "flavour", Operator: "=", Values: []string{strings.Repeat("x", MaxSemanticFilterBytes+1)}}}
 		}},

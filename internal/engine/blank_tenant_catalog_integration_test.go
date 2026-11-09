@@ -42,7 +42,7 @@ func TestBlankTenantApplicationCatalogIsEmptyNotUnavailable(t *testing.T) {
 	info := site.DBSiteInfo{SiteID: siteName, Name: siteName, DBType: "mysql", DBName: dbName, Status: "active"}
 	common := &site.CommonConfig{DBType: "mysql"}
 	loaded, err := loadTenantRuntime(context.Background(), info, common, nil, "test", tenantRuntimeDependencies{
-		connect:   func(*site.SiteConfig) (*sql.DB, error) { return database, nil },
+		connect:   func(*site.Config) (*sql.DB, error) { return database, nil },
 		bootstrap: func(*sql.DB, db.Dialect) error { return nil },
 	})
 	if err != nil {
@@ -50,7 +50,7 @@ func TestBlankTenantApplicationCatalogIsEmptyNotUnavailable(t *testing.T) {
 	}
 	install, err := NewTenantServiceInstaller(TenantServiceConfig{
 		Common: common, KernelCommands: kernel.NewCommandRegistry(),
-		ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) {
+		ResolveStorage: func(*site.Config) (storage.Backend, error) {
 			return storage.New(storage.Config{Backend: "local", LocalPath: t.TempDir()})
 		},
 	})

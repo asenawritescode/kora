@@ -37,7 +37,7 @@ func migrateAnalyticsWALNamespaces(
 	var owners []analyticsWALNamespaceOwner
 	cursor := ""
 	for {
-		var page []site.SiteDescriptor
+		var page []site.Descriptor
 		err := withAnalyticsWALMigrationAdmission(ctx, workAdmission, func() error {
 			var err error
 			page, err = directory.GetDirectoryDescriptorPageContext(ctx, cellID, cursor, analyticsWALMigrationPageSize)

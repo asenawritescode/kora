@@ -27,7 +27,7 @@ type AsyncHookInvocation struct {
 	Sequence        uint16                `json:"sequence"`
 	Doctype         string                `json:"doctype"`
 	Event           Event                 `json:"event"`
-	Record          ScriptRecord          `json:"record"`
+	Record          Record                `json:"record"`
 	Document        json.RawMessage       `json:"document"`
 	OldDocument     json.RawMessage       `json:"old_document,omitempty"`
 	Actor           contract.ActorContext `json:"actor"`

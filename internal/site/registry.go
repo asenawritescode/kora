@@ -31,19 +31,19 @@ type DBSiteInfo struct {
 	StorageBucket       string
 }
 
-func ensurePlatformSiteRegistration(platformDB *sql.DB, platformDBType string, cfg *SiteConfig) error {
+func ensurePlatformSiteRegistration(platformDB *sql.DB, platformDBType string, cfg *Config) error {
 	return ensurePlatformSiteRegistrationStatus(platformDB, platformDBType, cfg, "active")
 }
 
-func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType string, cfg *SiteConfig, status string, requestedIDs ...string) error {
+func ensurePlatformSiteRegistrationStatus(platformDB *sql.DB, platformDBType string, cfg *Config, status string, requestedIDs ...string) error {
 	return ensurePlatformSiteRegistrationStatusContext(context.Background(), platformDB, platformDBType, cfg, status, requestedIDs...)
 }
 
-func ensurePlatformSiteRegistrationStatusContext(ctx context.Context, platformDB *sql.DB, platformDBType string, cfg *SiteConfig, status string, requestedIDs ...string) error {
+func ensurePlatformSiteRegistrationStatusContext(ctx context.Context, platformDB *sql.DB, platformDBType string, cfg *Config, status string, requestedIDs ...string) error {
 	return ensurePlatformSiteRegistrationAssignmentContext(ctx, platformDB, platformDBType, cfg, status, "", requestedIDs...)
 }
 
-func ensurePlatformSiteRegistrationAssignmentContext(ctx context.Context, platformDB *sql.DB, platformDBType string, cfg *SiteConfig, status, runtimeCellID string, requestedIDs ...string) error {
+func ensurePlatformSiteRegistrationAssignmentContext(ctx context.Context, platformDB *sql.DB, platformDBType string, cfg *Config, status, runtimeCellID string, requestedIDs ...string) error {
 	if platformDB == nil || cfg == nil {
 		return nil
 	}

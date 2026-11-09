@@ -36,7 +36,7 @@ func TestLiveMySQLSiteRegistryUpsertAdvancesRevisionOnce(t *testing.T) {
 	}
 	hostname := fmt.Sprintf("revision-test-%d.example.invalid", time.Now().UnixNano())
 	registry := NewSQLSiteRegistry(database, "mysql")
-	config := &SiteConfig{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: hostname}
+	config := &Config{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: hostname}
 	if err := registry.Upsert(config); err != nil {
 		t.Fatal("initial upsert:", err)
 	}
@@ -85,8 +85,8 @@ func TestLiveMySQLAliasOwnershipConflictRollsBackRegistryUpdate(t *testing.T) {
 	secondName := fmt.Sprintf("alias-conflict-%d.example.invalid", stamp)
 	sharedAlias := fmt.Sprintf("shared-%d.example.invalid", stamp)
 	registry := NewSQLSiteRegistry(database, "mysql")
-	first := &SiteConfig{Hostname: firstName, DomainsList: []string{sharedAlias}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: firstName}
-	second := &SiteConfig{Hostname: secondName, DomainsList: []string{sharedAlias}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: secondName}
+	first := &Config{Hostname: firstName, DomainsList: []string{sharedAlias}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: firstName}
+	second := &Config{Hostname: secondName, DomainsList: []string{sharedAlias}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: secondName}
 	if err := registry.Upsert(first); err != nil {
 		t.Fatal("register first alias owner:", err)
 	}
@@ -131,7 +131,7 @@ func TestLiveMySQLSiteStateTransitionIsRevisionFencedAndIdempotent(t *testing.T)
 	}
 	hostname := fmt.Sprintf("state-test-%d.example.invalid", time.Now().UnixNano())
 	registry := NewSQLSiteRegistry(database, "mysql")
-	config := &SiteConfig{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: hostname, DBUser: "unused"}
+	config := &Config{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: hostname, DBUser: "unused"}
 	if err := registry.Upsert(config); err != nil {
 		t.Fatal("create disposable directory record:", err)
 	}
@@ -196,10 +196,10 @@ func TestLiveMySQLDeletionFenceBindsCheckpointToCurrentAllocation(t *testing.T) 
 			}
 		}
 	}()
-	newTenant := func(suffix string) (string, *SiteConfig, DBSiteInfo) {
+	newTenant := func(suffix string) (string, *Config, DBSiteInfo) {
 		t.Helper()
 		hostname := fmt.Sprintf("delete-fence-%s-%d.example.invalid", suffix, time.Now().UnixNano())
-		config := &SiteConfig{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "db_" + suffix + fmt.Sprint(time.Now().UnixNano()), DBUser: "unused"}
+		config := &Config{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1", DBPort: 3306, DBName: "db_" + suffix + fmt.Sprint(time.Now().UnixNano()), DBUser: "unused"}
 		if err := registry.Upsert(config); err != nil {
 			t.Fatal("create disposable directory record:", err)
 		}
@@ -290,7 +290,7 @@ func TestLiveMySQLCheckpointBoundDeletionDropsOnlyTheVerifiedAllocation(t *testi
 	if err != nil {
 		t.Fatal("parse disposable MySQL port:", err)
 	}
-	config := &SiteConfig{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: serverHost, DBPort: serverPort, DBName: databaseName, DBUser: server.User, DBPassword: server.Passwd, FileStorage: "local"}
+	config := &Config{Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: serverHost, DBPort: serverPort, DBName: databaseName, DBUser: server.User, DBPassword: server.Passwd, FileStorage: "local"}
 	if err := registry.Upsert(config); err != nil {
 		t.Fatal("create disposable site directory record:", err)
 	}
@@ -336,8 +336,8 @@ func TestLiveMySQLDirectoryConsumerLeaseFencesDuplicateOwner(t *testing.T) {
 		t.Fatal("read test feed boundary:", err)
 	}
 	consumerID := fmt.Sprintf("integration:mysql-lease:%d", time.Now().UnixNano())
-	oldOwner := &DirectoryConsumer{Registry: registry, ID: consumerID, OwnerID: "mysql-replica-old", InitialCursor: startCursor, Apply: func(context.Context, SiteDirectoryChange) error { return nil }}
-	newOwner := &DirectoryConsumer{Registry: registry, ID: consumerID, OwnerID: "mysql-replica-new", InitialCursor: startCursor, Apply: func(context.Context, SiteDirectoryChange) error { return nil }}
+	oldOwner := &DirectoryConsumer{Registry: registry, ID: consumerID, OwnerID: "mysql-replica-old", InitialCursor: startCursor, Apply: func(context.Context, DirectoryChange) error { return nil }}
+	newOwner := &DirectoryConsumer{Registry: registry, ID: consumerID, OwnerID: "mysql-replica-new", InitialCursor: startCursor, Apply: func(context.Context, DirectoryChange) error { return nil }}
 	if count, err := oldOwner.ProcessBatch(context.Background()); err != nil || count != 0 {
 		t.Fatalf("initial MySQL owner claim = %d, %v", count, err)
 	}

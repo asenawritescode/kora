@@ -59,7 +59,7 @@ func StartDirectoryFeed(parent context.Context, consumer *site.DirectoryConsumer
 				WorkAdmission:   consumer.WorkAdmission,
 				ID:              "engine-directory-nats:" + hex.EncodeToString(digest[:]),
 				PageSize:        100, InitialCursor: consumer.InitialCursor,
-				Apply: func(_ context.Context, change site.SiteDirectoryChange) error {
+				Apply: func(_ context.Context, change site.DirectoryChange) error {
 					return wakeups.PublishSiteDirectoryRevision(ctx, change.Cursor)
 				},
 				Resync: func(_ context.Context, revision uint64) error {

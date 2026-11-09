@@ -13,7 +13,7 @@ import (
 )
 
 func TestConnectionIdentityIsOpaqueAndTracksPoolCompatibility(t *testing.T) {
-	base := &SiteConfig{DBType: "mysql", DBHost: "db.internal", DBPort: 3306, DBName: "tenant", DBUser: "app", DBPassword: "secret", DBMaxOpenConns: 8, DBMaxIdleConns: 2}
+	base := &Config{DBType: "mysql", DBHost: "db.internal", DBPort: 3306, DBName: "tenant", DBUser: "app", DBPassword: "secret", DBMaxOpenConns: 8, DBMaxIdleConns: 2}
 	identity := ConnectionIdentity(base)
 	if identity == "" || strings.Contains(identity, "secret") || strings.Contains(identity, "db.internal") {
 		t.Fatalf("identity must be opaque: %q", identity)
@@ -34,7 +34,7 @@ func TestConnectionIdentityIsOpaqueAndTracksPoolCompatibility(t *testing.T) {
 }
 
 func TestDSN_MySQL(t *testing.T) {
-	cfg := &SiteConfig{
+	cfg := &Config{
 		DBType:     "mysql",
 		DBHost:     "db.example.com",
 		DBPort:     3306,
@@ -163,7 +163,7 @@ func TestEnsureConfigVersionRecoversInterruptedActivation(t *testing.T) {
 }
 
 func TestDSN_Postgres(t *testing.T) {
-	cfg := &SiteConfig{
+	cfg := &Config{
 		DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432,
 		DBName: "tenant", DBUser: "postgres", DBPassword: "acceptance-only",
 	}
@@ -230,12 +230,12 @@ func TestCreateAdminUserAllowsPasswordlessBootstrap(t *testing.T) {
 func TestDSN_LibSQL(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  *SiteConfig
+		cfg  *Config
 		want string
 	}{
 		{
 			name: "remote url",
-			cfg: &SiteConfig{
+			cfg: &Config{
 				DBType: "libsql",
 				DBHost: "libsql://test-db.turso.io",
 			},
@@ -243,7 +243,7 @@ func TestDSN_LibSQL(t *testing.T) {
 		},
 		{
 			name: "http with credentials",
-			cfg: &SiteConfig{
+			cfg: &Config{
 				DBType:     "libsql",
 				DBHost:     "https://db.turso.io",
 				DBUser:     "token",
@@ -253,7 +253,7 @@ func TestDSN_LibSQL(t *testing.T) {
 		},
 		{
 			name: "no prefix",
-			cfg: &SiteConfig{
+			cfg: &Config{
 				DBType: "libsql",
 				DBHost: "some-host",
 			},
@@ -324,22 +324,22 @@ func TestReconstructSiteConfig_Domains(t *testing.T) {
 func TestSiteConfig_Domains(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  *SiteConfig
+		cfg  *Config
 		want []string
 	}{
 		{
 			name: "uses domains list when set",
-			cfg:  &SiteConfig{Hostname: "example.com", DomainsList: []string{"a.com", "b.com"}},
+			cfg:  &Config{Hostname: "example.com", DomainsList: []string{"a.com", "b.com"}},
 			want: []string{"a.com", "b.com"},
 		},
 		{
 			name: "falls back to hostname",
-			cfg:  &SiteConfig{Hostname: "example.com"},
+			cfg:  &Config{Hostname: "example.com"},
 			want: []string{"example.com"},
 		},
 		{
 			name: "falls back to localhost",
-			cfg:  &SiteConfig{},
+			cfg:  &Config{},
 			want: []string{"localhost"},
 		},
 	}

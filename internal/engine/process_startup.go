@@ -29,7 +29,7 @@ type ProcessStartupConfig struct {
 	BinaryVersion              string
 	TenantConcurrency          uint16
 	MaxResidentTenants         uint32
-	ResolveStorage             func(*site.SiteConfig) (storage.Backend, error)
+	ResolveStorage             func(*site.Config) (storage.Backend, error)
 	CellURLs                   map[string]string
 	DirectoryConsumerID        string
 	DirectoryLagMetricsEnabled bool
@@ -174,7 +174,7 @@ func assembleProcessStartup(ctx context.Context, config ProcessStartupConfig, re
 func localDirectoryDescriptors(descriptors []contract.SiteDescriptor, cellID string) []contract.SiteDescriptor {
 	local := make([]contract.SiteDescriptor, 0, len(descriptors))
 	for _, descriptor := range descriptors {
-		if descriptor.Status != "deleted" && site.SiteBelongsToDeployment(descriptor.RuntimeCellID, cellID) {
+		if descriptor.Status != "deleted" && site.BelongsToDeployment(descriptor.RuntimeCellID, cellID) {
 			descriptor.Aliases = append([]string(nil), descriptor.Aliases...)
 			local = append(local, descriptor)
 		}

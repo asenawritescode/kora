@@ -142,7 +142,7 @@ func TestDurableLifecycleHookWorkerCommitsAuthorizedLocalMutationAcrossDialects(
 			invocation := script.AsyncHookInvocation{
 				TenantID: tenant, Site: siteName, SourceOperation: source, ConfigRevision: 1, Sequence: 1,
 				Doctype: "Task", Event: script.EventAfterSave,
-				Record: script.ScriptRecord{Name: handlerName, Site: siteName, ScriptType: script.TypeDocEvent,
+				Record: script.Record{Name: handlerName, Site: siteName, ScriptType: script.TypeDocEvent,
 					DocType: "Task", Event: script.EventAfterSave, IsActive: true, TimeoutMs: 5000, Script: "return true"},
 				Document: []byte(`{"doctype":"Task","name":"SOURCE-1","title":"source"}`), Actor: actor, Grants: grants,
 			}

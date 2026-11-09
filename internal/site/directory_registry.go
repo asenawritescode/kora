@@ -12,21 +12,21 @@ import (
 	kdb "github.com/asenawritescode/kora/internal/db"
 )
 
-// SiteRegistry is the Engine-owned directory boundary. DBSiteInfo is internal
+// Registry is the Engine-owned directory boundary. DBSiteInfo is internal
 // to Engine; callers must not expose it as an API model because it can contain
 // resolved database credentials.
-type SiteRegistry interface {
+type Registry interface {
 	GetSnapshot() ([]DBSiteInfo, error)
 	GetSnapshotForCell(cellID string) ([]DBSiteInfo, error)
 	GetDirectorySnapshot() ([]DBSiteInfo, error)
 	GetDirectorySnapshotForCell(cellID string) ([]DBSiteInfo, error)
 	ResolveAlias(alias string) (DBSiteInfo, error)
 	GetByID(siteID string) (DBSiteInfo, error)
-	GetDescriptorByID(siteID string) (SiteDescriptor, error)
-	Upsert(config *SiteConfig) error
+	GetDescriptorByID(siteID string) (Descriptor, error)
+	Upsert(config *Config) error
 	SetStatus(siteID, status string) error
-	SetRuntimeCellID(siteID, cellID string) (SiteDescriptor, error)
-	ChangesAfter(cursor uint64, limit int) ([]SiteDirectoryChange, error)
+	SetRuntimeCellID(siteID, cellID string) (Descriptor, error)
+	ChangesAfter(cursor uint64, limit int) ([]DirectoryChange, error)
 	CurrentDirectoryRevision() (uint64, error)
 	LoadConsumerCursor(consumerID string, initialCursor uint64) (uint64, error)
 	AcquireConsumerLease(consumerID, ownerID string, duration time.Duration) error
@@ -388,7 +388,7 @@ type SQLSiteRegistry struct {
 	dialect  string
 }
 
-var _ SiteRegistry = (*SQLSiteRegistry)(nil)
+var _ Registry = (*SQLSiteRegistry)(nil)
 var _ DirectoryChangeFeed = (*SQLSiteRegistry)(nil)
 var _ ContextDirectoryChangeFeed = (*SQLSiteRegistry)(nil)
 
@@ -435,7 +435,7 @@ func (r *SQLSiteRegistry) GetDirectorySnapshotForCell(cellID string) ([]DBSiteIn
 // GetDirectoryDescriptors returns a credential-free projection for Cloud and
 // audit consumers. It intentionally does not query or decrypt tenant database
 // credentials or storage connection details.
-func (r *SQLSiteRegistry) GetDirectoryDescriptors() ([]SiteDescriptor, error) {
+func (r *SQLSiteRegistry) GetDirectoryDescriptors() ([]Descriptor, error) {
 	if r == nil || r.database == nil {
 		return nil, errors.New("site registry unavailable")
 	}
@@ -444,7 +444,7 @@ func (r *SQLSiteRegistry) GetDirectoryDescriptors() ([]SiteDescriptor, error) {
 		return nil, fmt.Errorf("read credential-free site directory descriptors: %w", err)
 	}
 	defer rows.Close()
-	var descriptors []SiteDescriptor
+	var descriptors []Descriptor
 	for rows.Next() {
 		var info DBSiteInfo
 		var domainsJSON string
@@ -465,7 +465,7 @@ func (r *SQLSiteRegistry) GetDirectoryDescriptors() ([]SiteDescriptor, error) {
 // GetDirectoryDescriptorPageContext reads a bounded credential-free page of
 // locally assigned tenant routing metadata. afterSiteID is an exclusive keyset
 // cursor; callers persist the last returned ID only after processing the page.
-func (r *SQLSiteRegistry) GetDirectoryDescriptorPageContext(ctx context.Context, cellID, afterSiteID string, limit uint16) ([]SiteDescriptor, error) {
+func (r *SQLSiteRegistry) GetDirectoryDescriptorPageContext(ctx context.Context, cellID, afterSiteID string, limit uint16) ([]Descriptor, error) {
 	if r == nil || r.database == nil || ctx == nil || limit == 0 || limit > 500 {
 		return nil, errors.New("directory page requires registry, context, and a limit from 1 to 500")
 	}
@@ -483,7 +483,7 @@ func (r *SQLSiteRegistry) GetDirectoryDescriptorPageContext(ctx context.Context,
 		return nil, fmt.Errorf("read tenant directory page: %w", err)
 	}
 	defer rows.Close()
-	page := make([]SiteDescriptor, 0, limit)
+	page := make([]Descriptor, 0, limit)
 	for rows.Next() {
 		var info DBSiteInfo
 		var domainsJSON string
@@ -560,16 +560,16 @@ func (r *SQLSiteRegistry) GetByIDContext(ctx context.Context, siteID string) (DB
 
 // GetDescriptorByID reads current directory metadata without touching tenant
 // connection coordinates or credentials.
-func (r *SQLSiteRegistry) GetDescriptorByID(siteID string) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) GetDescriptorByID(siteID string) (Descriptor, error) {
 	return r.GetDescriptorByIDContext(context.Background(), siteID)
 }
 
-func (r *SQLSiteRegistry) GetDescriptorByIDContext(ctx context.Context, siteID string) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) GetDescriptorByIDContext(ctx context.Context, siteID string) (Descriptor, error) {
 	if r == nil || r.database == nil || strings.TrimSpace(siteID) == "" {
-		return SiteDescriptor{}, errors.New("site registry and site id are required")
+		return Descriptor{}, errors.New("site registry and site id are required")
 	}
 	if ctx == nil {
-		return SiteDescriptor{}, errors.New("reading site descriptor requires context")
+		return Descriptor{}, errors.New("reading site descriptor requires context")
 	}
 	query := `SELECT site_id, COALESCE(runtime_cell_id, ''), site, db_type, db_host, db_port, db_name, COALESCE(domains_json, '[]'), COALESCE(file_storage, 'local'), COALESCE(storage_bucket, ''), status, config_revision FROM _kora_site_registry WHERE site_id = ?`
 	if strings.EqualFold(r.dialect, "postgres") {
@@ -578,30 +578,30 @@ func (r *SQLSiteRegistry) GetDescriptorByIDContext(ctx context.Context, siteID s
 	var info DBSiteInfo
 	var domainsJSON string
 	if err := r.database.QueryRowContext(ctx, query, siteID).Scan(&info.SiteID, &info.RuntimeCellID, &info.Name, &info.DBType, &info.DBHost, &info.DBPort, &info.DBName, &domainsJSON, &info.FileStorage, &info.StorageBucket, &info.Status, &info.ConfigRevision); err != nil {
-		return SiteDescriptor{}, err
+		return Descriptor{}, err
 	}
 	if err := json.Unmarshal([]byte(domainsJSON), &info.Domains); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("decode site aliases for %s: %w", siteID, err)
+		return Descriptor{}, fmt.Errorf("decode site aliases for %s: %w", siteID, err)
 	}
 	return DescriptorFromDBSiteInfo(info), nil
 }
 
 // ResolveDescriptorByAlias resolves stable identity without reading tenant
 // connection coordinates or credentials.
-func (r *SQLSiteRegistry) ResolveDescriptorByAlias(alias string) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) ResolveDescriptorByAlias(alias string) (Descriptor, error) {
 	return r.ResolveDescriptorByAliasContext(context.Background(), alias)
 }
 
-func (r *SQLSiteRegistry) ResolveDescriptorByAliasContext(ctx context.Context, alias string) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) ResolveDescriptorByAliasContext(ctx context.Context, alias string) (Descriptor, error) {
 	if r == nil || r.database == nil {
-		return SiteDescriptor{}, errors.New("site registry is required")
+		return Descriptor{}, errors.New("site registry is required")
 	}
 	if ctx == nil {
-		return SiteDescriptor{}, errors.New("resolving site descriptor requires context")
+		return Descriptor{}, errors.New("resolving site descriptor requires context")
 	}
 	siteID, err := ResolveSiteAliasContext(ctx, r.database, r.dialect, alias)
 	if err != nil {
-		return SiteDescriptor{}, err
+		return Descriptor{}, err
 	}
 	return r.GetDescriptorByIDContext(ctx, siteID)
 }
@@ -609,13 +609,13 @@ func (r *SQLSiteRegistry) ResolveDescriptorByAliasContext(ctx context.Context, a
 // SetRuntimeCellID changes placement as a revisioned directory event. Blank is
 // the backwards-compatible default assignment; readers treat it as "default"
 // only when a process explicitly opts into cell mode.
-func (r *SQLSiteRegistry) SetRuntimeCellID(siteID, cellID string) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) SetRuntimeCellID(siteID, cellID string) (Descriptor, error) {
 	if r == nil || strings.TrimSpace(siteID) == "" {
-		return SiteDescriptor{}, errors.New("site registry and site id are required")
+		return Descriptor{}, errors.New("site registry and site id are required")
 	}
 	current, err := r.GetDescriptorByID(siteID)
 	if err != nil {
-		return SiteDescriptor{}, err
+		return Descriptor{}, err
 	}
 	return r.SetRuntimeCellIDAtRevisionContext(context.Background(), siteID, cellID, current.ConfigRevision)
 }
@@ -624,23 +624,23 @@ func (r *SQLSiteRegistry) SetRuntimeCellID(siteID, cellID string) (SiteDescripto
 // placement assignment only if the directory entry still has the revision
 // observed by the caller. This prevents a stale deployment/cell move from
 // overwriting a concurrent assignment or lifecycle update.
-func (r *SQLSiteRegistry) SetRuntimeCellIDAtRevisionContext(ctx context.Context, siteID, cellID string, expectedRevision uint64) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) SetRuntimeCellIDAtRevisionContext(ctx context.Context, siteID, cellID string, expectedRevision uint64) (Descriptor, error) {
 	if r == nil || r.database == nil || strings.TrimSpace(siteID) == "" {
-		return SiteDescriptor{}, errors.New("site registry and site id are required")
+		return Descriptor{}, errors.New("site registry and site id are required")
 	}
 	if ctx == nil {
-		return SiteDescriptor{}, errors.New("setting site placement requires a context")
+		return Descriptor{}, errors.New("setting site placement requires a context")
 	}
 	cellID, err := normalizeRuntimeCellID(cellID)
 	if err != nil {
-		return SiteDescriptor{}, err
+		return Descriptor{}, err
 	}
 	if expectedRevision == ^uint64(0) {
-		return SiteDescriptor{}, errors.New("site config revision cannot be incremented beyond uint64")
+		return Descriptor{}, errors.New("site config revision cannot be incremented beyond uint64")
 	}
 	tx, err := r.database.BeginTx(ctx, nil)
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("begin revision-fenced site placement update: %w", err)
+		return Descriptor{}, fmt.Errorf("begin revision-fenced site placement update: %w", err)
 	}
 	defer tx.Rollback()
 	update := `UPDATE _kora_site_registry SET runtime_cell_id = ?, config_revision = config_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE site_id = ? AND config_revision = ?`
@@ -651,36 +651,36 @@ func (r *SQLSiteRegistry) SetRuntimeCellIDAtRevisionContext(ctx context.Context,
 	}
 	result, err := tx.ExecContext(ctx, update, cellID, siteID, expectedRevision)
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("update revision-fenced site placement: %w", err)
+		return Descriptor{}, fmt.Errorf("update revision-fenced site placement: %w", err)
 	}
 	count, err := result.RowsAffected()
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("read revision-fenced site placement result: %w", err)
+		return Descriptor{}, fmt.Errorf("read revision-fenced site placement result: %w", err)
 	}
 	if count == 0 {
 		var currentID, currentCellID, currentName, currentDomains, currentStatus string
 		var currentRevision uint64
 		if err := tx.QueryRowContext(ctx, selectQuery, siteID).Scan(&currentID, &currentCellID, &currentName, &currentDomains, &currentStatus, &currentRevision); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return SiteDescriptor{}, sql.ErrNoRows
+				return Descriptor{}, sql.ErrNoRows
 			}
-			return SiteDescriptor{}, fmt.Errorf("check revision-fenced site placement: %w", err)
+			return Descriptor{}, fmt.Errorf("check revision-fenced site placement: %w", err)
 		}
-		return SiteDescriptor{}, ErrSiteRevisionConflict
+		return Descriptor{}, ErrSiteRevisionConflict
 	}
 	var info DBSiteInfo
 	var domainsJSON string
 	if err := tx.QueryRowContext(ctx, selectQuery, siteID).Scan(&info.SiteID, &info.RuntimeCellID, &info.Name, &domainsJSON, &info.Status, &info.ConfigRevision); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("read assigned site descriptor: %w", err)
+		return Descriptor{}, fmt.Errorf("read assigned site descriptor: %w", err)
 	}
 	if err := json.Unmarshal([]byte(domainsJSON), &info.Domains); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("decode assigned site aliases: %w", err)
+		return Descriptor{}, fmt.Errorf("decode assigned site aliases: %w", err)
 	}
 	if err := appendDirectoryChange(tx, r.dialect, info); err != nil {
-		return SiteDescriptor{}, err
+		return Descriptor{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("commit revision-fenced site placement update: %w", err)
+		return Descriptor{}, fmt.Errorf("commit revision-fenced site placement update: %w", err)
 	}
 	return DescriptorFromDBSiteInfo(info), nil
 }
@@ -703,7 +703,7 @@ func NormalizeRuntimeCellID(cellID string) (string, error) {
 	return normalizeRuntimeCellID(cellID)
 }
 
-func (r *SQLSiteRegistry) Upsert(config *SiteConfig) error {
+func (r *SQLSiteRegistry) Upsert(config *Config) error {
 	if r == nil || r.database == nil {
 		return errors.New("site registry unavailable")
 	}
@@ -718,29 +718,29 @@ func (r *SQLSiteRegistry) SetStatus(siteID, status string) error {
 // SetStatusAndGetDescriptor commits a lifecycle revision and returns the exact
 // credential-free routing view from the same transaction. Local routers can
 // apply this result without guessing a revision or racing a concurrent update.
-func (r *SQLSiteRegistry) SetStatusAndGetDescriptor(siteID, status string) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) SetStatusAndGetDescriptor(siteID, status string) (Descriptor, error) {
 	return r.SetStatusContext(context.Background(), siteID, status)
 }
 
-func (r *SQLSiteRegistry) SetStatusContext(ctx context.Context, siteID, status string) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) SetStatusContext(ctx context.Context, siteID, status string) (Descriptor, error) {
 	if r == nil || r.database == nil {
-		return SiteDescriptor{}, errors.New("site registry unavailable")
+		return Descriptor{}, errors.New("site registry unavailable")
 	}
 	if ctx == nil {
-		return SiteDescriptor{}, errors.New("site status update requires context")
+		return Descriptor{}, errors.New("site status update requires context")
 	}
 	if err := ctx.Err(); err != nil {
-		return SiteDescriptor{}, err
+		return Descriptor{}, err
 	}
 	status = strings.ToLower(strings.TrimSpace(status))
 	switch status {
 	case "provisioning", "active", "degraded", "suspended", "deleting", "deleted":
 	default:
-		return SiteDescriptor{}, fmt.Errorf("unsupported site status %q", status)
+		return Descriptor{}, fmt.Errorf("unsupported site status %q", status)
 	}
 	tx, err := r.database.BeginTx(ctx, nil)
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("begin site status update: %w", err)
+		return Descriptor{}, fmt.Errorf("begin site status update: %w", err)
 	}
 	defer tx.Rollback()
 	query := `UPDATE _kora_site_registry SET status = ?, config_revision = config_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE site_id = ?`
@@ -749,14 +749,14 @@ func (r *SQLSiteRegistry) SetStatusContext(ctx context.Context, siteID, status s
 	}
 	result, err := tx.Exec(query, status, siteID)
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("update site status: %w", err)
+		return Descriptor{}, fmt.Errorf("update site status: %w", err)
 	}
 	count, err := result.RowsAffected()
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("read status update result: %w", err)
+		return Descriptor{}, fmt.Errorf("read status update result: %w", err)
 	}
 	if count == 0 {
-		return SiteDescriptor{}, sql.ErrNoRows
+		return Descriptor{}, sql.ErrNoRows
 	}
 	selectQuery := `SELECT site, COALESCE(runtime_cell_id, ''), COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry WHERE site_id = ?`
 	if strings.EqualFold(r.dialect, "postgres") {
@@ -765,17 +765,17 @@ func (r *SQLSiteRegistry) SetStatusContext(ctx context.Context, siteID, status s
 	var info DBSiteInfo
 	var domainsJSON []byte
 	if err := tx.QueryRow(selectQuery, siteID).Scan(&info.Name, &info.RuntimeCellID, &domainsJSON, &info.Status, &info.ConfigRevision); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("read updated site status: %w", err)
+		return Descriptor{}, fmt.Errorf("read updated site status: %w", err)
 	}
 	info.SiteID = siteID
 	if err := json.Unmarshal(domainsJSON, &info.Domains); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("decode site aliases for directory change: %w", err)
+		return Descriptor{}, fmt.Errorf("decode site aliases for directory change: %w", err)
 	}
 	if err := appendDirectoryChange(tx, r.dialect, info); err != nil {
-		return SiteDescriptor{}, err
+		return Descriptor{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("commit site status update: %w", err)
+		return Descriptor{}, fmt.Errorf("commit site status update: %w", err)
 	}
 	return DescriptorFromDBSiteInfo(info), nil
 }
@@ -784,37 +784,37 @@ func (r *SQLSiteRegistry) SetStatusContext(ctx context.Context, siteID, status s
 // against the config revision Cloud inspected. Replaying the same target state
 // is idempotent, including after the directory update committed but before the
 // management operation journal was finished.
-func (r *SQLSiteRegistry) SetStatusAtRevision(ctx context.Context, siteID, status string, expectedRevision uint64) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) SetStatusAtRevision(ctx context.Context, siteID, status string, expectedRevision uint64) (Descriptor, error) {
 	if r == nil || r.database == nil || strings.TrimSpace(siteID) == "" {
-		return SiteDescriptor{}, errors.New("site registry and site id are required")
+		return Descriptor{}, errors.New("site registry and site id are required")
 	}
 	if ctx == nil {
-		return SiteDescriptor{}, errors.New("setting site status requires context")
+		return Descriptor{}, errors.New("setting site status requires context")
 	}
 	status = strings.ToLower(strings.TrimSpace(status))
 	if status != "active" && status != "suspended" {
-		return SiteDescriptor{}, fmt.Errorf("management can request only active or suspended site status")
+		return Descriptor{}, fmt.Errorf("management can request only active or suspended site status")
 	}
 	tx, err := r.database.BeginTx(ctx, nil)
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("begin revision-fenced site status update: %w", err)
+		return Descriptor{}, fmt.Errorf("begin revision-fenced site status update: %w", err)
 	}
 	defer tx.Rollback()
 	info, err := loadSiteStatusTx(ctx, tx, r.dialect, siteID)
 	if err != nil {
-		return SiteDescriptor{}, err
+		return Descriptor{}, err
 	}
 	if info.Status == status {
 		if err := tx.Commit(); err != nil {
-			return SiteDescriptor{}, fmt.Errorf("commit idempotent site status replay: %w", err)
+			return Descriptor{}, fmt.Errorf("commit idempotent site status replay: %w", err)
 		}
 		return DescriptorFromDBSiteInfo(info), nil
 	}
 	if info.ConfigRevision != expectedRevision {
-		return SiteDescriptor{}, ErrSiteRevisionConflict
+		return Descriptor{}, ErrSiteRevisionConflict
 	}
 	if info.ConfigRevision == ^uint64(0) {
-		return SiteDescriptor{}, errors.New("site config revision cannot be incremented beyond uint64")
+		return Descriptor{}, errors.New("site config revision cannot be incremented beyond uint64")
 	}
 	query := `UPDATE _kora_site_registry SET status = ?, config_revision = config_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE site_id = ? AND config_revision = ?`
 	if strings.EqualFold(r.dialect, "postgres") {
@@ -822,32 +822,32 @@ func (r *SQLSiteRegistry) SetStatusAtRevision(ctx context.Context, siteID, statu
 	}
 	result, err := tx.ExecContext(ctx, query, status, siteID, expectedRevision)
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("update revision-fenced site status: %w", err)
+		return Descriptor{}, fmt.Errorf("update revision-fenced site status: %w", err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("read revision-fenced site status result: %w", err)
+		return Descriptor{}, fmt.Errorf("read revision-fenced site status result: %w", err)
 	}
 	if changed != 1 {
 		current, readErr := loadSiteStatusTx(ctx, tx, r.dialect, siteID)
 		if readErr != nil {
-			return SiteDescriptor{}, readErr
+			return Descriptor{}, readErr
 		}
 		if current.Status == status {
 			if err := tx.Commit(); err != nil {
-				return SiteDescriptor{}, fmt.Errorf("commit idempotent site status replay: %w", err)
+				return Descriptor{}, fmt.Errorf("commit idempotent site status replay: %w", err)
 			}
 			return DescriptorFromDBSiteInfo(current), nil
 		}
-		return SiteDescriptor{}, ErrSiteRevisionConflict
+		return Descriptor{}, ErrSiteRevisionConflict
 	}
 	info.Status = status
 	info.ConfigRevision++
 	if err := appendDirectoryChange(tx, r.dialect, info); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("append site status directory change: %w", err)
+		return Descriptor{}, fmt.Errorf("append site status directory change: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("commit revision-fenced site status update: %w", err)
+		return Descriptor{}, fmt.Errorf("commit revision-fenced site status update: %w", err)
 	}
 	return DescriptorFromDBSiteInfo(info), nil
 }
@@ -859,39 +859,39 @@ var ErrSiteAllocationConflict = errors.New("site data allocation changed before 
 // tenant into deleting in the same transaction. Provisioning locks the same
 // directory row and refuses to replace a deleting tenant, so an allocation
 // cannot be swapped between checkpoint verification and teardown.
-func (r *SQLSiteRegistry) SetDeletingAtAllocation(ctx context.Context, siteID string, expectedRevision uint64, expectedDataPlaneRef string) (SiteDescriptor, error) {
+func (r *SQLSiteRegistry) SetDeletingAtAllocation(ctx context.Context, siteID string, expectedRevision uint64, expectedDataPlaneRef string) (Descriptor, error) {
 	if r == nil || r.database == nil || strings.TrimSpace(siteID) == "" || strings.TrimSpace(expectedDataPlaneRef) == "" {
-		return SiteDescriptor{}, errors.New("site registry, tenant ID, and expected data allocation are required")
+		return Descriptor{}, errors.New("site registry, tenant ID, and expected data allocation are required")
 	}
 	if ctx == nil {
-		return SiteDescriptor{}, errors.New("setting tenant deleting requires context")
+		return Descriptor{}, errors.New("setting tenant deleting requires context")
 	}
 	tx, err := r.database.BeginTx(ctx, nil)
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("begin allocation-fenced tenant deletion: %w", err)
+		return Descriptor{}, fmt.Errorf("begin allocation-fenced tenant deletion: %w", err)
 	}
 	defer tx.Rollback()
 	info, err := loadSiteStatusTx(ctx, tx, r.dialect, siteID)
 	if err != nil {
-		return SiteDescriptor{}, err
+		return Descriptor{}, err
 	}
 	if info.SiteID != siteID || DataPlaneReference(info) != expectedDataPlaneRef {
-		return SiteDescriptor{}, ErrSiteAllocationConflict
+		return Descriptor{}, ErrSiteAllocationConflict
 	}
 	if info.Status == "deleting" {
 		if err := tx.Commit(); err != nil {
-			return SiteDescriptor{}, fmt.Errorf("commit idempotent allocation-fenced deletion: %w", err)
+			return Descriptor{}, fmt.Errorf("commit idempotent allocation-fenced deletion: %w", err)
 		}
 		return DescriptorFromDBSiteInfo(info), nil
 	}
 	if info.Status != "active" && info.Status != "suspended" {
-		return SiteDescriptor{}, fmt.Errorf("cannot delete tenant in directory state %q", info.Status)
+		return Descriptor{}, fmt.Errorf("cannot delete tenant in directory state %q", info.Status)
 	}
 	if info.ConfigRevision != expectedRevision {
-		return SiteDescriptor{}, ErrSiteRevisionConflict
+		return Descriptor{}, ErrSiteRevisionConflict
 	}
 	if info.ConfigRevision == ^uint64(0) {
-		return SiteDescriptor{}, errors.New("site config revision cannot be incremented beyond uint64")
+		return Descriptor{}, errors.New("site config revision cannot be incremented beyond uint64")
 	}
 	query := `UPDATE _kora_site_registry SET status = 'deleting', config_revision = config_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE site_id = ? AND config_revision = ?`
 	args := []any{siteID, expectedRevision}
@@ -900,22 +900,22 @@ func (r *SQLSiteRegistry) SetDeletingAtAllocation(ctx context.Context, siteID st
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("fence tenant allocation for deletion: %w", err)
+		return Descriptor{}, fmt.Errorf("fence tenant allocation for deletion: %w", err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return SiteDescriptor{}, fmt.Errorf("read allocation-fenced deletion result: %w", err)
+		return Descriptor{}, fmt.Errorf("read allocation-fenced deletion result: %w", err)
 	}
 	if changed != 1 {
-		return SiteDescriptor{}, ErrSiteRevisionConflict
+		return Descriptor{}, ErrSiteRevisionConflict
 	}
 	info.Status = "deleting"
 	info.ConfigRevision++
 	if err := appendDirectoryChange(tx, r.dialect, info); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("append tenant deletion directory change: %w", err)
+		return Descriptor{}, fmt.Errorf("append tenant deletion directory change: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return SiteDescriptor{}, fmt.Errorf("commit allocation-fenced tenant deletion: %w", err)
+		return Descriptor{}, fmt.Errorf("commit allocation-fenced tenant deletion: %w", err)
 	}
 	return DescriptorFromDBSiteInfo(info), nil
 }
@@ -939,4 +939,4 @@ func loadSiteStatusTx(ctx context.Context, tx *sql.Tx, dialect, siteID string) (
 	return info, nil
 }
 
-var _ SiteRegistry = (*SQLSiteRegistry)(nil)
+var _ Registry = (*SQLSiteRegistry)(nil)

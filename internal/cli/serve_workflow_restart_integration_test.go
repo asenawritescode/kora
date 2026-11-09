@@ -89,7 +89,7 @@ func TestEngineProcessRestartResumesTimedWorkflow(t *testing.T) {
 	}()
 	hostname := "workflow-restart-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".example.invalid"
 	registry := site.NewSQLSiteRegistry(platform, "mysql")
-	if err := registry.Upsert(&site.SiteConfig{
+	if err := registry.Upsert(&site.Config{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1",
 		DBPort: mustPort(t, platformPort), DBName: tenantDB, DBUser: "root", DBPassword: "acceptance-only",
 	}); err != nil {
@@ -202,7 +202,7 @@ func TestEngineProcessRestartResumesTimedWorkflow(t *testing.T) {
 	if err := hookStore.AppendAsyncHookTx(ctx, hookTx, script.AsyncHookInvocation{
 		TenantID: tenant, Site: hostname, SourceOperation: hookSource, ConfigRevision: 1, Sequence: 1,
 		Doctype: task.Name, Event: script.EventAfterSave,
-		Record: script.ScriptRecord{Name: "restart-after-save", Site: hostname, ScriptType: script.TypeDocEvent,
+		Record: script.Record{Name: "restart-after-save", Site: hostname, ScriptType: script.TypeDocEvent,
 			DocType: task.Name, Event: script.EventAfterSave, IsActive: true, TimeoutMs: 5000, Script: "return true"},
 		Document: json.RawMessage(`{"name":"TASK-RESTART-1","title":"restart source"}`), Actor: hookActor,
 		Grants: []policy.Grant{{Resource: task.Name, Operation: "create"}},
@@ -286,7 +286,7 @@ func TestEngineProcessRestartResumesGovernedHumanApproval(t *testing.T) {
 	}()
 	hostname := "human-workflow-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".example.invalid"
 	registry := site.NewSQLSiteRegistry(platform, "mysql")
-	if err := registry.Upsert(&site.SiteConfig{
+	if err := registry.Upsert(&site.Config{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1",
 		DBPort: mustPort(t, platformPort), DBName: tenantDB, DBUser: "root", DBPassword: "acceptance-only",
 	}); err != nil {

@@ -110,7 +110,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		handle.Release()
 		return failed(contract.CodeUnsupportedVersion, "tenant database dialect is unsupported for package activation"), nil
 	}
-	tenantAdmission, err := site.ConnectionAdmission(&site.SiteConfig{
+	tenantAdmission, err := site.ConnectionAdmission(&site.Config{
 		DBType: info.DBType, DBHost: info.DBHost, DBPort: info.DBPort, DBName: info.DBName,
 		DBUser: info.DBUser, DBPassword: info.DBPassword,
 	})
@@ -404,7 +404,7 @@ func (e *managementPackageExecutor) complete(ctx context.Context, original site.
 	if info.SiteID != original.SiteID || site.DataPlaneReference(info) != site.DataPlaneReference(original) {
 		return errors.New("tenant directory identity or data allocation changed before package activation completion")
 	}
-	config := &site.SiteConfig{
+	config := &site.Config{
 		DBType: info.DBType, DBHost: info.DBHost, DBPort: info.DBPort, DBName: info.DBName,
 		DBUser: info.DBUser, DBPassword: info.DBPassword,
 	}

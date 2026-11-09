@@ -12,21 +12,21 @@ import (
 )
 
 type managementStateDirectoryStub struct {
-	descriptor site.SiteDescriptor
+	descriptor site.Descriptor
 	expected   uint64
 	state      string
 	err        error
 	calls      int
 }
 
-func (s *managementStateDirectoryStub) SetStatusAtRevision(_ context.Context, tenant, state string, expected uint64) (site.SiteDescriptor, error) {
+func (s *managementStateDirectoryStub) SetStatusAtRevision(_ context.Context, tenant, state string, expected uint64) (site.Descriptor, error) {
 	s.calls++
 	if tenant != s.descriptor.SiteID {
-		return site.SiteDescriptor{}, errors.New("wrong tenant")
+		return site.Descriptor{}, errors.New("wrong tenant")
 	}
 	s.state, s.expected = state, expected
 	if s.err != nil {
-		return site.SiteDescriptor{}, s.err
+		return site.Descriptor{}, s.err
 	}
 	s.descriptor.Status = state
 	s.descriptor.ConfigRevision++
@@ -59,7 +59,7 @@ func TestManagementStateExecutorUsesRevisionFenceAndConvergesRuntime(t *testing.
 		{name: "resume", state: contract.TenantActive, wantActive: "tenant-a"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			directory := &managementStateDirectoryStub{descriptor: site.SiteDescriptor{SiteID: "tenant-a", ConfigRevision: 8}}
+			directory := &managementStateDirectoryStub{descriptor: site.Descriptor{SiteID: "tenant-a", ConfigRevision: 8}}
 			coordinator := &managementStateCoordinatorStub{}
 			executor, err := newManagementStateExecutor(directory, coordinator)
 			if err != nil {
@@ -89,7 +89,7 @@ func TestManagementStateExecutorUsesRevisionFenceAndConvergesRuntime(t *testing.
 }
 
 func TestManagementStateExecutorMakesConflictTerminalWithoutRuntimeEffect(t *testing.T) {
-	directory := &managementStateDirectoryStub{descriptor: site.SiteDescriptor{SiteID: "tenant-a"}, err: site.ErrSiteRevisionConflict}
+	directory := &managementStateDirectoryStub{descriptor: site.Descriptor{SiteID: "tenant-a"}, err: site.ErrSiteRevisionConflict}
 	coordinator := &managementStateCoordinatorStub{}
 	executor, err := newManagementStateExecutor(directory, coordinator)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestManagementStateExecutorMakesConflictTerminalWithoutRuntimeEffect(t *tes
 }
 
 func TestManagementStateExecutorReportsPersistedDirectoryStateWhenRuntimeRecoveryFails(t *testing.T) {
-	directory := &managementStateDirectoryStub{descriptor: site.SiteDescriptor{SiteID: "tenant-a", ConfigRevision: 8}}
+	directory := &managementStateDirectoryStub{descriptor: site.Descriptor{SiteID: "tenant-a", ConfigRevision: 8}}
 	coordinator := &managementStateCoordinatorStub{err: errors.New("runtime drain failed")}
 	executor, err := newManagementStateExecutor(directory, coordinator)
 	if err != nil {

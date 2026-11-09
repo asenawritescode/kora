@@ -64,7 +64,7 @@ func TestLiveMySQLSiteDirectoryAssignCellWorkflow(t *testing.T) {
 	}
 	registry := site.NewSQLSiteRegistry(database, "mysql")
 	hostname := fmt.Sprintf("cell-assignment-%d.example.invalid", time.Now().UnixNano())
-	if err := registry.Upsert(&site.SiteConfig{
+	if err := registry.Upsert(&site.Config{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql",
 		DBHost: "127.0.0.1", DBPort: 3306, DBName: "unused_tenant_database",
 	}); err != nil {

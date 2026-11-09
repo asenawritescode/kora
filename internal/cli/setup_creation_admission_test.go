@@ -31,7 +31,7 @@ func TestSetupSiteCreationAdmitsAndDeduplicatesDatabaseEndpoints(t *testing.T) {
 			if separateEndpoint {
 				platformHost = "platform-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".invalid"
 			}
-			config := &site.SiteConfig{DBType: "mysql", DBHost: tenantHost, DBPort: 3306, DBName: "tenant", DBUser: "test"}
+			config := &site.Config{DBType: "mysql", DBHost: tenantHost, DBPort: 3306, DBName: "tenant", DBUser: "test"}
 			platformDSN := fmt.Sprintf("test@tcp(%s:3306)/platform", platformHost)
 			var held func()
 			var err error

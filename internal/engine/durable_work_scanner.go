@@ -24,7 +24,7 @@ import (
 )
 
 type durableScanDirectory interface {
-	GetDirectoryDescriptorPageContext(context.Context, string, string, uint16) ([]site.SiteDescriptor, error)
+	GetDirectoryDescriptorPageContext(context.Context, string, string, uint16) ([]site.Descriptor, error)
 	GetByIDContext(context.Context, string) (site.DBSiteInfo, error)
 }
 
@@ -38,7 +38,7 @@ type DurableWorkScannerConfig struct {
 	WorkAdmission   interface {
 		Acquire(context.Context) (func(), error)
 	}
-	TenantWorkAdmission func(*site.SiteConfig) (interface {
+	TenantWorkAdmission func(*site.Config) (interface {
 		Acquire(context.Context) (func(), error)
 	}, error)
 	Common              *site.CommonConfig
@@ -69,7 +69,7 @@ type DurableWorkScanner struct {
 	workAdmission interface {
 		Acquire(context.Context) (func(), error)
 	}
-	tenantWorkAdmission func(*site.SiteConfig) (interface {
+	tenantWorkAdmission func(*site.Config) (interface {
 		Acquire(context.Context) (func(), error)
 	}, error)
 	common                 *site.CommonConfig
@@ -252,7 +252,7 @@ func (s *DurableWorkScanner) scanPage(ctx context.Context) (bool, error) {
 		s.lastMu.Unlock()
 	}
 	s.beginColdWALScan(cursor)
-	var page []site.SiteDescriptor
+	var page []site.Descriptor
 	err = s.withWork(ctx, func() error {
 		var pageErr error
 		page, pageErr = s.directory.GetDirectoryDescriptorPageContext(ctx, s.cellID, cursor, s.pageSize)
@@ -340,14 +340,14 @@ func (s *DurableWorkScanner) withWork(ctx context.Context, work func() error) er
 	return work()
 }
 
-func activeScanDescriptor(descriptor site.SiteDescriptor, cellID string) bool {
+func activeScanDescriptor(descriptor site.Descriptor, cellID string) bool {
 	if descriptor.SiteID == "" || (descriptor.Status != "active" && descriptor.Status != "degraded") {
 		return false
 	}
-	return site.SiteBelongsToDeployment(descriptor.RuntimeCellID, cellID)
+	return site.BelongsToDeployment(descriptor.RuntimeCellID, cellID)
 }
 
-func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.SiteDescriptor) (bool, error) {
+func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.Descriptor) (bool, error) {
 	var info site.DBSiteInfo
 	err := s.withWork(ctx, func() error {
 		var lookupErr error
@@ -360,7 +360,7 @@ func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.Si
 	// The page descriptor may be stale by the time this cold probe runs.
 	// Recheck the current assignment fetched with the tenant coordinates before
 	// examining WAL or opening its tenant database.
-	if !site.SiteBelongsToDeployment(info.RuntimeCellID, s.cellID) {
+	if !site.BelongsToDeployment(info.RuntimeCellID, s.cellID) {
 		return false, nil
 	}
 	if info.Status != "active" && info.Status != "degraded" {

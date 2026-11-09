@@ -32,7 +32,7 @@ type StartupTenantConfig struct {
 	BinaryVersion     string
 	Concurrency       uint16
 	SharedPlatformDSN string
-	ResolveStorage    func(*site.SiteConfig) (storage.Backend, error)
+	ResolveStorage    func(*site.Config) (storage.Backend, error)
 }
 
 // StartupTenants is the coherent cold-start result transferred to the process
@@ -45,7 +45,7 @@ type StartupTenants struct {
 
 type startupTenantDependencies struct {
 	loadRuntime func(context.Context, site.DBSiteInfo, *site.CommonConfig, string) (*knet.LoadedSite, error)
-	admission   func(*site.SiteConfig) (*dbaccess.Admission, error)
+	admission   func(*site.Config) (*dbaccess.Admission, error)
 }
 
 // LoadStartupTenants activates the startup directory snapshot with bounded
@@ -130,7 +130,7 @@ func collectLoadedStartupTenants(results []startupTenantResult) ([]*knet.LoadedS
 	return loadedSites, domains, firstDB, nil
 }
 
-func loadStartupTenants(parent context.Context, sites []site.DBSiteInfo, common *site.CommonConfig, binaryVersion string, concurrency int, sharedPlatformDSN string, resolveStorage func(*site.SiteConfig) (storage.Backend, error), dependencies startupTenantDependencies) []startupTenantResult {
+func loadStartupTenants(parent context.Context, sites []site.DBSiteInfo, common *site.CommonConfig, binaryVersion string, concurrency int, sharedPlatformDSN string, resolveStorage func(*site.Config) (storage.Backend, error), dependencies startupTenantDependencies) []startupTenantResult {
 	tracer := otel.Tracer("kora/engine/startup")
 	ctx, startupSpan := tracer.Start(parent, "engine.load_sites",
 		trace.WithAttributes(attribute.Int("kora.site.count", len(sites))))
@@ -203,7 +203,7 @@ func loadStartupTenants(parent context.Context, sites []site.DBSiteInfo, common 
 	return results
 }
 
-func loadStartupTenant(ctx context.Context, info site.DBSiteInfo, common *site.CommonConfig, binaryVersion string, resolveStorage func(*site.SiteConfig) (storage.Backend, error), dependencies startupTenantDependencies) (result startupTenantResult) {
+func loadStartupTenant(ctx context.Context, info site.DBSiteInfo, common *site.CommonConfig, binaryVersion string, resolveStorage func(*site.Config) (storage.Backend, error), dependencies startupTenantDependencies) (result startupTenantResult) {
 	result.name = info.Name
 	var backend storage.Backend
 	var runtime *knet.LoadedSite

@@ -7,7 +7,7 @@ import (
 )
 
 func TestDirectoryChangeWirePayloadOmitsTenantCredentials(t *testing.T) {
-	change := SiteDirectoryChange{
+	change := DirectoryChange{
 		Cursor: 19,
 		ID:     "01J00000000000000000000000",
 		Descriptor: DescriptorFromDBSiteInfo(DBSiteInfo{
@@ -49,7 +49,7 @@ func TestSiteBelongsToRuntimeCell(t *testing.T) {
 		{"different explicit cell", "cell-a", "cell-b", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := SiteBelongsToRuntimeCell(test.siteCell, test.processCell); got != test.want {
+			if got := BelongsToRuntimeCell(test.siteCell, test.processCell); got != test.want {
 				t.Fatalf("SiteBelongsToRuntimeCell(%q, %q) = %v, want %v", test.siteCell, test.processCell, got, test.want)
 			}
 		})
@@ -69,7 +69,7 @@ func TestSiteBelongsToDeploymentValidatesPlacement(t *testing.T) {
 		{name: "invalid local assignment", siteDeployment: "deployment-a", processDeployment: "deployment/a"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := SiteBelongsToDeployment(test.siteDeployment, test.processDeployment); got != test.want {
+			if got := BelongsToDeployment(test.siteDeployment, test.processDeployment); got != test.want {
 				t.Fatalf("SiteBelongsToDeployment(%q, %q) = %t, want %t", test.siteDeployment, test.processDeployment, got, test.want)
 			}
 		})

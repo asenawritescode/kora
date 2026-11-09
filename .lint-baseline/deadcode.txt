@@ -248,7 +248,7 @@ internal/site/bootstrap.go::seedDefaultAdministratorRole
 internal/site/create.go::ensureConfigVersion
 internal/site/create.go::registeredSiteID
 internal/site/deletion_recovery.go::DeleteRegisteredSite
-internal/site/directory.go::SiteBelongsToRuntimeCell
+internal/site/directory.go::BelongsToRuntimeCell
 internal/site/import.go::ImportConfig
 internal/site/import.go::ImportConfigForTenant
 internal/site/import.go::ImportConfigFromPack

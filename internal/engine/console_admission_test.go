@@ -15,7 +15,7 @@ import (
 func TestTenantSiteProvisioningAdmissionReusesSharedEndpointPermit(t *testing.T) {
 	configureSiteProvisioningAdmissionTest(t)
 	host := "console-shared-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".invalid"
-	tenant := &site.SiteConfig{DBType: "mysql", DBHost: host, DBPort: 3306, DBName: "tenant", DBUser: "test"}
+	tenant := &site.Config{DBType: "mysql", DBHost: host, DBPort: 3306, DBName: "tenant", DBUser: "test"}
 	platformDSN := fmt.Sprintf("test@tcp(%s:3306)/platform", host)
 	admission, err := site.ConnectionAdmission(tenant)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestTenantSiteProvisioningAdmissionBoundsSeparateTenantEndpoint(t *testing.
 	configureSiteProvisioningAdmissionTest(t)
 	platformHost := "console-platform-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".invalid"
 	tenantHost := "console-tenant-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".invalid"
-	tenant := &site.SiteConfig{DBType: "mysql", DBHost: tenantHost, DBPort: 3306, DBName: "tenant", DBUser: "test"}
+	tenant := &site.Config{DBType: "mysql", DBHost: tenantHost, DBPort: 3306, DBName: "tenant", DBUser: "test"}
 	platformDSN := fmt.Sprintf("test@tcp(%s:3306)/platform", platformHost)
 	acquire := tenantSiteProvisioningAdmission("mysql", platformDSN)
 	release, err := acquire(context.Background(), tenant)
@@ -67,7 +67,7 @@ func TestTenantSiteProvisioningAdmissionClassifiesTemporaryCapacity(t *testing.T
 	configureSiteProvisioningAdmissionTest(t)
 	platformHost := "console-platform-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".invalid"
 	tenantHost := "console-tenant-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".invalid"
-	tenant := &site.SiteConfig{DBType: "mysql", DBHost: tenantHost, DBPort: 3306, DBName: "tenant", DBUser: "test"}
+	tenant := &site.Config{DBType: "mysql", DBHost: tenantHost, DBPort: 3306, DBName: "tenant", DBUser: "test"}
 	platformDSN := fmt.Sprintf("test@tcp(%s:3306)/platform", platformHost)
 	admission, err := site.ConnectionAdmission(tenant)
 	if err != nil {

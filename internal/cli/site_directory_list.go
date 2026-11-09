@@ -57,7 +57,7 @@ func runSiteDirectoryList(cmd *cobra.Command, _ []string) error {
 }
 
 type directoryDescriptorPager interface {
-	GetDirectoryDescriptorPageContext(context.Context, string, string, uint16) ([]site.SiteDescriptor, error)
+	GetDirectoryDescriptorPageContext(context.Context, string, string, uint16) ([]site.Descriptor, error)
 }
 
 // writeDirectoryDescriptorPages keeps memory and each admitted SQL read bounded
@@ -73,7 +73,7 @@ func writeDirectoryDescriptorPages(ctx context.Context, output io.Writer, regist
 	after := ""
 	wrote := false
 	for {
-		var page []site.SiteDescriptor
+		var page []site.Descriptor
 		err := runCLIWork(ctx, admission, func() error {
 			var err error
 			page, err = registry.GetDirectoryDescriptorPageContext(ctx, "", after, pageSize)

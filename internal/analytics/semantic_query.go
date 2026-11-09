@@ -43,7 +43,7 @@ type SemanticQueryResult struct {
 // ResolveSemanticQuery resolves the safe subset of semantic queries that can
 // be served by the existing metric rollups. It intentionally refuses queries
 // that would require an unsafe or ambiguous raw-table join.
-func (qe *QueryEngine) ResolveSemanticQuery(catalog *SemanticCatalog, request AnalyticsQueryRequest, registries ...*doctype.Registry) (*SemanticQueryResponse, error) {
+func (qe *QueryEngine) ResolveSemanticQuery(catalog *SemanticCatalog, request SemanticRequest, registries ...*doctype.Registry) (*SemanticQueryResponse, error) {
 	if err := request.Validate(catalog); err != nil {
 		return nil, err
 	}

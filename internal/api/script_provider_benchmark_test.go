@@ -70,7 +70,7 @@ func TestScriptProviderCRUDLoad(t *testing.T) {
 	store := &script.Store{DB: database, Dialect: db.Resolve("mysql")}
 	runner := script.NewEmbeddedRunner(script.EmbeddedConfig{PoolSize: workers, Timeout: 5 * time.Second})
 	t.Cleanup(func() { _ = runner.Close() })
-	if err := store.Insert(script.ScriptRecord{
+	if err := store.Insert(script.Record{
 		Name: "load-validation-hook", Site: site, ScriptType: script.TypeDocEvent,
 		DocType: "TestDoc", Event: script.EventValidate, IsActive: true,
 		Script: "var doc = __kora_event__.doc; var total = 0; for (var i = 0; i < 200; i++) total += i; if (!doc.title || total !== 19900) throw 'validation failed';",

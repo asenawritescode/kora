@@ -196,7 +196,7 @@ func integrationHookInvocation(tenant contract.TenantID, source contract.Operati
 	return AsyncHookInvocation{
 		TenantID: tenant, Site: site, SourceOperation: source, ConfigRevision: 1, Sequence: 1,
 		Doctype: "Task", Event: EventAfterSave,
-		Record: ScriptRecord{Name: "task-after-save", Site: site, ScriptType: TypeDocEvent,
+		Record: Record{Name: "task-after-save", Site: site, ScriptType: TypeDocEvent,
 			DocType: "Task", Event: EventAfterSave, IsActive: true, TimeoutMs: 1000, Script: "return true"},
 		Document: []byte(`{"name":"TASK-1"}`),
 		Actor: contract.ActorContext{PrincipalID: "worker-user", PrincipalType: contract.PrincipalHuman,

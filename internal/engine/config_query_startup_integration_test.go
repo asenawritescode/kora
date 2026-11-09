@@ -58,7 +58,7 @@ func TestTenantStartSkipsUnpublishedConfigQueries(t *testing.T) {
 
 			install, err := NewTenantServiceInstaller(TenantServiceConfig{
 				Common:         &site.CommonConfig{DBType: tc.driver},
-				ResolveStorage: func(*site.SiteConfig) (storage.Backend, error) { return &testStorageBackend{}, nil },
+				ResolveStorage: func(*site.Config) (storage.Backend, error) { return &testStorageBackend{}, nil },
 			})
 			if err != nil {
 				t.Fatal(err)

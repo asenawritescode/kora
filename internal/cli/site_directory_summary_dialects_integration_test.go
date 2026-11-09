@@ -64,7 +64,7 @@ func assertLiveDirectoryAssignmentSummary(t *testing.T, driver, dsn string, entr
 	privateIDs := make([]string, 0, entries)
 	for i := 0; i < entries; i++ {
 		hostname := fmt.Sprintf("directory-summary-%s-%03d.example.invalid", driver, i)
-		if err := registry.Upsert(&site.SiteConfig{
+		if err := registry.Upsert(&site.Config{
 			Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql",
 			DBHost: "127.0.0.1", DBPort: 3306, DBName: "never-opened-tenant-db",
 		}); err != nil {
@@ -150,8 +150,8 @@ func assertLiveDirectoryAssignmentSummary(t *testing.T, driver, dsn string, entr
 }
 
 type revisionFencedDirectoryAssignment interface {
-	GetDescriptorByIDContext(context.Context, string) (site.SiteDescriptor, error)
-	SetRuntimeCellIDAtRevisionContext(context.Context, string, string, uint64) (site.SiteDescriptor, error)
+	GetDescriptorByIDContext(context.Context, string) (site.Descriptor, error)
+	SetRuntimeCellIDAtRevisionContext(context.Context, string, string, uint64) (site.Descriptor, error)
 }
 
 func assertStaleDirectoryAssignmentRejected(t *testing.T, ctx context.Context, registry revisionFencedDirectoryAssignment, siteID string) {
@@ -183,7 +183,7 @@ func assertConcurrentDirectoryAssignmentConflict(t *testing.T, ctx context.Conte
 		t.Fatal("read assignment before concurrent CAS regression:", err)
 	}
 	type result struct {
-		descriptor site.SiteDescriptor
+		descriptor site.Descriptor
 		err        error
 	}
 	targets := []string{"deployment-cas-concurrent-a", "deployment-cas-concurrent-b"}
@@ -203,7 +203,7 @@ func assertConcurrentDirectoryAssignmentConflict(t *testing.T, ctx context.Conte
 	close(start)
 	group.Wait()
 	close(results)
-	var winner *site.SiteDescriptor
+	var winner *site.Descriptor
 	conflicts := 0
 	for result := range results {
 		switch {

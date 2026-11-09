@@ -35,7 +35,7 @@ func NewAuthorizer(store processworkflow.AuthorizationStore, registry *doctype.R
 
 var _ processworkflow.DefinitionAuthorizer = (*Authorizer)(nil)
 var _ processworkflow.InstanceAuthorizer = (*Authorizer)(nil)
-var _ processworkflow.WorkflowCancellationAuthorizer = (*Authorizer)(nil)
+var _ processworkflow.CancellationAuthorizer = (*Authorizer)(nil)
 
 func (a *Authorizer) CanManageWorkflowDefinitions(ctx context.Context, exec policy.Execution) (bool, error) {
 	roles, ok, err := a.currentHumanRoles(ctx, exec)

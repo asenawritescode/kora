@@ -80,7 +80,7 @@ func executeScriptCreate(tx *orm.TxManager, args map[string]any, siteName, owner
 	return fmt.Sprintf("✓ Created inactive script draft %q (type: %s). It will not run until a workspace Administrator reviews and activates it in Workspace → Admin → Scripts.", name, scriptType)
 }
 
-func newAIScriptDraft(args map[string]any, siteName, owner string, now time.Time) script.ScriptRecord {
+func newAIScriptDraft(args map[string]any, siteName, owner string, now time.Time) script.Record {
 	priority := 10
 	if value, ok := args["priority"].(float64); ok {
 		priority = int(value)
@@ -89,7 +89,7 @@ func newAIScriptDraft(args map[string]any, siteName, owner string, now time.Time
 	if value, ok := args["timeout_ms"].(float64); ok {
 		timeoutMs = int(value)
 	}
-	return script.ScriptRecord{
+	return script.Record{
 		Name:       stringOr(args, "name"),
 		ScriptType: script.Type(stringOr(args, "script_type")),
 		Script:     stringOr(args, "script"),

@@ -210,7 +210,7 @@ func TestPersistOnboardingPropagatesDurableStateWriteFailures(t *testing.T) {
 }
 
 func TestPrepareCreatedRuntimeLoadsDirectoryRevisionBeforePublication(t *testing.T) {
-	cfg := &site.SiteConfig{
+	cfg := &site.Config{
 		Hostname: "new-site.example", DBType: "postgres", DBHost: "db.internal", DBPort: 5432,
 		DBName: "new_site", DBUser: "engine", DBPassword: "secret", DomainsList: []string{"new-site.example", "alias.example"},
 		FileStorage: "local",
@@ -260,7 +260,7 @@ func TestPrepareCreatedRuntimeReleasesDirectoryAdmissionBeforeTenantInstaller(t 
 			return nil
 		},
 	}
-	if err := handler.prepareCreatedRuntime(context.Background(), loaded, "site-created", &site.SiteConfig{Hostname: loaded.Name}); err != nil {
+	if err := handler.prepareCreatedRuntime(context.Background(), loaded, "site-created", &site.Config{Hostname: loaded.Name}); err != nil {
 		t.Fatal("prepare created runtime with one shared work slot:", err)
 	}
 	if admission.calls.Load() != 2 || admission.releases.Load() != 2 || admission.active.Load() != 0 {
@@ -280,7 +280,7 @@ func TestPrepareCreatedRuntimeDiscardsPartiallyInstalledServicesOnFailure(t *tes
 			discarded = runtime == loaded
 		},
 	}
-	if err := handler.prepareCreatedRuntime(context.Background(), loaded, "site-created", &site.SiteConfig{Hostname: loaded.Name}); err == nil {
+	if err := handler.prepareCreatedRuntime(context.Background(), loaded, "site-created", &site.Config{Hostname: loaded.Name}); err == nil {
 		t.Fatal("expected runtime preparation failure")
 	}
 	if !discarded {

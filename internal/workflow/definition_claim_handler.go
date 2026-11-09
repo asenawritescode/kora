@@ -21,7 +21,7 @@ type ConditionScopeProvider interface {
 	Scope(context.Context, policy.Execution, contract.WorkflowInstance) (expression.Scope, error)
 }
 
-type WorkflowRequestPreparer interface {
+type RequestPreparer interface {
 	PrepareWorkflowSubmit(context.Context, policy.Execution, contract.SubmitRequest, contract.RequestSource) (*requests.PreparedSubmission, error)
 }
 
@@ -30,7 +30,7 @@ type HumanWaitCreator interface {
 }
 
 type HumanWaitRuntime struct {
-	Requests WorkflowRequestPreparer
+	Requests RequestPreparer
 	Store    HumanWaitCreator
 	Now      func() time.Time
 }
@@ -50,9 +50,9 @@ func workflowGrantAllows(execution policy.Execution, required policy.Grant, scop
 	return ok && grant.OwnerOnly == required.OwnerOnly
 }
 
-// WorkflowGrantAllows checks a trusted action registration against the exact
+// GrantAllows checks a trusted action registration against the exact
 // persisted workflow business scope.
-func WorkflowGrantAllows(execution policy.Execution, required policy.Grant, scope contract.BusinessScope) bool {
+func GrantAllows(execution policy.Execution, required policy.Grant, scope contract.BusinessScope) bool {
 	return workflowGrantAllows(execution, required, scope)
 }
 

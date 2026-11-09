@@ -13,26 +13,26 @@ import (
 )
 
 type assignmentRegistryStub struct {
-	descriptor  site.SiteDescriptor
-	updated     site.SiteDescriptor
+	descriptor  site.Descriptor
+	updated     site.Descriptor
 	getErr      error
 	setErr      error
 	setCalls    int
 	setRevision uint64
 }
 
-func (r *assignmentRegistryStub) GetDescriptorByIDContext(context.Context, string) (site.SiteDescriptor, error) {
+func (r *assignmentRegistryStub) GetDescriptorByIDContext(context.Context, string) (site.Descriptor, error) {
 	return r.descriptor, r.getErr
 }
 
-func (r *assignmentRegistryStub) SetRuntimeCellIDAtRevisionContext(_ context.Context, _, _ string, expectedRevision uint64) (site.SiteDescriptor, error) {
+func (r *assignmentRegistryStub) SetRuntimeCellIDAtRevisionContext(_ context.Context, _, _ string, expectedRevision uint64) (site.Descriptor, error) {
 	r.setCalls++
 	r.setRevision = expectedRevision
 	return r.updated, r.setErr
 }
 
 func TestApplySiteCellAssignmentPreviewsWithoutMutation(t *testing.T) {
-	registry := &assignmentRegistryStub{descriptor: site.SiteDescriptor{
+	registry := &assignmentRegistryStub{descriptor: site.Descriptor{
 		SiteID: "site-1", Aliases: []string{"shop.example.test"}, Status: "active", ConfigRevision: 4,
 	}}
 	report, err := applySiteCellAssignment(context.Background(), registry, "site-1", "cell-b", false, nil, "cell")
@@ -45,7 +45,7 @@ func TestApplySiteCellAssignmentPreviewsWithoutMutation(t *testing.T) {
 }
 
 func TestApplySiteCellAssignmentRequiresConfiguredEndpointAndIsIdempotent(t *testing.T) {
-	registry := &assignmentRegistryStub{descriptor: site.SiteDescriptor{SiteID: "site-1", RuntimeCellID: "cell-a"}}
+	registry := &assignmentRegistryStub{descriptor: site.Descriptor{SiteID: "site-1", RuntimeCellID: "cell-a"}}
 	if _, err := applySiteCellAssignment(context.Background(), registry, "site-1", "cell-b", true, nil, "cell"); err == nil || !strings.Contains(err.Error(), "target cell") {
 		t.Fatalf("apply without target endpoint error = %v, want cell placement diagnostic", err)
 	}
@@ -64,8 +64,8 @@ func TestApplySiteCellAssignmentRequiresConfiguredEndpointAndIsIdempotent(t *tes
 
 func TestApplySiteCellAssignmentWritesRevisionedRegistryOperation(t *testing.T) {
 	registry := &assignmentRegistryStub{
-		descriptor: site.SiteDescriptor{SiteID: "site-1", RuntimeCellID: "cell-a", ConfigRevision: 4},
-		updated:    site.SiteDescriptor{SiteID: "site-1", Aliases: []string{"shop.example.test"}, Status: "active", RuntimeCellID: "cell-b", ConfigRevision: 5},
+		descriptor: site.Descriptor{SiteID: "site-1", RuntimeCellID: "cell-a", ConfigRevision: 4},
+		updated:    site.Descriptor{SiteID: "site-1", Aliases: []string{"shop.example.test"}, Status: "active", RuntimeCellID: "cell-b", ConfigRevision: 5},
 	}
 	report, err := applySiteCellAssignment(context.Background(), registry, "site-1", "cell-b", true, map[string]string{"cell-b": "http://127.0.0.1:8002"}, "cell")
 	if err != nil {
@@ -83,7 +83,7 @@ func TestApplySiteCellAssignmentPropagatesRegistryErrors(t *testing.T) {
 		t.Fatalf("read error = %v, want %v", err, want)
 	}
 	registry.getErr = nil
-	registry.descriptor = site.SiteDescriptor{SiteID: "site-1", RuntimeCellID: "cell-a"}
+	registry.descriptor = site.Descriptor{SiteID: "site-1", RuntimeCellID: "cell-a"}
 	registry.setErr = want
 	if _, err := applySiteCellAssignment(context.Background(), registry, "site-1", "cell-b", true, map[string]string{"cell-b": "http://127.0.0.1:8002"}, "cell"); !errors.Is(err, want) {
 		t.Fatalf("write error = %v, want %v", err, want)
@@ -91,7 +91,7 @@ func TestApplySiteCellAssignmentPropagatesRegistryErrors(t *testing.T) {
 }
 
 func TestApplySiteDeploymentAssignmentUsesDeploymentDiagnostic(t *testing.T) {
-	registry := &assignmentRegistryStub{descriptor: site.SiteDescriptor{SiteID: "site-1", RuntimeCellID: "deployment-a"}}
+	registry := &assignmentRegistryStub{descriptor: site.Descriptor{SiteID: "site-1", RuntimeCellID: "deployment-a"}}
 	_, err := applySiteCellAssignment(context.Background(), registry, "site-1", "deployment-b", true, nil, "deployment")
 	if err == nil || !strings.Contains(err.Error(), "target deployment \"deployment-b\"") {
 		t.Fatalf("deployment assignment error = %v, want deployment placement diagnostic", err)

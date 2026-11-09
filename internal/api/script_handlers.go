@@ -32,7 +32,7 @@ func (h *Handler) HandleScriptList(c *gin.Context) {
 		return
 	}
 	if scripts == nil {
-		scripts = []script.ScriptRecord{}
+		scripts = []script.Record{}
 	}
 
 	c.JSON(http.StatusOK, Response{Data: scripts})
@@ -166,7 +166,7 @@ func (h *Handler) HandleScriptCreate(c *gin.Context) {
 		slog.Warn("script may contain hardcoded secrets", "script", req.Name, "issues", issues)
 	}
 
-	rec := script.ScriptRecord{
+	rec := script.Record{
 		Name:       req.Name,
 		Site:       siteNameStr,
 		ScriptType: script.Type(req.ScriptType),
@@ -241,7 +241,7 @@ func (h *Handler) HandleScriptUpdate(c *gin.Context) {
 			}
 		}
 	}
-	updateReq := script.ScriptUpdateRequest{
+	updateReq := script.UpdateRequest{
 		ScriptType: req.ScriptType, DocType: req.DocType, Event: req.Event,
 		MethodPath: req.MethodPath,
 		Schedule:   req.Schedule, Priority: req.Priority, IsActive: req.IsActive,

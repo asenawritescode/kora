@@ -65,7 +65,7 @@ func TestLiveMySQLSiteDirectoryAssignmentSummary(t *testing.T) {
 	want := make(map[directoryAssignmentKey]uint64)
 	for i := 0; i < entries; i++ {
 		hostname := fmt.Sprintf("directory-summary-%03d.example.invalid", i)
-		if err := registry.Upsert(&site.SiteConfig{
+		if err := registry.Upsert(&site.Config{
 			Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql",
 			DBHost: "127.0.0.1", DBPort: 3306, DBName: "never-opened-tenant-db",
 		}); err != nil {
