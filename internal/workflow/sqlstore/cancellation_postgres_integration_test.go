@@ -33,7 +33,7 @@ func TestPostgresWorkflowCancellationIsFencedAndIdempotent(t *testing.T) {
 		t.Fatal("ping disposable PostgreSQL:", err)
 	}
 	dialect := db.Resolve("postgres")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap system tables:", err)
 	}
 	store, err := sqlstore.NewInstanceStore(database, dialect)

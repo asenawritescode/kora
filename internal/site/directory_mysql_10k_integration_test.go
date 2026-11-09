@@ -1,6 +1,7 @@
 package site
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -50,7 +51,7 @@ func TestLiveMySQLDirectoryDescriptorsAt10K(t *testing.T) {
 		t.Fatal("open disposable benchmark schema:", err)
 	}
 	defer database.Close()
-	if err := BootstrapPlatformRegistry(database, db.Resolve("mysql")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap site registry:", err)
 	}
 	const count = 10_000

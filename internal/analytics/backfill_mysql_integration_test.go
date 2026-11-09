@@ -79,7 +79,7 @@ func TestMySQLBackfillFailurePreservesPreviouslyCommittedRollups(t *testing.T) {
 		`INSERT INTO _kora_analytics_monthly (site, doctype, metric, dimension, month, value) VALUES ('tenant-a', 'Task', 'task_count', '', '2026-02-01', 81), ('tenant-a', 'Task', 'task_created_daily', '', '2026-02-01', 82), ('tenant-a', 'Task', 'task_sum_missing_amount', '', '2026-02-01', 83)`,
 	} {
 		if strings.Contains(query, "_kora_analytics_") {
-			if err := BootstrapTables(database, db.Resolve("mysql")); err != nil {
+			if err = BootstrapTables(context.Background(), database, db.Resolve("mysql")); err != nil {
 				t.Fatal("bootstrap analytics schema:", err)
 			}
 		}
@@ -103,7 +103,7 @@ func TestMySQLBackfillFailurePreservesPreviouslyCommittedRollups(t *testing.T) {
 
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Task", Fields: []doctype.Field{{Fieldname: "missing_amount", Fieldtype: "Currency"}}})
-	if _, err := Backfill(database, db.Resolve("mysql"), "tenant-a", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ""); err == nil {
+	if _, err := Backfill(context.Background(), database, db.Resolve("mysql"), "tenant-a", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ""); err == nil {
 		t.Fatal("expected source query failure for missing amount column")
 	}
 	var checkpoints int

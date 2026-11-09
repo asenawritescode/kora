@@ -60,7 +60,7 @@ func TestSelfHostedWorkflowConfigAssemblesTenantRuntimeOnMySQL(t *testing.T) {
 	if err := database.PingContext(t.Context()); err != nil {
 		t.Fatal("ping isolated disposable database:", err)
 	}
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap Engine tables:", err)
 	}
 	requestDDL, err := requestsql.SchemaStatements(dialect)

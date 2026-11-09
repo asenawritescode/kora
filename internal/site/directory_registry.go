@@ -400,7 +400,7 @@ func (r *SQLSiteRegistry) GetSnapshot() ([]DBSiteInfo, error) {
 	if r == nil || r.database == nil {
 		return nil, errors.New("site registry unavailable")
 	}
-	return DiscoverSitesFromDB(r.database)
+	return DiscoverSitesFromDB(context.Background(), r.database)
 }
 
 // GetSnapshotForCell returns the active sites assigned to one Engine cell.
@@ -410,7 +410,7 @@ func (r *SQLSiteRegistry) GetSnapshotForCell(cellID string) ([]DBSiteInfo, error
 	if r == nil || r.database == nil {
 		return nil, errors.New("site registry unavailable")
 	}
-	return discoverRegistrySitesForCell(r.database, true, cellID, r.dialect)
+	return discoverRegistrySitesForCell(context.Background(), r.database, true, cellID, r.dialect)
 }
 
 // GetDirectorySnapshot returns every persisted lifecycle state (including
@@ -429,7 +429,7 @@ func (r *SQLSiteRegistry) GetDirectorySnapshotForCell(cellID string) ([]DBSiteIn
 	if r == nil || r.database == nil {
 		return nil, errors.New("site registry unavailable")
 	}
-	return discoverRegistrySitesForCell(r.database, false, cellID, r.dialect)
+	return discoverRegistrySitesForCell(context.Background(), r.database, false, cellID, r.dialect)
 }
 
 // GetDirectoryDescriptors returns a credential-free projection for Cloud and
@@ -508,7 +508,7 @@ func (r *SQLSiteRegistry) ResolveAlias(alias string) (DBSiteInfo, error) {
 	if r == nil || r.database == nil {
 		return DBSiteInfo{}, errors.New("site registry unavailable")
 	}
-	id, err := ResolveSiteAlias(r.database, r.dialect, alias)
+	id, err := ResolveSiteAlias(context.Background(), r.database, r.dialect, alias)
 	if err != nil {
 		return DBSiteInfo{}, err
 	}
@@ -564,6 +564,7 @@ func (r *SQLSiteRegistry) GetDescriptorByID(siteID string) (Descriptor, error) {
 	return r.GetDescriptorByIDContext(context.Background(), siteID)
 }
 
+// GetDescriptorByIDContext reads the descriptor for siteID under ctx.
 func (r *SQLSiteRegistry) GetDescriptorByIDContext(ctx context.Context, siteID string) (Descriptor, error) {
 	if r == nil || r.database == nil || strings.TrimSpace(siteID) == "" {
 		return Descriptor{}, errors.New("site registry and site id are required")
@@ -592,6 +593,8 @@ func (r *SQLSiteRegistry) ResolveDescriptorByAlias(alias string) (Descriptor, er
 	return r.ResolveDescriptorByAliasContext(context.Background(), alias)
 }
 
+// ResolveDescriptorByAliasContext resolves alias to a site ID, then reads that
+// site's descriptor, under ctx.
 func (r *SQLSiteRegistry) ResolveDescriptorByAliasContext(ctx context.Context, alias string) (Descriptor, error) {
 	if r == nil || r.database == nil {
 		return Descriptor{}, errors.New("site registry is required")
@@ -599,7 +602,7 @@ func (r *SQLSiteRegistry) ResolveDescriptorByAliasContext(ctx context.Context, a
 	if ctx == nil {
 		return Descriptor{}, errors.New("resolving site descriptor requires context")
 	}
-	siteID, err := ResolveSiteAliasContext(ctx, r.database, r.dialect, alias)
+	siteID, err := ResolveSiteAlias(ctx, r.database, r.dialect, alias)
 	if err != nil {
 		return Descriptor{}, err
 	}
@@ -703,6 +706,7 @@ func NormalizeRuntimeCellID(cellID string) (string, error) {
 	return normalizeRuntimeCellID(cellID)
 }
 
+// Upsert records config in the platform site registry, creating or updating its row.
 func (r *SQLSiteRegistry) Upsert(config *Config) error {
 	if r == nil || r.database == nil {
 		return errors.New("site registry unavailable")
@@ -722,6 +726,8 @@ func (r *SQLSiteRegistry) SetStatusAndGetDescriptor(siteID, status string) (Desc
 	return r.SetStatusContext(context.Background(), siteID, status)
 }
 
+// SetStatusContext changes the registry status of siteID under ctx and returns
+// the updated descriptor.
 func (r *SQLSiteRegistry) SetStatusContext(ctx context.Context, siteID, status string) (Descriptor, error) {
 	if r == nil || r.database == nil {
 		return Descriptor{}, errors.New("site registry unavailable")

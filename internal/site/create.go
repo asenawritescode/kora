@@ -181,16 +181,10 @@ type CreateSiteResult struct {
 	Registry *doctype.Registry
 }
 
-// CreateSite creates a complete Kigae site: database, system tables, admin user, config version.
-// This is the single canonical site creation codepath used by both CLI setup and the console API.
-func CreateSite(input CreateSiteInput) (*CreateSiteResult, error) {
-	return CreateSiteContext(context.Background(), input)
-}
-
-// CreateSiteContext provisions a tenant while respecting the lifecycle owner's
+// CreateSite provisions a tenant while respecting the lifecycle owner's
 // cancellation between and during database operations. Existing self-hosted
 // callers can continue to use CreateSite.
-func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteResult, error) {
+func CreateSite(ctx context.Context, input CreateSiteInput) (*CreateSiteResult, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("site creation requires context")
 	}
@@ -255,7 +249,7 @@ func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteR
 	if input.PlatformDB == nil {
 		return nil, fmt.Errorf("durable platform site directory is required to create a site")
 	}
-	if err := BootstrapPlatformRegistryContext(ctx, input.PlatformDB, sqlDialect.Resolve(input.PlatformDBType)); err != nil {
+	if err = BootstrapPlatformRegistry(ctx, input.PlatformDB, sqlDialect.Resolve(input.PlatformDBType)); err != nil {
 		return nil, fmt.Errorf("initializing platform site directory: %w", err)
 	}
 
@@ -285,7 +279,7 @@ func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteR
 	if err := ensurePlatformSiteRegistrationAssignmentContext(ctx, input.PlatformDB, input.PlatformDBType, siteCfg, "provisioning", input.RuntimeCellID, input.SiteID); err != nil {
 		return nil, fmt.Errorf("persisting platform site provisioning intent: %w", err)
 	}
-	siteID, err := registeredSiteIDContext(ctx, input.PlatformDB, input.PlatformDBType, input.Hostname)
+	siteID, err := registeredSiteID(ctx, input.PlatformDB, input.PlatformDBType, input.Hostname)
 	if err != nil {
 		return nil, fmt.Errorf("reading canonical site id: %w", err)
 	}
@@ -320,20 +314,20 @@ func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteR
 			db = input.PlatformDB
 			isOwnedDB = false
 		} else {
-			db, err = Connect(siteCfg)
+			db, err = Connect(ctx, siteCfg)
 			if err != nil {
 				return nil, fmt.Errorf("connecting to database: %w", err)
 			}
 		}
 	} else {
-		db, err = ConnectContext(ctx, siteCfg)
+		db, err = Connect(ctx, siteCfg)
 		if err != nil {
 			return nil, fmt.Errorf("connecting to database: %w", err)
 		}
 	}
 
 	// Step 3: Bootstrap system tables.
-	if err := BootstrapSystemTablesContext(ctx, db, sqlDialect.Resolve(input.DBType)); err != nil {
+	if err := BootstrapSystemTables(ctx, db, sqlDialect.Resolve(input.DBType)); err != nil {
 		if isOwnedDB {
 			db.Close()
 		}
@@ -350,7 +344,7 @@ func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteR
 	}
 
 	// Step 5: Create the initial config version for site history and review.
-	if err := ensureConfigVersionContext(ctx, db, dialect, input.Hostname, domains); err != nil {
+	if err := ensureConfigVersion(ctx, db, dialect, input.Hostname, domains); err != nil {
 		if isOwnedDB {
 			_ = db.Close()
 		}
@@ -386,11 +380,7 @@ func CreateSiteContext(ctx context.Context, input CreateSiteInput) (*CreateSiteR
 	}, nil
 }
 
-func registeredSiteID(platformDB *sql.DB, platformDBType, hostname string) (string, error) {
-	return registeredSiteIDContext(context.Background(), platformDB, platformDBType, hostname)
-}
-
-func registeredSiteIDContext(ctx context.Context, platformDB *sql.DB, platformDBType, hostname string) (string, error) {
+func registeredSiteID(ctx context.Context, platformDB *sql.DB, platformDBType, hostname string) (string, error) {
 	if platformDB == nil {
 		return "", nil
 	}
@@ -455,13 +445,7 @@ func seedTenantDisplayNameContext(ctx context.Context, db *sql.DB, dialect sqlDi
 	return nil
 }
 
-// ensureConfigVersion creates an initial config version if none exists for the site.
-// domains are persisted in the config JSON so they survive container redeploys.
-func ensureConfigVersion(db *sql.DB, dialect sqlDialect.QueryDialect, hostname string, domains []string) error {
-	return ensureConfigVersionContext(context.Background(), db, dialect, hostname, domains)
-}
-
-func ensureConfigVersionContext(ctx context.Context, db *sql.DB, dialect sqlDialect.QueryDialect, hostname string, domains []string) error {
+func ensureConfigVersion(ctx context.Context, db *sql.DB, dialect sqlDialect.QueryDialect, hostname string, domains []string) error {
 	var count int
 	if err := db.QueryRowContext(ctx, sqlDialect.Rebind(dialect, "SELECT COUNT(*) FROM _kora_config_version WHERE site = ?"), hostname).Scan(&count); err != nil {
 		return fmt.Errorf("checking initial config version: %w", err)

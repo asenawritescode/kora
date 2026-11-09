@@ -106,7 +106,7 @@ func SavePublishedProjection(ctx context.Context, database *sql.DB, dialect kdb.
 	if err := snapshot.Validate(); err != nil {
 		return err
 	}
-	if err := BootstrapTablesContext(ctx, database, dialect); err != nil {
+	if err := BootstrapTables(ctx, database, dialect); err != nil {
 		return err
 	}
 	tx, err := database.BeginTx(ctx, nil)
@@ -175,7 +175,7 @@ func MarkPublishedProjectionStale(ctx context.Context, database *sql.DB, dialect
 	if ctx == nil || database == nil || dialect == nil || site == "" || definition.Validate() != nil || scope.Validate() != nil || contract.ValidateResourceBusinessScope(scope, definition.ScopePolicy) != nil || sourceID == "" {
 		return errors.New("published projection stale marker requires a valid identity and scope")
 	}
-	if err := BootstrapTablesContext(ctx, database, dialect); err != nil {
+	if err := BootstrapTables(ctx, database, dialect); err != nil {
 		return err
 	}
 	tx, err := database.BeginTx(ctx, nil)

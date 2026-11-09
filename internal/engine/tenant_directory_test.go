@@ -302,7 +302,7 @@ func TestTenantDirectoryAssignmentEventRegistersColdTenantForLazyActivation(t *t
 	if err != nil {
 		t.Fatal("create tenant directory consumer:", err)
 	}
-	if err := consumer.Apply(context.Background(), site.DirectoryChange{
+	if err = consumer.Apply(context.Background(), site.DirectoryChange{
 		Cursor: 2, Descriptor: descriptor,
 	}); err != nil {
 		t.Fatal("apply local assignment event:", err)

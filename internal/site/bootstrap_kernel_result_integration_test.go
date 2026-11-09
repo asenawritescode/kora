@@ -3,6 +3,7 @@
 package site
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -105,7 +106,7 @@ func TestBootstrapMigratesExistingSystemAndKernelReceiptSchema(t *testing.T) {
 	if _, err := database.Exec(`INSERT INTO _kora_system_bootstrap (id, version) VALUES (1, 10)`); err != nil {
 		t.Fatal("seed v10 bootstrap marker:", err)
 	}
-	if err := BootstrapSystemTables(database, db.Resolve("mysql")); err != nil {
+	if err := BootstrapSystemTables(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap existing site:", err)
 	}
 	var outboxSequenceColumns, backlogIndexes, retainedEvents, tenantSequenceTables, receiptSequenceColumns, retainedReceipts, kernelReceiptIndexes int
@@ -180,7 +181,7 @@ func TestBootstrapMigratesExistingSystemAndKernelReceiptSchema(t *testing.T) {
 	}
 
 	// A routine restart must be a no-op after the successful migration.
-	if err := BootstrapSystemTables(database, db.Resolve("mysql")); err != nil {
+	if err := BootstrapSystemTables(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatalf("repeat bootstrap after migration: %v", err)
 	}
 	if err := database.QueryRow(`SELECT version FROM _kora_system_bootstrap WHERE id = 1`).Scan(&version); err != nil {

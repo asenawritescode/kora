@@ -64,7 +64,7 @@ func TestForEachStoredRowsAcrossDialects(t *testing.T) {
 func runStoredRows(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	dialect := kdb.Resolve(driver)
 	const siteName = "loop.example.test"
-	if err := BootstrapSystemTables(conn, dialect); err != nil {
+	if err := BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 		t.Fatal(err)
 	}
 	reg := doctype.NewRegistry()

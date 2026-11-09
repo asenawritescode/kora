@@ -81,7 +81,7 @@ func testLiveManagementProvisionRouteAndWorker(t *testing.T, driver, dsn string)
 		t.Fatal("ping explicitly disposable management database:", err)
 	}
 	dialect := db.Resolve(driver)
-	if err := site.BootstrapPlatformRegistryContext(ctx, platformDB, dialect); err != nil {
+	if err = site.BootstrapPlatformRegistry(ctx, platformDB, dialect); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	host, port, user, password, err := liveDatabaseTarget(driver, dsn)
@@ -217,7 +217,7 @@ func testLiveManagementProvisionRouteAndWorker(t *testing.T, driver, dsn string)
 					t.Fatalf("posts/activations = %d/%d, want 2/1", posts.Load(), coordinator.activated.Load())
 				}
 				var admins int
-				tenantDB, err := site.ConnectContext(ctx, &site.Config{DBType: info.DBType, DBHost: info.DBHost, DBPort: info.DBPort, DBName: info.DBName, DBUser: info.DBUser, DBPassword: info.DBPassword})
+				tenantDB, err := site.Connect(ctx, &site.Config{DBType: info.DBType, DBHost: info.DBHost, DBPort: info.DBPort, DBName: info.DBName, DBUser: info.DBUser, DBPassword: info.DBPassword})
 				if err != nil {
 					t.Fatal("connect provisioned tenant:", err)
 				}
@@ -266,7 +266,7 @@ func testLiveManagementProvisionReplay(t *testing.T, driver, dsn string) {
 	if err := platformDB.PingContext(ctx); err != nil {
 		t.Fatal("ping explicitly disposable management provisioning database:", err)
 	}
-	if err := site.BootstrapPlatformRegistryContext(ctx, platformDB, db.Resolve(driver)); err != nil {
+	if err = site.BootstrapPlatformRegistry(ctx, platformDB, db.Resolve(driver)); err != nil {
 		t.Fatal("bootstrap platform site directory:", err)
 	}
 	host, port, user, password, err := liveDatabaseTarget(driver, dsn)
@@ -306,7 +306,7 @@ func testLiveManagementProvisionReplay(t *testing.T, driver, dsn string) {
 	coordinator := &liveManagementProvisionCoordinator{}
 	common := &site.CommonConfig{DBType: driver, DBHost: host, DBPort: port, DBUser: user, DBPassword: password}
 	admission := &managementProvisionAdmissionStub{}
-	executor, err := newManagementProvisionExecutor(command.DatabaseAllocationRef, string(command.Deployment), platformDB, driver, common, admission, registry, coordinator, site.CreateSiteContext)
+	executor, err := newManagementProvisionExecutor(command.DatabaseAllocationRef, string(command.Deployment), platformDB, driver, common, admission, registry, coordinator, site.CreateSite)
 	if err != nil {
 		t.Fatal("configure live provisioning executor:", err)
 	}
@@ -326,7 +326,7 @@ func testLiveManagementProvisionReplay(t *testing.T, driver, dsn string) {
 	if info.Status != "active" || info.Name != command.PrimaryAlias || !sameAliases(info.Domains, append([]string{command.PrimaryAlias}, command.Aliases...)) {
 		t.Fatalf("provisioned directory entry = %+v", info)
 	}
-	tenantDB, err := site.ConnectContext(ctx, &site.Config{
+	tenantDB, err := site.Connect(ctx, &site.Config{
 		DBType: info.DBType, DBHost: info.DBHost, DBPort: info.DBPort, DBName: info.DBName,
 		DBUser: info.DBUser, DBPassword: info.DBPassword,
 	})

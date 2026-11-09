@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -30,7 +31,7 @@ func TestExternalOperationProviderScriptsUseScriptStoreAcrossDialects(t *testing
 				t.Skipf("set %s to a disposable %s database", tc.env, tc.driver)
 			}
 			database, dialect := openKernelDialectDatabase(t, tc.driver, dsn)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap %s system tables: %v", tc.driver, err)
 			}
 			var extensibilityTables []string

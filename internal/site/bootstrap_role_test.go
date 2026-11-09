@@ -1,6 +1,7 @@
 package site
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"testing"
@@ -20,7 +21,7 @@ func TestBootstrapSystemTablesReturnsDefaultRoleSeedFailure(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT IGNORE INTO _kora_role (name, description) VALUES ('Administrator', 'Full access to all doctypes')")).
 		WillReturnError(seedFailure)
 
-	if err := seedDefaultAdministratorRole(database, db.Resolve("mysql")); !errors.Is(err, seedFailure) {
+	if err := seedDefaultAdministratorRole(context.Background(), database, db.Resolve("mysql")); !errors.Is(err, seedFailure) {
 		t.Fatalf("seedDefaultAdministratorRole error = %v, want wrapped seed failure", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

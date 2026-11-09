@@ -55,7 +55,7 @@ func TestParseConfigPackModulesMatchImportAcrossDialects(t *testing.T) {
 			}
 			conn, name := posDB(t, tc.driver, dsn)
 			dialect := kdb.Resolve(tc.driver)
-			if err := BootstrapSystemTables(conn, dialect); err != nil {
+			if err := BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 				t.Fatal(err)
 			}
 			if err := ImportConfigFromSnapshotContext(context.Background(), conn, doctype.NewRegistry(), name, "m240.example", "m240.example", "install", installed, dialect, nil); err != nil {

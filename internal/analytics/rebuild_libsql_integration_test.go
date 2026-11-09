@@ -42,7 +42,7 @@ func TestLibSQLRebuildCutoffAndLaterEvents(t *testing.T) {
 		t.Fatal("ping disposable local LibSQL database:", err)
 	}
 	dialect := db.Resolve("libsql")
-	if err := BootstrapTables(database, dialect); err != nil {
+	if err = BootstrapTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap analytics schema:", err)
 	}
 	projectionDefinition := contract.ProjectionDefinition{
@@ -103,7 +103,7 @@ func TestLibSQLRebuildCutoffAndLaterEvents(t *testing.T) {
 		t.Fatal("seed source row:", err)
 	}
 	registry := testRegistry(buildTestDocType("Customer", false, field("name", "Data", "Name", true)))
-	if _, err := Backfill(database, dialect, "tenant-a", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ""); err != nil {
+	if _, err = Backfill(context.Background(), database, dialect, "tenant-a", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ""); err != nil {
 		t.Fatal("rebuild analytics snapshot:", err)
 	}
 	worker := NewWorker(newFakeBus(), database, dialect, registry, "tenant-a", LoadConfig())
@@ -205,7 +205,7 @@ func TestLibSQLRebuildCutoffAndLaterEvents(t *testing.T) {
 	if _, err := database.Exec(`ALTER TABLE tabCustomer RENAME TO tabCustomer_unavailable`); err != nil {
 		t.Fatal("temporarily hide LibSQL source table:", err)
 	}
-	_, rebuildErr := Backfill(database, dialect, "tenant-a", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "")
+	_, rebuildErr := Backfill(context.Background(), database, dialect, "tenant-a", registry, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "")
 	_, restoreErr := database.Exec(`ALTER TABLE tabCustomer_unavailable RENAME TO tabCustomer`)
 	if restoreErr != nil {
 		t.Fatal("restore LibSQL source table:", restoreErr)

@@ -19,7 +19,7 @@ func TestBootstrapTablesContextDoesNotReachDatabaseAfterCancellation(t *testing.
 	defer database.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := BootstrapTablesContext(ctx, database, db.Resolve("mysql")); !errors.Is(err, context.Canceled) {
+	if err := BootstrapTables(ctx, database, db.Resolve("mysql")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("bootstrap error = %v, want context canceled", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -128,7 +128,7 @@ func TestBootstrapRejectsOlderAnalyticsSchemaWithoutMigratingIt(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("CREATE TABLE IF NOT EXISTS _kora_analytics_bootstrap (\n\t\tid INTEGER PRIMARY KEY,\n\t\tversion INTEGER NOT NULL\n\t)")).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT version FROM _kora_analytics_bootstrap WHERE id = 1`)).
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(6))
-	if err := BootstrapTables(database, db.Resolve("mysql")); err == nil || !strings.Contains(err.Error(), "create a fresh tenant database") {
+	if err := BootstrapTables(context.Background(), database, db.Resolve("mysql")); err == nil || !strings.Contains(err.Error(), "create a fresh tenant database") {
 		t.Fatalf("older schema error = %v, want fresh-database guidance", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

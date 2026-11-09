@@ -36,7 +36,7 @@ func TestTenantPackQueriesPrintAndRequiresAcrossDialects(t *testing.T) {
 			}
 			database, dbName := isolatedDB(t, tc.driver, dsn)
 			dialect := db.Resolve(tc.driver)
-			if err := site.BootstrapSystemTables(database, dialect); err != nil {
+			if err := site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatal(err)
 			}
 			ctx := context.Background()

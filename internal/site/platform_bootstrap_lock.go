@@ -35,7 +35,7 @@ func bootstrapPlatformRegistryWithLockContext(parent context.Context, database *
 		return parent.Err()
 	}
 
-	release, err := acquirePlatformRegistryBootstrapLockContext(parent, database, dialect)
+	release, err := acquirePlatformRegistryBootstrapLock(parent, database, dialect)
 	if err != nil {
 		return err
 	}
@@ -47,11 +47,7 @@ func bootstrapPlatformRegistryWithLockContext(parent context.Context, database *
 	return bootstrapPlatformRegistryUnlockedContext(parent, database, dialect)
 }
 
-func acquirePlatformRegistryBootstrapLock(database *sql.DB, dialect db.Dialect) (func() error, error) {
-	return acquirePlatformRegistryBootstrapLockContext(context.Background(), database, dialect)
-}
-
-func acquirePlatformRegistryBootstrapLockContext(parent context.Context, database *sql.DB, dialect db.Dialect) (func() error, error) {
+func acquirePlatformRegistryBootstrapLock(parent context.Context, database *sql.DB, dialect db.Dialect) (func() error, error) {
 	if parent == nil {
 		return nil, errors.New("platform registry bootstrap lock requires context")
 	}

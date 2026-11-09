@@ -31,7 +31,7 @@ func TestLivePostgresNATSSiteDirectoryRecovery(t *testing.T) {
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapPlatformRegistry(database, db.Resolve("postgres")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), database, db.Resolve("postgres")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	registry := NewSQLSiteRegistry(database, "postgres")
@@ -66,7 +66,7 @@ func TestLivePostgresNATSSiteDirectoryRecovery(t *testing.T) {
 	}
 	defer cancelWake()
 
-	if err := registry.Upsert(&Config{
+	if err = registry.Upsert(&Config{
 		Hostname: hostname, DomainsList: []string{hostname, "alias." + hostname},
 		DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432, DBName: "unused",
 	}); err != nil {

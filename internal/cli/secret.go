@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -43,7 +44,7 @@ var secretSetCmd = &cobra.Command{
 func loadSiteDB(siteName string) (*sql.DB, kdb.Dialect, error) {
 	common := site.CommonConfigFromEnv()
 	cfg := site.ReconstructSiteConfig(siteName, common, nil)
-	db, err := site.Connect(cfg)
+	db, err := site.Connect(context.Background(), cfg)
 	if err != nil {
 		return nil, nil, err
 	}

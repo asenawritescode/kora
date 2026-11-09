@@ -12,16 +12,9 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 )
 
-// Backfill rebuilds analytics from the source tables for a site. It is safe to
-// call repeatedly: rollup keys are upserted and stale rows in the requested
-// scope are removed before regeneration.
-func Backfill(db *sql.DB, dialect kdb.Dialect, siteName string, registry *doctype.Registry, from time.Time, doctypeName string) (int, error) {
-	return BackfillContext(context.Background(), db, dialect, siteName, registry, from, doctypeName)
-}
-
-// BackfillContext runs the rebuild under ctx so shutdown/deadline cancellation
+// Backfill runs the rebuild under ctx so shutdown/deadline cancellation
 // can release the tenant rebuild lock and leave prior rollups intact.
-func BackfillContext(ctx context.Context, db *sql.DB, dialect kdb.Dialect, siteName string, registry *doctype.Registry, from time.Time, doctypeName string) (int, error) {
+func Backfill(ctx context.Context, db *sql.DB, dialect kdb.Dialect, siteName string, registry *doctype.Registry, from time.Time, doctypeName string) (int, error) {
 	if db == nil || registry == nil {
 		return 0, fmt.Errorf("analytics backfill requires database and registry")
 	}
@@ -30,7 +23,7 @@ func BackfillContext(ctx context.Context, db *sql.DB, dialect kdb.Dialect, siteN
 	}
 	utcFrom := from.UTC()
 	from = time.Date(utcFrom.Year(), utcFrom.Month(), utcFrom.Day(), 0, 0, 0, 0, time.UTC)
-	if err := BootstrapTables(db, dialect); err != nil {
+	if err := BootstrapTables(ctx, db, dialect); err != nil {
 		return 0, err
 	}
 	options := &sql.TxOptions{}

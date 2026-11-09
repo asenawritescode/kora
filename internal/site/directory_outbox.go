@@ -86,6 +86,8 @@ func (r *SQLSiteRegistry) ChangesAfter(cursor uint64, limit int) ([]DirectoryCha
 	return r.ChangesAfterContext(context.Background(), cursor, limit)
 }
 
+// ChangesAfterContext returns up to limit directory changes with a revision
+// greater than cursor, oldest first. limit must be between 1 and 500.
 func (r *SQLSiteRegistry) ChangesAfterContext(ctx context.Context, cursor uint64, limit int) ([]DirectoryChange, error) {
 	if r == nil || r.database == nil {
 		return nil, errors.New("site registry unavailable")

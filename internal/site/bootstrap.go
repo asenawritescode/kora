@@ -40,17 +40,9 @@ func isIdempotentSQLError(err error) bool {
 		strings.Contains(s, "Error 1064") && strings.Contains(s, "DEFAULT ''") // Same, alternate message format
 }
 
-// BootstrapSystemTables creates all _kora_* system tables if they don't exist.
-// This is the single canonical implementation used by CLI setup, server startup,
-// migration, and the console API. All DDL is idempotent — errors matching
-// isIdempotentSQLError are silently skipped.
-func BootstrapSystemTables(database *sql.DB, dialect db.Dialect) error {
-	return BootstrapSystemTablesContext(context.Background(), database, dialect)
-}
-
-// BootstrapSystemTablesContext creates the tenant's system schema while
+// BootstrapSystemTables creates the tenant's system schema while
 // observing cancellation from its lifecycle owner.
-func BootstrapSystemTablesContext(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
+func BootstrapSystemTables(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
 	if ctx == nil {
 		return errors.New("system bootstrap requires context")
 	}
@@ -367,15 +359,21 @@ func BootstrapSystemTablesContext(ctx context.Context, database *sql.DB, dialect
 		return err
 	}
 
-	if err := seedDefaultAdministratorRoleContext(ctx, database, dialect); err != nil {
+	err = seedDefaultAdministratorRole(ctx, database, dialect)
+	if err != nil {
 		return err
 	}
 	if err := auth.BackfillExtensionTokenHashes(ctx, database, dialect); err != nil {
 		return err
 	}
 
-	update := fmt.Sprintf(`UPDATE _kora_system_bootstrap SET version = %s WHERE id = 1`, dialect.Placeholder(1))
-	result, err := database.ExecContext(ctx, update, systemBootstrapVersion)
+	return markSystemBootstrapVersion(ctx, database, dialect)
+}
+
+// markSystemBootstrapVersion records systemBootstrapVersion in the bootstrap
+// marker row, inserting the row when it does not exist yet.
+func markSystemBootstrapVersion(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
+	result, err := database.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_system_bootstrap SET version = ? WHERE id = 1`), systemBootstrapVersion)
 	if err != nil {
 		return fmt.Errorf("updating system bootstrap marker: %w", err)
 	}
@@ -383,21 +381,17 @@ func BootstrapSystemTablesContext(ctx context.Context, database *sql.DB, dialect
 	if err != nil {
 		return fmt.Errorf("checking system bootstrap marker update: %w", err)
 	}
-	if updated == 0 {
-		insert := fmt.Sprintf(`INSERT INTO _kora_system_bootstrap (id, version) VALUES (1, %s)`, dialect.Placeholder(1))
-		if _, err := database.ExecContext(ctx, insert, systemBootstrapVersion); err != nil {
-			return fmt.Errorf("writing system bootstrap marker: %w", err)
-		}
+	if updated > 0 {
+		return nil
 	}
-
+	_, err = database.ExecContext(ctx, db.Rebind(dialect, `INSERT INTO _kora_system_bootstrap (id, version) VALUES (1, ?)`), systemBootstrapVersion)
+	if err != nil {
+		return fmt.Errorf("writing system bootstrap marker: %w", err)
+	}
 	return nil
 }
 
-func seedDefaultAdministratorRole(database *sql.DB, dialect db.Dialect) error {
-	return seedDefaultAdministratorRoleContext(context.Background(), database, dialect)
-}
-
-func seedDefaultAdministratorRoleContext(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
+func seedDefaultAdministratorRole(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
 	if database == nil || dialect == nil {
 		return fmt.Errorf("seeding default administrator role requires database and dialect")
 	}
@@ -411,16 +405,9 @@ func seedDefaultAdministratorRoleContext(ctx context.Context, database *sql.DB, 
 	return nil
 }
 
-// BootstrapPlatformRegistry creates the _kora_site_registry table on the
-// platform database. This is separate from BootstrapSystemTables because the
-// platform DB (used for site discovery) is distinct from per-site databases.
-func BootstrapPlatformRegistry(database *sql.DB, dialect db.Dialect) error {
-	return BootstrapPlatformRegistryContext(context.Background(), database, dialect)
-}
-
-// BootstrapPlatformRegistryContext initializes the Engine directory with a
+// BootstrapPlatformRegistry initializes the Engine directory with a
 // caller-owned deadline, including the session lock used by MySQL/PostgreSQL.
-func BootstrapPlatformRegistryContext(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
+func BootstrapPlatformRegistry(ctx context.Context, database *sql.DB, dialect db.Dialect) error {
 	return bootstrapPlatformRegistryWithLockContext(ctx, database, dialect)
 }
 

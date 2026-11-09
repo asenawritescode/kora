@@ -56,7 +56,7 @@ func assertLiveDirectoryAssignmentSummary(t *testing.T, driver, dsn string, entr
 		t.Fatalf("ping disposable %s platform registry: %v", driver, err)
 	}
 	dialect := kdb.Resolve(driver)
-	if err := site.BootstrapPlatformRegistryContext(ctx, database, dialect); err != nil {
+	if err := site.BootstrapPlatformRegistry(ctx, database, dialect); err != nil {
 		t.Fatalf("bootstrap disposable %s platform registry: %v", driver, err)
 	}
 	registry := site.NewSQLSiteRegistry(database, driver)

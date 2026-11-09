@@ -33,8 +33,8 @@ func LoadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 }
 
 type tenantRuntimeDependencies struct {
-	connect    func(*site.Config) (*sql.DB, error)
-	bootstrap  func(*sql.DB, kdb.Dialect) error
+	connect    func(context.Context, *site.Config) (*sql.DB, error)
+	bootstrap  func(context.Context, *sql.DB, kdb.Dialect) error
 	claimOwner func(context.Context, *sql.DB, kdb.Dialect, string) error
 }
 
@@ -64,7 +64,7 @@ func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 		ownsDatabase = false
 	} else {
 		_, phase := tracer.Start(ctx, "engine.tenant.connect")
-		database, err = dependencies.connect(siteCfg)
+		database, err = dependencies.connect(ctx, siteCfg)
 		if err != nil {
 			phase.SetStatus(codes.Error, "tenant database connection failed")
 		}
@@ -83,7 +83,7 @@ func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 		}
 	}()
 	_, phase := tracer.Start(ctx, "engine.tenant.bootstrap")
-	err = dependencies.bootstrap(database, dialect)
+	err = dependencies.bootstrap(ctx, database, dialect)
 	if err != nil {
 		phase.SetStatus(codes.Error, "tenant database bootstrap failed")
 	}
@@ -124,7 +124,7 @@ func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 		phase.End()
 		return nil, fmt.Errorf("loading views: %w", err)
 	}
-	minKoraVersion, err := ActiveConfigMinKoraVersionContext(ctx, database, dialect, info.Name)
+	minKoraVersion, err := ActiveConfigMinKoraVersion(ctx, database, dialect, info.Name)
 	if err != nil {
 		phase.SetStatus(codes.Error, "tenant configuration version load failed")
 		phase.End()
@@ -166,13 +166,8 @@ func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 
 // ActiveConfigMinKoraVersion reads the binary-version floor pinned by the
 // active tenant config snapshot. An empty result means no active version exists.
-func ActiveConfigMinKoraVersion(database *sql.DB, dialect kdb.Dialect, siteName string) (string, error) {
-	return ActiveConfigMinKoraVersionContext(context.Background(), database, dialect, siteName)
-}
-
-// ActiveConfigMinKoraVersionContext reads the pinned binary-version floor
-// using the tenant activation context so a canceled reload stops promptly.
-func ActiveConfigMinKoraVersionContext(ctx context.Context, database *sql.DB, dialect kdb.Dialect, siteName string) (string, error) {
+// It honors ctx so a canceled reload stops promptly.
+func ActiveConfigMinKoraVersion(ctx context.Context, database *sql.DB, dialect kdb.Dialect, siteName string) (string, error) {
 	if ctx == nil {
 		return "", errors.New("active config version lookup requires context")
 	}

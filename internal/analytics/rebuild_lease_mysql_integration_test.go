@@ -58,7 +58,7 @@ func TestMySQLRebuildLeaseFencesExpiredOwner(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	dialect := db.Resolve("mysql")
-	if err := BootstrapTables(database, dialect); err != nil {
+	if err = BootstrapTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap analytics schema:", err)
 	}
 	job := &RebuildJob{ID: "lease-job", Site: "tenant-a", Status: "queued", StartedAt: time.Now().UTC(), From: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}

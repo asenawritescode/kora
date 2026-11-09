@@ -56,7 +56,7 @@ func TestLiveMySQLSiteDirectoryAssignmentSummary(t *testing.T) {
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	if err := site.BootstrapPlatformRegistry(database, kdb.Resolve("mysql")); err != nil {
+	if err := site.BootstrapPlatformRegistry(context.Background(), database, kdb.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap disposable platform registry:", err)
 	}
 	registry := site.NewSQLSiteRegistry(database, "mysql")

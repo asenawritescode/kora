@@ -41,7 +41,7 @@ func TestPOSReturnBalancesAcrossDialects(t *testing.T) {
 func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	ctx := context.Background()
 	dialect := kdb.Resolve(driver)
-	if err := BootstrapSystemTables(conn, dialect); err != nil {
+	if err := BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 		t.Fatal(err)
 	}
 	reg := doctype.NewRegistry()

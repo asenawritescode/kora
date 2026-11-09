@@ -113,7 +113,7 @@ func TestRolelessWorkflowServiceCannotSynthesizeTransitionRoleAfterWorkerRestart
 		t.Fatal("ping disposable MySQL:", err)
 	}
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap Engine tables:", err)
 	}
 	var suffix string

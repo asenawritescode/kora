@@ -12,17 +12,11 @@ import (
 // Increment this when rollupTableDDL gains or changes analytics schema DDL.
 const analyticsBootstrapVersion = 7
 
-// BootstrapTables creates the analytics rollup tables in the operational DB.
-// Idempotent — uses IF NOT EXISTS. Called once per site at startup.
-func BootstrapTables(database *sql.DB, dialect db.SchemaDialect) error {
-	return BootstrapTablesContext(context.Background(), database, dialect)
-}
-
-// BootstrapTablesContext creates the analytics schema using the caller's
+// BootstrapTables creates the analytics schema using the caller's
 // cancellation and deadline. Engine startup passes its tenant work
 // admission context here so schema work participates in the same bounded
 // database-work budget as requests and workers.
-func BootstrapTablesContext(ctx context.Context, database *sql.DB, dialect db.SchemaDialect) error {
+func BootstrapTables(ctx context.Context, database *sql.DB, dialect db.SchemaDialect) error {
 	if ctx == nil {
 		return errors.New("analytics bootstrap requires context")
 	}

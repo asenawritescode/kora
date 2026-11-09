@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -57,7 +58,7 @@ func openPlatformSiteDirectoryWithOpener(driver, dsn, dialectName, rawCellID str
 	}
 	tunePlatformDBPool(database, driver, maxOpen)
 	slog.Info("database connected", "type", driver)
-	if err = site.BootstrapPlatformRegistry(database, kdb.Resolve(dialectName)); err != nil {
+	if err = site.BootstrapPlatformRegistry(context.Background(), database, kdb.Resolve(dialectName)); err != nil {
 		return PlatformSiteDirectory{}, fmt.Errorf("bootstrapping platform registry: %w", err)
 	}
 	directory := site.NewSQLSiteRegistry(database, dialectName)

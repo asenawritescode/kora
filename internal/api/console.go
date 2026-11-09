@@ -423,7 +423,7 @@ func (h *ConsoleHandler) HandleListSites(c *gin.Context) {
 			writeError(c, http.StatusServiceUnavailable, "dependency.unavailable", "Platform work capacity is temporarily exhausted", nil)
 			return
 		}
-		dbSites, discoverErr := site.DiscoverSitesFromDB(h.PlatformDB)
+		dbSites, discoverErr := site.DiscoverSitesFromDB(context.Background(), h.PlatformDB)
 		release()
 		if discoverErr == nil {
 			for _, info := range dbSites {
@@ -617,7 +617,7 @@ func (h *ConsoleHandler) HandleCreateSite(c *gin.Context) {
 	var result *site.CreateSiteResult
 	err := h.withTenantSiteAdmission(c.Request.Context(), createInput.ResolvedTenantConfig(), func() error {
 		var createErr error
-		result, createErr = site.CreateSite(createInput)
+		result, createErr = site.CreateSite(context.Background(), createInput)
 		return createErr
 	})
 	if err != nil {
@@ -1013,7 +1013,7 @@ func (h *ConsoleHandler) processOnboardJob(ctx context.Context, job site.Onboard
 	var result *site.CreateSiteResult
 	err := h.withTenantSiteAdmissionRetry(ctx, createInput.ResolvedTenantConfig(), func() error {
 		var createErr error
-		result, createErr = site.CreateSite(createInput)
+		result, createErr = site.CreateSite(context.Background(), createInput)
 		return createErr
 	})
 	if err != nil {
@@ -1144,7 +1144,7 @@ func (h *ConsoleHandler) newCreatedSessionManager(database *sql.DB, dbType strin
 	return manager
 }
 
-func (h *ConsoleHandler) prepareCreatedRuntime(ctx context.Context, loaded *net.LoadedSite, siteID string, cfg *site.Config) error {
+func (h *ConsoleHandler) prepareCreatedRuntime(ctx context.Context, loaded *net.LoadedSite, siteID string, cfg *site.Config) error { //nolint:contextcheck // tolerates a nil ctx from legacy callers
 	if ctx == nil {
 		ctx = context.Background()
 	}

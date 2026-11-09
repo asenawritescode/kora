@@ -36,7 +36,7 @@ func TestLiveMySQLCreateSiteRegistersCanonicalDirectoryAndRetries(t *testing.T) 
 	if err := platformDB.PingContext(t.Context()); err != nil {
 		t.Fatal("ping disposable MySQL platform database:", err)
 	}
-	if err := BootstrapPlatformRegistryContext(t.Context(), platformDB, db.Resolve("mysql")); err != nil {
+	if err = BootstrapPlatformRegistry(t.Context(), platformDB, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap MySQL platform registry:", err)
 	}
 
@@ -59,7 +59,7 @@ func TestLiveMySQLCreateSiteRegistersCanonicalDirectoryAndRetries(t *testing.T) 
 		AdminEmail:    "owner@" + hostname, CloudSubjectID: "cloud-user-" + tenantID, PlatformDBType: "mysql", PlatformDB: platformDB,
 		ExtraDomains: []string{"workspace." + hostname},
 	}
-	result, err = CreateSiteContext(t.Context(), input)
+	result, err = CreateSite(t.Context(), input)
 	if err != nil {
 		t.Fatal("create MySQL tenant:", err)
 	}
@@ -70,7 +70,8 @@ func TestLiveMySQLCreateSiteRegistersCanonicalDirectoryAndRetries(t *testing.T) 
 	if err != nil || descriptor.RuntimeCellID != "deployment-test" {
 		t.Fatalf("created site's deployment assignment = %q, %v; want deployment-test", descriptor.RuntimeCellID, err)
 	}
-	if got, err := ResolveSiteAliasContext(t.Context(), platformDB, "mysql", "workspace."+hostname); err != nil || got != tenantID {
+	got, err := ResolveSiteAlias(t.Context(), platformDB, "mysql", "workspace."+hostname)
+	if err != nil || got != tenantID {
 		t.Fatalf("additional alias resolves to %q, %v; want %q", got, err, tenantID)
 	}
 	var admins, activeVersions int
@@ -88,7 +89,7 @@ func TestLiveMySQLCreateSiteRegistersCanonicalDirectoryAndRetries(t *testing.T) 
 	}
 	result.DB = nil
 	input.RuntimeCellID = "deployment-other"
-	result, err = CreateSiteContext(context.Background(), input)
+	result, err = CreateSite(context.Background(), input)
 	if err != nil {
 		t.Fatal("retry MySQL tenant creation:", err)
 	}
@@ -122,7 +123,7 @@ func TestLiveMySQLProvisioningRegistrationBackfillsOnlyUnassignedRows(t *testing
 	if err := platformDB.PingContext(t.Context()); err != nil {
 		t.Fatal("ping disposable MySQL platform database:", err)
 	}
-	if err := BootstrapPlatformRegistryContext(t.Context(), platformDB, db.Resolve("mysql")); err != nil {
+	if err = BootstrapPlatformRegistry(t.Context(), platformDB, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap MySQL platform registry:", err)
 	}
 

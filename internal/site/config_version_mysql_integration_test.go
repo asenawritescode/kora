@@ -3,6 +3,7 @@
 package site
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -26,12 +27,12 @@ func TestLiveMySQLEnsureConfigVersionRecoversInterruptedActivation(t *testing.T)
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapSystemTables(database, db.Resolve("mysql")); err != nil {
+	if err := BootstrapSystemTables(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal(err)
 	}
 	siteName := fmt.Sprintf("config-version-recovery-%d.example.test", time.Now().UnixNano())
 	defer database.Exec("DELETE FROM _kora_config_version WHERE site = ?", siteName)
-	if err := ensureConfigVersion(database, db.Resolve("mysql"), siteName, []string{siteName}); err != nil {
+	if err := ensureConfigVersion(context.Background(), database, db.Resolve("mysql"), siteName, []string{siteName}); err != nil {
 		t.Fatalf("create initial config version: %v", err)
 	}
 	var versionID string
@@ -41,7 +42,7 @@ func TestLiveMySQLEnsureConfigVersionRecoversInterruptedActivation(t *testing.T)
 	if _, err := database.Exec("UPDATE _kora_config_version SET is_active = 0 WHERE id = ?", versionID); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureConfigVersion(database, db.Resolve("mysql"), siteName, []string{siteName}); err != nil {
+	if err := ensureConfigVersion(context.Background(), database, db.Resolve("mysql"), siteName, []string{siteName}); err != nil {
 		t.Fatalf("recover interrupted config activation: %v", err)
 	}
 	var active int
@@ -51,7 +52,7 @@ func TestLiveMySQLEnsureConfigVersionRecoversInterruptedActivation(t *testing.T)
 	if active != 1 {
 		t.Fatalf("recovered config version active flag = %d, want 1", active)
 	}
-	if err := ensureConfigVersion(database, db.Resolve("mysql"), siteName, []string{siteName}); err != nil {
+	if err := ensureConfigVersion(context.Background(), database, db.Resolve("mysql"), siteName, []string{siteName}); err != nil {
 		t.Fatalf("replay completed config bootstrap: %v", err)
 	}
 	var count int

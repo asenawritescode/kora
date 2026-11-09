@@ -431,7 +431,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	services.UploadAdmission = config.UploadAdmission
 	bootstrapCtx, cancelBootstrap := context.WithTimeout(config.ProcessContext, 30*time.Second)
 	err = withTenantWorkAdmission(bootstrapCtx, workAdmission, "bootstrap analytics schema", func() error {
-		return analytics.BootstrapTablesContext(bootstrapCtx, loaded.DB, dialect)
+		return analytics.BootstrapTables(bootstrapCtx, loaded.DB, dialect)
 	})
 	cancelBootstrap()
 	if err != nil {

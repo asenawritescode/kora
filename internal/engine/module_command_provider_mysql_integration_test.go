@@ -158,7 +158,7 @@ func TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction(t *
 		t.Fatal("ping isolated module command database:", err)
 	}
 	dialect := kdb.Resolve("mysql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap kernel system tables:", err)
 	}
 	for _, statements := range [][]string{kdb.KernelTablesMySQL(), kdb.OutboxTablesMySQL()} {

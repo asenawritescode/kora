@@ -93,7 +93,7 @@ func TestPOSPackEndToEndAcrossDialects(t *testing.T) {
 func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	ctx := context.Background()
 	dialect := kdb.Resolve(driver)
-	if err := BootstrapSystemTables(conn, dialect); err != nil {
+	if err := BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 		t.Fatal(err)
 	}
 	// Installing the pos pack pulls in inventory through pack.yaml requires.

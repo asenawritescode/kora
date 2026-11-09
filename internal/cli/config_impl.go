@@ -59,7 +59,7 @@ func runConfigExportContext(ctx context.Context, siteName, path string) error {
 	if err != nil {
 		return err
 	}
-	db, err := site.ConnectContext(ctx, siteCfg)
+	db, err := site.Connect(ctx, siteCfg)
 	if err != nil {
 		release()
 		return fmt.Errorf("connecting to database: %w", err)
@@ -169,13 +169,7 @@ func marshalPageManifestYAML(manifest *doctype.PageManifest) ([]byte, error) {
 	return yaml.Marshal(document)
 }
 
-// runConfigImport imports a config pack with a background context. It is the entry point used by the
-// integration tests; the CLI commands call runConfigImportContext directly.
-func runConfigImport(siteName, path, dbName string) (returnErr error) {
-	return runConfigImportContext(context.Background(), siteName, path, dbName)
-}
-
-func runConfigImportContext(ctx context.Context, siteName, path, dbName string) (returnErr error) {
+func runConfigImport(ctx context.Context, siteName, path, dbName string) (returnErr error) { //nolint:contextcheck // tolerates a nil ctx from legacy callers
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -189,7 +183,7 @@ func runConfigImportContext(ctx context.Context, siteName, path, dbName string) 
 	return runConfigImportForSiteContext(ctx, siteName, path, siteCfg, tenantID)
 }
 
-func runConfigImportForSiteContext(ctx context.Context, siteName, path string, siteCfg *site.Config, tenantID string) (returnErr error) {
+func runConfigImportForSiteContext(ctx context.Context, siteName, path string, siteCfg *site.Config, tenantID string) (returnErr error) { //nolint:contextcheck // tolerates a nil ctx from legacy callers
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -203,7 +197,7 @@ func runConfigImportForSiteContext(ctx context.Context, siteName, path string, s
 	if err != nil {
 		return err
 	}
-	db, err := site.ConnectContext(ctx, siteCfg)
+	db, err := site.Connect(ctx, siteCfg)
 	if err != nil {
 		release()
 		return fmt.Errorf("connecting to database: %w", err)
@@ -212,7 +206,7 @@ func runConfigImportForSiteContext(ctx context.Context, siteName, path string, s
 	defer release()
 
 	// Bootstrap system tables if needed.
-	if err := site.BootstrapSystemTables(db, kdb.Resolve(siteCfg.DBType)); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), db, kdb.Resolve(siteCfg.DBType)); err != nil {
 		return fmt.Errorf("bootstrapping: %w", err)
 	}
 
@@ -339,7 +333,7 @@ func lookupRegisteredSiteContext(ctx context.Context, siteName string, commonCfg
 	err = func() error {
 		defer release()
 		var discoverErr error
-		sites, discoverErr = site.DiscoverSitesFromDBContext(ctx, db)
+		sites, discoverErr = site.DiscoverSitesFromDB(ctx, db)
 		return discoverErr
 	}()
 	if err != nil {
@@ -393,7 +387,7 @@ func openSiteDiscoveryDBContext(ctx context.Context, commonCfg *site.CommonConfi
 	if err != nil {
 		return nil, err
 	}
-	db, err := site.ConnectContext(ctx, discoveryCfg)
+	db, err := site.Connect(ctx, discoveryCfg)
 	release()
 	return db, err
 }
@@ -453,7 +447,7 @@ func runConfigVersionsContext(ctx context.Context, siteName string) error {
 	if err != nil {
 		return err
 	}
-	db, err := site.ConnectContext(ctx, siteCfg)
+	db, err := site.Connect(ctx, siteCfg)
 	if err != nil {
 		release()
 		return err
@@ -513,7 +507,7 @@ func runConfigDiffContext(ctx context.Context, siteName, fromID, toID string) er
 	if err != nil {
 		return err
 	}
-	db, err := site.ConnectContext(ctx, siteCfg)
+	db, err := site.Connect(ctx, siteCfg)
 	if err != nil {
 		release()
 		return fmt.Errorf("connecting to site database: %w", err)
@@ -564,7 +558,7 @@ func runConfigRollbackContext(ctx context.Context, siteName string, toVersion in
 	if err != nil {
 		return err
 	}
-	db, err := site.ConnectContext(ctx, siteCfg)
+	db, err := site.Connect(ctx, siteCfg)
 	if err != nil {
 		release()
 		return err

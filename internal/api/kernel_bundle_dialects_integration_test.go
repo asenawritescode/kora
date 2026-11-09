@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -42,7 +43,7 @@ func TestLiveRecordMutationBundleCommitsAndReplaysAcrossDialects(t *testing.T) {
 				t.Skipf("set %s to a disposable %s database", tc.env, tc.driver)
 			}
 			database, dialect := openKernelDialectDatabase(t, tc.driver, dsn)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap %s tables: %v", tc.driver, err)
 			}
 
@@ -220,7 +221,7 @@ func TestLiveExpectedVersionUpdateRaceAcrossDialects(t *testing.T) {
 				t.Skipf("set %s to a disposable %s database", tc.env, tc.driver)
 			}
 			database, dialect := openKernelDialectDatabase(t, tc.driver, dsn)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap %s tables: %v", tc.driver, err)
 			}
 
@@ -336,7 +337,7 @@ func TestLiveWorkflowTransitionUsesKernelAcrossDialects(t *testing.T) {
 				t.Skipf("set %s to a disposable %s database", tc.env, tc.driver)
 			}
 			database, dialect := openKernelDialectDatabase(t, tc.driver, dsn)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap %s tables: %v", tc.driver, err)
 			}
 
@@ -465,7 +466,7 @@ func TestScriptProviderCRUDUsesKernelAcrossDialects(t *testing.T) {
 				t.Skipf("set %s to a disposable %s database", tc.env, tc.driver)
 			}
 			database, dialect := openKernelDialectDatabase(t, tc.driver, dsn)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap %s tables: %v", tc.driver, err)
 			}
 			suffix := fmt.Sprintf("%x", time.Now().UnixNano())
@@ -554,7 +555,7 @@ func TestExternalOperationManifestActionUsesKernelAcrossDialects(t *testing.T) {
 				t.Skipf("set %s to a disposable %s database", tc.env, tc.driver)
 			}
 			database, dialect := openKernelDialectDatabase(t, tc.driver, dsn)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap %s tables: %v", tc.driver, err)
 			}
 			siteName := "external-operation-" + tc.driver + "-" + fmt.Sprintf("%x", time.Now().UnixNano())

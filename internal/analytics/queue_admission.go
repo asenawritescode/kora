@@ -25,6 +25,7 @@ type QueueAdmission struct {
 	rejectedListeners uint64
 }
 
+// QueueSnapshot is a point-in-time view of a QueueAdmission budget.
 type QueueSnapshot struct {
 	UsedBytes         uint64
 	MaxBytes          uint64
@@ -34,10 +35,14 @@ type QueueSnapshot struct {
 	RejectedListeners uint64
 }
 
+// NewAnalyticsQueueAdmission returns a byte budget for queued analytics events
+// with the default listener limit.
 func NewAnalyticsQueueAdmission(maxBytes uint64) (*QueueAdmission, error) {
 	return NewAnalyticsQueueAdmissionWithLimits(maxBytes, DefaultAnalyticsProcessMaxListeners)
 }
 
+// NewAnalyticsQueueAdmissionWithLimits returns a budget of maxBytes queued bytes
+// and maxListeners process listeners, or an error if either is out of range.
 func NewAnalyticsQueueAdmissionWithLimits(maxBytes uint64, maxListeners int) (*QueueAdmission, error) {
 	if maxBytes == 0 || maxBytes > MaxAnalyticsQueueAdmissionBytes {
 		return nil, ErrAnalyticsQueueBudgetInvalid
@@ -77,6 +82,8 @@ func (a *QueueAdmission) ReleaseListener() {
 	a.mu.Unlock()
 }
 
+// TryAcquire reserves bytes from the budget and reports whether they fit. A
+// refusal is counted in the snapshot.
 func (a *QueueAdmission) TryAcquire(bytes uint64) bool {
 	if a == nil || bytes == 0 {
 		return true
@@ -91,6 +98,7 @@ func (a *QueueAdmission) TryAcquire(bytes uint64) bool {
 	return true
 }
 
+// Release returns bytes reserved by TryAcquire to the budget.
 func (a *QueueAdmission) Release(bytes uint64) {
 	if a == nil || bytes == 0 {
 		return
@@ -104,6 +112,7 @@ func (a *QueueAdmission) Release(bytes uint64) {
 	a.mu.Unlock()
 }
 
+// Snapshot returns the current usage, limits and rejection counts.
 func (a *QueueAdmission) Snapshot() QueueSnapshot {
 	if a == nil {
 		return QueueSnapshot{}

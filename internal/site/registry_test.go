@@ -21,7 +21,7 @@ func TestDiscoverSitesFromDBContextHonorsCancellation(t *testing.T) {
 	defer database.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := DiscoverSitesFromDBContext(ctx, database); !errors.Is(err, context.Canceled) {
+	if _, err := DiscoverSitesFromDB(ctx, database); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled directory discovery error = %v, want context.Canceled", err)
 	}
 }
@@ -504,7 +504,7 @@ func TestDiscoverSitesFromDBUsesRegistryWhenAvailable(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(registrySelect)).
 		WillReturnRows(rows)
 
-	sites, err := DiscoverSitesFromDB(db)
+	sites, err := DiscoverSitesFromDB(context.Background(), db)
 	if err != nil {
 		t.Fatalf("DiscoverSitesFromDB: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestDiscoverSitesFromDBDoesNotFallBackWhenRegistryIsMissing(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(registrySelect)).
 		WillReturnError(assertRegistryMissingError{})
 
-	if sites, err := DiscoverSitesFromDB(db); err == nil {
+	if sites, err := DiscoverSitesFromDB(context.Background(), db); err == nil {
 		t.Fatalf("DiscoverSitesFromDB returned %d sites without the canonical registry", len(sites))
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -569,7 +569,7 @@ func TestDiscoverSitesFromDBUsesOnlyRegistry(t *testing.T) {
 	)
 	mock.ExpectQuery(regexp.QuoteMeta(registrySelect)).
 		WillReturnRows(rows)
-	sites, err := DiscoverSitesFromDB(db)
+	sites, err := DiscoverSitesFromDB(context.Background(), db)
 	if err != nil {
 		t.Fatalf("DiscoverSitesFromDB: %v", err)
 	}

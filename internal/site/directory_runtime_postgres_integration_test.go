@@ -31,13 +31,13 @@ func TestLivePostgresDirectoryRevisionReplacesRoutedRuntime(t *testing.T) {
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapPlatformRegistry(database, db.Resolve("postgres")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), database, db.Resolve("postgres")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 
 	name := fmt.Sprintf("runtime-revision-%d.example.invalid", time.Now().UnixNano())
 	registry := NewSQLSiteRegistry(database, "postgres")
-	if err := registry.Upsert(&Config{Hostname: name, DomainsList: []string{name, "alias." + name}, DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432, DBName: "unused"}); err != nil {
+	if err = registry.Upsert(&Config{Hostname: name, DomainsList: []string{name, "alias." + name}, DBType: "postgres", DBHost: "127.0.0.1", DBPort: 5432, DBName: "unused"}); err != nil {
 		t.Fatal("create directory entry:", err)
 	}
 	defer func() {

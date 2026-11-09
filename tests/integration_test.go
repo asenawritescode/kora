@@ -100,7 +100,7 @@ func dbDSNWithDatabase(baseDSN, dbName string) (string, error) {
 // tables), so use the real bootstrap.
 func bootstrapForTest(t *testing.T, db *sql.DB) {
 	t.Helper()
-	if err := site.BootstrapSystemTables(db, &kdb.MySQLDialect{}); err != nil {
+	if err := site.BootstrapSystemTables(context.Background(), db, &kdb.MySQLDialect{}); err != nil {
 		t.Fatalf("bootstrapping system tables: %v", err)
 	}
 }

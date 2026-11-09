@@ -3,6 +3,7 @@
 package site
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -74,7 +75,7 @@ func TestMySQLCurrentCRMPackInstallsIntoFreshTenant(t *testing.T) {
 	}
 
 	dialect := db.Resolve("mysql")
-	if err := BootstrapSystemTables(tenantDB, dialect); err != nil {
+	if err = BootstrapSystemTables(context.Background(), tenantDB, dialect); err != nil {
 		t.Fatal("bootstrap Engine system tables:", err)
 	}
 	registry := doctype.NewRegistry()

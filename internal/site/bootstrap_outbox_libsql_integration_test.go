@@ -3,6 +3,7 @@
 package site
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
@@ -52,7 +53,7 @@ func TestBootstrapMigratesExistingLibSQLV17OutboxWithoutLosingRows(t *testing.T)
 	if _, err := database.Exec(`INSERT INTO _kora_system_bootstrap (id,version) VALUES (1,17)`); err != nil {
 		t.Fatal("seed v17 bootstrap marker:", err)
 	}
-	if err := BootstrapSystemTables(database, db.Resolve("libsql")); err != nil {
+	if err := BootstrapSystemTables(context.Background(), database, db.Resolve("libsql")); err != nil {
 		t.Fatal("upgrade v17 LibSQL system tables:", err)
 	}
 	var sourceSequence int64

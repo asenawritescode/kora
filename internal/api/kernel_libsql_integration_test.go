@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -35,7 +36,7 @@ func TestLiveLibSQLResourceCRUDUsesKernelAndPreservesRESTContract(t *testing.T) 
 	if err := database.Ping(); err != nil {
 		t.Fatal("ping disposable LibSQL database:", err)
 	}
-	if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+	if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap LibSQL system tables:", err)
 	}
 

@@ -73,7 +73,7 @@ func TestMySQLConfigActivationJournalRetry(t *testing.T) {
 		t.Fatal("ping isolated activation database:", err)
 	}
 	dialect := kdb.Resolve("mysql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap isolated activation database:", err)
 	}
 	oldType := &doctype.DocType{Name: "RecoveryProbe", Module: "Test", Fields: []doctype.Field{{Fieldname: "subject", Fieldtype: "Data"}}}

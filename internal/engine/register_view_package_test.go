@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"strings"
@@ -50,7 +51,7 @@ components:
 			}
 			t.Cleanup(func() { database.Close() })
 			dialect := db.Resolve("libsql")
-			if err := site.BootstrapSystemTables(database, dialect); err != nil {
+			if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatal(err)
 			}
 			const siteName = "register-view.example.test"
@@ -108,7 +109,7 @@ func TestPOSPackRegisterViewReachesTenant(t *testing.T) {
 	}
 	t.Cleanup(func() { database.Close() })
 	dialect := db.Resolve("libsql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal(err)
 	}
 	const siteName = "pos-register.example.test"

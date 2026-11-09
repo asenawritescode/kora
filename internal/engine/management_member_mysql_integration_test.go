@@ -33,7 +33,7 @@ func openMySQLMemberDatabase(t *testing.T) (*sql.DB, db.Dialect) {
 	memberMySQLOnce.Do(func() {
 		memberMySQL, memberMySQLErr = sql.Open("mysql", os.Getenv("KORA_ENGINE_MEMBER_DISPOSABLE_MYSQL_DSN"))
 		if memberMySQLErr == nil {
-			memberMySQLErr = site.BootstrapSystemTablesContext(context.Background(), memberMySQL, db.Resolve("mysql"))
+			memberMySQLErr = site.BootstrapSystemTables(context.Background(), memberMySQL, db.Resolve("mysql"))
 		}
 	})
 	if memberMySQLErr != nil {

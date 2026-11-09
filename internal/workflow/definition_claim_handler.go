@@ -21,6 +21,7 @@ type ConditionScopeProvider interface {
 	Scope(context.Context, policy.Execution, contract.WorkflowInstance) (expression.Scope, error)
 }
 
+// RequestPreparer validates and prepares a workflow submission before it is committed.
 type RequestPreparer interface {
 	PrepareWorkflowSubmit(context.Context, policy.Execution, contract.SubmitRequest, contract.RequestSource) (*requests.PreparedSubmission, error)
 }

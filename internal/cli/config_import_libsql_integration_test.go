@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ func TestLibSQLConfigImportUsesRemoteTransportAndReusesOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := runConfigImport("libsql-import-test.example", pack, "libsql_import_test"); err != nil {
+		if err := runConfigImport(context.Background(), "libsql-import-test.example", pack, "libsql_import_test"); err != nil {
 			t.Fatalf("config import attempt %d through remote LibSQL transport: %v", attempt+1, err)
 		}
 	}

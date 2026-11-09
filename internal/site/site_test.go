@@ -73,7 +73,7 @@ func TestSiteBootstrapWritesRebindForPostgres(t *testing.T) {
 		WithArgs(1, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).
 		WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(1))
-	if err := ensureConfigVersion(database, dialect, "site-pg", []string{"site-pg"}); err != nil {
+	if err := ensureConfigVersion(context.Background(), database, dialect, "site-pg", []string{"site-pg"}); err != nil {
 		t.Fatalf("create PostgreSQL config version: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -134,7 +134,7 @@ func TestEnsureConfigVersionReportsPersistenceFailures(t *testing.T) {
 			}
 			defer database.Close()
 			test.setup(mock)
-			if err := ensureConfigVersion(database, sqlDialect.Resolve("postgres"), "site-pg", []string{"site-pg"}); err == nil {
+			if err := ensureConfigVersion(context.Background(), database, sqlDialect.Resolve("postgres"), "site-pg", []string{"site-pg"}); err == nil {
 				t.Fatal("ensureConfigVersion returned nil after injected persistence failure")
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
@@ -154,7 +154,7 @@ func TestEnsureConfigVersionRecoversInterruptedActivation(t *testing.T) {
 	mock.ExpectQuery(`SELECT id FROM _kora_config_version WHERE site = \$1 AND status = 'Active' ORDER BY version DESC LIMIT 1`).WithArgs("site-pg").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("version-1"))
 	mock.ExpectExec(`UPDATE _kora_config_version SET is_active = \$1 WHERE id = \$2`).WithArgs(1, "version-1").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT is_active FROM _kora_config_version WHERE id = \$1`).WithArgs("version-1").WillReturnRows(sqlmock.NewRows([]string{"is_active"}).AddRow(1))
-	if err := ensureConfigVersion(database, sqlDialect.Resolve("postgres"), "site-pg", []string{"site-pg"}); err != nil {
+	if err := ensureConfigVersion(context.Background(), database, sqlDialect.Resolve("postgres"), "site-pg", []string{"site-pg"}); err != nil {
 		t.Fatalf("recover config version activation: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

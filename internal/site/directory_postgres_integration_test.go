@@ -33,7 +33,7 @@ func TestLivePostgresSiteDirectoryLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := BootstrapPlatformRegistry(database, db.Resolve("postgres")); err != nil {
+		if err = BootstrapPlatformRegistry(context.Background(), database, db.Resolve("postgres")); err != nil {
 			t.Fatalf("bootstrap attempt %d: %v", attempt+1, err)
 		}
 	}
@@ -198,7 +198,7 @@ func TestLivePostgresSiteBootstrapWrites(t *testing.T) {
 		t.Fatal("seed pre-migration PostgreSQL outbox receipt:", err)
 	}
 	dialect := db.Resolve("postgres")
-	if err := BootstrapSystemTables(database, dialect); err != nil {
+	if err := BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap Engine system tables:", err)
 	}
 	var sourceSequenceColumns, backlogIndexes, retainedEvents, tenantSequenceTables, receiptSequenceColumns, retainedReceipts int
@@ -228,10 +228,10 @@ func TestLivePostgresSiteBootstrapWrites(t *testing.T) {
 	if err := createPasswordlessAdminUserContext(context.Background(), database, dialect, "owner@example.invalid", "Owner", siteName, "cloud-user-postgres"); err != nil {
 		t.Fatal("create admin user:", err)
 	}
-	if err := ensureConfigVersion(database, dialect, siteName, []string{siteName, "pos.example.invalid"}); err != nil {
+	if err := ensureConfigVersion(context.Background(), database, dialect, siteName, []string{siteName, "pos.example.invalid"}); err != nil {
 		t.Fatal("create initial config version:", err)
 	}
-	if err := ensureConfigVersion(database, dialect, siteName, []string{siteName, "pos.example.invalid"}); err != nil {
+	if err := ensureConfigVersion(context.Background(), database, dialect, siteName, []string{siteName, "pos.example.invalid"}); err != nil {
 		t.Fatal("reuse initial config version:", err)
 	}
 
@@ -276,7 +276,7 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 	if err := platformDB.Ping(); err != nil {
 		t.Fatal("ping PostgreSQL platform database:", err)
 	}
-	if err := BootstrapPlatformRegistry(platformDB, db.Resolve("postgres")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), platformDB, db.Resolve("postgres")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 
@@ -293,7 +293,7 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 		quotedName := `"` + strings.ReplaceAll(databaseName, `"`, `""`) + `"`
 		_, _ = platformDB.Exec(`DROP DATABASE IF EXISTS ` + quotedName)
 	})
-	result, err = CreateSite(CreateSiteInput{
+	result, err = CreateSite(context.Background(), CreateSiteInput{
 		Hostname: hostname, SiteID: canonicalTenantID, DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
 		DBName: databaseName, DBUser: user, DBPassword: password,
 		RuntimeCellID: "deployment-postgres-test",
@@ -309,7 +309,7 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 	if err != nil || descriptor.RuntimeCellID != "deployment-postgres-test" {
 		t.Fatalf("created site's deployment assignment = %q, %v; want deployment-postgres-test", descriptor.RuntimeCellID, err)
 	}
-	_, mismatchErr := CreateSite(CreateSiteInput{
+	_, mismatchErr := CreateSite(context.Background(), CreateSiteInput{
 		Hostname: hostname, SiteID: "tenant-replacement-001", DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
 		DBName: databaseName + "_must_not_be_created", DBUser: user, DBPassword: password,
 		AdminEmail: "owner@" + hostname, CloudSubjectID: "cloud-user-owner", PlatformDBType: "postgres", PlatformDB: platformDB,
@@ -321,7 +321,7 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 	if err := result.DB.Close(); err != nil {
 		t.Fatal("close first tenant handle before retry:", err)
 	}
-	result, err = CreateSite(CreateSiteInput{
+	result, err = CreateSite(context.Background(), CreateSiteInput{
 		Hostname: hostname, SiteID: canonicalTenantID, DBType: "postgres", DBHost: connectionURL.Hostname(), DBPort: port,
 		DBName: databaseName, DBUser: user, DBPassword: password,
 		RuntimeCellID: "deployment-postgres-test",
@@ -333,7 +333,7 @@ func TestLivePostgresCreateSiteRegistersCanonicalDirectoryRecord(t *testing.T) {
 	if result.SiteID != firstSiteID {
 		t.Fatalf("retry changed canonical site ID from %q to %q", firstSiteID, result.SiteID)
 	}
-	byAlias, err := ResolveSiteAlias(platformDB, "postgres", hostname)
+	byAlias, err := ResolveSiteAlias(context.Background(), platformDB, "postgres", hostname)
 	if err != nil || byAlias != result.SiteID {
 		t.Fatalf("canonical alias resolution = %q, %v; want site ID %q", byAlias, err, result.SiteID)
 	}
@@ -362,7 +362,7 @@ func TestLivePostgresProvisioningRegistrationBackfillsOnlyUnassignedRows(t *test
 	if err := database.PingContext(t.Context()); err != nil {
 		t.Fatal("ping disposable PostgreSQL database:", err)
 	}
-	if err := BootstrapPlatformRegistryContext(t.Context(), database, db.Resolve("postgres")); err != nil {
+	if err = BootstrapPlatformRegistry(t.Context(), database, db.Resolve("postgres")); err != nil {
 		t.Fatal("bootstrap PostgreSQL platform registry:", err)
 	}
 
@@ -406,7 +406,7 @@ func TestLivePostgresConsumerLeaseFencesExpiredOwner(t *testing.T) {
 	if err := database.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	if err := BootstrapPlatformRegistry(database, db.Resolve("postgres")); err != nil {
+	if err = BootstrapPlatformRegistry(context.Background(), database, db.Resolve("postgres")); err != nil {
 		t.Fatal("bootstrap platform registry:", err)
 	}
 	id := fmt.Sprintf("integration:lease:%d", time.Now().UnixNano())

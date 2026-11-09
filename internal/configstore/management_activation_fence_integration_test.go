@@ -39,7 +39,7 @@ func TestLiveManagementActivationFenceAcrossDialects(t *testing.T) {
 			database, cleanup := openFenceTestDatabase(t, test.driver, dsn)
 			defer cleanup()
 			database.SetMaxOpenConns(1)
-			if err := site.BootstrapSystemTables(database, test.dialect()); err != nil {
+			if err := site.BootstrapSystemTables(context.Background(), database, test.dialect()); err != nil {
 				t.Fatal("bootstrap disposable tenant system tables:", err)
 			}
 			digest := strings.Repeat("a", 64)

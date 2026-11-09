@@ -41,7 +41,7 @@ Configure Claude Desktop to use it:
 		common := site.CommonConfigFromEnv()
 		cfg := site.ReconstructSiteConfig(siteName, common, nil)
 
-		db, err := site.Connect(cfg)
+		db, err := site.Connect(context.Background(), cfg)
 		if err != nil {
 			return fmt.Errorf("connecting to database: %w", err)
 		}

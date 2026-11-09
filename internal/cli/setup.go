@@ -78,7 +78,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		platformDriver = tenantConfig.DBType
 	}
 	result, err := runSetupSiteCreation(cmd.Context(), tenantConfig, platformDriver, createInput.PlatformDBDSN, func() (*site.CreateSiteResult, error) {
-		return site.CreateSite(createInput)
+		return site.CreateSite(context.Background(), createInput)
 	})
 	if err != nil {
 		return fmt.Errorf("creating site: %w", err)

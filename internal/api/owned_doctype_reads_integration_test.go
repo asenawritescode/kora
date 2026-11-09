@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -125,5 +126,5 @@ func TestPublishedOwnedDocTypeReadsViaMatrixPostgres(t *testing.T) {
 }
 
 func bootstrapForOwnedReads(db *sql.DB, dialect kdb.Dialect) error {
-	return ksite.BootstrapSystemTables(db, dialect)
+	return ksite.BootstrapSystemTables(context.Background(), db, dialect)
 }

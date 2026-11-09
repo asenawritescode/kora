@@ -63,7 +63,7 @@ func TestMySQLAnalyticsReceiptDeduplicatesReplayAfterCommit(t *testing.T) {
 		t.Fatal("open isolated analytics database:", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	if err := BootstrapTables(database, db.Resolve("mysql")); err != nil {
+	if err = BootstrapTables(context.Background(), database, db.Resolve("mysql")); err != nil {
 		t.Fatal("bootstrap analytics tables:", err)
 	}
 	registry := testRegistry(buildTestDocType("Customer", false, field("name", "Data", "Name", true)))
@@ -83,7 +83,7 @@ func TestMySQLAnalyticsReceiptDeduplicatesReplayAfterCommit(t *testing.T) {
 		t.Fatal("seed source sequence:", err)
 	}
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := Backfill(database, db.Resolve("mysql"), "tenant-a", registry, from, ""); err != nil {
+	if _, err = Backfill(context.Background(), database, db.Resolve("mysql"), "tenant-a", registry, from, ""); err != nil {
 		t.Fatal("rebuild analytics snapshot:", err)
 	}
 	event := ChangeEvent{

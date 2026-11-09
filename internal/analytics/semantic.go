@@ -322,6 +322,8 @@ type VisualSeries struct {
 	Format string `json:"format,omitempty" yaml:"format,omitempty"`
 }
 
+// SemanticRequest is a catalog-only analytics query: one or more model queries
+// over a time range, with an optional result row limit.
 type SemanticRequest struct {
 	Queries []ModelQuery `json:"queries"`
 	Time    QueryTime    `json:"time"`
@@ -510,6 +512,8 @@ func (r *RollupDefinition) Validate(measures, dimensions map[string]bool, modelT
 	return nil
 }
 
+// Validate checks the request against catalog and the query, measure, filter,
+// range and row limits, returning the first violation.
 func (q *SemanticRequest) Validate(catalog *SemanticCatalog) error {
 	if catalog == nil {
 		return fmt.Errorf("analytics catalog is required")

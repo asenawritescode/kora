@@ -35,15 +35,15 @@ func TestBlankTenantApplicationCatalogIsEmptyNotUnavailable(t *testing.T) {
 	}
 	database, dbName := isolatedDB(t, "mysql", dsn)
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err := site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal(err)
 	}
 	siteName := fmt.Sprintf("blank-tenant-%d", time.Now().UnixNano())
 	info := site.DBSiteInfo{SiteID: siteName, Name: siteName, DBType: "mysql", DBName: dbName, Status: "active"}
 	common := &site.CommonConfig{DBType: "mysql"}
 	loaded, err := loadTenantRuntime(context.Background(), info, common, nil, "test", tenantRuntimeDependencies{
-		connect:   func(*site.Config) (*sql.DB, error) { return database, nil },
-		bootstrap: func(*sql.DB, db.Dialect) error { return nil },
+		connect:   func(context.Context, *site.Config) (*sql.DB, error) { return database, nil },
+		bootstrap: func(context.Context, *sql.DB, db.Dialect) error { return nil },
 	})
 	if err != nil {
 		t.Fatal(err)

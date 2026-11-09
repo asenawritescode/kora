@@ -150,7 +150,7 @@ func runPurchaseApprovalPolicyAndDomainTransition(t *testing.T, database *sql.DB
 	if err := database.Ping(); err != nil {
 		t.Fatalf("ping disposable %s database: %v", dialect.DriverName(), err)
 	}
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err := site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatalf("bootstrap %s Engine tables: %v", dialect.DriverName(), err)
 	}
 	requestDDL, err := requestsql.SchemaStatements(dialect)

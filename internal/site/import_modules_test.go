@@ -1,6 +1,7 @@
 package site
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -44,7 +45,7 @@ func versionCount(t *testing.T, conn *sql.DB) int {
 // runImportModules proves modules and the config version commit together.
 func runImportModules(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	dialect := kdb.Resolve(driver)
-	if err := BootstrapSystemTables(conn, dialect); err != nil {
+	if err := BootstrapSystemTables(context.Background(), conn, dialect); err != nil {
 		t.Fatal(err)
 	}
 	site, pos := "m238.example", filepath.Join("..", "..", "config", "pos")

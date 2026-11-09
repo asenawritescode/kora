@@ -40,7 +40,7 @@ func TestLibSQLWorkflowLocalActionCommitsDomainAndProgressAtomically(t *testing.
 		t.Fatal("ping disposable LibSQL:", err)
 	}
 	dialect := db.Resolve("libsql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap Engine tables:", err)
 	}
 	definitions, err := sqlstore.NewDefinitionStore(database, dialect)

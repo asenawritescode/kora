@@ -33,7 +33,7 @@ func TestConfiguredCommandCommitsAndRollsBackAcrossDialects(t *testing.T) {
 				t.Skipf("set %s to a disposable %s database", tc.env, tc.driver)
 			}
 			database, dialect := openKernelDialectDatabase(t, tc.driver, dsn)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap %s tables: %v", tc.driver, err)
 			}
 
@@ -178,7 +178,7 @@ func TestPublicFormProjectionAndReplayAcrossDialects(t *testing.T) {
 				t.Skipf("set %s to a disposable %s database", tc.env, tc.driver)
 			}
 			database, dialect := openKernelDialectDatabase(t, tc.driver, dsn)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap %s tables: %v", tc.driver, err)
 			}
 

@@ -75,7 +75,7 @@ func TestEngineProcessRestartResumesTimedWorkflow(t *testing.T) {
 		}
 	}
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapPlatformRegistry(platform, dialect); err != nil {
+	if err = site.BootstrapPlatformRegistry(context.Background(), platform, dialect); err != nil {
 		t.Fatal("bootstrap disposable platform directory:", err)
 	}
 	tenantDB := "kora_workflow_restart_" + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -89,7 +89,7 @@ func TestEngineProcessRestartResumesTimedWorkflow(t *testing.T) {
 	}()
 	hostname := "workflow-restart-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".example.invalid"
 	registry := site.NewSQLSiteRegistry(platform, "mysql")
-	if err := registry.Upsert(&site.Config{
+	if err = registry.Upsert(&site.Config{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1",
 		DBPort: mustPort(t, platformPort), DBName: tenantDB, DBUser: "root", DBPassword: "acceptance-only",
 	}); err != nil {
@@ -111,7 +111,7 @@ func TestEngineProcessRestartResumesTimedWorkflow(t *testing.T) {
 	}
 	tenantDBConn.SetMaxOpenConns(4)
 	defer tenantDBConn.Close()
-	if err := site.BootstrapSystemTablesContext(ctx, tenantDBConn, dialect); err != nil {
+	if err = site.BootstrapSystemTables(ctx, tenantDBConn, dialect); err != nil {
 		t.Fatal("bootstrap disposable tenant system tables:", err)
 	}
 	hookRegistry := doctype.NewRegistry()
@@ -272,7 +272,7 @@ func TestEngineProcessRestartResumesGovernedHumanApproval(t *testing.T) {
 		}
 	}
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapPlatformRegistry(platform, dialect); err != nil {
+	if err = site.BootstrapPlatformRegistry(context.Background(), platform, dialect); err != nil {
 		t.Fatal("bootstrap disposable platform directory:", err)
 	}
 	tenantDB := "kora_human_workflow_" + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -286,7 +286,7 @@ func TestEngineProcessRestartResumesGovernedHumanApproval(t *testing.T) {
 	}()
 	hostname := "human-workflow-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".example.invalid"
 	registry := site.NewSQLSiteRegistry(platform, "mysql")
-	if err := registry.Upsert(&site.Config{
+	if err = registry.Upsert(&site.Config{
 		Hostname: hostname, DomainsList: []string{hostname}, DBType: "mysql", DBHost: "127.0.0.1",
 		DBPort: mustPort(t, platformPort), DBName: tenantDB, DBUser: "root", DBPassword: "acceptance-only",
 	}); err != nil {
@@ -307,7 +307,7 @@ func TestEngineProcessRestartResumesGovernedHumanApproval(t *testing.T) {
 	}
 	tenantDatabase.SetMaxOpenConns(8)
 	defer tenantDatabase.Close()
-	if err := site.BootstrapSystemTablesContext(ctx, tenantDatabase, dialect); err != nil {
+	if err = site.BootstrapSystemTables(ctx, tenantDatabase, dialect); err != nil {
 		t.Fatal("bootstrap disposable tenant tables:", err)
 	}
 	suffix := contract.NewID()

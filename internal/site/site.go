@@ -372,14 +372,9 @@ func getEnvInt(key string, fallback int) int {
 	return fallback
 }
 
-// DiscoverSitesFromDB reads the canonical platform site directory.
-func DiscoverSitesFromDB(db *sql.DB) ([]DBSiteInfo, error) {
-	return DiscoverSitesFromDBContext(context.Background(), db)
-}
-
-// DiscoverSitesFromDBContext reads the canonical platform site directory with
+// DiscoverSitesFromDB reads the canonical platform site directory with
 // the caller's cancellation and deadline.
-func DiscoverSitesFromDBContext(ctx context.Context, db *sql.DB) ([]DBSiteInfo, error) {
+func DiscoverSitesFromDB(ctx context.Context, db *sql.DB) ([]DBSiteInfo, error) {
 	return discoverSitesFromRegistryContext(ctx, db)
 }
 
@@ -387,7 +382,7 @@ func DiscoverSitesFromDBContext(ctx context.Context, db *sql.DB) ([]DBSiteInfo, 
 // registry, including inactive tenants. Migration tools use it to avoid
 // leaving stored configuration behind on a suspended tenant.
 func DiscoverAllSitesFromDBContext(ctx context.Context, db *sql.DB) ([]DBSiteInfo, error) {
-	return discoverRegistrySitesContext(ctx, db, false)
+	return discoverRegistrySites(ctx, db, false)
 }
 
 // ReconstructSiteConfig builds a SiteConfig from platform defaults and persisted domains.
@@ -450,14 +445,9 @@ func ReconstructSiteConfigFromDBInfo(info DBSiteInfo, common *CommonConfig) *Con
 	return cfg
 }
 
-// Connect opens a database connection for the site.
-func Connect(cfg *Config) (*sql.DB, error) {
-	return ConnectContext(context.Background(), cfg)
-}
-
-// ConnectContext opens a tenant database through the shared process connection
+// Connect opens a tenant database through the shared process connection
 // budget and bounds the initial ping by the caller's activation/probe context.
-func ConnectContext(ctx context.Context, cfg *Config) (*sql.DB, error) {
+func Connect(ctx context.Context, cfg *Config) (*sql.DB, error) {
 	if ctx == nil || cfg == nil {
 		return nil, fmt.Errorf("database connection requires context and site config")
 	}
@@ -567,6 +557,8 @@ func tuneConnectionPool(db *sql.DB, driver string, maxOpen, maxIdle int) {
 	}
 }
 
+// CreateDatabaseContext creates the tenant database for cfg after validating its
+// name for the configured database type. It stops if ctx is canceled.
 func CreateDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *Config) error {
 	if ctx == nil {
 		return fmt.Errorf("database creation requires context")

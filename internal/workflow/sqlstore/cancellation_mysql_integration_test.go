@@ -33,7 +33,7 @@ func TestMySQLWorkflowCancellationIsFencedAndIdempotent(t *testing.T) {
 		t.Fatal("ping disposable MySQL:", err)
 	}
 	dialect := db.Resolve("mysql")
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap system tables:", err)
 	}
 	store, err := sqlstore.NewInstanceStore(database, dialect)

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -35,7 +36,7 @@ func assertPageManifestEndpointsServeRegisterView(t *testing.T, database *sql.DB
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	dialect := db.Resolve(dbType)
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err := site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal(err)
 	}
 	const siteName = "pos-manifest.example.test"

@@ -201,10 +201,10 @@ func insertSiteAliases(execer aliasExecer, dialect db.Dialect, siteID string, al
 	}
 	return nil
 }
-func ResolveSiteAlias(database *sql.DB, platformDBType, alias string) (string, error) {
-	return ResolveSiteAliasContext(context.Background(), database, platformDBType, alias)
-}
-func ResolveSiteAliasContext(ctx context.Context, database *sql.DB, platformDBType, alias string) (string, error) {
+
+// ResolveSiteAlias returns the site ID registered for alias. It returns
+// ErrSiteAliasIndexUnavailable until the alias index has been initialized.
+func ResolveSiteAlias(ctx context.Context, database *sql.DB, platformDBType, alias string) (string, error) {
 	if database == nil {
 		return "", errors.New("site registry unavailable")
 	}

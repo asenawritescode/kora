@@ -46,7 +46,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			}
 			database, dbName := isolatedDB(t, tc.driver, dsn)
 			dialect := db.Resolve(tc.driver)
-			if err := site.BootstrapSystemTables(database, dialect); err != nil {
+			if err := site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatal(err)
 			}
 			siteName := fmt.Sprintf("pos-cashier-%d.example.test", time.Now().UnixNano())
@@ -56,8 +56,8 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			info := site.DBSiteInfo{SiteID: siteName, Name: siteName, DBType: tc.driver, DBName: dbName, Status: "active"}
 			common := &site.CommonConfig{DBType: tc.driver}
 			loaded, err := loadTenantRuntime(context.Background(), info, common, nil, "test", tenantRuntimeDependencies{
-				connect:   func(*site.Config) (*sql.DB, error) { return database, nil },
-				bootstrap: func(*sql.DB, db.Dialect) error { return nil },
+				connect:   func(context.Context, *site.Config) (*sql.DB, error) { return database, nil },
+				bootstrap: func(context.Context, *sql.DB, db.Dialect) error { return nil },
 			})
 			if err != nil {
 				t.Fatal(err)

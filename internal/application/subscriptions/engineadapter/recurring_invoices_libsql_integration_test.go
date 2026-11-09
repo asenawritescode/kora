@@ -113,7 +113,7 @@ func TestLibSQLSubscriptionBillingProgressSurvivesRestartAndConcurrentRuns(t *te
 	if err != nil {
 		t.Fatal("open fresh fixture libSQL:", err)
 	}
-	if err := site.BootstrapSystemTables(database, dialect); err != nil {
+	if err = site.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap fresh fixture:", err)
 	}
 	if err := schema.MigrateSiteFromRegistry(database, siteName, registry, dialect); err != nil {

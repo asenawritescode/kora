@@ -4,6 +4,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -33,7 +34,7 @@ func TestCSVImportGroupByAcrossDialects(t *testing.T) {
 				t.Skipf("set %s", tc.env)
 			}
 			database, dialect := openKernelDialectDatabase(t, tc.driver, dsn)
-			if err := ksite.BootstrapSystemTables(database, dialect); err != nil {
+			if err := ksite.BootstrapSystemTables(context.Background(), database, dialect); err != nil {
 				t.Fatalf("bootstrap: %v", err)
 			}
 			suffix := fmt.Sprintf("%x", time.Now().UnixNano())

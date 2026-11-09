@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -74,7 +75,7 @@ func TestMySQLConfigImportRetriesJournaledPackWithoutDuplicateVersion(t *testing
 		t.Fatal("open disposable tenant schema")
 	}
 	tenantDB.SetMaxOpenConns(2)
-	if err := site.BootstrapSystemTables(tenantDB, db.MySQL()); err != nil {
+	if err := site.BootstrapSystemTables(context.Background(), tenantDB, db.MySQL()); err != nil {
 		tenantDB.Close()
 		t.Fatal("bootstrap config import system tables:", err)
 	}
@@ -86,7 +87,7 @@ func TestMySQLConfigImportRetriesJournaledPackWithoutDuplicateVersion(t *testing
 		t.Fatal("close setup connection:", err)
 	}
 
-	if err := runConfigImport("import-test.example", pack, databaseName); err == nil || !strings.Contains(err.Error(), "injected config import version failure") {
+	if err := runConfigImport(context.Background(), "import-test.example", pack, databaseName); err == nil || !strings.Contains(err.Error(), "injected config import version failure") {
 		t.Fatalf("first import error = %v, want injected config-version failure", err)
 	}
 	var failedPhase, failureMessage string
@@ -106,10 +107,10 @@ func TestMySQLConfigImportRetriesJournaledPackWithoutDuplicateVersion(t *testing
 	if _, err := adminDB.Exec("DROP TRIGGER `" + databaseName + "`.fail_import_version"); err != nil {
 		t.Fatal("remove disposable failure trigger:", err)
 	}
-	if err := runConfigImport("import-test.example", pack, databaseName); err != nil {
+	if err := runConfigImport(context.Background(), "import-test.example", pack, databaseName); err != nil {
 		t.Fatalf("retry journaled import: %v", err)
 	}
-	if err := runConfigImport("import-test.example", pack, databaseName); err != nil {
+	if err := runConfigImport(context.Background(), "import-test.example", pack, databaseName); err != nil {
 		t.Fatalf("repeat completed import: %v", err)
 	}
 

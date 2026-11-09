@@ -12,6 +12,8 @@ import (
 	"github.com/asenawritescode/kora/contract"
 )
 
+// Descriptor is the durable registry record of a site: its identity, deployment
+// assignment, database coordinates, domains and status. It carries no credentials.
 type Descriptor = contract.SiteDescriptor
 
 // DeploymentEntryV2FromDescriptor projects the existing single assignment

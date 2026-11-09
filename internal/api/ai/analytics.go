@@ -413,8 +413,8 @@ func executeAnalyticsReport(reg *doctype.Registry, tx *orm.TxManager, siteName s
 	return executeAnalyticsQuery(reg, tx, siteName, queryArgs, execution)
 }
 
-func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.SemanticRequest, execution policy.Execution, scopes ...contract.BusinessScope) error {
-	_, err := authorizeRelatedAnalytics(reg, reports, request, execution, scopes...)
+func checkRelatedAnalyticsPermissions(reg *doctype.Registry, reports []analytics.ReportDefinition, request analytics.SemanticRequest, execution policy.Execution) error {
+	_, err := authorizeRelatedAnalytics(reg, reports, request, execution)
 	return err
 }
 
