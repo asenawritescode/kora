@@ -445,10 +445,25 @@ WHERE id = ?`, runID).Scan(
 	return rec, nil
 }
 
-func AppendMessage(ctx context.Context, db *sql.DB, site, conversationID, runID, role, content, kind, stepID string, sequence int) error {
+// MessageRecord is one durable transcript entry. A zero Kind means "message"
+// and a non-positive Sequence means 1.
+type MessageRecord struct {
+	Site           string
+	ConversationID string
+	RunID          string
+	Role           string
+	Content        string
+	Kind           string
+	StepID         string
+	Sequence       int
+}
+
+// AppendMessage stores msg at its explicit Sequence.
+func AppendMessage(ctx context.Context, db *sql.DB, msg MessageRecord) error {
 	if db == nil {
 		return nil
 	}
+	kind, sequence := msg.Kind, msg.Sequence
 	if kind == "" {
 		kind = "message"
 	}
@@ -458,7 +473,7 @@ func AppendMessage(ctx context.Context, db *sql.DB, site, conversationID, runID,
 	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_message (id, site, conversation_id, run_id, role, content, message_kind, step_id, sequence, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ulid.Make().String(), site, conversationID, runID, role, content, kind, stepID, sequence, time.Now().UTC(),
+		ulid.Make().String(), msg.Site, msg.ConversationID, msg.RunID, msg.Role, msg.Content, kind, msg.StepID, sequence, time.Now().UTC(),
 	)
 	return err
 }
@@ -489,25 +504,44 @@ ORDER BY sequence, created_at, id`, site, conversationID)
 }
 
 // AppendConversationMessage assigns the next sequence inside the tenant's
-// conversation so refreshes and multiple turns preserve transcript order.
-func AppendConversationMessage(ctx context.Context, db *sql.DB, site, conversationID, runID, role, content, kind, stepID string) error {
+// conversation so refreshes and multiple turns preserve transcript order. The
+// Sequence field of msg is replaced by the assigned value.
+func AppendConversationMessage(ctx context.Context, db *sql.DB, msg MessageRecord) error {
 	var sequence int
 	if err := (aiSQL{db}).QueryRowContext(ctx, `
 SELECT COALESCE(MAX(sequence), 0) + 1
 FROM _kora_ai_message
-WHERE site = ? AND conversation_id = ?`, site, conversationID).Scan(&sequence); err != nil {
+WHERE site = ? AND conversation_id = ?`, msg.Site, msg.ConversationID).Scan(&sequence); err != nil {
 		return err
 	}
-	return AppendMessage(ctx, db, site, conversationID, runID, role, content, kind, stepID, sequence)
+	msg.Sequence = sequence
+	return AppendMessage(ctx, db, msg)
 }
 
-func UpsertStep(ctx context.Context, db *sql.DB, stepID, site, runID, conversationID, stepKey, status, summary, toolName, inputJSON, outputJSON, errorMessage string) error {
+// StepRecord is one run step as stored by UpsertStep. An empty ID is replaced
+// with a fresh ULID.
+type StepRecord struct {
+	ID             string
+	Site           string
+	RunID          string
+	ConversationID string
+	StepKey        string
+	Status         string
+	Summary        string
+	ToolName       string
+	InputJSON      string
+	OutputJSON     string
+	ErrorMessage   string
+}
+
+// UpsertStep inserts step or updates the stored row with the same ID.
+func UpsertStep(ctx context.Context, db *sql.DB, step StepRecord) error {
 	if db == nil {
 		return nil
 	}
 	now := time.Now().UTC()
-	if stepID == "" {
-		stepID = ulid.Make().String()
+	if step.ID == "" {
+		step.ID = ulid.Make().String()
 	}
 	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_step (
@@ -525,7 +559,7 @@ ON CONFLICT(id) DO UPDATE SET
 	output_json=excluded.output_json,
 	error_message=excluded.error_message,
 	updated_at=excluded.updated_at`,
-		stepID, site, runID, conversationID, stepKey, status, summary, toolName, inputJSON, outputJSON, errorMessage, now, now,
+		step.ID, step.Site, step.RunID, step.ConversationID, step.StepKey, step.Status, step.Summary, step.ToolName, step.InputJSON, step.OutputJSON, step.ErrorMessage, now, now,
 	)
 	return err
 }
@@ -607,11 +641,20 @@ WHERE id = ?`, status, notes, now, completed, taskID)
 	return err
 }
 
-func QueueFollowUpTasks(ctx context.Context, db *sql.DB, site, runID, conversationID string, tasks []TaskRecord) error {
+// RunScope names the tenant, run and conversation that new rows belong to.
+type RunScope struct {
+	Site           string
+	RunID          string
+	ConversationID string
+}
+
+// QueueFollowUpTasks stores tasks under scope, defaulting an empty Status to
+// "queued" and an empty Kind to "task".
+func QueueFollowUpTasks(ctx context.Context, db *sql.DB, scope RunScope, tasks []TaskRecord) error {
 	for i := range tasks {
-		tasks[i].Site = site
-		tasks[i].RunID = runID
-		tasks[i].ConversationID = conversationID
+		tasks[i].Site = scope.Site
+		tasks[i].RunID = scope.RunID
+		tasks[i].ConversationID = scope.ConversationID
 		if tasks[i].Status == "" {
 			tasks[i].Status = "queued"
 		}
@@ -625,7 +668,19 @@ func QueueFollowUpTasks(ctx context.Context, db *sql.DB, site, runID, conversati
 	return nil
 }
 
-func UpdateStepStatus(ctx context.Context, db *sql.DB, stepID, status, summary, toolName, inputJSON, outputJSON, errorMessage string) error {
+// StepUpdate carries the step fields UpdateStepStatus changes. An empty field
+// leaves the stored value as it is.
+type StepUpdate struct {
+	Status       string
+	Summary      string
+	ToolName     string
+	InputJSON    string
+	OutputJSON   string
+	ErrorMessage string
+}
+
+// UpdateStepStatus applies the non-empty fields of upd to the step stepID.
+func UpdateStepStatus(ctx context.Context, db *sql.DB, stepID string, upd StepUpdate) error {
 	if db == nil || stepID == "" {
 		return nil
 	}
@@ -639,7 +694,7 @@ SET status = COALESCE(NULLIF(?, ''), status),
 	error_message = COALESCE(NULLIF(?, ''), error_message),
 	updated_at = ?
 WHERE id = ?`,
-		status, summary, toolName, inputJSON, outputJSON, errorMessage, time.Now().UTC(), stepID,
+		upd.Status, upd.Summary, upd.ToolName, upd.InputJSON, upd.OutputJSON, upd.ErrorMessage, time.Now().UTC(), stepID,
 	)
 	return err
 }
@@ -874,7 +929,7 @@ func MarkRunPendingApproval(ctx context.Context, db *sql.DB, runID, stepID, reas
 	if err := UpsertRun(ctx, db, rec); err != nil {
 		return err
 	}
-	return UpsertStep(ctx, db, stepID, rec.Site, rec.ID, rec.ConversationID, stepID, "pending_approval", reason, "", "", "", reason)
+	return UpsertStep(ctx, db, StepRecord{ID: stepID, Site: rec.Site, RunID: rec.ID, ConversationID: rec.ConversationID, StepKey: stepID, Status: "pending_approval", Summary: reason, ErrorMessage: reason})
 }
 
 func MarkRunPlanning(ctx context.Context, db *sql.DB, runID string) (RunRecord, error) {

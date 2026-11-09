@@ -142,11 +142,23 @@ INSERT INTO _kora_ai_audit (
 	return nil
 }
 
+// BudgetRequest asks ReserveBudget for RequestedTokens out of Budget. A
+// non-positive RequestedTokens counts as 1 and a non-positive Budget means no
+// limit.
+type BudgetRequest struct {
+	Site            string
+	Model           string
+	RequestedTokens int
+	Budget          int
+	Note            string
+}
+
 // ReserveBudget records a token reservation if enough unreserved budget remains.
-func ReserveBudget(ctx context.Context, db *sql.DB, site, model string, requestedTokens, budget int, note string) (BudgetReservation, error) {
+func ReserveBudget(ctx context.Context, db *sql.DB, req BudgetRequest) (BudgetReservation, error) {
 	if db == nil {
 		return BudgetReservation{}, nil
 	}
+	site, model, requestedTokens, budget, note := req.Site, req.Model, req.RequestedTokens, req.Budget, req.Note
 	if requestedTokens <= 0 {
 		requestedTokens = 1
 	}

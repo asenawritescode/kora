@@ -104,10 +104,10 @@ func TestLivePostgresAIApprovalListBootstrap(t *testing.T) {
 	if got, err := aiStore.LoadRun(storeCtx, database, run.ID); err != nil || got.InputMessage != run.InputMessage {
 		t.Fatalf("load PostgreSQL AI run = %#v, %v", got, err)
 	}
-	if err := aiStore.AppendMessage(storeCtx, database, "site-pg", conversation.ID, run.ID, "user", "hello", "message", "", 1); err != nil {
+	if err = aiStore.AppendMessage(storeCtx, database, aiStore.MessageRecord{Site: "site-pg", ConversationID: conversation.ID, RunID: run.ID, Role: "user", Content: "hello", Kind: "message", Sequence: 1}); err != nil {
 		t.Fatal("append PostgreSQL AI message:", err)
 	}
-	if err := aiStore.UpsertStep(storeCtx, database, "step-pg", "site-pg", run.ID, conversation.ID, "plan", "planning", "started", "", "{}", "{}", ""); err != nil {
+	if err = aiStore.UpsertStep(storeCtx, database, aiStore.StepRecord{ID: "step-pg", Site: "site-pg", RunID: run.ID, ConversationID: conversation.ID, StepKey: "plan", Status: "planning", Summary: "started", InputJSON: "{}", OutputJSON: "{}"}); err != nil {
 		t.Fatal("upsert PostgreSQL AI step:", err)
 	}
 	if err := aiStore.UpsertTask(storeCtx, database, aiStore.TaskRecord{ID: "task-pg", Site: "site-pg", RunID: run.ID, ConversationID: conversation.ID, Title: "Task", Status: "queued"}); err != nil {
@@ -119,7 +119,7 @@ func TestLivePostgresAIApprovalListBootstrap(t *testing.T) {
 	if err := aiStore.MarkTaskStatus(storeCtx, database, "task-pg", "completed", "done"); err != nil {
 		t.Fatal("update PostgreSQL AI task:", err)
 	}
-	if err := aiStore.UpdateStepStatus(storeCtx, database, "step-pg", "completed", "done", "", "", "", ""); err != nil {
+	if err = aiStore.UpdateStepStatus(storeCtx, database, "step-pg", aiStore.StepUpdate{Status: "completed", Summary: "done"}); err != nil {
 		t.Fatal("update PostgreSQL AI step:", err)
 	}
 	if _, err := aiStore.ListRunSteps(storeCtx, database, run.ID); err != nil {
@@ -131,7 +131,7 @@ func TestLivePostgresAIApprovalListBootstrap(t *testing.T) {
 	if err := aiStore.RecordAudit(storeCtx, database, aiStore.AuditEvent{ID: "audit-pg", Site: "site-pg", RunID: run.ID, Kind: "tool_call", Status: "completed"}); err != nil {
 		t.Fatal("record PostgreSQL AI audit:", err)
 	}
-	reservation, err := aiStore.ReserveBudget(storeCtx, database, "site-pg", "model-pg", 10, 100, "integration test")
+	reservation, err := aiStore.ReserveBudget(storeCtx, database, aiStore.BudgetRequest{Site: "site-pg", Model: "model-pg", RequestedTokens: 10, Budget: 100, Note: "integration test"})
 	if err != nil {
 		t.Fatal("reserve PostgreSQL AI budget:", err)
 	}
