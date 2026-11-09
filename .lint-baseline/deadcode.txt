@@ -171,7 +171,6 @@ internal/doctype/parser.go::validateQuantityEffects
 internal/doctype/rollback.go::GenerateRollbackPlan
 internal/doctype/sexpr.go::CanonicalizeSExpr
 internal/doctype/snapshot.go::IsJSONConfig
-internal/engine/async_hooks.go::NewAsyncHookWorker
 internal/engine/async_hooks.go::StartAsyncHookWorker
 internal/engine/deletion_worker.go::StartPendingDeletionWorker
 internal/engine/directory_lag.go::StartDirectoryLagMonitor

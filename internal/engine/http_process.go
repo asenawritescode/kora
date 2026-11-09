@@ -87,15 +87,11 @@ func AssembleHTTPProcess(config HTTPProcessAssemblyConfig) (*HTTPProcessAssembly
 	if queueSize == 0 {
 		queueSize = DefaultAsyncHookQueueSize
 	}
-	maxQueuedBytes := config.AsyncHookMaxQueuedBytes
-	if maxQueuedBytes == 0 {
-		maxQueuedBytes = DefaultAsyncHookMaxQueuedBytes
-	}
-	maxEventBytes := config.AsyncHookMaxEventBytes
-	if maxEventBytes == 0 {
-		maxEventBytes = DefaultAsyncHookMaxEventBytes
-	}
-	asyncHooks, err := NewAsyncHookWorkerWithLimits(queueSize, maxQueuedBytes, maxEventBytes, config.Application.ScriptRunner, config.Application.Tenants, config.Application.Common.DBType, config.Application.HTTPAllowlist)
+	asyncHooks, err := NewAsyncHookWorker(AsyncHookOptions{
+		QueueSize: queueSize, MaxQueuedBytes: config.AsyncHookMaxQueuedBytes, MaxEventBytes: config.AsyncHookMaxEventBytes,
+		Runner: config.Application.ScriptRunner, Sites: config.Application.Tenants,
+		DBType: config.Application.Common.DBType, HTTPAllowlist: config.Application.HTTPAllowlist,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("start async script hook worker: %w", err)
 	}

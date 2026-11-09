@@ -178,8 +178,10 @@ func TestDurableLifecycleHookWorkerCommitsAuthorizedLocalMutationAcrossDialects(
 
 			writer := outbox.NewSQLWriter(dialect)
 			failing := &integrationMutationLifecycleRunner{failAfterMutation: true}
-			worked, err := processOneDurableLifecycleHook(ctx, failing, store, database, registry, dialect, writer,
-				tenant, siteName, "worker-fail", nil, nil, nil)
+			worked, err := processOneDurableLifecycleHook(ctx, &lifecycleHookPass{
+				LifecycleHookWorker: LifecycleHookWorker{Runner: failing, Store: store, DB: database, Registry: registry, Outbox: writer, Site: siteName},
+				dialect:             dialect, tenant: tenant, owner: "worker-fail",
+			})
 			if err != nil || !worked {
 				t.Fatalf("failed worker pass = (%t, %v), want handled script failure", worked, err)
 			}
@@ -194,8 +196,10 @@ func TestDurableLifecycleHookWorkerCommitsAuthorizedLocalMutationAcrossDialects(
 				t.Fatal("make retry due:", err)
 			}
 			succeeding := &integrationMutationLifecycleRunner{}
-			worked, err = processOneDurableLifecycleHook(ctx, succeeding, store, database, registry, dialect, writer,
-				tenant, siteName, "worker-retry", nil, nil, nil)
+			worked, err = processOneDurableLifecycleHook(ctx, &lifecycleHookPass{
+				LifecycleHookWorker: LifecycleHookWorker{Runner: succeeding, Store: store, DB: database, Registry: registry, Outbox: writer, Site: siteName},
+				dialect:             dialect, tenant: tenant, owner: "worker-retry",
+			})
 			if err != nil || !worked {
 				t.Fatalf("successful worker pass = (%t, %v), want success", worked, err)
 			}
@@ -228,8 +232,10 @@ func TestDurableLifecycleHookWorkerCommitsAuthorizedLocalMutationAcrossDialects(
 				t.Fatal("commit protected invocation:", err)
 			}
 			protectedRunner := &integrationMutationLifecycleRunner{targetDoctype: protected.Name}
-			worked, err = processOneDurableLifecycleHook(ctx, protectedRunner, store, database, registry, dialect, writer,
-				tenant, siteName, "worker-protected", nil, nil, nil)
+			worked, err = processOneDurableLifecycleHook(ctx, &lifecycleHookPass{
+				LifecycleHookWorker: LifecycleHookWorker{Runner: protectedRunner, Store: store, DB: database, Registry: registry, Outbox: writer, Site: siteName},
+				dialect:             dialect, tenant: tenant, owner: "worker-protected",
+			})
 			if err != nil || !worked {
 				t.Fatalf("protected nested-write worker pass = (%t, %v), want handled script rejection", worked, err)
 			}

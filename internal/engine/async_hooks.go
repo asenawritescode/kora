@@ -44,10 +44,22 @@ type AsyncHookWorker struct {
 	runFn    func(context.Context)
 }
 
+// AsyncHookOptions configures an AsyncHookWorker. A zero MaxQueuedBytes or
+// MaxEventBytes selects the default limit.
+type AsyncHookOptions struct {
+	QueueSize      int
+	MaxQueuedBytes uint64
+	MaxEventBytes  uint64
+	Runner         script.Runner
+	Sites          *knet.SiteRouter
+	DBType         string
+	HTTPAllowlist  []string
+}
+
 // StartAsyncHookWorker creates one process-owned worker. Its independent
 // context lets the process owner drain accepted work before cancellation.
-func StartAsyncHookWorker(queueSize int, runner script.Runner, siteRouter *knet.SiteRouter, dbType string, httpAllowlist []string) (*AsyncHookWorker, error) {
-	worker, err := NewAsyncHookWorker(queueSize, runner, siteRouter, dbType, httpAllowlist)
+func StartAsyncHookWorker(opts AsyncHookOptions) (*AsyncHookWorker, error) {
+	worker, err := NewAsyncHookWorker(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -58,30 +70,32 @@ func StartAsyncHookWorker(queueSize int, runner script.Runner, siteRouter *knet.
 }
 
 // NewAsyncHookWorker prepares the bounded queue without launching its consumer.
-func NewAsyncHookWorker(queueSize int, runner script.Runner, siteRouter *knet.SiteRouter, dbType string, httpAllowlist []string) (*AsyncHookWorker, error) {
-	return NewAsyncHookWorkerWithLimits(queueSize, DefaultAsyncHookMaxQueuedBytes, DefaultAsyncHookMaxEventBytes, runner, siteRouter, dbType, httpAllowlist)
-}
-
-// NewAsyncHookWorkerWithLimits bounds both queued request count and estimated
-// serialized bytes. The estimate is conservative and stops once a limit is hit.
-func NewAsyncHookWorkerWithLimits(queueSize int, maxQueuedBytes, maxEventBytes uint64, runner script.Runner, siteRouter *knet.SiteRouter, dbType string, httpAllowlist []string) (*AsyncHookWorker, error) {
-	if queueSize <= 0 {
+// It bounds both the queued request count and the estimated serialized bytes;
+// the estimate is conservative and stops once a limit is hit.
+func NewAsyncHookWorker(opts AsyncHookOptions) (*AsyncHookWorker, error) {
+	if opts.QueueSize <= 0 {
 		return nil, ErrAsyncHookQueueSize
 	}
-	if maxQueuedBytes == 0 || maxEventBytes == 0 || maxEventBytes > maxQueuedBytes {
+	if opts.MaxQueuedBytes == 0 {
+		opts.MaxQueuedBytes = DefaultAsyncHookMaxQueuedBytes
+	}
+	if opts.MaxEventBytes == 0 {
+		opts.MaxEventBytes = DefaultAsyncHookMaxEventBytes
+	}
+	if opts.MaxEventBytes > opts.MaxQueuedBytes {
 		return nil, errors.New("async hook byte limits must be positive and event limit cannot exceed queue limit")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	worker := &AsyncHookWorker{
 		sink: &asyncHookQueueSink{
-			queue: make(chan asyncHookQueueItem, queueSize), maxQueuedBytes: maxQueuedBytes,
-			maxEventBytes: maxEventBytes,
+			queue: make(chan asyncHookQueueItem, opts.QueueSize), maxQueuedBytes: opts.MaxQueuedBytes,
+			maxEventBytes: opts.MaxEventBytes,
 		},
 		ctx:    ctx,
 		cancel: cancel,
 		done:   make(chan struct{}),
 	}
-	worker.runFn = func(ctx context.Context) { worker.run(ctx, runner, siteRouter, dbType, httpAllowlist) }
+	worker.runFn = func(ctx context.Context) { worker.run(ctx, opts) }
 	return worker, nil
 }
 
@@ -138,7 +152,7 @@ func (w *AsyncHookWorker) Done() <-chan struct{} {
 	return w.done
 }
 
-func (w *AsyncHookWorker) run(ctx context.Context, runner script.Runner, siteRouter *knet.SiteRouter, dbType string, httpAllowlist []string) {
+func (w *AsyncHookWorker) run(ctx context.Context, opts AsyncHookOptions) {
 	for {
 		var req orm.AsyncHookRequest
 		select {
@@ -151,11 +165,11 @@ func (w *AsyncHookWorker) run(ctx context.Context, runner script.Runner, siteRou
 			w.sink.releaseBytes(next.bytes)
 			req = next.request
 		}
-		if runner == nil || siteRouter == nil {
+		if opts.Runner == nil || opts.Sites == nil {
 			slog.Warn("async hook dropped because script execution is unavailable", "site", req.Site, "script", req.Rec.Name)
 			continue
 		}
-		_, handle, ok := siteRouter.AcquireByName(ctx, req.Site)
+		_, handle, ok := opts.Sites.AcquireByName(ctx, req.Site)
 		if !ok || handle == nil {
 			continue
 		}
@@ -174,13 +188,13 @@ func (w *AsyncHookWorker) run(ctx context.Context, runner script.Runner, siteRou
 
 			loadedDBType := loadedSite.DBType
 			if loadedDBType == "" {
-				loadedDBType = dbType
+				loadedDBType = opts.DBType
 			}
 			tm := &orm.TxManager{
 				DB:              loadedSite.DB,
 				Registry:        loadedSite.Registry,
 				Dialect:         kdb.Resolve(loadedDBType),
-				ScriptRunner:    runner,
+				ScriptRunner:    opts.Runner,
 				SiteName:        req.Site,
 				CurrentUser:     req.User,
 				CurrentUserRole: req.UserRole,
@@ -195,7 +209,7 @@ func (w *AsyncHookWorker) run(ctx context.Context, runner script.Runner, siteRou
 			}
 			defer releaseWork()
 			tm.ScriptStore = services.ScriptStore
-			tm.ScriptProvider = api.NewScriptProvider(tm, loadedSite.Registry, req.Site, nil, httpAllowlist)
+			tm.ScriptProvider = api.NewScriptProvider(tm, loadedSite.Registry, req.Site, nil, opts.HTTPAllowlist)
 
 			doc := orm.DocumentFromMap(loadedSite.Registry, req.Doctype, req.Doc)
 			if doc == nil {
@@ -231,7 +245,7 @@ func (w *AsyncHookWorker) run(ctx context.Context, runner script.Runner, siteRou
 				execReq.OldDocument = oldDoc.ToMap()
 			}
 
-			result, execErr := runner.Execute(ctx, execReq)
+			result, execErr := opts.Runner.Execute(ctx, execReq)
 			status := "success"
 			errMsg := ""
 			durationMs := 0

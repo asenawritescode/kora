@@ -58,7 +58,7 @@ func TestFallbackPathSiteRoutingStillDispatchesAPI(t *testing.T) {
 }
 
 func TestAsyncHookWorkerExitsAfterQueueClose(t *testing.T) {
-	worker, err := engine.StartAsyncHookWorker(1, nil, nil, "", nil)
+	worker, err := engine.StartAsyncHookWorker(engine.AsyncHookOptions{QueueSize: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,9 @@ func TestAsyncHookWorkerPinsTenantRuntimeUntilExecutionFinishes(t *testing.T) {
 	}
 	router := knet.NewSiteRouter([]*knet.LoadedSite{runtime})
 	entered, release := make(chan struct{}), make(chan struct{})
-	worker, err := engine.StartAsyncHookWorker(1, blockingAsyncHookRunner{entered: entered, release: release}, router, "mysql", nil)
+	worker, err := engine.StartAsyncHookWorker(engine.AsyncHookOptions{
+		QueueSize: 1, Runner: blockingAsyncHookRunner{entered: entered, release: release}, Sites: router, DBType: "mysql",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
