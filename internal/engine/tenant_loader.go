@@ -25,7 +25,7 @@ import (
 // generation may lend its stable DB and session manager; failed preparation
 // never closes those borrowed resources.
 func LoadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.CommonConfig, reusable *knet.LoadedSite, binaryVersion string) (runtime *knet.LoadedSite, err error) {
-	return loadTenantRuntime(ctx, info, common, reusable, binaryVersion, tenantRuntimeDependencies{
+	return loadTenantRuntime(ctx, tenantRuntimeRequest{info: info, common: common, reusable: reusable, binaryVersion: binaryVersion}, tenantRuntimeDependencies{
 		connect:    site.Connect,
 		bootstrap:  site.BootstrapSystemTables,
 		claimOwner: site.ClaimDatabaseOwner,
@@ -38,7 +38,16 @@ type tenantRuntimeDependencies struct {
 	claimOwner func(context.Context, *sql.DB, kdb.Dialect, string) error
 }
 
-func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.CommonConfig, reusable *knet.LoadedSite, binaryVersion string, dependencies tenantRuntimeDependencies) (runtime *knet.LoadedSite, err error) {
+// tenantRuntimeRequest names the tenant generation to prepare and the
+// resources a compatible previous generation may lend it.
+type tenantRuntimeRequest struct {
+	info          site.DBSiteInfo
+	common        *site.CommonConfig
+	reusable      *knet.LoadedSite
+	binaryVersion string
+}
+
+func loadTenantRuntime(ctx context.Context, req tenantRuntimeRequest, dependencies tenantRuntimeDependencies) (runtime *knet.LoadedSite, err error) { //nolint:contextcheck // tolerates a nil ctx from legacy callers
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -49,18 +58,18 @@ func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 		dependencies.bootstrap = site.BootstrapSystemTables
 	}
 	tracer := otel.Tracer("kora/engine/tenant_runtime")
-	ctx, span := tracer.Start(ctx, "engine.load_tenant_runtime", trace.WithAttributes(attribute.String("kora.site.name", info.Name)))
+	ctx, span := tracer.Start(ctx, "engine.load_tenant_runtime", trace.WithAttributes(attribute.String("kora.site.name", req.info.Name)))
 	defer span.End()
-	siteCfg := site.ReconstructSiteConfigFromDBInfo(info, common)
+	siteCfg := site.ReconstructSiteConfigFromDBInfo(req.info, req.common)
 	dialect := kdb.Resolve(siteCfg.DBType)
 	databaseIdentity := site.ConnectionIdentity(siteCfg)
 	span.SetAttributes(attribute.String("db.system", siteCfg.DBType))
 	var database *sql.DB
 	var sessionManager *auth.SessionManager
 	ownsDatabase := true
-	if canReuseTenantResources(reusable, databaseIdentity) {
-		database = reusable.DB
-		sessionManager = reusable.SessionManager
+	if canReuseTenantResources(req.reusable, databaseIdentity) {
+		database = req.reusable.DB
+		sessionManager = req.reusable.SessionManager
 		ownsDatabase = false
 	} else {
 		_, phase := tracer.Start(ctx, "engine.tenant.connect")
@@ -94,45 +103,45 @@ func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 	// LibSQL tenants all resolve to the shared DB_DSN database and its business
 	// tables are not tenant-prefixed, so only one tenant may own it.
 	if siteCfg.DBType == "libsql" && dependencies.claimOwner != nil {
-		if err = dependencies.claimOwner(ctx, database, dialect, info.SiteID); err != nil {
+		if err = dependencies.claimOwner(ctx, database, dialect, req.info.SiteID); err != nil {
 			return nil, fmt.Errorf("claiming tenant database: %w", err)
 		}
 	}
 	_, phase = tracer.Start(ctx, "engine.tenant.load_config")
 	store := configstore.NewStore(database, dialect)
-	doctypes, err := store.LoadAll(info.Name)
+	doctypes, err := store.LoadAll(req.info.Name)
 	if err != nil {
 		phase.SetStatus(codes.Error, "tenant configuration load failed")
 		phase.End()
 		return nil, fmt.Errorf("loading doctypes: %w", err)
 	}
-	roles, err := store.LoadRoles(info.Name)
+	roles, err := store.LoadRoles(req.info.Name)
 	if err != nil {
 		phase.SetStatus(codes.Error, "tenant configuration load failed")
 		phase.End()
 		return nil, fmt.Errorf("loading roles: %w", err)
 	}
-	permissions, err := store.LoadPermissions(info.Name)
+	permissions, err := store.LoadPermissions(req.info.Name)
 	if err != nil {
 		phase.SetStatus(codes.Error, "tenant configuration load failed")
 		phase.End()
 		return nil, fmt.Errorf("loading permissions: %w", err)
 	}
-	views, err := store.LoadViews(info.Name)
+	views, err := store.LoadViews(req.info.Name)
 	if err != nil {
 		phase.SetStatus(codes.Error, "tenant configuration load failed")
 		phase.End()
 		return nil, fmt.Errorf("loading views: %w", err)
 	}
-	minKoraVersion, err := ActiveConfigMinKoraVersion(ctx, database, dialect, info.Name)
+	minKoraVersion, err := ActiveConfigMinKoraVersion(ctx, database, dialect, req.info.Name)
 	if err != nil {
 		phase.SetStatus(codes.Error, "tenant configuration version load failed")
 		phase.End()
 		return nil, fmt.Errorf("loading active config version: %w", err)
 	}
 	phase.End()
-	if minKoraVersion != "" && binaryVersion != "" && !doctype.MinVersionOK(binaryVersion, minKoraVersion) {
-		slog.Warn("active config version requires newer kora binary", "site", info.Name, "required", minKoraVersion, "running", binaryVersion)
+	if minKoraVersion != "" && req.binaryVersion != "" && !doctype.MinVersionOK(req.binaryVersion, minKoraVersion) {
+		slog.Warn("active config version requires newer kora binary", "site", req.info.Name, "required", minKoraVersion, "running", req.binaryVersion)
 	}
 	registry := doctype.NewRegistry()
 	registry.LoadFull(doctypes, roles, permissions)
@@ -150,10 +159,10 @@ func loadTenantRuntime(ctx context.Context, info site.DBSiteInfo, common *site.C
 		sessionManager = auth.NewOwnedSessionManagerPaused(database).SetDialect(dialect)
 	}
 	runtime = &knet.LoadedSite{
-		SiteID: info.SiteID, ConfigRevision: info.ConfigRevision, DatabaseIdentity: databaseIdentity, Status: info.Status, DBType: siteCfg.DBType,
-		Name: info.Name,
+		SiteID: req.info.SiteID, ConfigRevision: req.info.ConfigRevision, DatabaseIdentity: databaseIdentity, Status: req.info.Status, DBType: siteCfg.DBType,
+		Name: req.info.Name,
 		Config: knet.SiteRouterConfig{
-			Hostname:      info.Name,
+			Hostname:      req.info.Name,
 			Domains:       siteCfg.Domains(),
 			FileStorage:   siteCfg.FileStorage,
 			StorageBucket: siteCfg.StorageBucket,

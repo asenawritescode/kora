@@ -499,7 +499,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		}
 		workflowRuntimeConfig = &workflowConfigCopy
 	}
-	workflowWorker, definitionService, instanceService, err := configureTenantWorkflow(config.ProcessContext, workflowRuntimeConfig, loaded, dialect, requestService, workAdmission, domainKernel)
+	workflowWorker, definitionService, instanceService, err := configureTenantWorkflow(config.ProcessContext, workflowRuntimeConfig, loaded, tenantWorkflowDeps{dialect: dialect, requests: requestService, admission: workAdmission, domainKernel: domainKernel})
 	if err != nil {
 		return fmt.Errorf("compose durable workflow runtime for tenant %s: %w", loaded.Name, err)
 	}
@@ -632,7 +632,12 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			jobs = append(jobs, &scheduler.JobConfig{Name: definition.Name, OwnerModuleID: definition.OwnerModuleID, Type: scheduler.JobType(definition.Type), Schedule: definition.Schedule, Config: jobConfig, Scope: scope, RequiredResource: definition.RequiredResource, RequiredOperation: definition.RequiredOperation})
 		}
 	}
-	tenantScheduler, err := newTenantScheduler(loaded, dialect, jobs, domainKernel, services.ModuleBindings, config.SchedulerHandlerFactory, config.SchedulerExecutionResolverFactory, config.Mailer, services.Outbox, config.ScriptRunner, services.ScriptStore, services.WorkAdmission, worker)
+	tenantScheduler, err := newTenantScheduler(loaded, tenantSchedulerOptions{
+		dialect: dialect, jobs: jobs, operationKernel: domainKernel, moduleBindings: services.ModuleBindings,
+		handlerFactory: config.SchedulerHandlerFactory, executionResolverFactory: config.SchedulerExecutionResolverFactory,
+		mailer: config.Mailer, outbox: services.Outbox, scriptRunner: config.ScriptRunner, scriptStore: services.ScriptStore,
+		workAdmission: services.WorkAdmission, webhookRetrier: worker,
+	})
 	if err != nil {
 		return fmt.Errorf("construct scheduler for tenant %s: %w", loaded.Name, err)
 	}
@@ -813,57 +818,77 @@ func registerWebhookDelivery(config TenantServiceConfig, loaded *knet.LoadedSite
 	})
 }
 
-func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*scheduler.JobConfig, operationKernel *kernel.Kernel, moduleBindings *plugin.BindingPlan, handlerFactory ScheduledJobHandlerFactory, executionResolverFactory ScheduledJobExecutionResolverFactory, mailer *email.Sender, outboxWriter outbox.Writer, scriptRunner script.Runner, scriptStore *script.Store, workAdmission interface {
+// tenantWorkAdmission gates the database work of one tenant.
+type tenantWorkAdmission interface {
 	Acquire(context.Context) (func(), error)
-}, webhookRetrier scheduler.WebhookRetrier) (*scheduler.Scheduler, error) {
+}
+
+// tenantSchedulerOptions are the tenant services a scheduler generation draws
+// on. Every field except dialect may be omitted.
+type tenantSchedulerOptions struct {
+	dialect                  kdb.Dialect
+	jobs                     []*scheduler.JobConfig
+	operationKernel          *kernel.Kernel
+	moduleBindings           *plugin.BindingPlan
+	handlerFactory           ScheduledJobHandlerFactory
+	executionResolverFactory ScheduledJobExecutionResolverFactory
+	mailer                   *email.Sender
+	outbox                   outbox.Writer
+	scriptRunner             script.Runner
+	scriptStore              *script.Store
+	workAdmission            tenantWorkAdmission
+	webhookRetrier           scheduler.WebhookRetrier
+}
+
+func newTenantScheduler(loaded *knet.LoadedSite, opts tenantSchedulerOptions) (*scheduler.Scheduler, error) {
 	if loaded == nil || loaded.DB == nil || loaded.Registry == nil {
 		return nil, nil
 	}
 	if loaded.SiteID == "" {
 		return nil, errors.New("tenant scheduler requires stable tenant ID")
 	}
-	store, err := schedulersql.New(loaded.DB, dialect)
+	store, err := schedulersql.New(loaded.DB, opts.dialect)
 	if err != nil {
 		return nil, err
 	}
 	ensureCtx, cancelEnsure := context.WithTimeout(context.Background(), 30*time.Second)
-	err = withTenantWorkAdmission(ensureCtx, workAdmission, "ensure durable scheduler schema", func() error {
+	err = withTenantWorkAdmission(ensureCtx, opts.workAdmission, "ensure durable scheduler schema", func() error {
 		return store.Ensure(ensureCtx)
 	})
 	cancelEnsure()
 	if err != nil {
 		return nil, fmt.Errorf("prepare durable scheduler store: %w", err)
 	}
-	if len(jobs) == 0 {
+	if len(opts.jobs) == 0 {
 		return nil, nil
 	}
-	if mailer == nil {
-		mailer = email.NewSender(&email.Config{From: "kora@localhost"})
+	if opts.mailer == nil {
+		opts.mailer = email.NewSender(&email.Config{From: "kora@localhost"})
 	}
 	txManager := &orm.TxManager{
-		DB: loaded.DB, Registry: loaded.Registry, Dialect: dialect,
-		Outbox: outboxWriter, ScriptRunner: scriptRunner,
-		ScriptStore: scriptStore, SiteName: loaded.Name,
+		DB: loaded.DB, Registry: loaded.Registry, Dialect: opts.dialect,
+		Outbox: opts.outbox, ScriptRunner: opts.scriptRunner,
+		ScriptStore: opts.scriptStore, SiteName: loaded.Name,
 	}
-	worker := scheduler.New(loaded.DB, loaded.Registry, txManager, mailer)
-	worker.WebhookWorker = webhookRetrier
-	worker.ScriptRunner = scriptRunner
-	worker.ScriptStore = scriptStore
+	worker := scheduler.New(loaded.DB, loaded.Registry, txManager, opts.mailer)
+	worker.WebhookWorker = opts.webhookRetrier
+	worker.ScriptRunner = opts.scriptRunner
+	worker.ScriptStore = opts.scriptStore
 	worker.SiteName = loaded.Name
-	worker.WorkAdmission = workAdmission
+	worker.WorkAdmission = opts.workAdmission
 	worker.TenantID = loaded.SiteID
 	worker.WorkerID = contract.NewID()
-	if executionResolverFactory != nil {
-		worker.ResolveExecution = executionResolverFactory(TenantJobRuntime{
-			Database: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Kernel: operationKernel,
-			ModuleBindings: moduleBindings,
+	if opts.executionResolverFactory != nil {
+		worker.ResolveExecution = opts.executionResolverFactory(TenantJobRuntime{
+			Database: loaded.DB, Registry: loaded.Registry, Dialect: opts.dialect, Kernel: opts.operationKernel,
+			ModuleBindings: opts.moduleBindings,
 			TenantID:       loaded.SiteID, SiteName: loaded.Name, ConfigRevision: loaded.ConfigRevision,
 		})
 	}
-	if handlerFactory != nil {
-		handlers := handlerFactory(TenantJobRuntime{
-			Database: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Kernel: operationKernel,
-			ModuleBindings: moduleBindings,
+	if opts.handlerFactory != nil {
+		handlers := opts.handlerFactory(TenantJobRuntime{
+			Database: loaded.DB, Registry: loaded.Registry, Dialect: opts.dialect, Kernel: opts.operationKernel,
+			ModuleBindings: opts.moduleBindings,
 			TenantID:       loaded.SiteID, SiteName: loaded.Name, ConfigRevision: loaded.ConfigRevision,
 		})
 		for jobType, handler := range handlers {
@@ -872,8 +897,8 @@ func newTenantScheduler(loaded *knet.LoadedSite, dialect kdb.Dialect, jobs []*sc
 			}
 		}
 	}
-	activeJobs := make([]*scheduler.JobConfig, 0, len(jobs))
-	for _, job := range jobs {
+	activeJobs := make([]*scheduler.JobConfig, 0, len(opts.jobs))
+	for _, job := range opts.jobs {
 		if job == nil {
 			continue
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/dbaccess"
+	"github.com/asenawritescode/kora/internal/doctype"
 	knet "github.com/asenawritescode/kora/internal/net"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/storage"
@@ -146,6 +148,51 @@ func TestStartupTenantAcquisitionFailuresCloseStorage(t *testing.T) {
 			}
 			if backend.closed != 1 {
 				t.Fatalf("storage close count = %d, want 1", backend.closed)
+			}
+		})
+	}
+}
+
+func TestLoadStartupTenantSetAppliesConfigDefaultsToEveryTenant(t *testing.T) {
+	tests := []struct {
+		name        string
+		concurrency uint16
+	}{
+		{"zero concurrency selects the default", 0},
+		{"explicit concurrency", 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			common := &site.CommonConfig{}
+			var mu sync.Mutex
+			seen := map[string]string{}
+			backend := &startupTestBackend{}
+			result, err := loadStartupTenantSet(context.Background(), StartupTenantConfig{
+				Sites:  []site.DBSiteInfo{{Name: "a.example"}, {Name: "b.example"}, {Name: "c.example"}},
+				Common: common, BinaryVersion: "v-test", Concurrency: tt.concurrency,
+				ResolveStorage: func(*site.Config) (storage.Backend, error) { return backend, nil },
+			}, startupTenantDependencies{
+				admission: func(*site.Config) (*dbaccess.Admission, error) { return nil, nil },
+				loadRuntime: func(_ context.Context, info site.DBSiteInfo, got *site.CommonConfig, version string) (*knet.LoadedSite, error) {
+					mu.Lock()
+					defer mu.Unlock()
+					if got != common {
+						t.Errorf("tenant %s received a different common config", info.Name)
+					}
+					seen[info.Name] = version
+					return &knet.LoadedSite{Name: info.Name, Registry: doctype.NewRegistry()}, nil
+				},
+			})
+			if err != nil {
+				t.Fatal("load startup tenants:", err)
+			}
+			if len(result.Runtimes) != 3 || len(seen) != 3 {
+				t.Fatalf("loaded %d runtimes from %d activations, want 3 and 3", len(result.Runtimes), len(seen))
+			}
+			for name, version := range seen {
+				if version != "v-test" {
+					t.Fatalf("tenant %s activated with version %q, want v-test", name, version)
+				}
 			}
 		})
 	}

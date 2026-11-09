@@ -83,8 +83,9 @@ func TestSelfHostedWorkflowConfigAssemblesTenantRuntimeOnMySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal("create workflow active-work admission:", err)
 	}
-	worker, definitions, instances, err := configureTenantWorkflow(t.Context(), SelfHostedWorkflowConfig(), loaded, dialect, requestService, admission,
-		kernel.New(dialect, outbox.NewSQLWriter(dialect)))
+	worker, definitions, instances, err := configureTenantWorkflow(t.Context(), SelfHostedWorkflowConfig(), loaded, tenantWorkflowDeps{
+		dialect: dialect, requests: requestService, admission: admission, domainKernel: kernel.New(dialect, outbox.NewSQLWriter(dialect)),
+	})
 	if err != nil {
 		t.Fatal("assemble self-hosted tenant workflow:", err)
 	}

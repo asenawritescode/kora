@@ -74,7 +74,7 @@ func composedRetailFiles(t *testing.T) []contract.PackFile {
 func installTenantServicesForTest(t *testing.T, info site.DBSiteInfo, database *sql.DB) *knet.LoadedSite {
 	t.Helper()
 	common := &site.CommonConfig{DBType: info.DBType}
-	loaded, err := loadTenantRuntime(context.Background(), info, common, nil, "test", tenantRuntimeDependencies{
+	loaded, err := loadTenantRuntime(context.Background(), tenantRuntimeRequest{info: info, common: common, binaryVersion: "test"}, tenantRuntimeDependencies{
 		connect:   func(context.Context, *site.Config) (*sql.DB, error) { return database, nil },
 		bootstrap: func(context.Context, *sql.DB, db.Dialect) error { return nil },
 	})

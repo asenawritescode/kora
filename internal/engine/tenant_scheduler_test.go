@@ -67,11 +67,15 @@ func TestTenantSchedulersBindToTheirOwnDatabaseAndRegistry(t *testing.T) {
 		mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM information_schema\\.statistics").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	}
 
-	schedulerA, err := newTenantScheduler(&net.LoadedSite{Name: "tenant-a", SiteID: "tenant-a", DB: dbA, Registry: registryA}, &kdb.MySQLDialect{}, jobs, nil, bindingsA, handlerFactory, nil, nil, nil, nil, nil, admissionA, nil)
+	schedulerA, err := newTenantScheduler(&net.LoadedSite{Name: "tenant-a", SiteID: "tenant-a", DB: dbA, Registry: registryA}, tenantSchedulerOptions{
+		dialect: &kdb.MySQLDialect{}, jobs: jobs, moduleBindings: bindingsA, handlerFactory: handlerFactory, workAdmission: admissionA,
+	})
 	if err != nil {
 		t.Fatal("construct tenant A scheduler:", err)
 	}
-	schedulerB, err := newTenantScheduler(&net.LoadedSite{Name: "tenant-b", SiteID: "tenant-b", DB: dbB, Registry: registryB}, &kdb.MySQLDialect{}, jobs, nil, bindingsB, handlerFactory, nil, nil, nil, nil, nil, admissionB, nil)
+	schedulerB, err := newTenantScheduler(&net.LoadedSite{Name: "tenant-b", SiteID: "tenant-b", DB: dbB, Registry: registryB}, tenantSchedulerOptions{
+		dialect: &kdb.MySQLDialect{}, jobs: jobs, moduleBindings: bindingsB, handlerFactory: handlerFactory, workAdmission: admissionB,
+	})
 	if err != nil {
 		t.Fatal("construct tenant B scheduler:", err)
 	}
@@ -114,8 +118,10 @@ func TestTenantSchedulerSchemaEnsureRequiresAdmission(t *testing.T) {
 	admission := &rejectingTenantWorkAdmission{err: capacityErr}
 	_, err = newTenantScheduler(
 		&net.LoadedSite{Name: "tenant-a", SiteID: "tenant-a", DB: database, Registry: doctype.NewRegistry()},
-		&kdb.MySQLDialect{}, []*scheduler.JobConfig{{Name: "hourly", Type: scheduler.JobWebhook, Schedule: "@every 1h"}},
-		nil, nil, nil, nil, nil, nil, nil, nil, admission, nil,
+		tenantSchedulerOptions{
+			dialect: &kdb.MySQLDialect{}, jobs: []*scheduler.JobConfig{{Name: "hourly", Type: scheduler.JobWebhook, Schedule: "@every 1h"}},
+			workAdmission: admission,
+		},
 	)
 	if !errors.Is(err, capacityErr) {
 		t.Fatalf("scheduler construction error = %v, want admission rejection", err)
@@ -140,7 +146,7 @@ func TestTenantSchedulerSchemaIsPreparedWithoutConfiguredJobs(t *testing.T) {
 
 	worker, err := newTenantScheduler(
 		&net.LoadedSite{Name: "tenant-a", SiteID: "tenant-a", DB: database, Registry: doctype.NewRegistry()},
-		&kdb.MySQLDialect{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		tenantSchedulerOptions{dialect: &kdb.MySQLDialect{}},
 	)
 	if err != nil {
 		t.Fatal("prepare scheduler schema without jobs:", err)

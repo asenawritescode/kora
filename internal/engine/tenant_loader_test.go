@@ -39,7 +39,7 @@ func TestLoadTenantRuntimeJoinsOwnedDBCloseFailure(t *testing.T) {
 	bootstrapErr := errors.New("tenant bootstrap failed")
 	closeErr := errors.New("tenant DB close failed")
 	mock.ExpectClose().WillReturnError(closeErr)
-	_, err = loadTenantRuntime(context.Background(), site.DBSiteInfo{Name: "tenant.example", DBType: "mysql", DBName: "tenant_test"}, nil, nil, "test-version", tenantRuntimeDependencies{
+	_, err = loadTenantRuntime(context.Background(), tenantRuntimeRequest{info: site.DBSiteInfo{Name: "tenant.example", DBType: "mysql", DBName: "tenant_test"}, binaryVersion: "test-version"}, tenantRuntimeDependencies{
 		connect: func(context.Context, *site.Config) (*sql.DB, error) { return database, nil },
 		bootstrap: func(context.Context, *sql.DB, kdb.Dialect) error {
 			return bootstrapErr
@@ -64,7 +64,7 @@ func TestLoadTenantRuntimeNeverClosesBorrowedDBOnFailedReplacement(t *testing.T)
 	reusable := &knet.LoadedSite{
 		DB: database, SessionManager: &auth.SessionManager{}, DatabaseIdentity: site.ConnectionIdentity(config),
 	}
-	_, err = loadTenantRuntime(context.Background(), info, nil, reusable, "test-version", tenantRuntimeDependencies{
+	_, err = loadTenantRuntime(context.Background(), tenantRuntimeRequest{info: info, reusable: reusable, binaryVersion: "test-version"}, tenantRuntimeDependencies{
 		connect: func(context.Context, *site.Config) (*sql.DB, error) {
 			t.Fatal("compatible replacement unexpectedly opened a new DB")
 			return nil, nil
@@ -99,7 +99,7 @@ func TestLoadTenantRuntimeRefusesSecondTenantOnSharedLibSQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			claimed := ""
-			_, err = loadTenantRuntime(context.Background(), site.DBSiteInfo{SiteID: "tenant-b", Name: "b.example", DBType: tt.dbType, DBHost: "libsql://shared.example", DBName: "tenant_b"}, nil, nil, "test-version", tenantRuntimeDependencies{
+			_, err = loadTenantRuntime(context.Background(), tenantRuntimeRequest{info: site.DBSiteInfo{SiteID: "tenant-b", Name: "b.example", DBType: tt.dbType, DBHost: "libsql://shared.example", DBName: "tenant_b"}, binaryVersion: "test-version"}, tenantRuntimeDependencies{
 				connect:   func(context.Context, *site.Config) (*sql.DB, error) { return database, nil },
 				bootstrap: func(context.Context, *sql.DB, kdb.Dialect) error { return nil },
 				claimOwner: func(_ context.Context, _ *sql.DB, _ kdb.Dialect, tenantID string) error {
