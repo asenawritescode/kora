@@ -61,7 +61,7 @@ jobs:
           bun-version: latest
       - name: Verify producer generation and every consumer pin
         run: |
-          go run ./cmd/contractgen -check
+          go run ./cmd/contract-gen -check
           python3 scripts/sync-contract-consumers.py --check
           python3 scripts/check-contract-fixture-manifest.py
       - name: Decode shared Engine fixtures in the TypeScript SDK
@@ -150,7 +150,7 @@ jobs:
         run: go test -tags=integration ./internal/recon -run TestBusinessRunPersistenceAcrossDisposableDialects -count=1 -timeout=5m
 
       - name: Check generated contracts
-        run: go run ./cmd/contractgen -check
+        run: go run ./cmd/contract-gen -check
 
       - name: Test Go SDK module
         run: cd sdk && go test ./... -count=1

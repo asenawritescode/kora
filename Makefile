@@ -44,18 +44,18 @@ restart:                           ## Rebuild Go, kill old server, start fresh
 
 ## Quality
 check-contracts:                      ## Verify generated schemas, fixture copies, and runtime validators
-	go run ./cmd/contractgen -check
+	go run ./cmd/contract-gen -check
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_sync_contract_consumers.py
 	python3 scripts/check-contract-fixture-manifest.py --local-only
 
 sync-contracts:                         ## Regenerate and copy Engine contracts to first-party consumers
-	go run ./cmd/contractgen -write
+	go run ./cmd/contract-gen -write
 	python3 scripts/sync-contract-consumers.py
 
 check-cross-repo-contracts:            ## Verify consumer contracts, route inventory, and complete Go import graph
 	python3 scripts/sync-contract-consumers.py --check
 	python3 scripts/check-contract-fixture-manifest.py
-	go run ./cmd/routeinventory -check
+	go run ./cmd/route-inventory -check
 	python3 scripts/architecture-import-graph.py --check
 	python3 scripts/check-cloud-engine-boundary.py
 

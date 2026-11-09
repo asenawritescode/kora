@@ -23,6 +23,7 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 - Work in a worktree off a fresh `git fetch`; never edit the main checkout. The user's own clones (`~/projects/kora`, `~/projects/kora-studio-mvp`, etc.) hold uncommitted work: use worktrees only.
 - Push only to the `kora-upstream` remote. In the local clone, `origin` points at a different repo (kora-ui); never push there.
 - Never force-push. Never delete branches you did not create.
+- No attribution: never add `Co-authored-by` trailers, "Generated with" lines or any tool/agent credit to commits, PR or issue text, code comments or docs. Commits carry the repository owner's own identity only.
 - Never merge on a red or pending Go check, even when the failure looks unrelated.
 - kora-ui merges also require the `contracts` check (lint ratchet: no new `any`, `react-refresh/only-export-components`, set-state-in-effect).
 - Never run the contract sync script with default paths; it writes into the user's real sibling clones. Point `KORA_PROJECTS_ROOT` at a scratch directory. After 3 failed fix rounds, comment the blocker on the ticket, label it `blocked`, close the PR.
@@ -144,7 +145,7 @@ This repository is the **Engine only**: a single Go binary built from `cmd/kora`
 | `kora-website` | `~/projects/kora-website` | Public marketing site |
 | `kora-ts-extension-sdk` | `~/projects/kora-ts-sdk` | TypeScript SDK and extension tooling |
 
-The Engine's wire contract is generated here (`go run ./cmd/contractgen -write`, output in `contract/generated/` and `contract/schema/`) and copied into the consumer repositories with `scripts/sync-contract-consumers.py`. Fixtures are in `contract-fixtures/` and catalogued in `docs/architecture/contract-fixture-manifest.json`.
+The Engine's wire contract is generated here (`go run ./cmd/contract-gen -write`, output in `contract/generated/` and `contract/schema/`) and copied into the consumer repositories with `scripts/sync-contract-consumers.py`. Fixtures are in `contract-fixtures/` and catalogued in `docs/architecture/contract-fixture-manifest.json`.
 
 Studio-specific behaviour (routes, admin pages, chat widget, component library) is documented in the kora-ui repository, not here. The Engine-side surfaces Studio calls are the REST API (`/api/v1`), the v2 request/module/offline routes (`/api/v2`), and the OpenAPI document at `/api/swagger-ui`.
 
@@ -386,7 +387,7 @@ Go code follows these quality standards:
 - **Table-driven tests** — new code uses table-driven test patterns
 - **Interface hygiene** — small interfaces (1-3 methods), defined at consumption point
 - **No `utils`, `helpers`, `common` packages** — packages are organized by domain capability
-- **Module layout** follows https://go.dev/doc/modules/layout for a server project: logic in `internal/`, commands in `cmd/`, and as few exported packages as possible. Exported packages are the contract with other repositories (`contract`, the nested `sdk` module); anything else Cloud or tooling needs should be exposed through them rather than by importing implementation packages. The layout is: `cmd/kora` (the server and CLI binary), `cmd/contractgen` and `cmd/routeinventory` (developer tools), `internal/` (all implementation packages), `contract/` (the public wire contract) and `sdk/` (the public Go client module). Other repositories must not import `internal/...` (Go enforces this); anything they need is added to `contract` or `sdk`. Cloud tests that used to import `site`, `db`, `auth`, `api`, `doctype` or `management` need to run the Engine binary or use the SDK instead.
+- **Module layout** follows https://go.dev/doc/modules/layout for a server project: logic in `internal/`, commands in `cmd/`, and as few exported packages as possible. Exported packages are the contract with other repositories (`contract`, the nested `sdk` module); anything else Cloud or tooling needs should be exposed through them rather than by importing implementation packages. The layout is: `cmd/kora` (the server and CLI binary), `cmd/contract-gen` and `cmd/route-inventory` (developer tools), `internal/` (all implementation packages), `contract/` (the public wire contract) and `sdk/` (the public Go client module). Other repositories must not import `internal/...` (Go enforces this); anything they need is added to `contract` or `sdk`. Cloud tests that used to import `site`, `db`, `auth`, `api`, `doctype` or `management` need to run the Engine binary or use the SDK instead.
 - **Error wrapping** — all errors use `%w` for proper error chains
 
 ### ORM Document Model

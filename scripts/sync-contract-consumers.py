@@ -39,7 +39,7 @@ def sha256(data: bytes) -> str:
 def source_revision(engine: Path = ENGINE) -> tuple[str, str]:
     contract_inputs = [
         ":(glob)contract/**/*.go",
-        ":(glob)cmd/contractgen/**/*.go",
+        ":(glob)cmd/contract-gen/**/*.go",
         "contract/generated/engine-v2.ts",
         "contract/schema/engine-v2.json",
     ]
