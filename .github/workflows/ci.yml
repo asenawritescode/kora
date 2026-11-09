@@ -106,11 +106,6 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Prepare embed
-        run: |
-          mkdir -p workspace/dist
-          touch workspace/dist/index.html
-
       - name: Lint (go vet)
         run: go vet ./...
 
@@ -165,25 +160,3 @@ jobs:
 
       - name: Build
         run: go build -o /dev/null .
-
-  ui:
-    name: UI
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install
-        run: cd ui && bun install --frozen-lockfile
-
-      - name: Check Engine contract bundle
-        run: cd ui && KORA_ENGINE_CONTRACT_PATH=../contract/generated/engine-v2.ts bun run check:contracts
-
-      - name: TypeScript check
-        run: cd ui && bunx tsc -b --noEmit
-
-      - name: Build
-        run: cd ui && bun run build

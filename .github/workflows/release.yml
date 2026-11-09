@@ -22,20 +22,6 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
-
-      - name: Build UI
-        run: |
-          cd ui
-          bun install --frozen-lockfile
-          bun run build
-          cd ..
-          rm -rf workspace/dist
-          cp -r ui/dist workspace/dist
-
       - name: Build binaries
         run: |
           VERSION="${{ github.ref_name }}"

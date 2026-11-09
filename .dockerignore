@@ -1,11 +1,5 @@
-# Dependencies
-ui/node_modules
-ui/.bun
-
 # Build artifacts
 kora
-workspace/dist
-ui/dist
 
 # Config and data (mounted at runtime, not baked in)
 sites/
