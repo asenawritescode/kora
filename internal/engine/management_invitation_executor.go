@@ -136,16 +136,6 @@ func revokeInvitationForReconciliation(ctx context.Context, tx *sql.Tx, dialect 
 	return nil
 }
 
-func newManagementInvitationExecutor(directory managementInvitationDirectory, coordinator managementStateCoordinator, admission managementWorkAdmission, tenants *knet.SiteRouter, mailer auth.MagicLinkMailer, publicAppBaseURL string) (*managementInvitationExecutor, error) {
-	if directory == nil || coordinator == nil || admission == nil || tenants == nil || mailer == nil {
-		return nil, errors.New("management invitation executor requires tenant directory, runtime coordinator, bounded admission, router, and configured mailer")
-	}
-	if err := auth.ValidatePublicAppBaseURL(publicAppBaseURL); err != nil {
-		return nil, fmt.Errorf("invalid public application base URL: %w", err)
-	}
-	return &managementInvitationExecutor{directory: directory, coordinator: coordinator, admission: admission, tenants: tenants, mailer: mailer, publicAppBaseURL: publicAppBaseURL}, nil
-}
-
 func (e *managementInvitationExecutor) magicLinkURL(tenant, token string) (string, error) {
 	if e != nil && strings.TrimSpace(e.publicAppBaseURL) != "" {
 		return auth.TenantPathMagicLinkURL(e.publicAppBaseURL, tenant, token)

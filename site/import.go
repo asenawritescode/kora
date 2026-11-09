@@ -8,13 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asenawritescode/kora/query"
-	"github.com/goccy/go-yaml"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/asenawritescode/kora/query"
+	"github.com/goccy/go-yaml"
 
 	"github.com/asenawritescode/kora/analytics"
 	"github.com/asenawritescode/kora/configstore"
@@ -206,14 +207,6 @@ func ParseWorkflowDefinitionsDirectory(directory string) ([]contract.WorkflowDef
 // is read from the DB and applied here — no filesystem dependency.
 func ImportConfigFromSnapshot(db *sql.DB, registry *doctype.Registry, dbName, siteName, label string, snapshot *doctype.ConfigSnapshot, dialect sqlDialect.Dialect, scriptBodyByHash map[string]string) error {
 	return ImportConfigFromSnapshotForTenant(db, registry, dbName, siteName, siteName, label, snapshot, dialect, scriptBodyByHash)
-}
-
-func PublishImportedWorkflowDefinitions(ctx context.Context, database *sql.DB, dialect sqlDialect.Dialect, tenantID string, definitions []contract.WorkflowDefinition, registry *doctype.Registry) error {
-	tenant, err := contract.ParseTenantID(tenantID)
-	if err != nil {
-		return fmt.Errorf("invalid tenant ID: %w", err)
-	}
-	return publishImportedWorkflows(ctx, database, dialect, tenant, definitions, registry)
 }
 
 func publishImportedWorkflows(ctx context.Context, database *sql.DB, dialect sqlDialect.Dialect, tenant contract.TenantID, definitions []contract.WorkflowDefinition, registry *doctype.Registry) error {
