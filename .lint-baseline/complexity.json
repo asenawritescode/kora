@@ -6,10 +6,6 @@
    "cyclomatic": 23,
    "statements": 82
   },
-  "cmd/contractgen::enumValues": {
-   "cognitive": 57,
-   "cyclomatic": 18
-  },
   "cmd/contractgen::generateTypeScript": {
    "cognitive": 46,
    "cyclomatic": 24,
@@ -27,11 +23,6 @@
    "cognitive": 37,
    "cyclomatic": 21,
    "statements": 49
-  },
-  "cmd/contractgen::visitType": {
-   "cognitive": 34,
-   "cyclomatic": 25,
-   "statements": 42
   },
   "contract::(ApplicationCatalog).Validate": {
    "cognitive": 75,

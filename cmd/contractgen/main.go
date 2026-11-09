@@ -597,32 +597,13 @@ func rawComments(group *ast.CommentGroup) string {
 	return b.String()
 }
 
+// visitType walks a field's type and calls include for every named type it depends on.
 func visitType(expr ast.Expr, defs map[string]ast.Expr, include func(string) error) error {
 	switch t := expr.(type) {
 	case *ast.Ident:
-		switch t.Name {
-		case "string", "bool", "byte", "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "float32", "float64":
-			return nil
-		}
-		if strings.HasPrefix(t.Name, "int") || strings.HasPrefix(t.Name, "uint") || t.Name == "float64" {
-			return nil
-		}
-		if t.Name == "Time" {
-			return nil
-		}
-		_, ok := defs[t.Name]
-		if !ok {
-			return fmt.Errorf("unsupported identifier %q", t.Name)
-		}
-		return include(t.Name)
+		return visitIdent(t, defs, include)
 	case *ast.SelectorExpr:
-		if x, ok := t.X.(*ast.Ident); ok && x.Name == "time" && t.Sel.Name == "Time" {
-			return nil
-		}
-		if isRawJSON(t) {
-			return nil
-		}
-		return fmt.Errorf("unsupported selector")
+		return visitSelector(t)
 	case *ast.StarExpr:
 		return visitType(t.X, defs, include)
 	case *ast.ArrayType:
@@ -631,18 +612,7 @@ func visitType(expr ast.Expr, defs map[string]ast.Expr, include func(string) err
 		}
 		return visitType(t.Elt, defs, include)
 	case *ast.MapType:
-		k, ok := t.Key.(*ast.Ident)
-		if !ok {
-			return fmt.Errorf("map keys must be a string or registered string enum")
-		}
-		if k.Name != "string" {
-			keyType, defined := defs[k.Name]
-			base, isString := keyType.(*ast.Ident)
-			if !defined || !isString || base.Name != "string" {
-				return fmt.Errorf("map key type %s must be a defined string type", k.Name)
-			}
-		}
-		return visitType(t.Value, defs, include)
+		return visitMap(t, defs, include)
 	case *ast.StructType:
 		for _, f := range t.Fields.List {
 			if err := visitType(f.Type, defs, include); err != nil {
@@ -655,6 +625,51 @@ func visitType(expr ast.Expr, defs map[string]ast.Expr, include func(string) err
 	}
 }
 
+func visitIdent(t *ast.Ident, defs map[string]ast.Expr, include func(string) error) error {
+	switch t.Name {
+	case "string", "bool", "byte", "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "float32", "float64":
+		return nil
+	}
+	if strings.HasPrefix(t.Name, "int") || strings.HasPrefix(t.Name, "uint") || t.Name == "float64" {
+		return nil
+	}
+	if t.Name == "Time" {
+		return nil
+	}
+	if _, ok := defs[t.Name]; !ok {
+		return fmt.Errorf("unsupported identifier %q", t.Name)
+	}
+	return include(t.Name)
+}
+
+func visitSelector(t *ast.SelectorExpr) error {
+	if x, ok := t.X.(*ast.Ident); ok && x.Name == "time" && t.Sel.Name == "Time" {
+		return nil
+	}
+	if isRawJSON(t) {
+		return nil
+	}
+	return fmt.Errorf("unsupported selector")
+}
+
+func visitMap(t *ast.MapType, defs map[string]ast.Expr, include func(string) error) error {
+	k, ok := t.Key.(*ast.Ident)
+	if !ok {
+		return fmt.Errorf("map keys must be a string or registered string enum")
+	}
+	if k.Name != "string" {
+		keyType, defined := defs[k.Name]
+		base, isString := keyType.(*ast.Ident)
+		if !defined || !isString || base.Name != "string" {
+			return fmt.Errorf("map key type %s must be a defined string type", k.Name)
+		}
+	}
+	return visitType(t.Value, defs, include)
+}
+
+// enumValues returns the string constants declared for the enum type root, in source order. A const
+// group belongs to the enum from the first spec typed root (or named root) until a spec of another
+// type begins.
 func enumValues(files []string, fset *token.FileSet, root string) ([]string, error) {
 	var vals []string
 	for _, file := range files {
@@ -670,37 +685,73 @@ func enumValues(files []string, fset *token.FileSet, root string) ([]string, err
 			if !ok || g.Tok != token.CONST {
 				continue
 			}
-			active := false
-			for _, sp := range g.Specs {
-				v, ok := sp.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				if v.Type != nil {
-					if id, ok := v.Type.(*ast.Ident); ok {
-						active = id.Name == root
-					} else {
-						active = false
-					}
-				}
-				for i, n := range v.Names {
-					if n.Name == root {
-						active = true
-					}
-					if active && i < len(v.Values) {
-						if lit, ok := v.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-							s, e := strconv.Unquote(lit.Value)
-							if e != nil {
-								return nil, e
-							}
-							vals = append(vals, s)
-						}
-					}
-				}
+			groupVals, err := enumValuesInConstGroup(g, root)
+			if err != nil {
+				return nil, err
 			}
+			vals = append(vals, groupVals...)
 		}
 	}
 	return vals, nil
+}
+
+func enumValuesInConstGroup(g *ast.GenDecl, root string) ([]string, error) {
+	scan := &enumScan{root: root}
+	for _, sp := range g.Specs {
+		if v, ok := sp.(*ast.ValueSpec); ok {
+			if err := scan.addSpec(v); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return scan.vals, nil
+}
+
+// enumScan collects the string constants of one const group that belong to the enum root.
+type enumScan struct {
+	root   string
+	active bool
+	vals   []string
+}
+
+func (e *enumScan) addSpec(v *ast.ValueSpec) error {
+	if v.Type != nil {
+		e.active = isIdentNamed(v.Type, e.root)
+	}
+	for i, n := range v.Names {
+		if n.Name == e.root {
+			e.active = true
+		}
+		if !e.active || i >= len(v.Values) {
+			continue
+		}
+		value, isString, err := stringConstant(v.Values[i])
+		if err != nil {
+			return err
+		}
+		if isString {
+			e.vals = append(e.vals, value)
+		}
+	}
+	return nil
+}
+
+func isIdentNamed(expr ast.Expr, name string) bool {
+	id, ok := expr.(*ast.Ident)
+	return ok && id.Name == name
+}
+
+// stringConstant returns the value of a string literal; ok is false for any other expression.
+func stringConstant(expr ast.Expr) (value string, ok bool, err error) {
+	lit, isLit := expr.(*ast.BasicLit)
+	if !isLit || lit.Kind != token.STRING {
+		return "", false, nil
+	}
+	value, err = strconv.Unquote(lit.Value)
+	if err != nil {
+		return "", false, err
+	}
+	return value, true, nil
 }
 
 // typeSchema maps a Go type expression from the contract package to its JSON Schema. It only
