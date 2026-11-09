@@ -163,9 +163,6 @@ jobs:
 
   lint:
     name: Lint
-    # Correctness linters from .golangci.yml, applied to lines a pull request changes. The existing
-    # backlog is cleaned package by package; new code must not add to it.
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -176,10 +173,24 @@ jobs:
         with:
           go-version: "1.25"
 
-      # Build the linter with the repository's Go version: a prebuilt binary compiled with an older Go
-      # refuses to load a module that targets a newer one.
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+      # Build the tools with the repository's Go version: a prebuilt golangci-lint compiled with an
+      # older Go refuses to load a module that targets a newer one.
+      - name: Install golangci-lint and deadcode
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+          go install golang.org/x/tools/cmd/deadcode@v0.52.0
 
-      - name: Lint (findings on changed lines)
+      # Correctness, security and API-hygiene linters (.golangci.yml) on every line the PR changes.
+      - name: Static analysis (changed lines)
+        if: github.event_name == 'pull_request'
         run: golangci-lint run --new-from-rev=origin/${{ github.base_ref }}
+
+      # God functions: no function may become newly over the complexity/length limits, and no function
+      # already over them may get worse (.lint-baseline/complexity.json only ever shrinks).
+      - name: Function complexity ratchet
+        run: python3 scripts/complexity-ratchet.py
+
+      # Dead code: no function may become unreachable from the binary and cmd/ tools
+      # (.lint-baseline/deadcode.txt only ever shrinks).
+      - name: Dead code ratchet
+        run: python3 scripts/deadcode-ratchet.py

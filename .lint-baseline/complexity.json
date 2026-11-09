@@ -1,0 +1,3029 @@
+{
+ "comment": "Functions over the limits in .golangci-complexity.yml. This file may only shrink; see scripts/complexity-ratchet.py.",
+ "functions": {
+  "analytics::(*AnalyticsQueryRequest).Validate": {
+   "cognitive": 67,
+   "cyclomatic": 43
+  },
+  "analytics::(*CloudRelay).Start": {
+   "cognitive": 20
+  },
+  "analytics::(*MultiBus).ListenerQueueBudget": {
+   "cognitive": 16
+  },
+  "analytics::(*MultiBus).Start": {
+   "cognitive": 24
+  },
+  "analytics::(*MultiBus).addListener": {
+   "cognitive": 26,
+   "cyclomatic": 20
+  },
+  "analytics::(*QueryEngine).Resolve": {
+   "cognitive": 23,
+   "cyclomatic": 22
+  },
+  "analytics::(*QueryEngine).ResolveInsights": {
+   "cognitive": 45,
+   "cyclomatic": 20
+  },
+  "analytics::(*QueryEngine).resolveModelQuery": {
+   "cognitive": 38,
+   "cyclomatic": 26
+  },
+  "analytics::(*QueryEngine).resolvePublishedProjection": {
+   "cognitive": 110,
+   "cyclomatic": 67
+  },
+  "analytics::(*QueryEngine).resolveRelatedMeasure": {
+   "cognitive": 81,
+   "cyclomatic": 54
+  },
+  "analytics::(*RebuildRunner).process": {
+   "cognitive": 51,
+   "cyclomatic": 28
+  },
+  "analytics::(*ReportDefinition).Validate": {
+   "cognitive": 32,
+   "cyclomatic": 21
+  },
+  "analytics::(*SemanticModel).Validate": {
+   "cognitive": 80,
+   "cyclomatic": 58
+  },
+  "analytics::(*Worker).flush": {
+   "cognitive": 51,
+   "cyclomatic": 45
+  },
+  "analytics::(*Worker).process": {
+   "cognitive": 61,
+   "cyclomatic": 40
+  },
+  "analytics::(*Worker).run": {
+   "cognitive": 24
+  },
+  "analytics::(*channelBus).AcknowledgeWAL": {
+   "cognitive": 46,
+   "cyclomatic": 28
+  },
+  "analytics::(*channelBus).refreshWALBacklogLocked": {
+   "cognitive": 32,
+   "cyclomatic": 19
+  },
+  "analytics::(*channelBus).writeWAL": {
+   "cognitive": 23,
+   "cyclomatic": 18
+  },
+  "analytics::(PublishedProjectionSnapshot).Validate": {
+   "cognitive": 19,
+   "cyclomatic": 27
+  },
+  "analytics::(QueryRequest).Validate": {
+   "cognitive": 26,
+   "cyclomatic": 28
+  },
+  "analytics::AcknowledgeWAL": {
+   "statements": 65
+  },
+  "analytics::BackfillContext": {
+   "cognitive": 59,
+   "cyclomatic": 39,
+   "statements": 78
+  },
+  "analytics::BootstrapTablesContext": {
+   "cognitive": 21,
+   "cyclomatic": 17
+  },
+  "analytics::BuildSemanticModel": {
+   "cognitive": 19,
+   "cyclomatic": 17
+  },
+  "analytics::ClaimNextRebuildJob": {
+   "cognitive": 29,
+   "cyclomatic": 25,
+   "statements": 59
+  },
+  "analytics::GenerateMetrics": {
+   "cognitive": 16,
+   "lines": 83
+  },
+  "analytics::LoadConfig": {
+   "cognitive": 26,
+   "cyclomatic": 23
+  },
+  "analytics::MarkPublishedProjectionStale": {
+   "cyclomatic": 18
+  },
+  "analytics::Resolve": {
+   "statements": 49
+  },
+  "analytics::Validate": {
+   "statements": 65
+  },
+  "analytics::ValidateReportModels": {
+   "cognitive": 83,
+   "cyclomatic": 36,
+   "statements": 50
+  },
+  "analytics::addListener": {
+   "statements": 49
+  },
+  "analytics::analyticsPeriodExpression": {
+   "cyclomatic": 19
+  },
+  "analytics::backfillMetricWithExec": {
+   "statements": 41
+  },
+  "analytics::contributionOutsideRebuiltRange": {
+   "cognitive": 17
+  },
+  "analytics::flush": {
+   "statements": 132
+  },
+  "analytics::process": {
+   "statements": 79
+  },
+  "analytics::refreshWALBacklogLocked": {
+   "statements": 58
+  },
+  "analytics::resolveModelQuery": {
+   "statements": 47
+  },
+  "analytics::resolvePublishedProjection": {
+   "statements": 132
+  },
+  "analytics::resolveRelatedMeasure": {
+   "statements": 138
+  },
+  "analytics::rollupTableDDL": {
+   "lines": 154
+  },
+  "analytics::writeWAL": {
+   "statements": 52
+  },
+  "api/ai::EnsureAIRunTables": {
+   "lines": 185
+  },
+  "api/ai::HandleChat": {
+   "cognitive": 119,
+   "cyclomatic": 57,
+   "statements": 225
+  },
+  "api/ai::ValidateProviderProfile": {
+   "cyclomatic": 16
+  },
+  "api/ai::aiBundleChildFieldGuide": {
+   "cognitive": 28
+  },
+  "api/ai::analyticsModelReadable": {
+   "cognitive": 56,
+   "cyclomatic": 42,
+   "statements": 62
+  },
+  "api/ai::authorizeRelatedAnalytics": {
+   "cognitive": 50,
+   "cyclomatic": 27,
+   "statements": 51
+  },
+  "api/ai::buildAIMutationBundle": {
+   "cognitive": 83,
+   "cyclomatic": 45,
+   "statements": 70
+  },
+  "api/ai::buildSystemFunctions": {
+   "lines": 321
+  },
+  "api/ai::executeAIMutationBundle": {
+   "cognitive": 24,
+   "cyclomatic": 20,
+   "statements": 50
+  },
+  "api/ai::executeAnalyticsInsights": {
+   "cognitive": 47,
+   "cyclomatic": 27,
+   "statements": 61
+  },
+  "api/ai::executeCreateDoctypeDraft": {
+   "cognitive": 16
+  },
+  "api/ai::executeScriptCreate": {
+   "cognitive": 20,
+   "cyclomatic": 18,
+   "statements": 41
+  },
+  "api/ai::executeSingleToolWithMutationKeyAndExecution": {
+   "cognitive": 81,
+   "cyclomatic": 72,
+   "statements": 173
+  },
+  "api/ai::executeToolCallsForAIWithExecution": {
+   "lines": 114
+  },
+  "api/ai::executeUpdateDoctypeDraft": {
+   "cognitive": 16
+  },
+  "api/ai::filterAnalyticsCatalog": {
+   "cognitive": 17
+  },
+  "api/ai::summarizeCompacted": {
+   "cognitive": 19
+  },
+  "api/ai::validateAndCoerceFilter": {
+   "cognitive": 20
+  },
+  "api::(*ConsoleHandler).HandleCreateSite": {
+   "cognitive": 40,
+   "cyclomatic": 33
+  },
+  "api::(*ConsoleHandler).HandleDeleteSite": {
+   "cognitive": 27,
+   "cyclomatic": 25
+  },
+  "api::(*ConsoleHandler).HandleListSites": {
+   "cognitive": 61,
+   "cyclomatic": 28
+  },
+  "api::(*ConsoleHandler).HandleOnboard": {
+   "cognitive": 26,
+   "cyclomatic": 23
+  },
+  "api::(*ConsoleHandler).HandleResetSitePassword": {
+   "cyclomatic": 16
+  },
+  "api::(*ConsoleHandler).HandleUpdateSite": {
+   "cognitive": 32,
+   "cyclomatic": 23
+  },
+  "api::(*ConsoleHandler).processOnboardJob": {
+   "cognitive": 84,
+   "cyclomatic": 50
+  },
+  "api::(*Handler).HandleAgentEffectivePermissions": {
+   "cognitive": 29
+  },
+  "api::(*Handler).HandleConfigVersionActivate": {
+   "cognitive": 134,
+   "cyclomatic": 72
+  },
+  "api::(*Handler).HandleConfigVersionPreview": {
+   "cognitive": 19
+  },
+  "api::(*Handler).HandleConfigVersionRollback": {
+   "cognitive": 85,
+   "cyclomatic": 55
+  },
+  "api::(*Handler).HandleConfigVersionSnapshot": {
+   "cognitive": 17
+  },
+  "api::(*Handler).HandleConfigurationDraft": {
+   "cognitive": 44,
+   "cyclomatic": 36
+  },
+  "api::(*Handler).HandleImport": {
+   "cognitive": 95,
+   "cyclomatic": 67
+  },
+  "api::(*Handler).HandleMPesaSTKCallback": {
+   "cognitive": 36,
+   "cyclomatic": 28
+  },
+  "api::(*Handler).HandleManagedChannelClientRevoke": {
+   "cognitive": 31,
+   "cyclomatic": 27
+  },
+  "api::(*Handler).HandleManagedChannelClientRotate": {
+   "cognitive": 32,
+   "cyclomatic": 26
+  },
+  "api::(*Handler).HandleMethod": {
+   "cognitive": 22,
+   "cyclomatic": 18
+  },
+  "api::(*Handler).HandleOfflineBootstrapV2": {
+   "cognitive": 24,
+   "cyclomatic": 32
+  },
+  "api::(*Handler).HandleOfflineIntentsV2": {
+   "cognitive": 26,
+   "cyclomatic": 21
+  },
+  "api::(*Handler).HandleOfflinePullV2": {
+   "cognitive": 19,
+   "cyclomatic": 27
+  },
+  "api::(*Handler).HandlePublicCreate": {
+   "cyclomatic": 16
+  },
+  "api::(*Handler).HandlePublicView": {
+   "cognitive": 36,
+   "cyclomatic": 19
+  },
+  "api::(*Handler).HandlePublishedModuleQuery": {
+   "cognitive": 16
+  },
+  "api::(*Handler).HandleRecordHistory": {
+   "cognitive": 40,
+   "cyclomatic": 25
+  },
+  "api::(*Handler).HandleScriptCreate": {
+   "cognitive": 24,
+   "cyclomatic": 21
+  },
+  "api::(*Handler).HandleSystemDoctypeCreate": {
+   "cognitive": 33,
+   "cyclomatic": 23
+  },
+  "api::(*Handler).HandleSystemDoctypeDelete": {
+   "cognitive": 35,
+   "cyclomatic": 27
+  },
+  "api::(*Handler).HandleSystemDoctypeUpdate": {
+   "cognitive": 19
+  },
+  "api::(*Handler).HandleSystemNavigation": {
+   "cognitive": 52,
+   "cyclomatic": 36
+  },
+  "api::(*Handler).HandleUpload": {
+   "cognitive": 28,
+   "cyclomatic": 22
+  },
+  "api::(*Handler).HandleUserDirectory": {
+   "cognitive": 31,
+   "cyclomatic": 22
+  },
+  "api::(*Handler).HandleViewAction": {
+   "cognitive": 25
+  },
+  "api::(*Handler).HandleViewByRoute": {
+   "cognitive": 17
+  },
+  "api::(*Handler).applyUserAccessUpdate": {
+   "cognitive": 33,
+   "cyclomatic": 28
+  },
+  "api::(*Handler).buildApplicationCatalog": {
+   "cognitive": 141,
+   "cyclomatic": 69
+  },
+  "api::(*Handler).buildKernelOperation": {
+   "cognitive": 31,
+   "cyclomatic": 25
+  },
+  "api::(*Handler).commitExternalOperationFailure": {
+   "cognitive": 16
+  },
+  "api::(*Handler).commitExternalOperationSuccess": {
+   "cognitive": 16
+  },
+  "api::(*Handler).executeCreateQuantityEffect": {
+   "cyclomatic": 17
+  },
+  "api::(*Handler).executeCreateRecord": {
+   "cognitive": 42,
+   "cyclomatic": 25
+  },
+  "api::(*Handler).executeCreateTransaction": {
+   "cognitive": 105,
+   "cyclomatic": 69
+  },
+  "api::(*Handler).executeInitiateExternalOperation": {
+   "cognitive": 53,
+   "cyclomatic": 32
+  },
+  "api::(*Handler).executeTransactionPaymentScript": {
+   "cognitive": 17,
+   "cyclomatic": 18
+  },
+  "api::(*Handler).handleChannelTool": {
+   "cognitive": 22,
+   "cyclomatic": 20
+  },
+  "api::(*Handler).handleSystemRealtimeSSE": {
+   "cognitive": 20
+  },
+  "api::(*Handler).publicDocToMap": {
+   "cognitive": 23
+  },
+  "api::(*Handler).realtimeEventVisible": {
+   "cognitive": 22,
+   "cyclomatic": 22
+  },
+  "api::(*Handler).replayRealtime": {
+   "cognitive": 24,
+   "cyclomatic": 17
+  },
+  "api::(*Handler).serveStoredFile": {
+   "cognitive": 17
+  },
+  "api::(*Handler).siteTx": {
+   "cognitive": 57,
+   "cyclomatic": 19
+  },
+  "api::(*Handler).streamRealtime": {
+   "cognitive": 82,
+   "cyclomatic": 33
+  },
+  "api::(*Handler).validateAgentPermissions": {
+   "cognitive": 18
+  },
+  "api::(*ManagementInspectHandler).RegisterOperations": {
+   "cognitive": 44,
+   "cyclomatic": 53
+  },
+  "api::(*ManagementInspectHandler).resolveDeploymentEntry": {
+   "cognitive": 20
+  },
+  "api::(*scriptProvider).DoHTTP": {
+   "cognitive": 16,
+   "cyclomatic": 16
+  },
+  "api::(*workflowHandler).capabilities": {
+   "cognitive": 20,
+   "cyclomatic": 22
+  },
+  "api::BuildSystemGraph": {
+   "cognitive": 22
+  },
+  "api::FieldToJSONSchema": {
+   "cognitive": 21,
+   "cyclomatic": 24,
+   "statements": 57
+  },
+  "api::HandleConfigVersionActivate": {
+   "statements": 172
+  },
+  "api::HandleConfigVersionPreview": {
+   "statements": 42
+  },
+  "api::HandleConfigVersionRollback": {
+   "statements": 149
+  },
+  "api::HandleConfigVersionSnapshot": {
+   "statements": 42
+  },
+  "api::HandleConfigurationDraft": {
+   "statements": 88
+  },
+  "api::HandleCreateSite": {
+   "statements": 90
+  },
+  "api::HandleDeleteSite": {
+   "statements": 93
+  },
+  "api::HandleExecutePublishedOperation": {
+   "statements": 47
+  },
+  "api::HandleImport": {
+   "statements": 134
+  },
+  "api::HandleList": {
+   "statements": 42
+  },
+  "api::HandleListSites": {
+   "statements": 50
+  },
+  "api::HandleLookupPublishedOperation": {
+   "statements": 42
+  },
+  "api::HandleMPesaSTKCallback": {
+   "statements": 88
+  },
+  "api::HandleManagedChannelClientRevoke": {
+   "statements": 64
+  },
+  "api::HandleManagedChannelClientRotate": {
+   "statements": 69
+  },
+  "api::HandleMethod": {
+   "statements": 51
+  },
+  "api::HandleOfflineBootstrapV2": {
+   "statements": 55
+  },
+  "api::HandleOfflineIntentsV2": {
+   "statements": 48
+  },
+  "api::HandleOfflinePullV2": {
+   "statements": 55
+  },
+  "api::HandleOnboard": {
+   "statements": 58
+  },
+  "api::HandlePublicCreate": {
+   "statements": 42
+  },
+  "api::HandlePublishedModuleQuery": {
+   "statements": 50
+  },
+  "api::HandleRecordHistory": {
+   "statements": 70
+  },
+  "api::HandleResetSitePassword": {
+   "statements": 52
+  },
+  "api::HandleScriptCreate": {
+   "statements": 60
+  },
+  "api::HandleSystemDoctypeCreate": {
+   "statements": 63
+  },
+  "api::HandleSystemDoctypeDelete": {
+   "statements": 64
+  },
+  "api::HandleSystemDoctypeUpdate": {
+   "statements": 52
+  },
+  "api::HandleSystemNavigation": {
+   "statements": 76
+  },
+  "api::HandleUpdateSite": {
+   "statements": 64
+  },
+  "api::HandleUpload": {
+   "statements": 72
+  },
+  "api::HandleUserDirectory": {
+   "statements": 59
+  },
+  "api::NewPrintHandler": {
+   "cognitive": 41,
+   "cyclomatic": 22
+  },
+  "api::RegisterAnalyticsRoutesWithQueryCache": {
+   "cognitive": 153,
+   "cyclomatic": 82,
+   "lines": 386
+  },
+  "api::RegisterOperations": {
+   "statements": 78
+  },
+  "api::RegisterRoutesOnGroupWithRealtimeOwner": {
+   "statements": 79
+  },
+  "api::RegisterSystemRoutes": {
+   "statements": 41
+  },
+  "api::WorkAdmissionMiddleware": {
+   "cognitive": 19
+  },
+  "api::addLinkTitles": {
+   "cognitive": 44,
+   "cyclomatic": 22,
+   "statements": 46
+  },
+  "api::analyticsModelSourcesReadable": {
+   "cognitive": 26,
+   "cyclomatic": 20
+  },
+  "api::applyTransactionLinkedFields": {
+   "cognitive": 24,
+   "cyclomatic": 17
+  },
+  "api::applyTransactionTotals": {
+   "cognitive": 30,
+   "cyclomatic": 27,
+   "statements": 56
+  },
+  "api::applyUserAccessUpdate": {
+   "statements": 72
+  },
+  "api::assembleImportGroups": {
+   "cognitive": 39,
+   "cyclomatic": 24,
+   "statements": 53
+  },
+  "api::authorizePublishedProjectionActorScope": {
+   "cyclomatic": 16
+  },
+  "api::authorizePublishedQueryActorScope": {
+   "cognitive": 23,
+   "cyclomatic": 23
+  },
+  "api::buildApplicationCatalog": {
+   "statements": 118
+  },
+  "api::buildConfigRestoreDDL": {
+   "cognitive": 63,
+   "cyclomatic": 34,
+   "statements": 84
+  },
+  "api::buildKernelOperation": {
+   "statements": 66
+  },
+  "api::buildTransactionChildren": {
+   "cognitive": 18
+  },
+  "api::capabilities": {
+   "statements": 43
+  },
+  "api::checkRelatedModelPermissions": {
+   "cognitive": 52,
+   "cyclomatic": 24,
+   "statements": 42
+  },
+  "api::configuredTransactionLineRecords": {
+   "cognitive": 51,
+   "cyclomatic": 30,
+   "statements": 53
+  },
+  "api::configuredTransactionNumericUpdates": {
+   "cognitive": 41,
+   "cyclomatic": 26,
+   "statements": 42
+  },
+  "api::configuredTransactionRelatedRecords": {
+   "cognitive": 28,
+   "cyclomatic": 16
+  },
+  "api::containsIgnoreCase": {
+   "cognitive": 17
+  },
+  "api::decodeDraftConfigurationRequest": {
+   "statements": 42
+  },
+  "api::docToMap": {
+   "cognitive": 27
+  },
+  "api::documentMatchesPublicFilters": {
+   "cognitive": 20
+  },
+  "api::executeCreateRecord": {
+   "statements": 53
+  },
+  "api::executeCreateTransaction": {
+   "statements": 156
+  },
+  "api::executeInitiateExternalOperation": {
+   "statements": 97
+  },
+  "api::executeTransactionPaymentScript": {
+   "statements": 44
+  },
+  "api::filterPublishedProjectionRows": {
+   "cognitive": 16
+  },
+  "api::filterReadableAnalyticsCatalog": {
+   "cognitive": 16
+  },
+  "api::handleChannelTool": {
+   "statements": 49
+  },
+  "api::handleConfigurationCheck": {
+   "cognitive": 37,
+   "cyclomatic": 27,
+   "statements": 61
+  },
+  "api::normalizeManifestBindings": {
+   "cognitive": 36
+  },
+  "api::optimizeUploadedImage": {
+   "cognitive": 21
+  },
+  "api::orderDraftDocTypes": {
+   "cognitive": 45,
+   "cyclomatic": 22,
+   "statements": 42
+  },
+  "api::pageManifestPurpose": {
+   "cognitive": 18,
+   "cyclomatic": 20
+  },
+  "api::parseRange": {
+   "cognitive": 17
+  },
+  "api::processOnboardJob": {
+   "statements": 133
+  },
+  "api::projectScriptReadDocument": {
+   "cognitive": 33,
+   "cyclomatic": 16
+  },
+  "api::publicFiltersJSON": {
+   "cognitive": 17
+  },
+  "api::publishedOperationByRef": {
+   "cognitive": 26
+  },
+  "api::replayRealtime": {
+   "statements": 50
+  },
+  "api::resolveCreateRecordTemplate": {
+   "cognitive": 22,
+   "cyclomatic": 17
+  },
+  "api::resolveImportLinks": {
+   "cognitive": 47,
+   "cyclomatic": 30,
+   "statements": 57
+  },
+  "api::scriptMutationFields": {
+   "cognitive": 20
+  },
+  "api::serveStoredFile": {
+   "statements": 46
+  },
+  "api::siteTx": {
+   "statements": 52
+  },
+  "api::streamRealtime": {
+   "lines": 111
+  },
+  "api::validateCandidateDocTypeReferences": {
+   "cognitive": 28,
+   "cyclomatic": 17
+  },
+  "api::validateCandidateViews": {
+   "cognitive": 22
+  },
+  "api::validateCheckoutViewBindings": {
+   "cognitive": 40,
+   "cyclomatic": 16
+  },
+  "api::validateConfigurationCandidateRules": {
+   "cognitive": 21,
+   "cyclomatic": 17
+  },
+  "api::validateConfigurationPublishedBindings": {
+   "cognitive": 94,
+   "cyclomatic": 54,
+   "statements": 85
+  },
+  "api::validateExperience": {
+   "cognitive": 16,
+   "cyclomatic": 16
+  },
+  "api::validateScriptCandidates": {
+   "cognitive": 23
+  },
+  "api::validateTransactionChildren": {
+   "cognitive": 20
+  },
+  "auth/oidc::ValidateIDToken": {
+   "cognitive": 16
+  },
+  "auth::(*OIDCLogin).completeSignIn": {
+   "cognitive": 16,
+   "cyclomatic": 18
+  },
+  "auth::(*SessionManager).consumeMagicLink": {
+   "cognitive": 21,
+   "cyclomatic": 21
+  },
+  "auth::(*SiteGuard).Middleware": {
+   "cognitive": 53,
+   "cyclomatic": 33
+  },
+  "auth::RegisterCloudHandoffRoute": {
+   "cognitive": 33,
+   "cyclomatic": 23,
+   "lines": 93
+  },
+  "auth::RevalidateRealtimeIdentity": {
+   "cognitive": 19,
+   "cyclomatic": 17,
+   "statements": 47
+  },
+  "auth::allowMagicLinkRequest": {
+   "cognitive": 22
+  },
+  "auth::completeSignIn": {
+   "statements": 42
+  },
+  "auth::consumeMagicLink": {
+   "statements": 51
+  },
+  "auth::parseExtensionPermissions": {
+   "cognitive": 19
+  },
+  "auth::publicAppBaseURL": {
+   "cyclomatic": 17
+  },
+  "auth::registerAuthRoutes": {
+   "cognitive": 25
+  },
+  "auth::registerMagicLinkRoutes": {
+   "cognitive": 37,
+   "cyclomatic": 21
+  },
+  "auth::registerPasswordLoginRoute": {
+   "cognitive": 36,
+   "cyclomatic": 22
+  },
+  "auth::scanUserJSON": {
+   "cognitive": 37,
+   "cyclomatic": 18
+  },
+  "cli::(*remoteClient).doWithHeaders": {
+   "cognitive": 16,
+   "cyclomatic": 17
+  },
+  "cli::(*remoteOptions).client": {
+   "cognitive": 19,
+   "cyclomatic": 20
+  },
+  "cli::acquireSiteCreationWork": {
+   "cognitive": 22,
+   "cyclomatic": 16
+  },
+  "cli::enginePlacementConfig": {
+   "cognitive": 27,
+   "cyclomatic": 21,
+   "statements": 45
+  },
+  "cli::lookupRegisteredSiteContext": {
+   "cognitive": 17
+  },
+  "cli::newAdminModulesCommand": {
+   "cognitive": 40,
+   "cyclomatic": 21,
+   "lines": 100
+  },
+  "cli::newAdminProfileCommand": {
+   "cognitive": 34,
+   "cyclomatic": 17
+  },
+  "cli::newRemoteAuthCommand": {
+   "cognitive": 51,
+   "cyclomatic": 27,
+   "lines": 120
+  },
+  "cli::newRemoteOperationCommand": {
+   "cognitive": 53,
+   "cyclomatic": 26,
+   "lines": 120
+  },
+  "cli::newRemoteProfileCommand": {
+   "cognitive": 51,
+   "cyclomatic": 26,
+   "lines": 136
+  },
+  "cli::newRemoteReconciliationCommand": {
+   "cognitive": 31,
+   "cyclomatic": 17,
+   "lines": 89
+  },
+  "cli::newRemoteWorkflowCommand": {
+   "cognitive": 48,
+   "cyclomatic": 25,
+   "lines": 134
+  },
+  "cli::publishConfigExport": {
+   "cognitive": 41,
+   "cyclomatic": 33,
+   "statements": 81
+  },
+  "cli::publishConfigExportStage": {
+   "cognitive": 16
+  },
+  "cli::recoverConfigExports": {
+   "cognitive": 25
+  },
+  "cli::rollbackConfigExportStage": {
+   "cognitive": 29,
+   "cyclomatic": 16
+  },
+  "cli::runAnalyticsBackfill": {
+   "cognitive": 19,
+   "cyclomatic": 17,
+   "statements": 50
+  },
+  "cli::runConfigExportContext": {
+   "cognitive": 47,
+   "cyclomatic": 31,
+   "statements": 75
+  },
+  "cli::runConfigImportForSiteContext": {
+   "cognitive": 27,
+   "cyclomatic": 27,
+   "statements": 68
+  },
+  "cli::runConfigRollbackContext": {
+   "cognitive": 21,
+   "cyclomatic": 19,
+   "statements": 54
+  },
+  "cli::runMigrate": {
+   "cognitive": 28,
+   "cyclomatic": 17,
+   "statements": 60
+  },
+  "cli::runServe": {
+   "cognitive": 48,
+   "cyclomatic": 44,
+   "statements": 111
+  },
+  "cli::runSiteDirectoryProbe": {
+   "cognitive": 32,
+   "cyclomatic": 19,
+   "statements": 56
+  },
+  "cli::summarizeDirectoryAssignments": {
+   "cognitive": 37,
+   "cyclomatic": 22,
+   "statements": 57
+  },
+  "cli::writeDirectoryDescriptorPages": {
+   "cognitive": 27,
+   "cyclomatic": 16
+  },
+  "cmd/contractgen::addV2SemanticRules": {
+   "cognitive": 32,
+   "cyclomatic": 23,
+   "statements": 82
+  },
+  "cmd/contractgen::enumValues": {
+   "cognitive": 57,
+   "cyclomatic": 18
+  },
+  "cmd/contractgen::generateTypeScript": {
+   "cognitive": 46,
+   "cyclomatic": 24,
+   "statements": 75
+  },
+  "cmd/contractgen::generateVersion": {
+   "cognitive": 121,
+   "cyclomatic": 44,
+   "statements": 103
+  },
+  "cmd/contractgen::main": {
+   "cognitive": 20
+  },
+  "cmd/contractgen::schemaType": {
+   "cognitive": 51,
+   "cyclomatic": 25,
+   "statements": 67
+  },
+  "cmd/contractgen::taggedUnionSchema": {
+   "cognitive": 37,
+   "cyclomatic": 21,
+   "statements": 49
+  },
+  "cmd/contractgen::typeSchema": {
+   "cognitive": 146,
+   "cyclomatic": 58,
+   "statements": 112
+  },
+  "cmd/contractgen::visitType": {
+   "cognitive": 34,
+   "cyclomatic": 25,
+   "statements": 42
+  },
+  "configstore::(*ModuleStore).AdmitCapabilityAttempt": {
+   "cognitive": 25,
+   "cyclomatic": 20
+  },
+  "configstore::(*ModuleStore).AdmitPinnedCapabilityRecovery": {
+   "cyclomatic": 33
+  },
+  "configstore::(*ModuleStore).ApplyModuleLifecycleChangeTx": {
+   "cognitive": 26,
+   "cyclomatic": 29
+  },
+  "configstore::(*ModuleStore).BeginPublishedOperationAttempt": {
+   "cyclomatic": 37
+  },
+  "configstore::(*ModuleStore).EnsureCapabilityLease": {
+   "cognitive": 18,
+   "cyclomatic": 18
+  },
+  "configstore::(*ModuleStore).LoadPublishedOperationAttempt": {
+   "cognitive": 21,
+   "cyclomatic": 47
+  },
+  "configstore::(*ModuleStore).LoadPublishedOperationReceipt": {
+   "cyclomatic": 19
+  },
+  "configstore::(*ModuleStore).ValidateCapabilityLease": {
+   "cyclomatic": 20
+  },
+  "configstore::(*Store).AutoCreatePermissionsForDoctype": {
+   "cognitive": 24
+  },
+  "configstore::(*Store).CommitManagementActivation": {
+   "cyclomatic": 18
+  },
+  "configstore::(*Store).LoadPermissions": {
+   "cognitive": 16
+  },
+  "configstore::(*Store).LoadViews": {
+   "cognitive": 22
+  },
+  "configstore::(*Store).activateSnapshot": {
+   "cognitive": 22,
+   "cyclomatic": 17
+  },
+  "configstore::ApplyModuleLifecycleChangeTx": {
+   "statements": 42
+  },
+  "configstore::CollectSnapshot": {
+   "statements": 43
+  },
+  "configstore::CompleteManagementActivation": {
+   "cyclomatic": 16
+  },
+  "configstore::PlanModuleLifecycleChange": {
+   "cognitive": 127,
+   "cyclomatic": 63,
+   "statements": 100
+  },
+  "configstore::RecordManagementActivationFence": {
+   "cyclomatic": 24
+  },
+  "configstore::ValidateManagementActivationFenceTx": {
+   "cyclomatic": 16
+  },
+  "configstore::normalizeModuleBlockers": {
+   "cognitive": 20
+  },
+  "configstore::validateModuleSnapshot": {
+   "cognitive": 54,
+   "cyclomatic": 41,
+   "statements": 59
+  },
+  "contract::(ApplicationCatalog).Validate": {
+   "cognitive": 75,
+   "cyclomatic": 91
+  },
+  "contract::(CapabilityLease).Validate": {
+   "cyclomatic": 17
+  },
+  "contract::(CheckoutOperationContract).Validate": {
+   "cyclomatic": 18
+  },
+  "contract::(ConfigurationSurfaceBinding).Validate": {
+   "cyclomatic": 28
+  },
+  "contract::(EventEnvelope).Validate": {
+   "cyclomatic": 17
+  },
+  "contract::(LineEntryLayout).Validate": {
+   "cognitive": 25,
+   "cyclomatic": 23
+  },
+  "contract::(ModuleDescriptor).Validate": {
+   "cognitive": 168,
+   "cyclomatic": 113
+  },
+  "contract::(OfflineCapabilities).Validate": {
+   "cyclomatic": 36
+  },
+  "contract::(OfflineIntent).Validate": {
+   "cyclomatic": 18
+  },
+  "contract::(OfflineSnapshotPage).Validate": {
+   "cyclomatic": 16
+  },
+  "contract::(OperationReceipt).Validate": {
+   "cognitive": 20,
+   "cyclomatic": 31
+  },
+  "contract::(PageManifest).Validate": {
+   "cognitive": 20
+  },
+  "contract::(PinnedDispatch).Validate": {
+   "cyclomatic": 17
+  },
+  "contract::(ProjectionDefinition).Validate": {
+   "cognitive": 17,
+   "cyclomatic": 30
+  },
+  "contract::(QueryReplayPage).Validate": {
+   "cognitive": 33,
+   "cyclomatic": 27
+  },
+  "contract::(QueryResult).Validate": {
+   "cognitive": 22,
+   "cyclomatic": 22
+  },
+  "contract::OrderByCausation": {
+   "cognitive": 19
+  },
+  "contract::OrderModuleExtensions": {
+   "cognitive": 160,
+   "cyclomatic": 81,
+   "statements": 125
+  },
+  "contract::PackDigest": {
+   "cognitive": 17,
+   "statements": 41
+  },
+  "contract::PlanComposition": {
+   "cognitive": 74,
+   "cyclomatic": 35,
+   "statements": 77
+  },
+  "contract::Validate": {
+   "statements": 143
+  },
+  "contract::ValidateApplyPackage": {
+   "cognitive": 20,
+   "cyclomatic": 20
+  },
+  "contract::ValidateInstalledPackages": {
+   "cognitive": 42,
+   "cyclomatic": 26
+  },
+  "contract::ValidateManifestPackRefs": {
+   "cognitive": 34,
+   "cyclomatic": 27
+  },
+  "contract::ValidateModuleSet": {
+   "cognitive": 48,
+   "cyclomatic": 22
+  },
+  "contract::ValidateProvisionTenant": {
+   "cognitive": 21,
+   "cyclomatic": 21
+  },
+  "contract::ValidateScheduledJobDefinitions": {
+   "cognitive": 28,
+   "cyclomatic": 25
+  },
+  "contract::ValidateSubmitRequest": {
+   "cognitive": 18
+  },
+  "contract::ValidateTenantDescriptorV2": {
+   "cognitive": 18,
+   "cyclomatic": 19
+  },
+  "contract::appendCanonicalPackageJSON": {
+   "cognitive": 27,
+   "cyclomatic": 19
+  },
+  "contract::compareEngineVersions": {
+   "cognitive": 18,
+   "cyclomatic": 16
+  },
+  "contract::topologicalModuleOrder": {
+   "cognitive": 20
+  },
+  "contract::validIdentifiers": {
+   "cognitive": 17
+  },
+  "contract::validPackageFileType": {
+   "cognitive": 18,
+   "cyclomatic": 30
+  },
+  "contract::validateLocalSchemaReferences": {
+   "cognitive": 31
+  },
+  "db::(*LibSQLDialect).LoadSchema": {
+   "cognitive": 45,
+   "cyclomatic": 22
+  },
+  "db::ExtensibilityTablesLibSQL": {
+   "lines": 259
+  },
+  "db::ExtensibilityTablesMySQL": {
+   "lines": 142
+  },
+  "db::ExtensibilityTablesPostgres": {
+   "lines": 83
+  },
+  "db::LoadSchema": {
+   "statements": 41
+  },
+  "db::SystemTableSQL": {
+   "lines": 250
+  },
+  "db::temporalDefaultExpr": {
+   "cyclomatic": 16
+  },
+  "doctype::(*DocType).Validate": {
+   "cognitive": 114,
+   "cyclomatic": 60
+  },
+  "doctype::(*DocType).validateDecimalFields": {
+   "cognitive": 18
+  },
+  "doctype::(*LispSandbox).registerBuiltins": {
+   "cognitive": 60,
+   "cyclomatic": 31
+  },
+  "doctype::(*PageManifest).ToView": {
+   "cognitive": 30
+  },
+  "doctype::(*PermissionMatrix).CanUserInBusinessScope": {
+   "cognitive": 17
+  },
+  "doctype::(*PermissionMatrix).RowScopeFor": {
+   "cognitive": 19
+  },
+  "doctype::(*ViewComponent).Validate": {
+   "cognitive": 18
+  },
+  "doctype::(*sLexer).readString": {
+   "cognitive": 21
+  },
+  "doctype::ComputeFieldsWithHook": {
+   "cognitive": 46,
+   "cyclomatic": 29,
+   "statements": 52
+  },
+  "doctype::ConvertConfigChanges": {
+   "cognitive": 25,
+   "cyclomatic": 18,
+   "statements": 43
+  },
+  "doctype::DiffConfigs": {
+   "cognitive": 18
+  },
+  "doctype::PageManifestFromView": {
+   "cognitive": 17
+  },
+  "doctype::ParsePageManifestsDirectory": {
+   "cognitive": 19
+  },
+  "doctype::Validate": {
+   "statements": 99
+  },
+  "doctype::ValidateAll": {
+   "cognitive": 26
+  },
+  "doctype::ValidateDocumentWithResolvers": {
+   "cognitive": 92,
+   "cyclomatic": 44,
+   "statements": 55
+  },
+  "doctype::ValidatePageManifestReferences": {
+   "cognitive": 220,
+   "cyclomatic": 87,
+   "statements": 158
+  },
+  "doctype::ValidateSnapshotReferences": {
+   "cognitive": 108,
+   "cyclomatic": 68,
+   "statements": 98
+  },
+  "doctype::bindViewComponentResources": {
+   "cognitive": 16
+  },
+  "doctype::buildSnapshot": {
+   "cognitive": 69,
+   "cyclomatic": 33,
+   "statements": 76
+  },
+  "doctype::checkFieldUnknownKeys": {
+   "cognitive": 69,
+   "cyclomatic": 21
+  },
+  "doctype::diffFields": {
+   "cognitive": 60,
+   "cyclomatic": 31,
+   "statements": 69
+  },
+  "doctype::diffOneEntity": {
+   "cognitive": 24
+  },
+  "doctype::diffSubEntityList": {
+   "cognitive": 16
+  },
+  "doctype::evalDecimalNode": {
+   "cognitive": 44,
+   "cyclomatic": 29,
+   "statements": 54
+  },
+  "doctype::evaluateCondition": {
+   "cognitive": 16
+  },
+  "doctype::findUnknownKeys": {
+   "cognitive": 178,
+   "cyclomatic": 29,
+   "statements": 54
+  },
+  "doctype::kwStringList": {
+   "cognitive": 17
+  },
+  "doctype::pageValueMatches": {
+   "cognitive": 16
+  },
+  "doctype::parseConstraint": {
+   "cognitive": 20
+  },
+  "doctype::parseDocConstraint": {
+   "cognitive": 23,
+   "cyclomatic": 24,
+   "statements": 46
+  },
+  "doctype::parseDocType": {
+   "cognitive": 24
+  },
+  "doctype::parseField": {
+   "cognitive": 18
+  },
+  "doctype::parseView": {
+   "cognitive": 20
+  },
+  "doctype::parseViewComponent": {
+   "cognitive": 39,
+   "cyclomatic": 27,
+   "statements": 49
+  },
+  "doctype::parseViewFilters": {
+   "cognitive": 17
+  },
+  "doctype::registerBuiltins": {
+   "lines": 140
+  },
+  "doctype::validateBindingValue": {
+   "cognitive": 38,
+   "cyclomatic": 27,
+   "statements": 45
+  },
+  "doctype::validateComponentContract": {
+   "cognitive": 40,
+   "cyclomatic": 24
+  },
+  "doctype::validateConstraintValue": {
+   "cognitive": 16
+  },
+  "doctype::validateDocConstraint": {
+   "cognitive": 72,
+   "cyclomatic": 46,
+   "statements": 87
+  },
+  "doctype::validatePageActionInput": {
+   "cognitive": 70,
+   "cyclomatic": 52,
+   "statements": 70
+  },
+  "doctype::validateQuantityEffects": {
+   "cognitive": 52,
+   "cyclomatic": 33,
+   "statements": 43
+  },
+  "doctype::validateTransactionLineRecords": {
+   "cognitive": 43,
+   "cyclomatic": 22
+  },
+  "doctype::validateTransactionNumericUpdates": {
+   "cognitive": 24
+  },
+  "doctype::validateViewReferences": {
+   "cognitive": 145,
+   "cyclomatic": 55,
+   "statements": 79
+  },
+  "doctype::writeSExprDocConstraint": {
+   "cognitive": 18,
+   "cyclomatic": 18,
+   "statements": 42
+  },
+  "doctype::writeSExprDocType": {
+   "cognitive": 25,
+   "cyclomatic": 22,
+   "statements": 49
+  },
+  "doctype::writeSExprField": {
+   "cognitive": 26,
+   "cyclomatic": 24,
+   "statements": 52
+  },
+  "doctype::writeSExprPermission": {
+   "cognitive": 18,
+   "cyclomatic": 16,
+   "statements": 44
+  },
+  "doctype::writeSExprView": {
+   "cognitive": 16
+  },
+  "doctype::writeSExprViewComponent": {
+   "cognitive": 28,
+   "cyclomatic": 22,
+   "statements": 66
+  },
+  "email::sendSMTPContext": {
+   "cognitive": 34,
+   "cyclomatic": 25,
+   "statements": 67
+  },
+  "expression::(*TreeEvaluator).eval": {
+   "cognitive": 27,
+   "cyclomatic": 19
+  },
+  "expression::(*parser).next": {
+   "cognitive": 54,
+   "cyclomatic": 53
+  },
+  "expression::(*parser).parsePrimary": {
+   "cognitive": 34,
+   "cyclomatic": 24
+  },
+  "expression::eval": {
+   "statements": 43
+  },
+  "expression::evalBinary": {
+   "cognitive": 27,
+   "cyclomatic": 24
+  },
+  "expression::next": {
+   "statements": 76
+  },
+  "expression::parsePrimary": {
+   "statements": 55
+  },
+  "ingress::(*Gateway).Wrap": {
+   "cognitive": 19
+  },
+  "internal/application/process::(*Coordinator).ApproveAndApply": {
+   "cognitive": 34,
+   "cyclomatic": 37
+  },
+  "internal/application/process::(*WorkflowLocalActionExecutor).ExecuteLocal": {
+   "cognitive": 33,
+   "cyclomatic": 42
+  },
+  "internal/application/process::ApproveAndApply": {
+   "statements": 63
+  },
+  "internal/application/process::ExecuteLocal": {
+   "statements": 58
+  },
+  "internal/application/process::NewWorkflowLocalActionExecutor": {
+   "cognitive": 16,
+   "cyclomatic": 19
+  },
+  "internal/application/purchasing/sqlstore::(*Store).UsersWithRoles": {
+   "cyclomatic": 16
+  },
+  "internal/application/purchasing::(*RequestAuthorizer).Response": {
+   "cognitive": 26,
+   "cyclomatic": 27
+  },
+  "internal/application/purchasing::(*RequestAuthorizer).purchaseApprovalSubmission": {
+   "cognitive": 28,
+   "cyclomatic": 25
+  },
+  "internal/application/purchasing::Response": {
+   "statements": 45
+  },
+  "internal/application/purchasing::purchaseApprovalSubmission": {
+   "statements": 44
+  },
+  "internal/application/subscriptions/engineadapter::(*recurringInvoiceGenerator).GenerateDueInvoices": {
+   "cognitive": 30,
+   "cyclomatic": 22
+  },
+  "internal/application/subscriptions/engineadapter::(*recurringInvoiceGenerator).generateForSubscription": {
+   "cognitive": 33,
+   "cyclomatic": 21
+  },
+  "internal/application/subscriptions/engineadapter::(BillingObligation).Validate": {
+   "cognitive": 18,
+   "cyclomatic": 21
+  },
+  "internal/application/subscriptions/engineadapter::GenerateDueInvoices": {
+   "statements": 47
+  },
+  "internal/application/subscriptions/engineadapter::NewCapabilityBillingAdapter": {
+   "cognitive": 21,
+   "cyclomatic": 20
+  },
+  "internal/application/subscriptions/engineadapter::generateForSubscription": {
+   "statements": 52
+  },
+  "internal/application/workflow::(*Authorizer).canReadSubject": {
+   "cognitive": 22,
+   "cyclomatic": 17
+  },
+  "internal/dbaccess::ConfigFromEnv": {
+   "cognitive": 29,
+   "cyclomatic": 28,
+   "statements": 46
+  },
+  "internal/dbaccess::endpoint": {
+   "cognitive": 24,
+   "cyclomatic": 16
+  },
+  "internal/disposabledb::Open": {
+   "statements": 44
+  },
+  "internal/engine::(*AsyncHookWorker).run": {
+   "cognitive": 54,
+   "cyclomatic": 26
+  },
+  "internal/engine::(*DurableWorkScanner).probeTenant": {
+   "cognitive": 54,
+   "cyclomatic": 31
+  },
+  "internal/engine::(*DurableWorkScanner).run": {
+   "cognitive": 20
+  },
+  "internal/engine::(*DurableWorkScanner).scanPage": {
+   "cognitive": 29,
+   "cyclomatic": 21
+  },
+  "internal/engine::(*HTTPManagementPackageArtifactResolver).ResolvePackage": {
+   "cognitive": 18,
+   "cyclomatic": 23
+  },
+  "internal/engine::(*ProcessResources).Shutdown": {
+   "cognitive": 93,
+   "cyclomatic": 56
+  },
+  "internal/engine::(*TenantReloadController).Reload": {
+   "cognitive": 25,
+   "cyclomatic": 19
+  },
+  "internal/engine::(*TenantRuntimeCoordinator).ActivateFromDirectory": {
+   "cognitive": 19,
+   "cyclomatic": 16
+  },
+  "internal/engine::(*kernelCommandProviderHandle).InvokeCapability": {
+   "cyclomatic": 31
+  },
+  "internal/engine::(*kernelCommandProviderHandle).Resolve": {
+   "cognitive": 22,
+   "cyclomatic": 29
+  },
+  "internal/engine::(*managementDeleteExecutor).Execute": {
+   "cognitive": 22,
+   "cyclomatic": 30
+  },
+  "internal/engine::(*managementInvitationExecutor).Execute": {
+   "cognitive": 45,
+   "cyclomatic": 49
+  },
+  "internal/engine::(*managementInvitationExecutor).ReconcileInvitation": {
+   "cognitive": 33,
+   "cyclomatic": 45
+  },
+  "internal/engine::(*managementModuleLifecycleExecutor).Execute": {
+   "cognitive": 23,
+   "cyclomatic": 28
+  },
+  "internal/engine::(*managementModuleLifecycleExecutor).InspectExecution": {
+   "cyclomatic": 20
+  },
+  "internal/engine::(*managementModuleLifecycleExecutor).InspectModules": {
+   "cognitive": 84,
+   "cyclomatic": 46
+  },
+  "internal/engine::(*managementPackageExecutor).Execute": {
+   "cognitive": 89,
+   "cyclomatic": 80
+  },
+  "internal/engine::(*managementProvisionExecutor).Execute": {
+   "cognitive": 37,
+   "cyclomatic": 34
+  },
+  "internal/engine::(*managementProvisionExecutor).createTenant": {
+   "cognitive": 18,
+   "cyclomatic": 19
+  },
+  "internal/engine::(*tenantWorkflowConditionScope).Scope": {
+   "cognitive": 22,
+   "cyclomatic": 22
+  },
+  "internal/engine::(recordEmailWorkflowAction).Execute": {
+   "cyclomatic": 18
+  },
+  "internal/engine::(recordNotificationWorkflowAction).Execute": {
+   "cognitive": 52,
+   "cyclomatic": 40
+  },
+  "internal/engine::AssembleHTTPProcess": {
+   "cognitive": 60,
+   "cyclomatic": 48,
+   "statements": 101
+  },
+  "internal/engine::AssembleTenantRuntime": {
+   "cognitive": 26,
+   "cyclomatic": 23,
+   "statements": 46
+  },
+  "internal/engine::Execute": {
+   "statements": 70
+  },
+  "internal/engine::InspectModules": {
+   "statements": 95
+  },
+  "internal/engine::NewDurableWorkScanner": {
+   "cyclomatic": 16
+  },
+  "internal/engine::NewTenantDirectoryConsumer": {
+   "cognitive": 204,
+   "cyclomatic": 74,
+   "statements": 137
+  },
+  "internal/engine::ReconcileInvitation": {
+   "statements": 62
+  },
+  "internal/engine::RegisterApplicationRoutes": {
+   "statements": 56
+  },
+  "internal/engine::RegisterPlatformRoutes": {
+   "cognitive": 22
+  },
+  "internal/engine::RegisterTenantReloadRoute": {
+   "cognitive": 22
+  },
+  "internal/engine::ResolvePackage": {
+   "statements": 44
+  },
+  "internal/engine::RunNATSConsumerWithBackoff": {
+   "cognitive": 19
+  },
+  "internal/engine::RunOutboxPublisher": {
+   "cognitive": 20
+  },
+  "internal/engine::RunRequestNotificationWorker": {
+   "cognitive": 29
+  },
+  "internal/engine::Shutdown": {
+   "statements": 101
+  },
+  "internal/engine::StartDirectoryFeed": {
+   "cognitive": 32,
+   "cyclomatic": 17
+  },
+  "internal/engine::acquireAsyncHookWork": {
+   "cognitive": 17
+  },
+  "internal/engine::assembleManagementOperationRuntime": {
+   "cognitive": 36,
+   "cyclomatic": 32,
+   "statements": 84
+  },
+  "internal/engine::assembleProcessStartup": {
+   "cognitive": 39,
+   "cyclomatic": 30,
+   "statements": 69
+  },
+  "internal/engine::bindOwnedPackageResource": {
+   "cognitive": 101,
+   "cyclomatic": 55,
+   "statements": 74
+  },
+  "internal/engine::collectLoadedStartupTenants": {
+   "cognitive": 17
+  },
+  "internal/engine::configureTenantWorkflow": {
+   "cognitive": 83,
+   "cyclomatic": 70,
+   "statements": 141
+  },
+  "internal/engine::configuredInternalOffer": {
+   "cognitive": 23
+  },
+  "internal/engine::estimateHookPayloadBytes": {
+   "cognitive": 91,
+   "cyclomatic": 42,
+   "statements": 99
+  },
+  "internal/engine::executePublishedOperation": {
+   "cognitive": 103,
+   "cyclomatic": 90,
+   "statements": 99
+  },
+  "internal/engine::grantTenantMember": {
+   "cognitive": 18,
+   "cyclomatic": 16
+  },
+  "internal/engine::hasDueTenantWork": {
+   "cognitive": 16
+  },
+  "internal/engine::installTenantServices": {
+   "cognitive": 186,
+   "cyclomatic": 115,
+   "statements": 338
+  },
+  "internal/engine::loadStartupTenants": {
+   "cognitive": 31,
+   "cyclomatic": 18,
+   "statements": 52
+  },
+  "internal/engine::loadTenantRuntime": {
+   "cognitive": 28,
+   "cyclomatic": 28,
+   "statements": 81
+  },
+  "internal/engine::lookupPublishedOperation": {
+   "cognitive": 23,
+   "cyclomatic": 31,
+   "statements": 41
+  },
+  "internal/engine::mergeModuleDescriptors": {
+   "cognitive": 20
+  },
+  "internal/engine::mergeProviderSelections": {
+   "cognitive": 24
+  },
+  "internal/engine::migrateAnalyticsWALDirectories": {
+   "cognitive": 56,
+   "cyclomatic": 32,
+   "statements": 62
+  },
+  "internal/engine::migrateAnalyticsWALNamespaces": {
+   "cognitive": 27
+  },
+  "internal/engine::newEngine": {
+   "cognitive": 66,
+   "cyclomatic": 54,
+   "statements": 132
+  },
+  "internal/engine::newManagementProvisionExecutor": {
+   "cyclomatic": 17
+  },
+  "internal/engine::newModulePayloadSchemas": {
+   "cognitive": 23
+  },
+  "internal/engine::newStorageResolver": {
+   "cognitive": 23
+  },
+  "internal/engine::newTenantScheduler": {
+   "cognitive": 21,
+   "cyclomatic": 18,
+   "statements": 46
+  },
+  "internal/engine::packageContainsResource": {
+   "cognitive": 85,
+   "cyclomatic": 48,
+   "statements": 55
+  },
+  "internal/engine::probeTenant": {
+   "lines": 92
+  },
+  "internal/engine::processOneDurableLifecycleHook": {
+   "cognitive": 35,
+   "cyclomatic": 43,
+   "statements": 89
+  },
+  "internal/engine::registerRequestNotifications": {
+   "cyclomatic": 16
+  },
+  "internal/engine::registerResourceMetrics": {
+   "cognitive": 154,
+   "cyclomatic": 52,
+   "statements": 233
+  },
+  "internal/engine::registeredConfigQueryProviders": {
+   "cognitive": 52,
+   "cyclomatic": 26,
+   "statements": 53
+  },
+  "internal/engine::registeredKernelCommandProviders": {
+   "cognitive": 50,
+   "cyclomatic": 22,
+   "statements": 43
+  },
+  "internal/engine::registeredSQLPublishedQueryProviders": {
+   "cognitive": 47,
+   "cyclomatic": 28,
+   "statements": 44
+  },
+  "internal/engine::run": {
+   "lines": 111
+  },
+  "internal/engine::scanPage": {
+   "statements": 61
+  },
+  "internal/engine::validateBuiltinWorkflowSchema": {
+   "cognitive": 56,
+   "cyclomatic": 68,
+   "statements": 55
+  },
+  "internal/engine::validateModuleProviderCutovers": {
+   "cognitive": 29,
+   "cyclomatic": 18
+  },
+  "internal/engine::verifiedManagementPackage": {
+   "cognitive": 35,
+   "cyclomatic": 26,
+   "statements": 55
+  },
+  "internal/engine::workflowExpressionValue": {
+   "cyclomatic": 17
+  },
+  "internal/envcompat::Promote": {
+   "cognitive": 20,
+   "cyclomatic": 16
+  },
+  "internal/tenantruntime::(*Manager).Activate": {
+   "cognitive": 50,
+   "cyclomatic": 33
+  },
+  "internal/tenantruntime::(*Manager).ApplyDescriptor": {
+   "cognitive": 30,
+   "cyclomatic": 22
+  },
+  "internal/tenantruntime::(*Manager).ValidateAliases": {
+   "cognitive": 17
+  },
+  "internal/tenantruntime::(*Runtime).Close": {
+   "cognitive": 25,
+   "cyclomatic": 20
+  },
+  "internal/tenantruntime::Activate": {
+   "statements": 60
+  },
+  "internal/tenantruntime::ApplyDescriptor": {
+   "statements": 44
+  },
+  "internal/tenantruntime::buildDirectorySnapshot": {
+   "cognitive": 28,
+   "cyclomatic": 17
+  },
+  "internal/tenantruntime::validateCandidate": {
+   "cognitive": 21
+  },
+  "kernel::(*CommandResource).RequiredInputs": {
+   "cognitive": 28,
+   "cyclomatic": 16
+  },
+  "kernel::(*CommandResource).fieldReadAliases": {
+   "cognitive": 36,
+   "cyclomatic": 19
+  },
+  "kernel::(*CommandResource).validateCompute": {
+   "cognitive": 17
+  },
+  "kernel::(*CommandResource).validateGuardRefs": {
+   "cognitive": 16
+  },
+  "kernel::(*CommandResource).validateGuards": {
+   "cognitive": 43,
+   "cyclomatic": 22
+  },
+  "kernel::(*CommandResource).validateStepReferences": {
+   "cognitive": 56,
+   "cyclomatic": 40
+  },
+  "kernel::(*CommandResource).validateWith": {
+   "cognitive": 82,
+   "cyclomatic": 63
+  },
+  "kernel::(*Kernel).Execute": {
+   "cognitive": 40,
+   "cyclomatic": 28
+  },
+  "kernel::(*Kernel).ExecuteInTx": {
+   "cognitive": 27,
+   "cyclomatic": 24
+  },
+  "kernel::(*Kernel).LookupReceiptByIntent": {
+   "cognitive": 16,
+   "cyclomatic": 21
+  },
+  "kernel::(*Kernel).checkCommandGuards": {
+   "cognitive": 33,
+   "cyclomatic": 16
+  },
+  "kernel::(*Kernel).execDefinedCommand": {
+   "cognitive": 210,
+   "cyclomatic": 95
+  },
+  "kernel::(*Kernel).executeInTx": {
+   "cognitive": 496,
+   "cyclomatic": 208
+  },
+  "kernel::(*Kernel).executeScriptMutationInTx": {
+   "cognitive": 76,
+   "cyclomatic": 48
+  },
+  "kernel::(*Kernel).loadGuardRows": {
+   "cognitive": 18
+  },
+  "kernel::(*Kernel).lookupLegacyReceipt": {
+   "cognitive": 19,
+   "cyclomatic": 25
+  },
+  "kernel::(*Kernel).lookupReceiptKey": {
+   "cognitive": 16,
+   "cyclomatic": 18
+  },
+  "kernel::(*Kernel).upsertRow": {
+   "cognitive": 16,
+   "cyclomatic": 17
+  },
+  "kernel::Execute": {
+   "statements": 77
+  },
+  "kernel::ExecuteInTx": {
+   "statements": 64
+  },
+  "kernel::adjustQuantity": {
+   "cognitive": 19,
+   "cyclomatic": 17
+  },
+  "kernel::applyAdjustments": {
+   "cognitive": 26,
+   "cyclomatic": 18
+  },
+  "kernel::applyData": {
+   "cognitive": 27
+  },
+  "kernel::authorize": {
+   "cognitive": 16
+  },
+  "kernel::authorizeOp": {
+   "cognitive": 108,
+   "cyclomatic": 63,
+   "statements": 93
+  },
+  "kernel::authorizePublicForm": {
+   "cyclomatic": 16
+  },
+  "kernel::enforceModuleLifecycleAdmissionTx": {
+   "cognitive": 25,
+   "cyclomatic": 19
+  },
+  "kernel::execDefinedCommand": {
+   "statements": 245
+  },
+  "kernel::executeInTx": {
+   "statements": 471
+  },
+  "kernel::executeScriptMutationInTx": {
+   "statements": 142
+  },
+  "kernel::expandCommandSteps": {
+   "cognitive": 25
+  },
+  "kernel::prepareQuantityEffect": {
+   "cognitive": 39,
+   "cyclomatic": 31,
+   "statements": 58
+  },
+  "kernel::resolveBundleValue": {
+   "cognitive": 22
+  },
+  "kernel::upsertRow": {
+   "statements": 48
+  },
+  "kernel::validDynamicBase": {
+   "cyclomatic": 16
+  },
+  "kernel::validateStepReferences": {
+   "statements": 51
+  },
+  "kernel::validateWith": {
+   "statements": 70
+  },
+  "management/sqlstore::(*Store).Accept": {
+   "cognitive": 26,
+   "cyclomatic": 33
+  },
+  "management/sqlstore::(*Store).Finish": {
+   "cyclomatic": 16
+  },
+  "management/sqlstore::(*Store).RetryDeleteOperation": {
+   "cognitive": 27,
+   "cyclomatic": 28
+  },
+  "management/sqlstore::(*Store).RetryInvitationOperation": {
+   "cognitive": 26,
+   "cyclomatic": 27
+  },
+  "management/sqlstore::(*Store).RetryPackageOperation": {
+   "cognitive": 26,
+   "cyclomatic": 27
+  },
+  "management/sqlstore::(*Store).RetryProvisionOperation": {
+   "cognitive": 26,
+   "cyclomatic": 28
+  },
+  "management/sqlstore::(*Store).RetryStateOperation": {
+   "cognitive": 24,
+   "cyclomatic": 24
+  },
+  "management/sqlstore::(*Store).claimDue": {
+   "cognitive": 25,
+   "cyclomatic": 27
+  },
+  "management/sqlstore::RetryDeleteOperation": {
+   "statements": 51
+  },
+  "management/sqlstore::RetryInvitationOperation": {
+   "statements": 50
+  },
+  "management/sqlstore::RetryPackageOperation": {
+   "statements": 49
+  },
+  "management/sqlstore::RetryProvisionOperation": {
+   "statements": 49
+  },
+  "management/sqlstore::RetryStateOperation": {
+   "statements": 46
+  },
+  "management/sqlstore::claimDue": {
+   "statements": 64
+  },
+  "management::(*Worker).Run": {
+   "cognitive": 30,
+   "cyclomatic": 24
+  },
+  "management::(*Worker).process": {
+   "cognitive": 18
+  },
+  "natsprovider::(*Consumer).Run": {
+   "cognitive": 81,
+   "cyclomatic": 29
+  },
+  "natsprovider::(*Provider).Bootstrap": {
+   "cognitive": 21,
+   "cyclomatic": 19
+  },
+  "natsprovider::(*Provider).RealtimeBudget": {
+   "cognitive": 19
+  },
+  "natsprovider::(*Provider).Subscribe": {
+   "cognitive": 26,
+   "cyclomatic": 17
+  },
+  "natsprovider::(*Provider).SubscribeSiteDirectoryWakeups": {
+   "cognitive": 38,
+   "cyclomatic": 20
+  },
+  "natsprovider::Run": {
+   "statements": 77
+  },
+  "natsprovider::Subscribe": {
+   "statements": 48
+  },
+  "net::(*SiteRouter).Middleware": {
+   "cognitive": 57,
+   "cyclomatic": 32
+  },
+  "net::Middleware": {
+   "lines": 104
+  },
+  "net::RegisterPathSiteRoutes": {
+   "cognitive": 34,
+   "cyclomatic": 18
+  },
+  "notifications/sqlstore::(*Store).Claim": {
+   "cognitive": 32,
+   "cyclomatic": 30
+  },
+  "notifications/sqlstore::(*Store).RecordEvent": {
+   "cognitive": 27,
+   "cyclomatic": 29
+  },
+  "notifications/sqlstore::Claim": {
+   "statements": 59
+  },
+  "notifications/sqlstore::RecordEvent": {
+   "statements": 45
+  },
+  "notifications::(*Service).Consume": {
+   "cognitive": 20,
+   "cyclomatic": 17
+  },
+  "orm::(*TxManager).CaptureAsyncAfterHooksTx": {
+   "cognitive": 21,
+   "cyclomatic": 24
+  },
+  "orm::(*TxManager).GetDocWithScope": {
+   "cognitive": 17,
+   "cyclomatic": 20
+  },
+  "orm::(*TxManager).GetListWithScope": {
+   "cognitive": 70,
+   "cyclomatic": 56
+  },
+  "orm::(*TxManager).InsertInTx": {
+   "cognitive": 53,
+   "cyclomatic": 30
+  },
+  "orm::(*TxManager).MatchingNamesLocked": {
+   "cognitive": 18,
+   "cyclomatic": 17
+  },
+  "orm::(*TxManager).SaveInTxWithScope": {
+   "cognitive": 74,
+   "cyclomatic": 46
+  },
+  "orm::(*TxManager).computedScriptHook": {
+   "cognitive": 33
+  },
+  "orm::(*TxManager).populateLinkedFields": {
+   "cognitive": 50,
+   "cyclomatic": 28
+  },
+  "orm::(*TxManager).rowScopePredicate": {
+   "cognitive": 22,
+   "cyclomatic": 20
+  },
+  "orm::(*TxManager).runHooks": {
+   "cognitive": 90,
+   "cyclomatic": 54
+  },
+  "orm::(*TxManager).selectLifecycleScripts": {
+   "cognitive": 22,
+   "cyclomatic": 21
+  },
+  "orm::(*TxManager).validateEntityReferences": {
+   "cognitive": 22,
+   "cyclomatic": 18
+  },
+  "orm::DocumentFromMap": {
+   "cognitive": 21
+  },
+  "orm::GetDocWithScope": {
+   "statements": 53
+  },
+  "orm::GetListWithScope": {
+   "statements": 94
+  },
+  "orm::InsertInTx": {
+   "statements": 78
+  },
+  "orm::SaveInTxWithScope": {
+   "statements": 93
+  },
+  "orm::buildClause": {
+   "cyclomatic": 23,
+   "statements": 46
+  },
+  "orm::insertChildrenBatch": {
+   "cognitive": 32,
+   "cyclomatic": 18,
+   "statements": 43
+  },
+  "orm::normalizeSQLValue": {
+   "cognitive": 21
+  },
+  "orm::persistComputedChildFields": {
+   "cognitive": 16
+  },
+  "orm::populateLinkedFields": {
+   "statements": 50
+  },
+  "orm::reconcileChildren": {
+   "cognitive": 25,
+   "cyclomatic": 17
+  },
+  "orm::runHooks": {
+   "statements": 97
+  },
+  "orm::validateOrderBy": {
+   "cognitive": 16
+  },
+  "outbox::(*Dispatcher).Run": {
+   "cognitive": 78,
+   "cyclomatic": 39
+  },
+  "outbox::(*Dispatcher).consumerQuery": {
+   "cognitive": 33,
+   "cyclomatic": 16
+  },
+  "outbox::(*Dispatcher).matchesWorkerEvent": {
+   "cognitive": 21
+  },
+  "outbox::(*Publisher).Backlog": {
+   "cognitive": 29,
+   "cyclomatic": 17
+  },
+  "outbox::(*Publisher).PublishDue": {
+   "cognitive": 34,
+   "cyclomatic": 21
+  },
+  "outbox::InspectOpenWork": {
+   "cognitive": 34,
+   "cyclomatic": 28,
+   "statements": 68
+  },
+  "outbox::PublishDue": {
+   "statements": 76
+  },
+  "outbox::Run": {
+   "statements": 103
+  },
+  "outbox::nextSourceSequence": {
+   "cyclomatic": 16
+  },
+  "payment::(*Service).Request": {
+   "cognitive": 17,
+   "cyclomatic": 17
+  },
+  "plugin::(*SQLPublishedQueryProvider).PutFactTx": {
+   "cognitive": 16,
+   "cyclomatic": 18
+  },
+  "plugin::(*SQLPublishedQueryProvider).appendChange": {
+   "cyclomatic": 18
+  },
+  "plugin::(BindingPlan).InvokeCapability": {
+   "cognitive": 26,
+   "cyclomatic": 45
+  },
+  "plugin::(BindingPlan).ProviderSelections": {
+   "cognitive": 20
+  },
+  "plugin::(BindingPlan).RebuildPublishedProjection": {
+   "cognitive": 210,
+   "cyclomatic": 97
+  },
+  "plugin::(BindingPlan).ReconcileCapability": {
+   "cognitive": 18,
+   "cyclomatic": 37
+  },
+  "plugin::(BindingPlan).ReplayPublishedQueryForActor": {
+   "cognitive": 37,
+   "cyclomatic": 37
+  },
+  "plugin::(BindingPlan).ResolveBusinessReference": {
+   "cyclomatic": 17
+  },
+  "plugin::(BindingPlan).executePublishedQuery": {
+   "cognitive": 60,
+   "cyclomatic": 44
+  },
+  "plugin::InvokeCapability": {
+   "statements": 50
+  },
+  "plugin::RebuildPublishedProjection": {
+   "statements": 181
+  },
+  "plugin::ReplayPublishedQueryForActor": {
+   "statements": 52
+  },
+  "plugin::ResolveModules": {
+   "cognitive": 276,
+   "cyclomatic": 143,
+   "statements": 213
+  },
+  "plugin::executePublishedQuery": {
+   "statements": 60
+  },
+  "plugin::validateLineEntryLayouts": {
+   "cognitive": 39,
+   "cyclomatic": 17
+  },
+  "print::walkIdent": {
+   "cognitive": 24,
+   "cyclomatic": 18
+  },
+  "query::(*Definition).validate": {
+   "cognitive": 18,
+   "cyclomatic": 17
+  },
+  "query::(*Definition).validateAggregates": {
+   "cognitive": 23,
+   "cyclomatic": 17
+  },
+  "query::(*Definition).validateFilter": {
+   "cognitive": 25,
+   "cyclomatic": 17
+  },
+  "query::(*Definition).validateRest": {
+   "cognitive": 26,
+   "cyclomatic": 19
+  },
+  "query::(*builder).leaf": {
+   "cognitive": 16
+  },
+  "query::Build": {
+   "cognitive": 17
+  },
+  "query::Run": {
+   "cognitive": 18
+  },
+  "query::buildAggregate": {
+   "cognitive": 21,
+   "cyclomatic": 16
+  },
+  "recon::(*BusinessRunStore).InspectOpenWork": {
+   "cognitive": 30,
+   "cyclomatic": 23
+  },
+  "recon::(*BusinessRunStore).Load": {
+   "cognitive": 23,
+   "cyclomatic": 26
+  },
+  "recon::(*BusinessRunStore).Repair": {
+   "cognitive": 58,
+   "cyclomatic": 54
+  },
+  "recon::(*BusinessRunStore).Save": {
+   "cognitive": 26,
+   "cyclomatic": 35
+  },
+  "recon::(*BusinessRunStore).Waive": {
+   "cognitive": 19,
+   "cyclomatic": 25
+  },
+  "recon::CompareBusinessObligations": {
+   "cognitive": 49,
+   "cyclomatic": 45,
+   "statements": 78
+  },
+  "recon::ExecuteBusinessReconciliation": {
+   "cognitive": 18,
+   "cyclomatic": 29
+  },
+  "recon::InspectOpenWork": {
+   "statements": 48
+  },
+  "recon::Load": {
+   "statements": 47
+  },
+  "recon::Repair": {
+   "statements": 92
+  },
+  "recon::Save": {
+   "statements": 45
+  },
+  "recon::readBusinessPages": {
+   "cognitive": 31,
+   "cyclomatic": 24
+  },
+  "requests/sqlstore::(*DirectTaskAuthorizer).Management": {
+   "cognitive": 22,
+   "cyclomatic": 17
+  },
+  "requests/sqlstore::(*DirectTaskAuthorizer).Submission": {
+   "cognitive": 21,
+   "cyclomatic": 19
+  },
+  "requests/sqlstore::(*Store).Cancel": {
+   "cognitive": 31,
+   "cyclomatic": 28
+  },
+  "requests/sqlstore::(*Store).CreateInTx": {
+   "cognitive": 16,
+   "cyclomatic": 18
+  },
+  "requests/sqlstore::(*Store).ExpireDue": {
+   "cognitive": 32,
+   "cyclomatic": 24
+  },
+  "requests/sqlstore::(*Store).History": {
+   "cognitive": 60,
+   "cyclomatic": 39
+  },
+  "requests/sqlstore::(*Store).ListVisible": {
+   "cognitive": 47,
+   "cyclomatic": 44
+  },
+  "requests/sqlstore::(*Store).MarkStale": {
+   "cognitive": 31,
+   "cyclomatic": 39
+  },
+  "requests/sqlstore::(*Store).Reassign": {
+   "cognitive": 42,
+   "cyclomatic": 37
+  },
+  "requests/sqlstore::(*Store).Response": {
+   "cognitive": 24,
+   "cyclomatic": 27
+  },
+  "requests/sqlstore::(*Store).commitDecision": {
+   "cognitive": 94,
+   "cyclomatic": 73
+  },
+  "requests/sqlstore::(*Store).get": {
+   "cognitive": 44,
+   "cyclomatic": 42
+  },
+  "requests/sqlstore::(*Store).loadAssignmentsFrom": {
+   "cognitive": 35,
+   "cyclomatic": 28
+  },
+  "requests/sqlstore::Cancel": {
+   "statements": 64
+  },
+  "requests/sqlstore::DirectTaskNotificationRecipients": {
+   "statements": 43
+  },
+  "requests/sqlstore::ExpireDue": {
+   "statements": 58
+  },
+  "requests/sqlstore::History": {
+   "statements": 92
+  },
+  "requests/sqlstore::ListVisible": {
+   "statements": 89
+  },
+  "requests/sqlstore::MarkStale": {
+   "statements": 60
+  },
+  "requests/sqlstore::Reassign": {
+   "statements": 80
+  },
+  "requests/sqlstore::Response": {
+   "statements": 50
+  },
+  "requests/sqlstore::commitDecision": {
+   "statements": 161
+  },
+  "requests/sqlstore::get": {
+   "statements": 59
+  },
+  "requests/sqlstore::insertHistory": {
+   "cognitive": 27,
+   "cyclomatic": 22
+  },
+  "requests/sqlstore::loadAssignmentsFrom": {
+   "statements": 46
+  },
+  "requests/sqlstore::matchesInboxView": {
+   "cognitive": 28,
+   "cyclomatic": 22
+  },
+  "requests/sqlstore::validateCreateCommit": {
+   "cognitive": 83,
+   "cyclomatic": 83,
+   "statements": 94
+  },
+  "requests/sqlstore::validateDecisionCommit": {
+   "cognitive": 31,
+   "cyclomatic": 41,
+   "statements": 46
+  },
+  "requests/sqlstore::validateLoadedRecord": {
+   "cognitive": 31,
+   "cyclomatic": 40
+  },
+  "requests/sqlstore::validateReassignCommit": {
+   "cognitive": 17,
+   "cyclomatic": 19
+  },
+  "requests::(*Service).Reassign": {
+   "cognitive": 16,
+   "cyclomatic": 16
+  },
+  "requests::(*Service).prepareResponse": {
+   "cognitive": 45,
+   "cyclomatic": 33
+  },
+  "requests::(*Service).prepareSubmitUsing": {
+   "cognitive": 42,
+   "cyclomatic": 36
+  },
+  "requests::Reassign": {
+   "statements": 45
+  },
+  "requests::prepareResponse": {
+   "statements": 64
+  },
+  "requests::prepareSubmitUsing": {
+   "statements": 68
+  },
+  "scheduler/sqlstore::(*Store).ClaimDue": {
+   "cognitive": 53,
+   "cyclomatic": 42
+  },
+  "scheduler/sqlstore::(*Store).InspectOpenWork": {
+   "cognitive": 40,
+   "cyclomatic": 27
+  },
+  "scheduler/sqlstore::(*Store).RegisterDefinition": {
+   "cognitive": 27,
+   "cyclomatic": 20
+  },
+  "scheduler/sqlstore::ClaimDue": {
+   "statements": 83
+  },
+  "scheduler/sqlstore::InspectOpenWork": {
+   "statements": 63
+  },
+  "scheduler/sqlstore::RegisterDefinition": {
+   "statements": 44
+  },
+  "scheduler/sqlstore::tableStatements": {
+   "lines": 97
+  },
+  "scheduler::(*Scheduler).executeScheduledWork": {
+   "cognitive": 30,
+   "cyclomatic": 28
+  },
+  "scheduler::(*Scheduler).runDoctypeAlert": {
+   "cognitive": 22
+  },
+  "scheduler::(*Scheduler).runDurableJob": {
+   "cognitive": 43,
+   "cyclomatic": 22
+  },
+  "scheduler::(*Scheduler).runEmailReport": {
+   "cognitive": 22,
+   "cyclomatic": 16
+  },
+  "scheduler::(*Scheduler).runOccurrence": {
+   "cognitive": 30,
+   "cyclomatic": 16
+  },
+  "scheduler::runDurableJob": {
+   "statements": 75
+  },
+  "scheduler::runEmailReport": {
+   "statements": 42
+  },
+  "scheduler::runOccurrence": {
+   "statements": 50
+  },
+  "schema::(*Diff).GenerateDDL": {
+   "cognitive": 46,
+   "cyclomatic": 19
+  },
+  "schema::AnalyzeImpact": {
+   "cognitive": 38,
+   "cyclomatic": 22,
+   "statements": 57
+  },
+  "schema::ComputeDiff": {
+   "cognitive": 182,
+   "cyclomatic": 66,
+   "statements": 98
+  },
+  "schema::GenerateSnapshotActivationDDL": {
+   "cognitive": 42,
+   "cyclomatic": 26,
+   "statements": 49
+  },
+  "schema::LoadLiveSchema": {
+   "cognitive": 18
+  },
+  "schema::generateCreateTableForDoctypes": {
+   "cognitive": 32,
+   "cyclomatic": 18,
+   "statements": 45
+  },
+  "script::(*EmbeddedRunner).Execute": {
+   "cognitive": 32,
+   "cyclomatic": 23
+  },
+  "script::(*Store).AppendAsyncHookTx": {
+   "cognitive": 20,
+   "cyclomatic": 35
+  },
+  "script::(*Store).ClaimAsyncHooks": {
+   "cognitive": 36,
+   "cyclomatic": 31
+  },
+  "script::(*Store).FinishAsyncHook": {
+   "cognitive": 22,
+   "cyclomatic": 26
+  },
+  "script::(*Store).Update": {
+   "cognitive": 16,
+   "cyclomatic": 17
+  },
+  "script::(*koraAPI).buildObject": {
+   "cognitive": 70,
+   "cyclomatic": 34
+  },
+  "script::ClaimAsyncHooks": {
+   "statements": 60
+  },
+  "script::Execute": {
+   "statements": 70
+  },
+  "script::InspectLifecycleInventory": {
+   "cognitive": 21,
+   "cyclomatic": 17
+  },
+  "script::Update": {
+   "statements": 54
+  },
+  "script::buildObject": {
+   "lines": 197
+  },
+  "site::(*CommonConfig).ApplyEnvOverrides": {
+   "cognitive": 23,
+   "cyclomatic": 21
+  },
+  "site::(*CreateSiteInput).applyDefaults": {
+   "cognitive": 47,
+   "cyclomatic": 29
+  },
+  "site::(*DirectoryConsumer).ProcessBatch": {
+   "cognitive": 45,
+   "cyclomatic": 29
+  },
+  "site::(*SQLSiteRegistry).PruneOutboxBeforeContext": {
+   "cognitive": 18,
+   "cyclomatic": 19
+  },
+  "site::(*SQLSiteRegistry).ReconcileConsumerCursorContext": {
+   "cyclomatic": 16
+  },
+  "site::(*SQLSiteRegistry).SetDeletingAtAllocation": {
+   "cognitive": 20,
+   "cyclomatic": 22
+  },
+  "site::(*SQLSiteRegistry).SetRuntimeCellIDAtRevisionContext": {
+   "cognitive": 19,
+   "cyclomatic": 18
+  },
+  "site::(*SQLSiteRegistry).SetStatusAtRevision": {
+   "cognitive": 25,
+   "cyclomatic": 22
+  },
+  "site::(*SQLSiteRegistry).SetStatusContext": {
+   "cyclomatic": 16
+  },
+  "site::(importedWorkflowSchemas).Validate": {
+   "cognitive": 32,
+   "cyclomatic": 36
+  },
+  "site::(packResourceNames).add": {
+   "cognitive": 43,
+   "cyclomatic": 31
+  },
+  "site::BootstrapSystemTablesContext": {
+   "cognitive": 96,
+   "cyclomatic": 86,
+   "statements": 212
+  },
+  "site::CreateDatabaseContext": {
+   "cognitive": 18,
+   "cyclomatic": 18
+  },
+  "site::CreateSiteContext": {
+   "cognitive": 60,
+   "cyclomatic": 41,
+   "statements": 92
+  },
+  "site::DeleteRegisteredSiteWithAllocation": {
+   "cognitive": 19,
+   "cyclomatic": 17
+  },
+  "site::DeleteSite": {
+   "cognitive": 62,
+   "cyclomatic": 33,
+   "statements": 81
+  },
+  "site::GeneratePackModules": {
+   "cognitive": 36,
+   "cyclomatic": 17,
+   "statements": 47
+  },
+  "site::ImportConfigFromSnapshotContext": {
+   "cognitive": 78,
+   "cyclomatic": 55,
+   "statements": 122
+  },
+  "site::ParseConfigPack": {
+   "cognitive": 37,
+   "cyclomatic": 19,
+   "statements": 49
+  },
+  "site::ProcessBatch": {
+   "statements": 65
+  },
+  "site::PruneOutboxBeforeContext": {
+   "statements": 42
+  },
+  "site::ResolvePackTree": {
+   "cognitive": 26
+  },
+  "site::SetDeletingAtAllocation": {
+   "statements": 42
+  },
+  "site::SetRuntimeCellIDAtRevisionContext": {
+   "statements": 43
+  },
+  "site::SetStatusAtRevision": {
+   "statements": 47
+  },
+  "site::SetStatusContext": {
+   "statements": 41
+  },
+  "site::UpdatePlatformSiteRegistration": {
+   "cognitive": 26,
+   "cyclomatic": 21,
+   "statements": 52
+  },
+  "site::ValidatePack": {
+   "cognitive": 96,
+   "cyclomatic": 53,
+   "statements": 105
+  },
+  "site::acquirePlatformRegistryBootstrapLockContext": {
+   "cognitive": 27,
+   "cyclomatic": 19,
+   "statements": 67
+  },
+  "site::add": {
+   "statements": 71
+  },
+  "site::addPackCommands": {
+   "cognitive": 22,
+   "statements": 43
+  },
+  "site::addPackOwnership": {
+   "cognitive": 39,
+   "cyclomatic": 27,
+   "statements": 48
+  },
+  "site::bootstrapPlatformRegistryUnlockedContext": {
+   "cognitive": 39,
+   "cyclomatic": 32,
+   "statements": 58
+  },
+  "site::commandInputSchema": {
+   "cognitive": 17
+  },
+  "site::createPostgresDatabaseContext": {
+   "cognitive": 20,
+   "cyclomatic": 18
+  },
+  "site::discoverRegistrySitesForCellContext": {
+   "cognitive": 36,
+   "cyclomatic": 22,
+   "statements": 42
+  },
+  "site::encodePrintFormats": {
+   "cognitive": 16
+  },
+  "site::ensurePlatformSiteRegistrationAssignmentContext": {
+   "cognitive": 45,
+   "cyclomatic": 31,
+   "statements": 70
+  },
+  "site::isIdempotentSQLError": {
+   "cyclomatic": 16
+  },
+  "site::mergePackSnapshot": {
+   "cognitive": 23,
+   "cyclomatic": 16
+  },
+  "site::parseConfigPack": {
+   "cognitive": 90,
+   "cyclomatic": 59,
+   "statements": 125
+  },
+  "site::parsePackSnapshot": {
+   "cognitive": 20,
+   "cyclomatic": 19,
+   "statements": 51
+  },
+  "site::publishImportedWorkflows": {
+   "cognitive": 20
+  },
+  "site::removePlatformSiteRegistrationByID": {
+   "cognitive": 33,
+   "cyclomatic": 24
+  },
+  "site::resolvePrintOperations": {
+   "cognitive": 21
+  },
+  "site::validatePackFileSyntax": {
+   "cyclomatic": 18,
+   "statements": 43
+  },
+  "storage::(*localBackend).Delete": {
+   "cognitive": 25,
+   "cyclomatic": 19
+  },
+  "storage::(*localBackend).Head": {
+   "cognitive": 20
+  },
+  "storage::(*s3Backend).Head": {
+   "cognitive": 18,
+   "cyclomatic": 16
+  },
+  "storage::Delete": {
+   "statements": 42
+  },
+  "storage::publishLocalObject": {
+   "cognitive": 23,
+   "cyclomatic": 17,
+   "statements": 43
+  },
+  "storage::recoverLocalPublish": {
+   "cognitive": 36,
+   "cyclomatic": 32,
+   "statements": 46
+  },
+  "webhook::(*Worker).RetryDeadLettersContext": {
+   "cognitive": 21,
+   "cyclomatic": 17
+  },
+  "webhook::(*Worker).StartContext": {
+   "cognitive": 22
+  },
+  "webhook::(*Worker).acquireDBWork": {
+   "cognitive": 17
+  },
+  "webhook::(*Worker).loadMatchingExtensions": {
+   "cognitive": 17
+  },
+  "webhook::RetryDeadLettersContext": {
+   "statements": 52
+  },
+  "webhook::Verify": {
+   "cognitive": 18
+  },
+  "workflow/sqlstore::(*AuthorizationStore).Subject": {
+   "cognitive": 18
+  },
+  "workflow/sqlstore::(*DefinitionStore).GetStatusPolicyInTx": {
+   "cognitive": 34,
+   "cyclomatic": 25
+  },
+  "workflow/sqlstore::(*DefinitionStore).PublishDefinition": {
+   "cognitive": 39,
+   "cyclomatic": 35
+  },
+  "workflow/sqlstore::(*DefinitionStore).PublishImportedBatch": {
+   "cognitive": 26,
+   "cyclomatic": 21
+  },
+  "workflow/sqlstore::(*DefinitionStore).RecordPreview": {
+   "cyclomatic": 16
+  },
+  "workflow/sqlstore::(*ExecutionStore).AcceptSignalInTx": {
+   "cognitive": 32,
+   "cyclomatic": 34
+  },
+  "workflow/sqlstore::(*ExecutionStore).ClaimDue": {
+   "cognitive": 37,
+   "cyclomatic": 24
+  },
+  "workflow/sqlstore::(*ExecutionStore).CommitHumanWaitInTx": {
+   "cyclomatic": 19
+  },
+  "workflow/sqlstore::(*ExecutionStore).CommitStepInTx": {
+   "cognitive": 74,
+   "cyclomatic": 71
+  },
+  "workflow/sqlstore::(*ExecutionStore).ResumeDueTimedWaits": {
+   "cognitive": 56,
+   "cyclomatic": 41
+  },
+  "workflow/sqlstore::(*ExecutionStore).ResumeTerminalHumanWaits": {
+   "cognitive": 54,
+   "cyclomatic": 41
+  },
+  "workflow/sqlstore::(*ExecutionStore).ValidateClaimInTx": {
+   "cyclomatic": 16
+  },
+  "workflow/sqlstore::(*ExecutionStore).applySignalPairTx": {
+   "cognitive": 53,
+   "cyclomatic": 44
+  },
+  "workflow/sqlstore::(*ExecutionStore).beginExternalAttempt": {
+   "cognitive": 45,
+   "cyclomatic": 38
+  },
+  "workflow/sqlstore::(*ExecutionStore).resumeEventSignalsTx": {
+   "cognitive": 17
+  },
+  "workflow/sqlstore::(*InstanceStore).Cancel": {
+   "cognitive": 50,
+   "cyclomatic": 48
+  },
+  "workflow/sqlstore::(*InstanceStore).InspectOpenWork": {
+   "cognitive": 38,
+   "cyclomatic": 33
+  },
+  "workflow/sqlstore::(*InstanceStore).Reconcile": {
+   "cognitive": 68,
+   "cyclomatic": 73
+  },
+  "workflow/sqlstore::(*InstanceStore).startInstanceOnce": {
+   "cognitive": 34,
+   "cyclomatic": 29
+  },
+  "workflow/sqlstore::(*InstanceStore).validateStart": {
+   "cognitive": 23,
+   "cyclomatic": 28
+  },
+  "workflow/sqlstore::AcceptSignalInTx": {
+   "statements": 68
+  },
+  "workflow/sqlstore::Cancel": {
+   "statements": 99
+  },
+  "workflow/sqlstore::ClaimDue": {
+   "statements": 65
+  },
+  "workflow/sqlstore::CommitStepInTx": {
+   "statements": 99
+  },
+  "workflow/sqlstore::GetStatusPolicyInTx": {
+   "statements": 41
+  },
+  "workflow/sqlstore::InspectOpenWork": {
+   "statements": 70
+  },
+  "workflow/sqlstore::PublishDefinition": {
+   "statements": 68
+  },
+  "workflow/sqlstore::Reconcile": {
+   "statements": 124
+  },
+  "workflow/sqlstore::ResumeDueTimedWaits": {
+   "statements": 85
+  },
+  "workflow/sqlstore::ResumeTerminalHumanWaits": {
+   "statements": 84
+  },
+  "workflow/sqlstore::applySignalPairTx": {
+   "statements": 67
+  },
+  "workflow/sqlstore::beginExternalAttempt": {
+   "statements": 69
+  },
+  "workflow/sqlstore::getInstanceTx": {
+   "cognitive": 18
+  },
+  "workflow/sqlstore::startInstanceOnce": {
+   "statements": 71
+  },
+  "workflow::(*Catalog).Register": {
+   "cognitive": 22,
+   "cyclomatic": 52
+  },
+  "workflow::(*DefinitionClaimHandler).HandleClaim": {
+   "cyclomatic": 22
+  },
+  "workflow::(*DefinitionClaimHandler).handleAction": {
+   "cognitive": 41,
+   "cyclomatic": 28
+  },
+  "workflow::(*DefinitionClaimHandler).handleCondition": {
+   "cognitive": 22,
+   "cyclomatic": 20
+  },
+  "workflow::(*ExternalActionExecutor).Execute": {
+   "cognitive": 64,
+   "cyclomatic": 71
+  },
+  "workflow::(*HTTPSCapabilityDispatcher).Dispatch": {
+   "cognitive": 25,
+   "cyclomatic": 42
+  },
+  "workflow::(*HTTPSCapabilityDispatcher).ReconcilePinned": {
+   "cyclomatic": 20
+  },
+  "workflow::(*HTTPSCapabilityDispatcher).reconcileRequest": {
+   "cognitive": 18,
+   "cyclomatic": 20
+  },
+  "workflow::(*HumanWaitRecoveryWorker).runPass": {
+   "cognitive": 23,
+   "cyclomatic": 22
+  },
+  "workflow::(*InstanceService).Cancel": {
+   "cyclomatic": 16
+  },
+  "workflow::(*InstanceService).Reconcile": {
+   "cognitive": 43,
+   "cyclomatic": 45
+  },
+  "workflow::(*InstanceService).Start": {
+   "cognitive": 23,
+   "cyclomatic": 25
+  },
+  "workflow::(*InstanceService).StartFromRecordEvent": {
+   "cognitive": 35,
+   "cyclomatic": 37
+  },
+  "workflow::(*Service).Publish": {
+   "cognitive": 39,
+   "cyclomatic": 24
+  },
+  "workflow::(*Service).Validate": {
+   "cognitive": 16
+  },
+  "workflow::ApplyStatusTransition": {
+   "cognitive": 37,
+   "cyclomatic": 23
+  },
+  "workflow::DefinitionDigest": {
+   "cognitive": 16
+  },
+  "workflow::Execute": {
+   "statements": 90
+  },
+  "workflow::NewDefinitionClaimHandler": {
+   "cyclomatic": 17
+  },
+  "workflow::NewPinnedDispatch": {
+   "cyclomatic": 21
+  },
+  "workflow::PreviewRecordDefinition": {
+   "cognitive": 45,
+   "cyclomatic": 31,
+   "statements": 73
+  },
+  "workflow::Publish": {
+   "statements": 42
+  },
+  "workflow::Reconcile": {
+   "statements": 71
+  },
+  "workflow::StartFromRecordEvent": {
+   "statements": 47
+  },
+  "workflow::ValidateDefinition": {
+   "cognitive": 198,
+   "cyclomatic": 109,
+   "statements": 185
+  },
+  "workflow::ValidateRecordActionFields": {
+   "cognitive": 67,
+   "cyclomatic": 27
+  },
+  "workflow::handleAction": {
+   "statements": 54
+  },
+  "workflow::handleCondition": {
+   "statements": 41
+  }
+ }
+}

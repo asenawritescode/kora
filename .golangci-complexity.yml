@@ -34,5 +34,6 @@ linters-settings:
 
 issues:
   exclude-use-default: false
+  uniq-by-line: false   # report every metric for a function, not only the first linter on that line
   max-issues-per-linter: 0
   max-same-issues: 0
