@@ -375,10 +375,14 @@ Kigae provides two official SDKs for building integrations:
 
 Go code follows these quality standards:
 
-- **`golangci-lint`** — all linters pass on every PR
+- **`golangci-lint`** — `.golangci.yml` is the enforced correctness set (govet, errcheck, staticcheck, gosimple, unused, ineffassign, unconvert, misspell, with `-tags integration`). CI's `Lint` job fails a pull request that adds a finding on a line it changes (`--new-from-rev`); the existing backlog is cleared package by package. Run `make lint`. Complexity and duplication (gocognit, gocyclo, nestif, funlen, dupl, goconst) are tracked with `make lint-complexity` and are not a merge gate; refactor the functions you touch when you can.
+- **Errors** — handle every error or discard it with `_ =` and a reason. Never shadow `err` inside an `if` that the code after it depends on. Use `errors.Is`/`As`, not string matching. Context keys use a private type, never a bare string.
+- **No ignored parameters** — a function must not accept an identity (actor, owner, roles) that it then overwrites from the verified execution; remove the parameter. Check with `unparam`.
+- **Dead code** — `deadcode ./...` (golang.org/x/tools/cmd/deadcode) lists functions unreachable from the binary. Check `//go:build integration` tests and Cloud before deleting.
 - **Table-driven tests** — new code uses table-driven test patterns
 - **Interface hygiene** — small interfaces (1-3 methods), defined at consumption point
 - **No `utils`, `helpers`, `common` packages** — packages are organized by domain capability
+- **Module layout** follows https://go.dev/doc/modules/layout for a server project: logic in `internal/`, commands in `cmd/`, and as few exported packages as possible. Exported packages are the contract with other repositories (`contract`, the nested `sdk` module); anything else Cloud or tooling needs should be exposed through them rather than by importing implementation packages. The migration of the existing top-level packages into `internal/` is tracked as a separate, cross-repository change.
 - **Error wrapping** — all errors use `%w` for proper error chains
 
 ### ORM Document Model

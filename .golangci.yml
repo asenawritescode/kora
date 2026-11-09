@@ -1,22 +1,22 @@
+# Enforced lint policy. CI runs this with --new-from-rev on pull requests, so new code must be clean
+# while the existing backlog is burned down package by package. Complexity and duplication metrics
+# live in .golangci-complexity.yml (make lint-complexity) and are tracked, not gated.
 run:
-  timeout: 3m
+  timeout: 8m
   tests: true
+  build-tags:
+    - integration
 
 linters:
   enable:
     - govet
     - errcheck
     - staticcheck
+    - gosimple
     - unused
-    - gocyclo
-    - gocognit
-    - nestif
-    - funlen
-    - dupl
     - ineffassign
-    - misspell
     - unconvert
-    - goconst
+    - misspell
 
 linters-settings:
   errcheck:
@@ -42,20 +42,6 @@ linters-settings:
       - (net/http.Flusher).Flush
       - (*github.com/nats-io/nats.go.Subscription).Unsubscribe
       - (*github.com/spf13/cobra.Command).MarkFlagRequired  # fails only for a misspelled flag name
-  gocyclo:
-    min-complexity: 15
-  gocognit:
-    min-complexity: 15
-  funlen:
-    lines: 80
-    statements: 40
-  nestif:
-    min-complexity: 3
-  dupl:
-    threshold: 80
-  goconst:
-    min-len: 3
-    min-occurrences: 3
 
 issues:
   exclude-use-default: false

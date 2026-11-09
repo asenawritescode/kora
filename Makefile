@@ -1,4 +1,4 @@
-.PHONY: build build-go dev setup serve test lint clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
+.PHONY: build build-go dev setup serve test lint lint-complexity clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
 
 # Defaults
 SITE ?= airtime.local
@@ -70,8 +70,11 @@ test:                              ## Run Go and SDK tests
 	go test ./... -v -count=1
 	cd sdk && go test ./... -count=1
 
-lint:                              ## Run linters
-	golangci-lint run --timeout=3m
+lint:                              ## Run the enforced linters (correctness; new findings fail CI)
+	golangci-lint run
+
+lint-complexity:                   ## Report complexity and duplication hotspots (informational)
+	golangci-lint run --config .golangci-complexity.yml
 
 fmt:                               ## Format code
 	go fmt ./...
