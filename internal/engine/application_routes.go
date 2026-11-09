@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/asenawritescode/kora/api"
@@ -17,7 +16,6 @@ import (
 	knet "github.com/asenawritescode/kora/net"
 	"github.com/asenawritescode/kora/orm"
 	"github.com/asenawritescode/kora/script"
-	"github.com/asenawritescode/kora/workspace"
 	"github.com/gin-gonic/gin"
 )
 
@@ -124,18 +122,9 @@ func RegisterApplicationRoutes(config ApplicationRouteConfig) (*auth.SessionMana
 	api.RegisterPublicRoutesOnGroupWithRuntimeServices(publicV1Group, config.Registry, config.Transactions, nil, nil)
 	api.RegisterPublicRoutesOnGroupWithRuntimeServices(publicLegacyGroup, config.Registry, config.Transactions, nil, nil)
 
-	workspaceHandler := workspace.NewHandler(config.Registry)
-	if spaIndex, _ := workspace.SPAFS().Open("index.html"); spaIndex != nil {
-		_ = spaIndex.Close()
-		slog.Info("serving React SPA at /workspace")
-		workspace.RegisterSPARoutes(config.Router, config.Tenants)
-	} else {
-		slog.Info("SPA not built, using HTMX templates at /workspace")
-		knet.RegisterPathSiteRoutes(config.Router, config.Tenants, nil)
-		workspaceGroup := config.Router.Group("/workspace")
-		workspaceGroup.Use(siteGuard.Middleware(false))
-		workspaceHandler.RegisterRoutesOnGroup(workspaceGroup)
-	}
+	// The Engine is API-only. Path-based tenant access (/s/:site/api/...) is the only non-API route
+	// family, and the standalone UI is served by its own deployment.
+	knet.RegisterPathSiteRoutes(config.Router, config.Tenants)
 	return sessionManager, nil
 }
 

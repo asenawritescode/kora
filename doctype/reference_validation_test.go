@@ -118,11 +118,24 @@ func TestHistoricalSnapshotRequiresDeclaredSchemaAndValidatesWithoutProvider(t *
 	}
 }
 
-func TestPageComponentContractsMatchRenderedComponentRegistry(t *testing.T) {
-	source, err := os.ReadFile(filepath.Join("..", "ui", "src", "components", "views", "registry.tsx"))
-	if err != nil {
-		t.Fatalf("read UI component registry: %v", err)
+// uiSource reads a file from the standalone UI repository, which no longer lives in this one. The
+// UI/Engine parity tests are opt-in: set KORA_UI_ROOT to a checkout of the UI (for example
+// ../kora-studio-mvp) to run them; without it they are skipped so the Engine tests are self-contained.
+func uiSource(t *testing.T, rel ...string) []byte {
+	t.Helper()
+	root := os.Getenv("KORA_UI_ROOT")
+	if root == "" {
+		t.Skip("set KORA_UI_ROOT to a checkout of the standalone UI to run the UI/Engine parity tests")
 	}
+	source, err := os.ReadFile(filepath.Join(append([]string{root}, rel...)...))
+	if err != nil {
+		t.Fatalf("read UI source %s: %v", filepath.Join(rel...), err)
+	}
+	return source
+}
+
+func TestPageComponentContractsMatchRenderedComponentRegistry(t *testing.T) {
+	source := uiSource(t, "src", "components", "views", "registry.tsx")
 	pattern := regexp.MustCompile(`(?m)^\s{2}([a-z_]+): create(?:Static|Lazy)Entry\(`)
 	matches := pattern.FindAllSubmatch(source, -1)
 	uiNames := map[string]bool{}
@@ -142,10 +155,7 @@ func TestPageComponentContractsMatchRenderedComponentRegistry(t *testing.T) {
 			t.Errorf("component %q contract version = %d; expected current runtime version 1", contract.Name, contract.Version)
 		}
 	}
-	policySource, err := os.ReadFile(filepath.Join("..", "ui", "src", "manifest", "runtime", "policy.ts"))
-	if err != nil {
-		t.Fatalf("read UI component policy: %v", err)
-	}
+	policySource := uiSource(t, "src", "manifest", "runtime", "policy.ts")
 	dataBlockPattern := regexp.MustCompile(`(?s)const DATA_DISPLAY_COMPONENTS = new Set\(\[(.*?)\]\)`)
 	dataBlock := dataBlockPattern.FindSubmatch(policySource)
 	if dataBlock == nil {
@@ -164,10 +174,7 @@ func TestPageComponentContractsMatchRenderedComponentRegistry(t *testing.T) {
 }
 
 func TestPageActionContractsCoverManifestRuntimeAllowlist(t *testing.T) {
-	source, err := os.ReadFile(filepath.Join("..", "ui", "src", "manifest", "runtime", "policy.ts"))
-	if err != nil {
-		t.Fatalf("read UI page action policy: %v", err)
-	}
+	source := uiSource(t, "src", "manifest", "runtime", "policy.ts")
 	blockPattern := regexp.MustCompile(`(?s)export const ALLOWED_ACTION_COMMANDS = \[(.*?)\] as const`)
 	block := blockPattern.FindSubmatch(source)
 	if block == nil {
