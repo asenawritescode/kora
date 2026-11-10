@@ -43,16 +43,16 @@ func TestApplyAdjustmentsIsExactAndHonoursFloor(t *testing.T) {
 	old.Set("weight", 0.1)
 	doc := doctype.NewDocument("Shelf")
 	env := refEnv{input: map[string]any{"n": float64(2), "w": "0.2"}}
-	if err := applyAdjustments(dt, old, doc, map[string]FieldAdjust{"copies": {Decrease: "$input.n", Min: "0"}, "weight": {Increase: "$input.w"}}, env, 0); err != nil {
+	if err := applyAdjustments(dt, old, doc, map[string]FieldAdjust{"copies": {Decrease: "$input.n", Min: "0"}, "weight": {Increase: "$input.w"}}, stepEnv{env: env}); err != nil {
 		t.Fatal(err)
 	}
 	if doc.Get("copies") != int64(1) || doc.Get("weight") != "0.3" {
 		t.Fatalf("copies=%v weight=%v", doc.Get("copies"), doc.Get("weight"))
 	}
-	if err := applyAdjustments(dt, old, doc, map[string]FieldAdjust{"copies": {Decrease: "$input.n", Min: "2"}}, env, 0); err == nil || err.Type != "CONFLICT" {
+	if err := applyAdjustments(dt, old, doc, map[string]FieldAdjust{"copies": {Decrease: "$input.n", Min: "2"}}, stepEnv{env: env}); err == nil || err.Type != "CONFLICT" {
 		t.Fatalf("floor not enforced: %v", err)
 	}
-	if err := applyAdjustments(dt, old, doc, map[string]FieldAdjust{"copies": {Increase: "$input.w"}}, env, 0); err == nil {
+	if err := applyAdjustments(dt, old, doc, map[string]FieldAdjust{"copies": {Increase: "$input.w"}}, stepEnv{env: env}); err == nil {
 		t.Fatal("fractional change to an Int field was accepted")
 	}
 }

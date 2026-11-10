@@ -227,7 +227,7 @@ func (h *Handler) HandleImport(c *gin.Context) {
 			h.writeKernelError(c, cerr)
 			return
 		}
-		bulkResults = k.ExecuteBulk(c.Request.Context(), sqlDB, reg, base, bulk, kernel.BulkOptions{ImportID: spec.ImportID, DryRun: spec.DryRun, KeyFields: spec.Target.KeyFields})
+		bulkResults = k.ExecuteBulk(c.Request.Context(), sqlDB, reg, base, kernel.BulkOptions{Rows: bulk, ImportID: spec.ImportID, DryRun: spec.DryRun, KeyFields: spec.Target.KeyFields})
 	}
 	for _, r := range bulkResults {
 		rr := importRowResult{Row: r.Index, OK: r.Error == nil, Error: r.Error}

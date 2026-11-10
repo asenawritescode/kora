@@ -350,7 +350,7 @@ func recoverLocalPublishedOperation(ctx context.Context, rt publishedOperationRu
 	if user == "" {
 		user = actor.PrincipalID
 	}
-	result, found, lookupErr := rt.commandKernel.LookupReceiptByIntent(ctx, rt.store.DB, target.execution, user, command.FullName(), string(r.intentKey))
+	result, found, lookupErr := rt.commandKernel.LookupReceiptByIntent(ctx, rt.store.DB, kernel.ReceiptIntent{Execution: target.execution, ActorUser: user, Command: command.FullName(), IdempotencyKey: string(r.intentKey)})
 	if lookupErr != nil {
 		if typed := asContractError(lookupErr); typed != nil && typed.Type == contract.CodeOutcomeUnknown {
 			receipt, updateErr := rt.receipts(actor).unknown(ctx, r.attempt, typed)

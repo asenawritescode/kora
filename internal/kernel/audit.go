@@ -56,8 +56,15 @@ func (k *Kernel) writeAudit(dbTx *sql.Tx, row AuditRow) (string, error) {
 	return row.ID, nil
 }
 
+// auditOutcome is the record an audit row is about and how the operation ended.
+type auditOutcome struct {
+	Doctype, DocName string
+	Status           contract.Status
+	ErrorCode        string
+}
+
 // buildAuditRow constructs the success/failure row for an executed operation.
-func (k *Kernel) buildAuditRow(op Operation, def CommandDefinition, opID, doctypeName, docName string, status contract.Status, errorCode string) AuditRow {
+func (k *Kernel) buildAuditRow(op Operation, def CommandDefinition, opID string, outcome auditOutcome) AuditRow {
 	user := op.Context.User
 	if user == "" {
 		user = "system"
@@ -73,10 +80,10 @@ func (k *Kernel) buildAuditRow(op Operation, def CommandDefinition, opID, doctyp
 		PrincipalID:   op.Context.Actor.PrincipalID,
 		ActorUser:     user,
 		Command:       def.Name,
-		Doctype:       doctypeName,
-		DocName:       docName,
-		Status:        string(status),
-		ErrorCode:     errorCode,
+		Doctype:       outcome.Doctype,
+		DocName:       outcome.DocName,
+		Status:        string(outcome.Status),
+		ErrorCode:     outcome.ErrorCode,
 		PayloadHash:   payloadHash(op.Payload),
 	}
 }
@@ -97,7 +104,7 @@ func (k *Kernel) writeFailureAudit(siteDB *sql.DB, op Operation, def CommandDefi
 	}
 	defer tx.Rollback()
 	doctypeName := payloadDoctype(op.Payload)
-	row := k.buildAuditRow(op, def, opID, doctypeName, "", contract.StatusRejected, string(code))
+	row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: doctypeName, Status: contract.StatusRejected, ErrorCode: string(code)})
 	_, _ = k.writeAudit(tx, row)
 	_ = tx.Commit()
 }

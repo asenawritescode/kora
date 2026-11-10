@@ -50,7 +50,16 @@ func (c *CommandResource) validatePaymentGuard(index int, p *GuardPayment) error
 	return nil
 }
 
-func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, site, opID string, p *GuardPayment, source string, env refEnv, index int) *contract.Error {
+// paymentClaim names one payment intent an operation consumes. Site, OpID and
+// Source are fixed per guard; Ref, Amount and Currency are filled per intent.
+type paymentClaim struct {
+	Site, OpID, Source string
+	Ref                string
+	Amount             decimal.Decimal
+	Currency           string
+}
+
+func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, claim paymentClaim, p *GuardPayment, env refEnv, index int) *contract.Error {
 	invalid := func(format string, args ...any) *contract.Error {
 		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("require %d: "+format, append([]any{index}, args...)...))
 	}
@@ -66,6 +75,7 @@ func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, site, opID string, p *GuardPa
 	if err != nil {
 		return invalid("%v", err)
 	}
+	claim.Currency = currency
 	for _, raw := range items {
 		item, ok := raw.(map[string]any)
 		if !ok {
@@ -84,7 +94,8 @@ func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, site, opID string, p *GuardPa
 		if err != nil {
 			return invalid("payment %q amount is not a number", ref)
 		}
-		if cerr := consumePaymentIntent(dbTx, k.dialect(), site, opID, ref, source, amount, currency); cerr != nil {
+		claim.Ref, claim.Amount = ref, amount
+		if cerr := consumePaymentIntent(dbTx, k.dialect(), claim); cerr != nil {
 			return cerr
 		}
 	}
@@ -94,7 +105,8 @@ func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, site, opID string, p *GuardPa
 // consumePaymentIntent locks the intent row, checks it, and marks it consumed.
 // The row lock (or the conditional UPDATE where FOR UPDATE is unavailable)
 // makes concurrent consumers of one payment mutually exclusive.
-func consumePaymentIntent(dbTx *sql.Tx, dialect db.Dialect, site, opID, ref, source string, amount decimal.Decimal, currency string) *contract.Error {
+func consumePaymentIntent(dbTx *sql.Tx, dialect db.Dialect, claim paymentClaim) *contract.Error {
+	site, opID, ref, source, amount, currency := claim.Site, claim.OpID, claim.Ref, claim.Source, claim.Amount, claim.Currency
 	reject := func(why string) *contract.Error {
 		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("payment %q %s", ref, why))
 	}

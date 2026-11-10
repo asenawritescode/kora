@@ -26,10 +26,20 @@ func (k *Kernel) lookupReceipt(ctx context.Context, siteDB *sql.DB, op Operation
 	return k.lookupReceiptFrom(ctx, siteDB, op)
 }
 
+// ReceiptIntent identifies the receipt LookupReceiptByIntent recovers. Every
+// field is required.
+type ReceiptIntent struct {
+	Execution      policy.Execution
+	ActorUser      string
+	Command        string
+	IdempotencyKey string
+}
+
 // LookupReceiptByIntent recovers a completed receipt without dispatching the
 // command. The caller must derive idempotencyKey from its full public intent
 // (including scope and operation reference) before calling this method.
-func (k *Kernel) LookupReceiptByIntent(ctx context.Context, siteDB *sql.DB, execution policy.Execution, actorUser, command, idempotencyKey string) (contract.CommandResult, bool, *contract.Error) {
+func (k *Kernel) LookupReceiptByIntent(ctx context.Context, siteDB *sql.DB, intent ReceiptIntent) (contract.CommandResult, bool, *contract.Error) {
+	execution, actorUser, command, idempotencyKey := intent.Execution, intent.ActorUser, intent.Command, intent.IdempotencyKey
 	if ctx == nil || siteDB == nil || !execution.Valid() || actorUser == "" || command == "" || idempotencyKey == "" {
 		return contract.CommandResult{}, false, contract.NewError(contract.CodeValidationFailed, "receipt lookup identity is invalid")
 	}

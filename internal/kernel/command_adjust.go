@@ -35,9 +35,17 @@ func (a FieldAdjust) validate() error {
 	return nil
 }
 
+// stepEnv is a command step's reference environment and its position, which
+// error messages quote.
+type stepEnv struct {
+	env   refEnv
+	index int
+}
+
 // resolveUpdateTarget returns the record an update step changes: by name, or
 // the single record matching where.
-func resolveUpdateTarget(txMgr *orm.TxManager, dt *doctype.DocType, step *StepUpdate, env refEnv, scope policy.RowScope, index int) (string, *contract.Error) {
+func resolveUpdateTarget(txMgr *orm.TxManager, dt *doctype.DocType, step *StepUpdate, at stepEnv, scope policy.RowScope) (string, *contract.Error) {
+	env, index := at.env, at.index
 	if step.Name != "" {
 		name, err := resolveEnvStringRef(step.Name, env)
 		if err != nil || name == "" {
@@ -71,7 +79,8 @@ func lockRecordRow(dbTx *sql.Tx, dialect db.Dialect, dt *doctype.DocType, name s
 }
 
 // applyAdjustments computes each adjusted value from the stored one.
-func applyAdjustments(dt *doctype.DocType, oldDoc, doc *doctype.Document, adjust map[string]FieldAdjust, env refEnv, index int) *contract.Error {
+func applyAdjustments(dt *doctype.DocType, oldDoc, doc *doctype.Document, adjust map[string]FieldAdjust, at stepEnv) *contract.Error {
+	env, index := at.env, at.index
 	for field, change := range adjust {
 		definition := dt.GetField(field)
 		if definition == nil || (definition.Fieldtype != "Int" && definition.Fieldtype != "Float" && definition.Fieldtype != "Currency" && definition.Fieldtype != "Percent") {
@@ -141,7 +150,8 @@ func exactNumber(value any) (*big.Rat, bool) {
 
 // ensureExisting returns the name of the record an ensure step finds, or ""
 // when none matches and the step must create it.
-func ensureExisting(txMgr *orm.TxManager, reg *doctype.Registry, step *StepEnsure, env refEnv, scope policy.RowScope, index int) (string, *contract.Error) {
+func ensureExisting(txMgr *orm.TxManager, reg *doctype.Registry, step *StepEnsure, at stepEnv, scope policy.RowScope) (string, *contract.Error) {
+	env, index := at.env, at.index
 	dt := reg.Get(step.Record)
 	if dt == nil {
 		return "", contract.NewError(contract.CodeNotFound, fmt.Sprintf("step %d: record %q not found", index, step.Record))

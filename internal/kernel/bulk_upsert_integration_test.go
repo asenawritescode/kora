@@ -86,7 +86,7 @@ func TestBulkUpsert(t *testing.T) {
 					p, _ := json.Marshal(map[string]any{"doctype": "Supplier", "data": json.RawMessage(r)})
 					br = append(br, kernel.BulkRow{Index: i + 1, Payload: p})
 				}
-				return k.ExecuteBulk(context.Background(), conn, reg, base, br, kernel.BulkOptions{ImportID: id, DryRun: dry, KeyFields: keys})
+				return k.ExecuteBulk(context.Background(), conn, reg, base, kernel.BulkOptions{Rows: br, ImportID: id, DryRun: dry, KeyFields: keys})
 			}
 			count := func() (n int) {
 				_ = conn.QueryRow("SELECT COUNT(*) FROM " + d.QuoteIdent("tabSupplier")).Scan(&n)

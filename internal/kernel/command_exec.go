@@ -491,7 +491,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		}
 		lastBusinessScope = stepOp.Context.BusinessScope
 		if step.Ensure != nil {
-			existing, ensureErr := ensureExisting(txMgr, reg, step.Ensure, env, scopeForOperation(reg, stepOp, step.Ensure.Record, "write"), i)
+			existing, ensureErr := ensureExisting(txMgr, reg, step.Ensure, stepEnv{env, i}, scopeForOperation(reg, stepOp, step.Ensure.Record, "write")) //nolint:contextcheck // the context travels in txMgr.Context
 			if ensureErr != nil {
 				return nil, ensureErr
 			}
@@ -577,7 +577,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("command %q: record %q not found", def.Name, step.Update.Record))
 			}
 			scope := scopeForOperation(reg, stepOp, dt.Name, "write")
-			targetName, targetErr := resolveUpdateTarget(txMgr, dt, step.Update, env, scope, i)
+			targetName, targetErr := resolveUpdateTarget(txMgr, dt, step.Update, stepEnv{env, i}, scope) //nolint:contextcheck // the context travels in txMgr.Context
 			if targetErr != nil {
 				return nil, targetErr
 			}
@@ -617,7 +617,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 				}
 				doc.Set(field, v)
 			}
-			if adjustErr := applyAdjustments(dt, oldDoc, doc, step.Update.Adjust, env, i); adjustErr != nil {
+			if adjustErr := applyAdjustments(dt, oldDoc, doc, step.Update.Adjust, stepEnv{env, i}); adjustErr != nil {
 				return nil, adjustErr
 			}
 			doc.IsNew = false
@@ -714,7 +714,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		}
 	}
 
-	row := k.buildAuditRow(op, def, opID, lastRecord, lastName, contract.StatusCompleted, "")
+	row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: lastRecord, DocName: lastName, Status: contract.StatusCompleted})
 	row.Command = def.Name
 	if _, aerr := k.writeAudit(dbTx, row); aerr != nil {
 		return nil, contract.NewError(contract.CodeInternal, "audit write failed")

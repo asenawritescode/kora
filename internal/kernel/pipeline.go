@@ -449,7 +449,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 			}
 			doc.IsNew = false
 			afterHash := CanonicalDocHash(doc.Fields)
-			row := k.buildAuditRow(op, def, opID, recordDT.Name, doc.Name, contract.StatusCompleted, "")
+			row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: recordDT.Name, DocName: doc.Name, Status: contract.StatusCompleted})
 			row.BeforeHash = beforeHash
 			row.AfterHash = afterHash
 			auditID, auditErr := k.writeAudit(dbTx, row)
@@ -525,7 +525,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 			return nil, hookErr
 		}
 		doc.IsNew = false
-		row := k.buildAuditRow(op, def, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
+		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
 		row.AfterHash = afterHash
 		auditID, aerr := k.writeAudit(dbTx, row)
 		if aerr != nil {
@@ -601,7 +601,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
 			return nil, hookErr
 		}
-		row := k.buildAuditRow(op, def, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
+		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
 		row.BeforeHash = beforeHash
 		row.AfterHash = afterHash
 		auditID, aerr := k.writeAudit(dbTx, row)
@@ -645,7 +645,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterDelete, oldDoc, nil); hookErr != nil {
 			return nil, hookErr
 		}
-		row := k.buildAuditRow(op, def, opID, dt.Name, oldDoc.Name, contract.StatusCompleted, "")
+		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: oldDoc.Name, Status: contract.StatusCompleted})
 		row.BeforeHash = beforeHash
 		auditID, aerr := k.writeAudit(dbTx, row)
 		if aerr != nil {
@@ -747,7 +747,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
 			return nil, hookErr
 		}
-		row := k.buildAuditRow(op, def, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
+		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
 		row.BeforeHash = beforeHash
 		row.AfterHash = afterHash
 		auditID, aerr := k.writeAudit(dbTx, row)
