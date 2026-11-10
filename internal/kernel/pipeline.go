@@ -89,6 +89,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 
 	m := &mutation{k: k, run: run, op: op, def: def, dt: dt, ownsTx: ownsTransaction}
 
+	var stepErr *contract.Error
 	switch op.Command {
 	case CommandRecordMutateBundle:
 		var p RecordMutationBundlePayload
@@ -517,47 +518,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		m.savedDoc, m.savedOldDoc = doc, oldDoc
 
 	case CommandRecordDelete:
-		var p RecordUpdatePayload
-		if err := json.Unmarshal(op.Payload, &p); err != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, "invalid record.delete payload")
-		}
-		if p.Name == "" {
-			return nil, contract.NewError(contract.CodeValidationFailed, "record.delete missing name")
-		}
-		scope := scopeForOperation(reg, op, dt.Name, "delete")
-		oldDoc, err := txMgr.GetDocWithScope(dt, p.Name, scope)
-		if err != nil {
-			if errors.Is(err, orm.ErrNotFound) {
-				return nil, contract.NewError(contract.CodeNotFound, "document not found")
-			}
-			return nil, contract.NewError(contract.CodeDependencyUnavailable, "load document failed")
-		}
-		if err := txMgr.PrepareDelete(dt, oldDoc); err != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-		}
-		if op.Context.IdempotencyKey != "" && def.IdempotentByKey {
-			if cerr := k.claimReceipt(dbTx, op, def, opID, payloadHash(op.Payload)); cerr != nil {
-				return nil, cerr
-			}
-		}
-		beforeHash := CanonicalDocHash(oldDoc.Fields)
-		if err := txMgr.DeleteInTxWithScope(dbTx, dt, p.Name, scope, oldDoc); err != nil {
-			return nil, wrapORMError(err)
-		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterDelete, oldDoc, nil}); hookErr != nil {
-			return nil, hookErr
-		}
-		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: oldDoc.Name, Status: contract.StatusCompleted})
-		row.BeforeHash = beforeHash
-		auditID, aerr := k.writeAudit(dbTx, row)
-		if aerr != nil {
-			return nil, contract.NewError(contract.CodeInternal, "audit write failed")
-		}
-		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, nil); err != nil {
-			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
-		}
-		m.deletedDoc = oldDoc
-		m.result = &ResultData{Doctype: dt.Name, Name: oldDoc.Name, Deleted: true, AuditID: auditID, Operation: opID}
+		stepErr = m.remove(ctx)
 
 	case CommandWorkflowStatusTransition:
 		var p WorkflowStatusTransitionPayload
@@ -664,6 +625,9 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 
 	default:
 		return nil, contract.NewError(contract.CodeValidationFailed, "unknown command "+op.Command)
+	}
+	if stepErr != nil {
+		return nil, stepErr
 	}
 	return m.finish() //nolint:contextcheck // the context travels in txMgr.Context
 }
