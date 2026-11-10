@@ -20,6 +20,10 @@ type mutation struct {
 	def    CommandDefinition
 	dt     *doctype.DocType
 	ownsTx bool
+	// user stamps the rows written; auditFailure records a rejected attempt
+	// outside the transaction when this run owns it.
+	user         string
+	auditFailure func(contract.Code)
 
 	result                *ResultData
 	deletedDoc            *doctype.Document
@@ -111,6 +115,24 @@ func (m *mutation) load(name string, scope policy.RowScope) (*doctype.Document, 
 		return nil, contract.NewError(contract.CodeDependencyUnavailable, "load document failed")
 	}
 	return doc, nil
+}
+
+// checkVersion rejects the command when the version the caller expects no
+// longer matches the stored row.
+func (m *mutation) checkVersion(name string) *contract.Error {
+	expected := expectedVersionFrom(m.op)
+	if expected == "" {
+		return nil
+	}
+	prior, err := readRowVersion(m.run.Tx, m.k.dialect(), m.dt.RawTableName(), name)
+	if err != nil {
+		return contract.NewError(contract.CodeDependencyUnavailable, "read document version failed")
+	}
+	if prior != expected {
+		m.auditFailure(ErrStaleVersion.Type)
+		return ErrStaleVersion
+	}
+	return nil
 }
 
 // record writes the audit row and the record history of a completed step and
