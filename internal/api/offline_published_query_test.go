@@ -72,7 +72,7 @@ func TestOfflinePublishedQueryHTTPPinsSnapshotAndPullsCommittedChanges(t *testin
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := provider.PutFactTx(ctx, tx, execution, query, input, json.RawMessage(row)); err != nil {
+		if _, err := provider.PutFactTx(ctx, tx, plugin.FactStream{Execution: execution, Query: query, Input: input}, json.RawMessage(row)); err != nil {
 			_ = tx.Rollback()
 			t.Fatal(err)
 		}

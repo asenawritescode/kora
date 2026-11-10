@@ -79,7 +79,7 @@ func TestConfigQueryExecutorPagesWithCursor(t *testing.T) {
 	var names []string
 	cursor := ""
 	for page := 0; page < 3; page++ {
-		res, err := exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, scope, json.RawMessage(`{}`), cursor, 2)
+		res, err := exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, scope, plugin.QueryPageRequest{Input: json.RawMessage(`{}`), Cursor: cursor, Limit: 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestConfigQueryExecutorPagesWithCursor(t *testing.T) {
 	}
 	own := *def
 	own.OwnerField = "title"
-	if _, err := (&configQueryExecutor{db: database, dialect: db.Resolve("libsql"), def: &own}).ExecutePublishedQuery(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, json.RawMessage(`{}`), "", 2); err == nil {
+	if _, err := (&configQueryExecutor{db: database, dialect: db.Resolve("libsql"), def: &own}).ExecutePublishedQuery(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, plugin.QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 2}); err == nil {
 		t.Fatal("owner-restricted query ran without actor scope")
 	}
 }
@@ -210,7 +210,7 @@ func TestConfigQueryExecutorReportsCallerInputErrors(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			exec := &configQueryExecutor{db: database, dialect: db.Resolve("libsql"), def: base}
-			_, err := exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, plugin.PublishedQueryActorScope{SubjectID: "u1"}, json.RawMessage(tc.input), tc.cursor, 2)
+			_, err := exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, plugin.PublishedQueryActorScope{SubjectID: "u1"}, plugin.QueryPageRequest{Input: json.RawMessage(tc.input), Cursor: tc.cursor, Limit: 2})
 			var inputErr *plugin.QueryInputError
 			if !errors.As(err, &inputErr) || inputErr.Field != tc.wantField {
 				t.Fatalf("err = %#v, want *plugin.QueryInputError field %q", err, tc.wantField)
@@ -252,9 +252,9 @@ func TestConfigQueryExecutorHonoursLimitBelowPageLimit(t *testing.T) {
 			var got []string
 			cursor := ""
 			for range 10 {
-				res, err := exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, pq, plugin.PublishedQueryActorScope{SubjectID: "u1"}, json.RawMessage(`{}`), cursor, tt.limit)
-				if err != nil {
-					t.Fatal(err)
+				res, pageErr := exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, pq, plugin.PublishedQueryActorScope{SubjectID: "u1"}, plugin.QueryPageRequest{Input: json.RawMessage(`{}`), Cursor: cursor, Limit: tt.limit})
+				if pageErr != nil {
+					t.Fatal(pageErr)
 				}
 				if err := res.Validate(pq, tt.limit, scope); err != nil {
 					t.Fatalf("result violates the page contract for limit %d: %v", tt.limit, err)
@@ -278,7 +278,7 @@ func TestConfigQueryExecutorHonoursLimitBelowPageLimit(t *testing.T) {
 		})
 	}
 	// A limit above page_limit is the caller's mistake, not a provider fault.
-	_, err = exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, pq, plugin.PublishedQueryActorScope{SubjectID: "u1"}, json.RawMessage(`{}`), "", 5)
+	_, err = exec.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, pq, plugin.PublishedQueryActorScope{SubjectID: "u1"}, plugin.QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 5})
 	var inputErr *plugin.QueryInputError
 	if !errors.As(err, &inputErr) || inputErr.Field != "limit" {
 		t.Fatalf("limit above page_limit: err = %v, want limit QueryInputError", err)

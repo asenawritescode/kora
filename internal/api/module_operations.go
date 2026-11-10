@@ -138,6 +138,19 @@ func (h *Handler) HandleOfflineIntentsV2(c *gin.Context) {
 	c.JSON(http.StatusOK, Response{Data: contract.OfflineIntentsResponse{Receipts: receipts}})
 }
 
+// offlineActorScope builds the verified actor scope an offline page is read
+// with. granted carries the row scope the actor's grants allow, nil for none.
+func offlineActorScope(execution policy.Execution, query contract.PublishedQuery, scope contract.BusinessScope, granted *plugin.PublishedQueryActorScope) plugin.PublishedQueryActorScope {
+	actor := plugin.PublishedQueryActorScope{BusinessScope: scope, SubjectID: execution.Actor().SubjectUserID, OwnerOnly: granted != nil && granted.OwnerOnly, OwnerField: query.OwnerField}
+	if actor.SubjectID == "" {
+		actor.SubjectID = execution.Actor().PrincipalID
+	}
+	if granted != nil {
+		actor.AssignedFields = append([]string(nil), granted.AssignedFields...)
+	}
+	return actor
+}
+
 func (h *Handler) HandleOfflineBootstrapV2(c *gin.Context) {
 	execution, ok := requestExecution(c)
 	if !ok {
@@ -182,19 +195,12 @@ func (h *Handler) HandleOfflineBootstrapV2(c *gin.Context) {
 		writeError(c, http.StatusForbidden, "module.query_online_only", "Published query actor scope is not eligible for offline sync", nil)
 		return
 	}
-	actorScopeValue := plugin.PublishedQueryActorScope{BusinessScope: request.BusinessScope, SubjectID: execution.Actor().SubjectUserID, OwnerOnly: actorScope != nil && actorScope.OwnerOnly, OwnerField: query.OwnerField}
-	if actorScopeValue.SubjectID == "" {
-		actorScopeValue.SubjectID = execution.Actor().PrincipalID
-	}
+	actorScopeValue := offlineActorScope(execution, query, request.BusinessScope, actorScope)
+	var scopedActor *plugin.PublishedQueryActorScope
 	if actorScope != nil {
-		actorScopeValue.AssignedFields = append([]string(nil), actorScope.AssignedFields...)
+		scopedActor = &actorScopeValue
 	}
-	var result contract.QueryResult
-	if actorScope == nil {
-		result, err = plan.ExecutePublishedQuery(c.Request.Context(), request.BusinessScope, query.OwnerModuleID, query.Name, request.Source.Input, request.PageCursor, request.Limit)
-	} else {
-		result, err = plan.ExecutePublishedQueryForActor(c.Request.Context(), request.BusinessScope, query.OwnerModuleID, query.Name, actorScopeValue, request.Source.Input, request.PageCursor, request.Limit)
-	}
+	result, err := plan.ExecutePublishedQuery(c.Request.Context(), plugin.PublishedQueryKey{Scope: request.BusinessScope, OwnerModuleID: query.OwnerModuleID, Name: query.Name}, scopedActor, plugin.QueryPageRequest{Input: request.Source.Input, Cursor: request.PageCursor, Limit: request.Limit})
 	if err != nil || result.SnapshotToken == "" || result.SourceCursor == "" || result.Freshness != contract.QueryFresh {
 		writeError(c, http.StatusServiceUnavailable, "module.offline_snapshot_unavailable", "Published query cannot provide a fresh pinned snapshot", nil)
 		return
@@ -262,14 +268,8 @@ func (h *Handler) HandleOfflinePullV2(c *gin.Context) {
 		writeError(c, http.StatusConflict, "module.stale_snapshot", "Offline source input does not match its pinned hash", nil)
 		return
 	}
-	actorScopeValue := plugin.PublishedQueryActorScope{BusinessScope: request.BusinessScope, SubjectID: execution.Actor().SubjectUserID, OwnerOnly: actorScope != nil && actorScope.OwnerOnly, OwnerField: query.OwnerField}
-	if actorScopeValue.SubjectID == "" {
-		actorScopeValue.SubjectID = execution.Actor().PrincipalID
-	}
-	if actorScope != nil {
-		actorScopeValue.AssignedFields = append([]string(nil), actorScope.AssignedFields...)
-	}
-	page, err := plan.ReplayPublishedQueryForActor(c.Request.Context(), request.BusinessScope, query.OwnerModuleID, query.Name, actorScopeValue, request.Source.Input, request.SnapshotToken, request.ReplayPosition, request.ThroughCursor, request.PageCursor, request.Limit)
+	actorScopeValue := offlineActorScope(execution, query, request.BusinessScope, actorScope)
+	page, err := plan.ReplayPublishedQueryForActor(c.Request.Context(), plugin.PublishedQueryKey{Scope: request.BusinessScope, OwnerModuleID: query.OwnerModuleID, Name: query.Name}, actorScopeValue, plugin.QueryReplayRequest{Input: request.Source.Input, Snapshot: request.SnapshotToken, After: request.ReplayPosition, Through: request.ThroughCursor, Replay: request.PageCursor, Limit: request.Limit})
 	if err != nil {
 		writeError(c, http.StatusServiceUnavailable, "module.offline_replay_unavailable", "Published query replay is unavailable or revoked", nil)
 		return

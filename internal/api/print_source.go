@@ -231,12 +231,7 @@ func (s sitePrintSource) Query(c *gin.Context, module, name string, input map[st
 	if err != nil {
 		return nil, ErrPrintRenderFailed
 	}
-	var result contract.QueryResult
-	if actorScope == nil {
-		result, err = plan.ExecutePublishedQuery(c.Request.Context(), scope, moduleID, name, raw, "", query.PageLimit)
-	} else {
-		result, err = plan.ExecutePublishedQueryForActor(c.Request.Context(), scope, moduleID, name, *actorScope, raw, "", query.PageLimit)
-	}
+	result, err := plan.ExecutePublishedQuery(c.Request.Context(), plugin.PublishedQueryKey{Scope: scope, OwnerModuleID: moduleID, Name: name}, actorScope, plugin.QueryPageRequest{Input: raw, Limit: query.PageLimit})
 	var rows []map[string]any
 	if err != nil || json.Unmarshal(result.Data, &rows) != nil {
 		return nil, ErrPrintRenderFailed

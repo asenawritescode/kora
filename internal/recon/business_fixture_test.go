@@ -17,7 +17,7 @@ import (
 
 type fixtureBusinessQueryExecutor struct{ data json.RawMessage }
 
-func (e fixtureBusinessQueryExecutor) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, uint16) (contract.QueryResult, error) {
+func (e fixtureBusinessQueryExecutor) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, plugin.QueryPageRequest) (contract.QueryResult, error) {
 	return contract.QueryResult{Data: append(json.RawMessage(nil), e.data...), SnapshotToken: "fixture-snapshot", SourceRevision: "fixture-revision", AsOf: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh}, nil
 }
 

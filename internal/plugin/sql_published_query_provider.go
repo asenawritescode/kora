@@ -110,9 +110,26 @@ func (p *SQLPublishedQueryProvider) EnsureSchema(ctx context.Context) error {
 	return nil
 }
 
+// FactStream names the change stream one published query input writes to:
+// the verified owner execution, the query and the query input.
+type FactStream struct {
+	Execution contract.ModuleExecution
+	Query     contract.PublishedQuery
+	Input     json.RawMessage
+}
+
+// factChange is one appended row of a FactStream.
+type factChange struct {
+	key     string
+	ownerID string
+	deleted bool
+	data    json.RawMessage
+}
+
 // PutFactTx appends a full replacement row. The caller owns tx and must commit
 // it with the business effect that made the fact authoritative.
-func (p *SQLPublishedQueryProvider) PutFactTx(ctx context.Context, tx *sql.Tx, execution contract.ModuleExecution, query contract.PublishedQuery, input, data json.RawMessage) (uint64, error) {
+func (p *SQLPublishedQueryProvider) PutFactTx(ctx context.Context, tx *sql.Tx, stream FactStream, data json.RawMessage) (uint64, error) {
+	execution, query, input := stream.Execution, stream.Query, stream.Input
 	if tx == nil || !execution.Verified() || execution.OwnerModuleID != query.OwnerModuleID || execution.AllowedOperation != query.Operation {
 		return 0, fmt.Errorf("published fact write requires verified owner execution and transaction")
 	}
@@ -137,28 +154,30 @@ func (p *SQLPublishedQueryProvider) PutFactTx(ctx context.Context, tx *sql.Tx, e
 	if err != nil {
 		return 0, fmt.Errorf("published fact owner: %w", err)
 	}
-	previousOwner, found, err := p.latestFactOwnerTx(ctx, tx, execution.Scope, query, input, factKey)
+	previousOwner, found, err := p.latestFactOwnerTx(ctx, tx, stream, factKey)
 	if err != nil {
 		return 0, err
 	}
 	if found && previousOwner != ownerID {
-		if _, err := p.appendChange(ctx, tx, execution.Scope, query, input, factKey, previousOwner, true, json.RawMessage(`{}`)); err != nil {
+		if _, err := p.appendChange(ctx, tx, stream, factChange{key: factKey, ownerID: previousOwner, deleted: true, data: json.RawMessage(`{}`)}); err != nil {
 			return 0, fmt.Errorf("append previous-owner tombstone: %w", err)
 		}
 	}
-	return p.appendChange(ctx, tx, execution.Scope, query, input, factKey, ownerID, false, data)
+	return p.appendChange(ctx, tx, stream, factChange{key: factKey, ownerID: ownerID, data: data})
 }
 
 // DeleteFactTx appends a tombstone. ownerID is retained on the tombstone so a
 // deletion can only be replayed to actors who could see the prior fact.
-func (p *SQLPublishedQueryProvider) DeleteFactTx(ctx context.Context, tx *sql.Tx, execution contract.ModuleExecution, query contract.PublishedQuery, input json.RawMessage, factKey, ownerID string) (uint64, error) {
+func (p *SQLPublishedQueryProvider) DeleteFactTx(ctx context.Context, tx *sql.Tx, stream FactStream, factKey, ownerID string) (uint64, error) {
+	execution, query := stream.Execution, stream.Query
 	if tx == nil || !execution.Verified() || execution.OwnerModuleID != query.OwnerModuleID || execution.AllowedOperation != query.Operation || strings.TrimSpace(factKey) == "" || strings.TrimSpace(ownerID) == "" {
 		return 0, fmt.Errorf("published fact tombstone requires verified owner identity")
 	}
-	return p.appendChange(ctx, tx, execution.Scope, query, input, factKey, ownerID, true, json.RawMessage(`{}`))
+	return p.appendChange(ctx, tx, stream, factChange{key: factKey, ownerID: ownerID, deleted: true, data: json.RawMessage(`{}`)})
 }
 
-func (p *SQLPublishedQueryProvider) latestFactOwnerTx(ctx context.Context, tx *sql.Tx, scope contract.BusinessScope, query contract.PublishedQuery, input json.RawMessage, factKey string) (string, bool, error) {
+func (p *SQLPublishedQueryProvider) latestFactOwnerTx(ctx context.Context, tx *sql.Tx, stream FactStream, factKey string) (string, bool, error) {
+	scope, query, input := stream.Execution.Scope, stream.Query, stream.Input
 	var owner string
 	err := tx.QueryRowContext(ctx, db.Rebind(p.dialect, `SELECT owner_id FROM _kora_published_query_change WHERE tenant_id=? AND scope_kind=? AND legal_entity_id=? AND owner_module_id=? AND query_name=? AND input_hash=? AND fact_key=? ORDER BY sequence DESC LIMIT 1`), scope.TenantID, scope.Kind, scope.LegalEntityID, query.OwnerModuleID, query.Name, publishedInputHash(input), factKey).Scan(&owner)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -170,7 +189,9 @@ func (p *SQLPublishedQueryProvider) latestFactOwnerTx(ctx context.Context, tx *s
 	return owner, true, nil
 }
 
-func (p *SQLPublishedQueryProvider) appendChange(ctx context.Context, tx *sql.Tx, scope contract.BusinessScope, query contract.PublishedQuery, input json.RawMessage, factKey, ownerID string, deleted bool, data json.RawMessage) (uint64, error) {
+func (p *SQLPublishedQueryProvider) appendChange(ctx context.Context, tx *sql.Tx, stream FactStream, change factChange) (uint64, error) {
+	scope, query, input := stream.Execution.Scope, stream.Query, stream.Input
+	factKey, ownerID, deleted, data := change.key, change.ownerID, change.deleted, change.data
 	if ctx == nil || scope.Validate() != nil || contract.ValidateResourceBusinessScope(scope, query.ScopePolicy) != nil || !query.OfflineEligible || query.OfflineFactKey == "" || query.OwnerField == "" || len(factKey) > 256 || len(ownerID) > 160 || len(input) == 0 || !json.Valid(input) || len(data) > 1<<20 || !json.Valid(data) {
 		return 0, fmt.Errorf("published fact change is outside its registered contract")
 	}
@@ -195,14 +216,19 @@ func (p *SQLPublishedQueryProvider) appendChange(ctx context.Context, tx *sql.Tx
 	return uint64(sequence), nil
 }
 
-func (p *SQLPublishedQueryProvider) ExecutePublishedQuery(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+// ExecutePublishedQuery reads one snapshot page of the durable facts for every
+// owner.
+func (p *SQLPublishedQueryProvider) ExecutePublishedQuery(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, page QueryPageRequest) (contract.QueryResult, error) {
+	input := page.Input
 	if !execution.Verified() || execution.OwnerModuleID != query.OwnerModuleID || execution.Scope.Validate() != nil || contract.ValidateResourceBusinessScope(execution.Scope, query.ScopePolicy) != nil || !query.OfflineEligible || query.OfflineFactKey == "" || len(input) == 0 || !json.Valid(input) {
 		return contract.QueryResult{}, fmt.Errorf("durable published query execution is invalid")
 	}
-	return p.executeSnapshot(ctx, execution, query, input, cursor, limit, "")
+	return p.executeSnapshot(ctx, execution, query, page, "")
 }
 
-func (p *SQLPublishedQueryProvider) ExecutePublishedQueryForActor(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, actor PublishedQueryActorScope, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+// ExecutePublishedQueryForActor reads one snapshot page, narrowed to the
+// facts owned by the actor when the scope is owner-only.
+func (p *SQLPublishedQueryProvider) ExecutePublishedQueryForActor(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, actor PublishedQueryActorScope, page QueryPageRequest) (contract.QueryResult, error) {
 	if err := validateSQLPublishedActor(execution, query, actor); err != nil {
 		return contract.QueryResult{}, err
 	}
@@ -213,10 +239,11 @@ func (p *SQLPublishedQueryProvider) ExecutePublishedQueryForActor(ctx context.Co
 	if actor.OwnerOnly {
 		subject = actor.SubjectID
 	}
-	return p.executeSnapshot(ctx, execution, query, input, cursor, limit, subject)
+	return p.executeSnapshot(ctx, execution, query, page, subject)
 }
 
-func (p *SQLPublishedQueryProvider) executeSnapshot(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, input json.RawMessage, cursor string, limit uint16, subject string) (contract.QueryResult, error) {
+func (p *SQLPublishedQueryProvider) executeSnapshot(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, page QueryPageRequest, subject string) (contract.QueryResult, error) {
+	input, cursor, limit := page.Input, page.Cursor, page.Limit
 	high := uint64(0)
 	factCursor := ""
 	var err error
@@ -228,7 +255,7 @@ func (p *SQLPublishedQueryProvider) executeSnapshot(ctx context.Context, executi
 	if err != nil {
 		return contract.QueryResult{}, fmt.Errorf("published query snapshot cursor is invalid: %w", err)
 	}
-	rows, nextFact, err := p.snapshotRows(ctx, execution.Scope, query, subject, input, factCursor, high, limit)
+	rows, nextFact, err := p.snapshotRows(ctx, changeFilter{scope: execution.Scope, query: query, subject: subject, input: input}, factCursor, high, limit)
 	if err != nil {
 		return contract.QueryResult{}, err
 	}
@@ -243,14 +270,20 @@ func (p *SQLPublishedQueryProvider) executeSnapshot(ctx context.Context, executi
 	return contract.QueryResult{Data: encoded, NextCursor: next, SnapshotToken: "snapshot:" + strconv.FormatUint(high, 10), SourceCursor: strconv.FormatUint(high, 10), SourceRevision: "revision:" + strconv.FormatUint(high, 10), AsOf: time.Now().UTC(), Freshness: contract.QueryFresh}, nil
 }
 
-func (p *SQLPublishedQueryProvider) ReplayPublishedQuery(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, input json.RawMessage, after, through, replay string, limit uint16) (contract.QueryReplayPage, error) {
+// ReplayPublishedQuery replays the changes after a snapshot for every owner.
+// The snapshot token is derived from req.After.
+func (p *SQLPublishedQueryProvider) ReplayPublishedQuery(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, req QueryReplayRequest) (contract.QueryReplayPage, error) {
+	input := req.Input
 	if !execution.Verified() || execution.OwnerModuleID != query.OwnerModuleID || execution.Scope.Validate() != nil || contract.ValidateResourceBusinessScope(execution.Scope, query.ScopePolicy) != nil || !query.OfflineEligible || query.OfflineFactKey == "" || len(input) == 0 || !json.Valid(input) {
 		return contract.QueryReplayPage{}, fmt.Errorf("durable published query replay is invalid")
 	}
-	return p.replay(ctx, execution, query, input, "snapshot:"+after, after, through, replay, limit, "")
+	req.Snapshot = "snapshot:" + req.After
+	return p.replay(ctx, execution, query, req, "")
 }
 
-func (p *SQLPublishedQueryProvider) ReplayPublishedQueryForActor(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, actor PublishedQueryActorScope, input json.RawMessage, snapshot, after, through, replay string, limit uint16) (contract.QueryReplayPage, error) {
+// ReplayPublishedQueryForActor replays the changes after req.Snapshot,
+// narrowed to the actor's facts when the scope is owner-only.
+func (p *SQLPublishedQueryProvider) ReplayPublishedQueryForActor(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, actor PublishedQueryActorScope, req QueryReplayRequest) (contract.QueryReplayPage, error) {
 	if err := validateSQLPublishedActor(execution, query, actor); err != nil {
 		return contract.QueryReplayPage{}, err
 	}
@@ -261,10 +294,11 @@ func (p *SQLPublishedQueryProvider) ReplayPublishedQueryForActor(ctx context.Con
 	if actor.OwnerOnly {
 		subject = actor.SubjectID
 	}
-	return p.replay(ctx, execution, query, input, snapshot, after, through, replay, limit, subject)
+	return p.replay(ctx, execution, query, req, subject)
 }
 
-func (p *SQLPublishedQueryProvider) replay(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, input json.RawMessage, snapshot, after, through, replay string, limit uint16, subject string) (contract.QueryReplayPage, error) {
+func (p *SQLPublishedQueryProvider) replay(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, req QueryReplayRequest, subject string) (contract.QueryReplayPage, error) {
+	input, snapshot, after, through, replay, limit := req.Input, req.Snapshot, req.After, req.Through, req.Replay, req.Limit
 	snapshotHigh, err := parsePublishedCursor(strings.TrimPrefix(snapshot, "snapshot:"))
 	if err != nil || snapshot != "snapshot:"+strconv.FormatUint(snapshotHigh, 10) || after != strconv.FormatUint(snapshotHigh, 10) {
 		return contract.QueryReplayPage{}, fmt.Errorf("published query snapshot cursor mismatch")
@@ -285,7 +319,7 @@ func (p *SQLPublishedQueryProvider) replay(ctx context.Context, execution contra
 	if err != nil || high < start {
 		return contract.QueryReplayPage{}, fmt.Errorf("published query replay high-water mark is invalid")
 	}
-	changes, next, err := p.replayRows(ctx, execution.Scope, query, subject, input, start, high, limit)
+	changes, next, err := p.replayRows(ctx, changeFilter{scope: execution.Scope, query: query, subject: subject, input: input}, start, high, limit)
 	if err != nil {
 		return contract.QueryReplayPage{}, err
 	}
@@ -302,6 +336,15 @@ func validateSQLPublishedActor(execution contract.ModuleExecution, query contrac
 	return nil
 }
 
+// changeFilter selects the change rows of one query input. A non-empty subject
+// narrows them to that owner.
+type changeFilter struct {
+	scope   contract.BusinessScope
+	query   contract.PublishedQuery
+	subject string
+	input   json.RawMessage
+}
+
 func (p *SQLPublishedQueryProvider) highWater(ctx context.Context, scope contract.BusinessScope, query contract.PublishedQuery, input json.RawMessage) (uint64, error) {
 	var high uint64
 	err := p.database.QueryRowContext(ctx, db.Rebind(p.dialect, `SELECT COALESCE(MAX(sequence),0) FROM _kora_published_query_change WHERE tenant_id=? AND scope_kind=? AND legal_entity_id=? AND owner_module_id=? AND query_name=? AND input_hash=?`), scope.TenantID, scope.Kind, scope.LegalEntityID, query.OwnerModuleID, query.Name, publishedInputHash(input)).Scan(&high)
@@ -311,7 +354,8 @@ func (p *SQLPublishedQueryProvider) highWater(ctx context.Context, scope contrac
 	return high, nil
 }
 
-func (p *SQLPublishedQueryProvider) snapshotRows(ctx context.Context, scope contract.BusinessScope, query contract.PublishedQuery, subject string, input json.RawMessage, cursor string, high uint64, limit uint16) ([]json.RawMessage, string, error) {
+func (p *SQLPublishedQueryProvider) snapshotRows(ctx context.Context, filter changeFilter, cursor string, high uint64, limit uint16) ([]json.RawMessage, string, error) {
+	scope, query, subject, input := filter.scope, filter.query, filter.subject, filter.input
 	base := `SELECT c.fact_key,c.data_json FROM _kora_published_query_change c WHERE c.tenant_id=? AND c.scope_kind=? AND c.legal_entity_id=? AND c.owner_module_id=? AND c.query_name=? AND c.input_hash=?`
 	args := []any{scope.TenantID, scope.Kind, scope.LegalEntityID, query.OwnerModuleID, query.Name, publishedInputHash(input)}
 	if subject != "" {
@@ -347,7 +391,8 @@ func (p *SQLPublishedQueryProvider) snapshotRows(ctx context.Context, scope cont
 	return result, next, nil
 }
 
-func (p *SQLPublishedQueryProvider) replayRows(ctx context.Context, scope contract.BusinessScope, query contract.PublishedQuery, subject string, input json.RawMessage, start, high uint64, limit uint16) ([]contract.QueryReplayChange, string, error) {
+func (p *SQLPublishedQueryProvider) replayRows(ctx context.Context, filter changeFilter, start, high uint64, limit uint16) ([]contract.QueryReplayChange, string, error) {
+	scope, query, subject, input := filter.scope, filter.query, filter.subject, filter.input
 	statement := `SELECT sequence,fact_key,deleted,data_json FROM _kora_published_query_change WHERE tenant_id=? AND scope_kind=? AND legal_entity_id=? AND owner_module_id=? AND query_name=? AND input_hash=?`
 	args := []any{scope.TenantID, scope.Kind, scope.LegalEntityID, query.OwnerModuleID, query.Name, publishedInputHash(input)}
 	if subject != "" {

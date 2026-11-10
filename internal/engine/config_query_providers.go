@@ -138,20 +138,20 @@ type configQueryExecutor struct {
 }
 
 // ExecutePublishedQuery has no verified actor, so owner-restricted queries fail closed.
-func (e *configQueryExecutor) ExecutePublishedQuery(ctx context.Context, exec contract.ModuleExecution, q contract.PublishedQuery, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+func (e *configQueryExecutor) ExecutePublishedQuery(ctx context.Context, exec contract.ModuleExecution, q contract.PublishedQuery, page plugin.QueryPageRequest) (contract.QueryResult, error) {
 	if e.def.OwnerField != "" {
 		return contract.QueryResult{}, contract.NewError(contract.CodePermissionDenied, "actor scope is required")
 	}
-	return e.run(ctx, configQueryCall{scope: exec.Scope, full: true, input: input, cursor: cursor, limit: limit})
+	return e.run(ctx, configQueryCall{scope: exec.Scope, full: true, input: page.Input, cursor: page.Cursor, limit: page.Limit})
 }
 
 // ExecutePublishedQueryForActor binds $actor to the verified subject. OwnerOnly
 // (an if_owner grant) also applies owner_field; otherwise every row is read.
-func (e *configQueryExecutor) ExecutePublishedQueryForActor(ctx context.Context, exec contract.ModuleExecution, q contract.PublishedQuery, actor plugin.PublishedQueryActorScope, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+func (e *configQueryExecutor) ExecutePublishedQueryForActor(ctx context.Context, exec contract.ModuleExecution, q contract.PublishedQuery, actor plugin.PublishedQueryActorScope, page plugin.QueryPageRequest) (contract.QueryResult, error) {
 	if e.def.OwnerField != "" && strings.TrimSpace(actor.SubjectID) == "" {
 		return contract.QueryResult{}, contract.NewError(contract.CodePermissionDenied, "actor scope is required")
 	}
-	return e.run(ctx, configQueryCall{scope: exec.Scope, actor: actor, full: !actor.OwnerOnly, input: input, cursor: cursor, limit: limit})
+	return e.run(ctx, configQueryCall{scope: exec.Scope, actor: actor, full: !actor.OwnerOnly, input: page.Input, cursor: page.Cursor, limit: page.Limit})
 }
 
 // configQueryCall is the verified request of one config query execution.

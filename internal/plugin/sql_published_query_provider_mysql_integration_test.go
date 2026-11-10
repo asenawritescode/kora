@@ -87,7 +87,7 @@ func TestSQLPublishedQueryProviderMySQLFreshDatabaseRestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := provider.PutFactTx(ctx, tx, execution, query, json.RawMessage(`{}`), json.RawMessage(data)); err != nil {
+		if _, err := provider.PutFactTx(ctx, tx, FactStream{Execution: execution, Query: query, Input: json.RawMessage(`{}`)}, json.RawMessage(data)); err != nil {
 			_ = tx.Rollback()
 			t.Fatal(err)
 		}
@@ -109,7 +109,7 @@ func TestSQLPublishedQueryProviderMySQLFreshDatabaseRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := PublishedQueryActorScope{BusinessScope: scope, SubjectID: "alice", OwnerOnly: true, OwnerField: query.OwnerField}
-	result, err := restarted.ExecutePublishedQueryForActor(ctx, execution, query, actor, json.RawMessage(`{}`), "", 10)
+	result, err := restarted.ExecutePublishedQueryForActor(ctx, execution, query, actor, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,9 +122,9 @@ func TestSQLPublishedQueryProviderMySQLFreshDatabaseRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.DeleteFactTx(ctx, deleteTx, execution, query, json.RawMessage(`{}`), "order-2", "alice"); err != nil {
+	if _, deleteErr := provider.DeleteFactTx(ctx, deleteTx, FactStream{Execution: execution, Query: query, Input: json.RawMessage(`{}`)}, "order-2", "alice"); deleteErr != nil {
 		_ = deleteTx.Rollback()
-		t.Fatal(err)
+		t.Fatal(deleteErr)
 	}
 	if err := deleteTx.Commit(); err != nil {
 		t.Fatal(err)
@@ -138,21 +138,21 @@ func TestSQLPublishedQueryProviderMySQLFreshDatabaseRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := restarted.ReplayPublishedQueryForActor(ctx, execution, query, actor, json.RawMessage(`{}`), result.SnapshotToken, result.SourceCursor, "", "", 1)
+	first, err := restarted.ReplayPublishedQueryForActor(ctx, execution, query, actor, QueryReplayRequest{Input: json.RawMessage(`{}`), Snapshot: result.SnapshotToken, After: result.SourceCursor, Limit: 1})
 	if err != nil {
 		t.Fatal("first MySQL replay page:", err)
 	}
 	if len(first.Changes) != 1 || first.Changes[0].FactKey != "order-1" || first.Changes[0].Deleted || string(first.Changes[0].Data) != `{"id":"order-1","owner_id":"alice","state":"approved"}` || first.NextCursor == "" {
 		t.Fatalf("first MySQL replay page = %+v", first)
 	}
-	repeated, err := restarted.ReplayPublishedQueryForActor(ctx, execution, query, actor, json.RawMessage(`{}`), result.SnapshotToken, result.SourceCursor, first.ThroughCursor, "", 1)
+	repeated, err := restarted.ReplayPublishedQueryForActor(ctx, execution, query, actor, QueryReplayRequest{Input: json.RawMessage(`{}`), Snapshot: result.SnapshotToken, After: result.SourceCursor, Through: first.ThroughCursor, Limit: 1})
 	if err != nil {
 		t.Fatal("repeat MySQL replay page:", err)
 	}
 	if len(repeated.Changes) != len(first.Changes) || repeated.Changes[0].FactKey != first.Changes[0].FactKey || string(repeated.Changes[0].Data) != string(first.Changes[0].Data) {
 		t.Fatalf("repeated MySQL replay changed page identity: first=%+v repeated=%+v", first, repeated)
 	}
-	second, err := restarted.ReplayPublishedQueryForActor(ctx, execution, query, actor, json.RawMessage(`{}`), result.SnapshotToken, result.SourceCursor, first.ThroughCursor, first.NextCursor, 1)
+	second, err := restarted.ReplayPublishedQueryForActor(ctx, execution, query, actor, QueryReplayRequest{Input: json.RawMessage(`{}`), Snapshot: result.SnapshotToken, After: result.SourceCursor, Through: first.ThroughCursor, Replay: first.NextCursor, Limit: 1})
 	if err != nil {
 		t.Fatal("second MySQL replay page:", err)
 	}

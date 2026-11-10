@@ -17,7 +17,8 @@ import (
 // log rather than an in-memory fake.
 type sqliteOfflineProvider struct{ db *sql.DB }
 
-func (p sqliteOfflineProvider) ExecutePublishedQueryForActor(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, actor PublishedQueryActorScope, _ json.RawMessage, _ string, limit uint16) (contract.QueryResult, error) {
+func (p sqliteOfflineProvider) ExecutePublishedQueryForActor(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, actor PublishedQueryActorScope, page QueryPageRequest) (contract.QueryResult, error) {
+	limit := page.Limit
 	if !execution.Verified() || execution.Scope != actor.BusinessScope || !actor.OwnerOnly || actor.OwnerField != query.OwnerField || !query.OfflineEligible || query.OfflineFactKey == "" {
 		return contract.QueryResult{}, fmt.Errorf("invalid offline snapshot scope")
 	}
@@ -59,15 +60,16 @@ func (p sqliteOfflineProvider) ExecutePublishedQueryForActor(ctx context.Context
 	return contract.QueryResult{Data: encoded, SnapshotToken: fmt.Sprintf("snapshot:%d", high), SourceCursor: fmt.Sprint(high), SourceRevision: fmt.Sprintf("revision:%d", high), AsOf: time.Now().UTC(), Freshness: contract.QueryFresh}, nil
 }
 
-func (p sqliteOfflineProvider) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, uint16) (contract.QueryResult, error) {
+func (p sqliteOfflineProvider) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, QueryPageRequest) (contract.QueryResult, error) {
 	return contract.QueryResult{}, fmt.Errorf("offline query requires actor scope")
 }
 
-func (p sqliteOfflineProvider) ReplayPublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, string, string, uint16) (contract.QueryReplayPage, error) {
+func (p sqliteOfflineProvider) ReplayPublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, QueryReplayRequest) (contract.QueryReplayPage, error) {
 	return contract.QueryReplayPage{}, fmt.Errorf("offline replay requires actor scope")
 }
 
-func (p sqliteOfflineProvider) ReplayPublishedQueryForActor(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, actor PublishedQueryActorScope, _ json.RawMessage, snapshot, after, through, replay string, limit uint16) (contract.QueryReplayPage, error) {
+func (p sqliteOfflineProvider) ReplayPublishedQueryForActor(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, actor PublishedQueryActorScope, req QueryReplayRequest) (contract.QueryReplayPage, error) {
+	snapshot, after, through, replay, limit := req.Snapshot, req.After, req.Through, req.Replay, req.Limit
 	if !execution.Verified() || execution.Scope != actor.BusinessScope || !actor.OwnerOnly || actor.OwnerField != query.OwnerField || !query.OfflineEligible || query.OfflineFactKey == "" {
 		return contract.QueryReplayPage{}, fmt.Errorf("invalid offline replay scope")
 	}
@@ -179,7 +181,7 @@ CREATE TABLE offline_changes(seq INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TE
 			}
 			actor := PublishedQueryActorScope{BusinessScope: scope, SubjectID: "alice", OwnerOnly: true, OwnerField: "owner_id"}
 			input := json.RawMessage(`{}`)
-			snapshot, err := plan.ExecutePublishedQueryForActor(ctx, scope, module.ID, query.Name, actor, input, "", 10)
+			snapshot, err := plan.ExecutePublishedQuery(ctx, PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, &actor, QueryPageRequest{Input: input, Limit: 10})
 			if err != nil {
 				t.Fatal("snapshot:", err)
 			}
@@ -210,14 +212,14 @@ CREATE TABLE offline_changes(seq INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TE
 				}
 			}
 
-			first, err := plan.ReplayPublishedQueryForActor(ctx, scope, module.ID, query.Name, actor, input, snapshot.SnapshotToken, snapshot.SourceCursor, "", "", 1)
+			first, err := plan.ReplayPublishedQueryForActor(ctx, PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, actor, QueryReplayRequest{Input: input, Snapshot: snapshot.SnapshotToken, After: snapshot.SourceCursor, Limit: 1})
 			if err != nil {
 				t.Fatal("first replay page:", err)
 			}
 			if first.ThroughCursor != "5" || len(first.Changes) != 1 || first.Changes[0].FactKey != "a-3" || first.NextCursor == "" {
 				t.Fatalf("first replay page=%+v", first)
 			}
-			second, err := plan.ReplayPublishedQueryForActor(ctx, scope, module.ID, query.Name, actor, input, snapshot.SnapshotToken, snapshot.SourceCursor, first.ThroughCursor, first.NextCursor, 1)
+			second, err := plan.ReplayPublishedQueryForActor(ctx, PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, actor, QueryReplayRequest{Input: input, Snapshot: snapshot.SnapshotToken, After: snapshot.SourceCursor, Through: first.ThroughCursor, Replay: first.NextCursor, Limit: 1})
 			if err != nil {
 				t.Fatal("second replay page:", err)
 			}
