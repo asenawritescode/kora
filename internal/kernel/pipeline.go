@@ -2,30 +2,17 @@ package kernel
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/configstore"
-	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/script"
 	"github.com/asenawritescode/kora/internal/workflow"
-)
-
-// Typed sentinel errors. Adapters map these to wire errors via contract.Code;
-// they must never be detected by string matching.
-var (
-	ErrUnauthenticated = contract.NewError(contract.CodeUnauthenticated, "operation context has no authenticated actor")
-	ErrNoSite          = contract.NewError(contract.CodeValidationFailed, "operation context missing tenant site")
-	ErrPermission      = contract.NewError(contract.CodePermissionDenied, "not permitted")
-	ErrStaleVersion    = contract.NewError(contract.CodeConflict, "document was modified by another operation")
-	ErrKeyReused       = contract.NewError(contract.CodeIdempotencyKeyReused, "idempotency key already used with a different payload")
 )
 
 // payloadDoctype extracts the target doctype from either typed payload.
@@ -37,47 +24,6 @@ func payloadDoctype(raw json.RawMessage) string {
 		return ""
 	}
 	return probe.Doctype
-}
-
-// lifecycleEvent is one document event whose async after-hooks are captured.
-type lifecycleEvent struct {
-	Event  script.Event
-	Doc    *doctype.Document
-	OldDoc *doctype.Document
-}
-
-func captureLifecycleHooks(ctx context.Context, txMgr *orm.TxManager, tx *sql.Tx, dt *doctype.DocType, ev lifecycleEvent) *contract.Error {
-	if err := txMgr.CaptureAsyncAfterHooksTx(ctx, tx, dt, ev.Event, ev.Doc, ev.OldDoc); err != nil {
-		return contract.NewError(contract.CodeDependencyUnavailable, "persisting async lifecycle hooks failed: "+err.Error())
-	}
-	return nil
-}
-
-// txRun is the transactional environment one command executes in.
-type txRun struct {
-	SiteDB *sql.DB
-	// Tx is the caller's transaction; nil makes the executor open, own and
-	// commit-or-roll-back its own.
-	Tx          *sql.Tx
-	Mgr         *orm.TxManager
-	Reg         *doctype.Registry
-	OpID        string
-	AfterCommit *func()
-}
-
-// begin returns the run bound to its transaction, and a function that rolls
-// the transaction back unless it was committed. A transaction the caller
-// supplied is left to the caller.
-func (r txRun) begin(ctx context.Context) (txRun, func(), *contract.Error) {
-	if r.Tx != nil {
-		return r, func() {}, nil
-	}
-	tx, err := r.SiteDB.BeginTx(ctx, nil)
-	if err != nil {
-		return r, nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
-	}
-	r.Tx = tx
-	return r, func() { _ = tx.Rollback() }, nil
 }
 
 // executeInTx runs mutation + receipt claim + audit write inside ONE SQL
@@ -771,87 +717,4 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		*afterCommit = complete
 	}
 	return result, nil
-}
-
-// documentCheck is what validating a document needs beyond the document: its
-// prior state on update, and the operation's business-reference and
-// historical-snapshot validators.
-type documentCheck struct {
-	Old        *doctype.Document
-	References contract.BusinessReferenceValidator
-	Snapshots  contract.HistoricalSnapshotValidator
-}
-
-func validateOperationDocument(txMgr *orm.TxManager, dt *doctype.DocType, doc *doctype.Document, reg *doctype.Registry, check documentCheck) doctype.ValidationErrors {
-	resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
-		return txMgr.GetDoc(target, name, "")
-	}
-	return doctype.ValidateDocumentWithResolvers(dt, doc, reg, check.Old, resolver, check.References, check.Snapshots)
-}
-
-// eventOrigin carries the operation's authenticated cause onto the change
-// events its writes append.
-func eventOrigin(op Operation) *orm.EventOrigin {
-	return &orm.EventOrigin{Actor: op.Context.Actor, CorrelationID: op.Context.CorrelationID, CausationID: op.Context.CausationID, CausationDepth: op.Context.CausationDepth}
-}
-
-func validationContractError(verrs doctype.ValidationErrors) *contract.Error {
-	raw, _ := json.Marshal(verrs)
-	e := contract.NewError(contract.CodeValidationFailed, "validation failed")
-	e.Details = raw
-	return e
-}
-
-// wrapORMError converts ORM sentinel errors into typed contract errors.
-func wrapORMError(err error) *contract.Error {
-	if errors.Is(err, orm.ErrConflict) {
-		return ErrStaleVersion
-	}
-	switch {
-	case errors.Is(err, orm.ErrDuplicate):
-		return contract.NewError(contract.CodeConflict, sanitize(err.Error()))
-	case errors.Is(err, orm.ErrValidation):
-		return contract.NewError(contract.CodeValidationFailed, "record validation failed")
-	case errors.Is(err, orm.ErrNotFound):
-		return contract.NewError(contract.CodeNotFound, "document not found or access denied")
-	default:
-		return contract.NewError(contract.CodeDependencyUnavailable, "record persistence failed")
-	}
-}
-
-func wrapExpectedVersionORMError(err error, op Operation, dialect db.Dialect) *contract.Error {
-	if expectedVersionFrom(op) != "" && dialect.IsWriteConflict(err) {
-		return ErrStaleVersion
-	}
-	return wrapORMError(err)
-}
-
-// sanitize strips SQL driver internals from user-facing messages while keeping
-// the meaningful suffix.
-func sanitize(msg string) string {
-	if i := strings.LastIndex(msg, ": "); i > 0 && strings.Count(msg, ": ") > 1 {
-		return msg[i+2:]
-	}
-	return msg
-}
-
-func (k *Kernel) rejected(opID string, op Operation, e *contract.Error) (contract.CommandResult, *contract.Error) {
-	return contract.CommandResult{
-		OperationID:   opID,
-		CorrelationID: op.Context.CorrelationID,
-		Status:        statusFor(e.Type),
-		Error:         e,
-	}, e
-}
-
-func statusFor(c contract.Code) contract.Status {
-	switch c {
-	case contract.CodeConflict:
-		return contract.StatusConflict
-	case contract.CodePermissionDenied, contract.CodeUnauthenticated,
-		contract.CodeValidationFailed, contract.CodeNotFound, contract.CodeIdempotencyKeyReused:
-		return contract.StatusRejected
-	default:
-		return contract.StatusFailed
-	}
 }
