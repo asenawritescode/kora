@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -91,64 +90,11 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 	var stepErr *contract.Error
 	switch op.Command {
 	case CommandRecordMutateBundle:
-		var p RecordMutationBundlePayload
-		if err := json.Unmarshal(op.Payload, &p); err != nil || len(p.Records) == 0 || len(p.Records) > MaxMutationBundleRecords || p.Doctype != dt.Name || p.Records[0].Doctype != dt.Name {
-			return nil, contract.NewError(contract.CodeValidationFailed, "invalid record.mutate_bundle payload")
+		b, cerr := m.openBundle(ctx)
+		if cerr != nil {
+			return nil, cerr
 		}
-		keySet := make(map[string]struct{}, len(p.Records))
-		for _, item := range p.Records {
-			if item.Key == "" || item.Doctype == "" {
-				return nil, contract.NewError(contract.CodeValidationFailed, "bundle record key and doctype are required")
-			}
-			if _, exists := keySet[item.Key]; exists {
-				return nil, contract.NewError(contract.CodeValidationFailed, "bundle record keys must be unique")
-			}
-			if reg.Get(item.Doctype) == nil {
-				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("doctype %q not found", item.Doctype))
-			}
-			keySet[item.Key] = struct{}{}
-		}
-		for _, item := range p.Records {
-			recordDT := reg.Get(item.Doctype)
-			if err := txMgr.LoadLifecycleHooksTx(ctx, dbTx, recordDT); err != nil {
-				return nil, contract.NewError(contract.CodeDependencyUnavailable, err.Error())
-			}
-		}
-		// Claim the idempotency key before allocating names or performing other
-		// transactional writes. Concurrent retries must contend on the unique
-		// receipt first; otherwise SQLite-compatible dialects can report a name
-		// allocator lock error before the duplicate is recognized as a replay.
-		if op.Context.IdempotencyKey != "" && def.IdempotentByKey {
-			if cerr := k.claimReceipt(dbTx, op, def, opID, payloadHash(op.Payload)); cerr != nil {
-				return nil, cerr
-			}
-		}
-
-		recordNames := make(map[string]string, len(p.Records))
-		for _, item := range p.Records {
-			operation := item.Operation
-			if operation == "" {
-				operation = "create"
-			}
-			if operation == "create" {
-				recordDT := reg.Get(item.Doctype)
-				name, _, allocationErr := orm.AllocateDocumentName(dbTx, k.dialect(), recordDT, orm.DocumentValues(item.Data), time.Now().UTC())
-				if allocationErr != nil {
-					var validation *doctype.ValidationError
-					if errors.As(allocationErr, &validation) {
-						return nil, contract.NewError(contract.CodeValidationFailed, validation.Message)
-					}
-					return nil, contract.NewError(contract.CodeDependencyUnavailable, "allocate bundle record name failed")
-				}
-				recordNames[item.Key] = name
-			} else {
-				name, resolveErr := resolveBundleName(item.Name, recordNames)
-				if resolveErr != nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, resolveErr.Error())
-				}
-				recordNames[item.Key] = name
-			}
-		}
+		p, recordNames := b.payload, b.names
 		bundleDocs := make([]*doctype.Document, len(p.Records))
 		bundleTypes := make([]*doctype.DocType, len(p.Records))
 		pendingLinks := make(map[string]*doctype.Document, len(p.Records))
