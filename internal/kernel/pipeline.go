@@ -14,7 +14,6 @@ import (
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
-	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/script"
 	"github.com/asenawritescode/kora/internal/workflow"
 )
@@ -28,63 +27,6 @@ var (
 	ErrStaleVersion    = contract.NewError(contract.CodeConflict, "document was modified by another operation")
 	ErrKeyReused       = contract.NewError(contract.CodeIdempotencyKeyReused, "idempotency key already used with a different payload")
 )
-
-// validateContext enforces fail-closed identity: no site or no authenticated
-// principal means no execution. A mismatch between the executing site and the
-// actor's home site is a cross-tenant attempt and is rejected.
-func (k *Kernel) validateContext(op Operation) *contract.Error {
-	if op.Context.Site == "" {
-		return ErrNoSite
-	}
-	if !op.Context.Actor.Authenticated() {
-		return ErrUnauthenticated
-	}
-	if op.Context.Actor.Site != "" && op.Context.Actor.Site != op.Context.Site {
-		return ErrPermission
-	}
-	return nil
-}
-
-// authorize evaluates the site registry's permission matrix identically for
-// every source. AI/MCP actors carry resolved human subjects; the gate never
-// special-cases them (authorization parity, KERNEL-004 / SEC-003).
-func authorize(reg *doctype.Registry, op Operation, def CommandDefinition) *contract.Error {
-	if reg == nil {
-		return ErrPermission
-	}
-	doctypeName := payloadDoctype(op.Payload)
-	if doctypeName == "" {
-		return contract.NewError(contract.CodeValidationFailed, "payload missing doctype")
-	}
-	if resolved := reg.Get(doctypeName); resolved != nil {
-		doctypeName = resolved.Name
-		if resolved.AppendOnly && op.Command != CommandRecordCreate && op.Command != CommandPublicFormSubmit && op.Command != CommandRecordMutateBundle {
-			return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
-		}
-	}
-	permission := def.AuthorizesWith
-	var bundle RecordMutationBundlePayload
-	if op.Command == CommandRecordMutateBundle && json.Unmarshal(op.Payload, &bundle) == nil && len(bundle.Records) > 0 {
-		permission = bundle.Records[0].Operation
-		if permission == "" {
-			permission = "create"
-		}
-		if permission == "update" && bundle.Records[0].TransitionAction != "" {
-			if _, err := decideOperationResource(op, reg, reg.Get(doctypeName), "submit"); err != nil {
-				return err
-			}
-		}
-	}
-	_, err := decideOperationResource(op, reg, reg.Get(doctypeName), permission)
-	return err
-}
-
-func decideOperationResource(op Operation, reg *doctype.Registry, dt *doctype.DocType, operation string) (policy.Decision, *contract.Error) {
-	if dt == nil {
-		return policy.Decision{}, contract.NewError(contract.CodeNotFound, "resource not found")
-	}
-	return policy.DecideForBusinessScope(op.Context.Execution, reg, dt.Name, operation, op.Context.BusinessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned)
-}
 
 // payloadDoctype extracts the target doctype from either typed payload.
 func payloadDoctype(raw json.RawMessage) string {
@@ -845,85 +787,6 @@ func validateOperationDocument(txMgr *orm.TxManager, dt *doctype.DocType, doc *d
 		return txMgr.GetDoc(target, name, "")
 	}
 	return doctype.ValidateDocumentWithResolvers(dt, doc, reg, check.Old, resolver, check.References, check.Snapshots)
-}
-
-func setDefaultValues(dt *doctype.DocType, doc *doctype.Document) {
-	doctype.ApplyDefaultValues(dt, doc)
-}
-
-func scopeForOperation(reg *doctype.Registry, op Operation, doctypeName, permission string) policy.RowScope {
-	dt := reg.Get(doctypeName)
-	decision, err := decideOperationResource(op, reg, dt, permission)
-	if err != nil {
-		return policy.RowScope{Business: op.Context.BusinessScope}
-	}
-	actor := op.Context.Execution.Actor()
-	userID := actor.SubjectUserID
-	if userID == "" {
-		userID = actor.PrincipalID
-	}
-	return policy.RowScope{UserID: userID, Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...), Business: op.Context.BusinessScope}
-}
-
-// cloneDoc copies a loaded document so mutation attempts never alias the
-// previously persisted state.
-func cloneDoc(d *doctype.Document) *doctype.Document {
-	c := doctype.NewDocument(d.DocType)
-	for k, v := range d.Fields {
-		c.Fields[k] = v
-	}
-	c.Name = d.Name
-	c.DocStatus = d.DocStatus
-	c.Revision = d.Revision
-	c.IsNew = false
-	return c
-}
-
-// applyData merges JSON field data into a document, rejecting unknown keys —
-// unsupported configuration is never silently discarded.
-func applyData(dt *doctype.DocType, doc *doctype.Document, raw json.RawMessage, reg *doctype.Registry, skipReadOnly bool) error {
-	var fields map[string]any
-	if len(raw) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return fmt.Errorf("data is not a JSON object")
-	}
-	for key, val := range fields {
-		f := dt.GetField(key)
-		if f == nil {
-			return fmt.Errorf("unknown field %q on doctype %q", key, dt.Name)
-		}
-		if skipReadOnly && f.ReadOnly {
-			continue
-		}
-		if f.Fieldtype == "Table" {
-			rows, ok := val.([]any)
-			if !ok {
-				return fmt.Errorf("field %q must be an array of child rows", key)
-			}
-			childDT := reg.Get(f.Options)
-			if childDT == nil {
-				return fmt.Errorf("child doctype %q not found", f.Options)
-			}
-			children := make([]*doctype.Document, 0, len(rows))
-			for index, value := range rows {
-				row, ok := value.(map[string]any)
-				if !ok {
-					return fmt.Errorf("field %q row %d must be an object", key, index)
-				}
-				child := doctype.NewDocument(f.Options)
-				for childField, childValue := range row {
-					child.Set(childField, childValue)
-				}
-				children = append(children, child)
-			}
-			doc.Set(key, children)
-			continue
-		}
-		doc.Set(key, val)
-	}
-	return nil
 }
 
 // eventOrigin carries the operation's authenticated cause onto the change
