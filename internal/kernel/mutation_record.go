@@ -130,3 +130,99 @@ func (m *mutation) saveUpdate(ctx context.Context, doc, oldDoc *doctype.Document
 	m.savedDoc, m.savedOldDoc = doc, oldDoc
 	return nil
 }
+
+// create inserts the record the payload describes. A public form submission
+// keeps only the fields the doctype publishes.
+func (m *mutation) create(ctx context.Context) *contract.Error {
+	var p RecordCreatePayload
+	if err := json.Unmarshal(m.op.Payload, &p); err != nil {
+		return contract.NewError(contract.CodeValidationFailed, "invalid record.create payload")
+	}
+	if m.op.Command == CommandPublicFormSubmit {
+		data, cerr := m.publicFormData(p.Data)
+		if cerr != nil {
+			return cerr
+		}
+		p.Data = data
+	}
+	doc, cerr := m.prepareCreate(ctx, p.Data)
+	if cerr != nil {
+		return cerr
+	}
+	return m.insert(ctx, doc)
+}
+
+// publicFormData drops every submitted field the doctype does not publish.
+func (m *mutation) publicFormData(raw json.RawMessage) (json.RawMessage, *contract.Error) {
+	var submitted map[string]any
+	if err := json.Unmarshal(raw, &submitted); err != nil {
+		return nil, contract.NewError(contract.CodeValidationFailed, "public form data must be an object")
+	}
+	publicFields := m.dt.PublicFieldSet()
+	filtered := make(map[string]any, len(submitted))
+	for field, value := range submitted {
+		if publicFields[field] {
+			filtered[field] = value
+		}
+	}
+	data, _ := json.Marshal(filtered)
+	return data, nil
+}
+
+// prepareCreate returns the new record built from the payload data, after the
+// hooks, workflow initial state and schema validation have passed.
+func (m *mutation) prepareCreate(ctx context.Context, data json.RawMessage) (*doctype.Document, *contract.Error) {
+	op, dt, txMgr := m.op, m.dt, m.run.Mgr
+	doc := doctype.NewDocument(dt.Name)
+	if err := m.k.rejectWorkflowStateOnCreate(ctx, m.run.Tx, op, dt, data); err != nil {
+		return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+	}
+	if err := applyData(dt, doc, data, m.run.Reg, false); err != nil {
+		return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+	}
+	if err := dt.BindBusinessScope(doc, op.Context.BusinessScope, true, nil); err != nil {
+		return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
+	}
+	setDefaultValues(dt, doc)
+	if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+		return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+	}
+	if err := m.k.initializeWorkflowStateOnCreate(ctx, m.run.Tx, op, dt, doc); err != nil {
+		return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+	}
+	check := documentCheck{Old: nil, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}
+	if verrs := validateOperationDocument(txMgr, dt, doc, m.run.Reg, check); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
+		return nil, validationContractError(verrs)
+	}
+	if err := txMgr.PrepareInsert(dt, doc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+		return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+	}
+	return doc, nil
+}
+
+// insert persists the new record with its audit and history rows.
+func (m *mutation) insert(ctx context.Context, doc *doctype.Document) *contract.Error {
+	if claimErr := m.claim(); claimErr != nil {
+		return claimErr
+	}
+	afterHash := CanonicalDocHash(doc.Fields)
+	if err := m.run.Mgr.InsertInTx(m.run.Tx, m.dt, doc, m.owner, m.user); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+		return wrapORMError(err)
+	}
+	if hookErr := captureLifecycleHooks(ctx, m.run.Mgr, m.run.Tx, m.dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
+		return hookErr
+	}
+	if hookErr := captureLifecycleHooks(ctx, m.run.Mgr, m.run.Tx, m.dt, lifecycleEvent{script.EventAfterSave, doc, nil}); hookErr != nil {
+		return hookErr
+	}
+	doc.IsNew = false
+	row := m.k.buildAuditRow(m.op, m.def, m.run.OpID, auditOutcome{Doctype: m.dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
+	row.AfterHash = afterHash
+	auditID, cerr := m.record(row, nil, doc)
+	if cerr != nil {
+		return cerr
+	}
+	m.result = &ResultData{Doctype: m.dt.Name, Name: doc.Name, Created: true, Document: doc.ToMap(), AuditID: auditID, Operation: m.run.OpID}
+	m.insertedDocs = append(m.insertedDocs, doc)
+	return nil
+}
