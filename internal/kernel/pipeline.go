@@ -3,12 +3,10 @@ package kernel
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
-	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/script"
 	"github.com/asenawritescode/kora/internal/workflow"
 )
@@ -100,29 +98,9 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		pendingLinks := make(map[string]*doctype.Document, len(p.Records))
 		for i, item := range p.Records {
 			recordDT := reg.Get(item.Doctype)
-			operation := item.Operation
-			if operation == "" {
-				operation = "create"
-			}
-			if operation != "create" && operation != "update" && operation != "decrement" && operation != "adjust" {
-				return nil, contract.NewError(contract.CodeValidationFailed, "bundle operation must be create, update, decrement, or adjust")
-			}
-			permission := "create"
-			if operation != "create" {
-				permission = "write"
-			}
-			if !op.Context.isEffectItem(item.Key) {
-				if _, permissionErr := decideOperationResource(op, reg, recordDT, permission); permissionErr != nil {
-					return nil, permissionErr
-				}
-			}
-			if item.TransitionAction != "" {
-				if operation != "update" {
-					return nil, contract.NewError(contract.CodeValidationFailed, "transition actions require an update bundle item")
-				}
-				if _, permissionErr := decideOperationResource(op, reg, recordDT, "submit"); permissionErr != nil {
-					return nil, permissionErr
-				}
+			operation, itemErr := m.authorizeItem(item, recordDT)
+			if itemErr != nil {
+				return nil, itemErr
 			}
 			data, err := resolveCreateBundleData(item.Data, recordNames)
 			if err != nil {
@@ -140,36 +118,9 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 				if rejectErr := k.rejectWorkflowStateMutation(ctx, dbTx, op, recordDT, data); rejectErr != nil {
 					return nil, contract.NewError(contract.CodeValidationFailed, rejectErr.Error())
 				}
-				oldDoc, err = txMgr.GetDocWithScope(recordDT, doc.Name, scopeForOperation(reg, op, recordDT.Name, "write"))
-				if err != nil {
-					if errors.Is(err, orm.ErrNotFound) {
-						return nil, contract.NewError(contract.CodeNotFound, "document not found")
-					}
-					return nil, contract.NewError(contract.CodeDependencyUnavailable, "load bundle document failed")
-				}
-				if item.TransitionAction != "" {
-					if _, err = txMgr.GetDocWithScope(recordDT, doc.Name, scopeForOperation(reg, op, recordDT.Name, "submit")); err != nil {
-						if errors.Is(err, orm.ErrNotFound) {
-							return nil, contract.NewError(contract.CodeNotFound, "document not found")
-						}
-						return nil, contract.NewError(contract.CodeDependencyUnavailable, "load workflow document failed")
-					}
-				}
-				if item.ExpectedRevision > 0 && oldDoc.Revision != item.ExpectedRevision {
-					auditFailure(ErrStaleVersion.Type)
-					return nil, ErrStaleVersion
-				}
-				if i == 0 {
-					if expectedVersion := expectedVersionFrom(op); expectedVersion != "" {
-						currentVersion, versionErr := readRowVersion(dbTx, k.dialect(), recordDT.RawTableName(), doc.Name)
-						if versionErr != nil {
-							return nil, contract.NewError(contract.CodeDependencyUnavailable, "read bundle record version failed")
-						}
-						if currentVersion != expectedVersion {
-							auditFailure(ErrStaleVersion.Type)
-							return nil, ErrStaleVersion
-						}
-					}
+				oldDoc, itemErr = m.loadItem(item, i, recordDT, doc.Name) //nolint:contextcheck // the context travels in txMgr.Context
+				if itemErr != nil {
+					return nil, itemErr
 				}
 				doc = cloneDoc(oldDoc)
 			}

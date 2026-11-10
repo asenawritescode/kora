@@ -101,3 +101,82 @@ func (m *mutation) bundleNames(p RecordMutationBundlePayload) (map[string]string
 	}
 	return names, nil
 }
+
+// authorizeItem checks the item's operation and the caller's permission for
+// it, and returns the operation with its default applied.
+func (m *mutation) authorizeItem(item RecordMutationBundleItem, recordDT *doctype.DocType) (string, *contract.Error) {
+	operation := item.Operation
+	if operation == "" {
+		operation = "create"
+	}
+	if operation != "create" && operation != "update" && operation != "decrement" && operation != "adjust" {
+		return "", contract.NewError(contract.CodeValidationFailed, "bundle operation must be create, update, decrement, or adjust")
+	}
+	permission := "create"
+	if operation != "create" {
+		permission = "write"
+	}
+	if !m.op.Context.isEffectItem(item.Key) {
+		if _, permissionErr := decideOperationResource(m.op, m.run.Reg, recordDT, permission); permissionErr != nil {
+			return "", permissionErr
+		}
+	}
+	if item.TransitionAction != "" {
+		if operation != "update" {
+			return "", contract.NewError(contract.CodeValidationFailed, "transition actions require an update bundle item")
+		}
+		if _, permissionErr := decideOperationResource(m.op, m.run.Reg, recordDT, "submit"); permissionErr != nil {
+			return "", permissionErr
+		}
+	}
+	return operation, nil
+}
+
+// loadItem reads the record an update, decrement or adjust item changes and
+// checks the revision and version the caller expects of it.
+func (m *mutation) loadItem(item RecordMutationBundleItem, i int, recordDT *doctype.DocType, name string) (*doctype.Document, *contract.Error) {
+	reg, txMgr := m.run.Reg, m.run.Mgr
+	oldDoc, err := txMgr.GetDocWithScope(recordDT, name, scopeForOperation(reg, m.op, recordDT.Name, "write")) //nolint:contextcheck // the context travels in txMgr.Context
+	if err != nil {
+		if errors.Is(err, orm.ErrNotFound) {
+			return nil, contract.NewError(contract.CodeNotFound, "document not found")
+		}
+		return nil, contract.NewError(contract.CodeDependencyUnavailable, "load bundle document failed")
+	}
+	if item.TransitionAction != "" {
+		if _, err = txMgr.GetDocWithScope(recordDT, name, scopeForOperation(reg, m.op, recordDT.Name, "submit")); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+			if errors.Is(err, orm.ErrNotFound) {
+				return nil, contract.NewError(contract.CodeNotFound, "document not found")
+			}
+			return nil, contract.NewError(contract.CodeDependencyUnavailable, "load workflow document failed")
+		}
+	}
+	if item.ExpectedRevision > 0 && oldDoc.Revision != item.ExpectedRevision {
+		m.auditFailure(ErrStaleVersion.Type)
+		return nil, ErrStaleVersion
+	}
+	if i == 0 {
+		if cerr := m.checkItemVersion(recordDT, name); cerr != nil {
+			return nil, cerr
+		}
+	}
+	return oldDoc, nil
+}
+
+// checkItemVersion compares the caller's expected version with the stored
+// row of the bundle's primary record.
+func (m *mutation) checkItemVersion(recordDT *doctype.DocType, name string) *contract.Error {
+	expectedVersion := expectedVersionFrom(m.op)
+	if expectedVersion == "" {
+		return nil
+	}
+	currentVersion, err := readRowVersion(m.run.Tx, m.k.dialect(), recordDT.RawTableName(), name)
+	if err != nil {
+		return contract.NewError(contract.CodeDependencyUnavailable, "read bundle record version failed")
+	}
+	if currentVersion != expectedVersion {
+		m.auditFailure(ErrStaleVersion.Type)
+		return ErrStaleVersion
+	}
+	return nil
+}
