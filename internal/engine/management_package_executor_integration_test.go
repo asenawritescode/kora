@@ -216,11 +216,11 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 					for _, selection := range selections {
 						pluginSelections = append(pluginSelections, plugin.ProviderSelection{Key: plugin.BindingKey{Scope: selection.Key.Scope, ConsumerModuleID: selection.Key.ConsumerModuleID, CapabilityName: selection.Key.CapabilityName}, ProviderID: selection.ProviderID})
 					}
-					return plugin.ResolveInstalledModules(scope, packages, modules, []plugin.ProviderRegistration{{
+					return plugin.ResolveInstalledModules(scope, plugin.InstalledModules{Packages: packages, Modules: modules, Providers: []plugin.ProviderRegistration{{
 						TenantID: tenant, ProviderID: "external-warehouse", OwnerModuleID: "warehouse.external", Kind: plugin.ProviderExternal,
 						Offers:    []contract.CapabilityOffer{{Name: "warehouse.lookup", Contract: contract.SchemaRef{ID: "warehouse.stock", Version: 1}}},
 						Factories: map[contract.CapabilityName]plugin.ProviderFactory{"warehouse.lookup": plugin.NewStaticFactory("warehouse.lookup", nil)},
-					}}, pluginSelections, revision)
+					}}, Selections: pluginSelections, Revision: revision})
 				}},
 			}
 			router := knet.NewSiteRouter([]*knet.LoadedSite{runtime})

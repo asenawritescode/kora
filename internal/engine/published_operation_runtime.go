@@ -244,7 +244,7 @@ func executePublishedOperation(ctx context.Context, rt publishedOperationRuntime
 		var recovered plugin.CapabilityOperationResult
 		var reconcileErr error
 		if dispatchOwner {
-			recovered, reconcileErr = plan.InvokeCapability(ctx, target.execution, lease, target.scope, caller, target.published.Capability, target.published.Operation, contract.CommandMeta{IdempotencyKey: pin.IdempotencyKey}, call.input)
+			recovered, reconcileErr = plan.InvokeCapability(ctx, target.execution, plugin.CapabilityCall{Lease: lease, Scope: target.scope, Caller: caller, Capability: target.published.Capability, Operation: target.published.Operation, Meta: contract.CommandMeta{IdempotencyKey: pin.IdempotencyKey}, Payload: call.input})
 			if reconcileErr == nil {
 				outcome = contract.ExternalApplied
 			} else {
@@ -271,7 +271,7 @@ func executePublishedOperation(ctx context.Context, rt publishedOperationRuntime
 	// Published capability providers receive the business payload described by
 	// the immutable operation schema. The selected local command provider adds
 	// its established kernel envelope at its own implementation boundary.
-	result, invokeErr := plan.InvokeCapability(ctx, target.execution, lease, target.scope, caller, target.published.Capability, target.published.Operation, call.meta, call.input)
+	result, invokeErr := plan.InvokeCapability(ctx, target.execution, plugin.CapabilityCall{Lease: lease, Scope: target.scope, Caller: caller, Capability: target.published.Capability, Operation: target.published.Operation, Meta: call.meta, Payload: call.input})
 	if invokeErr != nil {
 		status, operationErr := receiptFailureForError(invokeErr, spec.Effect == contract.EffectExternal)
 		if status == contract.ReceiptOutcomeUnknown {

@@ -112,11 +112,11 @@ func TestBindingPlanResolvesReferencesOnlyThroughSelectedScopedProvider(t *testi
 		t.Fatal(err)
 	}
 	rule := contract.ReferenceRule{Kind: "published_business_ref", CapabilityName: capability, ResourceType: "warehouse.location"}
-	resolved, err := plan.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, ref)
+	resolved, err := plan.ResolveBusinessReference(context.Background(), execution, BusinessReferenceRequest{Scope: scope, Consumer: consumer.ID, Rule: rule, Ref: ref})
 	if err != nil || resolved.Display != "A" || !handleA.revoked {
 		t.Fatalf("selected provider resolution = %#v, %v, revoked=%v", resolved, err, handleA.revoked)
 	}
-	if _, err := plan.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, refB); err == nil {
+	if _, shadowErr := plan.ResolveBusinessReference(context.Background(), execution, BusinessReferenceRequest{Scope: scope, Consumer: consumer.ID, Rule: rule, Ref: refB}); shadowErr == nil {
 		t.Fatal("reference from an unselected provider was accepted")
 	}
 	providerBSelection := ProviderSelection{Key: selection.Key, ProviderID: "warehouse-b"}
@@ -124,25 +124,25 @@ func TestBindingPlanResolvesReferencesOnlyThroughSelectedScopedProvider(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolvedB, err := rebound.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, refB)
+	resolvedB, err := rebound.ResolveBusinessReference(context.Background(), execution, BusinessReferenceRequest{Scope: scope, Consumer: consumer.ID, Rule: rule, Ref: refB})
 	if err != nil || resolvedB.Display != "B" {
 		t.Fatalf("replacement provider did not resolve its own same-id identity: %#v, %v", resolvedB, err)
 	}
-	if _, err := rebound.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, ref); err == nil {
+	if _, err := rebound.ResolveBusinessReference(context.Background(), execution, BusinessReferenceRequest{Scope: scope, Consumer: consumer.ID, Rule: rule, Ref: ref}); err == nil {
 		t.Fatal("provider replacement silently reinterpreted historical provider-A identity")
 	}
 	wrongType := ref
 	wrongType.ResourceType = "account.customer"
-	if _, err := plan.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, wrongType); err == nil {
+	if _, err := plan.ResolveBusinessReference(context.Background(), execution, BusinessReferenceRequest{Scope: scope, Consumer: consumer.ID, Rule: rule, Ref: wrongType}); err == nil {
 		t.Fatal("wrong resource type was accepted")
 	}
 	otherScope := scope
 	otherScope.LegalEntityID = "entity-b"
-	if _, err := plan.ResolveBusinessReference(context.Background(), execution, otherScope, consumer.ID, rule, ref); err == nil {
+	if _, err := plan.ResolveBusinessReference(context.Background(), execution, BusinessReferenceRequest{Scope: otherScope, Consumer: consumer.ID, Rule: rule, Ref: ref}); err == nil {
 		t.Fatal("cross-scope reference was accepted")
 	}
 	handleA.err = errors.New("provider offline")
-	if _, err := plan.ResolveBusinessReference(context.Background(), execution, scope, consumer.ID, rule, ref); err == nil {
+	if _, err := plan.ResolveBusinessReference(context.Background(), execution, BusinessReferenceRequest{Scope: scope, Consumer: consumer.ID, Rule: rule, Ref: ref}); err == nil {
 		t.Fatal("selected provider outage was accepted")
 	}
 	if handleB.opened != 1 {
@@ -204,7 +204,7 @@ func TestBindingPlanInvokesPinnedCapabilityWithSchemasAndProvenance(t *testing.T
 		t.Fatal("verified actor execution:", err)
 	}
 	meta := contract.CommandMeta{IdempotencyKey: "issue-ord-1"}
-	result, err := plan.InvokeCapability(context.Background(), execution, lease, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`))
+	result, err := plan.InvokeCapability(context.Background(), execution, CapabilityCall{Lease: lease, Scope: scope, Caller: consumer.ID, Capability: offer.Name, Operation: "issue", Meta: meta, Payload: json.RawMessage(`{"order_id":"ORD-1"}`)})
 	if err != nil {
 		t.Fatal("invoke pinned capability:", err)
 	}
@@ -255,13 +255,13 @@ func TestBindingPlanRejectsBadCapabilitySchemasBeforeAndAfterProviderCall(t *tes
 		t.Fatal("verified actor execution:", err)
 	}
 	meta := contract.CommandMeta{IdempotencyKey: "issue-ord-2"}
-	if _, err := plan.InvokeCapability(context.Background(), execution, lease, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"bad":"input"}`)); err == nil {
+	if _, err := plan.InvokeCapability(context.Background(), execution, CapabilityCall{Lease: lease, Scope: scope, Caller: consumer.ID, Capability: offer.Name, Operation: "issue", Meta: meta, Payload: json.RawMessage(`{"bad":"input"}`)}); err == nil {
 		t.Fatal("input schema mismatch reached provider")
 	}
 	if handle.opened != 0 || handle.calls != 0 {
 		t.Fatalf("invalid input opened provider: opens=%d calls=%d", handle.opened, handle.calls)
 	}
-	if _, err := plan.InvokeCapability(context.Background(), execution, lease, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`)); err == nil {
+	if _, err := plan.InvokeCapability(context.Background(), execution, CapabilityCall{Lease: lease, Scope: scope, Caller: consumer.ID, Capability: offer.Name, Operation: "issue", Meta: meta, Payload: json.RawMessage(`{"order_id":"ORD-1"}`)}); err == nil {
 		t.Fatal("output schema mismatch was accepted")
 	}
 	if handle.calls != 1 || !handle.revoked {
@@ -269,7 +269,7 @@ func TestBindingPlanRejectsBadCapabilitySchemasBeforeAndAfterProviderCall(t *tes
 	}
 	handle.executionID = ""
 	handle.output = json.RawMessage(`{"invoice_id":"INV-1"}`)
-	if _, err := plan.InvokeCapability(context.Background(), execution, lease, scope, consumer.ID, offer.Name, "issue", meta, json.RawMessage(`{"order_id":"ORD-1"}`)); err == nil {
+	if _, err := plan.InvokeCapability(context.Background(), execution, CapabilityCall{Lease: lease, Scope: scope, Caller: consumer.ID, Capability: offer.Name, Operation: "issue", Meta: meta, Payload: json.RawMessage(`{"order_id":"ORD-1"}`)}); err == nil {
 		t.Fatal("provider result without an execution identity was accepted")
 	}
 	if handle.calls != 2 || !handle.revoked {

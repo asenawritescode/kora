@@ -129,7 +129,7 @@ func TestGeneratePackCommandOperations(t *testing.T) {
 		providers = append(providers, plugin.ProviderRegistration{TenantID: scope.TenantID, ProviderID: "p-" + string(offer.Name), OwnerModuleID: core.ID, Kind: plugin.ProviderInternal, Offers: []contract.CapabilityOffer{offer},
 			Factories: map[contract.CapabilityName]plugin.ProviderFactory{offer.Name: plugin.NewStaticFactory(offer.Name, nil)}})
 	}
-	plan, err := plugin.ResolveInstalledModules(scope, nil, mods, providers, nil, 1)
+	plan, err := plugin.ResolveInstalledModules(scope, plugin.InstalledModules{Modules: mods, Providers: providers, Revision: 1})
 	if err != nil || len(plan.Blockers) != 0 || len(plan.Bindings) != 2 {
 		t.Fatalf("plan %+v err %v", plan, err)
 	}

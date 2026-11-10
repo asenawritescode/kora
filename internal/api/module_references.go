@@ -32,7 +32,7 @@ func newBusinessReferenceValidator(ctx context.Context, services SiteRuntimeServ
 		if planErr != nil {
 			return fmt.Errorf("business reference provider plan is unavailable: %w", planErr)
 		}
-		_, err := plan.ResolveBusinessReference(ctx, execution, scope, consumer, rule, ref)
+		_, err := plan.ResolveBusinessReference(ctx, execution, plugin.BusinessReferenceRequest{Scope: scope, Consumer: consumer, Rule: rule, Ref: ref})
 		return err
 	}
 }

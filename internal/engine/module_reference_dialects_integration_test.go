@@ -63,17 +63,17 @@ func TestInternalProviderBusinessReferenceResolvesAcrossDialects(t *testing.T) {
 			}
 			rule := contract.ReferenceRule{Kind: "published_business_ref", CapabilityName: capability, ResourceType: "warehouse.location"}
 			refA := contract.BusinessRef{ProviderID: provider.ProviderID, ResourceType: "warehouse.location", ID: "EXT-A", Scope: scopeA}
-			if _, err := plan.ResolveBusinessReference(ctx, execution, scopeA, consumer.ID, rule, refA); err != nil {
-				t.Fatal("resolve entity A identity (entity-scoped branch):", err)
+			if _, shadowErr := plan.ResolveBusinessReference(ctx, execution, plugin.BusinessReferenceRequest{Scope: scopeA, Consumer: consumer.ID, Rule: rule, Ref: refA}); shadowErr != nil {
+				t.Fatal("resolve entity A identity (entity-scoped branch):", shadowErr)
 			}
 			otherEntity := refA
 			otherEntity.ID = "EXT-B"
-			if _, err := plan.ResolveBusinessReference(ctx, execution, scopeA, consumer.ID, rule, otherEntity); err == nil {
+			if _, shadowErr := plan.ResolveBusinessReference(ctx, execution, plugin.BusinessReferenceRequest{Scope: scopeA, Consumer: consumer.ID, Rule: rule, Ref: otherEntity}); shadowErr == nil {
 				t.Fatal("entity B identity resolved from entity A scope")
 			}
 			missing := refA
 			missing.ID = "EXT-NONE"
-			if _, err := plan.ResolveBusinessReference(ctx, execution, scopeA, consumer.ID, rule, missing); err == nil {
+			if _, shadowErr := plan.ResolveBusinessReference(ctx, execution, plugin.BusinessReferenceRequest{Scope: scopeA, Consumer: consumer.ID, Rule: rule, Ref: missing}); shadowErr == nil {
 				t.Fatal("unknown identity resolved")
 			}
 			// Tenant-owned branch (no entity filter) is the single-placeholder query.
@@ -85,7 +85,7 @@ func TestInternalProviderBusinessReferenceResolvesAcrossDialects(t *testing.T) {
 				t.Fatal(err)
 			}
 			refT := contract.BusinessRef{ProviderID: provider.ProviderID, ResourceType: "warehouse.location", ID: "EXT-B", Scope: scopeT}
-			if _, err := planT.ResolveBusinessReference(ctx, execution, scopeT, consumer.ID, rule, refT); err != nil {
+			if _, err := planT.ResolveBusinessReference(ctx, execution, plugin.BusinessReferenceRequest{Scope: scopeT, Consumer: consumer.ID, Rule: rule, Ref: refT}); err != nil {
 				t.Fatal("resolve tenant-owned identity:", err)
 			}
 		})

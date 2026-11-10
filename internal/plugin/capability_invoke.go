@@ -53,21 +53,33 @@ type CapabilityOperationResult struct {
 	Output       json.RawMessage      `json:"output"`
 }
 
+// CapabilityCall names one operation of a consumer's capability and carries
+// the lease, idempotency metadata and payload it runs with.
+type CapabilityCall struct {
+	Lease      contract.CapabilityLease
+	Scope      contract.BusinessScope
+	Caller     contract.ModuleID
+	Capability contract.CapabilityName
+	Operation  string
+	Meta       contract.CommandMeta
+	Payload    json.RawMessage
+}
+
 // InvokeCapability dispatches an operation through the provider selected in
 // this plan. Provider identity, scope, contract, schema and binding revision
 // are pinned before the handle is opened.
-func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Execution, lease contract.CapabilityLease, scope contract.BusinessScope, caller contract.ModuleID, capability contract.CapabilityName, operation string, meta contract.CommandMeta, payload json.RawMessage) (CapabilityOperationResult, error) {
-	if ctx == nil || !execution.Valid() || scope.Validate() != nil || execution.Tenant() != scope.TenantID || caller == "" || capability == "" || operation == "" || meta.IdempotencyKey == "" || len(payload) == 0 || len(payload) > 1<<20 || !json.Valid(payload) || p.LeaseAdmission == nil {
+func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Execution, call CapabilityCall) (CapabilityOperationResult, error) {
+	if ctx == nil || !execution.Valid() || call.Scope.Validate() != nil || execution.Tenant() != call.Scope.TenantID || call.Caller == "" || call.Capability == "" || call.Operation == "" || call.Meta.IdempotencyKey == "" || len(call.Payload) == 0 || len(call.Payload) > 1<<20 || !json.Valid(call.Payload) || p.LeaseAdmission == nil {
 		return CapabilityOperationResult{}, fmt.Errorf("capability invocation identity or payload is invalid")
 	}
-	key := BindingKey{Scope: scope, ConsumerModuleID: caller, CapabilityName: capability}
+	key := BindingKey{Scope: call.Scope, ConsumerModuleID: call.Caller, CapabilityName: call.Capability}
 	binding, ok := p.Resolve(key)
 	if !ok || binding.Revision == 0 || binding.OwnerModuleID == "" || binding.Factory == nil || binding.validateSchema == nil {
 		return CapabilityOperationResult{}, fmt.Errorf("capability binding is unavailable or unpinned")
 	}
 	var spec *contract.OperationSpec
 	for index := range binding.Operations {
-		if binding.Operations[index].Name == operation {
+		if binding.Operations[index].Name == call.Operation {
 			spec = &binding.Operations[index]
 			break
 		}
@@ -75,13 +87,13 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 	if spec == nil || (spec.Effect != contract.EffectLocal && spec.Effect != contract.EffectExternal) {
 		return CapabilityOperationResult{}, fmt.Errorf("capability operation is not a declared command")
 	}
-	if lease.Validate() != nil || lease.State != "active" || lease.TenantID != scope.TenantID || lease.Scope != scope || lease.CallerModuleID != caller || lease.ProviderID != binding.ProviderID || lease.Operation != operation || lease.BindingRevision != binding.Revision {
+	if call.Lease.Validate() != nil || call.Lease.State != "active" || call.Lease.TenantID != call.Scope.TenantID || call.Lease.Scope != call.Scope || call.Lease.CallerModuleID != call.Caller || call.Lease.ProviderID != binding.ProviderID || call.Lease.Operation != call.Operation || call.Lease.BindingRevision != binding.Revision {
 		return CapabilityOperationResult{}, contract.NewError(contract.CodePermissionDenied, "capability lease does not match the resolved binding")
 	}
-	if lease.ProviderModuleID != binding.OwnerModuleID {
+	if call.Lease.ProviderModuleID != binding.OwnerModuleID {
 		return CapabilityOperationResult{}, contract.NewError(contract.CodePermissionDenied, "capability lease provider owner does not match the resolved binding")
 	}
-	if err := binding.validateSchema(spec.Input, payload); err != nil {
+	if err := binding.validateSchema(spec.Input, call.Payload); err != nil {
 		// The caller's mistake is named by field; the validator's own text is not returned.
 		input := newInputError(err, "operation")
 		failure := contract.NewError(contract.CodeValidationFailed, input.Message)
@@ -89,7 +101,7 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 		return CapabilityOperationResult{}, failure
 	}
 	actor := execution.Actor()
-	providerContext := contract.OperationContext{Site: string(scope.TenantID), Actor: actor.PrincipalID, Scope: scope}
+	providerContext := contract.OperationContext{Site: string(call.Scope.TenantID), Actor: actor.PrincipalID, Scope: call.Scope}
 	handle, err := binding.Open(providerContext)
 	if err != nil {
 		return CapabilityOperationResult{}, fmt.Errorf("open selected capability provider: %w", err)
@@ -102,7 +114,7 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 	if !ok {
 		return CapabilityOperationResult{}, fmt.Errorf("selected capability provider cannot invoke operations")
 	}
-	moduleExecution, err := contract.NewModuleExecution(scope, caller, binding.OwnerModuleID, binding.Revision, operation)
+	moduleExecution, err := contract.NewModuleExecution(call.Scope, call.Caller, binding.OwnerModuleID, binding.Revision, call.Operation)
 	if err != nil {
 		return CapabilityOperationResult{}, err
 	}
@@ -111,13 +123,13 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 		if err := json.Unmarshal(raw, &ref); err != nil {
 			return fmt.Errorf("business reference must be a provider-qualified object")
 		}
-		_, err := p.ResolveBusinessReference(ctx, execution, scope, module, rule, ref)
-		return err
+		_, resolveErr := p.ResolveBusinessReference(ctx, execution, BusinessReferenceRequest{Scope: call.Scope, Consumer: module, Rule: rule, Ref: ref})
+		return resolveErr
 	})
-	if err := p.LeaseAdmission.AdmitCapabilityAttempt(ctx, lease, time.Now().UTC()); err != nil {
-		return CapabilityOperationResult{}, err
+	if admitErr := p.LeaseAdmission.AdmitCapabilityAttempt(ctx, call.Lease, time.Now().UTC()); admitErr != nil {
+		return CapabilityOperationResult{}, admitErr
 	}
-	providerResult, err := invoker.InvokeCapability(ctx, CapabilityInvocation{Context: providerContext, Execution: execution, ModuleExecution: moduleExecution, Operation: *spec, Meta: meta, Payload: append(json.RawMessage(nil), payload...), BusinessReferenceValidator: referenceValidator})
+	providerResult, err := invoker.InvokeCapability(ctx, CapabilityInvocation{Context: providerContext, Execution: execution, ModuleExecution: moduleExecution, Operation: *spec, Meta: call.Meta, Payload: append(json.RawMessage(nil), call.Payload...), BusinessReferenceValidator: referenceValidator})
 	if err != nil {
 		return CapabilityOperationResult{}, err
 	}
@@ -177,10 +189,20 @@ func (p BindingPlan) ReconcileCapability(ctx context.Context, execution policy.E
 	return outcome, CapabilityOperationResult{ExecutionID: result.ExecutionID, Status: "completed", OutputSchema: spec.Output, Output: append(json.RawMessage(nil), result.Output...)}, nil
 }
 
+// BusinessReferenceRequest is one reference a consumer module asks to resolve
+// under the rule that declares it.
+type BusinessReferenceRequest struct {
+	Scope    contract.BusinessScope
+	Consumer contract.ModuleID
+	Rule     contract.ReferenceRule
+	Ref      contract.BusinessRef
+}
+
 // ResolveBusinessReference opens only the provider already selected for the
 // consumer capability in this immutable plan. It does not search alternate
 // providers when resolution fails.
-func (p BindingPlan) ResolveBusinessReference(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, consumer contract.ModuleID, rule contract.ReferenceRule, ref contract.BusinessRef) (contract.ResolvedBusinessRef, error) {
+func (p BindingPlan) ResolveBusinessReference(ctx context.Context, execution policy.Execution, req BusinessReferenceRequest) (contract.ResolvedBusinessRef, error) {
+	scope, consumer, rule, ref := req.Scope, req.Consumer, req.Rule, req.Ref
 	if ctx == nil || !execution.Valid() || execution.Tenant() != scope.TenantID || scope.Validate() != nil || consumer == "" || rule.Validate() != nil || rule.Kind != "published_business_ref" || rule.ResourceType != ref.ResourceType {
 		return contract.ResolvedBusinessRef{}, fmt.Errorf("business reference rule or verified execution is invalid")
 	}

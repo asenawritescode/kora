@@ -225,7 +225,7 @@ func (r businessCapabilityRepairer) RepairBusinessObligation(ctx context.Context
 	if err != nil {
 		return "", err
 	}
-	result, err := r.plan.InvokeCapability(ctx, r.execution, r.lease, r.scope, r.registration.RepairCallerModuleID, r.registration.RepairCapability, r.registration.RepairOperation, contract.CommandMeta{IdempotencyKey: idempotency}, input)
+	result, err := r.plan.InvokeCapability(ctx, r.execution, plugin.CapabilityCall{Lease: r.lease, Scope: r.scope, Caller: r.registration.RepairCallerModuleID, Capability: r.registration.RepairCapability, Operation: r.registration.RepairOperation, Meta: contract.CommandMeta{IdempotencyKey: idempotency}, Payload: input})
 	if err != nil {
 		return "", err
 	}
