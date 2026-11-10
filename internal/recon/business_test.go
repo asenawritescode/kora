@@ -10,6 +10,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/plugin"
 )
 
 func TestCompareBusinessObligationsFindingsAreStableAndScoped(t *testing.T) {
@@ -206,8 +207,8 @@ type businessPublishedPlanStub struct {
 	result   contract.QueryResult
 }
 
-func (s *businessPublishedPlanStub) ExecutePublishedQuery(_ context.Context, scope contract.BusinessScope, owner contract.ModuleID, name string, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
-	s.requests = append(s.requests, BusinessQueryRequest{Scope: scope, OwnerModuleID: owner, Name: name, Input: input, Cursor: cursor, Limit: limit})
+func (s *businessPublishedPlanStub) ExecutePublishedQuery(_ context.Context, key plugin.PublishedQueryKey, _ *plugin.PublishedQueryActorScope, page plugin.QueryPageRequest) (contract.QueryResult, error) {
+	s.requests = append(s.requests, BusinessQueryRequest{Scope: key.Scope, OwnerModuleID: key.OwnerModuleID, Name: key.Name, Input: page.Input, Cursor: page.Cursor, Limit: page.Limit})
 	return s.result, nil
 }
 

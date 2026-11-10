@@ -153,10 +153,7 @@ func (h *Handler) HandleBusinessReconciliationRun(c *gin.Context) {
 		if query.OwnerModuleID == registration.TargetQueryOwnerModuleID && query.Name == registration.TargetQueryName {
 			actorScope = targetScope
 		}
-		if actorScope == nil {
-			return plan.ExecutePublishedQuery(ctx, scope, query.OwnerModuleID, query.Name, query.Input, query.Cursor, query.Limit)
-		}
-		return plan.ExecutePublishedQueryForActor(ctx, scope, query.OwnerModuleID, query.Name, *actorScope, query.Input, query.Cursor, query.Limit)
+		return plan.ExecutePublishedQuery(ctx, plugin.PublishedQueryKey{Scope: scope, OwnerModuleID: query.OwnerModuleID, Name: query.Name}, actorScope, plugin.QueryPageRequest{Input: query.Input, Cursor: query.Cursor, Limit: query.Limit})
 	}
 	var run recon.BusinessRun
 	if request.PreviousRunID == "" {

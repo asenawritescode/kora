@@ -20,7 +20,7 @@ import (
 
 type historicalPublishedQueryExecutor struct{ result contract.QueryResult }
 
-func (e historicalPublishedQueryExecutor) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, uint16) (contract.QueryResult, error) {
+func (e historicalPublishedQueryExecutor) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, plugin.QueryPageRequest) (contract.QueryResult, error) {
 	return e.result, nil
 }
 
@@ -364,7 +364,7 @@ func TestAuthorizePublishedQueryOwnerSourceSkipsSourceRead(t *testing.T) {
 
 type failingPublishedQueryExecutor struct{ err error }
 
-func (e failingPublishedQueryExecutor) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, uint16) (contract.QueryResult, error) {
+func (e failingPublishedQueryExecutor) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, plugin.QueryPageRequest) (contract.QueryResult, error) {
 	return contract.QueryResult{}, e.err
 }
 

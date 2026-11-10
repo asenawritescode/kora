@@ -22,7 +22,7 @@ import (
 
 type reconciliationQueryExecutor struct{ rows json.RawMessage }
 
-func (e reconciliationQueryExecutor) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, json.RawMessage, string, uint16) (contract.QueryResult, error) {
+func (e reconciliationQueryExecutor) ExecutePublishedQuery(context.Context, contract.ModuleExecution, contract.PublishedQuery, plugin.QueryPageRequest) (contract.QueryResult, error) {
 	return contract.QueryResult{Data: append(json.RawMessage(nil), e.rows...), SnapshotToken: "snapshot-1", SourceRevision: "revision-1", AsOf: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh}, nil
 }
 

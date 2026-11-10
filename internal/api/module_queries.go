@@ -62,12 +62,7 @@ func (h *Handler) HandlePublishedModuleQuery(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid published query request", nil)
 		return
 	}
-	var result contract.QueryResult
-	if actorScope == nil {
-		result, err = plan.ExecutePublishedQuery(c.Request.Context(), scope, moduleID, queryName, request.Input, request.Cursor, request.Limit)
-	} else {
-		result, err = plan.ExecutePublishedQueryForActor(c.Request.Context(), scope, moduleID, queryName, *actorScope, request.Input, request.Cursor, request.Limit)
-	}
+	result, err := plan.ExecutePublishedQuery(c.Request.Context(), plugin.PublishedQueryKey{Scope: scope, OwnerModuleID: moduleID, Name: queryName}, actorScope, plugin.QueryPageRequest{Input: request.Input, Cursor: request.Cursor, Limit: request.Limit})
 	var inputErr *plugin.QueryInputError
 	if errors.As(err, &inputErr) {
 		var details map[string]any

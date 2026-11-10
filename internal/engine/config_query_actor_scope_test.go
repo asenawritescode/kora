@@ -186,9 +186,9 @@ func TestConfigQueryExecutorActorScope(t *testing.T) {
 			var res contract.QueryResult
 			var err error
 			if tc.actor == nil {
-				res, err = e.ExecutePublishedQuery(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, json.RawMessage(`{}`), "", 10)
+				res, err = e.ExecutePublishedQuery(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, plugin.QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 10})
 			} else {
-				res, err = e.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, *tc.actor, json.RawMessage(`{}`), "", 10)
+				res, err = e.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, contract.PublishedQuery{}, *tc.actor, plugin.QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 10})
 			}
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)

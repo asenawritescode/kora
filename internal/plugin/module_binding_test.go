@@ -287,7 +287,7 @@ func TestFreshModuleCompositionModeMatrix(t *testing.T) {
 
 type testPublishedQueryExecutor struct{ result contract.QueryResult }
 
-func (e testPublishedQueryExecutor) ExecutePublishedQuery(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, _ json.RawMessage, _ string, _ uint16) (contract.QueryResult, error) {
+func (e testPublishedQueryExecutor) ExecutePublishedQuery(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, _ QueryPageRequest) (contract.QueryResult, error) {
 	return e.result, nil
 }
 
@@ -296,11 +296,12 @@ type actorScopedTestQueryExecutor struct {
 	ignore bool
 }
 
-func (e actorScopedTestQueryExecutor) ExecutePublishedQuery(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, input json.RawMessage, cursor string, limit uint16) (contract.QueryResult, error) {
+func (e actorScopedTestQueryExecutor) ExecutePublishedQuery(ctx context.Context, execution contract.ModuleExecution, query contract.PublishedQuery, _ QueryPageRequest) (contract.QueryResult, error) {
 	return e.result, nil
 }
 
-func (e actorScopedTestQueryExecutor) ExecutePublishedQueryForActor(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, actor PublishedQueryActorScope, _ json.RawMessage, _ string, limit uint16) (contract.QueryResult, error) {
+func (e actorScopedTestQueryExecutor) ExecutePublishedQueryForActor(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, actor PublishedQueryActorScope, page QueryPageRequest) (contract.QueryResult, error) {
+	limit := page.Limit
 	if e.ignore {
 		return e.result, nil
 	}
@@ -352,7 +353,7 @@ func TestPublishedQueryAppliesActorAssignmentBeforePageLimit(t *testing.T) {
 		t.Fatal("resolve scoped query:", err)
 	}
 	actor := PublishedQueryActorScope{BusinessScope: scope, SubjectID: "alice", AssignedFields: []string{"assigned_to"}}
-	got, err := plan.ExecutePublishedQueryForActor(context.Background(), scope, module.ID, query.Name, actor, json.RawMessage(`{}`), "", 1)
+	got, err := plan.ExecutePublishedQuery(context.Background(), PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, &actor, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 1})
 	if err != nil || string(got.Data) != `[{"assigned_to":"alice","id":"mine","owner_id":"alice"}]` {
 		t.Fatalf("actor-scoped page = %s, error=%v", got.Data, err)
 	}
@@ -364,7 +365,7 @@ func TestPublishedQueryAppliesActorAssignmentBeforePageLimit(t *testing.T) {
 		t.Fatal("resolve owner-scoped query:", err)
 	}
 	ownerScope := PublishedQueryActorScope{BusinessScope: scope, SubjectID: "alice", OwnerOnly: true, OwnerField: query.OwnerField}
-	got, err = plan.ExecutePublishedQueryForActor(context.Background(), scope, module.ID, query.Name, ownerScope, json.RawMessage(`{}`), "", 1)
+	got, err = plan.ExecutePublishedQuery(context.Background(), PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, &ownerScope, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 1})
 	if err != nil || string(got.Data) != `[{"assigned_to":"alice","id":"mine","owner_id":"alice"}]` {
 		t.Fatalf("owner-scoped page = %s, error=%v", got.Data, err)
 	}
@@ -373,7 +374,7 @@ func TestPublishedQueryAppliesActorAssignmentBeforePageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal("resolve misbehaving scoped query:", err)
 	}
-	if _, err := plan.ExecutePublishedQueryForActor(context.Background(), scope, module.ID, query.Name, actor, json.RawMessage(`{}`), "", 1); err == nil {
+	if _, err := plan.ExecutePublishedQuery(context.Background(), PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, &actor, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 1}); err == nil {
 		t.Fatal("provider returned a row outside the verified actor assignment")
 	}
 }
@@ -413,11 +414,11 @@ func TestPublishedQueryUsesSameBoundedContractForInternalAndExternalProviders(t 
 		if err != nil {
 			t.Fatalf("%s resolve: %v", kind, err)
 		}
-		got, err := plan.ExecutePublishedQuery(context.Background(), scope, module.ID, query.Name, json.RawMessage(`{}`), "", 5)
+		got, err := plan.ExecutePublishedQuery(context.Background(), PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, nil, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 5})
 		if err != nil || string(got.Data) != string(result.Data) {
 			t.Fatalf("%s query = %#v, %v", kind, got, err)
 		}
-		if _, err := plan.ExecutePublishedQuery(context.Background(), scope, module.ID, query.Name, json.RawMessage(`{}`), "", 11); err == nil {
+		if _, overLimitErr := plan.ExecutePublishedQuery(context.Background(), PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, nil, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 11}); overLimitErr == nil {
 			t.Fatalf("%s query exceeded page limit", kind)
 		}
 		bad := testPublishedQueryExecutor{contract.QueryResult{Data: json.RawMessage(`[{"secret":true}]`), AsOf: time.Now().UTC(), Freshness: contract.QueryFresh}}
@@ -426,7 +427,7 @@ func TestPublishedQueryUsesSameBoundedContractForInternalAndExternalProviders(t 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = plan.ExecutePublishedQuery(context.Background(), scope, module.ID, query.Name, json.RawMessage(`{}`), "", 5); err == nil {
+		if _, err = plan.ExecutePublishedQuery(context.Background(), PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, nil, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 5}); err == nil {
 			t.Fatalf("%s provider leaked an undeclared field", kind)
 		}
 		provider.Offers = nil
@@ -434,7 +435,7 @@ func TestPublishedQueryUsesSameBoundedContractForInternalAndExternalProviders(t 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := unoffered.ExecutePublishedQuery(context.Background(), scope, module.ID, query.Name, json.RawMessage(`{}`), "", 5); err == nil {
+		if _, err := unoffered.ExecutePublishedQuery(context.Background(), PublishedQueryKey{Scope: scope, OwnerModuleID: module.ID, Name: query.Name}, nil, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 5}); err == nil {
 			t.Fatalf("%s query executor without the capability offer was accepted", kind)
 		}
 	}
@@ -579,15 +580,16 @@ type projectionPageExecutor struct {
 	afterFirstPage func()
 }
 
-func (e projectionPageExecutor) ReplayPublishedQuery(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, _ json.RawMessage, _ string, _ string, cursor string, _ uint16) (contract.QueryReplayPage, error) {
-	page, ok := e.replay[cursor]
+func (e projectionPageExecutor) ReplayPublishedQuery(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, req QueryReplayRequest) (contract.QueryReplayPage, error) {
+	page, ok := e.replay[req.Replay]
 	if !ok {
 		return contract.QueryReplayPage{}, errors.New("replay cursor unavailable")
 	}
 	return page, nil
 }
 
-func (e projectionPageExecutor) ExecutePublishedQuery(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, _ json.RawMessage, cursor string, _ uint16) (contract.QueryResult, error) {
+func (e projectionPageExecutor) ExecutePublishedQuery(_ context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, req QueryPageRequest) (contract.QueryResult, error) {
+	cursor := req.Cursor
 	if cursor == "" && e.afterFirstPage != nil {
 		e.afterFirstPage()
 	}

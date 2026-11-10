@@ -19,8 +19,8 @@ import (
 
 type queryFn func(ctx context.Context, input json.RawMessage) ([]map[string]any, error)
 
-func (f queryFn) ExecutePublishedQuery(ctx context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, input json.RawMessage, _ string, _ uint16) (contract.QueryResult, error) {
-	rows, err := f(ctx, input)
+func (f queryFn) ExecutePublishedQuery(ctx context.Context, _ contract.ModuleExecution, _ contract.PublishedQuery, page plugin.QueryPageRequest) (contract.QueryResult, error) {
+	rows, err := f(ctx, page.Input)
 	if err != nil {
 		return contract.QueryResult{}, err
 	}

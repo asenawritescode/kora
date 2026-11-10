@@ -67,7 +67,7 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := provider.PutFactTx(ctx, tx, execution, query, input, json.RawMessage(row)); err != nil {
+		if _, err := provider.PutFactTx(ctx, tx, FactStream{Execution: execution, Query: query, Input: input}, json.RawMessage(row)); err != nil {
 			_ = tx.Rollback()
 			t.Fatal(err)
 		}
@@ -85,7 +85,7 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := provider.DeleteFactTx(ctx, tx, execution, query, input, key, owner); err != nil {
+		if _, err := provider.DeleteFactTx(ctx, tx, FactStream{Execution: execution, Query: query, Input: input}, key, owner); err != nil {
 			_ = tx.Rollback()
 			t.Fatal(err)
 		}
@@ -109,11 +109,11 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 	if plan.CanReplayPublishedQueryOfflineForActor(scopeA, module.ID, query.Name, &assignedActor) {
 		t.Fatal("provider advertised unsupported assignment-scoped offline replay")
 	}
-	unrestricted, err := plan.ExecutePublishedQuery(ctx, scopeA, module.ID, query.Name, input, "", 2)
+	unrestricted, err := plan.ExecutePublishedQuery(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, nil, QueryPageRequest{Input: input, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	unrestrictedNext, err := plan.ExecutePublishedQuery(ctx, scopeA, module.ID, query.Name, input, unrestricted.NextCursor, 2)
+	unrestrictedNext, err := plan.ExecutePublishedQuery(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, nil, QueryPageRequest{Input: input, Cursor: unrestricted.NextCursor, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 	if !strings.Contains(allUnrestricted, `"owner_id":"alice"`) || !strings.Contains(allUnrestricted, `"owner_id":"bob"`) || strings.Contains(allUnrestricted, `"id":"a-2"`) {
 		t.Fatalf("unrestricted entity snapshot = %s", unrestricted.Data)
 	}
-	snapshot, err := plan.ExecutePublishedQueryForActor(ctx, scopeA, module.ID, query.Name, actor, input, "", 1)
+	snapshot, err := plan.ExecutePublishedQuery(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, &actor, QueryPageRequest{Input: input, Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 	write(scopeA, `{"id":"a-1","owner_id":"alice","amount":2}`)
 	write(scopeA, `{"id":"a-3","owner_id":"alice","amount":3}`)
 	remove(scopeA, "a-1", "alice")
-	secondSnapshot, err := plan.ExecutePublishedQueryForActor(ctx, scopeA, module.ID, query.Name, actor, input, snapshot.NextCursor, 1)
+	secondSnapshot, err := plan.ExecutePublishedQuery(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, &actor, QueryPageRequest{Input: input, Cursor: snapshot.NextCursor, Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,14 +151,14 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := plan.ReplayPublishedQueryForActor(ctx, scopeA, module.ID, query.Name, actor, input, snapshot.SnapshotToken, snapshot.SourceCursor, "", "", 2)
+	first, err := plan.ReplayPublishedQueryForActor(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, actor, QueryReplayRequest{Input: input, Snapshot: snapshot.SnapshotToken, After: snapshot.SourceCursor, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(first.Changes) != 2 || first.Changes[0].FactKey != "a-1" || first.Changes[1].FactKey != "a-3" || first.NextCursor == "" {
 		t.Fatalf("first replay = %+v", first)
 	}
-	second, err := plan.ReplayPublishedQueryForActor(ctx, scopeA, module.ID, query.Name, actor, input, snapshot.SnapshotToken, snapshot.SourceCursor, first.ThroughCursor, first.NextCursor, 2)
+	second, err := plan.ReplayPublishedQueryForActor(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, actor, QueryReplayRequest{Input: input, Snapshot: snapshot.SnapshotToken, After: snapshot.SourceCursor, Through: first.ThroughCursor, Replay: first.NextCursor, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 	if err != nil {
 		t.Fatal(err)
 	}
-	pinnedRows, _, err := restarted.snapshotRows(ctx, scopeA, query, "alice", input, "", pinnedHigh, 2)
+	pinnedRows, _, err := restarted.snapshotRows(ctx, changeFilter{scope: scopeA, query: query, subject: "alice", input: input}, "", pinnedHigh, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := kindPlan.ExecutePublishedQueryForActor(ctx, scopeA, module.ID, query.Name, actor, input, "", 2)
+			got, err := kindPlan.ExecutePublishedQuery(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, &actor, QueryPageRequest{Input: input, Limit: 2})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -199,12 +199,12 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 		})
 	}
 
-	beforeTransfer, err := plan.ExecutePublishedQueryForActor(ctx, scopeA, module.ID, query.Name, actor, input, "", 2)
+	beforeTransfer, err := plan.ExecutePublishedQuery(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, &actor, QueryPageRequest{Input: input, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	write(scopeA, `{"id":"a-0","owner_id":"bob","amount":10}`)
-	revoked, err := plan.ReplayPublishedQueryForActor(ctx, scopeA, module.ID, query.Name, actor, input, beforeTransfer.SnapshotToken, beforeTransfer.SourceCursor, "", "", 2)
+	revoked, err := plan.ReplayPublishedQueryForActor(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, actor, QueryReplayRequest{Input: input, Snapshot: beforeTransfer.SnapshotToken, After: beforeTransfer.SourceCursor, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestSQLPublishedQueryProvider_PinnedSnapshotReplayRestartAndScopeIsolation(
 		t.Fatalf("previous owner revocation replay = %+v", revoked)
 	}
 	bob := PublishedQueryActorScope{BusinessScope: scopeA, SubjectID: "bob", OwnerOnly: true, OwnerField: query.OwnerField}
-	bobSnapshot, err := plan.ExecutePublishedQueryForActor(ctx, scopeA, module.ID, query.Name, bob, input, "", 2)
+	bobSnapshot, err := plan.ExecutePublishedQuery(ctx, PublishedQueryKey{Scope: scopeA, OwnerModuleID: module.ID, Name: query.Name}, &bob, QueryPageRequest{Input: input, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,14 +235,14 @@ func TestSQLPublishedQueryProvider_RejectsUnverifiedAndAssignedScopes(t *testing
 	query := contract.PublishedQuery{OwnerModuleID: "sales.orders", Name: "mine", ScopePolicy: contract.ScopeEntityOwned, OwnerField: "owner_id", OfflineEligible: true, OfflineFactKey: "id", PageLimit: 10}
 	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
 	actor := PublishedQueryActorScope{BusinessScope: scope, SubjectID: "alice", OwnerOnly: true, OwnerField: "owner_id", AssignedFields: []string{"assignee_id"}}
-	if _, err := provider.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, query, actor, json.RawMessage(`{}`), "", 10); err == nil {
+	if _, unverifiedErr := provider.ExecutePublishedQueryForActor(context.Background(), contract.ModuleExecution{}, query, actor, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 10}); unverifiedErr == nil {
 		t.Fatal("unverified execution was accepted")
 	}
 	execution, err := contract.NewModuleExecution(scope, query.OwnerModuleID, query.OwnerModuleID, 1, "list")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.ExecutePublishedQueryForActor(context.Background(), execution, query, actor, json.RawMessage(`{}`), "", 10); err == nil {
+	if _, err := provider.ExecutePublishedQueryForActor(context.Background(), execution, query, actor, QueryPageRequest{Input: json.RawMessage(`{}`), Limit: 10}); err == nil {
 		t.Fatal("assigned scope without an owner-published visibility projection was accepted")
 	}
 }

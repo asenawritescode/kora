@@ -382,7 +382,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			if err != nil {
 				return contract.QueryResult{}, err
 			}
-			return plan.ExecutePublishedQuery(ctx, request.Scope, request.OwnerModuleID, request.Name, request.Input, request.Cursor, request.Limit)
+			return plan.ExecutePublishedQuery(ctx, plugin.PublishedQueryKey{Scope: request.Scope, OwnerModuleID: request.OwnerModuleID, Name: request.Name}, nil, plugin.QueryPageRequest{Input: request.Input, Cursor: request.Cursor, Limit: request.Limit})
 		},
 	}
 	if config.ScriptRunner != nil {

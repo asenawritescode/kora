@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/plugin"
 )
 
 type BusinessObligation = contract.BusinessObligation
@@ -57,7 +58,7 @@ type BusinessQueryPageReader func(context.Context, BusinessQueryRequest) (contra
 // PublishedBusinessQueryPlan is the existing module binding-plan query
 // surface. It is intentionally the only provider lookup used by this runner.
 type PublishedBusinessQueryPlan interface {
-	ExecutePublishedQuery(context.Context, contract.BusinessScope, contract.ModuleID, string, json.RawMessage, string, uint16) (contract.QueryResult, error)
+	ExecutePublishedQuery(context.Context, plugin.PublishedQueryKey, *plugin.PublishedQueryActorScope, plugin.QueryPageRequest) (contract.QueryResult, error)
 }
 
 func PublishedBusinessQueryReader(plan PublishedBusinessQueryPlan) BusinessQueryPageReader {
@@ -65,7 +66,7 @@ func PublishedBusinessQueryReader(plan PublishedBusinessQueryPlan) BusinessQuery
 		if plan == nil {
 			return contract.QueryResult{}, fmt.Errorf("published module query plan is unavailable")
 		}
-		return plan.ExecutePublishedQuery(ctx, request.Scope, request.OwnerModuleID, request.Name, request.Input, request.Cursor, request.Limit)
+		return plan.ExecutePublishedQuery(ctx, plugin.PublishedQueryKey{Scope: request.Scope, OwnerModuleID: request.OwnerModuleID, Name: request.Name}, nil, plugin.QueryPageRequest{Input: request.Input, Cursor: request.Cursor, Limit: request.Limit})
 	}
 }
 
