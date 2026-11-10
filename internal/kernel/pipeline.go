@@ -86,7 +86,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		owner = user
 	}
 
-	m := &mutation{k: k, run: run, op: op, def: def, dt: dt, user: user, ownsTx: ownsTransaction, auditFailure: auditFailure}
+	m := &mutation{k: k, run: run, op: op, def: def, dt: dt, user: user, owner: owner, ownsTx: ownsTransaction, auditFailure: auditFailure}
 
 	var stepErr *contract.Error
 	switch op.Command {
@@ -370,74 +370,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		m.result.Related = related
 
 	case CommandRecordCreate, CommandPublicFormSubmit:
-		var p RecordCreatePayload
-		if err := json.Unmarshal(op.Payload, &p); err != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, "invalid record.create payload")
-		}
-		if op.Command == CommandPublicFormSubmit {
-			var submitted map[string]any
-			if err := json.Unmarshal(p.Data, &submitted); err != nil {
-				return nil, contract.NewError(contract.CodeValidationFailed, "public form data must be an object")
-			}
-			publicFields := dt.PublicFieldSet()
-			filtered := make(map[string]any, len(submitted))
-			for field, value := range submitted {
-				if publicFields[field] {
-					filtered[field] = value
-				}
-			}
-			p.Data, _ = json.Marshal(filtered)
-		}
-		doc := doctype.NewDocument(dt.Name)
-		if err := k.rejectWorkflowStateOnCreate(ctx, dbTx, op, dt, p.Data); err != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-		}
-		if err := applyData(dt, doc, p.Data, reg, false); err != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-		}
-		if err := dt.BindBusinessScope(doc, op.Context.BusinessScope, true, nil); err != nil {
-			return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
-		}
-		setDefaultValues(dt, doc)
-		if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-		}
-		if err := k.initializeWorkflowStateOnCreate(ctx, dbTx, op, dt, doc); err != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-		}
-		if verrs := validateOperationDocument(txMgr, dt, doc, reg, documentCheck{Old: nil, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
-			return nil, validationContractError(verrs)
-		}
-		if err := txMgr.PrepareInsert(dt, doc); err != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-		}
-		if op.Context.IdempotencyKey != "" && def.IdempotentByKey {
-			if cerr := k.claimReceipt(dbTx, op, def, opID, payloadHash(op.Payload)); cerr != nil {
-				return nil, cerr
-			}
-		}
-		afterHash := CanonicalDocHash(doc.Fields)
-		if err := txMgr.InsertInTx(dbTx, dt, doc, owner, user); err != nil {
-			return nil, wrapORMError(err)
-		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
-			return nil, hookErr
-		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, nil}); hookErr != nil {
-			return nil, hookErr
-		}
-		doc.IsNew = false
-		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
-		row.AfterHash = afterHash
-		auditID, aerr := k.writeAudit(dbTx, row)
-		if aerr != nil {
-			return nil, contract.NewError(contract.CodeInternal, "audit write failed")
-		}
-		if err := k.writeRecordHistory(dbTx, row, dt, nil, doc); err != nil {
-			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
-		}
-		m.result = &ResultData{Doctype: dt.Name, Name: doc.Name, Created: true, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
-		m.insertedDocs = append(m.insertedDocs, doc)
+		stepErr = m.create(ctx)
 
 	case CommandRecordUpdate:
 		stepErr = m.update(ctx)

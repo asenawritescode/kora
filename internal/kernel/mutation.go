@@ -22,7 +22,7 @@ type mutation struct {
 	ownsTx bool
 	// user stamps the rows written; auditFailure records a rejected attempt
 	// outside the transaction when this run owns it.
-	user         string
+	user, owner  string
 	auditFailure func(contract.Code)
 
 	result                *ResultData
