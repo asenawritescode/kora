@@ -1819,8 +1819,8 @@
    "cyclomatic": 94
   },
   "internal/kernel::(*Kernel).executeInTx": {
-   "cognitive": 291,
-   "cyclomatic": 108
+   "cognitive": 246,
+   "cyclomatic": 88
   },
   "internal/kernel::(*Kernel).executeScriptMutationInTx": {
    "cognitive": 76,
@@ -1877,7 +1877,7 @@
    "statements": 244
   },
   "internal/kernel::executeInTx": {
-   "statements": 237
+   "statements": 208
   },
   "internal/kernel::executeScriptMutationInTx": {
    "statements": 142
