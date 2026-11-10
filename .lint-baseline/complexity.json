@@ -2179,7 +2179,7 @@
    "statements": 50
   },
   "internal/plugin::RebuildPublishedProjection": {
-   "statements": 181
+   "statements": 180
   },
   "internal/plugin::ReplayPublishedQueryForActor": {
    "statements": 52

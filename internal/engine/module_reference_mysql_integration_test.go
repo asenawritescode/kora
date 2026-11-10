@@ -70,12 +70,12 @@ func TestInternalProviderBusinessReferenceIsEntityScopedOnMySQL(t *testing.T) {
 	}
 	rule := contract.ReferenceRule{Kind: "published_business_ref", CapabilityName: capability, ResourceType: "warehouse.location"}
 	refA := contract.BusinessRef{ProviderID: provider.ProviderID, ResourceType: "warehouse.location", ID: "EXT-A", Scope: scopeA}
-	if _, err = plan.ResolveBusinessReference(ctx, execution, scopeA, consumer.ID, rule, refA); err != nil {
+	if _, err = plan.ResolveBusinessReference(ctx, execution, plugin.BusinessReferenceRequest{Scope: scopeA, Consumer: consumer.ID, Rule: rule, Ref: refA}); err != nil {
 		t.Fatal("resolve entity A identity:", err)
 	}
 	wrongEntityID := refA
 	wrongEntityID.ID = "EXT-B"
-	if _, err = plan.ResolveBusinessReference(ctx, execution, scopeA, consumer.ID, rule, wrongEntityID); err == nil {
+	if _, err = plan.ResolveBusinessReference(ctx, execution, plugin.BusinessReferenceRequest{Scope: scopeA, Consumer: consumer.ID, Rule: rule, Ref: wrongEntityID}); err == nil {
 		t.Fatal("entity B identity resolved from entity A scope")
 	}
 	if err = database.PingContext(ctx); err != nil {

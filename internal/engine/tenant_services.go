@@ -244,9 +244,9 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		if err := validateModuleExtensionSchemas(moduleSnapshot.Modules, config.ModuleSchemas); err != nil {
 			return plugin.BindingPlan{}, err
 		}
-		plan, err := plugin.ResolveInstalledModules(scope, moduleSnapshot.Packages, moduleSnapshot.Modules, providers, pluginProviderSelections(selections), moduleSnapshot.Revision)
-		if err != nil {
-			return plan, err
+		plan, resolveErr := plugin.ResolveInstalledModules(scope, plugin.InstalledModules{Packages: moduleSnapshot.Packages, Modules: moduleSnapshot.Modules, Providers: providers, Selections: pluginProviderSelections(selections), Revision: moduleSnapshot.Revision})
+		if resolveErr != nil {
+			return plan, resolveErr
 		}
 		plan.LeaseAdmission = moduleStore
 		plan.LeaseReader = moduleStore
@@ -300,7 +300,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		if err != nil {
 			return plugin.BindingPlan{}, err
 		}
-		plan, err := plugin.ResolveInstalledModules(scope, packages, modules, candidateProviders, pluginProviderSelections(candidateSelections), revision)
+		plan, err := plugin.ResolveInstalledModules(scope, plugin.InstalledModules{Packages: packages, Modules: modules, Providers: candidateProviders, Selections: pluginProviderSelections(candidateSelections), Revision: revision})
 		if err != nil {
 			return plan, err
 		}

@@ -190,9 +190,19 @@ type CapabilityLeaseReader interface {
 	LoadCapabilityLease(context.Context, contract.TenantID, string) (contract.CapabilityLease, bool, error)
 }
 
+// InstalledModules is the durable module set of one scope at one revision.
+type InstalledModules struct {
+	Packages   []contract.InstalledPackage
+	Modules    []contract.ModuleDescriptor
+	Providers  []ProviderRegistration
+	Selections []ProviderSelection
+	Revision   uint64
+}
+
 // ResolveInstalledModules uses the same provider resolver while including the
 // durable package dependency set in deterministic preflight and plan hashing.
-func ResolveInstalledModules(scope contract.BusinessScope, packages []contract.InstalledPackage, modules []contract.ModuleDescriptor, providers []ProviderRegistration, selections []ProviderSelection, revision uint64) (BindingPlan, error) {
+func ResolveInstalledModules(scope contract.BusinessScope, installed InstalledModules) (BindingPlan, error) {
+	packages, modules, providers, selections, revision := installed.Packages, installed.Modules, installed.Providers, installed.Selections, installed.Revision
 	plan, err := ResolveModules(scope, modules, providers, selections, revision)
 	if err != nil {
 		return plan, err
@@ -509,8 +519,7 @@ func (p BindingPlan) executePublishedQuery(ctx context.Context, key PublishedQue
 // RebuildPublishedProjection reads every source under pinned provider
 // revisions, verifies each paged result, then atomically publishes one
 // complete snapshot through the existing analytics rebuild store.
-func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store PublishedProjectionStore, scope contract.BusinessScope, owner contract.ModuleID, projectionID string, inputs map[string]json.RawMessage) error {
-	key := PublishedProjectionKey{OwnerModuleID: owner, ID: projectionID}
+func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store PublishedProjectionStore, scope contract.BusinessScope, key PublishedProjectionKey, inputs map[string]json.RawMessage) error {
 	definition, ok := p.Projections[key]
 	if ctx == nil || !ok || store == nil || scope.Validate() != nil {
 		return fmt.Errorf("published projection is unavailable")

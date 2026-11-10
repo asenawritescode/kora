@@ -67,11 +67,11 @@ func TestResolveInstalledModulesHashesDeterministicPackageComposition(t *testing
 	modules := []contract.ModuleDescriptor{{ID: "sales.orders", Version: "1.0.0"}}
 	base := contract.InstalledPackage{PackageID: "base", ReleaseID: "base-1", Version: "1.0.0", Digest: "base-digest"}
 	consumer := contract.InstalledPackage{PackageID: "sales", ReleaseID: "sales-1", Version: "1.0.0", Digest: "sales-digest", Requires: []contract.ManifestPackRef{{PackageID: "base", ReleaseID: "base-1", Version: "1.0.0"}}}
-	first, err := ResolveInstalledModules(scope, []contract.InstalledPackage{consumer, base}, modules, nil, nil, 5)
+	first, err := ResolveInstalledModules(scope, InstalledModules{Packages: []contract.InstalledPackage{consumer, base}, Modules: modules, Revision: 5})
 	if err != nil {
 		t.Fatal("resolve installed package composition:", err)
 	}
-	second, err := ResolveInstalledModules(scope, []contract.InstalledPackage{base, consumer}, modules, nil, nil, 5)
+	second, err := ResolveInstalledModules(scope, InstalledModules{Packages: []contract.InstalledPackage{base, consumer}, Modules: modules, Revision: 5})
 	if err != nil || first.Composition.PlanHash != second.Composition.PlanHash {
 		t.Fatalf("package input order changed composition hash: %q / %q, %v", first.Composition.PlanHash, second.Composition.PlanHash, err)
 	}
@@ -79,7 +79,7 @@ func TestResolveInstalledModulesHashesDeterministicPackageComposition(t *testing
 		t.Fatalf("resolved package constraints are not retained deterministically: %#v", first.Packages)
 	}
 	consumer.Digest = "changed-digest"
-	changed, err := ResolveInstalledModules(scope, []contract.InstalledPackage{base, consumer}, modules, nil, nil, 5)
+	changed, err := ResolveInstalledModules(scope, InstalledModules{Packages: []contract.InstalledPackage{base, consumer}, Modules: modules, Revision: 5})
 	if err != nil || changed.Composition.PlanHash == first.Composition.PlanHash {
 		t.Fatalf("composition hash did not bind immutable package digest: %q / %q, %v", first.Composition.PlanHash, changed.Composition.PlanHash, err)
 	}
@@ -470,8 +470,8 @@ func TestPublishedProjectionRebuildPinsSourceRevisionAndPreservesOnOutage(t *tes
 		t.Fatal("resolve plan:", err)
 	}
 	store := &testProjectionStore{}
-	if err := plan.RebuildPublishedProjection(context.Background(), store, scope, owner.ID, projection.ID, nil); err != nil {
-		t.Fatal("rebuild projection:", err)
+	if shadowErr := plan.RebuildPublishedProjection(context.Background(), store, scope, PublishedProjectionKey{OwnerModuleID: owner.ID, ID: projection.ID}, nil); shadowErr != nil {
+		t.Fatal("rebuild projection:", shadowErr)
 	}
 	if !store.saved || store.stale || string(store.snapshot.Data) != `[{"amount":9,"id":"fact-2"},{"amount":6,"id":"fact-3"}]` || store.snapshot.SourceRevision == "source-r7" || !store.snapshot.AsOf.Equal(asOf.Add(time.Minute)) || !strings.Contains(store.snapshot.Cursor, "log-8") || concurrentSourceRevision != "source-r8" {
 		t.Fatalf("stored projection snapshot = %#v, saved=%v stale=%v", store.snapshot, store.saved, store.stale)
@@ -482,8 +482,8 @@ func TestPublishedProjectionRebuildPinsSourceRevisionAndPreservesOnOutage(t *tes
 		t.Fatal("resolve provider without replay:", err)
 	}
 	store.saved, store.stale = false, false
-	if err := plan.RebuildPublishedProjection(context.Background(), store, scope, owner.ID, projection.ID, nil); err == nil || store.saved || !store.stale {
-		t.Fatalf("provider without replay support was not failed closed: err=%v saved=%v stale=%v", err, store.saved, store.stale)
+	if shadowErr := plan.RebuildPublishedProjection(context.Background(), store, scope, PublishedProjectionKey{OwnerModuleID: owner.ID, ID: projection.ID}, nil); shadowErr == nil || store.saved || !store.stale {
+		t.Fatalf("provider without replay support was not failed closed: shadowErr=%v saved=%v stale=%v", shadowErr, store.saved, store.stale)
 	}
 	provider.Queries[query.Name] = projectionPageExecutor{pages: map[string]contract.QueryResult{
 		"":     {Data: json.RawMessage(`[{"amount":13,"id":"fact-3"}]`), NextCursor: "next", SnapshotToken: "snapshot-r8", SourceRevision: "source-r8", AsOf: asOf, Freshness: contract.QueryFresh},
@@ -494,7 +494,7 @@ func TestPublishedProjectionRebuildPinsSourceRevisionAndPreservesOnOutage(t *tes
 		t.Fatal("resolve changed plan:", err)
 	}
 	store.saved, store.stale = false, false
-	if err := plan.RebuildPublishedProjection(context.Background(), store, scope, owner.ID, projection.ID, nil); err == nil {
+	if err := plan.RebuildPublishedProjection(context.Background(), store, scope, PublishedProjectionKey{OwnerModuleID: owner.ID, ID: projection.ID}, nil); err == nil {
 		t.Fatal("mixed source revisions were accepted")
 	}
 	if store.saved || !store.stale {
@@ -537,7 +537,7 @@ func TestPublishedProjectionRejectsUncoordinatedSourceSnapshots(t *testing.T) {
 		t.Fatal("resolve providers:", err)
 	}
 	store := &testProjectionStore{}
-	if err := plan.RebuildPublishedProjection(context.Background(), store, scope, projection.OwnerModuleID, projection.ID, nil); err == nil {
+	if err := plan.RebuildPublishedProjection(context.Background(), store, scope, PublishedProjectionKey{OwnerModuleID: projection.OwnerModuleID, ID: projection.ID}, nil); err == nil {
 		t.Fatal("cross-source rebuild accepted inconsistent global snapshot tokens")
 	}
 	if store.saved || !store.stale {
@@ -670,5 +670,38 @@ func TestResolveModulesSelectsExternalProviderPerLegalEntity(t *testing.T) {
 	operation.Scope = scopeB
 	if _, err := planA.Bindings[0].Open(operation); err == nil {
 		t.Fatal("entity A provider opened under entity B operation scope")
+	}
+}
+
+// TestResolveInstalledModulesZeroValues pins that omitted InstalledModules
+// fields mean what the old nil arguments meant: no packages, providers or
+// selections, and nil and empty slices describe the same composition.
+func TestResolveInstalledModulesZeroValues(t *testing.T) {
+	scope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}
+	modules := []contract.ModuleDescriptor{{ID: "sales.orders", Version: "1.0.0"}}
+	tests := []struct {
+		name      string
+		installed InstalledModules
+	}{
+		{"omitted optional fields", InstalledModules{Modules: modules, Revision: 3}},
+		{"empty optional slices", InstalledModules{Packages: []contract.InstalledPackage{}, Modules: modules, Providers: []ProviderRegistration{}, Selections: []ProviderSelection{}, Revision: 3}},
+	}
+	var want string
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := ResolveInstalledModules(scope, tc.installed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Revision != 3 || len(plan.Packages) != 0 {
+				t.Fatalf("revision %d packages %v, want revision 3 and no packages", plan.Revision, plan.Packages)
+			}
+			if i == 0 {
+				want = plan.Composition.PlanHash
+			}
+			if plan.Composition.PlanHash != want {
+				t.Fatalf("plan hash %q, want %q", plan.Composition.PlanHash, want)
+			}
+		})
 	}
 }

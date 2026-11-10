@@ -247,7 +247,7 @@ func (a *CapabilityBillingAdapter) invoke(ctx context.Context, execution policy.
 	if err != nil || !found || current != lease {
 		return BillingResult{}, contract.NewError(contract.CodePermissionDenied, "durable billing capability grant changed or is unavailable")
 	}
-	result, err := a.Plan.InvokeCapability(ctx, execution, lease, a.Scope, a.Caller, BillingCapabilityName, operation, contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey(idempotencyKey)}, payload)
+	result, err := a.Plan.InvokeCapability(ctx, execution, plugin.CapabilityCall{Lease: lease, Scope: a.Scope, Caller: a.Caller, Capability: BillingCapabilityName, Operation: operation, Meta: contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey(idempotencyKey)}, Payload: payload})
 	if err != nil {
 		return BillingResult{}, err
 	}

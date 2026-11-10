@@ -129,7 +129,7 @@ func fixtureScenarioBinding(t *testing.T, scope contract.BusinessScope, consumer
 
 func invokeFixture(t *testing.T, plan BindingPlan, lease contract.CapabilityLease, execution policy.Execution, scope contract.BusinessScope, caller contract.ModuleID, capability contract.CapabilityName, key string, payload string) (CapabilityOperationResult, error) {
 	t.Helper()
-	return plan.InvokeCapability(context.Background(), execution, lease, scope, caller, capability, "apply", contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey(key)}, json.RawMessage(payload))
+	return plan.InvokeCapability(context.Background(), execution, CapabilityCall{Lease: lease, Scope: scope, Caller: caller, Capability: capability, Operation: "apply", Meta: contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey(key)}, Payload: json.RawMessage(payload)})
 }
 
 func TestProgrammaticFixtureProfilesUseDeclaredOwnerOperations(t *testing.T) {

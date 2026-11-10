@@ -107,7 +107,7 @@ func (h *Handler) HandleRebuildPublishedModuleProjection(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid projection rebuild request", nil)
 		return
 	}
-	if err := plan.RebuildPublishedProjection(c.Request.Context(), services.PublishedProjections, scope, moduleID, projectionID, request.Inputs); err != nil {
+	if err := plan.RebuildPublishedProjection(c.Request.Context(), services.PublishedProjections, scope, plugin.PublishedProjectionKey{OwnerModuleID: moduleID, ID: projectionID}, request.Inputs); err != nil {
 		writeError(c, http.StatusServiceUnavailable, "module.projection_stale", "Projection rebuild failed; any prior snapshot remains available with stale freshness", nil)
 		return
 	}
