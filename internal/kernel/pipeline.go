@@ -44,7 +44,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		return nil, beginErr
 	}
 	defer rollback()
-	dbTx, txMgr, reg, opID, afterCommit := run.Tx, run.Mgr, run.Reg, run.OpID, run.AfterCommit
+	dbTx, txMgr, reg, opID := run.Tx, run.Mgr, run.Reg, run.OpID
 	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, op, admissionScope{Dialect: k.dialect(), Registry: reg}); admissionErr != nil {
 		return nil, admissionErr
 	}
@@ -87,11 +87,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		owner = user
 	}
 
-	var result *ResultData
-	var deletedDoc *doctype.Document
-	var insertedDocs []*doctype.Document
-	var savedDoc, savedOldDoc *doctype.Document
-	var bundleSavedDocs []savedBundleDocument
+	m := &mutation{k: k, run: run, op: op, def: def, dt: dt, ownsTx: ownsTransaction}
 
 	switch op.Command {
 	case CommandRecordMutateBundle:
@@ -290,7 +286,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 			}
 			bundleDocs[i], bundleTypes[i] = doc, recordDT
 			pendingLinks[recordDT.Name+"\x00"+doc.Name] = doc
-			bundleSavedDocs = append(bundleSavedDocs, savedBundleDocument{dt: recordDT, doc: doc, oldDoc: oldDoc, workflowTransition: item.TransitionAction != ""})
+			m.bundleSavedDocs = append(m.bundleSavedDocs, savedBundleDocument{dt: recordDT, doc: doc, oldDoc: oldDoc, workflowTransition: item.TransitionAction != ""})
 		}
 		resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
 			if target != nil {
@@ -302,7 +298,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		}
 		for i, doc := range bundleDocs {
 			recordDT := bundleTypes[i]
-			oldDoc := bundleSavedDocs[i].oldDoc
+			oldDoc := m.bundleSavedDocs[i].oldDoc
 			if err := txMgr.RunHooksForValidate(recordDT, doc, oldDoc); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 			}
@@ -311,7 +307,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 				}
 			}
-			if oldDoc != nil && !bundleSavedDocs[i].workflowTransition {
+			if oldDoc != nil && !m.bundleSavedDocs[i].workflowTransition {
 				if err := k.rejectWorkflowStateChange(ctx, dbTx, op, recordDT, docChange{oldDoc, doc}); err != nil {
 					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 				}
@@ -330,7 +326,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		related := make([]RelatedRecordResult, 0, len(p.Records)-1)
 		for i, doc := range bundleDocs {
 			recordDT := bundleTypes[i]
-			oldDoc := bundleSavedDocs[i].oldDoc
+			oldDoc := m.bundleSavedDocs[i].oldDoc
 			beforeHash := ""
 			if oldDoc == nil {
 				if err := txMgr.InsertInTx(dbTx, recordDT, doc, owner, user); err != nil {
@@ -342,7 +338,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, lifecycleEvent{script.EventAfterSave, doc, nil}); hookErr != nil {
 					return nil, hookErr
 				}
-				insertedDocs = append(insertedDocs, doc)
+				m.insertedDocs = append(m.insertedDocs, doc)
 			} else {
 				beforeHash = CanonicalDocHash(oldDoc.Fields)
 				if err := txMgr.SaveInTxWithScope(dbTx, recordDT, doc, user, scopeForOperation(reg, op, recordDT.Name, "write"), oldDoc); err != nil {
@@ -351,7 +347,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
 					return nil, hookErr
 				}
-				bundleSavedDocs[i].oldDoc = oldDoc
+				m.bundleSavedDocs[i].oldDoc = oldDoc
 			}
 			doc.IsNew = false
 			afterHash := CanonicalDocHash(doc.Fields)
@@ -366,12 +362,12 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 				return nil, contract.NewError(contract.CodeInternal, "record history write failed")
 			}
 			if i == 0 {
-				result = &ResultData{Doctype: recordDT.Name, Name: doc.Name, Created: oldDoc == nil, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
+				m.result = &ResultData{Doctype: recordDT.Name, Name: doc.Name, Created: oldDoc == nil, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
 			} else {
 				related = append(related, RelatedRecordResult{Key: p.Records[i].Key, Doctype: recordDT.Name, Name: doc.Name, Created: oldDoc == nil})
 			}
 		}
-		result.Related = related
+		m.result.Related = related
 
 	case CommandRecordCreate, CommandPublicFormSubmit:
 		var p RecordCreatePayload
@@ -440,8 +436,8 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		if err := k.writeRecordHistory(dbTx, row, dt, nil, doc); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
 		}
-		result = &ResultData{Doctype: dt.Name, Name: doc.Name, Created: true, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
-		insertedDocs = append(insertedDocs, doc)
+		m.result = &ResultData{Doctype: dt.Name, Name: doc.Name, Created: true, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
+		m.insertedDocs = append(m.insertedDocs, doc)
 
 	case CommandRecordUpdate:
 		var p RecordUpdatePayload
@@ -517,8 +513,8 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, doc); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
 		}
-		result = &ResultData{Doctype: dt.Name, Name: doc.Name, Created: false, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
-		savedDoc, savedOldDoc = doc, oldDoc
+		m.result = &ResultData{Doctype: dt.Name, Name: doc.Name, Created: false, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
+		m.savedDoc, m.savedOldDoc = doc, oldDoc
 
 	case CommandRecordDelete:
 		var p RecordUpdatePayload
@@ -560,8 +556,8 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, nil); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
 		}
-		deletedDoc = oldDoc
-		result = &ResultData{Doctype: dt.Name, Name: oldDoc.Name, Deleted: true, AuditID: auditID, Operation: opID}
+		m.deletedDoc = oldDoc
+		m.result = &ResultData{Doctype: dt.Name, Name: oldDoc.Name, Deleted: true, AuditID: auditID, Operation: opID}
 
 	case CommandWorkflowStatusTransition:
 		var p WorkflowStatusTransitionPayload
@@ -663,58 +659,11 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, doc); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
 		}
-		result = &ResultData{Doctype: dt.Name, Name: doc.Name, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
-		savedDoc, savedOldDoc = doc, oldDoc
+		m.result = &ResultData{Doctype: dt.Name, Name: doc.Name, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
+		m.savedDoc, m.savedOldDoc = doc, oldDoc
 
 	default:
 		return nil, contract.NewError(contract.CodeValidationFailed, "unknown command "+op.Command)
 	}
-	if result != nil && op.Context.IdempotencyKey != "" && def.IdempotentByKey {
-		data, marshalErr := json.Marshal(result)
-		if marshalErr != nil {
-			return nil, contract.NewError(contract.CodeInternal, "encoding command result failed")
-		}
-		if cerr := k.storeReceiptResult(dbTx, op, contract.CommandResult{
-			OperationID: opID, CorrelationID: op.Context.CorrelationID,
-			Status: contract.StatusCompleted, Data: data,
-		}); cerr != nil {
-			return nil, cerr
-		}
-	}
-
-	nestedPostCommitHooks := append([]func(){}, txMgr.PostCommitHooks...)
-	completionManager := *txMgr
-	completionManager.ScriptMutationExecutor = nil
-	completionManager.PostCommitHooks = nil
-	completionManager.Transaction = nil
-	complete := func() {
-		for _, hook := range nestedPostCommitHooks {
-			hook()
-		}
-		if deletedDoc != nil {
-			completionManager.CompleteDelete(dt, deletedDoc)
-		}
-		for _, doc := range insertedDocs {
-			completionManager.CompleteInsert(reg.Get(doc.DocType), doc)
-		}
-		for _, saved := range bundleSavedDocs {
-			if saved.oldDoc != nil {
-				completionManager.CompleteSave(saved.dt, saved.doc, saved.oldDoc)
-			}
-		}
-		if savedDoc != nil {
-			completionManager.CompleteSave(dt, savedDoc, savedOldDoc)
-		}
-	}
-	if ownsTransaction {
-		if err := dbTx.Commit(); err != nil {
-			return nil, contract.NewError(contract.CodeInternal, "commit failed")
-		}
-		txMgr.ScriptMutationExecutor = nil
-		txMgr.PostCommitHooks = nil
-		complete()
-	} else if afterCommit != nil {
-		*afterCommit = complete
-	}
-	return result, nil
+	return m.finish() //nolint:contextcheck // the context travels in txMgr.Context
 }
