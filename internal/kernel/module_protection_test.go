@@ -33,7 +33,7 @@ func TestModuleLifecycleAdmissionFencesOwnerCommands(t *testing.T) {
 			mock.ExpectExec("UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectQuery("SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"snapshot_json"}).AddRow(string(snapshot)))
 			op := Operation{Command: CommandRecordCreate, Payload: payload, Context: OperationContext{TenantID: "tenant-a", ModuleExecution: &contract.ModuleExecution{}}}
-			got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, kdb.Resolve("libsql"), op, registry, nil)
+			got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, op, admissionScope{Dialect: kdb.Resolve("libsql"), Registry: registry})
 			if state == "active" && got != nil {
 				t.Fatalf("active module rejected: %v", got)
 			}
@@ -71,7 +71,7 @@ func TestModuleLifecycleAdmissionFencesGenericWritesWithoutModuleIdentity(t *tes
 			mock.ExpectExec("UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectQuery("SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"snapshot_json"}).AddRow(string(snapshot)))
 			op := Operation{Command: CommandRecordCreate, Payload: payload, Context: OperationContext{TenantID: "tenant-a"}}
-			got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, kdb.Resolve("libsql"), op, registry, nil)
+			got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, op, admissionScope{Dialect: kdb.Resolve("libsql"), Registry: registry})
 			if test.denied && (got == nil || got.Type != contract.CodePermissionDenied) {
 				t.Fatalf("generic %s write admission = %v, want permission denied", test.state, got)
 			}
@@ -114,7 +114,7 @@ func TestDrainingModuleAllowsOnlyPreDrainPinnedWorkflowCommand(t *testing.T) {
 	}
 	payload, _ := json.Marshal(RecordCreatePayload{Doctype: "Invoice", Data: json.RawMessage(`{}`)})
 	op := Operation{Command: CommandRecordCreate, Payload: payload, Context: OperationContext{TenantID: "tenant-a", ModuleExecution: &module}}
-	if got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, kdb.Resolve("libsql"), op, registry, nil); got != nil {
+	if got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, op, admissionScope{Dialect: kdb.Resolve("libsql"), Registry: registry}); got != nil {
 		t.Fatalf("pre-drain pinned command rejected: %v", got)
 	}
 	_ = tx.Rollback()

@@ -111,35 +111,67 @@ func payloadDoctype(raw json.RawMessage) string {
 	return probe.Doctype
 }
 
-func captureLifecycleHooks(ctx context.Context, txMgr *orm.TxManager, tx *sql.Tx, dt *doctype.DocType, event script.Event, doc, oldDoc *doctype.Document) *contract.Error {
-	if err := txMgr.CaptureAsyncAfterHooksTx(ctx, tx, dt, event, doc, oldDoc); err != nil {
+// lifecycleEvent is one document event whose async after-hooks are captured.
+type lifecycleEvent struct {
+	Event  script.Event
+	Doc    *doctype.Document
+	OldDoc *doctype.Document
+}
+
+func captureLifecycleHooks(ctx context.Context, txMgr *orm.TxManager, tx *sql.Tx, dt *doctype.DocType, ev lifecycleEvent) *contract.Error {
+	if err := txMgr.CaptureAsyncAfterHooksTx(ctx, tx, dt, ev.Event, ev.Doc, ev.OldDoc); err != nil {
 		return contract.NewError(contract.CodeDependencyUnavailable, "persisting async lifecycle hooks failed: "+err.Error())
 	}
 	return nil
 }
 
+// txRun is the transactional environment one command executes in.
+type txRun struct {
+	SiteDB *sql.DB
+	// Tx is the caller's transaction; nil makes the executor open, own and
+	// commit-or-roll-back its own.
+	Tx          *sql.Tx
+	Mgr         *orm.TxManager
+	Reg         *doctype.Registry
+	OpID        string
+	AfterCommit *func()
+}
+
+// begin returns the run bound to its transaction, and a function that rolls
+// the transaction back unless it was committed. A transaction the caller
+// supplied is left to the caller.
+func (r txRun) begin(ctx context.Context) (txRun, func(), *contract.Error) {
+	if r.Tx != nil {
+		return r, func() {}, nil
+	}
+	tx, err := r.SiteDB.BeginTx(ctx, nil)
+	if err != nil {
+		return r, nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
+	}
+	r.Tx = tx
+	return r, func() { _ = tx.Rollback() }, nil
+}
+
 // executeInTx runs mutation + receipt claim + audit write inside ONE SQL
 // transaction (the mutation itself writes its outbox rows via orm InTx
 // variants). Any failure rolls back everything; a commit implies all of it.
-func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, def CommandDefinition, opID string, afterCommit *func()) (*ResultData, *contract.Error) {
+func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def CommandDefinition) (*ResultData, *contract.Error) {
 	if op.Context.HistoricalSnapshotValidator == nil {
 		op.Context.HistoricalSnapshotValidator = newHistoricalSnapshotValidator(op.Context.BusinessScope, k.CommandSchemas)
 	}
-	ownsTransaction := dbTx == nil
+	ownsTransaction := run.Tx == nil
 	auditFailure := func(code contract.Code) {
 		if ownsTransaction {
-			k.writeFailureAudit(siteDB, op, def, opID, code)
+			k.writeFailureAudit(run.SiteDB, op, def, run.OpID, code)
 		}
 	}
-	if ownsTransaction {
-		var err error
-		dbTx, err = siteDB.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
-		}
-		defer dbTx.Rollback()
+	run, rollback, beginErr := run.begin(ctx)
+	if beginErr != nil {
+		return nil, beginErr
 	}
-	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, k.dialect(), op, reg, nil); admissionErr != nil {
+	defer rollback()
+	dbTx, txMgr, reg, opID, afterCommit := run.Tx, run.Mgr, run.Reg, run.OpID, run.AfterCommit
+	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, op, admissionScope{Dialect: k.dialect(), Registry: reg}); admissionErr != nil {
 		return nil, admissionErr
 	}
 	priorMutationExecutor := txMgr.ScriptMutationExecutor
@@ -281,16 +313,16 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("bundle record %q: %v", item.Key, err))
 			}
 			if operation == "create" {
-				if err := k.rejectWorkflowStateOnCreate(ctx, dbTx, op, recordDT, reg, data); err != nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("bundle record %q: %v", item.Key, err))
+				if rejectErr := k.rejectWorkflowStateOnCreate(ctx, dbTx, op, recordDT, data); rejectErr != nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("bundle record %q: %v", item.Key, rejectErr))
 				}
 			}
 			doc := doctype.NewDocument(recordDT.Name)
 			doc.Name = recordNames[item.Key]
 			var oldDoc *doctype.Document
 			if operation != "create" {
-				if err := k.rejectWorkflowStateMutation(ctx, dbTx, op, recordDT, reg, data); err != nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+				if rejectErr := k.rejectWorkflowStateMutation(ctx, dbTx, op, recordDT, data); rejectErr != nil {
+					return nil, contract.NewError(contract.CodeValidationFailed, rejectErr.Error())
 				}
 				oldDoc, err = txMgr.GetDocWithScope(recordDT, doc.Name, scopeForOperation(reg, op, recordDT.Name, "write"))
 				if err != nil {
@@ -406,7 +438,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 				}
 			}
 			if oldDoc != nil && !bundleSavedDocs[i].workflowTransition {
-				if err := k.rejectWorkflowStateChange(ctx, dbTx, op, recordDT, reg, oldDoc, doc); err != nil {
+				if err := k.rejectWorkflowStateChange(ctx, dbTx, op, recordDT, docChange{oldDoc, doc}); err != nil {
 					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 				}
 			}
@@ -430,10 +462,10 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 				if err := txMgr.InsertInTx(dbTx, recordDT, doc, owner, user); err != nil {
 					return nil, wrapORMError(err)
 				}
-				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, script.EventAfterInsert, doc, nil); hookErr != nil {
+				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
 					return nil, hookErr
 				}
-				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, script.EventAfterSave, doc, nil); hookErr != nil {
+				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, lifecycleEvent{script.EventAfterSave, doc, nil}); hookErr != nil {
 					return nil, hookErr
 				}
 				insertedDocs = append(insertedDocs, doc)
@@ -442,7 +474,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 				if err := txMgr.SaveInTxWithScope(dbTx, recordDT, doc, user, scopeForOperation(reg, op, recordDT.Name, "write"), oldDoc); err != nil {
 					return nil, wrapExpectedVersionORMError(err, op, k.dialect())
 				}
-				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+				if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, recordDT, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
 					return nil, hookErr
 				}
 				bundleSavedDocs[i].oldDoc = oldDoc
@@ -487,7 +519,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 			p.Data, _ = json.Marshal(filtered)
 		}
 		doc := doctype.NewDocument(dt.Name)
-		if err := k.rejectWorkflowStateOnCreate(ctx, dbTx, op, dt, reg, p.Data); err != nil {
+		if err := k.rejectWorkflowStateOnCreate(ctx, dbTx, op, dt, p.Data); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		if err := applyData(dt, doc, p.Data, reg, false); err != nil {
@@ -503,7 +535,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if err := k.initializeWorkflowStateOnCreate(ctx, dbTx, op, dt, doc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if verrs := validateOperationDocumentWithResolvers(txMgr, dt, doc, reg, nil, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
+		if verrs := validateOperationDocument(txMgr, dt, doc, reg, documentCheck{Old: nil, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
 			return nil, validationContractError(verrs)
 		}
 		if err := txMgr.PrepareInsert(dt, doc); err != nil {
@@ -518,10 +550,10 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if err := txMgr.InsertInTx(dbTx, dt, doc, owner, user); err != nil {
 			return nil, wrapORMError(err)
 		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterInsert, doc, nil); hookErr != nil {
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
 			return nil, hookErr
 		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, nil); hookErr != nil {
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, nil}); hookErr != nil {
 			return nil, hookErr
 		}
 		doc.IsNew = false
@@ -545,7 +577,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if p.Name == "" {
 			return nil, contract.NewError(contract.CodeValidationFailed, "record.update missing name")
 		}
-		if err := k.rejectWorkflowStateMutation(ctx, dbTx, op, dt, reg, p.Data); err != nil {
+		if err := k.rejectWorkflowStateMutation(ctx, dbTx, op, dt, p.Data); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		scope := scopeForOperation(reg, op, dt.Name, "write")
@@ -579,10 +611,10 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if err := txMgr.RunHooksForValidate(dt, doc, oldDoc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if err := k.rejectWorkflowStateChange(ctx, dbTx, op, dt, reg, oldDoc, doc); err != nil {
+		if err := k.rejectWorkflowStateChange(ctx, dbTx, op, dt, docChange{oldDoc, doc}); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if verrs := validateOperationDocumentWithResolvers(txMgr, dt, doc, reg, oldDoc, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
+		if verrs := validateOperationDocument(txMgr, dt, doc, reg, documentCheck{Old: oldDoc, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
 			return nil, validationContractError(verrs)
 		}
 		if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {
@@ -598,7 +630,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, user, scope, oldDoc); err != nil {
 			return nil, wrapExpectedVersionORMError(err, op, k.dialect())
 		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
 			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
@@ -642,7 +674,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if err := txMgr.DeleteInTxWithScope(dbTx, dt, p.Name, scope, oldDoc); err != nil {
 			return nil, wrapORMError(err)
 		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterDelete, oldDoc, nil); hookErr != nil {
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterDelete, oldDoc, nil}); hookErr != nil {
 			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: oldDoc.Name, Status: contract.StatusCompleted})
@@ -744,7 +776,7 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 		if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, user, scope, oldDoc); err != nil {
 			return nil, wrapORMError(err)
 		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
 			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
@@ -813,11 +845,20 @@ func (k *Kernel) executeInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 	return result, nil
 }
 
-func validateOperationDocumentWithResolvers(txMgr *orm.TxManager, dt *doctype.DocType, doc *doctype.Document, reg *doctype.Registry, oldDoc *doctype.Document, referenceResolver contract.BusinessReferenceValidator, snapshotValidator contract.HistoricalSnapshotValidator) doctype.ValidationErrors {
+// documentCheck is what validating a document needs beyond the document: its
+// prior state on update, and the operation's business-reference and
+// historical-snapshot validators.
+type documentCheck struct {
+	Old        *doctype.Document
+	References contract.BusinessReferenceValidator
+	Snapshots  contract.HistoricalSnapshotValidator
+}
+
+func validateOperationDocument(txMgr *orm.TxManager, dt *doctype.DocType, doc *doctype.Document, reg *doctype.Registry, check documentCheck) doctype.ValidationErrors {
 	resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
 		return txMgr.GetDoc(target, name, "")
 	}
-	return doctype.ValidateDocumentWithResolvers(dt, doc, reg, oldDoc, resolver, referenceResolver, snapshotValidator)
+	return doctype.ValidateDocumentWithResolvers(dt, doc, reg, check.Old, resolver, check.References, check.Snapshots)
 }
 
 func resolveCreateBundleData(raw json.RawMessage, priorNames map[string]string) (json.RawMessage, error) {
@@ -995,7 +1036,7 @@ func (k *Kernel) workflowStatusPolicy(ctx context.Context, tx *sql.Tx, op Operat
 	return repository.GetStatusPolicyInTx(ctx, tx, op.Context.TenantID, table)
 }
 
-func (k *Kernel) rejectWorkflowStateMutation(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, reg *doctype.Registry, raw json.RawMessage) error {
+func (k *Kernel) rejectWorkflowStateMutation(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, raw json.RawMessage) error {
 	if dt == nil || len(raw) == 0 {
 		return nil
 	}
@@ -1016,7 +1057,7 @@ func (k *Kernel) rejectWorkflowStateMutation(ctx context.Context, tx *sql.Tx, op
 	return nil
 }
 
-func (k *Kernel) rejectWorkflowStateOnCreate(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, reg *doctype.Registry, raw json.RawMessage) error {
+func (k *Kernel) rejectWorkflowStateOnCreate(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, raw json.RawMessage) error {
 	if dt == nil || len(raw) == 0 {
 		return nil
 	}
@@ -1053,7 +1094,13 @@ func (k *Kernel) rejectWorkflowStateOnCreate(ctx context.Context, tx *sql.Tx, op
 	return nil
 }
 
-func (k *Kernel) rejectWorkflowStateChange(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, reg *doctype.Registry, before, after *doctype.Document) error {
+// docChange is a record before and after a mutation.
+type docChange struct {
+	Before, After *doctype.Document
+}
+
+func (k *Kernel) rejectWorkflowStateChange(ctx context.Context, tx *sql.Tx, op Operation, dt *doctype.DocType, change docChange) error {
+	before, after := change.Before, change.After
 	if dt == nil || before == nil || after == nil {
 		return nil
 	}

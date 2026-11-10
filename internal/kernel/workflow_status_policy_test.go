@@ -24,17 +24,17 @@ func TestPublishedStatusActionGuardsGenericRecordWrites(t *testing.T) {
 	statusPolicy := workflow.StatusPolicy{Table: dt.Name, StateField: "phase", InitialState: "draft", Transitions: []workflow.StatusTransition{{Action: "Approve", From: "draft", To: "approved", AllowedRoles: []string{"Approver"}}}}
 	k := &Kernel{WorkflowStatusPolicies: publishedStatusPolicyStub{policy: statusPolicy}}
 	op := Operation{Context: OperationContext{TenantID: "tenant-a"}}
-	if err := k.rejectWorkflowStateMutation(context.Background(), nil, op, dt, registry, json.RawMessage(`{"phase":"approved"}`)); err == nil {
+	if err := k.rejectWorkflowStateMutation(context.Background(), nil, op, dt, json.RawMessage(`{"phase":"approved"}`)); err == nil {
 		t.Fatal("generic update bypassed published status action")
 	}
-	if err := k.rejectWorkflowStateOnCreate(context.Background(), nil, op, dt, registry, json.RawMessage(`{"phase":"approved"}`)); err == nil {
+	if err := k.rejectWorkflowStateOnCreate(context.Background(), nil, op, dt, json.RawMessage(`{"phase":"approved"}`)); err == nil {
 		t.Fatal("create inserted a noninitial workflow status")
 	}
 	before := doctype.NewDocument(dt.Name)
 	before.Set("phase", "draft")
 	after := doctype.NewDocument(dt.Name)
 	after.Set("phase", "approved")
-	if err := k.rejectWorkflowStateChange(context.Background(), nil, op, dt, registry, before, after); err == nil {
+	if err := k.rejectWorkflowStateChange(context.Background(), nil, op, dt, docChange{before, after}); err == nil {
 		t.Fatal("generic document mutation changed workflow status")
 	}
 }
