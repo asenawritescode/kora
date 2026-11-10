@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/configstore"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/script"
@@ -87,7 +86,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		owner = user
 	}
 
-	m := &mutation{k: k, run: run, op: op, def: def, dt: dt, ownsTx: ownsTransaction}
+	m := &mutation{k: k, run: run, op: op, def: def, dt: dt, user: user, ownsTx: ownsTransaction, auditFailure: auditFailure}
 
 	var stepErr *contract.Error
 	switch op.Command {
@@ -521,107 +520,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		stepErr = m.remove(ctx)
 
 	case CommandWorkflowStatusTransition:
-		var p WorkflowStatusTransitionPayload
-		if err := json.Unmarshal(op.Payload, &p); err != nil || p.Name == "" || p.Action == "" {
-			return nil, contract.NewError(contract.CodeValidationFailed, "workflow.status_transition requires name and action")
-		}
-		if op.Context.ExpectedConfigRevision > 0 {
-			if err := configstore.FenceConfigRevisionTx(ctx, dbTx, k.dialect(), op.Context.ExpectedConfigRevision); err != nil {
-				if errors.Is(err, configstore.ErrConfigRevisionConflict) {
-					auditFailure(ErrStaleVersion.Type)
-					return nil, contract.NewError(contract.CodeConflict, "tenant configuration changed while the workflow transition was being prepared")
-				}
-				return nil, contract.NewError(contract.CodeDependencyUnavailable, "lock workflow configuration revision failed")
-			}
-		}
-		statusPolicy, hasStatusPolicy, statusPolicyErr := k.workflowStatusPolicy(ctx, dbTx, op, dt.Name)
-		if statusPolicyErr != nil {
-			return nil, contract.NewError(contract.CodeDependencyUnavailable, "load workflow status policy failed")
-		}
-		if !hasStatusPolicy || statusPolicy == nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, "no published status transition policy for table")
-		}
-		stateField := statusPolicy.StateField
-		if dt.GetField(stateField) == nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, "workflow state field is not defined on doctype")
-		}
-		scope := scopeForOperation(reg, op, dt.Name, "submit")
-		oldDoc, err := txMgr.GetDocWithScope(dt, p.Name, scope)
-		if err != nil {
-			if errors.Is(err, orm.ErrNotFound) {
-				return nil, contract.NewError(contract.CodeNotFound, "document not found")
-			}
-			return nil, contract.NewError(contract.CodeDependencyUnavailable, "load document failed")
-		}
-		if p.ExpectedRevision > 0 && oldDoc.Revision != p.ExpectedRevision {
-			auditFailure(ErrStaleVersion.Type)
-			return nil, ErrStaleVersion
-		}
-		if ev := expectedVersionFrom(op); ev != "" {
-			prior, versionErr := readRowVersion(dbTx, k.dialect(), dt.RawTableName(), p.Name)
-			if versionErr != nil {
-				return nil, contract.NewError(contract.CodeDependencyUnavailable, "read document version failed")
-			}
-			if prior != ev {
-				auditFailure(ErrStaleVersion.Type)
-				return nil, ErrStaleVersion
-			}
-		}
-		currentState := fmt.Sprint(oldDoc.Get(stateField))
-		if currentState == "<nil>" || currentState == "" {
-			currentState = statusPolicy.InitialState
-		}
-		roles := append([]string(nil), op.Context.Roles...)
-		if op.Context.UserRole != "" {
-			found := false
-			for _, role := range roles {
-				found = found || role == op.Context.UserRole
-			}
-			if !found {
-				roles = append([]string{op.Context.UserRole}, roles...)
-			}
-		}
-		if len(roles) == 0 {
-			return nil, contract.NewError(contract.CodePermissionDenied, "workflow transition requires an assigned role")
-		}
-		var newState string
-		var newStatus int
-		var transitionErr error
-		newState, newStatus, transitionErr = workflow.ApplyStatusTransition(statusPolicy, currentState, p.Action, roles, oldDoc)
-		if transitionErr != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, transitionErr.Error())
-		}
-		doc := cloneDoc(oldDoc)
-		doc.Set(stateField, newState)
-		doc.DocStatus = newStatus
-		if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {
-			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-		}
-		if op.Context.IdempotencyKey != "" && def.IdempotentByKey {
-			if cerr := k.claimReceipt(dbTx, op, def, opID, payloadHash(op.Payload)); cerr != nil {
-				return nil, cerr
-			}
-		}
-		beforeHash := CanonicalDocHash(oldDoc.Fields)
-		afterHash := CanonicalDocHash(doc.Fields)
-		if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, user, scope, oldDoc); err != nil {
-			return nil, wrapORMError(err)
-		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
-			return nil, hookErr
-		}
-		row := k.buildAuditRow(op, def, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
-		row.BeforeHash = beforeHash
-		row.AfterHash = afterHash
-		auditID, aerr := k.writeAudit(dbTx, row)
-		if aerr != nil {
-			return nil, contract.NewError(contract.CodeInternal, "audit write failed")
-		}
-		if err := k.writeRecordHistory(dbTx, row, dt, oldDoc, doc); err != nil {
-			return nil, contract.NewError(contract.CodeInternal, "record history write failed")
-		}
-		m.result = &ResultData{Doctype: dt.Name, Name: doc.Name, Document: doc.ToMap(), AuditID: auditID, Operation: opID}
-		m.savedDoc, m.savedOldDoc = doc, oldDoc
+		stepErr = m.transition(ctx)
 
 	default:
 		return nil, contract.NewError(contract.CodeValidationFailed, "unknown command "+op.Command)
