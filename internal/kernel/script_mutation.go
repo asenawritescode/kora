@@ -112,7 +112,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 			return nil, hookErr
 		}
 		doc.IsNew = false
-		row := k.buildAuditRow(op, definition, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
+		row := k.buildAuditRow(op, definition, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
 		row.AfterHash = afterHash
 		if _, err := k.writeAudit(dbTx, row); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "nested script audit write failed")
@@ -160,7 +160,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
 			return nil, hookErr
 		}
-		row := k.buildAuditRow(op, definition, opID, dt.Name, doc.Name, contract.StatusCompleted, "")
+		row := k.buildAuditRow(op, definition, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
 		row.BeforeHash, row.AfterHash = beforeHash, afterHash
 		if _, err := k.writeAudit(dbTx, row); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "nested script audit write failed")
@@ -197,7 +197,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterDelete, oldDoc, nil); hookErr != nil {
 			return nil, hookErr
 		}
-		row := k.buildAuditRow(op, definition, opID, dt.Name, oldDoc.Name, contract.StatusCompleted, "")
+		row := k.buildAuditRow(op, definition, opID, auditOutcome{Doctype: dt.Name, DocName: oldDoc.Name, Status: contract.StatusCompleted})
 		row.BeforeHash = CanonicalDocHash(oldDoc.Fields)
 		if _, err := k.writeAudit(dbTx, row); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "nested script audit write failed")

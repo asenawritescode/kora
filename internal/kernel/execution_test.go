@@ -469,7 +469,7 @@ func TestLookupReceiptByIntentRecoversWithoutPayloadDispatch(t *testing.T) {
 	op := Operation{Command: "sales.invoice.issue", Context: OperationContext{Site: "tenant-route", TenantID: "stable-tenant", Actor: execution.Actor(), User: "alice", Execution: execution, IdempotencyKey: "scope-op-key"}}
 	query := regexp.QuoteMeta("SELECT operation_id, command_name, actor_user, result_hash, status, result_json FROM _kora_idempotency_receipt WHERE idempotency_key = ? LIMIT 2")
 	mock.ExpectQuery(query).WithArgs(scopedReceiptKey(op)).WillReturnRows(sqlmock.NewRows([]string{"operation_id", "command_name", "actor_user", "result_hash", "status", "result_json"}).AddRow(prior.OperationID, op.Command, "alice", resultHash(prior), receiptCompleted, string(encoded)))
-	result, found, commandErr := New(db.Resolve("mysql"), nil).LookupReceiptByIntent(context.Background(), database, execution, "alice", op.Command, "scope-op-key")
+	result, found, commandErr := New(db.Resolve("mysql"), nil).LookupReceiptByIntent(context.Background(), database, ReceiptIntent{Execution: execution, ActorUser: "alice", Command: op.Command, IdempotencyKey: "scope-op-key"})
 	if commandErr != nil || !found || !result.Replayed || result.OperationID != prior.OperationID || string(result.Data) != string(prior.Data) {
 		t.Fatalf("intent receipt = (%#v,%v,%v)", result, found, commandErr)
 	}

@@ -63,7 +63,7 @@ func TestConsumePaymentIntent(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				cerr := consumePaymentIntent(tx, tc.d, "s1", op, id, "Sale", decimal.RequireFromString(amount), currency)
+				cerr := consumePaymentIntent(tx, tc.d, paymentClaim{Site: "s1", OpID: op, Ref: id, Source: "Sale", Amount: decimal.RequireFromString(amount), Currency: currency})
 				if cerr != nil {
 					_ = tx.Rollback()
 					return cerr
@@ -82,7 +82,7 @@ func TestConsumePaymentIntent(t *testing.T) {
 				}
 			}
 			tx, _ := conn.Begin()
-			if cerr := consumePaymentIntent(tx, tc.d, "s1", "OP9", "ok1", "Order", decimal.RequireFromString("100"), "KES"); cerr == nil || !strings.Contains(cerr.Message, "source does not match") {
+			if cerr := consumePaymentIntent(tx, tc.d, paymentClaim{Site: "s1", OpID: "OP9", Ref: "ok1", Source: "Order", Amount: decimal.RequireFromString("100"), Currency: "KES"}); cerr == nil || !strings.Contains(cerr.Message, "source does not match") {
 				t.Errorf("other source_doctype: want source rejection, got %v", cerr)
 			}
 			_ = tx.Rollback()

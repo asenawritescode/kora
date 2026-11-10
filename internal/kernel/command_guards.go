@@ -159,7 +159,7 @@ func (k *Kernel) checkCommandGuards(dbTx *sql.Tx, opID string, txMgr *orm.TxMana
 			continue
 		}
 		if guard.Payment != nil {
-			if cerr := k.consumePaymentGuard(dbTx, op.Context.Site, opID, guard.Payment, cmd.Input.Record, env, i); cerr != nil {
+			if cerr := k.consumePaymentGuard(dbTx, paymentClaim{Site: op.Context.Site, OpID: opID, Source: cmd.Input.Record}, guard.Payment, env, i); cerr != nil {
 				return cerr
 			}
 			continue

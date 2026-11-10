@@ -27,6 +27,8 @@ type BulkRowResult struct {
 
 // BulkOptions controls a bulk run.
 type BulkOptions struct {
+	// Rows are the inputs, run in order.
+	Rows []BulkRow
 	// ImportID scopes per-row idempotency keys: sha256(ImportID:index).
 	ImportID string
 	// DryRun executes each row and rolls it back; nothing is persisted.
@@ -45,9 +47,9 @@ func BulkRowKey(importID string, index int) string {
 // ExecuteBulk runs base.Command once per row, sequentially, one transaction per
 // row. It never stops on failure: every row is reported. Each row carries its own
 // idempotency key so re-running a bulk skips completed rows (replayed receipts).
-func (k *Kernel) ExecuteBulk(ctx context.Context, siteDB *sql.DB, reg *doctype.Registry, base Operation, rows []BulkRow, opts BulkOptions) []BulkRowResult {
+func (k *Kernel) ExecuteBulk(ctx context.Context, siteDB *sql.DB, reg *doctype.Registry, base Operation, opts BulkOptions) []BulkRowResult {
 	if len(opts.KeyFields) > 0 {
-		return k.executeBulkUpsert(ctx, siteDB, reg, base, rows, opts)
+		return k.executeBulkUpsert(ctx, bulkEnv{siteDB: siteDB, reg: reg, base: base, opts: opts})
 	}
 	exec := func(op Operation) (contract.CommandResult, *contract.Error) {
 		if opts.DryRun {
@@ -55,7 +57,7 @@ func (k *Kernel) ExecuteBulk(ctx context.Context, siteDB *sql.DB, reg *doctype.R
 		}
 		return k.Execute(ctx, siteDB, reg, op)
 	}
-	return runBulk(base, rows, opts, exec)
+	return runBulk(base, opts.Rows, opts, exec)
 }
 
 // SequenceBulk visits rows in order, never stopping, with each row's
