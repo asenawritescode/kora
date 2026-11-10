@@ -10,6 +10,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/script"
 	"github.com/asenawritescode/kora/internal/workflow"
 )
 
@@ -32,6 +33,26 @@ func (b *bundle) start() {
 	b.docs = make([]*doctype.Document, n)
 	b.types = make([]*doctype.DocType, n)
 	b.pending = make(map[string]*doctype.Document, n)
+}
+
+// bundle applies several related records in one transaction: it prepares
+// every item, validates the whole set (items may link to one another), then
+// writes them in order. The first item is the primary record of the result.
+func (m *mutation) bundle(ctx context.Context) *contract.Error {
+	b, cerr := m.openBundle(ctx)
+	if cerr != nil {
+		return cerr
+	}
+	b.start()
+	for i := range b.payload.Records {
+		if cerr := m.buildItem(ctx, b, i); cerr != nil {
+			return cerr
+		}
+	}
+	if cerr := m.validateBundle(ctx, b); cerr != nil {
+		return cerr
+	}
+	return m.persistBundle(ctx, b)
 }
 
 // openBundle validates the payload, loads the hooks of every doctype it
@@ -308,4 +329,129 @@ func (m *mutation) loadExisting(ctx context.Context, b *bundle, i int, recordDT 
 	}
 	item := b.payload.Records[i]
 	return m.loadItem(item, i, recordDT, b.names[item.Key]) //nolint:contextcheck // the context travels in txMgr.Context
+}
+
+// validateBundle validates every prepared record. Links between items resolve
+// to the pending records, anything else to the stored ones.
+func (m *mutation) validateBundle(ctx context.Context, b *bundle) *contract.Error {
+	resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) { //nolint:contextcheck // the context travels in txMgr.Context
+		if target != nil {
+			if pending, exists := b.pending[target.Name+"\x00"+name]; exists {
+				return pending, nil
+			}
+		}
+		return m.run.Mgr.GetDoc(target, name, "")
+	}
+	for i := range b.docs {
+		if cerr := m.validateItem(ctx, b, i, resolver); cerr != nil {
+			return cerr
+		}
+	}
+	return nil
+}
+
+// validateItem runs the hooks, workflow guards and schema validation of
+// prepared record i and readies it for its write.
+func (m *mutation) validateItem(ctx context.Context, b *bundle, i int, resolver doctype.LinkedDocumentResolver) *contract.Error {
+	txMgr, op := m.run.Mgr, m.op
+	doc, recordDT := b.docs[i], b.types[i]
+	oldDoc := m.bundleSavedDocs[i].oldDoc
+	if err := txMgr.RunHooksForValidate(recordDT, doc, oldDoc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+		return contract.NewError(contract.CodeValidationFailed, err.Error())
+	}
+	if oldDoc == nil {
+		if err := m.k.initializeWorkflowStateOnCreate(ctx, m.run.Tx, op, recordDT, doc); err != nil {
+			return contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+	}
+	if oldDoc != nil && !m.bundleSavedDocs[i].workflowTransition {
+		if err := m.k.rejectWorkflowStateChange(ctx, m.run.Tx, op, recordDT, docChange{oldDoc, doc}); err != nil {
+			return contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+	}
+	if verrs := doctype.ValidateDocumentWithResolvers(recordDT, doc, m.run.Reg, oldDoc, resolver, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
+		return validationContractError(verrs)
+	}
+	if oldDoc == nil {
+		if err := txMgr.PrepareInsert(recordDT, doc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+			return contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
+		return nil
+	}
+	if err := txMgr.PrepareSave(recordDT, doc, oldDoc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+		return contract.NewError(contract.CodeValidationFailed, err.Error())
+	}
+	return nil
+}
+
+// persistBundle writes the prepared records in item order and builds the
+// result: the primary record, with the others as related records.
+func (m *mutation) persistBundle(ctx context.Context, b *bundle) *contract.Error {
+	related := make([]RelatedRecordResult, 0, len(b.payload.Records)-1)
+	for i, doc := range b.docs {
+		auditID, cerr := m.persistItem(ctx, b, i)
+		if cerr != nil {
+			return cerr
+		}
+		recordDT := b.types[i]
+		created := m.bundleSavedDocs[i].oldDoc == nil
+		if i == 0 {
+			m.result = &ResultData{Doctype: recordDT.Name, Name: doc.Name, Created: created, Document: doc.ToMap(), AuditID: auditID, Operation: m.run.OpID}
+		} else {
+			related = append(related, RelatedRecordResult{Key: b.payload.Records[i].Key, Doctype: recordDT.Name, Name: doc.Name, Created: created})
+		}
+	}
+	m.result.Related = related
+	return nil
+}
+
+// persistItem inserts or saves prepared record i and writes its audit and
+// history rows.
+func (m *mutation) persistItem(ctx context.Context, b *bundle, i int) (string, *contract.Error) {
+	doc, recordDT := b.docs[i], b.types[i]
+	oldDoc := m.bundleSavedDocs[i].oldDoc
+	beforeHash, cerr := m.writeItem(ctx, recordDT, doc, oldDoc)
+	if cerr != nil {
+		return "", cerr
+	}
+	doc.IsNew = false
+	row := m.k.buildAuditRow(m.op, m.def, m.run.OpID, auditOutcome{Doctype: recordDT.Name, DocName: doc.Name, Status: contract.StatusCompleted})
+	row.BeforeHash = beforeHash
+	row.AfterHash = CanonicalDocHash(doc.Fields)
+	auditID, auditErr := m.k.writeAudit(m.run.Tx, row)
+	if auditErr != nil {
+		return "", contract.NewError(contract.CodeInternal, "audit write failed")
+	}
+	if historyErr := m.k.writeRecordHistory(m.run.Tx, row, recordDT, oldDoc, doc); historyErr != nil {
+		return "", contract.NewError(contract.CodeInternal, "record history write failed")
+	}
+	return auditID, nil
+}
+
+// writeItem inserts a new record or saves a changed one, and captures its
+// after-hooks. It returns the hash of the record before the write.
+func (m *mutation) writeItem(ctx context.Context, recordDT *doctype.DocType, doc, oldDoc *doctype.Document) (string, *contract.Error) {
+	txMgr, tx := m.run.Mgr, m.run.Tx
+	if oldDoc == nil {
+		if err := txMgr.InsertInTx(tx, recordDT, doc, m.owner, m.user); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+			return "", wrapORMError(err)
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, tx, recordDT, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
+			return "", hookErr
+		}
+		if hookErr := captureLifecycleHooks(ctx, txMgr, tx, recordDT, lifecycleEvent{script.EventAfterSave, doc, nil}); hookErr != nil {
+			return "", hookErr
+		}
+		m.insertedDocs = append(m.insertedDocs, doc)
+		return "", nil
+	}
+	scope := scopeForOperation(m.run.Reg, m.op, recordDT.Name, "write")
+	beforeHash := CanonicalDocHash(oldDoc.Fields)
+	if err := txMgr.SaveInTxWithScope(tx, recordDT, doc, m.user, scope, oldDoc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+		return "", wrapExpectedVersionORMError(err, m.op, m.k.dialect())
+	}
+	if hookErr := captureLifecycleHooks(ctx, txMgr, tx, recordDT, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
+		return "", hookErr
+	}
+	return beforeHash, nil
 }
