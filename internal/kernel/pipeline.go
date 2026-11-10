@@ -8,7 +8,6 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/script"
-	"github.com/asenawritescode/kora/internal/workflow"
 )
 
 // payloadDoctype extracts the target doctype from either typed payload.
@@ -92,109 +91,23 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 		if cerr != nil {
 			return nil, cerr
 		}
-		p, recordNames := b.payload, b.names
-		bundleDocs := make([]*doctype.Document, len(p.Records))
-		bundleTypes := make([]*doctype.DocType, len(p.Records))
-		pendingLinks := make(map[string]*doctype.Document, len(p.Records))
-		for i, item := range p.Records {
-			recordDT := reg.Get(item.Doctype)
-			operation, itemErr := m.authorizeItem(item, recordDT)
-			if itemErr != nil {
-				return nil, itemErr
+		p := b.payload
+		b.start()
+		for i := range p.Records {
+			if cerr := m.buildItem(ctx, b, i); cerr != nil {
+				return nil, cerr
 			}
-			data, err := resolveCreateBundleData(item.Data, recordNames)
-			if err != nil {
-				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("bundle record %q: %v", item.Key, err))
-			}
-			if operation == "create" {
-				if rejectErr := k.rejectWorkflowStateOnCreate(ctx, dbTx, op, recordDT, data); rejectErr != nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("bundle record %q: %v", item.Key, rejectErr))
-				}
-			}
-			doc := doctype.NewDocument(recordDT.Name)
-			doc.Name = recordNames[item.Key]
-			var oldDoc *doctype.Document
-			if operation != "create" {
-				if rejectErr := k.rejectWorkflowStateMutation(ctx, dbTx, op, recordDT, data); rejectErr != nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, rejectErr.Error())
-				}
-				oldDoc, itemErr = m.loadItem(item, i, recordDT, doc.Name) //nolint:contextcheck // the context travels in txMgr.Context
-				if itemErr != nil {
-					return nil, itemErr
-				}
-				doc = cloneDoc(oldDoc)
-			}
-			if operation == "decrement" || operation == "adjust" {
-				adjusted, err := adjustQuantity(recordDT, oldDoc, operation, data)
-				if err != nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-				}
-				data = adjusted
-			}
-			if err := applyData(recordDT, doc, data, reg, operation == "update" && !op.Context.AllowReadOnlyFields); err != nil {
-				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-			}
-			if err := recordDT.BindBusinessScope(doc, op.Context.BusinessScope, operation == "create", oldDoc); err != nil {
-				return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
-			}
-			if item.TransitionAction != "" {
-				statusPolicy, unified, policyErr := k.workflowStatusPolicy(ctx, dbTx, op, recordDT.Name)
-				if policyErr != nil {
-					return nil, contract.NewError(contract.CodeDependencyUnavailable, "load workflow status policy failed")
-				}
-				if !unified || statusPolicy == nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, "no published status transition policy for table")
-				}
-				stateField := statusPolicy.StateField
-				if recordDT.GetField(stateField) == nil || oldDoc == nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, "workflow state field is not defined on doctype")
-				}
-				currentState := fmt.Sprint(oldDoc.Get(stateField))
-				if currentState == "<nil>" || currentState == "" {
-					currentState = statusPolicy.InitialState
-				}
-				roles := append([]string(nil), op.Context.Roles...)
-				if op.Context.UserRole != "" {
-					found := false
-					for _, role := range roles {
-						found = found || role == op.Context.UserRole
-					}
-					if !found {
-						roles = append([]string{op.Context.UserRole}, roles...)
-					}
-				}
-				if len(roles) == 0 {
-					return nil, contract.NewError(contract.CodePermissionDenied, "workflow transition requires an assigned role")
-				}
-				var newState string
-				var newStatus int
-				var transitionErr error
-				newState, newStatus, transitionErr = workflow.ApplyStatusTransition(statusPolicy, currentState, item.TransitionAction, roles, doc)
-				if transitionErr != nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, transitionErr.Error())
-				}
-				doc.Set(stateField, newState)
-				doc.DocStatus = newStatus
-			}
-			if operation == "create" {
-				setDefaultValues(recordDT, doc)
-			} else {
-				doc.IsNew = false
-			}
-			bundleDocs[i], bundleTypes[i] = doc, recordDT
-			pendingLinks[recordDT.Name+"\x00"+doc.Name] = doc
-			m.bundleSavedDocs = append(m.bundleSavedDocs, savedBundleDocument{dt: recordDT, doc: doc, oldDoc: oldDoc, workflowTransition: item.TransitionAction != ""})
 		}
 		resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
 			if target != nil {
-				if pending, exists := pendingLinks[target.Name+"\x00"+name]; exists {
+				if pending, exists := b.pending[target.Name+"\x00"+name]; exists {
 					return pending, nil
 				}
 			}
 			return txMgr.GetDoc(target, name, "")
 		}
-		for i, doc := range bundleDocs {
-			recordDT := bundleTypes[i]
+		for i, doc := range b.docs {
+			recordDT := b.types[i]
 			oldDoc := m.bundleSavedDocs[i].oldDoc
 			if err := txMgr.RunHooksForValidate(recordDT, doc, oldDoc); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
@@ -221,8 +134,8 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 			}
 		}
 		related := make([]RelatedRecordResult, 0, len(p.Records)-1)
-		for i, doc := range bundleDocs {
-			recordDT := bundleTypes[i]
+		for i, doc := range b.docs {
+			recordDT := b.types[i]
 			oldDoc := m.bundleSavedDocs[i].oldDoc
 			beforeHash := ""
 			if oldDoc == nil {
