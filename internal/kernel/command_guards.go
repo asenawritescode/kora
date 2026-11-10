@@ -10,7 +10,6 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
-	"github.com/asenawritescode/kora/internal/orm"
 )
 
 // CommandGuard is a precondition checked inside the command transaction before
@@ -141,7 +140,8 @@ func (c *CommandResource) validateGuards(aliases map[string]bool) error {
 	return nil
 }
 
-func (k *Kernel) checkCommandGuards(dbTx *sql.Tx, opID string, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, cmd *CommandResource, env refEnv) *contract.Error {
+func (k *Kernel) checkCommandGuards(run txRun, op Operation, cmd *CommandResource, env refEnv) *contract.Error {
+	dbTx, opID, txMgr, reg := run.Tx, run.OpID, run.Mgr, run.Reg
 	for i, guard := range cmd.Require {
 		if guard.skippedFor(op.Context.Roles) {
 			continue

@@ -335,7 +335,7 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 	bindScriptProvider(txMgr)
 
 	if dyn != nil {
-		data, execErr := k.execDefinedCommand(ctx, siteDB, nil, txMgr, reg, op, def, opID, dyn, nil)
+		data, execErr := k.execDefinedCommand(ctx, txRun{SiteDB: siteDB, Mgr: txMgr, Reg: reg, OpID: opID}, op, def, dyn)
 		if execErr != nil {
 			if execErr == errConcurrentIdempotencyClaim {
 				if replay, found, lookupErr := k.lookupReceipt(ctx, siteDB, op); lookupErr != nil {
@@ -355,7 +355,7 @@ func (k *Kernel) Execute(ctx context.Context, siteDB *sql.DB, reg *doctype.Regis
 		return result, nil
 	}
 
-	data, execErr := k.executeInTx(ctx, siteDB, nil, txMgr, reg, op, def, opID, nil)
+	data, execErr := k.executeInTx(ctx, txRun{SiteDB: siteDB, Mgr: txMgr, Reg: reg, OpID: opID}, op, def)
 	if execErr != nil {
 		if execErr == errConcurrentIdempotencyClaim {
 			if replay, found, lookupErr := k.lookupReceipt(ctx, siteDB, op); lookupErr != nil {
@@ -460,13 +460,13 @@ func (k *Kernel) ExecuteInTx(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, 
 	bindScriptProvider(txMgr)
 	var afterCommit func()
 	if dyn != nil {
-		data, execErr := k.execDefinedCommand(ctx, siteDB, dbTx, txMgr, reg, op, def, opID, dyn, &afterCommit)
+		data, execErr := k.execDefinedCommand(ctx, txRun{SiteDB: siteDB, Tx: dbTx, Mgr: txMgr, Reg: reg, OpID: opID, AfterCommit: &afterCommit}, op, def, dyn)
 		if execErr != nil {
 			return contract.CommandResult{}, nil, execErr
 		}
 		return contract.CommandResult{OperationID: opID, CorrelationID: op.Context.CorrelationID, Status: contract.StatusCompleted, Data: data}, afterCommit, nil
 	}
-	data, execErr := k.executeInTx(ctx, siteDB, dbTx, txMgr, reg, op, def, opID, &afterCommit)
+	data, execErr := k.executeInTx(ctx, txRun{SiteDB: siteDB, Tx: dbTx, Mgr: txMgr, Reg: reg, OpID: opID, AfterCommit: &afterCommit}, op, def)
 	if execErr != nil {
 		return contract.CommandResult{}, nil, execErr
 	}

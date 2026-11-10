@@ -51,7 +51,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 	if authzErr := authorizeOp(txMgr.Registry, op, definition, nil); authzErr != nil {
 		return nil, authzErr
 	}
-	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, txMgr.Transaction, k.dialect(), op, txMgr.Registry, nil); admissionErr != nil {
+	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, txMgr.Transaction, op, admissionScope{Dialect: k.dialect(), Registry: txMgr.Registry}); admissionErr != nil {
 		return nil, admissionErr
 	}
 	doctypeName := payloadDoctype(op.Payload)
@@ -90,7 +90,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if validation := validateOperationDocumentWithResolvers(txMgr, dt, doc, txMgr.Registry, nil, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); validation.HasErrors() {
+		if validation := validateOperationDocument(txMgr, dt, doc, txMgr.Registry, documentCheck{Old: nil, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); validation.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
 			return nil, validationContractError(validation)
 		}
 		if err := txMgr.PrepareInsert(dt, doc); err != nil {
@@ -105,10 +105,10 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 			slog.Error("authorized nested script record create failed", "doctype", dt.Name, "error", err)
 			return nil, wrapORMError(err)
 		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterInsert, doc, nil); hookErr != nil {
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
 			return nil, hookErr
 		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, nil); hookErr != nil {
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, nil}); hookErr != nil {
 			return nil, hookErr
 		}
 		doc.IsNew = false
@@ -147,7 +147,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := txMgr.RunHooksForValidate(dt, doc, oldDoc); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
-		if validation := validateOperationDocumentWithResolvers(txMgr, dt, doc, txMgr.Registry, oldDoc, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); validation.HasErrors() {
+		if validation := validateOperationDocument(txMgr, dt, doc, txMgr.Registry, documentCheck{Old: oldDoc, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); validation.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
 			return nil, validationContractError(validation)
 		}
 		if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {
@@ -157,7 +157,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, op.Context.User, scope, oldDoc); err != nil {
 			return nil, wrapORMError(err)
 		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
 			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, definition, opID, auditOutcome{Doctype: dt.Name, DocName: doc.Name, Status: contract.StatusCompleted})
@@ -194,7 +194,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if err := txMgr.DeleteInTxWithScope(dbTx, dt, payload.Name, scope, oldDoc); err != nil {
 			return nil, wrapORMError(err)
 		}
-		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterDelete, oldDoc, nil); hookErr != nil {
+		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterDelete, oldDoc, nil}); hookErr != nil {
 			return nil, hookErr
 		}
 		row := k.buildAuditRow(op, definition, opID, auditOutcome{Doctype: dt.Name, DocName: oldDoc.Name, Status: contract.StatusCompleted})

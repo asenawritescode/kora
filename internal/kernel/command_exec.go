@@ -17,10 +17,19 @@ import (
 	"github.com/asenawritescode/kora/internal/script"
 )
 
+// admissionScope is what module-lifecycle admission looks up: the schema
+// registry, the SQL dialect, and the config-defined command, if any.
+type admissionScope struct {
+	Dialect  db.Dialect
+	Registry *doctype.Registry
+	Dynamic  *CommandResource
+}
+
 // enforceModuleLifecycleAdmissionTx serializes module-owned command admission
 // with lifecycle transitions by touching the snapshot row inside the business
 // transaction. Historical reads do not pass through this write guard.
-func enforceModuleLifecycleAdmissionTx(ctx context.Context, tx *sql.Tx, dialect db.Dialect, op Operation, reg *doctype.Registry, dynamic *CommandResource) *contract.Error {
+func enforceModuleLifecycleAdmissionTx(ctx context.Context, tx *sql.Tx, op Operation, scope admissionScope) *contract.Error {
+	dialect, reg, dynamic := scope.Dialect, scope.Registry, scope.Dynamic
 	if tx == nil || reg == nil {
 		return nil
 	}
@@ -380,22 +389,20 @@ type stepOutcome struct {
 // receipt claim, per-step writes (each validated against its target record
 // schema), emitted events into the outbox, and the audit row — all commit or
 // roll back together.
-func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *sql.Tx, txMgr *orm.TxManager, reg *doctype.Registry, op Operation, def CommandDefinition, opID string, cmd *CommandResource, afterCommit *func()) (json.RawMessage, *contract.Error) {
-	ownsTransaction := dbTx == nil
+func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation, def CommandDefinition, cmd *CommandResource) (json.RawMessage, *contract.Error) { //nolint:contextcheck // the context travels in txMgr.Context
+	ownsTransaction := run.Tx == nil
 	auditFailure := func(code contract.Code) {
 		if ownsTransaction {
-			k.writeFailureAudit(siteDB, op, def, opID, code)
+			k.writeFailureAudit(run.SiteDB, op, def, run.OpID, code)
 		}
 	}
-	if ownsTransaction {
-		var err error
-		dbTx, err = siteDB.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, contract.NewError(contract.CodeDependencyUnavailable, "begin transaction: "+err.Error())
-		}
-		defer dbTx.Rollback()
+	run, rollback, beginErr := run.begin(ctx)
+	if beginErr != nil {
+		return nil, beginErr
 	}
-	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, k.dialect(), op, reg, cmd); admissionErr != nil {
+	defer rollback()
+	dbTx, txMgr, reg, opID, afterCommit := run.Tx, run.Mgr, run.Reg, run.OpID, run.AfterCommit
+	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, op, admissionScope{Dialect: k.dialect(), Registry: reg, Dynamic: cmd}); admissionErr != nil {
 		return nil, admissionErr
 	}
 	priorMutationExecutor := txMgr.ScriptMutationExecutor
@@ -465,7 +472,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 		return nil, contract.NewError(contract.CodeValidationFailed, computeErr.Error())
 	}
 	fieldReader := k.stepFieldReader(txMgr, reg, op, cmd, stepNames)
-	if cerr := k.checkCommandGuards(dbTx, opID, txMgr, reg, op, cmd, refEnv{input: input, steps: stepNames, fieldReader: fieldReader, computed: computed, now: pinnedNow, actor: user}); cerr != nil {
+	if cerr := k.checkCommandGuards(run, op, cmd, refEnv{input: input, steps: stepNames, fieldReader: fieldReader, computed: computed, now: pinnedNow, actor: user}); cerr != nil { //nolint:contextcheck // the context travels in txMgr.Context
 		auditFailure(cerr.Type)
 		return nil, cerr
 	}
@@ -534,7 +541,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 			}
-			if verrs := validateOperationDocumentWithResolvers(txMgr, dt, doc, reg, nil, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
+			if verrs := validateOperationDocument(txMgr, dt, doc, reg, documentCheck{Old: nil, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
 				return nil, validationContractError(verrs)
 			}
 			if err := txMgr.PrepareInsert(dt, doc); err != nil {
@@ -552,10 +559,10 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			if err := txMgr.InsertInTx(dbTx, dt, doc, owner, user); err != nil {
 				return nil, wrapORMError(err)
 			}
-			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterInsert, doc, nil); hookErr != nil {
+			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
 				return nil, hookErr
 			}
-			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, nil); hookErr != nil {
+			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, nil}); hookErr != nil {
 				return nil, hookErr
 			}
 			doc.IsNew = false
@@ -621,7 +628,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 				return nil, adjustErr
 			}
 			doc.IsNew = false
-			if verrs := validateOperationDocumentWithResolvers(txMgr, dt, doc, reg, oldDoc, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
+			if verrs := validateOperationDocument(txMgr, dt, doc, reg, documentCheck{Old: oldDoc, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
 				return nil, validationContractError(verrs)
 			}
 			if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {
@@ -635,7 +642,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, siteDB *sql.DB, dbTx *s
 			if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, user, scope, oldDoc); err != nil {
 				return nil, wrapExpectedVersionORMError(err, op, k.dialect())
 			}
-			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, script.EventAfterSave, doc, oldDoc); hookErr != nil {
+			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
 				return nil, hookErr
 			}
 			completeTx := *txMgr
