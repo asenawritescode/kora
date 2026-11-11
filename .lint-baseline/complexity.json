@@ -2464,9 +2464,9 @@
    "statements": 57
   },
   "internal/schema::ComputeDiff": {
-   "cognitive": 182,
-   "cyclomatic": 66,
-   "statements": 98
+   "cognitive": 165,
+   "cyclomatic": 59,
+   "statements": 88
   },
   "internal/schema::GenerateSnapshotActivationDDL": {
    "cognitive": 42,

@@ -246,33 +246,9 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 			}
 		}
 
-		// Detect orphaned columns (columns in DB but not in registry).
-		registryFields := make(map[string]bool)
-		for _, f := range dt.DataFields() {
-			registryFields[f.Fieldname] = true
-		}
-		// Add system columns.
-		for _, sc := range doctype.SystemColumns() {
-			registryFields[sc.Name] = true
-			if _, exists := liveTable.Columns[sc.Name]; !exists && sc.Name == "revision" {
-				// Legacy test fixtures and partially-created tables may not yet
-				// contain the normal system timestamp. Only upgrade a real Kigae
-				// document table here; table creation gets revision from DDL.
-				if _, hasModified := liveTable.Columns["modified"]; !hasModified {
-					continue
-				}
-				diff.NewColumns[tableName] = append(diff.NewColumns[tableName], ColumnAdd{Name: sc.Name, Type: "BIGINT", Nullable: false, Default: "1"})
-			}
-		}
+		diff.addMissingUniqueIndexes(tableName, dt, liveTable)
 
-		for colName := range liveTable.Columns {
-			if !registryFields[colName] {
-				diff.Orphaned = append(diff.Orphaned, OrphanedColumn{
-					Table:  tableName,
-					Column: colName,
-				})
-			}
-		}
+		diff.addOrphanedColumns(tableName, dt, liveTable)
 	}
 
 	// Check for child tables (separate from main loop — applies even when parent is new).
@@ -741,6 +717,62 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 // to the new doctypes-slice functions. Existing test and integration code
 // can keep using these without changes.
 // ---------------------------------------------------------------------------
+
+// addOrphanedColumns records the live columns the registry no longer declares, and adds the
+// system revision column to a real document table that lacks it.
+func (d *Diff) addOrphanedColumns(tableName string, dt *doctype.DocType, liveTable *TableInfo) {
+	// Detect orphaned columns (columns in DB but not in registry).
+	registryFields := make(map[string]bool)
+	for _, f := range dt.DataFields() {
+		registryFields[f.Fieldname] = true
+	}
+	// Add system columns.
+	for _, sc := range doctype.SystemColumns() {
+		registryFields[sc.Name] = true
+		if _, exists := liveTable.Columns[sc.Name]; !exists && sc.Name == "revision" {
+			// Legacy test fixtures and partially-created tables may not yet
+			// contain the normal system timestamp. Only upgrade a real Kigae
+			// document table here; table creation gets revision from DDL.
+			if _, hasModified := liveTable.Columns["modified"]; !hasModified {
+				continue
+			}
+			d.NewColumns[tableName] = append(d.NewColumns[tableName], ColumnAdd{Name: sc.Name, Type: "BIGINT", Nullable: false, Default: "1"})
+		}
+	}
+
+	for colName := range liveTable.Columns {
+		if !registryFields[colName] {
+			d.Orphaned = append(d.Orphaned, OrphanedColumn{
+				Table:  tableName,
+				Column: colName,
+			})
+		}
+	}
+}
+
+// addMissingUniqueIndexes gives an existing table the unique index CREATE TABLE would have given a
+// new one, whether or not the field is search-indexed and whether its column exists or is being
+// added in this pass. Without it a unique field added to a table that already exists was never
+// enforced. A search-indexed field whose column exists is handled with its search index above.
+func (d *Diff) addMissingUniqueIndexes(tableName string, dt *doctype.DocType, liveTable *TableInfo) {
+	adding := make(map[string]bool, len(d.NewColumns[tableName]))
+	for _, column := range d.NewColumns[tableName] {
+		adding[column.Name] = true
+	}
+	for _, field := range dt.DataFields() {
+		if !field.Unique || !field.IsDataField() || field.Fieldtype == "Table" {
+			continue
+		}
+		live, exists := liveTable.Columns[field.Fieldname]
+		if exists && (field.SearchIndex || len(live.UniqueIndexNames) > 0) {
+			continue
+		}
+		if !exists && !adding[field.Fieldname] {
+			continue
+		}
+		d.NewIndexes[tableName] = append(d.NewIndexes[tableName], IndexAdd{Table: tableName, Columns: []string{field.Fieldname}, Unique: true})
+	}
+}
 
 // ComputeDiffFromRegistry is a backward-compat wrapper. Prefer calling
 // ComputeDiff directly with doctype slices.

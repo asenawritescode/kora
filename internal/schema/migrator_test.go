@@ -219,6 +219,61 @@ func TestComputeDiff_RelaxUniquePreservesSearchIndex(t *testing.T) {
 	}
 }
 
+func TestComputeDiff_UniqueFieldOnExistingTable(t *testing.T) {
+	const table = "tabSale"
+	unique := func(searchIndex bool) doctype.Field {
+		return doctype.Field{Fieldname: "reference", Fieldtype: "Data", Unique: true, SearchIndex: searchIndex}
+	}
+	tests := []struct {
+		name       string
+		field      doctype.Field
+		live       map[string]*ColumnInfo
+		wantUnique int
+		wantColumn bool
+	}{
+		{"existing column, unique, no search index, no index yet", unique(false), map[string]*ColumnInfo{"reference": {Name: "reference"}}, 1, false},
+		{"existing column that already has a unique index", unique(false), map[string]*ColumnInfo{"reference": {Name: "reference", Indexed: true, UniqueIndexNames: []string{"uq_tabSale_reference"}}}, 0, false},
+		{"new column that is unique", unique(false), map[string]*ColumnInfo{}, 1, true},
+		{"new column that is unique and search-indexed", unique(true), map[string]*ColumnInfo{}, 1, true},
+		{"existing search-indexed unique column is left to the search-index rule", unique(true), map[string]*ColumnInfo{"reference": {Name: "reference"}}, 1, false},
+		{"new column that is not unique", doctype.Field{Fieldname: "note", Fieldtype: "Data"}, map[string]*ColumnInfo{}, 0, true},
+		{"existing column that is not unique", doctype.Field{Fieldname: "note", Fieldtype: "Data"}, map[string]*ColumnInfo{"note": {Name: "note"}}, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dt := &doctype.DocType{Name: "Sale", Fields: []doctype.Field{tt.field}}
+			live := map[string]*TableInfo{table: {Name: table, Columns: tt.live}}
+			diff := ComputeDiff([]*doctype.DocType{dt}, func(string) *doctype.DocType { return dt }, live, newMySQLDialect())
+			uniques := 0
+			for _, idx := range diff.NewIndexes[table] {
+				if idx.Unique {
+					uniques++
+					if len(idx.Columns) != 1 || idx.Columns[0] != tt.field.Fieldname {
+						t.Fatalf("unique index on %v, want %s", idx.Columns, tt.field.Fieldname)
+					}
+				}
+			}
+			if uniques != tt.wantUnique {
+				t.Fatalf("unique indexes = %d, want %d: %#v", uniques, tt.wantUnique, diff.NewIndexes[table])
+			}
+			if got := len(diff.NewColumns[table]) == 1; got != tt.wantColumn {
+				t.Fatalf("adds a column = %v, want %v", got, tt.wantColumn)
+			}
+		})
+	}
+}
+
+func TestComputeDiff_UniqueIndexIsCreatedAfterItsColumn(t *testing.T) {
+	dt := &doctype.DocType{Name: "Sale", Fields: []doctype.Field{{Fieldname: "reference", Fieldtype: "Data", Unique: true}}}
+	live := map[string]*TableInfo{"tabSale": {Name: "tabSale", Columns: map[string]*ColumnInfo{}}}
+	dialect := newMySQLDialect()
+	statements := ComputeDiff([]*doctype.DocType{dt}, func(string) *doctype.DocType { return dt }, live, dialect).
+		GenerateDDL([]*doctype.DocType{dt}, func(string) *doctype.DocType { return dt }, dialect)
+	if len(statements) != 2 || !contains(statements[0], "ADD COLUMN") || !contains(statements[1], "UNIQUE") {
+		t.Fatalf("DDL = %#v, want the column added, then its unique index", statements)
+	}
+}
+
 func TestAnalyzeImpact_SafeChanges(t *testing.T) {
 	dialect := newMySQLDialect()
 	reg := doctype.NewRegistry()
