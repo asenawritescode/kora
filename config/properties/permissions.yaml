@@ -1,0 +1,48 @@
+- doctype: Property
+  role: Estate Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Unit
+  role: Estate Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Tenant
+  role: Estate Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Lease
+  role: Estate Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Property
+  role: Leasing Agent
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Unit
+  role: Leasing Agent
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Tenant
+  role: Leasing Agent
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Lease
+  role: Leasing Agent
+  read: true
+  write: true
+  create: true
+  delete: false

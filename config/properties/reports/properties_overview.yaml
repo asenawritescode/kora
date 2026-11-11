@@ -1,0 +1,29 @@
+name: properties_overview
+label: Properties overview
+route: /reports/properties
+queries:
+  - id: units_by_status
+    model: unit
+    measures: [count, monthly_rent_sum]
+    dimensions: [status]
+  - id: leases_by_status
+    model: lease
+    measures: [count, monthly_rent_sum]
+    dimensions: [status]
+visuals:
+  - id: units_by_status
+    type: bar
+    source: units_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Units
+        type: bar
+  - id: leases_by_status
+    type: bar
+    source: leases_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Leases
+        type: bar

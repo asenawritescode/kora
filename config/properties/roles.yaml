@@ -1,0 +1,6 @@
+- name: Estate Manager
+  workspace_access: true
+  description: Runs the property register. Manages properties, units, tenants and leases, and can delete them.
+- name: Leasing Agent
+  workspace_access: true
+  description: Reads properties and units, and creates and updates tenants and leases. Cannot delete.

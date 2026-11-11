@@ -1,0 +1,74 @@
+name: Lease
+module: Properties
+title_field: reference
+search_fields: reference, status
+sort_field: modified
+sort_order: DESC
+description: An agreement that lets one tenant occupy one unit for a rent.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: unit
+    fieldtype: Link
+    options: Unit
+    label: Unit
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: tenant
+    fieldtype: Link
+    options: Tenant
+    label: Tenant
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start date
+    reqd: true
+    in_list_view: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: End date
+    in_list_view: true
+  - fieldname: monthly_rent
+    fieldtype: Currency
+    label: Monthly rent
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The rent cannot be negative."
+  - fieldname: deposit
+    fieldtype: Currency
+    label: Deposit
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The deposit cannot be negative."
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Ended
+    default: Active
+    in_list_view: true
+    in_standard_filter: true
+doc_constraints:
+  - type: cross_field
+    lhs: end_date
+    operator: ">="
+    rhs: start_date
+    message: "The end date cannot be before the start date."
+  - type: immutable_after
+    status_field: status
+    status_values: [Ended]
+    immutable_fields: [unit, tenant, start_date]
+    message: "An ended lease cannot be changed."

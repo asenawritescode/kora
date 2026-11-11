@@ -1,0 +1,37 @@
+name: Property
+module: Properties
+title_field: property_name
+search_fields: property_name, address
+sort_field: modified
+sort_order: DESC
+description: A building or plot of land that the business lets or manages.
+
+fields:
+  - fieldname: property_name
+    fieldtype: Data
+    label: Property
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: address
+    fieldtype: Data
+    label: Address
+    in_list_view: true
+  - fieldname: property_type
+    fieldtype: Select
+    label: Type
+    options: |
+      House
+      Apartment
+      Shop
+      Office
+      Land
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: owner_name
+    fieldtype: Data
+    label: Owner
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
