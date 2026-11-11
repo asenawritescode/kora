@@ -1,0 +1,36 @@
+- doctype: Donor
+  role: Grants Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Grant
+  role: Grants Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Grant Report
+  role: Grants Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Donor
+  role: Programme Officer
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Grant
+  role: Programme Officer
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Grant Report
+  role: Programme Officer
+  read: true
+  write: true
+  create: true
+  delete: false

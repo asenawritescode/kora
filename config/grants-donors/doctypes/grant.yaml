@@ -1,0 +1,71 @@
+name: Grant
+module: Grants
+title_field: reference
+search_fields: reference, grant_title
+sort_field: modified
+sort_order: DESC
+description: Funding promised by a donor, from proposal to closure.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: grant_title
+    fieldtype: Data
+    label: Title
+    reqd: true
+    in_list_view: true
+  - fieldname: donor
+    fieldtype: Link
+    options: Donor
+    label: Donor
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.01
+        message: "The grant amount must be more than zero."
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start date
+    in_list_view: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: End date
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Proposed
+      Awarded
+      Active
+      Closed
+      Declined
+    default: Proposed
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: cross_field
+    lhs: end_date
+    operator: ">="
+    rhs: start_date
+    message: "The end date cannot be before the start date."
+  - type: immutable_after
+    status_field: status
+    status_values: [Closed, Declined]
+    immutable_fields: [donor, amount]
+    message: "The donor and amount of a closed or declined grant cannot be changed."

@@ -1,0 +1,6 @@
+- name: Grants Manager
+  workspace_access: true
+  description: Runs donor and grant records. Manages donors, grants and grant reports, and can delete them.
+- name: Programme Officer
+  workspace_access: true
+  description: Tracks reporting. Can read donors and grants, and can create and update grant reports.
