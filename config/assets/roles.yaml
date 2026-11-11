@@ -1,0 +1,6 @@
+- name: Asset Manager
+  workspace_access: true
+  description: Runs the asset register. Manages assets, categories, maintenance tasks and assignments.
+- name: Asset User
+  workspace_access: true
+  description: Reads assets and categories, plans maintenance and records who has which asset. Cannot delete.

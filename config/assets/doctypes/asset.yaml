@@ -1,0 +1,64 @@
+name: Asset
+module: Assets
+title_field: asset_name
+search_fields: asset_tag, asset_name, serial_no
+sort_field: modified
+sort_order: DESC
+description: A piece of equipment the business owns and looks after.
+
+fields:
+  - fieldname: asset_tag
+    fieldtype: Data
+    label: Asset tag
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: asset_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: category
+    fieldtype: Link
+    options: Asset Category
+    label: Category
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: serial_no
+    fieldtype: Data
+    label: Serial number
+  - fieldname: purchase_date
+    fieldtype: Date
+    label: Purchase date
+  - fieldname: purchase_cost
+    fieldtype: Currency
+    label: Purchase cost
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      In use
+      In store
+      Under repair
+      Retired
+    default: In use
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: assigned_to
+    fieldtype: User
+    label: Assigned to
+    in_standard_filter: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: immutable_after
+    status_field: status
+    status_values: [Retired]
+    immutable_fields: [asset_tag, purchase_date]
+    message: "A retired asset's tag and purchase date cannot be changed."

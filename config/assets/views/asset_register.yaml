@@ -1,0 +1,27 @@
+name: Asset Register
+route: /assets
+type: workspace
+layout: single
+label: Assets
+module: Assets
+components:
+  - id: assets
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Asset
+    label: Assets
+    desktop_columns: [asset_tag, asset_name, category, location, status, assigned_to]
+    mobile_columns: [asset_name, status, location]
+  - id: planned_maintenance
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Maintenance Task
+    label: Planned maintenance
+    filters:
+      - field: status
+        op: equals
+        value: Planned
+    desktop_columns: [reference, asset, due_date, description]
+    mobile_columns: [asset, due_date]

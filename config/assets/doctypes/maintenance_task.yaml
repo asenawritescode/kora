@@ -1,0 +1,55 @@
+name: Maintenance Task
+module: Assets
+title_field: reference
+search_fields: reference, status
+sort_field: due_date
+sort_order: ASC
+description: A repair or service planned for an asset, open until it is done or cancelled.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: asset
+    fieldtype: Link
+    options: Asset
+    label: Asset
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due date
+    reqd: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Planned
+      Done
+      Cancelled
+    default: Planned
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: done_on
+    fieldtype: Date
+    label: Done on
+  - fieldname: cost
+    fieldtype: Currency
+    label: Cost
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: field_dependency
+    condition: "status == 'Done'"
+    require_fields: [done_on]
+    message: "Say when the work was done before marking the task Done."

@@ -1,0 +1,38 @@
+name: Asset Assignment
+module: Assets
+sort_field: from_date
+sort_order: DESC
+description: Who had an asset, and for which dates.
+
+fields:
+  - fieldname: asset
+    fieldtype: Link
+    options: Asset
+    label: Asset
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: assigned_to
+    fieldtype: User
+    label: Assigned to
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: from_date
+    fieldtype: Date
+    label: From
+    reqd: true
+    in_list_view: true
+  - fieldname: to_date
+    fieldtype: Date
+    label: To
+    in_list_view: true
+  - fieldname: note
+    fieldtype: Text
+    label: Note
+doc_constraints:
+  - type: cross_field
+    lhs: to_date
+    operator: ">="
+    rhs: from_date
+    message: "The end date cannot be before the start date."
