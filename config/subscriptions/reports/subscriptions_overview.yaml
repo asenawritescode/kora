@@ -1,0 +1,38 @@
+name: subscriptions_overview
+label: Subscriptions overview
+route: /reports/subscriptions
+queries:
+  - id: subscriptions_by_plan
+    model: subscription
+    measures: [count, recurring_amount_sum]
+    dimensions: [plan]
+    filters:
+      - field: status
+        operator: in
+        values: [Active]
+  - id: invoices_by_status
+    model: recurring_invoice
+    measures: [count, total_sum, balance_sum]
+    dimensions: [status]
+visuals:
+  - id: subscriptions_by_plan
+    type: bar
+    source: subscriptions_by_plan
+    x_field: plan
+    series:
+      - field: count
+        label: Active subscriptions
+        type: bar
+  - id: invoices_by_status
+    type: bar
+    source: invoices_by_status
+    x_field: status
+    series:
+      - field: total_sum
+        label: Invoiced
+        type: bar
+        format: currency
+      - field: balance_sum
+        label: Balance due
+        type: bar
+        format: currency

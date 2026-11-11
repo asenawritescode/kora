@@ -1,0 +1,76 @@
+name: Usage Record
+module: Subscriptions
+append_only: true
+title_field: reference
+search_fields: reference, metric, external_event_id
+sort_field: recorded_at
+sort_order: DESC
+quantity_effect:
+  target_doctype: Entitlement
+  target_quantity_field: used_quantity
+  source_record_field: entitlement
+  delta_field: quantity
+  direction: increase
+description: A measured use of an entitlement. Saving it adds the quantity to the entitlement's used quantity in the same step, and is refused when that goes above the allowance. It cannot be edited afterwards. Usage is recorded, not billed.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: entitlement
+    fieldtype: Link
+    options: Entitlement
+    label: Entitlement
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: subscription
+    fieldtype: Link
+    options: Subscription
+    label: Subscription
+    read_only: true
+    linked_field: "entitlement.subscription"
+  - fieldname: metric
+    fieldtype: Data
+    label: Usage metric
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."
+  - fieldname: unit
+    fieldtype: Data
+    label: Unit
+    reqd: true
+  - fieldname: period_start
+    fieldtype: Datetime
+    label: Period start
+    reqd: true
+  - fieldname: period_end
+    fieldtype: Datetime
+    label: Period end
+    reqd: true
+  - fieldname: recorded_at
+    fieldtype: Datetime
+    label: Recorded at
+    reqd: true
+  - fieldname: external_event_id
+    fieldtype: Data
+    label: External event ID
+    unique: true
+doc_constraints:
+  - type: cross_field
+    lhs: period_end
+    operator: ">="
+    rhs: period_start
+    message: "The period cannot end before it starts."

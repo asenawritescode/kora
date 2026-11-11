@@ -1,0 +1,48 @@
+name: Subscriber
+module: Subscriptions
+title_field: subscriber_name
+search_fields: subscriber_name, subscriber_code, email, phone
+sort_field: subscriber_name
+sort_order: ASC
+description: A person or organisation that holds one or more subscriptions, for example a parent, a tenant or a client.
+
+fields:
+  - fieldname: subscriber_code
+    fieldtype: Data
+    label: Subscriber code
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: subscriber_name
+    fieldtype: Data
+    label: Subscriber name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: email
+    fieldtype: Data
+    label: Billing email
+    options: Email
+    in_list_view: true
+    search_index: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Billing phone
+    options: Phone
+    search_index: true
+  - fieldname: billing_address
+    fieldtype: Text
+    label: Billing address
+  - fieldname: tax_identifier
+    fieldtype: Data
+    label: Tax identifier
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true
+    in_standard_filter: true

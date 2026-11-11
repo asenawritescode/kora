@@ -1,0 +1,133 @@
+name: Recurring Invoice
+module: Subscriptions
+title_field: invoice_number
+search_fields: invoice_number, status
+sort_field: due_date
+sort_order: DESC
+description: An invoice for one billing period of a subscription. Type the subtotal (usually the subscription's amount per period); tax, total, balance and the payment state are worked out. Once issued, the subscription, subtotal, tax rate and currency are frozen. Payments update the amount paid when they are saved; the invoice refuses a payment above the balance, and payments on a draft or void invoice. The invoice is a record; it is not charged to anyone.
+
+fields:
+  - fieldname: invoice_number
+    fieldtype: Data
+    label: Invoice number
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: subscription
+    fieldtype: Link
+    options: Subscription
+    label: Subscription
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: subscriber
+    fieldtype: Link
+    options: Subscriber
+    label: Subscriber
+    read_only: true
+    linked_field: "subscription.subscriber"
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: billing_schedule
+    fieldtype: Link
+    options: Billing Schedule
+    label: Billing schedule
+  - fieldname: issue_date
+    fieldtype: Date
+    label: Issue date
+    reqd: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due date
+    reqd: true
+    in_list_view: true
+  - fieldname: currency
+    fieldtype: Select
+    label: Currency
+    options: |
+      KES
+      USD
+      EUR
+      GBP
+    default: KES
+    reqd: true
+  - fieldname: subtotal
+    fieldtype: Currency
+    label: Subtotal
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The subtotal cannot be negative."
+  - fieldname: tax_rate
+    fieldtype: Float
+    label: Tax rate (%)
+    default: "0"
+    constraints:
+      - type: min
+        value: 0
+        message: "The tax rate cannot be negative."
+      - type: max
+        value: 100
+        message: "The tax rate cannot be more than 100."
+  - fieldname: tax_amount
+    fieldtype: Currency
+    label: Tax amount
+    computed: "ROUND(subtotal * tax_rate / 100, 2)"
+    read_only: true
+  - fieldname: total
+    fieldtype: Currency
+    label: Invoice total
+    computed: "ROUND(subtotal + tax_amount, 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: amount_paid
+    fieldtype: Currency
+    label: Amount paid
+    description: Changed by payments when they are saved, not typed in.
+    default: "0"
+    read_only: true
+  - fieldname: balance
+    fieldtype: Currency
+    label: Balance due
+    description: The total less the amount paid.
+    computed: "ROUND(total - amount_paid, 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: payment_status
+    fieldtype: Select
+    label: Payment state
+    options: |
+      Unpaid
+      Partially Paid
+      Paid
+    computed: '(if (> (round total 9) 0) (if (>= (round amount_paid 9) (round total 9)) "Paid" (if (> (round amount_paid 9) 0) "Partially Paid" "Unpaid")) "Unpaid")'
+    read_only: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Issued
+      Overdue
+      Void
+    default: Draft
+    in_list_view: true
+    in_standard_filter: true
+doc_constraints:
+  - type: predicate
+    predicate: '(if (> (round amount_paid 9) (round (+ (round subtotal 9) (round (/ (* (round subtotal 9) (round tax_rate 9)) 100) 2)) 2)) 0 (if (> (round amount_paid 9) 0) (if (== status "Draft") 0 (if (== status "Void") 0 1)) 1))'
+    message: "A payment cannot be more than the balance due, and a draft or void invoice cannot take payments or be voided once paid."
+  - type: cross_field
+    lhs: due_date
+    operator: ">="
+    rhs: issue_date
+    message: "The due date cannot be before the issue date."
+  - type: immutable_after
+    status_field: status
+    status_values: [Issued, Overdue, Void]
+    immutable_fields: [invoice_number, subscription, subtotal, tax_rate, currency]
+    message: "An issued invoice cannot be repriced. Void it and make a new one."

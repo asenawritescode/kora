@@ -1,0 +1,51 @@
+name: Subscriptions
+route: /subscriptions
+type: workspace
+layout: two_panel
+label: Subscriptions
+module: Subscriptions
+components:
+  - id: subscriptions
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Subscription
+    label: Subscriptions
+    filters:
+      - field: status
+        op: in
+        value: [Quoted, Active, Paused, Past Due]
+    desktop_columns: [reference, subscriber, plan, status, recurring_amount, currency, next_billing_date]
+    mobile_columns: [reference, subscriber, status]
+  - id: upcoming_billing
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Billing Schedule
+    label: Upcoming billing
+    filters:
+      - field: status
+        op: equals
+        value: Scheduled
+    desktop_columns: [reference, subscription, billing_date, amount, currency]
+    mobile_columns: [reference, billing_date, amount]
+  - id: open_invoices
+    type: record_table
+    region: side
+    position: 0
+    source_doctype: Recurring Invoice
+    label: Invoices
+    filters:
+      - field: status
+        op: in
+        value: [Draft, Issued, Overdue]
+    desktop_columns: [invoice_number, subscriber, due_date, total, balance, payment_status, status]
+    mobile_columns: [invoice_number, balance, status]
+  - id: recent_payments
+    type: record_table
+    region: side
+    position: 1
+    source_doctype: Subscription Payment
+    label: Recent payments
+    desktop_columns: [payment_reference, invoice, amount, currency, paid_at, method]
+    mobile_columns: [payment_reference, amount, method]

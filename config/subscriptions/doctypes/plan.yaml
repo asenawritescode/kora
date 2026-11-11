@@ -1,0 +1,96 @@
+name: Plan
+module: Subscriptions
+title_field: plan_name
+search_fields: plan_name, plan_code
+sort_field: plan_name
+sort_order: ASC
+description: A recurring plan with its price and billing interval. A subscription uses one plan.
+
+fields:
+  - fieldname: plan_code
+    fieldtype: Data
+    label: Plan code
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: plan_name
+    fieldtype: Data
+    label: Plan name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+  - fieldname: billing_interval
+    fieldtype: Select
+    label: Billing interval
+    options: |
+      Weekly
+      Monthly
+      Quarterly
+      Annually
+    default: Monthly
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: interval_count
+    fieldtype: Int
+    label: Interval count
+    description: Bill every this many intervals, for example 3 with Monthly is every three months.
+    default: "1"
+    reqd: true
+    constraints:
+      - type: min
+        value: 1
+        message: "The interval count must be at least 1."
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit price
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The price cannot be negative."
+  - fieldname: currency
+    fieldtype: Select
+    label: Currency
+    options: |
+      KES
+      USD
+      EUR
+      GBP
+    default: KES
+    reqd: true
+    in_list_view: true
+  - fieldname: trial_days
+    fieldtype: Int
+    label: Trial days
+    default: "0"
+    constraints:
+      - type: min
+        value: 0
+        message: "Trial days cannot be negative."
+  - fieldname: tax_rate
+    fieldtype: Float
+    label: Tax rate (%)
+    default: "0"
+    constraints:
+      - type: min
+        value: 0
+        message: "The tax rate cannot be negative."
+      - type: max
+        value: 100
+        message: "The tax rate cannot be more than 100."
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Active
+      Retired
+    default: Active
+    in_list_view: true
+    in_standard_filter: true

@@ -1,0 +1,149 @@
+name: Subscription
+module: Subscriptions
+title_field: reference
+search_fields: reference, status
+sort_field: next_billing_date
+sort_order: ASC
+description: A subscriber's agreement to pay for a plan again and again. The agreed price is typed in (the plan price, or a negotiated one) and stays as typed; extra priced items go on the lines and add to the amount per period.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: subscriber
+    fieldtype: Link
+    options: Subscriber
+    label: Subscriber
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: plan
+    fieldtype: Link
+    options: Plan
+    label: Plan
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    default: "1"
+    reqd: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Agreed unit price
+    description: The plan price, or the negotiated price when it differs.
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The price cannot be negative."
+  - fieldname: currency
+    fieldtype: Select
+    label: Currency
+    options: |
+      KES
+      USD
+      EUR
+      GBP
+    default: KES
+    reqd: true
+  - fieldname: billing_interval
+    fieldtype: Select
+    label: Billing interval
+    options: |
+      Weekly
+      Monthly
+      Quarterly
+      Annually
+    default: Monthly
+    reqd: true
+  - fieldname: interval_count
+    fieldtype: Int
+    label: Interval count
+    default: "1"
+    reqd: true
+    constraints:
+      - type: min
+        value: 1
+        message: "The interval count must be at least 1."
+  - fieldname: lines
+    fieldtype: Table
+    options: Subscription Line
+    label: Extra items
+  - fieldname: lines_total
+    fieldtype: Currency
+    label: Extra items total
+    computed: "SUM(lines.amount)"
+    read_only: true
+  - fieldname: recurring_amount
+    fieldtype: Currency
+    label: Amount per period
+    description: Quantity times the agreed price, plus the extra items. Tax is added on the invoice.
+    computed: "ROUND(quantity * unit_price + lines_total, 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start date
+    reqd: true
+    in_list_view: true
+  - fieldname: next_billing_date
+    fieldtype: Date
+    label: Next billing date
+    reqd: true
+    in_list_view: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: End date
+  - fieldname: assignee
+    fieldtype: User
+    label: Assignee
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Quoted
+      Active
+      Paused
+      Past Due
+      Cancelled
+      Expired
+    default: Quoted
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: exception_reason
+    fieldtype: Text
+    label: Reason
+    description: Required when the subscription is paused, past due or cancelled.
+doc_constraints:
+  - type: cross_field
+    lhs: next_billing_date
+    operator: ">="
+    rhs: start_date
+    message: "The next billing date cannot be before the start date."
+  - type: cross_field
+    lhs: end_date
+    operator: ">="
+    rhs: start_date
+    message: "The end date cannot be before the start date."
+  - type: field_dependency
+    condition: "status == 'Paused'"
+    require_fields: [exception_reason]
+    message: "Say why the subscription is paused."
+  - type: field_dependency
+    condition: "status == 'Past Due'"
+    require_fields: [exception_reason]
+    message: "Say why the subscription is past due."
+  - type: field_dependency
+    condition: "status == 'Cancelled'"
+    require_fields: [exception_reason]
+    message: "Say why the subscription is cancelled."

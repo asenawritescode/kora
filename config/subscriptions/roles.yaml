@@ -1,0 +1,6 @@
+- name: Subscriptions Manager
+  workspace_access: true
+  description: Sets up plans and manages every subscription record, invoice and entitlement.
+- name: Subscriptions Clerk
+  workspace_access: true
+  description: Keeps subscribers, subscriptions, invoices and payments day to day. Can read plans.

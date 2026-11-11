@@ -1,0 +1,73 @@
+name: Entitlement
+module: Subscriptions
+title_field: reference
+search_fields: reference, entitlement_name
+sort_field: modified
+sort_order: DESC
+description: A benefit or usage allowance granted by a subscription. Usage records add to the quantity used, and the quantity used cannot go above the allowance.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: subscription
+    fieldtype: Link
+    options: Subscription
+    label: Subscription
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: entitlement_name
+    fieldtype: Data
+    label: Entitlement
+    reqd: true
+    in_list_view: true
+  - fieldname: allowance
+    fieldtype: Float
+    label: Allowance
+    description: Leave empty for no limit.
+    constraints:
+      - type: min
+        value: 0
+        message: "The allowance cannot be negative."
+  - fieldname: used_quantity
+    fieldtype: Float
+    label: Used quantity
+    description: Changed by usage records when they are saved, not typed in.
+    default: "0"
+    read_only: true
+    in_list_view: true
+  - fieldname: unit
+    fieldtype: Data
+    label: Unit
+  - fieldname: valid_from
+    fieldtype: Date
+    label: Valid from
+    reqd: true
+  - fieldname: valid_until
+    fieldtype: Date
+    label: Valid until
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Suspended
+      Expired
+      Cancelled
+    default: Active
+    in_list_view: true
+    in_standard_filter: true
+doc_constraints:
+  - type: predicate
+    predicate: '(if (empty allowance) 1 (if (> (round used_quantity 9) (round allowance 9)) 0 1))'
+    message: "The usage is more than the allowance."
+  - type: cross_field
+    lhs: valid_until
+    operator: ">="
+    rhs: valid_from
+    message: "The entitlement cannot end before it starts."
