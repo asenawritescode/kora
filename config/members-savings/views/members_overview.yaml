@@ -1,0 +1,31 @@
+name: Members Overview
+route: /members
+type: workspace
+layout: single
+label: Members
+module: Members
+components:
+  - id: members
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Member
+    label: Members
+    filters:
+      - field: status
+        op: in
+        value: [Active, Dormant]
+    desktop_columns: [member_no, member_name, phone, joined_on, status]
+    mobile_columns: [member_name, phone, status]
+  - id: loans_open
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Loan
+    label: Loans waiting or running
+    filters:
+      - field: status
+        op: in
+        value: [Applied, Approved, Disbursed]
+    desktop_columns: [reference, member, amount, interest_rate, applied_on, status]
+    mobile_columns: [reference, member, amount]

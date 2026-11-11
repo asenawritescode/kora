@@ -1,0 +1,71 @@
+name: Loan
+module: Members
+title_field: reference
+search_fields: reference, status
+sort_field: modified
+sort_order: DESC
+description: A loan applied for by a member and the decision on it. It records the terms only. Interest is not calculated, no repayment schedule is produced, the outstanding balance is not tracked and nothing posts to the books. Once Repaid or Rejected the terms are frozen.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: member
+    fieldtype: Link
+    options: Member
+    label: Member
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.01
+        message: "The amount must be more than zero."
+  - fieldname: interest_rate
+    fieldtype: Percent
+    label: Interest rate
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The interest rate cannot be negative."
+  - fieldname: term_months
+    fieldtype: Int
+    label: Term (months)
+    reqd: true
+    constraints:
+      - type: min
+        value: 1.0
+        message: "The term must be at least one month."
+  - fieldname: applied_on
+    fieldtype: Date
+    label: Applied on
+    reqd: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Applied
+      Approved
+      Disbursed
+      Repaid
+      Rejected
+    default: Applied
+    in_list_view: true
+    in_standard_filter: true
+doc_constraints:
+  - type: immutable_after
+    status_field: status
+    status_values: [Repaid, Rejected]
+    immutable_fields: [member, amount, interest_rate, term_months]
+    message: "A repaid or rejected loan cannot be changed."

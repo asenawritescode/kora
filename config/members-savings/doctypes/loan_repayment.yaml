@@ -1,0 +1,32 @@
+name: Loan Repayment
+module: Members
+append_only: true
+title_field: repayment_date
+search_fields: repayment_date
+sort_field: repayment_date
+sort_order: DESC
+description: One payment received against a loan. It is a record only. The loan's outstanding balance is not reduced, a loan is not marked Repaid automatically and nothing posts to the books. It cannot be edited afterwards.
+
+fields:
+  - fieldname: loan
+    fieldtype: Link
+    options: Loan
+    label: Loan
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: repayment_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.01
+        message: "The amount must be more than zero."

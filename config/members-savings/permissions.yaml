@@ -1,0 +1,48 @@
+- doctype: Member
+  role: SACCO Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Savings Entry
+  role: SACCO Manager
+  read: true
+  write: false
+  create: true
+  delete: false
+- doctype: Loan
+  role: SACCO Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Loan Repayment
+  role: SACCO Manager
+  read: true
+  write: false
+  create: true
+  delete: false
+- doctype: Member
+  role: Teller
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Loan
+  role: Teller
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Savings Entry
+  role: Teller
+  read: true
+  write: false
+  create: true
+  delete: false
+- doctype: Loan Repayment
+  role: Teller
+  read: true
+  write: false
+  create: true
+  delete: false
