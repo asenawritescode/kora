@@ -246,6 +246,8 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 			}
 		}
 
+		diff.addMissingUniqueIndexes(tableName, dt, liveTable)
+
 		// Detect orphaned columns (columns in DB but not in registry).
 		registryFields := make(map[string]bool)
 		for _, f := range dt.DataFields() {
@@ -741,6 +743,30 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 // to the new doctypes-slice functions. Existing test and integration code
 // can keep using these without changes.
 // ---------------------------------------------------------------------------
+
+// addMissingUniqueIndexes gives an existing table the unique index CREATE TABLE would have given a
+// new one, whether or not the field is search-indexed and whether its column exists or is being
+// added in this pass. Without it a unique field added to a table that already exists was never
+// enforced. A search-indexed field whose column exists is handled with its search index above.
+func (d *Diff) addMissingUniqueIndexes(tableName string, dt *doctype.DocType, liveTable *TableInfo) {
+	adding := make(map[string]bool, len(d.NewColumns[tableName]))
+	for _, column := range d.NewColumns[tableName] {
+		adding[column.Name] = true
+	}
+	for _, field := range dt.DataFields() {
+		if !field.Unique || !field.IsDataField() || field.Fieldtype == "Table" {
+			continue
+		}
+		live, exists := liveTable.Columns[field.Fieldname]
+		if exists && (field.SearchIndex || len(live.UniqueIndexNames) > 0) {
+			continue
+		}
+		if !exists && !adding[field.Fieldname] {
+			continue
+		}
+		d.NewIndexes[tableName] = append(d.NewIndexes[tableName], IndexAdd{Table: tableName, Columns: []string{field.Fieldname}, Unique: true})
+	}
+}
 
 // ComputeDiffFromRegistry is a backward-compat wrapper. Prefer calling
 // ComputeDiff directly with doctype slices.
