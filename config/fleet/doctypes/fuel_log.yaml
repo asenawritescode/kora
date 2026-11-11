@@ -1,0 +1,42 @@
+name: Fuel Log
+module: Fleet
+title_field: label
+search_fields: label
+sort_field: fill_date
+sort_order: DESC
+description: A fuel fill for one vehicle.
+
+fields:
+  - fieldname: vehicle
+    fieldtype: Link
+    options: Vehicle
+    label: Vehicle
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: fill_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+  - fieldname: label
+    fieldtype: Data
+    label: Entry
+    read_only: true
+    search_index: true
+    computed: '(concat vehicle " " fill_date)'
+  - fieldname: litres
+    fieldtype: Float
+    label: Litres
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.0
+        message: "Litres cannot be negative."
+  - fieldname: cost
+    fieldtype: Currency
+    label: Cost
+    in_list_view: true
+  - fieldname: odometer_km
+    fieldtype: Float
+    label: Odometer (km)

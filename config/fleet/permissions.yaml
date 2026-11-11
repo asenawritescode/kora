@@ -1,0 +1,60 @@
+- doctype: Vehicle
+  role: Fleet Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Driver
+  role: Fleet Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Trip
+  role: Fleet Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Fuel Log
+  role: Fleet Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Service Record
+  role: Fleet Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Vehicle
+  role: Dispatcher
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Driver
+  role: Dispatcher
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Trip
+  role: Dispatcher
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Fuel Log
+  role: Dispatcher
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Service Record
+  role: Dispatcher
+  read: true
+  write: true
+  create: true
+  delete: false

@@ -1,0 +1,36 @@
+name: Driver
+module: Fleet
+title_field: driver_name
+search_fields: driver_name, phone, licence_no
+sort_field: modified
+sort_order: DESC
+description: A person who drives for the business.
+
+fields:
+  - fieldname: driver_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    in_list_view: true
+  - fieldname: licence_no
+    fieldtype: Data
+    label: Licence number
+  - fieldname: licence_expiry
+    fieldtype: Date
+    label: Licence expiry
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      On leave
+      Left
+    default: Active
+    in_list_view: true
+    in_standard_filter: true

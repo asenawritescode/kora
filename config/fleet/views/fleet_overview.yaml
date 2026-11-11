@@ -1,0 +1,27 @@
+name: Fleet Overview
+route: /fleet
+type: workspace
+layout: single
+label: Fleet
+module: Fleet
+components:
+  - id: vehicles
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Vehicle
+    label: Vehicles
+    desktop_columns: [registration, make, model, status, odometer_km]
+    mobile_columns: [registration, status]
+  - id: open_trips
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Trip
+    label: Open trips
+    filters:
+      - field: status
+        op: in
+        value: [Planned, On the road]
+    desktop_columns: [reference, vehicle, driver, origin, destination, start_date, status]
+    mobile_columns: [reference, destination, status]

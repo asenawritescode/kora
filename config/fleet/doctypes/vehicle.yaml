@@ -1,0 +1,48 @@
+name: Vehicle
+module: Fleet
+title_field: registration
+search_fields: registration, make, model, status
+sort_field: modified
+sort_order: DESC
+description: A vehicle the business owns or runs.
+
+fields:
+  - fieldname: registration
+    fieldtype: Data
+    label: Registration
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: make
+    fieldtype: Data
+    label: Make
+    in_list_view: true
+  - fieldname: model
+    fieldtype: Data
+    label: Model
+    in_list_view: true
+  - fieldname: year
+    fieldtype: Int
+    label: Year
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Available
+      On trip
+      In service
+      Retired
+    default: Available
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: odometer_km
+    fieldtype: Float
+    label: Odometer (km)
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The odometer cannot be negative."
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
