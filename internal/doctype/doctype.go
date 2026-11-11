@@ -2,6 +2,7 @@
 package doctype
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
@@ -44,6 +45,20 @@ type DocType struct {
 	tableFields        []Field
 	listFields         []Field
 	validSortColumns   map[string]bool
+}
+
+// MarshalJSON writes the lists a client walks as arrays. A record type with no fields or no
+// document constraints holds nil slices, which encoding/json writes as null; the wire contract
+// says array, and clients call array methods on them.
+func (d DocType) MarshalJSON() ([]byte, error) {
+	type plain DocType // a type without these methods, so the call below does not recurse
+	if d.Fields == nil {
+		d.Fields = []Field{}
+	}
+	if d.DocConstraints == nil {
+		d.DocConstraints = []DocConstraint{}
+	}
+	return json.Marshal(plain(d))
 }
 
 // QuantityEffect says what saving a record does to a number on another record,
