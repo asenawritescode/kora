@@ -1,0 +1,31 @@
+name: Produce Deliveries
+route: /produce
+type: workspace
+layout: single
+label: Produce
+module: Produce
+components:
+  - id: farmers
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Farmer
+    label: Active farmers
+    filters:
+      - field: status
+        op: equals
+        value: Active
+    desktop_columns: [member_no, farmer_name, village, group_name, phone]
+    mobile_columns: [farmer_name, village]
+  - id: unpaid_deliveries
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Produce Delivery
+    label: Deliveries not yet paid
+    filters:
+      - field: status
+        op: equals
+        value: Received
+    desktop_columns: [reference, farmer, product, delivery_date, quantity_kg, grade, amount]
+    mobile_columns: [farmer, quantity_kg, amount]
