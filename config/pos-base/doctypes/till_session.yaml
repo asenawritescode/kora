@@ -20,9 +20,29 @@ fields:
     fieldtype: Link
     options: Register
     label: Register
-    reqd: true
     in_list_view: true
     in_standard_filter: true
+  - fieldname: register_code
+    fieldtype: Data
+    label: Register code
+    description: The code of the register the till is at, for example REG-001. Sales keep the register as a code too.
+    in_list_view: true
+  - fieldname: opening_cash
+    fieldtype: Currency
+    label: Opening cash
+    description: Cash in the drawer when the till was opened, in the base currency.
+    default: "0"
+  - fieldname: expected_cash
+    fieldtype: Currency
+    label: Expected cash
+    description: Opening cash plus the cash taken at the register. Filled in by the register.
+    default: "0"
+    read_only: true
+    in_list_view: true
+  - fieldname: closing_cash
+    fieldtype: Currency
+    label: Counted cash
+    description: The cash counted in the drawer when the till is closed, in the base currency.
   - fieldname: status
     fieldtype: Select
     label: Status
@@ -54,3 +74,13 @@ fields:
   - fieldname: notes
     fieldtype: Text
     label: Notes
+doc_constraints:
+  - type: field_dependency
+    condition: "status == 'Closed'"
+    require_fields: [closing_cash]
+    message: "Count the cash in the drawer before closing the till."
+  - type: immutable_after
+    status_field: status
+    status_values: [Closed]
+    immutable_fields: [reference, register, register_code, opening_cash, expected_cash, opened_by, opened_at]
+    message: "A closed till cannot be changed."

@@ -43,11 +43,44 @@ components:
       methods: literal:cash
       register: literal:REG-001
     actions:
+      - id: open_till
+        trigger: on_click
+        type: create_record
+        config:
+          target_doctype: Till Session
+          context_field: till_session
+          label: Till session
+          button_label: Open till
+          reference_prefix: TILL
+          inputs:
+            - field: opening_cash
+              label: Opening cash
+              fieldtype: Currency
+              default: 0
+              required: true
+          fields:
+            reference: $generated
+            register_code: $binding.register
+            opened_at: $now
+            opened_by: $actor
+            opening_cash: $input.opening_cash
+            expected_cash: $input.opening_cash
+            status: Open
       - id: complete
         trigger: on_click
         type: create_transaction
         config:
           target_doctype: Sale
+          required_related_status:
+            - doctype: Till Session
+              record_field: till_session
+              status_field: status
+              equals: Open
+          related_numeric_updates:
+            - doctype: Till Session
+              field: expected_cash
+              record_field: till_session
+              source_field: total
           allowed_context_values:
             register: [REG-001]
             payment_method: [Cash]
@@ -73,6 +106,7 @@ components:
                 amount: "$context.total"
                 method: "$context.payment_method"
                 register: "$context.register"
+                till_session: "$context.till_session"
                 received_by: "$actor"
           child_table: Sale Item
           line_source: cart

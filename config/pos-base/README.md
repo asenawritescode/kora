@@ -45,6 +45,18 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 - Till sessions count cash per currency (Till Count rows).
 - A product can carry prices in other currencies (Product Price rows).
 
+## Till sessions
+
+- **The register will not sell without an open till.** The panel shows "Open till"
+  (with an opening cash figure) until a Till Session is open. Each sale and its
+  Payment are linked to that session, and the session's `expected_cash` goes up by
+  the cash taken. The check is on the server: a sale for a missing or closed
+  session is refused and nothing is saved.
+- **Closing:** set the session's status to Closed and fill in `closing_cash` (the
+  count). A closed till takes no more register sales and cannot be edited.
+- Sales entered outside the register (back-office entries, old sales) need no
+  session, so upgrading keeps every earlier sale editable.
+
 ## Limits to know
 
 - **The register screen sells in the base currency.** Its payment panel does not
@@ -59,6 +71,16 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 - Amounts keep two decimals. Currencies without minor units, or with three
   (such as JPY or KWD), are not modelled. Exchange rates keep nine decimals.
 - The register screen is tied to register code `REG-001` and cash, as in `retail-shop`.
+- The panel remembers the open till for the browser session only. After closing the
+  browser, "Open till" opens a new session, and the earlier one stays open until
+  someone closes it from the Till Session list. Two open tills for one cashier are
+  not prevented (the Engine has no composite uniqueness).
+- A closed session's status can be edited back to Open by anyone who may edit Till
+  Sessions; only its figures are frozen.
+- `expected_cash` adds the sale total, so it is right only for base-currency cash
+  sales, which is all the register takes.
+- Closing needs the counted figure (a document rule), because the Engine does not
+  enforce `required_if` or `mandatory_depends_on` on an empty field.
   Sale and Payment keep the register as a code (text), not a link, because a
   Register record's own name is generated and can never be `REG-001`.
 - The Engine's `Date` field default `today` breaks table creation on MySQL, so
@@ -66,7 +88,7 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 
 ## Not here yet
 
-A stock movement ledger (adjustments are in `erp-inventory`), purchasing, returns and refunds, approvals, automatic posting to accounts.
+A stock movement ledger (adjustments are in `erp-inventory`), purchasing, returns and refunds, approvals, automatic posting to accounts, a Z-report.
 
 ## Checks
 
