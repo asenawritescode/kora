@@ -54,6 +54,12 @@ fields:
     label: Register code
     description: The code of the register that took the sale, for example REG-001.
     in_standard_filter: true
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till session
+    description: The till session the sale was rung up in. Sales rung up on the register need an open one.
+    in_standard_filter: true
   - fieldname: customer
     fieldtype: Link
     options: Customer

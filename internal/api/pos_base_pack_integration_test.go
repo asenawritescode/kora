@@ -107,6 +107,8 @@ func seedPOSBaseShop(t *testing.T, db *sql.DB) {
 		// No Register record is inserted on purpose: a register created in the
 		// UI gets a generated name, so the sale must work with only the code.
 		"INSERT INTO `tabProduct` (name, reference, product_name, selling_price, stock_qty, status) VALUES ('PROD-001','P-1','Soda',100,1000,'Active')",
+		// The register only sells on an open till session.
+		"INSERT INTO `tabTill Session` (name, reference, status, opening_cash, expected_cash, register_code) VALUES ('TILL-TEST','T-TEST','Open',0,0,'REG-001')",
 		"INSERT INTO `tabCurrency` (name, code, currency_name, rate_to_base, enabled) VALUES ('KES','KES','Base money',1,1)",
 		"INSERT INTO `tabCurrency` (name, code, currency_name, rate_to_base, enabled) VALUES ('USD','USD','Dollar',129.5,1)",
 		"INSERT INTO `tabCurrency` (name, code, currency_name, rate_to_base, enabled) VALUES ('UGX','UGX','Small rate money',0.0345,1)",
@@ -123,7 +125,7 @@ func posBasePanelCheckout(reference string, total float64, extra map[string]any)
 	checkout := map[string]any{
 		"reference": reference, "cart": []any{map[string]any{"product": "PROD-001", "rate": 100.0, "quantity": total / 100}},
 		"customer": "", "customer_name": "", "invoice_date": "2026-11-08", "due_date": "2026-11-08",
-		"register": "REG-001", "payment_status": "Paid", "payment_method": "Cash", "total": total,
+		"register": "REG-001", "till_session": "TILL-TEST", "payment_status": "Paid", "payment_method": "Cash", "total": total,
 	}
 	for key, value := range extra {
 		checkout[key] = value
