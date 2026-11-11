@@ -1,0 +1,6 @@
+pack: crm
+seed_mode: demo
+records:
+  - doctype: Deal
+    reference: DEMO-CRM-001
+    status: Draft

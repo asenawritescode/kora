@@ -1,0 +1,122 @@
+name: Lead
+module: CRM
+description: A prospective buyer tracked from first contact through qualification, conversion, or disqualification.
+title_field: lead_name
+search_fields: lead_name, reference, email, phone, company, lifecycle_stage
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: lead_name
+    fieldtype: Data
+    label: Lead Name
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  # Retained as an optional legacy identifier for records created with the
+  # earlier reference-based Lead schema.
+  - fieldname: reference
+    fieldtype: Data
+    label: Legacy Reference
+    search_index: true
+    unique: true
+    in_standard_filter: true
+    depends_on: reference
+
+  - fieldname: company
+    fieldtype: Link
+    options: Company
+    label: Company
+    search_index: true
+    in_list_view: true
+  - fieldname: contact
+    fieldtype: Link
+    options: Contact
+    label: Contact
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+    search_index: true
+    options: Email
+    in_list_view: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    search_index: true
+    options: Phone
+  - fieldname: lead_source
+    fieldtype: Select
+    label: Lead Source
+    options: |
+      Website
+      Referral
+      Social Media
+      Event
+      Cold Call
+      Email Campaign
+      Partner
+      Existing Customer
+      Other
+    in_standard_filter: true
+  - fieldname: assignee
+    fieldtype: Data
+    label: Legacy Assignee
+    description: Preserved for records from the earlier CRM release.
+    depends_on: assignee
+  - fieldname: assignee_user
+    fieldtype: User
+    label: Assignee
+    in_list_view: true
+    in_standard_filter: true
+    description: Select an existing workspace user.
+  - fieldname: status
+    fieldtype: Data
+    label: Legacy Status
+    description: Preserved for records from the earlier CRM release.
+    depends_on: status
+
+  - fieldname: lifecycle_stage
+    fieldtype: Select
+    label: Status
+    search_index: true
+    options: |
+      Draft
+      New
+      Working
+      Qualified
+      Disqualified
+      Converted
+    default: Draft
+    read_only: true
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: disqualification_reason
+    fieldtype: Text
+    label: Disqualification Reason
+    depends_on: lifecycle_stage
+  - fieldname: converted_deal
+    fieldtype: Link
+    options: Deal
+    label: Converted Deal
+    description: Link the deal created from this qualified lead.
+    depends_on: lifecycle_stage
+  - fieldname: next_follow_up
+    fieldtype: Date
+    label: Next Follow-up
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+
+  # Legacy data fields remain readable during the source-pack transition.
+  - fieldname: source_record
+    fieldtype: Data
+    label: Legacy Source Record
+    depends_on: source_record
+  - fieldname: evidence
+    fieldtype: Text
+    label: Legacy Evidence
+    depends_on: evidence

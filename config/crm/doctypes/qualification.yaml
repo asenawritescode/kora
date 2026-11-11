@@ -1,0 +1,83 @@
+name: Qualification
+module: CRM
+description: Evidence that a prospect has a real need, fit, authority, budget, and timing.
+title_field: reference
+search_fields: reference, lead, qualification_status, status
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Qualification Name
+    search_index: true
+    reqd: true
+    in_list_view: true
+  - fieldname: lead
+    fieldtype: Link
+    options: Lead
+    label: Lead
+    search_index: true
+    in_list_view: true
+  - fieldname: assessor
+    fieldtype: User
+    label: Assessed By
+    description: Select an existing workspace user.
+  - fieldname: customer_need
+    fieldtype: Text
+    label: Need and Desired Outcome
+  - fieldname: decision_authority
+    fieldtype: Data
+    label: Decision-maker / Buying Process
+  - fieldname: budget_status
+    fieldtype: Select
+    label: Budget
+    options: |
+      Confirmed
+      Expected
+      Unknown
+      Not available
+  - fieldname: timing
+    fieldtype: Select
+    label: Timing
+    options: |
+      Within 30 days
+      Within 90 days
+      Later
+      Unknown
+  - fieldname: fit
+    fieldtype: Select
+    label: Solution Fit
+    options: |
+      Strong
+      Partial
+      Poor
+      Unknown
+  - fieldname: qualification_status
+    fieldtype: Select
+    label: Review Status
+    search_index: true
+    options: |
+      Draft
+      In Review
+      Qualified
+      Not Qualified
+    default: Draft
+    read_only: true
+    in_list_view: true
+  - fieldname: evidence
+    fieldtype: Text
+    label: Evidence and Notes
+  - fieldname: source_record
+    fieldtype: Data
+    label: Legacy Source Record
+    depends_on: source_record
+  - fieldname: assignee
+    fieldtype: Data
+    label: Legacy Assignee
+    depends_on: assignee
+  - fieldname: status
+    fieldtype: Data
+    label: Legacy Status
+    search_index: true
+    depends_on: status

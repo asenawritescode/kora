@@ -1,0 +1,72 @@
+name: Handoff
+module: CRM
+description: A trackable transfer from Sales to the team responsible for delivery or customer onboarding.
+title_field: reference
+search_fields: reference, deal, handoff_status
+sort_field: due_date
+sort_order: ASC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Handoff Title
+    search_index: true
+    reqd: true
+    in_list_view: true
+  - fieldname: deal
+    fieldtype: Link
+    options: Deal
+    label: Won Deal
+    search_index: true
+    reqd: true
+    in_list_view: true
+  - fieldname: receiving_owner
+    fieldtype: User
+    label: Receiving Owner
+    description: Select an existing workspace user.
+    in_list_view: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Target Handoff Date
+    in_list_view: true
+  - fieldname: customer_outcome
+    fieldtype: Text
+    label: Customer Goals / Promises
+  - fieldname: scope_summary
+    fieldtype: Text
+    label: Agreed Scope and Commitments
+  - fieldname: open_items
+    fieldtype: Text
+    label: Open Questions / Follow-ups
+  - fieldname: handoff_status
+    fieldtype: Select
+    label: Handoff Status
+    search_index: true
+    options: |
+      Draft
+      Ready for Review
+      Accepted
+      Blocked
+      Complete
+    default: Draft
+    read_only: true
+    in_list_view: true
+  - fieldname: blocker_reason
+    fieldtype: Text
+    label: Blocker / Return Reason
+  - fieldname: source_record
+    fieldtype: Data
+    label: Legacy Source Record
+    depends_on: source_record
+  - fieldname: assignee
+    fieldtype: Data
+    label: Legacy Assignee
+    depends_on: assignee
+  - fieldname: evidence
+    fieldtype: Text
+    label: Legacy Evidence
+    depends_on: evidence
+  - fieldname: status
+    fieldtype: Data
+    label: Legacy Status
+    depends_on: status

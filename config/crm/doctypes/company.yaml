@@ -1,0 +1,121 @@
+name: Company
+module: CRM
+title_field: company_name
+search_fields: company_name, website, industry
+sort_field: company_name
+sort_order: ASC
+
+fields:
+  # --- Section: Company Info ---
+  - fieldname: section_info
+    fieldtype: Section Break
+    label: Company Information
+
+  - fieldname: col_left
+    fieldtype: Column Break
+
+  - fieldname: company_name
+    fieldtype: Data
+    label: Company Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: website
+    fieldtype: Data
+    label: Website
+    search_index: true
+    options: URL
+    in_list_view: true
+
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+
+  - fieldname: col_right
+    fieldtype: Column Break
+
+  - fieldname: industry
+    fieldtype: Select
+    label: Industry
+    search_index: true
+    options: |
+      Technology
+      Healthcare
+      Finance
+      Manufacturing
+      Retail
+      Education
+      Real Estate
+      Professional Services
+      Non-Profit
+      Government
+      Other
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: company_type
+    fieldtype: Select
+    label: Company Type
+    options: |
+      Customer
+      Prospect
+      Partner
+      Vendor
+      Investor
+    default: Prospect
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: first_engaged_date
+    fieldtype: Date
+    label: First Engaged
+    description: Date the company first entered the sales relationship, for historical reporting.
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: employee_count
+    fieldtype: Int
+    label: Employee Count
+    constraints:
+      - type: min
+        value: 0
+        message: "Employee count cannot be negative."
+
+  - fieldname: annual_revenue
+    fieldtype: Currency
+    label: Annual Revenue
+    constraints:
+      - type: min
+        value: 0
+        message: "Annual revenue cannot be negative."
+
+  # --- Section: Addresses ---
+  - fieldname: section_address
+    fieldtype: Section Break
+    label: Addresses
+
+  - fieldname: billing_address
+    fieldtype: Text
+    label: Billing Address
+
+  - fieldname: shipping_address
+    fieldtype: Text
+    label: Shipping Address
+
+  # --- Section: Status ---
+  - fieldname: section_status
+    fieldtype: Section Break
+    label: Status
+
+  - fieldname: is_active
+    fieldtype: Check
+    label: Active
+    default: "1"
+    in_list_view: true
+
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
