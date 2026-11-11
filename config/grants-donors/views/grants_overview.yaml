@@ -1,0 +1,27 @@
+name: Grants Overview
+route: /grants
+type: workspace
+layout: single
+label: Grants
+module: Grants
+components:
+  - id: grants
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Grant
+    label: Grants
+    desktop_columns: [reference, grant_title, donor, amount, end_date, status]
+    mobile_columns: [grant_title, amount, status]
+  - id: reports_due
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Grant Report
+    label: Reports due
+    filters:
+      - field: status
+        op: equals
+        value: Due
+    desktop_columns: [grant_ref, due_date, status]
+    mobile_columns: [grant_ref, due_date]

@@ -1,0 +1,47 @@
+name: Grant Report
+module: Grants
+title_field: grant_ref
+search_fields: grant_ref, status
+sort_field: due_date
+sort_order: ASC
+description: A report a donor expects on a grant, with its deadline.
+
+fields:
+  - fieldname: grant_ref
+    fieldtype: Link
+    options: Grant
+    label: Grant
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due date
+    reqd: true
+    in_list_view: true
+  - fieldname: submitted_on
+    fieldtype: Date
+    label: Submitted on
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Due
+      Submitted
+      Accepted
+    default: Due
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: field_dependency
+    condition: "status == 'Submitted'"
+    require_fields: [submitted_on]
+    message: "Say when the report was submitted."
+  - type: field_dependency
+    condition: "status == 'Accepted'"
+    require_fields: [submitted_on]
+    message: "Say when the report was submitted."

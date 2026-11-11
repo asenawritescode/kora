@@ -1,0 +1,29 @@
+name: grants_overview
+label: Grants overview
+route: /reports/grants
+queries:
+  - id: grants_by_status
+    model: grant
+    measures: [count, amount_sum]
+    dimensions: [status]
+  - id: reports_by_status
+    model: grant_report
+    measures: [count]
+    dimensions: [status]
+visuals:
+  - id: grants_by_status
+    type: bar
+    source: grants_by_status
+    x_field: status
+    series:
+      - field: amount_sum
+        label: Grant amount
+        type: bar
+  - id: reports_by_status
+    type: bar
+    source: reports_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Reports
+        type: bar
