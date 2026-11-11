@@ -1,0 +1,62 @@
+name: Task
+module: Projects
+title_field: task_title
+search_fields: task_title, status, priority
+sort_field: modified
+sort_order: DESC
+description: A piece of work inside a project, given to one person.
+
+fields:
+  - fieldname: task_title
+    fieldtype: Data
+    label: Task
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: project
+    fieldtype: Link
+    options: Project
+    label: Project
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      To do
+      In progress
+      Blocked
+      Done
+    default: To do
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: priority
+    fieldtype: Select
+    label: Priority
+    options: |
+      Low
+      Normal
+      High
+    default: Normal
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: assignee
+    fieldtype: User
+    label: Assignee
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due date
+    in_list_view: true
+  - fieldname: estimate_hours
+    fieldtype: Float
+    label: Estimate (hours)
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The estimate cannot be negative."
+  - fieldname: description
+    fieldtype: Text
+    label: Description

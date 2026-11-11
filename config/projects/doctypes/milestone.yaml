@@ -1,0 +1,37 @@
+name: Milestone
+module: Projects
+title_field: milestone_name
+search_fields: milestone_name, status
+sort_field: due_date
+sort_order: ASC
+description: A date a project has to reach, such as a handover or an inspection.
+
+fields:
+  - fieldname: milestone_name
+    fieldtype: Data
+    label: Milestone
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: project
+    fieldtype: Link
+    options: Project
+    label: Project
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due date
+    reqd: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Open
+      Reached
+      Missed
+    default: Open
+    in_list_view: true
+    in_standard_filter: true

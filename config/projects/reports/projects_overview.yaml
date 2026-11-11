@@ -1,0 +1,29 @@
+name: projects_overview
+label: Projects overview
+route: /reports/projects
+queries:
+  - id: tasks_by_status
+    model: task
+    measures: [count]
+    dimensions: [status]
+  - id: hours_by_project
+    model: timesheet_entry
+    measures: [hours_sum]
+    dimensions: [project]
+visuals:
+  - id: tasks_by_status
+    type: bar
+    source: tasks_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Tasks
+        type: bar
+  - id: hours_by_project
+    type: bar
+    source: hours_by_project
+    x_field: project
+    series:
+      - field: hours_sum
+        label: Hours
+        type: bar
