@@ -1,0 +1,95 @@
+name: crm_pipeline_performance
+label: CRM pipeline performance
+route: /reports/crm-pipeline-performance
+queries:
+  - id: deals_by_stage
+    model: deal
+    measures: [count, total_sum]
+    dimensions: [pipeline_stage]
+    filters:
+      - field: pipeline_stage
+        operator: in
+        values: [Lead, Qualified, Proposal, Negotiation]
+  - id: closed_deals_by_stage
+    model: deal
+    measures: [count, total_sum]
+    dimensions: [pipeline_stage]
+    filters:
+      - field: pipeline_stage
+        operator: in
+        values: [Closed Won, Closed Lost]
+  - id: deals_by_owner
+    model: deal
+    measures: [count, total_sum]
+    dimensions: [owner_user]
+  - id: leads_by_lifecycle_stage
+    model: lead
+    measures: [count]
+    dimensions: [lifecycle_stage]
+  - id: activities_by_status
+    model: activity
+    measures: [count]
+    dimensions: [status]
+  - id: activities_by_due_date
+    model: activity
+    measures: [count]
+    dimensions: [due_date]
+visuals:
+  - id: pipeline_by_stage
+    type: bar
+    source: deals_by_stage
+    x_field: pipeline_stage
+    series:
+      - field: total_sum
+        label: Open pipeline value
+        type: bar
+        format: currency
+  - id: closed_deals_by_outcome
+    type: bar
+    source: closed_deals_by_stage
+    x_field: pipeline_stage
+    series:
+      - field: count
+        label: Closed deals
+        type: bar
+        format: number
+      - field: total_sum
+        label: Closed deal value
+        type: bar
+        format: currency
+  - id: pipeline_by_owner
+    type: bar
+    source: deals_by_owner
+    x_field: owner_user
+    series:
+      - field: total_sum
+        label: Total Deal value
+        type: bar
+        format: currency
+  - id: activities_by_due_date
+    type: line
+    source: activities_by_due_date
+    x_field: due_date
+    series:
+      - field: count
+        label: Activities
+        type: line
+        format: number
+  - id: leads_by_stage
+    type: bar
+    source: leads_by_lifecycle_stage
+    x_field: lifecycle_stage
+    series:
+      - field: count
+        label: Leads
+        type: bar
+        format: number
+  - id: activities_by_status
+    type: bar
+    source: activities_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Activities
+        type: bar
+        format: number

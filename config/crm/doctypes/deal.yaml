@@ -1,0 +1,185 @@
+name: Deal
+module: CRM
+is_submittable: true
+track_changes: true
+title_field: deal_name
+search_fields: deal_name, contact, company
+sort_field: modified
+sort_order: DESC
+
+fields:
+  # --- Section: Deal Info ---
+  - fieldname: section_deal
+    fieldtype: Section Break
+    label: Deal Information
+
+  - fieldname: col_left
+    fieldtype: Column Break
+
+  - fieldname: deal_name
+    fieldtype: Data
+    label: Deal Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: contact
+    fieldtype: Link
+    label: Primary Contact
+    search_index: true
+    options: Contact
+    reqd: true
+    in_list_view: true
+
+  - fieldname: company
+    fieldtype: Link
+    label: Company
+    search_index: true
+    options: Company
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: owner_user
+    fieldtype: User
+    label: Deal owner
+    in_list_view: true
+    in_standard_filter: true
+    description: Select an existing workspace user.
+
+  - fieldname: col_right
+    fieldtype: Column Break
+
+  - fieldname: expected_close_date
+    fieldtype: Date
+    label: Expected Close Date
+    in_list_view: true
+
+  - fieldname: actual_close_date
+    fieldtype: Date
+    label: Actual Close Date
+    description: Historical date this deal was won or lost; leave blank while it is open.
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: probability
+    fieldtype: Percent
+    label: Probability (%)
+    constraints:
+      - type: min
+        value: 0
+        message: "Probability cannot be less than 0%."
+      - type: max
+        value: 100
+        message: "Probability cannot exceed 100%."
+
+  - fieldname: lead_source
+    fieldtype: Select
+    label: Lead Source
+    options: |
+      Website
+      Referral
+      Social Media
+      Event
+      Cold Call
+      Email Campaign
+      Partner
+      Existing Customer
+      Other
+    in_standard_filter: true
+
+  - fieldname: next_step
+    fieldtype: Data
+    label: Next action
+    in_list_view: true
+
+  - fieldname: next_step_due_date
+    fieldtype: Date
+    label: Next action due
+    in_list_view: true
+    in_standard_filter: true
+
+  # --- Section: Financials ---
+  - fieldname: section_finance
+    fieldtype: Section Break
+    label: Financials
+
+  - fieldname: items
+    fieldtype: Table
+    label: Line Items
+    options: Deal Item
+    reqd: true
+    constraints:
+      - type: min_rows
+        value: 1
+        message: "At least one line item is required."
+
+  - fieldname: subtotal
+    fieldtype: Currency
+    label: Subtotal
+    computed: "SUM(items.line_total)"
+    read_only: true
+
+  - fieldname: discount
+    fieldtype: Currency
+    label: Discount
+    default: "0"
+    constraints:
+      - type: min
+        value: 0
+        message: "Discount cannot be negative."
+
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    computed: "ROUND(subtotal - discount, 2)"
+    read_only: true
+
+  # --- Section: Pipeline ---
+  - fieldname: section_pipeline
+    fieldtype: Section Break
+    label: Pipeline
+
+  - fieldname: status
+    fieldtype: Data
+    label: Legacy Stage
+    description: Preserved for records from the earlier CRM release.
+    depends_on: status
+
+  - fieldname: pipeline_stage
+    fieldtype: Select
+    label: Stage
+    options: |
+      Lead
+      Qualified
+      Proposal
+      Negotiation
+      Closed Won
+      Closed Lost
+    default: Lead
+    read_only: true
+    in_list_view: true
+    in_standard_filter: true
+
+  # --- Section: Notes ---
+  - fieldname: section_notes
+    fieldtype: Section Break
+    label: Notes
+
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+
+  - fieldname: loss_reason
+    fieldtype: Text
+    label: Loss Reason
+    depends_on: pipeline_stage
+
+  - fieldname: competitor
+    fieldtype: Link
+    options: Competitor
+    label: Competitor
+
+  - fieldname: competitor_notes
+    fieldtype: Text
+    label: Competitive Notes

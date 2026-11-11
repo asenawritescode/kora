@@ -1,0 +1,134 @@
+name: Contact
+module: CRM
+title_field: full_name
+search_fields: first_name, last_name, full_name, email, company
+sort_field: modified
+sort_order: DESC
+
+fields:
+  # --- Section: Personal Details ---
+  - fieldname: section_personal
+    fieldtype: Section Break
+    label: Personal Details
+
+  - fieldname: col_left
+    fieldtype: Column Break
+
+  - fieldname: first_name
+    fieldtype: Data
+    label: First Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: last_name
+    fieldtype: Data
+    label: Last Name
+    reqd: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: full_name
+    fieldtype: Data
+    label: Full Name
+    read_only: true
+    in_list_view: true
+    search_index: true
+    computed: '(concat first_name " " last_name)'
+
+  - fieldname: col_right
+    fieldtype: Column Break
+
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+    search_index: true
+    options: Email
+    in_list_view: true
+    constraints:
+      - type: regex
+        pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+        message: "Enter a valid email address."
+
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+    in_list_view: true
+
+  - fieldname: mobile
+    fieldtype: Data
+    label: Mobile
+
+  # --- Section: Organization ---
+  - fieldname: section_org
+    fieldtype: Section Break
+    label: Organization
+
+  - fieldname: company
+    fieldtype: Link
+    label: Company
+    search_index: true
+    options: Company
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: job_title
+    fieldtype: Data
+    label: Job Title
+
+  - fieldname: department
+    fieldtype: Data
+    label: Department
+
+  # --- Section: Classification ---
+  - fieldname: section_class
+    fieldtype: Section Break
+    label: Classification
+
+  - fieldname: contact_type
+    fieldtype: Select
+    label: Contact Type
+    options: |
+      Customer
+      Prospect
+      Partner
+      Vendor
+      Investor
+    default: Prospect
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: lead_source
+    fieldtype: Select
+    label: Lead Source
+    options: |
+      Website
+      Referral
+      Social Media
+      Event
+      Cold Call
+      Email Campaign
+      Partner
+      Other
+    in_standard_filter: true
+
+  - fieldname: is_active
+    fieldtype: Check
+    label: Active
+    default: "1"
+    in_list_view: true
+
+  # --- Section: Notes ---
+  - fieldname: section_notes
+    fieldtype: Section Break
+    label: Notes
+
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+
+  - fieldname: mailing_address
+    fieldtype: Text
+    label: Mailing Address

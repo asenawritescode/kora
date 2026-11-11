@@ -1,0 +1,278 @@
+# --- Lead ---
+- doctype: Lead
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: true
+  if_assigned: [assignee_user]
+
+- doctype: Lead
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: false
+
+- doctype: Lead
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+
+# --- Contact ---
+- doctype: Contact
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  if_owner: true
+
+- doctype: Contact
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  if_owner: false
+
+- doctype: Contact
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+# --- Company ---
+- doctype: Company
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  if_owner: true
+
+- doctype: Company
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  if_owner: false
+
+- doctype: Company
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+# --- Deal ---
+- doctype: Deal
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  can_cancel: true
+  if_owner: true
+  if_assigned: [owner_user]
+
+- doctype: Deal
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  can_cancel: true
+  if_owner: false
+
+- doctype: Deal
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+  can_cancel: true
+
+# --- Deal Item (child table, same permissions as parent Deal) ---
+- doctype: Deal Item
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  if_owner: true
+
+- doctype: Deal Item
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  if_owner: false
+
+- doctype: Deal Item
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+# --- Activity ---
+- doctype: Activity
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: true
+  if_assigned: [assigned_to]
+
+- doctype: Activity
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: false
+
+- doctype: Activity
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+
+# Reps can read and update their own or explicitly assigned Lead, Deal, and
+# Activity rows. Other CRM records remain creator-scoped; Sales Managers can
+# review team records.
+- doctype: Qualification
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: true
+- doctype: Qualification
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: false
+- doctype: Qualification
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+
+- doctype: Sales Quote
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: true
+- doctype: Sales Quote
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: false
+- doctype: Sales Quote
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+
+- doctype: Risk
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: true
+- doctype: Risk
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: false
+- doctype: Risk
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+
+- doctype: Handoff
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: true
+- doctype: Handoff
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: false
+- doctype: Handoff
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+
+- doctype: Competitor
+  role: Sales Rep
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  if_owner: true
+- doctype: Competitor
+  role: Sales Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  if_owner: false
+- doctype: Competitor
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

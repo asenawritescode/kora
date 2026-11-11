@@ -1,0 +1,28 @@
+name: Sales Pipeline
+route: /crm
+type: workspace
+layout: single
+label: Sales Pipeline
+module: CRM
+components:
+  - id: pipeline_board
+    type: kanban_board
+    region: main
+    position: 0
+    source_doctype: Deal
+    label: Deals by stage
+    bindings:
+      status: pipeline_stage
+      title: deal_name
+  - id: follow_up_queue
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Activity
+    label: Next actions
+    filters:
+      - field: status
+        op: in
+        value: [Open, In Progress]
+    desktop_columns: [subject, assigned_to, due_date, priority, status]
+    mobile_columns: [subject, due_date, priority]

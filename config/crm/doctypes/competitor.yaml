@@ -1,0 +1,58 @@
+name: Competitor
+module: CRM
+description: A competitor referenced in a sales deal and its win or loss review.
+title_field: reference
+search_fields: reference, website, positioning
+sort_field: reference
+sort_order: ASC
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Competitor Name
+    reqd: true
+    bold: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: website
+    fieldtype: Data
+    label: Website
+    search_index: true
+    options: URL
+  - fieldname: positioning
+    fieldtype: Select
+    label: Market Position
+    search_index: true
+    options: |
+      Lower cost
+      Similar offering
+      Premium offering
+      Unknown
+    default: Unknown
+    in_list_view: true
+  - fieldname: strengths
+    fieldtype: Text
+    label: Known Strengths
+  - fieldname: differentiators
+    fieldtype: Text
+    label: Our Differentiators
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+  - fieldname: source_record
+    fieldtype: Data
+    label: Legacy Source Record
+    depends_on: source_record
+  - fieldname: assignee
+    fieldtype: Data
+    label: Legacy Assignee
+    depends_on: assignee
+  - fieldname: evidence
+    fieldtype: Text
+    label: Legacy Evidence
+    depends_on: evidence
+  - fieldname: status
+    fieldtype: Data
+    label: Legacy Status
+    depends_on: status

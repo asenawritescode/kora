@@ -1,0 +1,43 @@
+name: Deal Item
+module: CRM
+is_child_table: true
+title_field: product_name
+
+fields:
+  - fieldname: product_name
+    fieldtype: Data
+    label: Product / Service
+    reqd: true
+    bold: true
+
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+
+  - fieldname: quantity
+    fieldtype: Int
+    label: Quantity
+    default: "1"
+    reqd: true
+    constraints:
+      - type: min
+        value: 1
+        message: "Quantity must be at least 1."
+      - type: max
+        value: 1000
+        message: "Quantity cannot exceed 1,000."
+
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit Price
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: "Unit price cannot be negative."
+
+  - fieldname: line_total
+    fieldtype: Currency
+    label: Line Total
+    computed: "quantity * unit_price"
+    read_only: true
