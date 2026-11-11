@@ -1,0 +1,31 @@
+name: Students Register
+route: /students
+type: workspace
+layout: single
+label: Students
+module: Students
+components:
+  - id: enrolled_students
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Student
+    label: Enrolled students
+    filters:
+      - field: status
+        op: equals
+        value: Enrolled
+    desktop_columns: [admission_no, student_name, class_group, guardian_name, guardian_phone]
+    mobile_columns: [student_name, class_group, guardian_phone]
+  - id: absences
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Class Register Entry
+    label: Absences and late arrivals
+    filters:
+      - field: status
+        op: in
+        value: [Absent, Late]
+    desktop_columns: [student, entry_date, status, note]
+    mobile_columns: [student, entry_date, status]

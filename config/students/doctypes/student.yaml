@@ -1,0 +1,46 @@
+name: Student
+module: Students
+title_field: student_name
+search_fields: admission_no, student_name, guardian_name
+sort_field: modified
+sort_order: DESC
+description: A learner enrolled at the school or training centre.
+
+fields:
+  - fieldname: admission_no
+    fieldtype: Data
+    label: Admission number
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: student_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: date_of_birth
+    fieldtype: Date
+    label: Date of birth
+  - fieldname: guardian_name
+    fieldtype: Data
+    label: Guardian
+  - fieldname: guardian_phone
+    fieldtype: Data
+    label: Guardian phone
+  - fieldname: class_group
+    fieldtype: Link
+    options: Class
+    label: Class
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Enrolled
+      Graduated
+      Left
+    default: Enrolled
+    in_list_view: true
+    in_standard_filter: true

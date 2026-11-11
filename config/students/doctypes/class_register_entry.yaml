@@ -1,0 +1,33 @@
+name: Class Register Entry
+module: Students
+sort_field: entry_date
+sort_order: DESC
+description: Whether a student was in class on a day.
+
+fields:
+  - fieldname: student
+    fieldtype: Link
+    options: Student
+    label: Student
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: entry_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Present
+      Absent
+      Late
+    default: Present
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: note
+    fieldtype: Text
+    label: Note
