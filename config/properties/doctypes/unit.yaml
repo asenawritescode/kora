@@ -1,0 +1,40 @@
+name: Unit
+module: Properties
+title_field: unit_no
+search_fields: unit_no, status
+sort_field: modified
+sort_order: DESC
+description: A flat, room, shop or plot inside a property, with its asking rent.
+
+fields:
+  - fieldname: unit_no
+    fieldtype: Data
+    label: Unit
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: property
+    fieldtype: Link
+    options: Property
+    label: Property
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: monthly_rent
+    fieldtype: Currency
+    label: Monthly rent
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The rent cannot be negative."
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Vacant
+      Occupied
+      Maintenance
+    default: Vacant
+    in_list_view: true
+    in_standard_filter: true

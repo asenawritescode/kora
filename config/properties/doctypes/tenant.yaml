@@ -1,0 +1,25 @@
+name: Tenant
+module: Properties
+title_field: tenant_name
+search_fields: tenant_name, phone, id_number
+sort_field: modified
+sort_order: DESC
+description: A person or business that rents a unit.
+
+fields:
+  - fieldname: tenant_name
+    fieldtype: Data
+    label: Tenant
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    in_list_view: true
+  - fieldname: id_number
+    fieldtype: Data
+    label: ID number
+  - fieldname: email
+    fieldtype: Data
+    label: Email

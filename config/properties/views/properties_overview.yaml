@@ -1,0 +1,27 @@
+name: Properties Overview
+route: /properties
+type: workspace
+layout: single
+label: Properties
+module: Properties
+components:
+  - id: units
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Unit
+    label: Units
+    desktop_columns: [unit_no, property, monthly_rent, status]
+    mobile_columns: [unit_no, property, status]
+  - id: active_leases
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Lease
+    label: Active leases
+    filters:
+      - field: status
+        op: equals
+        value: Active
+    desktop_columns: [reference, unit, tenant, start_date, end_date, monthly_rent]
+    mobile_columns: [reference, tenant, monthly_rent]
