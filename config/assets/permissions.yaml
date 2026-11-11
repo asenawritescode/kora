@@ -1,0 +1,48 @@
+- doctype: Asset Category
+  role: Asset Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Asset
+  role: Asset Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Maintenance Task
+  role: Asset Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Asset Assignment
+  role: Asset Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Asset Category
+  role: Asset User
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Asset
+  role: Asset User
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Maintenance Task
+  role: Asset User
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Asset Assignment
+  role: Asset User
+  read: true
+  write: true
+  create: true
+  delete: false

@@ -1,0 +1,41 @@
+name: assets_overview
+label: Assets overview
+route: /reports/assets
+queries:
+  - id: assets_by_category
+    model: asset
+    measures: [count]
+    dimensions: [category]
+  - id: assets_by_status
+    model: asset
+    measures: [count]
+    dimensions: [status]
+  - id: tasks_by_status
+    model: maintenance_task
+    measures: [count]
+    dimensions: [status]
+visuals:
+  - id: assets_by_category
+    type: bar
+    source: assets_by_category
+    x_field: category
+    series:
+      - field: count
+        label: Assets
+        type: bar
+  - id: assets_by_status
+    type: bar
+    source: assets_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Assets
+        type: bar
+  - id: tasks_by_status
+    type: bar
+    source: tasks_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Maintenance tasks
+        type: bar
