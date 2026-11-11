@@ -1,0 +1,27 @@
+name: Workshop
+route: /workshop
+type: workspace
+layout: single
+label: Workshop
+module: Workshop
+components:
+  - id: open_job_cards
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Job Card
+    label: Open job cards
+    filters:
+      - field: status
+        op: in
+        value: [Booked, In progress, Waiting for parts, Done]
+    desktop_columns: [reference, customer_vehicle, status, opened_on, promised_on]
+    mobile_columns: [reference, customer_vehicle, status]
+  - id: vehicles
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Customer Vehicle
+    label: Vehicles
+    desktop_columns: [registration, make, model, owner_name, owner_phone]
+    mobile_columns: [registration, make, owner_name]

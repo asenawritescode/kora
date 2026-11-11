@@ -1,0 +1,36 @@
+- doctype: Customer Vehicle
+  role: Workshop Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Customer Vehicle
+  role: Mechanic
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Job Card
+  role: Workshop Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Job Card
+  role: Mechanic
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Job Card Part
+  role: Workshop Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Job Card Part
+  role: Mechanic
+  read: true
+  write: true
+  create: true
+  delete: false

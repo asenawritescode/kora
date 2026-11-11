@@ -1,0 +1,6 @@
+- name: Workshop Manager
+  workspace_access: true
+  description: Runs the workshop. Manages vehicles and job cards, including deleting them.
+- name: Mechanic
+  workspace_access: true
+  description: Works on vehicles. Reads vehicles and job cards, and creates and updates job cards. Cannot delete.

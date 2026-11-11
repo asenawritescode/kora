@@ -1,0 +1,17 @@
+name: job_cards_by_status
+label: Job cards by status
+route: /reports/workshop
+queries:
+  - id: job_cards_by_status
+    model: job_card
+    measures: [count, labour_charge_sum]
+    dimensions: [status]
+visuals:
+  - id: job_cards_by_status
+    type: bar
+    source: job_cards_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Job cards
+        type: bar
