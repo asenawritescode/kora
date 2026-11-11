@@ -1,0 +1,38 @@
+- doctype: Document Category
+  role: Documents Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Document
+  role: Documents Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Document Version
+  role: Documents Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Document Category
+  role: Documents User
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Document
+  role: Documents User
+  read: true
+  write: true
+  create: true
+  delete: false
+  if_owner: true
+- doctype: Document Version
+  role: Documents User
+  read: true
+  write: true
+  create: true
+  delete: false
+  if_owner: true
