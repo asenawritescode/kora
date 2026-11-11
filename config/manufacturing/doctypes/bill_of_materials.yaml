@@ -1,0 +1,58 @@
+name: Bill of Materials
+module: Manufacturing
+title_field: reference
+search_fields: reference, status
+sort_field: modified
+sort_order: DESC
+description: A recipe. It lists the materials that go into a batch and how much of the finished product the batch makes. A retired recipe's product and materials are frozen.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Makes
+    description: The finished product this recipe produces.
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: output_quantity
+    fieldtype: Float
+    label: Output per batch
+    description: How much finished product one batch makes.
+    reqd: true
+    default: "1"
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The output must be more than zero."
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Active
+      Retired
+    default: Draft
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: components
+    fieldtype: Table
+    label: Materials
+    options: BOM Component
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: immutable_after
+    status_field: status
+    status_values: [Retired]
+    immutable_fields: [product, components]
+    message: "A retired bill of materials cannot be changed."

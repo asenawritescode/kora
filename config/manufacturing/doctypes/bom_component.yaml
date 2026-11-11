@@ -1,0 +1,24 @@
+name: BOM Component
+module: Manufacturing
+is_child_table: true
+title_field: material
+sort_field: modified
+sort_order: DESC
+description: One material in a recipe, and how much of it goes into one batch.
+
+fields:
+  - fieldname: material
+    fieldtype: Link
+    label: Material
+    options: Product
+    reqd: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    description: How much of this material one batch needs, in the material's own unit.
+    reqd: true
+    default: "1"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."

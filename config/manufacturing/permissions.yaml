@@ -1,0 +1,60 @@
+- doctype: Bill of Materials
+  role: Production Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: BOM Component
+  role: Production Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Work Order
+  role: Production Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Production Run
+  role: Production Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Material Issue
+  role: Production Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Bill of Materials
+  role: Production Operator
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: BOM Component
+  role: Production Operator
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Work Order
+  role: Production Operator
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Production Run
+  role: Production Operator
+  read: true
+  write: false
+  create: true
+  delete: false
+- doctype: Material Issue
+  role: Production Operator
+  read: true
+  write: false
+  create: true
+  delete: false

@@ -1,0 +1,54 @@
+name: Production Run
+module: Manufacturing
+append_only: true
+title_field: reference
+search_fields: reference
+sort_field: creation
+sort_order: DESC
+description: Finished goods made. Saving a run adds the quantity to the finished product's stock in the same step, from any screen or the API. It cannot be edited afterwards; correct a mistake with a Stock Adjustment from the Stock module.
+quantity_effect:
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  source_record_field: product
+  delta_field: quantity
+  direction: increase
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: work_order
+    fieldtype: Link
+    options: Work Order
+    label: Work order
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product made
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity made
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."
+  - fieldname: run_date
+    fieldtype: Date
+    label: Run date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

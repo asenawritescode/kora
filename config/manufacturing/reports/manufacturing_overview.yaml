@@ -1,0 +1,29 @@
+name: manufacturing_overview
+label: Manufacturing overview
+route: /reports/manufacturing
+queries:
+  - id: work_orders_by_status
+    model: work_order
+    measures: [count]
+    dimensions: [status]
+  - id: production_by_product
+    model: production_run
+    measures: [count, quantity_sum]
+    dimensions: [product]
+visuals:
+  - id: work_orders_by_status
+    type: bar
+    source: work_orders_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Work orders
+        type: bar
+  - id: production_by_product
+    type: bar
+    source: production_by_product
+    x_field: product
+    series:
+      - field: quantity_sum
+        label: Quantity made
+        type: bar

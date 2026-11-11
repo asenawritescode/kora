@@ -1,0 +1,51 @@
+name: Material Issue
+module: Manufacturing
+append_only: true
+title_field: reference
+search_fields: reference
+sort_field: creation
+sort_order: DESC
+description: Material taken from stock for a work order. Making a work order does not use up materials by itself; each issue you record takes its quantity off the material's stock in the same step. It cannot be edited afterwards; correct a mistake with a Stock Adjustment from the Stock module.
+quantity_effect:
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  source_record_field: material
+  delta_field: quantity
+  direction: decrease
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: work_order
+    fieldtype: Link
+    options: Work Order
+    label: Work order
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: material
+    fieldtype: Link
+    options: Product
+    label: Material
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity issued
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."
+  - fieldname: issue_date
+    fieldtype: Date
+    label: Issue date
+    in_list_view: true
+    in_standard_filter: true

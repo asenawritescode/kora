@@ -1,0 +1,27 @@
+name: Production Overview
+route: /production
+type: workspace
+layout: single
+label: Production
+module: Manufacturing
+components:
+  - id: open_work_orders
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Work Order
+    label: Open work orders
+    filters:
+      - field: status
+        op: in
+        value: [Planned, In progress]
+    desktop_columns: [reference, bom, quantity, due_date, status]
+    mobile_columns: [reference, quantity, status]
+  - id: recipes
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Bill of Materials
+    label: Bills of materials
+    desktop_columns: [reference, product, output_quantity, status]
+    mobile_columns: [reference, product, status]
