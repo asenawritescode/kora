@@ -1,0 +1,31 @@
+name: People Directory
+route: /people
+type: workspace
+layout: single
+label: People
+module: People
+components:
+  - id: employees
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Employee
+    label: Employees
+    filters:
+      - field: status
+        op: in
+        value: [Active, On leave]
+    desktop_columns: [employee_no, full_name, department, job_title, status]
+    mobile_columns: [full_name, job_title, status]
+  - id: leave_waiting
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Leave Request
+    label: Leave waiting for a decision
+    filters:
+      - field: status
+        op: equals
+        value: Pending
+    desktop_columns: [employee, leave_type, start_date, end_date, days]
+    mobile_columns: [employee, start_date, days]

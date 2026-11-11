@@ -1,0 +1,29 @@
+name: people_overview
+label: People overview
+route: /reports/people
+queries:
+  - id: employees_by_department
+    model: employee
+    measures: [count]
+    dimensions: [department]
+  - id: leave_by_type
+    model: leave_request
+    measures: [count, days_sum]
+    dimensions: [leave_type]
+visuals:
+  - id: employees_by_department
+    type: bar
+    source: employees_by_department
+    x_field: department
+    series:
+      - field: count
+        label: Employees
+        type: bar
+  - id: leave_by_type
+    type: bar
+    source: leave_by_type
+    x_field: leave_type
+    series:
+      - field: days_sum
+        label: Days of leave
+        type: bar

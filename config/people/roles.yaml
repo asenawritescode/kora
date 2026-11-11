@@ -1,0 +1,6 @@
+- name: HR Manager
+  workspace_access: true
+  description: Runs people records. Manages employees, departments and leave types, and decides leave requests.
+- name: HR User
+  workspace_access: true
+  description: Keeps attendance and enters leave requests. Can read employees, departments and leave types.
