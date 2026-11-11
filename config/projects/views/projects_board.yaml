@@ -1,0 +1,25 @@
+name: Projects Board
+route: /projects
+type: workspace
+layout: single
+label: Projects
+module: Projects
+components:
+  - id: task_board
+    type: kanban_board
+    region: main
+    position: 0
+    source_doctype: Task
+    label: Tasks
+    bindings:
+      status: status
+      title: task_title
+      priority: priority
+  - id: projects
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Project
+    label: Projects
+    desktop_columns: [project_name, client, status, manager, start_date, due_date]
+    mobile_columns: [project_name, status, due_date]

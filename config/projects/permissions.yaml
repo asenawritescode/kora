@@ -1,0 +1,48 @@
+- doctype: Project
+  role: Project Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Task
+  role: Project Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Milestone
+  role: Project Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Timesheet Entry
+  role: Project Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Project
+  role: Project Member
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Milestone
+  role: Project Member
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Task
+  role: Project Member
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Timesheet Entry
+  role: Project Member
+  read: true
+  write: true
+  create: true
+  delete: false

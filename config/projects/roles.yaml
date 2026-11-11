@@ -1,0 +1,6 @@
+- name: Project Manager
+  workspace_access: true
+  description: Runs projects. Manages projects, tasks, milestones and timesheet entries, including deleting them.
+- name: Project Member
+  workspace_access: true
+  description: Works on projects. Reads projects and milestones, creates and updates tasks and timesheet entries. Cannot delete.

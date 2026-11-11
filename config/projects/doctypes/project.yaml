@@ -1,0 +1,65 @@
+name: Project
+module: Projects
+title_field: project_name
+search_fields: project_name, client, status
+sort_field: modified
+sort_order: DESC
+description: A piece of work for a client, planned and followed until it is done.
+
+fields:
+  - fieldname: project_name
+    fieldtype: Data
+    label: Project
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: client
+    fieldtype: Data
+    label: Client
+    in_list_view: true
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start date
+    in_list_view: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due date
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Planning
+      Active
+      On hold
+      Done
+      Cancelled
+    default: Planning
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: manager
+    fieldtype: User
+    label: Manager
+    in_standard_filter: true
+  - fieldname: budget
+    fieldtype: Currency
+    label: Budget
+    constraints:
+      - type: min
+        value: 0.0
+        message: "Budget cannot be negative."
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: cross_field
+    lhs: due_date
+    operator: ">="
+    rhs: start_date
+    message: "The due date cannot be before the start date."
+  - type: immutable_after
+    status_field: status
+    status_values: [Done, Cancelled]
+    immutable_fields: [project_name, client]
+    message: "A finished or cancelled project's name and client cannot be changed."

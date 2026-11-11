@@ -1,0 +1,54 @@
+name: Timesheet Entry
+module: Projects
+title_field: label
+search_fields: label
+sort_field: entry_date
+sort_order: DESC
+description: Hours one person spent on a task on one day.
+
+fields:
+  - fieldname: task
+    fieldtype: Link
+    options: Task
+    label: Task
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: project
+    fieldtype: Link
+    options: Project
+    label: Project
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: entry_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+  - fieldname: label
+    fieldtype: Data
+    label: Entry
+    read_only: true
+    search_index: true
+    computed: '(concat task " " entry_date)'
+  - fieldname: hours
+    fieldtype: Float
+    label: Hours
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.25
+        message: "Enter at least 0.25 hours."
+      - type: max
+        value: 24.0
+        message: "A day has 24 hours; enter 24 or fewer."
+  - fieldname: worker
+    fieldtype: User
+    label: Worker
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: note
+    fieldtype: Text
+    label: Note
