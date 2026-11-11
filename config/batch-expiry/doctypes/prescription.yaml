@@ -1,0 +1,54 @@
+name: Prescription
+module: Dispensary
+title_field: reference
+search_fields: reference, prescriber, status
+sort_field: modified
+sort_order: DESC
+description: A prescription handed in, waiting until it is dispensed or cancelled. Once dispensed, the patient and the prescription date cannot be changed.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: patient
+    fieldtype: Link
+    options: Patient
+    label: Patient
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: prescriber
+    fieldtype: Data
+    label: Prescriber
+    in_list_view: true
+  - fieldname: prescribed_on
+    fieldtype: Date
+    label: Prescribed on
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Received
+      Dispensed
+      Cancelled
+    default: Received
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: lines
+    fieldtype: Table
+    options: Prescription Line
+    label: Medicines
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: immutable_after
+    status_field: status
+    status_values: [Dispensed]
+    immutable_fields: [patient, prescribed_on]
+    message: "A dispensed prescription's patient and date cannot be changed."

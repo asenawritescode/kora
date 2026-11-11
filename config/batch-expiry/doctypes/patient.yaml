@@ -1,0 +1,30 @@
+name: Patient
+module: Dispensary
+title_field: patient_name
+search_fields: patient_name, phone
+sort_field: modified
+sort_order: DESC
+description: A person the pharmacy or clinic dispenses to.
+
+fields:
+  - fieldname: patient_name
+    fieldtype: Data
+    label: Patient
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    in_list_view: true
+    search_index: true
+  - fieldname: date_of_birth
+    fieldtype: Date
+    label: Date of birth
+  - fieldname: allergies
+    fieldtype: Text
+    label: Allergies
+    description: Known allergies, shown to whoever prepares a prescription.
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

@@ -1,0 +1,42 @@
+name: Medicine Batch
+module: Dispensary
+title_field: batch_no
+search_fields: batch_no, supplier
+sort_field: expiry_date
+sort_order: ASC
+description: A delivery lot of one medicine, with the date it expires.
+
+fields:
+  - fieldname: batch_no
+    fieldtype: Data
+    label: Batch number
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Medicine
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: expiry_date
+    fieldtype: Date
+    label: Expiry date
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity_received
+    fieldtype: Float
+    label: Quantity received
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The quantity cannot be negative."
+  - fieldname: supplier
+    fieldtype: Data
+    label: Supplier
+  - fieldname: received_on
+    fieldtype: Date
+    label: Received on
