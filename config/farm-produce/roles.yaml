@@ -1,0 +1,6 @@
+- name: Produce Clerk
+  workspace_access: true
+  description: Records deliveries at the collection point. Can read farmers and enter deliveries.
+- name: Cooperative Manager
+  workspace_access: true
+  description: Runs produce records. Manages farmers and deliveries.

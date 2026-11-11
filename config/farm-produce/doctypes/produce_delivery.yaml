@@ -1,0 +1,87 @@
+name: Produce Delivery
+module: Produce
+append_only: true
+quantity_effect:
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  source_record_field: product
+  delta_field: quantity_kg
+  direction: increase
+title_field: reference
+search_fields: reference, farmer, status
+sort_field: modified
+sort_order: DESC
+description: >-
+  Produce a farmer brought in. Saving a delivery adds the kilograms to the
+  product's stock in the same step. It cannot be edited afterwards; correct a
+  mistake with a Stock Adjustment.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: farmer
+    fieldtype: Link
+    options: Farmer
+    label: Farmer
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: delivery_date
+    fieldtype: Date
+    label: Delivery date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: quantity_kg
+    fieldtype: Float
+    label: Quantity (kg)
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."
+  - fieldname: grade
+    fieldtype: Select
+    label: Grade
+    options: |
+      A
+      B
+      C
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: price_per_kg
+    fieldtype: Currency
+    label: Price per kg
+    constraints:
+      - type: min
+        value: 0
+        message: "The price cannot be negative."
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    read_only: true
+    in_list_view: true
+    computed: "(round (* (round quantity_kg 9) (round price_per_kg 9)) 2)"
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    description: Set when the delivery is recorded. Choose Paid if the farmer was paid on the spot. A saved delivery cannot be changed.
+    options: |
+      Received
+      Paid
+    default: Received
+    in_list_view: true
+    in_standard_filter: true

@@ -1,0 +1,42 @@
+name: Farmer
+module: Produce
+title_field: farmer_name
+search_fields: member_no, farmer_name, phone, village, group_name
+sort_field: modified
+sort_order: DESC
+description: A farmer who delivers produce, with the village and group they belong to.
+
+fields:
+  - fieldname: member_no
+    fieldtype: Data
+    label: Member number
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: farmer_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+  - fieldname: village
+    fieldtype: Data
+    label: Village
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: group_name
+    fieldtype: Data
+    label: Group
+    in_standard_filter: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Inactive
+    default: Active
+    in_list_view: true
+    in_standard_filter: true

@@ -1,0 +1,24 @@
+- doctype: Farmer
+  role: Cooperative Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Produce Delivery
+  role: Cooperative Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Farmer
+  role: Produce Clerk
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Produce Delivery
+  role: Produce Clerk
+  read: true
+  write: false
+  create: true
+  delete: false

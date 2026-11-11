@@ -1,0 +1,29 @@
+name: produce_overview
+label: Produce overview
+route: /reports/produce
+queries:
+  - id: deliveries_by_grade
+    model: produce_delivery
+    measures: [count, quantity_kg_sum]
+    dimensions: [grade]
+  - id: deliveries_by_farmer
+    model: produce_delivery
+    measures: [count, quantity_kg_sum]
+    dimensions: [farmer]
+visuals:
+  - id: deliveries_by_grade
+    type: bar
+    source: deliveries_by_grade
+    x_field: grade
+    series:
+      - field: quantity_kg_sum
+        label: Kilograms
+        type: bar
+  - id: deliveries_by_farmer
+    type: bar
+    source: deliveries_by_farmer
+    x_field: farmer
+    series:
+      - field: quantity_kg_sum
+        label: Kilograms
+        type: bar
