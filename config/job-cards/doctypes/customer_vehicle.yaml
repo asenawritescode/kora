@@ -1,0 +1,34 @@
+name: Customer Vehicle
+module: Workshop
+title_field: registration
+search_fields: registration, make, model, owner_name
+sort_field: modified
+sort_order: DESC
+description: A vehicle brought to the workshop, with the person who owns it.
+
+fields:
+  - fieldname: registration
+    fieldtype: Data
+    label: Registration
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: make
+    fieldtype: Data
+    label: Make
+    in_list_view: true
+  - fieldname: model
+    fieldtype: Data
+    label: Model
+    in_list_view: true
+  - fieldname: year
+    fieldtype: Int
+    label: Year
+  - fieldname: owner_name
+    fieldtype: Data
+    label: Owner
+    in_list_view: true
+  - fieldname: owner_phone
+    fieldtype: Data
+    label: Owner phone

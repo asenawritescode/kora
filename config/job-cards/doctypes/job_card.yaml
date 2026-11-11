@@ -1,0 +1,79 @@
+name: Job Card
+module: Workshop
+title_field: reference
+search_fields: reference, status
+sort_field: modified
+sort_order: DESC
+quantity_effect:
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  lines_field: parts
+  source_record_field: product
+  delta_field: quantity
+  direction: decrease
+description: Work on one customer vehicle. Saving a new job card takes the parts listed on it off the stock of each product in the same step. Changing the parts of a job card later does not change stock; correct that with a Stock Adjustment.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: customer_vehicle
+    fieldtype: Link
+    options: Customer Vehicle
+    label: Vehicle
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: complaint
+    fieldtype: Text
+    label: Complaint
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Booked
+      In progress
+      Waiting for parts
+      Done
+      Collected
+    default: Booked
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: opened_on
+    fieldtype: Date
+    label: Opened on
+    reqd: true
+    in_list_view: true
+  - fieldname: promised_on
+    fieldtype: Date
+    label: Promised on
+    in_list_view: true
+  - fieldname: labour_charge
+    fieldtype: Currency
+    label: Labour charge
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The labour charge cannot be negative."
+  - fieldname: parts
+    fieldtype: Table
+    label: Parts used
+    options: Job Card Part
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: cross_field
+    lhs: promised_on
+    operator: ">="
+    rhs: opened_on
+    message: "The promised date cannot be before the day the job card was opened."
+  - type: immutable_after
+    status_field: status
+    status_values: [Collected]
+    immutable_fields: [customer_vehicle, opened_on]
+    message: "A collected job card cannot be changed."

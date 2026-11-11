@@ -1,0 +1,23 @@
+name: Job Card Part
+module: Workshop
+is_child_table: true
+title_field: product
+sort_field: modified
+sort_order: DESC
+description: One part taken from stock for a job card, and how much of it.
+
+fields:
+  - fieldname: product
+    fieldtype: Link
+    label: Part
+    options: Product
+    reqd: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    default: "1"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."
