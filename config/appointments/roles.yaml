@@ -1,0 +1,6 @@
+- name: Salon Manager
+  workspace_access: true
+  description: Runs the service list and every appointment, including deleting.
+- name: Stylist
+  workspace_access: true
+  description: Reads services and books and updates appointments. Cannot change services or delete appointments.

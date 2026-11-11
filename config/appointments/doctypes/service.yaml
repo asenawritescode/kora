@@ -1,0 +1,40 @@
+name: Service
+module: Appointments
+title_field: service_name
+search_fields: service_name
+sort_field: modified
+sort_order: ASC
+description: Something a client can book, with how long it takes and what it costs.
+
+fields:
+  - fieldname: service_name
+    fieldtype: Data
+    label: Service
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: duration_minutes
+    fieldtype: Int
+    label: Minutes
+    reqd: true
+    default: "30"
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 5.0
+        message: "A service takes at least 5 minutes."
+  - fieldname: price
+    fieldtype: Currency
+    label: Price
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The price cannot be negative."
+  - fieldname: active
+    fieldtype: Check
+    label: Offered
+    default: "1"
+    in_list_view: true

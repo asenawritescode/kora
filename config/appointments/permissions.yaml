@@ -1,0 +1,24 @@
+- doctype: Service
+  role: Salon Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Appointment
+  role: Salon Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Service
+  role: Stylist
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Appointment
+  role: Stylist
+  read: true
+  write: true
+  create: true
+  delete: false
