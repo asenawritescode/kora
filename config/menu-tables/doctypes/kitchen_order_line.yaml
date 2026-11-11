@@ -1,0 +1,26 @@
+name: Kitchen Order Line
+module: Menu
+is_child_table: true
+title_field: menu_item
+
+fields:
+  - fieldname: menu_item
+    fieldtype: Link
+    options: Menu Item
+    label: Item
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Int
+    label: Quantity
+    default: "1"
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 1
+        message: "Order at least one."
+  - fieldname: note
+    fieldtype: Data
+    label: Note
+    in_list_view: true

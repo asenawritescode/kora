@@ -1,0 +1,32 @@
+name: Menu and Tables
+route: /menu
+type: workspace
+layout: single
+label: Menu
+module: Menu
+components:
+  - id: open_orders
+    type: kanban_board
+    region: main
+    position: 0
+    source_doctype: Kitchen Order
+    label: Kitchen orders
+    bindings:
+      status: status
+      title: reference
+  - id: tables
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Dining Table
+    label: Tables
+    desktop_columns: [table_no, seats, status]
+    mobile_columns: [table_no, status]
+  - id: menu_items
+    type: record_table
+    region: main
+    position: 2
+    source_doctype: Menu Item
+    label: Menu
+    desktop_columns: [item_name, category, price, available]
+    mobile_columns: [item_name, price]

@@ -1,0 +1,48 @@
+name: Menu Item
+module: Menu
+title_field: item_name
+search_fields: item_name, category
+sort_field: item_name
+sort_order: ASC
+description: A dish or drink on the menu, with its price and whether it can be ordered today.
+
+fields:
+  - fieldname: item_name
+    fieldtype: Data
+    label: Item
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Starter
+      Main
+      Side
+      Drink
+      Dessert
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: price
+    fieldtype: Currency
+    label: Price
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The price cannot be negative."
+  - fieldname: available
+    fieldtype: Check
+    label: Available
+    default: "1"
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Stock item
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

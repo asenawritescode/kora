@@ -1,0 +1,6 @@
+- name: Restaurant Manager
+  workspace_access: true
+  description: Runs the menu, the dining room and the kitchen orders. Can delete.
+- name: Waiter
+  workspace_access: true
+  description: Reads the menu and tables, takes and updates kitchen orders. Cannot delete.

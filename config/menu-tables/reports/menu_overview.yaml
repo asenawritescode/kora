@@ -1,0 +1,29 @@
+name: menu_overview
+label: Menu overview
+route: /reports/menu
+queries:
+  - id: orders_by_status
+    model: kitchen_order
+    measures: [count]
+    dimensions: [status]
+  - id: items_by_category
+    model: menu_item
+    measures: [count]
+    dimensions: [category]
+visuals:
+  - id: orders_by_status
+    type: bar
+    source: orders_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Kitchen orders
+        type: bar
+  - id: items_by_category
+    type: bar
+    source: items_by_category
+    x_field: category
+    series:
+      - field: count
+        label: Menu items
+        type: bar
