@@ -172,11 +172,11 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 			handle.Release()
 			return packageRecoveryRequired("tenant configuration snapshot read needs recovery"), nil
 		}
-		target, mergeErr := mergeManagementPackageSnapshot(currentSnapshot, incoming)
-		if mergeErr != nil {
+		target, refusal := prepareManagementPackageTarget(ctx, runtime.DB, info.DBName, dialect, currentSnapshot, incoming)
+		if refusal != nil {
 			releaseTenantWork()
 			handle.Release()
-			return failed(contract.CodeConflict, "package configuration conflicts with existing tenant configuration"), nil
+			return *refusal, nil
 		}
 		journal, err = configstore.EnsureActivationOperation(runtime.DB, dialect, info.Name, string(operation.ID), "management_package", target)
 		if err != nil {
