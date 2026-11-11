@@ -1,0 +1,125 @@
+- doctype: Plan
+  role: Subscriptions Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Plan
+  role: Subscriptions Clerk
+  read: true
+  write: false
+  create: false
+  delete: false
+
+- doctype: Subscriber
+  role: Subscriptions Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Subscriber
+  role: Subscriptions Clerk
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Subscription
+  role: Subscriptions Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Subscription
+  role: Subscriptions Clerk
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Subscription Line
+  role: Subscriptions Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Subscription Line
+  role: Subscriptions Clerk
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Billing Schedule
+  role: Subscriptions Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Billing Schedule
+  role: Subscriptions Clerk
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Recurring Invoice
+  role: Subscriptions Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Recurring Invoice
+  role: Subscriptions Clerk
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Subscription Payment
+  role: Subscriptions Manager
+  read: true
+  write: false
+  create: true
+  delete: false
+
+- doctype: Subscription Payment
+  role: Subscriptions Clerk
+  read: true
+  write: false
+  create: true
+  delete: false
+
+- doctype: Entitlement
+  role: Subscriptions Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Entitlement
+  role: Subscriptions Clerk
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Usage Record
+  role: Subscriptions Manager
+  read: true
+  write: false
+  create: true
+  delete: false
+
+- doctype: Usage Record
+  role: Subscriptions Clerk
+  read: true
+  write: false
+  create: true
+  delete: false

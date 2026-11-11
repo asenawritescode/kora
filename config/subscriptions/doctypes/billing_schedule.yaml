@@ -1,0 +1,72 @@
+name: Billing Schedule
+module: Subscriptions
+title_field: reference
+search_fields: reference
+sort_field: billing_date
+sort_order: ASC
+description: One planned billing period for a subscription, entered by hand. Nothing creates invoices from it automatically.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: subscription
+    fieldtype: Link
+    options: Subscription
+    label: Subscription
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: billing_date
+    fieldtype: Date
+    label: Billing date
+    reqd: true
+    in_list_view: true
+  - fieldname: period_start
+    fieldtype: Date
+    label: Period start
+    reqd: true
+  - fieldname: period_end
+    fieldtype: Date
+    label: Period end
+    reqd: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount to bill
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The amount cannot be negative."
+  - fieldname: currency
+    fieldtype: Select
+    label: Currency
+    options: |
+      KES
+      USD
+      EUR
+      GBP
+    default: KES
+    reqd: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Scheduled
+      Invoiced
+      Skipped
+      Cancelled
+    default: Scheduled
+    in_list_view: true
+    in_standard_filter: true
+doc_constraints:
+  - type: cross_field
+    lhs: period_end
+    operator: ">="
+    rhs: period_start
+    message: "The period cannot end before it starts."

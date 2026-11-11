@@ -1,0 +1,33 @@
+name: Subscription Line
+module: Subscriptions
+is_child_table: true
+title_field: description
+
+fields:
+  - fieldname: description
+    fieldtype: Data
+    label: Description
+    reqd: true
+    bold: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    default: "1"
+    reqd: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit price
+    reqd: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The price cannot be negative."
+  - fieldname: amount
+    fieldtype: Currency
+    label: Line amount
+    computed: "ROUND(quantity * unit_price, 2)"
+    read_only: true
