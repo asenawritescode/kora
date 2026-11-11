@@ -16,21 +16,28 @@ import (
 // packageRowCounter reports how many records a table holds.
 type packageRowCounter func(ctx context.Context, table string) (int64, error)
 
+// packageTenantDB is the tenant database a package is checked against.
+type packageTenantDB struct {
+	conn    *sql.DB
+	name    string
+	dialect db.Dialect
+}
+
 // prepareManagementPackageTarget merges a package into the tenant's configuration and checks it is
 // safe for the records the tenant already has. A non-nil result refuses the operation. It runs
 // before the activation journal exists, so a retry of a half-applied package never meets it.
-func prepareManagementPackageTarget(ctx context.Context, database *sql.DB, dbName string, dialect db.Dialect, current, incoming *doctype.ConfigSnapshot) (*doctype.ConfigSnapshot, *management.FinishResult) {
+func prepareManagementPackageTarget(ctx context.Context, tenant packageTenantDB, current, incoming *doctype.ConfigSnapshot) (*doctype.ConfigSnapshot, *management.FinishResult) {
 	target, err := mergeManagementPackageSnapshot(current, incoming)
 	if err != nil {
 		refusal := failed(contract.CodeConflict, "package configuration conflicts with existing tenant configuration")
 		return nil, &refusal
 	}
-	live, err := schema.LoadLiveSchema(database, dbName, dialect)
+	live, err := schema.LoadLiveSchema(tenant.conn, tenant.name, tenant.dialect)
 	if err != nil {
 		refusal := packageRecoveryRequired("package safety check could not read the tenant schema")
 		return nil, &refusal
 	}
-	blockers, err := packageUpgradeBlockers(ctx, live, countTableRows(database, dialect), current, incoming)
+	blockers, err := packageUpgradeBlockers(ctx, live, countTableRows(tenant.conn, tenant.dialect), current, incoming)
 	if err != nil {
 		refusal := packageRecoveryRequired("package safety check could not count the tenant's records")
 		return nil, &refusal
