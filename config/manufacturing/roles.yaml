@@ -1,0 +1,6 @@
+- name: Production Manager
+  workspace_access: true
+  description: Runs production. Manages recipes and work orders, and records production runs and material issues.
+- name: Production Operator
+  workspace_access: true
+  description: Works on the shop floor. Reads recipes and work orders, and records production runs and material issues.
