@@ -1,0 +1,83 @@
+name: Shipment
+module: Shipments
+title_field: reference
+search_fields: reference, customer_name, status
+sort_field: modified
+sort_order: DESC
+description: Goods booked for carriage from an origin to a destination, followed until they are delivered or fail to be.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: customer_name
+    fieldtype: Data
+    label: Customer
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: origin
+    fieldtype: Data
+    label: From
+    reqd: true
+    in_list_view: true
+  - fieldname: destination
+    fieldtype: Data
+    label: To
+    reqd: true
+    in_list_view: true
+  - fieldname: booked_on
+    fieldtype: Date
+    label: Booked on
+    reqd: true
+    in_list_view: true
+  - fieldname: delivered_on
+    fieldtype: Date
+    label: Delivered on
+  - fieldname: weight_kg
+    fieldtype: Float
+    label: Weight (kg)
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The weight cannot be negative."
+  - fieldname: charge
+    fieldtype: Currency
+    label: Charge
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The charge cannot be negative."
+  - fieldname: vehicle
+    fieldtype: Data
+    label: Vehicle
+  - fieldname: driver
+    fieldtype: Data
+    label: Driver
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Booked
+      Collected
+      In transit
+      Delivered
+      Failed
+    default: Booked
+    in_list_view: true
+    in_standard_filter: true
+doc_constraints:
+  - type: field_dependency
+    condition: "status == 'Delivered'"
+    require_fields: [delivered_on]
+    message: "Say when the shipment was delivered before marking it Delivered."
+  - type: immutable_after
+    status_field: status
+    status_values: [Delivered]
+    immutable_fields: [customer_name, origin, destination]
+    message: "A delivered shipment's customer, origin and destination cannot be changed."

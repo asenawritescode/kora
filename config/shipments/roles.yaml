@@ -1,0 +1,6 @@
+- name: Logistics Manager
+  workspace_access: true
+  description: Runs shipments. Books, updates and deletes shipments and their tracking events.
+- name: Shipping Clerk
+  workspace_access: true
+  description: Books shipments and records tracking events. Can read everything but cannot delete.

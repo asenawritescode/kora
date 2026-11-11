@@ -1,0 +1,40 @@
+name: Shipment Event
+module: Shipments
+title_field: label
+search_fields: label, status
+sort_field: event_date
+sort_order: DESC
+description: One step in a shipment's journey, such as collection, a stop in transit, delivery or a failed attempt.
+
+fields:
+  - fieldname: shipment
+    fieldtype: Link
+    options: Shipment
+    label: Shipment
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: event_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+  - fieldname: label
+    fieldtype: Data
+    label: Entry
+    read_only: true
+    search_index: true
+    computed: '(concat shipment " " event_date)'
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Collected
+      In transit
+      Delivered
+      Failed
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: note
+    fieldtype: Text
+    label: Note

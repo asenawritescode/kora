@@ -1,0 +1,25 @@
+name: shipments_overview
+label: Shipments overview
+route: /reports/shipments
+queries:
+  - id: shipments_by_status
+    model: shipment
+    measures: [count, charge_sum]
+    dimensions: [status]
+visuals:
+  - id: shipments_by_status
+    type: bar
+    source: shipments_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Shipments
+        type: bar
+  - id: charge_by_status
+    type: bar
+    source: shipments_by_status
+    x_field: status
+    series:
+      - field: charge_sum
+        label: Charge
+        type: bar

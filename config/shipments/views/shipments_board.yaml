@@ -1,0 +1,27 @@
+name: Shipments Board
+route: /shipments
+type: workspace
+layout: single
+label: Shipments
+module: Shipments
+components:
+  - id: open_shipments
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Shipment
+    label: Shipments on the way
+    filters:
+      - field: status
+        op: in
+        value: [Booked, Collected, In transit]
+    desktop_columns: [reference, customer_name, origin, destination, booked_on, status]
+    mobile_columns: [reference, destination, status]
+  - id: recent_events
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Shipment Event
+    label: Tracking events
+    desktop_columns: [shipment, event_date, status, note]
+    mobile_columns: [shipment, status]
