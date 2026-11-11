@@ -1,0 +1,29 @@
+name: members_overview
+label: Members overview
+route: /reports/members
+queries:
+  - id: members_by_status
+    model: member
+    measures: [count]
+    dimensions: [status]
+  - id: loans_by_status
+    model: loan
+    measures: [count, amount_sum]
+    dimensions: [status]
+visuals:
+  - id: members_by_status
+    type: bar
+    source: members_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Members
+        type: bar
+  - id: loans_by_status
+    type: bar
+    source: loans_by_status
+    x_field: status
+    series:
+      - field: amount_sum
+        label: Loan amount
+        type: bar

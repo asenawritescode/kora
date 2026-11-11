@@ -1,0 +1,6 @@
+- name: SACCO Manager
+  workspace_access: true
+  description: Runs the member register. Manages members, savings entries, loans and repayments, and decides loans.
+- name: Teller
+  workspace_access: true
+  description: Serves members at the counter. Reads members and loans, and records savings entries and loan repayments. Cannot change or delete anything.

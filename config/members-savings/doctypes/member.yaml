@@ -1,0 +1,41 @@
+name: Member
+module: Members
+title_field: member_name
+search_fields: member_no, member_name, phone
+sort_field: modified
+sort_order: DESC
+description: A person who belongs to the society or lender. This is a register entry only; the member's savings balance and loan balance are not calculated anywhere.
+
+fields:
+  - fieldname: member_no
+    fieldtype: Data
+    label: Member number
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: member_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    in_list_view: true
+  - fieldname: id_number
+    fieldtype: Data
+    label: ID number
+  - fieldname: joined_on
+    fieldtype: Date
+    label: Joined on
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Dormant
+      Exited
+    default: Active
+    in_list_view: true
+    in_standard_filter: true

@@ -1,0 +1,44 @@
+name: Savings Entry
+module: Members
+append_only: true
+title_field: entry_type
+search_fields: entry_type
+sort_field: entry_date
+sort_order: DESC
+description: One deposit or withdrawal recorded for a member. It is a record only. No balance is calculated, a withdrawal is not checked against what the member has saved, and nothing posts to the books. It cannot be edited afterwards; record an opposite entry to correct a mistake.
+
+fields:
+  - fieldname: member
+    fieldtype: Link
+    options: Member
+    label: Member
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: entry_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: entry_type
+    fieldtype: Select
+    label: Type
+    options: |
+      Deposit
+      Withdrawal
+    default: Deposit
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.01
+        message: "The amount must be more than zero."
+  - fieldname: note
+    fieldtype: Text
+    label: Note
