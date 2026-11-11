@@ -1,0 +1,24 @@
+- doctype: Shipment
+  role: Logistics Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Shipment Event
+  role: Logistics Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Shipment
+  role: Shipping Clerk
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Shipment Event
+  role: Shipping Clerk
+  read: true
+  write: true
+  create: true
+  delete: false
