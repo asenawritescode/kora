@@ -1,0 +1,17 @@
+name: stock_adjustments
+label: Stock adjustments
+route: /reports/stock-adjustments
+queries:
+  - id: adjustments_by_reason
+    model: stock_adjustment
+    measures: [count, delta_sum]
+    dimensions: [reason]
+visuals:
+  - id: adjustments_by_reason
+    type: bar
+    source: adjustments_by_reason
+    x_field: reason
+    series:
+      - field: count
+        label: Adjustments
+        type: bar
