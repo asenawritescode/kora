@@ -58,19 +58,7 @@ func packageUpgradeBlockers(ctx context.Context, live map[string]*schema.TableIn
 		if dt == nil || live[dt.RawTableName()] == nil {
 			continue
 		}
-		var risky []string
-		for _, field := range dt.DataFields() {
-			if field.Fieldtype == "Table" {
-				continue
-			}
-			var prior *doctype.Field
-			if old := existing[dt.Name]; old != nil {
-				prior = old.GetField(field.Fieldname)
-			}
-			if risk := fieldRisk(field, prior); risk != "" {
-				risky = append(risky, fmt.Sprintf("%s %q", risk, field.Fieldname))
-			}
-		}
+		risky := riskyFields(dt, existing[dt.Name])
 		if len(risky) == 0 {
 			continue
 		}
@@ -83,6 +71,25 @@ func packageUpgradeBlockers(ctx context.Context, live map[string]*schema.TableIn
 		}
 	}
 	return blockers, nil
+}
+
+// riskyFields lists what the package brings to one record type that old records could not satisfy.
+// prior is the type as the tenant has it now, nil when the type is new to the tenant.
+func riskyFields(dt, prior *doctype.DocType) []string {
+	var risky []string
+	for _, field := range dt.DataFields() {
+		if field.Fieldtype == "Table" {
+			continue
+		}
+		var old *doctype.Field
+		if prior != nil {
+			old = prior.GetField(field.Fieldname)
+		}
+		if risk := fieldRisk(field, old); risk != "" {
+			risky = append(risky, fmt.Sprintf("%s %q", risk, field.Fieldname))
+		}
+	}
+	return risky
 }
 
 // fieldRisk says what is risky about a field the package brings, or "" when nothing is.
