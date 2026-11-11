@@ -1,0 +1,29 @@
+name: documents_overview
+label: Documents overview
+route: /reports/documents
+queries:
+  - id: documents_by_status
+    model: document
+    measures: [count]
+    dimensions: [status]
+  - id: documents_by_category
+    model: document
+    measures: [count]
+    dimensions: [category]
+visuals:
+  - id: documents_by_status
+    type: bar
+    source: documents_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Documents
+        type: bar
+  - id: documents_by_category
+    type: bar
+    source: documents_by_category
+    x_field: category
+    series:
+      - field: count
+        label: Documents
+        type: bar

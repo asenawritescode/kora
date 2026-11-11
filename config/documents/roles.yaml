@@ -1,0 +1,6 @@
+- name: Documents Manager
+  workspace_access: true
+  description: Runs the document register. Manages categories and documents, and decides sign-off.
+- name: Documents User
+  workspace_access: true
+  description: Files documents and versions. Reads and edits the documents they created; cannot delete.

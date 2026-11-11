@@ -1,0 +1,67 @@
+name: Document
+module: Documents
+title_field: title
+search_fields: title, status, approval_status
+sort_field: modified
+sort_order: DESC
+description: A file kept on record, with an expiry date and a sign-off status.
+
+fields:
+  - fieldname: title
+    fieldtype: Data
+    label: Title
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: category
+    fieldtype: Link
+    options: Document Category
+    label: Category
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Active
+      Archived
+    default: Draft
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: expiry_date
+    fieldtype: Date
+    label: Expiry date
+    in_list_view: true
+  - fieldname: attachment
+    fieldtype: Attach
+    label: File
+  - fieldname: owner_user
+    fieldtype: User
+    label: Kept by
+  - fieldname: approval_status
+    fieldtype: Select
+    label: Sign-off
+    options: |
+      Not needed
+      Waiting
+      Approved
+      Rejected
+    default: Not needed
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: approver
+    fieldtype: User
+    label: Approver
+  - fieldname: decision_note
+    fieldtype: Text
+    label: Decision note
+doc_constraints:
+  - type: immutable_after
+    status_field: approval_status
+    status_values: [Approved, Rejected]
+    immutable_fields: [title, category, attachment]
+    message: "A document that has been signed off or rejected cannot change its title, category or file."

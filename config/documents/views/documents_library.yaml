@@ -1,0 +1,31 @@
+name: Documents Library
+route: /documents
+type: workspace
+layout: single
+label: Documents
+module: Documents
+components:
+  - id: documents
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Document
+    label: Documents
+    filters:
+      - field: status
+        op: in
+        value: [Draft, Active]
+    desktop_columns: [title, category, status, expiry_date, approval_status]
+    mobile_columns: [title, status, expiry_date]
+  - id: waiting_sign_off
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Document
+    label: Waiting for sign-off
+    filters:
+      - field: approval_status
+        op: equals
+        value: Waiting
+    desktop_columns: [title, category, expiry_date, approver]
+    mobile_columns: [title, approver, expiry_date]

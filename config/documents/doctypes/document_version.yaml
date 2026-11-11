@@ -1,0 +1,36 @@
+name: Document Version
+module: Documents
+title_field: label
+search_fields: label, change_note
+sort_field: modified
+sort_order: DESC
+description: One saved version of a document's file.
+
+fields:
+  - fieldname: document
+    fieldtype: Link
+    options: Document
+    label: Document
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: version_no
+    fieldtype: Int
+    label: Version
+    reqd: true
+    in_list_view: true
+  - fieldname: label
+    fieldtype: Data
+    label: Entry
+    read_only: true
+    search_index: true
+    computed: '(concat document " v" (round version_no 9))'
+  - fieldname: file
+    fieldtype: Attach
+    label: File
+  - fieldname: change_note
+    fieldtype: Text
+    label: What changed
+  - fieldname: uploaded_by
+    fieldtype: User
+    label: Uploaded by
