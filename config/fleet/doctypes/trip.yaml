@@ -1,0 +1,84 @@
+name: Trip
+module: Fleet
+title_field: reference
+search_fields: reference, origin, destination, status
+sort_field: modified
+sort_order: DESC
+description: A journey with one vehicle and one driver, from planning to delivery.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: vehicle
+    fieldtype: Link
+    options: Vehicle
+    label: Vehicle
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: driver
+    fieldtype: Link
+    options: Driver
+    label: Driver
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: origin
+    fieldtype: Data
+    label: From
+    reqd: true
+    in_list_view: true
+  - fieldname: destination
+    fieldtype: Data
+    label: To
+    reqd: true
+    in_list_view: true
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start date
+    reqd: true
+    in_list_view: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: End date
+  - fieldname: distance_km
+    fieldtype: Float
+    label: Distance (km)
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The distance cannot be negative."
+  - fieldname: cargo
+    fieldtype: Text
+    label: Cargo
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Planned
+      On the road
+      Delivered
+      Cancelled
+    default: Planned
+    in_list_view: true
+    in_standard_filter: true
+doc_constraints:
+  - type: cross_field
+    lhs: end_date
+    operator: ">="
+    rhs: start_date
+    message: "The end date cannot be before the start date."
+  - type: field_dependency
+    condition: "status == 'Delivered'"
+    require_fields: [end_date]
+    message: "Enter the end date before marking a trip delivered."
+  - type: immutable_after
+    status_field: status
+    status_values: [Delivered, Cancelled]
+    immutable_fields: [vehicle, driver, origin, destination]
+    message: "A delivered or cancelled trip cannot be changed."

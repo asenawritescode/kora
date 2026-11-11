@@ -1,0 +1,38 @@
+name: Service Record
+module: Fleet
+title_field: label
+search_fields: label, description
+sort_field: service_date
+sort_order: DESC
+description: Maintenance done on one vehicle.
+
+fields:
+  - fieldname: vehicle
+    fieldtype: Link
+    options: Vehicle
+    label: Vehicle
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: service_date
+    fieldtype: Date
+    label: Service date
+    reqd: true
+    in_list_view: true
+  - fieldname: label
+    fieldtype: Data
+    label: Entry
+    read_only: true
+    search_index: true
+    computed: '(concat vehicle " " service_date)'
+  - fieldname: description
+    fieldtype: Text
+    label: Work done
+  - fieldname: cost
+    fieldtype: Currency
+    label: Cost
+    in_list_view: true
+  - fieldname: next_service_date
+    fieldtype: Date
+    label: Next service due
+    in_list_view: true

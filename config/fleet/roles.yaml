@@ -1,0 +1,6 @@
+- name: Fleet Manager
+  workspace_access: true
+  description: Runs the fleet. Manages vehicles, drivers, trips, fuel logs and service records.
+- name: Dispatcher
+  workspace_access: true
+  description: Plans and records trips, fuel and servicing. Can read vehicles and drivers. Cannot delete.

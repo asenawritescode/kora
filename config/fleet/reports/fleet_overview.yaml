@@ -1,0 +1,41 @@
+name: fleet_overview
+label: Fleet overview
+route: /reports/fleet
+queries:
+  - id: trips_by_status
+    model: trip
+    measures: [count]
+    dimensions: [status]
+  - id: fuel_cost_by_vehicle
+    model: fuel_log
+    measures: [cost_sum]
+    dimensions: [vehicle]
+  - id: distance_by_vehicle
+    model: trip
+    measures: [distance_km_sum]
+    dimensions: [vehicle]
+visuals:
+  - id: trips_by_status
+    type: bar
+    source: trips_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Trips
+        type: bar
+  - id: fuel_cost_by_vehicle
+    type: bar
+    source: fuel_cost_by_vehicle
+    x_field: vehicle
+    series:
+      - field: cost_sum
+        label: Fuel cost
+        type: bar
+  - id: distance_by_vehicle
+    type: bar
+    source: distance_by_vehicle
+    x_field: vehicle
+    series:
+      - field: distance_km_sum
+        label: Distance (km)
+        type: bar
