@@ -1,0 +1,28 @@
+name: Guest
+module: Rooms
+title_field: guest_name
+search_fields: guest_name, phone, id_number
+sort_field: modified
+sort_order: DESC
+description: A person who stays, with the details the front desk needs to find them again.
+
+fields:
+  - fieldname: guest_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    in_list_view: true
+    search_index: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    in_list_view: true
+  - fieldname: id_number
+    fieldtype: Data
+    label: ID or passport number
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

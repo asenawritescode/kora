@@ -1,0 +1,36 @@
+- doctype: Room
+  role: Hotel Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Guest
+  role: Hotel Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Booking
+  role: Hotel Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Room
+  role: Front Desk
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Guest
+  role: Front Desk
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Booking
+  role: Front Desk
+  read: true
+  write: true
+  create: true
+  delete: false

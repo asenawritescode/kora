@@ -1,0 +1,27 @@
+name: Rooms Desk
+route: /rooms
+type: workspace
+layout: single
+label: Rooms
+module: Rooms
+components:
+  - id: bookings
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Booking
+    label: Bookings
+    filters:
+      - field: status
+        op: in
+        value: [Booked, Checked in]
+    desktop_columns: [reference, guest, room, check_in, check_out, nights, total, status]
+    mobile_columns: [guest, room, check_in, status]
+  - id: rooms
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Room
+    label: Rooms
+    desktop_columns: [room_no, room_type, rate_per_night, status]
+    mobile_columns: [room_no, room_type, status]

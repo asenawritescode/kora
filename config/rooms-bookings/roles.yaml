@@ -1,0 +1,6 @@
+- name: Hotel Manager
+  workspace_access: true
+  description: Runs the rooms. Manages rooms, guests and bookings.
+- name: Front Desk
+  workspace_access: true
+  description: Reads rooms, takes bookings and registers guests. Cannot delete.

@@ -1,0 +1,29 @@
+name: rooms_overview
+label: Rooms overview
+route: /reports/rooms
+queries:
+  - id: bookings_by_status
+    model: booking
+    measures: [count, total_sum]
+    dimensions: [status]
+  - id: rooms_by_status
+    model: room
+    measures: [count]
+    dimensions: [status]
+visuals:
+  - id: bookings_by_status
+    type: bar
+    source: bookings_by_status
+    x_field: status
+    series:
+      - field: total_sum
+        label: Booking value
+        type: bar
+  - id: rooms_by_status
+    type: bar
+    source: rooms_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Rooms
+        type: bar
