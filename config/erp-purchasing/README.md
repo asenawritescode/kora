@@ -12,6 +12,8 @@ is a fact that goods arrived, so it cannot be edited afterwards; correct it with
 Stock Adjustment (`erp-inventory`). Roles: Buyer (orders, receives) and Purchasing Manager (everything here). The
 workspace administrator can do all of it.
 
+Report: **Buying overview** (orders and supplier bills by status, in base currency).
+
 Same money convention as `pos-base`: every money record has `currency` (empty =
 base currency) and a frozen `exchange_rate`, and a computed base amount. Rates
 are typed in by hand.

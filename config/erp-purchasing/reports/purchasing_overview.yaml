@@ -1,0 +1,31 @@
+name: purchasing_overview
+label: Buying overview
+route: /reports/buying
+queries:
+  - id: orders_by_status
+    model: purchase_order
+    measures: [count, base_total_sum]
+    dimensions: [status]
+  - id: bills_by_status
+    model: supplier_bill
+    measures: [count, base_amount_sum]
+    dimensions: [status]
+visuals:
+  - id: orders_by_status
+    type: bar
+    source: orders_by_status
+    x_field: status
+    series:
+      - field: base_total_sum
+        label: Ordered, in base currency
+        type: bar
+        format: currency
+  - id: bills_by_status
+    type: bar
+    source: bills_by_status
+    x_field: status
+    series:
+      - field: base_amount_sum
+        label: Billed, in base currency
+        type: bar
+        format: currency

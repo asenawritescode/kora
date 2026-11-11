@@ -1,0 +1,47 @@
+name: Owner Dashboard
+route: /dashboard
+type: dashboard
+layout: grid
+label: Business at a glance
+module: Selling
+components:
+  - id: grid
+    type: dashboard_grid
+    region: main
+    position: 0
+    label: Key figures
+    components:
+      - id: sales_count
+        type: metric_card
+        region: main
+        position: 0
+        source_doctype: Sale
+        label: Sales
+        bindings:
+          metric: count
+      - id: sales_total
+        type: metric_card
+        region: main
+        position: 1
+        source_doctype: Sale
+        label: Sales total
+        bindings:
+          metric: sum
+          value_field: base_total
+      - id: expenses_total
+        type: metric_card
+        region: main
+        position: 2
+        source_doctype: Expense
+        label: Expenses
+        bindings:
+          metric: sum
+          value_field: base_amount
+      - id: products_count
+        type: metric_card
+        region: main
+        position: 3
+        source_doctype: Product
+        label: Products
+        bindings:
+          metric: count

@@ -22,6 +22,10 @@ feeds, journals and accounts (nothing posted to them), stock ledgers (see
 Reports (all in base currency): Sales (by day, currency, status), Payments
 received (by currency, method), Expenses (by category, day).
 
+The **Owner Dashboard** view (`/dashboard`) shows the key figures on one screen: number of
+sales, sales total, expenses total and number of products, in the base currency. It counts
+and adds up every record; it has no date range yet.
+
 Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 (sells, takes payments, works a till). Cashiers cannot change currencies or rates.
 

@@ -16,6 +16,8 @@ How it works: the record type declares a `quantity_effect` rule. The Engine
 applies it inside the same all-or-nothing step as the save. See the Engine note in
 `kernel/quantity_effect.go`.
 
+Report: **Stock adjustments** (count and units changed, by reason).
+
 Not here yet: a stock movement ledger (one row per change with before/after),
 warehouses, transfers, stock counts, and approval for large adjustments.
 Adjustments apply when created; they are not a submit-and-cancel document.
