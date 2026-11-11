@@ -1,0 +1,29 @@
+name: appointments_overview
+label: Appointments overview
+route: /reports/appointments
+queries:
+  - id: appointments_by_status
+    model: appointment
+    measures: [count]
+    dimensions: [status]
+  - id: appointments_by_service
+    model: appointment
+    measures: [count]
+    dimensions: [service]
+visuals:
+  - id: appointments_by_status
+    type: bar
+    source: appointments_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Appointments
+        type: bar
+  - id: appointments_by_service
+    type: bar
+    source: appointments_by_service
+    x_field: service
+    series:
+      - field: count
+        label: Appointments
+        type: bar

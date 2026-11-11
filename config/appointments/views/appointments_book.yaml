@@ -1,0 +1,27 @@
+name: Appointment Book
+route: /appointments
+type: workspace
+layout: single
+label: Appointments
+module: Appointments
+components:
+  - id: upcoming
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Appointment
+    label: Upcoming appointments
+    filters:
+      - field: status
+        op: equals
+        value: Booked
+    desktop_columns: [reference, client_name, service, staff, scheduled_for]
+    mobile_columns: [client_name, service, scheduled_for]
+  - id: services
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Service
+    label: Services
+    desktop_columns: [service_name, duration_minutes, price, active]
+    mobile_columns: [service_name, price]

@@ -1,0 +1,58 @@
+name: Appointment
+module: Appointments
+title_field: reference
+search_fields: reference, client_name, client_phone
+sort_field: scheduled_for
+sort_order: ASC
+description: A client booked for a service at a set time, until it is done, missed or cancelled.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: client_name
+    fieldtype: Data
+    label: Client
+    reqd: true
+    in_list_view: true
+  - fieldname: client_phone
+    fieldtype: Data
+    label: Phone
+  - fieldname: service
+    fieldtype: Link
+    options: Service
+    label: Service
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: staff
+    fieldtype: User
+    label: Staff
+    in_standard_filter: true
+  - fieldname: scheduled_for
+    fieldtype: Datetime
+    label: When
+    reqd: true
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Booked
+      Done
+      No show
+      Cancelled
+    default: Booked
+    in_list_view: true
+    in_standard_filter: true
+    constraints:
+      - type: one_of
+        values: [Booked, Done, No show, Cancelled]
+        message: "The status must be Booked, Done, No show or Cancelled."
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
