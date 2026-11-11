@@ -1,0 +1,27 @@
+name: Dispensary
+route: /dispensary
+type: workspace
+layout: single
+label: Dispensary
+module: Dispensary
+components:
+  - id: prescriptions_waiting
+    type: record_table
+    region: main
+    position: 0
+    source_doctype: Prescription
+    label: Prescriptions waiting
+    filters:
+      - field: status
+        op: equals
+        value: Received
+    desktop_columns: [reference, patient, prescriber, prescribed_on]
+    mobile_columns: [reference, patient]
+  - id: batches
+    type: record_table
+    region: main
+    position: 1
+    source_doctype: Medicine Batch
+    label: Medicine batches
+    desktop_columns: [batch_no, product, expiry_date, quantity_received, supplier]
+    mobile_columns: [batch_no, expiry_date]

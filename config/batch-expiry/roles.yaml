@@ -1,0 +1,6 @@
+- name: Pharmacist
+  workspace_access: true
+  description: Runs the dispensary. Manages patients, prescriptions and medicine batches.
+- name: Dispensing Assistant
+  workspace_access: true
+  description: Reads patients and batches, and records and edits prescriptions. Cannot delete.

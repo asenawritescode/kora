@@ -1,0 +1,25 @@
+name: Prescription Line
+module: Dispensary
+is_child_table: true
+title_field: product
+description: One medicine on a prescription.
+
+fields:
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Medicine
+    reqd: true
+  - fieldname: dosage
+    fieldtype: Data
+    label: Dosage
+    description: For example one tablet twice a day for five days.
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    reqd: true
+    default: "1"
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The quantity must be more than zero."

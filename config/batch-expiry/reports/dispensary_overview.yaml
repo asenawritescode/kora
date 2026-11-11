@@ -1,0 +1,29 @@
+name: dispensary_overview
+label: Dispensary overview
+route: /reports/dispensary
+queries:
+  - id: prescriptions_by_status
+    model: prescription
+    measures: [count]
+    dimensions: [status]
+  - id: batches_by_product
+    model: medicine_batch
+    measures: [count, quantity_received_sum]
+    dimensions: [product]
+visuals:
+  - id: prescriptions_by_status
+    type: bar
+    source: prescriptions_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Prescriptions
+        type: bar
+  - id: batches_by_product
+    type: bar
+    source: batches_by_product
+    x_field: product
+    series:
+      - field: quantity_received_sum
+        label: Quantity received
+        type: bar

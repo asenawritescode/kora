@@ -1,0 +1,48 @@
+- doctype: Patient
+  role: Pharmacist
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Prescription
+  role: Pharmacist
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Prescription Line
+  role: Pharmacist
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Medicine Batch
+  role: Pharmacist
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Patient
+  role: Dispensing Assistant
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Prescription
+  role: Dispensing Assistant
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Prescription Line
+  role: Dispensing Assistant
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Medicine Batch
+  role: Dispensing Assistant
+  read: true
+  write: false
+  create: false
+  delete: false
