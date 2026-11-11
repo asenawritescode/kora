@@ -1,0 +1,48 @@
+- doctype: Menu Item
+  role: Restaurant Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Dining Table
+  role: Restaurant Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Kitchen Order
+  role: Restaurant Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Kitchen Order Line
+  role: Restaurant Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Menu Item
+  role: Waiter
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Dining Table
+  role: Waiter
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Kitchen Order
+  role: Waiter
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Kitchen Order Line
+  role: Waiter
+  read: true
+  write: true
+  create: true
+  delete: false

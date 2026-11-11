@@ -1,0 +1,35 @@
+name: Dining Table
+module: Menu
+title_field: table_no
+search_fields: table_no, status
+sort_field: table_no
+sort_order: ASC
+description: A table in the dining room and whether it is free, taken or reserved.
+
+fields:
+  - fieldname: table_no
+    fieldtype: Data
+    label: Table
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: seats
+    fieldtype: Int
+    label: Seats
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 1
+        message: "A table needs at least one seat."
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Free
+      Occupied
+      Reserved
+    default: Free
+    in_list_view: true
+    in_standard_filter: true

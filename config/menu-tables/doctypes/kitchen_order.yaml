@@ -1,0 +1,61 @@
+name: Kitchen Order
+module: Menu
+title_field: reference
+search_fields: reference, dining_table, status
+sort_field: creation
+sort_order: DESC
+description: What a table has ordered, followed from the kitchen to the table.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: dining_table
+    fieldtype: Link
+    options: Dining Table
+    label: Table
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      New
+      Preparing
+      Served
+      Cancelled
+    default: New
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: lines
+    fieldtype: Table
+    options: Kitchen Order Line
+    label: Items
+    reqd: true
+    constraints:
+      - type: min_rows
+        value: 1
+        message: "An order needs at least one item."
+  - fieldname: item_count
+    fieldtype: Int
+    label: Items ordered
+    computed: "SUM(lines.quantity)"
+    read_only: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: field_dependency
+    condition: "status == 'Cancelled'"
+    require_fields: [notes]
+    message: "Say why the order was cancelled in the notes."
+  - type: immutable_after
+    status_field: status
+    status_values: [Served, Cancelled]
+    immutable_fields: [reference, dining_table]
+    message: "A served or cancelled order's reference and table cannot be changed."
