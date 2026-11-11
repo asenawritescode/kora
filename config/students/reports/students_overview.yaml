@@ -1,0 +1,29 @@
+name: students_overview
+label: Students overview
+route: /reports/students
+queries:
+  - id: students_by_class
+    model: student
+    measures: [count]
+    dimensions: [class_group]
+  - id: register_by_status
+    model: class_register_entry
+    measures: [count]
+    dimensions: [status]
+visuals:
+  - id: students_by_class
+    type: bar
+    source: students_by_class
+    x_field: class_group
+    series:
+      - field: count
+        label: Students
+        type: bar
+  - id: register_by_status
+    type: bar
+    source: register_by_status
+    x_field: status
+    series:
+      - field: count
+        label: Register entries
+        type: bar

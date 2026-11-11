@@ -1,0 +1,29 @@
+name: Class
+module: Students
+title_field: class_name
+search_fields: class_name
+sort_field: modified
+sort_order: DESC
+description: A class or training group that students belong to.
+
+fields:
+  - fieldname: class_name
+    fieldtype: Data
+    label: Class
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: teacher
+    fieldtype: User
+    label: Teacher
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: year
+    fieldtype: Int
+    label: Year
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

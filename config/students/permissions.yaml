@@ -1,0 +1,36 @@
+- doctype: Class
+  role: School Administrator
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Student
+  role: School Administrator
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Class Register Entry
+  role: School Administrator
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Class
+  role: Teacher
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Student
+  role: Teacher
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Class Register Entry
+  role: Teacher
+  read: true
+  write: true
+  create: true
+  delete: false

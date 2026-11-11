@@ -1,0 +1,6 @@
+- name: School Administrator
+  workspace_access: true
+  description: Runs student records. Manages classes, students and the class register.
+- name: Teacher
+  workspace_access: true
+  description: Reads classes and students and keeps the class register. Cannot delete anything.
