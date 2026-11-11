@@ -1,0 +1,76 @@
+name: Employee
+module: People
+title_field: full_name
+search_fields: employee_no, full_name, email
+sort_field: modified
+sort_order: DESC
+description: A person who works for the business.
+
+fields:
+  - fieldname: employee_no
+    fieldtype: Data
+    label: Employee number
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: first_name
+    fieldtype: Data
+    label: First name
+    reqd: true
+  - fieldname: last_name
+    fieldtype: Data
+    label: Last name
+    reqd: true
+  - fieldname: full_name
+    fieldtype: Data
+    label: Name
+    read_only: true
+    in_list_view: true
+    search_index: true
+    computed: '(concat first_name " " last_name)'
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+  - fieldname: department
+    fieldtype: Link
+    options: Department
+    label: Department
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: job_title
+    fieldtype: Data
+    label: Job title
+    in_list_view: true
+  - fieldname: employment_type
+    fieldtype: Select
+    label: Employment type
+    options: |
+      Full time
+      Part time
+      Contract
+      Casual
+    default: Full time
+    in_standard_filter: true
+  - fieldname: hire_date
+    fieldtype: Date
+    label: Hire date
+  - fieldname: manager
+    fieldtype: Link
+    options: Employee
+    label: Reports to
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      On leave
+      Left
+    default: Active
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

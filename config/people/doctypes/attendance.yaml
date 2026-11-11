@@ -1,0 +1,48 @@
+name: Attendance
+module: People
+title_field: label
+search_fields: label, status
+sort_field: attendance_date
+sort_order: DESC
+description: Whether an employee was at work on a day.
+
+fields:
+  - fieldname: employee
+    fieldtype: Link
+    options: Employee
+    label: Employee
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: attendance_date
+    fieldtype: Date
+    label: Date
+    reqd: true
+    in_list_view: true
+  - fieldname: label
+    fieldtype: Data
+    label: Entry
+    read_only: true
+    search_index: true
+    computed: '(concat employee " " attendance_date)'
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Present
+      Absent
+      Late
+      Half day
+      On leave
+    default: Present
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: check_in
+    fieldtype: Time
+    label: Arrived
+  - fieldname: check_out
+    fieldtype: Time
+    label: Left
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

@@ -1,0 +1,19 @@
+name: Department
+module: People
+title_field: department_name
+search_fields: department_name
+sort_field: modified
+sort_order: DESC
+description: A team or section of the business.
+
+fields:
+  - fieldname: department_name
+    fieldtype: Data
+    label: Department
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

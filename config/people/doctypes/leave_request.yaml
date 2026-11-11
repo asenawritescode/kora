@@ -1,0 +1,76 @@
+name: Leave Request
+module: People
+title_field: reference
+search_fields: reference, status
+sort_field: modified
+sort_order: DESC
+description: A request for time off, waiting for a decision until it is approved or rejected.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: employee
+    fieldtype: Link
+    options: Employee
+    label: Employee
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: leave_type
+    fieldtype: Link
+    options: Leave Type
+    label: Leave type
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: start_date
+    fieldtype: Date
+    label: First day
+    reqd: true
+    in_list_view: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: Last day
+    reqd: true
+    in_list_view: true
+  - fieldname: days
+    fieldtype: Int
+    label: Days
+    read_only: true
+    in_list_view: true
+    computed: "(+ (datediff start_date end_date) 1)"
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Pending
+      Approved
+      Rejected
+      Cancelled
+    default: Pending
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: approver
+    fieldtype: User
+    label: Approver
+  - fieldname: reason
+    fieldtype: Text
+    label: Reason
+  - fieldname: decision_note
+    fieldtype: Text
+    label: Decision note
+doc_constraints:
+  - type: cross_field
+    lhs: end_date
+    operator: ">="
+    rhs: start_date
+    message: "The last day cannot be before the first day."
+  - type: immutable_after
+    status_field: status
+    status_values: [Approved, Rejected]
+    immutable_fields: [employee, leave_type, start_date, end_date]
+    message: "A decided leave request cannot be changed."

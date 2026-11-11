@@ -1,0 +1,25 @@
+name: Leave Type
+module: People
+title_field: leave_type_name
+search_fields: leave_type_name
+sort_field: modified
+sort_order: DESC
+description: A kind of leave, such as annual or sick leave.
+
+fields:
+  - fieldname: leave_type_name
+    fieldtype: Data
+    label: Leave type
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: days_per_year
+    fieldtype: Int
+    label: Days per year
+    in_list_view: true
+  - fieldname: paid
+    fieldtype: Check
+    label: Paid leave
+    default: "1"
+    in_list_view: true

@@ -1,0 +1,60 @@
+- doctype: Department
+  role: HR Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Employee
+  role: HR Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Leave Type
+  role: HR Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Leave Request
+  role: HR Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Attendance
+  role: HR Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Department
+  role: HR User
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Employee
+  role: HR User
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Leave Type
+  role: HR User
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Leave Request
+  role: HR User
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Attendance
+  role: HR User
+  read: true
+  write: true
+  create: true
+  delete: false
