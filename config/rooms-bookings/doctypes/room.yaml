@@ -1,0 +1,49 @@
+name: Room
+module: Rooms
+title_field: room_no
+search_fields: room_no, room_type, status
+sort_field: room_no
+sort_order: ASC
+description: A room the business lets out, with its rate and whether it can be given to a guest now.
+
+fields:
+  - fieldname: room_no
+    fieldtype: Data
+    label: Room number
+    reqd: true
+    unique: true
+    in_list_view: true
+    search_index: true
+  - fieldname: room_type
+    fieldtype: Select
+    label: Room type
+    options: |
+      Single
+      Double
+      Suite
+      Family
+    default: Single
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: rate_per_night
+    fieldtype: Currency
+    label: Rate per night
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The rate per night cannot be negative."
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Available
+      Occupied
+      Cleaning
+      Out of service
+    default: Available
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

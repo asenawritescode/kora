@@ -1,0 +1,83 @@
+name: Booking
+module: Rooms
+title_field: reference
+search_fields: reference, status
+sort_field: check_in
+sort_order: DESC
+description: A guest's stay in a room, from the day they arrive to the day they leave.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+    unique: true
+    in_list_view: true
+  - fieldname: guest
+    fieldtype: Link
+    options: Guest
+    label: Guest
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: room
+    fieldtype: Link
+    options: Room
+    label: Room
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: check_in
+    fieldtype: Date
+    label: Check in
+    reqd: true
+    in_list_view: true
+  - fieldname: check_out
+    fieldtype: Date
+    label: Check out
+    reqd: true
+    in_list_view: true
+  - fieldname: nights
+    fieldtype: Int
+    label: Nights
+    read_only: true
+    in_list_view: true
+    computed: "(datediff check_in check_out)"
+  - fieldname: rate
+    fieldtype: Currency
+    label: Rate per night
+    constraints:
+      - type: min
+        value: 0.0
+        message: "The rate cannot be negative."
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    read_only: true
+    in_list_view: true
+    computed: "(round (* (round nights 9) (round rate 9)) 2)"
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Booked
+      Checked in
+      Checked out
+      Cancelled
+    default: Booked
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes
+doc_constraints:
+  - type: cross_field
+    lhs: check_out
+    operator: ">"
+    rhs: check_in
+    message: "The guest must check out after the day they check in."
+  - type: immutable_after
+    status_field: status
+    status_values: [Checked out, Cancelled]
+    immutable_fields: [guest, room, check_in, check_out]
+    message: "A booking that is checked out or cancelled cannot be changed."
