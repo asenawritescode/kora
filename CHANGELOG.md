@@ -1,3 +1,26 @@
+## v1.0.0 — 2026-11-13
+
+The Engine is API-only: the UI is deployed separately from kora-ui, and the Docker image and release workflow build only the Go binary.
+
+### Features
+- Config packs for Selling (pos-base: till sessions that must be open to sell, closed with a cash count, multi-currency, mobile-money payments, owner dashboard), Stock, Buying and Books
+- Module packs: CRM, People, Documents, Assets, Projects, Fleet, Manufacturing, Subscriptions, Menu and tables, Dispensary (batch-expiry), Produce (farm-produce), Students, Shipments, Properties, Appointments, Workshop (job-cards), Members and savings, Grants, Rooms and bookings, each with roles, permissions, a view and a report
+- Package upgrades are refused when they would invalidate records a tenant already has
+- Tenant member plan, grant and revoke operations; optional ProvisionTenant display name
+- quantity_effect applies on any create; ensure-command steps; $steps.<alias>.<field> reads
+- ZANA_* environment variables, with the KORA_* names kept as a deprecated fallback for one release
+
+### Fixes
+- A unique field gets its unique index on a table that already exists
+- A record type with no fields or constraints serialises them as [], never null
+- 34 more fixes since v1.0.0-alpha.2; see the full diff
+
+### Improvements
+- Exported names no longer repeat their package; the contract generator and command directories were renamed
+
+**Full diff:** https://github.com/asenawritescode/kora/compare/v1.0.0-alpha.2...v1.0.0
+
+
 ## v0.9.5 — 2026-08-31
 
 ### Features
