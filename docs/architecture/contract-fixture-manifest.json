@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "snapshot_date": "2026-11-05",
+  "snapshot_date": "2026-11-13",
   "release_status": "unreleased-working-tree-snapshot",
   "fixtures": [
     {
@@ -52,19 +52,19 @@
     {
       "version": "v2",
       "schema": "kora/contract/schema/engine-v2.json",
-      "schema_sha256": "7f443c7388b23e014aee44b6b6aecc83724bf0cac26873ef1444d5ac00da7a0c",
+      "schema_sha256": "5c8ff139a013ea82eef631b4e5464c9856d1727a00948057b37382d67cbbf932",
       "typescript": "kora/contract/generated/engine-v2.ts",
-      "typescript_sha256": "9fcb6c6f909579d1dcf6b69dd38665b94a848a5f098cba37f818e5489feda87b",
+      "typescript_sha256": "d504bdb6ebff90409bec88588683de502d8dd9b642bbecf889f7e84e1ef95e1e",
       "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
-      "studio_copy_sha256": "9fcb6c6f909579d1dcf6b69dd38665b94a848a5f098cba37f818e5489feda87b",
+      "studio_copy_sha256": "d504bdb6ebff90409bec88588683de502d8dd9b642bbecf889f7e84e1ef95e1e",
       "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
-      "sdk_copy_sha256": "9fcb6c6f909579d1dcf6b69dd38665b94a848a5f098cba37f818e5489feda87b",
+      "sdk_copy_sha256": "d504bdb6ebff90409bec88588683de502d8dd9b642bbecf889f7e84e1ef95e1e",
       "android_schema": "kora-mobile-app/app/src/main/assets/contracts/engine-v2.json",
-      "android_schema_sha256": "7f443c7388b23e014aee44b6b6aecc83724bf0cac26873ef1444d5ac00da7a0c",
+      "android_schema_sha256": "5c8ff139a013ea82eef631b4e5464c9856d1727a00948057b37382d67cbbf932",
       "android_manifest": "kora-mobile-app/app/src/main/java/com/kora/mobile/generated/EngineContractManifest.kt",
-      "android_manifest_sha256": "5cc494b81c0d8a98373f374e8b522944e1fdb4bccbeffdd0fc78984a76db35c1",
+      "android_manifest_sha256": "bafae681e242fb16fdd4980d46500db5d3467c64440d0258958094e63ebc2665",
       "cloud_manifest": "kora-cloud/contract-fixtures/engine-v2-manifest.json",
-      "cloud_manifest_sha256": "f285701c767f7a1249a04699c55d60fddb80cab6265855711ffdc57bf08c8c0d"
+      "cloud_manifest_sha256": "5a9ee91e10ec2540219e180f4673b9dbf341fd5533cbcbc48879ba8347435ed7"
     }
   ]
 }
