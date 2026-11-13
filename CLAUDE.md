@@ -45,7 +45,7 @@ make setup              # Setup a site (SITE=airtime.local CONFIG=config/v0/airt
 make test               # Run Go tests (18 packages)
 make lint               # Run linters (golangci-lint)
 make fmt                # Format code
-make release TAG=v0.2.0 # Tag and push a release
+make release TAG=v1.0.1 # Open the release PR (then: make release-tag TAG=v1.0.1)
 make help               # Show all commands
 ```
 
@@ -450,30 +450,31 @@ On tag push (`v*`): builds binaries for linux/darwin (amd64/arm64), categorizes 
 
 ### Creating a Release
 
-```bash
-# Full release: validates, generates changelog, bumps version, tags, pushes
-./scripts/release.sh v0.2.0
+A release goes through a pull request, never a direct push to `main` (see Branch Rules). Run from a checkout of the current `main`:
 
-# Or via Make:
-make release TAG=v0.2.0
+```bash
+make release TAG=v1.0.1 TICKET=123   # 1. opens a PR bumping VERSION and CHANGELOG.md
+# ... merge the PR once Go and Lint are green ...
+make release-tag TAG=v1.0.1          # 2. tags the merged commit and pushes the tag
 ```
 
-The release script (`scripts/release.sh`) runs these steps:
+`scripts/release.py` does both steps (`prepare`, `tag`; tests in `scripts/test_release.py`, run by CI):
 
 | Step | What it does |
 |------|-------------|
-| 1. **Validate** | `go test ./...` + `go build` — blocks release if checks fail |
-| 2. **Changelog** | Categorizes commits into Features/Fixes/Security/Improvements/Docs, prepends to `CHANGELOG.md` |
-| 3. **Version bump** | Writes version number to `VERSION` file |
-| 4. **Tag & push** | Commits changelog + version, creates annotated tag, pushes |
+| `prepare` | Requires a clean checkout at the remote's `main` and an unused tag, builds, groups the commits since the previous tag by type (feat, fix, security, refactor/perf, docs) into a `CHANGELOG.md` entry, bumps `VERSION`, pushes `release/<tag>` and opens the PR |
+| `tag` | Requires the bump merged, a `CHANGELOG.md` entry for the tag and the `Go` and `Lint` jobs green on the merge commit (advisory jobs do not gate), then creates the annotated tag and pushes it |
 
-After push, GitHub Actions:
+It pushes only to the `KORA_RELEASE_REMOTE` remote (default `kora-upstream`) and takes the GitHub repository from that remote's URL, so it never touches `origin`.
+
+Pushing the tag starts the Release workflow:
 - Builds `kora-linux-amd64`, `kora-darwin-amd64`, `kora-darwin-arm64` with SHA256 checksums
 - Creates a GitHub Release with categorized release notes and download links
+- Builds the Engine-only Docker image and pushes `smitdockerhub/kora:<version>`, `:v<version>` and `:latest`
 
 ### Version File
 
-`VERSION` at the repo root holds the current version (e.g., `0.2.0`). The release script bumps it automatically. The `go.mod` uses `go 1.25.0` (gin v1.12.0 requires it). CI uses `golangci-lint run ./...` for linting across all packages.
+`VERSION` at the repo root holds the current version (e.g., `0.2.0`). `make release` bumps it in the release PR. The `go.mod` uses `go 1.25.0` (gin v1.12.0 requires it). CI uses `golangci-lint run ./...` for linting across all packages.
 
 ### Branch Rules (set in GitHub Settings → Rules → Rulesets)
 
