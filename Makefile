@@ -1,4 +1,4 @@
-.PHONY: build build-go dev setup serve test lint lint-complexity complexity-ratchet complexity-baseline deadcode-ratchet deadcode-baseline primitive-funcs-ratchet primitive-funcs-baseline params-ratchet params-baseline lint-all clean release sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
+.PHONY: build build-go dev setup serve test lint lint-complexity complexity-ratchet complexity-baseline deadcode-ratchet deadcode-baseline primitive-funcs-ratchet primitive-funcs-baseline params-ratchet params-baseline lint-all clean release release-tag release-test sync-contracts check-contracts check-cross-repo-contracts check-selfhost-backup check-selfhost-restore-live
 
 # Defaults
 SITE ?= airtime.local
@@ -108,9 +108,16 @@ fmt:                               ## Format code
 	go fmt ./...
 
 ## Release
-release:                           ## Full release: test → lint → changelog → bump → tag → push (TAG=v0.2.0)
-	@test -n "$(TAG)" || (echo "Usage: make release TAG=v0.2.0" && exit 1)
-	./scripts/release.sh $(TAG)
+release:                           ## Open the release PR: changelog and VERSION bump (TAG=v1.0.1 [TICKET=N])
+	@test -n "$(TAG)" || (echo "Usage: make release TAG=v1.0.1 [TICKET=N]" && exit 1)
+	./scripts/release.py prepare $(TAG) $(if $(TICKET),--ticket $(TICKET))
+
+release-tag:                       ## After the release PR merges and CI is green: tag it and publish (TAG=v1.0.1)
+	@test -n "$(TAG)" || (echo "Usage: make release-tag TAG=v1.0.1" && exit 1)
+	./scripts/release.py tag $(TAG)
+
+release-test:                      ## Test the release tooling
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_release.py
 
 ## Cleanup
 clean:                             ## Remove build artifacts
