@@ -14,6 +14,7 @@ import (
 	subscriptionjobs "github.com/asenawritescode/kora/internal/application/subscriptions/engineadapter"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/engine"
+	"github.com/asenawritescode/kora/internal/envcompat"
 	"github.com/asenawritescode/kora/internal/ingress"
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/natsprovider"
@@ -407,8 +408,8 @@ func runServe() error {
 	}
 	listenerTLS := knet.TLSConfig{Mode: common.TLSMode, Email: common.TLSEmail}
 	var managementPackageResolver engine.ManagementPackageArtifactResolver
-	artifactURL, artifactToken := strings.TrimSpace(os.Getenv("KORA_ENGINE_MANAGEMENT_ARTIFACT_URL")), strings.TrimSpace(os.Getenv("KORA_ENGINE_MANAGEMENT_ARTIFACT_TOKEN"))
-	if artifactURL != "" || artifactToken != "" {
+	artifactURL, artifactToken := strings.TrimSpace(os.Getenv("KORA_ENGINE_MANAGEMENT_ARTIFACT_URL")), envcompat.IntegrationToken()
+	if artifactURL != "" { // the shared token is always set; the URL turns package downloads on
 		managementPackageResolver, err = engine.NewHTTPManagementPackageArtifactResolver(artifactURL, artifactToken, nil)
 		if err != nil {
 			return fmt.Errorf("configure Engine management package artifact resolver: %w", err)
@@ -428,12 +429,12 @@ func runServe() error {
 		OutboxEnabled:      outboxEnabledFromEnv(os.Getenv("KORA_OUTBOX"), natsEnabled()),
 		PlatformDBUser:     common.DBUser, PlatformDBPassword: common.DBPassword,
 		AllowConsoleOnboarding:          sc.AllowConsoleOnboarding,
-		ReloadToken:                     os.Getenv("KORA_RELOAD_TOKEN"),
-		ManagementToken:                 os.Getenv("KORA_ENGINE_MANAGEMENT_TOKEN"),
+		ReloadToken:                     envcompat.IntegrationToken(),
+		ManagementToken:                 envcompat.IntegrationToken(),
 		ManagementCallerID:              os.Getenv("KORA_ENGINE_MANAGEMENT_CALLER_ID"),
 		PublicAppBaseURL:                strings.TrimSpace(os.Getenv("KORA_PUBLIC_APP_BASE_URL")),
 		CloudIdentityURL:                strings.TrimSpace(os.Getenv("KORA_ENGINE_CLOUD_IDENTITY_URL")),
-		CloudIdentityToken:              strings.TrimSpace(os.Getenv("KORA_ENGINE_CLOUD_IDENTITY_TOKEN")),
+		CloudIdentityToken:              envcompat.IntegrationToken(),
 		DeploymentID:                    os.Getenv("KORA_ENGINE_DEPLOYMENT_ID"),
 		ManagementDatabaseAllocationRef: os.Getenv("KORA_ENGINE_MANAGEMENT_DATABASE_ALLOCATION_REF"),
 		ManagementPackageResolver:       managementPackageResolver,

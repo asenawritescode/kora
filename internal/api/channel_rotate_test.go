@@ -14,7 +14,7 @@ import (
 
 func TestHandleManagedChannelClientRotateStoresOnlyVerifier(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "provisioning-secret")
+	t.Setenv("KORA_INTEGRATION_TOKEN", "provisioning-secret")
 	const key = "rotate-op-123456"
 	token, err := managedChannelToken("tenant-1", key)
 	if err != nil {
@@ -67,7 +67,7 @@ func TestHandleManagedChannelClientRotateStoresOnlyVerifier(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer db.Close()
-		t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "rotated-provisioning-secret")
+		t.Setenv("KORA_INTEGRATION_TOKEN", "rotated-provisioning-secret")
 		mock.ExpectQuery(selectCurrent).WithArgs("tenant-1", "kora-cloud-channel").
 			WillReturnRows(sqlmock.NewRows([]string{"access_token_hash", "managed_idempotency_key"}).AddRow(tokenHash, auth.HashExtensionAccessToken(key)))
 		response := invokeManagedCredentialRotate(t, db, key)

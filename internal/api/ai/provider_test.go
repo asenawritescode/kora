@@ -128,7 +128,7 @@ func TestResolveProviderPrefersCloudGateway(t *testing.T) {
 	}
 	defer db.Close()
 	t.Setenv("KORA_CLOUD_AI_GATEWAY_URL", "http://127.0.0.1:8081/internal/engine/ai")
-	t.Setenv("KORA_CLOUD_AI_GATEWAY_TOKEN", "engine-cloud-token")
+	t.Setenv("KORA_INTEGRATION_TOKEN", "engine-cloud-token")
 	t.Setenv("KORA_CLOUD_AI_GATEWAY_MODEL", "cloud-model")
 
 	providerKey, apiKey, baseURL, model := resolveProvider(db, "site-a", "")

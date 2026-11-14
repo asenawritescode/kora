@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/asenawritescode/kora/internal/api/ai"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/envcompat"
 	"github.com/asenawritescode/kora/internal/webhook"
 	"github.com/gin-gonic/gin"
 )
@@ -350,7 +350,7 @@ func revokeManagedChannelSessions(ctx context.Context, executor interface {
 // provisioning secret, tenant and Cloud's idempotency key. Only the verifier is
 // stored, so a replayed rotation re-derives the token instead of reading it.
 func managedChannelToken(siteName, idempotencyKey string) (string, error) {
-	key := os.Getenv("KORA_ENGINE_PROVISIONING_TOKEN")
+	key := envcompat.IntegrationToken()
 	if key == "" {
 		return "", errors.New("provisioning token is not configured")
 	}

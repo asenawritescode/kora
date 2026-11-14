@@ -62,13 +62,10 @@ services:
       KORA_ASYNC_HOOK_MAX_QUEUED_BYTES: ${KORA_ASYNC_HOOK_MAX_QUEUED_BYTES:-67108864}
       KORA_ASYNC_HOOK_MAX_EVENT_BYTES: ${KORA_ASYNC_HOOK_MAX_EVENT_BYTES:-1048576}
       KORA_PUBLIC_APP_BASE_URL: ${KORA_PUBLIC_APP_BASE_URL:-}
-      # Dedicated token for the narrow managed-channel credential endpoints.
-      # Keep it identical to Cloud's KORA_CLOUD_ENGINE_PROVISIONING_TOKEN.
-      KORA_ENGINE_PROVISIONING_TOKEN: ${KORA_ENGINE_PROVISIONING_TOKEN:-}
-      # Optional Cloud management API. Keep the token identical to
-      # KORA_CLOUD_ENGINE_MANAGEMENT_TOKEN and set the deployment/allocation
-      # values to the same identifiers configured in Cloud.
-      KORA_ENGINE_MANAGEMENT_TOKEN: ${KORA_ENGINE_MANAGEMENT_TOKEN:-}
+      # The one secret shared with Cloud; set the same value in Cloud.
+      KORA_INTEGRATION_TOKEN: ${KORA_INTEGRATION_TOKEN:-}
+      # Optional Cloud management API. Set the deployment/allocation values to
+      # the same identifiers configured in Cloud.
       KORA_ENGINE_MANAGEMENT_CALLER_ID: ${KORA_ENGINE_MANAGEMENT_CALLER_ID:-}
       KORA_ENGINE_DEPLOYMENT_ID: ${KORA_ENGINE_DEPLOYMENT_ID:-}
       KORA_ENGINE_MANAGEMENT_DATABASE_ALLOCATION_REF: ${KORA_ENGINE_MANAGEMENT_DATABASE_ALLOCATION_REF:-}

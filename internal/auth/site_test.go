@@ -352,7 +352,7 @@ func TestRevalidateRealtimeIdentityRefreshesExtensionPermissions(t *testing.T) {
 
 func TestProvisioningTokenIsRestrictedToManagedCredentialOperations(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "provisioning-secret")
+	t.Setenv("KORA_INTEGRATION_TOKEN", "provisioning-secret")
 	guardOwner := NewSiteGuardWithSessionManager(nil)
 	defer guardOwner.Close()
 	guard := guardOwner.Middleware(true)

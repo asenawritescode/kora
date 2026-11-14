@@ -436,7 +436,8 @@ Key environment variables for extensibility and analytics:
 - `KORA_STORAGE_S3_USE_SSL` — TLS to S3 endpoint (default: `true`)
 - `KORA_STORAGE_S3_PUBLIC_URL` — Optional public base URL (else presigned URLs are used)
 - On startup, S3-compatible backends are checked and the bucket is created idempotently when missing.
-- `KORA_ENGINE_CLOUD_IDENTITY_URL` / `KORA_ENGINE_CLOUD_IDENTITY_TOKEN` — Cloud sign-in handoff redemption endpoint and service token; set both or neither (neither: startup WARN and `POST /api/auth/cloud/handoff` answers 503 `auth.cloud_handoff_unconfigured`; one: startup fails). Local dev: `http://127.0.0.1:8081/internal/identity/handoff/redeem`
+- `KORA_INTEGRATION_TOKEN` — the one secret shared with Cloud (same value in both); it replaced the separate management, artifact, provisioning, identity, reload, AI gateway and events tokens, which are no longer read (startup warns if they are still set)
+- `KORA_ENGINE_CLOUD_IDENTITY_URL` — Cloud sign-in handoff redemption endpoint; requires `KORA_INTEGRATION_TOKEN` (unset: startup WARN and `POST /api/auth/cloud/handoff` answers 503 `auth.cloud_handoff_unconfigured`). Local dev: `http://127.0.0.1:8081/internal/identity/handoff/redeem`
 - `KORA_MAX_UPLOAD_MB` — Per-file upload cap (default: `50`)
 
 ## Release Workflow

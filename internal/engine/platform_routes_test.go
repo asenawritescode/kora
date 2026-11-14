@@ -1,11 +1,14 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/asenawritescode/kora/internal/site"
 	"github.com/gin-gonic/gin"
 )
 
@@ -58,4 +61,45 @@ func TestRegisterPlatformRoutesRequiresRouter(t *testing.T) {
 	if err := RegisterPlatformRoutes(PlatformRouteConfig{}); err == nil {
 		t.Fatal("RegisterPlatformRoutes without router succeeded")
 	}
+}
+
+// The shared integration token alone must not turn on (or break) the management
+// API: an Engine that uses Cloud only for, say, the AI gateway has no deployment ID.
+func TestManagementRoutesNeedTheTokenAndADeploymentID(t *testing.T) {
+	tests := []struct {
+		name       string
+		token, id  string
+		wantStatus int
+	}{
+		{name: "token without deployment ID stays off", token: "shared", wantStatus: http.StatusNotFound},
+		{name: "token and deployment ID turn it on", token: "shared", id: "default", wantStatus: http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			if err := RegisterPlatformRoutes(PlatformRouteConfig{Router: router, Directory: managementTestDirectory{}, ManagementToken: tt.token, DeploymentID: tt.id}); err != nil {
+				t.Fatalf("RegisterPlatformRoutes: %v", err)
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/management/v2/tenants/tenant-a", nil))
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
+			}
+		})
+	}
+}
+
+type managementTestDirectory struct{}
+
+func (managementTestDirectory) GetDescriptorByIDContext(context.Context, string) (site.Descriptor, error) {
+	return site.Descriptor{}, errors.New("not found")
+}
+
+func (managementTestDirectory) ResolveDescriptorByAliasContext(context.Context, string) (site.Descriptor, error) {
+	return site.Descriptor{}, errors.New("not found")
+}
+
+func (managementTestDirectory) CurrentDirectoryRevisionContext(context.Context) (uint64, error) {
+	return 0, nil
 }

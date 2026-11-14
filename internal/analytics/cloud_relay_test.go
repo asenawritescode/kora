@@ -156,7 +156,7 @@ func TestLoadCloudRelayConfigRequiresURLAndAccount(t *testing.T) {
 	t.Setenv("KORA_CLOUD_EVENTS_URL", "https://cloud.example.com/api/cloud/events")
 	t.Setenv("KORA_CLOUD_ACCOUNT_ID", "acct-1")
 	t.Setenv("KORA_CLOUD_SITE_ID", "site-1")
-	t.Setenv("KORA_CLOUD_EVENTS_TOKEN", "secret")
+	t.Setenv("KORA_INTEGRATION_TOKEN", "secret")
 	cfg := LoadCloudRelayConfig()
 	if cfg == nil {
 		t.Fatal("expected config")

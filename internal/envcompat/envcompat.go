@@ -42,6 +42,7 @@ type Report struct {
 func Apply(log *slog.Logger) (Report, error) {
 	report, err := Promote(os.Environ(), os.Setenv)
 	report.Log(log)
+	warnRetiredTokens(log, os.Getenv)
 	return report, err
 }
 
