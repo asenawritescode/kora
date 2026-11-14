@@ -128,7 +128,7 @@ func render() ([]byte, error) {
 		RouteComposition: "cli/serve.go API/auth/public/request registration functions; DocType and host routing are data/runtime dependent",
 		RegisteredRoutes: registered,
 		Conditional: []conditionalRoute{
-			{Method: "POST", Path: "/_kora/admin/reload-site", Condition: "always mounted; requires KORA_RELOAD_TOKEN at request time", Source: "cli/serve.go"},
+			{Method: "POST", Path: "/_kora/admin/reload-site", Condition: "always mounted; requires KORA_INTEGRATION_TOKEN at request time", Source: "cli/serve.go"},
 			{Method: "GET", Path: "/api/v1/ping", Condition: "always mounted", Source: "cli/serve.go"},
 			{Method: "GET", Path: "/api/ping", Condition: "always mounted", Source: "cli/serve.go"},
 			{Method: "GET", Path: "/health", Condition: "always mounted", Source: "cli/serve.go"},
@@ -138,8 +138,8 @@ func render() ([]byte, error) {
 			{Method: "GET", Path: "/api/console/sites", Condition: "system guard configured", Source: "cli/serve.go"},
 			{Method: "PUT", Path: "/api/console/sites/:name", Condition: "system guard configured", Source: "cli/serve.go"},
 			{Method: "DELETE", Path: "/api/console/sites/:name", Condition: "system guard configured", Source: "cli/serve.go"},
-			{Method: "GET", Path: "/api/management/v2/tenants/:id", Condition: "KORA_ENGINE_MANAGEMENT_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured", Source: "api/management_inspect.go; cli/serve.go"},
-			{Method: "GET", Path: "/api/management/v2/tenants/resolve", Condition: "KORA_ENGINE_MANAGEMENT_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured", Source: "api/management_inspect.go; cli/serve.go"},
+			{Method: "GET", Path: "/api/management/v2/tenants/:id", Condition: "KORA_INTEGRATION_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured", Source: "api/management_inspect.go; cli/serve.go"},
+			{Method: "GET", Path: "/api/management/v2/tenants/resolve", Condition: "KORA_INTEGRATION_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured", Source: "api/management_inspect.go; cli/serve.go"},
 		},
 		Fallbacks: []fallback{
 			{Behavior: "Serve SPA for /workspace, /console, /assets and /s/:site/*; unmatched paths return 404", Condition: "embedded SPA index.html is present", Source: "workspace/spa.go; cli/serve.go"},

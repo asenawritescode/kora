@@ -123,7 +123,7 @@ Runtime config comes from environment variables plus site metadata in the databa
 | `KORA_SESSION_HOURS` | `72` | Session lifetime in hours |
 | `KORA_HOST` | — | Public app hostname (e.g., `app.kora.mradiafrica.com`) |
 | `KORA_CLOUD_AI_GATEWAY_URL` | — | Private Kigae Cloud AI gateway base URL (for example `http://127.0.0.1:8081/internal/engine/ai`) |
-| `KORA_CLOUD_AI_GATEWAY_TOKEN` | — | Private Engine-to-Cloud bearer token; configure the matching `KORA_CLOUD_ENGINE_AI_TOKEN` in Cloud |
+| `KORA_INTEGRATION_TOKEN` | — | The one secret shared with Cloud (same value in both); used by the AI gateway, management API, reload, sign-in handoff, pack downloads and events |
 | `KORA_CLOUD_AI_GATEWAY_MODEL` | `cloud-managed` | Model label sent to Cloud; Cloud selects the actual provider model |
 | `KORA_SCRIPTS_ENABLED` | `false` | Enable JS script engine for extensions |
 | `KORA_OUTBOX` | `true` | Enable transactional kernel events; set `false` only if reports and event-driven integrations are intentionally disabled |
@@ -132,7 +132,6 @@ Runtime config comes from environment variables plus site metadata in the databa
 | `KORA_NATS_SUBJECT_PREFIX` | `kora` | Event subject tree `<prefix>.>` captured by the event stream (requires NATS) |
 | `KORA_NATS_DEAD_LETTER` | `<prefix>_deadletter` | Literal subject where exhausted deliveries are stored. The event stream captures it, but it must lie outside every consumer filter (the default consumer filter is `<prefix>.>`); startup rejects a subject the consumer filter matches. Before this default, it was `kora.deadletter` (requires NATS) |
 | `KORA_DB_PORT` | `3306` | Database port (MySQL) |
-| `KORA_RELOAD_TOKEN` | — | Bearer token for `/_kora/admin/reload-site` endpoint |
 | `KORA_SCRIPTS_HTTP_ALLOWLIST` | — | Comma-separated domains allowed for script HTTP requests |
 | `KORA_LOG_FORMAT` | `text` | Log format: `text` or `json` |
 | `KORA_CSRF_SECURE` | `true` | Set secure flag on CSRF cookies |

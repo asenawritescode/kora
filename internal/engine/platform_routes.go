@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/asenawritescode/kora/internal/api"
 	"github.com/asenawritescode/kora/internal/site"
@@ -37,29 +38,40 @@ type PlatformRouteConfig struct {
 	BinaryVersion string
 }
 
+// registerManagementRoutes installs the management API when the shared
+// integration token and a deployment ID are set. The token alone is set
+// whenever Cloud is used at all, so it does not turn the API on.
+func registerManagementRoutes(config PlatformRouteConfig) error {
+	var handler *api.ManagementInspectHandler
+	if config.ManagementToken != "" && strings.TrimSpace(config.DeploymentID) != "" {
+		var err error
+		handler, err = api.NewManagementInspectHandler(config.Directory, config.ManagementToken, config.DeploymentID, config.PlatformWorkAdmission)
+		if err != nil {
+			return err
+		}
+		handler.Register(config.Router)
+		handler.SetTenantConfigRevisionResolver(config.TenantConfigRevision)
+	}
+	if config.ManagementOperations == nil {
+		return nil
+	}
+	if handler == nil {
+		return errors.New("management operation routes require KORA_INTEGRATION_TOKEN and KORA_ENGINE_DEPLOYMENT_ID")
+	}
+	if err := handler.RegisterOperations(config.Router, *config.ManagementOperations); err != nil {
+		return fmt.Errorf("register management operation routes: %w", err)
+	}
+	return nil
+}
+
 // RegisterPlatformRoutes installs liveness, health, readiness, and optional
 // authenticated management-inspection endpoints on the platform router.
 func RegisterPlatformRoutes(config PlatformRouteConfig) error {
 	if config.Router == nil {
 		return errors.New("Engine HTTP router is required")
 	}
-	var managementHandler *api.ManagementInspectHandler
-	if config.ManagementToken != "" {
-		handler, err := api.NewManagementInspectHandler(config.Directory, config.ManagementToken, config.DeploymentID, config.PlatformWorkAdmission)
-		if err != nil {
-			return err
-		}
-		handler.Register(config.Router)
-		handler.SetTenantConfigRevisionResolver(config.TenantConfigRevision)
-		managementHandler = handler
-	}
-	if config.ManagementOperations != nil {
-		if managementHandler == nil {
-			return errors.New("management operation routes require the dedicated management bearer token")
-		}
-		if err := managementHandler.RegisterOperations(config.Router, *config.ManagementOperations); err != nil {
-			return fmt.Errorf("register management operation routes: %w", err)
-		}
+	if err := registerManagementRoutes(config); err != nil {
+		return err
 	}
 	config.Router.GET("/api/v1/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong", "version": config.BinaryVersion})

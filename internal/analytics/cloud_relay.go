@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/envcompat"
 )
 
 var (
@@ -30,7 +32,7 @@ func LoadCloudRelayConfig() *CloudRelayConfig {
 		EventsURL:   strings.TrimSpace(os.Getenv("KORA_CLOUD_EVENTS_URL")),
 		SiteID:      strings.TrimSpace(os.Getenv("KORA_CLOUD_SITE_ID")),
 		AccountID:   strings.TrimSpace(os.Getenv("KORA_CLOUD_ACCOUNT_ID")),
-		EventsToken: strings.TrimSpace(os.Getenv("KORA_CLOUD_EVENTS_TOKEN")),
+		EventsToken: envcompat.IntegrationToken(),
 	}
 	if cfg.EventsURL == "" || cfg.AccountID == "" {
 		return nil

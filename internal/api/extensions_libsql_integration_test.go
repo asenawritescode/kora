@@ -27,7 +27,7 @@ import (
 // and rotation against a disposable LibSQL server. The target must be a fresh
 // database: the test refuses to run if any user tables already exist.
 func TestLiveLibSQLManagedCredentialLifecycle(t *testing.T) {
-	t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "integration-provisioning-secret")
+	t.Setenv("KORA_INTEGRATION_TOKEN", "integration-provisioning-secret")
 	dsn := os.Getenv("KORA_API_LIVE_LIBSQL_DSN")
 	if dsn == "" {
 		t.Skip("set KORA_API_LIVE_LIBSQL_DSN to a fresh disposable LibSQL database")

@@ -16,6 +16,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/envcompat"
 	"github.com/asenawritescode/kora/internal/extension"
 	extensionsql "github.com/asenawritescode/kora/internal/extension/sqlstore"
 	"github.com/asenawritescode/kora/internal/policy"
@@ -118,7 +119,7 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 		authHeader := c.GetHeader("Authorization")
 		if strings.HasPrefix(authHeader, "Bearer ") {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
-			if matchesEnvToken(token, "KORA_ENGINE_PROVISIONING_TOKEN") && ((c.Request.Method == http.MethodPost && (path == "/api/internal/channel/managed-client/rotate" || path == "/api/internal/channel/managed-client/revoke")) || (c.Request.Method == http.MethodGet && path == "/api/internal/site/identity")) {
+			if matchesEnvToken(token, envcompat.IntegrationTokenEnv) && ((c.Request.Method == http.MethodPost && (path == "/api/internal/channel/managed-client/rotate" || path == "/api/internal/channel/managed-client/revoke")) || (c.Request.Method == http.MethodGet && path == "/api/internal/site/identity")) {
 				c.Set("auth_type", "engine_provisioner")
 				c.Set("user", "kora-cloud-provisioner")
 				c.Next()

@@ -24,7 +24,7 @@ preserving cookies and CSRF behavior. Do not point this setting at a public
 managed Cloud service unless that data flow is an intentional operator choice.
 
 To let Cloud provision tenants through the Engine management API, also set
-`KORA_ENGINE_MANAGEMENT_TOKEN`, `KORA_ENGINE_MANAGEMENT_CALLER_ID`,
+`KORA_INTEGRATION_TOKEN`, `KORA_ENGINE_MANAGEMENT_CALLER_ID`,
 `KORA_ENGINE_DEPLOYMENT_ID`, and
 `KORA_ENGINE_MANAGEMENT_DATABASE_ALLOCATION_REF` in the Engine `.env`.
 Configure Cloud with the same Engine base URL and token, enable
@@ -47,13 +47,10 @@ have been deliberately migrated. A missing capability route is a
 configuration/version mismatch and should be fixed at the Engine deployment;
 do not fall back to Cloud opening tenant databases.
 
-Cloud's managed channel credential rotation uses a separate narrow Engine
-credential. Set `KORA_ENGINE_PROVISIONING_TOKEN` on Engine and the exact same
-secret as `KORA_CLOUD_ENGINE_PROVISIONING_TOKEN` on Cloud. Keep it distinct
-from the Engine management API token and the issued tenant channel credential.
-The Engine accepts it only on managed-channel rotate/revoke and site-identity
-routes; if the values do not match, Cloud receives HTTP 401 when issuing a
-managed channel credential.
+Every call between Cloud and the Engine uses one shared secret,
+`KORA_INTEGRATION_TOKEN`, set to the same value in both. On tenant routes the
+Engine accepts it only on managed-channel rotate/revoke and site-identity; if
+the values do not match, Cloud receives HTTP 401.
 
 For path-routed tenants, set `KORA_PUBLIC_APP_BASE_URL` to the public workspace
 origin in `.env` (for example `https://app.example.com`). Engine uses it to
@@ -97,23 +94,21 @@ inspect Engine logs for shutdown errors before database maintenance. `docker
 compose down` respects dependency order and the Engine grace period.
 
 The Engine management inspection route is disabled unless
-`KORA_ENGINE_MANAGEMENT_TOKEN` and `KORA_ENGINE_DEPLOYMENT_ID` are set. Keep
-that bearer secret separate from provisioning and managed-channel credentials.
+`KORA_INTEGRATION_TOKEN` and `KORA_ENGINE_DEPLOYMENT_ID` are set.
 The API exposes credential-free tenant descriptors. Setting
 `KORA_ENGINE_MANAGEMENT_CALLER_ID` additionally enables durable operation
 capabilities and submission/polling routes for configured Engine-owned
 operations, including active/suspended state transitions;
 the caller value must be a stable Engine principal ID. That state executor
 revision-fences the directory update and converges the local tenant runtime.
-Cloud sign-in handoff (including accepting a member invitation) needs both
+Cloud sign-in handoff (including accepting a member invitation) is turned on by
 `KORA_ENGINE_CLOUD_IDENTITY_URL` (Cloud's private
 `/internal/identity/handoff/redeem` endpoint, for local development
-`http://127.0.0.1:8081/internal/identity/handoff/redeem`) and
-`KORA_ENGINE_CLOUD_IDENTITY_TOKEN` (the Cloud engine provisioning token). With
-neither set, the Engine logs one startup WARN naming both variables and
-`POST /api/auth/cloud/handoff` answers `503` with code
-`auth.cloud_handoff_unconfigured`; with only one set, startup fails. Values are
-never logged. The local `scripts/restart-server.sh` forwards both from `.env.local`.
+`http://127.0.0.1:8081/internal/identity/handoff/redeem`) and authenticates with
+`KORA_INTEGRATION_TOKEN`. With the URL unset, the Engine logs one startup WARN
+and `POST /api/auth/cloud/handoff` answers `503` with code
+`auth.cloud_handoff_unconfigured`; with the URL set and no token, startup fails.
+Values are never logged. The local `scripts/restart-server.sh` forwards both from `.env.local`.
 
 For deployment ingress, set `KORA_ENGINE_LOCAL_DEPLOYMENT_ID` and
 `KORA_ENGINE_DEPLOYMENT_URLS` as comma-separated
@@ -141,11 +136,10 @@ bootstrap administrator but does not deliver an enrollment link. A
 `recovery_required` package-free provision can be retried through the audited
 `reconcile-tenant-provision` operation route after verifying tenant identity
 and allocation. Package activation is a separate Engine operation: configure
-both `KORA_ENGINE_MANAGEMENT_ARTIFACT_URL` and
-`KORA_ENGINE_MANAGEMENT_ARTIFACT_TOKEN` to enable it. The provider must be
+`KORA_ENGINE_MANAGEMENT_ARTIFACT_URL` (authenticated with
+`KORA_INTEGRATION_TOKEN`) to enable it. The provider must be
 Cloud or another trusted service implementing the immutable artifact contract;
-use HTTPS outside loopback and keep this bearer token distinct from the
-management API token. Cloud also requires its package-management opt-in and
+use HTTPS outside loopback. Cloud also requires its package-management opt-in and
 the matching dedicated artifact token. Package activation is not yet a
 production release claim; complete the remaining transactional recovery and
 consumer compatibility gates first. Tenant deletion remains unavailable until

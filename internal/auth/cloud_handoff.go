@@ -11,13 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asenawritescode/kora/internal/envcompat"
 	"github.com/gin-gonic/gin"
 )
 
 // Environment variables that configure Cloud handoff; both are required.
 const (
 	CloudHandoffURLEnv   = "KORA_ENGINE_CLOUD_IDENTITY_URL"
-	CloudHandoffTokenEnv = "KORA_ENGINE_CLOUD_IDENTITY_TOKEN"
+	CloudHandoffTokenEnv = envcompat.IntegrationTokenEnv
 
 	cloudHandoffPath             = "/api/auth/cloud/handoff"
 	cloudHandoffUnconfiguredCode = "auth.cloud_handoff_unconfigured"
@@ -38,17 +39,14 @@ func RegisterCloudHandoffRoute(router *gin.Engine, sm *SessionManager, db *sql.D
 	}
 	hasURL, hasToken := strings.TrimSpace(cfg.RedeemURL) != "", strings.TrimSpace(cfg.ServiceToken) != ""
 	switch {
-	case hasURL != hasToken:
-		// Half configuration is an operator mistake, like a management caller
-		// without its token: refuse to start instead of silently disabling.
-		missing := CloudHandoffURLEnv
-		if hasURL {
-			missing = CloudHandoffTokenEnv
-		}
-		return fmt.Errorf("Cloud handoff requires %s and %s together; %s is missing", CloudHandoffURLEnv, CloudHandoffTokenEnv, missing)
+	case hasURL && !hasToken:
+		// The URL turns handoff on; without the shared token it cannot work,
+		// so refuse to start instead of silently disabling. The token alone is
+		// normal: it is shared with every other Cloud integration.
+		return fmt.Errorf("Cloud handoff requires %s with %s; %s is missing", CloudHandoffURLEnv, CloudHandoffTokenEnv, CloudHandoffTokenEnv)
 	case !hasURL:
-		slog.Warn("Cloud sign-in handoff is disabled: "+CloudHandoffURLEnv+" and "+CloudHandoffTokenEnv+" are not set; Cloud sign-in handoff and member invitation acceptance will not work until both are configured",
-			"missing", []string{CloudHandoffURLEnv, CloudHandoffTokenEnv}, "route", cloudHandoffPath, "code", cloudHandoffUnconfiguredCode)
+		slog.Warn("Cloud sign-in handoff is disabled: "+CloudHandoffURLEnv+" is not set; Cloud sign-in handoff and member invitation acceptance will not work until it and "+CloudHandoffTokenEnv+" are configured",
+			"missing", CloudHandoffURLEnv, "route", cloudHandoffPath, "code", cloudHandoffUnconfiguredCode)
 		router.POST(cloudHandoffPath, func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"code": cloudHandoffUnconfiguredCode, "message": "Cloud sign-in is not configured on this Engine."}})
 		})

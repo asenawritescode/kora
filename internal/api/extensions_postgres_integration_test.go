@@ -23,7 +23,7 @@ import (
 )
 
 func TestLivePostgresExtensionRoutes(t *testing.T) {
-	t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "integration-provisioning-secret")
+	t.Setenv("KORA_INTEGRATION_TOKEN", "integration-provisioning-secret")
 	dsn := os.Getenv("KORA_API_LIVE_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("set KORA_API_LIVE_POSTGRES_DSN to test extension API routes against a disposable PostgreSQL database")

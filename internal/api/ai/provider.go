@@ -16,6 +16,7 @@ import (
 	"time"
 
 	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/envcompat"
 	"github.com/asenawritescode/kora/internal/secret"
 )
 
@@ -201,7 +202,7 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.
 	// a private service token. If no Cloud gateway is configured, self-hosted
 	// sites may still use a provider key stored in their own Secrets page.
 	if gatewayURL := strings.TrimRight(strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_URL")), "/"); gatewayURL != "" {
-		gatewayToken := strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_TOKEN"))
+		gatewayToken := envcompat.IntegrationToken()
 		if gatewayToken == "" {
 			return "", "", "", ""
 		}

@@ -1478,7 +1478,7 @@
     {
       "method": "POST",
       "path": "/_kora/admin/reload-site",
-      "condition": "always mounted; requires KORA_RELOAD_TOKEN at request time",
+      "condition": "always mounted; requires KORA_INTEGRATION_TOKEN at request time",
       "source": "cli/serve.go"
     },
     {
@@ -1538,13 +1538,13 @@
     {
       "method": "GET",
       "path": "/api/management/v2/tenants/:id",
-      "condition": "KORA_ENGINE_MANAGEMENT_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured",
+      "condition": "KORA_INTEGRATION_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured",
       "source": "api/management_inspect.go; cli/serve.go"
     },
     {
       "method": "GET",
       "path": "/api/management/v2/tenants/resolve",
-      "condition": "KORA_ENGINE_MANAGEMENT_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured",
+      "condition": "KORA_INTEGRATION_TOKEN and valid KORA_ENGINE_DEPLOYMENT_ID configured",
       "source": "api/management_inspect.go; cli/serve.go"
     }
   ],

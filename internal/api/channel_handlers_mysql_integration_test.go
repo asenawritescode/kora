@@ -27,7 +27,7 @@ import (
 // TestLiveMySQLManagedCredentialIdempotency exercises credential retries and
 // first-issue concurrency against a disposable MySQL schema.
 func TestLiveMySQLManagedCredentialIdempotency(t *testing.T) {
-	t.Setenv("KORA_ENGINE_PROVISIONING_TOKEN", "integration-provisioning-secret")
+	t.Setenv("KORA_INTEGRATION_TOKEN", "integration-provisioning-secret")
 	dsn := os.Getenv("KORA_API_LIVE_MYSQL_DSN")
 	if dsn == "" {
 		t.Skip("set KORA_API_LIVE_MYSQL_DSN to a disposable MySQL server")

@@ -133,8 +133,9 @@ func TestCloudHandoffConfigurationVisibility(t *testing.T) {
 	}{
 		{name: "unset", cfg: CloudHandoffConfig{}, wantStatus: http.StatusServiceUnavailable, wantCode: "auth.cloud_handoff_unconfigured", wantWarn: true},
 		{name: "blank values", cfg: CloudHandoffConfig{RedeemURL: "  ", ServiceToken: "\t"}, wantStatus: http.StatusServiceUnavailable, wantCode: "auth.cloud_handoff_unconfigured", wantWarn: true},
-		{name: "only url", cfg: CloudHandoffConfig{RedeemURL: secretURL}, wantErr: "KORA_ENGINE_CLOUD_IDENTITY_TOKEN", wantAbsent: []string{secretURL, "secret-host"}},
-		{name: "only token", cfg: CloudHandoffConfig{ServiceToken: secretToken}, wantErr: "KORA_ENGINE_CLOUD_IDENTITY_URL", wantAbsent: []string{secretToken}},
+		{name: "only url", cfg: CloudHandoffConfig{RedeemURL: secretURL}, wantErr: "KORA_INTEGRATION_TOKEN", wantAbsent: []string{secretURL, "secret-host"}},
+		// The shared integration token is normally set for other Cloud calls; without the URL, handoff is just off.
+		{name: "only token", cfg: CloudHandoffConfig{ServiceToken: secretToken}, wantStatus: http.StatusServiceUnavailable, wantCode: "auth.cloud_handoff_unconfigured", wantWarn: true, wantAbsent: []string{secretToken}},
 		{name: "fully set", cfg: CloudHandoffConfig{RedeemURL: secretURL, ServiceToken: secretToken}, wantStatus: http.StatusBadRequest, wantAbsent: []string{secretURL, secretToken}},
 	}
 	for _, tt := range tests {
@@ -180,7 +181,7 @@ func TestCloudHandoffConfigurationVisibility(t *testing.T) {
 				t.Fatalf("WARN lines = %d, want warn=%v: %s", got, tt.wantWarn, output)
 			}
 			if tt.wantWarn {
-				for _, name := range []string{"KORA_ENGINE_CLOUD_IDENTITY_URL", "KORA_ENGINE_CLOUD_IDENTITY_TOKEN"} {
+				for _, name := range []string{"KORA_ENGINE_CLOUD_IDENTITY_URL", "KORA_INTEGRATION_TOKEN"} {
 					if !strings.Contains(output, name) {
 						t.Fatalf("warning does not name %s: %s", name, output)
 					}
