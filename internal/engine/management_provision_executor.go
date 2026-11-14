@@ -75,7 +75,7 @@ func newManagementProvisionExecutor(opts managementProvisionOptions) (*managemen
 
 func (e *managementProvisionExecutor) Execute(ctx context.Context, claim management.Claim) (management.FinishResult, error) {
 	failed := func(code contract.Code, message string) management.FinishResult {
-		return management.FinishResult{State: contract.OperationFailed, Error: contract.NewError(code, message)}
+		return refused(claim.Operation, code, message)
 	}
 	if e == nil || e.directory == nil || e.coordinator == nil || e.createSite == nil {
 		return management.FinishResult{}, errors.New("management provisioning executor is not configured")
@@ -109,7 +109,7 @@ func (e *managementProvisionExecutor) Execute(ctx context.Context, claim managem
 	}
 	release, err := e.admission.Acquire(ctx)
 	if err != nil {
-		return recoveryRequired(), nil
+		return stepAdmission.stopped(operation, err), nil
 	}
 	defer func() {
 		if release != nil {
@@ -134,26 +134,26 @@ func (e *managementProvisionExecutor) Execute(ctx context.Context, claim managem
 		}
 		if info.Status == "provisioning" {
 			if err := e.createTenant(ctx, command); err != nil {
-				return recoveryRequired(), nil
+				return stepCreateTenant.stopped(operation, err), nil
 			}
 		}
 		release()
 		release = nil
 		if err := e.coordinator.ActivateFromDirectory(ctx, string(command.Tenant)); err != nil {
-			return recoveryRequired(), nil
+			return stepActivate.stopped(operation, err), nil
 		}
 		return management.FinishResult{State: contract.OperationSucceeded}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return recoveryRequired(), nil
+		return stepReadDirectory.stopped(operation, err), nil
 	}
 	if err := e.createTenant(ctx, command); err != nil {
-		return recoveryRequired(), nil
+		return stepCreateTenant.stopped(operation, err), nil
 	}
 	release()
 	release = nil
 	if err := e.coordinator.ActivateFromDirectory(ctx, string(command.Tenant)); err != nil {
-		return recoveryRequired(), nil
+		return stepActivate.stopped(operation, err), nil
 	}
 	return management.FinishResult{State: contract.OperationSucceeded}, nil
 }
