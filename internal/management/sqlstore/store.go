@@ -255,7 +255,7 @@ func (s *Store) Finish(ctx context.Context, claim management.Claim, outcome mana
 	if err := validateClaim(claim); err != nil {
 		return err
 	}
-	if outcome.State != contract.OperationSucceeded && outcome.State != contract.OperationFailed && outcome.State != contract.OperationRecoveryRequired {
+	if !management.MoveFinish.Allows(contract.OperationRunning, outcome.State) {
 		return fmt.Errorf("management operation result state must be terminal")
 	}
 	if outcome.State == contract.OperationSucceeded && outcome.Error != nil {
