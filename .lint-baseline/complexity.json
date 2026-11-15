@@ -1902,44 +1902,9 @@
    "cognitive": 26,
    "cyclomatic": 33
   },
-  "internal/management/sqlstore::(*Store).RetryDeleteOperation": {
-   "cognitive": 27,
-   "cyclomatic": 28
-  },
-  "internal/management/sqlstore::(*Store).RetryInvitationOperation": {
-   "cognitive": 26,
-   "cyclomatic": 27
-  },
-  "internal/management/sqlstore::(*Store).RetryPackageOperation": {
-   "cognitive": 26,
-   "cyclomatic": 27
-  },
-  "internal/management/sqlstore::(*Store).RetryProvisionOperation": {
-   "cognitive": 26,
-   "cyclomatic": 28
-  },
-  "internal/management/sqlstore::(*Store).RetryStateOperation": {
-   "cognitive": 24,
-   "cyclomatic": 24
-  },
   "internal/management/sqlstore::(*Store).claimDue": {
    "cognitive": 25,
    "cyclomatic": 27
-  },
-  "internal/management/sqlstore::RetryDeleteOperation": {
-   "statements": 51
-  },
-  "internal/management/sqlstore::RetryInvitationOperation": {
-   "statements": 50
-  },
-  "internal/management/sqlstore::RetryPackageOperation": {
-   "statements": 49
-  },
-  "internal/management/sqlstore::RetryProvisionOperation": {
-   "statements": 49
-  },
-  "internal/management/sqlstore::RetryStateOperation": {
-   "statements": 46
   },
   "internal/management/sqlstore::claimDue": {
    "statements": 64
