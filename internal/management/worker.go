@@ -117,49 +117,15 @@ func (w *Worker) process(parent context.Context, claim Claim, lease time.Duratio
 		cancelExec()
 		return fmt.Errorf("validate management operation claim before execution: %w", err)
 	}
-	stopRenew := make(chan struct{})
-	renewDone := make(chan struct{})
-	var claimMu sync.Mutex
-	var renewErr error
-	go func() {
-		defer close(renewDone)
-		ticker := time.NewTicker(lease / 3)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stopRenew:
-				return
-			case <-execCtx.Done():
-				return
-			case <-ticker.C:
-				claimMu.Lock()
-				renewed, err := w.store.Renew(execCtx, current, lease)
-				if err == nil {
-					current = renewed
-				} else {
-					renewErr = err
-				}
-				claimMu.Unlock()
-				if err != nil {
-					cancelExec()
-					return
-				}
-			}
-		}
-	}()
-
-	claimMu.Lock()
-	executionClaim := current
-	claimMu.Unlock()
-	result, executeErr := w.executor.Execute(execCtx, executionClaim)
+	renewal := startLeaseRenewal(execCtx, w.store, current, lease, cancelExec)
+	result, executeErr := w.executor.Execute(execCtx, current)
+	// Stop renewing before cancelling execution so a renewal already in flight
+	// completes instead of being aborted and mistaken for a lost lease.
+	current, renewErr := renewal.stop()
 	cancelExec()
-	close(stopRenew)
-	<-renewDone
-	claimMu.Lock()
 	if renewErr != nil {
 		executeErr = errors.Join(executeErr, renewErr)
 	}
-	claimMu.Unlock()
 
 	result = normalizeFinishResult(result, executeErr)
 	finishCtx, cancelFinish := detachedTimeout(parent, 5*time.Second)
@@ -168,6 +134,82 @@ func (w *Worker) process(parent context.Context, claim Claim, lease time.Duratio
 		return errors.Join(executeErr, err)
 	}
 	return executeErr
+}
+
+// leaseRenewal keeps a claim's lease current while its executor runs. A
+// renewal failure is fatal only while execution is still running, when it also
+// cancels the execution. After execution returns, the outcome is known and
+// Finish is fenced by the same lease, so a late renewal failure is not recorded.
+type leaseRenewal struct {
+	store   Store
+	lease   time.Duration
+	cancel  context.CancelFunc
+	halt    chan struct{}
+	done    chan struct{}
+	mu      sync.Mutex
+	claim   Claim
+	running bool
+	err     error
+}
+
+func startLeaseRenewal(ctx context.Context, store Store, claim Claim, lease time.Duration, cancel context.CancelFunc) *leaseRenewal {
+	r := &leaseRenewal{store: store, lease: lease, cancel: cancel, halt: make(chan struct{}), done: make(chan struct{}), claim: claim, running: true}
+	go r.loop(ctx)
+	return r
+}
+
+func (r *leaseRenewal) loop(ctx context.Context) {
+	defer close(r.done)
+	ticker := time.NewTicker(r.lease / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.halt:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			select {
+			case <-r.halt:
+				return
+			default:
+			}
+			if !r.renew(ctx) {
+				return
+			}
+		}
+	}
+}
+
+func (r *leaseRenewal) renew(ctx context.Context) bool {
+	r.mu.Lock()
+	current := r.claim
+	r.mu.Unlock()
+	renewed, err := r.store.Renew(ctx, current, r.lease)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err == nil {
+		r.claim = renewed
+		return true
+	}
+	if r.running {
+		r.err = err
+		r.cancel()
+	}
+	return false
+}
+
+// stop marks execution finished, waits for an in-flight renewal to complete,
+// and returns the latest claim with any renewal failure seen during execution.
+func (r *leaseRenewal) stop() (Claim, error) {
+	r.mu.Lock()
+	r.running = false
+	r.mu.Unlock()
+	close(r.halt)
+	<-r.done
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.claim, r.err
 }
 
 func normalizeFinishResult(result FinishResult, executeErr error) FinishResult {
