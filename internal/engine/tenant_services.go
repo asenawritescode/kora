@@ -36,6 +36,8 @@ import (
 	"github.com/asenawritescode/kora/internal/secret"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/storage"
+	"github.com/asenawritescode/kora/internal/tenantruntime"
+	"github.com/asenawritescode/kora/internal/usage"
 	"github.com/asenawritescode/kora/internal/webhook"
 	"github.com/asenawritescode/kora/internal/workflow"
 )
@@ -49,6 +51,7 @@ type TenantServiceConfig struct {
 	Common                  *site.CommonConfig
 	Analytics               *analytics.Config
 	CloudRelay              *analytics.CloudRelayConfig
+	CloudUsage              *usage.Config
 	AnalyticsQueueAdmission *analytics.QueueAdmission
 	NATS                    *natsprovider.Provider
 	ScriptRunner            script.Runner
@@ -542,12 +545,8 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if err := registerWebhookDelivery(config, loaded, worker, dialect, workAdmission); err != nil {
 		return fmt.Errorf("configure webhook delivery for tenant %s: %w", loaded.Name, err)
 	}
-	if config.CloudRelay != nil {
-		relay := analytics.NewCloudRelay(multiBus, loaded.Name, *config.CloudRelay)
-		services.AnalyticsRelay = relay
-		if err := registerTenantWorkerStart(config, func() error { relay.Start(); return nil }); err != nil {
-			return fmt.Errorf("register analytics relay for tenant %s: %w", loaded.Name, err)
-		}
+	if cloudErr := registerCloudWorkers(config, loaded, &services, multiBus, dialect); cloudErr != nil {
+		return cloudErr
 	}
 	runner := analytics.NewRebuildRunner(loaded.DB, dialect, loaded.Name, loaded.Registry, services.WorkAdmission)
 	services.AnalyticsRebuild = runner
@@ -948,6 +947,31 @@ func withTenantWorkAdmission(ctx context.Context, admission interface {
 	}
 	defer release()
 	return work()
+}
+
+// registerCloudWorkers starts the tenant's Cloud-facing workers, each only when
+// configured: the analytics relay and the usage reporter.
+func registerCloudWorkers(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, bus *analytics.MultiBus, dialect kdb.Dialect) error {
+	if config.CloudRelay != nil {
+		relay := analytics.NewCloudRelay(bus, loaded.Name, *config.CloudRelay)
+		services.AnalyticsRelay = relay
+		if err := registerTenantWorkerStart(config, func() error { relay.Start(); return nil }); err != nil {
+			return fmt.Errorf("register analytics relay for tenant %s: %w", loaded.Name, err)
+		}
+	}
+	if config.CloudUsage == nil {
+		return nil
+	}
+	reporter := &usage.Reporter{Config: *config.CloudUsage, SiteID: loaded.SiteID, Count: usage.Records{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry}.Count}
+	if err := registerTenantWorkerStart(config, func() error {
+		if !loaded.StartWorker(config.ProcessContext, reporter.Run) {
+			return fmt.Errorf("tenant runtime is stopping")
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("register Cloud usage reporter for tenant %s: %w", loaded.Name, err)
+	}
+	return nil
 }
 
 func registerTenantWorkerStart(config TenantServiceConfig, start func() error) error {

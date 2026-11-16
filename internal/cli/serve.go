@@ -22,6 +22,7 @@ import (
 	"github.com/asenawritescode/kora/internal/script"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/storage"
+	"github.com/asenawritescode/kora/internal/usage"
 )
 
 // Version is set at build time via -ldflags "-X github.com/asenawritescode/kora/cli.Version=...".
@@ -402,18 +403,18 @@ func runServe() error {
 		natsConfig = &config
 	}
 	cloudRelayConfig := analytics.LoadCloudRelayConfig()
+	cloudUsageConfig, err := usage.LoadConfig(os.Getenv)
+	if err != nil {
+		return fmt.Errorf("configure Cloud usage reporting: %w", err)
+	}
 	port := common.HTTPPort
 	if httpPortFlag > 0 {
 		port = httpPortFlag
 	}
 	listenerTLS := knet.TLSConfig{Mode: common.TLSMode, Email: common.TLSEmail}
-	var managementPackageResolver engine.ManagementPackageArtifactResolver
-	artifactURL, artifactToken := strings.TrimSpace(os.Getenv("KORA_ENGINE_MANAGEMENT_ARTIFACT_URL")), envcompat.IntegrationToken()
-	if artifactURL != "" { // the shared token is always set; the URL turns package downloads on
-		managementPackageResolver, err = engine.NewHTTPManagementPackageArtifactResolver(artifactURL, artifactToken, nil)
-		if err != nil {
-			return fmt.Errorf("configure Engine management package artifact resolver: %w", err)
-		}
+	managementPackageResolver, err := managementPackageResolverFromEnv()
+	if err != nil {
+		return err
 	}
 	engineConfig := engine.Config{
 		Telemetry: telemetryConfig, DBDriver: sc.DBType, DBDSN: sc.DBDSN, DBDialect: common.DBType,
@@ -422,7 +423,7 @@ func runServe() error {
 		TenantActivationWaiters: uint16(activationWaiters), TenantActivationWait: time.Duration(activationWaitMS) * time.Millisecond, ResolveStorage: storageResolver,
 		CellURLs: deploymentURLs, DirectoryConsumerID: os.Getenv("KORA_SITE_DIRECTORY_CONSUMER_ID"),
 		NATSConfig: natsConfig, ScriptsEnabled: scriptEnabled == "" || scriptEnabled == "true",
-		KernelCommands: kernelCommands, HTTPAllowlist: httpAllowlist, CloudRelay: cloudRelayConfig,
+		KernelCommands: kernelCommands, HTTPAllowlist: httpAllowlist, CloudRelay: cloudRelayConfig, CloudUsage: cloudUsageConfig,
 		CORSAllowedOrigins: splitHTTPOrigins(os.Getenv("KORA_CORS_ALLOWED_ORIGINS")),
 		Workflow:           engine.SelfHostedWorkflowConfig(),
 		Analytics:          analytics.LoadConfig(),
@@ -493,4 +494,18 @@ func configureLogging(level, format string) {
 		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
 	}
 	slog.SetDefault(slog.New(handler))
+}
+
+// managementPackageResolverFromEnv returns the management package artifact
+// resolver, or nil when KORA_ENGINE_MANAGEMENT_ARTIFACT_URL is unset.
+func managementPackageResolverFromEnv() (engine.ManagementPackageArtifactResolver, error) {
+	artifactURL, artifactToken := strings.TrimSpace(os.Getenv("KORA_ENGINE_MANAGEMENT_ARTIFACT_URL")), envcompat.IntegrationToken()
+	if artifactURL == "" { // the shared token is always set; the URL turns package downloads on
+		return nil, nil
+	}
+	resolver, err := engine.NewHTTPManagementPackageArtifactResolver(artifactURL, artifactToken, nil)
+	if err != nil {
+		return nil, fmt.Errorf("configure Engine management package artifact resolver: %w", err)
+	}
+	return resolver, nil
 }

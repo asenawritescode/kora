@@ -21,6 +21,7 @@ import (
 	"github.com/asenawritescode/kora/internal/script"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/storage"
+	"github.com/asenawritescode/kora/internal/usage"
 	"github.com/asenawritescode/kora/internal/workflow"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -61,6 +62,7 @@ type Config struct {
 	HTTPAllowlist                     []string
 	CORSAllowedOrigins                []string
 	CloudRelay                        *analytics.CloudRelayConfig
+	CloudUsage                        *usage.Config
 	Analytics                         *analytics.Config
 	OutboxEnabled                     bool
 	SystemGuard                       *auth.SystemGuard
@@ -288,7 +290,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 		Common: config.Common, BinaryVersion: config.BinaryVersion, Ingress: tenantIngress,
 		Resources: resources,
 		Services: TenantServiceConfig{
-			ProcessContext: processCtx, Analytics: analyticsConfig, CloudRelay: relay, AnalyticsQueueAdmission: resources.AnalyticsQueueAdmission,
+			ProcessContext: processCtx, Analytics: analyticsConfig, CloudRelay: relay, CloudUsage: config.CloudUsage, AnalyticsQueueAdmission: resources.AnalyticsQueueAdmission,
 			SchedulerHandlerFactory: config.SchedulerHandlerFactory, SchedulerExecutionResolverFactory: config.SchedulerExecutionResolverFactory, Mailer: mailer,
 			NATS: shared.NATSProvider, ScriptRunner: shared.ScriptRunner, HTTPAllowlist: config.HTTPAllowlist, RealtimeAdmission: resources.RealtimeStreams,
 			SessionCacheBudget:  resources.SessionCacheBudget,
