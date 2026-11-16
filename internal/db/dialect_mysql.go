@@ -268,6 +268,11 @@ func (d *MySQLDialect) ChildColumnDDL() []string {
 	}
 }
 
+// DatabaseSizeQuery sums data and index bytes of the current schema's tables.
+func (d *MySQLDialect) DatabaseSizeQuery() string {
+	return "SELECT CAST(COALESCE(SUM(data_length + index_length), 0) AS SIGNED) FROM information_schema.tables WHERE table_schema = DATABASE()"
+}
+
 func (d *MySQLDialect) TableSuffix() string {
 	return "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
 }

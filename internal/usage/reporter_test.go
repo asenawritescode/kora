@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -23,45 +24,69 @@ type sentRecord struct {
 
 func TestReport(t *testing.T) {
 	end := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	records := func(n int64) Meter {
+		return Meter{Metric: MetricRecords, Measure: func(context.Context) (int64, error) { return n, nil }}
+	}
+	storage := func(n int64) Meter {
+		return Meter{Metric: MetricStorageBytes, Measure: func(context.Context) (int64, error) { return n, nil }}
+	}
+	failing := func(metric string) Meter {
+		return Meter{Metric: metric, Measure: func(context.Context) (int64, error) { return 0, errors.New("db down") }}
+	}
 	tests := []struct {
 		name    string
-		count   func(context.Context) (int64, error)
+		meters  []Meter
 		status  int
 		wantErr bool
-		want    *sentRecord
+		// want lists the snapshots Cloud receives, in order.
+		want []sentRecord
 	}{
-		{name: "posts the record count", count: func(context.Context) (int64, error) { return 1234, nil }, status: http.StatusAccepted,
-			want: &sentRecord{ID: "site-1-records-1794830400", SiteID: "site-1", Metric: "records", Quantity: 1234,
-				WindowStart: end.Add(-6 * time.Hour), WindowEnd: end, Labels: map[string]string{"source": "engine"}}},
-		{name: "count fails, nothing sent", count: func(context.Context) (int64, error) { return 0, errors.New("db down") }, wantErr: true},
-		{name: "Cloud refuses", count: func(context.Context) (int64, error) { return 1, nil }, status: http.StatusUnauthorized, wantErr: true},
+		{name: "posts record count and storage bytes", meters: []Meter{records(1234), storage(4096)}, status: http.StatusAccepted,
+			want: []sentRecord{
+				{ID: fmt.Sprintf("site-1-records-%d", end.Unix()), Metric: "records", Quantity: 1234},
+				{ID: fmt.Sprintf("site-1-storage_bytes-%d", end.Unix()), Metric: "storage_bytes", Quantity: 4096},
+			}},
+		{name: "record count fails, storage still posted", meters: []Meter{failing(MetricRecords), storage(4096)}, status: http.StatusAccepted, wantErr: true,
+			want: []sentRecord{{ID: fmt.Sprintf("site-1-storage_bytes-%d", end.Unix()), Metric: "storage_bytes", Quantity: 4096}}},
+		{name: "storage fails, record count still posted", meters: []Meter{records(7), failing(MetricStorageBytes)}, status: http.StatusAccepted, wantErr: true,
+			want: []sentRecord{{ID: fmt.Sprintf("site-1-records-%d", end.Unix()), Metric: "records", Quantity: 7}}},
+		{name: "every meter fails, nothing sent", meters: []Meter{failing(MetricRecords), failing(MetricStorageBytes)}, wantErr: true},
+		{name: "Cloud refuses both snapshots", meters: []Meter{records(1), storage(2)}, status: http.StatusUnauthorized, wantErr: true,
+			want: []sentRecord{
+				{ID: fmt.Sprintf("site-1-records-%d", end.Unix()), Metric: "records", Quantity: 1},
+				{ID: fmt.Sprintf("site-1-storage_bytes-%d", end.Unix()), Metric: "storage_bytes", Quantity: 2},
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got *sentRecord
+			var got []sentRecord
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer secret" || r.Header.Get("Content-Type") != "application/json" {
 					t.Errorf("request = %s auth %q type %q", r.Method, r.Header.Get("Authorization"), r.Header.Get("Content-Type"))
 				}
-				got = &sentRecord{}
-				if err := json.NewDecoder(r.Body).Decode(got); err != nil {
+				var rec sentRecord
+				if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
 					t.Errorf("decode: %v", err)
 				}
+				got = append(got, rec)
 				w.WriteHeader(tt.status)
 			}))
 			defer server.Close()
-			reporter := &Reporter{Config: Config{URL: server.URL, Token: "secret", Interval: 6 * time.Hour}, SiteID: "site-1", Count: tt.count,
+			reporter := &Reporter{Config: Config{URL: server.URL, Token: "secret", Interval: 6 * time.Hour}, SiteID: "site-1", Meters: tt.meters,
 				Now: func() time.Time { return end }}
 			err := reporter.Report(context.Background())
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.want == nil {
-				return
+			if len(got) != len(tt.want) {
+				t.Fatalf("sent %d snapshots, want %d: %+v", len(got), len(tt.want), got)
 			}
-			if got == nil || got.ID != tt.want.ID || got.SiteID != tt.want.SiteID || got.Metric != tt.want.Metric || got.Quantity != tt.want.Quantity ||
-				!got.WindowStart.Equal(tt.want.WindowStart) || !got.WindowEnd.Equal(tt.want.WindowEnd) || got.Labels["source"] != "engine" {
-				t.Fatalf("sent %+v, want %+v", got, tt.want)
+			for i, want := range tt.want {
+				g := got[i]
+				if g.ID != want.ID || g.SiteID != "site-1" || g.Metric != want.Metric || g.Quantity != want.Quantity ||
+					!g.WindowStart.Equal(end.Add(-6*time.Hour)) || !g.WindowEnd.Equal(end) || g.Labels["source"] != "engine" {
+					t.Errorf("snapshot %d = %+v, want %+v", i, g, want)
+				}
 			}
 		})
 	}
@@ -76,7 +101,7 @@ func TestRunReportsUntilStopped(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	reporter := &Reporter{Config: Config{URL: server.URL, Token: "t", Interval: time.Millisecond}, SiteID: "site-1", FirstDelay: time.Millisecond,
-		Count: func(context.Context) (int64, error) { return 1, nil }}
+		Meters: []Meter{{Metric: MetricRecords, Measure: func(context.Context) (int64, error) { return 1, nil }}}}
 	done := make(chan struct{})
 	go func() { reporter.Run(ctx); close(done) }()
 	deadline := time.After(5 * time.Second)

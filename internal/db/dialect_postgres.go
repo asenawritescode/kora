@@ -270,6 +270,11 @@ func (d *PostgresDialect) DropColumn(tableName, columnName string) string {
 	return fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", d.QuoteIdent(tableName), d.QuoteIdent(columnName))
 }
 
+// DatabaseSizeQuery returns the current database's total size in bytes.
+func (d *PostgresDialect) DatabaseSizeQuery() string {
+	return "SELECT pg_database_size(current_database())"
+}
+
 func (d *PostgresDialect) QuoteIdent(name string) string {
 	return `"` + name + `"`
 }

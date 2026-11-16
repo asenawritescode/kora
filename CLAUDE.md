@@ -439,7 +439,7 @@ Key environment variables for extensibility and analytics:
 - `KORA_INTEGRATION_TOKEN` — the one secret shared with Cloud (same value in both); it replaced the separate management, artifact, provisioning, identity, reload, AI gateway and events tokens, which are no longer read (startup warns if they are still set)
 - `KORA_ENGINE_CLOUD_IDENTITY_URL` — Cloud sign-in handoff redemption endpoint; requires `KORA_INTEGRATION_TOKEN` (unset: startup WARN and `POST /api/auth/cloud/handoff` answers 503 `auth.cloud_handoff_unconfigured`). Local dev: `http://127.0.0.1:8081/internal/identity/handoff/redeem`
 - `KORA_MAX_UPLOAD_MB` — Per-file upload cap (default: `50`)
-- `KORA_CLOUD_USAGE_URL` — Cloud usage endpoint; when set each tenant posts its record count every `KORA_CLOUD_USAGE_INTERVAL` (default 6h, min 10m) using `KORA_INTEGRATION_TOKEN`
+- `KORA_CLOUD_USAGE_URL` — Cloud usage endpoint; when set each tenant posts its record count and database size every `KORA_CLOUD_USAGE_INTERVAL` (default 6h, min 10m) using `KORA_INTEGRATION_TOKEN`
 
 ## Release Workflow
 

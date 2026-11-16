@@ -962,7 +962,12 @@ func registerCloudWorkers(config TenantServiceConfig, loaded *knet.LoadedSite, s
 	if config.CloudUsage == nil {
 		return nil
 	}
-	reporter := &usage.Reporter{Config: *config.CloudUsage, SiteID: loaded.SiteID, Count: usage.Records{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry}.Count}
+	records := usage.Records{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry}
+	storage := usage.Storage{DB: loaded.DB, Dialect: dialect}
+	reporter := &usage.Reporter{Config: *config.CloudUsage, SiteID: loaded.SiteID, Meters: []usage.Meter{
+		{Metric: usage.MetricRecords, Measure: records.Count},
+		{Metric: usage.MetricStorageBytes, Measure: storage.Bytes},
+	}}
 	if err := registerTenantWorkerStart(config, func() error {
 		if !loaded.StartWorker(config.ProcessContext, reporter.Run) {
 			return fmt.Errorf("tenant runtime is stopping")
