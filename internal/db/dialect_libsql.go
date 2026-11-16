@@ -311,6 +311,11 @@ func (d *LibSQLDialect) ChildColumnDDL() []string {
 	}
 }
 
+// DatabaseSizeQuery returns the database file size: pages times page size.
+func (d *LibSQLDialect) DatabaseSizeQuery() string {
+	return "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()"
+}
+
 func (d *LibSQLDialect) TableSuffix() string {
 	return ""
 }

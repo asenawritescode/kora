@@ -4,24 +4,34 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 )
 
+// Metric names Cloud's usage endpoint receives.
 const (
-	metricRecords     = "records"
-	defaultFirstDelay = time.Minute
+	MetricRecords      = "records"
+	MetricStorageBytes = "storage_bytes"
 )
 
-// Reporter posts one tenant's usage snapshot to Cloud every Config.Interval.
+const defaultFirstDelay = time.Minute
+
+// Meter measures one usage metric of a tenant.
+type Meter struct {
+	Metric  string
+	Measure func(context.Context) (int64, error)
+}
+
+// Reporter posts one tenant's usage snapshots to Cloud every Config.Interval.
 type Reporter struct {
 	Config Config
 	// SiteID is the tenant's site ID, which Cloud uses as its workspace ID.
 	SiteID string
-	// Count returns the tenant's current record count.
-	Count func(context.Context) (int64, error)
+	// Meters are measured and posted on every report, one snapshot each.
+	Meters []Meter
 	// FirstDelay is the wait before the first report (default one minute),
 	// so a restart does not report every tenant at once.
 	FirstDelay time.Duration
@@ -62,20 +72,31 @@ func (r *Reporter) Run(ctx context.Context) {
 	}
 }
 
-// Report counts the tenant's records and posts one snapshot covering the
-// interval that ends now.
+// Report measures every meter and posts one snapshot per meter, all covering
+// the interval that ends now. A meter that fails does not stop the others; the
+// errors are joined.
 func (r *Reporter) Report(ctx context.Context) error {
-	count, err := r.Count(ctx)
-	if err != nil {
-		return fmt.Errorf("count records: %w", err)
-	}
 	end := r.now().UTC().Truncate(time.Second)
+	var errs []error
+	for _, meter := range r.Meters {
+		if err := r.reportMeter(ctx, meter, end); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (r *Reporter) reportMeter(ctx context.Context, meter Meter, end time.Time) error {
+	quantity, err := meter.Measure(ctx)
+	if err != nil {
+		return fmt.Errorf("measure %s: %w", meter.Metric, err)
+	}
 	body, err := json.Marshal(snapshot{
-		ID: fmt.Sprintf("%s-%s-%d", r.SiteID, metricRecords, end.Unix()), SiteID: r.SiteID, Metric: metricRecords, Quantity: count,
+		ID: fmt.Sprintf("%s-%s-%d", r.SiteID, meter.Metric, end.Unix()), SiteID: r.SiteID, Metric: meter.Metric, Quantity: quantity,
 		WindowStart: end.Add(-r.Config.Interval), WindowEnd: end, Labels: map[string]string{"source": "engine"},
 	})
 	if err != nil {
-		return fmt.Errorf("encode usage snapshot: %w", err)
+		return fmt.Errorf("encode %s snapshot: %w", meter.Metric, err)
 	}
 	return r.post(ctx, body)
 }

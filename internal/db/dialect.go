@@ -118,6 +118,10 @@ type Dialect interface {
 	// For MySQL: wraps in a transaction.
 	// For embedded SQLite: wraps in a transaction.
 	ExecuteBatch(db *sql.DB, statements []string) error
+
+	// DatabaseSizeQuery returns a query yielding one BIGINT row: the current
+	// database's data and index size in bytes.
+	DatabaseSizeQuery() string
 }
 
 // ---------------------------------------------------------------------------
