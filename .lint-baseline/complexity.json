@@ -980,9 +980,9 @@
    "cyclomatic": 33
   },
   "internal/auth::RegisterCloudHandoffRoute": {
-   "cognitive": 33,
+   "cognitive": 32,
    "cyclomatic": 23,
-   "lines": 93
+   "lines": 89
   },
   "internal/auth::RevalidateRealtimeIdentity": {
    "cognitive": 19,
@@ -1114,8 +1114,8 @@
    "statements": 60
   },
   "internal/cli::runServe": {
-   "cognitive": 48,
-   "cyclomatic": 44,
+   "cognitive": 46,
+   "cyclomatic": 43,
    "statements": 111
   },
   "internal/cli::runSiteDirectoryProbe": {
@@ -1560,9 +1560,6 @@
   "internal/engine::RegisterApplicationRoutes": {
    "statements": 56
   },
-  "internal/engine::RegisterPlatformRoutes": {
-   "cognitive": 22
-  },
   "internal/engine::RegisterTenantReloadRoute": {
    "cognitive": 22
   },
@@ -1632,9 +1629,9 @@
    "cognitive": 16
   },
   "internal/engine::installTenantServices": {
-   "cognitive": 186,
-   "cyclomatic": 115,
-   "statements": 338
+   "cognitive": 184,
+   "cyclomatic": 114,
+   "statements": 335
   },
   "internal/engine::loadStartupTenants": {
    "cognitive": 31,
@@ -1905,9 +1902,6 @@
    "cognitive": 26,
    "cyclomatic": 33
   },
-  "internal/management/sqlstore::(*Store).Finish": {
-   "cyclomatic": 16
-  },
   "internal/management/sqlstore::(*Store).RetryDeleteOperation": {
    "cognitive": 27,
    "cyclomatic": 28
@@ -1953,9 +1947,6 @@
   "internal/management::(*Worker).Run": {
    "cognitive": 30,
    "cyclomatic": 24
-  },
-  "internal/management::(*Worker).process": {
-   "cognitive": 18
   },
   "internal/natsprovider::(*Consumer).Run": {
    "cognitive": 81,
