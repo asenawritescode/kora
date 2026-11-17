@@ -437,8 +437,8 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 	return &SemanticQueryResult{Model: query.Model, Columns: columns, Rows: rows, Total: len(rows)}, nil
 }
 
-// resolveMeasure resolves one measure: related models read live, measures with
-// filters aggregate live, and the rest read the rollup tables.
+// resolveMeasure resolves one measure: related models read live tables, and
+// the rest read the rollup tables.
 func (qe *QueryEngine) resolveMeasure(call semanticCall, measureName, groupBy string) (*QueryResult, error) {
 	model, query := call.model, call.query
 	if model.Relation != nil {
@@ -448,9 +448,6 @@ func (qe *QueryEngine) resolveMeasure(call semanticCall, measureName, groupBy st
 			result.Total = len(result.Rows)
 		}
 		return result, err
-	}
-	if measure := semanticMeasure(*model, measureName); len(measure.Filters) > 0 {
-		return qe.resolveLiveMeasure(call, measure, groupBy)
 	}
 	metric, err := metricForSemanticMeasure(model, measureName, query.Dimensions)
 	if err != nil {

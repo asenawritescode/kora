@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"reflect"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -12,7 +11,7 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 )
 
-func liveTaskRegistry() *doctype.Registry {
+func taskRegistry() *doctype.Registry {
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Task", Fields: []doctype.Field{
 		{Fieldname: "transaction_date", Fieldtype: "Date"},
@@ -26,7 +25,7 @@ func liveTaskRegistry() *doctype.Registry {
 	return registry
 }
 
-func liveTaskModel(filters ...SemanticFilter) SemanticModel {
+func taskModel() SemanticModel {
 	return SemanticModel{
 		Name: "task", Label: "Tasks", SourceDoctype: "Task", TimeDimension: "transaction_date",
 		Dimensions: []SemanticDimension{
@@ -35,13 +34,13 @@ func liveTaskModel(filters ...SemanticFilter) SemanticModel {
 		},
 		Measures: []SemanticMeasure{
 			{Name: "count", Aggregation: "count"},
-			{Name: "paid_amount", Aggregation: "sum", Field: "amount", Filters: filters},
+			{Name: "paid_amount", Aggregation: "sum", Field: "amount"},
 		},
 	}
 }
 
 func TestSemanticRequestValidatesQueryOrder(t *testing.T) {
-	model := liveTaskModel()
+	model := taskModel()
 	cases := []struct {
 		name       string
 		order      string
@@ -97,53 +96,6 @@ func TestRelatedOrderByKeepsMeasureOrder(t *testing.T) {
 		if got := relatedOrderBy(quote, tc.order); got != tc.want {
 			t.Fatalf("relatedOrderBy(%q) = %q, want %q", tc.order, got, tc.want)
 		}
-	}
-}
-
-func TestLiveStatementAppliesMeasureFiltersInEveryDialect(t *testing.T) {
-	for _, dialectName := range []string{"mysql", "postgres"} {
-		t.Run(dialectName, func(t *testing.T) {
-			dialect := kdb.Resolve(dialectName)
-			model := liveTaskModel(SemanticFilter{Field: "status", Operator: "=", Values: []string{"Paid"}})
-			call := semanticCall{model: &model, query: ModelQuery{Model: "task", Measures: []string{"paid_amount"}, Dimensions: []string{"customer"}, Order: OrderMeasureDesc}, time: QueryTime{From: "2026-01-01", To: "2026-01-31"}, limit: 5, registry: liveTaskRegistry()}
-			source := call.registry.Get("Task")
-			query, err := liveSQL(dialect, call, model.Measures[1], "", source)
-			if err != nil {
-				t.Fatal("liveSQL:", err)
-			}
-			statement := query.statement
-			for _, want := range []string{"SUM(" + dialect.QuoteIdent("amount") + ") AS " + dialect.QuoteIdent("value"), dialect.QuoteIdent("status") + " = ?", "GROUP BY " + dialect.QuoteIdent("customer"), "ORDER BY " + dialect.QuoteIdent("value") + " DESC, " + dialect.QuoteIdent("dimension") + " LIMIT ?"} {
-				if !strings.Contains(statement, want) {
-					t.Fatalf("statement %q missing %q", statement, want)
-				}
-			}
-			if query.kind != "dimension" || query.dimension != "customer" {
-				t.Fatalf("kind/dimension = %q/%q", query.kind, query.dimension)
-			}
-			if want := []any{"2026-01-01", "2026-02-01", "Paid", 5}; !reflect.DeepEqual(query.args, want) {
-				t.Fatalf("args = %v, want %v", query.args, want)
-			}
-		})
-	}
-}
-
-func TestLiveStatementRejectsUnsafeMeasureFilters(t *testing.T) {
-	cases := []struct {
-		name   string
-		filter SemanticFilter
-	}{
-		{name: "unknown field", filter: SemanticFilter{Field: "missing", Operator: "=", Values: []string{"x"}}},
-		{name: "unsupported operator", filter: SemanticFilter{Field: "status", Operator: "; drop", Values: []string{"x"}}},
-		{name: "no values", filter: SemanticFilter{Field: "status", Operator: "in"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			model := liveTaskModel(tc.filter)
-			call := semanticCall{model: &model, query: ModelQuery{Model: "task", Measures: []string{"paid_amount"}}, time: QueryTime{From: "2026-01-01", To: "2026-01-31"}, registry: liveTaskRegistry()}
-			if _, err := liveSQL(kdb.Resolve("mysql"), call, model.Measures[1], "", call.registry.Get("Task")); err == nil {
-				t.Fatal("expected unsafe measure filter to be rejected")
-			}
-		})
 	}
 }
 
