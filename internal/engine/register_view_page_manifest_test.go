@@ -114,7 +114,7 @@ func assertPageManifestEndpointsServeRegisterView(t *testing.T, database *sql.DB
 			published[resource.ID] = true
 		}
 	}
-	if !published["registers"] || len(byRoute.Data.Spec.Resources) != 5 {
+	if !published["registers"] || len(byRoute.Data.Spec.Resources) != 4 {
 		t.Fatalf("register manifest lacks its published.query resources: %+v", byRoute.Data.Spec.Resources)
 	}
 	var tender *doctype.PageComponent

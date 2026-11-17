@@ -161,7 +161,11 @@ func TestPOSPackRegisterViewReachesTenant(t *testing.T) {
 		t.Fatalf("register view lacks the registers resource: %+v", register.Resources)
 	}
 	tender := types["tender_panel"]
-	if register.Layout != "register" || len(register.Resources) != 5 || len(register.Components) != 5 ||
+	finder := types["product_finder"]
+	if finder.Version != 2 || finder.ResourceBindings["items"] != "items" || finder.Bindings["favourite"] != "favourite_position" {
+		t.Fatalf("product_finder lost its version or bindings: %+v", finder)
+	}
+	if register.Layout != "register" || len(register.Resources) != 4 || len(register.Components) != 3 ||
 		tender.Version != 2 || tender.Bindings["submit_operation_ref"] != "pos.core~pos.checkout~record_sale" ||
 		tender.Context["till_session"] != "session.name" || tender.Context["register"] != "session.register" || tender.Context["location"] != "session.location" {
 		t.Fatalf("register view lost its shape: %+v", register)
