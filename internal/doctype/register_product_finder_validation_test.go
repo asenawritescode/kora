@@ -44,6 +44,17 @@ components:
       category_label_field: category_name
 `
 
+// bindStockRole adds the optional stock resource role with all three stock bindings.
+func bindStockRole(view *View) {
+	view.Resources = append(view.Resources, PageResource{ID: "stock", Query: "published.query", Params: map[string]any{
+		"owner_module_id": "shop.core", "query_name": "item_stock", "input": map[string]any{},
+	}})
+	view.Components[0].ResourceBindings["stock"] = "stock"
+	view.Components[0].Bindings["stock_item"] = "item"
+	view.Components[0].Bindings["stock_quantity"] = "quantity"
+	view.Components[0].Bindings["stock_location"] = "location"
+}
+
 func productFinderModule() contract.ModuleDescriptor {
 	module := publishedRegisterModule(true, true)
 	module.Queries = append(module.Queries,
@@ -53,6 +64,7 @@ func productFinderModule() contract.ModuleDescriptor {
 		},
 		contract.PublishedQuery{OwnerModuleID: "shop.core", Name: "item_rank", AllowedFields: []string{"name"}},
 		contract.PublishedQuery{OwnerModuleID: "shop.core", Name: "item_categories", AllowedFields: []string{"name", "category_name", "display_order"}},
+		contract.PublishedQuery{OwnerModuleID: "shop.core", Name: "item_stock", AllowedFields: []string{"name", "item", "location", "quantity"}},
 	)
 	module.Schemas = append(module.Schemas, contract.ModuleSchemaDocument{Ref: contract.SchemaRef{ID: "shop.sell.input", Version: 1}, Schema: json.RawMessage(`{"type":"object"}`)})
 	return module
@@ -88,6 +100,23 @@ func TestPublishedProductFinderReferences(t *testing.T) {
 		{name: "rank bound to a document query", mutate: func(v *View) {
 			v.Resources[1] = PageResource{ID: "rank", Query: "document.list", Params: map[string]any{}}
 		}, wantCode: "reference.component_resource_incompatible"},
+		{name: "stock role with its bindings is valid", mutate: bindStockRole},
+		{name: "stock_item is required with the stock role", mutate: func(v *View) {
+			bindStockRole(v)
+			delete(finder(v).Bindings, "stock_item")
+		}, wantCode: "reference.component_binding_required"},
+		{name: "stock_quantity is required with the stock role", mutate: func(v *View) {
+			bindStockRole(v)
+			delete(finder(v).Bindings, "stock_quantity")
+		}, wantCode: "reference.component_binding_required"},
+		{name: "stock_location is required with the stock role", mutate: func(v *View) {
+			bindStockRole(v)
+			delete(finder(v).Bindings, "stock_location")
+		}, wantCode: "reference.component_binding_required"},
+		{name: "stock_location outside item_stock fields", mutate: func(v *View) {
+			bindStockRole(v)
+			finder(v).Bindings["stock_location"] = "warehouse"
+		}, wantCode: "reference.published_field_missing"},
 		{name: "unknown published query", mutate: func(v *View) { v.Resources[0].Params["query_name"] = "nope" }, wantCode: "reference.published_query_missing"},
 	}
 	for _, tc := range tests {

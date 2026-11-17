@@ -11,6 +11,9 @@ resources:
   - id: categories
     query: published.query
     params: {owner_module_id: inventory.core, query_name: item_categories}
+  - id: stock
+    query: published.query
+    params: {owner_module_id: inventory.core, query_name: item_stock, input: {}}
   - id: session
     query: published.query
     params: {owner_module_id: pos.core, query_name: my_session}
@@ -24,8 +27,11 @@ components:
     version: 2
     region: main
     position: 0
-    resource_bindings: {items: items, categories: categories}
+    resource_bindings: {items: items, categories: categories, stock: stock}
     bindings:
+      stock_item: item
+      stock_quantity: quantity
+      stock_location: location
       title: item_name
       local_name: local_name
       shelf_code: shelf_code

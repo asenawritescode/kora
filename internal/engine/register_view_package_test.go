@@ -165,7 +165,15 @@ func TestPOSPackRegisterViewReachesTenant(t *testing.T) {
 	if finder.Version != 2 || finder.ResourceBindings["items"] != "items" || finder.Bindings["favourite"] != "favourite_position" {
 		t.Fatalf("product_finder lost its version or bindings: %+v", finder)
 	}
-	if register.Layout != "register" || len(register.Resources) != 4 || len(register.Components) != 3 ||
+	stock := false
+	for _, r := range register.Resources {
+		stock = stock || r.ID == "stock" && r.Query == "published.query" && r.Params["owner_module_id"] == "inventory.core" && r.Params["query_name"] == "item_stock"
+	}
+	if !stock || finder.ResourceBindings["stock"] != "stock" || finder.Bindings["stock_item"] != "item" ||
+		finder.Bindings["stock_quantity"] != "quantity" || finder.Bindings["stock_location"] != "location" {
+		t.Fatalf("product_finder lost its stock role: resources %+v finder %+v", register.Resources, finder)
+	}
+	if register.Layout != "register" || len(register.Resources) != 5 || len(register.Components) != 3 ||
 		tender.Version != 2 || tender.Bindings["submit_operation_ref"] != "pos.core~pos.checkout~record_sale" ||
 		tender.Context["till_session"] != "session.name" || tender.Context["register"] != "session.register" || tender.Context["location"] != "session.location" {
 		t.Fatalf("register view lost its shape: %+v", register)
