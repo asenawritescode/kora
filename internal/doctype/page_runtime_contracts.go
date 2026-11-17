@@ -222,6 +222,23 @@ var publishedPageComponentContracts = map[string]PageComponentContract{
 		contract.RequiresData = false
 		return contract
 	}(),
+	// product_finder is the Studio till search: field bindings read the items resource rows,
+	// rank_key reads the rank resource, category_label_field reads the categories resource,
+	// and the stock_* bindings read the optional stock resource (item_stock rows by location).
+	"product_finder": publishedComponent("product_finder", map[string]PageResourceBindingContract{
+		"items": publishedItems, "rank": {Query: publishedQueryResource}, "categories": {Query: publishedQueryResource},
+		"stock": {Query: publishedQueryResource},
+	}, map[string]PageBindingContract{
+		"stock_item":     {Kind: "field", FieldTypes: []string{"*"}, ResourceRole: "stock", RequiredWhenResourceRole: "stock"},
+		"stock_quantity": {Kind: "field", FieldTypes: []string{"*"}, ResourceRole: "stock", RequiredWhenResourceRole: "stock"},
+		"stock_location": {Kind: "field", FieldTypes: []string{"*"}, ResourceRole: "stock", RequiredWhenResourceRole: "stock"},
+		"key":            publishedField("items", false), "title": publishedField("items", true), "price": publishedField("items", true),
+		"local_name": publishedField("items", false), "shelf_code": publishedField("items", false), "barcode": publishedField("items", false),
+		"sku": publishedField("items", false), "subtitle": publishedField("items", false), "image": publishedField("items", false),
+		"category": publishedField("items", false), "favourite": publishedField("items", false), "stock": publishedField("items", false),
+		"rank_key":             publishedField("rank", false),
+		"category_label_field": {Kind: "field", FieldTypes: []string{"*"}, ResourceRole: "categories", RequiredWhenResourceRole: "categories"},
+	}),
 	"tender_panel": publishedComponent("tender_panel", nil, map[string]PageBindingContract{
 		"submit_operation_ref": {Kind: "operation", Required: true}, "methods": literalBinding(false), "quick_cash": literalBinding(false),
 	}),

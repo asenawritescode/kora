@@ -8,12 +8,17 @@ scope: tenant
 input:
   term: {type: string, max_length: 80}
   category: {type: string, max_length: 140}
+# Stock at the till's location is not joined here: the query DSL has no joins.
+# The till reads it with item_stock (item + location) for the rows it shows.
+# Barcode matches exactly: the DSL has no ends-with operator.
 filters:
   - any:
       - {field: item_name, op: contains, value: $input.term, optional: true}
+      - {field: local_name, op: contains, value: $input.term, optional: true}
+      - {field: shelf_code, op: contains, value: $input.term, optional: true}
       - {field: barcode, op: eq, value: $input.term, optional: true}
     optional: true
   - {field: category, op: eq, value: $input.category, optional: true}
-fields: [name, item_name, barcode, uom, price, category, image]
+fields: [name, item_name, local_name, shelf_code, barcode, uom, price, category, image, favourite_position]
 sort: [{field: item_name, dir: asc}]
 offline_eligible: true

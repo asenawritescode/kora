@@ -28,10 +28,16 @@ func TestInventoryPackageValidatesAndInstalls(t *testing.T) {
 		}
 	}
 	item := reg.Get("Item")
-	for _, f := range []string{"price", "cost", "barcode", "uom", "category", "image"} {
+	for _, f := range []string{"price", "cost", "barcode", "uom", "category", "image", "local_name", "shelf_code", "favourite_position"} {
 		if item.GetField(f) == nil {
 			t.Errorf("Item missing field %s", f)
 		}
+	}
+	if f := item.GetField("shelf_code"); !f.Unique || !f.SearchIndex {
+		t.Errorf("Item.shelf_code = %+v, want unique and searchable", f)
+	}
+	if f := item.GetField("favourite_position"); f.Fieldtype != "Int" || !f.Unique {
+		t.Errorf("Item.favourite_position = %+v, want unique Int", f)
 	}
 	if f := item.GetField("category"); f.Fieldtype != "Link" || f.Options != "Item Category" || f.Reqd {
 		t.Errorf("Item.category = %+v, want optional Link to Item Category", f)

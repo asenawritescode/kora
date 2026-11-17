@@ -8,12 +8,12 @@ resources:
   - id: items
     query: published.query
     params: {owner_module_id: inventory.core, query_name: item_search, input: {}}
-  - id: lookup
-    query: published.query
-    params: {owner_module_id: inventory.core, query_name: item_search, input: {}}
   - id: categories
     query: published.query
     params: {owner_module_id: inventory.core, query_name: item_categories}
+  - id: stock
+    query: published.query
+    params: {owner_module_id: inventory.core, query_name: item_stock, input: {}}
   - id: session
     query: published.query
     params: {owner_module_id: pos.core, query_name: my_session}
@@ -21,30 +21,27 @@ resources:
     query: published.query
     params: {owner_module_id: pos.core, query_name: my_registers}
 components:
-  - id: scan
+  - id: finder
     label: Scan or search
-    type: scanner_input
+    type: product_finder
     version: 2
     region: main
     position: 0
-    resource_bindings: {lookup: lookup}
-    bindings: {term_input: term, title: item_name, price: price, sku: barcode}
-  - id: categories
-    label: Categories
-    type: category_tabs
-    version: 2
-    region: main
-    position: 1
-    resource_bindings: {items: items, categories: categories}
-    bindings: {group_field: category, category_label_field: category_name}
-  - id: products
-    label: Items
-    type: product_grid
-    version: 2
-    region: main
-    position: 2
-    resource_bindings: {items: items}
-    bindings: {title: item_name, subtitle: uom, price: price, sku: barcode, image: image}
+    resource_bindings: {items: items, categories: categories, stock: stock}
+    bindings:
+      stock_item: item
+      stock_quantity: quantity
+      stock_location: location
+      title: item_name
+      local_name: local_name
+      shelf_code: shelf_code
+      barcode: barcode
+      subtitle: uom
+      price: price
+      image: image
+      category: category
+      favourite: favourite_position
+      category_label_field: category_name
   - id: cart
     label: Current sale
     type: cart_panel

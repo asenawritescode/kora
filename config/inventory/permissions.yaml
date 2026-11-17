@@ -39,6 +39,9 @@
 - doctype: module.inventory.core.query.item_search
   role: Inventory Manager
   read: true
+- doctype: module.inventory.core.query.favourite_items
+  role: Inventory Manager
+  read: true
 - doctype: module.inventory.core.query.item_stock
   role: Inventory Manager
   read: true
