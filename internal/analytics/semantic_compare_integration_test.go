@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"reflect"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/internal/db"
+	"github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 )
 
@@ -88,14 +90,8 @@ func runCompareIntegration(t *testing.T, dsnVar, driver, dialectName string) {
 	if dsn == "" {
 		t.Skipf("set %s to a disposable %s database", dsnVar, dialectName)
 	}
-	database, err := sql.Open(driver, dsn)
-	if err != nil {
-		t.Fatal("open database:", err)
-	}
-	defer database.Close()
-	if err := database.Ping(); err != nil {
-		t.Skipf("disposable %s unavailable: %v", dialectName, err)
-	}
+	database, cleanup := openIsolatedCompareDatabase(t, dsn, driver, dialectName)
+	defer cleanup()
 	dialect := db.Resolve(dialectName)
 	if err := BootstrapTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap analytics tables:", err)
@@ -135,6 +131,63 @@ func runCompareIntegration(t *testing.T, dsnVar, driver, dialectName string) {
 			}
 		})
 	}
+}
+
+// openIsolatedCompareDatabase creates a database the test owns, as the sibling
+// disposable tests do: a fresh MySQL database, or a fresh PostgreSQL schema
+// selected through search_path. The returned cleanup drops it.
+func openIsolatedCompareDatabase(t *testing.T, dsn, driver, dialectName string) (*sql.DB, func()) {
+	t.Helper()
+	root, err := sql.Open(driver, dsn)
+	if err != nil {
+		t.Fatal("open disposable database:", err)
+	}
+	if err := root.Ping(); err != nil {
+		_ = root.Close()
+		t.Skipf("disposable %s unavailable: %v", dialectName, err)
+	}
+	isolatedDSN, create, drop := compareIsolation(t, dsn, dialectName)
+	if _, err := root.Exec(create); err != nil {
+		_ = root.Close()
+		t.Fatal("create isolated compare database:", err)
+	}
+	database, err := sql.Open(driver, isolatedDSN)
+	if err != nil {
+		_, _ = root.Exec(drop)
+		_ = root.Close()
+		t.Fatal("open isolated compare database:", err)
+	}
+	cleanup := func() {
+		_ = database.Close()
+		_, _ = root.Exec(drop)
+		_ = root.Close()
+	}
+	return database, cleanup
+}
+
+// compareIsolation returns the DSN that selects a fresh database or schema,
+// plus the statements that create and drop it.
+func compareIsolation(t *testing.T, dsn, dialectName string) (isolatedDSN, create, drop string) {
+	t.Helper()
+	name := fmt.Sprintf("kora_analytics_compare_%d", time.Now().UnixNano())
+	if dialectName == "mysql" {
+		config, err := mysql.ParseDSN(dsn)
+		if err != nil {
+			t.Fatal("parse disposable MySQL DSN:", err)
+		}
+		config.DBName = name
+		return config.FormatDSN(),
+			"CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+			"DROP DATABASE IF EXISTS `" + name + "`"
+	}
+	pgURL, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal("parse disposable PostgreSQL DSN:", err)
+	}
+	query := pgURL.Query()
+	query.Set("search_path", name)
+	pgURL.RawQuery = query.Encode()
+	return pgURL.String(), `CREATE SCHEMA "` + name + `"`, `DROP SCHEMA IF EXISTS "` + name + `" CASCADE`
 }
 
 func insertCompareSeed(t *testing.T, database *sql.DB, dialect db.Dialect, site string, seed compareSeed) {
