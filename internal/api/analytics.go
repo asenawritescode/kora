@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -104,29 +105,15 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			return
 		}
 		siteRegistry := analyticsRegistry(c, registry)
-		docTypes := make([]*doctype.DocType, 0, len(siteRegistry.Names()))
-		for _, name := range siteRegistry.Names() {
-			docTypes = append(docTypes, siteRegistry.Get(name))
-		}
-		catalog := analytics.BuildSemanticCatalog(docTypes)
-		reports, err := loadAvailableReports(c, siteRegistry, getSiteDB(c, siteDB), dialect)
+		catalog, err := analyticsCatalogWithReports(c, siteRegistry, getSiteDB(c, siteDB), dialect)
 		if err != nil {
-			internalError(c, "loading analytics reports", err)
+			internalError(c, "building analytics catalog", err)
 			return
 		}
-		if err := analytics.AddReportModels(catalog, reports); err != nil {
-			internalError(c, "adding report models to analytics catalog", err)
-			return
-		}
-		if err := analytics.ValidateReportModels(siteRegistry, reports); err != nil {
-			internalError(c, "validating report model sources", err)
-			return
-		}
-		catalog.Reports = reports
 		var report *analytics.ReportDefinition
-		for index := range reports {
-			if reports[index].Name == c.Param("name") {
-				report = &reports[index]
+		for index := range catalog.Reports {
+			if catalog.Reports[index].Name == c.Param("name") {
+				report = &catalog.Reports[index]
 				break
 			}
 		}
@@ -143,8 +130,8 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		if request.Time.Granularity == "" {
 			request.Time.Granularity = "day"
 		}
-		if err := report.Validate(catalog); err != nil {
-			writeError(c, http.StatusUnprocessableEntity, "analytics.report_invalid", err.Error(), nil)
+		if validateErr := report.ValidateQuery(catalog, request.Queries); validateErr != nil {
+			writeError(c, http.StatusUnprocessableEntity, "analytics.report_invalid", validateErr.Error(), nil)
 			return
 		}
 		report.ApplyTo(&request)
@@ -236,6 +223,8 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 		}
 		c.JSON(http.StatusOK, Response{Data: result})
 	})
+
+	registerAnalyticsDrill(ag, registry, siteDB, dialect)
 
 	// Status endpoint always available — reports whether analytics is running.
 	ag.GET("/status", func(c *gin.Context) {
@@ -605,4 +594,30 @@ func getQueryEngine(c *gin.Context, fallbackDB *sql.DB, dialect db.Dialect) *ana
 		return nil
 	}
 	return &analytics.QueryEngine{DB: db, SiteName: siteName, Dialect: siteDialectFromContext(c, dialect)}
+}
+
+// analyticsCatalogWithReports is the catalog with report models, validated.
+func analyticsCatalogWithReports(c *gin.Context, registry *doctype.Registry, database *sql.DB, dialect db.Dialect) (*analytics.SemanticCatalog, error) {
+	catalog := analytics.BuildSemanticCatalog(registry.All())
+	reports, err := loadAvailableReports(c, registry, database, dialect)
+	if err != nil {
+		return nil, err
+	}
+	if err := analytics.AddReportModels(catalog, reports); err != nil {
+		return nil, err
+	}
+	if err := analytics.ValidateReportModels(registry, reports); err != nil {
+		return nil, err
+	}
+	catalog.Reports = reports
+	return catalog, nil
+}
+
+// analyticsQueryScope is the caller's legal entity scope, else tenant-wide.
+func analyticsQueryScope(c *gin.Context) contract.BusinessScope {
+	tenantID := cmp.Or(c.GetString("site_id"), c.GetString("site_name"))
+	if execution, valid := requestExecution(c); valid {
+		return businessScopeFromRequest(c, execution)
+	}
+	return contract.BusinessScope{TenantID: contract.TenantID(tenantID), Kind: contract.ScopeKindTenant}
 }
