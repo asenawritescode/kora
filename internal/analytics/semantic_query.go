@@ -78,6 +78,7 @@ type semanticCall struct {
 	time     QueryTime
 	limit    int
 	registry *doctype.Registry
+	scope    contract.BusinessScope
 }
 
 // resolveQueryWithCompare resolves one query with its comparison and zero-fill.
@@ -387,7 +388,7 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 		return nil, fmt.Errorf("model %q filters require one grouping dimension so the rollup can apply them safely", query.Model)
 	}
 
-	call := semanticCall{model: model, query: query, time: queryTime, limit: limit, registry: registry}
+	call := semanticCall{model: model, query: query, time: queryTime, limit: limit, registry: registry, scope: qe.callScope()}
 	if query.Order != "" {
 		// Each measure must return every group before ranking, or a group absent
 		// from one measure's top-N would lose its other measures.
@@ -437,8 +438,8 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 	return &SemanticQueryResult{Model: query.Model, Columns: columns, Rows: rows, Total: len(rows)}, nil
 }
 
-// resolveMeasure resolves one measure: related models read live tables, and
-// the rest read the rollup tables.
+// resolveMeasure resolves one measure: related models read live tables,
+// measures with filters aggregate live, and the rest read the rollup tables.
 func (qe *QueryEngine) resolveMeasure(call semanticCall, measureName, groupBy string) (*QueryResult, error) {
 	model, query := call.model, call.query
 	if model.Relation != nil {
@@ -448,6 +449,9 @@ func (qe *QueryEngine) resolveMeasure(call semanticCall, measureName, groupBy st
 			result.Total = len(result.Rows)
 		}
 		return result, err
+	}
+	if measure := semanticMeasure(*model, measureName); len(measure.Filters) > 0 {
+		return qe.resolveLiveMeasure(call, measure, groupBy)
 	}
 	metric, err := metricForSemanticMeasure(model, measureName, query.Dimensions)
 	if err != nil {

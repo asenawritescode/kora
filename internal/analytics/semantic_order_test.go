@@ -25,7 +25,7 @@ func taskRegistry() *doctype.Registry {
 	return registry
 }
 
-func taskModel() SemanticModel {
+func taskModel(filters ...SemanticFilter) SemanticModel {
 	return SemanticModel{
 		Name: "task", Label: "Tasks", SourceDoctype: "Task", TimeDimension: "transaction_date",
 		Dimensions: []SemanticDimension{
@@ -34,7 +34,7 @@ func taskModel() SemanticModel {
 		},
 		Measures: []SemanticMeasure{
 			{Name: "count", Aggregation: "count"},
-			{Name: "paid_amount", Aggregation: "sum", Field: "amount"},
+			{Name: "paid_amount", Aggregation: "sum", Field: "amount", Filters: filters},
 		},
 	}
 }
