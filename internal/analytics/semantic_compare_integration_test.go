@@ -142,12 +142,12 @@ func openIsolatedCompareDatabase(t *testing.T, dsn, driver, dialectName string) 
 	if err != nil {
 		t.Fatal("open disposable database:", err)
 	}
-	if err := root.Ping(); err != nil {
+	if err = root.Ping(); err != nil {
 		_ = root.Close()
 		t.Skipf("disposable %s unavailable: %v", dialectName, err)
 	}
 	isolatedDSN, create, drop := compareIsolation(t, dsn, dialectName)
-	if _, err := root.Exec(create); err != nil {
+	if _, err = root.Exec(create); err != nil {
 		_ = root.Close()
 		t.Fatal("create isolated compare database:", err)
 	}
