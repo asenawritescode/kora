@@ -214,3 +214,29 @@ func TestAnalyticsOptionsQueryCache(t *testing.T) {
 		})
 	}
 }
+
+func TestAnalyticsQueryCacheKeyIncludesComparisonMode(t *testing.T) {
+	cache := newAnalyticsQueryCache(time.Minute, 10)
+	base := analytics.SemanticRequest{
+		Queries: []analytics.ModelQuery{{Model: "task", Measures: []string{"count"}}},
+		Time:    analytics.QueryTime{From: "2026-03-01", To: "2026-03-31", Granularity: "day"},
+	}
+	compared := base
+	compared.Compare = analytics.CompareModePreviousPeriod
+	tests := []struct {
+		name      string
+		request   analytics.SemanticRequest
+		wantEqual bool
+	}{
+		{"same request reuses the key", base, true},
+		{"previous_period gets its own key", compared, false},
+	}
+	baseKey := cache.key("tenant-a", 7, "scope", base)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cache.key("tenant-a", 7, "scope", tc.request) == baseKey; got != tc.wantEqual {
+				t.Fatalf("key equality = %v, want %v", got, tc.wantEqual)
+			}
+		})
+	}
+}
