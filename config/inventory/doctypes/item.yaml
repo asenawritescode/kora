@@ -4,7 +4,7 @@ module_ownership_mode: crud
 module_access: published
 module: Inventory
 title_field: item_name
-search_fields: item_name, barcode
+search_fields: item_name, local_name, shelf_code, barcode
 sort_field: item_name
 sort_order: ASC
 
@@ -16,6 +16,27 @@ fields:
     bold: true
     in_list_view: true
     search_index: true
+  - fieldname: local_name
+    fieldtype: Data
+    label: Local name
+    search_index: true
+    in_list_view: true
+  - fieldname: shelf_code
+    fieldtype: Data
+    label: Shelf code
+    unique: true
+    search_index: true
+  - fieldname: favourite_position
+    fieldtype: Int
+    label: Favourite position
+    unique: true
+    constraints:
+      - type: min
+        value: 1.0
+        message: "Favourite positions run from 1 to 12."
+      - type: max
+        value: 12.0
+        message: "Favourite positions run from 1 to 12."
   - fieldname: barcode
     fieldtype: Data
     label: Barcode

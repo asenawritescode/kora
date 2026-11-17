@@ -1,0 +1,13 @@
+name: favourite_items
+module_owner_id: inventory.core
+capability: inventory.items
+operation: favourite_items
+source: Item
+permission: read
+scope: tenant
+filters:
+  - {field: favourite_position, op: gt, value: 0}
+fields: [name, item_name, local_name, shelf_code, barcode, uom, price, category, image, favourite_position]
+sort: [{field: favourite_position, dir: asc}]
+limit: 12
+offline_eligible: true

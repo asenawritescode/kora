@@ -1,9 +1,9 @@
-item_name,barcode,uom,price,cost,category
-Maize Flour 2kg,6001000000011,Each,180,150,Grocery
-Sugar 1kg,6001000000028,Each,160,135,Grocery
-Cooking Oil 1L,6001000000035,Each,320,280,Grocery
-Bread 400g,6001000000042,Each,65,50,Bakery
-Milk 500ml,6001000000059,Each,60,48,Dairy
-Tea Leaves 250g,6001000000066,Each,130,105,Beverages
-Rice 1kg,6001000000073,Each,210,175,Grocery
-Bar Soap,6001000000080,Each,50,38,Household
+item_name,barcode,uom,price,cost,category,local_name,shelf_code
+Maize Flour 2kg,6001000000011,Each,180,150,Grocery,Unga 2kg,A-01
+Sugar 1kg,6001000000028,Each,160,135,Grocery,Sukari 1kg,A-02
+Cooking Oil 1L,6001000000035,Each,320,280,Grocery,Mafuta 1L,A-03
+Bread 400g,6001000000042,Each,65,50,Bakery,Mkate 400g,B-01
+Milk 500ml,6001000000059,Each,60,48,Dairy,Maziwa 500ml,C-01
+Tea Leaves 250g,6001000000066,Each,130,105,Beverages,Chai 250g,D-01
+Rice 1kg,6001000000073,Each,210,175,Grocery,Mchele 1kg,A-04
+Bar Soap,6001000000080,Each,50,38,Household,Sabuni,E-01

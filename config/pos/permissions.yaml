@@ -323,6 +323,9 @@
 - doctype: module.inventory.core.query.item_search
   role: Owner
   read: true
+- doctype: module.inventory.core.query.favourite_items
+  role: Owner
+  read: true
 - doctype: module.inventory.core.query.item_categories
   role: Owner
   read: true
@@ -335,6 +338,9 @@
 - doctype: module.inventory.core.query.item_search
   role: Manager
   read: true
+- doctype: module.inventory.core.query.favourite_items
+  role: Manager
+  read: true
 - doctype: module.inventory.core.query.item_categories
   role: Manager
   read: true
@@ -345,6 +351,9 @@
   role: Manager
   read: true
 - doctype: module.inventory.core.query.item_search
+  role: Cashier
+  read: true
+- doctype: module.inventory.core.query.favourite_items
   role: Cashier
   read: true
 - doctype: module.inventory.core.query.item_categories
