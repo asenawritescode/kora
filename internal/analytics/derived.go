@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -249,12 +250,34 @@ func applyDerivedToTotals(formula derivedFormula, query ModelQuery, comparison *
 	totals.Delta[formula.name] = semanticDelta(current, previous)
 }
 
-// ApplyTo sets the request's queries and derived metrics from the report, so
-// its formulas evaluate over the report's own queries.
+// ApplyTo sets the request's queries and derived metrics from the report. Client
+// queries already in the request add their filters to the report query with the
+// same id; ValidateQuery has rejected ids the report does not define.
 func (r *ReportDefinition) ApplyTo(request *SemanticRequest) {
+	client := request.Queries
 	request.Queries = make([]ModelQuery, 0, len(r.Queries))
 	for _, query := range r.Queries {
 		request.Queries = append(request.Queries, ModelQuery{ID: query.ID, Model: query.Model, Measures: query.Measures, Dimensions: query.Dimensions, Filters: query.Filters})
 	}
+	for _, extra := range client {
+		for i := range request.Queries {
+			if request.Queries[i].ID == extra.ID {
+				request.Queries[i].Filters = append(append([]SemanticFilter(nil), request.Queries[i].Filters...), extra.Filters...)
+			}
+		}
+	}
 	request.Derived = r.Derived
+}
+
+// ValidateQuery checks the report and that each client query names one of its queries.
+func (r *ReportDefinition) ValidateQuery(catalog *SemanticCatalog, client []ModelQuery) error {
+	if err := r.Validate(catalog); err != nil {
+		return err
+	}
+	for _, extra := range client {
+		if !slices.ContainsFunc(r.Queries, func(query ReportQuery) bool { return query.ID == extra.ID }) {
+			return fmt.Errorf("query %q is not in report %q", extra.ID, r.Name)
+		}
+	}
+	return nil
 }

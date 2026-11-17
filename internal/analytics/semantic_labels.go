@@ -38,6 +38,8 @@ func (qe *QueryEngine) applyLinkLabels(call semanticCall, rows []map[string]any)
 	}
 	for i, row := range rows {
 		row[name] = ids[i]
+		// The raw key drives drill-down; "<dimension>.key" cannot clash with a field name.
+		row[name+".key"] = ids[i]
 		if label, found := labels[ids[i]]; found {
 			row[name] = label
 		}
