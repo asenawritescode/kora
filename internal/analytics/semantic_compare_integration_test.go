@@ -75,24 +75,27 @@ func compareCases() []compareCase {
 // cases against real rollup tables. Each case uses its own site so reruns on a
 // shared database stay isolated.
 func TestCompareIntegrationMySQL(t *testing.T) {
-	runCompareIntegration(t, "KORA_ANALYTICS_COMPARE_MYSQL_DSN", "mysql", "mysql")
+	runCompareIntegration(t, "KORA_ANALYTICS_DISPOSABLE_MYSQL_DSN", "mysql", "mysql")
 }
 
 func TestCompareIntegrationPostgres(t *testing.T) {
-	runCompareIntegration(t, "KORA_ANALYTICS_COMPARE_POSTGRES_DSN", "postgres", "postgres")
+	runCompareIntegration(t, "KORA_ANALYTICS_DISPOSABLE_POSTGRES_DSN", "postgres", "postgres")
 }
 
 func runCompareIntegration(t *testing.T, dsnVar, driver, dialectName string) {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv(dsnVar))
 	if dsn == "" {
-		t.Fatalf("set %s to a disposable %s database", dsnVar, dialectName)
+		t.Skipf("set %s to a disposable %s database", dsnVar, dialectName)
 	}
 	database, err := sql.Open(driver, dsn)
 	if err != nil {
 		t.Fatal("open database:", err)
 	}
 	defer database.Close()
+	if err := database.Ping(); err != nil {
+		t.Skipf("disposable %s unavailable: %v", dialectName, err)
+	}
 	dialect := db.Resolve(dialectName)
 	if err := BootstrapTables(context.Background(), database, dialect); err != nil {
 		t.Fatal("bootstrap analytics tables:", err)

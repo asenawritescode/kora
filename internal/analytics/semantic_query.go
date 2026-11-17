@@ -61,7 +61,8 @@ func (qe *QueryEngine) ResolveSemanticQuery(catalog *SemanticCatalog, request Se
 		registry = registries[0]
 	}
 	for _, query := range request.Queries {
-		result, err := qe.resolveQueryWithCompare(response, catalog.model(query.Model), query, request, limit, registry)
+		call := semanticCall{model: catalog.model(query.Model), query: query, time: request.Time, limit: limit, registry: registry}
+		result, err := qe.resolveQueryWithCompare(response, call, request)
 		if err != nil {
 			return nil, err
 		}
@@ -70,9 +71,19 @@ func (qe *QueryEngine) ResolveSemanticQuery(catalog *SemanticCatalog, request Se
 	return response, nil
 }
 
+// semanticCall is one model query with the window, limit and registry it runs under.
+type semanticCall struct {
+	model    *SemanticModel
+	query    ModelQuery
+	time     QueryTime
+	limit    int
+	registry *doctype.Registry
+}
+
 // resolveQueryWithCompare resolves one query with its comparison and zero-fill.
-func (qe *QueryEngine) resolveQueryWithCompare(response *SemanticQueryResponse, model *SemanticModel, query ModelQuery, request SemanticRequest, limit int, registry *doctype.Registry) (*SemanticQueryResult, error) {
-	result, err := qe.resolveSemanticModel(model, query, request.Time, limit, registry)
+func (qe *QueryEngine) resolveQueryWithCompare(response *SemanticQueryResponse, call semanticCall, request SemanticRequest) (*SemanticQueryResult, error) {
+	model := call.model
+	result, err := qe.resolveSemanticModel(model, call.query, call.time, call.limit, call.registry)
 	if err != nil {
 		return nil, err
 	}
@@ -83,17 +94,17 @@ func (qe *QueryEngine) resolveQueryWithCompare(response *SemanticQueryResponse, 
 		response.DataSource = "live_records"
 	}
 	if request.Compare != "" {
-		result.Comparison, err = qe.compareSemanticQuery(model, query, request.Time, limit, registry, result)
+		result.Comparison, err = qe.compareSemanticQuery(call, result)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if bucketedQuery(*model, query, request.Time.Granularity) {
-		start, end, err := parseSemanticWindow(request.Time.From, request.Time.To)
+	if bucketedQuery(*model, call.query, call.time.Granularity) {
+		start, end, err := parseSemanticWindow(call.time.From, call.time.To)
 		if err != nil {
 			return nil, err
 		}
-		result.Rows = fillSemanticBuckets(model.TimeDimension, query.Measures, bucketLabels(start, end, request.Time.Granularity), result.Rows)
+		result.Rows = fillSemanticBuckets(model.TimeDimension, call.query.Measures, bucketLabels(start, end, call.time.Granularity), result.Rows)
 		result.Total = len(result.Rows)
 	}
 	return result, nil

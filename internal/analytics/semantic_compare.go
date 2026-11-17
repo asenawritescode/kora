@@ -5,8 +5,6 @@ import (
 	"math"
 	"strconv"
 	"time"
-
-	"github.com/asenawritescode/kora/internal/doctype"
 )
 
 // CompareModePreviousPeriod compares with the equal-length window before the range.
@@ -41,20 +39,21 @@ type SemanticDelta struct {
 
 // compareSemanticQuery builds the previous-window comparison. current.Rows must
 // still be raw, before zero-filling.
-func (qe *QueryEngine) compareSemanticQuery(model *SemanticModel, query ModelQuery, queryTime QueryTime, limit int, registry *doctype.Registry, current *SemanticQueryResult) (*SemanticComparison, error) {
-	from, to, err := parseSemanticWindow(queryTime.From, queryTime.To)
+func (qe *QueryEngine) compareSemanticQuery(call semanticCall, current *SemanticQueryResult) (*SemanticComparison, error) {
+	from, to, err := parseSemanticWindow(call.time.From, call.time.To)
 	if err != nil {
 		return nil, err
 	}
 	previousFrom, previousTo := previousWindow(from, to)
-	previousTime := QueryTime{From: previousFrom.Format(time.DateOnly), To: previousTo.Format(time.DateOnly), Granularity: queryTime.Granularity}
-	previous, err := qe.resolveSemanticModel(model, query, previousTime, limit, registry)
+	previousTime := QueryTime{From: previousFrom.Format(time.DateOnly), To: previousTo.Format(time.DateOnly), Granularity: call.time.Granularity}
+	previous, err := qe.resolveSemanticModel(call.model, call.query, previousTime, call.limit, call.registry)
 	if err != nil {
 		return nil, err
 	}
-	comparison := &SemanticComparison{PreviousRange: SemanticDateRange{From: previousTime.From, To: previousTime.To}, Totals: semanticTotals(*model, query.Measures, current.Rows, previous.Rows)}
-	if bucketedQuery(*model, query, queryTime.Granularity) {
-		comparison.PreviousRows = fillSemanticBuckets(model.TimeDimension, query.Measures, bucketLabels(previousFrom, previousTo, queryTime.Granularity), previous.Rows)
+	model := call.model
+	comparison := &SemanticComparison{PreviousRange: SemanticDateRange{From: previousTime.From, To: previousTime.To}, Totals: semanticTotals(*model, call.query.Measures, current.Rows, previous.Rows)}
+	if bucketedQuery(*model, call.query, call.time.Granularity) {
+		comparison.PreviousRows = fillSemanticBuckets(model.TimeDimension, call.query.Measures, bucketLabels(previousFrom, previousTo, call.time.Granularity), previous.Rows)
 	}
 	return comparison, nil
 }
