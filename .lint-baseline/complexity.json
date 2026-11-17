@@ -169,8 +169,8 @@
    "cyclomatic": 20
   },
   "internal/analytics::(*QueryEngine).resolveModelQuery": {
-   "cognitive": 38,
-   "cyclomatic": 26
+   "cognitive": 25,
+   "cyclomatic": 23
   },
   "internal/analytics::(*QueryEngine).resolvePublishedProjection": {
    "cognitive": 110,
@@ -193,8 +193,8 @@
    "cyclomatic": 58
   },
   "internal/analytics::(*SemanticRequest).Validate": {
-   "cognitive": 67,
-   "cyclomatic": 43
+   "cognitive": 66,
+   "cyclomatic": 42
   },
   "internal/analytics::(*Worker).flush": {
    "cognitive": 51,
@@ -292,7 +292,7 @@
    "statements": 58
   },
   "internal/analytics::resolveModelQuery": {
-   "statements": 47
+   "statements": 42
   },
   "internal/analytics::resolvePublishedProjection": {
    "statements": 132

@@ -336,7 +336,11 @@ type ModelQuery struct {
 	Measures   []string         `json:"measures"`
 	Dimensions []string         `json:"dimensions,omitempty"`
 	Filters    []SemanticFilter `json:"filters,omitempty"`
+	Order      string           `json:"order,omitempty"` // "measure_desc": rank by the first measure
 }
+
+// OrderMeasureDesc ranks grouped rows by their first measure, highest first.
+const OrderMeasureDesc = "measure_desc"
 
 type QueryTime struct {
 	From        string `json:"from"`
@@ -552,9 +556,6 @@ func (q *SemanticRequest) Validate(catalog *SemanticCatalog) error {
 		if totalMeasures > MaxSemanticMeasures {
 			return fmt.Errorf("request measure count exceeds %d", MaxSemanticMeasures)
 		}
-		if len(query.Dimensions) > 1 {
-			return fmt.Errorf("queries[%d]: at most one dimension is supported", i)
-		}
 		if len(query.Filters) > MaxSemanticFilters {
 			return fmt.Errorf("queries[%d]: filter count exceeds %d", i, MaxSemanticFilters)
 		}
@@ -565,6 +566,9 @@ func (q *SemanticRequest) Validate(catalog *SemanticCatalog) error {
 		model := catalog.model(query.Model)
 		if model == nil {
 			return fmt.Errorf("queries[%d]: unknown model %q", i, query.Model)
+		}
+		if err := validateQueryShape(i, query, model); err != nil {
+			return err
 		}
 		if err := model.Validate(); err != nil {
 			return fmt.Errorf("queries[%d]: model %q is invalid: %w", i, query.Model, err)
@@ -608,6 +612,18 @@ func (q *SemanticRequest) Validate(catalog *SemanticCatalog) error {
 				return fmt.Errorf("queries[%d]: filter operator %q requires exactly one value", i, filter.Operator)
 			}
 		}
+	}
+	return nil
+}
+
+// validateQueryShape allows one grouping dimension, and order only on one
+// non-time dimension.
+func validateQueryShape(i int, query ModelQuery, model *SemanticModel) error {
+	switch {
+	case len(query.Dimensions) > 1:
+		return fmt.Errorf("queries[%d]: at most one dimension is supported", i)
+	case query.Order != "" && (query.Order != OrderMeasureDesc || len(query.Dimensions) != 1 || query.Dimensions[0] == model.TimeDimension):
+		return fmt.Errorf("queries[%d]: unsupported order %q", i, query.Order)
 	}
 	return nil
 }

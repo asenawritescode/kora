@@ -170,7 +170,7 @@ func (qe *QueryEngine) resolveRelatedMeasure(registry *doctype.Registry, model *
 		limit = MaxSemanticResultRows
 	}
 	if dimensionName != "" {
-		querySQL += " ORDER BY " + q("dimension")
+		querySQL += " ORDER BY " + relatedOrderBy(q, query.Order)
 	}
 	querySQL += " LIMIT ?"
 	args = append(args, limit)
@@ -217,4 +217,12 @@ func fieldExprForSource(source, field string, quote func(string) string) string 
 		alias = "c"
 	}
 	return quote(alias) + "." + quote(field)
+}
+
+// relatedOrderBy ranks by the measure when asked, otherwise alphabetically.
+func relatedOrderBy(quote func(string) string, order string) string {
+	if order == OrderMeasureDesc {
+		return quote("value") + " DESC, " + quote("dimension")
+	}
+	return quote("dimension")
 }

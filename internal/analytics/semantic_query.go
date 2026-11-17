@@ -387,43 +387,18 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 		return nil, fmt.Errorf("model %q filters require one grouping dimension so the rollup can apply them safely", query.Model)
 	}
 
+	call := semanticCall{model: model, query: query, time: queryTime, limit: limit, registry: registry}
+	if query.Order != "" {
+		// Each measure must return every group before ranking, or a group absent
+		// from one measure's top-N would lose its other measures.
+		call.limit = MaxSemanticResultRows
+	}
 	merged := map[string]map[string]any{}
 	order := []string{}
-	dimensionName := model.TimeDimension
-	if len(query.Dimensions) == 1 {
-		dimensionName = query.Dimensions[0]
-	}
 	for _, measureName := range query.Measures {
-		var metricResult *QueryResult
-		var err error
-		if model.Relation != nil {
-			metricResult, err = qe.resolveRelatedMeasure(registry, model, query, queryTime, measureName, limit)
-		} else {
-			var metric *Metric
-			metric, err = metricForSemanticMeasure(model, measureName, query.Dimensions)
-			if err == nil {
-				metricResult, err = qe.Resolve(metric, QueryRequest{
-					From:      queryTime.From,
-					To:        queryTime.To,
-					GroupBy:   groupBy,
-					Dimension: dimensionName,
-					Filters:   query.Filters,
-					Limit:     limit,
-				})
-			}
-		}
+		metricResult, err := qe.resolveMeasure(call, measureName, groupBy)
 		if err != nil {
 			return nil, err
-		}
-		if len(query.Filters) > 0 {
-			// Category filters are applied in SQL before aggregation and LIMIT.
-			// Keep a defensive post-filter for alternate metric sources, but do
-			// not re-filter rollup results: their dimension column contains the
-			// encoded "field=value" form used by the database predicate.
-			if model.Relation != nil {
-				metricResult.Rows = filterSemanticRows(metricResult.Rows, query.Dimensions[0], query.Filters)
-				metricResult.Total = len(metricResult.Rows)
-			}
 		}
 		for _, row := range metricResult.Rows {
 			key := semanticRowKey(row)
@@ -439,10 +414,17 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 	for _, key := range order {
 		rows = append(rows, merged[key])
 	}
+	if err := qe.applyLinkLabels(call, rows); err != nil {
+		return nil, err
+	}
+	if query.Order == OrderMeasureDesc {
+		// Ranking happens before the limit so top-N keeps the highest rows.
+		sortRowsByMeasure(rows, query.Dimensions[0], query.Measures[0])
+	}
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
-	if len(query.Dimensions) == 1 && query.Dimensions[0] != model.TimeDimension {
+	if len(query.Dimensions) == 1 && query.Dimensions[0] != model.TimeDimension && query.Order == "" {
 		sort.Slice(rows, func(i, j int) bool {
 			return fmt.Sprint(rows[i][query.Dimensions[0]]) < fmt.Sprint(rows[j][query.Dimensions[0]])
 		})
@@ -453,6 +435,41 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 	}
 	columns = append(columns, query.Measures...)
 	return &SemanticQueryResult{Model: query.Model, Columns: columns, Rows: rows, Total: len(rows)}, nil
+}
+
+// resolveMeasure resolves one measure: related models read live, measures with
+// filters aggregate live, and the rest read the rollup tables.
+func (qe *QueryEngine) resolveMeasure(call semanticCall, measureName, groupBy string) (*QueryResult, error) {
+	model, query := call.model, call.query
+	if model.Relation != nil {
+		result, err := qe.resolveRelatedMeasure(call.registry, model, query, call.time, measureName, call.limit)
+		if err == nil && len(query.Filters) > 0 {
+			result.Rows = filterSemanticRows(result.Rows, query.Dimensions[0], query.Filters)
+			result.Total = len(result.Rows)
+		}
+		return result, err
+	}
+	if measure := semanticMeasure(*model, measureName); len(measure.Filters) > 0 {
+		return qe.resolveLiveMeasure(call, measure, groupBy)
+	}
+	metric, err := metricForSemanticMeasure(model, measureName, query.Dimensions)
+	if err != nil {
+		return nil, err
+	}
+	dimension := model.TimeDimension
+	if len(query.Dimensions) == 1 {
+		dimension = query.Dimensions[0]
+	}
+	return qe.Resolve(metric, QueryRequest{From: call.time.From, To: call.time.To, GroupBy: groupBy, Dimension: dimension, Filters: query.Filters, Limit: call.limit})
+}
+
+// sortRowsByMeasure orders rows by the measure, highest first, ties by label.
+func sortRowsByMeasure(rows []map[string]any, dimension, measure string) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, _ := semanticNumber(rows[i][measure])
+		b, _ := semanticNumber(rows[j][measure])
+		return a > b || a == b && fmt.Sprint(rows[i][dimension]) < fmt.Sprint(rows[j][dimension])
+	})
 }
 
 // rowLabels starts a merged row with its bucket or dimension label.
