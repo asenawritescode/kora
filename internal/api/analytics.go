@@ -147,10 +147,7 @@ func RegisterAnalyticsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Regist
 			writeError(c, http.StatusUnprocessableEntity, "analytics.report_invalid", err.Error(), nil)
 			return
 		}
-		request.Queries = make([]analytics.ModelQuery, 0, len(report.Queries))
-		for _, query := range report.Queries {
-			request.Queries = append(request.Queries, analytics.ModelQuery{Model: query.Model, Measures: query.Measures, Dimensions: query.Dimensions, Filters: query.Filters})
-		}
+		report.ApplyTo(&request)
 		if !checkRelatedReportPermissions(c, siteRegistry, report, catalog) {
 			return
 		}

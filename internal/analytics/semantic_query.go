@@ -68,6 +68,7 @@ func (qe *QueryEngine) ResolveSemanticQuery(catalog *SemanticCatalog, request Se
 		}
 		response.Queries = append(response.Queries, *result)
 	}
+	applyDerivedMetrics(response, request)
 	return response, nil
 }
 

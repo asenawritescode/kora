@@ -329,9 +329,13 @@ type SemanticRequest struct {
 	Time    QueryTime    `json:"time"`
 	Limit   int          `json:"limit,omitempty"`
 	Compare string       `json:"compare,omitempty"`
+	// Derived metrics are evaluated over the result of the queries they reference.
+	Derived []DerivedMetric `json:"derived,omitempty"`
 }
 
 type ModelQuery struct {
+	// ID names the query for derived formulas (`id.measure`); optional.
+	ID         string           `json:"id,omitempty"`
 	Model      string           `json:"model"`
 	Measures   []string         `json:"measures"`
 	Dimensions []string         `json:"dimensions,omitempty"`
