@@ -323,11 +323,12 @@ type VisualSeries struct {
 }
 
 // SemanticRequest is a catalog-only analytics query: one or more model queries
-// over a time range, with an optional result row limit.
+// over a time range, with an optional result row limit and optional comparison.
 type SemanticRequest struct {
 	Queries []ModelQuery `json:"queries"`
 	Time    QueryTime    `json:"time"`
 	Limit   int          `json:"limit,omitempty"`
+	Compare string       `json:"compare,omitempty"`
 }
 
 type ModelQuery struct {
@@ -538,8 +539,8 @@ func (q *SemanticRequest) Validate(catalog *SemanticCatalog) error {
 	if int(to.Sub(from).Hours()/24)+1 > MaxSemanticDateRangeDays {
 		return fmt.Errorf("date range must not exceed %d days", MaxSemanticDateRangeDays)
 	}
-	if q.Time.Granularity != "" && !validGranularity(q.Time.Granularity) {
-		return fmt.Errorf("unsupported query granularity %q", q.Time.Granularity)
+	if err := q.validateTimeOptions(); err != nil {
+		return err
 	}
 	totalMeasures := 0
 	totalFilters := 0
@@ -607,6 +608,16 @@ func (q *SemanticRequest) Validate(catalog *SemanticCatalog) error {
 				return fmt.Errorf("queries[%d]: filter operator %q requires exactly one value", i, filter.Operator)
 			}
 		}
+	}
+	return nil
+}
+
+func (q *SemanticRequest) validateTimeOptions() error {
+	if q.Time.Granularity != "" && !validGranularity(q.Time.Granularity) {
+		return fmt.Errorf("unsupported query granularity %q", q.Time.Granularity)
+	}
+	if q.Compare != "" && q.Compare != CompareModePreviousPeriod {
+		return fmt.Errorf("unsupported compare %q", q.Compare)
 	}
 	return nil
 }
