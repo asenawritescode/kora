@@ -105,6 +105,18 @@ type CommandStep struct {
 	// created with Where plus Values when absent. With As, later steps
 	// address the existing or new record as $steps.<as>.name.
 	Ensure *StepEnsure `yaml:"ensure,omitempty" json:"ensure,omitempty"`
+	// Reserve takes a block of numbers from Record's naming series for Owner.
+	// As names the block's first record name, so later steps can reference it.
+	Reserve *StepReserve `yaml:"reserve,omitempty" json:"reserve,omitempty"`
+}
+
+// StepReserve reserves Size numbers from the naming series of Record. Owner is
+// a $input or $steps reference to the record that owns the block, such as an
+// open till session. The block never spans two series prefixes.
+type StepReserve struct {
+	Record string `yaml:"record" json:"record"`
+	Owner  string `yaml:"owner"  json:"owner"`
+	Size   int64  `yaml:"size"   json:"size"`
 }
 
 // StepEnsure is a create-if-absent. Where fields identify the record and seed
@@ -118,10 +130,10 @@ type StepEnsure struct {
 	Values map[string]string `yaml:"values,omitempty" json:"values,omitempty"`
 }
 
-// kindCount returns how many of create, update and ensure the step sets.
+// kindCount returns how many of create, update, ensure and reserve the step sets.
 func (s CommandStep) kindCount() int {
 	kinds := 0
-	for _, present := range []bool{s.Create != nil, s.Update != nil, s.Ensure != nil} {
+	for _, present := range []bool{s.Create != nil, s.Update != nil, s.Ensure != nil, s.Reserve != nil} {
 		if present {
 			kinds++
 		}
@@ -129,9 +141,23 @@ func (s CommandStep) kindCount() int {
 	return kinds
 }
 
+// reserveOwner returns the owner reference of a reserve step, or "".
+func (s CommandStep) reserveOwner() string {
+	if s.Reserve == nil {
+		return ""
+	}
+	return s.Reserve.Owner
+}
+
 // createSpec returns the record this step would create: the create step
 // itself, or the creation an ensure step falls back to.
+//
+// A reserve step names its record too: it writes numbers in that record's
+// series, so it needs the same create permission.
 func (s CommandStep) createSpec() *StepCreate {
+	if s.Reserve != nil {
+		return &StepCreate{Record: s.Reserve.Record}
+	}
 	if s.Ensure == nil {
 		return s.Create
 	}
@@ -162,15 +188,38 @@ type StepUpdate struct {
 	Adjust map[string]FieldAdjust `yaml:"adjust,omitempty" json:"adjust,omitempty"`
 }
 
-// validateEnsure checks an ensure step's record, where and values.
-func (c *CommandResource) validateEnsure(i int, e *StepEnsure) error {
-	if e.Record == "" || len(e.Where) == 0 {
-		return fmt.Errorf("command %q: step %d ensure requires record and where", c.Name, i)
+// validateReserve checks that a reserve step names a record, an owner and a size.
+func (c *CommandResource) validateReserve(i int, r *StepReserve) error {
+	if r.Record == "" || r.Owner == "" || r.Size < 1 {
+		return fmt.Errorf("command %q: step %d reserve requires record, owner and a positive size", c.Name, i)
 	}
-	for field := range e.Values {
-		if _, dup := e.Where[field]; dup {
-			return fmt.Errorf("command %q: step %d ensure sets %q in both where and values", c.Name, i, field)
+	return nil
+}
+
+// validateStep checks one transaction step: its kind and its fields.
+func (c *CommandResource) validateStep(i int, s CommandStep) error {
+	if s.kindCount() > 1 {
+		return fmt.Errorf("command %q: step %d must set exactly one of create, update or ensure", c.Name, i)
+	}
+	switch {
+	case s.Ensure != nil:
+		if err := c.validateEnsure(i, s.Ensure); err != nil {
+			return err
 		}
+	case s.Reserve != nil:
+		if err := c.validateReserve(i, s.Reserve); err != nil {
+			return err
+		}
+	case s.Create != nil:
+		if err := c.validateCreate(i, s.Create); err != nil {
+			return err
+		}
+	case s.Update != nil:
+		if err := c.validateUpdate(i, s.Update); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("command %q: step %d has none of create, update or ensure", c.Name, i)
 	}
 	return nil
 }
@@ -220,6 +269,19 @@ func (c *CommandResource) validateUpdate(i int, u *StepUpdate) error {
 	return c.validateAdjustments(i, u)
 }
 
+// validateEnsure checks an ensure step's record, where and values.
+func (c *CommandResource) validateEnsure(i int, e *StepEnsure) error {
+	if e.Record == "" || len(e.Where) == 0 {
+		return fmt.Errorf("command %q: step %d ensure requires record and where", c.Name, i)
+	}
+	for field := range e.Values {
+		if _, dup := e.Where[field]; dup {
+			return fmt.Errorf("command %q: step %d ensure sets %q in both where and values", c.Name, i, field)
+		}
+	}
+	return nil
+}
+
 // validateAdjustments checks that each adjusted field is set only by adjust
 // and that its adjustment is well formed.
 func (c *CommandResource) validateAdjustments(i int, u *StepUpdate) error {
@@ -257,24 +319,8 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 		return err
 	}
 	for i, s := range c.Steps {
-		if s.kindCount() > 1 {
-			return fmt.Errorf("command %q: step %d must set exactly one of create, update or ensure", c.Name, i)
-		}
-		switch {
-		case s.Ensure != nil:
-			if err := c.validateEnsure(i, s.Ensure); err != nil {
-				return err
-			}
-		case s.Create != nil:
-			if err := c.validateCreate(i, s.Create); err != nil {
-				return err
-			}
-		case s.Update != nil:
-			if err := c.validateUpdate(i, s.Update); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("command %q: step %d has none of create, update or ensure", c.Name, i)
+		if err := c.validateStep(i, s); err != nil {
+			return err
 		}
 	}
 	if c.Input.Record == "" {

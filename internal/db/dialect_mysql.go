@@ -398,11 +398,17 @@ func (d *MySQLDialect) AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, table
 	})
 }
 
-// AllocateSeriesNumber increments the counter row. The probe is a non-locking
-// read: an UPDATE that misses would take a gap lock, and concurrent first
-// allocations for a new key would deadlock on each other's gap locks. The
-// table scan behind seed runs only when the row is missing.
+// AllocateSeriesNumber increments the counter row by one and returns the number.
 func (d *MySQLDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed func() (int64, error)) (int64, error) {
+	_, last, err := d.ReserveSeriesRange(tx, doctypeName, key, 1, seed)
+	return last, err
+}
+
+// ReserveSeriesRange moves the counter row forward by size. The probe is a
+// non-locking read: an UPDATE that misses would take a gap lock, and concurrent
+// first allocations for a new key would deadlock on each other's gap locks. The
+// table scan behind seed runs only when the row is missing.
+func (d *MySQLDialect) ReserveSeriesRange(tx *sql.Tx, doctypeName, key string, size int64, seed func() (int64, error)) (int64, int64, error) {
 	var current int64
 	err := tx.QueryRow(
 		`SELECT current FROM _kora_naming_series WHERE doctype = ? AND prefix = ?`,
@@ -411,30 +417,41 @@ func (d *MySQLDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string,
 	if errors.Is(err, sql.ErrNoRows) {
 		highest, seedErr := seed()
 		if seedErr != nil {
-			return 0, seedErr
+			return 0, 0, seedErr
 		}
 		if _, execErr := tx.Exec(
 			`INSERT INTO _kora_naming_series (doctype, prefix, current, modified)
 VALUES (?, ?, LAST_INSERT_ID(?), NOW(6))
-ON DUPLICATE KEY UPDATE current = LAST_INSERT_ID(current + 1), modified = NOW(6)`,
-			doctypeName, key, highest+1,
+ON DUPLICATE KEY UPDATE current = LAST_INSERT_ID(current + ?), modified = NOW(6)`,
+			doctypeName, key, highest+size, size,
 		); execErr != nil {
-			return 0, fmt.Errorf("allocating series number: %w", execErr)
+			return 0, 0, fmt.Errorf("allocating series number: %w", execErr)
 		}
 	} else if err != nil {
-		return 0, fmt.Errorf("reading series counter: %w", err)
+		return 0, 0, fmt.Errorf("reading series counter: %w", err)
 	} else if _, execErr := tx.Exec(
-		`UPDATE _kora_naming_series SET current = LAST_INSERT_ID(current + 1), modified = NOW(6)
+		`UPDATE _kora_naming_series SET current = LAST_INSERT_ID(current + ?), modified = NOW(6)
 WHERE doctype = ? AND prefix = ?`,
-		doctypeName, key,
+		size, doctypeName, key,
 	); execErr != nil {
-		return 0, fmt.Errorf("incrementing series number: %w", execErr)
+		return 0, 0, fmt.Errorf("incrementing series number: %w", execErr)
 	}
-	var allocated int64
-	if err := tx.QueryRow("SELECT LAST_INSERT_ID()").Scan(&allocated); err != nil {
-		return 0, fmt.Errorf("reading allocated series number: %w", err)
+	var last int64
+	if err := tx.QueryRow("SELECT LAST_INSERT_ID()").Scan(&last); err != nil {
+		return 0, 0, fmt.Errorf("reading allocated series number: %w", err)
 	}
-	return allocated, nil
+	return last - size + 1, last, nil
+}
+
+// RecordNumberBlock inserts one reserved range into _kora_number_block.
+func (d *MySQLDialect) RecordNumberBlock(tx *sql.Tx, row NumberBlockRow) error {
+	if _, err := tx.Exec(
+		`INSERT INTO _kora_number_block (doctype, prefix, first_number, last_number, owner, state) VALUES (?, ?, ?, ?, ?, ?)`,
+		row.Doctype, row.Prefix, row.First, row.Last, row.Owner, row.State,
+	); err != nil {
+		return fmt.Errorf("recording number block: %w", err)
+	}
+	return nil
 }
 
 // NameGenQuery returns the query for the highest existing number under a name prefix.
@@ -482,8 +499,16 @@ func isIgnorableMySQLCreateError(err error, stmt string) bool {
 	}
 }
 
+// numberBlockSQL creates _kora_number_block: a range of series numbers
+// reserved for one owner.
+func (d *MySQLDialect) numberBlockSQL() []string {
+	return []string{
+		"CREATE TABLE IF NOT EXISTS _kora_number_block (\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\tprefix VARCHAR(32) NOT NULL,\n\t\t\tfirst_number BIGINT NOT NULL,\n\t\t\tlast_number BIGINT NOT NULL,\n\t\t\towner VARCHAR(140) NOT NULL,\n\t\t\tstate VARCHAR(16) NOT NULL,\n\t\t\tcreation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),\n\t\t\tPRIMARY KEY (doctype, prefix, first_number)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+	}
+}
+
 func (d *MySQLDialect) SystemTableSQL() []string {
-	return append([]string{
+	return append(append(d.numberBlockSQL(), []string{
 		// _kora_naming_series
 		"CREATE TABLE IF NOT EXISTS _kora_naming_series (\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\tprefix VARCHAR(32) NOT NULL,\n\t\t\tcurrent BIGINT NOT NULL DEFAULT 0,\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tPRIMARY KEY (doctype, prefix)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
@@ -569,7 +594,7 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_view ADD COLUMN idx INT NOT NULL DEFAULT 0",
 		"ALTER TABLE _kora_view DROP PRIMARY KEY",
 		"ALTER TABLE _kora_view ADD PRIMARY KEY (name)",
-	}, PaymentTablesMySQL()...)
+	}...), PaymentTablesMySQL()...)
 }
 
 func parseMySQLKeyField(msg string) string {

@@ -59,6 +59,7 @@ func (c *CommandResource) RequiredInputs() []string {
 		if s.Ensure != nil {
 			addMap(s.Ensure.Where)
 		}
+		add(s.reserveOwner())
 		if s.Update != nil {
 			add(s.Update.Name)
 			addMap(s.Update.Where)

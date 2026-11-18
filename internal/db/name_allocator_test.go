@@ -21,7 +21,7 @@ func TestMySQLAllocateNameNumberBootstrapsFromExistingRows(t *testing.T) {
 		WithArgs("CUST-%").
 		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(7))
 	mock.ExpectExec("INSERT INTO _kora_naming_series").
-		WithArgs("Customer", "CUST", int64(8)).
+		WithArgs("Customer", "CUST", int64(8), int64(1)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT LAST_INSERT_ID\\(\\)").
 		WillReturnRows(sqlmock.NewRows([]string{"last_insert_id"}).AddRow(8))
@@ -52,13 +52,13 @@ func TestPostgresAllocateNameNumberBootstrapsFromExistingRows(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`UPDATE "_kora_naming_series"`).
-		WithArgs("Customer", "CUST").
+		WithArgs("Customer", "CUST", int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"current"}))
 	mock.ExpectQuery("SELECT COALESCE\\(MAX").
 		WithArgs("CUST-%").
 		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(7))
 	mock.ExpectQuery(`INSERT INTO "_kora_naming_series"`).
-		WithArgs("Customer", "CUST", int64(8)).
+		WithArgs("Customer", "CUST", int64(8), int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"current"}).AddRow(8))
 
 	tx, err := sqlDB.Begin()

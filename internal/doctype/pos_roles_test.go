@@ -89,7 +89,7 @@ func TestPOSRolePermissions(t *testing.T) {
 			t.Errorf("%s %s %s = %v, want %v", tc.role, tc.op, tc.dt, got, tc.want)
 		}
 	}
-	posOps := []string{"open_session", "close_session", "record_sale", "return_sale", "void_sale"}
+	posOps := []string{"open_session", "close_session", "record_sale", "return_sale", "void_sale", "reserve_numbers"}
 	invOps := []string{"receive_stock", "adjust_stock"}
 	posQ := []string{"closed_session", "my_registers", "my_session", "payments_by_method", "refunds_by_method", "recent_sales", "sale_items", "sale_payments", "sale_lines", "today_totals"}
 	invQ := []string{"item_search", "item_categories", "item_stock", "low_stock"}
